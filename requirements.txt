@@ -1,0 +1,6 @@
+# GitReins — Git-Native Agent Co-Harness
+# Dependencies: mcp, pyyaml, requests (3 packages)
+
+mcp>=1.0.0
+pyyaml>=6.0
+requests>=2.28

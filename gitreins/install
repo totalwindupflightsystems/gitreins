@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+# GitReins Install — One-command activation
+# Run from repo root: ./gitreins/install
+
+set -e
+
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+HOOKS_DIR="$REPO_ROOT/.git/hooks"
+GITREINS_DIR="$REPO_ROOT/gitreins"
+
+echo "GitReins Install"
+echo "================"
+echo "Repo: $REPO_ROOT"
+echo ""
+
+# Create .gitreins config dir if needed
+mkdir -p "$REPO_ROOT/.gitreins"
+
+# Create default config if missing
+if [ ! -f "$REPO_ROOT/.gitreins/config.yaml" ]; then
+    cat > "$REPO_ROOT/.gitreins/config.yaml" << 'EOF'
+# GitReins Configuration
+
+guards:
+  secrets: true
+  lint: true
+  tests: true
+  test_command: "pytest -x --tb=short"
+
+evaluator:
+  max_iterations: 15
+EOF
+    echo "✓ Created .gitreins/config.yaml"
+else
+    echo "  .gitreins/config.yaml already exists — skipping"
+fi
+
+# Install pre-commit hook
+if [ -d "$HOOKS_DIR" ]; then
+    cat > "$HOOKS_DIR/pre-commit" << 'HOOKEOF'
+#!/usr/bin/env bash
+# GitReins pre-commit hook
+# Runs Tier 1 guards before every commit
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$REPO_ROOT"
+
+# Run guards via Python
+python3 -c "
+import sys, os
+sys.path.insert(0, os.path.join('$REPO_ROOT', 'gitreins'))
+os.chdir('$REPO_ROOT')
+from engine.guard_manager import GuardManager
+gm = GuardManager('$REPO_ROOT')
+result = gm.run_all()
+if not result.passed:
+    print('COMMIT BLOCKED: Tier 1 guards failed')
+    print(result.summary)
+    sys.exit(1)
+print('Tier 1: PASS')
+sys.exit(0)
+"
+HOOKEOF
+    chmod +x "$HOOKS_DIR/pre-commit"
+    echo "✓ Installed .git/hooks/pre-commit"
+else
+    echo "✗ Not a git repository — skipping hooks"
+fi
+
+echo ""
+echo "GitReins installed. Create your first task:"
+echo "  cd $REPO_ROOT"
+echo "  python3 gitreins/cli.py task create login-endpoint 'Implement POST /login' 'Accepts JSON body' 'Returns JWT' 'Has tests'"
+echo ""
+echo "Or start the MCP server for your AI agent:"
+echo "  python3 gitreins/gitreins_mcp/server.py"

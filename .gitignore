@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# GitReins sandbox (evaluation scratch space)
+.gitreins-sandbox/
+# Runtime task data (committed separately on gitreins branch)
+.gitreins/tasks.yaml
+
+# Secrets
+.env
+*.key
+*.pem

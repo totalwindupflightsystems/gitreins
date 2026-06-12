@@ -1,0 +1,1011 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GitReins (PoC) — Git-Native Agent Co-Harness</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #020617;
+  --bg-card: #0f172a;
+  --bg-card-hover: #1e293b;
+  --border: #1e293b;
+  --text: #e2e8f0;
+  --text-dim: #94a3b8;
+  --text-muted: #64748b;
+  --cyan: #22d3ee;
+  --emerald: #34d399;
+  --violet: #a78bfa;
+  --amber: #fbbf24;
+  --rose: #fb7185;
+  --orange: #fb923c;
+  --slate: #94a3b8;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'JetBrains Mono', monospace;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+.container { max-width: 1200px; margin: 0 auto; padding: 0 2rem; }
+
+/* Header */
+.hero {
+  padding: 6rem 0 4rem;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+}
+.hero h1 {
+  font-size: 3.5rem;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -1px;
+}
+.hero h1 span { color: var(--cyan); }
+.hero .subtitle {
+  font-size: 1.2rem;
+  color: var(--text-dim);
+  margin-top: 1rem;
+}
+.status-dot {
+  display: inline-block;
+  width: 10px; height: 10px;
+  background: var(--emerald);
+  border-radius: 50%;
+  margin-right: 0.5rem;
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* Sections */
+section { padding: 5rem 0; border-bottom: 1px solid var(--border); }
+section:last-of-type { border-bottom: none; }
+h2 {
+  font-size: 1.8rem;
+  font-weight: 600;
+  margin-bottom: 2rem;
+  color: var(--text);
+}
+h2::before { content: '// '; color: var(--cyan); font-weight: 400; }
+h3 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: var(--cyan);
+  margin: 1.5rem 0 0.75rem;
+}
+
+/* Cards */
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 1.5rem;
+  margin: 2rem 0;
+}
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+}
+.card:hover { background: var(--bg-card-hover); }
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.card-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.card-dot.cyan { background: var(--cyan); }
+.card-dot.emerald { background: var(--emerald); }
+.card-dot.violet { background: var(--violet); }
+.card-dot.amber { background: var(--amber); }
+.card-dot.rose { background: var(--rose); }
+.card-dot.orange { background: var(--orange); }
+.card h4 { font-size: 1rem; color: var(--text); }
+
+/* Tables */
+.table-wrap {
+  overflow-x: auto;
+  margin: 1.5rem 0;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+}
+th {
+  text-align: left;
+  padding: 0.75rem 1rem;
+  background: var(--bg-card);
+  border-bottom: 2px solid var(--border);
+  color: var(--cyan);
+  font-weight: 600;
+}
+td {
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+tr:hover td { background: rgba(34, 211, 238, 0.05); }
+
+/* Code */
+code {
+  background: var(--bg-card);
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  color: var(--cyan);
+}
+pre {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+  overflow-x: auto;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  margin: 1rem 0;
+}
+pre code {
+  background: none;
+  padding: 0;
+  color: var(--text);
+}
+
+/* SVG Container */
+.svg-wrap {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  margin: 2rem 0;
+  overflow-x: auto;
+}
+.svg-wrap svg { display: block; margin: 0 auto; }
+
+/* Tags */
+.tag {
+  display: inline-block;
+  padding: 0.2rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  margin: 0.2rem;
+}
+.tag.python { background: rgba(34, 211, 238, 0.15); color: var(--cyan); }
+.tag.yaml { background: rgba(167, 139, 250, 0.15); color: var(--violet); }
+.tag.bash { background: rgba(52, 211, 153, 0.15); color: var(--emerald); }
+.tag.mcp { background: rgba(251, 191, 36, 0.15); color: var(--amber); }
+.tag.llm { background: rgba(251, 113, 133, 0.15); color: var(--rose); }
+
+/* Phases */
+.phase-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+  margin: 2rem 0;
+}
+.phase {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.25rem;
+  border-left: 3px solid var(--cyan);
+}
+.phase .num {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+.phase h4 { margin: 0.5rem 0; }
+.phase p { font-size: 0.85rem; color: var(--text-dim); }
+
+/* Footer */
+footer {
+  text-align: center;
+  padding: 3rem 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* Comparison */
+.compare-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1rem;
+  margin: 2rem 0;
+}
+.compare-col {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1.5rem;
+}
+.compare-col.recommended {
+  border-color: var(--emerald);
+  border-width: 2px;
+}
+.compare-col h4 { margin-bottom: 1rem; }
+.compare-col ul { list-style: none; font-size: 0.85rem; }
+.compare-col ul li { padding: 0.3rem 0; }
+.compare-col ul li::before { content: '→ '; color: var(--cyan); }
+
+@media (max-width: 768px) {
+  .compare-grid { grid-template-columns: 1fr; }
+  .hero h1 { font-size: 2rem; }
+  .card-grid { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- Hero -->
+<header class="hero">
+  <div class="container">
+    <h1><span class="status-dot"></span>Git<span>Reins</span> <span style="font-size: 1rem; color: var(--amber);">PoC</span></h1>
+    <p class="subtitle">Git-Native Agent Co-Harness — Quality Gates for AI-Generated Code</p>
+  </div>
+</header>
+
+<!-- Overview -->
+<section>
+  <div class="container">
+    <h2>Overview</h2>
+    <p style="font-size: 1.1rem; max-width: 800px;">
+      GitReins is a <strong>co-harness</strong> that lives inside your git repository. 
+      It provides MCP tools for task lifecycle management, an agentic evaluator that judges 
+      code completeness against task definitions, and git hooks that ensure nothing bypasses 
+      the quality gates.
+    </p>
+
+    <div class="card-grid" style="margin-top: 2rem;">
+      <div class="card">
+        <div class="card-header"><div class="card-dot cyan"></div><h4>Primary Agent</h4></div>
+        <p style="color: var(--text-dim);">Any AI coding agent (Pi, Claude, Hermes, Codex) does the creative work — writes code, runs tests, iterates.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-dot emerald"></div><h4>GitReins Co-Harness</h4></div>
+        <p style="color: var(--text-dim);">Manages task lifecycle, enforces quality, validates completeness. The TODO items <em>are</em> the guardrails.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-dot violet"></div><h4>Agentic Evaluator</h4></div>
+        <p style="color: var(--text-dim);">Not a single LLM call — an agentic loop with 5 tools that reads, tests, searches, and verifies every task criterion.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Architecture Diagram -->
+<section>
+  <div class="container">
+    <h2>System Architecture</h2>
+    <div class="svg-wrap">
+      <svg viewBox="0 0 1100 680" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1e293b" stroke-width="0.5"/>
+          </pattern>
+          <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#94a3b8"/>
+          </marker>
+          <marker id="arrow-cyan" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#22d3ee"/>
+          </marker>
+          <marker id="arrow-rose" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#fb7185"/>
+          </marker>
+        </defs>
+        <rect width="1100" height="680" fill="url(#grid)"/>
+
+        <!-- Primary Agent -->
+        <rect x="400" y="20" width="300" height="70" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+        <rect x="400" y="20" width="300" height="70" rx="6" fill="rgba(8,51,68,0.4)"/>
+        <text x="550" y="48" text-anchor="middle" fill="#22d3ee" font-size="12" font-family="JetBrains Mono">PRIMARY AI AGENT</text>
+        <text x="550" y="68" text-anchor="middle" fill="#94a3b8" font-size="9" font-family="JetBrains Mono">Pi / Claude / Hermes / Codex</text>
+
+        <!-- Arrow: Agent → MCP -->
+        <line x1="550" y1="90" x2="550" y2="125" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+        <text x="560" y="112" fill="#22d3ee" font-size="8" font-family="JetBrains Mono">MCP stdio</text>
+
+        <!-- MCP Server -->
+        <rect x="370" y="130" width="360" height="80" rx="6" fill="#0f172a" stroke="#fbbf24" stroke-width="1.5"/>
+        <rect x="370" y="130" width="360" height="80" rx="6" fill="rgba(120,53,15,0.3)"/>
+        <text x="550" y="155" text-anchor="middle" fill="#fbbf24" font-size="12" font-family="JetBrains Mono">MCP SERVER</text>
+        <text x="550" y="175" text-anchor="middle" fill="#94a3b8" font-size="9" font-family="JetBrains Mono">task.* commit() guard.*</text>
+
+        <!-- Tool list inside MCP box -->
+        <rect x="385" y="185" width="65" height="18" rx="3" fill="rgba(251,191,36,0.1)" stroke="#fbbf24" stroke-width="0.5"/>
+        <text x="417" y="197" text-anchor="middle" fill="#fbbf24" font-size="7" font-family="JetBrains Mono">task.create</text>
+        <rect x="458" y="185" width="60" height="18" rx="3" fill="rgba(251,191,36,0.1)" stroke="#fbbf24" stroke-width="0.5"/>
+        <text x="488" y="197" text-anchor="middle" fill="#fbbf24" font-size="7" font-family="JetBrains Mono">task.start</text>
+        <rect x="526" y="185" width="68" height="18" rx="3" fill="rgba(251,191,36,0.1)" stroke="#fbbf24" stroke-width="0.5"/>
+        <text x="560" y="197" text-anchor="middle" fill="#fbbf24" font-size="7" font-family="JetBrains Mono">task.complete</text>
+        <rect x="602" y="185" width="62" height="18" rx="3" fill="rgba(251,191,36,0.1)" stroke="#fbbf24" stroke-width="0.5"/>
+        <text x="633" y="197" text-anchor="middle" fill="#fbbf24" font-size="7" font-family="JetBrains Mono">commit()</text>
+
+        <!-- Arrow: MCP → Engine -->
+        <line x1="550" y1="210" x2="550" y2="245" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+        <!-- Engine Box -->
+        <rect x="250" y="250" width="600" height="160" rx="8" fill="none" stroke="#34d399" stroke-width="2" stroke-dasharray="4,4"/>
+        <text x="275" y="270" fill="#34d399" font-size="10" font-family="JetBrains Mono">GITREINS ENGINE</text>
+
+        <!-- Task Manager -->
+        <rect x="270" y="285" width="170" height="55" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+        <rect x="270" y="285" width="170" height="55" rx="6" fill="rgba(8,51,68,0.4)"/>
+        <text x="355" y="308" text-anchor="middle" fill="#22d3ee" font-size="10" font-family="JetBrains Mono">Task Manager</text>
+        <text x="355" y="325" text-anchor="middle" fill="#94a3b8" font-size="8" font-family="JetBrains Mono">create / start / complete</text>
+
+        <!-- Evaluator -->
+        <rect x="465" y="285" width="170" height="55" rx="6" fill="#0f172a" stroke="#fb7185" stroke-width="1.5"/>
+        <rect x="465" y="285" width="170" height="55" rx="6" fill="rgba(136,19,55,0.4)"/>
+        <text x="550" y="308" text-anchor="middle" fill="#fb7185" font-size="10" font-family="JetBrains Mono">Agentic Evaluator</text>
+        <text x="550" y="325" text-anchor="middle" fill="#94a3b8" font-size="8" font-family="JetBrains Mono">5 tools · agentic loop</text>
+
+        <!-- Guard Manager -->
+        <rect x="660" y="285" width="170" height="55" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+        <rect x="660" y="285" width="170" height="55" rx="6" fill="rgba(76,29,149,0.4)"/>
+        <text x="745" y="308" text-anchor="middle" fill="#a78bfa" font-size="10" font-family="JetBrains Mono">Guard Manager</text>
+        <text x="745" y="325" text-anchor="middle" fill="#94a3b8" font-size="8" font-family="JetBrains Mono">secrets / lint / tests</text>
+
+        <!-- Judge orchestrator -->
+        <rect x="370" y="355" width="360" height="40" rx="6" fill="#0f172a" stroke="#fb923c" stroke-width="1.5"/>
+        <rect x="370" y="355" width="360" height="40" rx="6" fill="rgba(251,146,60,0.15)"/>
+        <text x="550" y="380" text-anchor="middle" fill="#fb923c" font-size="10" font-family="JetBrains Mono">JUDGE (Orchestrator) → Tier 1 → Tier 2 → Tier 3</text>
+
+        <!-- Arrow: Engine → Hooks -->
+        <line x1="550" y1="410" x2="550" y2="445" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+        <!-- Git Hooks -->
+        <rect x="370" y="450" width="360" height="45" rx="6" fill="#0f172a" stroke="#94a3b8" stroke-width="1.5"/>
+        <text x="550" y="478" text-anchor="middle" fill="#94a3b8" font-size="10" font-family="JetBrains Mono">Git Hooks (.git/hooks/)</text>
+
+        <!-- Arrow: Hooks → Repo -->
+        <line x1="550" y1="495" x2="550" y2="530" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+        <!-- Git Repo -->
+        <rect x="300" y="535" width="500" height="120" rx="6" fill="#0f172a" stroke="#94a3b8" stroke-width="1.5"/>
+        <rect x="300" y="535" width="500" height="120" rx="6" fill="rgba(30,41,59,0.3)"/>
+        
+        <rect x="320" y="550" width="220" height="40" rx="4" fill="rgba(34,211,238,0.08)" stroke="#22d3ee" stroke-width="1"/>
+        <text x="430" y="568" text-anchor="middle" fill="#22d3ee" font-size="9" font-family="JetBrains Mono">main branch</text>
+        <text x="430" y="582" text-anchor="middle" fill="#64748b" font-size="7" font-family="JetBrains Mono">code + gitreins/engine/</text>
+
+        <rect x="560" y="550" width="220" height="40" rx="4" fill="rgba(167,139,250,0.08)" stroke="#a78bfa" stroke-width="1"/>
+        <text x="670" y="568" text-anchor="middle" fill="#a78bfa" font-size="9" font-family="JetBrains Mono">gitreins branch</text>
+        <text x="670" y="582" text-anchor="middle" fill="#64748b" font-size="7" font-family="JetBrains Mono">config / tasks / prompts</text>
+
+        <text x="550" y="610" text-anchor="middle" fill="#64748b" font-size="8" font-family="JetBrains Mono">Clone → ./gitreins/install → Harness live. No external deps beyond Python.</text>
+
+        <!-- Enforcement arrows -->
+        <path d="M 250 500 L 170 500 L 170 200 L 360 200" fill="none" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="6,4" marker-end="url(#arrow-rose)"/>
+        <text x="175" y="360" fill="#fb7185" font-size="8" font-family="JetBrains Mono" transform="rotate(-90, 175, 360)">Can't bypass hooks</text>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- Evaluator Loop -->
+<section>
+  <div class="container">
+    <h2>Agentic Evaluator — Not a Single LLM Call</h2>
+    <p style="max-width: 800px; margin-bottom: 2rem;">
+      The evaluator is an agentic loop with <strong>5 purpose-built tools</strong>. It doesn't just 
+      receive a prompt and return a verdict — it reads files, runs tests, searches for patterns, 
+      and digs deeper when evidence is unclear. The loop continues until the LLM has enough 
+      evidence to deliver a verdict.
+    </p>
+
+    <div class="svg-wrap">
+      <svg viewBox="0 0 1100 410" xmlns="http://www.w3.org/2000/svg">
+        <rect width="1100" height="410" fill="url(#grid)"/>
+        
+        <!-- Loop circle -->
+        <ellipse cx="280" cy="190" rx="140" ry="100" fill="none" stroke="#34d399" stroke-width="1.5" stroke-dasharray="4,4"/>
+        <text x="280" y="155" text-anchor="middle" fill="#34d399" font-size="10" font-family="JetBrains Mono">AGENTIC LOOP</text>
+        <text x="280" y="170" text-anchor="middle" fill="#64748b" font-size="8" font-family="JetBrains Mono">iterate until verdict</text>
+
+        <!-- Start -->
+        <rect x="220" y="100" width="120" height="35" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+        <text x="280" y="122" text-anchor="middle" fill="#22d3ee" font-size="10" font-family="JetBrains Mono">LOAD CONTEXT</text>
+        
+        <rect x="360" y="200" width="120" height="35" rx="6" fill="#0f172a" stroke="#fbbf24" stroke-width="1.5"/>
+        <text x="420" y="222" text-anchor="middle" fill="#fbbf24" font-size="10" font-family="JetBrains Mono">LLM CALL</text>
+
+        <rect x="220" y="280" width="120" height="35" rx="6" fill="#0f172a" stroke="#fb923c" stroke-width="1.5"/>
+        <text x="280" y="302" text-anchor="middle" fill="#fb923c" font-size="10" font-family="JetBrains Mono">TOOL CALL?</text>
+
+        <!-- Arrows in loop -->
+        <line x1="280" y1="135" x2="220" y2="200" stroke="#22d3ee" stroke-width="1" marker-end="url(#arrow-cyan)"/>
+        <line x1="280" y1="218" x2="360" y2="218" stroke="#fbbf24" stroke-width="1"/>
+        <line x1="420" y1="235" x2="340" y2="280" stroke="#fbbf24" stroke-width="1" marker-end="url(#arrow)"/>
+        <line x1="280" y1="315" x2="280" y2="280" stroke="#fb923c" stroke-width="1"/>
+        <line x1="160" y1="218" x2="160" y2="280" stroke="#fb923c" stroke-width="1" stroke-dasharray="3,3"/>
+        <text x="135" y="255" fill="#fb923c" font-size="8" font-family="JetBrains Mono">yes</text>
+
+        <!-- 5 Tools -->
+        <text x="550" y="100" fill="#64748b" font-size="11" font-family=\"JetBrains Mono\">7 EVALUATION TOOLS</text>
+
+        <!-- Repo Inspection -->
+        <rect x="550" y="110" width="240" height="26" rx="4" fill="rgba(34,211,238,0.08)" stroke="#22d3ee" stroke-width="1"/>
+        <text x="670" y="128" text-anchor="middle" fill="#22d3ee" font-size="9" font-family="JetBrains Mono">read_file(path)</text>
+
+        <rect x="550" y="142" width="240" height="26" rx="4" fill="rgba(34,211,238,0.08)" stroke="#22d3ee" stroke-width="1"/>
+        <text x="670" y="160" text-anchor="middle" fill="#22d3ee" font-size="9" font-family="JetBrains Mono">run_command(cmd)</text>
+
+        <rect x="550" y="174" width="240" height="26" rx="4" fill="rgba(251,146,60,0.08)" stroke="#fb923c" stroke-width="1"/>
+        <text x="670" y="192" text-anchor="middle" fill="#fb923c" font-size="9" font-family="JetBrains Mono">search_pattern(regex)</text>
+
+        <rect x="550" y="206" width="240" height="26" rx="4" fill="rgba(167,139,250,0.08)" stroke="#a78bfa" stroke-width="1"/>
+        <text x="670" y="224" text-anchor="middle" fill="#a78bfa" font-size="9" font-family="JetBrains Mono">read_diff(filter?)</text>
+
+        <rect x="550" y="238" width="240" height="26" rx="4" fill="rgba(251,191,36,0.08)" stroke="#fbbf24" stroke-width="1"/>
+        <text x="670" y="256" text-anchor="middle" fill="#fbbf24" font-size="9" font-family="JetBrains Mono">get_task_item(id)</text>
+
+        <!-- External & Sandbox -->
+        <rect x="550" y="274" width="240" height="26" rx="4" fill="rgba(34,211,238,0.12)" stroke="#34d399" stroke-width="1.5" stroke-dasharray="3,2"/>
+        <text x="670" y="292" text-anchor="middle" fill="#34d399" font-size="9" font-family="JetBrains Mono">mcp_call(server, tool) ✦</text>
+
+        <rect x="550" y="306" width="240" height="26" rx="4" fill="rgba(167,139,250,0.12)" stroke="#a78bfa" stroke-width="1.5" stroke-dasharray="3,2"/>
+        <text x="670" y="324" text-anchor="middle" fill="#a78bfa" font-size="9" font-family="JetBrains Mono">sandbox_{write,read}() ◇</text>
+
+        <text x="550" y="350" fill="#64748b" font-size="7" font-family="JetBrains Mono">✦ pluggable · ◇ virtual FS</text>
+
+        <!-- Verdict -->
+        <rect x="800" y="210" width="180" height="40" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="2"/>
+        <text x="890" y="230" text-anchor="middle" fill="#34d399" font-size="11" font-family="JetBrains Mono">VERDICT</text>
+        <text x="890" y="244" text-anchor="middle" fill="#64748b" font-size="8" font-family="JetBrains Mono">COMPLETE / INCOMPLETE</text>
+
+        <line x1="420" y1="218" x2="800" y2="230" stroke="#34d399" stroke-width="1.5" stroke-dasharray="6,4" marker-end="url(#arrow)"/>
+        <text x="610" y="225" fill="#34d399" font-size="8" font-family="JetBrains Mono">no tool calls → verdict</text>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- MCP Bridge & Sandbox -->
+<section>
+  <div class="container">
+    <h2>Pluggable MCP + Virtual FS Sandbox</h2>
+
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-header"><div class="card-dot emerald"></div><h4>mcp_call — External Truth Sources</h4></div>
+        <p style="color: var(--text-dim); margin-bottom: 1rem;">
+          The evaluator can fetch external context to verify work against real-world sources. 
+          Nothing is available by default — repos opt in via allowlist.
+        </p>
+        <pre><code># .gitreins.yaml
+evaluator:
+  mcp_allowlist:
+    - server: jira
+      tools: ["get_issue", "search_issues"]
+    - server: internal_docs
+      tools: ["fetch_page", "search_docs"]
+    - server: database
+      tools: ["query_schema"]</code></pre>
+        <p style="color: var(--text-dim); font-size: 0.85rem; margin-top: 0.5rem;">
+          "Task says 'matches Jira PROJ-423' → evaluator fetches the ticket and compares."
+        </p>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-dot violet"></div><h4>sandbox_write/read — Evaluator Scratch Space</h4></div>
+        <p style="color: var(--text-dim); margin-bottom: 1rem;">
+          The evaluator gets a temporary virtual filesystem that is isolated from the repository. 
+          Used for tracking evidence, building checklists, and offloading intermediate results.
+        </p>
+        <div class="table-wrap">
+          <table>
+            <tr><th style="color: var(--violet);">Sandbox Property</th><th>Behavior</th></tr>
+            <tr><td>Location</td><td><code>/tmp/gitreins-eval-&lt;uuid&gt;/</code></td></tr>
+            <tr><td>Isolation</td><td>Cannot touch repository code</td></tr>
+            <tr><td>Lifespan</td><td>Created per evaluation, cleaned after verdict</td></tr>
+            <tr><td>Persistence</td><td>Available across all tool calls in one session</td></tr>
+            <tr><td>Use case</td><td>Evidence log, checklist, partial findings</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top: 1.5rem; color: var(--text-dim); font-size: 0.9rem;">
+      <strong style="color: var(--cyan);">Why this matters:</strong> Without the sandbox, the evaluator keeps everything in LLM context — expensive and lossy over a long agentic loop. 
+      With MCP, the evaluator's reach extends beyond the repo to any external truth source (Jira, docs, APIs, databases). 
+      Both are opt-in per repo via <code style="color: var(--cyan);">.gitreins.yaml</code>.
+    </div>
+  </div>
+</section>
+
+<!-- Build vs Borrow -->
+<section>
+  <div class="container">
+    <h2>Build vs Borrow — Agent Runtime Decision</h2>
+    <p style="max-width: 800px; margin-bottom: 2rem;">
+      We researched three approaches for the evaluator's agentic runtime. 
+      Pi's compiled binary path has known cross-platform issues (Bun 1.3.12 SIGKILL on macOS). 
+      mcp-agent (8.3K stars) and smolagents (27K stars) are full frameworks — overkill for a focused evaluator.
+    </p>
+
+    <div class="compare-grid">
+      <div class="compare-col">
+        <h4 style="color: var(--amber);">A: Pi (Compiled Binary)</h4>
+        <ul>
+          <li style="color: var(--text-dim);">28K stars, battle-tested agent loop</li>
+          <li style="color: var(--text-dim);">MCP via extensions</li>
+          <li style="color: var(--text-dim);">Can compile to standalone binary</li>
+          <li style="color: var(--rose);">Bun build --compile has macOS SIGKILL regression</li>
+          <li style="color: var(--rose);">~60MB binary (embeds JS runtime)</li>
+          <li style="color: var(--rose);">Requires Bun to BUILD</li>
+          <li style="color: var(--rose);">Carries full coding agent (TUI, themes, sessions)</li>
+          <li style="color: var(--rose);">Not reliable for embedded evaluator</li>
+        </ul>
+      </div>
+      <div class="compare-col recommended">
+        <h4 style="color: var(--emerald);">B: mcp SDK + Custom Loop ✓</h4>
+        <ul>
+          <li style="color: var(--emerald);">~100 line custom agentic loop</li>
+          <li style="color: var(--emerald);">Official mcp Python SDK for MCP protocol</li>
+          <li style="color: var(--emerald);">requests for LLM API calls</li>
+          <li style="color: var(--emerald);">3 pip deps: mcp, pyyaml, requests</li>
+          <li style="color: var(--emerald);">Python 3.10+ (Ubuntu 22.04 LTS standard)</li>
+          <li style="color: var(--emerald);">Full control, minimal dependencies</li>
+          <li style="color: var(--emerald);">No framework lifecycle — embed anywhere</li>
+          <li style="color: var(--emerald);">Simple to maintain, easy to debug</li>
+        </ul>
+      </div>
+      <div class="compare-col">
+        <h4 style="color: var(--slate);">C: mcp-agent / smolagents</h4>
+        <ul>
+          <li style="color: var(--text-dim);">mcp-agent: 8.3K stars, Apache 2.0</li>
+          <li style="color: var(--text-dim);">smolagents: 27K stars, HuggingFace</li>
+          <li style="color: var(--text-dim);">MCP-native, evaluator pattern built-in</li>
+          <li style="color: var(--rose);">Heavy async framework (MCPApp lifecycle)</li>
+          <li style="color: var(--rose);">Designed for standalone apps, not embedding</li>
+          <li style="color: var(--rose);">smolagents uses code-gen paradigm (wrong fit)</li>
+          <li style="color: var(--rose);">Significant dependency weight</li>
+          <li style="color: var(--rose);">Overkill for a ~100 line evaluator loop</li>
+        </ul>
+      </div>
+    </div>
+
+    <div style="margin-top: 2rem;">
+      <h3>Why the Agentic Loop Is Simple</h3>
+      <pre><code>while True:
+    response = llm.chat(messages, tools)
+    if not response.tool_calls:
+        return response.content  # Verdict — agent decided it's done
+    for call in response.tool_calls:
+        result = execute_tool(call)  # read_file, mcp_call, sandbox_write...
+        messages.append(tool_result(result))
+    # Loop — LLM gets results, may call more tools</code></pre>
+      <p style="color: var(--text-dim); font-size: 0.9rem; margin-top: 0.5rem;">
+        The loop itself is 10 lines. The complexity was always in MCP protocol handling — 
+        solved by the <strong>official mcp Python SDK</strong>. The evaluator calls 
+        <code>mcp_call(server, tool, args)</code> and the SDK handles JSON-RPC, connection lifecycle, 
+        and tool discovery.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- Sandbox Architecture -->
+<section>
+  <div class="container">
+    <h2>Sandbox: gitreins Branch Persistence</h2>
+    <p style="max-width: 800px; margin-bottom: 2rem;">
+      The evaluator's scratch space lives on the <strong>gitreins branch</strong>, not /tmp. 
+      Every evaluation's evidence log and checklist is version-controlled, auditable, and cloneable.
+    </p>
+
+    <div class="svg-wrap">
+      <svg viewBox="0 0 1000 180" xmlns="http://www.w3.org/2000/svg">
+        <rect width="1000" height="180" fill="url(#grid)"/>
+
+        <!-- During evaluation -->
+        <rect x="30" y="20" width="440" height="140" rx="6" fill="#0f172a" stroke="#fbbf24" stroke-width="1.5" stroke-dasharray="4,4"/>
+        <text x="250" y="45" text-anchor="middle" fill="#fbbf24" font-size="10" font-family="JetBrains Mono">DURING EVALUATION</text>
+
+        <rect x="50" y="60" width="190" height="40" rx="4" fill="rgba(167,139,250,0.08)" stroke="#a78bfa" stroke-width="1"/>
+        <text x="145" y="85" text-anchor="middle" fill="#a78bfa" font-size="9" font-family="JetBrains Mono">.git/gitreins-sandbox/</text>
+        
+        <rect x="260" y="60" width="190" height="40" rx="4" fill="rgba(34,211,238,0.08)" stroke="#22d3ee" stroke-width="1"/>
+        <text x="355" y="85" text-anchor="middle" fill="#22d3ee" font-size="9" font-family="JetBrains Mono">evidence-log.md</text>
+
+        <text x="250" y="130" text-anchor="middle" fill="#64748b" font-size="8" font-family="JetBrains Mono">gitignored · isolated from working tree</text>
+
+        <!-- Arrow -->
+        <line x1="470" y1="90" x2="520" y2="90" stroke="#34d399" stroke-width="2" marker-end="url(#arrow)"/>
+        <text x="495" y="80" fill="#34d399" font-size="8" font-family="JetBrains Mono">verdict</text>
+
+        <!-- After verdict -->
+        <rect x="530" y="20" width="440" height="140" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="1.5" stroke-dasharray="4,4"/>
+        <text x="750" y="45" text-anchor="middle" fill="#34d399" font-size="10" font-family="JetBrains Mono">AFTER VERDICT</text>
+
+        <rect x="550" y="60" width="190" height="40" rx="4" fill="rgba(34,211,238,0.08)" stroke="#34d399" stroke-width="1"/>
+        <text x="645" y="78" text-anchor="middle" fill="#34d399" font-size="8" font-family="JetBrains Mono">gitreins branch:</text>
+        <text x="645" y="93" text-anchor="middle" fill="#22d3ee" font-size="8" font-family="JetBrains Mono">history/2026-05-26/</text>
+
+        <rect x="760" y="60" width="190" height="40" rx="4" fill="rgba(34,211,238,0.08)" stroke="#34d399" stroke-width="1"/>
+        <text x="855" y="78" text-anchor="middle" fill="#34d399" font-size="8" font-family="JetBrains Mono">&lt;commit-hash&gt;/</text>
+        <text x="855" y="93" text-anchor="middle" fill="#22d3ee" font-size="8" font-family="JetBrains Mono">verdict.json + logs</text>
+
+        <text x="750" y="130" text-anchor="middle" fill="#64748b" font-size="8" font-family="JetBrains Mono">version-controlled · auditable · cloneable</text>
+      </svg>
+    </div>
+
+    <div class="card-grid" style="margin-top: 1.5rem;">
+      <div class="card">
+        <div class="card-header"><div class="card-dot violet"></div><h4>Isolation</h4></div>
+        <p style="color: var(--text-dim);">Sandbox is <code>.git/gitreins-sandbox/</code> — gitignored, never touches the working tree. Evaluator writes freely here.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-dot emerald"></div><h4>Persistence</h4></div>
+        <p style="color: var(--text-dim);">After verdict: engine auto-commits sandbox to <code>gitreins</code> branch under <code>history/&lt;date&gt;/&lt;hash&gt;/</code>. Full audit trail.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-dot cyan"></div><h4>Learning</h4></div>
+        <p style="color: var(--text-dim);">Past evaluations are queryable. Agent can learn from common failure patterns across the evaluation history.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Component Map -->
+<section>
+  <div class="container">
+    <h2>Component Map</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Component</th>
+            <th>Path</th>
+            <th>Lines</th>
+            <th>Responsibility</th>
+            <th>Tags</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="color: var(--cyan);">Task Manager</td>
+            <td><code>engine/task_manager.py</code></td>
+            <td>~200</td>
+            <td>Task lifecycle: create, start, complete, status, nesting, dependencies</td>
+            <td><span class="tag python">Python</span></td>
+          </tr>
+          <tr>
+            <td style="color: var(--rose);">Agentic Evaluator</td>
+            <td><code>engine/evaluator.py</code></td>
+            <td>~300</td>
+            <td>Agentic loop + 7 evaluation tools (5 repo + MCP bridge + sandbox) + verdict parsing</td>
+            <td><span class="tag python">Python</span><span class="tag llm">LLM</span></td>
+          </tr>
+          <tr>
+            <td style="color: var(--violet);">Guard Manager</td>
+            <td><code>engine/guard_manager.py</code></td>
+            <td>~150</td>
+            <td>Static checks: secrets (gitleaks), lint, staged tests</td>
+            <td><span class="tag python">Python</span></td>
+          </tr>
+          <tr>
+            <td style="color: var(--orange);">Judge Orchestrator</td>
+            <td><code>engine/judge.py</code></td>
+            <td>~100</td>
+            <td>Tier 1 → Tier 2 pipeline, verdict compilation</td>
+            <td><span class="tag python">Python</span></td>
+          </tr>
+          <tr>
+            <td style="color: var(--cyan);">LLM Interface</td>
+            <td><code>engine/llm.py</code></td>
+            <td>~100</td>
+            <td>Multi-provider API (OpenAI, Anthropic), model selection</td>
+            <td><span class="tag python">Python</span><span class="tag llm">LLM</span></td>
+          </tr>
+          <tr>
+            <td style="color: var(--emerald);">Test Runner</td>
+            <td><code>engine/test_runner.py</code></td>
+            <td>~80</td>
+            <td>Run registered tests, capture output, report results</td>
+            <td><span class="tag python">Python</span></td>
+          </tr>
+          <tr>
+            <td style="color: var(--amber);">MCP Server</td>
+            <td><code>mcp/server.py</code></td>
+            <td>~150</td>
+            <td>MCP stdio transport, tool registration, primary agent interface</td>
+            <td><span class="tag python">Python</span><span class="tag mcp">MCP</span></td>
+          </tr>
+          <tr>
+            <td style="color: var(--slate);">Git Hooks</td>
+            <td><code>hooks/pre-commit</code></td>
+            <td>~20</td>
+            <td>Thin relay — calls engine for Tier 1 + Tier 2 checks</td>
+            <td><span class="tag bash">Bash</span></td>
+          </tr>
+          <tr>
+            <td style="color: var(--slate);">Bootstrap</td>
+            <td><code>install</code></td>
+            <td>~30</td>
+            <td>Symlinks hooks into .git/hooks/ — one command activation</td>
+            <td><span class="tag bash">Bash</span></td>
+          </tr>
+          <tr>
+            <td style="color: var(--violet);">Config</td>
+            <td><code>gitreins branch</code></td>
+            <td>—</td>
+            <td>config.yaml, guardrails/, prompts/, tasks/, history/</td>
+            <td><span class="tag yaml">YAML</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- Implementation Plan -->
+<section>
+  <div class="container">
+    <h2>Implementation Plan</h2>
+
+    <div class="phase-grid">
+      <div class="phase">
+        <div class="num">Phase 0 · Day 1</div>
+        <h4>Template & Bootstrap</h4>
+        <p>gitreins-template repo, install/uninstall scripts, hook stubs. Clone → active in 10 seconds.</p>
+      </div>
+      <div class="phase">
+        <div class="num">Phase 1 · Day 1–2</div>
+        <h4>Static Guards</h4>
+        <p>Secrets scanning, lint, staged tests. Tier 1 enforcement. No LLM dependency.</p>
+      </div>
+      <div class="phase">
+        <div class="num">Phase 2 · Day 2–3</div>
+        <h4>Task Manager</h4>
+        <p>Task lifecycle without evaluation. Create, start, complete (checkbox), status, nesting.</p>
+      </div>
+      <div class="phase">
+        <div class="num">Phase 3 · Day 3–5</div>
+        <h4>Agentic Evaluator</h4>
+        <p>The core innovation. Agentic loop with 5 tools, LLM judge, verdict system.</p>
+      </div>
+      <div class="phase">
+        <div class="num">Phase 4 · Day 5–6</div>
+        <h4>MCP Server</h4>
+        <p>Primary agent integration. stdio transport, tool registration. Works with any MCP agent.</p>
+      </div>
+      <div class="phase">
+        <div class="num">Phase 5 · Day 6–7</div>
+        <h4>CLI</h4>
+        <p>Human-usable command line. gitreins task, gitreins commit, gitreins guard.</p>
+      </div>
+      <div class="phase">
+        <div class="num">Phase 6 · Day 7–8</div>
+        <h4>gitreins Branch</h4>
+        <p>Config, tasks, prompts, history on dedicated branch. Version-controlled, cloneable.</p>
+      </div>
+      <div class="phase">
+        <div class="num">Phase 7 · Week 3+</div>
+        <h4>Advanced</h4>
+        <p>Deep review (Tier 3), multi-agent, π learning, IDE integrations.</p>
+      </div>
+    </div>
+
+    <div style="margin-top: 2rem;">
+      <h3>Dependency Chain</h3>
+      <pre><code>Phase 0: Template + Bootstrap
+    ↓
+Phase 1: Static Guards ──────────────────┐
+    ↓                                     │
+Phase 2: Task Manager                     │
+    ↓                                     │
+Phase 3: Agentic Evaluator ←─────────────┘  ← CRITICAL PATH
+    ↓
+Phase 4: MCP Server
+    ↓
+Phase 5: CLI
+    ↓
+Phase 6: gitreins Branch Config
+    ↓
+Phase 7: Advanced Features</code></pre>
+    </div>
+  </div>
+</section>
+
+<!-- Data Flow -->
+<section>
+  <div class="container">
+    <h2>Commit Flow (End-to-End)</h2>
+    <div class="svg-wrap">
+      <svg viewBox="0 0 1100 460" xmlns="http://www.w3.org/2000/svg">
+        <rect width="1100" height="460" fill="url(#grid)"/>
+
+        <!-- Step 1: Agent completes items -->
+        <rect x="20" y="30" width="240" height="80" rx="6" fill="#0f172a" stroke="#22d3ee" stroke-width="1.5"/>
+        <rect x="20" y="30" width="240" height="80" rx="6" fill="rgba(8,51,68,0.4)"/>
+        <text x="140" y="55" text-anchor="middle" fill="#22d3ee" font-size="10" font-family="JetBrains Mono">1. Agent Completes Items</text>
+        <text x="140" y="72" text-anchor="middle" fill="#94a3b8" font-size="8" font-family="JetBrains Mono">task.complete("login", "endpoint")</text>
+        <text x="140" y="90" text-anchor="middle" fill="#64748b" font-size="7" font-family="JetBrains Mono">Evaluator checks item → PASS</text>
+
+        <!-- Arrow -->
+        <line x1="260" y1="70" x2="320" y2="70" stroke="#22d3ee" stroke-width="1.5" marker-end="url(#arrow-cyan)"/>
+
+        <!-- Step 2: Tier 1 -->
+        <rect x="325" y="30" width="210" height="80" rx="6" fill="#0f172a" stroke="#a78bfa" stroke-width="1.5"/>
+        <rect x="325" y="30" width="210" height="80" rx="6" fill="rgba(76,29,149,0.4)"/>
+        <text x="430" y="55" text-anchor="middle" fill="#a78bfa" font-size="10" font-family="JetBrains Mono">2. Tier 1: Static Guards</text>
+        <text x="430" y="72" text-anchor="middle" fill="#94a3b8" font-size="8" font-family="JetBrains Mono">gitleaks → PASS</text>
+        <text x="430" y="90" text-anchor="middle" fill="#94a3b8" font-size="8" font-family="JetBrains Mono">lint + staged tests → PASS</text>
+
+        <!-- Arrow -->
+        <line x1="535" y1="70" x2="595" y2="70" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+        <!-- Step 3: Tier 2 -->
+        <rect x="600" y="30" width="250" height="80" rx="6" fill="#0f172a" stroke="#fb7185" stroke-width="1.5"/>
+        <rect x="600" y="30" width="250" height="80" rx="6" fill="rgba(136,19,55,0.4)"/>
+        <text x="725" y="55" text-anchor="middle" fill="#fb7185" font-size="10" font-family="JetBrains Mono">3. Tier 2: Agentic Evaluator</text>
+        <text x="725" y="72" text-anchor="middle" fill="#94a3b8" font-size="8" font-family="JetBrains Mono">LLM reads files, runs tests,</text>
+        <text x="725" y="90" text-anchor="middle" fill="#94a3b8" font-size="8" font-family="JetBrains Mono">verifies criteria → COMPLETE</text>
+
+        <!-- Arrow -->
+        <line x1="850" y1="70" x2="910" y2="70" stroke="#fb7185" stroke-width="1.5" marker-end="url(#arrow-rose)"/>
+
+        <!-- Step 4: Commit -->
+        <rect x="915" y="30" width="165" height="80" rx="6" fill="#0f172a" stroke="#34d399" stroke-width="2"/>
+        <rect x="915" y="30" width="165" height="80" rx="6" fill="rgba(6,78,59,0.4)"/>
+        <text x="997" y="55" text-anchor="middle" fill="#34d399" font-size="10" font-family="JetBrains Mono">4. git commit ✓</text>
+        <text x="997" y="72" text-anchor="middle" fill="#94a3b8" font-size="8" font-family="JetBrains Mono">Commit created</text>
+        <text x="997" y="90" text-anchor="middle" fill="#64748b" font-size="7" font-family="JetBrains Mono">Tag: task/done</text>
+
+        <!-- Bypass attempt section -->
+        <rect x="20" y="150" width="1060" height="160" rx="6" fill="none" stroke="#fb7185" stroke-width="1.5" stroke-dasharray="4,4"/>
+        <text x="40" y="170" fill="#fb7185" font-size="10" font-family="JetBrains Mono">BYPASS ATTEMPT</text>
+
+        <rect x="40" y="190" width="300" height="50" rx="6" fill="rgba(136,19,55,0.1)" stroke="#fb7185" stroke-width="1"/>
+        <text x="190" y="212" text-anchor="middle" fill="#fb7185" font-size="10" font-family="JetBrains Mono">Agent tries: git commit directly</text>
+        <text x="190" y="228" text-anchor="middle" fill="#94a3b8" font-size="8" font-family="JetBrains Mono">(bypassing MCP tools)</text>
+
+        <line x1="340" y1="215" x2="400" y2="215" stroke="#fb7185" stroke-width="1.5" marker-end="url(#arrow-rose)"/>
+
+        <rect x="405" y="190" width="300" height="50" rx="6" fill="rgba(136,19,55,0.08)" stroke="#fb7185" stroke-width="1"/>
+        <text x="555" y="212" text-anchor="middle" fill="#fb7185" font-size="10" font-family="JetBrains Mono">pre-commit hook fires</text>
+        <text x="555" y="228" text-anchor="middle" fill="#94a3b8" font-size="8" font-family="JetBrains Mono">Same Tier 1 + Tier 2 pipeline runs</text>
+
+        <line x1="705" y1="215" x2="765" y2="215" stroke="#fb7185" stroke-width="1.5" marker-end="url(#arrow-rose)"/>
+
+        <rect x="770" y="190" width="290" height="50" rx="6" fill="rgba(136,19,55,0.06)" stroke="#fb7185" stroke-width="1"/>
+        <text x="915" y="212" text-anchor="middle" fill="#fb7185" font-size="10" font-family="JetBrains Mono">REJECTED — items incomplete</text>
+        <text x="915" y="228" text-anchor="middle" fill="#94a3b8" font-size="8" font-family="JetBrains Mono">"Cannot bypass quality gates"</text>
+
+        <text x="550" y="285" text-anchor="middle" fill="#64748b" font-size="9" font-family="JetBrains Mono">Two-layer enforcement: MCP tools (friendly) + Git hooks (hard gate)</text>
+
+        <!-- Verdict example -->
+        <rect x="20" y="330" width="1060" height="110" rx="6" fill="#0f172a" stroke="#1e293b" stroke-width="1.5"/>
+        <text x="40" y="350" fill="#64748b" font-size="9" font-family="JetBrains Mono">EXAMPLE VERDICT (INCOMPLETE)</text>
+        <text x="40" y="372" fill="#fb7185" font-size="9" font-family="JetBrains Mono">✗ error-handling: No 401 for invalid credentials → routes.py:65 missing</text>
+        <text x="40" y="392" fill="#fb7185" font-size="9" font-family="JetBrains Mono">✗ tests: Missing 3 required tests → test_login.py only has happy-path</text>
+        <text x="40" y="412" fill="#34d399" font-size="9" font-family="JetBrains Mono">✓ login-endpoint: POST /login confirmed at routes.py:42-68</text>
+        <text x="40" y="430" fill="#fbbf24" font-size="9" font-family="JetBrains Mono">VERDICT: INCOMPLETE — 2 items failed, 4 gaps to fix</text>
+      </svg>
+    </div>
+  </div>
+</section>
+
+<!-- Tech Choices -->
+<section>
+  <div class="container">
+    <h2>Technology Choices</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Choice</th><th>Decision</th><th>Rationale</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Language</td><td style="color: var(--cyan);">Python 3.10+</td><td>Ubuntu 22.04 LTS standard; mcp SDK requirement</td></tr>
+          <tr><td>Dependencies</td><td style="color: var(--cyan);">mcp, pyyaml, requests</td><td>Official MCP SDK + YAML + HTTP — 3 packages</td></tr>
+          <tr><td>MCP Client</td><td style="color: var(--amber);">mcp SDK (official)</td><td>Handles JSON-RPC, connection lifecycle, tool discovery</td></tr>
+          <tr><td>LLM API</td><td style="color: var(--cyan);">Direct HTTP</td><td>Simple, no SDK overhead (OpenAI/Anthropic)</td></tr>
+          <tr><td>Evaluator Model</td><td style="color: var(--cyan);">Haiku / GPT-4o-mini</td><td>Fast (&lt;2s), cheap (~$0.001/check)</td></tr>
+          <tr><td>MCP Transport</td><td style="color: var(--amber);">stdio</td><td>Standard, works everywhere</td></tr>
+          <tr><td>Git Backend</td><td style="color: var(--cyan);">subprocess (git CLI)</td><td>Most reliable, no libgit2 dependency</td></tr>
+          <tr><td>Config Format</td><td style="color: var(--violet);">YAML</td><td>Human-readable, widely supported</td></tr>
+          <tr><td>Task Storage</td><td style="color: var(--violet);">YAML on gitreins branch</td><td>Version-controlled, cloneable</td></tr>
+          <tr><td>Distribution</td><td style="color: var(--emerald);">gitreins/ in template repo</td><td>Clone → install → works</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<!-- Pi Research -->
+<section>
+  <div class="container">
+    <h2>Pi Research Summary</h2>
+    <p style="max-width: 800px; margin-bottom: 1.5rem;">
+      Pi Coding Agent by Mario Zechner (<a href="https://pi.dev" style="color: var(--cyan);">pi.dev</a>) is a 
+      TypeScript monorepo with a minimal coding agent CLI. We analyzed its architecture to inform GitReins' design:
+    </p>
+
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-header"><div class="card-dot cyan"></div><h4>4 Built-in Tools</h4></div>
+        <p style="color: var(--text-dim);">read, write, edit, bash. System prompt under 1,000 tokens. Maximizes context window for actual code.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-dot emerald"></div><h4>Agent Loop</h4></div>
+        <p style="color: var(--text-dim);">Loops until the model stops calling tools. No max-steps, no iteration limits. Extension system for custom tools.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-dot violet"></div><h4>Monorepo Layers</h4></div>
+        <p style="color: var(--text-dim);">pi-ai (LLM API) → pi-agent-core (loop) → pi-coding-agent (CLI) → pi-tui (terminal). Clean separation.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-dot amber"></div><h4>4 Modes</h4></div>
+        <p style="color: var(--text-dim);">Interactive (TUI), Print, JSON stream, RPC (JSONL stdio). Embeddable in other systems.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-dot orange"></div><h4>Binary Compilation</h4></div>
+        <p style="color: var(--text-dim);">Can compile to standalone binary via <code>bun build --compile</code>. Removes Node.js runtime requirement.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-dot rose"></div><h4>Why Not Pi for Evaluator</h4></div>
+        <p style="color: var(--text-dim);">Pi is a general coding agent. The evaluator needs a focused judgment agent. Different purpose, different constraints.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Success Criteria -->
+<section>
+  <div class="container">
+    <h2>Success Criteria</h2>
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-header"><div class="card-dot emerald"></div><h4>1. Instant Activation</h4></div>
+        <p style="color: var(--text-dim);">Clone → <code>./gitreins/install</code> → hooks active. Under 10 seconds.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-dot cyan"></div><h4>2. Secrets Caught Instantly</h4></div>
+        <p style="color: var(--text-dim);">Tier 1 static guard blocks secrets at pre-commit. Under 100ms.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-dot violet"></div><h4>3. Fast Evaluation</h4></div>
+        <p style="color: var(--text-dim);">Evaluator verdict returned in under 3 seconds for typical tasks. Haiku/GPT-4o-mini.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-dot amber"></div><h4>4. Agent Workflow Works</h4></div>
+        <p style="color: var(--text-dim);">Create task → complete items → commit. End-to-end with any MCP-compatible agent.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-dot orange"></div><h4>5. Zero Infrastructure</h4></div>
+        <p style="color: var(--text-dim);">Everything lives in the repo. No servers, no CI, no external services beyond LLM API.</p>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-dot rose"></div><h4>6. Universal Runtime</h4></div>
+        <p style="color: var(--text-dim);">Python 3.9+ — works on any system with git + Python. Linux, macOS, WSL, CI runners.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer class="container">
+  <p>GitReins · Git-Native Agent Co-Harness · Architecture v6 · PoC · 2026-05-26</p>
+  <p style="margin-top: 0.5rem;">
+    <span class="tag python">Python</span>
+    <span class="tag yaml">YAML</span>
+    <span class="tag bash">Bash</span>
+    <span class="tag mcp">MCP</span>
+    <span class="tag llm">LLM</span>
+  </p>
+</footer>
+
+</body>
+</html>

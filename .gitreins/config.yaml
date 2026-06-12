@@ -1,0 +1,63 @@
+# GitReins Configuration
+
+# ── Guards (Tier 1 static checks) ───────────────────────────
+guards:
+  secrets: true         # Scan for secrets (gitleaks or simple pattern match)
+  lint: true            # Run linter (ruff/flake8) on staged Python files
+  tests: true           # Run tests via pytest
+  test_command: "pytest -x --tb=short"
+
+# ── Evaluation Pipeline ──────────────────────────────────
+# Stages run sequentially by default.
+# Set parallel: true to run steps concurrently.
+# Each step has type: script | ai_eval | output
+#
+# Stage conditions:
+#   - "true" / "always" → always run
+#   - "stage.<id>.any_failed" → run if a previous stage had failures
+#   - "stage.<id>.passed" → run if a previous stage passed
+#   - "task.has_criteria" → run if task has criteria
+#   - Support AND/OR: "stage.tier1.any_failed or task.has_criteria"
+#
+# on_fail modes for script steps:
+#   - "block" (default) → stop pipeline
+#   - "continue" → mark as failed but keep going (feed to AI)
+
+pipeline:
+  stages:
+    # Stage 1: Parallel static checks (pre-commit + pre-eval)
+    - id: tier1
+      parallel: true
+      on: [pre-commit, pre-eval]
+      steps:
+        - id: secrets
+          type: script
+          run: "gitleaks detect --source . --no-git 2>/dev/null || python3 -c \"from engine.guard_manager import GuardManager; gm = GuardManager('.'); r = gm._check_secrets(); import sys; sys.exit(0 if r.passed else 1)\""
+          on_fail: continue  # Don't block — feed failures to AI
+
+        - id: lint
+          type: script
+          run: "ruff check . --quiet 2>/dev/null || python3 -c \"from engine.guard_manager import GuardManager; gm = GuardManager('.'); r = gm._check_lint(); import sys; sys.exit(0 if r.passed else 1)\""
+          on_fail: continue
+
+        - id: tests
+          type: script
+          run: "pytest -x --tb=short 2>/dev/null || true"
+          on_fail: continue
+
+    # Stage 2: AI evaluation (pre-eval only, runs if tier1 had failures or task has criteria)
+    - id: tier2
+      type: ai_eval
+      on: [pre-eval]
+      condition: "true"
+      max_iterations: 16
+      tools: [read_file, run_command, search_pattern, read_diff, sandbox]
+
+# ── Evaluator Settings ──────────────────────────────────
+evaluator:
+  max_iterations: 20    # Max tool-calling iterations per evaluation
+
+# ── External MCP Servers (opt-in) ────────────────────────
+# mcp_allowlist:
+#   - server: jira
+#     tools: ["get_issue", "search_issues"]
