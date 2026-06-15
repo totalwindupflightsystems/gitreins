@@ -1,5 +1,10 @@
 # Sandbox: gitreins Branch Persistence
 
+> ⚠️ **Implementation Note:** The current implementation differs from this design doc.
+> In practice, sandbox is an in-memory Python dict (`AgenticEvaluator._sandbox`), not a
+> filesystem directory. It is cleared at each evaluation start. Auto-commit to a gitreins
+> branch is not yet implemented. See `engine/evaluator.py` for actual behavior.
+
 The evaluator's scratch space does not live in `/tmp`. It persists on the **gitreins branch**, making every evaluation version-controlled, auditable, and cloneable.
 
 ## Flow
