@@ -274,6 +274,14 @@ class GitReinsMCPServer:
         params = request.get("params", {}) or {}
         req_id = request.get("id")
 
+        # Validate jsonrpc field per JSON-RPC 2.0 spec
+        if request.get("jsonrpc") != "2.0":
+            return {
+                "jsonrpc": "2.0",
+                "id": req_id,
+                "error": {"code": -32600, "message": "Invalid Request: jsonrpc field must be '2.0'"},
+            }
+
         try:
             if method == "initialize":
                 self._initialized = True
@@ -351,6 +359,7 @@ class GitReinsMCPServer:
                     depth = 0
                     in_string = False
                     escape = False
+                    first_brace = -1
                     split_at = -1
                     for i, ch in enumerate(buffer):
                         if escape:
@@ -365,16 +374,18 @@ class GitReinsMCPServer:
                         if in_string:
                             continue
                         if ch in '{[':
+                            if depth == 0:
+                                first_brace = i
                             depth += 1
                         elif ch in '}]':
                             depth -= 1
-                            if depth == 0 and i > 0:
+                            if depth == 0 and first_brace >= 0:
                                 split_at = i + 1
                                 break
 
-                    if split_at > 0:
-                        json_str = buffer[:split_at]
-                        buffer = buffer[split_at:]
+                    if split_at > 0 and first_brace >= 0:
+                        json_str = buffer[first_brace:split_at]
+                        buffer = buffer[:first_brace] + buffer[split_at:]
                         try:
                             request = json.loads(json_str)
                             response = self.handle_request(request)
