@@ -4,35 +4,46 @@
 
 GitReins lives inside your git repository as a co-harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ⚠️ **Proof of Concept** — This repo captures the architecture, design decisions, and implementation plan. Code implementation is pending.
+> ✅ **Proof of Concept — Implemented (v0.1.0)** — All engine modules, MCP server, CLI, and git hooks are built and working. 221 tests pass.
 
 ## How It Works
 
-- **Primary Agent** — Any AI coding agent (Pi, Claude, Hermes, Codex) does the creative work
-- **GitReins Co-Harness** — Manages task lifecycle, enforces quality, validates completeness
-- **Agentic Evaluator** — Not a single LLM call — an agentic loop with 7 tools that reads, tests, searches, and verifies every task criterion
+1. **Create tasks** — Define criteria via CLI or MCP tools
+2. **Work with your AI agent** — Pi, Claude, Hermes, or Codex does code generation
+3. **Complete tasks** — Agent calls `task.complete`
+4. **Automatic evaluation** — Tier 1 static guards (secrets, lint, tests) + Tier 2 agentic evaluator
+5. **Commit through harness** — `commit` tool runs guards, blocks if checks fail
 
-## Architecture
+The evaluator is an agentic loop: it reads files, runs tests, searches patterns, and delivers a structured verdict with per-criterion PASS/FAIL. No single-shot LLM judgment.
 
-- [Full Architecture](docs/architecture.md)
-- [Build vs Borrow — Runtime Decision](docs/build-vs-borrow.md)
-- [Agentic Evaluator Design](docs/evaluator-loop.md)
-- [Sandbox: gitreins Branch Persistence](docs/sandbox.md)
-- [Technology Choices](docs/technology-choices.md)
-- [Component Map](docs/component-map.md)
-- [Implementation Plan](docs/implementation-plan.md)
-- [Pi Research Summary](docs/pi-research.md)
+## Architecture & Docs
+
+| Document | Purpose |
+|----------|---------|
+| [Full Architecture](docs/architecture.md) | System design and data flow |
+| [Component Map](docs/component-map.md) | Module inventory with paths and line counts |
+| [Agentic Evaluator Design](docs/evaluator-loop.md) | How the 7-tool agentic loop works |
+| [Sandbox](docs/sandbox.md) | Evaluator scratch space (in-memory, with filesystem plans) |
+| [Implementation Plan](docs/implementation-plan.md) | Phase history |
+
+Full reverse-engineered specs are in `specs/` — one per component, with realized-by links to actual code files.
 
 ## Status
 
-**Phase: Architecture & Design** — All design docs complete. Implementation tracked in [implementation-plan.md](docs/implementation-plan.md).
+**Phase: Fully Implemented (v0.1.0)** — All seven engine modules, MCP server (9 tools), CLI (5 top-level commands: task, guard, judge, commit, mcp-server), git hooks, and install script are built. See [Component Map](docs/component-map.md) for current state.
 
-## Quick Start (Future)
+## Quick Start
 
 ```bash
-git clone https://gitlab.readydedis.com/totalwindup/gitreins-poc.git
-cd your-project
-./gitreins/install    # Activates hooks in 10 seconds
+cd gitreins-poc
+./gitreins/install                    # Activate hooks in <10 seconds
+
+# Create a task and evaluate it
+python3 gitreins/cli.py task create demo "Demo task" \
+  "File exists" "Has tests" "No secrets"
+
+# Start the MCP server for your AI agent
+python3 gitreins_mcp/server.py
 ```
 
 ## Tech Stack
@@ -40,5 +51,7 @@ cd your-project
 - **Language:** Python 3.10+
 - **Dependencies:** mcp, pyyaml, requests (3 packages)
 - **MCP Transport:** stdio
-- **Config:** YAML on `gitreins` branch
+- **Config:** YAML in `.gitreins/` directory
 - **Evaluator Model:** Haiku / GPT-4o-mini (<2s, ~$0.001/check)
+
+<!-- axiom:trace work_item=GR-012 spec=specs/01-Architecture.md,specs/09-CLI.md,specs/10-Install-Bootstrap.md,specs/11-Configuration.md plan=.memory-bank/work-items/GR-012/plan.yaml -->
