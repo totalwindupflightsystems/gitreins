@@ -158,6 +158,22 @@ EVALUATOR_TOOLS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "detect_dead_code",
+            "description": "Detect dead code: unreachable code, unused functions, empty functions, and unused imports. Returns per-file findings with line numbers.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "skylos_scan",
+            "description": "Multi-language dead code and AI-mistake scan via Skylos. Detects unused functions, imports, classes, variables, unreachable code, and AI-hallucinated patterns across Python, TS/JS, Go, Java, PHP, Rust, Dart, C#. Returns grade and per-file findings.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
 ]
 
 
@@ -349,6 +365,10 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 return self._tool_sandbox_write(**tc.arguments)
             elif tc.name == "sandbox_read":
                 return self._tool_sandbox_read(**tc.arguments)
+            elif tc.name == "detect_dead_code":
+                return self._tool_detect_dead_code()
+            elif tc.name == "skylos_scan":
+                return self._tool_skylos_scan()
             else:
                 return {"error": f"Unknown tool: {tc.name}"}
         except Exception as e:
@@ -567,3 +587,77 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             verdict=verdict,
             summary=f"(auto-parsed from non-JSON response) {content[:300]}",
         )
+
+    def _tool_detect_dead_code(self) -> dict:
+        """Run dead code detection and return structured results."""
+        try:
+            from engine.dead_code import DeadCodeDetector
+
+            detector = DeadCodeDetector(self.workdir)
+            report = detector.scan()
+            unused = detector.find_unused_functions()
+            report.findings.extend(unused)
+
+            by_category: dict[str, list[dict]] = {}
+            for f in report.findings:
+                by_category.setdefault(f.category, []).append({
+                    "file": f.file,
+                    "line": f.line,
+                    "message": f.message,
+                })
+
+            return {
+                "total_findings": len(report.findings),
+                "passed": report.passed,
+                "by_category": {
+                    cat: {"count": len(items), "items": items[:20]}
+                    for cat, items in by_category.items()
+                },
+            }
+        except ImportError:
+            return {"error": "Dead code detector unavailable"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _tool_skylos_scan(self) -> dict:
+        """Run Skylos multi-language dead code and AI-mistake scan."""
+        try:
+            import json as _json
+            import subprocess as _sp
+
+            result = _sp.run(
+                ["skylos", self.workdir, "--format", "json", "--no-grep-verify"],
+                capture_output=True, text=True, timeout=120,
+                cwd=self.workdir,
+            )
+            if result.returncode != 0:
+                return {"error": f"skylos exited {result.returncode}", "stderr": result.stderr[:500]}
+
+            data = _json.loads(result.stdout)
+
+            findings = {
+                "unused_functions": [
+                    {"file": f["file"], "line": f["line"], "name": f["name"]}
+                    for f in data.get("unused_functions", [])
+                ],
+                "unused_imports": [
+                    {"file": f["file"], "line": f["line"], "name": f["name"]}
+                    for f in data.get("unused_imports", [])
+                ],
+                "dead_symbols": [
+                    {"file": info["file"], "line": info["line"], "name": name}
+                    for name, info in data.get("definitions", {}).items()
+                    if info.get("dead")
+                ],
+            }
+
+            grade = data.get("grade", {}).get("overall", {})
+            return {
+                "grade": f"{grade.get('letter', '?')} ({grade.get('score', '?')})",
+                "total_findings": sum(len(v) for v in findings.values()),
+                "findings": findings,
+            }
+        except FileNotFoundError:
+            return {"error": "skylos not installed — pip install skylos"}
+        except Exception as e:
+            return {"error": str(e)}

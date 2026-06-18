@@ -49,4 +49,4 @@ Phase 6: Config
 Phase 7: Advanced Features
 ```
 
-<!-- axiom:trace work_item=GR-008 spec=specs/01-Architecture.md impl=docs/component-map.md -->
+<!-- Component map — maps every file to its role in the architecture -->

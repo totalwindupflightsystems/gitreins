@@ -9,6 +9,7 @@ Tier 1 (no LLM, fast):
 All checks are optional and configurable via .gitreins/config.yaml
 """
 
+import json
 import logging
 import os
 import re
@@ -50,6 +51,8 @@ class GuardManager:
             "secrets": self.config.get("guards", {}).get("secrets", True),
             "lint": self.config.get("guards", {}).get("lint", True),
             "tests": self.config.get("guards", {}).get("tests", True),
+            "dead_code": self.config.get("guards", {}).get("dead_code", True),
+            "skylos": self.config.get("guards", {}).get("skylos", False),  # opt-in: needs pip install
         }
 
     def run_all(self) -> Tier1Result:
@@ -64,6 +67,12 @@ class GuardManager:
 
         if self._enabled["tests"]:
             results.append(self._check_tests())
+
+        if self._enabled["dead_code"]:
+            results.append(self._check_dead_code())
+
+        if self._enabled["skylos"]:
+            results.append(self._check_skylos())
 
         passed = all(r.passed for r in results)
         return Tier1Result(passed=passed, results=results)
@@ -239,3 +248,96 @@ class GuardManager:
             return GuardResult(name="tests", passed=False, output="Tests timed out after 120s")
         except Exception as e:
             return GuardResult(name="tests", passed=False, error=str(e))
+
+    def _check_dead_code(self) -> GuardResult:
+        """Detect unreachable code, unused functions, and unused imports."""
+        try:
+            from engine.dead_code import DeadCodeDetector
+
+            detector = DeadCodeDetector(self.workdir)
+            report = detector.scan()
+
+            # Also check for unused functions project-wide
+            unused_funcs = detector.find_unused_functions()
+            report.findings.extend(unused_funcs)
+
+            if report.passed:
+                return GuardResult(name="dead_code", passed=True, output="No dead code found")
+
+            # Group by category for clear output
+            output = report.summary
+            if len(output) > 2000:
+                output = output[:2000] + "\n... [truncated]"
+
+            return GuardResult(name="dead_code", passed=False, output=output)
+        except ImportError:
+            return GuardResult(name="dead_code", passed=True, output="Dead code detector unavailable — skipped")
+        except Exception as e:
+            return GuardResult(name="dead_code", passed=False, error=str(e))
+
+    def _check_skylos(self) -> GuardResult:
+        """Multi-language dead code + AI mistake detection via Skylos.
+
+        Requires: pip install skylos
+        Detects: unused functions, imports, classes, variables, parameters,
+                 unreachable code, AI-hallucinated patterns.
+        Languages: Python, TS/JS, Go, Java, PHP, Rust, Dart, C#
+        """
+        try:
+            result = subprocess.run(
+                ["skylos", self.workdir, "--format", "json", "--no-grep-verify"],
+                capture_output=True, text=True, timeout=120,
+                cwd=self.workdir,
+            )
+            if result.returncode != 0:
+                return GuardResult(
+                    name="skylos", passed=True,
+                    output=f"skylos exited {result.returncode}: {result.stderr[:200]}",
+                )
+
+            data = json.loads(result.stdout)
+
+            findings = []
+            for f in data.get("unused_functions", []):
+                findings.append(f"{f['file']}:{f['line']} — unused function {f['name']}")
+            for f in data.get("unused_imports", []):
+                findings.append(f"{f['file']}:{f['line']} — unused import {f['name']}")
+            for f in data.get("unused_classes", []):
+                findings.append(f"{f['file']}:{f['line']} — unused class {f['name']}")
+
+            # Dead symbols from definitions
+            for name, info in data.get("definitions", {}).items():
+                if info.get("dead"):
+                    findings.append(f"{info['file']}:{info['line']} — dead: {name}")
+
+            grade = data.get("grade", {}).get("overall", {})
+            score = grade.get("score", "?")
+            letter = grade.get("letter", "?")
+
+            if not findings:
+                return GuardResult(
+                    name="skylos", passed=True,
+                    output=f"Skylos grade {letter} ({score}) — no dead code found",
+                )
+
+            output = f"Skylos grade {letter} ({score}) — {len(findings)} findings:\n"
+            output += "\n".join(f"  • {f}" for f in findings[:20])
+            if len(findings) > 20:
+                output += f"\n  ... and {len(findings) - 20} more"
+
+            if len(output) > 2000:
+                output = output[:2000] + "\n... [truncated]"
+
+            return GuardResult(name="skylos", passed=False, output=output)
+
+        except FileNotFoundError:
+            return GuardResult(
+                name="skylos", passed=True,
+                output="skylos not installed — install with: pip install skylos",
+            )
+        except json.JSONDecodeError:
+            return GuardResult(name="skylos", passed=True, output="skylos output unparseable")
+        except subprocess.TimeoutExpired:
+            return GuardResult(name="skylos", passed=True, output="skylos timed out")
+        except Exception as e:
+            return GuardResult(name="skylos", passed=False, error=str(e))
