@@ -378,6 +378,53 @@ class Pipeline:
         }
 
 
+def _normalize_yaml_bool_keys(obj):
+    """Recursively convert boolean keys to their string equivalents.
+
+    PyYAML 1.1 parses unquoted ``on``, ``off``, ``yes``, ``no``, ``true``,
+    ``false`` as Python bools.  When those appear as mapping keys they break
+    lookups: ``stage_def.get("on")`` returns None because the real key is
+    ``True``.  This walker converts them back to the lowercase string form.
+    """
+    if isinstance(obj, dict):
+        fixed = {}
+        for k, v in obj.items():
+            if isinstance(k, bool):
+                k = str(k).lower()  # True→"true", False→"false"
+            fixed[k] = _normalize_yaml_bool_keys(v)
+        return fixed
+    if isinstance(obj, list):
+        return [_normalize_yaml_bool_keys(i) for i in obj]
+    return obj
+
+
+# Mapping of Python bool → YAML 1.1 boolean keyword that would have
+# produced it when used as a plain scalar key.
+_YAML_BOOL_KEY_MAP: dict[bool, str] = {
+    True: "on",
+    False: "off",
+}
+
+
+def _fix_on_key(obj):
+    """Post-processor specifically for the ``on`` / ``off`` key pitfall.
+
+    YAML 1.1 interprets ``on: [...]`` as ``True: [...]``.  This second pass
+    converts bool-to-string using the most-common-intent mapping
+    (True→"on", False→"off") rather than the generic True→"true".
+    """
+    if isinstance(obj, dict):
+        fixed = {}
+        for k, v in obj.items():
+            if isinstance(k, bool):
+                k = _YAML_BOOL_KEY_MAP.get(k, str(k).lower())
+            fixed[k] = _fix_on_key(v)
+        return fixed
+    if isinstance(obj, list):
+        return [_fix_on_key(i) for i in obj]
+    return obj
+
+
 def load_pipeline_config(workdir: str = ".") -> dict:
     """Load pipeline configuration from .gitreins/config.yaml."""
     config_path = os.path.join(workdir, ".gitreins", "config.yaml")
@@ -415,6 +462,9 @@ def load_pipeline_config(workdir: str = ".") -> dict:
     try:
         with open(config_path, "r") as f:
             config = yaml.safe_load(f) or {}
+        # Fix YAML 1.1 boolean-key pitfall: unquoted ``on:`` / ``off:``
+        # are parsed as ``True:`` / ``False:`` and break key lookups.
+        config = _fix_on_key(config)
         if "pipeline" not in config:
             config["pipeline"] = {
                 "stages": [
