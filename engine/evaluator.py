@@ -198,7 +198,7 @@ class AgenticEvaluator:
         self,
         llm: LLMClient,
         workdir: str = ".",
-        max_iterations: int = 15,
+        max_iterations: int = 100,
     ):
         self.llm = llm
         self.workdir = os.path.abspath(workdir)
@@ -307,20 +307,14 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             logger.debug("Evaluator iteration %d: %d tool calls, %d messages",
                          iteration + 1, len(response.tool_calls), len(messages))
 
-        # Hit max iterations — force verdict
-        logger.warning("Evaluator hit max iterations (%d)", self.max_iterations)
-        messages.append({
-            "role": "user",
-            "content": "You've reached the maximum number of tool calls. Deliver your final verdict NOW. Output ONLY the JSON — no markdown, no explanation before it.",
-        })
-        try:
-            final = self.llm.chat(messages, tools=EVALUATOR_TOOLS)
-        except Exception as e:
-            return Verdict(verdict="INCOMPLETE", summary=f"Max iterations, final call failed: {e}")
-
-        if final.content:
-            return self._parse_verdict(final.content)
-        return Verdict(verdict="INCOMPLETE", summary="Max iterations reached, no verdict.")
+        # Hit max iterations — return clear error instead of forcing garbled verdict
+        msg = (
+            f"Hit iteration cap ({self.max_iterations}). "
+            "Raise max_iterations in eval-runner.py (e.g. max_iterations=100) "
+            "or split criteria into focused single-criterion tasks."
+        )
+        logger.warning(msg)
+        return Verdict(verdict="INCOMPLETE", summary=msg)
 
     def _execute_tool_with_dedup(self, tc: ToolCall) -> tuple[dict, bool]:
         """Execute a tool and return (result, was_duplicate)."""

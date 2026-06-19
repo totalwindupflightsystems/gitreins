@@ -27,7 +27,7 @@ guards:
   # skylos: true       # opt-in: multi-language dead code + AI mistake detection
 
 evaluator:
-  max_iterations: 15
+  max_iterations: 100
 """
 
 PRE_COMMIT_HOOK = """\
