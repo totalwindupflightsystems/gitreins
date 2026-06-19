@@ -51,7 +51,7 @@ class GuardManager:
             "secrets": self.config.get("guards", {}).get("secrets", True),
             "lint": self.config.get("guards", {}).get("lint", True),
             "tests": self.config.get("guards", {}).get("tests", True),
-            "dead_code": self.config.get("guards", {}).get("dead_code", True),
+            "dead_code": self.config.get("guards", {}).get("dead_code", False),  # opt-in: Python-only, can be noisy
             "skylos": self.config.get("guards", {}).get("skylos", False),  # opt-in: needs pip install
         }
 
@@ -234,12 +234,7 @@ class GuardManager:
         return GuardResult(name="lint", passed=True, output="No linter found — skipped")
 
     def _check_tests(self) -> GuardResult:
-        """Run tests related to staged changes."""
-        try:
-            subprocess.run(["pytest", "--version"], capture_output=True, timeout=5)
-        except (FileNotFoundError, subprocess.TimeoutExpired):
-            return GuardResult(name="tests", passed=True, output="pytest not found — skipped")
-
+        """Run the configured test command."""
         cmd = self.config.get("guards", {}).get("test_command", "pytest -x --tb=short")
         try:
             result = subprocess.run(

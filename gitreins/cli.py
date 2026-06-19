@@ -23,6 +23,8 @@ guards:
   lint: true
   tests: true
   test_command: "pytest -x --tb=short"
+  # dead_code: true    # opt-in: Python dead-code detection (AST-based)
+  # skylos: true       # opt-in: multi-language dead code + AI mistake detection
 
 evaluator:
   max_iterations: 15
@@ -47,8 +49,21 @@ import argparse
 import logging
 import os
 import sys
+import yaml
 
 from engine.version import __version__
+
+
+def load_config(workdir: str) -> dict:
+    """Load .gitreins/config.yaml, returning {} if not found."""
+    config_path = os.path.join(workdir, ".gitreins", "config.yaml")
+    if not os.path.isfile(config_path):
+        return {}
+    try:
+        with open(config_path, "r") as f:
+            return yaml.safe_load(f) or {}
+    except Exception:
+        return {}
 
 
 def get_workdir() -> str:
@@ -199,7 +214,9 @@ def cmd_task_delete(args):
 
 def cmd_guard_run(args):
     from engine.guard_manager import GuardManager
-    gm = GuardManager(get_workdir())
+    workdir = get_workdir()
+    config = load_config(workdir)
+    gm = GuardManager(workdir, config=config)
     result = gm.run_all()
     print(f"Tier 1 Guards: {'PASS' if result.passed else 'FAIL'}")
     print(result.summary)
@@ -228,7 +245,8 @@ def cmd_commit(args):
     from engine.guard_manager import GuardManager
 
     workdir = get_workdir()
-    gm = GuardManager(workdir)
+    config = load_config(workdir)
+    gm = GuardManager(workdir, config=config)
     tier1 = gm.run_all()
 
     if not tier1.passed:
