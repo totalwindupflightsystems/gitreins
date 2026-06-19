@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gitreins"
+version = "0.1.0"
+description = "Git-native AI agent co-harness — MCP server, static guards, and agentic evaluator for LLM-assisted coding"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "Bane"}]
+keywords = ["git", "ai", "llm", "mcp", "code-review", "agent"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Quality Assurance",
+    "Topic :: Software Development :: Version Control :: Git",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=1.0.0",
+    "pyyaml>=6.0",
+    "requests>=2.28",
+]
+
+[project.scripts]
+gitreins = "gitreins.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/totalwindupflightsystems/gitreins"
+Repository = "https://github.com/totalwindupflightsystems/gitreins"
+Issues = "https://github.com/totalwindupflightsystems/gitreins/issues"
+
+[tool.setuptools.packages.find]
+include = ["engine*", "gitreins*", "gitreins_mcp*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

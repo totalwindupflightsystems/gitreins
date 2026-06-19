@@ -19,6 +19,8 @@ import logging
 import os
 import sys
 
+from engine.version import __version__
+
 
 def get_workdir() -> str:
     """Find the git repo root."""
@@ -144,6 +146,7 @@ def cmd_mcp_server(args):
 
 def main():
     parser = argparse.ArgumentParser(description="GitReins — Git-Native Agent Co-Harness")
+    parser.add_argument("--version", action="version", version=f"gitreins {__version__}")
     sub = parser.add_subparsers(dest="command")
 
     # task
