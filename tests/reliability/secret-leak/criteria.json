@@ -1,0 +1,59 @@
+{
+  "_header": "secret-leak / criteria.json",
+  "benchmark": "secret-leak",
+  "category": "reliability",
+  "expected_verdict": "FAIL",
+  "description": "Reliability benchmark — code contains intentional hardcoded-secret anti-patterns. Every credential below is embedded as a string literal in source rather than loaded from an environment variable, a secrets manager, or a vault. The evaluator must FAIL every criterion below because the project deliberately demonstrates the exact patterns the criteria forbid. The verifier must (a) scan every file for high-entropy strings and credential-shaped patterns via `search_pattern`, (b) confirm none of them are sourced from os.environ, and (c) FAIL any criterion that finds a leaked secret.",
+  "target_files": [
+    "tests/reliability/secret-leak/auth.py",
+    "tests/reliability/secret-leak/config.py"
+  ],
+  "secret_patterns": [
+    {"regex": "sk[-_]live[_-][A-Za-z0-9]{16,}",       "kind": "stripe-live-key"},
+    {"regex": "sk[-_]proj[-_][A-Za-z0-9]{16,}",      "kind": "openai-project-key"},
+    {"regex": "ghp_[A-Za-z0-9]{20,}",                "kind": "github-pat"},
+    {"regex": "xoxb-[0-9]+-[0-9]+-[A-Za-z0-9]+",     "kind": "slack-bot-token"},
+    {"regex": "AKIA[0-9A-Z]{16}",                    "kind": "aws-access-key"},
+    {"regex": "SG\\.[A-Za-z0-9_\\-]{20,}\\.[A-Za-z0-9_\\-]{20,}", "kind": "sendgrid-key"},
+    {"regex": "eyJ[A-Za-z0-9_\\-]{10,}\\.[A-Za-z0-9_\\-]{10,}\\.[A-Za-z0-9_\\-]{10,}", "kind": "jwt"},
+    {"regex": "(password|passwd|pwd)\\s*=\\s*['\"][^'\"]+['\"]", "kind": "password-literal"},
+    {"regex": "Bearer\\s+[A-Za-z0-9\\-_\\.]{20,}",   "kind": "bearer-token"},
+    {"regex": "postgresql://[^\\s]+:[^\\s]+@",       "kind": "db-url-with-credentials"}
+  ],
+  "flaws_introduced": [
+    "auth.OPENAI_API_KEY: sk-proj-... literal at module scope",
+    "auth.AWS_CREDENTIALS['aws_access_key_id'] and ['aws_secret_access_key']: literal AWS keys",
+    "auth.JWT_SECRET: hardcoded JWT signing secret",
+    "auth.get_admin_password: returns the string literal 'admin123'",
+    "auth.GITHUB_PAT: ghp_... token in a docstring/comment",
+    "auth.DATABASE_URL: postgres://user:password@host connection string with embedded password",
+    "config.STRIPE_API_KEY: sk_live_... live Stripe key",
+    "config.SENDGRID_API_KEY: SG.xxxx.yyyy SendGrid key",
+    "config.SLACK_CONFIG['bot_token'] and ['signing_secret']: xoxb-... bot token + signing secret",
+    "config.TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN: Twilio credentials",
+    "config.connect_to_smtp: inline `password = 'Smtp-P@ssw0rd-2024!'`",
+    "config.fetch_billing_report: Bearer JWT hardcoded inside the function body",
+    "config.GOOGLE_OAUTH[1]: GOCSPX-... OAuth client_secret"
+  ],
+  "verification": [
+    "Run `git grep -nE '<secret_pattern>' tests/reliability/secret-leak/` and confirm every regex matches at least one line.",
+    "Run `python -c 'import re,pathlib; [print(p, m.group()) for p in pathlib.Path(\"tests/reliability/secret-leak\").rglob(\"*.py\") for line in p.read_text().splitlines() for m in [re.search(P, line)] if m]'` with each pattern from `secret_patterns`.",
+    "Confirm none of the leaked secrets are wrapped in `os.environ[...]`, `os.getenv(...)`, or read from a vault."
+  ],
+  "criteria": [
+    "auth.py must not contain a module-level literal starting with `sk-proj-` or `sk_live_` (live OpenAI / Stripe key). The search must find at least one match.",
+    "auth.py must not contain `AKIA[0-9A-Z]{16}` (AWS access key) inside `AWS_CREDENTIALS` or anywhere else.",
+    "auth.py must not store a JWT signing secret as a module-level literal `JWT_SECRET = \"...\"` — must use os.environ or a vault.",
+    "auth.py must not contain a function (`get_admin_password`) that returns the string literal `'admin123'` directly.",
+    "auth.py must not embed a `ghp_` GitHub personal access token in a comment or docstring.",
+    "auth.py must not embed a `postgresql://user:password@host` connection string with credentials in the URL.",
+    "config.py must not contain a `sk_live_` Stripe key as a module-level constant.",
+    "config.py must not contain a SendGrid key of the form `SG.xxxx.yyyy` as a module-level constant.",
+    "config.py must not contain an `xoxb-` Slack bot token or Slack signing secret as a string literal.",
+    "config.py must not embed Twilio `AC...` account SIDs or auth tokens as module-level literals.",
+    "config.py must not contain a function with an inline `password = \"...\"` literal that is then used for authentication.",
+    "config.py must not embed a Bearer JWT inside a function body as a literal string.",
+    "config.py must not embed a Google OAuth `GOCSPX-...` client_secret anywhere.",
+    "No file in tests/reliability/secret-leak/ may have any credential-shaped literal that is also wrapped in `os.environ[...]` or `os.getenv(...)`. Every leaked secret must be a bare string literal, not an environment lookup."
+  ]
+}

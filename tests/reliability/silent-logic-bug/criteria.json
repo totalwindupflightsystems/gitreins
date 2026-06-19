@@ -1,0 +1,52 @@
+{
+  "_header": "silent-logic-bug / criteria.json",
+  "benchmark": "silent-logic-bug",
+  "category": "reliability",
+  "expected_verdict": "FAIL",
+  "description": "Reliability benchmark — code contains intentional silent-logic-bug anti-patterns. Every function compiles, runs, and returns a value, but the value is wrong. The evaluator must FAIL every criterion below because the implementation diverges from the documented contract for each function. The verifier must (a) read each function, (b) run a known-input fixture against it, and (c) FAIL any criterion whose expected output does not match the actual output.",
+  "target_files": [
+    "tests/reliability/silent-logic-bug/stats.py",
+    "tests/reliability/silent-logic-bug/strings.py"
+  ],
+  "fixtures": {
+    "stats.average":        {"args": [[10, 20, 30]],            "expected": 20.0,   "actual_flaw": 60.0},
+    "stats.first_n_squares": {"args": [3],                      "expected": [1, 4, 9], "actual_flaw": [0, 1, 4]},
+    "stats.find_max":       {"args": [[1, 5, 3, 2]],            "expected": 5,      "actual_flaw": 1},
+    "stats.is_adult":       {"args": [15],                     "expected": false,  "actual_flaw": true},
+    "stats.factorial":      {"args": [5],                      "expected": 120,    "actual_flaw": 24},
+    "strings.count_vowels": {"args": ["hello"],                "expected": 2,      "actual_flaw": 3},
+    "strings.unique_preserving_order": {"args": [[3, 1, 3, 2]], "expected": [3, 1, 2], "actual_flaw": [2, 1, 3]},
+    "strings.clamp":        {"args": [-5, 0, 10],              "expected": 0,      "actual_flaw": 10},
+    "strings.contains":     {"args": [[1, 2, 3], 2],           "expected": true,   "actual_flaw": false},
+    "strings.mean":         {"args": [[10, 20, 30]],           "expected": 20.0,   "actual_flaw": 60.0}
+  },
+  "flaws_introduced": [
+    "stats.average: returns `sum(values)` instead of `sum(values) / len(values)`",
+    "stats.first_n_squares: iterates `range(n)` instead of `range(1, n + 1)` — produces [0, 1, 4] for n=3",
+    "stats.find_max: comparison inverted (`<` instead of `>`) — returns the minimum instead of maximum",
+    "stats.is_adult: returns True for `age < 18` (inverted) — adults evaluate as minors and vice versa",
+    "stats.factorial: iterates `range(2, n)` instead of `range(2, n + 1)` — skips the final multiplication, so factorial(5)=24 not 120",
+    "strings.count_vowels: counts non-vowels instead of vowels",
+    "strings.unique_preserving_order: returns `list(reversed(...))` — order is inverted",
+    "strings.clamp: returns the OPPOSITE bound when value is outside [lo, hi] — clamp(-5, 0, 10) returns 10 instead of 0",
+    "strings.contains: returns `needle not in haystack` — membership test is inverted",
+    "strings.mean: returns `sum(values)` instead of `sum(values) / len(values)` — duplicate of the stats.average flaw"
+  ],
+  "verification": [
+    "Run each function with the documented `fixtures[*].args` and confirm the actual output does NOT match `fixtures[*].expected`.",
+    "Run `python -c 'from tests.reliability.silent-logic-bug import stats, strings'` to confirm both modules import cleanly (the bugs are runtime, not import-time).",
+    "Use `search_pattern` for `< `, `> `, `not in`, `not >=`, `sum(values)` without division to locate suspect sites."
+  ],
+  "criteria": [
+    "stats.average([10, 20, 30]) must return 20.0; the current implementation returns 60.0 (sum without division).",
+    "stats.first_n_squares(3) must return [1, 4, 9]; the current implementation returns [0, 1, 4] (off-by-one in range()).",
+    "stats.find_max([1, 5, 3, 2]) must return 5; the current implementation returns 1 (inverted comparison).",
+    "stats.is_adult(15) must return false; the current implementation returns true (inverted condition).",
+    "stats.factorial(5) must equal 120; the current implementation returns 24 (range(2, n) skips the final multiplication).",
+    "strings.count_vowels('hello') must return 2; the current implementation returns 3 (counts consonants instead of vowels).",
+    "strings.unique_preserving_order([3, 1, 3, 2]) must return [3, 1, 2]; the current implementation returns [2, 1, 3] (order reversed).",
+    "strings.clamp(-5, 0, 10) must return 0; the current implementation returns 10 (bounds swapped — returns hi when below lo).",
+    "strings.contains([1, 2, 3], 2) must return true; the current implementation returns false (membership test inverted).",
+    "strings.mean([10, 20, 30]) must return 20.0; the current implementation returns 60.0 (same sum-without-division flaw as stats.average)."
+  ]
+}

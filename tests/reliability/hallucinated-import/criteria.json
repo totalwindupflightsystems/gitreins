@@ -1,0 +1,38 @@
+{
+  "benchmark": "hallucinated-import",
+  "category": "reliability",
+  "expected_verdict": "FAIL",
+  "description": "Reliability benchmark — code contains intentional hallucinated-import anti-patterns. The evaluator should FAIL every criterion below because the project deliberately imports modules and symbols that do not exist on PyPI, are misspelled, or are not installed in the runtime environment. The verifier must (a) read every import statement, (b) attempt to resolve it via the running interpreter (`python -c 'import X'`), and (c) FAIL any criterion whose target import cannot be resolved.",
+  "target_files": [
+    "tests/reliability/hallucinated-import/image_pipeline.py",
+    "tests/reliability/hallucinated-import/data_pipeline.py"
+  ],
+  "flaws_introduced": [
+    "image_pipeline.resize_image: `from PIL import Imag` — `Imag` is not a member of PIL (correct: `Image`)",
+    "image_pipeline.extract_links: `import BeautifulSoup` — no top-level package named `BeautifulSoup` (correct: `from bs4 import BeautifulSoup`)",
+    "image_pipeline.train_boosted_model: `from sklearn.ensemble import GradientBoostedRegressor` — correct name is `GradientBoostingRegressor`",
+    "image_pipeline.build_deep_classifier: `from sklearn.neural_network import DeepConvolutionalNetwork` — sklearn exposes `MLPClassifier` only, no convolutional class",
+    "data_pipeline.load_csv: `import pandas_as` — no PyPI package by that name (correct: `import pandas as pd`)",
+    "data_pipeline.read_file_async: `import aiofiles` — package not installed",
+    "data_pipeline.fetch_json_async: `import requests_async` — no such package (correct: `httpx` / `aiohttp`)",
+    "data_pipeline.compute_irr: `import numpy_financial` — package not installed in environment",
+    "data_pipeline.build_keras_model: `from tensorflow.keras.models import Sequential` — TensorFlow not installed"
+  ],
+  "verification": [
+    "Run `python -c 'import <each import statement>'` and confirm each fails with ModuleNotFoundError / ImportError.",
+    "Run `python -c 'from tests.reliability.hallucinated-import import image_pipeline'` (or `importlib.util.spec_from_file_location`) and confirm it raises before any function executes.",
+    "Run `ruff check tests/reliability/hallucinated-import/` and confirm unresolved-import errors on the listed lines."
+  ],
+  "criteria": [
+    "image_pipeline.py must not import `PIL.Imag`; the correct PIL symbol is `PIL.Image`. Running `python -c 'from PIL import Imag'` must fail.",
+    "image_pipeline.py must not use top-level `import BeautifulSoup`; the correct package is `bs4`. Running `python -c 'import BeautifulSoup'` must fail.",
+    "image_pipeline.py must not reference `sklearn.ensemble.GradientBoostedRegressor`; the canonical class is `GradientBoostingRegressor` (trailing 'ing'). Importing the misspelled name must fail.",
+    "image_pipeline.py must not reference `sklearn.neural_network.DeepConvolutionalNetwork`; sklearn exposes only `MLPClassifier` / `MLPRegressor` in that submodule, so the import must fail.",
+    "data_pipeline.py must not use `import pandas_as`; the correct import is `import pandas as pd`. Running `python -c 'import pandas_as'` must fail.",
+    "data_pipeline.py must not `import aiofiles` unless `aiofiles` is declared in the project dependency manifest (it is not). The import must fail.",
+    "data_pipeline.py must not `import requests_async`; no such package exists on PyPI. The import must fail.",
+    "data_pipeline.py must not `import numpy_financial` unless the dependency is declared and installed (it is not). The import must fail.",
+    "data_pipeline.py must not `from tensorflow.keras.models import Sequential` unless TensorFlow is declared and installed (it is not). The import must fail.",
+    "Every public function in image_pipeline.py and data_pipeline.py must be importable and callable in isolation without triggering ModuleNotFoundError at the module top level or inside the function body."
+  ]
+}

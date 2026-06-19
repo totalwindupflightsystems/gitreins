@@ -1,0 +1,49 @@
+{
+  "_header": "dead-tests / criteria.json",
+  "benchmark": "dead-tests",
+  "category": "reliability",
+  "expected_verdict": "FAIL",
+  "description": "Reliability benchmark — code contains intentional dead-test anti-patterns. Every test_ function below looks like a real pytest test but does not actually exercise the production code: assertions are tautologies, bodies have no asserts, asserts are wrapped in swallow-all decorators, or asserts are after `return` in unreachable positions. The evaluator must FAIL every criterion below because none of the tests verify any production behaviour. The verifier must (a) parse each test function, (b) confirm the function body contains at least one `assert <expr>` where `<expr>` references the SUT or a computed value (not a literal tautology), and (c) FAIL any criterion whose test does not meet that bar.",
+  "target_files": [
+    "tests/reliability/dead-tests/test_arithmetic.py",
+    "tests/reliability/dead-tests/test_strings.py"
+  ],
+  "system_under_test": {
+    "test_arithmetic.add":       "def add(a: int, b: int) -> int: return a + b",
+    "test_arithmetic.divide":    "def divide(a: float, b: float) -> float: raise ZeroDivisionError if b==0 else return a/b",
+    "test_strings.reverse_string": "def reverse_string(s: str) -> str: return s[::-1]",
+    "test_strings.is_palindrome":  "def is_palindrome(s: str) -> bool: return s == s[::-1]"
+  },
+  "flaws_introduced": [
+    "test_arithmetic.test_add_with_assert_true: body contains only `assert True` — passes for any state of the SUT",
+    "test_arithmetic.test_divide_with_trivial_equality: discards `divide(10, 2)` result and asserts `1 == 1`",
+    "test_arithmetic.test_subtract_no_assertion: computes `5 - 3` and returns the value — pytest ignores the return",
+    "test_arithmetic.test_passes_when_it_should_fail: wraps an `assert` in `try/except AssertionError: pass`",
+    "test_arithmetic.test_uses_hardcoded_literal: asserts `4 == 4` instead of calling the SUT",
+    "test_strings.test_reverse_string_empty_body: discards SUT result, body is just `pass`",
+    "test_strings.test_is_palindrome_with_message: asserts `True` with a misleading message string",
+    "test_strings.test_concat_uses_literal: asserts `'a' + 'b' == 'ab'` — never calls any SUT",
+    "test_strings.test_reverse_against_wrong_value: `assert` is AFTER `return` in the function body — unreachable",
+    "test_strings.test_decorator_swallows_assert: an `@ignore_failures` decorator catches `AssertionError` and returns None"
+  ],
+  "verification": [
+    "Run `pytest tests/reliability/dead-tests/ --collect-only -q` and confirm every test_ function is collected (they all pass pytest discovery).",
+    "Run `pytest tests/reliability/dead-tests/ -v` and confirm every test PASSES — the dead tests pass even though they verify nothing.",
+    "Use `search_pattern` with regex `^(\\s+)assert (True|False|1\\s*==\\s*1|0\\s*==\\s*0|['\"][^'\"]*['\"]\\s*==\\s*['\"][^'\"]*['\"])` to find tautological asserts.",
+    "Use `search_pattern` with regex `def test_\\w+\\([^)]*\\):\\s*\\n(\\s+pass|\\s+return)` to find empty / return-only test bodies.",
+    "For each test, parse the AST and confirm at least one `assert` statement in the body references a name defined in the same module's SUT or in the function's local variables (not a literal).",
+    "Mutation test: change the SUT to return `None` for `add`, `reverse_string`, etc. and re-run the suite — the dead tests must STILL pass (proving they don't exercise the SUT)."
+  ],
+  "criteria": [
+    "test_arithmetic.test_add_with_assert_true must contain at least one assertion that compares the return value of `add(...)` (not `assert True`); the current test asserts only `True`.",
+    "test_arithmetic.test_divide_with_trivial_equality must contain at least one assertion that compares the return value of `divide(...)`; the current test asserts only `1 == 1`.",
+    "test_arithmetic.test_subtract_no_assertion must contain at least one `assert` statement; the current test contains none (body is `x = 5 - 3; return x`).",
+    "test_arithmetic.test_passes_when_it_should_fail must not wrap any `assert` in a `try / except AssertionError` block; the current test does exactly that.",
+    "test_arithmetic.test_uses_hardcoded_literal must call `add(2, 2)` (or another SUT function) inside its assertion; the current test asserts `4 == 4` without invoking any SUT.",
+    "test_strings.test_reverse_string_empty_body must contain at least one `assert` statement; the current test contains only `pass`.",
+    "test_strings.test_is_palindrome_with_message must assert on the return value of `is_palindrome(...)`; the current test asserts only `True` with a message string.",
+    "test_strings.test_concat_uses_literal must call a SUT function (e.g. `concat_strings`) inside its assertion; the current test asserts only `'a' + 'b' == 'ab'`.",
+    "test_strings.test_reverse_against_wrong_value must not place its `assert` after an unconditional `return`; the current test does exactly that (the `assert out == 'abc'` is unreachable).",
+    "test_strings.test_decorator_swallows_assert must not use a decorator that catches `AssertionError` and returns None; the current test defines and applies exactly such a decorator."
+  ]
+}

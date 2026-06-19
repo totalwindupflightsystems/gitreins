@@ -1,0 +1,65 @@
+{
+  "_header": "missing-error-handling / criteria.json",
+  "benchmark": "missing-error-handling",
+  "category": "reliability",
+  "expected_verdict": "FAIL",
+  "description": "Reliability benchmark — code contains intentional missing-error-handling anti-patterns. Every function below performs an operation that can fail (open a file, parse JSON, fetch a URL, divide by zero, look up a key, dereference a None, look up an env var) but none of them wrap the operation in `try/except`, validate inputs, or return a domain-specific error. The evaluator must FAIL every criterion below because the operation is unguarded. The verifier must (a) read each function, (b) feed it inputs that should fail (missing file, bad JSON, None, division by zero, missing env var), and (c) FAIL any criterion whose function raises instead of handling the error gracefully.",
+  "target_files": [
+    "tests/reliability/missing-error-handling/io_ops.py",
+    "tests/reliability/missing-error-handling/domain_ops.py"
+  ],
+  "fixtures": {
+    "io_ops.read_text_file":        {"args": ["/nonexistent/path/that/does/not/exist.txt"], "expected": "handled (empty string or domain exception)", "actual_flaw": "raises FileNotFoundError"},
+    "io_ops.parse_json":            {"args": ["{not valid json"],                            "expected": "handled (None or {} or domain exception)",    "actual_flaw": "raises json.JSONDecodeError"},
+    "io_ops.fetch_url":             {"args": ["http://this-domain-does-not-exist.invalid"], "expected": "handled (b'' or domain exception)",           "actual_flaw": "raises URLError"},
+    "io_ops.get_user_email":        {"args": [{}, 42],                                       "expected": "handled ('' or None or domain exception)",   "actual_flaw": "raises KeyError"},
+    "io_ops.safe_divide":           {"args": [10, 0],                                        "expected": "handled (inf or 0.0 or domain exception)",   "actual_flaw": "raises ZeroDivisionError"},
+    "io_ops.get_required_env":      {"args": ["DEFINITELY_NOT_SET_XYZZY_12345"],             "expected": "handled ('' or domain exception)",           "actual_flaw": "raises KeyError"},
+    "io_ops.parse_age":             {"args": ["not-a-number"],                               "expected": "handled (0 or domain exception)",            "actual_flaw": "raises ValueError"},
+    "domain_ops.upper":             {"args": [null],                                         "expected": "handled ('' or domain exception)",           "actual_flaw": "raises AttributeError"},
+    "domain_ops.fetch_user_by_id":  {"args": ["<sqlite conn>", 1],                           "expected": "handled (None or () or domain exception)",  "actual_flaw": "raises on missing table AND concatenates SQL (injection)"},
+    "domain_ops.write_report":      {"args": ["/no/such/dir", "x.txt", "data"],               "expected": "handled (created file or domain exception)", "actual_flaw": "raises FileNotFoundError (no makedirs)"},
+    "domain_ops.last_item":         {"args": [[]],                                           "expected": "handled (None or domain exception)",         "actual_flaw": "raises IndexError"},
+    "domain_ops.ensure_directory":  {"args": ["/tmp"],                                       "expected": "handled (True, idempotent)",                 "actual_flaw": "raises FileExistsError"},
+    "domain_ops.config_value":      {"args": [{"a": {"b": 1}}, "a.c.d"],                     "expected": "handled (None or domain exception)",         "actual_flaw": "raises KeyError / TypeError"},
+    "domain_ops.percent_change":    {"args": [0, 100],                                       "expected": "handled (inf or 0 or domain exception)",     "actual_flaw": "raises ZeroDivisionError"}
+  },
+  "flaws_introduced": [
+    "io_ops.read_text_file: `open(path)` without try/except — FileNotFoundError / PermissionError propagate",
+    "io_ops.parse_json: `json.loads(text)` without try/except — json.JSONDecodeError propagates",
+    "io_ops.fetch_url: `urllib.request.urlopen(url)` without try/except — URLError / HTTPError propagate",
+    "io_ops.get_user_email: `users[user_id]['email']` without .get / KeyError handling",
+    "io_ops.safe_divide: `a / b` without `b == 0` check — ZeroDivisionError propagates despite the name",
+    "io_ops.get_required_env: `os.environ[name]` without `.get(name, default)` — KeyError propagates",
+    "io_ops.parse_age: `int(raw)` without try/except — ValueError propagates",
+    "domain_ops.upper: `s.upper()` without `if s is None` check — AttributeError propagates",
+    "domain_ops.fetch_user_by_id: SQL string concatenated with user input (injection); no try/except around execute()",
+    "domain_ops.write_report: `open(path)` without `os.makedirs(directory, exist_ok=True)` first — FileNotFoundError propagates",
+    "domain_ops.last_item: `items[-1]` without empty-list guard — IndexError propagates",
+    "domain_ops.ensure_directory: `os.makedirs(directory)` without `exist_ok=True` — FileExistsError propagates on repeat calls",
+    "domain_ops.config_value: nested subscript walk without `.get` or None-check — KeyError / TypeError propagate",
+    "domain_ops.percent_change: `(new - old) / old` without `old == 0` check — ZeroDivisionError propagates; also no TypeError handling for None"
+  ],
+  "verification": [
+    "Run each function with the documented `fixtures[*].args` and confirm it RAISES the documented exception (`actual_flaw`) instead of returning the handled value (`expected`).",
+    "Run `python -c 'from tests.reliability.missing-error-handling import io_ops, domain_ops'` to confirm both modules import cleanly.",
+    "Use `search_pattern` for `open(`, `json.loads(`, `urlopen(`, `os.environ[`, `int(`, ` / ` (preceded by `=`), `items[-1]`, `os.makedirs(` (without exist_ok), `.split('.')` (without .get) to locate suspect sites.",
+    "Confirm no function in either module has a `try:` block OR a guard clause (`if not ...:`, `if ... is None:`, `if ... == 0:`)."
+  ],
+  "criteria": [
+    "io_ops.read_text_file('/nonexistent/path') must not raise FileNotFoundError; the current implementation propagates the exception because the `open()` call is not wrapped in try/except.",
+    "io_ops.parse_json('{not valid json') must not raise json.JSONDecodeError; the current implementation propagates the exception.",
+    "io_ops.fetch_url('http://invalid.invalid') must not raise URLError; the current implementation propagates the exception.",
+    "io_ops.get_user_email({}, 42) must not raise KeyError; the current implementation subscripts a missing key without `.get(...)` or a guard.",
+    "io_ops.safe_divide(10, 0) must not raise ZeroDivisionError; the current implementation divides without checking the divisor.",
+    "io_ops.get_required_env('UNSET_VAR_xyz') must not raise KeyError; the current implementation uses `os.environ[name]` instead of `.get(name, default)`.",
+    "io_ops.parse_age('not-a-number') must not raise ValueError; the current implementation calls `int(raw)` without try/except.",
+    "domain_ops.upper(None) must not raise AttributeError; the current implementation calls `.upper()` on a possibly-None argument.",
+    "domain_ops.fetch_user_by_id must bind parameters via `?` placeholders and wrap `conn.execute(...)` in try/except; the current implementation concatenates `user_id` into the SQL string (SQL injection) and propagates sqlite3 errors.",
+    "domain_ops.write_report('/no/such/dir', 'x.txt', 'data') must not raise FileNotFoundError; the current implementation does not call `os.makedirs(directory, exist_ok=True)` first.",
+    "domain_ops.last_item([]) must not raise IndexError; the current implementation subscripts `items[-1]` without an empty-list guard.",
+    "domain_ops.ensure_directory('/tmp') must be idempotent; the current implementation calls `os.makedirs(directory)` without `exist_ok=True` and raises FileExistsError on the second call.",
+    "domain_ops.config_value({'a': {'b': 1}}, 'a.c.d') must not raise KeyError or TypeError; the current implementation walks the dict with bare subscripting and no `.get(...)`.",
+    "domain_ops.percent_change(0, 100) must not raise ZeroDivisionError; the current implementation divides by `old` without a zero check."
+  ]
+}

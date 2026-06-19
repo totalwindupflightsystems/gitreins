@@ -1,0 +1,53 @@
+{
+  "_header": "wrong-control-flow / criteria.json",
+  "benchmark": "wrong-control-flow",
+  "category": "reliability",
+  "expected_verdict": "FAIL",
+  "description": "Reliability benchmark — code contains intentional wrong-control-flow anti-patterns. Every function compiles and runs but produces wrong output because a branch is unreachable, a return is misplaced, a break/continue is inverted, or a condition is tautologically false. The evaluator must FAIL every criterion below because the documented intent does not match the actual execution. The verifier must (a) read each function, (b) run a known-input fixture, and (c) FAIL any criterion whose expected output does not match the actual output.",
+  "target_files": [
+    "tests/reliability/wrong-control-flow/control.py",
+    "tests/reliability/wrong-control-flow/iter.py"
+  ],
+  "fixtures": {
+    "control.first_even":              {"args": [[2, 4, 6, 8]],            "expected": 2,            "actual_flaw": "raises TypeError (checks None % 2)"},
+    "control.find_user":               {"args": [["alice","bob","charlie"], "bob"], "expected": 1,        "actual_flaw": "returns None (break on first non-match)"},
+    "control.categorise_priority":     {"args": ["critical"],              "expected": "P0",         "actual_flaw": "duplicate elif is unreachable"},
+    "control.describe_temperature":    {"args": [35],                      "expected": "hot",        "actual_flaw": "returns 'warm' (missing elif chain)"},
+    "control.index_of":                {"args": [[10, 20, 30], 99],        "expected": -1,           "actual_flaw": "returns -2 (for/else sentinel is wrong)"},
+    "iter.all_positive":               {"args": [[1, 2, -3]],              "expected": false,        "actual_flaw": "returns true (return True inside loop)"},
+    "iter.grade":                      {"args": [-5],                      "expected": "ValueError", "actual_flaw": "returns 'F' (nested if condition is tautologically false)"},
+    "iter.take_until_blank":           {"args": [["a","b","","c","d"]],    "expected": ["a","b"],    "actual_flaw": "returns full list (missing break)"},
+    "iter.parse_int_strict":           {"args": [null],                    "expected": 0,            "actual_flaw": "raises TypeError (only catches ValueError)"},
+    "iter.any_match":                  {"args": [[1, 2, 3], "x==2"],       "expected": true,         "actual_flaw": "returns false (flag variable never assigned)"}
+  },
+  "flaws_introduced": [
+    "control.first_even: checks `result % 2` instead of `n % 2` — first iteration raises TypeError",
+    "control.find_user: `break` and `continue` are swapped — breaks on the first non-match instead of the first match",
+    "control.categorise_priority: `elif priority == 'critical':` immediately after `if priority == 'critical':` — duplicate condition makes P1 branch unreachable",
+    "control.describe_temperature: a chain of `if`s instead of `elif`s — the second `if celsius >= 20` runs only when the earlier branches failed, then `celsius >= 30` is checked against an already-handled range",
+    "control.index_of: `for ... else:` clause returns -2 instead of -1 when needle not found",
+    "iter.all_positive: `return True` is inside the loop — returns after the first element",
+    "iter.grade: nested `if score > 0:` is inside the `else` of `if score >= 0:` — always false, validation is unreachable",
+    "iter.take_until_blank: `if not line:` uses `continue` instead of `break` — never stops at the blank line",
+    "iter.parse_int_strict: catches `ValueError` only — `TypeError` (from int(None)) propagates",
+    "iter.any_match: flag variable `found` is never assigned inside the loop — the function always returns False"
+  ],
+  "verification": [
+    "Run each function with the documented `fixtures[*].args` and confirm the actual output does NOT match `fixtures[*].expected`.",
+    "Run `python -c 'from tests.reliability.wrong-control-flow import control, iter'` to confirm both modules import cleanly (the bugs are runtime, not import-time).",
+    "Use `search_pattern` for `return True` and `return False` inside `for` / `while` blocks to locate suspect sites.",
+    "Use `search_pattern` for `if .*:\\s*$\\n.*raise` to locate unreachable raise statements."
+  ],
+  "criteria": [
+    "control.first_even([2, 4, 6, 8]) must return 2; the current implementation raises TypeError because the loop body checks `result` (initially None) instead of `n`.",
+    "control.find_user(['alice', 'bob', 'charlie'], 'bob') must return 1; the current implementation returns None because `break` and `continue` are swapped.",
+    "control.categorise_priority('critical') must return 'P0'; the current implementation has a duplicate `elif priority == 'critical':` immediately after the `if` (P1 branch is unreachable — verified by reading the source).",
+    "control.describe_temperature(35) must return 'hot'; the current implementation returns 'warm' because the chain uses `if` instead of `elif`.",
+    "control.index_of([10, 20, 30], 99) must return -1; the current implementation returns -2 because the `for ... else:` clause returns the wrong sentinel.",
+    "iter.all_positive([1, 2, -3]) must return False; the current implementation returns True because `return True` is inside the loop body.",
+    "iter.grade(-5) must raise ValueError; the current implementation returns 'F' because the nested `if score > 0:` is tautologically false in the `else` branch.",
+    "iter.take_until_blank(['a', 'b', '', 'c', 'd']) must return ['a', 'b']; the current implementation returns the full list because `if not line:` uses `continue` instead of `break`.",
+    "iter.parse_int_strict(None) must return 0; the current implementation raises TypeError because only `ValueError` is caught.",
+    "iter.any_match([1, 2, 3], lambda x: x == 2) must return True; the current implementation returns False because the flag variable `found` is never assigned inside the loop."
+  ]
+}
