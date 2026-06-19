@@ -6,12 +6,34 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![version](https://img.shields.io/badge/version-0.1.0-blue)](https://github.com/totalwindupflightsystems/gitreins/releases)
+[![PyPI](https://img.shields.io/pypi/v/gitreins)](https://pypi.org/project/gitreins/)
 
 ![GitReins Banner](assets/banner-dark.jpg)
 
 GitReins lives inside your git repository as a co-harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ✅ **Proof of Concept — Implemented (v0.1.0)** — All engine modules, MCP server, CLI, and git hooks are built and working. 221 tests pass.
+> ✅ **Proof of Concept — Implemented (v0.1.0)** — All engine modules, MCP server, CLI, and git hooks are built and working. 322 tests pass.
+
+## Install
+
+```bash
+# PyPI (recommended)
+pip install gitreins
+
+# GitHub
+pip install git+https://github.com/totalwindupflightsystems/gitreins.git
+
+# From source
+git clone https://github.com/totalwindupflightsystems/gitreins.git
+cd gitreins && pip install -e .
+```
+
+Then activate in any repo:
+
+```bash
+cd /path/to/your-project
+gitreins install
+```
 
 ## How It Works
 
