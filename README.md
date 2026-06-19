@@ -2,6 +2,11 @@
 
 **Git-Native Agent Co-Harness — Proof of Concept**
 
+[![CI](https://github.com/totalwindupflightsystems/gitreins/actions/workflows/ci.yml/badge.svg)](https://github.com/totalwindupflightsystems/gitreins/actions/workflows/ci.yml)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![version](https://img.shields.io/badge/version-0.1.0-blue)](https://github.com/totalwindupflightsystems/gitreins/releases)
+
 GitReins lives inside your git repository as a co-harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
 > ✅ **Proof of Concept — Implemented (v0.1.0)** — All engine modules, MCP server, CLI, and git hooks are built and working. 221 tests pass.
@@ -45,6 +50,16 @@ python3 gitreins/cli.py task create demo "Demo task" \
 # Start the MCP server for your AI agent
 python3 gitreins_mcp/server.py
 ```
+
+## Demos
+Three demo projects are included showing GitReins in action:
+| Project | Type | What it tests |
+|---------|------|---------------|
+| demo-slugify/ | Single-file | URL slug generator — basic criteria verification |
+| demo-calc/ | Multi-file CLI | Calculator with operations, parser, CLI — 13 pytest tests |
+| demo-string-utils/ | Single-file | String utilities with intentional palindrome bug — FAIL→FIX→PASS cycle |
+
+Run any demo:
 
 ## Tech Stack
 
