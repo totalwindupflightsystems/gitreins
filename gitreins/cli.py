@@ -3,6 +3,7 @@
 GitReins CLI — Human-usable command line.
 
 Usage:
+    gitreins install
     gitreins task create <id> <title> [criteria...]
     gitreins task start <id>
     gitreins task complete <id>
@@ -12,6 +13,34 @@ Usage:
     gitreins judge <id>
     gitreins commit <message>
     gitreins mcp-server
+"""
+
+DEFAULT_GITREINS_CONFIG = """\
+# GitReins Configuration
+
+guards:
+  secrets: true
+  lint: true
+  tests: true
+  test_command: "pytest -x --tb=short"
+
+evaluator:
+  max_iterations: 15
+"""
+
+PRE_COMMIT_HOOK = """\
+#!/usr/bin/env bash
+# GitReins pre-commit hook — runs Tier 1 guards on staged changes.
+
+# Skip cleanly if the repo hasn't been initialised with a config.
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+if [ ! -f "$REPO_ROOT/.gitreins/config.yaml" ]; then
+    exit 0
+fi
+
+cd "$REPO_ROOT"
+gitreins guard
+exit $?
 """
 
 import argparse
@@ -33,6 +62,86 @@ def get_workdir() -> str:
         return result.stdout.strip()
     except Exception:
         return os.getcwd()
+
+
+def cmd_install(args):
+    """One-command GitReins activation for the current repo.
+
+    Creates:
+      - .gitreins/config.yaml   (default config if missing)
+      - .git/hooks/pre-commit   (runs `gitreins guard` on staged changes)
+      - .gitignore              (adds .gitreins/tasks.yaml if not already present)
+    """
+    import subprocess
+
+    workdir = get_workdir()
+    git_dir = os.path.join(workdir, ".git")
+    hooks_dir = os.path.join(git_dir, "hooks")
+    gitreins_dir = os.path.join(workdir, ".gitreins")
+    config_path = os.path.join(gitreins_dir, "config.yaml")
+    hook_path = os.path.join(hooks_dir, "pre-commit")
+    gitignore_path = os.path.join(workdir, ".gitignore")
+    tasks_entry = ".gitreins/tasks.yaml"
+
+    if not os.path.isdir(git_dir):
+        print(f"Error: {workdir} is not a git repository (no .git directory).")
+        print("Run `git init` first, then re-run `gitreins install`.")
+        sys.exit(1)
+
+    created = []
+    skipped = []
+
+    # 1. .gitreins/config.yaml
+    os.makedirs(gitreins_dir, exist_ok=True)
+    if os.path.isfile(config_path):
+        skipped.append(config_path)
+    else:
+        with open(config_path, "w") as f:
+            f.write(DEFAULT_GITREINS_CONFIG)
+        created.append(config_path)
+
+    # 2. .git/hooks/pre-commit
+    os.makedirs(hooks_dir, exist_ok=True)
+    hook_existed = os.path.isfile(hook_path)
+    with open(hook_path, "w") as f:
+        f.write(PRE_COMMIT_HOOK)
+    os.chmod(hook_path, 0o755)
+    created.append(hook_path + ("" if not hook_existed else " (overwritten)"))
+
+    # 3. .gitignore — add .gitreins/tasks.yaml if not present
+    existing_gitignore = ""
+    if os.path.isfile(gitignore_path):
+        with open(gitignore_path, "r") as f:
+            existing_gitignore = f.read()
+    already_present = any(
+        line.strip() == tasks_entry
+        for line in existing_gitignore.splitlines()
+    )
+    if already_present:
+        skipped.append(f"{tasks_entry} already in .gitignore")
+    else:
+        with open(gitignore_path, "a") as f:
+            if existing_gitignore and not existing_gitignore.endswith("\n"):
+                f.write("\n")
+            f.write(tasks_entry + "\n")
+        created.append(f".gitignore (added {tasks_entry})")
+
+    # 4. Success summary
+    print(f"GitReins installed in {workdir}")
+    print()
+    print("Created:")
+    for path in created:
+        print(f"  + {path}")
+    if skipped:
+        print()
+        print("Skipped:")
+        for path in skipped:
+            print(f"  - {path}")
+    print()
+    print("Next steps:")
+    print("  - Create a task:  gitreins task create <id> <title> [criteria...]")
+    print("  - Run guards:     gitreins guard")
+    print("  - Try the hook:   make a change, git add ., git commit -m 'test'")
 
 
 def cmd_task_create(args):
@@ -149,6 +258,9 @@ def main():
     parser.add_argument("--version", action="version", version=f"gitreins {__version__}")
     sub = parser.add_subparsers(dest="command")
 
+    # install
+    sub.add_parser("install", help="Install GitReins hooks and config in the current repo")
+
     # task
     task_p = sub.add_parser("task", help="Task management")
     task_sub = task_p.add_subparsers(dest="subcommand")
@@ -192,7 +304,9 @@ def main():
         format="%(name)s: %(levelname)s: %(message)s",
     )
 
-    if args.command == "task":
+    if args.command == "install":
+        cmd_install(args)
+    elif args.command == "task":
         if args.subcommand == "create":
             cmd_task_create(args)
         elif args.subcommand == "start":
