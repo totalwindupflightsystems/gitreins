@@ -7,6 +7,8 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![version](https://img.shields.io/badge/version-0.1.0-blue)](https://github.com/totalwindupflightsystems/gitreins/releases)
 
+![GitReins Banner](assets/banner-dark.jpg)
+
 GitReins lives inside your git repository as a co-harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
 > ✅ **Proof of Concept — Implemented (v0.1.0)** — All engine modules, MCP server, CLI, and git hooks are built and working. 221 tests pass.
