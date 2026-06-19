@@ -25,3 +25,15 @@ Thumbs.db
 .env
 *.key
 *.pem
+
+# Test artifacts
+.coverage
+.skylos/
+# Node (if present from bootstrap)
+node_modules/
+apps/
+packages/
+temporal-vector/
+# Temp
+test_write
+*.tmp
