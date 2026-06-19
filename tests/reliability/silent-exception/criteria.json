@@ -1,0 +1,27 @@
+{
+  "benchmark": "silent-exception",
+  "category": "reliability",
+  "expected_verdict": "INCOMPLETE",
+  "description": "Reliability benchmark — code contains intentional silent-exception anti-patterns. The evaluator should FAIL every criterion below because the project deliberately demonstrates the exact patterns the criteria forbid.",
+  "target_files": [
+    "tests/reliability/silent-exception/api.py",
+    "tests/reliability/silent-exception/db.py"
+  ],
+  "flaws_introduced": [
+    "Bare `except:` followed by `pass` in api.fetch_user",
+    "`except Exception: pass` with no logging in api.delete_user",
+    "Catch-and-return-default with no logging in api.parse_payload and api.update_user_email",
+    "`except Exception: continue` inside a loop with no logging in db.bulk_insert",
+    "Bare `except:` returning None on connection bootstrap in db.connect",
+    "`except Exception: pass` on upsert path with no logging in db.upsert_user and db.fetch_one"
+  ],
+  "criteria": [
+    "api.py contains no bare `except:` clause that swallows errors silently without logging or re-raising",
+    "api.py contains no `except Exception: pass` pattern — every broad except must at minimum call logger.exception(...) or re-raise",
+    "api.py functions must surface failures (log, re-raise, or raise a domain-specific exception) instead of returning None / {} / False as a silent fallback",
+    "db.py contains no `except Exception: continue` inside a loop — every per-iteration error must be logged",
+    "db.py contains no bare `except:` clause; connection and write paths must log the failure before returning",
+    "db.py every `except Exception:` block must include a logger.exception(...) or logger.error(...) call so the failure is observable",
+    "No function in api.py or db.py may catch an exception and return a falsy sentinel (None, {}, False) without logging the underlying error"
+  ]
+}
