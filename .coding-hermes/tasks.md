@@ -12,7 +12,7 @@
 - **Files:** engine/pipeline.py, .gitreins/config.yaml
 - **AC:** `"on":` (quoted) in config.yaml preserves correct trigger list instead of parsing as boolean
 
-## [ ] GR-022: Go project support
+## [x] GR-022: Go project support
 - **Priority:** medium
 - **Model:** MiniMax-M3
 - **Files:** engine/guard_manager.py, engine/guards.py (new)

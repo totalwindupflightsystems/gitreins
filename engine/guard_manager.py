@@ -18,6 +18,8 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger("gitreins.guard")
 
+from engine.guards import is_go_project, check_go_lint, check_go_tests, check_go_build
+
 
 @dataclass
 class GuardResult:
@@ -55,6 +57,10 @@ class GuardManager:
             "skylos": self.config.get("guards", {}).get("skylos", False),  # opt-in: needs pip install
         }
 
+        # Project type detection
+        self._is_go = os.path.isfile(os.path.join(self.workdir, "go.mod"))
+        self._go_guards = self.config.get("guards", {}).get("go", {})
+
     def run_all(self) -> Tier1Result:
         """Run all enabled Tier 1 guards."""
         results: list[GuardResult] = []
@@ -73,6 +79,14 @@ class GuardManager:
 
         if self._enabled["skylos"]:
             results.append(self._check_skylos())
+
+        if self._is_go:
+            if self._go_guards.get("build", True):
+                results.append(self._check_go_build())
+            if self._go_guards.get("lint", True):
+                results.append(self._check_go_lint())
+            if self._go_guards.get("tests", True):
+                results.append(self._check_go_tests())
 
         passed = all(r.passed for r in results)
         return Tier1Result(passed=passed, results=results)
@@ -345,3 +359,18 @@ class GuardManager:
             return GuardResult(name="skylos", passed=True, output="skylos timed out")
         except Exception as e:
             return GuardResult(name="skylos", passed=False, error=str(e))
+
+    def _check_go_lint(self) -> GuardResult:
+        """Run Go lint checks (delegates to engine.guards)."""
+        r = check_go_lint(self.workdir)
+        return GuardResult(name=r.name, passed=r.passed, output=r.output, error=r.error)
+
+    def _check_go_tests(self) -> GuardResult:
+        """Run Go tests (delegates to engine.guards)."""
+        r = check_go_tests(self.workdir)
+        return GuardResult(name=r.name, passed=r.passed, output=r.output, error=r.error)
+
+    def _check_go_build(self) -> GuardResult:
+        """Run Go build (delegates to engine.guards)."""
+        r = check_go_build(self.workdir)
+        return GuardResult(name=r.name, passed=r.passed, output=r.output, error=r.error)
