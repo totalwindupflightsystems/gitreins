@@ -299,21 +299,40 @@ class TestMaxIterationsAndErrors:
     """Test max_iterations cap and error handling — step-1-4-1-7."""
 
     def test_max_iterations_reached_returns_incomplete(self, evaluator, llm_client):
-        """Evaluator stops at max_iterations and returns INCOMPLETE."""
-        # Always return tool calls (never a verdict)
+        """Evaluator stops at max_iterations and returns INCOMPLETE with actionable error."""
+        # Always return tool calls (never a verdict) — exhausts the cap
         calls = []
         for i in range(10):
             tc = ToolCall(id=f"tc{i}", name="read_file", arguments={"path": f"f{i}.txt"})
             calls.append(LLMResponse(content="working", tool_calls=[tc]))
-        # On the final forced call, return a verdict
-        calls.append(LLMResponse(content='{"verdict":"INCOMPLETE","items":[],"summary":"exhausted"}'))
         mock_chat = MagicMock(side_effect=calls)
         with patch.object(llm_client, 'chat', mock_chat):
-            # Create evaluator with max_iterations=2 to keep test fast
             from engine.evaluator import AgenticEvaluator
             fast_eval = AgenticEvaluator(llm_client, evaluator.workdir, max_iterations=2)
             verdict = fast_eval.evaluate({"id": "loop", "title": "x", "criteria": ["c1"]})
         assert verdict.verdict == "INCOMPLETE"
+        assert "Hit iteration cap" in verdict.summary
+        assert "Raise max_iterations" in verdict.summary
+
+    def test_max_iterations_error_message_actionable(self, evaluator, llm_client):
+        """Error message on cap tells user exactly how to fix it."""
+        calls = [LLMResponse(content="working", tool_calls=[
+            ToolCall(id="t0", name="read_file", arguments={"path": "x.txt"})
+        ]) for _ in range(5)]
+        mock_chat = MagicMock(side_effect=calls)
+        with patch.object(llm_client, 'chat', mock_chat):
+            from engine.evaluator import AgenticEvaluator
+            fast_eval = AgenticEvaluator(llm_client, evaluator.workdir, max_iterations=1)
+            verdict = fast_eval.evaluate({"id": "t", "title": "x", "criteria": ["c1"]})
+        assert "max_iterations" in verdict.summary
+        assert "split criteria" in verdict.summary
+        assert str(fast_eval.max_iterations) in verdict.summary
+
+    def test_default_max_iterations_is_100(self, llm_client, tmp_workdir):
+        """Default max_iterations is 100 (was 15 — too low for complex criteria)."""
+        from engine.evaluator import AgenticEvaluator
+        evaluator = AgenticEvaluator(llm_client, tmp_workdir)
+        assert evaluator.max_iterations == 100
 
     def test_llm_exception_returns_incomplete(self, evaluator, llm_client):
         """LLM exception → INCOMPLETE with error summary."""

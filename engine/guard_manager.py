@@ -62,19 +62,23 @@ class GuardManager:
         self._go_guards = self.config.get("guards", {}).get("go", {})
 
     def run_all(self) -> Tier1Result:
-        """Run all enabled Tier 1 guards."""
+        """Run all enabled Tier 1 guards.
+
+        For Go projects, the Python-specific guards (lint, tests, dead_code)
+        are skipped in favor of Go-native equivalents (go vet, go test, go build).
+        """
         results: list[GuardResult] = []
 
         if self._enabled["secrets"]:
             results.append(self._check_secrets())
 
-        if self._enabled["lint"]:
+        if self._enabled["lint"] and not self._is_go:
             results.append(self._check_lint())
 
-        if self._enabled["tests"]:
+        if self._enabled["tests"] and not self._is_go:
             results.append(self._check_tests())
 
-        if self._enabled["dead_code"]:
+        if self._enabled["dead_code"] and not self._is_go:
             results.append(self._check_dead_code())
 
         if self._enabled["skylos"]:
