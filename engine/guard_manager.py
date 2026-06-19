@@ -159,6 +159,15 @@ class GuardManager:
                 if os.path.getsize(full) > 1_000_000:
                     continue  # Skip very large files
 
+                # Skip documentation files — they routinely contain
+                # example API keys, placeholder tokens, and credential
+                # snippets that are not actual secrets.
+                if (
+                    any(skip in fpath for skip in ('.memory-bank/', 'docs/', 'CONTRIBUTING.md', 'SECURITY.md'))
+                    or fpath.endswith('.md')
+                ):
+                    continue
+
                 try:
                     with open(full, "r", errors="replace") as f:
                         lines = f.readlines()
