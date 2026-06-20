@@ -156,6 +156,7 @@ class GitReinsMCPServer:
                     "properties": {
                         "id": {"type": "string", "description": "Task ID to evaluate"},
                         "workdir": {"type": "string", "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir."},
+                        "eval_cap": {"type": "string", "description": "Evaluation cap. Supports: '100' (iterations), '-1' (unlimited), '30m' (time), '200k/50k' (input/output tokens), '100/30m/200k/50k' (combined). Defaults to evaluator.cap in .gitreins/config.yaml or 100 iterations."},
                     },
                     "required": ["id"],
                 },
@@ -291,21 +292,22 @@ class GitReinsMCPServer:
             ],
         }
 
-    def _judge_evaluate(self, id: str, workdir: str = None) -> dict:
-        """Run full evaluation pipeline. Accepts optional workdir for cross-repo use."""
+    def _judge_evaluate(self, id: str, workdir: str | None = None, eval_cap: str | None = None) -> dict:
+        """Run full evaluation pipeline. Accepts optional workdir and eval_cap for cross-repo use."""
         wd = os.path.abspath(workdir) if workdir else self.workdir
         if wd != self.workdir:
             tm = TaskManager(wd)
             task = tm.get(id)
             if not task:
                 return {"error": f"Task not found: {id} in {wd}"}
-            j = Judge(self.llm, wd)
+            j = Judge(self.llm, wd, eval_cap=eval_cap)
             result = j.evaluate_task(task)
         else:
             task = self.tasks.get(id)
             if not task:
                 return {"error": f"Task not found: {id}"}
-            result = self.judge.evaluate_task(task)
+            j = Judge(self.llm, self.workdir, eval_cap=eval_cap) if eval_cap else self.judge
+            result = j.evaluate_task(task)
         d = {
             "task_id": id,
             "passed": result.passed,

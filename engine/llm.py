@@ -32,9 +32,18 @@ class ToolCall:
 
 
 @dataclass
+class LLMUsage:
+    """Token usage returned by the LLM API."""
+    prompt_tokens: int = 0       # OpenAI: prompt_tokens, Anthropic: input_tokens
+    completion_tokens: int = 0   # OpenAI: completion_tokens, Anthropic: output_tokens
+    total_tokens: int = 0        # OpenAI: total_tokens, Anthropic: input+output
+
+
+@dataclass
 class LLMResponse:
     content: str | None
     tool_calls: list[ToolCall] = field(default_factory=list)
+    usage: LLMUsage | None = None
 
 
 def _is_anthropic(url: str) -> bool:
@@ -168,7 +177,17 @@ class LLMClient:
                     ToolCall(id=tc["id"], name=tc["function"]["name"], arguments=args)
                 )
 
-        return LLMResponse(content=message.get("content"), tool_calls=tool_calls)
+        # Extract token usage
+        usage = None
+        if "usage" in data:
+            u = data["usage"]
+            usage = LLMUsage(
+                prompt_tokens=u.get("prompt_tokens", 0),
+                completion_tokens=u.get("completion_tokens", 0),
+                total_tokens=u.get("total_tokens", 0),
+            )
+
+        return LLMResponse(content=message.get("content"), tool_calls=tool_calls, usage=usage)
 
     def _convert_messages_for_openai(self, messages: list[dict]) -> list[dict]:
         """Ensure messages use OpenAI format (identity for OpenAI-native)."""
@@ -235,7 +254,19 @@ class LLMClient:
                     arguments=block.get("input", {}),
                 ))
 
-        return LLMResponse(content=content, tool_calls=tool_calls)
+        # Extract token usage (Anthropic uses input_tokens/output_tokens)
+        usage = None
+        if "usage" in data:
+            u = data["usage"]
+            input_tok = u.get("input_tokens", 0)
+            output_tok = u.get("output_tokens", 0)
+            usage = LLMUsage(
+                prompt_tokens=input_tok,
+                completion_tokens=output_tok,
+                total_tokens=input_tok + output_tok,
+            )
+
+        return LLMResponse(content=content, tool_calls=tool_calls, usage=usage)
 
     def _convert_messages_for_anthropic(self, messages: list[dict]) -> list[dict]:
         """

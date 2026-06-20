@@ -23,11 +23,13 @@ class Judge:
         llm: LLMClient,
         workdir: str = ".",
         guard_config: dict | None = None,
+        eval_cap: str | None = None,
     ):
         self.workdir = workdir
         self.llm = llm
         self.guard_config = guard_config or {}
         self.guard_manager = GuardManager(workdir, self.guard_config)
+        self.eval_cap = eval_cap
 
     def evaluate_task(self, task: Task) -> "JudgeResult":
         """Run the pipeline against a task.
@@ -83,7 +85,7 @@ class Judge:
         print("  Tier 1 PASSED")
         print("  Tier 2: Running agentic evaluator...")
 
-        evaluator = AgenticEvaluator(self.llm, self.workdir)
+        evaluator = AgenticEvaluator(self.llm, self.workdir, eval_cap=self.eval_cap)
         task_dict = {
             "id": task.id,
             "title": task.title,

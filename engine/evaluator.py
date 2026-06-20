@@ -22,9 +22,11 @@ import logging
 import os
 import re
 import subprocess
+import time
 from dataclasses import dataclass, field
 
 from engine.llm import LLMClient, ToolCall
+from engine.eval_cap import EvalCap, parse_eval_cap, eval_cap_from_config
 
 logger = logging.getLogger("gitreins.evaluator")
 
@@ -192,22 +194,62 @@ class Verdict:
 
 
 class AgenticEvaluator:
-    """The evaluator loop: LLM iterates with tools until it delivers a verdict."""
+    """The evaluator loop: LLM iterates with tools until it delivers a verdict.
+
+    Caps can be set via:
+      - eval_cap string: "100", "30m", "200k/50k", "100/30m/200k/50k", "-1" (unlimited)
+      - eval_cap EvalCap object: pre-parsed cap
+      - max_iterations int: simple iteration cap (backward compat)
+      - .gitreins/config.yaml: evaluator.cap key (auto-loaded if no cap specified)
+
+    Priority: eval_cap param > max_iterations param > config.yaml > default (100 iter)
+    """
 
     def __init__(
         self,
         llm: LLMClient,
         workdir: str = ".",
-        max_iterations: int = 100,
+        max_iterations: int | None = None,
+        eval_cap: str | EvalCap | None = None,
     ):
         self.llm = llm
         self.workdir = os.path.abspath(workdir)
-        self.max_iterations = max_iterations
+
+        # Resolve eval cap — explicit param wins, then max_iterations, then config
+        if isinstance(eval_cap, EvalCap):
+            self.eval_cap = eval_cap
+        elif isinstance(eval_cap, str):
+            self.eval_cap = parse_eval_cap(eval_cap)
+        elif max_iterations is not None:
+            self.eval_cap = EvalCap(max_iterations=max_iterations, source=f"max_iterations={max_iterations}")
+        else:
+            # Try config.yaml
+            config = self._load_config()
+            self.eval_cap = eval_cap_from_config(config)
+            # If config gave us the default 100 iter, check if max_iterations was the real intent
+            if max_iterations is None and self.eval_cap.max_iterations == 100 and self.eval_cap.source == "(config default)":
+                pass  # Keep default
+
+        # Backward compat: expose max_iterations for code that reads it
+        self.max_iterations = self.eval_cap.max_iterations if self.eval_cap.max_iterations > 0 else 100
+
         self._sandbox: dict[str, str] = {}
         self._task_index: dict[str, dict] = {}
         self._files_read: set[str] = set()
         self._commands_run: set[str] = set()
         self._searches_done: set[str] = set()
+
+    def _load_config(self) -> dict:
+        """Load .gitreins/config.yaml if present."""
+        import yaml
+        config_path = os.path.join(self.workdir, ".gitreins", "config.yaml")
+        if os.path.isfile(config_path):
+            try:
+                with open(config_path) as f:
+                    return yaml.safe_load(f) or {}
+            except Exception:
+                pass
+        return {}
 
     def evaluate(self, task: dict) -> Verdict:
         """Run the agentic loop against a task and return a verdict.
@@ -249,7 +291,22 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             {"role": "user", "content": task_prompt},
         ]
 
-        for iteration in range(self.max_iterations):
+        # Start tracking
+        self.eval_cap.start()
+
+        # Determine iteration cap. If unlimited, use a safety max.
+        iter_limit = self.eval_cap.max_iterations if self.eval_cap.max_iterations > 0 else 10_000
+
+        for iteration in range(iter_limit):
+            # Check caps (handles time/token limits even with unlimited iterations)
+            cap_error = self.eval_cap.check()
+            if cap_error:
+                logger.warning("Eval cap exceeded: %s", cap_error)
+                return Verdict(
+                    verdict="INCOMPLETE",
+                    summary=f"Cap exceeded: {cap_error}",
+                )
+
             try:
                 response = self.llm.chat(messages, tools=EVALUATOR_TOOLS)
             except Exception as e:
@@ -257,6 +314,17 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 return Verdict(
                     verdict="INCOMPLETE",
                     summary=f"Evaluator error: LLM call failed: {e}",
+                )
+
+            # Track token usage
+            prompt_tok = response.usage.prompt_tokens if response.usage else 0
+            completion_tok = response.usage.completion_tokens if response.usage else 0
+            cap_error = self.eval_cap.record_iteration(prompt_tok, completion_tok)
+            if cap_error:
+                logger.warning("Eval cap exceeded: %s", cap_error)
+                return Verdict(
+                    verdict="INCOMPLETE",
+                    summary=f"Cap exceeded: {cap_error}",
                 )
 
             # No tool calls → LLM is delivering a verdict
@@ -307,10 +375,10 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             logger.debug("Evaluator iteration %d: %d tool calls, %d messages",
                          iteration + 1, len(response.tool_calls), len(messages))
 
-        # Hit max iterations — return clear error instead of forcing garbled verdict
+        # Hit iteration cap — return clear error
         msg = (
-            f"Hit iteration cap ({self.max_iterations}). "
-            "Raise max_iterations in eval-runner.py (e.g. max_iterations=100) "
+            f"Cap exceeded: {self.eval_cap.summary()}. "
+            "Increase caps (eval_cap param or evaluator.cap in .gitreins/config.yaml) "
             "or split criteria into focused single-criterion tasks."
         )
         logger.warning(msg)
