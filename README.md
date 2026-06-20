@@ -8,11 +8,11 @@
 [![version](https://img.shields.io/badge/version-0.1.0-blue)](https://github.com/totalwindupflightsystems/gitreins/releases)
 [![PyPI](https://img.shields.io/pypi/v/gitreins)](https://pypi.org/project/gitreins/)
 
-![GitReins Banner](assets/banner-dark.jpg)
+![GitReins Banner](https://raw.githubusercontent.com/totalwindupflightsystems/gitreins/main/assets/banner-dark.jpg)
 
 GitReins lives inside your git repository as a co-harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ✅ **Proof of Concept — Implemented (v0.1.0)** — All engine modules, MCP server, CLI, and git hooks are built and working. 322 tests pass.
+> ✅ **v0.5.0** — Single-source defaults, update checker, 383 tests pass.
 
 ## Install
 
