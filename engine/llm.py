@@ -8,7 +8,7 @@ Supports:
 Configure via environment variables:
     GITREINS_LLM_BASE_URL   — API base URL
     GITREINS_LLM_API_KEY    — API key
-    GITREINS_LLM_MODEL      — Model name (default: gpt-4o-mini)
+    GITREINS_LLM_MODEL      — Model name (default: deepseek-v4-flash)
     GITREINS_LLM_PROVIDER   — Force provider: "openai" or "anthropic" (auto-detect if unset)
 """
 
@@ -82,7 +82,7 @@ class LLMClient:
                 self.api_key = os.getenv(env_key, "")
                 if self.api_key:
                     break
-        self.model = model or os.getenv("GITREINS_LLM_MODEL", "deepseek-chat")
+        self.model = model or os.getenv("GITREINS_LLM_MODEL", "deepseek-v4-flash")
         self.max_retries = max_retries
 
         # Auto-detect provider if not forced

@@ -283,10 +283,10 @@ class TestLLMClientDefaults:
     """Test default values and configuration."""
 
     def test_default_model(self, monkeypatch):
-        """Default model is 'gpt-4o-mini'."""
+        """Default model is 'deepseek-v4-flash'."""
         monkeypatch.delenv("GITREINS_LLM_MODEL", raising=False)
         client = LLMClient(base_url="https://test.local/v1")
-        assert client.model == "gpt-4o-mini"
+        assert client.model == "deepseek-v4-flash"
 
     def test_custom_model(self):
         """Constructor model arg overrides default."""
