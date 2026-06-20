@@ -34,6 +34,7 @@ guards:
   secrets: true
   lint: true
   tests: true
+  test_mode: "full"                      # "full" or "diff" (smart)
   test_command: "pytest -x --tb=short"
   # dead_code: true    # opt-in: Python dead-code detection (AST-based)
   # skylos: true       # opt-in: multi-language dead code + AI mistake detection
@@ -243,7 +244,8 @@ def cmd_guard_run(args):
     config = load_config(workdir)
     gm = GuardManager(workdir, config=config)
     result = gm.run_all()
-    print(f"Tier 1 Guards: {'PASS' if result.passed else 'FAIL'}")
+    mode_note = f"  (test mode: {gm.test_mode})" if gm._enabled.get("tests") else ""
+    print(f"Tier 1 Guards: {'PASS' if result.passed else 'FAIL'}{mode_note}")
     print(result.summary)
 
 

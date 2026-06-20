@@ -4,11 +4,20 @@ Guard Manager — Static checks at pre-commit time.
 Tier 1 (no LLM, fast):
     1. Secrets scanning (gitleaks or built-in pattern scanner)
     2. Lint (ruff/flake8)
-    3. Staged tests (pytest on changed files)
+    3. Tests (full or diff-mode, configurable)
 
 All checks are optional and configurable via .gitreins/config.yaml
+
+Config:
+    guards:
+      secrets: true
+      lint: true
+      tests: true
+      test_mode: "full" | "diff"     # default: full
+      test_command: "pytest -x --tb=short"
 """
 
+import fnmatch
 import json
 import logging
 import os
@@ -43,23 +52,131 @@ class Tier1Result:
         return "\n".join(lines)
 
 
+# ── Diff-based test discovery ──────────────────────────────────
+
+# Files that, when changed, force a full test run (too broad to narrow)
+_FORCE_FULL_TEST_GLOBS = [
+    "pyproject.toml",
+    "setup.cfg",
+    "setup.py",
+    "conftest.py",
+    ".gitreins/config.yaml",
+    ".github/workflows/*.yml",
+    "Makefile",
+]
+
+
+def _discover_test_targets(workdir: str) -> list[str] | None:
+    """Return a list of test file paths to run, or None for full suite.
+
+    None means "full suite" — returned when:
+    - No staged changes
+    - A force-full file was changed
+    - No test files map to the changed sources (safety fallback)
+
+    Returns absolute paths to test files.
+    """
+    # Get staged files
+    staged = _get_staged_files(workdir)
+    if not staged:
+        return None
+
+    # Check force-full triggers
+    for staged_file in staged:
+        for glob in _FORCE_FULL_TEST_GLOBS:
+            if fnmatch.fnmatch(staged_file, glob):
+                logger.debug("Force-full trigger: %s matches %s", staged_file, glob)
+                return None
+
+    # Map staged source files to test files using basename matching
+    test_files: set[str] = set()
+    for staged_file in staged:
+        # If a test file itself changed, always include it
+        basename = os.path.basename(staged_file)
+        if basename.startswith("test_") and basename.endswith(".py"):
+            test_files.add(os.path.join(workdir, staged_file))
+            continue
+
+        # Derive test file from source basename:
+        #   engine/foo.py → tests/test_foo.py
+        #   gitreins/bar.py → tests/test_bar.py
+        #   gitreins_mcp/server.py → tests/test_mcp_server.py
+        module = os.path.splitext(basename)[0]
+        candidates = [
+            os.path.join(workdir, "tests", f"test_{module}.py"),
+        ]
+        # Special case: gitreins_mcp/server.py → tests/test_mcp_server.py
+        if os.path.dirname(staged_file).startswith("gitreins_mcp"):
+            candidates.append(os.path.join(workdir, "tests", f"test_mcp_{module}.py"))
+
+        for candidate in candidates:
+            if os.path.isfile(candidate):
+                test_files.add(candidate)
+                logger.debug("Mapped %s → %s", staged_file, os.path.relpath(candidate, workdir))
+                break
+        else:
+            logger.debug("No test file found for %s (tried: %s)", staged_file, candidates)
+
+    if not test_files:
+        # Changed files don't map to any known tests — safety: run full suite
+        logger.debug("No test targets discovered for staged files, running full suite")
+        return None
+
+    return sorted(test_files)
+
+
+def _get_staged_files(workdir: str) -> list[str]:
+    """Return staged file paths relative to workdir."""
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+            capture_output=True, text=True, timeout=10,
+            cwd=workdir,
+        )
+        return [f.strip() for f in result.stdout.split("\n") if f.strip()]
+    except Exception:
+        return []
+
+
+def _build_diff_test_command(test_command: str, test_files: list[str], workdir: str) -> str:
+    """Build a test command targeting specific test files.
+
+    If test_command starts with 'pytest', appends the test file paths.
+    Otherwise returns the original command (custom runners can't be
+    narrowed without user config).
+    """
+    cmd = test_command.strip()
+
+    if cmd.startswith("pytest"):
+        # Convert absolute paths to relative for cleaner output
+        rel_paths = [os.path.relpath(f, workdir) for f in test_files]
+        return f"{cmd} {' '.join(rel_paths)}"
+
+    # Non-pytest runner — can't narrow, run full
+    return cmd
+
+
 class GuardManager:
     """Run static checks against staged changes."""
 
     def __init__(self, workdir: str = ".", config: dict | None = None):
         self.workdir = os.path.abspath(workdir)
         self.config = config or {}
+        guards_cfg = self.config.get("guards", {})
         self._enabled = {
-            "secrets": self.config.get("guards", {}).get("secrets", True),
-            "lint": self.config.get("guards", {}).get("lint", True),
-            "tests": self.config.get("guards", {}).get("tests", True),
-            "dead_code": self.config.get("guards", {}).get("dead_code", False),  # opt-in: Python-only, can be noisy
-            "skylos": self.config.get("guards", {}).get("skylos", False),  # opt-in: needs pip install
+            "secrets": guards_cfg.get("secrets", True),
+            "lint": guards_cfg.get("lint", True),
+            "tests": guards_cfg.get("tests", True),
+            "dead_code": guards_cfg.get("dead_code", False),  # opt-in: Python-only, can be noisy
+            "skylos": guards_cfg.get("skylos", False),  # opt-in: needs pip install
         }
+
+        # Test mode: "full" (default) or "diff"
+        self._test_mode = guards_cfg.get("test_mode", "full")
 
         # Project type detection
         self._is_go = os.path.isfile(os.path.join(self.workdir, "go.mod"))
-        self._go_guards = self.config.get("guards", {}).get("go", {})
+        self._go_guards = guards_cfg.get("go", {})
 
     def run_all(self) -> Tier1Result:
         """Run all enabled Tier 1 guards.
@@ -94,6 +211,10 @@ class GuardManager:
 
         passed = all(r.passed for r in results)
         return Tier1Result(passed=passed, results=results)
+
+    @property
+    def test_mode(self) -> str:
+        return self._test_mode
 
     def _check_secrets(self) -> GuardResult:
         """Scan staged changes for secrets using gitleaks or built-in scanner."""
@@ -149,7 +270,7 @@ class GuardManager:
         # Patterns we explicitly IGNORE (common false positives)
         whitelist_patterns = [
             r'(?i)(api[_-]?key|apikey|secret|token|password|passwd)\s*[:=]\s*(os\.getenv|os\.environ|getenv|environ\[|request\.form|request\.args|\.env|config\[|settings\[)',
-            r'(?i)\$\{[A-Z_]+}',                     # Shell variable substitution
+            r'(?i)\$\{[A-Z_]+\}',                     # Shell variable substitution
             r'(?i)\{\{[^}]*\}\}',                     # Template variables
             r'(?i)PASSWORD\s*=\s*""',                 # Empty password
             r'(?i)EXAMPLE|PLACEHOLDER|TODO|FIXME|xxx+',  # Placeholders
@@ -160,12 +281,7 @@ class GuardManager:
         findings = []
         try:
             # Get staged files
-            result = subprocess.run(
-                ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-                capture_output=True, text=True, timeout=10,
-                cwd=self.workdir,
-            )
-            staged_files = [f for f in result.stdout.strip().split("\n") if f]
+            staged_files = _get_staged_files(self.workdir)
 
             if not staged_files:
                 return GuardResult(name="secrets", passed=True, output="No staged files to scan")
@@ -224,12 +340,8 @@ class GuardManager:
         for linter in linters:
             try:
                 # Get staged Python files
-                result = subprocess.run(
-                    ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-                    capture_output=True, text=True, timeout=10,
-                    cwd=self.workdir,
-                )
-                py_files = [f for f in result.stdout.strip().split("\n") if f.endswith(".py")]
+                staged_files = _get_staged_files(self.workdir)
+                py_files = [f for f in staged_files if f.endswith(".py")]
                 if not py_files:
                     return GuardResult(name="lint", passed=True, output="No Python files staged")
 
@@ -252,8 +364,27 @@ class GuardManager:
         return GuardResult(name="lint", passed=True, output="No linter found — skipped")
 
     def _check_tests(self) -> GuardResult:
-        """Run the configured test command."""
-        cmd = self.config.get("guards", {}).get("test_command", "pytest -x --tb=short")
+        """Run the configured test command.
+
+        In 'diff' mode, only runs tests relevant to staged changes.
+        In 'full' mode (default), runs the entire test suite.
+        """
+        test_command = self.config.get("guards", {}).get("test_command", "pytest -x --tb=short")
+
+        if self._test_mode == "diff":
+            test_files = _discover_test_targets(self.workdir)
+            if test_files is not None:
+                # Narrowed — only run relevant tests
+                cmd = _build_diff_test_command(test_command, test_files, self.workdir)
+                label = f"tests (diff: {len(test_files)} files)"
+                return self._run_test_command(cmd, label)
+            # Fall through to full suite (safety default)
+
+        label = "tests (full)"
+        return self._run_test_command(test_command, label)
+
+    def _run_test_command(self, cmd: str, label: str) -> GuardResult:
+        """Execute a test command and return a GuardResult."""
         try:
             result = subprocess.run(
                 cmd, shell=True, capture_output=True, text=True, timeout=120,
@@ -263,13 +394,13 @@ class GuardManager:
             if len(output) > 2000:
                 output = output[-2000:]  # Keep last 2000 chars for failure context
             if result.returncode == 0:
-                return GuardResult(name="tests", passed=True, output=output[:500])
+                return GuardResult(name=label, passed=True, output=output[:500])
             else:
-                return GuardResult(name="tests", passed=False, output=output)
+                return GuardResult(name=label, passed=False, output=output)
         except subprocess.TimeoutExpired:
-            return GuardResult(name="tests", passed=False, output="Tests timed out after 120s")
+            return GuardResult(name=label, passed=False, output="Tests timed out after 120s")
         except Exception as e:
-            return GuardResult(name="tests", passed=False, error=str(e))
+            return GuardResult(name=label, passed=False, error=str(e))
 
     def _check_dead_code(self) -> GuardResult:
         """Detect unreachable code, unused functions, and unused imports."""
