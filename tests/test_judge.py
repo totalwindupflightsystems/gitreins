@@ -85,11 +85,17 @@ class TestJudgeLegacyPath:
         with patch.object(judge.guard_manager, 'run_all', return_value=tier1_pass):
             # Mock evaluator to return COMPLETE
             verdict_json = '{"verdict":"COMPLETE","items":[{"criterion":"c1","status":"PASS","detail":"verified"}],"summary":"good"}'
-            with patch.object(llm_client, 'chat', return_value=mock.MagicMock(content=verdict_json)):
+            mock_resp = mock.MagicMock(content=verdict_json, tool_calls=None)
+            with patch.object(llm_client, 'chat', return_value=mock_resp):
                 result = judge._run_legacy(task)
         assert result.passed is True
         assert result.verdict is not None
         assert result.verdict.verdict == "COMPLETE"
+        # BUGFIX: tier1 and tier2 are now populated
+        assert result.tier1 is not None
+        assert result.tier1.passed is True
+        assert result.tier2 is not None
+        assert result.tier2.verdict == "COMPLETE"
 
     def test_legacy_guards_fail_tier2_skipped(self, judge):
         """When guards fail, Tier 2 is skipped, result.passed=False."""
@@ -104,6 +110,9 @@ class TestJudgeLegacyPath:
             result = judge._run_legacy(task)
         assert result.passed is False
         assert result.pipeline_result == {}
+        assert result.tier1 is not None
+        assert result.tier1.passed is False
+        assert result.tier2 is None  # Skipped because guards failed
 
 
 class TestJudgeEvaluateTask:
@@ -152,7 +161,8 @@ class TestJudgeEvaluateTask:
         ])
         with patch.object(judge.guard_manager, 'run_all', return_value=tier1_pass):
             verdict_json = '{"verdict":"COMPLETE","items":[{"criterion":"c1","status":"PASS","detail":"ok"}],"summary":"done"}'
-            with patch.object(llm_client, 'chat', return_value=mock.MagicMock(content=verdict_json)):
+            mock_resp = mock.MagicMock(content=verdict_json, tool_calls=None)
+            with patch.object(llm_client, 'chat', return_value=mock_resp):
                 result = judge.evaluate_task(task)
         assert result.passed is True
 
@@ -264,3 +274,30 @@ class TestExtendedJudge:
         assert "c1" in summary
         assert "c2" in summary
         assert "INCOMPLETE" in summary
+
+    def test_judge_result_stores_tier1_and_tier2(self):
+        """BUGFIX: JudgeResult.tier1 and .tier2 are populated by _run_legacy."""
+        from engine.judge import Judge, JudgeResult
+        from engine.llm import LLMClient
+
+        verdict = Verdict(verdict="COMPLETE", items=[
+            VerdictItem(criterion="c1", status="PASS", detail="ok")
+        ], summary="all good")
+        tier1 = Tier1Result(passed=True, results=[
+            GuardResult(name="secrets", passed=True, output="clean")
+        ])
+
+        result = JudgeResult(task_id="t4", passed=True, tier1=tier1, tier2=verdict)
+        assert result.tier1 is not None
+        assert result.tier1.passed is True
+        assert result.tier2 is not None
+        assert result.tier2.verdict == "COMPLETE"
+
+    def test_tier1_none_safe_access(self):
+        """BUGFIX: tier1 is None safe (e.g. pipeline path)."""
+        result = JudgeResult(task_id="t5", passed=True)
+        assert result.tier1 is None
+        assert result.tier2 is None
+        # The MCP handler pattern: result.tier1.passed if result.tier1 else None
+        tier1_passed = result.tier1.passed if result.tier1 else None
+        assert tier1_passed is None

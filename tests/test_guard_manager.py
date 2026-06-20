@@ -258,11 +258,13 @@ class TestTestsGuard:
     """Test _check_tests behavior."""
 
     def test_pytest_not_found_skips(self, guard_manager):
-        """Tests guard passes when pytest not installed."""
-        with patch('subprocess.run', side_effect=FileNotFoundError("pytest")):
+        """Tests guard returns failure when test command can't run."""
+        # Since v0.1.2, _check_tests runs test_command directly (no pytest gate).
+        # If the command can't be found, subprocess.run raises an exception.
+        with patch('subprocess.run', side_effect=FileNotFoundError("go")):
             result = guard_manager._check_tests()
-        assert result.passed is True
-        assert "pytest not found" in result.output
+        assert result.passed is False
+        assert "go" in str(result.error) or "FileNotFound" in str(result.error)
 
 
 class TestExtendedGuardManager:
@@ -285,10 +287,7 @@ class TestExtendedGuardManager:
 
     def test_check_tests_timeout_returns_failure(self, guard_manager):
         """_check_tests handles subprocess timeout."""
-        with patch('subprocess.run', side_effect=[
-            MagicMock(returncode=0, stdout="pytest 7.0", stderr=""),  # pytest --version
-            subprocess.TimeoutExpired(cmd="pytest", timeout=120),
-        ]):
+        with patch('subprocess.run', side_effect=subprocess.TimeoutExpired(cmd="go test", timeout=120)):
             result = guard_manager._check_tests()
         assert result.passed is False
         assert "timed out" in result.output

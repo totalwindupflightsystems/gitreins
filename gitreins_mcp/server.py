@@ -17,6 +17,7 @@ import sys
 from engine.task_manager import TaskManager
 from engine.judge import Judge
 from engine.llm import LLMClient
+from engine.guard_manager import GuardManager
 
 logger = logging.getLogger("gitreins.mcp")
 
@@ -133,8 +134,13 @@ class GitReinsMCPServer:
             },
             {
                 "name": "guard.run",
-                "description": "Run Tier 1 static guards (secrets, lint, tests).",
-                "inputSchema": {"type": "object", "properties": {}},
+                "description": "Run Tier 1 static guards (secrets, lint, tests). Optional workdir for cross-repo use.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workdir": {"type": "string", "description": "Absolute path to the repo to guard. Defaults to the MCP server's workdir."},
+                    },
+                },
             },
             {
                 "name": "judge.evaluate",
@@ -143,6 +149,7 @@ class GitReinsMCPServer:
                     "type": "object",
                     "properties": {
                         "id": {"type": "string", "description": "Task ID to evaluate"},
+                        "workdir": {"type": "string", "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir."},
                     },
                     "required": ["id"],
                 },
@@ -239,24 +246,42 @@ class GitReinsMCPServer:
         except Exception as e:
             return {"error": str(e)}
 
-    def _guard_run(self) -> dict:
-        result = self.judge.guard_manager.run_all()
+    def _guard_run(self, workdir: str = None) -> dict:
+        """Run Tier 1 static guards. Accepts optional workdir for cross-repo use."""
+        wd = os.path.abspath(workdir) if workdir else self.workdir
+        if wd != self.workdir:
+            gm = GuardManager(wd)
+            result = gm.run_all()
+        else:
+            result = self.judge.guard_manager.run_all()
         return {
             "passed": result.passed,
+            "workdir": wd,
             "results": [
                 {"name": r.name, "passed": r.passed, "output": r.output[:500]}
                 for r in result.results
             ],
         }
 
-    def _judge_evaluate(self, id: str) -> dict:
-        task = self.tasks.get(id)
-        if not task:
-            return {"error": f"Task not found: {id}"}
-        result = self.judge.evaluate_task(task)
+    def _judge_evaluate(self, id: str, workdir: str = None) -> dict:
+        """Run full evaluation pipeline. Accepts optional workdir for cross-repo use."""
+        wd = os.path.abspath(workdir) if workdir else self.workdir
+        if wd != self.workdir:
+            tm = TaskManager(wd)
+            task = tm.get(id)
+            if not task:
+                return {"error": f"Task not found: {id} in {wd}"}
+            j = Judge(self.llm, wd)
+            result = j.evaluate_task(task)
+        else:
+            task = self.tasks.get(id)
+            if not task:
+                return {"error": f"Task not found: {id}"}
+            result = self.judge.evaluate_task(task)
         d = {
             "task_id": id,
             "passed": result.passed,
+            "workdir": wd,
             "tier1_passed": result.tier1.passed if result.tier1 else None,
         }
         if result.tier2:

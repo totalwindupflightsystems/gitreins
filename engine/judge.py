@@ -73,6 +73,7 @@ class Judge:
 
         print("  Tier 1: Running static guards...")
         tier1 = self.guard_manager.run_all()
+        result.tier1 = tier1
 
         if not tier1.passed:
             print("  Tier 1 FAILED — skipping evaluator")
@@ -88,9 +89,10 @@ class Judge:
             "title": task.title,
             "criteria": task.criteria,
         }
-        verdict = evaluator.evaluate(task_dict)
-        result.passed = verdict.verdict == "COMPLETE"
-        result.verdict = verdict
+        tier2 = evaluator.evaluate(task_dict)
+        result.tier2 = tier2
+        result.passed = tier2.verdict == "COMPLETE"
+        result.verdict = tier2
         return result
 
     def run_precommit(self) -> bool:
@@ -104,11 +106,13 @@ class Judge:
 class JudgeResult:
     """Result of running the judge pipeline."""
 
-    def __init__(self, task_id: str, passed: bool = False, pipeline_result: dict = None, verdict=None):
+    def __init__(self, task_id: str, passed: bool = False, pipeline_result: dict = None, verdict=None, tier1=None, tier2=None):
         self.task_id = task_id
         self.passed = passed
         self.pipeline_result = pipeline_result or {}
         self.verdict = verdict
+        self.tier1 = tier1   # Tier1Result from guard_manager.run_all()
+        self.tier2 = tier2   # Verdict from AgenticEvaluator.evaluate()
 
     @property
     def summary(self) -> str:
