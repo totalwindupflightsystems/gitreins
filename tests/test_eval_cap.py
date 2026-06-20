@@ -84,6 +84,22 @@ class TestEvalCapParser:
         assert cap.max_input_tokens == 200_000
         assert cap.max_output_tokens == 50_000
 
+    def test_decimal_tokens(self):
+        """Decimal notation: 0.1M = 100k, 1.5M = 1.5 million."""
+        assert parse_eval_cap("0.1M").max_output_tokens == 100_000
+        assert parse_eval_cap("0.5M").max_output_tokens == 500_000
+        assert parse_eval_cap("1.5M").max_output_tokens == 1_500_000
+        assert parse_eval_cap("0.1k").max_output_tokens == 100
+        assert parse_eval_cap("1.5k").max_output_tokens == 1_500
+
+    def test_decimal_slash_tokens(self):
+        cap = parse_eval_cap("0.1M/0.05M")
+        assert cap.max_input_tokens == 100_000
+        assert cap.max_output_tokens == 50_000
+        cap = parse_eval_cap("0.2M/0.1M")
+        assert cap.max_input_tokens == 200_000
+        assert cap.max_output_tokens == 100_000
+
     def test_raw_numeric_is_iterations(self):
         """Raw numbers without suffix are iteration caps, not tokens."""
         cap = parse_eval_cap("50000")

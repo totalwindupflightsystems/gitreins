@@ -133,8 +133,8 @@ class EvalCap:
 # ── Parsing ────────────────────────────────────────────────
 
 _TIME_RE = re.compile(r"^(\d+)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours)$")
-_TOKEN_RE = re.compile(r"^(\d+)(k|m|K|M)?$")
-_SLASH_TOKEN_RE = re.compile(r"^(\d+)(k|m|K|M)?\s*/\s*(\d+)(k|m|K|M)?$")
+_TOKEN_RE = re.compile(r"^(\d+\.?\d*)(k|m|K|M)?$")
+_SLASH_TOKEN_RE = re.compile(r"^(\d+\.?\d*)(k|m|K|M)?\s*/\s*(\d+\.?\d*)(k|m|K|M)?$")
 
 
 def _parse_time(raw: str) -> int | None:
@@ -160,17 +160,20 @@ def _parse_time(raw: str) -> int | None:
 
 
 def _parse_tokens(raw: str) -> int | None:
-    """Parse a token count string like '200k' or '50000'. Returns None if not a token string."""
+    """Parse a token count string like '200k', '0.1M', or '50000'. Returns None if not a token string.
+
+    Supports decimal notation: 0.1M = 100,000, 1.5k = 1,500, 2.5M = 2,500,000.
+    """
     m = _TOKEN_RE.match(raw.strip())
     if not m:
         return None
-    value = int(m.group(1))
+    value = float(m.group(1))
     suffix = (m.group(2) or "").lower()
     if suffix == "k":
         value *= 1_000
     elif suffix == "m":
         value *= 1_000_000
-    return value
+    return int(value)
 
 
 def _parse_slash_tokens(raw: str) -> tuple[int | None, int | None]:
@@ -188,21 +191,21 @@ def _parse_slash_tokens(raw: str) -> tuple[int | None, int | None]:
     if _parse_time(left) is not None or _parse_time(right) is not None:
         return None, None
 
-    input_val = int(m.group(1))
+    input_val = float(m.group(1))
     input_suffix = (m.group(2) or "").lower()
     if input_suffix == "k":
         input_val *= 1_000
     elif input_suffix == "m":
         input_val *= 1_000_000
 
-    output_val = int(m.group(3))
+    output_val = float(m.group(3))
     output_suffix = (m.group(4) or "").lower()
     if output_suffix == "k":
         output_val *= 1_000
     elif output_suffix == "m":
         output_val *= 1_000_000
 
-    return input_val, output_val
+    return int(input_val), int(output_val)
 
 
 def _format_seconds(secs: int) -> str:
