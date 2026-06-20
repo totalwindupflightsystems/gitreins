@@ -9,6 +9,7 @@ Verifies:
 import json
 import os
 import subprocess
+import sys
 import tempfile
 
 import pytest
@@ -33,10 +34,14 @@ def _send_request(proc, request: dict) -> dict:
 
 def _start_mcp_server(workdir: str):
     """Start an MCP server subprocess in the given workdir."""
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env = os.environ.copy()
+    existing = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = project_root + (":" + existing if existing else "")
     proc = subprocess.Popen(
-        ["python3", MCP_SERVER_SCRIPT, str(workdir)],
+        [sys.executable, MCP_SERVER_SCRIPT, str(workdir)],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, cwd=workdir,
+        text=True, cwd=workdir, env=env,
     )
     # Initialize
     init_req = {
