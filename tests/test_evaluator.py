@@ -311,7 +311,7 @@ class TestMaxIterationsAndErrors:
             fast_eval = AgenticEvaluator(llm_client, evaluator.workdir, max_iterations=2)
             verdict = fast_eval.evaluate({"id": "loop", "title": "x", "criteria": ["c1"]})
         assert verdict.verdict == "INCOMPLETE"
-        assert "Hit iteration cap" in verdict.summary
+        assert "Cap exceeded" in verdict.summary
         assert "Raise max_iterations" in verdict.summary
 
     def test_max_iterations_error_message_actionable(self, evaluator, llm_client):
