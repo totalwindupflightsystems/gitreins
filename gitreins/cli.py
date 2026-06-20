@@ -727,7 +727,7 @@ def main():
     create_p.add_argument("id")
     create_p.add_argument("title")
     create_p.add_argument("criteria", nargs="*")
-    create_p.add_argument("--depends-on", nargs="*", default=[], help="Task IDs that must complete first")
+    create_p.add_argument("--depends-on", action="append", default=[], help="Task ID that must complete first (repeatable)")
 
     start_p = task_sub.add_parser("start", help="Start a task")
     start_p.add_argument("id")
