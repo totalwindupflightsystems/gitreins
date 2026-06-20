@@ -1,7 +1,11 @@
 """
-Tests for EvalCap — parser, limit checking, and AgenticEvaluator integration.
+Tests for EvalCap: parser, limit checking, and AgenticEvaluator integration.
 """
+import os
 import time
+
+import pytest
+import yaml
 
 from engine.eval_cap import parse_eval_cap, eval_cap_from_config, EvalCap
 from engine.evaluator import AgenticEvaluator
@@ -230,7 +234,6 @@ class TestAgenticEvaluatorCapIntegration:
 
     def test_evaluator_reads_config_yaml(self, tmp_path):
         """When no cap specified, evaluator reads evaluator.cap from .gitreins/config.yaml."""
-        import os, yaml
         gitreins_dir = tmp_path / ".gitreins"
         gitreins_dir.mkdir()
         config = {"evaluator": {"cap": "25/10m"}}
@@ -241,3 +244,112 @@ class TestAgenticEvaluatorCapIntegration:
         evaluator = AgenticEvaluator(llm, workdir=str(tmp_path))
         assert evaluator.eval_cap.max_iterations == 25
         assert evaluator.eval_cap.max_seconds == 600
+
+
+class TestEvalCapRealEvaluator:
+    """Integration tests that run the full evaluator loop with a real LLM and tight caps.
+
+    These tests verify that caps actually STOP the evaluator, not just that they're
+    parsed correctly. They use a real LLM (DeepSeek via GITREINS_LLM_* env vars)
+    but with deliberately tiny caps so they complete in seconds and cost < $0.01.
+
+    Skip with: pytest -m "not llm"
+    """
+
+    @pytest.fixture(autouse=True)
+    def _require_llm_key(self):
+        """Skip if no LLM API key is configured."""
+        api_key = os.getenv("GITREINS_LLM_API_KEY", "") or os.getenv("DEEPSEEK_API_KEY", "")
+        if not api_key:
+            pytest.skip("No LLM API key configured — set GITREINS_LLM_API_KEY or DEEPSEEK_API_KEY")
+
+    def _make_repo(self, tmp_path):
+        """Create a temp git repo with a simple task."""
+        import subprocess
+        d = str(tmp_path)
+        subprocess.run(["git", "init"], cwd=d, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@evalcap.test"], cwd=d, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "EvalCap Test"], cwd=d, capture_output=True)
+        # Create .gitreins/ with a task and config (disable guards to keep it fast)
+        gitreins_dir = os.path.join(d, ".gitreins")
+        os.makedirs(gitreins_dir, exist_ok=True)
+        config = {"guards": {"secrets": False, "lint": False, "tests": False, "dead_code": False, "skylos": False}}
+        with open(os.path.join(gitreins_dir, "config.yaml"), "w") as f:
+            yaml.dump(config, f)
+        # Create a simple file
+        with open(os.path.join(d, "README.md"), "w") as f:
+            f.write("# Test Repo\n")
+        # Initial commit so diff works
+        subprocess.run(["git", "add", "README.md", ".gitreins/"], cwd=d, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=d, capture_output=True)
+
+        task = {
+            "id": "simple-check",
+            "title": "Simple file check",
+            "criteria": [
+                "README.md exists in the repo root with content '# Test Repo'",
+            ],
+        }
+        return d, task
+
+    def test_iteration_cap_stops_evaluator(self, tmp_path):
+        """Set cap=2 — the evaluator MUST stop after 2 LLM calls with 'Cap exceeded'."""
+        import subprocess
+        d, task = self._make_repo(tmp_path)
+
+        llm = LLMClient()
+        evaluator = AgenticEvaluator(llm, workdir=d, eval_cap="2")
+        verdict = evaluator.evaluate(task)
+
+        # Must be INCOMPLETE (it can't finish in 2 iterations)
+        assert verdict.verdict == "INCOMPLETE", f"Expected INCOMPLETE, got {verdict.verdict}: {verdict.summary}"
+        assert "Cap exceeded" in verdict.summary, f"Summary should mention cap: {verdict.summary}"
+        # Must have stopped because of cap, not LLM error
+        assert "LLM call failed" not in verdict.summary, f"Should be cap stop, not error: {verdict.summary}"
+        # Verify it actually made some progress (reached the cap)
+        assert "iterations: 2/2" in evaluator.eval_cap.summary() or \
+               evaluator.eval_cap.iterations == 2, \
+            f"Expected 2 iterations, got {evaluator.eval_cap.iterations}: {evaluator.eval_cap.summary()}"
+
+    def test_time_cap_stops_evaluator(self, tmp_path):
+        """Set cap=10s — with a task that triggers multiple tool calls, evaluator must stop."""
+        import subprocess
+        d, task = self._make_repo(tmp_path)
+
+        # Add more criteria so the evaluator keeps working (tool calls take time)
+        task["criteria"] = [
+            "README.md exists in the repo root",
+            "The file .gitreins/config.yaml exists",
+            "The .gitreins directory contains a tasks.yaml or is empty",
+            "The repo has at least one git commit",
+            "README.md has non-empty content",
+        ]
+
+        llm = LLMClient()
+        evaluator = AgenticEvaluator(llm, workdir=d, eval_cap="10s")
+        verdict = evaluator.evaluate(task)
+
+        # Must have been cut short by time cap
+        assert verdict.verdict == "INCOMPLETE", f"Expected INCOMPLETE, got {verdict.verdict}: {verdict.summary}"
+        assert "Cap exceeded" in verdict.summary, f"Summary should mention cap: {verdict.summary}"
+        assert "Time cap" in verdict.summary, f"Should be time cap: {verdict.summary}"
+        # Should have made some progress (at least 1 iteration)
+        assert evaluator.eval_cap.iterations >= 1, f"Expected >= 1 iteration, got {evaluator.eval_cap.iterations}"
+
+    def test_unlimited_completes_normally(self, tmp_path):
+        """With unlimited cap, a simple task should pass (smoke test)."""
+        import subprocess
+        d, task = self._make_repo(tmp_path)
+
+        llm = LLMClient()
+        evaluator = AgenticEvaluator(llm, workdir=d, eval_cap="-1")
+        verdict = evaluator.evaluate(task)
+
+        # With unlimited cap and a simple task, it should complete
+        # (but if the LLM is flaky, INCOMPLETE is acceptable — we just want no crash)
+        assert verdict.verdict in ("COMPLETE", "INCOMPLETE"), f"Unexpected verdict: {verdict.verdict}"
+        # No cap error
+        assert "Cap exceeded" not in verdict.summary, \
+            f"Unlimited should not hit cap: {verdict.summary}"
+        # Should have verdict items (it evaluated something)
+        assert len(verdict.items) >= 1, f"Expected verdict items, got {len(verdict.items)}"
