@@ -220,15 +220,13 @@ class AgenticEvaluator:
             self.eval_cap = eval_cap
         elif isinstance(eval_cap, str):
             self.eval_cap = parse_eval_cap(eval_cap)
-        elif max_iterations is not None:
+        elif max_iterations is not None and max_iterations > 0:
+            # Explicit positive value — use it directly
             self.eval_cap = EvalCap(max_iterations=max_iterations, source=f"max_iterations={max_iterations}")
         else:
-            # Try config.yaml
+            # max_iterations=None or max_iterations<=0 — read from config.yaml
             config = self._load_config()
             self.eval_cap = eval_cap_from_config(config)
-            # If config gave us the default 100 iter, check if max_iterations was the real intent
-            if max_iterations is None and self.eval_cap.max_iterations == 100 and self.eval_cap.source == "(config default)":
-                pass  # Keep default
 
         # Backward compat: expose max_iterations for code that reads it
         self.max_iterations = self.eval_cap.max_iterations if self.eval_cap.max_iterations > 0 else 100

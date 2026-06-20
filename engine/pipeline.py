@@ -274,7 +274,7 @@ class Pipeline:
         """Run the AI evaluator as a pipeline step."""
         step_id = step_def.get("id", "ai_eval")
         model = step_def.get("model")
-        max_iterations = step_def.get("max_iterations", 20)
+        max_iterations = step_def.get("max_iterations", -1)
 
         # Lazy init LLM client
         if self._llm is None:
@@ -452,7 +452,7 @@ def load_pipeline_config(workdir: str = ".") -> dict:
                         "type": "ai_eval",
                         "on": ["pre-eval"],
                         "condition": "true",
-                        "max_iterations": 20,
+                        "max_iterations": -1,
                         "tools": ["read_file", "run_command", "search_pattern", "read_diff", "sandbox"],
                     },
                 ]

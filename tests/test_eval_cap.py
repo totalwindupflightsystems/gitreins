@@ -271,6 +271,18 @@ class TestAgenticEvaluatorCapIntegration:
         evaluator = AgenticEvaluator(llm, max_iterations=42, eval_cap="10")
         assert evaluator.eval_cap.max_iterations == 10
 
+    def test_max_iterations_negative_defers_to_config(self, tmp_path):
+        """When max_iterations=-1 (from Pipeline default), evaluator reads config."""
+        gitreins_dir = tmp_path / ".gitreins"
+        gitreins_dir.mkdir()
+        config = {"evaluator": {"max_iterations": 30, "max_time": "5m"}}
+        with open(gitreins_dir / "config.yaml", "w") as f:
+            yaml.dump(config, f)
+        llm = LLMClient()
+        evaluator = AgenticEvaluator(llm, workdir=str(tmp_path), max_iterations=-1)
+        assert evaluator.eval_cap.max_iterations == 30
+        assert evaluator.eval_cap.max_seconds == 300
+
     def test_evaluator_reads_config_yaml(self, tmp_path):
         gitreins_dir = tmp_path / ".gitreins"
         gitreins_dir.mkdir()
