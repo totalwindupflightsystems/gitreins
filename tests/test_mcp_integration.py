@@ -183,3 +183,97 @@ class TestMCPRealIntegration:
         finally:
             proc.terminate()
             proc.wait(timeout=5)
+
+    def test_cross_repo_task_workdir(self, tmp_git_repo):
+        """Tasks with workdir land in the target repo, not the MCP server's dir."""
+        proc = _start_mcp_server(tmp_git_repo)
+
+        # Create a second temp directory (simulating a different repo)
+        second_repo = tempfile.mkdtemp()
+        try:
+            subprocess.run(["git", "init"], cwd=second_repo, capture_output=True)
+            subprocess.run(["git", "config", "user.email", "cross@test.com"], cwd=second_repo, capture_output=True)
+            subprocess.run(["git", "config", "user.name", "CrossRepo"], cwd=second_repo, capture_output=True)
+            # Need a commit so git diff --cached works for guard.run
+            with open(os.path.join(second_repo, "README.md"), "w") as f:
+                f.write("# Second Repo\n")
+            subprocess.run(["git", "add", "README.md"], cwd=second_repo, capture_output=True)
+            subprocess.run(["git", "commit", "-m", "init"], cwd=second_repo, capture_output=True)
+
+            # Create task in second_repo via workdir
+            req = {"jsonrpc": "2.0", "id": 20, "method": "tools/call",
+                   "params": {"name": "task.create", "arguments": {
+                       "id": "cross-repo-task",
+                       "title": "Cross repo test",
+                       "criteria": ["README.md exists with content '# Second Repo'"],
+                       "workdir": second_repo,
+                   }}}
+            resp = _send_request(proc, req)
+            result = json.loads(resp["result"]["content"][0]["text"])
+            assert result["id"] == "cross-repo-task"
+            assert result["status"] == "pending"
+
+            # Verify task file was created in second_repo, NOT in tmp_git_repo
+            second_tasks = os.path.join(second_repo, ".gitreins", "tasks.yaml")
+            assert os.path.isfile(second_tasks), f"Expected tasks.yaml in {second_repo}"
+
+            # Verify task does NOT exist in MCP server's workdir
+            main_tasks = os.path.join(tmp_git_repo, ".gitreins", "tasks.yaml")
+            if os.path.isfile(main_tasks):
+                with open(main_tasks) as f:
+                    content = f.read()
+                assert "cross-repo-task" not in content, \
+                    "Task leaked into MCP server workdir"
+
+            # List tasks from second_repo
+            req = {"jsonrpc": "2.0", "id": 21, "method": "tools/call",
+                   "params": {"name": "task.list", "arguments": {"workdir": second_repo}}}
+            resp = _send_request(proc, req)
+            result = json.loads(resp["result"]["content"][0]["text"])
+            assert len(result["tasks"]) == 1
+            assert result["tasks"][0]["id"] == "cross-repo-task"
+
+            # Start task in second_repo
+            req = {"jsonrpc": "2.0", "id": 22, "method": "tools/call",
+                   "params": {"name": "task.start", "arguments": {
+                       "id": "cross-repo-task", "workdir": second_repo,
+                   }}}
+            resp = _send_request(proc, req)
+            result = json.loads(resp["result"]["content"][0]["text"])
+            assert result["status"] == "in_progress"
+
+            # judge.evaluate should also work cross-repo
+            req = {"jsonrpc": "2.0", "id": 23, "method": "tools/call",
+                   "params": {"name": "judge.evaluate", "arguments": {
+                       "id": "cross-repo-task", "workdir": second_repo,
+                   }}}
+            resp = _send_request(proc, req)
+            result = json.loads(resp["result"]["content"][0]["text"])
+            assert "error" not in result, f"judge.evaluate failed: {result}"
+            assert result["task_id"] == "cross-repo-task"
+            assert result["workdir"] == os.path.abspath(second_repo)
+            # Without LLM configured, tier1 runs but tier2 is skipped
+            assert "tier1_passed" in result
+
+            # Delete task in second_repo
+            req = {"jsonrpc": "2.0", "id": 24, "method": "tools/call",
+                   "params": {"name": "task.delete", "arguments": {
+                       "id": "cross-repo-task", "workdir": second_repo,
+                   }}}
+            resp = _send_request(proc, req)
+            result = json.loads(resp["result"]["content"][0]["text"])
+            assert result["deleted"] == "cross-repo-task"
+
+            # Verify task list is empty in second_repo
+            req = {"jsonrpc": "2.0", "id": 25, "method": "tools/call",
+                   "params": {"name": "task.list", "arguments": {"workdir": second_repo}}}
+            resp = _send_request(proc, req)
+            result = json.loads(resp["result"]["content"][0]["text"])
+            assert len(result["tasks"]) == 0
+
+        finally:
+            proc.terminate()
+            proc.wait(timeout=5)
+            # Clean up second repo
+            import shutil
+            shutil.rmtree(second_repo, ignore_errors=True)

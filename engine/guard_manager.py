@@ -134,8 +134,8 @@ class GuardManager:
             (r'gho_[A-Za-z0-9]{36,}', "GitHub OAuth token"),
             # GitLab tokens
             (r'glpat-[A-Za-z0-9_\-]{20,}', "GitLab personal access token"),
-            # OpenAI keys (literal)
-            (r'sk-[A-Za-z0-9]{32,}', "OpenAI API key"),
+            # OpenAI/OpenRouter keys (supports sk-or-v1-, sk-proj-, etc.)
+            (r'sk-[A-Za-z0-9_\-]{32,}', "OpenAI/OpenRouter API key"),
             # AWS keys (literal)
             (r'(?i)AKIA[0-9A-Z]{16}', "AWS access key"),
             # JWTs assigned as literal strings

@@ -59,6 +59,7 @@ class GitReinsMCPServer:
                             "items": {"type": "string"},
                             "description": "List of completion criteria — each must be verified",
                         },
+                        "workdir": {"type": "string", "description": "Absolute path to the repo. Tasks are stored in <workdir>/.gitreins/tasks.yaml. Defaults to the MCP server's workdir."},
                     },
                     "required": ["id", "title", "criteria"],
                 },
@@ -70,6 +71,7 @@ class GitReinsMCPServer:
                     "type": "object",
                     "properties": {
                         "id": {"type": "string", "description": "Task ID to start"},
+                        "workdir": {"type": "string", "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir."},
                     },
                     "required": ["id"],
                 },
@@ -81,6 +83,7 @@ class GitReinsMCPServer:
                     "type": "object",
                     "properties": {
                         "id": {"type": "string", "description": "Task ID to complete"},
+                        "workdir": {"type": "string", "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir."},
                     },
                     "required": ["id"],
                 },
@@ -96,6 +99,7 @@ class GitReinsMCPServer:
                             "enum": ["pending", "in_progress", "complete"],
                             "description": "Filter by status",
                         },
+                        "workdir": {"type": "string", "description": "Absolute path to the repo. Defaults to the MCP server's workdir."},
                     },
                 },
             },
@@ -106,6 +110,7 @@ class GitReinsMCPServer:
                     "type": "object",
                     "properties": {
                         "id": {"type": "string", "description": "Task ID"},
+                        "workdir": {"type": "string", "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir."},
                     },
                     "required": ["id"],
                 },
@@ -117,6 +122,7 @@ class GitReinsMCPServer:
                     "type": "object",
                     "properties": {
                         "id": {"type": "string", "description": "Task ID to delete"},
+                        "workdir": {"type": "string", "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir."},
                     },
                     "required": ["id"],
                 },
@@ -158,27 +164,39 @@ class GitReinsMCPServer:
 
     # ── Tool handlers ────────────────────────────────────────────
 
-    def _task_create(self, id: str, title: str, criteria: list[str]) -> dict:
-        task = self.tasks.create(id, title, criteria)
-        logger.info("Task created: %s", id)
-        return self.tasks.to_dict(task)
+    def _task_manager_for(self, workdir: str | None = None) -> TaskManager:
+        """Return TaskManager for the given workdir, or the server default."""
+        if workdir:
+            wd = os.path.abspath(workdir)
+            if wd != self.workdir:
+                return TaskManager(wd)
+        return self.tasks
 
-    def _task_start(self, id: str) -> dict:
-        task = self.tasks.start(id)
-        logger.info("Task started: %s", id)
-        return self.tasks.to_dict(task)
+    def _task_create(self, id: str, title: str, criteria: list[str], workdir: str | None = None) -> dict:
+        tm = self._task_manager_for(workdir)
+        task = tm.create(id, title, criteria)
+        logger.info("Task created: %s (workdir=%s)", id, tm.workdir)
+        return tm.to_dict(task)
 
-    def _task_complete(self, id: str) -> dict:
-        task = self.tasks.complete(id)
-        logger.info("Task completed: %s", id)
+    def _task_start(self, id: str, workdir: str | None = None) -> dict:
+        tm = self._task_manager_for(workdir)
+        task = tm.start(id)
+        logger.info("Task started: %s (workdir=%s)", id, tm.workdir)
+        return tm.to_dict(task)
+
+    def _task_complete(self, id: str, workdir: str | None = None) -> dict:
+        tm = self._task_manager_for(workdir)
+        task = tm.complete(id)
+        logger.info("Task completed: %s (workdir=%s)", id, tm.workdir)
 
         # Trigger evaluation if LLM is configured
         api_key = os.getenv("GITREINS_LLM_API_KEY", "")
         if api_key:
             try:
-                judge_result = self.judge.evaluate_task(task)
+                j = self.judge if tm is self.tasks else Judge(self.llm, tm.workdir)
+                judge_result = j.evaluate_task(task)
                 return {
-                    "task": self.tasks.to_dict(task),
+                    "task": tm.to_dict(task),
                     "verdict": {
                         "passed": judge_result.passed,
                         "tier1_passed": judge_result.tier1.passed if judge_result.tier1 else None,
@@ -192,26 +210,29 @@ class GitReinsMCPServer:
             except Exception as e:
                 logger.exception("Evaluation failed for %s", id)
                 return {
-                    "task": self.tasks.to_dict(task),
+                    "task": tm.to_dict(task),
                     "verdict": {"error": str(e)},
                 }
 
-        return {"task": self.tasks.to_dict(task), "note": "LLM not configured — skipping evaluation"}
+        return {"task": tm.to_dict(task), "note": "LLM not configured — skipping evaluation"}
 
-    def _task_list(self, status: str | None = None) -> dict:
-        tasks = self.tasks.list_tasks(status)
-        return {"tasks": [self.tasks.to_dict(t) for t in tasks]}
+    def _task_list(self, status: str | None = None, workdir: str | None = None) -> dict:
+        tm = self._task_manager_for(workdir)
+        tasks = tm.list_tasks(status)
+        return {"tasks": [tm.to_dict(t) for t in tasks]}
 
-    def _task_get(self, id: str) -> dict:
-        task = self.tasks.get(id)
+    def _task_get(self, id: str, workdir: str | None = None) -> dict:
+        tm = self._task_manager_for(workdir)
+        task = tm.get(id)
         if not task:
             return {"error": f"Task not found: {id}"}
-        return self.tasks.to_dict(task)
+        return tm.to_dict(task)
 
-    def _task_delete(self, id: str) -> dict:
+    def _task_delete(self, id: str, workdir: str | None = None) -> dict:
+        tm = self._task_manager_for(workdir)
         try:
-            self.tasks.delete(id)
-            logger.info("Task deleted: %s", id)
+            tm.delete(id)
+            logger.info("Task deleted: %s (workdir=%s)", id, tm.workdir)
             return {"deleted": id}
         except KeyError:
             return {"error": f"Task not found: {id}"}
