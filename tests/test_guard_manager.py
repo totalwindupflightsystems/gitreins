@@ -2,7 +2,6 @@
 Unit tests for engine/guard_manager.py — pre-commit static checks.
 axiom:trace work_item=GR-001 spec=specs/04-Guard-Manager.md plan=.memory-bank/work-items/GR-001/plan.yaml
 """
-import os
 import pytest
 import subprocess
 from unittest import mock
@@ -261,8 +260,9 @@ class TestTestsGuard:
         """Tests guard returns failure when test command can't run."""
         # Since v0.1.2, _check_tests runs test_command directly (no pytest gate).
         # If the command can't be found, subprocess.run raises an exception.
-        with patch('subprocess.run', side_effect=FileNotFoundError("go")):
-            result = guard_manager._check_tests()
+        with patch('engine.guard_manager._get_staged_files', return_value=["dummy.py"]):
+            with patch('subprocess.run', side_effect=FileNotFoundError("go")):
+                result = guard_manager._check_tests()
         assert result.passed is False
         assert "go" in str(result.error) or "FileNotFound" in str(result.error)
 
@@ -287,8 +287,9 @@ class TestExtendedGuardManager:
 
     def test_check_tests_timeout_returns_failure(self, guard_manager):
         """_check_tests handles subprocess timeout."""
-        with patch('subprocess.run', side_effect=subprocess.TimeoutExpired(cmd="go test", timeout=120)):
-            result = guard_manager._check_tests()
+        with patch('engine.guard_manager._get_staged_files', return_value=["dummy.py"]):
+            with patch('subprocess.run', side_effect=subprocess.TimeoutExpired(cmd="go test", timeout=120)):
+                result = guard_manager._check_tests()
         assert result.passed is False
         assert "timed out" in result.output
 
