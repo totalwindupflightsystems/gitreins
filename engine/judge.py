@@ -9,6 +9,7 @@ import logging
 from engine.evaluator import AgenticEvaluator
 from engine.guard_manager import GuardManager
 from engine.llm import LLMClient
+from engine.eval_cap import EvalCap
 from engine.pipeline import Pipeline, load_pipeline_config
 from engine.task_manager import Task
 
@@ -23,7 +24,7 @@ class Judge:
         llm: LLMClient,
         workdir: str = ".",
         guard_config: dict | None = None,
-        eval_cap: str | None = None,
+        eval_cap: "str | EvalCap | None" = None,
     ):
         self.workdir = workdir
         self.llm = llm

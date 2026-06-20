@@ -295,7 +295,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         self.eval_cap.start()
 
         # Determine iteration cap. If unlimited, use a safety max.
-        iter_limit = self.eval_cap.max_iterations if self.eval_cap.max_iterations > 0 else 10_000
+        iter_limit = self.eval_cap.max_iterations_int
 
         for iteration in range(iter_limit):
             # Check caps (handles time/token limits even with unlimited iterations)
@@ -316,10 +316,10 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                     summary=f"Evaluator error: LLM call failed: {e}",
                 )
 
-            # Track token usage
+            # Track LLM call (costs 1.0 iterations + token usage)
             prompt_tok = response.usage.prompt_tokens if response.usage else 0
             completion_tok = response.usage.completion_tokens if response.usage else 0
-            cap_error = self.eval_cap.record_iteration(prompt_tok, completion_tok)
+            cap_error = self.eval_cap.record_llm_call(prompt_tok, completion_tok)
             if cap_error:
                 logger.warning("Eval cap exceeded: %s", cap_error)
                 return Verdict(
@@ -357,6 +357,15 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             # Execute each tool call — with dedup hints
             for tc in response.tool_calls:
                 result, was_dup = self._execute_tool_with_dedup(tc)
+
+                # Track tool call (costs tool_call_weight, default 0.1 iterations)
+                cap_error = self.eval_cap.record_tool_call()
+                if cap_error:
+                    logger.warning("Eval cap exceeded during tool call: %s", cap_error)
+                    return Verdict(
+                        verdict="INCOMPLETE",
+                        summary=f"Cap exceeded: {cap_error}",
+                    )
 
                 # Add dedup warning to result if this was a repeat
                 if was_dup:

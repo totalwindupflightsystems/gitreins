@@ -150,13 +150,18 @@ class GitReinsMCPServer:
             },
             {
                 "name": "judge.evaluate",
-                "description": "Run full evaluation pipeline (Tier 1 + Tier 2) on a task.",
+                "description": "Run full evaluation pipeline (Tier 1 + Tier 2) on a task. Caps can be set individually or via legacy eval_cap string.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "id": {"type": "string", "description": "Task ID to evaluate"},
                         "workdir": {"type": "string", "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir."},
-                        "eval_cap": {"type": "string", "description": "Evaluation cap. Supports: '100' (iterations), '-1' (unlimited), '30m' (time), '200k/50k' (input/output tokens), '100/30m/200k/50k' (combined). Defaults to evaluator.cap in .gitreins/config.yaml or 100 iterations."},
+                        "max_iterations": {"type": "number", "description": "Max LLM reasoning turns (-1 = unlimited). Tool calls cost 0.1 by default."},
+                        "max_time": {"type": "string", "description": "Wall-clock cap: '30s', '5m', '2h'."},
+                        "max_input_tokens": {"type": "string", "description": "Input token budget: '200k', '0.1M'."},
+                        "max_output_tokens": {"type": "string", "description": "Output token budget: '50k', '0.05M'."},
+                        "tool_call_weight": {"type": "number", "description": "Fraction of an iteration each tool call costs (default 0.1)."},
+                        "eval_cap": {"type": "string", "description": "Legacy combined cap string: '100/30m/200k/50k'. Individual params take priority if both are set."},
                     },
                     "required": ["id"],
                 },
@@ -292,21 +297,57 @@ class GitReinsMCPServer:
             ],
         }
 
-    def _judge_evaluate(self, id: str, workdir: str | None = None, eval_cap: str | None = None) -> dict:
-        """Run full evaluation pipeline. Accepts optional workdir and eval_cap for cross-repo use."""
+    def _judge_evaluate(self, id: str, workdir: str | None = None,
+                        max_iterations: float | None = None,
+                        max_time: str | None = None,
+                        max_input_tokens: str | None = None,
+                        max_output_tokens: str | None = None,
+                        tool_call_weight: float | None = None,
+                        eval_cap: str | None = None) -> dict:
+        """Run full evaluation pipeline. Accepts individual cap params or legacy eval_cap string."""
+        from engine.eval_cap import EvalCap
+
+        # Build EvalCap from params
+        cap = EvalCap()
+        if eval_cap:
+            from engine.eval_cap import parse_eval_cap
+            cap = parse_eval_cap(eval_cap)
+        if max_iterations is not None:
+            cap.max_iterations = -1.0 if max_iterations <= 0 else float(max_iterations)
+        if max_time is not None:
+            from engine.eval_cap import _parse_time
+            t = _parse_time(max_time)
+            if t is not None:
+                cap.max_seconds = float(t)
+        if max_input_tokens is not None:
+            from engine.eval_cap import _parse_tokens
+            tok = _parse_tokens(max_input_tokens)
+            if tok is not None:
+                cap.max_input_tokens = tok
+        if max_output_tokens is not None:
+            from engine.eval_cap import _parse_tokens
+            tok = _parse_tokens(max_output_tokens)
+            if tok is not None:
+                cap.max_output_tokens = tok
+        if tool_call_weight is not None:
+            cap.tool_call_weight = float(tool_call_weight)
+
         wd = os.path.abspath(workdir) if workdir else self.workdir
         if wd != self.workdir:
             tm = TaskManager(wd)
             task = tm.get(id)
             if not task:
                 return {"error": f"Task not found: {id} in {wd}"}
-            j = Judge(self.llm, wd, eval_cap=eval_cap)
+            j = Judge(self.llm, wd, eval_cap=cap)
             result = j.evaluate_task(task)
         else:
             task = self.tasks.get(id)
             if not task:
                 return {"error": f"Task not found: {id}"}
-            j = Judge(self.llm, self.workdir, eval_cap=eval_cap) if eval_cap else self.judge
+            j = Judge(self.llm, self.workdir, eval_cap=cap) if any([
+                max_iterations is not None, max_time, max_input_tokens,
+                max_output_tokens, tool_call_weight, eval_cap,
+            ]) else self.judge
             result = j.evaluate_task(task)
         d = {
             "task_id": id,
