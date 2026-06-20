@@ -180,3 +180,5 @@ No external services needed — GitReins is self-contained.
 ## Recovery Notes
 - **2026-06-12:** Orphan `gitreins` branch resolved — reconciled with `origin/main`, created initial commit `8029720`. Pre-existing ruff lint violations (15 across engine/) fixed. AC-003 regression fixed (commit order overwritten by origin/main checkout). AC-012 unblocked and verified.
 - **2026-06-11:** Engine source files (`engine/*.py`, `gitreins/cli.py`, `gitreins_mcp/server.py`) were missing — only `.pyc` bytecode survived. Recovered from `origin/main`.
+### Test Count Update — 2026-06-20
+**Evidence:** 384 passed, 1 skipped in 219.40s (+62 tests since AC-019 verified 2026-06-15). Core engine: 228 passed in 37s.

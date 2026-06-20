@@ -187,8 +187,15 @@ class TestJudgeCLI:
 
     def test_judge_existing_task_exits_0(self, tmp_workdir):
         """Judge on existing task exits code 0, prints summary."""
+        from unittest.mock import MagicMock, patch
+        verdict_json = '{"verdict":"COMPLETE","items":[{"criterion":"c1","status":"PASS","detail":"ok"}],"summary":"all good"}'
+        mock_usage = MagicMock(prompt_tokens=0, completion_tokens=0,
+                               cache_read_tokens=0, cache_write_tokens=0,
+                               total_tokens=0)
+        mock_resp = MagicMock(content=verdict_json, tool_calls=None, usage=mock_usage)
         run_cli("task", "create", "judge-me", "Judge Test", "c1", cwd=tmp_workdir)
-        result = run_cli("judge", "judge-me", cwd=tmp_workdir)
+        with patch("engine.llm.LLMClient.chat", return_value=mock_resp):
+            result = run_cli("judge", "judge-me", cwd=tmp_workdir)
         assert result.returncode in (0, 1)
         output = result.stdout + result.stderr
         assert "Judge Result" in output
