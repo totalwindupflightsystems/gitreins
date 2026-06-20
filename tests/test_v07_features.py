@@ -1,0 +1,414 @@
+"""
+Integration tests for v0.7.0 features:
+  - Verdict persistence (engine/persist.py)
+  - gitreins report command
+  - Task dependencies (--depends-on)
+  - gitreins init command
+  - Cleaner guard output
+"""
+
+import json
+import os
+import subprocess
+import sys
+import tempfile
+
+import pytest
+
+# Add gitreins-poc to path for direct imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+# ══════════════════════════════════════════════════════════════════
+# Verdict persistence
+# ══════════════════════════════════════════════════════════════════
+
+class TestVerdictPersistence:
+    """Tests for engine/persist.py — verdict storage and reporting."""
+
+    def test_config_defaults(self):
+        """Verifies default history config values."""
+        from engine.persist import DEFAULT_HISTORY_CONFIG
+        assert DEFAULT_HISTORY_CONFIG["enabled"] is True
+        assert DEFAULT_HISTORY_CONFIG["storage"] == "git"
+        assert DEFAULT_HISTORY_CONFIG["max_verdicts"] == 1000
+        assert ".gitreins/history" in DEFAULT_HISTORY_CONFIG["path"]
+
+    def test_load_history_config_defaults(self, tmp_path):
+        """load_history_config returns defaults when no config file exists."""
+        from engine.persist import load_history_config
+        config = load_history_config(str(tmp_path))
+        assert config["enabled"] is True
+        assert config["storage"] == "git"
+
+    def test_load_history_config_disabled(self, tmp_path):
+        """load_history_config respects disabled flag in config."""
+        from engine.persist import load_history_config
+        import yaml
+
+        os.makedirs(os.path.join(tmp_path, ".gitreins"), exist_ok=True)
+        config_path = os.path.join(tmp_path, ".gitreins", "config.yaml")
+        with open(config_path, "w") as f:
+            yaml.dump({"history": {"enabled": False, "storage": "filesystem"}}, f)
+
+        config = load_history_config(str(tmp_path))
+        assert config["enabled"] is False
+        assert config["storage"] == "filesystem"
+
+    def test_persist_writes_files(self, tmp_path):
+        """persist() writes verdict.json and summary.md to the history dir."""
+        from engine.persist import VerdictPersister
+
+        persister = VerdictPersister(workdir=str(tmp_path))
+        # Override storage to filesystem to avoid git ops
+        persister.config["storage"] = "filesystem"
+
+        verdict_data = {
+            "task_id": "test-task",
+            "task_title": "Test Task",
+            "task_criteria": ["criteria 1", "criteria 2"],
+            "passed": True,
+            "items": [
+                {"criterion": "criteria 1", "status": "PASS", "detail": "works"},
+                {"criterion": "criteria 2", "status": "PASS", "detail": "also works"},
+            ],
+            "summary": "All good",
+        }
+
+        commit_hash = persister.persist("test-task", verdict_data)
+        assert commit_hash in ("dry-run", "disabled") or len(commit_hash) == 8
+
+        # Verify files exist
+        history_dir = persister.history_dir
+        assert os.path.isdir(history_dir)
+
+        # Find the entry
+        date_dirs = os.listdir(history_dir)
+        assert len(date_dirs) > 0
+
+        entry_dir = os.path.join(history_dir, date_dirs[0])
+        hash_dirs = os.listdir(entry_dir)
+        assert len(hash_dirs) > 0
+
+        final_dir = os.path.join(entry_dir, hash_dirs[0])
+        assert os.path.isfile(os.path.join(final_dir, "verdict.json"))
+        assert os.path.isfile(os.path.join(final_dir, "summary.md"))
+
+        # Verify verdict.json content
+        with open(os.path.join(final_dir, "verdict.json")) as f:
+            saved = json.load(f)
+        assert saved["task_id"] == "test-task"
+        assert saved["passed"] is True
+
+    def test_persist_disabled_returns_disabled(self, tmp_path):
+        """When history is disabled, persist returns 'disabled'."""
+        from engine.persist import VerdictPersister
+
+        persister = VerdictPersister(workdir=str(tmp_path))
+        persister.config["enabled"] = False
+
+        result = persister.persist("test", {"passed": True})
+        assert result == "disabled"
+
+    def test_list_verdicts(self, tmp_path):
+        """list_verdicts returns persisted verdicts."""
+        from engine.persist import VerdictPersister
+
+        persister = VerdictPersister(workdir=str(tmp_path))
+        persister.config["storage"] = "filesystem"
+
+        # Persist two verdicts
+        persister.persist("task-a", {"task_id": "task-a", "task_title": "A", "passed": True, "items": []})
+        import time
+        time.sleep(0.1)  # ensure different timestamps/hashes
+        persister.persist("task-b", {"task_id": "task-b", "task_title": "B", "passed": False, "items": []})
+
+        verdicts = persister.list_verdicts(n=10)
+        assert len(verdicts) == 2
+
+        # Filter by task_id
+        a_only = persister.list_verdicts(n=10, task_id="task-a")
+        assert len(a_only) == 1
+        assert a_only[0]["task_id"] == "task-a"
+
+    def test_build_report(self, tmp_path):
+        """build_report returns a formatted string."""
+        from engine.persist import VerdictPersister, build_report
+
+        persister = VerdictPersister(workdir=str(tmp_path))
+        persister.config["storage"] = "filesystem"
+        persister.persist("test-report", {"task_id": "test-report", "task_title": "Report Test", "passed": True, "items": []})
+
+        report = build_report(str(tmp_path), n=10)
+        assert "test-report" in report
+        assert "100%" in report
+        assert "gitreins" not in report.lower() or "storage" in report.lower()
+
+
+# ══════════════════════════════════════════════════════════════════
+# Task dependencies
+# ══════════════════════════════════════════════════════════════════
+
+class TestTaskDependencies:
+    """Tests for task dependencies (--depends-on flag)."""
+
+    def test_task_has_depends_on_field(self):
+        """Task dataclass includes depends_on field."""
+        from engine.task_manager import Task
+        task = Task(id="test", title="Test", depends_on=["other-task"])
+        assert task.depends_on == ["other-task"]
+
+    def test_task_saved_with_depends_on(self, tmp_path):
+        """Tasks with depends_on are persisted and loaded back."""
+        import yaml
+        from engine.task_manager import TaskManager
+
+        os.makedirs(os.path.join(tmp_path, ".gitreins"), exist_ok=True)
+        tm = TaskManager(workdir=str(tmp_path))
+
+        dep_task = tm.create("dep-a", "Dependency A", [])
+        tm.complete("dep-a")
+
+        task = tm.create("main-task", "Main Task", ["do something"], depends_on=["dep-a"])
+        assert task.depends_on == ["dep-a"]
+
+        # Verify saved to YAML
+        with open(os.path.join(tmp_path, ".gitreins", "tasks.yaml")) as f:
+            data = yaml.safe_load(f)
+        saved = [t for t in data["tasks"] if t["id"] == "main-task"][0]
+        assert saved["depends_on"] == ["dep-a"]
+
+        # Load fresh and verify
+        tm2 = TaskManager(workdir=str(tmp_path))
+        loaded = tm2.get("main-task")
+        assert loaded.depends_on == ["dep-a"]
+
+    def test_check_dependencies_passes_when_deps_complete(self, tmp_path):
+        """check_dependencies returns empty when all deps are complete."""
+        from engine.task_manager import TaskManager
+
+        os.makedirs(os.path.join(tmp_path, ".gitreins"), exist_ok=True)
+        tm = TaskManager(workdir=str(tmp_path))
+
+        tm.create("dep-1", "Dep 1", [])
+        tm.complete("dep-1")
+        tm.create("main", "Main", [], depends_on=["dep-1"])
+
+        blocked = tm.check_dependencies("main")
+        assert blocked == []
+
+    def test_check_dependencies_blocks_when_deps_pending(self, tmp_path):
+        """check_dependencies returns blocked list when deps not complete."""
+        from engine.task_manager import TaskManager
+
+        os.makedirs(os.path.join(tmp_path, ".gitreins"), exist_ok=True)
+        tm = TaskManager(workdir=str(tmp_path))
+
+        tm.create("dep-1", "Dep 1", [])
+        # dep-1 is still pending — not completed
+        tm.create("main", "Main", [], depends_on=["dep-1"])
+
+        blocked = tm.check_dependencies("main")
+        assert "dep-1" in blocked
+
+    def test_complete_blocks_on_dependencies(self, tmp_path):
+        """complete() raises DependencyError when deps not met."""
+        from engine.task_manager import TaskManager, DependencyError
+
+        os.makedirs(os.path.join(tmp_path, ".gitreins"), exist_ok=True)
+        tm = TaskManager(workdir=str(tmp_path))
+
+        tm.create("dep-1", "Dep 1", [])
+        tm.create("main", "Main", [], depends_on=["dep-1"])
+
+        with pytest.raises(DependencyError, match="dep-1"):
+            tm.complete("main")
+
+    def test_complete_force_bypasses_dependencies(self, tmp_path):
+        """complete(force=True) skips dependency checks."""
+        from engine.task_manager import TaskManager
+
+        os.makedirs(os.path.join(tmp_path, ".gitreins"), exist_ok=True)
+        tm = TaskManager(workdir=str(tmp_path))
+
+        tm.create("dep-1", "Dep 1", [])
+        tm.create("main", "Main", [], depends_on=["dep-1"])
+
+        # Should succeed with force
+        task = tm.complete("main", force=True)
+        assert task.status == "complete"
+
+    def test_no_depends_on_defaults_to_empty(self, tmp_path):
+        """Tasks without --depends-on default to empty list."""
+        from engine.task_manager import TaskManager
+
+        os.makedirs(os.path.join(tmp_path, ".gitreins"), exist_ok=True)
+        tm = TaskManager(workdir=str(tmp_path))
+
+        task = tm.create("standalone", "No deps", [])
+        assert task.depends_on == []
+        assert tm.check_dependencies("standalone") == []
+
+
+# ══════════════════════════════════════════════════════════════════
+# gitreins init
+# ══════════════════════════════════════════════════════════════════
+
+class TestInit:
+    """Tests for gitreins init command."""
+
+    def test_detect_go_project(self, tmp_path):
+        """Detects Go project from go.mod."""
+        from gitreins.cli import _detect_language
+
+        (tmp_path / "go.mod").write_text("module example.com/test")
+        info = _detect_language(str(tmp_path))
+        assert info["is_go"]
+        assert info["name"] == "Go"
+
+    def test_detect_python_project(self, tmp_path):
+        """Detects Python project from pyproject.toml."""
+        from gitreins.cli import _detect_language
+
+        (tmp_path / "pyproject.toml").write_text("[project]\nname='test'")
+        info = _detect_language(str(tmp_path))
+        assert info["is_python"]
+        assert info["name"] == "Python"
+
+    def test_detect_ts_project(self, tmp_path):
+        """Detects TypeScript project from package.json."""
+        from gitreins.cli import _detect_language
+
+        (tmp_path / "package.json").write_text('{"name":"test"}')
+        info = _detect_language(str(tmp_path))
+        assert info["is_ts"]
+        assert info["name"] == "TypeScript"
+
+    def test_detect_unknown_project(self, tmp_path):
+        """Returns unknown for unrecognized project types."""
+        from gitreins.cli import _detect_language
+
+        info = _detect_language(str(tmp_path))
+        assert info["name"] == "unknown"
+        assert not any([info["is_go"], info["is_python"], info["is_ts"]])
+
+    def test_build_guards_go(self):
+        """Go project guards include go: section and disable Python-only guards."""
+        from gitreins.cli import _build_guards_section
+
+        lang = {"is_go": True, "is_python": False, "is_ts": False}
+        guards = _build_guards_section(lang, "go test ./...")
+        assert guards["secrets"] is True
+        assert guards["lint"] is False  # Python-only
+        assert guards["tests"] is False  # Python-only
+        assert guards["test_mode"] == "full"  # new projects start full
+        assert guards["go"]["build"] is True
+        assert guards["go"]["lint"] is True
+        assert guards["go"]["tests"] is True
+
+    def test_build_guards_python(self):
+        """Python project guards use pytest and full test mode default."""
+        from gitreins.cli import _build_guards_section
+
+        lang = {"is_go": False, "is_python": True, "is_ts": False}
+        guards = _build_guards_section(lang, "pytest")
+        assert guards["secrets"] is True
+        assert guards["lint"] is True
+        assert guards["tests"] is True
+        assert guards["test_mode"] == "full"
+
+    def test_fill_missing_guards_adds_missing(self):
+        """_fill_missing_guards adds missing keys without overwriting existing."""
+        from gitreins.cli import _fill_missing_guards
+
+        lang = {"is_go": True, "is_python": False, "is_ts": False}
+        existing = {"secrets": False}  # explicit override
+        added = _fill_missing_guards(existing, lang, "go test ./...")
+        # secrets should NOT be overwritten
+        assert existing["secrets"] is False
+        # missing keys should be added
+        assert "lint" in existing
+        assert "go" in existing
+
+    def test_detect_project_size_small(self, tmp_path):
+        """Small projects get low cap recommendations."""
+        from gitreins.cli import _detect_project_size
+
+        lang = {"is_python": True, "is_go": False}
+        (tmp_path / "__init__.py").write_text("")
+        size = _detect_project_size(str(tmp_path), lang)
+        assert size["packages"] == 1
+        assert size["max_iterations"] == 15
+        assert size["test_mode"] == "full"
+
+    def test_detect_project_size_large(self, tmp_path):
+        """Large projects get higher caps and diff mode recommendation."""
+        from gitreins.cli import _detect_project_size
+
+        lang = {"is_python": True, "is_go": False, "is_ts": False}
+        # Create 6 packages
+        for i in range(6):
+            pkg = tmp_path / f"pkg{i}"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text("")
+
+        size = _detect_project_size(str(tmp_path), lang)
+        assert size["packages"] >= 6
+        assert size["max_iterations"] == 25  # 6 packages → 6 ≤ 10 → 25
+        assert size["test_mode"] == "diff"
+
+
+# ══════════════════════════════════════════════════════════════════
+# Cleaner guard output
+# ══════════════════════════════════════════════════════════════════
+
+class TestGuardOutput:
+    """Tests for the cleaner guard output formatting."""
+
+    def test_guard_result_pass_detail(self):
+        """GuardResult._pass_detail returns appropriate short details."""
+        from engine.guard_manager import GuardResult
+
+        secrets = GuardResult(name="secrets", passed=True, output="gitleaks: clean")
+        assert "clean" in secrets._pass_detail()
+
+        lint = GuardResult(name="lint", passed=True)
+        assert "ok" in lint._pass_detail()
+
+        go_lint = GuardResult(name="go_lint", passed=True)
+        assert "ok" in go_lint._pass_detail()
+
+        tests = GuardResult(name="tests", passed=True, output="10 passed")
+        assert "passed" in tests._pass_detail()
+
+        # Unknown guard types return empty
+        unknown = GuardResult(name="custom", passed=True)
+        assert unknown._pass_detail() == ""
+
+    def test_tier1_result_summary_with_failures(self):
+        """Tier1Result.summary shows failure counts."""
+        from engine.guard_manager import Tier1Result, GuardResult
+
+        result = Tier1Result(
+            passed=False,
+            results=[
+                GuardResult(name="secrets", passed=True, output="clean"),
+                GuardResult(name="tests", passed=False, output="FAILED test_a\nFAILED test_b\nFAILED test_c"),
+            ]
+        )
+        summary = result.summary
+        assert "✓ secrets" in summary
+        assert "✗ tests" in summary
+        assert "failure" in summary.lower()
+
+    def test_tier1_result_extra_populated(self):
+        """Tier1Result.extra contains test_mode info."""
+        from engine.guard_manager import Tier1Result, GuardResult
+
+        result = Tier1Result(
+            passed=True,
+            results=[GuardResult(name="secrets", passed=True)],
+            extra={"test_mode": "diff", "test_targets": 3, "staged_count": 5},
+        )
+        assert result.extra["test_mode"] == "diff"
+        assert result.extra["test_targets"] == 3
