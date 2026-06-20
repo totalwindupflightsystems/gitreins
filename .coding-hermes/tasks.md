@@ -36,7 +36,7 @@
 ## [x] GR-027: Mock LLM calls in hanging CLI judge test
 - **Priority:** high
 - **Files:** tests/test_cli.py
-- **Commit:** pending
+- **Commit:** `2138689`
 - **AC:** `test_judge_existing_task_exits_0` no longer makes real LLM calls — mock `engine.llm.LLMClient.chat` so it returns instantly with fake verdict JSON
 
 ## [ ] GR-028: Unit tests for dead_code detector
