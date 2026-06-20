@@ -248,12 +248,19 @@ class GitReinsMCPServer:
 
     def _guard_run(self, workdir: str = None) -> dict:
         """Run Tier 1 static guards. Accepts optional workdir for cross-repo use."""
+        import yaml
         wd = os.path.abspath(workdir) if workdir else self.workdir
-        if wd != self.workdir:
-            gm = GuardManager(wd)
-            result = gm.run_all()
-        else:
-            result = self.judge.guard_manager.run_all()
+        # Load config from .gitreins/config.yaml (same pattern as CLI)
+        config = {}
+        config_path = os.path.join(wd, ".gitreins", "config.yaml")
+        if os.path.isfile(config_path):
+            try:
+                with open(config_path, "r") as f:
+                    config = yaml.safe_load(f) or {}
+            except Exception:
+                pass
+        gm = GuardManager(wd, config=config)
+        result = gm.run_all()
         return {
             "passed": result.passed,
             "workdir": wd,
@@ -437,6 +444,10 @@ if __name__ == "__main__":
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
         stream=sys.stderr,
     )
-    server = GitReinsMCPServer()
+    # Accept optional workdir from command line (defaults to CWD)
+    workdir = sys.argv[1] if len(sys.argv) > 1 else "."
+    if workdir == "stdio":
+        workdir = "."  # Hermes MCP passes "stdio" — ignore it
+    server = GitReinsMCPServer(workdir)
     logger.info("GitReins MCP server starting — workdir=%s", server.workdir)
     server.run_stdio()
