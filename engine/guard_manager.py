@@ -408,8 +408,14 @@ class GuardManager:
 
         In 'diff' mode, only runs tests relevant to staged changes.
         In 'full' mode (default), runs the entire test suite.
+        When no files are staged, tests are skipped entirely.
         """
         test_command = self.config.get("guards", {}).get("test_command", "pytest -x --tb=short")
+
+        # Skip if nothing is staged — nothing to test
+        staged = _get_staged_files(self.workdir)
+        if not staged:
+            return GuardResult(name="tests", passed=True, output="No files staged — skipped")
 
         if self._test_mode == "diff":
             test_files = _discover_test_targets(self.workdir)
@@ -418,7 +424,7 @@ class GuardManager:
                 cmd = _build_diff_test_command(test_command, test_files, self.workdir)
                 label = f"tests (diff: {len(test_files)} files)"
                 return self._run_test_command(cmd, label)
-            # Fall through to full suite (safety default)
+            # Fall through to full suite (safety default for force-full triggers)
 
         label = "tests (full)"
         return self._run_test_command(test_command, label)
