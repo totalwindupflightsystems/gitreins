@@ -18,6 +18,18 @@ Usage:
 DEFAULT_GITREINS_CONFIG = """\
 # GitReins Configuration
 
+# ── Global defaults (overrides engine.config.GitReinsDefaults) ─────
+defaults:
+  # model: deepseek-v4-flash            # default LLM
+  max_iterations: 100                   # LLM turns (-1 = unlimited)
+  # max_time: "30m"                     # wall clock
+  max_input_tokens: "10M"               # 10 million
+  max_output_tokens: "1M"               # 1 million
+  tool_call_weight: 0.1                 # fraction per tool call
+  check_for_updates: true               # check PyPI on each run
+  update_check_ttl: "24h"               # re-check after this period
+
+# ── Guards (Tier 1 static checks) ─────────────────────────────────
 guards:
   secrets: true
   lint: true
@@ -26,6 +38,7 @@ guards:
   # dead_code: true    # opt-in: Python dead-code detection (AST-based)
   # skylos: true       # opt-in: multi-language dead code + AI mistake detection
 
+# ── Evaluator caps (v0.5.0) ─────────────────────────────────────
 evaluator:
   max_iterations: 100
 """
@@ -77,6 +90,17 @@ def get_workdir() -> str:
         return result.stdout.strip()
     except Exception:
         return os.getcwd()
+
+
+def _check_for_updates():
+    """Check PyPI for a newer version. Prints notice to stderr if available."""
+    try:
+        from engine.config import check_for_update
+        msg = check_for_update(workdir=get_workdir())
+        if msg:
+            print(f"  \033[33m{msg}\033[0m", file=sys.stderr)
+    except Exception:
+        pass  # never block on update check failures
 
 
 def cmd_install(args):
@@ -213,6 +237,7 @@ def cmd_task_delete(args):
 
 
 def cmd_guard_run(args):
+    _check_for_updates()
     from engine.guard_manager import GuardManager
     workdir = get_workdir()
     config = load_config(workdir)
@@ -223,6 +248,7 @@ def cmd_guard_run(args):
 
 
 def cmd_judge(args):
+    _check_for_updates()
     from engine.task_manager import TaskManager
     from engine.llm import LLMClient
     from engine.judge import Judge

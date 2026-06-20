@@ -228,8 +228,8 @@ class AgenticEvaluator:
             config = self._load_config()
             self.eval_cap = eval_cap_from_config(config)
 
-        # Backward compat: expose max_iterations for code that reads it
-        self.max_iterations = self.eval_cap.max_iterations if self.eval_cap.max_iterations > 0 else 100
+        # max_iterations from EvalCap is authoritative — 100 by default, -1 for unlimited
+        self.max_iterations = self.eval_cap.max_iterations if self.eval_cap.max_iterations > 0 else 10_000
 
         self._sandbox: dict[str, str] = {}
         self._task_index: dict[str, dict] = {}

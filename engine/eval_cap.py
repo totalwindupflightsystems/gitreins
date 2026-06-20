@@ -372,6 +372,9 @@ def parse_eval_cap(raw: str) -> EvalCap:
 def eval_cap_from_config(config: dict) -> EvalCap:
     """Build an EvalCap from .gitreins/config.yaml.
 
+    Defaults come from engine.config.GitReinsDefaults (single source of truth),
+    overridden by config.yaml's evaluator: and defaults: sections.
+
     Supports new individual keys (v0.3.0+) and legacy combined string (v0.2.x).
 
     New format (individual):
@@ -387,20 +390,27 @@ def eval_cap_from_config(config: dict) -> EvalCap:
           cap: "100/30m/200k/50k"
 
     Individual keys take priority over the combined string.
+    Config defaults: section is the global fallback.
     """
+    from engine.config import GitReinsDefaults
+
+    # Start with global defaults, overlaid by config's defaults: section
+    gd = GitReinsDefaults().overlay(config)
+    cap = EvalCap(
+        max_iterations=gd.max_iterations,
+        max_seconds=gd.max_seconds,
+        max_input_tokens=gd.max_input_tokens,
+        max_output_tokens=gd.max_output_tokens,
+        tool_call_weight=gd.tool_call_weight,
+        source=gd._source,
+    )
+
     ev = config.get("evaluator", {}) or {}
 
     # Try legacy combined string first
     cap_str = ev.get("cap", "") or config.get("guards", {}).get("eval_cap", "")
     if cap_str:
         cap = parse_eval_cap(str(cap_str))
-    else:
-        # Default caps: 10M input tokens, 1M output tokens (DeepSeek pricing)
-        cap = EvalCap(
-            max_input_tokens=10_000_000,
-            max_output_tokens=1_000_000,
-            source="(default: 10M in / 1M out)",
-        )
 
     # Override with individual keys (v0.3.0+)
     if "max_iterations" in ev:

@@ -85,7 +85,10 @@ class TestJudgeLegacyPath:
         with patch.object(judge.guard_manager, 'run_all', return_value=tier1_pass):
             # Mock evaluator to return COMPLETE
             verdict_json = '{"verdict":"COMPLETE","items":[{"criterion":"c1","status":"PASS","detail":"verified"}],"summary":"good"}'
-            mock_resp = mock.MagicMock(content=verdict_json, tool_calls=None)
+            mock_usage = mock.MagicMock(prompt_tokens=0, completion_tokens=0,
+                                        cache_read_tokens=0, cache_write_tokens=0,
+                                        total_tokens=0)
+            mock_resp = mock.MagicMock(content=verdict_json, tool_calls=None, usage=mock_usage)
             with patch.object(llm_client, 'chat', return_value=mock_resp):
                 result = judge._run_legacy(task)
         assert result.passed is True
@@ -161,7 +164,10 @@ class TestJudgeEvaluateTask:
         ])
         with patch.object(judge.guard_manager, 'run_all', return_value=tier1_pass):
             verdict_json = '{"verdict":"COMPLETE","items":[{"criterion":"c1","status":"PASS","detail":"ok"}],"summary":"done"}'
-            mock_resp = mock.MagicMock(content=verdict_json, tool_calls=None)
+            mock_usage = mock.MagicMock(prompt_tokens=0, completion_tokens=0,
+                                        cache_read_tokens=0, cache_write_tokens=0,
+                                        total_tokens=0)
+            mock_resp = mock.MagicMock(content=verdict_json, tool_calls=None, usage=mock_usage)
             with patch.object(llm_client, 'chat', return_value=mock_resp):
                 result = judge.evaluate_task(task)
         assert result.passed is True

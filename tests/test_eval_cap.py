@@ -132,7 +132,7 @@ class TestEvalCapFromConfig:
 
     def test_empty_defaults(self):
         cap = eval_cap_from_config({})
-        assert cap.max_iterations == -1.0
+        assert cap.max_iterations == 100.0
         assert cap.max_input_tokens == 10_000_000
         assert cap.max_output_tokens == 1_000_000
 

@@ -312,7 +312,7 @@ class TestMaxIterationsAndErrors:
             verdict = fast_eval.evaluate({"id": "loop", "title": "x", "criteria": ["c1"]})
         assert verdict.verdict == "INCOMPLETE"
         assert "Cap exceeded" in verdict.summary
-        assert "Raise max_iterations" in verdict.summary
+        assert "Increase max_iterations" in verdict.summary
 
     def test_max_iterations_error_message_actionable(self, evaluator, llm_client):
         """Error message on cap tells user exactly how to fix it."""
