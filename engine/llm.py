@@ -33,10 +33,21 @@ class ToolCall:
 
 @dataclass
 class LLMUsage:
-    """Token usage returned by the LLM API."""
-    prompt_tokens: int = 0       # OpenAI: prompt_tokens, Anthropic: input_tokens
-    completion_tokens: int = 0   # OpenAI: completion_tokens, Anthropic: output_tokens
-    total_tokens: int = 0        # OpenAI: total_tokens, Anthropic: input+output
+    """Token usage returned by the LLM API.
+
+    Distinguishes regular input from cached input. Cache hits are
+    cheaper — most providers charge 10-50% of the regular price.
+    """
+    prompt_tokens: int = 0         # Regular (uncached) input tokens
+    cache_read_tokens: int = 0     # Cache hit — tokens served from cache
+    cache_write_tokens: int = 0    # New tokens written to cache
+    completion_tokens: int = 0     # Output tokens generated
+    total_tokens: int = 0          # Sum of all (for display)
+
+    @property
+    def all_input_tokens(self) -> int:
+        """Total input tokens including cache (for budget tracking)."""
+        return self.prompt_tokens + self.cache_read_tokens + self.cache_write_tokens
 
 
 @dataclass
@@ -71,7 +82,7 @@ class LLMClient:
                 self.api_key = os.getenv(env_key, "")
                 if self.api_key:
                     break
-        self.model = model or os.getenv("GITREINS_LLM_MODEL", "gpt-4o-mini")
+        self.model = model or os.getenv("GITREINS_LLM_MODEL", "deepseek-chat")
         self.max_retries = max_retries
 
         # Auto-detect provider if not forced
@@ -177,12 +188,14 @@ class LLMClient:
                     ToolCall(id=tc["id"], name=tc["function"]["name"], arguments=args)
                 )
 
-        # Extract token usage
+        # Extract token usage (with cache detection for DeepSeek)
         usage = None
         if "usage" in data:
             u = data["usage"]
             usage = LLMUsage(
                 prompt_tokens=u.get("prompt_tokens", 0),
+                cache_read_tokens=u.get("prompt_cache_hit_tokens", 0),
+                cache_write_tokens=u.get("prompt_cache_miss_tokens", 0),
                 completion_tokens=u.get("completion_tokens", 0),
                 total_tokens=u.get("total_tokens", 0),
             )
@@ -254,14 +267,19 @@ class LLMClient:
                     arguments=block.get("input", {}),
                 ))
 
-        # Extract token usage (Anthropic uses input_tokens/output_tokens)
+        # Extract token usage (Anthropic distinguishes cache reads/writes)
         usage = None
         if "usage" in data:
             u = data["usage"]
             input_tok = u.get("input_tokens", 0)
             output_tok = u.get("output_tokens", 0)
+            cache_read = u.get("cache_read_input_tokens", 0)
+            cache_write = u.get("cache_creation_input_tokens", 0)
+            regular_input = max(0, input_tok - cache_read - cache_write)
             usage = LLMUsage(
-                prompt_tokens=input_tok,
+                prompt_tokens=regular_input,
+                cache_read_tokens=cache_read,
+                cache_write_tokens=cache_write,
                 completion_tokens=output_tok,
                 total_tokens=input_tok + output_tok,
             )

@@ -317,7 +317,14 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             # Track LLM call (costs 1.0 iterations + token usage)
             prompt_tok = response.usage.prompt_tokens if response.usage else 0
             completion_tok = response.usage.completion_tokens if response.usage else 0
-            cap_error = self.eval_cap.record_llm_call(prompt_tok, completion_tok)
+            cache_read = response.usage.cache_read_tokens if response.usage else 0
+            cache_write = response.usage.cache_write_tokens if response.usage else 0
+            cap_error = self.eval_cap.record_llm_call(
+                prompt_tokens=prompt_tok,
+                completion_tokens=completion_tok,
+                cache_read_tokens=cache_read,
+                cache_write_tokens=cache_write,
+            )
             if cap_error:
                 logger.warning("Eval cap exceeded: %s", cap_error)
                 return Verdict(

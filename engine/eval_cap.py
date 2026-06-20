@@ -58,12 +58,13 @@ class EvalCap:
     max_output_tokens: int = -1        # -1 = unlimited
     tool_call_weight: float = 0.1      # fraction of an iteration per tool call
 
-    # ── Runtime tracking ────────────────────────────────────
-
-    iteration_credit: float = 0.0      # fractional iterations consumed
+    # Runtime tracking
+    iteration_credit: float = 0.0
     start_time: float = 0.0
-    cumulative_input_tokens: int = 0
-    cumulative_output_tokens: int = 0
+    cumulative_input_tokens: int = 0      # total input (regular + cache)
+    cumulative_output_tokens: int = 0     # output tokens
+    cumulative_cache_read: int = 0        # tokens served from cache
+    cumulative_cache_write: int = 0       # tokens written to cache
 
     # Display
     source: str = ""
@@ -83,7 +84,8 @@ class EvalCap:
         """Begin the wall-clock timer."""
         self.start_time = time.time()
 
-    def record_llm_call(self, prompt_tokens: int = 0, completion_tokens: int = 0) -> str | None:
+    def record_llm_call(self, prompt_tokens: int = 0, completion_tokens: int = 0,
+                        cache_read_tokens: int = 0, cache_write_tokens: int = 0) -> str | None:
         """Record a full LLM reasoning call (costs 1.0 iterations).
 
         The cap is checked BEFORE the call — so at 99.9/100, a 1.0
@@ -98,8 +100,11 @@ class EvalCap:
             )
 
         self.iteration_credit += 1.0
-        self.cumulative_input_tokens += prompt_tokens
+        all_input = prompt_tokens + cache_read_tokens + cache_write_tokens
+        self.cumulative_input_tokens += all_input
         self.cumulative_output_tokens += completion_tokens
+        self.cumulative_cache_read += cache_read_tokens
+        self.cumulative_cache_write += cache_write_tokens
 
         # Check time and token caps (these are hard limits)
         return self._check_hard_caps()
@@ -162,10 +167,20 @@ class EvalCap:
         if self.max_seconds > 0:
             elapsed = int(time.time() - self.start_time) if self.start_time > 0 else 0
             parts.append(f"time: {_fmt_seconds(elapsed)}/{_fmt_seconds(self.max_seconds)}")
-        if self.max_input_tokens > 0:
-            parts.append(f"in: {_fmt_tokens(self.cumulative_input_tokens)}/{_fmt_tokens(self.max_input_tokens)}")
-        if self.max_output_tokens > 0:
-            parts.append(f"out: {_fmt_tokens(self.cumulative_output_tokens)}/{_fmt_tokens(self.max_output_tokens)}")
+        if self.max_input_tokens > 0 or self.max_output_tokens > 0:
+            in_str = f"in: {_fmt_tokens(self.cumulative_input_tokens)}"
+            if self.max_input_tokens > 0:
+                in_str += f"/{_fmt_tokens(self.max_input_tokens)}"
+            if self.cumulative_cache_read > 0 or self.cumulative_cache_write > 0:
+                cache_parts = []
+                if self.cumulative_cache_read > 0:
+                    cache_parts.append(f"cache-hit {_fmt_tokens(self.cumulative_cache_read)}")
+                if self.cumulative_cache_write > 0:
+                    cache_parts.append(f"cache-write {_fmt_tokens(self.cumulative_cache_write)}")
+                in_str += f" ({', '.join(cache_parts)})"
+            parts.append(in_str)
+            parts.append(f"out: {_fmt_tokens(self.cumulative_output_tokens)}"
+                         + (f"/{_fmt_tokens(self.max_output_tokens)}" if self.max_output_tokens > 0 else ""))
         if not parts:
             return "no caps (unlimited)"
         return ", ".join(parts)
@@ -380,7 +395,12 @@ def eval_cap_from_config(config: dict) -> EvalCap:
     if cap_str:
         cap = parse_eval_cap(str(cap_str))
     else:
-        cap = EvalCap(source="(config default)")
+        # Default caps: 10M input tokens, 1M output tokens (DeepSeek pricing)
+        cap = EvalCap(
+            max_input_tokens=10_000_000,
+            max_output_tokens=1_000_000,
+            source="(default: 10M in / 1M out)",
+        )
 
     # Override with individual keys (v0.3.0+)
     if "max_iterations" in ev:

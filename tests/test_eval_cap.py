@@ -133,6 +133,8 @@ class TestEvalCapFromConfig:
     def test_empty_defaults(self):
         cap = eval_cap_from_config({})
         assert cap.max_iterations == -1.0
+        assert cap.max_input_tokens == 10_000_000
+        assert cap.max_output_tokens == 1_000_000
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -240,6 +242,54 @@ class TestEvalCapChecking:
         assert "time:" in s
         assert "in:" in s
         assert "out:" in s
+
+    def test_summary_shows_cache(self):
+        """Cache hits and writes show in summary."""
+        cap = EvalCap(max_input_tokens=1_000_000, max_output_tokens=500_000)
+        cap.start()
+        cap.record_llm_call(
+            prompt_tokens=100_000,
+            completion_tokens=50_000,
+            cache_read_tokens=200_000,
+            cache_write_tokens=50_000,
+        )
+        s = cap.summary()
+        assert "cache-hit 200k" in s
+        assert "cache-write 50k" in s
+
+    def test_cache_tokens_count_toward_input_budget(self):
+        """Cache tokens are included in the input token budget."""
+        cap = EvalCap(max_input_tokens=1_000, max_output_tokens=10_000)
+        cap.start()
+        # 400 regular + 299 cache read + 300 cache write = 999 total input
+        err = cap.record_llm_call(
+            prompt_tokens=400,
+            cache_read_tokens=299,
+            cache_write_tokens=300,
+        )
+        assert err is None  # still under cap
+        # Next call should exceed
+        err = cap.record_llm_call(prompt_tokens=1)
+        assert err is not None
+        assert "Input token budget" in err
+
+    def test_cache_tracking_fields(self):
+        """EvalCap tracks cache reads and writes separately."""
+        cap = EvalCap(max_input_tokens=1_000_000)
+        cap.start()
+        cap.record_llm_call(
+            prompt_tokens=100_000,
+            cache_read_tokens=50_000,
+            cache_write_tokens=25_000,
+        )
+        cap.record_llm_call(
+            prompt_tokens=80_000,
+            cache_read_tokens=40_000,
+            cache_write_tokens=10_000,
+        )
+        assert cap.cumulative_cache_read == 90_000
+        assert cap.cumulative_cache_write == 35_000
+        assert cap.cumulative_input_tokens == 305_000  # 175k (call1) + 130k (call2) = 305k
 
 
 # ═══════════════════════════════════════════════════════════════
