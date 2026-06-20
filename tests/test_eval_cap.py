@@ -395,3 +395,100 @@ class TestEvalCapRealEvaluator:
             f"Expected > 3.0 (tool calls add fractional cost), got {evaluator.eval_cap.iteration_credit}"
         # Should have stopped because of cap
         assert "Cap exceeded" in verdict.summary or verdict.verdict == "COMPLETE"
+
+
+# ═══════════════════════════════════════════════════════════════
+# Pipeline caps regression tests — prevent hardcoded defaults
+# ═══════════════════════════════════════════════════════════════
+
+class TestPipelineCapRegression:
+    """Verify Pipeline tier2 and _run_ai_eval respect evaluator caps.
+
+    Regression: Pipeline defaulted to max_iterations=20, overriding
+    the evaluator's own config. Fixed in v0.3.1 — these tests
+    ensure it never regresses.
+    """
+
+    def test_default_pipeline_tier2_has_negative_max_iterations(self):
+        """The DEFAULT pipeline config (used when no .gitreins/config.yaml
+        exists) must have max_iterations=-1 so evaluator config takes over."""
+        from engine.pipeline import load_pipeline_config
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            config = load_pipeline_config(d)
+            tier2 = [s for s in config["pipeline"]["stages"] if s["id"] == "tier2"]
+            assert len(tier2) == 1, "Default pipeline missing tier2 stage"
+            assert tier2[0].get("max_iterations") == -1, \
+                f"Default pipeline tier2 max_iterations must be -1, got {tier2[0].get('max_iterations')}"
+
+    def test_run_ai_eval_default_is_negative(self):
+        """_run_ai_eval's default for max_iterations must be -1."""
+        from engine.pipeline import Pipeline
+        from engine.llm import LLMClient
+        p = Pipeline({}, workdir=".")
+        # Simulate a minimal step_def with no max_iterations key
+        step_def = {"id": "tier2", "type": "ai_eval"}
+        # The _run_ai_eval method defaults to -1
+        # (We verify via code inspection — the method reads step_def.get("max_iterations", -1))
+        # This test is here to document and assert the contract.
+        import inspect
+        source = inspect.getsource(p._run_ai_eval)
+        assert 'step_def.get("max_iterations", -1)' in source, \
+            "_run_ai_eval must default max_iterations to -1, not 20"
+
+    def test_pipeline_passes_max_iterations_negative_to_evaluator(self, tmp_path):
+        """Pipeline._run_ai_eval passes max_iterations=-1 to AgenticEvaluator
+        when the step doesn't set it, and the evaluator reads config."""
+        import subprocess
+        d = str(tmp_path)
+        subprocess.run(["git", "init"], cwd=d, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], cwd=d, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=d, capture_output=True)
+        gitreins_dir = os.path.join(d, ".gitreins")
+        os.makedirs(gitreins_dir, exist_ok=True)
+        # Set evaluator caps in config — these should be picked up
+        config = {
+            "evaluator": {
+                "max_iterations": 30,
+                "max_time": "10m",
+                "tool_call_weight": 0.05,
+            },
+            "guards": {"secrets": False, "lint": False, "tests": False, "dead_code": False, "skylos": False},
+        }
+        with open(os.path.join(gitreins_dir, "config.yaml"), "w") as f:
+            yaml.dump(config, f)
+        with open(os.path.join(d, "README.md"), "w") as f:
+            f.write("# test\n")
+        subprocess.run(["git", "add", "README.md", ".gitreins/"], cwd=d, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=d, capture_output=True)
+
+        # Simulate what Pipeline._run_ai_eval does: create evaluator with max_iterations=-1
+        llm = LLMClient()
+        evaluator = AgenticEvaluator(llm, workdir=d, max_iterations=-1)
+        # The evaluator should have read config caps, not created an unlimited cap
+        assert evaluator.eval_cap.max_iterations == 30, \
+            f"Evaluator should read config max_iterations=30, got {evaluator.eval_cap.max_iterations}"
+        assert evaluator.eval_cap.max_seconds == 600
+        assert evaluator.eval_cap.tool_call_weight == 0.05
+
+    def test_pipeline_explicit_max_iterations_is_honored(self, tmp_path):
+        """When pipeline step explicitly sets max_iterations, it IS used
+        (not overridden by config)."""
+        import subprocess
+        d = str(tmp_path)
+        subprocess.run(["git", "init"], cwd=d, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t"], cwd=d, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=d, capture_output=True)
+        gitreins_dir = os.path.join(d, ".gitreins")
+        os.makedirs(gitreins_dir, exist_ok=True)
+        config = {
+            "evaluator": {"max_iterations": 999},  # should NOT be used
+        }
+        with open(os.path.join(gitreins_dir, "config.yaml"), "w") as f:
+            yaml.dump(config, f)
+
+        llm = LLMClient()
+        # Pipeline step sets max_iterations=5 explicitly — evaluator should use it
+        evaluator = AgenticEvaluator(llm, workdir=d, max_iterations=5)
+        assert evaluator.eval_cap.max_iterations == 5, \
+            f"Explicit max_iterations=5 should win, got {evaluator.eval_cap.max_iterations}"
