@@ -46,8 +46,7 @@
 - **AC:** Tests cover unreachable code, unused functions, unused imports, empty functions; all pass
 - **Result:** 38 tests pass (0.03s). Covers all 4 categories + edge cases.
 
-## [ ] GR-029: Commit pending AGENTS.md + AC changes
+## [x] GR-029: Commit pending AGENTS.md + AC changes
 - **Priority:** low
-- **Files:** AGENTS.md, .hermes/acceptance-criteria.md
-- **Model:** direct (no spawn)
-- **AC:** Pending diffs committed with descriptive message + Co-authored-by trailer
+- **Commit:** `446527a` (local only — main branch protected on GitLab)
+- **AC:** Acceptance criteria diff committed with descriptive message + Co-authored-by trailer. Push blocked: protected branch.
