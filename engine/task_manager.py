@@ -23,6 +23,11 @@ from typing import Any
 import yaml
 
 
+class DependencyError(Exception):
+    """Raised when a task cannot complete because its dependencies are not met."""
+    pass
+
+
 @dataclass
 class Task:
     id: str
@@ -31,6 +36,7 @@ class Task:
     status: str = "pending"  # pending | in_progress | complete
     created_at: str = ""
     completed_at: str | None = None
+    depends_on: list[str] = field(default_factory=list)  # task IDs that must complete first
 
 
 class TaskManager:
@@ -58,6 +64,7 @@ class TaskManager:
                     status=item.get("status", "pending"),
                     created_at=item.get("created_at", ""),
                     completed_at=item.get("completed_at"),
+                    depends_on=item.get("depends_on", []),
                 )
                 self._tasks[task.id] = task
         except Exception as e:
@@ -77,12 +84,14 @@ class TaskManager:
             }
             if task.completed_at:
                 entry["completed_at"] = task.completed_at
+            if task.depends_on:
+                entry["depends_on"] = task.depends_on
             tasks_list.append(entry)
         with open(self._tasks_file, "w") as f:
             yaml.dump({"tasks": tasks_list}, f, default_flow_style=False, sort_keys=False)
 
-    def create(self, id: str, title: str, criteria: list[str]) -> Task:
-        """Create a new task."""
+    def create(self, id: str, title: str, criteria: list[str], depends_on: list[str] | None = None) -> Task:
+        """Create a new task. Optional depends_on lists task IDs that must complete first."""
         now = datetime.now(timezone.utc).isoformat()
         task = Task(
             id=id,
@@ -90,6 +99,7 @@ class TaskManager:
             criteria=criteria,
             status="pending",
             created_at=now,
+            depends_on=depends_on or [],
         )
         self._tasks[id] = task
         self._save()
@@ -104,15 +114,37 @@ class TaskManager:
         self._save()
         return task
 
-    def complete(self, id: str) -> Task:
+    def complete(self, id: str, force: bool = False) -> Task:
         """Mark a task as complete."""
         task = self._tasks.get(id)
         if not task:
             raise KeyError(f"Task not found: {id}")
+
+        # Check dependencies (skip if forced)
+        if not force:
+            blocked = self.check_dependencies(id)
+            if blocked:
+                raise DependencyError(
+                    f"Task '{id}' depends on incomplete tasks: {', '.join(blocked)}. "
+                    f"Complete those first or use --force to skip."
+                )
+
         task.status = "complete"
         task.completed_at = datetime.now(timezone.utc).isoformat()
         self._save()
         return task
+
+    def check_dependencies(self, id: str) -> list[str]:
+        """Return list of dependency task IDs that are not yet complete."""
+        task = self._tasks.get(id)
+        if not task:
+            return []
+        blocked = []
+        for dep_id in task.depends_on:
+            dep = self._tasks.get(dep_id)
+            if not dep or dep.status != "complete":
+                blocked.append(dep_id)
+        return blocked
 
     def get(self, id: str) -> Task | None:
         """Get a task by ID."""
@@ -138,7 +170,7 @@ class TaskManager:
 
     def to_dict(self, task: Task) -> dict:
         """Convert a Task to a plain dict (for MCP/serialization)."""
-        return {
+        result = {
             "id": task.id,
             "title": task.title,
             "criteria": task.criteria,
@@ -146,3 +178,6 @@ class TaskManager:
             "created_at": task.created_at,
             "completed_at": task.completed_at,
         }
+        if task.depends_on:
+            result["depends_on"] = task.depends_on
+        return result

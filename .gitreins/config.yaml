@@ -2,6 +2,7 @@
 
 # ── Guards (Tier 1 static checks) ───────────────────────────
 guards:
+  test_mode: "diff"
   secrets: true         # Scan for secrets (gitleaks or simple pattern match)
   lint: true            # Run linter (ruff/flake8) on staged Python files
   tests: true           # Run tests via pytest
@@ -55,7 +56,18 @@ pipeline:
 
 # ── Evaluator Settings ──────────────────────────────────
 evaluator:
-  max_iterations: 20    # Max tool-calling iterations per evaluation
+  max_iterations: 40
+  max_time: "10m"
+  max_output_tokens: "200k"
+  tool_call_weight: 0.1
+  model: deepseek/deepseek-v4-pro
+
+# ── Defaults ──────────────────────────────────
+defaults:
+  model: deepseek-v4-flash
+  max_iterations: 100
+  check_for_updates: true
+  update_check_ttl: "24h"
 
 # ── External MCP Servers (opt-in) ────────────────────────
 # mcp_allowlist:

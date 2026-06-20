@@ -52,6 +52,12 @@ class GitReinsDefaults:
     check_for_updates: bool = True
     update_check_ttl_hours: float = 24.0  # re-check after this many hours
 
+    # ── History / verdict persistence ──
+    history_enabled: bool = True
+    history_path: str = ".gitreins/history"
+    history_storage: str = "git"         # "git" or "filesystem"
+    history_max_verdicts: int = 1000
+
     # Metadata
     _source: str = field(default="(built-in defaults)", repr=False)
 
@@ -75,6 +81,10 @@ class GitReinsDefaults:
             tool_call_weight=float(defaults.get("tool_call_weight", self.tool_call_weight)),
             check_for_updates=bool(defaults.get("check_for_updates", self.check_for_updates)),
             update_check_ttl_hours=_coerce_float(defaults.get("update_check_ttl", self.update_check_ttl_hours)),
+            history_enabled=bool(defaults.get("history_enabled", self.history_enabled)),
+            history_path=str(defaults.get("history_path", self.history_path)),
+            history_storage=str(defaults.get("history_storage", self.history_storage)),
+            history_max_verdicts=int(defaults.get("history_max_verdicts", self.history_max_verdicts)),
             _source=".gitreins/config.yaml" if defaults else self._source,
         )
 
