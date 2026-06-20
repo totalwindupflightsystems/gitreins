@@ -39,11 +39,12 @@
 - **Commit:** `2138689`
 - **AC:** `test_judge_existing_task_exits_0` no longer makes real LLM calls — mock `engine.llm.LLMClient.chat` so it returns instantly with fake verdict JSON
 
-## [ ] GR-028: Unit tests for dead_code detector
+## [x] GR-028: Unit tests for dead_code detector
 - **Priority:** medium
 - **Files:** tests/test_dead_code.py (new), engine/dead_code.py
 - **Model:** MiniMax-M3 (minimax)
 - **AC:** Tests cover unreachable code, unused functions, unused imports, empty functions; all pass
+- **Result:** 38 tests pass (0.03s). Covers all 4 categories + edge cases.
 
 ## [ ] GR-029: Commit pending AGENTS.md + AC changes
 - **Priority:** low
