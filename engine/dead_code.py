@@ -186,7 +186,6 @@ class DeadCodeDetector:
             with open(fpath, "r") as f:
                 source = f.read()
             tree = ast.parse(source, filename=fpath)
-            lines = source.split("\n")
         except (SyntaxError, UnicodeDecodeError, FileNotFoundError, PermissionError):
             return findings
 

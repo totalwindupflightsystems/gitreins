@@ -67,3 +67,15 @@
 - **Files:** tests/test_cli.py, gitreins_mcp/server.py
 - **Fix:** Added GITREINS_MOCK_LLM_RESPONSE env var to 4 tests calling `task complete` in test_cli.py. Added API key guard to MCP server's _judge_evaluate to skip LLM eval when no key configured.
 - **Result:** 484 passed, 2 skipped, 0 failures.
+
+## [ ] GR-038: Fix F841 unused variable `lines` in dead_code.py
+- **Priority:** low
+- **Model:** direct (mechanical fix)
+- **Files:** engine/dead_code.py
+- **Fix:** Remove `lines = source.split("\n")` on line 189 — variable assigned but never read.
+
+## [ ] GR-039: Fix F401 unused import `__version__` in engine/__init__.py
+- **Priority:** low
+- **Model:** direct (mechanical fix)
+- **Files:** engine/__init__.py
+- **Fix:** Add `as __version__` re-export alias: `from engine.version import __version__ as __version__`.
