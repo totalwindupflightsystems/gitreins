@@ -51,14 +51,12 @@
 - **Priority:** high
 - **Commit:** `d335582`
 
-## [ ] GR-035: Clean working tree — remove untracked cruft
+## [x] GR-035: Clean working tree — remove untracked cruft
 - **Priority:** low
-- **Files:** .gitignore (modify), rm untracked files
-- **Model:** deepseek-v4-flash (deepseek) — mechanical task, no spawn needed
-- **AC:** Remove test artifacts (`.hermes-write-test`, `test_write`, etc.), add entries to .gitignore for `.coverage`, `.skylos/`, `*.tmp`. Verify `git status` shows clean tree (only intentional untracked dirs like `.hermes/`, `specs/`).
+- **Commit:** `0deb91a`
+- **Result:** Added *.db to .gitignore, removed .acl_test. .coverage/.skylos/*.tmp already gitignored.
 
-## [ ] GR-036: Add uv.lock to repo for deterministic builds
+## [x] GR-036: Add uv.lock to repo for deterministic builds
 - **Priority:** low
-- **Files:** uv.lock (git add), .gitignore (remove uv.lock if present)
-- **Model:** deepseek-v4-flash (deepseek) — mechanical
-- **AC:** `uv.lock` committed. `uv sync` produces consistent environment.
+- **Commit:** `0deb91a`
+- **Result:** uv.lock (1101 lines) committed.
