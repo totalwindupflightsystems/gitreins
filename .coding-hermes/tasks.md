@@ -49,3 +49,8 @@
 - **Files:** .gitleaksignore (new), .gitleaks.toml (new, additional)
 - **Model:** deepseek-v4-flash (deepseek) — handled directly by foreman (mechanical/config)
 - **Result:** Guard passes clean. Created `.gitleaks.toml` with `[allowlist] paths` excluding test files, `__pycache__/`, `.memory-bank/`, `.env`, and `.gitreins-sandbox/`. Created `.gitleaksignore` with fingerprints for `.env` and `.memory-bank/`. Both files auto-discovered by gitleaks — no code change needed. 75/75 secrets tests pass.
+
+## [x] GR-034: Fix hanging test_judge_requires_api_key
+- **Priority:** high
+- **Files:** tests/test_cli.py
+- **Result:** Converted test_judge_requires_api_key and test_judge_existing_task_runs_evaluation to use GITREINS_MOCK_LLM_RESPONSE mock (same pattern as GR-030). Both tests now pass in under 1s (was 15s+ for one, hang for the other). Full suite: 485 passed, 1 skipped.

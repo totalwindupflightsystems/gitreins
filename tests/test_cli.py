@@ -528,8 +528,14 @@ class TestJudgeExtended:
 
     def test_judge_existing_task_runs_evaluation(self, tmp_workdir):
         """Judge on existing task runs evaluation and prints summary."""
+        verdict_json = json.dumps({
+            "verdict": "COMPLETE",
+            "items": [{"criterion": "c1", "status": "PASS", "detail": "ok"}],
+            "summary": "all good",
+        })
         run_cli("task", "create", "judge-eval", "Judge Eval", "c1", cwd=tmp_workdir)
-        result = run_cli("judge", "judge-eval", cwd=tmp_workdir)
+        result = run_cli("judge", "judge-eval", cwd=tmp_workdir,
+                         extra_env={"GITREINS_MOCK_LLM_RESPONSE": json.dumps({"content": verdict_json})})
         assert "Judge Result" in result.stdout
         assert "Overall:" in result.stdout
 
@@ -537,9 +543,15 @@ class TestJudgeExtended:
         """Judge integration test that requires DEEPSEEK_API_KEY."""
         if not os.environ.get("DEEPSEEK_API_KEY"):
             pytest.skip("requires DEEPSEEK_API_KEY")
+        verdict_json = json.dumps({
+            "verdict": "COMPLETE",
+            "items": [{"criterion": "c1", "status": "PASS", "detail": "ok"}],
+            "summary": "all good",
+        })
+        mock_env = {"GITREINS_MOCK_LLM_RESPONSE": json.dumps({"content": verdict_json})}
         run_cli("task", "create", "judge-api", "Judge API", "c1", cwd=tmp_workdir)
         run_cli("task", "start", "judge-api", cwd=tmp_workdir)
-        run_cli("task", "complete", "judge-api", cwd=tmp_workdir)
-        result = run_cli("judge", "judge-api", cwd=tmp_workdir)
+        run_cli("task", "complete", "judge-api", cwd=tmp_workdir, extra_env=mock_env)
+        result = run_cli("judge", "judge-api", cwd=tmp_workdir, extra_env=mock_env)
         assert result.returncode in (0, 1)
         assert "Judge Result" in result.stdout or "Judge" in result.stdout
