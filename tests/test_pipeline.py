@@ -364,3 +364,73 @@ class TestExtendedPipeline:
         result = p.run({"id": "t1", "title": "x", "criteria": []}, trigger="pre-eval")
         # t1 not in pre-eval, so it should be skipped
         assert "t1" not in result["stages"]
+
+
+# ── Regression: pipeline fallback when config exists but lacks pipeline key ───
+
+
+class TestLoadPipelineConfigFallback:
+    """Regression tests for load_pipeline_config fallback behavior."""
+
+    def test_config_exists_no_pipeline_section_gets_tier1_plus_tier2(self, tmp_workdir):
+        """When .gitreins/config.yaml exists but has no 'pipeline' key,
+        load_pipeline_config must inject a two-tier pipeline (tier1 + tier2),
+        not the old broken single-tier default (secrets: true only)."""
+        import yaml
+        workdir = tmp_workdir
+        # Create a config.yaml with NO pipeline section (simulates existing config
+        # that was set up before pipeline was a concept)
+        config_dir = os.path.join(workdir, ".gitreins")
+        os.makedirs(config_dir, exist_ok=True)
+        config_path = os.path.join(config_dir, "config.yaml")
+        config_without_pipeline = {
+            "guards": {
+                "secrets": True,
+                "lint": True,
+                "tests": True,
+                "test_mode": "diff",
+                "test_command": "pytest -x --tb=short",
+            },
+            "evaluator": {
+                "model": "deepseek-v4-flash",
+                "max_iterations": 100,
+            },
+        }
+        with open(config_path, "w") as f:
+            yaml.dump(config_without_pipeline, f)
+
+        result = load_pipeline_config(workdir)
+
+        assert "pipeline" in result
+        stages = result["pipeline"]["stages"]
+        assert len(stages) >= 2, f"Expected at least tier1 + tier2, got {len(stages)} stage(s)"
+
+        tier1 = next((s for s in stages if s["id"] == "tier1"), None)
+        tier2 = next((s for s in stages if s["id"] == "tier2"), None)
+
+        assert tier1 is not None, "tier1 stage missing from fallback pipeline"
+        assert tier2 is not None, "tier2 stage missing from fallback pipeline"
+
+        # tier1 should have real steps, not just secrets: true
+        assert len(tier1["steps"]) >= 1
+        step_ids = [s["id"] for s in tier1["steps"]]
+        assert "secrets" in step_ids, "secrets step missing from tier1 fallback"
+
+        # tier2 should be an ai_eval stage
+        assert tier2["type"] == "ai_eval", f"tier2 should be ai_eval, got {tier2['type']}"
+        assert "tools" in tier2, "tier2 should have tools configured"
+        assert "max_iterations" in tier2, "tier2 should have max_iterations"
+
+    def test_config_missing_file_gets_two_tier_default(self, tmp_workdir):
+        """When .gitreins/config.yaml does not exist at all,
+        load_pipeline_config returns the full default (already correct)."""
+        workdir = tmp_workdir
+        result = load_pipeline_config(workdir)
+
+        stages = result["pipeline"]["stages"]
+        assert len(stages) >= 2
+        tier1 = next((s for s in stages if s["id"] == "tier1"), None)
+        tier2 = next((s for s in stages if s["id"] == "tier2"), None)
+        assert tier1 is not None
+        assert tier2 is not None
+        assert tier2["type"] == "ai_eval"

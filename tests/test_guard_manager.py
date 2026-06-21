@@ -2,12 +2,16 @@
 Unit tests for engine/guard_manager.py — pre-commit static checks.
 axiom:trace work_item=GR-001 spec=specs/04-Guard-Manager.md plan=.memory-bank/work-items/GR-001/plan.yaml
 """
+import os
 import pytest
 import subprocess
 from unittest import mock
 from unittest.mock import MagicMock, patch
 
-from engine.guard_manager import GuardManager, GuardResult, Tier1Result
+from engine.guard_manager import (
+    GuardManager, GuardResult, Tier1Result,
+    _discover_test_targets,
+)
 
 
 # ── Phase 1-3-1: GuardResult/Tier1Result dataclasses — step-1-3-1-1 ─────────
@@ -386,6 +390,171 @@ class TestExtendedGuardManager:
         summary = tr.summary
         assert "✓ secrets" in summary
         assert "✗ lint" in summary
+
+
+# ── Regression: GuardManager self-loads config + diff mode skip ──────────────
+
+
+class TestGuardManagerConfigAutoLoad:
+    """Regression: GuardManager must auto-load .gitreins/config.yaml
+    when no config dict is passed (e.g. from pre-commit hook script)."""
+
+    def test_auto_loads_test_mode_from_config(self, tmp_workdir):
+        """GuardManager() with no config dict reads test_mode from .gitreins/config.yaml."""
+        import yaml
+        workdir = tmp_workdir
+        config_dir = os.path.join(workdir, ".gitreins")
+        os.makedirs(config_dir, exist_ok=True)
+        config_path = os.path.join(config_dir, "config.yaml")
+        yaml.safe_dump(
+            {"guards": {"test_mode": "diff", "test_command": "echo ok"}},
+            open(config_path, "w"),
+        )
+
+        gm = GuardManager(workdir)
+        assert gm.test_mode == "diff", (
+            f"GuardManager must read test_mode from config, got '{gm.test_mode}'"
+        )
+
+    def test_auto_loads_defaults_when_config_missing(self, tmp_workdir):
+        """GuardManager() defaults to test_mode='full' when no config file exists."""
+        gm = GuardManager(tmp_workdir)
+        assert gm.test_mode == "full", (
+            f"Default test_mode should be 'full', got '{gm.test_mode}'"
+        )
+
+    def test_auto_load_does_not_override_explicit_config(self, tmp_workdir):
+        """Explicit config dict takes priority over .gitreins/config.yaml."""
+        import yaml
+        workdir = tmp_workdir
+        config_dir = os.path.join(workdir, ".gitreins")
+        os.makedirs(config_dir, exist_ok=True)
+        config_path = os.path.join(config_dir, "config.yaml")
+        yaml.safe_dump(
+            {"guards": {"test_mode": "full", "test_command": "echo ok"}},
+            open(config_path, "w"),
+        )
+
+        # Pass explicit config with diff — should win
+        gm = GuardManager(workdir, config={"guards": {"test_mode": "diff"}})
+        assert gm.test_mode == "diff", "Explicit config dict must take priority"
+
+    def test_auto_load_picks_up_secrets_flags(self, tmp_workdir):
+        """GuardManager reads enabled flags (secrets, lint, tests) from config."""
+        import yaml
+        workdir = tmp_workdir
+        config_dir = os.path.join(workdir, ".gitreins")
+        os.makedirs(config_dir, exist_ok=True)
+        config_path = os.path.join(config_dir, "config.yaml")
+        yaml.safe_dump(
+            {"guards": {"secrets": False, "lint": False, "tests": True, "test_command": "echo ok"}},
+            open(config_path, "w"),
+        )
+
+        gm = GuardManager(workdir)
+        assert gm.test_mode == "full"  # default
+        # Run all — secrets and lint should be skipped
+        result = gm.run_all()
+        # With secrets and lint disabled, only tests should run
+        # (secrets returns PASS when disabled, but run_all skips them entirely)
+        summary = result.summary
+        # Only tests should appear (secrets and lint are disabled → not in output)
+        assert "tests" in summary
+
+
+class TestDiscoverTestTargetsDiffMode:
+    """Regression: _discover_test_targets returns [] (not None) when
+    no matching test files found, and _check_tests skips with PASS."""
+
+    def test_returns_empty_list_when_no_test_file_exists(self, tmp_workdir):
+        """_discover_test_targets returns [] when staged file has no matching
+        test file, NOT None (which caused fallthrough to full suite)."""
+        import os
+        workdir = tmp_workdir
+        # Create a source file with NO corresponding test file
+        src_dir = os.path.join(workdir, "src")
+        os.makedirs(src_dir, exist_ok=True)
+        src_file = os.path.join(src_dir, "utils.py")
+        with open(src_file, "w") as f:
+            f.write("def helper(): pass\n")
+        # Stage it
+        subprocess.run(["git", "add", src_file], cwd=workdir, capture_output=True)
+
+        result = _discover_test_targets(workdir)
+        assert result == [], (
+            f"_discover_test_targets must return [] when no test files match, got {result!r}"
+        )
+
+    def test_returns_test_file_when_match_exists(self, tmp_workdir):
+        """_discover_test_targets returns the matching test file when it exists."""
+        import os
+        workdir = tmp_workdir
+        # Create a source file AND a matching test file
+        src_dir = os.path.join(workdir, "engine")
+        os.makedirs(src_dir, exist_ok=True)
+        src_file = os.path.join(src_dir, "thing.py")
+        with open(src_file, "w") as f:
+            f.write("def do_stuff(): pass\n")
+
+        tests_dir = os.path.join(workdir, "tests")
+        os.makedirs(tests_dir, exist_ok=True)
+        test_file = os.path.join(tests_dir, "test_thing.py")
+        with open(test_file, "w") as f:
+            f.write("def test_do_stuff(): pass\n")
+
+        # Stage the source
+        subprocess.run(["git", "add", src_file], cwd=workdir, capture_output=True)
+
+        result = _discover_test_targets(workdir)
+        assert len(result) == 1
+        assert "test_thing.py" in result[0]
+
+    def test_force_full_trigger_returns_none_for_config_change(self, tmp_workdir):
+        """When .gitreins/config.yaml is staged, _discover_test_targets returns None
+        (force-full trigger) to run the full test suite."""
+        import os
+        workdir = tmp_workdir
+        config_dir = os.path.join(workdir, ".gitreins")
+        os.makedirs(config_dir, exist_ok=True)
+        config_file = os.path.join(config_dir, "config.yaml")
+        with open(config_file, "w") as f:
+            f.write("guards: {test_mode: full}\n")
+        subprocess.run(["git", "add", config_file], cwd=workdir, capture_output=True)
+
+        result = _discover_test_targets(workdir)
+        assert result is None, (
+            f"Force-full trigger (.gitreins/config.yaml) must return None, got {result!r}"
+        )
+
+    def test_check_tests_skips_when_no_matching_test_files(self, tmp_workdir):
+        """_check_tests in diff mode returns PASS when no test files match,
+        instead of falling through to full suite (and timing out)."""
+        import os
+        workdir = tmp_workdir
+        # Create .gitreins/config.yaml with test_mode=diff
+        config_dir = os.path.join(workdir, ".gitreins")
+        os.makedirs(config_dir, exist_ok=True)
+        import yaml
+        with open(os.path.join(config_dir, "config.yaml"), "w") as f:
+            yaml.safe_dump({"guards": {"test_mode": "diff", "test_command": "echo ok"}}, f)
+
+        # Create a source file with NO matching test file
+        src_dir = os.path.join(workdir, "lib")
+        os.makedirs(src_dir, exist_ok=True)
+        src_file = os.path.join(src_dir, "helpers.py")
+        with open(src_file, "w") as f:
+            f.write("x=1\n")
+        subprocess.run(["git", "add", src_file], cwd=workdir, capture_output=True)
+
+        gm = GuardManager(workdir)
+        # _check_tests should return PASS with skip message, NOT run echo ok
+        result = gm._check_tests()
+        assert result.passed is True, (
+            f"_check_tests should PASS when no matching test files in diff mode, got: {result.output}"
+        )
+        assert "skipped" in result.output.lower(), (
+            f"Output should mention skip, got: {result.output}"
+        )
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
