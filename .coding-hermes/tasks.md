@@ -53,4 +53,5 @@
 ## [x] GR-034: Fix hanging test_judge_requires_api_key
 - **Priority:** high
 - **Files:** tests/test_cli.py
+- **Commit:** `d335582`
 - **Result:** Converted test_judge_requires_api_key and test_judge_existing_task_runs_evaluation to use GITREINS_MOCK_LLM_RESPONSE mock (same pattern as GR-030). Both tests now pass in under 1s (was 15s+ for one, hang for the other). Full suite: 485 passed, 1 skipped.
