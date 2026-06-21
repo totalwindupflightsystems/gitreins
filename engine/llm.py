@@ -116,7 +116,27 @@ class LLMClient:
         temperature: float = 0.1,
         max_tokens: int = 2048,
     ) -> LLMResponse:
-        """Send a chat completion request with retry logic."""
+        """Send a chat completion request with retry logic.
+
+        Set GITREINS_MOCK_LLM_RESPONSE to a JSON string to bypass
+        the real API and return the mock response directly. Useful
+        for subprocess-based tests where unittest.mock.patch() can't
+        reach the child process.
+        """
+        mock_resp_json = os.getenv("GITREINS_MOCK_LLM_RESPONSE")
+        if mock_resp_json:
+            data = json.loads(mock_resp_json)
+            content = data.get("content", "")
+            tool_calls_raw = data.get("tool_calls")
+            tool_calls = []
+            if tool_calls_raw is not None:
+                tool_calls = [ToolCall(
+                    id=tc.get("id", ""),
+                    name=tc.get("name", ""),
+                    arguments=tc.get("arguments", {}),
+                ) for tc in tool_calls_raw]
+            return LLMResponse(content=content, tool_calls=tool_calls, usage=LLMUsage())
+
         last_error = None
         for attempt in range(self.max_retries):
             try:
