@@ -496,5 +496,3 @@ def load_pipeline_config(workdir: str = ".") -> dict:
     except Exception as e:
         logger.warning("Failed to load pipeline config: %s", e)
         return {"pipeline": {"stages": []}}
-# test guard config loading
-# verify e2e
