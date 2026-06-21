@@ -127,10 +127,15 @@ class TestTaskListCLI:
 
     def test_list_shows_status_icons(self, tmp_workdir):
         """List shows correct status icons for each task."""
+        mock_env = {"GITREINS_MOCK_LLM_RESPONSE": json.dumps({"content": json.dumps({
+            "verdict": "COMPLETE",
+            "items": [{"criterion": "c1", "status": "PASS", "detail": "ok"}],
+            "summary": "all good",
+        })})}
         run_cli("task", "create", "pending1", "P1", "c1", cwd=tmp_workdir)
         run_cli("task", "create", "progress1", "P2", "c1", cwd=tmp_workdir)
         run_cli("task", "start", "progress1", cwd=tmp_workdir)
-        run_cli("task", "complete", "progress1", cwd=tmp_workdir)
+        run_cli("task", "complete", "progress1", cwd=tmp_workdir, extra_env=mock_env)
         result = run_cli("task", "list", cwd=tmp_workdir)
         assert result.returncode == 0
         assert u"○" in result.stdout  # pending icon
@@ -138,10 +143,15 @@ class TestTaskListCLI:
 
     def test_list_with_status_filter(self, tmp_workdir):
         """List --status pending shows only pending tasks."""
+        mock_env = {"GITREINS_MOCK_LLM_RESPONSE": json.dumps({"content": json.dumps({
+            "verdict": "COMPLETE",
+            "items": [{"criterion": "c1", "status": "PASS", "detail": "ok"}],
+            "summary": "all good",
+        })})}
         run_cli("task", "create", "pend", "Pending", "c1", cwd=tmp_workdir)
         run_cli("task", "create", "done", "Done", "c1", cwd=tmp_workdir)
         run_cli("task", "start", "done", cwd=tmp_workdir)
-        run_cli("task", "complete", "done", cwd=tmp_workdir)
+        run_cli("task", "complete", "done", cwd=tmp_workdir, extra_env=mock_env)
         result = run_cli("task", "list", "--status", "pending", cwd=tmp_workdir)
         assert result.returncode == 0
         assert "pend" in result.stdout
@@ -249,9 +259,14 @@ class TestExtendedCLI:
 
     def test_complete_existing_task(self, tmp_workdir):
         """Complete existing task after creating and starting it."""
+        mock_env = {"GITREINS_MOCK_LLM_RESPONSE": json.dumps({"content": json.dumps({
+            "verdict": "COMPLETE",
+            "items": [{"criterion": "c1", "status": "PASS", "detail": "ok"}],
+            "summary": "all good",
+        })})}
         run_cli("task", "create", "comp-me", "Complete Me", "c1", cwd=tmp_workdir)
         run_cli("task", "start", "comp-me", cwd=tmp_workdir)
-        result = run_cli("task", "complete", "comp-me", cwd=tmp_workdir)
+        result = run_cli("task", "complete", "comp-me", cwd=tmp_workdir, extra_env=mock_env)
         assert result.returncode == 0
         assert "Complete" in result.stdout or "complete" in result.stdout
 
@@ -505,10 +520,15 @@ class TestEdgeCases:
 
     def test_list_no_filter_shows_all_tasks(self, tmp_workdir):
         """List without filter shows all tasks regardless of status."""
+        mock_env = {"GITREINS_MOCK_LLM_RESPONSE": json.dumps({"content": json.dumps({
+            "verdict": "COMPLETE",
+            "items": [{"criterion": "", "status": "PASS", "detail": "ok"}],
+            "summary": "all good",
+        })})}
         run_cli("task", "create", "pend1", "Pending", cwd=tmp_workdir)
         run_cli("task", "create", "comp1", "Complete", cwd=tmp_workdir)
         run_cli("task", "start", "comp1", cwd=tmp_workdir)
-        run_cli("task", "complete", "comp1", cwd=tmp_workdir)
+        run_cli("task", "complete", "comp1", cwd=tmp_workdir, extra_env=mock_env)
         result = run_cli("task", "list", cwd=tmp_workdir)
         assert "pend1" in result.stdout
         assert "comp1" in result.stdout

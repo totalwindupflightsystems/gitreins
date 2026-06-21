@@ -307,6 +307,10 @@ class GitReinsMCPServer:
         """Run full evaluation pipeline. Accepts individual cap params or legacy eval_cap string."""
         from engine.eval_cap import EvalCap
 
+        # Skip LLM evaluation if no API key configured (avoid hanging in tests)
+        if not self.llm.api_key:
+            return {"error": "LLM not configured — set GITREINS_LLM_API_KEY"}
+
         # Build EvalCap from params
         cap = EvalCap()
         if eval_cap:

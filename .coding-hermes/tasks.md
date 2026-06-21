@@ -60,3 +60,10 @@
 - **Priority:** low
 - **Commit:** `0deb91a`
 - **Result:** uv.lock (1101 lines) committed.
+
+## [x] GR-037: Fix hanging CLI and MCP integration tests
+- **Priority:** high
+- **Model:** direct (mechanical fix, no spawn)
+- **Files:** tests/test_cli.py, gitreins_mcp/server.py
+- **Fix:** Added GITREINS_MOCK_LLM_RESPONSE env var to 4 tests calling `task complete` in test_cli.py. Added API key guard to MCP server's _judge_evaluate to skip LLM eval when no key configured.
+- **Result:** 484 passed, 2 skipped, 0 failures.
