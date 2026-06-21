@@ -230,7 +230,6 @@ class TestTaskManagerEdgeCases:
 
     def test_load_corrupt_yaml(self, tmp_workdir):
         """TaskManager._load handles corrupt YAML gracefully."""
-        import yaml
         config_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
         # Write invalid YAML
@@ -261,7 +260,7 @@ class TestTaskManagerExtendedEdgeCases:
 
     def test_created_at_is_close_to_now(self, task_manager, sample_task_dict):
         """created_at timestamp is within 5 seconds of task creation."""
-        from datetime import datetime, timezone
+        from datetime import timezone
         before = datetime.now(timezone.utc)
         task = task_manager.create(
             sample_task_dict["id"],

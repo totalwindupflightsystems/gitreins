@@ -2,9 +2,7 @@
 Unit tests for engine/llm.py — multi-provider LLM client with retry logic.
 axiom:trace work_item=GR-001 spec=specs/02-LLM-Interface.md plan=.memory-bank/work-items/GR-001/plan.yaml
 """
-import os
 import pytest
-from unittest import mock
 from unittest.mock import MagicMock, patch
 
 import requests

@@ -3,9 +3,6 @@ Unit tests for engine/pipeline.py — configurable evaluation pipeline.
 axiom:trace work_item=GR-001 spec=specs/06-Pipeline-Engine.md plan=.memory-bank/work-items/GR-001/plan.yaml
 """
 import os
-import json
-import pytest
-from unittest import mock
 from unittest.mock import MagicMock, patch
 
 import yaml
@@ -204,7 +201,7 @@ class TestLoadPipelineConfig:
 
     def test_config_file_no_pipeline_key_returns_default(self, tmp_workdir):
         """Config file exists but no 'pipeline' key → returns default."""
-        import os, yaml
+        import os
         config_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
         with open(os.path.join(config_dir, "config.yaml"), "w") as f:
@@ -215,7 +212,7 @@ class TestLoadPipelineConfig:
     def test_config_file_empty_stages_returns_default(self, tmp_workdir):
         """Config file has pipeline but no stages → returns minimal default pipeline
         with tier1+secrets stage."""
-        import os, yaml
+        import os
         config_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
         with open(os.path.join(config_dir, "config.yaml"), "w") as f:
@@ -376,7 +373,6 @@ class TestLoadPipelineConfigFallback:
         """When .gitreins/config.yaml exists but has no 'pipeline' key,
         load_pipeline_config must inject a two-tier pipeline (tier1 + tier2),
         not the old broken single-tier default (secrets: true only)."""
-        import yaml
         workdir = tmp_workdir
         # Create a config.yaml with NO pipeline section (simulates existing config
         # that was set up before pipeline was a concept)

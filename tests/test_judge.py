@@ -2,9 +2,8 @@
 Unit tests for engine/judge.py — Judge orchestrator and pipeline dispatch.
 axiom:trace work_item=GR-001 spec=specs/07-Judge-Orchestrator.md plan=.memory-bank/work-items/GR-001/plan.yaml
 """
-import pytest
 from unittest import mock
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import patch
 
 from engine.judge import Judge, JudgeResult
 from engine.guard_manager import GuardResult, Tier1Result
@@ -125,7 +124,8 @@ class TestJudgeEvaluateTask:
         """evaluate_task runs pipeline when pipeline config has stages."""
         from engine.task_manager import Task
         # Write a config with pipeline stages
-        import os, yaml
+        import os
+        import yaml
         config_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
         config = {
@@ -174,7 +174,8 @@ class TestJudgeEvaluateTask:
 
     def test_run_precommit_runs_pipeline(self, judge, tmp_workdir):
         """run_precommit runs pipeline with trigger='pre-commit'."""
-        import os, yaml
+        import os
+        import yaml
         config_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
         config = {
@@ -233,7 +234,8 @@ class TestExtendedJudge:
     def test_evaluate_task_pipeline_exception_returns_error(self, judge, tmp_workdir, llm_client):
         """evaluate_task catches pipeline exception and returns error in result."""
         from engine.task_manager import Task
-        import os, yaml
+        import os
+        import yaml
         config_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
         config = {
@@ -283,8 +285,7 @@ class TestExtendedJudge:
 
     def test_judge_result_stores_tier1_and_tier2(self):
         """BUGFIX: JudgeResult.tier1 and .tier2 are populated by _run_legacy."""
-        from engine.judge import Judge, JudgeResult
-        from engine.llm import LLMClient
+        from engine.judge import JudgeResult
 
         verdict = Verdict(verdict="COMPLETE", items=[
             VerdictItem(criterion="c1", status="PASS", detail="ok")

@@ -18,7 +18,6 @@ the test does not verify any production behaviour.
 Do not use as a template — these tests are deliberately broken.
 """
 
-import pytest
 
 
 # ── The system under test (SUT) — intentionally trivial so the tests
@@ -44,7 +43,7 @@ def test_add_with_assert_true():
     FLAW: the only assertion is `assert True`. The SUT could return
     0 or raise and this test would still pass.
     """
-    result = add(2, 3)
+    add(2, 3)
     assert True                        # ← tautology — passes for any result
 
 

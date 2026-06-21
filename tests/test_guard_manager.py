@@ -3,9 +3,7 @@ Unit tests for engine/guard_manager.py — pre-commit static checks.
 axiom:trace work_item=GR-001 spec=specs/04-Guard-Manager.md plan=.memory-bank/work-items/GR-001/plan.yaml
 """
 import os
-import pytest
 import subprocess
-from unittest import mock
 from unittest.mock import MagicMock, patch
 
 from engine.guard_manager import (
@@ -304,7 +302,7 @@ class TestExtendedGuardManager:
         mock_run.returncode = 0
         mock_run.stdout = "gitleaks: clean"
         mock_run.stderr = ""
-        with patch('subprocess.run', return_value=mock_run) as mock_sub:
+        with patch('subprocess.run', return_value=mock_run):
             result = gm._check_secrets()
         assert "gitleaks" in result.output
         assert result.passed is True

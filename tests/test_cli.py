@@ -7,8 +7,6 @@ import os
 import sys
 import subprocess
 import pytest
-from unittest import mock
-from unittest.mock import MagicMock, patch
 
 
 # Get the path to the cli module

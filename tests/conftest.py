@@ -3,10 +3,6 @@ Shared pytest fixtures for GitReins tests.
 axiom:trace work_item=GR-001 spec=specs/05-Task-Manager.md plan=.memory-bank/work-items/GR-001/plan.yaml step=step-1-1-1-1
 """
 
-import os
-import tempfile
-import shutil
-from pathlib import Path
 import pytest
 
 

@@ -108,3 +108,9 @@
 - **Files:** tests/test_eval_cap.py
 - **AC:** All 4 TestEvalCapRealEvaluator tests skip when API key is invalid (401), instead of failing. Full test suite (excluding llm-marked tests) continues to pass.
 - **Fix:** Augment `_require_llm_key` fixture to check `GITREINS_REAL_LLM_TESTS=1` env var. When not set, skip with reason. Keeps existing key-existence check as fallback.
+
+## [x] GR-045: Commit pending import cleanup and evaluator.py param fix
+- **Priority:** low
+- **Model:** direct (mechanical, no spawn)
+- **Files:** engine/evaluator.py, tests/conftest.py, tests/test_cli.py, tests/test_llm.py, tests/test_evaluator.py, tests/test_guard_manager.py, tests/test_judge.py, tests/test_pipeline.py, tests/test_secrets_scanner.py, tests/test_task_manager.py, tests/test_v07_features.py, tests/reliability/dead-tests/test_arithmetic.py, .hermes/acceptance-criteria.md
+- **AC:** All pending working-tree changes committed. Guard passes. Tests pass.

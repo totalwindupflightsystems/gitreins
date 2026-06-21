@@ -530,8 +530,11 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         except Exception as e:
             return {"error": str(e)}
 
-    def _tool_run_command(self, cmd: str) -> dict:
+    def _tool_run_command(self, cmd: str = None, command: str = None) -> dict:
         """Run a shell command."""
+        cmd = cmd or command
+        if not cmd:
+            return {"error": "No command provided"}
         try:
             result = subprocess.run(
                 cmd,

@@ -3,17 +3,12 @@ Unit tests for engine/evaluator.py — agentic LLM loop with tools and dedup.
 axiom:trace work_item=GR-001 spec=specs/03-Agentic-Evaluator.md plan=.memory-bank/work-items/GR-001/plan.yaml
 """
 import os
-import json
-import pytest
-import subprocess
-from unittest import mock
-from unittest.mock import MagicMock, PropertyMock, patch
+from unittest.mock import MagicMock, patch
 
 from engine.evaluator import (
     AgenticEvaluator, Verdict, VerdictItem,
-    EVALUATOR_SYSTEM_PROMPT, EVALUATOR_TOOLS,
 )
-from engine.llm import LLMClient, LLMResponse, ToolCall
+from engine.llm import LLMResponse, ToolCall
 
 
 # ── Phase 1-4-1: AgenticEvaluator tools, dedup, verdict parsing ──────────────
@@ -91,7 +86,6 @@ class TestRunCommand:
 
     def test_run_command_timeout(self, evaluator, llm_client, tmp_workdir):
         """run_command with short timeout → timeout error in <5s."""
-        from engine.evaluator import AgenticEvaluator
         fast_eval = AgenticEvaluator(llm_client, tmp_workdir, max_iterations=5, command_timeout=2)
         result = fast_eval._tool_run_command("sleep 5")
         assert "error" in result
@@ -332,7 +326,6 @@ class TestMaxIterationsAndErrors:
 
     def test_default_max_iterations_is_100(self, llm_client, tmp_workdir):
         """Default max_iterations is 100 (was 15 — too low for complex criteria)."""
-        from engine.evaluator import AgenticEvaluator
         evaluator = AgenticEvaluator(llm_client, tmp_workdir)
         assert evaluator.max_iterations == 100
 
@@ -346,7 +339,6 @@ class TestMaxIterationsAndErrors:
     def test_custom_max_iterations(self, evaluator):
         """Evaluator respects custom max_iterations."""
         assert evaluator.max_iterations == 5
-        from engine.evaluator import AgenticEvaluator
         custom = AgenticEvaluator(evaluator.llm, evaluator.workdir, max_iterations=20)
         assert custom.max_iterations == 20
 

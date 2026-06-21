@@ -9,9 +9,7 @@ Integration tests for v0.7.0 features:
 
 import json
 import os
-import subprocess
 import sys
-import tempfile
 
 import pytest
 
@@ -166,7 +164,7 @@ class TestTaskDependencies:
         os.makedirs(os.path.join(tmp_path, ".gitreins"), exist_ok=True)
         tm = TaskManager(workdir=str(tmp_path))
 
-        dep_task = tm.create("dep-a", "Dependency A", [])
+        tm.create("dep-a", "Dependency A", [])
         tm.complete("dep-a")
 
         task = tm.create("main-task", "Main Task", ["do something"], depends_on=["dep-a"])
@@ -323,7 +321,7 @@ class TestInit:
 
         lang = {"is_go": True, "is_python": False, "is_ts": False}
         existing = {"secrets": False}  # explicit override
-        added = _fill_missing_guards(existing, lang, "go test ./...")
+        _fill_missing_guards(existing, lang, "go test ./...")
         # secrets should NOT be overwritten
         assert existing["secrets"] is False
         # missing keys should be added
