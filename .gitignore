@@ -37,3 +37,4 @@ temporal-vector/
 # Temp
 test_write
 *.tmp
+*.db
