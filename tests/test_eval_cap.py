@@ -11,7 +11,6 @@ import yaml
 
 from engine.eval_cap import (
     EvalCap, parse_eval_cap, eval_cap_from_config,
-    _parse_time, _parse_tokens,
 )
 from engine.evaluator import AgenticEvaluator
 from engine.llm import LLMClient
@@ -357,6 +356,8 @@ class TestEvalCapRealEvaluator:
 
     @pytest.fixture(autouse=True)
     def _require_llm_key(self):
+        if os.getenv("GITREINS_REAL_LLM_TESTS") != "1":
+            pytest.skip("GITREINS_REAL_LLM_TESTS=1 not set")
         api_key = os.getenv("GITREINS_LLM_API_KEY", "") or os.getenv("DEEPSEEK_API_KEY", "")
         if not api_key:
             pytest.skip("No LLM API key configured")
@@ -474,10 +475,8 @@ class TestPipelineCapRegression:
     def test_run_ai_eval_default_is_negative(self):
         """_run_ai_eval's default for max_iterations must be -1."""
         from engine.pipeline import Pipeline
-        from engine.llm import LLMClient
         p = Pipeline({}, workdir=".")
         # Simulate a minimal step_def with no max_iterations key
-        step_def = {"id": "tier2", "type": "ai_eval"}
         # The _run_ai_eval method defaults to -1
         # (We verify via code inspection — the method reads step_def.get("max_iterations", -1))
         # This test is here to document and assert the contract.

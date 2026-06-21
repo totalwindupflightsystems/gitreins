@@ -101,3 +101,10 @@
 - **Model:** direct (one-line fix)
 - **Files:** .gitignore
 - **Result:** Added `.gitreins/history/` to `.gitignore`. Untracked 2 existing history files via `git rm --cached`. Future guard run history will not be committed.
+
+## [x] GR-044: Fix TestEvalCapRealEvaluator — skip on invalid API key
+- **Priority:** medium
+- **Model:** direct (mechanical fix, no spawn)
+- **Files:** tests/test_eval_cap.py
+- **AC:** All 4 TestEvalCapRealEvaluator tests skip when API key is invalid (401), instead of failing. Full test suite (excluding llm-marked tests) continues to pass.
+- **Fix:** Augment `_require_llm_key` fixture to check `GITREINS_REAL_LLM_TESTS=1` env var. When not set, skip with reason. Keeps existing key-existence check as fallback.
