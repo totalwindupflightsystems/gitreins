@@ -24,7 +24,6 @@ import os
 import shutil
 import subprocess
 import tempfile
-import time
 from datetime import datetime
 
 logger = logging.getLogger("gitreins.persist")
@@ -236,7 +235,7 @@ class VerdictPersister:
         return "\n".join(lines)
 
     def _git_commit(self, entry_dir: str, task_id: str, passed: bool) -> str:
-        """Commit the verdict entry to the gitreins orphan branch. Returns short hash or 'dry-run'."""
+        """Commit verdict entry to gitreins orphan branch. Returns short hash or 'dry-run'."""
         git_dir = os.path.join(self.workdir, ".git")
         if not os.path.exists(git_dir):
             logger.warning("No .git directory — verdict files written but not committed")

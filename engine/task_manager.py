@@ -90,7 +90,10 @@ class TaskManager:
         with open(self._tasks_file, "w") as f:
             yaml.dump({"tasks": tasks_list}, f, default_flow_style=False, sort_keys=False)
 
-    def create(self, id: str, title: str, criteria: list[str], depends_on: list[str] | None = None) -> Task:
+    def create(
+        self, id: str, title: str, criteria: list[str],
+        depends_on: list[str] | None = None
+    ) -> Task:
         """Create a new task. Optional depends_on lists task IDs that must complete first."""
         now = datetime.now(timezone.utc).isoformat()
         task = Task(

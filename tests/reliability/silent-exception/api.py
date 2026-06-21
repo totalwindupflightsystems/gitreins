@@ -21,7 +21,6 @@ Do not use as a template — this code is deliberately broken.
 import json
 import urllib.request
 import urllib.error
-from typing import Any
 
 
 # ── Flaw 1: bare `except:` followed by `pass` ────────────────────────────────
@@ -39,7 +38,7 @@ def fetch_user(user_id: int) -> dict | None:
         with urllib.request.urlopen(url, timeout=5) as resp:
             data = resp.read().decode("utf-8")
             return json.loads(data)
-    except:
+    except:  # noqa: E722
         pass
 
 

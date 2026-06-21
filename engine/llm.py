@@ -84,7 +84,10 @@ class LLMClient:
         self.api_key = api_key or os.getenv("GITREINS_LLM_API_KEY", "")
         if not self.api_key:
             # Fallback: try common provider keys
-            for env_key in ("NEURALWATT_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY"):
+            for env_key in (
+                "NEURALWATT_API_KEY", "OPENAI_API_KEY",
+                "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY"
+            ):
                 self.api_key = os.getenv(env_key, "")
                 if self.api_key:
                     break
@@ -107,7 +110,10 @@ class LLMClient:
         else:
             self._chat_url = f"{base_url}/chat/completions"
 
-        logger.debug("LLM client: provider=%s model=%s url=%s", self.provider, self.model, self._chat_url)
+        logger.debug(
+            "LLM client: provider=%s model=%s url=%s",
+            self.provider, self.model, self._chat_url
+        )
 
     def chat(
         self,
@@ -150,7 +156,10 @@ class LLMClient:
                 logger.warning("HTTP error (attempt %d/%d): %s", attempt + 1, self.max_retries, e)
             except requests.RequestException as e:
                 last_error = e
-                logger.warning("Network error (attempt %d/%d): %s", attempt + 1, self.max_retries, e)
+                logger.warning(
+                    "Network error (attempt %d/%d): %s",
+                    attempt + 1, self.max_retries, e
+                )
 
             if attempt < self.max_retries - 1:
                 wait = 2 ** attempt
@@ -352,7 +361,13 @@ class LLMClient:
                         "type": "tool_use",
                         "id": tc["id"],
                         "name": tc["function"]["name"],
-                        "input": json.loads(tc["function"]["arguments"]) if isinstance(tc["function"]["arguments"], str) else tc["function"]["arguments"],
+                        "input": (
+                            json.loads(tc["function"]["arguments"])
+                            if isinstance(
+                                tc["function"]["arguments"], str
+                            )
+                            else tc["function"]["arguments"]
+                        ),
                     })
                 result.append({"role": "assistant", "content": content_blocks})
             else:

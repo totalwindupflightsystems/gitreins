@@ -22,7 +22,6 @@ import logging
 import os
 import re
 import subprocess
-import time
 from dataclasses import dataclass, field
 
 from engine.llm import LLMClient, ToolCall
@@ -35,6 +34,8 @@ EVALUATOR_SYSTEM_PROMPT = """You are a code quality evaluator. Your job is to ju
 ## YOUR TOOLS
 
 You have tools to read files, run commands, and search the codebase. Use them aggressively — don't guess. Read the actual code, run the actual tests.
+
+If available, use read_static_analysis to check for type errors and static analysis warnings before judging criteria — type violations are hard evidence for FAIL.
 
 For each criterion:
 1. Read the relevant files
@@ -106,6 +107,19 @@ EVALUATOR_TOOLS = [
                     "file_glob": {"type": "string", "description": "Optional: glob to filter files (e.g., '*.py')."},
                 },
                 "required": ["regex"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_static_analysis",
+            "description": "Get static analysis diagnostics (type errors, warnings) for the project. Returns structured diagnostics from tools like mypy and pyright. Use this to check for type safety before judging criteria.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Optional: specific file or directory path. Omit to get diagnostics for all files."},
+                },
             },
         },
     },
@@ -293,6 +307,13 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             {"role": "user", "content": task_prompt},
         ]
 
+        # Build tools list based on config
+        config = self._load_config()
+        evaluator_cfg = config.get("evaluator", {})
+        tools = list(EVALUATOR_TOOLS)  # copy
+        if not evaluator_cfg.get("static_analysis_diagnostics", False):
+            tools = [t for t in tools if t["function"]["name"] != "read_static_analysis"]
+
         # Start tracking
         self.eval_cap.start()
 
@@ -310,7 +331,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 )
 
             try:
-                response = self.llm.chat(messages, tools=EVALUATOR_TOOLS)
+                response = self.llm.chat(messages, tools=tools)
             except Exception as e:
                 logger.error("LLM call failed on iteration %d: %s", iteration, e)
                 return Verdict(
@@ -449,6 +470,8 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 return self._tool_detect_dead_code()
             elif tc.name == "skylos_scan":
                 return self._tool_skylos_scan()
+            elif tc.name == "read_static_analysis":
+                return self._tool_read_static_analysis(**tc.arguments)
             else:
                 return {"error": f"Unknown tool: {tc.name}"}
         except Exception as e:
@@ -585,6 +608,54 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             }
         except Exception as e:
             return {"error": str(e)}
+
+    def _tool_read_static_analysis(self, path: str | None = None) -> dict:
+        """Return static analysis diagnostics for the project or a specific path."""
+        from engine.static_analysis import run_static_check
+
+        config = self._load_config()
+        evaluator_cfg = config.get("evaluator", {})
+        if not evaluator_cfg.get("static_analysis_diagnostics", False):
+            return {"error": "static_analysis_diagnostics is not enabled in .gitreins/config.yaml"}
+
+        guards_cfg = config.get("guards", {})
+        static_tools = guards_cfg.get("static_analysis_tools", {})
+
+        # Determine which language tools to run
+        lang_tools: list[str] = []
+        for lang, tools in static_tools.items():
+            lang_tools.extend(tools)
+
+        if not lang_tools:
+            return {"diagnostics": [], "note": "No static analysis tools configured"}
+
+        # Determine workdir: if path is provided, use its parent; otherwise project root
+        import os
+        target_dir = self.workdir
+        if path:
+            abs_path = os.path.join(self.workdir, path)
+            if os.path.isfile(abs_path):
+                target_dir = os.path.dirname(abs_path)
+            elif os.path.isdir(abs_path):
+                target_dir = abs_path
+
+        all_diagnostics: list[dict] = []
+        for tool in lang_tools:
+            try:
+                diags = run_static_check(tool, target_dir)
+                all_diagnostics.extend(diags)
+            except Exception as exc:
+                all_diagnostics.append({
+                    "tool": tool, "error": str(exc),
+                    "file": "", "line": 0, "severity": "error",
+                    "message": f"Tool failed: {exc}", "code": "",
+                })
+
+        return {
+            "diagnostics": all_diagnostics,
+            "count": len(all_diagnostics),
+            "tools_used": lang_tools,
+        }
 
     def _tool_get_task_item(self, id: str) -> dict:
         """Get task definition."""

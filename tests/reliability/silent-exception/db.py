@@ -72,7 +72,7 @@ def connect(path: str = "app.db") -> sqlite3.Connection | None:
         _connection = sqlite3.connect(path)
         _connection.execute("PRAGMA journal_mode=WAL")
         return _connection
-    except:
+    except:  # noqa: E722
         return None
 
 

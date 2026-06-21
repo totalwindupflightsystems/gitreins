@@ -161,7 +161,10 @@ class EvalCap:
         """Human-readable summary of caps and current usage."""
         parts = []
         if self.max_iterations > 0:
-            parts.append(f"iterations: {_fmt_num(self.iteration_credit)}/{_fmt_num(self.max_iterations)}")
+            parts.append(
+                f"iterations: {_fmt_num(self.iteration_credit)}"
+                f"/{_fmt_num(self.max_iterations)}"
+            )
         elif self.max_iterations == -1:
             parts.append("iterations: unlimited")
         if self.max_seconds > 0:
@@ -179,8 +182,13 @@ class EvalCap:
                     cache_parts.append(f"cache-write {_fmt_tokens(self.cumulative_cache_write)}")
                 in_str += f" ({', '.join(cache_parts)})"
             parts.append(in_str)
-            parts.append(f"out: {_fmt_tokens(self.cumulative_output_tokens)}"
-                         + (f"/{_fmt_tokens(self.max_output_tokens)}" if self.max_output_tokens > 0 else ""))
+            parts.append(
+                f"out: {_fmt_tokens(self.cumulative_output_tokens)}"
+                + (
+                    f"/{_fmt_tokens(self.max_output_tokens)}"
+                    if self.max_output_tokens > 0 else ""
+                )
+            )
         if not parts:
             return "no caps (unlimited)"
         return ", ".join(parts)
@@ -195,7 +203,7 @@ class EvalCap:
 
 # ── Parsing helpers ────────────────────────────────────────
 
-_TIME_RE = re.compile(r"^(\d+)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours)$")
+_TIME_RE = re.compile(r"^(\d+)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours)$")  # noqa: E501
 _TOKEN_RE = re.compile(r"^(\d+\.?\d*)(k|m|K|M)?$")
 _SLASH_TOKEN_RE = re.compile(r"^(\d+\.?\d*)(k|m|K|M)?\s*/\s*(\d+\.?\d*)(k|m|K|M)?$")
 

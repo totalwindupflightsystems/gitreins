@@ -102,14 +102,21 @@ class Judge:
         """Run pre-commit pipeline stages only. Returns True if commit should proceed."""
         config = load_pipeline_config(self.workdir)
         pipeline = Pipeline(config, self.workdir, llm=self.llm)
-        result = pipeline.run({"id": "_precommit", "title": "pre-commit", "criteria": []}, trigger="pre-commit")
+        result = pipeline.run(
+            {"id": "_precommit", "title": "pre-commit", "criteria": []},
+            trigger="pre-commit"
+        )
         return result.get("passed", True)
 
 
 class JudgeResult:
     """Result of running the judge pipeline."""
 
-    def __init__(self, task_id: str, passed: bool = False, pipeline_result: dict = None, verdict=None, tier1=None, tier2=None):
+    def __init__(
+        self, task_id: str, passed: bool = False,
+        pipeline_result: dict = None, verdict=None,
+        tier1=None, tier2=None
+    ):
         self.task_id = task_id
         self.passed = passed
         self.pipeline_result = pipeline_result or {}

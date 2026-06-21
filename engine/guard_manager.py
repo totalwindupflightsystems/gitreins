@@ -26,6 +26,7 @@ import subprocess
 from dataclasses import dataclass, field
 
 from engine.guards import check_go_lint, check_go_tests, check_go_build
+from engine.static_analysis import run_static_check
 
 logger = logging.getLogger("gitreins.guard")
 
@@ -227,7 +228,9 @@ class GuardManager:
             "tests": guards_cfg.get("tests", True),
             "dead_code": guards_cfg.get("dead_code", False),  # opt-in: Python-only, can be noisy
             "skylos": guards_cfg.get("skylos", False),  # opt-in: needs pip install
+            "static_analysis": guards_cfg.get("static_analysis", False),  # opt-in: type checkers
         }
+        self._static_tools = guards_cfg.get("static_analysis_tools", {})
 
         # Test mode: "full" (default) or "diff"
         self._test_mode = guards_cfg.get("test_mode", "full")
@@ -235,6 +238,11 @@ class GuardManager:
         # Project type detection
         self._is_go = os.path.isfile(os.path.join(self.workdir, "go.mod"))
         self._go_guards = guards_cfg.get("go", {})
+        self._is_ruby = os.path.isfile(os.path.join(self.workdir, "Gemfile"))
+        self._is_php = os.path.isfile(os.path.join(self.workdir, "composer.json"))
+        self._has_sql = any(
+            f.endswith(".sql") for f in _get_staged_files(self.workdir)
+        ) or os.path.isdir(os.path.join(self.workdir, "migrations"))
 
     def run_all(self) -> Tier1Result:
         """Run all enabled Tier 1 guards.
@@ -258,6 +266,9 @@ class GuardManager:
 
         if self._enabled["skylos"]:
             results.append(self._check_skylos())
+
+        if self._enabled["static_analysis"]:
+            results.append(self._check_static_analysis())
 
         if self._is_go:
             if self._go_guards.get("build", True):
@@ -588,6 +599,75 @@ class GuardManager:
             return GuardResult(name="skylos", passed=True, output="skylos timed out")
         except Exception as e:
             return GuardResult(name="skylos", passed=False, error=str(e))
+
+    def _check_static_analysis(self) -> GuardResult:
+        """Run configured static analysis tools against the project.
+
+        Respects static_analysis_tools config key. Only runs tools that
+        exist on PATH. Returns FAIL if any tool finds errors.
+        """
+        if self._is_go:
+            return GuardResult(
+                name="static_analysis", passed=True,
+                output="Go compiler covers static analysis — skipped"
+            )
+        # Check for Python, Ruby, PHP, SQL
+        lang_tools: list[str] = []
+        if os.path.isfile(os.path.join(self.workdir, "pyproject.toml")) or \
+           os.path.isfile(os.path.join(self.workdir, "setup.py")) or \
+           os.path.isfile(os.path.join(self.workdir, "setup.cfg")):
+            lang_tools = self._static_tools.get("python", [])
+        elif self._is_ruby:
+            lang_tools = self._static_tools.get("ruby", [])
+        elif self._is_php:
+            lang_tools = self._static_tools.get("php", [])
+        elif self._has_sql:
+            lang_tools = self._static_tools.get("sql", [])
+
+        if not lang_tools:
+            return GuardResult(
+                name="static_analysis", passed=True,
+                output="No static analysis tools configured for this language"
+            )
+
+        all_diagnostics: list[str] = []
+        had_errors = False
+
+        for tool in lang_tools:
+            try:
+                diags = run_static_check(tool, self.workdir)
+            except Exception as exc:
+                logger.warning("static_analysis %s failed: %s", tool, exc)
+                continue
+
+            if not diags:
+                all_diagnostics.append(f"  {tool} — clean")
+                continue
+
+            for d in diags:
+                severity = d.get("severity", "error")
+                prefix = "✗" if severity == "error" else "⚠"
+                all_diagnostics.append(
+                    f"  {prefix} {d['file']}:{d['line']} [{tool}] {d['message']}"
+                )
+                if severity == "error":
+                    had_errors = True
+
+        if not all_diagnostics:
+            return GuardResult(
+                name="static_analysis", passed=True,
+                output="No tools ran — check static_analysis_tools config"
+            )
+
+        output = "\n".join(all_diagnostics)
+        if len(output) > 2000:
+            output = output[:2000] + "\n... [truncated]"
+
+        return GuardResult(
+            name="static_analysis",
+            passed=not had_errors,
+            output=output,
+        )
 
     def _check_go_lint(self) -> GuardResult:
         """Run Go lint checks (delegates to engine.guards)."""

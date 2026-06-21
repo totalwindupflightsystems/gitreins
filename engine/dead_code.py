@@ -200,12 +200,17 @@ class DeadCodeDetector:
                 if isinstance(child, (ast.Return, ast.Raise, ast.Break, ast.Continue)):
                     if i + 1 < len(body):
                         next_sib = body[i + 1]
-                        if isinstance(next_sib, ast.Expr) and isinstance(next_sib.value, ast.Constant):
+                        if isinstance(next_sib, ast.Expr) and isinstance(
+                            next_sib.value, ast.Constant
+                        ):
                             continue  # Skip docstrings
                         findings.append(DeadCodeFinding(
                             file=rel, line=next_sib.lineno,
                             category="unreachable",
-                            message=f"Code after {type(child).__name__.lower()} on line {child.lineno} is unreachable",
+                            message=(
+                                f"Code after {type(child).__name__.lower()} "
+                                f"on line {child.lineno} is unreachable"
+                            ),
                         ))
 
         # --- EMPTY FUNCTIONS ---
@@ -213,7 +218,9 @@ class DeadCodeDetector:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 body = node.body
                 # Strip docstrings
-                if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant):
+                if body and isinstance(body[0], ast.Expr) and isinstance(
+                    body[0].value, ast.Constant
+                ):
                     body = body[1:]
                 if len(body) == 0 or (len(body) == 1 and isinstance(body[0], ast.Pass)):
                     findings.append(DeadCodeFinding(
@@ -274,6 +281,9 @@ class DeadCodeDetector:
                     findings.append(DeadCodeFinding(
                         file=file, line=line,
                         category="unused_function",
-                        message=f"Function '{func_name}' is defined but never called in the project",
+                        message=(
+                            f"Function '{func_name}' is defined "
+                            "but never called in the project"
+                        ),
                     ))
         return findings

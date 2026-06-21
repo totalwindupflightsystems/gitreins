@@ -15,6 +15,14 @@ Usage:
     gitreins mcp-server
 """
 
+import argparse
+import logging
+import os
+import sys
+import yaml
+
+from engine.version import __version__
+
 DEFAULT_GITREINS_CONFIG = """\
 # GitReins Configuration
 
@@ -66,14 +74,6 @@ cd "$REPO_ROOT"
 gitreins guard
 exit $?
 """
-
-import argparse
-import logging
-import os
-import sys
-import yaml
-
-from engine.version import __version__
 
 
 def load_config(workdir: str) -> dict:
@@ -169,7 +169,6 @@ def cmd_install(args):
 
     For smarter auto-detection, use: gitreins init
     """
-    import subprocess
 
     workdir = get_workdir()
     git_dir = os.path.join(workdir, ".git")
@@ -256,6 +255,7 @@ def cmd_init(args):
     lang_info = _detect_language(workdir)
     test_cmd = _detect_test_command(workdir, lang_info)
     size = _detect_project_size(workdir, lang_info)
+    static_tools = _detect_static_analysis_tools(workdir, lang_info)
 
     # Load existing config or start fresh.
     # CRITICAL: load_config returns {} for BOTH "file doesn't exist" AND
@@ -280,7 +280,7 @@ def cmd_init(args):
 
     # Guards section
     if "guards" not in existing or args.reset:
-        existing["guards"] = _build_guards_section(lang_info, test_cmd)
+        existing["guards"] = _build_guards_section(lang_info, test_cmd, static_tools)
         changed.append("guards")
     else:
         # Fill in missing guard keys
@@ -334,6 +334,26 @@ def cmd_init(args):
     print(f"  Test mode:   {existing['guards'].get('test_mode', 'full')}")
     print(f"  Eval cap:    {existing['evaluator'].get('max_iterations', 100)} iterations")
     print(f"  History:     {existing.get('history', {}).get('enabled', True) and 'enabled' or 'disabled'}")
+    sa_enabled = existing.get('guards', {}).get('static_analysis', False)
+    sa_status = []
+    if sa_enabled and static_tools:
+        sa_status.append(f"enabled ({', '.join(static_tools)})")
+    elif sa_enabled:
+        # Build tool-specific install instructions for the detected language
+        install_hints = []
+        if lang_info["is_python"]:
+            install_hints.append("pip install mypy")
+        elif lang_info["is_ruby"]:
+            install_hints.append("gem install sorbet && srb init")
+        elif lang_info["is_php"]:
+            install_hints.append("composer require --dev phpstan/phpstan")
+        elif lang_info["has_sql"]:
+            install_hints.append("pip install sqlfluff")
+        hint = "; ".join(install_hints) if install_hints else "see docs for install instructions"
+        sa_status.append(f"enabled (no tools detected — install: {hint})")
+    else:
+        sa_status.append("disabled (compiled language or explicitly off)")
+    print(f"  Static analysis: {' '.join(sa_status)}")
     print()
     if changed:
         print(f"Updated: {', '.join(changed)}")
@@ -342,8 +362,13 @@ def cmd_init(args):
 
 
 def _detect_language(workdir: str) -> dict:
-    """Detect project language(s). Returns {name, type, is_go, is_python, is_ts}."""
-    info = {"name": "unknown", "type": "unknown", "is_go": False, "is_python": False, "is_ts": False}
+    """Detect project language(s). Returns {name, type, is_go, is_python, is_ts, ...}."""
+    info = {
+        "name": "unknown", "type": "unknown",
+        "is_go": False, "is_python": False, "is_ts": False,
+        "is_ruby": False, "is_php": False, "is_rust": False,
+        "has_sql": False,
+    }
 
     if os.path.isfile(os.path.join(workdir, "go.mod")):
         info["type"] = "go"
@@ -359,8 +384,50 @@ def _detect_language(workdir: str) -> dict:
         info["type"] = "typescript"
         info["is_ts"] = True
         info["name"] = "TypeScript"
+    elif os.path.isfile(os.path.join(workdir, "Gemfile")):
+        info["type"] = "ruby"
+        info["is_ruby"] = True
+        info["name"] = "Ruby"
+    elif os.path.isfile(os.path.join(workdir, "composer.json")):
+        info["type"] = "php"
+        info["is_php"] = True
+        info["name"] = "PHP"
+    elif os.path.isfile(os.path.join(workdir, "Cargo.toml")):
+        info["type"] = "rust"
+        info["is_rust"] = True
+        info["name"] = "Rust"
+
+    # SQL detection: check for .sql files or migrations dir
+    if not info["is_go"] and not info["is_python"]:
+        for root, dirs, files in os.walk(workdir):
+            dirs[:] = [d for d in dirs if d not in (".git", ".venv", "node_modules", ".gitreins")]
+            if any(f.endswith(".sql") for f in files):
+                info["has_sql"] = True
+                break
+            if "migrations" in dirs:
+                info["has_sql"] = True
+                break
 
     return info
+
+
+def _detect_static_analysis_tools(workdir: str, lang: dict) -> list[str]:
+    """Return list of installed static analysis tools for the detected language."""
+    from engine.static_analysis import list_available_tools
+
+    if lang["is_python"]:
+        return list_available_tools("python")
+    elif lang["is_ruby"]:
+        return list_available_tools("ruby")
+    elif lang["is_php"]:
+        return list_available_tools("php")
+    elif lang["has_sql"]:
+        return list_available_tools("sql")
+    elif lang["is_ts"]:
+        return list_available_tools("typescript")
+    elif lang["is_rust"]:
+        return list_available_tools("rust")
+    return []
 
 
 def _detect_test_command(workdir: str, lang: dict) -> str:
@@ -397,7 +464,6 @@ def _detect_project_size(workdir: str, lang: dict) -> dict:
     packages = 0
     if lang["is_go"]:
         # Count Go packages
-        import glob
         go_files = set()
         for root, dirs, files in os.walk(workdir):
             # Skip vendor, .git, node_modules
@@ -407,7 +473,6 @@ def _detect_project_size(workdir: str, lang: dict) -> dict:
                     go_files.add(os.path.relpath(os.path.dirname(os.path.join(root, f)), workdir))
         packages = len(go_files)
     elif lang["is_python"]:
-        import glob
         py_pkgs = set()
         for root, dirs, files in os.walk(workdir):
             dirs[:] = [d for d in dirs if d not in (".git", ".venv", "node_modules", ".gitreins", "__pycache__")]
@@ -432,8 +497,12 @@ def _detect_project_size(workdir: str, lang: dict) -> dict:
     }
 
 
-def _build_guards_section(lang: dict, test_cmd: str) -> dict:
+def _build_guards_section(lang: dict, test_cmd: str, static_tools: list[str] | None = None) -> dict:
     """Build guards section optimized for the detected language."""
+    if static_tools is None:
+        static_tools = []
+
+    section: dict
     if lang["is_go"]:
         return {
             "secrets": True,
@@ -443,13 +512,17 @@ def _build_guards_section(lang: dict, test_cmd: str) -> dict:
             "go": {"build": True, "lint": True, "tests": True},
         }
     elif lang["is_python"]:
-        return {
+        section = {
             "secrets": True,
             "lint": True,
             "tests": True,
             "test_mode": "full",
             "test_command": test_cmd,
+            "static_analysis": True,   # ON: dynamic language, no compiler
         }
+        if static_tools:
+            section["static_analysis_tools"] = {"python": static_tools}
+        return section
     elif lang["is_ts"]:
         return {
             "secrets": True,
@@ -457,6 +530,43 @@ def _build_guards_section(lang: dict, test_cmd: str) -> dict:
             "tests": True,
             "test_mode": "full",
             "test_command": test_cmd,
+            "static_analysis": False,  # OFF: tsc --noEmit covers this
+        }
+    elif lang["is_ruby"]:
+        return {
+            "secrets": True,
+            "lint": False,
+            "tests": False,
+            "test_mode": "full",
+            "test_command": "bundle exec rspec",
+            "static_analysis": True,   # ON: dynamic language, no compiler
+        }
+    elif lang["is_php"]:
+        return {
+            "secrets": True,
+            "lint": False,
+            "tests": False,
+            "test_mode": "full",
+            "test_command": "vendor/bin/phpunit",
+            "static_analysis": True,   # ON: dynamic language, no compiler
+        }
+    elif lang["is_rust"]:
+        return {
+            "secrets": True,
+            "lint": False,
+            "tests": False,
+            "test_mode": "full",
+            "test_command": "cargo test",
+            "static_analysis": False,  # OFF: cargo check covers this
+        }
+    elif lang["has_sql"]:
+        return {
+            "secrets": True,
+            "lint": False,
+            "tests": False,
+            "test_mode": "full",
+            "test_command": "echo 'No SQL test runner configured'",
+            "static_analysis": True,   # ON: no compiler for SQL
         }
     else:
         return {
@@ -490,6 +600,7 @@ def _build_evaluator_section(size: dict) -> dict:
     """Build evaluator section with size-appropriate caps."""
     return {
         "max_iterations": size["max_iterations"],
+        "static_analysis_diagnostics": False,  # OFF by default, visible for opt-in
     }
 
 
@@ -514,10 +625,9 @@ def cmd_task_start(args):
 
 
 def cmd_task_complete(args):
-    from engine.task_manager import TaskManager, DependencyError
+    from engine.task_manager import TaskManager
     from engine.llm import LLMClient
     from engine.judge import Judge
-    from engine.persist import VerdictPersister
 
     workdir = get_workdir()
     tm = TaskManager(workdir)
@@ -630,7 +740,9 @@ def _cmd_report_tui(workdir: str, n: int = 20):
     from engine.persist import build_report, VerdictPersister
 
     try:
-        import textual
+        from importlib.util import find_spec
+        if not find_spec("textual"):
+            raise ImportError
     except ImportError:
         print("Interactive mode requires 'textual'. Install with: pip install textual")
         print("Falling back to text mode...")
@@ -724,7 +836,6 @@ def cmd_judge(args):
     from engine.task_manager import TaskManager
     from engine.llm import LLMClient
     from engine.judge import Judge
-    from engine.persist import VerdictPersister
 
     workdir = get_workdir()
     tm = TaskManager(workdir)

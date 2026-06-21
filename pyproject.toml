@@ -60,6 +60,20 @@ select = [
     "F",      # pyflakes
     "B904",   # raise without from inside except
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# LLM system prompts — breaking lines changes the prompt text sent to the model
+"engine/evaluator.py" = ["E501"]
+# Test files — long assertion lines, fixtures, and test data strings
+"tests/**/*.py" = ["E501"]
+# gitreins_mcp JSON-RPC handler — long JSON schema strings
+"gitreins_mcp/server.py" = ["E501"]
+# Guard manager — long regex patterns for secret detection
+"engine/guard_manager.py" = ["E501"]
+# Pipeline templates — long embedded shell command strings for YAML generation
+"engine/pipeline.py" = ["E501"]
+# CLI — long help strings and argument definitions
+"gitreins/cli.py" = ["E501"]
 # B904: `raise ... from err` inside except — prevents swallowed exceptions
 # by forcing explicit exception chaining.
 #

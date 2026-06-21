@@ -76,15 +76,31 @@ class GitReinsDefaults:
             model=defaults.get("model", self.model),
             max_iterations=_coerce_float(defaults.get("max_iterations", self.max_iterations)),
             max_seconds=_coerce_seconds(defaults.get("max_time", self.max_seconds)),
-            max_input_tokens=_coerce_tokens(defaults.get("max_input_tokens", self.max_input_tokens)),
-            max_output_tokens=_coerce_tokens(defaults.get("max_output_tokens", self.max_output_tokens)),
-            tool_call_weight=float(defaults.get("tool_call_weight", self.tool_call_weight)),
-            check_for_updates=bool(defaults.get("check_for_updates", self.check_for_updates)),
-            update_check_ttl_hours=_coerce_float(defaults.get("update_check_ttl", self.update_check_ttl_hours)),
-            history_enabled=bool(defaults.get("history_enabled", self.history_enabled)),
+            max_input_tokens=_coerce_tokens(
+                defaults.get("max_input_tokens", self.max_input_tokens)
+            ),
+            max_output_tokens=_coerce_tokens(
+                defaults.get("max_output_tokens", self.max_output_tokens)
+            ),
+            tool_call_weight=float(defaults.get(
+                "tool_call_weight", self.tool_call_weight
+            )),
+            check_for_updates=bool(defaults.get(
+                "check_for_updates", self.check_for_updates
+            )),
+            update_check_ttl_hours=_coerce_float(defaults.get(
+                "update_check_ttl", self.update_check_ttl_hours
+            )),
+            history_enabled=bool(defaults.get(
+                "history_enabled", self.history_enabled
+            )),
             history_path=str(defaults.get("history_path", self.history_path)),
-            history_storage=str(defaults.get("history_storage", self.history_storage)),
-            history_max_verdicts=int(defaults.get("history_max_verdicts", self.history_max_verdicts)),
+            history_storage=str(defaults.get(
+                "history_storage", self.history_storage
+            )),
+            history_max_verdicts=int(defaults.get(
+                "history_max_verdicts", self.history_max_verdicts
+            )),
             _source=".gitreins/config.yaml" if defaults else self._source,
         )
 
@@ -94,10 +110,23 @@ class GitReinsDefaults:
         """Produce a dict suitable for writing to .gitreins/config.yaml."""
         return {
             "model": self.model,
-            "max_iterations": int(self.max_iterations) if self.max_iterations == int(self.max_iterations) else self.max_iterations,
-            "max_time": _fmt_seconds(self.max_seconds) if self.max_seconds > 0 else None,
-            "max_input_tokens": _fmt_tokens(self.max_input_tokens) if self.max_input_tokens > 0 else None,
-            "max_output_tokens": _fmt_tokens(self.max_output_tokens) if self.max_output_tokens > 0 else None,
+            "max_iterations": (
+                int(self.max_iterations)
+                if self.max_iterations == int(self.max_iterations)
+                else self.max_iterations
+            ),
+            "max_time": (
+                _fmt_seconds(self.max_seconds)
+                if self.max_seconds > 0 else None
+            ),
+            "max_input_tokens": (
+                _fmt_tokens(self.max_input_tokens)
+                if self.max_input_tokens > 0 else None
+            ),
+            "max_output_tokens": (
+                _fmt_tokens(self.max_output_tokens)
+                if self.max_output_tokens > 0 else None
+            ),
             "tool_call_weight": self.tool_call_weight,
             "check_for_updates": self.check_for_updates,
             "update_check_ttl": f"{int(self.update_check_ttl_hours)}h",
