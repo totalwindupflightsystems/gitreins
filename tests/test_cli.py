@@ -676,3 +676,155 @@ class TestCmdInitConfigSafety:
         result = run_cli("init", cwd=tmp_workdir)
         assert result.returncode == 0
         assert os.path.isfile(config_path), "Config file not created"
+
+
+# ── Integration: pre-commit hook end-to-end ──────────────────────────────────
+
+
+class TestPreCommitHookIntegration:
+    """Verify the pre-commit hook runs via gitreins guard CLI and blocks
+    bad commits — not just that it executes, but that it catches secrets
+    and exits non-zero."""
+
+    @pytest.mark.xfail(
+        reason="Installed gitreins v0.7.0 lacks sys.exit(1) in cmd_guard_run — "
+               "fixed in source at 167b30d, will pass after next PyPI publish"
+    )
+    def test_hook_blocks_commit_with_secret(self, tmp_workdir):
+        """Staging a file with a fake API key → hook must block commit."""
+        # Initialize mock git repo properly
+        git_dir = os.path.join(tmp_workdir, ".git")
+        os.makedirs(git_dir, exist_ok=True)
+        # Need a real git repo for git commit to work
+        subprocess.run(["git", "init", "-q"], cwd=tmp_workdir, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"],
+                       cwd=tmp_workdir, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"],
+                       cwd=tmp_workdir, capture_output=True)
+
+        # Create gitreins config
+        config_dir = os.path.join(tmp_workdir, ".gitreins")
+        os.makedirs(config_dir, exist_ok=True)
+        import yaml as _yaml
+        with open(os.path.join(config_dir, "config.yaml"), "w") as f:
+            _yaml.dump({"guards": {"test_mode": "diff", "test_command": "echo ok"}}, f)
+
+        # Install hook
+        hooks_dir = os.path.join(git_dir, "hooks")
+        os.makedirs(hooks_dir, exist_ok=True)
+        hook_path = os.path.join(hooks_dir, "pre-commit")
+        with open(hook_path, "w") as f:
+            f.write("""#!/usr/bin/env bash
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+[ ! -f "$REPO_ROOT/.gitreins/config.yaml" ] && exit 0
+cd "$REPO_ROOT"
+gitreins guard
+exit $?
+""")
+        os.chmod(hook_path, 0o755)
+
+        # Stage a file with a secret
+        with open(os.path.join(tmp_workdir, "leak.py"), "w") as f:
+            f.write('API_KEY = "sk-1234567890abcdef1234567890abcdef"\n')
+        subprocess.run(["git", "add", "leak.py"], cwd=tmp_workdir, capture_output=True)
+
+        # Try to commit — must fail
+        result = subprocess.run(
+            ["git", "commit", "-m", "should block"],
+            cwd=tmp_workdir, capture_output=True, text=True,
+        )
+        assert result.returncode != 0, (
+            f"Hook did not block commit with secret key. "
+            f"stdout: {result.stdout[:200]}, stderr: {result.stderr[:200]}"
+        )
+
+    def test_hook_allows_clean_commit(self, tmp_workdir):
+        """Staging a clean file → hook passes, commit succeeds."""
+        subprocess.run(["git", "init", "-q"], cwd=tmp_workdir, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"],
+                       cwd=tmp_workdir, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"],
+                       cwd=tmp_workdir, capture_output=True)
+
+        config_dir = os.path.join(tmp_workdir, ".gitreins")
+        os.makedirs(config_dir, exist_ok=True)
+        import yaml as _yaml
+        with open(os.path.join(config_dir, "config.yaml"), "w") as f:
+            _yaml.dump({"guards": {"test_mode": "diff", "test_command": "echo ok"}}, f)
+
+        hooks_dir = os.path.join(tmp_workdir, ".git", "hooks")
+        os.makedirs(hooks_dir, exist_ok=True)
+        hook_path = os.path.join(hooks_dir, "pre-commit")
+        with open(hook_path, "w") as f:
+            f.write("""#!/usr/bin/env bash
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+[ ! -f "$REPO_ROOT/.gitreins/config.yaml" ] && exit 0
+cd "$REPO_ROOT"
+gitreins guard
+exit $?
+""")
+        os.chmod(hook_path, 0o755)
+
+        with open(os.path.join(tmp_workdir, "clean.py"), "w") as f:
+            f.write("# just a comment\n")
+        subprocess.run(["git", "add", "clean.py"], cwd=tmp_workdir, capture_output=True)
+
+        result = subprocess.run(
+            ["git", "commit", "-m", "should pass"],
+            cwd=tmp_workdir, capture_output=True, text=True,
+        )
+        assert result.returncode == 0, (
+            f"Hook blocked clean commit. stderr: {result.stderr[:300]}"
+        )
+
+
+# ── Regression: CLI exit codes ───────────────────────────────────────────────
+
+
+class TestCLIExitCodes:
+    """Verify each CLI command exits non-zero on failure. These prevent
+    the 'hook always passes' class of bug."""
+
+    def test_guard_exits_nonzero_on_failure(self, tmp_workdir):
+        """gitreins guard exits 1 when secrets are detected."""
+        subprocess.run(["git", "init", "-q"], cwd=tmp_workdir, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "test@test.com"],
+                       cwd=tmp_workdir, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "Test"],
+                       cwd=tmp_workdir, capture_output=True)
+
+        config_dir = os.path.join(tmp_workdir, ".gitreins")
+        os.makedirs(config_dir, exist_ok=True)
+        import yaml as _yaml
+        with open(os.path.join(config_dir, "config.yaml"), "w") as f:
+            _yaml.dump({"guards": {"test_mode": "diff", "test_command": "echo ok"}}, f)
+
+        # Stage a file with a secret
+        with open(os.path.join(tmp_workdir, "leak.py"), "w") as f:
+            f.write('SECRET = "sk-abcdefghij1234567890abcdefghij"\n')
+        subprocess.run(["git", "add", "leak.py"], cwd=tmp_workdir, capture_output=True)
+
+        result = run_cli("guard", cwd=tmp_workdir)
+        assert result.returncode != 0, (
+            f"guard must exit non-zero on secrets, got {result.returncode}. "
+            f"stdout: {result.stdout[:200]}"
+        )
+
+    def test_init_exits_nonzero_on_broken_config(self, tmp_workdir):
+        """gitreins init exits non-zero when config is broken YAML."""
+        config_dir = os.path.join(tmp_workdir, ".gitreins")
+        os.makedirs(config_dir, exist_ok=True)
+        with open(os.path.join(config_dir, "config.yaml"), "w") as f:
+            f.write("guards: {broken yaml\n")
+
+        result = run_cli("init", cwd=tmp_workdir)
+        assert result.returncode != 0, (
+            f"init must exit non-zero on broken config, got {result.returncode}"
+        )
+
+    def test_judge_exits_nonzero_on_missing_task(self, tmp_workdir):
+        """gitreins judge exits non-zero when task doesn't exist."""
+        result = run_cli("judge", "nonexistent-task", cwd=tmp_workdir)
+        assert result.returncode != 0, (
+            f"judge must exit non-zero on missing task, got {result.returncode}"
+        )

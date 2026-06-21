@@ -109,6 +109,32 @@ def load_config(workdir: str) -> dict:
         return {}
 
 
+def _safe_overwrite(path: str, content_func) -> str | None:
+    """Write content to path, backing up the original if it exists.
+
+    Args:
+        path: Absolute or relative path to write.
+        content_func: Callable that writes to an open file handle, e.g.
+            lambda f: f.write(text) or lambda f: yaml.dump(data, f).
+
+    Creates parent directories if missing. Creates a .bak copy of the
+    original file before overwriting. The caller is responsible for
+    ensuring the content is valid before calling — this is a write
+    safety net, not a content validator.
+
+    Returns the bak_path if a backup was created, else None.
+    """
+    import shutil
+    bak_path = None
+    if os.path.isfile(path) and os.path.getsize(path) > 0:
+        bak_path = path + ".bak"
+        shutil.copy2(path, bak_path)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        content_func(f)
+    return bak_path
+
+
 def get_workdir() -> str:
     """Find the git repo root."""
     import subprocess
@@ -252,15 +278,6 @@ def cmd_init(args):
     # Build or update sections
     changed = []
 
-    # Backup the original config before writing
-    if config_exists:
-        import shutil
-        bak_path = config_path + ".bak"
-        shutil.copy2(config_path, bak_path)
-        changed.append(f"backup: {os.path.basename(bak_path)}")
-    else:
-        changed.append("new config")
-
     # Guards section
     if "guards" not in existing or args.reset:
         existing["guards"] = _build_guards_section(lang_info, test_cmd)
@@ -293,8 +310,11 @@ def cmd_init(args):
 
     # Write config
     os.makedirs(gitreins_dir, exist_ok=True)
-    with open(config_path, "w") as f:
-        yaml.dump(existing, f, default_flow_style=False, sort_keys=False)
+    bak = _safe_overwrite(config_path, lambda f: yaml.dump(
+        existing, f, default_flow_style=False, sort_keys=False,
+    ))
+    if bak:
+        changed.append(f"backup: {os.path.basename(bak)}")
 
     # Ensure pre-commit hook exists
     hook_path = os.path.join(workdir, ".git", "hooks", "pre-commit")

@@ -50,3 +50,22 @@ include = ["engine*", "gitreins*", "gitreins_mcp*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "B904",   # raise without from inside except
+]
+# B904: `raise ... from err` inside except — prevents swallowed exceptions
+# by forcing explicit exception chaining.
+#
+# Future: enable B001-B032 (flake8-bugbear) which includes:
+#   B001: bare except: — catches BaseException, should be except Exception:
+#   B015: pointless comparison
+#   B023: function uses loop variable
+#   B904: raise without from inside except
+# Enable with: extend-select = ["B"] after fixing existing violations.
