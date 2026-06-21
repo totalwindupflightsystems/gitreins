@@ -72,8 +72,7 @@
 - **Priority:** low
 - **Commit:** `8f12bdf`
 
-## [ ] GR-039: Fix F401 unused import `__version__` in engine/__init__.py
+## [x] GR-039: Fix F401 unused import `__version__` in engine/__init__.py
 - **Priority:** low
-- **Model:** direct (mechanical fix)
-- **Files:** engine/__init__.py
-- **Fix:** Add `as __version__` re-export alias: `from engine.version import __version__ as __version__`.
+- **Commit:** (pending)
+- **Result:** Ruff clean. 495 passed, 1 skipped, 1 xpassed.
