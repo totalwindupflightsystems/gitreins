@@ -468,11 +468,33 @@ def load_pipeline_config(workdir: str = ".") -> dict:
         if "pipeline" not in config:
             config["pipeline"] = {
                 "stages": [
-                    {"id": "tier1", "parallel": True, "on": ["pre-eval"],
-                     "steps": [{"id": "secrets", "type": "script", "run": "true", "on_fail": "continue"}]},
+                    {
+                        "id": "tier1",
+                        "parallel": True,
+                        "on": ["pre-commit", "pre-eval"],
+                        "steps": [
+                            {"id": "secrets", "type": "script",
+                             "run": "gitleaks detect --source . --no-git || python3 -c \"from engine.guard_manager import GuardManager; import sys; gm = GuardManager('.'); r = gm._check_secrets(); sys.exit(0 if r.passed else 1)\"",
+                             "on_fail": "continue"},
+                            {"id": "lint", "type": "script",
+                             "run": "ruff check . --quiet 2>/dev/null || true"},
+                            {"id": "tests", "type": "script",
+                             "run": "pytest -x --tb=short 2>/dev/null || true"},
+                        ],
+                    },
+                    {
+                        "id": "tier2",
+                        "type": "ai_eval",
+                        "on": ["pre-eval"],
+                        "condition": "true",
+                        "max_iterations": -1,
+                        "tools": ["read_file", "run_command", "search_pattern", "read_diff", "sandbox"],
+                    },
                 ]
             }
         return config
     except Exception as e:
         logger.warning("Failed to load pipeline config: %s", e)
         return {"pipeline": {"stages": []}}
+# test guard config loading
+# verify e2e

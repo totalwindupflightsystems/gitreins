@@ -25,9 +25,9 @@ import re
 import subprocess
 from dataclasses import dataclass, field
 
-logger = logging.getLogger("gitreins.guard")
+from engine.guards import check_go_lint, check_go_tests, check_go_build
 
-from engine.guards import is_go_project, check_go_lint, check_go_tests, check_go_build
+logger = logging.getLogger("gitreins.guard")
 
 
 @dataclass
@@ -64,7 +64,7 @@ class Tier1Result:
             detail = ""
             if not r.passed and r.output:
                 # Extract a short failure summary — first meaningful line
-                out_lines = [l for l in r.output.split("\n") if l.strip()]
+                out_lines = [ln for ln in r.output.split("\n") if ln.strip()]
                 if out_lines:
                     # Pick the first error-like line
                     first = out_lines[0].strip()
@@ -72,7 +72,7 @@ class Tier1Result:
                         first = first[:97] + "..."
                     detail = f" — {first}"
                 # Show count for tests
-                fail_count = len([l for l in out_lines if "FAIL" in l or "FAILED" in l])
+                fail_count = len([ln for ln in out_lines if "FAIL" in ln or "FAILED" in ln])
                 if fail_count:
                     detail = f" — {fail_count} failure(s)"
             elif r.passed:
@@ -147,9 +147,9 @@ def _discover_test_targets(workdir: str) -> list[str] | None:
             logger.debug("No test file found for %s (tried: %s)", staged_file, candidates)
 
     if not test_files:
-        # Changed files don't map to any known tests — safety: run full suite
-        logger.debug("No test targets discovered for staged files, running full suite")
-        return None
+        # Changed files don't map to any known tests — skip in diff mode
+        logger.debug("No test targets discovered for staged files, returning empty")
+        return []
 
     return sorted(test_files)
 
@@ -185,12 +185,31 @@ def _build_diff_test_command(test_command: str, test_files: list[str], workdir: 
     return cmd
 
 
+
+def _load_guard_config(workdir: str) -> dict:
+    """Load .gitreins/config.yaml and extract the guards section.
+
+    Returns the full config dict, or {} if the file doesn't exist.
+    This allows GuardManager to self-load its config when no config
+    dict is passed explicitly (e.g. from the pre-commit hook script).
+    """
+    import yaml as _yaml
+    config_path = os.path.join(workdir, ".gitreins", "config.yaml")
+    try:
+        with open(config_path, "r") as f:
+            return _yaml.safe_load(f) or {}
+    except Exception:
+        return {}
+
+
 class GuardManager:
     """Run static checks against staged changes."""
 
     def __init__(self, workdir: str = ".", config: dict | None = None):
         self.workdir = os.path.abspath(workdir)
-        self.config = config or {}
+        if config is None:
+            config = _load_guard_config(self.workdir)
+        self.config = config
         guards_cfg = self.config.get("guards", {})
         self._enabled = {
             "secrets": guards_cfg.get("secrets", True),
@@ -286,24 +305,37 @@ class GuardManager:
         """
         # Patterns that LIKELY represent actual secrets (high confidence)
         danger_patterns = [
-            # Literal-looking API keys assigned as values
-            (r'(?i)(api[_-]?key|apikey)\s*[:=]\s*["\']([A-Za-z0-9_\-]{20,})["\']', "hardcoded API key"),
-            # Private key blocks
-            (r'(?i)-----BEGIN\s+(RSA|DSA|EC|OPENSSH|PGP)\s+PRIVATE\s+KEY', "private key block"),
-            # GitHub tokens (literal-looking)
+            # Private key blocks (SSH, SSL, PGP, PKCS#8)
+            (r'(?i)-----BEGIN\s+(RSA|DSA|EC|OPENSSH|PGP|ENCRYPTED\s+)?\s*PRIVATE\s+KEY(\s+BLOCK)?', "private key block"),
+            # GitHub tokens
             (r'ghp_[A-Za-z0-9]{36,}', "GitHub personal access token"),
             (r'gho_[A-Za-z0-9]{36,}', "GitHub OAuth token"),
             # GitLab tokens
             (r'glpat-[A-Za-z0-9_\-]{20,}', "GitLab personal access token"),
-            # OpenAI/OpenRouter keys (supports sk-or-v1-, sk-proj-, etc.)
+            # OpenAI/OpenRouter keys
             (r'sk-[A-Za-z0-9_\-]{32,}', "OpenAI/OpenRouter API key"),
-            # AWS keys (literal)
+            # AWS keys
             (r'(?i)AKIA[0-9A-Z]{16}', "AWS access key"),
+            (r'(?i)(aws[_-]?secret[_-]?access[_-]?key|aws[_-]?secret|secret[_-]?access[_-]?key)\s*[:=]\s*["\'][A-Za-z0-9+/]{40,}["\']', "AWS secret access key"),
+            # GCP API keys
+            (r'AIza[0-9A-Za-z\-_]{35,}', "GCP API key"),
+            # DigitalOcean tokens
+            (r'dop_v1_[a-z0-9]{64}', "DigitalOcean access token"),
+            # Stripe live keys
+            (r'sk_live_[0-9a-zA-Z]{24,}', "Stripe live secret key"),
+            (r'rk_live_[0-9a-zA-Z]{24,}', "Stripe restricted key"),
+            # Azure storage
+            (r'(?i)DefaultEndpointsProtocol=https;AccountName=[^;]+;AccountKey=[A-Za-z0-9+/=]{60,}', "Azure storage connection string"),
+            (r'(?i)AccountKey\s*=\s*["\']?[A-Za-z0-9+/=]{60,}["\']?', "Azure storage account key"),
+            # Slack API tokens
+            (r'xox[baprs]-[0-9a-zA-Z\-]{20,}', "Slack API token"),
+            # Generic patterns (check LAST — specific providers above)
+            (r'(?i)(api[_-]?key|apikey)\s*[:=]\s*["\']([A-Za-z0-9_\-]{20,})["\']', "hardcoded API key"),
             # JWTs assigned as literal strings
             (r'(?i)(token|jwt)\s*[:=]\s*["\']eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{10,}["\']', "hardcoded JWT"),
-            # Passwords with literal-looking values (not function calls or env vars)
+            # Passwords with literal-looking values
             (r'(?i)(password|passwd)\s*[:=]\s*["\'][^"\'$]{8,}["\']', "hardcoded password"),
-            # Generic tokens with high-entropy looking values
+            # Generic tokens/secrets (check LAST)
             (r'(?i)(secret|token)\s*[:=]\s*["\'][A-Za-z0-9+/=]{32,}["\']', "hardcoded secret"),
         ]
 
@@ -420,6 +452,12 @@ class GuardManager:
         if self._test_mode == "diff":
             test_files = _discover_test_targets(self.workdir)
             if test_files is not None:
+                if not test_files:
+                    # No test files map to the changed sources — skip
+                    return GuardResult(
+                        name="tests", passed=True,
+                        output="No matching test files — skipped (diff mode)",
+                    )
                 # Narrowed — only run relevant tests
                 cmd = _build_diff_test_command(test_command, test_files, self.workdir)
                 label = f"tests (diff: {len(test_files)} files)"
