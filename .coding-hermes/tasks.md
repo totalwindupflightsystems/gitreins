@@ -54,7 +54,7 @@
 ## [x] GR-030: Fix hanging test_judge_existing_task_exits_0 — LLM mock in subprocess
 - **Priority:** high
 - **Files:** engine/llm.py, tests/test_cli.py
-- **Commit:** pending
+- **Commit:** `a34dc9a` (local only — main branch protected on GitLab)
 - **AC:** `test_judge_existing_task_exits_0` passes in <1s; suite green (447 passed)
 - **Root cause:** `run_cli` runs CLI as subprocess — `unittest.mock.patch()` has no effect. Fixed by adding `GITREINS_MOCK_LLM_RESPONSE` env var support to `LLMClient.chat()` + `extra_env` kwarg to `run_cli`.
 
