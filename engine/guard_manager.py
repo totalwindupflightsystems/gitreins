@@ -282,7 +282,7 @@ class GuardManager:
             result = subprocess.run(
                 ["gitleaks", "detect", "--source", self.workdir, "--no-git", "--verbose"],
                 capture_output=True, text=True, timeout=30,
-                cwd=self.workdir,
+                cwd=self.workdir, errors='replace',
             )
             if result.returncode == 0:
                 return GuardResult(name="secrets", passed=True, output="gitleaks: clean")
