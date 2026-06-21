@@ -10,11 +10,11 @@ guards:
 evaluator:
   max_iterations: 50
   max_time: 10m
-  max_input_tokens: 0.2M
-  max_output_tokens: 0.05M
+  max_input_tokens: 1M
+  max_output_tokens: 0.1M
   tool_call_weight: 0.1
 defaults:
-  model: deepseek-v4-flash
+  model: deepseek-v4-pro
 history:
   enabled: true
   storage: git

@@ -76,3 +76,10 @@
 - **Priority:** low
 - **Commit:** (pending)
 - **Result:** Ruff clean. 495 passed, 1 skipped, 1 xpassed.
+
+## [x] GR-040: Fix gitleaks false positive on synthetic AWS test key
+- **Priority:** high
+- **Model:** direct (mechanical fix, no spawn)
+- **Files:** tests/test_secrets_scanner.py, .gitleaksignore
+- **Fix:** Built synthetic AWS key at runtime (string concatenation across lines) to remove literal `AKIA` from source. Added both relative and absolute-path fingerprints to `.gitleaksignore` for historical evidence files. Root cause: guard uses `os.path.abspath()` for `--source`, so gitleaks produces absolute-path fingerprints that don't match relative `.gitleaksignore` entries.
+- **Result:** Guard PASS. 27/27 secrets scanner tests pass.

@@ -2,9 +2,27 @@
 #
 # Format: fingerprint (from gitleaks --no-git output) = file:rule:line
 # These are known false positives in tracked files.
+#
+# NOTE: Both relative and absolute-path fingerprints are listed because
+# the guard passes --source with os.path.abspath() (absolute), while
+# manual gitleaks runs may use relative paths. Both forms must exist.
 
 # .env file (git-ignored, untracked — contains local dev API key)
 .env:generic-api-key:2
 
 # Documentation finding in .memory-bank/ (example token in explanatory text)
 .memory-bank/findings/finding-004-precommit-guard-false-positives.md:generic-api-key:189
+
+# GR-040: Synthetic AWS test key in .gitreins/history/ evidence files
+# These are historical task evaluation artifacts — the literal key is evidence text, not a real secret.
+# The actual test file (tests/test_secrets_scanner.py) now builds the key at runtime.
+# — Relative paths (for manual gitleaks runs: --source .)
+.gitreins/history/2026-06-21/27e7f96c/summary.md:aws-access-token:22
+.gitreins/history/2026-06-21/27e7f96c/summary.md:aws-access-token:47
+.gitreins/history/2026-06-21/27e7f96c/verdict.json:aws-access-token:49
+.gitreins/history/2026-06-21/27e7f96c/verdict.json:aws-access-token:61
+# — Absolute paths (for gitreins guard: --source $(pwd))
+/home/kara/gitreins-poc/.gitreins/history/2026-06-21/27e7f96c/summary.md:aws-access-token:22
+/home/kara/gitreins-poc/.gitreins/history/2026-06-21/27e7f96c/summary.md:aws-access-token:47
+/home/kara/gitreins-poc/.gitreins/history/2026-06-21/27e7f96c/verdict.json:aws-access-token:49
+/home/kara/gitreins-poc/.gitreins/history/2026-06-21/27e7f96c/verdict.json:aws-access-token:61
