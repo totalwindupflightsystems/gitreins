@@ -42,16 +42,23 @@
 ## [x] GR-032: Fix gitleaks UTF-8 decode error
 - **Priority:** medium
 - **Commit:** `9d11da7`
-- **Result:** Added `errors='replace'` to `subprocess.run()` in `_check_secrets()`. Gitleaks now runs without decode crash. Found real secret: `.env` (git-ignored, untracked — false positive for guard). Also found doc false positive in `.memory-bank/`.
 
 ## [x] GR-033: Add .gitleaksignore to suppress false positives
 - **Priority:** medium
-- **Files:** .gitleaksignore (new), .gitleaks.toml (new, additional)
-- **Model:** deepseek-v4-flash (deepseek) — handled directly by foreman (mechanical/config)
-- **Result:** Guard passes clean. Created `.gitleaks.toml` with `[allowlist] paths` excluding test files, `__pycache__/`, `.memory-bank/`, `.env`, and `.gitreins-sandbox/`. Created `.gitleaksignore` with fingerprints for `.env` and `.memory-bank/`. Both files auto-discovered by gitleaks — no code change needed. 75/75 secrets tests pass.
+- **Commit:** `a9c1e46`
 
 ## [x] GR-034: Fix hanging test_judge_requires_api_key
 - **Priority:** high
-- **Files:** tests/test_cli.py
 - **Commit:** `d335582`
-- **Result:** Converted test_judge_requires_api_key and test_judge_existing_task_runs_evaluation to use GITREINS_MOCK_LLM_RESPONSE mock (same pattern as GR-030). Both tests now pass in under 1s (was 15s+ for one, hang for the other). Full suite: 485 passed, 1 skipped.
+
+## [ ] GR-035: Clean working tree — remove untracked cruft
+- **Priority:** low
+- **Files:** .gitignore (modify), rm untracked files
+- **Model:** deepseek-v4-flash (deepseek) — mechanical task, no spawn needed
+- **AC:** Remove test artifacts (`.hermes-write-test`, `test_write`, etc.), add entries to .gitignore for `.coverage`, `.skylos/`, `*.tmp`. Verify `git status` shows clean tree (only intentional untracked dirs like `.hermes/`, `specs/`).
+
+## [ ] GR-036: Add uv.lock to repo for deterministic builds
+- **Priority:** low
+- **Files:** uv.lock (git add), .gitignore (remove uv.lock if present)
+- **Model:** deepseek-v4-flash (deepseek) — mechanical
+- **AC:** `uv.lock` committed. `uv sync` produces consistent environment.
