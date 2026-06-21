@@ -89,12 +89,12 @@
 - **Model:** mechanical (auto-fix 58, per-file-ignores for LLM prompts/long regex/CLI, manual line-breaks)
 - **Result:** ruff check returns 0 errors across engine/, gitreins/, tests/, gitreins_mcp/. 70 tests pass, 1 pre-existing failure unchanged.
 
-## [ ] GR-042: Fix guard `--source` absolute path bug
+## [x] GR-042: Fix guard `--source` absolute path bug
 - **Priority:** medium
 - **Model:** direct (one-line fix)
 - **Files:** engine/guard_manager.py
-- **Bug:** `_check_secrets()` passes `os.path.abspath(self.workdir)` as `--source` to gitleaks, causing absolute-path fingerprints that don't match relative-path `.gitleaksignore` entries.
-- **Fix:** Pass `.` or relative path instead, or use `os.path.relpath()`.
+- **Fix:** Changed `--source self.workdir` to `--source .` in `_check_secrets()` (line 303). Since `cwd=self.workdir` is already set, gitleaks produces relative-path fingerprints that match `.gitleaksignore`.
+- **Result:** 495 passed, 0 failures. Guard PASS.
 
 ## [ ] GR-043: Add `.gitreins/history/` to `.gitignore`
 - **Priority:** low
