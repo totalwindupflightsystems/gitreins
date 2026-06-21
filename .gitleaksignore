@@ -1,0 +1,10 @@
+# GitReins .gitleaksignore — false positive suppressions
+#
+# Format: fingerprint (from gitleaks --no-git output) = file:rule:line
+# These are known false positives in tracked files.
+
+# .env file (git-ignored, untracked — contains local dev API key)
+.env:generic-api-key:2
+
+# Documentation finding in .memory-bank/ (example token in explanatory text)
+.memory-bank/findings/finding-004-precommit-guard-false-positives.md:generic-api-key:189

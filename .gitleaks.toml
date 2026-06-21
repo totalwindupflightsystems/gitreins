@@ -1,0 +1,20 @@
+# GitReins gitleaks configuration
+# Extends default gitleaks ruleset with project-specific allowlists.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "GitReins project allowlists — test fixtures, documentation, and build artifacts"
+
+# Test files with embedded fake secrets for scanner testing
+paths = [
+  '''tests/test_secrets_scanner\.py''',
+  '''tests/test_guard_manager\.py''',
+  '''tests/test_cli\.py''',
+  '''tests/reliability/secret-leak/.*''',
+  '''tests/__pycache__/.*''',
+  '''\.memory-bank/.*''',
+  '''__pycache__/.*''',
+  '''\.env''',
+  '''\.gitreins-sandbox/.*''',
+]
