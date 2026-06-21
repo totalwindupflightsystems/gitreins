@@ -7,9 +7,6 @@ import os
 import select
 import subprocess
 import sys
-import time
-from unittest import mock
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -80,7 +77,7 @@ class TestToolsList:
         })
         assert response is not None
         tools = response["result"]["tools"]
-        assert len(tools) == 9
+        assert len(tools) == 10
 
     def test_all_expected_tool_names_present(self, mcp_server):
         """All expected tool names: task.create, task.start, task.complete,
@@ -92,6 +89,7 @@ class TestToolsList:
         })
         names = [t["name"] for t in response["result"]["tools"]]
         expected = [
+            "configure",
             "task.create", "task.start", "task.complete",
             "task.list", "task.get", "task.delete",
             "commit", "guard.run", "judge.evaluate",
@@ -660,9 +658,10 @@ class TestMCPStdioIntegration:
             "jsonrpc": "2.0", "id": 1, "method": "tools/list",
         })
         tools = resp["result"]["tools"]
-        assert len(tools) == 9
+        assert len(tools) == 10
         names = [t["name"] for t in tools]
         expected = [
+            "configure",
             "task.create", "task.start", "task.complete",
             "task.list", "task.get", "task.delete",
             "commit", "guard.run", "judge.evaluate",
@@ -757,7 +756,7 @@ class TestMCPStdioIntegration:
         mcp_proc.stdin.flush()
         resp = self._read_response(mcp_proc)
         assert resp["id"] == 1
-        assert len(resp["result"]["tools"]) == 9
+        assert len(resp["result"]["tools"]) == 10
 
     def test_missing_jsonrpc_field(self, mcp_proc):
         """Missing jsonrpc field → invalid request error (-32600)."""

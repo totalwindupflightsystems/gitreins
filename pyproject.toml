@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gitreins"
-version = "0.7.2"
+version = "0.7.3"
 description = "Git-native AI agent co-harness — MCP server, static guards, and agentic evaluator for LLM-assisted coding"
 readme = "README.md"
 license = {text = "MIT"}

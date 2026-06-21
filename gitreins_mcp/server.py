@@ -32,7 +32,11 @@ class GitReinsMCPServer:
         self.judge = Judge(self.llm, workdir)
         self._initialized = False
 
+        # Runtime-configurable state (hot-reloaded via configure tool)
+        self._configured = False
+
         self._tools = {
+            "configure": self._configure,
             "task.create": self._task_create,
             "task.start": self._task_start,
             "task.complete": self._task_complete,
@@ -46,6 +50,33 @@ class GitReinsMCPServer:
 
     def _tool_schemas(self) -> list[dict]:
         return [
+            {
+                "name": "configure",
+                "description": "Hot-reload the MCP server's LLM configuration at runtime. Sets environment variables and recreates the LLM client so subsequent tool calls (judge.evaluate, task.complete) use the new config. Works with any MCP client — no config file editing or server restart needed.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "env": {
+                            "type": "object",
+                            "description": "Dict of environment variables to set (e.g. {\"DEEPSEEK_API_KEY\": \"sk-xxx\", \"OPENROUTER_API_KEY\": \"sk-xxx\"}). These are pushed into os.environ so the LLM client picks them up on next init.",
+                            "additionalProperties": {"type": "string"},
+                        },
+                        "model": {
+                            "type": "string",
+                            "description": "Override the default model (e.g. 'deepseek-v4-flash'). Sets GITREINS_LLM_MODEL.",
+                        },
+                        "base_url": {
+                            "type": "string",
+                            "description": "Override the API base URL (e.g. 'https://api.deepseek.com/v1'). Sets GITREINS_LLM_BASE_URL.",
+                        },
+                        "provider": {
+                            "type": "string",
+                            "enum": ["openai", "anthropic"],
+                            "description": "Override provider detection. Sets GITREINS_LLM_PROVIDER.",
+                        },
+                    },
+                },
+            },
             {
                 "name": "task.create",
                 "description": "Create a new task with criteria that must be met before commit.",
@@ -169,6 +200,71 @@ class GitReinsMCPServer:
         ]
 
     # ── Tool handlers ────────────────────────────────────────────
+
+    def _configure(self,
+                   env: dict[str, str] | None = None,
+                   model: str | None = None,
+                   base_url: str | None = None,
+                   provider: str | None = None) -> dict:
+        """Hot-reload the MCP server's LLM configuration at runtime.
+
+        Sets environment variables and recreates the LLM client and Judge
+        so all subsequent tool calls (judge.evaluate, task.complete) use
+        the new config. Works with any MCP client — Hermes, OpenCode,
+        Claude Code, etc.
+
+        Args:
+            env: Dict of environment variables to set (e.g.
+                 {"DEEPSEEK_API_KEY": "sk-xxx", "OPENROUTER_API_KEY": "sk-xxx"}).
+                 These are pushed into os.environ so LLMClient picks them up.
+            model: Override the default model (e.g. "deepseek-v4-flash").
+            base_url: Override the API base URL (e.g. "https://api.deepseek.com/v1").
+            provider: Override provider detection ("openai" or "anthropic").
+
+        Returns current config state after applying changes.
+        """
+        old_config = self._config_snapshot()
+
+        # Apply env vars
+        if env:
+            for key, value in env.items():
+                os.environ[key] = value
+                logger.info("configure: set env %s", key)
+
+        # Push model/base_url/provider as GITREINS_LLM_* env vars
+        if model:
+            os.environ["GITREINS_LLM_MODEL"] = model
+            logger.info("configure: model=%s", model)
+        if base_url:
+            os.environ["GITREINS_LLM_BASE_URL"] = base_url
+            logger.info("configure: base_url=%s", base_url)
+        if provider:
+            os.environ["GITREINS_LLM_PROVIDER"] = provider
+            logger.info("configure: provider=%s", provider)
+
+        # Recreate LLM client and Judge with new env
+        self.llm = LLMClient()
+        self.judge = Judge(self.llm, self.workdir)
+        self._configured = True
+
+        new_config = self._config_snapshot()
+        return {
+            "configured": True,
+            "previous": old_config,
+            "current": new_config,
+            "note": "LLM client and Judge recreated — all subsequent tool calls use new config.",
+        }
+
+    def _config_snapshot(self) -> dict:
+        """Return current LLM config state for reporting."""
+        return {
+            "model": self.llm.model,
+            "provider": self.llm.provider,
+            "api_key_configured": bool(self.llm.api_key),
+            "api_key_prefix": (self.llm.api_key[:10] + "...") if self.llm.api_key else None,
+            "base_url": self.llm._chat_url,
+            "env_keys": sorted(k for k in os.environ if "API_KEY" in k or "LLM" in k),
+        }
 
     def _task_manager_for(self, workdir: str | None = None) -> TaskManager:
         """Return TaskManager for the given workdir, or the server default."""
