@@ -58,7 +58,7 @@
 - **AC:** `test_judge_existing_task_exits_0` passes in <1s; suite green (447 passed)
 - **Root cause:** `run_cli` runs CLI as subprocess — `unittest.mock.patch()` has no effect. Fixed by adding `GITREINS_MOCK_LLM_RESPONSE` env var support to `LLMClient.chat()` + `extra_env` kwarg to `run_cli`.
 
-## [ ] GR-031: Speed up test_run_command_timeout (30s sleep)
+## [x] GR-031: Speed up test_run_command_timeout (30s sleep)
 - **Priority:** low
 - **Files:** tests/test_evaluator.py
 - **AC:** Test completes in <5s instead of 30s

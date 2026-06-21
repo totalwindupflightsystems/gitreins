@@ -211,6 +211,7 @@ class AgenticEvaluator:
         workdir: str = ".",
         max_iterations: int | None = None,
         eval_cap: str | EvalCap | None = None,
+        command_timeout: int = 30,
     ):
         self.llm = llm
         self.workdir = os.path.abspath(workdir)
@@ -230,6 +231,9 @@ class AgenticEvaluator:
 
         # max_iterations from EvalCap is authoritative — 100 by default, -1 for unlimited
         self.max_iterations = self.eval_cap.max_iterations if self.eval_cap.max_iterations > 0 else 10_000
+
+        # Command timeout for tool calls — configurable for tests
+        self.command_timeout = command_timeout
 
         self._sandbox: dict[str, str] = {}
         self._task_index: dict[str, dict] = {}
@@ -511,7 +515,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 shell=True,
                 capture_output=True,
                 text=True,
-                timeout=30,
+                timeout=self.command_timeout,
                 cwd=self.workdir,
             )
             output = result.stdout + result.stderr
@@ -523,7 +527,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 "output": output,
             }
         except subprocess.TimeoutExpired:
-            return {"cmd": cmd, "error": "Command timed out after 30s"}
+            return {"cmd": cmd, "error": f"Command timed out after {self.command_timeout}s"}
         except Exception as e:
             return {"cmd": cmd, "error": str(e)}
 

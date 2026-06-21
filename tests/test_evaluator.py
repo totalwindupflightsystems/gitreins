@@ -89,9 +89,11 @@ class TestRunCommand:
         result = evaluator._tool_run_command("false")
         assert result["exit_code"] == 1
 
-    def test_run_command_timeout(self, evaluator):
-        """run_command('sleep 31') → timeout error."""
-        result = evaluator._tool_run_command("sleep 31")
+    def test_run_command_timeout(self, evaluator, llm_client, tmp_workdir):
+        """run_command with short timeout → timeout error in <5s."""
+        from engine.evaluator import AgenticEvaluator
+        fast_eval = AgenticEvaluator(llm_client, tmp_workdir, max_iterations=5, command_timeout=2)
+        result = fast_eval._tool_run_command("sleep 5")
         assert "error" in result
         assert "timed out" in result["error"]
 
