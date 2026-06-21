@@ -28,6 +28,7 @@
 
 ## [x] GR-028: Unit tests for dead_code detector
 - **Priority:** medium
+- **Result:** 38 tests pass.
 
 ## [x] GR-029: Commit pending AGENTS.md + AC changes
 - **Priority:** low
@@ -42,3 +43,9 @@
 - **Priority:** medium
 - **Commit:** `9d11da7`
 - **Result:** Added `errors='replace'` to `subprocess.run()` in `_check_secrets()`. Gitleaks now runs without decode crash. Found real secret: `.env` (git-ignored, untracked — false positive for guard). Also found doc false positive in `.memory-bank/`.
+
+## [ ] GR-033: Add .gitleaksignore to suppress false positives
+- **Priority:** medium
+- **Files:** .gitleaksignore (new), engine/guard_manager.py
+- **Model:** deepseek-v4-flash (deepseek)
+- **AC:** Guard passes clean (no secrets failures) — `.gitleaksignore` suppresses the `.env` (git-ignored, untracked) and `.memory-bank/findings/` (documentation) false positives. The `_check_secrets` passes `--gitleaks-ignore-path` or the `.gitleaksignore` file is placed in the repo root.
