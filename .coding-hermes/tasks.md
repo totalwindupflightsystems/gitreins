@@ -96,8 +96,8 @@
 - **Fix:** Changed `--source self.workdir` to `--source .` in `_check_secrets()` (line 303). Since `cwd=self.workdir` is already set, gitleaks produces relative-path fingerprints that match `.gitleaksignore`.
 - **Result:** 495 passed, 0 failures. Guard PASS.
 
-## [ ] GR-043: Add `.gitreins/history/` to `.gitignore`
+## [x] GR-043: Add `.gitreins/history/` to `.gitignore`
 - **Priority:** low
 - **Model:** direct (one-line fix)
 - **Files:** .gitignore
-- **AC:** `.gitreins/history/` is gitignored (won't be committed in the future)
+- **Result:** Added `.gitreins/history/` to `.gitignore`. Untracked 2 existing history files via `git rm --cached`. Future guard run history will not be committed.
