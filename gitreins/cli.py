@@ -77,14 +77,35 @@ from engine.version import __version__
 
 
 def load_config(workdir: str) -> dict:
-    """Load .gitreins/config.yaml, returning {} if not found."""
+    """Load .gitreins/config.yaml, returning {} if not found.
+
+    WARNING: If the file exists but cannot be parsed (YAML syntax error,
+    encoding issue, etc.), this function logs a warning and returns {}.
+    Callers that write config back to disk (e.g. cmd_init) MUST check
+    whether the original file existed before treating an empty return
+    as "no config" — otherwise they will overwrite a broken-but-valuable
+    config file with auto-generated defaults.
+    """
+    logger = logging.getLogger("gitreins")
     config_path = os.path.join(workdir, ".gitreins", "config.yaml")
     if not os.path.isfile(config_path):
         return {}
     try:
         with open(config_path, "r") as f:
-            return yaml.safe_load(f) or {}
-    except Exception:
+            data = yaml.safe_load(f)
+            if data is None:
+                return {}
+            return data
+    except yaml.YAMLError as e:
+        logger.warning(
+            "Failed to parse %s: %s — config file exists but YAML is invalid. "
+            "Callers: do NOT overwrite this file with defaults. "
+            "User: fix the YAML syntax before running 'gitreins init'.",
+            config_path, e,
+        )
+        return {}
+    except Exception as e:
+        logger.warning("Failed to load %s: %s", config_path, e)
         return {}
 
 
@@ -210,13 +231,35 @@ def cmd_init(args):
     test_cmd = _detect_test_command(workdir, lang_info)
     size = _detect_project_size(workdir, lang_info)
 
-    # Load existing config or start fresh
+    # Load existing config or start fresh.
+    # CRITICAL: load_config returns {} for BOTH "file doesn't exist" AND
+    # "YAML parse error". We must NOT overwrite a broken-but-existent config
+    # with auto-generated defaults — that silently nukes user settings.
+    config_exists = os.path.isfile(config_path) and os.path.getsize(config_path) > 0
     existing = load_config(workdir)
     if not existing:
+        if config_exists:
+            print(
+                f"Error: {config_path} exists but could not be parsed.\n"
+                f"Fix the YAML syntax in that file, then re-run 'gitreins init'.\n"
+                f"To start fresh (discarding existing config), use --reset.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         existing = {}
+
 
     # Build or update sections
     changed = []
+
+    # Backup the original config before writing
+    if config_exists:
+        import shutil
+        bak_path = config_path + ".bak"
+        shutil.copy2(config_path, bak_path)
+        changed.append(f"backup: {os.path.basename(bak_path)}")
+    else:
+        changed.append("new config")
 
     # Guards section
     if "guards" not in existing or args.reset:
@@ -255,7 +298,9 @@ def cmd_init(args):
 
     # Ensure pre-commit hook exists
     hook_path = os.path.join(workdir, ".git", "hooks", "pre-commit")
+    hooks_dir = os.path.dirname(hook_path)
     if not os.path.isfile(hook_path) or args.reset:
+        os.makedirs(hooks_dir, exist_ok=True)
         with open(hook_path, "w") as f:
             f.write(PRE_COMMIT_HOOK)
         os.chmod(hook_path, 0o755)

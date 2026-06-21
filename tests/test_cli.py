@@ -575,3 +575,104 @@ class TestJudgeExtended:
         result = run_cli("judge", "judge-api", cwd=tmp_workdir, extra_env=mock_env)
         assert result.returncode in (0, 1)
         assert "Judge Result" in result.stdout or "Judge" in result.stdout
+
+
+# ── Regression: config deletion via silent parse failure ──────────────────────
+
+
+class TestLoadConfigParseFailure:
+    """Regression: load_config must warn on YAML parse failure, not silently
+    return {} which causes cmd_init to nuke the config file."""
+
+    def test_load_config_warns_on_broken_yaml(self, tmp_workdir, caplog):
+        """load_config logs a warning when config.yaml has invalid YAML."""
+        import logging
+        caplog.set_level(logging.WARNING, logger="gitreins")
+
+        from gitreins.cli import load_config
+
+        config_dir = os.path.join(tmp_workdir, ".gitreins")
+        os.makedirs(config_dir, exist_ok=True)
+        config_path = os.path.join(config_dir, "config.yaml")
+        # Write broken YAML
+        with open(config_path, "w") as f:
+            f.write("guards: {secrets: true\n  lint: yes\n")
+
+        result = load_config(tmp_workdir)
+        # Must return empty dict (can't parse), not crash
+        assert result == {}
+        # Must log a warning
+        warnings = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
+        assert any("Failed to parse" in str(w) for w in warnings), (
+            f"Expected 'Failed to parse' warning, got: {warnings}"
+        )
+
+    def test_load_config_returns_empty_for_missing_file(self, tmp_workdir):
+        """load_config returns {} when no config file exists (not a warning)."""
+        from gitreins.cli import load_config
+
+        result = load_config(tmp_workdir)
+        assert result == {}
+
+    def test_load_config_loads_valid_yaml(self, tmp_workdir):
+        """load_config returns parsed dict for valid config."""
+        import yaml as _yaml
+        from gitreins.cli import load_config
+
+        config_dir = os.path.join(tmp_workdir, ".gitreins")
+        os.makedirs(config_dir, exist_ok=True)
+        config_path = os.path.join(config_dir, "config.yaml")
+        valid = {"guards": {"test_mode": "diff", "secrets": True}}
+        with open(config_path, "w") as f:
+            _yaml.dump(valid, f)
+
+        result = load_config(tmp_workdir)
+        assert result == valid
+
+
+class TestCmdInitConfigSafety:
+    """Regression: cmd_init must NOT overwrite existing config when it can't be parsed."""
+
+    def test_init_refuses_broken_config(self, tmp_workdir):
+        """gitreins init exits non-zero when config.yaml exists but is broken YAML."""
+        config_dir = os.path.join(tmp_workdir, ".gitreins")
+        os.makedirs(config_dir, exist_ok=True)
+        config_path = os.path.join(config_dir, "config.yaml")
+        # Write broken YAML
+        with open(config_path, "w") as f:
+            f.write("guards: {secrets: true\n  lint: yes\n")
+
+        result = run_cli("init", cwd=tmp_workdir)
+        assert result.returncode != 0, (
+            f"init should refuse to overwrite broken config, got exit {result.returncode}"
+        )
+        assert "could not be parsed" in result.stderr.lower() or \
+               "could not be parsed" in result.stdout.lower()
+
+    def test_init_backs_up_existing_config(self, tmp_workdir):
+        """gitreins init creates a .bak when overwriting existing config."""
+        import yaml as _yaml
+        config_dir = os.path.join(tmp_workdir, ".gitreins")
+        os.makedirs(config_dir, exist_ok=True)
+        config_path = os.path.join(config_dir, "config.yaml")
+        bak_path = config_path + ".bak"
+        valid = {"guards": {"test_mode": "full", "secrets": True}}
+        with open(config_path, "w") as f:
+            _yaml.dump(valid, f)
+
+        result = run_cli("init", cwd=tmp_workdir)
+        assert result.returncode == 0
+        assert os.path.isfile(bak_path), f"Backup not created at {bak_path}"
+        # Backup should contain the original config
+        with open(bak_path) as f:
+            bak_data = _yaml.safe_load(f)
+        assert bak_data["guards"]["test_mode"] == "full"
+
+    def test_init_creates_new_config_when_none_exists(self, tmp_workdir):
+        """gitreins init works normally when no config file exists."""
+        config_dir = os.path.join(tmp_workdir, ".gitreins")
+        config_path = os.path.join(config_dir, "config.yaml")
+
+        result = run_cli("init", cwd=tmp_workdir)
+        assert result.returncode == 0
+        assert os.path.isfile(config_path), "Config file not created"
