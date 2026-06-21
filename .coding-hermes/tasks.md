@@ -83,3 +83,23 @@
 - **Files:** tests/test_secrets_scanner.py, .gitleaksignore
 - **Fix:** Built synthetic AWS key at runtime (string concatenation across lines) to remove literal `AKIA` from source. Added both relative and absolute-path fingerprints to `.gitleaksignore` for historical evidence files. Root cause: guard uses `os.path.abspath()` for `--source`, so gitleaks produces absolute-path fingerprints that don't match relative `.gitleaksignore` entries.
 - **Result:** Guard PASS. 27/27 secrets scanner tests pass.
+
+## [ ] GR-041: Fix 218 ruff lint errors
+- **Priority:** medium
+- **Model:** mechanical (auto-fix 58, manual fix 160)
+- **Files:** engine/*.py, gitreins/*.py, tests/*.py, gitreins_mcp/*.py
+- **AC:** `ruff check engine/ gitreins/ tests/ gitreins_mcp/` returns 0 errors
+- **Approach:** Run `ruff check --fix --unsafe-fixes` for auto-fixable, then fix remaining manually.
+
+## [ ] GR-042: Fix guard `--source` absolute path bug
+- **Priority:** medium
+- **Model:** direct (one-line fix)
+- **Files:** engine/guard_manager.py
+- **Bug:** `_check_secrets()` passes `os.path.abspath(self.workdir)` as `--source` to gitleaks, causing absolute-path fingerprints that don't match relative-path `.gitleaksignore` entries.
+- **Fix:** Pass `.` or relative path instead, or use `os.path.relpath()`.
+
+## [ ] GR-043: Add `.gitreins/history/` to `.gitignore`
+- **Priority:** low
+- **Model:** direct (one-line fix)
+- **Files:** .gitignore
+- **AC:** `.gitreins/history/` is gitignored (won't be committed in the future)
