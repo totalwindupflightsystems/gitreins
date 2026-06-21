@@ -189,15 +189,25 @@ def _build_diff_test_command(test_command: str, test_files: list[str], workdir: 
 def _load_guard_config(workdir: str) -> dict:
     """Load .gitreins/config.yaml and extract the guards section.
 
-    Returns the full config dict, or {} if the file doesn't exist.
-    This allows GuardManager to self-load its config when no config
-    dict is passed explicitly (e.g. from the pre-commit hook script).
+    Returns the full config dict, or {} if the file doesn't exist
+    or can't be parsed. Handles missing PyYAML gracefully (returns {}
+    with a log warning) since pre-commit hooks may run in a bare Python
+    environment without the project's dependencies installed.
     """
-    import yaml as _yaml
     config_path = os.path.join(workdir, ".gitreins", "config.yaml")
+    if not os.path.isfile(config_path):
+        return {}
     try:
+        import yaml as _yaml
         with open(config_path, "r") as f:
             return _yaml.safe_load(f) or {}
+    except ImportError:
+        logger.warning(
+            "PyYAML not available in this Python environment — "
+            "cannot load .gitreins/config.yaml. Guards will use defaults. "
+            "Install with: pip install pyyaml"
+        )
+        return {}
     except Exception:
         return {}
 

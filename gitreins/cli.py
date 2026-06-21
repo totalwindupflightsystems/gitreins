@@ -651,6 +651,7 @@ def cmd_guard_run(args):
     if not result.passed:
         print()
         print("Fix the issues above and re-run: gitreins guard")
+        sys.exit(1)
 
 
 def cmd_judge(args):
