@@ -26,3 +26,9 @@
 /home/kara/gitreins-poc/.gitreins/history/2026-06-21/27e7f96c/summary.md:aws-access-token:47
 /home/kara/gitreins-poc/.gitreins/history/2026-06-21/27e7f96c/verdict.json:aws-access-token:49
 /home/kara/gitreins-poc/.gitreins/history/2026-06-21/27e7f96c/verdict.json:aws-access-token:61
+
+# GR-044/GR-045: Synthetic test keys in .hermes/acceptance-criteria.md
+# These are example keys in documentation/acceptance criteria text — not real secrets.
+# — Relative paths (for gitreins guard: --source .)
+.hermes/acceptance-criteria.md:stripe-access-token:197
+.hermes/acceptance-criteria.md:generic-api-key:32

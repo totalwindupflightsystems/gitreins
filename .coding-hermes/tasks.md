@@ -114,3 +114,9 @@
 - **Model:** direct (mechanical, no spawn)
 - **Files:** engine/evaluator.py, tests/conftest.py, tests/test_cli.py, tests/test_llm.py, tests/test_evaluator.py, tests/test_guard_manager.py, tests/test_judge.py, tests/test_pipeline.py, tests/test_secrets_scanner.py, tests/test_task_manager.py, tests/test_v07_features.py, tests/reliability/dead-tests/test_arithmetic.py, .hermes/acceptance-criteria.md
 - **AC:** All pending working-tree changes committed. Guard passes. Tests pass.
+
+## [x] GR-046: Suppress synthetic key false positives in .gitleaksignore
+- **Priority:** low
+- **Model:** direct (mechanical, no spawn)
+- **Files:** .gitleaksignore
+- **AC:** Guard passes with no secrets findings from .hermes/acceptance-criteria.md.
