@@ -121,8 +121,8 @@
 - **Files:** .gitleaksignore
 - **AC:** Guard passes with no secrets findings from .hermes/acceptance-criteria.md.
 
-## [ ] GR-047: Add MIT LICENSE file
+## [x] GR-047: Add MIT LICENSE file
 - **Priority:** high
 - **Model:** direct (mechanical, no spawn)
 - **Files:** LICENSE
-- **AC:** MIT LICENSE exists at repo root with copyright line.
+- **Commit:** `6ed4c52`
