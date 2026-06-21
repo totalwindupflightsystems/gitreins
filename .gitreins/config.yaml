@@ -7,14 +7,15 @@ guards:
   test_timeout: 120
   dead_code: false
   skylos: false
+  static_analysis: true
 evaluator:
-  max_iterations: 50
-  max_time: 10m
-  max_input_tokens: 1M
-  max_output_tokens: 0.1M
+  max_iterations: 100
+  max_time: 30m
+  max_input_tokens: 10M
+  max_output_tokens: 1M
   tool_call_weight: 0.1
 defaults:
-  model: deepseek-v4-pro
+  model: deepseek-v4-flash
 history:
   enabled: true
   storage: git
