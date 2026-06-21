@@ -1,24 +1,21 @@
-# GitReins Configuration — gitreins-poc (dogfooding itself)
-#
-# Uses diff mode because the full 385-test suite (with real LLM
-# integration tests) takes >120s and triggers guard timeouts.
-# Diff mode tests only the packages with staged changes.
-
 guards:
   secrets: true
   lint: true
   tests: true
-  test_mode: "diff"
-  test_command: "pytest -x --tb=short"
+  test_mode: diff
+  test_command: pytest -x --tb=short
   test_timeout: 120
   dead_code: false
   skylos: false
-
 evaluator:
-  max_iterations: 40
-  model: deepseek/deepseek-v4-pro
-
+  max_iterations: 50
+  max_time: 10m
+  max_input_tokens: 0.2M
+  max_output_tokens: 0.05M
+  tool_call_weight: 0.1
+defaults:
+  model: deepseek-v4-flash
 history:
   enabled: true
-  storage: "git"
+  storage: git
   max_verdicts: 1000
