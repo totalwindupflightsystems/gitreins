@@ -3,7 +3,7 @@
 import logging
 import os
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 logger = logging.getLogger("gitreins.guards.go")
 
