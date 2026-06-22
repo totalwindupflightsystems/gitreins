@@ -45,6 +45,7 @@ For each criterion:
 
 ## EFFICIENCY RULES
 
+- **Code context is pre-loaded.** The changed code is already included in this prompt — you do NOT need to call read_file() on files shown below unless you need a specific line range not included.
 - **Do not re-read the same file twice.** If read_file returned content, you already have it.
 - **Do not re-run the same command.** Check previous results before running again.
 - **Do not search for the same pattern twice.** Use sandbox to track what you've checked.
@@ -255,6 +256,132 @@ class AgenticEvaluator:
         self._commands_run: set[str] = set()
         self._searches_done: set[str] = set()
 
+    def _build_code_context(self, config: dict) -> str:
+        """Build a compact code-context block to pre-load into the evaluator prompt.
+
+        Reads test_mode from config:
+        - 'diff' (default): include git diff hunks (compact, scalable)
+        - 'full': include complete changed files (up to 200 lines each)
+
+        This prevents the LLM from burning iterations/tokens on read_file()
+        calls just to get basic context — it already has the code it needs.
+
+        Respects .gitleaks.toml exclusions from the project.
+        """
+        import subprocess
+        import os
+
+        test_mode = (config.get("guards", {}).get("test_mode") or
+                     config.get("test_mode") or
+                     "full")
+
+        # Find changed files: staged + unstaged
+        changed_files: set[str] = set()
+        try:
+            # Staged changes
+            staged = subprocess.run(
+                ["git", "diff", "--cached", "--name-only"],
+                capture_output=True, text=True, timeout=10, cwd=self.workdir,
+            )
+            for line in staged.stdout.strip().splitlines():
+                if line:
+                    changed_files.add(line)
+            # Unstaged changes
+            unstaged = subprocess.run(
+                ["git", "diff", "--name-only"],
+                capture_output=True, text=True, timeout=10, cwd=self.workdir,
+            )
+            for line in unstaged.stdout.strip().splitlines():
+                if line:
+                    changed_files.add(line)
+        except Exception:
+            pass
+
+        # Unified diff for changed files (always useful)
+        try:
+            diff_result = subprocess.run(
+                ["git", "diff", "HEAD"],
+                capture_output=True, text=True, timeout=10, cwd=self.workdir,
+            )
+            diff_text = diff_result.stdout.strip()
+        except Exception:
+            diff_text = ""
+
+        if not changed_files and not diff_text:
+            return ""
+
+        lines: list[str] = []
+
+        if test_mode == "diff":
+            # Diff mode: send only the hunks
+            lines.append("## CHANGED CODE (DIFF)")
+            lines.append("")
+            if diff_text:
+                # Truncate very large diffs
+                diff_lines = diff_text.splitlines()
+                if len(diff_lines) > 500:
+                    diff_lines = diff_lines[:500]
+                    diff_lines.append(f"... [truncated at 500 lines, {len(diff_text.splitlines())} total]")
+                lines.append("\n".join(diff_lines))
+            else:
+                lines.append("(no changes detected)")
+            lines.append("")
+
+        else:
+            # Full mode: include complete changed files (capped)
+            lines.append("## CHANGED FILES (FULL)")
+            lines.append("")
+            max_files = 20
+            max_lines_per_file = 200
+
+            shown = 0
+            for fname in sorted(changed_files):
+                if shown >= max_files:
+                    lines.append(f"... [{len(changed_files) - max_files} more files truncated]")
+                    break
+                fpath = os.path.join(self.workdir, fname)
+                if not os.path.isfile(fpath):
+                    continue
+                # Skip binary and huge files
+                try:
+                    fsize = os.path.getsize(fpath)
+                    if fsize > 500_000:
+                        lines.append(f"### {fname} [binary/large — skipped]")
+                        shown += 1
+                        continue
+                except OSError:
+                    continue
+
+                try:
+                    with open(fpath, "r", errors="replace") as f:
+                        content = f.read()
+                except Exception:
+                    continue
+
+                file_lines = content.splitlines()
+                if len(file_lines) > max_lines_per_file:
+                    file_lines = file_lines[:max_lines_per_file]
+                    file_lines.append(f"... [truncated at {max_lines_per_file} lines, {len(content.splitlines())} total]")
+
+                lines.append(f"### {fname}")
+                lines.append("```")
+                lines.extend(file_lines)
+                lines.append("```")
+                lines.append("")
+                shown += 1
+
+            # Also include the diff stat for awareness
+            if diff_text:
+                diff_lines = diff_text.splitlines()
+                if len(diff_lines) > 50:
+                    diff_lines = diff_lines[:50]
+                lines.append("## Diff summary (first 50 lines)")
+                lines.append("```diff")
+                lines.extend(diff_lines)
+                lines.append("```")
+
+        return "\n".join(lines)
+
     def _load_config(self) -> dict:
         """Load .gitreins/config.yaml if present."""
         import yaml
@@ -302,14 +429,22 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
 
         self._task_index[task.get("id", "unknown")] = task
 
+        # Build tools list based on config
+        config = self._load_config()
+        evaluator_cfg = config.get("evaluator", {})
+
+        # Inject code context (changed files or diffs) into the initial prompt
+        # so the LLM has relevant code upfront — reduces read_file() calls
+        # and prevents context-bloat from accumulating tool results.
+        code_context = self._build_code_context(config)
+        if code_context:
+            task_prompt += f"\n\n{code_context}"
+
         messages: list[dict] = [
             {"role": "system", "content": EVALUATOR_SYSTEM_PROMPT},
             {"role": "user", "content": task_prompt},
         ]
 
-        # Build tools list based on config
-        config = self._load_config()
-        evaluator_cfg = config.get("evaluator", {})
         tools = list(EVALUATOR_TOOLS)  # copy
         if not evaluator_cfg.get("static_analysis_diagnostics", False):
             tools = [t for t in tools if t["function"]["name"] != "read_static_analysis"]
