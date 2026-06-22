@@ -84,6 +84,18 @@ class EvalCap:
         """Begin the wall-clock timer."""
         self.start_time = time.time()
 
+    def reset_context_tracking(self) -> None:
+        """Reset input/output token counters for a fresh context window.
+
+        Called after compaction — the conversation is rebuilt from scratch
+        so accumulated token counts from the old conversation are irrelevant.
+        Iteration and time tracking are NOT reset (they span the full evaluation).
+        """
+        self.cumulative_input_tokens = 0
+        self.cumulative_output_tokens = 0
+        self.cumulative_cache_read = 0
+        self.cumulative_cache_write = 0
+
     def record_llm_call(self, prompt_tokens: int = 0, completion_tokens: int = 0,
                         cache_read_tokens: int = 0, cache_write_tokens: int = 0) -> str | None:
         """Record a full LLM reasoning call (costs 1.0 iterations).

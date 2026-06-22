@@ -615,6 +615,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                     )
                     iteration = 0  # Reset — clean conversation
                     cumulative_prompt_tok = 0
+                    self.eval_cap.reset_context_tracking()  # Fresh context = fresh token budget
                     continue
 
             try:
@@ -651,6 +652,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                     )
                     iteration = 0  # Reset — fresh context
                     cumulative_prompt_tok = 0
+                    self.eval_cap.reset_context_tracking()  # Fresh context = fresh token budget
                     continue
 
                 logger.error("LLM call failed on iteration %d: %s", iteration, e)

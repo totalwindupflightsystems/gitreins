@@ -536,3 +536,203 @@ class TestExtendedEvaluator:
                 f.write(f"line {i}: {'x' * 100}\n")
         result = evaluator._tool_read_file("bigfile.py")
         assert "has_more" in result
+
+
+# ── v0.7.5: Compaction checkpoint + resume loop ──────────────────────
+
+class TestCompaction:
+    """Tests for context compaction: checkpoint, resume, sandbox survival."""
+
+    def test_build_compacted_prompt_extracts_verified_from_sandbox(self, evaluator):
+        """_build_compacted_prompt reads verified_N keys from sandbox."""
+        evaluator._sandbox["verified_0"] = "PASS: tests/test_auth.py:45"
+        evaluator._sandbox["verified_2"] = "FAIL: missing handler"
+
+        task = {"id": "t1", "title": "Test", "criteria": ["c0", "c1", "c2"]}
+        prompt = evaluator._build_compacted_prompt(task, "", 3)
+
+        assert "Already verified (2/3)" in prompt
+        assert "c0" in prompt
+        assert "tests/test_auth.py:45" in prompt
+        assert "c2" in prompt  # criteria text
+        assert "Still to verify (1/3)" in prompt
+        assert "c1" in prompt  # remaining
+
+    def test_build_compacted_prompt_all_verified(self, evaluator):
+        """All criteria verified → no 'still to verify' section."""
+        evaluator._sandbox["verified_0"] = "PASS"
+        evaluator._sandbox["verified_1"] = "PASS"
+        task = {"id": "t1", "title": "Test", "criteria": ["c0", "c1"]}
+        prompt = evaluator._build_compacted_prompt(task, "", 2)
+        assert "Already verified (2/2)" in prompt
+        assert "Still to verify" not in prompt
+
+    def test_build_compacted_prompt_none_verified(self, evaluator):
+        """No sandbox keys → all criteria listed as remaining."""
+        task = {"id": "t1", "title": "Test", "criteria": ["c0", "c1", "c2"]}
+        prompt = evaluator._build_compacted_prompt(task, "", 3)
+        assert "Already verified" not in prompt
+        assert "Still to verify (3/3)" in prompt
+
+    def test_compact_context_rebuilds_clean_messages(self, evaluator):
+        """_compact_context returns fresh messages with only system + compacted prompt."""
+        evaluator._sandbox["verified_0"] = "PASS"
+        task = {"id": "t1", "title": "Test", "criteria": ["c0", "c1"]}
+        old_messages = [{"role": "system", "content": "old"}, {"role": "user", "content": "old"}]
+        new_msgs, count = evaluator._compact_context(old_messages, task, "", 2, 1)
+        assert count == 2  # was compaction #1, now #2
+        assert len(new_msgs) == 2
+        assert new_msgs[0]["role"] == "system"
+        assert "EVALUATION PROGRESS" in new_msgs[1]["content"]
+        assert "c0" in new_msgs[1]["content"]
+
+    def test_compact_context_increments_count(self, evaluator):
+        """Each compaction increments the counter."""
+        task = {"id": "t1", "title": "Test", "criteria": ["c0"]}
+        _, count1 = evaluator._compact_context([], task, "", 1, 0)
+        _, count2 = evaluator._compact_context([], task, "", 1, 3)
+        assert count1 == 1
+        assert count2 == 4
+
+    def test_compaction_triggered_on_http_400(self, evaluator, llm_client):
+        """HTTP 400 with 'context' keyword triggers compaction, not immediate failure."""
+        import requests
+        # Build a fake HTTPError with status 400
+        fake_response = MagicMock()
+        fake_response.status_code = 400
+        http_err = requests.HTTPError("context length exceeded", response=fake_response)
+
+        # First call: HTTP 400 → compact
+        # Second call: verdict (after compaction, fresh context)
+        evaluator._sandbox["verified_0"] = "PASS"
+        with patch.object(llm_client, 'chat', side_effect=[
+            http_err,
+            LLMResponse(content='{"verdict":"COMPLETE","items":[{"criterion":"c0","status":"PASS","detail":"x"}],"summary":"ok"}'),
+        ]):
+            verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
+        assert verdict.verdict == "COMPLETE"
+
+    def test_compaction_not_triggered_on_other_error(self, evaluator, llm_client):
+        """Non-context errors (like ValueError) return INCOMPLETE immediately."""
+        with patch.object(llm_client, 'chat', side_effect=ValueError("some other error")):
+            verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
+        assert verdict.verdict == "INCOMPLETE"
+        assert "other error" in verdict.summary.lower()
+
+    def test_proactive_compaction_at_80pct_threshold(self, evaluator, llm_client):
+        """When cumulative prompt tokens exceed 80% of limit, compaction triggers."""
+        # Set a low input token cap to trigger compaction quickly
+        evaluator.eval_cap.max_input_tokens = 1000  # 1000 token limit
+
+        # Simulate a response with prompt_tokens near threshold
+        call_count = [0]
+
+        def fake_chat(messages, tools=None):
+            call_count[0] += 1
+            if call_count[0] <= 2:
+                # Build up context: return tool calls with high token count
+                tc = ToolCall(id=f"tc{call_count[0]}", name="read_file", arguments={"path": f"f{call_count[0]}.py"})
+                return LLMResponse(
+                    content="checking",
+                    tool_calls=[tc],
+                    usage=MagicMock(prompt_tokens=900, completion_tokens=10,
+                                    cache_read_tokens=0, cache_write_tokens=0, total_tokens=910),
+                )
+            else:
+                # After compaction: deliver verdict
+                return LLMResponse(
+                    content='{"verdict":"COMPLETE","items":[{"criterion":"c0","status":"PASS","detail":"ok"}],"summary":"done"}',
+                )
+
+        with patch.object(llm_client, 'chat', side_effect=fake_chat):
+            # Need to mock _tool_read_file so it doesn't fail
+            with patch.object(evaluator, '_tool_read_file', return_value={"content": "test", "total_lines": 1}):
+                verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
+        assert verdict.verdict == "COMPLETE"
+
+    def test_max_compactions_limit(self, evaluator, llm_client):
+        """After MAX_COMPACTIONS (3), HTTP 400 returns INCOMPLETE."""
+        import requests
+        fake_response = MagicMock()
+        fake_response.status_code = 400
+        http_err = requests.HTTPError("context length exceeded", response=fake_response)
+
+        with patch.object(llm_client, 'chat', side_effect=http_err):
+            verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
+        assert verdict.verdict == "INCOMPLETE"
+        # Should have failed after 3 compaction attempts
+        assert "LLM call failed" in verdict.summary
+
+    def test_estimate_context_uses_llm_tokens(self, evaluator):
+        """_estimate_context_tokens uses cumulative_prompt_tok when provided."""
+        messages = [{"role": "user", "content": "hello world" * 100}]
+        est = evaluator._estimate_context_tokens(messages, cumulative_prompt_tok=5000)
+        assert est == 5000
+
+    def test_estimate_context_falls_back_to_chars(self, evaluator):
+        """_estimate_context_tokens falls back to char/3.5 heuristic."""
+        messages = [{"role": "user", "content": "hello world" * 100}]
+        est = evaluator._estimate_context_tokens(messages, cumulative_prompt_tok=0)
+        assert est > 100  # Rough estimate should be reasonable
+
+
+# ── v0.7.4: Code context pre-loading ─────────────────────────────────
+
+class TestCodeContextPreloading:
+    """Tests for _build_code_context: full mode vs diff mode."""
+
+    def test_diff_mode_returns_git_diff(self, evaluator, tmp_workdir):
+        """In diff mode, _build_code_context returns git diff hunks."""
+        import subprocess
+        os.chdir(tmp_workdir)
+        subprocess.run(["git", "init", "-q"], cwd=tmp_workdir)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp_workdir)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_workdir)
+
+        # Create and commit a file, then modify it
+        with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
+            f.write("print('hello')\n")
+        subprocess.run(["git", "add", "main.py"], cwd=tmp_workdir)
+        subprocess.run(["git", "commit", "-m", "initial", "--no-verify"],
+                       cwd=tmp_workdir, env={**os.environ, "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "t@t.com", "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "t@t.com"})
+
+        with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
+            f.write("print('hello world')\n")
+
+        config = {"guards": {"test_mode": "diff"}}
+        ctx = evaluator._build_code_context(config)
+        assert "CHANGED CODE (DIFF)" in ctx
+        assert "main.py" in ctx  # Should reference the file
+
+    def test_full_mode_returns_file_contents(self, evaluator, tmp_workdir):
+        """In full mode, _build_code_context returns full changed file content."""
+        import subprocess
+        os.chdir(tmp_workdir)
+        subprocess.run(["git", "init", "-q"], cwd=tmp_workdir)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp_workdir)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_workdir)
+
+        with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
+            f.write("def foo():\n    return 42\n")
+        subprocess.run(["git", "add", "main.py"], cwd=tmp_workdir)
+        subprocess.run(["git", "commit", "-m", "initial", "--no-verify"],
+                       cwd=tmp_workdir, env={**os.environ, "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "t@t.com", "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "t@t.com"})
+
+        with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
+            f.write("def foo():\n    return 99\n")
+
+        config = {"guards": {"test_mode": "full"}}
+        ctx = evaluator._build_code_context(config)
+        assert "CHANGED FILES (FULL)" in ctx
+        assert "def foo():" in ctx
+        assert "return 99" in ctx
+        assert "main.py" in ctx
+
+    def test_no_changes_returns_empty(self, evaluator, tmp_workdir):
+        """When nothing changed, _build_code_context returns empty string."""
+        import subprocess
+        os.chdir(tmp_workdir)
+        subprocess.run(["git", "init", "-q"], cwd=tmp_workdir)
+        config = {"guards": {"test_mode": "full"}}
+        ctx = evaluator._build_code_context(config)
+        assert ctx == ""

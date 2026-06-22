@@ -451,6 +451,52 @@ class TestJudgeEvaluateMCP:
         assert "result" in response or "error" in response
 
 
+# ── v0.7.3: Configure MCP tool ───────────────────────────────────────────────
+
+class TestConfigureMCP:
+    """Tests for the configure tool: hot-reload LLM config at runtime."""
+
+    def test_configure_sets_api_key(self, mcp_server):
+        """configure with env dict pushes key into os.environ and LLM client."""
+        old_key = mcp_server.llm.api_key
+        result = mcp_server._configure(env={"GITREINS_LLM_API_KEY": "sk-newtestkey"})
+        assert result["configured"] is True
+        assert mcp_server.llm.api_key == "sk-newtestkey"
+        assert os.environ.get("GITREINS_LLM_API_KEY") == "sk-newtestkey"
+
+    def test_configure_sets_model(self, mcp_server):
+        """configure with model changes the LLM model."""
+        result = mcp_server._configure(model="claude-sonnet-4")
+        assert result["current"]["model"] == "claude-sonnet-4"
+        assert mcp_server.llm.model == "claude-sonnet-4"
+
+    def test_configure_sets_base_url(self, mcp_server):
+        """configure with base_url changes the API endpoint."""
+        result = mcp_server._configure(base_url="https://api.anthropic.com/v1")
+        assert "anthropic" in result["current"]["base_url"] or "api.anthropic.com" in result["current"]["base_url"]
+
+    def test_configure_reports_previous_and_current(self, mcp_server):
+        """configure returns old and new config snapshots."""
+        result = mcp_server._configure(model="gpt-4")
+        assert "previous" in result
+        assert "current" in result
+        assert result["previous"]["model"] != result["current"]["model"]
+        assert result["current"]["model"] == "gpt-4"
+
+    def test_configure_recreates_judge(self, mcp_server):
+        """configure recreates the Judge with the new LLM client."""
+        old_judge_id = id(mcp_server.judge)
+        mcp_server._configure(model="different-model")
+        assert id(mcp_server.judge) != old_judge_id
+
+    def test_configure_without_args_is_noop(self, mcp_server):
+        """configure with no arguments still works (returns current state)."""
+        old_model = mcp_server.llm.model
+        result = mcp_server._configure()
+        assert result["configured"] is True
+        assert result["current"]["model"] == old_model
+
+
 # ── Phase 2-4: stdio buffering ──────────────────────────────────────────────
 
 

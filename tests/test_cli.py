@@ -676,7 +676,68 @@ class TestCmdInitConfigSafety:
         assert os.path.isfile(config_path), "Config file not created"
 
 
-# ── Integration: pre-commit hook end-to-end ──────────────────────────────────
+# ── v0.7.2: Gitleaks .toml auto-generation ────────────────────────────
+
+class TestGitleaksTomlGeneration:
+    """Tests for _generate_gitleaks_config: auto-created during init."""
+
+    def test_python_project_gets_python_exclusions(self, tmp_workdir):
+        """Python project gets .venv, __pycache__, dist, etc. exclusions."""
+        import subprocess
+        os.makedirs(os.path.join(tmp_workdir, ".git"), exist_ok=True)
+        with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
+            f.write("print('hello')\n")
+        # Python detection requires setup.py, setup.cfg, or pyproject.toml
+        with open(os.path.join(tmp_workdir, "setup.py"), "w") as f:
+            f.write("# placeholder\n")
+        subprocess.run(["git", "init", "-q"], cwd=tmp_workdir)
+        result = run_cli("init", cwd=tmp_workdir)
+        assert result.returncode == 0
+
+        toml_path = os.path.join(tmp_workdir, ".gitleaks.toml")
+        assert os.path.isfile(toml_path), "gitleaks.toml should be created"
+        content = open(toml_path).read()
+        assert ".venv/" in content
+        assert "__pycache__/" in content
+        assert ".mypy_cache/" in content
+        assert ".pytest_cache/" in content
+        assert "dist/" in content
+        assert ".git/" in content
+
+    def test_existing_gitleaks_toml_not_overwritten(self, tmp_workdir):
+        """If .gitleaks.toml already exists, init does not modify it."""
+        import subprocess
+        os.makedirs(os.path.join(tmp_workdir, ".git"), exist_ok=True)
+        with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
+            f.write("print('hello')\n")
+        with open(os.path.join(tmp_workdir, "setup.py"), "w") as f:
+            f.write("# placeholder\n")
+        existing_toml = os.path.join(tmp_workdir, ".gitleaks.toml")
+        with open(existing_toml, "w") as f:
+            f.write("# Custom exclusions\ntest-key = true\n")
+        subprocess.run(["git", "init", "-q"], cwd=tmp_workdir)
+        result = run_cli("init", cwd=tmp_workdir)
+        assert result.returncode == 0
+        content = open(existing_toml).read()
+        assert "Custom exclusions" in content
+        assert "test-key" in content
+
+    def test_universal_exclusions_always_present(self, tmp_workdir):
+        """Every project gets .git/, .gitreins/, *.log exclusions."""
+        import subprocess
+        os.makedirs(os.path.join(tmp_workdir, ".git"), exist_ok=True)
+        with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
+            f.write("print('hello')\n")
+        with open(os.path.join(tmp_workdir, "setup.py"), "w") as f:
+            f.write("# placeholder\n")
+        subprocess.run(["git", "init", "-q"], cwd=tmp_workdir)
+        result = run_cli("init", cwd=tmp_workdir)
+        assert result.returncode == 0
+
+        content = open(os.path.join(tmp_workdir, ".gitleaks.toml")).read()
+        assert ".git/" in content
+        assert ".gitreins/" in content
+        assert "*.log" in content
 
 
 class TestPreCommitHookIntegration:
