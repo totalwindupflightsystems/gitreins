@@ -37,6 +37,19 @@ You have tools to read files, run commands, and search the codebase. Use them ag
 
 If available, use read_static_analysis to check for type errors and static analysis warnings before judging criteria — type violations are hard evidence for FAIL.
 
+## CRITERIA TRACKING (REQUIRED)
+
+After you verify EACH criterion, IMMEDIATELY save your finding to the sandbox:
+
+  sandbox_write("verified_0", "PASS: tests/test_auth.py:45 confirms token validation")
+  sandbox_write("verified_2", "FAIL: missing error handling in engine/handler.py:120")
+
+Use the criterion's index number (0-based, from the criteria list). This is NOT optional — it is how the evaluation survives context compaction. If the context window fills up, your progress is saved and you resume with a clean slate.
+
+## COMPACTION AWARENESS
+
+If you receive a prompt with "EVALUATION PROGRESS" at the top, you are resuming after compaction. The criteria marked ✓ are already verified — do NOT re-check them. Only the remaining criteria need your attention.
+
 For each criterion:
 1. Read the relevant files
 2. Run any related tests
@@ -394,6 +407,122 @@ class AgenticEvaluator:
                 pass
         return {}
 
+    def _estimate_context_tokens(self, messages: list[dict], cumulative_prompt_tok: int = 0) -> int:
+        """Estimate total context tokens in the message array.
+
+        Uses cumulative LLM-reported prompt tokens as primary source.
+        Falls back to character-based heuristic (chars / 3.5 ≈ tokens)
+        when LLM token data is unavailable.
+        """
+        if cumulative_prompt_tok > 0:
+            # LLM-reported tokens are most accurate
+            return cumulative_prompt_tok
+
+        # Rough heuristic: ~3.5 chars per token for English/code
+        total_chars = sum(len(json.dumps(m, ensure_ascii=False)) for m in messages)
+        return int(total_chars / 3.5)
+
+    def _build_compacted_prompt(
+        self,
+        task: dict,
+        code_context: str,
+        criteria_total: int,
+    ) -> str:
+        """Build a compacted resume prompt from sandbox state.
+
+        Extracts verified criteria and evidence from sandbox keys,
+        then builds a fresh prompt with progress summary + remaining work.
+        The LLM continues from this clean context.
+        """
+        criteria_list = task.get("criteria", [])
+        verified: dict[str, str] = {}  # criterion → evidence
+        remaining_indices: list[int] = []
+
+        # Extract verified criteria from sandbox
+        for i, criterion in enumerate(criteria_list):
+            key = f"verified_{i}"
+            if key in self._sandbox:
+                verified[criterion] = self._sandbox[key]
+            else:
+                remaining_indices.append(i)
+
+        # Build progress summary
+        lines: list[str] = []
+        lines.append("## EVALUATION PROGRESS (compacted — fresh context window)")
+        lines.append("")
+
+        if verified:
+            lines.append(f"### Already verified ({len(verified)}/{criteria_total}):")
+            for criterion, evidence in verified.items():
+                lines.append(f"- ✓ {criterion}")
+                if evidence and evidence != "PASS":
+                    lines.append(f"  Evidence: {evidence}")
+            lines.append("")
+
+        if remaining_indices:
+            lines.append(f"### Still to verify ({len(remaining_indices)}/{criteria_total}):")
+            for i in remaining_indices:
+                lines.append(f"  {i+1}. {criteria_list[i]}")
+            lines.append("")
+
+        lines.append("## INSTRUCTIONS (continued evaluation)")
+        lines.append("")
+        lines.append("You are resuming an evaluation with a clean context window. The criteria")
+        lines.append(f"marked ✓ above are already verified — do NOT re-check them. Focus ONLY on")
+        lines.append("the remaining criteria listed above.")
+        lines.append("")
+        lines.append("Use sandbox_write to track each criterion as you verify it:")
+        lines.append('  sandbox_write("verified_N", "PASS: evidence from file:line")')
+        lines.append("")
+        lines.append("When ALL remaining criteria are verified, output the JSON verdict for ALL")
+        lines.append(f"criteria (both the {len(verified)} already verified and the {len(remaining_indices)} you just checked).")
+        lines.append("Output ONLY the JSON verdict — no markdown fences, no extra text.")
+
+        prompt = "\n".join(lines)
+
+        # Append code context for reference
+        if code_context:
+            prompt += f"\n\n{code_context}"
+
+        # Append the full task criteria list for the JSON verdict
+        criteria_text = "\n".join(
+            f"  {i+1}. {c}" for i, c in enumerate(criteria_list)
+        )
+        prompt += f"\n\n## FULL CRITERIA LIST (for verdict JSON)\n{criteria_text}"
+
+        return prompt
+
+    def _compact_context(
+        self,
+        messages: list[dict],
+        task: dict,
+        code_context: str,
+        criteria_total: int,
+        compaction_count: int,
+    ) -> tuple[list[dict], int]:
+        """Compact the conversation: save progress, rebuild clean context.
+
+        Returns (new_messages, new_compaction_count).
+        The sandbox holds verified criteria — the LLM resumes from a clean
+        conversation with only the progress summary + remaining work.
+        """
+        logger.info(
+            "Compacting evaluator context (compaction #%d, %d messages → clean slate)",
+            compaction_count + 1, len(messages),
+        )
+
+        compacted_prompt = self._build_compacted_prompt(
+            task, code_context, criteria_total,
+        )
+
+        # Fresh conversation: system prompt + compacted task
+        new_messages: list[dict] = [
+            {"role": "system", "content": EVALUATOR_SYSTEM_PROMPT},
+            {"role": "user", "content": compacted_prompt},
+        ]
+
+        return new_messages, compaction_count + 1
+
     def evaluate(self, task: dict) -> Verdict:
         """Run the agentic loop against a task and return a verdict.
 
@@ -452,10 +581,17 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         # Start tracking
         self.eval_cap.start()
 
-        # Determine iteration cap. If unlimited, use a safety max.
+        # Compaction state
+        MAX_COMPACTIONS = 3
+        compaction_count = 0
+        cumulative_prompt_tok = 0
+        criteria_total = len(criteria_list)
+
+        # Use while loop so we can reset iteration counter after compaction
+        iteration = 0
         iter_limit = self.eval_cap.max_iterations_int
 
-        for iteration in range(iter_limit):
+        while iteration < iter_limit:
             # Check caps (handles time/token limits even with unlimited iterations)
             cap_error = self.eval_cap.check()
             if cap_error:
@@ -465,9 +601,58 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                     summary=f"Cap exceeded: {cap_error}",
                 )
 
+            # Proactive compaction: estimate if context is near the token limit
+            if cumulative_prompt_tok > 0 and compaction_count < MAX_COMPACTIONS:
+                threshold = int(self.eval_cap.max_input_tokens * 0.80)
+                if cumulative_prompt_tok > threshold:
+                    logger.warning(
+                        "Context near limit (%d/%d tokens) — compacting (compaction #%d)",
+                        cumulative_prompt_tok, self.eval_cap.max_input_tokens,
+                        compaction_count + 1,
+                    )
+                    messages, compaction_count = self._compact_context(
+                        messages, task, code_context, criteria_total, compaction_count,
+                    )
+                    iteration = 0  # Reset — clean conversation
+                    cumulative_prompt_tok = 0
+                    continue
+
             try:
                 response = self.llm.chat(messages, tools=tools)
             except Exception as e:
+                # Detect HTTP 400-499 errors (context window exceeded, etc.)
+                is_context_error = False
+                try:
+                    import requests
+                    if isinstance(e, requests.HTTPError):
+                        if hasattr(e, "response") and e.response is not None:
+                            status = e.response.status_code
+                            if 400 <= status < 500 and status != 429:
+                                is_context_error = True
+                except Exception:
+                    pass
+
+                # Also check error message for common context-window keywords
+                err_msg = str(e).lower()
+                if not is_context_error:
+                    is_context_error = any(
+                        kw in err_msg
+                        for kw in ("context", "token", "maximum", "exceeded",
+                                   "window", "truncat", "length")
+                    )
+
+                if is_context_error and compaction_count < MAX_COMPACTIONS:
+                    logger.warning(
+                        "Context error on iteration %d (compacting #%d): %s",
+                        iteration, compaction_count + 1, str(e)[:200],
+                    )
+                    messages, compaction_count = self._compact_context(
+                        messages, task, code_context, criteria_total, compaction_count,
+                    )
+                    iteration = 0  # Reset — fresh context
+                    cumulative_prompt_tok = 0
+                    continue
+
                 logger.error("LLM call failed on iteration %d: %s", iteration, e)
                 return Verdict(
                     verdict="INCOMPLETE",
@@ -479,6 +664,10 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             completion_tok = response.usage.completion_tokens if response.usage else 0
             cache_read = response.usage.cache_read_tokens if response.usage else 0
             cache_write = response.usage.cache_write_tokens if response.usage else 0
+
+            # Track cumulative prompt tokens for compaction threshold
+            cumulative_prompt_tok = max(cumulative_prompt_tok, prompt_tok)
+
             cap_error = self.eval_cap.record_llm_call(
                 prompt_tokens=prompt_tok,
                 completion_tokens=completion_tok,
@@ -548,6 +737,8 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
 
             logger.debug("Evaluator iteration %d: %d tool calls, %d messages",
                          iteration + 1, len(response.tool_calls), len(messages))
+
+            iteration += 1
 
         # Hit iteration cap — return clear error
         msg = (
