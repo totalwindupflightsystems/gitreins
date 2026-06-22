@@ -26,7 +26,7 @@ import subprocess
 from dataclasses import dataclass, field
 
 from engine.guards import check_go_lint, check_go_tests, check_go_build
-from engine.static_analysis import run_static_check
+from engine.lsp import run_lsp_check
 
 logger = logging.getLogger("gitreins.guard")
 
@@ -229,8 +229,10 @@ class GuardManager:
             "dead_code": guards_cfg.get("dead_code", False),  # opt-in: Python-only, can be noisy
             "skylos": guards_cfg.get("skylos", False),  # opt-in: needs pip install
             "static_analysis": guards_cfg.get("static_analysis", False),  # opt-in: type checkers
+            "lsp": guards_cfg.get("lsp", False),  # opt-in: LSP servers
         }
         self._static_tools = guards_cfg.get("static_analysis_tools", {})
+        self._lsp_tools = guards_cfg.get("lsp_tools", ["pylsp"])
 
         # Test mode: "full" (default) or "diff"
         self._test_mode = guards_cfg.get("test_mode", "full")
@@ -269,6 +271,9 @@ class GuardManager:
 
         if self._enabled["static_analysis"]:
             results.append(self._check_static_analysis())
+
+        if self._enabled["lsp"] and not self._is_go:
+            results.append(self._check_lsp())
 
         if self._is_go:
             if self._go_guards.get("build", True):
@@ -639,6 +644,7 @@ class GuardManager:
 
         for tool in lang_tools:
             try:
+                from engine.static_analysis import run_static_check
                 diags = run_static_check(tool, self.workdir)
             except Exception as exc:
                 logger.warning("static_analysis %s failed: %s", tool, exc)
@@ -672,6 +678,65 @@ class GuardManager:
             passed=not had_errors,
             output=output,
         )
+
+
+    def _check_lsp(self) -> GuardResult:
+        """Run configured LSP servers against staged files.
+
+        Uses lsp_tools config key. Only runs tools that exist on PATH.
+        Returns FAIL if any tool finds errors.
+        """
+        if self._is_go:
+            return GuardResult(
+                name="lsp", passed=True,
+                output="Go compiler covers static analysis — skipped"
+            )
+
+        if not self._lsp_tools:
+            return GuardResult(
+                name="lsp", passed=True,
+                output="No LSP tools configured"
+            )
+
+        all_diagnostics: list[str] = []
+        had_errors = False
+
+        for tool in self._lsp_tools:
+            try:
+                diags = run_lsp_check(tool, self.workdir)
+            except Exception as exc:
+                logger.warning("lsp %s failed: %s", tool, exc)
+                continue
+
+            if not diags:
+                all_diagnostics.append(f"  {tool} — clean")
+                continue
+
+            for d in diags:
+                severity = d.get("severity", "error")
+                prefix = "✗" if severity == "error" else "⚠"
+                all_diagnostics.append(
+                    f"  {prefix} {d['file']}:{d['line']} [{tool}] {d['message']}"
+                )
+                if severity == "error":
+                    had_errors = True
+
+        if not all_diagnostics:
+            return GuardResult(
+                name="lsp", passed=True,
+                output="No LSP tools ran — check lsp_tools config"
+            )
+
+        output = "\n".join(all_diagnostics)
+        if len(output) > 2000:
+            output = output[:2000] + "\n... [truncated]"
+
+        return GuardResult(
+            name="lsp",
+            passed=not had_errors,
+            output=output,
+        )
+
 
     def _check_go_lint(self) -> GuardResult:
         """Run Go lint checks (delegates to engine.guards)."""

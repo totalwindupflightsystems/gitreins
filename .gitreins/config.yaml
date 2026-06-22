@@ -8,6 +8,9 @@ guards:
   dead_code: false
   skylos: false
   static_analysis: true
+  lsp: false
+  lsp_tools:
+    - pylsp
 evaluator:
   max_iterations: 100
   max_time: 30m
