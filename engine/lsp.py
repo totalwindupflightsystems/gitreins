@@ -24,12 +24,14 @@ _TOOL_BINARIES = {
     "pyright": ["pyright-langserver", "pyright"],
     "lua-lsp": ["lua-lsp"],
     "ts-lsp": ["typescript-language-server"],
+    "rust-analyzer": ["rust-analyzer"],
 }
 
 _LANGUAGE_MAP: dict[str, str] = {
     ".py": "python",
     ".pyw": "python",
     ".lua": "lua",
+    ".rs": "rust",
     ".ts": "typescript",
     ".tsx": "typescriptreact",
     ".js": "javascript",
@@ -42,6 +44,7 @@ _TOOL_LANGUAGES: dict[str, list[str]] = {
     "pyright": ["python"],
     "lua-lsp": ["lua"],
     "ts-lsp": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
+    "rust-analyzer": ["rust"],
 }
 
 
@@ -285,7 +288,7 @@ def _lsp_shutdown(proc: subprocess.Popen) -> None:
         pass
 
 
-def _get_staged_python_files(workdir: str) -> list[str]:
+def _get_staged_files(workdir: str) -> list[str]:
     try:
         result = subprocess.run(
             ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
@@ -298,7 +301,7 @@ def _get_staged_python_files(workdir: str) -> list[str]:
 
 
 def _staged_files_by_language(workdir: str) -> dict[str, list[str]]:
-    staged = _get_staged_python_files(workdir)
+    staged = _get_staged_files(workdir)
     by_lang: dict[str, list[str]] = {}
     for fpath in staged:
         full = os.path.join(workdir, fpath)

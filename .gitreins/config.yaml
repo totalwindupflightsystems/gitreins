@@ -11,6 +11,8 @@ guards:
   lsp: false
   lsp_tools:
     - pylsp
+    - rust-analyzer
+    - ts-lsp
 evaluator:
   max_iterations: 100
   max_time: 30m

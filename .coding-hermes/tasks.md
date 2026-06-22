@@ -129,7 +129,7 @@
   - Evaluator can suggest fixes based on LSP diagnostics
   - Test: create task with a lint error, verify evaluator catches it
 
-## [ ] GR-053: LSP multi-language support — Round 1
+## [x] GR-053: LSP multi-language support — Round 1
 - **Priority:** low
 - **Model:** deepseek-v4-flash
 - **Provider:** deepseek
@@ -140,6 +140,7 @@
   - Config: `lsp_tools: [pylsp, rust-analyzer, typescript-language-server]`
   - Tests for each language's tool discovery
   - Graceful skip if LSP server not installed
+- **Result:** 570 passed, 7 skipped (+14 new tests). rust-analyzer skip for type-error test when no Cargo.toml (expected). ts-lsp skip graceful.
 
 ## [ ] GR-054: Increase guard test timeout from 120s to 180s
 - **Priority:** medium
