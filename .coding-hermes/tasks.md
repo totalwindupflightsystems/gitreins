@@ -103,7 +103,8 @@
 
 ## [x] GR-051: LSP guard Tier 1 — enable and test with real LSP servers
 - **Priority:** high
-- **Commit:** CHANGEME
+- **Commit:** `fa921c9`
+- **Result:** Rewritten _lsp_read_response (os.read bypasses BufferedReader), 29 LSP tests (22 unit + 7 integration with live pylsp), pyflakes+pycodestyle installed. Full suite: 544 passed, 5 skipped.
 - **Model:** deepseek-v4-flash
 - **Provider:** deepseek
 - **Files:** `engine/lsp.py`, `tests/test_lsp.py`, `.gitreins/config.yaml`
