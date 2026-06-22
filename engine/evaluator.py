@@ -35,7 +35,7 @@ EVALUATOR_SYSTEM_PROMPT = """You are a code quality evaluator. Your job is to ju
 
 You have tools to read files, run commands, and search the codebase. Use them aggressively — don't guess. Read the actual code, run the actual tests.
 
-If available, use read_static_analysis to check for type errors and static analysis warnings before judging criteria — type violations are hard evidence for FAIL.
+If available, use read_static_analysis to check for type errors and static analysis warnings, and read_lsp_diagnostics to check LSP (Language Server Protocol) diagnostics before judging criteria — type violations and LSP errors are hard evidence for FAIL.
 
 ## CRITERIA TRACKING (REQUIRED)
 
@@ -135,6 +135,14 @@ EVALUATOR_TOOLS = [
                     "path": {"type": "string", "description": "Optional: specific file or directory path. Omit to get diagnostics for all files."},
                 },
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_lsp_diagnostics",
+            "description": "Get LSP (Language Server Protocol) diagnostics collected during Tier 1 guard run. Returns structured diagnostics from LSP tools like pylsp with file, line, severity, and message for each finding. LSP diagnostics include undefined variables, syntax errors, type mismatches, and import errors — hard evidence for FAIL on criteria.",
+            "parameters": {"type": "object", "properties": {}},
         },
     },
     {
@@ -268,6 +276,7 @@ class AgenticEvaluator:
         self._files_read: set[str] = set()
         self._commands_run: set[str] = set()
         self._searches_done: set[str] = set()
+        self._tier1_diagnostics: list[dict] = []
 
     def _build_code_context(self, config: dict) -> str:
         """Build a compact code-context block to pre-load into the evaluator prompt.
@@ -468,7 +477,7 @@ class AgenticEvaluator:
         lines.append("## INSTRUCTIONS (continued evaluation)")
         lines.append("")
         lines.append("You are resuming an evaluation with a clean context window. The criteria")
-        lines.append(f"marked ✓ above are already verified — do NOT re-check them. Focus ONLY on")
+        lines.append("marked ✓ above are already verified — do NOT re-check them. Focus ONLY on")
         lines.append("the remaining criteria listed above.")
         lines.append("")
         lines.append("Use sandbox_write to track each criterion as you verify it:")
@@ -557,6 +566,20 @@ Use sandbox_write to track which criteria you have verified.
 Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
 
         self._task_index[task.get("id", "unknown")] = task
+
+        # Store and inject LSP diagnostics from Tier 1 if present
+        tier1_diags = task.get("tier1_diagnostics", [])
+        self._tier1_diagnostics = tier1_diags
+        if tier1_diags:
+            diag_lines = ["## TIER 1 LSP DIAGNOSTICS"]
+            for d in tier1_diags:
+                file = d.get("file", "")
+                line = d.get("line", 0)
+                severity = d.get("severity", "warning")
+                message = d.get("message", "")
+                tool = d.get("tool", "")
+                diag_lines.append(f"  {file}:{line}:{severity}:{message} [{tool}]")
+            task_prompt += "\n\n" + "\n".join(diag_lines)
 
         # Build tools list based on config
         config = self._load_config()
@@ -800,6 +823,8 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 return self._tool_skylos_scan()
             elif tc.name == "read_static_analysis":
                 return self._tool_read_static_analysis(**tc.arguments)
+            elif tc.name == "read_lsp_diagnostics":
+                return self._tool_read_lsp_diagnostics()
             else:
                 return {"error": f"Unknown tool: {tc.name}"}
         except Exception as e:
@@ -986,6 +1011,18 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             "diagnostics": all_diagnostics,
             "count": len(all_diagnostics),
             "tools_used": lang_tools,
+        }
+
+    def _tool_read_lsp_diagnostics(self) -> dict:
+        """Return LSP diagnostics collected during the Tier 1 guard run.
+
+        These diagnostics were gathered by LSP tools (e.g. pylsp) during
+        the guard phase and passed to the evaluator. No new LSP check is
+        triggered — this returns the cached results from Tier 1.
+        """
+        return {
+            "diagnostics": self._tier1_diagnostics,
+            "count": len(self._tier1_diagnostics),
         }
 
     def _tool_get_task_item(self, id: str) -> dict:

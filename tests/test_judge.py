@@ -308,3 +308,104 @@ class TestExtendedJudge:
         # The MCP handler pattern: result.tier1.passed if result.tier1 else None
         tier1_passed = result.tier1.passed if result.tier1 else None
         assert tier1_passed is None
+
+
+class TestLspDiagnosticsParsing:
+    """Test Judge._parse_lsp_output and _extract_lsp_diagnostics — step GR-NNN."""
+
+    def test_parse_lsp_output_empty(self, judge):
+        """Empty output returns empty list."""
+        result = judge._parse_lsp_output("")
+        assert result == []
+
+    def test_parse_lsp_output_clean(self, judge):
+        """Output with only clean lines returns empty list."""
+        output = "  pylsp — clean"
+        result = judge._parse_lsp_output(output)
+        assert result == []
+
+    def test_parse_lsp_output_error_diag(self, judge):
+        """Parses '✗' prefixed line as error severity."""
+        output = "  ✗ /path/to/file.py:5 [pylsp] Undefined variable 'x'"
+        result = judge._parse_lsp_output(output)
+        assert len(result) == 1
+        d = result[0]
+        assert d["file"] == "/path/to/file.py"
+        assert d["line"] == 5
+        assert d["severity"] == "error"
+        assert d["message"] == "Undefined variable 'x'"
+        assert d["tool"] == "pylsp"
+
+    def test_parse_lsp_output_warning_diag(self, judge):
+        """Parses '⚠' prefixed line as warning severity."""
+        output = "  ⚠ /path/to/file.py:10 [pylsp] unused variable 'y'"
+        result = judge._parse_lsp_output(output)
+        assert len(result) == 1
+        assert result[0]["severity"] == "warning"
+        assert result[0]["line"] == 10
+        assert result[0]["message"] == "unused variable 'y'"
+
+    def test_parse_lsp_output_multiple(self, judge):
+        """Multiple diagnostic lines are all parsed."""
+        output = (
+            "  ✗ /path/to/file.py:5 [pylsp] Undefined variable 'x'\n"
+            "  ⚠ /path/to/file.py:8 [pylsp] unused import os\n"
+            "  ✗ /path/to/file.py:12 [pylsp] syntax error\n"
+        )
+        result = judge._parse_lsp_output(output)
+        assert len(result) == 3
+        assert result[0]["severity"] == "error"
+        assert result[1]["severity"] == "warning"
+        assert result[2]["severity"] == "error"
+
+    def test_parse_lsp_output_mixed_content(self, judge):
+        """Non-diagnostic lines (status, blank) are ignored."""
+        output = (
+            "  pylsp — clean\n"
+            "  No staged files for LSP tool 'pylsp'\n"
+            "  ✗ /path/to/file.py:3 [pylsp] undefined name 'foo'\n"
+            ""
+        )
+        result = judge._parse_lsp_output(output)
+        assert len(result) == 1
+        assert result[0]["line"] == 3
+        assert result[0]["message"] == "undefined name 'foo'"
+
+    def test_extract_lsp_diagnostics_found(self, judge):
+        """_extract_lsp_diagnostics finds the lsp GuardResult and parses it."""
+        from engine.guard_manager import Tier1Result, GuardResult
+
+        lsp_result = GuardResult(
+            name="lsp", passed=False,
+            output="  ✗ /path/to/file.py:5 [pylsp] Undefined variable 'x'"
+        )
+        tier1 = Tier1Result(passed=False, results=[
+            GuardResult("secrets", True, "ok"),
+            lsp_result,
+            GuardResult("lint", True, "ok"),
+        ])
+        diags = judge._extract_lsp_diagnostics(tier1)
+        assert len(diags) == 1
+        assert diags[0]["file"] == "/path/to/file.py"
+        assert diags[0]["severity"] == "error"
+
+    def test_extract_lsp_diagnostics_not_present(self, judge):
+        """No lsp guard → empty list, no crash."""
+        from engine.guard_manager import Tier1Result, GuardResult
+
+        tier1 = Tier1Result(passed=True, results=[
+            GuardResult("secrets", True, "ok"),
+            GuardResult("lint", True, "ok"),
+        ])
+        diags = judge._extract_lsp_diagnostics(tier1)
+        assert diags == []
+
+    def test_extract_lsp_diagnostics_empty_output(self, judge):
+        """LSP guard with empty output → empty list."""
+        from engine.guard_manager import Tier1Result, GuardResult
+
+        tier1 = Tier1Result(passed=True, results=[
+            GuardResult("lsp", True, "  pylsp — clean"),
+        ])
+        diags = judge._extract_lsp_diagnostics(tier1)
+        assert diags == []

@@ -116,8 +116,10 @@
   - Non-zero exit on lsp error
   - Handle missing LSP server gracefully (skip, not crash)
 
-## [ ] GR-052: LSP guard Tier 2 evaluator integration
+## [x] GR-052: LSP guard Tier 2 evaluator integration
 - **Priority:** medium
+- **Commit:** `COMMIT_SHA_PLACEHOLDER`
+- **Result:** Judge extracts LSP diagnostics from Tier 1 GuardResult, passes to evaluator. Evaluator injects diagnostics into prompt + provides read_lsp_diagnostics tool. 556 passed, 6 skipped.
 - **Model:** deepseek-v4-flash
 - **Provider:** deepseek
 - **Files:** `engine/evaluator.py`, `engine/guard_manager.py`, `gitreins/cli.py`

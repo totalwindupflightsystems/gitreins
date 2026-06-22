@@ -5,9 +5,10 @@ Now delegate to the Pipeline engine for configurable multi-stage evaluation.
 """
 
 import logging
+import re
 
 from engine.evaluator import AgenticEvaluator
-from engine.guard_manager import GuardManager
+from engine.guard_manager import GuardManager, Tier1Result
 from engine.llm import LLMClient
 from engine.eval_cap import EvalCap
 from engine.pipeline import Pipeline, load_pipeline_config
@@ -78,6 +79,9 @@ class Judge:
         tier1 = self.guard_manager.run_all()
         result.tier1 = tier1
 
+        # Extract LSP diagnostics from Tier 1 results and pass to evaluator
+        tier1_diagnostics = self._extract_lsp_diagnostics(tier1)
+
         if not tier1.passed:
             print("  Tier 1 FAILED — skipping evaluator")
             result.passed = False
@@ -92,11 +96,50 @@ class Judge:
             "title": task.title,
             "criteria": task.criteria,
         }
+        if tier1_diagnostics:
+            task_dict["tier1_diagnostics"] = tier1_diagnostics
         tier2 = evaluator.evaluate(task_dict)
         result.tier2 = tier2
         result.passed = tier2.verdict == "COMPLETE"
         result.verdict = tier2
         return result
+
+    def _extract_lsp_diagnostics(self, tier1: Tier1Result) -> list[dict]:
+        """Extract structured LSP diagnostics from Tier 1 guard results.
+
+        Parses the GuardResult output for the 'lsp' guard back into
+        structured diagnostic dicts for the evaluator to consume.
+
+        Returns list of dicts with keys: file, line, severity, message, tool.
+        """
+        for guard_result in tier1.results:
+            if guard_result.name == "lsp" and guard_result.output:
+                return self._parse_lsp_output(guard_result.output)
+        return []
+
+    @staticmethod
+    def _parse_lsp_output(output: str) -> list[dict]:
+        """Parse GuardResult output text back into structured diagnostics.
+
+        The GuardResult._check_lsp output format is:
+          ✗ file:line [tool] message
+          ⚠ file:line [tool] message
+          tool — clean
+        """
+        diags: list[dict] = []
+        pattern = re.compile(r'^  [✗⚠] (.+?):(\d+) \[(.+?)\] (.+)')
+        for line in output.split("\n"):
+            m = pattern.match(line)
+            if m:
+                severity = "error" if line.startswith("  ✗") else "warning"
+                diags.append({
+                    "file": m.group(1),
+                    "line": int(m.group(2)),
+                    "severity": severity,
+                    "message": m.group(4),
+                    "tool": m.group(3),
+                })
+        return diags
 
     def run_precommit(self) -> bool:
         """Run pre-commit pipeline stages only. Returns True if commit should proceed."""
