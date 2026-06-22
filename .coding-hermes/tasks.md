@@ -141,6 +141,7 @@
   - Tests for each language's tool discovery
   - Graceful skip if LSP server not installed
 - **Result:** 570 passed, 7 skipped (+14 new tests). rust-analyzer skip for type-error test when no Cargo.toml (expected). ts-lsp skip graceful.
+- **Commit:** `97ae130`
 
 ## [ ] GR-054: Increase guard test timeout from 120s to 180s
 - **Priority:** medium
