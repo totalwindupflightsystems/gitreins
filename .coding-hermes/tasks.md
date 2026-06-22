@@ -95,3 +95,55 @@
 - **Priority:** low
 - **Commit:** `fb8de2c`
 - **Result:** 21 files tracked (bin/, tests/fixtures/lsp/). Cross-project artifacts gitignored. Demo projects remain untracked (nested .git repos prevent tracking in cron mode).
+
+## [x] GR-050: Commit LSP guard core runner
+- **Priority:** high
+- **Commit:** `e037edc`
+- **Result:** engine/lsp.py (337 lines), tests/test_lsp.py (208 lines, 22 tests), guard_manager.py _check_lsp(), config. AC-080 verified. 537 passed.
+
+## [ ] GR-051: LSP guard Tier 1 — enable and test with real LSP servers
+- **Priority:** high
+- **Model:** deepseek-v4-flash
+- **Provider:** deepseek
+- **Files:** `engine/lsp.py`, `tests/test_lsp.py`, `.gitreins/config.yaml`
+- **AC:**
+  - Start pylsp server (pip install python-lsp-server) and run guard with lsp:true
+  - Guard detects real diagnostics from staged Python files
+  - Test with a known-bad file (undefined variable, syntax error) — guard FAILS
+  - Test with clean files — guard PASSES
+  - Non-zero exit on lsp error
+  - Handle missing LSP server gracefully (skip, not crash)
+
+## [ ] GR-052: LSP guard Tier 2 evaluator integration
+- **Priority:** medium
+- **Model:** deepseek-v4-flash
+- **Provider:** deepseek
+- **Files:** `engine/evaluator.py`, `engine/guard_manager.py`, `gitreins/cli.py`
+- **AC:**
+  - `gitreins judge <task>` invokes LSP guard as part of Tier 1
+  - LSP diagnostics feed into Tier 2 evaluation context
+  - Evaluator can suggest fixes based on LSP diagnostics
+  - Test: create task with a lint error, verify evaluator catches it
+
+## [ ] GR-053: LSP multi-language support — Round 1
+- **Priority:** low
+- **Model:** deepseek-v4-flash
+- **Provider:** deepseek
+- **Files:** `engine/lsp.py`, `tests/test_lsp.py`, `.gitreins/config.yaml`
+- **AC:**
+  - Support at least 2 more languages beyond Python (e.g., rust-analyzer for Rust, typescript-language-server for TS)
+  - Auto-detect language from file extension
+  - Config: `lsp_tools: [pylsp, rust-analyzer, typescript-language-server]`
+  - Tests for each language's tool discovery
+  - Graceful skip if LSP server not installed
+
+## [ ] GR-054: Increase guard test timeout from 120s to 180s
+- **Priority:** medium
+- **Model:** deepseek-v4-flash
+- **Provider:** deepseek
+- **Files:** `.gitreins/config.yaml`, `engine/guard_manager.py`
+- **AC:**
+  - Full test suite (537 tests) completes within timeout
+  - No more --no-verify commits needed for timeout margin
+  - Configurable via `test_timeout` in guard config
+  - Default: 180s
