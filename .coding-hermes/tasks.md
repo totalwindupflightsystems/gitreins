@@ -101,8 +101,9 @@
 - **Commit:** `e037edc`
 - **Result:** engine/lsp.py (337 lines), tests/test_lsp.py (208 lines, 22 tests), guard_manager.py _check_lsp(), config. AC-080 verified. 537 passed.
 
-## [ ] GR-051: LSP guard Tier 1 — enable and test with real LSP servers
+## [x] GR-051: LSP guard Tier 1 — enable and test with real LSP servers
 - **Priority:** high
+- **Commit:** CHANGEME
 - **Model:** deepseek-v4-flash
 - **Provider:** deepseek
 - **Files:** `engine/lsp.py`, `tests/test_lsp.py`, `.gitreins/config.yaml`

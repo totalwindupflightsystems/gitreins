@@ -9,6 +9,7 @@ and returns any diagnostics.
 import json
 import logging
 import os
+import select
 import shutil
 import subprocess
 import urllib.parse
@@ -86,20 +87,63 @@ def _lsp_encode_message(msg: dict) -> bytes:
 
 
 def _lsp_read_response(proc: subprocess.Popen, timeout: float = 10.0) -> dict | None:
-    import select
+    """Read one JSON-RPC response from an LSP server process.
 
-    # Read the header
-    header_bytes = b""
-    while True:
-        if select.select([proc.stdout], [], [], timeout)[0]:
-            ch = proc.stdout.read(1)
-            if not ch:
-                return None
-            header_bytes += ch
-            if header_bytes.endswith(b"\r\n\r\n"):
-                break
-        else:
-            return None
+    Uses os.read on the raw file descriptor to bypass Python's
+    BufferedReader buffering, which interferes with select().
+    Falls back to proc.stdout.read() for in-memory streams (BytesIO).
+    """
+    import time as _time
+    import os as _os
+
+    deadline = _time.monotonic() + timeout
+
+    # Determine fd — use fileno() for real pipes, None for BytesIO
+    try:
+        fd = proc.stdout.fileno()
+    except Exception:
+        fd = None
+
+    # Accumulated raw data buffer
+    buffer = b""
+
+    def _read_more() -> int:
+        """Read more data into buffer. Returns bytes read (0 = EOF/timeout)."""
+        nonlocal buffer
+        if fd is None:
+            # BytesIO / mock — use normal read
+            chunk = proc.stdout.read(4096) if hasattr(proc.stdout, "read") else b""
+            buffer += chunk
+            return len(chunk)
+        # Real pipe — select with deadline, then os.read
+        remaining = deadline - _time.monotonic()
+        if remaining <= 0:
+            return 0
+        r, _, _ = select.select([fd], [], [], min(remaining, 1.0))
+        if not r:
+            return 0
+        try:
+            chunk = _os.read(fd, 4096)
+        except Exception:
+            return 0
+        if not chunk:
+            return 0
+        buffer += chunk
+        return len(chunk)
+
+    # ----------------------------------------------------------------
+    # Read header
+    header_end = -1
+    while header_end == -1:
+        idx = buffer.find(b"\r\n\r\n")
+        if idx >= 0:
+            header_end = idx + 4
+            break
+        if _read_more() == 0:
+            return None  # timeout / EOF before complete header
+
+    header_bytes = buffer[:header_end]
+    buffer = buffer[header_end:]
 
     header_text = header_bytes.decode("utf-8").strip()
     content_length = 0
@@ -110,18 +154,17 @@ def _lsp_read_response(proc: subprocess.Popen, timeout: float = 10.0) -> dict | 
     if content_length == 0:
         return None
 
-    body = b""
-    while len(body) < content_length:
-        if select.select([proc.stdout], [], [], timeout)[0]:
-            chunk = proc.stdout.read(content_length - len(body))
-            if not chunk:
-                break
-            body += chunk
-        else:
+    # ----------------------------------------------------------------
+    # Read body
+    while len(buffer) < content_length:
+        if _read_more() == 0:
             break
 
-    if not body:
+    if len(buffer) < content_length:
         return None
+
+    body = buffer[:content_length]
+    buffer = buffer[content_length:]
 
     try:
         return json.loads(body.decode("utf-8"))
@@ -273,24 +316,31 @@ def _tool_supports_language(tool: str, lang: str) -> bool:
     return lang in supported
 
 
-def run_lsp_check(tool: str, workdir: str) -> list[dict]:
+def run_lsp_check(
+    tool: str,
+    workdir: str,
+    files: list[str] | None = None,
+    timeout_per_file: float = 30.0,
+) -> list[dict]:
     tool_path = find_lsp_tool(tool)
     if not tool_path:
         logger.warning("LSP tool '%s' not found on PATH — skipping", tool)
         return []
 
-    files_by_lang = _staged_files_by_language(workdir)
-    staged_files: list[str] = []
-    for lang, files in files_by_lang.items():
-        if _tool_supports_language(tool, lang):
-            staged_files.extend(files)
+    if files is not None:
+        staged_files = files
+    else:
+        files_by_lang = _staged_files_by_language(workdir)
+        staged_files = []
+        for lang, lang_files in files_by_lang.items():
+            if _tool_supports_language(tool, lang):
+                staged_files.extend(lang_files)
 
     if not staged_files:
         logger.debug("No staged files for LSP tool '%s'", tool)
         return []
 
     all_diagnostics: list[dict] = []
-    timeout_per_file = 30.0
 
     try:
         proc = subprocess.Popen(

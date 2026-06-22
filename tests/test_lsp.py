@@ -3,8 +3,12 @@ Unit tests for engine/lsp.py — LSP guard runner.
 """
 
 import json
+import os
+import shutil
 import subprocess
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from engine.lsp import (
     LspDiag,
@@ -206,3 +210,108 @@ class TestLspHeaderParsing:
             result = _lsp_read_response(mock_proc, timeout=1.0)
         assert result is not None
         assert result["method"] == "textDocument/publishDiagnostics"
+
+
+# ── Integration tests with real pylsp server ────────────────────
+
+pytestmark_integration = pytest.mark.skipif(
+    shutil.which("pylsp") is None,
+    reason="pylsp not installed — integration test skipped",
+)
+
+
+@pytest.fixture
+def lsp_workdir(tmp_path):
+    """Create a clean temp directory for LSP integration tests."""
+    return str(tmp_path)
+
+
+class TestLspIntegration:
+    """Integration tests that exercise real pylsp server communication.
+
+    These tests use the optional ``files`` parameter of ``run_lsp_check``
+    to bypass git-staging logic and pass file paths directly.
+    """
+
+    BAD_CODE_UNDEFINED = "x = undefined_variable\n"
+
+    BAD_CODE_SYNTAX = "if True\n    pass\n"  # missing colon + unexpected indent → syntax error
+
+    CLEAN_CODE = "x = 1\ny = x + 1\nprint(y)\n"
+
+    def _write_py(self, workdir, name, content):
+        path = os.path.join(workdir, name)
+        with open(path, "w") as f:
+            f.write(content)
+        return path
+
+    def _run_check(self, workdir, files, tool="pylsp"):
+        return run_lsp_check(tool, workdir, files=files, timeout_per_file=8.0)
+
+    def test_pylsp_detects_undefined_variable(self, lsp_workdir):
+        """Bad code with undefined variable produces diagnostics."""
+        path = self._write_py(lsp_workdir, "bad_undefined.py", self.BAD_CODE_UNDEFINED)
+        diags = self._run_check(lsp_workdir, [path])
+        assert len(diags) > 0, "Expected diagnostics for undefined variable"
+        messages = [d["message"].lower() for d in diags]
+        assert any("undefined" in m for m in messages), (
+            f"No 'undefined' in diagnostics: {messages}"
+        )
+        # Verify severity is error (1)
+        assert any(d["severity"] == "error" for d in diags), (
+            "Expected at least one error-severity diagnostic"
+        )
+
+    def test_pylsp_detects_syntax_error(self, lsp_workdir):
+        """Syntax error produces diagnostics."""
+        path = self._write_py(lsp_workdir, "bad_syntax.py", self.BAD_CODE_SYNTAX)
+        diags = self._run_check(lsp_workdir, [path])
+        assert len(diags) > 0, "Expected diagnostics for syntax error"
+        messages = [d["message"].lower() for d in diags]
+        # pylsp/pyflakes reports "expected ':'" or "unexpected indent" for missing colon
+        assert any(
+            "expected" in m or "indent" in m or "syntax" in m for m in messages
+        ), f"No syntax error in diagnostics: {messages}"
+
+    def test_pylsp_clean_code_no_diagnostics(self, lsp_workdir):
+        """Clean code produces no diagnostics."""
+        path = self._write_py(lsp_workdir, "clean.py", self.CLEAN_CODE)
+        diags = self._run_check(lsp_workdir, [path])
+        assert diags == [], f"Expected no diagnostics for clean code, got: {diags}"
+
+    def test_pylsp_guard_fails_on_bad_code(self, lsp_workdir):
+        """Guard machinery reports FAIL for bad code."""
+        path = self._write_py(lsp_workdir, "failing.py", self.BAD_CODE_UNDEFINED)
+        diags = self._run_check(lsp_workdir, [path])
+        has_errors = any(d.get("severity") == "error" for d in diags)
+        assert has_errors, "Bad code should produce error-severity diagnostics"
+
+    def test_pylsp_guard_passes_on_clean_code(self, lsp_workdir):
+        """Guard machinery reports PASS for clean code."""
+        path = self._write_py(lsp_workdir, "passing.py", self.CLEAN_CODE)
+        diags = self._run_check(lsp_workdir, [path])
+        assert diags == [], "Clean code should produce no diagnostics"
+
+    def test_missing_lsp_tool_skips_gracefully(self, lsp_workdir):
+        """Non-existent tool returns empty list (skip, not crash)."""
+        path = self._write_py(lsp_workdir, "dummy.py", self.CLEAN_CODE)
+        diags = run_lsp_check("nonexistent-lsp-tool-xyz", lsp_workdir, files=[path])
+        assert diags == [], "Missing LSP tool should return empty diagnostics"
+
+    def test_pylsp_multiple_files_mixed(self, lsp_workdir):
+        """Mixed files — bad and clean — return only bad diagnostics."""
+        bad_path = self._write_py(
+            lsp_workdir, "mixed_bad.py", self.BAD_CODE_UNDEFINED
+        )
+        clean_path = self._write_py(
+            lsp_workdir, "mixed_clean.py", self.CLEAN_CODE
+        )
+        diags = self._run_check(lsp_workdir, [bad_path, clean_path])
+        # Should have at least one diagnostic for the bad file
+        assert len(diags) > 0, "Expected diagnostics from mixed files"
+        # All diagnostics should reference the bad file
+        bad_basename = os.path.basename(bad_path)
+        for d in diags:
+            assert bad_basename in d.get("file", ""), (
+                f"Diagnostic should reference bad file, got: {d}"
+            )
