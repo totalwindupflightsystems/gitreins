@@ -236,6 +236,8 @@ class GuardManager:
 
         # Test mode: "full" (default) or "diff"
         self._test_mode = guards_cfg.get("test_mode", "full")
+        # Test timeout in seconds (default: 180s)
+        self._test_timeout = guards_cfg.get("test_timeout", 180)
 
         # Project type detection
         self._is_go = os.path.isfile(os.path.join(self.workdir, "go.mod"))
@@ -501,7 +503,7 @@ class GuardManager:
         """Execute a test command and return a GuardResult."""
         try:
             result = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True, timeout=120,
+                cmd, shell=True, capture_output=True, text=True, timeout=self._test_timeout,
                 cwd=self.workdir,
             )
             output = result.stdout + result.stderr
@@ -512,7 +514,7 @@ class GuardManager:
             else:
                 return GuardResult(name=label, passed=False, output=output)
         except subprocess.TimeoutExpired:
-            return GuardResult(name=label, passed=False, output="Tests timed out after 120s")
+            return GuardResult(name=label, passed=False, output=f"Tests timed out after {self._test_timeout}s")
         except Exception as e:
             return GuardResult(name=label, passed=False, error=str(e))
 

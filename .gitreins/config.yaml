@@ -4,7 +4,7 @@ guards:
   tests: true
   test_mode: diff
   test_command: pytest -x --tb=short
-  test_timeout: 120
+  test_timeout: 180
   dead_code: false
   skylos: false
   static_analysis: true

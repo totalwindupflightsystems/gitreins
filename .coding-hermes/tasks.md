@@ -143,7 +143,7 @@
 - **Result:** 570 passed, 7 skipped (+14 new tests). rust-analyzer skip for type-error test when no Cargo.toml (expected). ts-lsp skip graceful.
 - **Commit:** `97ae130`
 
-## [ ] GR-054: Increase guard test timeout from 120s to 180s
+## [x] GR-054: Increase guard test timeout from 120s to 180s
 - **Priority:** medium
 - **Model:** deepseek-v4-flash
 - **Provider:** deepseek
@@ -153,3 +153,4 @@
   - No more --no-verify commits needed for timeout margin
   - Configurable via `test_timeout` in guard config
   - Default: 180s
+- **Result:** Changed `test_timeout: 120` → `180` in config.yaml. Added `self._test_timeout = guards_cfg.get("test_timeout", 180)` in GuardManager.__init__. Updated `_run_test_command` to use `self._test_timeout` (subprocess.run timeout + dynamic error message). 570 passed, 7 skipped. Guard PASS.
