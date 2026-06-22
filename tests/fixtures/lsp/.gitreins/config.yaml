@@ -1,0 +1,14 @@
+guards:
+  secrets: false
+  lint: false
+  tests: false
+  static_analysis: true
+  static_analysis_tools:
+    python:
+    - mypy
+    - pyright
+evaluator:
+  max_iterations: 15
+  static_analysis_diagnostics: true
+defaults:
+  model: deepseek-v4-flash

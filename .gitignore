@@ -40,3 +40,16 @@ temporal-vector/
 test_write
 *.tmp
 *.db
+
+# Cross-project artifacts (not part of GitReins)
+category-mapping.yaml
+hivemind-audit.md
+
+# GitReins nested runtime artifacts
+.gitreins/.gitreins/
+.gitreins/config.yaml.bak
+
+# Demo nested git dirs (demo projects have their own git repos)
+demo-calc/.git/
+demo-calc/calc/.git/
+demo-slugify/.git/
