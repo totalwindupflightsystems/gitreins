@@ -745,10 +745,6 @@ class TestPreCommitHookIntegration:
     bad commits — not just that it executes, but that it catches secrets
     and exits non-zero."""
 
-    @pytest.mark.xfail(
-        reason="Installed gitreins v0.7.0 lacks sys.exit(1) in cmd_guard_run — "
-               "fixed in source at 167b30d, will pass after next PyPI publish"
-    )
     def test_hook_blocks_commit_with_secret(self, tmp_workdir):
         """Staging a file with a fake API key → hook must block commit."""
         # Initialize mock git repo properly

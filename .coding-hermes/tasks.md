@@ -126,3 +126,9 @@
 - **Model:** direct (mechanical, no spawn)
 - **Files:** LICENSE
 - **Commit:** `6ed4c52`
+
+## [x] GR-048: Remove stale xfail marker from test_hook_blocks_commit_with_secret
+- **Priority:** low
+- **Model:** direct (mechanical fix, no spawn)
+- **Files:** tests/test_cli.py
+- **Result:** Removed `@pytest.mark.xfail` decorator (4 lines). Test passes as regular PASS (no longer XPASS). 514 passed, 6 skipped, 0 failures.

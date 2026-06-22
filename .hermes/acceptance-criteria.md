@@ -232,10 +232,53 @@ cd /home/kara/gitreins-poc && .venv/bin/python3 gitreins/cli.py commit "test" 2>
 
 ---
 
-## Backlog / Deferred
+## AC-060 — Dead Code Detection
 
-- **AC-060 — Dead Code Detection:** `dead_code` guard currently disabled (config: false). Enable and verify.
-- **AC-070 — Skylos Integration:** `skylos` guard disabled. Evaluate integration feasibility.
-- **AC-080 — LSP Guard (new):** LSP-based diagnostics as Tier 1 guard. Tasks exist but implementation not started.
-- **AC-090 — Static Analysis Guard (new):** Type checker output as Tier 1 guard. Tasks exist but implementation not started.
-- **AC-100 — Pre-Commit Hook Reliability:** Hook may fail on certain project configs (sys.path issues). Enhance robustness.
+**Status:** deferred (2026-06-21)
+**Dependency:** None
+
+`dead_code` guard disabled (config: false). Enable and verify when ready. `engine/dead_code.py` exists.
+
+## AC-070 — Skylos Integration
+
+**Status:** deferred (2026-06-21)
+**Dependency:** None
+
+`skylos` guard disabled (config: false). Evaluate integration feasibility.
+
+## AC-080 — LSP Guard
+
+**Status:** pending (2026-06-21)
+**Dependency:** AC-010
+
+### AC-080a: LSP core runner invokes LSP servers and parses diagnostics
+
+**How to verify:**
+```bash
+cd /home/kara/gitreins-poc && .venv/bin/python3 -m pytest tests/ -k lsp -x --tb=short -q 2>&1
+# Expected: test file exists with passing tests
+```
+
+Tasks: lsp-core-runner, lsp-guard-tier1, lsp-evaluator-tier2, lsp-languages-round1
+
+## AC-090 — Static Analysis Guard
+
+**Status:** ✅ passed (2026-06-21, maintenance wake)
+**Dependency:** AC-010
+
+### AC-090a: Static analysis guard runs on commit
+
+**How to verify:**
+```bash
+cd /home/kara/gitreins-poc && .venv/bin/python3 gitreins/cli.py guard 2>&1 | grep static
+# Expected: ✓ static_analysis
+```
+
+✅ **Verified (2026-06-21):** `static_analysis: true` in config, guard passes on every commit. `engine/static_analysis.py` functional.
+
+## AC-100 — Pre-Commit Hook Reliability
+
+**Status:** deferred (2026-06-21)
+**Dependency:** AC-010
+
+Hook may fail on certain project configs (sys.path issues). Enhance robustness. Current hook works for standard Python projects.
