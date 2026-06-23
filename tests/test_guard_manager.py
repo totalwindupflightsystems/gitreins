@@ -6,6 +6,8 @@ import os
 import subprocess
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from engine.guard_manager import (
     GuardManager, GuardResult, Tier1Result,
     _discover_test_targets,
@@ -32,6 +34,13 @@ class TestGuardResult:
         assert gr.passed is False
         assert "E501" in gr.output
         assert "exit code 1" in gr.error
+
+    def test_guardresult_is_frozen(self):
+        """GuardResult fields cannot be mutated after construction."""
+        from dataclasses import FrozenInstanceError
+        gr = GuardResult(name="secrets", passed=True, output="clean")
+        with pytest.raises(FrozenInstanceError):
+            gr.passed = False
 
 
 class TestTier1Result:
@@ -62,6 +71,13 @@ class TestTier1Result:
         assert tr.passed is False
         summary = tr.summary
         assert "✗ lint" in summary or summary.count("✗") >= 1
+
+    def test_tier1result_is_frozen(self):
+        """Tier1Result fields cannot be mutated after construction."""
+        from dataclasses import FrozenInstanceError
+        t1 = Tier1Result(passed=True, results=[])
+        with pytest.raises(FrozenInstanceError):
+            t1.passed = False
 
 
 class TestGuardManagerInit:

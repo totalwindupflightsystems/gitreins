@@ -188,7 +188,7 @@
   - Test verifies config propagation preserves overrides
 - **Result:** engine/propagate.py (180 lines) — Propagator class with recursive dict merge. MCP server integrated with _propagate handler. 7 tests (create, merge, multi-target, error cases, MCP JSON-RPC). 725 passed, 7 skipped.
 
-## [ ] GR-058: Type-safe GuardResult dataclass
+## [x] GR-058: Type-safe GuardResult dataclass
 - **Priority:** medium
 - **Model:** deepseek-v4-flash
 - **Provider:** deepseek
@@ -197,3 +197,4 @@
   - `GuardResult` is a frozen dataclass with typed fields
   - All callers use field access instead of dict access
   - Tests verify immutability and type correctness
+- **Result:** GuardResult + Tier1Result moved to engine/types.py with frozen=True. GuardResult(name, passed, output, error) + Tier1Result(passed, results, extra) both frozen. Immutability tests verify FrozenInstanceError on mutation. 684 passed, 2 skipped. Backward compat: guard_manager.py re-exports via `from engine.types import ...`.
