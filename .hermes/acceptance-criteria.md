@@ -295,9 +295,11 @@ Hook may fail on certain project configs (sys.path issues). Enhance robustness. 
 
 ## AC-110 — Secrets Scanner Completeness
 
-**Status:** pending (2026-06-22)
+**Status:** ✅ passed (2026-06-22)
 **Dependency:** AC-010
 **GitReins task:** qc-secrets-scanner
+
+✅ **Verified (2026-06-22):** Implemented via Axiom delegation (GR-056). 68 tests in `tests/test_secrets_completeness.py` across 5 classes: pattern completeness (11 types), whitelist correctness (6 patterns), output sanitization, documentation skip, fixture E2E. 17 fixture files in `tests/fixtures/secrets/`. Enhanced `engine/guard_manager.py`: pwd keyword, template vars ({% %}), shell refs ($KEY), placeholders, empty password detection. All 663 tests pass.
 
 ### AC-110a: All danger pattern types detected
 
@@ -327,9 +329,11 @@ cd /home/kara/gitreins-poc && echo 'STRIPE_KEY=sk_live_test1234567890ab' > /tmp/
 
 ## AC-120 — Guard Exit Codes & Commit Blocking
 
-**Status:** pending (2026-06-22)
+**Status:** ✅ passed (2026-06-22)
 **Dependency:** AC-010
 **GitReins task:** qc-guard-exit
+
+✅ **Verified (2026-06-22):** Implemented via Axiom delegation (GR-055). 8 integration tests in `tests/test_guard_exit.py`: exit 0 on clean tree, exit 1 on secrets, exit 1 on AWS key, commit blocks on secret, commit passes on clean. Verified existing exit code propagation in `engine/guard_manager.py` and `gitreins/cli.py`.
 
 ### AC-120a: Guard exits 0 on pass, 1 on fail
 
@@ -354,9 +358,11 @@ cd /home/kara/gitreins-poc && .venv/bin/python3 -m pytest tests/test_commit.py -
 
 ## AC-130 — Config Loading Priority Chain
 
-**Status:** pending (2026-06-22)
+**Status:** ✅ passed (2026-06-22)
 **Dependency:** AC-010
 **GitReins task:** qc-config-priority
+
+✅ **Verified (2026-06-22):** Implemented via Axiom delegation (GR-055). 16 tests in `tests/test_config_priority.py`: load_raw_config returns {} on missing file, defaults section overlays built-in GitReinsDefaults, evaluator individual keys override defaults section, explicit EvalCap constructor params override all config. Verified existing priority chain in `engine/config.py` and `engine/eval_cap.py`.
 
 ### AC-130a: Defaults → config.yaml → constructor params
 
