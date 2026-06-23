@@ -157,7 +157,7 @@
 
 ## [x] GR-055: Suppress MCP debug spam from mcp package
 - **Priority:** low
-- **Commit:** TBD
+- **Commit:** `d99f8ad`
 - **Model:** deepseek-v4-pro (direct)
 - **Files:** `gitreins_mcp/server.py`
 - **AC:**
