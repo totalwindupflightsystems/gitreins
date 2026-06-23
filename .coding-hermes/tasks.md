@@ -154,3 +154,44 @@
   - Configurable via `test_timeout` in guard config
   - Default: 180s
 - **Result:** Changed `test_timeout: 120` → `180` in config.yaml. Added `self._test_timeout = guards_cfg.get("test_timeout", 180)` in GuardManager.__init__. Updated `_run_test_command` to use `self._test_timeout` (subprocess.run timeout + dynamic error message). 570 passed, 7 skipped. Guard PASS.
+
+## [x] GR-055: Suppress MCP debug spam from mcp package
+- **Priority:** low
+- **Commit:** TBD
+- **Model:** deepseek-v4-pro (direct)
+- **Files:** `gitreins_mcp/server.py`
+- **AC:**
+  - mcp package debug-level logging is suppressed at import time
+  - No functional impact — all 718 tests pass
+  - `gitreins guard` still works
+- **Result:** Added `logging.basicConfig(level=WARNING, stream=sys.stderr, force=True)` before mcp imports. 718 passed, 3 skipped.
+
+## [ ] GR-056: Add MCP guard tool — dead_code boolean
+- **Priority:** medium
+- **Model:** deepseek-v4-flash
+- **Provider:** deepseek
+- **Files:** `gitreins_mcp/server.py`, `engine/guard_manager.py`
+- **AC:**
+  - `gitreins guard --dead-code` runs dead code detection
+  - MCP tool `guard_run` supports `dead_code: true` parameter
+  - Test verifies dead code tool reports unused functions
+
+## [ ] GR-057: Add MCP propagate tool for multi-repo quality
+- **Priority:** low
+- **Model:** deepseek-v4-flash
+- **Provider:** deepseek
+- **Files:** `gitreins_mcp/server.py`, new `engine/propagate.py`
+- **AC:**
+  - `mcp_gitreins_propagate` tool copies guard config to sibling repos
+  - Works with gitreins-poc and downstream repos
+  - Test verifies config propagation preserves overrides
+
+## [ ] GR-058: Type-safe GuardResult dataclass
+- **Priority:** medium
+- **Model:** deepseek-v4-flash
+- **Provider:** deepseek
+- **Files:** `engine/guard_manager.py`, `engine/types.py` (new)
+- **AC:**
+  - `GuardResult` is a frozen dataclass with typed fields
+  - All callers use field access instead of dict access
+  - Tests verify immutability and type correctness

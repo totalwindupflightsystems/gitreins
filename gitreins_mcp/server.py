@@ -19,6 +19,9 @@ from engine.judge import Judge
 from engine.llm import LLMClient
 from engine.guard_manager import GuardManager
 
+# MCP_NOISE_FIX: suppress debug spam from mcp package
+logging.basicConfig(level=logging.WARNING, stream=sys.stderr, force=True)
+
 logger = logging.getLogger("gitreins.mcp")
 
 
