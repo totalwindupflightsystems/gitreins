@@ -366,18 +366,20 @@ class GuardManager:
             # JWTs assigned as literal strings
             (r'(?i)(token|jwt)\s*[:=]\s*["\']eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{10,}["\']', "hardcoded JWT"),
             # Passwords with literal-looking values
-            (r'(?i)(password|passwd)\s*[:=]\s*["\'][^"\'$]{8,}["\']', "hardcoded password"),
+            (r'(?i)(password|passwd|pwd)\s*[:=]\s*["\'][^"\'$]{8,}["\']', "hardcoded password"),
             # Generic tokens/secrets (check LAST)
             (r'(?i)(secret|token)\s*[:=]\s*["\'][A-Za-z0-9+/=]{32,}["\']', "hardcoded secret"),
         ]
 
         # Patterns we explicitly IGNORE (common false positives)
         whitelist_patterns = [
-            r'(?i)(api[_-]?key|apikey|secret|token|password|passwd)\s*[:=]\s*(os\.getenv|os\.environ|getenv|environ\[|request\.form|request\.args|\.env|config\[|settings\[)',
+            r'(?i)(api[_-]?key|apikey|secret|token|password|passwd|pwd)\s*[:=]\s*(os\.getenv|os\.environ|getenv|environ\[|request\.form|request\.args|\.env|config\[|settings\[)',
             r'(?i)\$\{[A-Z_]+\}',                     # Shell variable substitution
-            r'(?i)\{\{[^}]*\}\}',                     # Template variables
-            r'(?i)PASSWORD\s*=\s*""',                 # Empty password
-            r'(?i)EXAMPLE|PLACEHOLDER|TODO|FIXME|xxx+',  # Placeholders
+            r'(?i)\$\w+',                              # Shell variable reference ($KEY)
+            r'(?i)\{\{[^}]*\}\}',                     # Template variables ({{ }})
+            r'(?i)\{%[^}]*%\}',                       # Template variables ({% %})
+            r'(?i)(password|passwd|pwd)\s*[:=]\s*""', # Empty password assignments
+            r'(?i)EXAMPLE|PLACEHOLDER|TODO|FIXME|xxx+|<your-[-a-z]+>|changeme',  # Placeholders
             r'(?i)jwt\.encode|jwt\.decode|b64encode', # JWT construction, not hardcoded
             r'(?i)generate|random|uuid|hash',         # Generated values
         ]

@@ -1,0 +1,2 @@
+GITHUB_TOKEN = "ghp_abc123def456ghi789jkl012mno345pqr678stu"
+GITHUB_OAUTH = "gho_abc123def456ghi789jkl012mno345pqr678stu"

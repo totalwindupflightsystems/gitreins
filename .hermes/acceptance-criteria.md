@@ -262,7 +262,13 @@ cd /home/kara/gitreins-poc && .venv/bin/python3 -m pytest tests/test_lsp.py -x -
 
 ✅ **Verified (2026-06-22):** LSP guard implemented via Axiom delegation. `engine/lsp.py` (337 lines) handles LSP server discovery (`find_lsp_tool`), JSON-RPC communication (initialize/didOpen/publishDiagnostics), Content-Length header parsing, and diagnostic normalization. `tests/test_lsp.py` (208 lines) with 22 tests covering diag serialization, tool discovery, subprocess mocking, header parsing, and graceful degradation. GuardManager wired with `_check_lsp()` method (pattern-matched from `_check_static_analysis()`). Config: `lsp: false` (opt-in) with `lsp_tools: [pylsp]`. Full test suite: 536 passed (was 514 before this feature).
 
-**Remaining tasks:** lsp-guard-tier1 (enable and test with real LSP servers), lsp-evaluator-tier2 (Tier 2 evaluation), lsp-languages-round1 (multi-language support)
+**Completed (2026-06-22):** All remaining tasks shipped:
+- **GR-051** (lsp-guard-tier1): Real pylsp integration with diagnostics — GuardManager._check_lsp() returns per-file diagnostics
+- **GR-052** (lsp-evaluator-tier2): Evaluator reads LSP diagnostics via tool_read_lsp_diagnostics
+- **GR-053** (lsp-languages-round1): Multi-language support — rust-analyzer + typescript-language-server + pylsp
+- **GR-054**: Guard test timeout increased to 180s (configurable)
+
+Full test suite: 571 passed (was 536 at original verification). All LSP tests pass clean.
 
 ## AC-090 — Static Analysis Guard
 
@@ -285,3 +291,157 @@ cd /home/kara/gitreins-poc && .venv/bin/python3 gitreins/cli.py guard 2>&1 | gre
 **Dependency:** AC-010
 
 Hook may fail on certain project configs (sys.path issues). Enhance robustness. Current hook works for standard Python projects.
+---
+
+## AC-110 — Secrets Scanner Completeness
+
+**Status:** pending (2026-06-22)
+**Dependency:** AC-010
+**GitReins task:** qc-secrets-scanner
+
+### AC-110a: All danger pattern types detected
+
+**How to verify:**
+```bash
+cd /home/kara/gitreins-poc && .venv/bin/python3 -m pytest tests/test_secrets.py -x --tb=short -q 2>&1
+# Expected: tests for AWS AKIA, Stripe sk_live_, GitHub ghp_, GitLab glpat-, OpenAI sk-, Slack xox, GCP AIza, private keys, hardcoded passwords pass
+```
+
+### AC-110b: Whitelist suppresses false positives
+
+**How to verify:**
+```bash
+cd /home/kara/gitreins-poc && .venv/bin/python3 -m pytest tests/test_secrets.py -k "whitelist or false_positive" -x --tb=short -q 2>&1
+# Expected: os.getenv(), config['key'], jwt.encode(), shell vars, templates, placeholders not flagged
+```
+
+### AC-110c: Output sanitization hides key values
+
+**How to verify:**
+```bash
+cd /home/kara/gitreins-poc && echo 'STRIPE_KEY=sk_live_test1234567890ab' > /tmp/gr-secret-test.env && .venv/bin/python3 -m engine.guards secrets /tmp/gr-secret-test.env 2>&1 | grep -c 'sk_live'
+# Expected: 0 (key value replaced with ***)
+```
+
+---
+
+## AC-120 — Guard Exit Codes & Commit Blocking
+
+**Status:** pending (2026-06-22)
+**Dependency:** AC-010
+**GitReins task:** qc-guard-exit
+
+### AC-120a: Guard exits 0 on pass, 1 on fail
+
+**How to verify:**
+```bash
+cd /home/kara/gitreins-poc && .venv/bin/python3 gitreins/cli.py guard 2>&1; echo "EXIT=$?"
+# Expected: EXIT=0 (clean tree)
+# Then create temp repo with secret, run guard → EXIT=1
+```
+
+### AC-120b: Commit blocks when secrets found
+
+**How to verify:**
+```bash
+# In disposable git repo: stage file with secret, run commit → blocked with non-zero exit
+# Full lifecycle test in tests/test_commit.py
+cd /home/kara/gitreins-poc && .venv/bin/python3 -m pytest tests/test_commit.py -x --tb=short -q 2>&1
+# Expected: tests pass
+```
+
+---
+
+## AC-130 — Config Loading Priority Chain
+
+**Status:** pending (2026-06-22)
+**Dependency:** AC-010
+**GitReins task:** qc-config-priority
+
+### AC-130a: Defaults → config.yaml → constructor params
+
+**How to verify:**
+```bash
+cd /home/kara/gitreins-poc && .venv/bin/python3 -m pytest tests/test_config.py -x --tb=short -q 2>&1
+# Expected: priority chain tests pass
+```
+
+### AC-130b: Missing config file returns defaults
+
+**How to verify:**
+```bash
+cd /tmp && .venv/bin/python3 -c "from engine.config import load_config; c=load_config('/nonexistent'); print('PASS' if c=={} else 'FAIL')"
+# Expected: PASS
+```
+
+---
+
+## AC-140 — Static Analysis Guard (Tier 1)
+
+**Status:** pending (2026-06-22)
+**Dependency:** AC-010, AC-090
+**GitReins task:** static-analysis-guard
+
+### AC-140a: Static analysis blocks commits on errors
+
+**How to verify:**
+```bash
+cd /home/kara/gitreins-poc && .venv/bin/python3 gitreins/cli.py guard 2>&1 | grep static_analysis
+# Expected: ✓ static_analysis or ✗ with specific diagnostics
+```
+
+### AC-140b: Tool dispatch per language (mypy for Python, sorbet for Ruby, etc.)
+
+**How to verify:**
+```bash
+cd /home/kara/gitreins-poc && .venv/bin/python3 -m pytest tests/test_static_analysis.py -x --tb=short -q 2>&1
+# Expected: tests pass for mypy, sorbet, sqlfluff, phpstan dispatch
+```
+
+---
+
+## AC-150 — Static Analysis Init Integration
+
+**Status:** pending (2026-06-22)
+**Dependency:** AC-140
+**GitReins task:** static-analysis-init
+
+### AC-150a: gitreins init auto-detects static analysis tools
+
+**How to verify:**
+```bash
+cd /tmp && rm -rf gr-init-sa && mkdir gr-init-sa && cd gr-init-sa && git init -q && /home/kara/gitreins-poc/.venv/bin/python3 /home/kara/gitreins-poc/gitreins/cli.py init 2>&1 | grep -i 'static analysis'
+# Expected: shows detected tools (mypy ✓, pyright ✓, srb ✗ if not installed)
+```
+
+---
+
+## AC-160 — Static Analysis Evaluator (Tier 2)
+
+**Status:** pending (2026-06-22)
+**Dependency:** AC-140
+**GitReins task:** static-analysis-evaluator
+
+### AC-160a: Evaluator feeds static analysis output to LLM
+
+**How to verify:**
+```bash
+cd /home/kara/gitreins-poc && DEEPSEEK_API_KEY=$DEEPSEEK_API_KEY .venv/bin/python3 -m pytest tests/test_eval_static_analysis.py -x --tb=short -q 2>&1
+# Expected: tests pass, LLM receives diagnostics in context
+```
+
+---
+
+## AC-170 — Setup Tools Command
+
+**Status:** pending (2026-06-22)
+**Dependency:** AC-140
+**GitReins task:** setup-tools-command
+
+### AC-170a: gitreins setup-tools is discoverable and functional
+
+**How to verify:**
+```bash
+cd /home/kara/gitreins-poc && .venv/bin/python3 gitreins/cli.py setup-tools --help 2>&1 | head -5
+# Expected: shows help for setup-tools command
+```

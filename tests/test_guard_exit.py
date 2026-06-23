@@ -6,17 +6,11 @@ Verifies:
   - gitreins guard exits 1 when a guard fails (secret, lint)
   - gitreins commit blocks (non-zero) when secrets are staged
 """
-"""
-Integration tests for gitreins guard exit codes.
-
-Verifies:
-  - gitreins guard exits 0 when all guards pass
-  - gitreins guard exits 1 when a guard fails (secret, lint)
-  - gitreins commit blocks (non-zero) when secrets are staged
-"""
 import os
 import subprocess
 import sys
+
+import yaml
 
 CLI_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "gitreins")
 CLI_SCRIPT = os.path.join(CLI_DIR, "cli.py")
@@ -53,7 +47,6 @@ def _stage_file(workdir, path, content):
 
 def _write_config(workdir, config_dict):
     """Write a minimal .gitreins/config.yaml."""
-    import yaml
     config_dir = os.path.join(workdir, ".gitreins")
     os.makedirs(config_dir, exist_ok=True)
     with open(os.path.join(config_dir, "config.yaml"), "w") as f:

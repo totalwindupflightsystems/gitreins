@@ -66,6 +66,8 @@ select = [
 "engine/evaluator.py" = ["E501"]
 # Test files — long assertion lines, fixtures, and test data strings
 "tests/**/*.py" = ["E501"]
+# Secrets scanner fixtures — intentionally malformed Python (shell scripts, templates, etc.)
+"tests/fixtures/secrets/**" = ["ALL"]
 # gitreins_mcp JSON-RPC handler — long JSON schema strings
 "gitreins_mcp/server.py" = ["E501"]
 # Guard manager — long regex patterns for secret detection

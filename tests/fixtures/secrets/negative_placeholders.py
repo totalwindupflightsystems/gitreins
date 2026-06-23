@@ -1,0 +1,5 @@
+API_KEY = "YOUR_API_KEY_HERE"
+SECRET = "<your-secret-key>"
+PASSWORD = "changeme"
+TODO = "sk-add-real-key-here for testing"
+FIXME = "add-real-api-key-12345678901234567890"
