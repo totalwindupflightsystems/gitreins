@@ -69,7 +69,7 @@ class TestToolsList:
     """Test tools/list — step-2-1-1-2."""
 
     def test_tools_list_returns_nine_tools(self, mcp_server):
-        """tools/list returns exactly 9 tool schemas."""
+        """tools/list returns exactly 11 tool schemas."""
         response = mcp_server.handle_request({
             "jsonrpc": "2.0",
             "id": 1,
@@ -77,7 +77,7 @@ class TestToolsList:
         })
         assert response is not None
         tools = response["result"]["tools"]
-        assert len(tools) == 10
+        assert len(tools) == 11
 
     def test_all_expected_tool_names_present(self, mcp_server):
         """All expected tool names: task.create, task.start, task.complete,
@@ -93,6 +93,7 @@ class TestToolsList:
             "task.create", "task.start", "task.complete",
             "task.list", "task.get", "task.delete",
             "commit", "guard.run", "judge.evaluate",
+            "propagate",
         ]
         for name in expected:
             assert name in names, f"Missing tool: {name}"
@@ -458,7 +459,6 @@ class TestConfigureMCP:
 
     def test_configure_sets_api_key(self, mcp_server):
         """configure with env dict pushes key into os.environ and LLM client."""
-        old_key = mcp_server.llm.api_key
         result = mcp_server._configure(env={"GITREINS_LLM_API_KEY": "sk-newtestkey"})
         assert result["configured"] is True
         assert mcp_server.llm.api_key == "sk-newtestkey"
@@ -699,18 +699,19 @@ class TestMCPStdioIntegration:
         assert "tools" in resp["result"]
 
     def test_tools_list_over_stdio(self, mcp_proc):
-        """tools/list returns exactly 9 tools with correct names and schemas."""
+        """tools/list returns exactly 11 tools with correct names and schemas."""
         resp = self._send_recv(mcp_proc, {
             "jsonrpc": "2.0", "id": 1, "method": "tools/list",
         })
         tools = resp["result"]["tools"]
-        assert len(tools) == 10
+        assert len(tools) == 11
         names = [t["name"] for t in tools]
         expected = [
             "configure",
             "task.create", "task.start", "task.complete",
             "task.list", "task.get", "task.delete",
             "commit", "guard.run", "judge.evaluate",
+            "propagate",
         ]
         for name in expected:
             assert name in names, f"Missing tool: {name}"
@@ -802,7 +803,7 @@ class TestMCPStdioIntegration:
         mcp_proc.stdin.flush()
         resp = self._read_response(mcp_proc)
         assert resp["id"] == 1
-        assert len(resp["result"]["tools"]) == 10
+        assert len(resp["result"]["tools"]) == 11
 
     def test_missing_jsonrpc_field(self, mcp_proc):
         """Missing jsonrpc field → invalid request error (-32600)."""
@@ -956,3 +957,209 @@ class TestMCPStdioIntegration:
         result = json.loads(resp["result"]["content"][0]["text"])
         assert "error" in result
         assert "Task not found" in result["error"]
+
+
+# ── GR-057: Propagate MCP tool ──────────────────────────────────────────────
+
+
+class TestPropagateMCP:
+    """Tests for the propagate tool: copy guard config to sibling repos."""
+
+    @pytest.fixture
+    def source_with_config(self, tmp_workdir):
+        """Create a source repo with a .gitreins/config.yaml."""
+        import yaml
+        gitreins_dir = os.path.join(tmp_workdir, ".gitreins")
+        os.makedirs(gitreins_dir, exist_ok=True)
+        config = {
+            "guards": {
+                "secrets": True,
+                "lint": True,
+                "tests": True,
+                "test_mode": "diff",
+                "test_command": "pytest -x --tb=short",
+                "test_timeout": 180,
+            },
+            "evaluator": {
+                "max_iterations": 100,
+                "max_time": "30m",
+            },
+            "defaults": {
+                "model": "deepseek-v4-flash",
+            },
+            "history": {
+                "enabled": True,
+                "storage": "git",
+                "max_verdicts": 1000,
+            },
+        }
+        config_path = os.path.join(gitreins_dir, "config.yaml")
+        with open(config_path, "w") as f:
+            yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+        return tmp_workdir
+
+    # ── Test 1: creates config in empty target ─────────────────
+
+    def test_propagate_creates_config_in_empty_target(self, source_with_config):
+        """Target has no .gitreins/, propagation creates it with source config."""
+        from engine.propagate import Propagator
+
+        target = _temp_target(source_with_config, "sibling-a")
+        propagator = Propagator(source_with_config)
+        result = propagator.propagate([target])
+
+        assert result["source"] == os.path.abspath(source_with_config)
+        assert len(result["results"]) == 1
+        r = result["results"][0]
+        assert r["action"] == "created"
+        assert "guards" in r["keys_added"]
+        assert "evaluator" in r["keys_added"]
+
+        # Config file exists and is valid YAML
+        import yaml
+        config_path = os.path.join(target, ".gitreins", "config.yaml")
+        assert os.path.isfile(config_path)
+        with open(config_path) as f:
+            parsed = yaml.safe_load(f)
+        assert parsed["guards"]["secrets"] is True
+        assert parsed["guards"]["test_timeout"] == 180
+
+    # ── Test 2: merge preserves target overrides ───────────────
+
+    def test_propagate_merges_preserving_overrides(self, source_with_config):
+        """Target has a config with different test_mode, propagation preserves it."""
+        import yaml
+        from engine.propagate import Propagator
+
+        target = _temp_target(source_with_config, "sibling-b")
+        # Create target with an override
+        target_config = {
+            "guards": {
+                "test_mode": "full",  # Different from source ("diff")
+                "test_timeout": 300,  # Different from source (180)
+            },
+        }
+        gitreins_dir = os.path.join(target, ".gitreins")
+        os.makedirs(gitreins_dir, exist_ok=True)
+        with open(os.path.join(gitreins_dir, "config.yaml"), "w") as f:
+            yaml.dump(target_config, f, default_flow_style=False, sort_keys=False)
+
+        propagator = Propagator(source_with_config)
+        result = propagator.propagate([target])
+
+        assert len(result["results"]) == 1
+        r = result["results"][0]
+        assert r["action"] == "merged"
+
+        # Verify the target's overrides were preserved
+        with open(os.path.join(gitreins_dir, "config.yaml")) as f:
+            merged = yaml.safe_load(f)
+
+        # Target overrides preserved
+        assert merged["guards"]["test_mode"] == "full"
+        assert merged["guards"]["test_timeout"] == 300
+        # Source keys that target didn't have were added
+        assert merged["guards"]["secrets"] is True
+        assert merged["guards"]["lint"] is True
+        assert merged["evaluator"]["max_iterations"] == 100
+
+        # keys_preserved should include "guards.test_mode" and "guards.test_timeout"
+        assert "guards.test_mode" in r["keys_preserved"]
+        assert "guards.test_timeout" in r["keys_preserved"]
+
+    # ── Test 3: returns results list with source ───────────────
+
+    def test_propagate_returns_results_list(self, source_with_config):
+        """Returns ``source`` path and ``results`` array."""
+        from engine.propagate import Propagator
+
+        target_a = _temp_target(source_with_config, "sibling-c")
+        target_b = _temp_target(source_with_config, "sibling-d")
+        propagator = Propagator(source_with_config)
+        result = propagator.propagate([target_a, target_b])
+
+        assert "source" in result
+        assert result["source"] == os.path.abspath(source_with_config)
+        assert "results" in result
+        assert len(result["results"]) == 2
+
+        for r in result["results"]:
+            assert "target" in r
+            assert "action" in r
+
+    # ── Test 4: missing source returns error ───────────────────
+
+    def test_propagate_missing_source_returns_error(self, tmp_workdir):
+        """Source has no config, returns error."""
+        from engine.propagate import Propagator
+
+        propagator = Propagator(tmp_workdir)
+        result = propagator.propagate([_temp_target(tmp_workdir, "sibling-e")])
+
+        assert "error" in result
+        assert "No config found" in result["error"]
+
+    # ── Test 5: nonexistent target creates dir ─────────────────
+
+    def test_propagate_nonexistent_target_creates_dir(self, source_with_config):
+        """Target path doesn't exist, creates it and copies config."""
+        from engine.propagate import Propagator
+
+        import tempfile
+        nonexistent = os.path.join(tempfile.mkdtemp(), "new-repo")
+        assert not os.path.exists(nonexistent)
+
+        propagator = Propagator(source_with_config)
+        result = propagator.propagate([nonexistent])
+
+        assert os.path.isdir(nonexistent)
+        assert os.path.isdir(os.path.join(nonexistent, ".gitreins"))
+        assert os.path.isfile(os.path.join(nonexistent, ".gitreins", "config.yaml"))
+
+        r = result["results"][0]
+        assert r["action"] == "created"
+
+    # ── Test 6: propagate via MCP tools/call ───────────────────
+
+    def test_propagate_via_mcp_tools_call(self, source_with_config, tmp_path):
+        """propagate tool via MCP tools/call pattern."""
+        from gitreins_mcp.server import GitReinsMCPServer
+
+        target = os.path.join(str(tmp_path), "mcp-target")
+        mcp = GitReinsMCPServer(source_with_config)
+        response = mcp.handle_request({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "propagate", "arguments": {"targets": [target]}},
+        })
+        assert response is not None
+        assert "result" in response
+        text = response["result"]["content"][0]["text"]
+        result = json.loads(text)
+        assert "source" in result
+        assert len(result["results"]) == 1
+        assert result["results"][0]["action"] in ("created", "merged")
+
+        # Config was written
+        assert os.path.isfile(os.path.join(target, ".gitreins", "config.yaml"))
+
+    # ── Test 7: propagate without targets returns error ────────
+
+    def test_propagate_without_targets_returns_error(self, source_with_config):
+        """Calling propagate with empty targets returns error."""
+        from gitreins_mcp.server import GitReinsMCPServer
+
+        mcp = GitReinsMCPServer(source_with_config)
+        response = mcp.handle_request({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "propagate", "arguments": {"targets": []}},
+        })
+        text = response["result"]["content"][0]["text"]
+        result = json.loads(text)
+        assert "error" in result
+
+
+def _temp_target(base: str, name: str) -> str:
+    """Create a temporary target repo directory and return its path."""
+    import tempfile
+    target = os.path.join(tempfile.mkdtemp(dir=os.path.dirname(base)), name)
+    return target

@@ -18,6 +18,7 @@ from engine.task_manager import TaskManager
 from engine.judge import Judge
 from engine.llm import LLMClient
 from engine.guard_manager import GuardManager
+from engine.propagate import Propagator
 
 # MCP_NOISE_FIX: suppress debug spam from mcp package
 logging.basicConfig(level=logging.WARNING, stream=sys.stderr, force=True)
@@ -49,6 +50,7 @@ class GitReinsMCPServer:
             "commit": self._commit,
             "guard.run": self._guard_run,
             "judge.evaluate": self._judge_evaluate,
+            "propagate": self._propagate,
         }
 
     def _tool_schemas(self) -> list[dict]:
@@ -199,6 +201,22 @@ class GitReinsMCPServer:
                         "eval_cap": {"type": "string", "description": "Legacy combined cap string: '100/30m/200k/50k'. Individual params take priority if both are set."},
                     },
                     "required": ["id"],
+                },
+            },
+            {
+                "name": "propagate",
+                "description": "Propagate guard configuration to sibling repos.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "source": {"type": "string", "description": "Source repo path. Defaults to server workdir."},
+                        "targets": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of target repo paths to propagate config to",
+                        },
+                    },
+                    "required": ["targets"],
                 },
             },
         ]
@@ -468,6 +486,22 @@ class GitReinsMCPServer:
             ]
             d["summary"] = result.tier2.summary
         return d
+
+    def _propagate(self, source: str | None = None, targets: list[str] | None = None) -> dict:
+        """Propagate guard configuration to sibling repos.
+
+        Args:
+            source: Source repo path. Defaults to server workdir.
+            targets: List of target repo paths to propagate config to.
+
+        Returns:
+            Dict with ``source`` path and ``results`` list.
+        """
+        if not targets:
+            return {"error": "targets list is required"}
+        src = os.path.abspath(source) if source else self.workdir
+        propagator = Propagator(src)
+        return propagator.propagate(targets)
 
     def handle_request(self, request: dict) -> dict | None:
         """Handle a single MCP JSON-RPC request."""

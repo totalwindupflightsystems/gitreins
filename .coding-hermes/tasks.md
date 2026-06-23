@@ -177,7 +177,7 @@
   - Test verifies dead code tool reports unused functions
 - **Result:** 718 passed, 7 skipped.
 
-## [ ] GR-057: Add MCP propagate tool for multi-repo quality
+## [x] GR-057: Add MCP propagate tool for multi-repo quality
 - **Priority:** low
 - **Model:** deepseek-v4-flash
 - **Provider:** deepseek
@@ -186,6 +186,7 @@
   - `mcp_gitreins_propagate` tool copies guard config to sibling repos
   - Works with gitreins-poc and downstream repos
   - Test verifies config propagation preserves overrides
+- **Result:** engine/propagate.py (180 lines) — Propagator class with recursive dict merge. MCP server integrated with _propagate handler. 7 tests (create, merge, multi-target, error cases, MCP JSON-RPC). 725 passed, 7 skipped.
 
 ## [ ] GR-058: Type-safe GuardResult dataclass
 - **Priority:** medium
