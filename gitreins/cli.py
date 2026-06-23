@@ -968,6 +968,45 @@ def cmd_commit(args):
     print(result.stdout + result.stderr)
 
 
+def cmd_setup_tools(args):
+    """Show available static analysis tools and install instructions for missing ones."""
+    from engine.static_analysis import find_tool, _TOOL_INSTALL_GUIDE
+
+    workdir = get_workdir()
+    lang = _detect_language(workdir)
+
+    lang_tools_map = {
+        "python": ["mypy", "pyright"],
+        "ruby": ["sorbet"],
+        "sql": ["sqlfluff"],
+        "php": ["phpstan"],
+    }
+    tools = lang_tools_map.get(lang["type"], [])
+
+    if not tools:
+        print(f"No static analysis tools are tracked for {lang['name']}.")
+        return
+
+    print(f"Static Analysis Tools for {lang['name']}:")
+    found = 0
+    missing = 0
+    for tool in tools:
+        path = find_tool(tool)
+        if path:
+            found += 1
+            display = path.split("/")[-1] if "/" in path else path
+            print(f"  {tool:<12} ✓ found  ({display})")
+        else:
+            missing += 1
+            install = _TOOL_INSTALL_GUIDE.get(
+                tool, f"Install {tool} from your package manager",
+            )
+            print(f"  {tool:<12} ✗ not installed — install: {install}")
+
+    print()
+    print(f"{found} tools available, {missing} missing.")
+
+
 def cmd_mcp_server(args):
     import sys
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -1025,6 +1064,9 @@ def main():
     # mcp-server
     sub.add_parser("mcp-server", help="Run MCP stdio server")
 
+    # setup-tools
+    sub.add_parser("setup-tools", help="Show available static analysis tools and install instructions")
+
     # report
     report_p = sub.add_parser("report", help="Show verdict history")
     report_p.add_argument("-n", type=int, default=10, help="Number of recent verdicts to show")
@@ -1063,6 +1105,8 @@ def main():
         cmd_commit(args)
     elif args.command == "mcp-server":
         cmd_mcp_server(args)
+    elif args.command == "setup-tools":
+        cmd_setup_tools(args)
     elif args.command == "report":
         cmd_report(args)
     else:
