@@ -166,15 +166,16 @@
   - `gitreins guard` still works
 - **Result:** Added `logging.basicConfig(level=WARNING, stream=sys.stderr, force=True)` before mcp imports. 718 passed, 3 skipped.
 
-## [ ] GR-056: Add MCP guard tool — dead_code boolean
+## [x] GR-056: Add MCP guard tool — dead_code boolean
 - **Priority:** medium
-- **Model:** deepseek-v4-flash
+- **Model:** deepseek-v4-pro (direct — 2-file mechanical wiring)
 - **Provider:** deepseek
-- **Files:** `gitreins_mcp/server.py`, `engine/guard_manager.py`
+- **Files:** `gitreins_mcp/server.py`, `engine/guard_manager.py`, `gitreins/cli.py`
 - **AC:**
   - `gitreins guard --dead-code` runs dead code detection
   - MCP tool `guard_run` supports `dead_code: true` parameter
   - Test verifies dead code tool reports unused functions
+- **Result:** 718 passed, 7 skipped.
 
 ## [ ] GR-057: Add MCP propagate tool for multi-repo quality
 - **Priority:** low

@@ -174,11 +174,12 @@ class GitReinsMCPServer:
             },
             {
                 "name": "guard.run",
-                "description": "Run Tier 1 static guards (secrets, lint, tests). Optional workdir for cross-repo use.",
+                "description": "Run Tier 1 static guards (secrets, lint, tests). Optional dead_code for dead-code detection. Optional workdir for cross-repo use.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
                         "workdir": {"type": "string", "description": "Absolute path to the repo to guard. Defaults to the MCP server's workdir."},
+                        "dead_code": {"type": "boolean", "description": "Enable dead-code detection (Python AST-based). Overrides config.", "default": False},
                     },
                 },
             },
@@ -372,8 +373,9 @@ class GitReinsMCPServer:
         except Exception as e:
             return {"error": str(e)}
 
-    def _guard_run(self, workdir: str = None) -> dict:
-        """Run Tier 1 static guards. Accepts optional workdir for cross-repo use."""
+    def _guard_run(self, workdir: str = None, dead_code: bool = False) -> dict:
+        """Run Tier 1 static guards. Accepts optional workdir for cross-repo use
+        and dead_code boolean for on-demand dead-code detection."""
         import yaml
         wd = os.path.abspath(workdir) if workdir else self.workdir
         # Load config from .gitreins/config.yaml (same pattern as CLI)
@@ -386,7 +388,7 @@ class GitReinsMCPServer:
             except Exception:
                 pass
         gm = GuardManager(wd, config=config)
-        result = gm.run_all()
+        result = gm.run_all(force_dead_code=dead_code)
         return {
             "passed": result.passed,
             "workdir": wd,

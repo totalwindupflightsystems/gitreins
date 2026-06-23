@@ -902,7 +902,7 @@ def cmd_guard_run(args):
     workdir = get_workdir()
     config = load_config(workdir)
     gm = GuardManager(workdir, config=config)
-    result = gm.run_all()
+    result = gm.run_all(force_dead_code=getattr(args, 'dead_code', False))
 
     # Build mode note
     mode = gm.test_mode
@@ -1051,7 +1051,8 @@ def main():
     delete_p.add_argument("id")
 
     # guard
-    sub.add_parser("guard", help="Run Tier 1 guards")
+    guard_p = sub.add_parser("guard", help="Run Tier 1 guards")
+    guard_p.add_argument("--dead-code", action="store_true", help="Enable Python dead-code detection (overrides config)")
 
     # judge
     judge_p = sub.add_parser("judge", help="Evaluate a task")

@@ -248,11 +248,15 @@ class GuardManager:
             f.endswith(".sql") for f in _get_staged_files(self.workdir)
         ) or os.path.isdir(os.path.join(self.workdir, "migrations"))
 
-    def run_all(self) -> Tier1Result:
+    def run_all(self, force_dead_code: bool = False) -> Tier1Result:
         """Run all enabled Tier 1 guards.
 
         For Go projects, the Python-specific guards (lint, tests, dead_code)
         are skipped in favor of Go-native equivalents (go vet, go test, go build).
+
+        Args:
+            force_dead_code: If True, enable dead_code guard regardless of config.
+                             Used by CLI --dead-code flag and MCP dead_code param.
         """
         results: list[GuardResult] = []
 
@@ -265,7 +269,8 @@ class GuardManager:
         if self._enabled["tests"] and not self._is_go:
             results.append(self._check_tests())
 
-        if self._enabled["dead_code"] and not self._is_go:
+        dead_code_enabled = self._enabled["dead_code"] or force_dead_code
+        if dead_code_enabled and not self._is_go:
             results.append(self._check_dead_code())
 
         if self._enabled["skylos"]:
