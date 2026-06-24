@@ -61,9 +61,23 @@ class Judge:
 
         try:
             result = pipeline.run(task_dict, trigger="pre-eval")
+
+            # Extract tier1 guard results from pipeline stages
+            tier1_stage = result.get("stages", {}).get("tier1", {})
+            tier1 = Tier1Result(
+                passed=tier1_stage.get("passed", True),
+                results=[],
+                extra={
+                    "pipeline": True,
+                    "summary": tier1_stage.get("summary", ""),
+                    "any_failed": tier1_stage.get("any_failed", False),
+                },
+            )
+
             return JudgeResult(
                 task_id=task.id,
                 passed=result.get("passed", False),
+                tier1=tier1,
                 pipeline_result=result,
             )
         except Exception as e:
