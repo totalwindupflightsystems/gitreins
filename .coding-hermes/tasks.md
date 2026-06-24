@@ -198,3 +198,18 @@
   - All callers use field access instead of dict access
   - Tests verify immutability and type correctness
 - **Result:** GuardResult + Tier1Result moved to engine/types.py with frozen=True. GuardResult(name, passed, output, error) + Tier1Result(passed, results, extra) both frozen. Immutability tests verify FrozenInstanceError on mutation. 684 passed, 2 skipped. Backward compat: guard_manager.py re-exports via `from engine.types import ...`.
+
+## [x] GR-059: Catch-up — bump uv.lock to 0.7.8
+- **Priority:** low
+- **Commit:** `23baf7a`
+- **Result:** uv.lock version synced with pyproject.toml/engine/version.py. Pushed to GitHub. 699 passed, 6 skipped (1 flaky LSP integration test).
+
+## [ ] GR-060: Investigate flaky LSP integration test
+- **Priority:** low
+- **Model:** deepseek-v4-pro (direct)
+- **Files:** `tests/test_lsp.py`
+- **AC:**
+  - `test_pylsp_detects_undefined_variable` passes reliably or is marked skip with clear reason
+  - Root cause identified: pylsp not producing diagnostics, or test environment issue
+  - If fixable: fix and verify 3 consecutive runs pass
+  - If environment-dependent: add skip guard with explanatory message
