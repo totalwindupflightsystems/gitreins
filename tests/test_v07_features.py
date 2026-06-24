@@ -290,6 +290,93 @@ class TestInit:
         assert info["name"] == "unknown"
         assert not any([info["is_go"], info["is_python"], info["is_ts"]])
 
+    def test_detect_python_from_requirements(self, tmp_path):
+        """Detects Python from requirements.txt as fallback."""
+        from gitreins.cli import _detect_language
+
+        (tmp_path / "requirements.txt").write_text("requests>=2.28\n")
+        info = _detect_language(str(tmp_path))
+        assert info["is_python"]
+        assert info["name"] == "Python"
+
+    def test_detect_ts_from_tsconfig(self, tmp_path):
+        """Detects TypeScript from tsconfig.json (no package.json)."""
+        from gitreins.cli import _detect_language
+
+        (tmp_path / "tsconfig.json").write_text('{"compilerOptions":{}}')
+        info = _detect_language(str(tmp_path))
+        assert info["is_ts"]
+        assert info["name"] == "TypeScript"
+
+    def test_detect_ruby_from_gemspec(self, tmp_path):
+        """Detects Ruby from .gemspec file (no Gemfile)."""
+        from gitreins.cli import _detect_language
+
+        (tmp_path / "mygem.gemspec").write_text("Gem::Specification.new do |s| end")
+        info = _detect_language(str(tmp_path))
+        assert info["is_ruby"]
+        assert "Ruby" in info["name"]
+
+    def test_detect_multiple_langs(self, tmp_path):
+        """Multi-language project: pyproject.toml + package.json → both detected."""
+        from gitreins.cli import _detect_language
+
+        (tmp_path / "pyproject.toml").write_text("[project]\nname='test'")
+        (tmp_path / "package.json").write_text('{"name":"test"}')
+        info = _detect_language(str(tmp_path))
+        assert info["is_python"]
+        assert info["is_ts"]
+        assert "Python" in info["name"]
+        assert "TypeScript" in info["name"]
+        # 'type' is first detected language
+        assert info["type"] == "python"
+
+    def test_detect_sql_even_with_python(self, tmp_path):
+        """SQL detection runs regardless of other languages (was gated behind not is_python)."""
+        from gitreins.cli import _detect_language
+
+        (tmp_path / "pyproject.toml").write_text("[project]\nname='test'")
+        (tmp_path / "migrations").mkdir()
+        info = _detect_language(str(tmp_path))
+        assert info["is_python"]
+        assert info["has_sql"], "SQL should be detected even when Python is present"
+        assert "SQL" in info["name"]
+
+    def test_detect_all_flags_multi_lang(self, tmp_path):
+        """Go + Python + Rust project — all flags set, no elif shadowing."""
+        from gitreins.cli import _detect_language
+
+        (tmp_path / "go.mod").write_text("module example.com/test")
+        (tmp_path / "pyproject.toml").write_text("[project]\nname='test'")
+        (tmp_path / "Cargo.toml").write_text("[package]\nname='test'")
+        info = _detect_language(str(tmp_path))
+        assert info["is_go"]
+        assert info["is_python"]
+        assert info["is_rust"]
+        assert "Go" in info["name"]
+        assert "Python" in info["name"]
+        assert "Rust" in info["name"]
+        # 'type' is first detected
+        assert info["type"] == "go"
+
+    def test_detect_static_analysis_tools_multi_lang(self, tmp_path):
+        """Multi-language detection feeds all languages to tool discovery."""
+        from gitreins.cli import _detect_language, _detect_static_analysis_tools
+        from unittest.mock import patch
+
+        (tmp_path / "pyproject.toml").write_text("[project]\nname='test'")
+        (tmp_path / "Gemfile").write_text("source 'https://rubygems.org'")
+
+        def fake_list_available(lang):
+            return [f"tool-for-{lang}"]
+
+        with patch("engine.static_analysis.list_available_tools", side_effect=fake_list_available):
+            lang_info = _detect_language(str(tmp_path))
+            tools = _detect_static_analysis_tools(str(tmp_path), lang_info)
+
+        assert "tool-for-python" in tools
+        assert "tool-for-ruby" in tools
+
     def test_build_guards_go(self):
         """Go project guards include go: section and disable Python-only guards."""
         from gitreins.cli import _build_guards_section

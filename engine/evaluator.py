@@ -25,7 +25,7 @@ import subprocess
 from dataclasses import dataclass, field
 
 from engine.llm import LLMClient, ToolCall
-from engine.eval_cap import EvalCap, parse_eval_cap, eval_cap_from_config
+from engine.eval_cap import EvalCap, parse_eval_cap, eval_cap_from_config, _fmt_tokens
 
 logger = logging.getLogger("gitreins.evaluator")
 
@@ -58,6 +58,7 @@ For each criterion:
 
 ## EFFICIENCY RULES
 
+- **Token budget: {token_budget}.** You have {token_budget} input tokens and {output_budget} output tokens. The code context pre-loaded below consumes part of this — be selective about what you re-read. Prioritize criteria-driven investigation over exhaustive file reading.
 - **Code context is pre-loaded.** The changed code is already included in this prompt — you do NOT need to call read_file() on files shown below unless you need a specific line range not included.
 - **Do not re-read the same file twice.** If read_file returned content, you already have it.
 - **Do not re-run the same command.** Check previous results before running again.
@@ -83,13 +84,16 @@ EVALUATOR_TOOLS = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Read a file from the working tree. For large files, use offset/limit to read specific line ranges. First call without offset/limit to get the file size.",
+            "description": "Read a file from the working tree. Supports line-based (offset/limit) and byte-based (byte_offset/byte_limit) partial reads. Set mode='bytes' for byte-level access. First call without offset/limit returns metadata plus first 400 lines for large files.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "Path relative to repo root."},
                     "offset": {"type": "integer", "description": "Line number to start from (1-indexed). Omit to read from beginning."},
                     "limit": {"type": "integer", "description": "Max lines to return. Omit for full file."},
+                    "byte_offset": {"type": "integer", "description": "Byte position to start from (0-indexed). Requires mode='bytes'."},
+                    "byte_limit": {"type": "integer", "description": "Max bytes to return. Requires mode='bytes'."},
+                    "mode": {"type": "string", "description": "'lines' (default) or 'bytes' for byte-level reads."},
                 },
                 "required": ["path"],
             },
@@ -526,7 +530,10 @@ class AgenticEvaluator:
 
         # Fresh conversation: system prompt + compacted task
         new_messages: list[dict] = [
-            {"role": "system", "content": EVALUATOR_SYSTEM_PROMPT},
+            {"role": "system", "content": EVALUATOR_SYSTEM_PROMPT
+                .replace("{token_budget}", _fmt_tokens(self.eval_cap.max_input_tokens) if self.eval_cap.max_input_tokens > 0 else "unlimited")
+                .replace("{output_budget}", _fmt_tokens(self.eval_cap.max_output_tokens) if self.eval_cap.max_output_tokens > 0 else "unlimited")
+            },
             {"role": "user", "content": compacted_prompt},
         ]
 
@@ -590,10 +597,22 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         # and prevents context-bloat from accumulating tool results.
         code_context = self._build_code_context(config)
         if code_context:
+            # Cap code context to 30% of input budget (leaves room for conversation)
+            max_ctx_tokens = int(self.eval_cap.max_input_tokens * 0.30) if self.eval_cap.max_input_tokens > 0 else None
+            if max_ctx_tokens:
+                ctx_est = len(code_context) // 3  # rough char→token: ~3 chars/token
+                if ctx_est > max_ctx_tokens:
+                    ctx_lines = code_context.splitlines()
+                    keep_lines = int(len(ctx_lines) * (max_ctx_tokens / ctx_est))
+                    code_context = "\n".join(ctx_lines[:keep_lines])
+                    code_context += f"\n\n... [code context truncated: {ctx_est} → {max_ctx_tokens} estimated tokens]"
             task_prompt += f"\n\n{code_context}"
 
         messages: list[dict] = [
-            {"role": "system", "content": EVALUATOR_SYSTEM_PROMPT},
+            {"role": "system", "content": EVALUATOR_SYSTEM_PROMPT
+                .replace("{token_budget}", _fmt_tokens(self.eval_cap.max_input_tokens) if self.eval_cap.max_input_tokens > 0 else "unlimited")
+                .replace("{output_budget}", _fmt_tokens(self.eval_cap.max_output_tokens) if self.eval_cap.max_output_tokens > 0 else "unlimited")
+            },
             {"role": "user", "content": task_prompt},
         ]
 
@@ -626,7 +645,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
 
             # Proactive compaction: estimate if context is near the token limit
             if cumulative_prompt_tok > 0 and compaction_count < MAX_COMPACTIONS:
-                threshold = int(self.eval_cap.max_input_tokens * 0.80)
+                threshold = int(self.eval_cap.max_input_tokens * 0.60)
                 if cumulative_prompt_tok > threshold:
                     logger.warning(
                         "Context near limit (%d/%d tokens) — compacting (compaction #%d)",
@@ -836,13 +855,18 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
 
     # ── Tool implementations ──────────────────────────────────────
 
-    def _tool_read_file(self, path: str, offset: int = 0, limit: int = 0) -> dict:
-        """Read a file from the working tree with optional line-range support.
+    def _tool_read_file(self, path: str, offset: int = 0, limit: int = 0,
+                         byte_offset: int = 0, byte_limit: int = 0,
+                         mode: str = "lines") -> dict:
+        """Read a file from the working tree with line or byte range support.
 
         Args:
             path: File path relative to workdir.
-            offset: Start line (1-indexed). 0 = from beginning.
-            limit: Max lines to return. 0 = no limit.
+            offset: Start line (1-indexed). 0 = from beginning. Used when mode='lines'.
+            limit: Max lines to return. 0 = no limit. Used when mode='lines'.
+            byte_offset: Byte position to start from (0-indexed). Used when mode='bytes'.
+            byte_limit: Max bytes to return. 0 = no limit. Used when mode='bytes'.
+            mode: 'lines' (default) or 'bytes'.
         """
         full_path = os.path.join(self.workdir, path)
         real = os.path.realpath(full_path)
@@ -853,6 +877,37 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         if os.path.isdir(real):
             return {"error": f"Path is a directory: {path}"}
         try:
+            total_bytes = os.path.getsize(real)
+
+            if mode == "bytes":
+                # Byte-level read
+                with open(real, "rb") as f:
+                    if byte_offset > 0:
+                        if byte_offset >= total_bytes:
+                            return {
+                                "error": f"Byte offset {byte_offset} exceeds file size ({total_bytes} bytes)",
+                                "path": path, "total_bytes": total_bytes,
+                            }
+                        f.seek(byte_offset)
+                    if byte_limit > 0:
+                        raw = f.read(byte_limit)
+                    else:
+                        raw = f.read()
+                # Decode as UTF-8 with replacement chars for binary content
+                content = raw.decode("utf-8", errors="replace")
+                shown_bytes = len(raw)
+                has_more = (byte_offset + shown_bytes) < total_bytes if byte_limit > 0 else False
+                return {
+                    "path": path,
+                    "content": content,
+                    "total_bytes": total_bytes,
+                    "shown_bytes": shown_bytes,
+                    "byte_offset_start": byte_offset,
+                    "has_more": has_more,
+                    "mode": "bytes",
+                }
+
+            # Line-based read (default)
             with open(real, "r", errors="replace") as f:
                 lines = f.readlines()
 
@@ -880,8 +935,10 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 "content": content,
                 "total_lines": total_lines,
                 "total_chars": total_chars,
+                "total_bytes": total_bytes,
                 "shown_lines": len(lines),
                 "has_more": (offset > 0 and (offset - 1 + limit < total_lines)) or (not offset and not limit and total_chars > 12000) or (offset > 0 and not limit),
+                "mode": "lines",
             }
         except Exception as e:
             return {"error": str(e)}

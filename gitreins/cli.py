@@ -368,72 +368,99 @@ def cmd_init(args):
 
 
 def _detect_language(workdir: str) -> dict:
-    """Detect project language(s). Returns {name, type, is_go, is_python, is_ts, ...}."""
+    """Detect project language(s). Returns {name, type, is_go, is_python, is_ts, ...}.
+
+    Uses independent if-blocks (not elif) so multi-language projects are detected
+    correctly — a repo with both pyproject.toml and package.json is Python AND TypeScript.
+    'type' is the primary language (first detected), 'name' aggregates all found.
+    """
     info = {
         "name": "unknown", "type": "unknown",
         "is_go": False, "is_python": False, "is_ts": False,
         "is_ruby": False, "is_php": False, "is_rust": False,
         "has_sql": False,
     }
+    langs_found: list[str] = []
 
     if os.path.isfile(os.path.join(workdir, "go.mod")):
-        info["type"] = "go"
         info["is_go"] = True
-        info["name"] = "Go"
-    elif os.path.isfile(os.path.join(workdir, "pyproject.toml")) or \
-         os.path.isfile(os.path.join(workdir, "setup.py")) or \
-         os.path.isfile(os.path.join(workdir, "setup.cfg")):
-        info["type"] = "python"
+        langs_found.append("Go")
+        if info["type"] == "unknown":
+            info["type"] = "go"
+
+    if os.path.isfile(os.path.join(workdir, "pyproject.toml")) or \
+       os.path.isfile(os.path.join(workdir, "setup.py")) or \
+       os.path.isfile(os.path.join(workdir, "setup.cfg")) or \
+       os.path.isfile(os.path.join(workdir, "requirements.txt")):
         info["is_python"] = True
-        info["name"] = "Python"
-    elif os.path.isfile(os.path.join(workdir, "package.json")):
-        info["type"] = "typescript"
+        langs_found.append("Python")
+        if info["type"] == "unknown":
+            info["type"] = "python"
+
+    if os.path.isfile(os.path.join(workdir, "package.json")) or \
+       os.path.isfile(os.path.join(workdir, "tsconfig.json")):
         info["is_ts"] = True
-        info["name"] = "TypeScript"
-    elif os.path.isfile(os.path.join(workdir, "Gemfile")):
-        info["type"] = "ruby"
+        langs_found.append("TypeScript")
+        if info["type"] == "unknown":
+            info["type"] = "typescript"
+
+    if os.path.isfile(os.path.join(workdir, "Gemfile")) or \
+       any(f.endswith(".gemspec") for f in os.listdir(workdir) if os.path.isfile(os.path.join(workdir, f))):
         info["is_ruby"] = True
-        info["name"] = "Ruby"
-    elif os.path.isfile(os.path.join(workdir, "composer.json")):
-        info["type"] = "php"
+        langs_found.append("Ruby")
+        if info["type"] == "unknown":
+            info["type"] = "ruby"
+
+    if os.path.isfile(os.path.join(workdir, "composer.json")):
         info["is_php"] = True
-        info["name"] = "PHP"
-    elif os.path.isfile(os.path.join(workdir, "Cargo.toml")):
-        info["type"] = "rust"
+        langs_found.append("PHP")
+        if info["type"] == "unknown":
+            info["type"] = "php"
+
+    if os.path.isfile(os.path.join(workdir, "Cargo.toml")):
         info["is_rust"] = True
-        info["name"] = "Rust"
+        langs_found.append("Rust")
+        if info["type"] == "unknown":
+            info["type"] = "rust"
 
     # SQL detection: check for .sql files or migrations dir
-    if not info["is_go"] and not info["is_python"]:
+    try:
         for root, dirs, files in os.walk(workdir):
             dirs[:] = [d for d in dirs if d not in (".git", ".venv", "node_modules", ".gitreins")]
             if any(f.endswith(".sql") for f in files):
                 info["has_sql"] = True
+                langs_found.append("SQL")
                 break
             if "migrations" in dirs:
                 info["has_sql"] = True
+                langs_found.append("SQL")
                 break
+    except PermissionError:
+        pass
 
+    if langs_found:
+        info["name"] = " + ".join(langs_found)
     return info
 
 
 def _detect_static_analysis_tools(workdir: str, lang: dict) -> list[str]:
-    """Return list of installed static analysis tools for the detected language."""
+    """Return list of installed static analysis tools for all detected languages."""
     from engine.static_analysis import list_available_tools
 
+    tools: list[str] = []
     if lang["is_python"]:
-        return list_available_tools("python")
-    elif lang["is_ruby"]:
-        return list_available_tools("ruby")
-    elif lang["is_php"]:
-        return list_available_tools("php")
-    elif lang["has_sql"]:
-        return list_available_tools("sql")
-    elif lang["is_ts"]:
-        return list_available_tools("typescript")
-    elif lang["is_rust"]:
-        return list_available_tools("rust")
-    return []
+        tools.extend(list_available_tools("python"))
+    if lang["is_ruby"]:
+        tools.extend(list_available_tools("ruby"))
+    if lang["is_php"]:
+        tools.extend(list_available_tools("php"))
+    if lang["has_sql"]:
+        tools.extend(list_available_tools("sql"))
+    if lang["is_ts"]:
+        tools.extend(list_available_tools("typescript"))
+    if lang["is_rust"]:
+        tools.extend(list_available_tools("rust"))
+    return tools
 
 
 def _detect_test_command(workdir: str, lang: dict) -> str:

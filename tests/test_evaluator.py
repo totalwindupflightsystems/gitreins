@@ -68,6 +68,64 @@ class TestReadFile:
         result = evaluator._tool_read_file("short.txt", offset=10)
         assert "error" in result
 
+    def test_read_file_byte_mode(self, evaluator, tmp_workdir):
+        """Byte mode reads raw bytes from the file."""
+        path = os.path.join(tmp_workdir, "data.txt")
+        with open(path, "wb") as f:
+            f.write(b"ABCDEFGHIJKLMNOPQRSTUVWXYZ")
+        result = evaluator._tool_read_file("data.txt", mode="bytes", byte_offset=5, byte_limit=5)
+        assert result["mode"] == "bytes"
+        assert result["shown_bytes"] == 5
+        assert result["byte_offset_start"] == 5
+        assert result["content"] == "FGHIJ"
+        assert result["total_bytes"] == 26
+        assert result["has_more"] is True
+
+    def test_read_file_byte_mode_full_file(self, evaluator, tmp_workdir):
+        """Byte mode without byte_limit reads to end of file."""
+        path = os.path.join(tmp_workdir, "data.txt")
+        with open(path, "wb") as f:
+            f.write(b"HELLO WORLD")
+        result = evaluator._tool_read_file("data.txt", mode="bytes")
+        assert result["mode"] == "bytes"
+        assert result["shown_bytes"] == 11
+        assert result["content"] == "HELLO WORLD"
+        assert result["total_bytes"] == 11
+        assert result["has_more"] is False
+
+    def test_read_file_byte_offset_exceeds_size(self, evaluator, tmp_workdir):
+        """Byte offset exceeding file size returns error."""
+        path = os.path.join(tmp_workdir, "small.txt")
+        with open(path, "wb") as f:
+            f.write(b"xy")
+        result = evaluator._tool_read_file("small.txt", mode="bytes", byte_offset=100)
+        assert "error" in result
+        assert "exceeds file size" in result["error"]
+        assert result["total_bytes"] == 2
+
+    def test_read_file_default_mode_is_lines(self, evaluator, tmp_workdir):
+        """Default mode is 'lines' — offset/limit still work as before."""
+        path = os.path.join(tmp_workdir, "lines.txt")
+        with open(path, "w") as f:
+            f.write("line1\nline2\nline3\nline4\nline5\n")
+        result = evaluator._tool_read_file("lines.txt", offset=2, limit=2)
+        assert result["mode"] == "lines"
+        assert result["content"] == "line2\nline3\n"
+        assert result["total_lines"] == 5
+        assert result["shown_lines"] == 2
+
+    def test_read_file_byte_mode_binary_escaping(self, evaluator, tmp_workdir):
+        """Byte mode with binary content uses replacement chars, doesn't crash."""
+        path = os.path.join(tmp_workdir, "binary.bin")
+        with open(path, "wb") as f:
+            f.write(bytes(range(256)))
+        result = evaluator._tool_read_file("binary.bin", mode="bytes", byte_offset=0, byte_limit=10)
+        assert result["mode"] == "bytes"
+        assert result["shown_bytes"] == 10
+        assert result["total_bytes"] == 256
+        # Content decodes with replacement chars for non-UTF-8 bytes
+        assert "content" in result
+
 
 class TestRunCommand:
     """Test _tool_run_command — execution, output, timeout — step-1-4-1-2."""
