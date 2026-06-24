@@ -677,18 +677,16 @@ class TestCompaction:
         assert verdict.verdict == "INCOMPLETE"
         assert "other error" in verdict.summary.lower()
 
-    def test_proactive_compaction_at_80pct_threshold(self, evaluator, llm_client):
-        """When cumulative prompt tokens exceed 80% of limit, compaction triggers."""
-        # Set a low input token cap to trigger compaction quickly
+    def test_proactive_compaction_at_70pct_threshold(self, evaluator, llm_client):
+        """When cumulative prompt tokens exceed 70% of limit, compaction triggers by default."""
         evaluator.eval_cap.max_input_tokens = 1000  # 1000 token limit
 
-        # Simulate a response with prompt_tokens near threshold
         call_count = [0]
 
         def fake_chat(messages, tools=None, max_tokens=None):
             call_count[0] += 1
             if call_count[0] <= 2:
-                # Build up context: return tool calls with high token count
+                # Build up context: 900 prompt tokens > 700 (70% of 1000)
                 tc = ToolCall(id=f"tc{call_count[0]}", name="read_file", arguments={"path": f"f{call_count[0]}.py"})
                 return LLMResponse(
                     content="checking",
@@ -703,7 +701,6 @@ class TestCompaction:
                 )
 
         with patch.object(llm_client, 'chat', side_effect=fake_chat):
-            # Need to mock _tool_read_file so it doesn't fail
             with patch.object(evaluator, '_tool_read_file', return_value={"content": "test", "total_lines": 1}):
                 verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
         assert verdict.verdict == "COMPLETE"
@@ -720,6 +717,125 @@ class TestCompaction:
         assert verdict.verdict == "INCOMPLETE"
         # Should have failed after 3 compaction attempts
         assert "LLM call failed" in verdict.summary
+
+    def test_compaction_threshold_config_override(self, evaluator, llm_client, tmp_workdir):
+        """When config sets compaction_threshold to 0.50, compaction triggers at 50%."""
+        import yaml
+        cdir = os.path.join(tmp_workdir, ".gitreins")
+        os.makedirs(cdir, exist_ok=True)
+        with open(os.path.join(cdir, "config.yaml"), "w") as f:
+            yaml.dump({"evaluator": {"compaction_threshold": 0.50}}, f)
+
+        evaluator.eval_cap.max_input_tokens = 1000  # 1000 token limit
+
+        call_count = [0]
+
+        def fake_chat(messages, tools=None, max_tokens=None):
+            call_count[0] += 1
+            if call_count[0] <= 2:
+                # 600 prompt tokens > 500 (50% of 1000) — should trigger compaction
+                tc = ToolCall(id=f"tc{call_count[0]}", name="read_file", arguments={"path": f"f{call_count[0]}.py"})
+                return LLMResponse(
+                    content="checking",
+                    tool_calls=[tc],
+                    usage=MagicMock(prompt_tokens=600, completion_tokens=10,
+                                    cache_read_tokens=0, cache_write_tokens=0, total_tokens=610),
+                )
+            else:
+                return LLMResponse(
+                    content='{"verdict":"COMPLETE","items":[{"criterion":"c0","status":"PASS","detail":"ok"}],"summary":"done"}',
+                )
+
+        with patch.object(llm_client, 'chat', side_effect=fake_chat):
+            with patch.object(evaluator, '_tool_read_file', return_value={"content": "test", "total_lines": 1}):
+                verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
+        assert verdict.verdict == "COMPLETE"
+
+    def test_compaction_threshold_not_triggered_below(self, evaluator, llm_client, tmp_workdir):
+        """When prompt tokens are below the configured threshold, no compaction occurs."""
+        import yaml
+        cdir = os.path.join(tmp_workdir, ".gitreins")
+        os.makedirs(cdir, exist_ok=True)
+        with open(os.path.join(cdir, "config.yaml"), "w") as f:
+            yaml.dump({"evaluator": {"compaction_threshold": 0.50}}, f)
+
+        evaluator.eval_cap.max_input_tokens = 10000  # large limit
+
+        call_count = [0]
+
+        def fake_chat(messages, tools=None, max_tokens=None):
+            call_count[0] += 1
+            if call_count[0] <= 2:
+                # 400 prompt tokens < 5000 (50% of 10000) — should NOT trigger compaction
+                tc = ToolCall(id=f"tc{call_count[0]}", name="read_file", arguments={"path": f"f{call_count[0]}.py"})
+                return LLMResponse(
+                    content="checking",
+                    tool_calls=[tc],
+                    usage=MagicMock(prompt_tokens=400, completion_tokens=10,
+                                    cache_read_tokens=0, cache_write_tokens=0, total_tokens=410),
+                )
+            else:
+                return LLMResponse(
+                    content='{"verdict":"COMPLETE","items":[{"criterion":"c0","status":"PASS","detail":"ok"}],"summary":"done"}',
+                )
+
+        with patch.object(llm_client, 'chat', side_effect=fake_chat):
+            with patch.object(evaluator, '_tool_read_file', return_value={"content": "test", "total_lines": 1}):
+                verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
+        assert verdict.verdict == "COMPLETE"
+        # Should have completed without compaction — all 3 calls direct
+        assert call_count[0] == 3
+
+    def test_code_context_budget_config_override(self, evaluator, llm_client, tmp_workdir):
+        """When config sets code_context_budget to 0.20, code context is capped at 20%."""
+        import yaml
+        cdir = os.path.join(tmp_workdir, ".gitreins")
+        os.makedirs(cdir, exist_ok=True)
+        with open(os.path.join(cdir, "config.yaml"), "w") as f:
+            yaml.dump({"evaluator": {"code_context_budget": 0.20}}, f)
+
+        evaluator.eval_cap.max_input_tokens = 1000  # budget = 200 tokens
+
+        # Build a very large code context — ~3000 chars (~1000 tokens)
+        large_ctx = "x" * 3000
+
+        with patch.object(evaluator, '_build_code_context', return_value=large_ctx):
+            captured_prompt = []
+
+            def capture_chat(messages, tools=None, max_tokens=None, temperature=0.1):
+                captured_prompt.append(messages[1]["content"] if len(messages) > 1 else "")
+                return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
+
+            with patch.object(llm_client, 'chat', capture_chat):
+                evaluator.evaluate({"id": "t", "title": "ct", "criteria": ["x"]})
+
+        assert captured_prompt, "chat() was never called"
+        assert "[code context truncated" in captured_prompt[0], (
+            f"Expected code context truncation at 20% of 1000=200 tokens (~600 chars), "
+            f"but got no truncation. Prompt length: {len(captured_prompt[0])} chars"
+        )
+
+    def test_code_context_budget_default_30pct(self, evaluator, llm_client):
+        """Without config override, code context budget defaults to 30%."""
+        evaluator.eval_cap.max_input_tokens = 1000  # budget = 300 tokens
+
+        large_ctx = "x" * 3000  # ~1000 tokens
+
+        with patch.object(evaluator, '_build_code_context', return_value=large_ctx):
+            captured_prompt = []
+
+            def capture_chat(messages, tools=None, max_tokens=None, temperature=0.1):
+                captured_prompt.append(messages[1]["content"] if len(messages) > 1 else "")
+                return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
+
+            with patch.object(llm_client, 'chat', capture_chat):
+                evaluator.evaluate({"id": "t", "title": "ct", "criteria": ["x"]})
+
+        assert captured_prompt, "chat() was never called"
+        assert "[code context truncated" in captured_prompt[0], (
+            f"Expected code context truncation at 30% of 1000=300 tokens (~900 chars), "
+            f"but got no truncation. Prompt length: {len(captured_prompt[0])} chars"
+        )
 
     def test_estimate_context_uses_llm_tokens(self, evaluator):
         """_estimate_context_tokens uses cumulative_prompt_tok when provided."""

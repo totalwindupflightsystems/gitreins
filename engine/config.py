@@ -47,6 +47,8 @@ class GitReinsDefaults:
     max_input_tokens: int = 10_000_000  # 10M
     max_output_tokens: int = 1_000_000  # 1M
     tool_call_weight: float = 0.1
+    compaction_threshold: float = 0.70  # compact when 70% of input budget used (30% remaining)
+    code_context_budget: float = 0.30   # cap pre-loaded code context to 30% of input budget
 
     # ── Update checking ──
     check_for_updates: bool = True
@@ -84,6 +86,12 @@ class GitReinsDefaults:
             ),
             tool_call_weight=float(defaults.get(
                 "tool_call_weight", self.tool_call_weight
+            )),
+            compaction_threshold=float(defaults.get(
+                "compaction_threshold", self.compaction_threshold
+            )),
+            code_context_budget=float(defaults.get(
+                "code_context_budget", self.code_context_budget
             )),
             check_for_updates=bool(defaults.get(
                 "check_for_updates", self.check_for_updates
@@ -128,6 +136,8 @@ class GitReinsDefaults:
                 if self.max_output_tokens > 0 else None
             ),
             "tool_call_weight": self.tool_call_weight,
+            "compaction_threshold": self.compaction_threshold,
+            "code_context_budget": self.code_context_budget,
             "check_for_updates": self.check_for_updates,
             "update_check_ttl": f"{int(self.update_check_ttl_hours)}h",
         }
