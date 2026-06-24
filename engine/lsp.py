@@ -143,7 +143,9 @@ def _lsp_read_response(proc: subprocess.Popen, timeout: float = 10.0) -> dict | 
             header_end = idx + 4
             break
         if _read_more() == 0:
-            return None  # timeout / EOF before complete header
+            if _time.monotonic() >= deadline:
+                return None  # global deadline exceeded
+            continue  # select() timed out but deadline not reached — retry
 
     header_bytes = buffer[:header_end]
     buffer = buffer[header_end:]
@@ -161,7 +163,9 @@ def _lsp_read_response(proc: subprocess.Popen, timeout: float = 10.0) -> dict | 
     # Read body
     while len(buffer) < content_length:
         if _read_more() == 0:
-            break
+            if _time.monotonic() >= deadline:
+                break  # global deadline exceeded
+            continue  # select() timed out but deadline not reached — retry
 
     if len(buffer) < content_length:
         return None
@@ -181,17 +185,25 @@ def _collect_diagnostics(
     timeout: float,
     tool: str,
 ) -> list[dict]:
+    import time as _time
+
     diags: list[dict] = []
-    deadline = timeout
+    deadline = _time.monotonic() + timeout
 
     try:
         while True:
-            msg = _lsp_read_response(proc, deadline)
-            if msg is None:
+            remaining = deadline - _time.monotonic()
+            if remaining <= 0:
                 break
+            msg = _lsp_read_response(proc, remaining)
+            if msg is None:
+                continue
             if msg.get("method") == "textDocument/publishDiagnostics":
                 uri = msg.get("params", {}).get("uri", "")
                 file_uri = urllib.parse.urlparse(uri).path if uri else filepath
+                # Only collect diagnostics for the requested file
+                if file_uri != filepath:
+                    continue
                 for d in msg.get("params", {}).get("diagnostics", []):
                     range_start = d.get("range", {}).get("start", {})
                     line_0based = range_start.get("line", 0)
@@ -203,6 +215,7 @@ def _collect_diagnostics(
                         "code": str(d.get("code", "")),
                         "tool": tool,
                     })
+                break  # got diagnostics for this file — done
     except Exception:
         pass
 

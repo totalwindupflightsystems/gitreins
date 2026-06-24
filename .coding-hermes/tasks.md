@@ -204,12 +204,13 @@
 - **Commit:** `23baf7a`
 - **Result:** uv.lock version synced with pyproject.toml/engine/version.py. Pushed to GitHub. 699 passed, 6 skipped (1 flaky LSP integration test).
 
-## [ ] GR-060: Investigate flaky LSP integration test
+## [x] GR-060: Investigate flaky LSP integration test
 - **Priority:** low
 - **Model:** deepseek-v4-pro (direct)
-- **Files:** `tests/test_lsp.py`
+- **Files:** `engine/lsp.py`, `tests/test_lsp.py`
 - **AC:**
   - `test_pylsp_detects_undefined_variable` passes reliably or is marked skip with clear reason
   - Root cause identified: pylsp not producing diagnostics, or test environment issue
   - If fixable: fix and verify 3 consecutive runs pass
   - If environment-dependent: add skip guard with explanatory message
+- **Result:** Root cause: `_lsp_read_response`'s select() cap at 1.0s per call caused early bail when the global deadline was 10s. Server response occasionally took >1s (cold start, system load), hitting the cap and returning None prematurely. Fix: (1) Header and body read loops now retry on select timeout until global deadline is reached. (2) `_collect_diagnostics` uses absolute deadline instead of per-call reset, so each file gets at most `timeout_per_file` seconds total. (3) Break after receiving `publishDiagnostics` for the target file instead of waiting for full timeout. 10/10 consecutive runs pass, full suite 752 passed, 7 skipped.
