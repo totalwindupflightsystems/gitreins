@@ -642,7 +642,10 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                     continue
 
             try:
-                response = self.llm.chat(messages, tools=tools)
+                response = self.llm.chat(
+                    messages, tools=tools,
+                    max_tokens=self.eval_cap.max_output_tokens if self.eval_cap.max_output_tokens > 0 else 16384,
+                )
             except Exception as e:
                 # Detect HTTP 400-499 errors (context window exceeded, etc.)
                 is_context_error = False

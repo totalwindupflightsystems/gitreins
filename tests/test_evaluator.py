@@ -627,7 +627,7 @@ class TestCompaction:
         # Simulate a response with prompt_tokens near threshold
         call_count = [0]
 
-        def fake_chat(messages, tools=None):
+        def fake_chat(messages, tools=None, max_tokens=None):
             call_count[0] += 1
             if call_count[0] <= 2:
                 # Build up context: return tool calls with high token count
@@ -736,3 +736,80 @@ class TestCodeContextPreloading:
         config = {"guards": {"test_mode": "full"}}
         ctx = evaluator._build_code_context(config)
         assert ctx == ""
+
+    def test_max_output_tokens_passed_to_llm(self, evaluator, llm_client):
+        """max_output_tokens from eval cap overrides LLM client default of 131072."""
+        from engine.eval_cap import EvalCap
+
+        evaluator.eval_cap = EvalCap(
+            max_iterations=10,
+            max_output_tokens=50_000,
+        )
+
+        captured_tokens = []
+
+        def capture_chat(messages, max_tokens=131072, tools=None, temperature=0.1):
+            captured_tokens.append(max_tokens)
+            return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
+
+        with patch.object(llm_client, 'chat', capture_chat):
+            evaluator.evaluate({"id": "t", "title": "token test", "criteria": ["x"]})
+
+        assert captured_tokens, "chat() was never called"
+        assert captured_tokens[0] == 50_000, (
+            f"Expected config max_tokens=50000 to override default 131072, got {captured_tokens[0]}"
+        )
+
+    def test_max_tokens_fallback_when_nothing_configured(self, evaluator, llm_client):
+        """When nothing set (unlimited), falls back to 16384 — not a stale default."""
+        from engine.eval_cap import EvalCap
+
+        evaluator.eval_cap = EvalCap(
+            max_iterations=10,
+            max_output_tokens=-1,  # unlimited — nothing configured
+        )
+
+        captured = []
+
+        def capture_chat(messages, max_tokens, tools=None, temperature=0.1):
+            captured.append(max_tokens)
+            return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
+
+        with patch.object(llm_client, 'chat', capture_chat):
+            evaluator.evaluate({"id": "t", "title": "unlimited", "criteria": ["x"]})
+
+        assert captured, "chat() was never called"
+        assert captured[0] == 16384, (
+            f"Expected fallback max_tokens=16384 when unlimited, got {captured[0]}"
+        )
+
+    def test_max_tokens_value_set_not_corrupted(self, evaluator, llm_client):
+        """When config says X, chat() receives X — not some other wrong value."""
+        from engine.eval_cap import EvalCap
+
+        evaluator.eval_cap = EvalCap(
+            max_iterations=10,
+            max_output_tokens=75_000,
+        )
+
+        captured = []
+
+        def capture_chat(messages, max_tokens, tools=None, temperature=0.1):
+            captured.append(max_tokens)
+            return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
+
+        with patch.object(llm_client, 'chat', capture_chat):
+            evaluator.evaluate({"id": "t", "title": "uncorrupted", "criteria": ["x"]})
+
+        assert captured, "chat() was never called"
+
+        # Must be exactly 75000 — not clamped, not rounded, not defaulted
+        wrong_values = [2048, 4096, 8192, 16384, 32768, 100_000, 131072]
+        assert captured[0] == 75_000, (
+            f"Config said 75000 but chat() got {captured[0]}. "
+            f"Checked wrong values: {wrong_values}"
+        )
+        for wrong in wrong_values:
+            assert captured[0] != wrong, (
+                f"chat() received {wrong} — matches a known wrong default, not the configured 75000"
+            )

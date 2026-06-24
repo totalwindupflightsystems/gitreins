@@ -118,9 +118,9 @@ class LLMClient:
     def chat(
         self,
         messages: list[dict[str, Any]],
+        max_tokens: int = 131072,
         tools: list[dict[str, Any]] | None = None,
         temperature: float = 0.1,
-        max_tokens: int = 2048,
     ) -> LLMResponse:
         """Send a chat completion request with retry logic.
 
@@ -129,6 +129,10 @@ class LLMClient:
         for subprocess-based tests where unittest.mock.patch() can't
         reach the child process.
         """
+        # Log warning when default is used — config should be driving this
+        if max_tokens == 131072:
+            logger.debug("LLM chat using default max_tokens=131072 — "
+                         "consider setting evaluator.max_output_tokens in config")
         mock_resp_json = os.getenv("GITREINS_MOCK_LLM_RESPONSE")
         if mock_resp_json:
             data = json.loads(mock_resp_json)

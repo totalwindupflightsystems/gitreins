@@ -31,7 +31,7 @@ pipeline:
     - id: tier2
       type: ai_eval
       condition: "stage.tier1.any_failed"
-      max_iterations: 20
+      max_iterations: -1  # Defer to evaluator config
       tools: [read_file, run_command, search_pattern, read_diff, sandbox]
       prompt_template: |
         Evaluate task completeness.
