@@ -8,11 +8,12 @@ guards:
   dead_code: false
   skylos: false
   static_analysis: true
-  lsp: false
+  static_analysis_tools:
+    python:
+    - mypy
+  lsp: true
   lsp_tools:
-    - pylsp
-    - rust-analyzer
-    - ts-lsp
+  - pylsp
 evaluator:
   max_iterations: 100
   max_time: 30m
@@ -21,6 +22,7 @@ evaluator:
   tool_call_weight: 0.1
   compaction_threshold: 0.90
   code_context_budget: 0.70
+  file_scope: changed
 defaults:
   model: deepseek-v4-flash
 history:

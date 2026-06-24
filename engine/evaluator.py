@@ -60,6 +60,7 @@ For each criterion:
 
 - **Token budget: {token_budget}.** You have {token_budget} input tokens and {output_budget} output tokens. The code context pre-loaded below consumes part of this — be selective about what you re-read. Prioritize criteria-driven investigation over exhaustive file reading.
 - **Code context is pre-loaded.** The changed code is already included in this prompt — you do NOT need to call read_file() on files shown below unless you need a specific line range not included.
+- **File scope: {file_scope}.** When scope is 'changed', you can ONLY access modified files (plus their tests and config files). read_file() and search_pattern() will reject files outside this set. This prevents context explosion on large repos.
 - **Do not re-read the same file twice.** If read_file returned content, you already have it.
 - **Do not re-run the same command.** Check previous results before running again.
 - **Do not search for the same pattern twice.** Use sandbox to track what you've checked.
@@ -281,6 +282,7 @@ class AgenticEvaluator:
         self._commands_run: set[str] = set()
         self._searches_done: set[str] = set()
         self._tier1_diagnostics: list[dict] = []
+        self._allowed_files: set[str] | None = None  # None = full scope, set = restricted
 
     def _build_code_context(self, config: dict) -> str:
         """Build a compact code-context block to pre-load into the evaluator prompt.
@@ -408,6 +410,68 @@ class AgenticEvaluator:
 
         return "\n".join(lines)
 
+    def _compute_allowed_files(self) -> set[str]:
+        """Compute the set of files the evaluator is allowed to touch.
+
+        When file_scope is 'changed', returns changed files from git diff
+        plus their corresponding test files. Returns empty set on git failures.
+
+        The LLM can only read_file / search_pattern within this set, preventing
+        context explosion on large monorepos.
+        """
+        import subprocess
+        allowed: set[str] = set()
+
+        try:
+            for args in (["git", "diff", "--cached", "--name-only"], ["git", "diff", "--name-only"]):
+                result = subprocess.run(
+                    args, capture_output=True, text=True,
+                    timeout=10, cwd=self.workdir,
+                )
+                for line in result.stdout.strip().splitlines():
+                    if line:
+                        allowed.add(line)
+        except Exception:
+            pass
+
+        # Also include test files that map to changed source files
+        test_substitutions = [
+            ("src/", "tests/"), ("lib/", "test/"), ("pkg/", "test/"),
+            (".py", "_test.py"), (".go", "_test.go"), (".rs", "_test.rs"),
+            (".ts", ".test.ts"), (".tsx", ".test.tsx"),
+            (".js", ".test.js"), (".rb", "_test.rb"),
+        ]
+        expanded: set[str] = set(allowed)
+        for f in allowed:
+            for src_suffix, test_suffix in test_substitutions:
+                if src_suffix in f:
+                    test_file = f.replace(src_suffix, test_suffix)
+                    tpath = os.path.join(self.workdir, test_file)
+                    if os.path.isfile(tpath):
+                        expanded.add(test_file)
+                    break
+
+        # Always allow common config files
+        always_allow = [
+            "pyproject.toml", "setup.cfg", "setup.py", "conftest.py",
+            "go.mod", "go.sum", "Cargo.toml", "package.json",
+            "Makefile", "Dockerfile", ".gitreins/config.yaml",
+        ]
+        for af in always_allow:
+            if os.path.isfile(os.path.join(self.workdir, af)):
+                expanded.add(af)
+
+        logger.debug("File scope 'changed': %d files allowed (%d changed + tests/config)",
+                     len(expanded), len(allowed))
+        return expanded
+
+    def _path_in_scope(self, path: str) -> bool:
+        """Check if a file path is within the current scope."""
+        if self._allowed_files is None:
+            return True
+        clean = path.lstrip("./").rstrip("/")
+        return clean in self._allowed_files
+
     def _load_config(self) -> dict:
         """Load .gitreins/config.yaml if present."""
         import yaml
@@ -533,6 +597,7 @@ class AgenticEvaluator:
             {"role": "system", "content": EVALUATOR_SYSTEM_PROMPT
                 .replace("{token_budget}", _fmt_tokens(self.eval_cap.max_input_tokens) if self.eval_cap.max_input_tokens > 0 else "unlimited")
                 .replace("{output_budget}", _fmt_tokens(self.eval_cap.max_output_tokens) if self.eval_cap.max_output_tokens > 0 else "unlimited")
+                .replace("{file_scope}", self._allowed_files is not None and "changed" or "full")
             },
             {"role": "user", "content": compacted_prompt},
         ]
@@ -592,6 +657,12 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         config = self._load_config()
         evaluator_cfg = config.get("evaluator", {})
 
+        # Compute file scope — which files the evaluator is allowed to touch
+        file_scope = evaluator_cfg.get("file_scope", "changed")
+        self._allowed_files: set[str] | None = None  # None = full scope
+        if file_scope == "changed":
+            self._allowed_files = self._compute_allowed_files()
+
         # Inject code context (changed files or diffs) into the initial prompt
         # so the LLM has relevant code upfront — reduces read_file() calls
         # and prevents context-bloat from accumulating tool results.
@@ -613,6 +684,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             {"role": "system", "content": EVALUATOR_SYSTEM_PROMPT
                 .replace("{token_budget}", _fmt_tokens(self.eval_cap.max_input_tokens) if self.eval_cap.max_input_tokens > 0 else "unlimited")
                 .replace("{output_budget}", _fmt_tokens(self.eval_cap.max_output_tokens) if self.eval_cap.max_output_tokens > 0 else "unlimited")
+                .replace("{file_scope}", self._allowed_files is not None and "changed" or "full")
             },
             {"role": "user", "content": task_prompt},
         ]
@@ -875,6 +947,10 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         real = os.path.realpath(full_path)
         if not real.startswith(os.path.realpath(self.workdir)):
             return {"error": f"Path outside working tree: {path}"}
+        # Enforce file scope BEFORE existence check — reject out-of-scope files
+        # even if they exist, so the LLM knows why it can't access them
+        if not self._path_in_scope(path):
+            return {"error": f"File not in scope: {path}. Evaluator is scoped to changed files only. Set evaluator.file_scope: full in .gitreins/config.yaml to allow all files."}
         if not os.path.exists(real):
             return {"error": f"File not found: {path}"}
         if os.path.isdir(real):
@@ -992,6 +1068,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                         continue
                 fpath = os.path.join(root, fname)
                 rel = os.path.relpath(fpath, self.workdir)
+                # Enforce file scope: only search within allowed files
+                if self._allowed_files is not None and not self._path_in_scope(rel):
+                    continue
                 files_searched += 1
                 try:
                     if os.path.getsize(fpath) > 500_000:

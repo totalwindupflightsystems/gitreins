@@ -49,6 +49,7 @@ class GitReinsDefaults:
     tool_call_weight: float = 0.1
     compaction_threshold: float = 0.90  # compact when 90% of input budget used (10% remaining)
     code_context_budget: float = 0.70   # cap pre-loaded code context to 70% of input budget
+    file_scope: str = "changed"         # "changed" = only changed files + tests, "full" = entire codebase
 
     # ── Update checking ──
     check_for_updates: bool = True
@@ -92,6 +93,9 @@ class GitReinsDefaults:
             )),
             code_context_budget=float(defaults.get(
                 "code_context_budget", self.code_context_budget
+            )),
+            file_scope=str(defaults.get(
+                "file_scope", self.file_scope
             )),
             check_for_updates=bool(defaults.get(
                 "check_for_updates", self.check_for_updates

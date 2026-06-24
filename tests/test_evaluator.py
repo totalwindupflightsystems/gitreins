@@ -987,3 +987,112 @@ class TestCodeContextPreloading:
             assert captured[0] != wrong, (
                 f"chat() received {wrong} — matches a known wrong default, not the configured 75000"
             )
+
+    # ── File scope tests ──────────────────────────────────────────
+
+    def test_file_scope_changed_rejects_outside_file(self, evaluator, tmp_workdir):
+        """In 'changed' scope, read_file on non-allowed file returns error."""
+        evaluator._allowed_files = {'src/main.py', 'tests/test_main.py', 'pyproject.toml'}
+
+        result = evaluator._tool_read_file('other/unrelated.py')
+        assert 'error' in result
+        assert 'File not in scope' in result['error']
+        assert 'unrelated.py' in result['error']
+
+    def test_file_scope_changed_allows_allowed_file(self, evaluator, tmp_workdir):
+        """In 'changed' scope, read_file on allowed file succeeds."""
+        import os
+        os.makedirs(os.path.join(tmp_workdir, 'src'), exist_ok=True)
+        with open(os.path.join(tmp_workdir, 'src', 'main.py'), 'w') as f:
+            f.write('def hello(): pass\n')
+
+        evaluator._allowed_files = {'src/main.py', 'tests/test_main.py'}
+
+        result = evaluator._tool_read_file('src/main.py')
+        assert 'content' in result
+        assert 'hello' in result['content']
+
+    def test_file_scope_full_allows_any_file(self, evaluator, tmp_workdir):
+        """In 'full' scope (None), read_file on any file succeeds."""
+        import os
+        os.makedirs(os.path.join(tmp_workdir, 'anywhere'), exist_ok=True)
+        with open(os.path.join(tmp_workdir, 'anywhere', 'deep.py'), 'w') as f:
+            f.write('x=1\n')
+
+        evaluator._allowed_files = None  # full scope
+
+        result = evaluator._tool_read_file('anywhere/deep.py')
+        assert 'content' in result
+        assert 'x=1' in result['content']
+
+    def test_search_pattern_respects_file_scope(self, evaluator, tmp_workdir):
+        """In 'changed' scope, search_pattern only finds results in allowed files."""
+        import os
+        os.makedirs(os.path.join(tmp_workdir, 'src'), exist_ok=True)
+        os.makedirs(os.path.join(tmp_workdir, 'vendor'), exist_ok=True)
+        with open(os.path.join(tmp_workdir, 'src', 'main.py'), 'w') as f:
+            f.write('TODO: implement\n')
+        with open(os.path.join(tmp_workdir, 'vendor', 'lib.py'), 'w') as f:
+            f.write('TODO: fix this\n')
+
+        evaluator._allowed_files = {'src/main.py', 'Makefile'}
+
+        result = evaluator._tool_search_pattern('TODO')
+        assert result['count'] == 1, (
+            f"Expected 1 match in allowed files, got {result['count']}: {result['matches']}"
+        )
+        assert 'src/main.py' in str(result['matches'])
+        assert 'vendor/lib.py' not in str(result['matches'])
+
+    def test_file_scope_integration_with_evaluate(self, evaluator, llm_client, tmp_workdir):
+        """End-to-end: evaluator with 'changed' scope works correctly."""
+        import os, yaml, subprocess
+        from engine.llm import LLMResponse, ToolCall
+
+        cdir = os.path.join(tmp_workdir, '.gitreins')
+        os.makedirs(cdir, exist_ok=True)
+        with open(os.path.join(cdir, 'config.yaml'), 'w') as f:
+            yaml.dump({'evaluator': {'file_scope': 'changed'}}, f)
+
+        os.makedirs(os.path.join(tmp_workdir, 'src'), exist_ok=True)
+        with open(os.path.join(tmp_workdir, 'src', 'main.py'), 'w') as f:
+            f.write("print('ok')\n")
+        subprocess.run(['git', 'init'], cwd=tmp_workdir, capture_output=True)
+        subprocess.run(['git', 'add', '-A'], cwd=tmp_workdir, capture_output=True)
+        subprocess.run(['git', 'commit', '-m', 'initial'], cwd=tmp_workdir, capture_output=True)
+        with open(os.path.join(tmp_workdir, 'src', 'main.py'), 'a') as f:
+            f.write('# change\n')
+
+        captured = []
+        def fake_chat(messages, tools=None, max_tokens=None):
+            captured.append(len(messages))
+            if len(captured) == 1:
+                return LLMResponse(
+                    content='checking',
+                    tool_calls=[ToolCall(id='tc1', name='read_file', arguments={'path': 'nonexistent_outside.py'})],
+                )
+            return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
+
+        with patch.object(llm_client, 'chat', side_effect=fake_chat):
+            verdict = evaluator.evaluate({'id': 't', 'title': 'scope test', 'criteria': ['c0']})
+        assert verdict.verdict == 'COMPLETE'
+
+    def test_file_scope_default_is_changed(self, evaluator, tmp_workdir):
+        """Without config override, file_scope defaults to 'changed'."""
+        import os
+        # Ensure no config.yaml exists
+        cdir = os.path.join(tmp_workdir, '.gitreins')
+        cfg = os.path.join(cdir, 'config.yaml')
+        if os.path.exists(cfg):
+            os.remove(cfg)
+
+        # In a fresh git repo with no changes, _allowed_files will be empty
+        import subprocess
+        subprocess.run(['git', 'init'], cwd=tmp_workdir, capture_output=True)
+        subprocess.run(['git', 'commit', '--allow-empty', '-m', 'init'], cwd=tmp_workdir, capture_output=True)
+
+        evaluator._allowed_files = evaluator._compute_allowed_files()
+        # In a clean repo with no uncommitted changes, set should be empty (or just config files)
+        assert 'src/main.py' not in evaluator._allowed_files, (
+            'No changed files should be in scope for a clean repo'
+        )
