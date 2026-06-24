@@ -597,8 +597,8 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         # and prevents context-bloat from accumulating tool results.
         code_context = self._build_code_context(config)
         if code_context:
-            # Cap code context to configured budget (default 30% of input budget — leaves room for conversation)
-            ctx_budget = evaluator_cfg.get("code_context_budget", 0.30)
+            # Cap code context to configured budget (default 70% of input budget)
+            ctx_budget = evaluator_cfg.get("code_context_budget", 0.70)
             max_ctx_tokens = int(self.eval_cap.max_input_tokens * ctx_budget) if self.eval_cap.max_input_tokens > 0 else None
             if max_ctx_tokens:
                 ctx_est = len(code_context) // 3  # rough char→token: ~3 chars/token
@@ -645,9 +645,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 )
 
             # Proactive compaction: compact when context exceeds configured threshold
-            # (default 70% of input budget — 30% remaining)
+            # (default 90% of input budget — 10% remaining)
             if cumulative_prompt_tok > 0 and compaction_count < MAX_COMPACTIONS:
-                threshold_ratio = evaluator_cfg.get("compaction_threshold", 0.70)
+                threshold_ratio = evaluator_cfg.get("compaction_threshold", 0.90)
                 threshold = int(self.eval_cap.max_input_tokens * threshold_ratio)
                 if cumulative_prompt_tok > threshold:
                     logger.warning(

@@ -47,8 +47,8 @@ class GitReinsDefaults:
     max_input_tokens: int = 10_000_000  # 10M
     max_output_tokens: int = 1_000_000  # 1M
     tool_call_weight: float = 0.1
-    compaction_threshold: float = 0.70  # compact when 70% of input budget used (30% remaining)
-    code_context_budget: float = 0.30   # cap pre-loaded code context to 30% of input budget
+    compaction_threshold: float = 0.90  # compact when 90% of input budget used (10% remaining)
+    code_context_budget: float = 0.70   # cap pre-loaded code context to 70% of input budget
 
     # ── Update checking ──
     check_for_updates: bool = True

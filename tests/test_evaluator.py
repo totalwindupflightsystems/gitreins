@@ -677,8 +677,8 @@ class TestCompaction:
         assert verdict.verdict == "INCOMPLETE"
         assert "other error" in verdict.summary.lower()
 
-    def test_proactive_compaction_at_70pct_threshold(self, evaluator, llm_client):
-        """When cumulative prompt tokens exceed 70% of limit, compaction triggers by default."""
+    def test_proactive_compaction_at_90pct_threshold(self, evaluator, llm_client):
+        """When cumulative prompt tokens exceed 90% of limit, compaction triggers by default."""
         evaluator.eval_cap.max_input_tokens = 1000  # 1000 token limit
 
         call_count = [0]
@@ -686,12 +686,12 @@ class TestCompaction:
         def fake_chat(messages, tools=None, max_tokens=None):
             call_count[0] += 1
             if call_count[0] <= 2:
-                # Build up context: 900 prompt tokens > 700 (70% of 1000)
+                # Build up context: 950 prompt tokens > 900 (90% of 1000)
                 tc = ToolCall(id=f"tc{call_count[0]}", name="read_file", arguments={"path": f"f{call_count[0]}.py"})
                 return LLMResponse(
                     content="checking",
                     tool_calls=[tc],
-                    usage=MagicMock(prompt_tokens=900, completion_tokens=10,
+                    usage=MagicMock(prompt_tokens=950, completion_tokens=10,
                                     cache_read_tokens=0, cache_write_tokens=0, total_tokens=910),
                 )
             else:
@@ -815,8 +815,8 @@ class TestCompaction:
             f"but got no truncation. Prompt length: {len(captured_prompt[0])} chars"
         )
 
-    def test_code_context_budget_default_30pct(self, evaluator, llm_client):
-        """Without config override, code context budget defaults to 30%."""
+    def test_code_context_budget_default_70pct(self, evaluator, llm_client):
+        """Without config override, code context budget defaults to 70%."""
         evaluator.eval_cap.max_input_tokens = 1000  # budget = 300 tokens
 
         large_ctx = "x" * 3000  # ~1000 tokens
@@ -833,7 +833,7 @@ class TestCompaction:
 
         assert captured_prompt, "chat() was never called"
         assert "[code context truncated" in captured_prompt[0], (
-            f"Expected code context truncation at 30% of 1000=300 tokens (~900 chars), "
+            f"Expected code context truncation at 70% of 1000=700 tokens (~2100 chars), "
             f"but got no truncation. Prompt length: {len(captured_prompt[0])} chars"
         )
 
