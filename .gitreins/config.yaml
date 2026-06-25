@@ -20,8 +20,8 @@ evaluator:
   max_input_tokens: 10M
   max_output_tokens: 1M
   tool_call_weight: 0.1
-  compaction_threshold: 0.90
-  code_context_budget: 0.70
+  compaction_threshold: 0.9
+  code_context_budget: 0.7
   file_scope: changed
 defaults:
   model: deepseek-v4-flash

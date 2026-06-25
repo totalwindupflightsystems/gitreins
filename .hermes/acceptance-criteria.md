@@ -7,7 +7,7 @@
 > **Binary:** `.venv/bin/python3 gitreins/cli.py`
 > **Test runner:** `.venv/bin/pytest tests/ -x --tb=short -q`
 > **MCP transport:** stdio (JSON-RPC 2.0 line-delimited)
-> **Last run:** 2026-06-23 05:20 UTC — 4 pending criteria tested, 3 new features shipped, 1 already passed
+> **Last run:** 2026-06-25 20:00 UTC — maintenance mode, all clear. 759 passed, 7 skipped. Tier 1 PASS. Container healthy (Up 16h).
 
 ## Demo Infrastructure
 
@@ -36,7 +36,7 @@
 
 ### AC-010c: Test guard runs tests
 
-✅ passed — 708+ tests as of 2026-06-23
+✅ passed — 759 tests as of 2026-06-25
 
 ### AC-010d: Static analysis guard works
 
@@ -73,7 +73,7 @@
 
 ### AC-040a-040c: All CLI subcommands work
 
-✅ passed — install, init, task, guard, judge, commit, mcp-server, report, setup-tools all functional.
+✅ passed — install, init, task, guard, judge, commit, mcp-server, setup-tools, report all functional.
 
 ---
 
@@ -126,7 +126,7 @@
 
 **Status:** ✅ passed (2026-06-22)
 
-✅ 68 tests in tests/test_secrets_completeness.py, 17 fixture files. All 663 tests pass.
+✅ 68 tests in tests/test_secrets_completeness.py, 17 fixture files. All 759 tests pass.
 
 ---
 
@@ -182,7 +182,7 @@ cd /home/kara/gitreins-poc && .venv/bin/python3 -m pytest tests/test_static_anal
 
 **How to verify:**
 ```bash
-cd /tmp && mkdir -p gr-init-sa && cd gr-init-sa && git init -q && \\
+cd /tmp && mkdir -p gr-init-sa && cd gr-init-sa && git init -q && \
   /home/kara/gitreins-poc/.venv/bin/python3 /home/kara/gitreins-poc/gitreins/cli.py init 2>&1 | grep -i 'static analysis'
 # Expected: shows detected tools (mypy ✓, pyright ✓ for Python)
 ```
@@ -229,10 +229,11 @@ cd /home/kara/gitreins-poc && .venv/bin/python3 gitreins/cli.py setup-tools 2>&1
 
 ## ALL CRITERIA PASSED ✅
 
-**Summary (2026-06-23):**
+**Summary (2026-06-24):**
 - 17 acceptance criteria total
-- 13 passed
+- 14 passed
 - 3 deferred (AC-060 dead code, AC-070 skylos, AC-100 pre-commit hook)
-- 1 maintenance-only (AC-050)
-- Full test suite: 708 passed, 7 skipped
-- Latest commits: e3747e2 (AC-140), 059a9d4 (AC-160), b37fa55 (AC-170)
+- Full test suite: 759 passed, 7 skipped
+- Tier 1 guards: all PASS (secrets, lint, tests, static_analysis, lsp)
+- Latest commits: 9d14b5b (GR-060 LSP retry), c0ddea8 (v0.8.1 fix), 25f7b02 (v0.8.0 file_scope)
+- Container: healthy, recreated this wake (was missing from `docker ps -a`)
