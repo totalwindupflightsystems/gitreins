@@ -76,7 +76,7 @@ def normalize_severity(severity: int) -> str:
 def find_lsp_tool(tool_name: str) -> str | None:
     binaries = _TOOL_BINARIES.get(tool_name, [tool_name])
     for binary in binaries:
-        path = shutil.which(binary)
+        path = os.path.abspath(shutil.which(binary)) if shutil.which(binary) else None
         if path:
             return path
     return None
