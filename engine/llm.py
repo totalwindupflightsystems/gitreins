@@ -86,7 +86,8 @@ class LLMClient:
             # Fallback: try common provider keys
             for env_key in (
                 "NEURALWATT_API_KEY", "OPENAI_API_KEY",
-                "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY"
+                "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY",
+                "KIMI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY",
             ):
                 self.api_key = os.getenv(env_key, "")
                 if self.api_key:
@@ -187,6 +188,32 @@ class LLMClient:
 
     # ── OpenAI path ──────────────────────────────────────────────
 
+    # Provider output token caps (max_tokens in chat/completions).
+    # Values sourced from provider docs as of 2026-06.
+    _PROVIDER_MAX_OUTPUT_TOKENS: dict[str, int] = {
+        "deepseek": 393_216,     # DeepSeek v4 API: max_tokens range [1, 393216]
+        "openai": 1_000_000,     # OpenAI varies by model; safe ceiling
+        "anthropic": 1_000_000,  # Anthropic varies by model; safe ceiling
+        "openrouter": 1_000_000,  # OpenRouter — pass-through; no known hard cap
+    }
+
+    @staticmethod
+    def _clamp_max_tokens(max_tokens: int, provider_hint: str = "") -> int:
+        """Clamp max_tokens to the provider's documented API limit.
+
+        Returns the original value if the provider is unknown or has no cap.
+        """
+        if max_tokens <= 0:
+            return max_tokens  # unlimited / unset
+        limit = LLMClient._PROVIDER_MAX_OUTPUT_TOKENS.get(provider_hint.lower())
+        if limit is not None and max_tokens > limit:
+            logger.warning(
+                "clamping max_tokens %d → %d (provider %s API limit)",
+                max_tokens, limit, provider_hint,
+            )
+            return limit
+        return max_tokens
+
     def _chat_openai(
         self,
         messages: list[dict[str, Any]],
@@ -194,6 +221,7 @@ class LLMClient:
         temperature: float,
         max_tokens: int,
     ) -> LLMResponse:
+        max_tokens = self._clamp_max_tokens(max_tokens, provider_hint=self.provider)
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": self._convert_messages_for_openai(messages),

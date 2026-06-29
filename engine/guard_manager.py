@@ -104,13 +104,33 @@ def _discover_test_targets(workdir: str) -> list[str] | None:
 
 
 def _get_staged_files(workdir: str) -> list[str]:
-    """Return staged file paths relative to workdir."""
+    """Return staged file paths relative to workdir.
+
+    Uses git diff --cached when HEAD exists (only changed files),
+    falls back to git ls-files --cached when no HEAD (all staged files
+    are new and should still be scanned).
+    """
     try:
-        result = subprocess.run(
-            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-            capture_output=True, text=True, timeout=10,
+        head_check = subprocess.run(
+            ["git", "rev-parse", "--verify", "-q", "HEAD"],
+            capture_output=True, text=True, timeout=5,
             cwd=workdir,
         )
+        if head_check.returncode != 0:
+            # No HEAD — use ls-files to list all staged files.
+            # In a fresh repo, every staged file is "new" but the
+            # guard should still scan them for secrets/lint/etc.
+            result = subprocess.run(
+                ["git", "ls-files", "--cached"],
+                capture_output=True, text=True, timeout=10,
+                cwd=workdir,
+            )
+        else:
+            result = subprocess.run(
+                ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+                capture_output=True, text=True, timeout=10,
+                cwd=workdir,
+            )
         return [f.strip() for f in result.stdout.split("\n") if f.strip()]
     except Exception:
         return []
@@ -297,8 +317,8 @@ class GuardManager:
             (r'gho_[A-Za-z0-9]{36,}', "GitHub OAuth token"),
             # GitLab tokens
             (r'glpat-[A-Za-z0-9_\-]{20,}', "GitLab personal access token"),
-            # OpenAI/OpenRouter keys
-            (r'sk-[A-Za-z0-9_\-]{32,}', "OpenAI/OpenRouter API key"),
+            # OpenAI/OpenRouter keys (20+ chars — catches all sk- variants)
+            (r'sk-[A-Za-z0-9_\-]{20,}', "OpenAI/OpenRouter API key"),
             # AWS keys
             (r'(?i)AKIA[0-9A-Z]{16}', "AWS access key"),
             (r'(?i)(aws[_-]?secret[_-]?access[_-]?key|aws[_-]?secret|secret[_-]?access[_-]?key)\s*[:=]\s*["\'][A-Za-z0-9+/]{40,}["\']', "AWS secret access key"),

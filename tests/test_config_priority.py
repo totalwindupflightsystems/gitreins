@@ -129,7 +129,7 @@ class TestEvaluatorSectionOverridesDefaults:
         cap = eval_cap_from_config(config)
         assert cap.max_iterations == 100.0
         assert cap.max_input_tokens == 10_000_000
-        assert cap.max_output_tokens == 1_000_000
+        assert cap.max_output_tokens == 131_072
 
     def test_evaluator_partial_override(self, tmp_path):
         """Only specified evaluator keys override; others fall through to defaults."""

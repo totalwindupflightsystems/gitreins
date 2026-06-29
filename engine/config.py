@@ -45,11 +45,12 @@ class GitReinsDefaults:
     max_iterations: float = 100.0       # -1 = unlimited
     max_seconds: float = -1.0           # -1 = unlimited
     max_input_tokens: int = 10_000_000  # 10M
-    max_output_tokens: int = 1_000_000  # 1M
+    max_output_tokens: int = 131_072   # 128K — safe floor below most provider caps
     tool_call_weight: float = 0.1
     compaction_threshold: float = 0.90  # compact when 90% of input budget used (10% remaining)
     code_context_budget: float = 0.70   # cap pre-loaded code context to 70% of input budget
     file_scope: str = "changed"         # "changed" = only changed files + tests, "full" = entire codebase
+    pass_on_error: bool = False          # skip Tier 2 when LLM is unavailable (advisory-only mode)
 
     # ── Update checking ──
     check_for_updates: bool = True
@@ -97,6 +98,9 @@ class GitReinsDefaults:
             file_scope=str(defaults.get(
                 "file_scope", self.file_scope
             )),
+            pass_on_error=bool(defaults.get(
+                "pass_on_error", self.pass_on_error
+            )),
             check_for_updates=bool(defaults.get(
                 "check_for_updates", self.check_for_updates
             )),
@@ -142,6 +146,8 @@ class GitReinsDefaults:
             "tool_call_weight": self.tool_call_weight,
             "compaction_threshold": self.compaction_threshold,
             "code_context_budget": self.code_context_budget,
+            "file_scope": self.file_scope,
+            "pass_on_error": self.pass_on_error,
             "check_for_updates": self.check_for_updates,
             "update_check_ttl": f"{int(self.update_check_ttl_hours)}h",
         }

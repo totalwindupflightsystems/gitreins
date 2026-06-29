@@ -357,14 +357,17 @@ def run_lsp_check(
         return []
 
     all_diagnostics: list[dict] = []
+    proc = None
 
     try:
+        import signal as _signal
         proc = subprocess.Popen(
             [tool_path],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             cwd=workdir,
+            start_new_session=True,  # isolate in own process group for clean kill
         )
     except Exception as exc:
         logger.warning("Failed to start LSP tool '%s': %s", tool, exc)
@@ -373,7 +376,6 @@ def run_lsp_check(
     try:
         if not _lsp_initialize(proc, workdir):
             logger.warning("LSP tool '%s' failed to initialize", tool)
-            _lsp_shutdown(proc)
             return []
 
         for filepath in staged_files:
@@ -385,19 +387,37 @@ def run_lsp_check(
             diags = _collect_diagnostics(proc, filepath, timeout_per_file, tool)
             all_diagnostics.extend(diags)
 
-        _lsp_shutdown(proc)
-
     except subprocess.TimeoutExpired:
         logger.warning("LSP tool '%s' timed out", tool)
     except Exception as exc:
         logger.warning("LSP tool '%s' error: %s", tool, exc)
     finally:
-        try:
-            proc.wait(timeout=5)
-        except Exception:
+        # Always attempt graceful shutdown first, then force-kill the process group
+        if proc is not None:
+            _lsp_shutdown(proc)
             try:
-                proc.kill()
-            except Exception:
-                pass
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                logger.warning("LSP tool '%s' (pid %d) did not exit — killing process group", tool, proc.pid)
+                try:
+                    import signal as _signal
+                    lsp_pgid = os.getpgid(proc.pid)
+                    our_pgid = os.getpgid(os.getpid())
+                    if lsp_pgid != our_pgid:
+                        os.killpg(lsp_pgid, _signal.SIGKILL)
+                    else:
+                        logger.error(
+                            "LSP tool '%s' is in our process group (pgid=%d) — "
+                            "start_new_session may have failed. Falling back to proc.kill()",
+                            tool, lsp_pgid,
+                        )
+                        proc.kill()
+                    proc.wait(timeout=2)
+                except Exception:
+                    try:
+                        proc.kill()
+                        proc.wait(timeout=2)
+                    except Exception:
+                        pass
 
     return all_diagnostics

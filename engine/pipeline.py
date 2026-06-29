@@ -425,6 +425,69 @@ def _fix_on_key(obj):
     return obj
 
 
+def _default_tier1_steps(workdir: str) -> list[dict]:
+    """Return language-appropriate default Tier 1 pipeline steps.
+
+    Detects the project language(s) by checking for ecosystem files
+    (go.mod, pyproject.toml, Cargo.toml, package.json, etc.) and
+    returns lint + test commands for the primary language found.
+    Falls back to a secrets-only step when no language is detected.
+    """
+    steps: list[dict] = [
+        {"id": "secrets", "type": "script",
+         "run": (
+             "gitleaks detect --source . --no-git || "
+             "python3 -c \"from engine.guard_manager import GuardManager; "
+             "import sys; gm = GuardManager('.'); "
+             "r = gm._check_secrets(); sys.exit(0 if r.passed else 1)\""
+         ),
+         "on_fail": "continue"},
+    ]
+
+    # Lint + test commands per language ecosystem
+    _LANG_COMMANDS: dict[str, tuple[str, str]] = {
+        "go":     ("go vet ./...",                                "go test ./..."),
+        "rust":   ("cargo clippy -- -D warnings 2>/dev/null || true", "cargo test --no-fail-fast 2>/dev/null || true"),
+        "python": ("ruff check . --quiet 2>/dev/null || true",    "pytest -x --tb=short 2>/dev/null || true"),
+        "js":     ("npx eslint . 2>/dev/null || true",            "npm test 2>/dev/null || true"),
+        "java":   ("mvn checkstyle:check 2>/dev/null || true",    "mvn test -q 2>/dev/null || true"),
+        "c":      ("make lint 2>/dev/null || true",               "make test 2>/dev/null || true"),
+        "ruby":   ("rubocop 2>/dev/null || true",                 "bundle exec rspec 2>/dev/null || true"),
+        "php":    ("php vendor/bin/phpcs 2>/dev/null || true",    "php vendor/bin/phpunit 2>/dev/null || true"),
+    }
+
+    # Detection order — first match becomes the primary language
+    _SIGNATURE_FILES: list[tuple[str, str]] = [
+        ("go.mod", "go"),
+        ("Cargo.toml", "rust"),
+        ("pyproject.toml", "python"),
+        ("setup.py", "python"),
+        ("requirements.txt", "python"),
+        ("package.json", "js"),
+        ("pom.xml", "java"),
+        ("build.gradle", "java"),
+        ("CMakeLists.txt", "c"),
+        ("Makefile", "c"),
+        ("Gemfile", "ruby"),
+        ("composer.json", "php"),
+    ]
+
+    primary = None
+    for sig_file, lang in _SIGNATURE_FILES:
+        if os.path.isfile(os.path.join(workdir, sig_file)):
+            primary = lang
+            break
+
+    if primary is not None:
+        lint_cmd, test_cmd = _LANG_COMMANDS[primary]
+        steps.append({"id": "lint", "type": "script",
+                       "run": lint_cmd})
+        steps.append({"id": "tests", "type": "script",
+                       "run": test_cmd})
+
+    return steps
+
+
 def load_pipeline_config(workdir: str = ".") -> dict:
     """Load pipeline configuration from .gitreins/config.yaml."""
     config_path = os.path.join(workdir, ".gitreins", "config.yaml")
@@ -437,15 +500,7 @@ def load_pipeline_config(workdir: str = ".") -> dict:
                         "id": "tier1",
                         "parallel": True,
                         "on": ["pre-commit", "pre-eval"],
-                        "steps": [
-                            {"id": "secrets", "type": "script",
-                             "run": "gitleaks detect --source . --no-git || python3 -c \"from engine.guard_manager import GuardManager; import sys; gm = GuardManager('.'); r = gm._check_secrets(); sys.exit(0 if r.passed else 1)\"",
-                             "on_fail": "continue"},
-                            {"id": "lint", "type": "script",
-                             "run": "ruff check . --quiet 2>/dev/null || true"},
-                            {"id": "tests", "type": "script",
-                             "run": "pytest -x --tb=short 2>/dev/null || true"},
-                        ],
+                        "steps": _default_tier1_steps(workdir),
                     },
                     {
                         "id": "tier2",
@@ -472,15 +527,7 @@ def load_pipeline_config(workdir: str = ".") -> dict:
                         "id": "tier1",
                         "parallel": True,
                         "on": ["pre-commit", "pre-eval"],
-                        "steps": [
-                            {"id": "secrets", "type": "script",
-                             "run": "gitleaks detect --source . --no-git || python3 -c \"from engine.guard_manager import GuardManager; import sys; gm = GuardManager('.'); r = gm._check_secrets(); sys.exit(0 if r.passed else 1)\"",
-                             "on_fail": "continue"},
-                            {"id": "lint", "type": "script",
-                             "run": "ruff check . --quiet 2>/dev/null || true"},
-                            {"id": "tests", "type": "script",
-                             "run": "pytest -x --tb=short 2>/dev/null || true"},
-                        ],
+                        "steps": _default_tier1_steps(workdir),
                     },
                     {
                         "id": "tier2",

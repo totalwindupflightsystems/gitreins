@@ -7,7 +7,7 @@
 > **Binary:** `.venv/bin/python3 gitreins/cli.py`
 > **Test runner:** `.venv/bin/pytest tests/ -x --tb=short -q`
 > **MCP transport:** stdio (JSON-RPC 2.0 line-delimited)
-> **Last run:** 2026-06-25 20:00 UTC — maintenance mode, all clear. 759 passed, 7 skipped. Tier 1 PASS. Container healthy (Up 16h).
+> **Last run:** 2026-06-26 ~12:25 UTC — maintenance mode, one LSP regression found and fixed. 752 passed, 7 skipped. Tier 1 PASS. Container healthy (Up 26h).
 
 ## Demo Infrastructure
 
@@ -36,7 +36,7 @@
 
 ### AC-010c: Test guard runs tests
 
-✅ passed — 759 tests as of 2026-06-25
+✅ passed — 752 tests passed, 7 skipped as of 2026-06-26
 
 ### AC-010d: Static analysis guard works
 
@@ -102,9 +102,11 @@
 
 ## AC-080 — LSP Guard
 
-**Status:** ✅ passed (2026-06-22)
+**Status:** ✅ passed (2026-06-26)
+**Dependency:** AC-010
 
 ✅ LSP guard: engine/lsp.py (337 lines), tests/test_lsp.py (208 lines, 22 tests), GuardManager wired.
+**2026-06-26 fix:** `find_lsp_tool` now resolves `shutil.which` result to absolute path via `os.path.abspath()`, fixing LSP integration tests when PATH contains relative entries. Commit `1dd0aea`. Also installed missing pylsp linter plugins (pyflakes, pycodestyle, mccabe) in project venv.
 
 ---
 
@@ -229,11 +231,12 @@ cd /home/kara/gitreins-poc && .venv/bin/python3 gitreins/cli.py setup-tools 2>&1
 
 ## ALL CRITERIA PASSED ✅
 
-**Summary (2026-06-24):**
+**Summary (2026-06-26):**
 - 17 acceptance criteria total
 - 14 passed
 - 3 deferred (AC-060 dead code, AC-070 skylos, AC-100 pre-commit hook)
-- Full test suite: 759 passed, 7 skipped
+- Full test suite: 752 passed, 7 skipped (all 7 are conditional skips: API key, Rust, host stdio)
 - Tier 1 guards: all PASS (secrets, lint, tests, static_analysis, lsp)
-- Latest commits: 9d14b5b (GR-060 LSP retry), c0ddea8 (v0.8.1 fix), 25f7b02 (v0.8.0 file_scope)
-- Container: healthy, recreated this wake (was missing from `docker ps -a`)
+- LSP regression found and fixed this wake: pylsp linter plugin deps missing in PATH-first venv, `find_lsp_tool` relative path bug
+- Latest commits: 1dd0aea (LSP fix), 8ef7165 (maintenance), 9d14b5b (GR-060 LSP retry)
+- Container: healthy (Up 26h)

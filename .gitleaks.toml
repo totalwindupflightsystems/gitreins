@@ -3,6 +3,12 @@
 [extend]
 useDefault = true
 
+# Catch all sk- prefixed API keys (OpenAI, OpenRouter, DeepSeek, etc.)
+[[rules]]
+id = "sk-api-key"
+description = "OpenAI/OpenRouter/DeepSeek API key (sk- prefix)"
+regex = '''(?i)sk-[a-zA-Z0-9_-]{20,}'''
+
 [allowlist]
 description = "GitReins project allowlists — test fixtures, documentation, and build artifacts"
 

@@ -291,14 +291,18 @@ class TestExtendedGuardManager:
     def test_custom_test_command_is_used(self, tmp_workdir):
         """_check_tests uses custom test_command from config."""
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": "echo custom-test-run"}})
-        # Mock subprocess.run to capture the command
+        # Mock subprocess.run to capture the command.
+        # _get_staged_files now makes 2 calls (rev-parse + diff/ls-files),
+        # then _check_tests makes 2 more (pytest --version + actual test cmd).
         mock_run = MagicMock()
         mock_run.return_value.returncode = 0
         mock_run.return_value.stdout = "custom output"
         mock_run.return_value.stderr = ""
         with patch('subprocess.run', side_effect=[
+            MagicMock(returncode=0, stdout="abc1234...", stderr=""),  # git rev-parse HEAD
+            MagicMock(returncode=0, stdout="test.py\n", stderr=""),   # git diff --cached
             MagicMock(returncode=0, stdout="pytest 7.0", stderr=""),  # pytest --version
-            mock_run.return_value,
+            mock_run.return_value,                                     # echo custom-test-run
         ]):
             result = gm._check_tests()
         assert result.passed is True
@@ -338,6 +342,10 @@ class TestExtendedGuardManager:
         """_check_lint uses ruff when available with Python files staged."""
         _write_staged_file(tmp_workdir, "code.py", "x = 1\n")
         gm = GuardManager(tmp_workdir)
+        mock_git_rev = MagicMock()
+        mock_git_rev.returncode = 0
+        mock_git_rev.stdout = "abc123..."
+        mock_git_rev.stderr = ""
         mock_git_diff = MagicMock()
         mock_git_diff.returncode = 0
         mock_git_diff.stdout = "code.py"
@@ -346,7 +354,7 @@ class TestExtendedGuardManager:
         mock_ruff.returncode = 0
         mock_ruff.stdout = "ruff: clean"
         mock_ruff.stderr = ""
-        with patch('subprocess.run', side_effect=[mock_git_diff, mock_ruff]):
+        with patch('subprocess.run', side_effect=[mock_git_rev, mock_git_diff, mock_ruff]):
             result = gm._check_lint()
         assert result.passed is True
         assert "ruff" in result.output

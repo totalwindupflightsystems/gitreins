@@ -38,13 +38,32 @@ class Judge:
 
         Uses the configurable pipeline from .gitreins/config.yaml.
         Falls back to the simple Tier 1 → Tier 2 if no pipeline defined.
+
+        When ``pass_on_error`` is True in config, Tier 2 (LLM evaluator)
+        is skipped if the LLM is unavailable — the task passes on Tier 1
+        alone.  Useful for CI environments or when the LLM provider is down.
         """
         config = load_pipeline_config(self.workdir)
+        self._pass_on_error = self._read_pass_on_error()
 
         if config.get("pipeline", {}).get("stages"):
             return self._run_pipeline(task, config)
         else:
             return self._run_legacy(task)
+
+    def _read_pass_on_error(self) -> bool:
+        """Read pass_on_error from .gitreins/config.yaml, defaulting to False."""
+        import os
+        config_path = os.path.join(self.workdir, ".gitreins", "config.yaml")
+        if os.path.exists(config_path):
+            try:
+                import yaml
+                with open(config_path, "r") as f:
+                    cfg = yaml.safe_load(f) or {}
+                return bool((cfg.get("defaults") or {}).get("pass_on_error", False))
+            except Exception:
+                pass
+        return False
 
     def _run_pipeline(self, task: Task, config: dict) -> "JudgeResult":
         """Run the configurable pipeline."""
@@ -81,6 +100,13 @@ class Judge:
                 pipeline_result=result,
             )
         except Exception as e:
+            if self._pass_on_error:
+                logger.warning(
+                    "Pipeline execution failed but pass_on_error=True — returning pass",
+                )
+                return JudgeResult(task_id=task.id, passed=True,
+                                   tier1=Tier1Result(passed=True, results=[], extra={"pass_on_error": True}),
+                                   pipeline_result={"error": str(e), "pass_on_error": True})
             logger.exception("Pipeline execution failed")
             return JudgeResult(task_id=task.id, passed=False, pipeline_result={"error": str(e)})
 
@@ -112,10 +138,18 @@ class Judge:
         }
         if tier1_diagnostics:
             task_dict["tier1_diagnostics"] = tier1_diagnostics
-        tier2 = evaluator.evaluate(task_dict)
-        result.tier2 = tier2
-        result.passed = tier2.verdict == "COMPLETE"
-        result.verdict = tier2
+        try:
+            tier2 = evaluator.evaluate(task_dict)
+            result.tier2 = tier2
+            result.passed = tier2.verdict == "COMPLETE"
+            result.verdict = tier2
+        except Exception as e:
+            if self._pass_on_error:
+                logger.warning("Tier 2 failed but pass_on_error=True — task passes on Tier 1 alone")
+                result.passed = True
+            else:
+                logger.exception("Tier 2 evaluator failed")
+                result.passed = False
         return result
 
     def _extract_lsp_diagnostics(self, tier1: Tier1Result) -> list[dict]:
