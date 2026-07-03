@@ -204,6 +204,26 @@
 - **Commit:** `23baf7a`
 - **Result:** uv.lock version synced with pyproject.toml/engine/version.py. Pushed to GitHub. 699 passed, 6 skipped (1 flaky LSP integration test).
 
+## [x] GR-062: Show git diff in commit audit output for alignment
+- **Priority:** high
+- **Model:** deepseek-v4-flash (coding-hermes)
+- **Files:** `engine/config.py`, `engine/commit_audit.py`, `engine/pipeline.py`, `gitreins/cli.py`, `tests/test_commit_audit.py`
+- **Result:** All 6 AC items already implemented. `CommitAuditResult.diff` field (commit_audit.py:161), pipeline diff output with 40-line truncation (pipeline.py:394-404), `commit_audit_show_diff` config key (config.py:61), CLI diff display (cli.py:1059-1070), 7 diff-specific tests in `TestCommitAuditDiffOutput`. 38/38 tests pass.
+- **Commit:** (pending)
+
+## [ ] GR-061: Catch-up — LSP process-group isolation + sk-api-key rule + init template sync
+- **Priority:** medium
+- **Model:** deepseek-v4-pro (direct — catch-up commit)
+- **Files:** `.gitleaks.toml`, `engine/guard_manager.py`, `engine/lsp.py`, `gitreins/cli.py`, `tests/test_guard_manager.py`, `.hermes/acceptance-criteria.md`, `uv.lock`
+- **AC:**
+  - LSP server shutdown uses os.killpg for clean process-group termination
+  - `_get_staged_files` handles fresh repos with no HEAD
+  - sk-api-key gitleaks rule uses 20+ char minimum (not 32+)
+  - `gitreins init` template includes sk-api-key rule
+  - Tests updated for new subprocess.run call pattern
+  - Full test suite passes
+- **Status:** ready
+
 ## [x] GR-060: Investigate flaky LSP integration test
 - **Priority:** low
 - **Model:** deepseek-v4-pro (direct)
