@@ -52,6 +52,13 @@ class GitReinsDefaults:
     file_scope: str = "changed"         # "changed" = only changed files + tests, "full" = entire codebase
     pass_on_error: bool = False          # skip Tier 2 when LLM is unavailable (advisory-only mode)
 
+    # ── Commit audit ──
+    commit_audit_enabled: bool = True      # validate commit messages against staged diff
+    commit_audit_mode: str = "warn"        # "warn" | "block" | "suggest"
+    commit_audit_strictness: str = "standard"  # "lenient" | "standard" | "strict"
+    commit_audit_max_iterations: int = 3   # LLM exploration rounds (0 = no tools, single call)
+    commit_audit_suggest_message: bool = True  # suggest better message on rejection
+
     # ── Update checking ──
     check_for_updates: bool = True
     update_check_ttl_hours: float = 24.0  # re-check after this many hours
@@ -101,6 +108,21 @@ class GitReinsDefaults:
             pass_on_error=bool(defaults.get(
                 "pass_on_error", self.pass_on_error
             )),
+            commit_audit_enabled=bool(defaults.get(
+                "commit_audit", {}).get("enabled", self.commit_audit_enabled
+            )),
+            commit_audit_mode=str(defaults.get(
+                "commit_audit", {}).get("mode", self.commit_audit_mode
+            )),
+            commit_audit_strictness=str(defaults.get(
+                "commit_audit", {}).get("strictness", self.commit_audit_strictness
+            )),
+            commit_audit_max_iterations=int(defaults.get(
+                "commit_audit", {}).get("max_iterations", self.commit_audit_max_iterations
+            )),
+            commit_audit_suggest_message=bool(defaults.get(
+                "commit_audit", {}).get("suggest_message", self.commit_audit_suggest_message
+            )),
             check_for_updates=bool(defaults.get(
                 "check_for_updates", self.check_for_updates
             )),
@@ -148,6 +170,13 @@ class GitReinsDefaults:
             "code_context_budget": self.code_context_budget,
             "file_scope": self.file_scope,
             "pass_on_error": self.pass_on_error,
+            "commit_audit": {
+                "enabled": self.commit_audit_enabled,
+                "mode": self.commit_audit_mode,
+                "strictness": self.commit_audit_strictness,
+                "max_iterations": self.commit_audit_max_iterations,
+                "suggest_message": self.commit_audit_suggest_message,
+            },
             "check_for_updates": self.check_for_updates,
             "update_check_ttl": f"{int(self.update_check_ttl_hours)}h",
         }

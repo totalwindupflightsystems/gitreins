@@ -212,6 +212,8 @@ class Pipeline:
 
         if stage_def.get("type") == "ai_eval":
             step_result = self._run_ai_eval(stage_def, task)
+        elif stage_def.get("type") == "commit_audit":
+            step_result = self._run_commit_audit(stage_def, task)
         elif stage_def.get("type") == "output":
             step_result = self._run_output(stage_def, task)
         else:
@@ -233,6 +235,8 @@ class Pipeline:
             return self._run_script_step(step_def, task)
         elif step_type == "ai_eval":
             return self._run_ai_eval(step_def, task)
+        elif step_type == "commit_audit":
+            return self._run_commit_audit(step_def, task)
         elif step_type == "output":
             return self._run_output(step_def, task)
         else:
@@ -315,6 +319,114 @@ class Pipeline:
         except Exception as e:
             logger.exception("AI eval failed")
             return StepResult(id=step_id, type="ai_eval", passed=False, error=str(e))
+
+    def _run_commit_audit(self, step_def: dict, task: dict) -> StepResult:
+        """Run the commit message auditor as a pipeline step.
+
+        Reads the commit message from ``task["commit_message"]`` and the
+        staged diff from git.  Uses the CommitAuditor to validate the
+        message against the diff, with optional LLM exploration
+        (configured via ``max_iterations`` in the step or config).
+
+        Config keys (from .gitreins/config.yaml):
+          ``commit_audit.mode`` — "warn" (default) | "block" | "suggest"
+          ``commit_audit.strictness`` — "lenient" | "standard" (default) | "strict"
+          ``commit_audit.max_iterations`` — int, default 3
+          ``commit_audit.suggest_message`` — bool, default True
+        """
+        step_id = step_def.get("id", "commit_audit")
+
+        # Lazy init LLM client
+        if self._llm is None:
+            from engine.llm import LLMClient
+            self._llm = LLMClient()
+
+        from engine.commit_audit import CommitAuditor
+
+        # Read config for commit_audit settings
+        config = self._load_commit_audit_config()
+
+        auditor = CommitAuditor(
+            self._llm,
+            self.workdir,
+            strictness=config.get("strictness", "standard"),
+            max_iterations=config.get("max_iterations", 3),
+            suggest_message=config.get("suggest_message", True),
+        )
+
+        message = task.get("commit_message", "")
+        if not message:
+            # Try reading from git commit message file
+            msg_path = os.path.join(self.workdir, ".git", "COMMIT_EDITMSG")
+            if os.path.exists(msg_path):
+                try:
+                    with open(msg_path, "r") as f:
+                        raw = f.read().strip()
+                    # Strip comment lines
+                    message = "\n".join(
+                        line for line in raw.split("\n")
+                        if not line.startswith("#")
+                    ).strip()
+                except Exception:
+                    pass
+
+        if not message:
+            return StepResult(
+                id=step_id, type="commit_audit", passed=True,
+                output="No commit message to audit.",
+            )
+
+        try:
+            result = auditor.audit(message)
+        except Exception as e:
+            logger.warning("Commit audit failed: %s", e)
+            return StepResult(
+                id=step_id, type="commit_audit", passed=True,
+                output=f"Audit error (passing): {e}",
+            )
+
+        mode = config.get("mode", "warn")
+        passed = result.valid or mode != "block"
+
+        output_lines: list[str] = []
+        if result.valid:
+            output_lines.append("✓ Commit message looks good.")
+        else:
+            output_lines.append("⚠ Commit message issues:")
+            for issue in result.issues:
+                output_lines.append(f"  - {issue}")
+            if result.suggested_message:
+                output_lines.append(f"\nSuggested message: {result.suggested_message}")
+            if mode == "block":
+                output_lines.append("\n(Commit BLOCKED — fix message or set commit_audit.mode=warn)")
+            elif mode == "warn":
+                output_lines.append("\n(Warning only — commit will proceed)")
+
+        return StepResult(
+            id=step_id, type="commit_audit",
+            passed=passed,
+            output="\n".join(output_lines),
+            data={
+                "valid": result.valid,
+                "issues": result.issues,
+                "suggested_message": result.suggested_message,
+                "mode": mode,
+                "iterations_used": result.iterations_used,
+            },
+        )
+
+    def _load_commit_audit_config(self) -> dict:
+        """Read commit_audit section from .gitreins/config.yaml."""
+        import yaml
+        config_path = os.path.join(self.workdir, ".gitreins", "config.yaml")
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, "r") as f:
+                    cfg = yaml.safe_load(f) or {}
+                return cfg.get("commit_audit", {})
+            except Exception:
+                pass
+        return {}
 
     def _run_output(self, step_def: dict, task: dict) -> StepResult:
         """Compile output from all stages."""

@@ -1002,6 +1002,60 @@ def cmd_commit(args):
     print(result.stdout + result.stderr)
 
 
+def cmd_commit_audit(args):
+    """Validate a commit message against the staged diff using LLM.
+
+    Reads the message from ``args.message`` or falls back to the git
+    commit message file.  Runs the commit_audit pipeline stage and
+    exits non-zero if configured to block on bad messages.
+    """
+    import os
+    from engine.pipeline import Pipeline, load_pipeline_config
+    from engine.llm import LLMClient
+
+    workdir = get_workdir()
+    message = args.message or ""
+
+    # Fallback: read from git COMMIT_EDITMSG
+    if not message:
+        msg_path = os.path.join(workdir, ".git", "COMMIT_EDITMSG")
+        if os.path.exists(msg_path):
+            with open(msg_path, "r") as f:
+                raw = f.read().strip()
+            message = "\n".join(
+                line for line in raw.split("\n")
+                if not line.startswith("#")
+            ).strip()
+
+    if not message:
+        print("No commit message to audit.")
+        sys.exit(0)
+
+    # Load config and run commit_audit stage
+    config = load_pipeline_config(workdir)
+    llm = LLMClient()
+    pipeline = Pipeline(config, workdir, llm=llm)
+
+    task = {
+        "id": "_commit_msg",
+        "title": "Commit message audit",
+        "criteria": [],
+        "commit_message": message,
+    }
+
+    result = pipeline.run(task, trigger="commit-msg")
+
+    # Check if audit stage blocked
+    audit_stage = result.get("stages", {}).get("commit_audit", {})
+    if audit_stage and not audit_stage.get("passed", True):
+        print("\n" + audit_stage.get("summary", "Commit message rejected."))
+        sys.exit(1)
+
+    if audit_stage:
+        print(audit_stage.get("summary", "✓ Commit message OK."))
+    sys.exit(0)
+
+
 def cmd_setup_tools(args):
     """Show available static analysis tools and install instructions for missing ones."""
     from engine.static_analysis import find_tool, _TOOL_INSTALL_GUIDE
@@ -1096,6 +1150,10 @@ def main():
     commit_p = sub.add_parser("commit", help="Commit with guard checks")
     commit_p.add_argument("message")
 
+    # commit-audit
+    audit_p = sub.add_parser("commit-audit", help="Validate commit message against staged diff (commit-msg hook)")
+    audit_p.add_argument("message", nargs="?", help="Commit message (reads from COMMIT_EDITMSG if omitted)")
+
     # mcp-server
     sub.add_parser("mcp-server", help="Run MCP stdio server")
 
@@ -1138,6 +1196,8 @@ def main():
         cmd_judge(args)
     elif args.command == "commit":
         cmd_commit(args)
+    elif args.command == "commit-audit":
+        cmd_commit_audit(args)
     elif args.command == "mcp-server":
         cmd_mcp_server(args)
     elif args.command == "setup-tools":
