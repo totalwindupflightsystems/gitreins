@@ -212,7 +212,7 @@
 - **Current coverage gap:** Pipeline: 8 langs. LSP: 4. Static analysis: 4. Many top-20 languages missing.
 
 ### Phase 1 — C++ (most requested)
-- [ ] GR-063a: C++ LSP — add clangd to `_TOOL_BINARIES`, map `.cpp`/`.hpp`/`.cc`/`.cxx`/`.h` to `cpp` in `_LANGUAGE_MAP`
+- [x] GR-063a: C++ LSP — add clangd to `_TOOL_BINARIES`, map `.cpp`/`.hpp`/`.cc`/`.cxx`/`.h` to `cpp` in `_LANGUAGE_MAP`
 - [ ] GR-063b: C++ static analysis — add `cppcheck` or `clang-tidy` to `_TOOL_BINARIES` + `_TOOL_INSTALL_GUIDE`
 - [ ] GR-063c: C++ pipeline — split "c" from "cpp" in `_LANG_COMMANDS`, add `CMakeLists.txt` → `cpp` detection
 
