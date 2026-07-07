@@ -204,6 +204,50 @@
 - **Commit:** `23baf7a`
 - **Result:** uv.lock version synced with pyproject.toml/engine/version.py. Pushed to GitHub. 699 passed, 6 skipped (1 flaky LSP integration test).
 
+## [ ] GR-063: Expand language coverage across all tool subsystems
+- **Priority:** high
+- **Model:** deepseek-v4-flash (coding-hermes cron)
+- **Files:** `engine/pipeline.py`, `engine/lsp.py`, `engine/static_analysis.py`, `engine/config.py`, `tests/`
+- **Status:** phased — cron picks up one sub-task per run
+- **Current coverage gap:** Pipeline: 8 langs. LSP: 4. Static analysis: 4. Many top-20 languages missing.
+
+### Phase 1 — C++ (most requested)
+- [ ] GR-063a: C++ LSP — add clangd to `_TOOL_BINARIES`, map `.cpp`/`.hpp`/`.cc`/`.cxx`/`.h` to `cpp` in `_LANGUAGE_MAP`
+- [ ] GR-063b: C++ static analysis — add `cppcheck` or `clang-tidy` to `_TOOL_BINARIES` + `_TOOL_INSTALL_GUIDE`
+- [ ] GR-063c: C++ pipeline — split "c" from "cpp" in `_LANG_COMMANDS`, add `CMakeLists.txt` → `cpp` detection
+
+### Phase 2 — Go (widely used, missing LSP+static)
+- [ ] GR-063d: Go LSP — add gopls to `_TOOL_BINARIES`, map `.go` → `go` in `_LANGUAGE_MAP`
+- [ ] GR-063e: Go static analysis — add staticcheck to `_TOOL_BINARIES` + `_TOOL_INSTALL_GUIDE`
+
+### Phase 3 — Java/Kotlin
+- [ ] GR-063f: Java LSP — add jdtls to `_TOOL_BINARIES`
+- [ ] GR-063g: Kotlin LSP — add kotlin-language-server, map `.kt`/`.kts`
+- [ ] GR-063h: Java/Kotlin pipeline — add kotlin to `_LANG_COMMANDS` (gradle), add `settings.gradle.kts` detection
+
+### Phase 4 — C# / .NET
+- [ ] GR-063i: C# LSP — add omnisharp-roslyn or csharp-ls
+- [ ] GR-063j: C# pipeline — add to `_LANG_COMMANDS` (dotnet), detect `.csproj`/`.sln`
+
+### Phase 5 — Swift, Dart, Elixir, Scala
+- [ ] GR-063k: Swift LSP — sourcekit-lsp, map `.swift`
+- [ ] GR-063l: Dart LSP — dart, map `.dart`, detect `pubspec.yaml`
+- [ ] GR-063m: Elixir LSP — elixir-ls, map `.ex`/`.exs`, detect `mix.exs`
+- [ ] GR-063n: Scala LSP — metals, map `.scala`/`.sc`, detect `build.sbt`
+
+### Phase 6 — Rust, Python, JS/TS gap fill
+- [ ] GR-063o: Rust static analysis — add clippy as static analysis (reuse from pipeline)
+- [ ] GR-063p: JS/TS static analysis — add eslint as static analysis tool
+- [ ] GR-063q: Ruby LSP — add solargraph or ruby-lsp to `_TOOL_BINARIES`
+
+**Per-subtask pattern:**
+1. Add binary detection + install guide
+2. Wire into language map + tool-languages map
+3. Add to default pipeline `_LANG_COMMANDS` if not present
+4. Add signature file detection
+5. 4+ tests per language (tool discovery, language mapping, skip-when-missing, integration)
+6. Verify full suite still green
+
 ## [x] GR-062: Show git diff in commit audit output for alignment
 - **Priority:** high
 - **Model:** deepseek-v4-flash (coding-hermes)
