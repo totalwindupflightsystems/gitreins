@@ -204,6 +204,25 @@
 - **Commit:** `23baf7a`
 - **Result:** uv.lock version synced with pyproject.toml/engine/version.py. Pushed to GitHub. 699 passed, 6 skipped (1 flaky LSP integration test).
 
+## [ ] GR-064: Tier 2 large-repo hardening — dexdat-memory feedback
+- **Priority:** high
+- **Model:** deepseek-v4-flash (coding-hermes cron)
+- **Source:** Real-world test on dexdat-memory (147 Go packages, 40+ tested)
+- **Files:** `engine/evaluator.py`, `engine/pipeline.py`, `gitreins/cli.py`, `engine/config.py`
+
+### What broke:
+- Tier 2 LLM eval consistently timed out (15m/75 iterations never completed)
+- Judge spun reading files, hit token limits despite 29M input budget
+- Pre-commit hook hung on `git push` (process timeout)
+- `file_scope: changed` wasn't aggressive enough — LLM still chased call graphs
+
+### Tasks:
+- [ ] GR-064a: **Fast-track mode** — skip full call-graph analysis on large repos; verify only changed lines + immediate callers. Add `evaluator.fast_track` config (default: auto-detect based on package count)
+- [ ] GR-064b: **Aggressive timeout respect** — return partial findings when deadline hits instead of failing silently. Wire `max_time` into the tool-call loop so `read_file`/`search_pattern` check remaining budget before executing
+- [ ] GR-064c: **`--skip-tier2` flag** — CLI flag for config/docs/ops commits that bypasses Tier 2 entirely. Also configurable per-commit via `gitreins.skip-tier2` trailer in commit message body
+- [ ] GR-064d: **Token budget overflow protection** — cap individual `read_file` results proportional to remaining budget. Don't let one 2MB file eat the entire context window. Add `max_file_bytes` config (default: 128KB per file in evaluator context)
+- [ ] GR-064e: **Pre-commit hook timeout** — add configurable `hook_timeout` (default: 120s). If exceeded, fail open with warning (don't block the push indefinitely)
+
 ## [ ] GR-063: Expand language coverage across all tool subsystems
 - **Priority:** high
 - **Model:** deepseek-v4-flash (coding-hermes cron)
