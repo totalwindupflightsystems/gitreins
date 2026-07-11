@@ -204,6 +204,49 @@
 - **Commit:** `23baf7a`
 - **Result:** uv.lock version synced with pyproject.toml/engine/version.py. Pushed to GitHub. 699 passed, 6 skipped (1 flaky LSP integration test).
 
+## [ ] GR-065: CodeRabbit-style commit review agent (mini-harness for Tier 2)
+- **Priority:** high
+- **Model:** deepseek-v4-flash (coding-hermes cron)
+- **Files:** `engine/commit_audit.py`, `engine/config.py`, `engine/pipeline.py`, `gitreins/cli.py`, `tests/test_commit_audit.py`
+- **Concept:** Expand Tier 2 commit audit into a mini LLM agent that does CodeRabbit-level commit review — not just "is the message accurate?" but "is this code good?"
+
+### New config surface (`commit_audit` section):
+
+```yaml
+commit_audit:
+  enabled: true
+  mode: warn | block | suggest          # unchanged — controls action on failure
+
+  # ── NEW: review engine ──
+  review_mode: message | review | agent  # message=current, review=CodeRabbit single-call, agent=multi-turn with tools
+  review_checks:                         # which checks to run
+    bugs: true
+    security: true
+    style: false                         # off by default — linter covers this
+    performance: false
+    anti_patterns: true
+  review_severity: standard              # critical-only | standard | all
+  review_suggest_fix: true               # include fix suggestions for issues found
+  review_max_tokens: 2048                # cap for review response
+```
+
+### Behavior per review_mode:
+
+| Mode | What it does | Iterations | Time |
+|------|-------------|:---:|:---:|
+| `message` | Current Tier 2 — validate commit message vs diff | 1 call | <2s |
+| `review` | CodeRabbit-style — scan diff for bugs, security, anti-patterns, suggest fixes, validate message. Like a senior dev doing a quick review. | 1 call | <10s |
+| `agent` | Full mini-harness — multi-turn LLM with read_file/search_pattern tools. Explores surrounding code for deeper analysis. | up to `max_iterations` | Configurable |
+
+### Tasks:
+- [ ] GR-065a: Review system prompt — write a `COMMIT_REVIEW_SYSTEM_PROMPT` that instructs the LLM to act like a senior code reviewer. Covers all review_checks categories with examples.
+- [ ] GR-065b: `review_mode` implementation — wire `review` mode as a single-call path alongside existing `message` mode. Same `CommitAuditor`, new code path.
+- [ ] GR-065c: `agent` mode — reuse existing `_tool_loop()` from commit audit. Let the LLM explore files before rendering verdict.
+- [ ] GR-065d: Review result structure — `CommitReviewResult` with `{issues: [{file, line, severity, category, message, suggestion}], summary, message_valid, message_issues}`
+- [ ] GR-065e: Config wiring — all new keys in `GitReinsDefaults`, `overlay()`, `to_config_dict()`, pipeline step reading
+- [ ] GR-065f: CLI output — `gitreins commit-audit` shows review findings with file:line references, severity markers, and fix suggestions
+- [ ] GR-065g: Tests — mock LLM review responses, verify structured parsing, test config defaults, test all severity levels
+
 ## [ ] GR-064: Tier 2 large-repo hardening — dexdat-memory feedback
 - **Priority:** high
 - **Model:** deepseek-v4-flash (coding-hermes cron)
