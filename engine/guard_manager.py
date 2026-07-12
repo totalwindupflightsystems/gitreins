@@ -426,7 +426,7 @@ class GuardManager:
 
                 lint_result = subprocess.run(
                     [linter, "check", *py_files] if linter == "ruff" else [linter, *py_files],
-                    capture_output=True, text=True, timeout=30,
+                    capture_output=True, text=True, timeout=120,
                     cwd=self.workdir,
                 )
                 output = lint_result.stdout + lint_result.stderr
@@ -489,7 +489,11 @@ class GuardManager:
             else:
                 return GuardResult(name=label, passed=False, output=output)
         except subprocess.TimeoutExpired:
-            return GuardResult(name=label, passed=False, output=f"Tests timed out after {self._test_timeout}s")
+            return GuardResult(name=label, passed=False, output=(
+                f"Tests timed out after {self._test_timeout}s. "
+                f"To raise the limit: set guards.test_timeout in "
+                f".gitreins/config.yaml (e.g. test_timeout: 300)."
+            ))
         except Exception as e:
             return GuardResult(name=label, passed=False, error=str(e))
 

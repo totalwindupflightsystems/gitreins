@@ -89,7 +89,7 @@ def _lsp_encode_message(msg: dict) -> bytes:
     return header.encode("utf-8") + body
 
 
-def _lsp_read_response(proc: subprocess.Popen, timeout: float = 10.0) -> dict | None:
+def _lsp_read_response(proc: subprocess.Popen, timeout: float = 60.0) -> dict | None:
     """Read one JSON-RPC response from an LSP server process.
 
     Uses os.read on the raw file descriptor to bypass Python's
@@ -237,7 +237,7 @@ def _lsp_initialize(proc: subprocess.Popen, workdir: str) -> bool:
     proc.stdin.write(_lsp_encode_message(init_msg))
     proc.stdin.flush()
 
-    response = _lsp_read_response(proc, timeout=10.0)
+    response = _lsp_read_response(proc, timeout=60.0)
     if response is None:
         return False
 
@@ -285,7 +285,7 @@ def _lsp_shutdown(proc: subprocess.Popen) -> None:
     try:
         proc.stdin.write(_lsp_encode_message(shutdown_msg))
         proc.stdin.flush()
-        _lsp_read_response(proc, timeout=5.0)
+        _lsp_read_response(proc, timeout=30.0)
     except Exception:
         pass
 

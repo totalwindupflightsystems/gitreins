@@ -59,6 +59,17 @@ class GitReinsDefaults:
     commit_audit_max_iterations: int = 3   # LLM exploration rounds (0 = no tools, single call)
     commit_audit_suggest_message: bool = True  # suggest better message on rejection
 
+    # ── Commit review (GR-065: CodeRabbit-style) ──
+    commit_audit_review_mode: str = "message"  # "message" | "review" | "agent"
+    commit_audit_review_checks_bugs: bool = True
+    commit_audit_review_checks_security: bool = True
+    commit_audit_review_checks_style: bool = False
+    commit_audit_review_checks_performance: bool = False
+    commit_audit_review_checks_anti_patterns: bool = True
+    commit_audit_review_severity: str = "standard"  # "critical-only" | "standard" | "all"
+    commit_audit_review_suggest_fix: bool = True
+    commit_audit_review_max_tokens: int = 2048
+
     # ── Update checking ──
     check_for_updates: bool = True
     update_check_ttl_hours: float = 24.0  # re-check after this many hours
@@ -123,6 +134,34 @@ class GitReinsDefaults:
             commit_audit_suggest_message=bool(defaults.get(
                 "commit_audit", {}).get("suggest_message", self.commit_audit_suggest_message
             )),
+            # Review fields
+            commit_audit_review_mode=str(defaults.get(
+                "commit_audit", {}).get("review_mode", self.commit_audit_review_mode
+            )),
+            commit_audit_review_checks_bugs=bool(defaults.get(
+                "commit_audit", {}).get("review_checks", {}).get("bugs", self.commit_audit_review_checks_bugs
+            )),
+            commit_audit_review_checks_security=bool(defaults.get(
+                "commit_audit", {}).get("review_checks", {}).get("security", self.commit_audit_review_checks_security
+            )),
+            commit_audit_review_checks_style=bool(defaults.get(
+                "commit_audit", {}).get("review_checks", {}).get("style", self.commit_audit_review_checks_style
+            )),
+            commit_audit_review_checks_performance=bool(defaults.get(
+                "commit_audit", {}).get("review_checks", {}).get("performance", self.commit_audit_review_checks_performance
+            )),
+            commit_audit_review_checks_anti_patterns=bool(defaults.get(
+                "commit_audit", {}).get("review_checks", {}).get("anti_patterns", self.commit_audit_review_checks_anti_patterns
+            )),
+            commit_audit_review_severity=str(defaults.get(
+                "commit_audit", {}).get("review_severity", self.commit_audit_review_severity
+            )),
+            commit_audit_review_suggest_fix=bool(defaults.get(
+                "commit_audit", {}).get("review_suggest_fix", self.commit_audit_review_suggest_fix
+            )),
+            commit_audit_review_max_tokens=int(defaults.get(
+                "commit_audit", {}).get("review_max_tokens", self.commit_audit_review_max_tokens
+            )),
             check_for_updates=bool(defaults.get(
                 "check_for_updates", self.check_for_updates
             )),
@@ -176,6 +215,17 @@ class GitReinsDefaults:
                 "strictness": self.commit_audit_strictness,
                 "max_iterations": self.commit_audit_max_iterations,
                 "suggest_message": self.commit_audit_suggest_message,
+                "review_mode": self.commit_audit_review_mode,
+                "review_checks": {
+                    "bugs": self.commit_audit_review_checks_bugs,
+                    "security": self.commit_audit_review_checks_security,
+                    "style": self.commit_audit_review_checks_style,
+                    "performance": self.commit_audit_review_checks_performance,
+                    "anti_patterns": self.commit_audit_review_checks_anti_patterns,
+                },
+                "review_severity": self.commit_audit_review_severity,
+                "review_suggest_fix": self.commit_audit_review_suggest_fix,
+                "review_max_tokens": self.commit_audit_review_max_tokens,
             },
             "check_for_updates": self.check_for_updates,
             "update_check_ttl": f"{int(self.update_check_ttl_hours)}h",
@@ -296,7 +346,7 @@ def _fetch_latest_version() -> str | None:
     """Fetch the latest version string from PyPI JSON API."""
     import requests
     try:
-        resp = requests.get("https://pypi.org/pypi/gitreins/json", timeout=5)
+        resp = requests.get("https://pypi.org/pypi/gitreins/json", timeout=15)
         resp.raise_for_status()
         return resp.json()["info"]["version"]
     except Exception:
