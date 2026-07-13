@@ -529,7 +529,8 @@ class CommitAuditor:
         try:
             data = json.loads(content)
         except json.JSONDecodeError:
-            match = re.search(r"\{[\s\S]*\}", content)
+            # Try to extract the first complete JSON object (non-greedy)
+            match = re.search(r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}", content)
             if match:
                 try:
                     data = json.loads(match.group(0))
