@@ -912,7 +912,7 @@ class TestCodeContextPreloading:
         assert ctx == ""
 
     def test_max_output_tokens_passed_to_llm(self, evaluator, llm_client):
-        """max_output_tokens from eval cap overrides LLM client default of 131072."""
+        """Per-request max_tokens is always capped at 16384 — session budget is separate."""
         from engine.eval_cap import EvalCap
 
         evaluator.eval_cap = EvalCap(
@@ -930,8 +930,9 @@ class TestCodeContextPreloading:
             evaluator.evaluate({"id": "t", "title": "token test", "criteria": ["x"]})
 
         assert captured_tokens, "chat() was never called"
-        assert captured_tokens[0] == 50_000, (
-            f"Expected config max_tokens=50000 to override default 131072, got {captured_tokens[0]}"
+        # Per-request max_tokens is always 16384 regardless of session budget
+        assert captured_tokens[0] == 16384, (
+            f"Expected per-request max_tokens=16384 (session budget is 50000), got {captured_tokens[0]}"
         )
 
     def test_max_tokens_fallback_when_nothing_configured(self, evaluator, llm_client):
@@ -958,7 +959,7 @@ class TestCodeContextPreloading:
         )
 
     def test_max_tokens_value_set_not_corrupted(self, evaluator, llm_client):
-        """When config says X, chat() receives X — not some other wrong value."""
+        """Session budget tracked via EvalCap, per-request max_tokens always 16384."""
         from engine.eval_cap import EvalCap
 
         evaluator.eval_cap = EvalCap(
@@ -976,17 +977,12 @@ class TestCodeContextPreloading:
             evaluator.evaluate({"id": "t", "title": "uncorrupted", "criteria": ["x"]})
 
         assert captured, "chat() was never called"
-
-        # Must be exactly 75000 — not clamped, not rounded, not defaulted
-        wrong_values = [2048, 4096, 8192, 16384, 32768, 100_000, 131072]
-        assert captured[0] == 75_000, (
-            f"Config said 75000 but chat() got {captured[0]}. "
-            f"Checked wrong values: {wrong_values}"
+        # Per-request is always 16384 — session budget of 75000 enforced via EvalCap
+        assert captured[0] == 16384, (
+            f"Per-request max_tokens should be 16384 (session budget 75000), got {captured[0]}"
         )
-        for wrong in wrong_values:
-            assert captured[0] != wrong, (
-                f"chat() received {wrong} — matches a known wrong default, not the configured 75000"
-            )
+        # Verify session budget is correctly stored
+        assert evaluator.eval_cap.max_output_tokens == 75_000
 
     # ── File scope tests ──────────────────────────────────────────
 

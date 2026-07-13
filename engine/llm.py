@@ -191,7 +191,7 @@ class LLMClient:
     # Provider output token caps (max_tokens in chat/completions).
     # Values sourced from provider docs as of 2026-06.
     _PROVIDER_MAX_OUTPUT_TOKENS: dict[str, int] = {
-        "deepseek": 393_216,     # DeepSeek v4 API: max_tokens range [1, 393216]
+        "deepseek": 393_216,     # DeepSeek V4 API: max_tokens range [1, 393216]
         "openai": 1_000_000,     # OpenAI varies by model; safe ceiling
         "anthropic": 1_000_000,  # Anthropic varies by model; safe ceiling
         "openrouter": 1_000_000,  # OpenRouter — pass-through; no known hard cap
