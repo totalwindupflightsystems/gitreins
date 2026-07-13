@@ -689,6 +689,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             {"role": "user", "content": task_prompt},
         ]
 
+        # Per-request token cap — read from config (default 16384)
+        max_tokens_per_call = int(evaluator_cfg.get("max_tokens_per_call", 16384))
+
         tools = list(EVALUATOR_TOOLS)  # copy
         if not evaluator_cfg.get("static_analysis_diagnostics", False):
             tools = [t for t in tools if t["function"]["name"] != "read_static_analysis"]
@@ -738,7 +741,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             try:
                 response = self.llm.chat(
                     messages, tools=tools,
-                    max_tokens=16384,  # Per-request cap (session budget enforced via EvalCap)
+                    max_tokens=max_tokens_per_call,
                 )
             except Exception as e:
                 # Detect HTTP 400-499 errors (context window exceeded, etc.)

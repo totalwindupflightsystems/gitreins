@@ -46,6 +46,7 @@ class GitReinsDefaults:
     max_seconds: float = -1.0           # -1 = unlimited
     max_input_tokens: int = 10_000_000  # 10M
     max_output_tokens: int = 131_072   # 128K — safe floor below most provider caps
+    max_tokens_per_call: int = 16384   # Per-LLM-call cap (session budget is separate)
     tool_call_weight: float = 0.1
     compaction_threshold: float = 0.90  # compact when 90% of input budget used (10% remaining)
     code_context_budget: float = 0.70   # cap pre-loaded code context to 70% of input budget
@@ -104,6 +105,9 @@ class GitReinsDefaults:
             max_output_tokens=_coerce_tokens(
                 defaults.get("max_output_tokens", self.max_output_tokens)
             ),
+            max_tokens_per_call=int(defaults.get(
+                "max_tokens_per_call", self.max_tokens_per_call
+            )),
             tool_call_weight=float(defaults.get(
                 "tool_call_weight", self.tool_call_weight
             )),
@@ -203,6 +207,10 @@ class GitReinsDefaults:
             "max_output_tokens": (
                 _fmt_tokens(self.max_output_tokens)
                 if self.max_output_tokens > 0 else None
+            ),
+            "max_tokens_per_call": (
+                _fmt_tokens(self.max_tokens_per_call)
+                if self.max_tokens_per_call > 0 else None
             ),
             "tool_call_weight": self.tool_call_weight,
             "compaction_threshold": self.compaction_threshold,
