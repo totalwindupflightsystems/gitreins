@@ -316,6 +316,21 @@ Add `_chat_anthropic()` method to `LLMClient` that detects Anthropic providers (
 - [ ] GR-067d: Provider list — add `anthropic` to the model/provider palette in `coding-hermes-north-star`
 - [ ] GR-067e: Tests — mock Anthropic responses, verify routing, verify tool call conversion
 
+## [ ] GR-068: DeepSeek prompt caching + reasoning flag — cost optimization
+- **Priority:** high
+- **Model:** deepseek-v4-flash (coding-hermes cron)
+- **Goal:** Use DeepSeek's automatic prompt caching to reduce evaluator costs by 50-90% on cache hits. Set reasoning/thinking flag appropriately for the task type.
+- **Why:** DeepSeek caches repeated prompt prefixes automatically. Evaluator system prompt + code context is identical across multiple judge calls — huge cache-hit potential. Adam W. identified that setting the right flag by default unlocks this.
+- **Impact:** Each evaluator run currently sends the full system prompt + code context (~50K-200K tokens). With caching, subsequent runs on the same codebase only pay for the diff.
+
+### Tasks:
+- [ ] GR-068a: Research — confirm DeepSeek V4 caching behavior (auto-prefix vs explicit). Check if `enable_thinking`, `reasoning_effort`, or other flags affect cache eligibility.
+- [ ] GR-068b: Flag config — add `llm.cache_enabled` (default true) and `llm.reasoning` (default none) to LLMClient and `.gitreins/config.yaml`
+- [ ] GR-068c: Wire flags — pass cache/reasoning parameters in `_chat_openai()` request body if provider is `deepseek`
+- [ ] GR-068d: Cache telemetry — log `cache_read_tokens` / `cache_write_tokens` from LLMResponse.usage in evaluator output. Show $ saved.
+- [ ] GR-068e: Tests — mock DeepSeek cache hit/miss responses, verify telemetry, verify flags in request body
+- [ ] GR-068f: Skill docs — document caching behavior, expected savings, and how to verify it's working (check `cache_read_tokens > 0` in judge output)
+
 ## [ ] GR-064: Tier 2 large-repo hardening — dexdat-memory feedback
 - **Priority:** high
 - **Model:** deepseek-v4-flash (coding-hermes cron)
