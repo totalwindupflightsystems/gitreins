@@ -239,11 +239,11 @@ commit_audit:
 | `agent` | Full mini-harness — multi-turn LLM with read_file/search_pattern tools. Explores surrounding code for deeper analysis. | up to `max_iterations` | Configurable |
 
 ### Tasks:
-- [ ] GR-065a: Review system prompt — write a `COMMIT_REVIEW_SYSTEM_PROMPT` that instructs the LLM to act like a senior code reviewer. Covers all review_checks categories with examples.
-- [ ] GR-065b: `review_mode` implementation — wire `review` mode as a single-call path alongside existing `message` mode. Same `CommitAuditor`, new code path.
-- [ ] GR-065c: `agent` mode — reuse existing `_tool_loop()` from commit audit. Let the LLM explore files before rendering verdict.
-- [ ] GR-065d: Review result structure — `CommitReviewResult` with `{issues: [{file, line, severity, category, message, suggestion}], summary, message_valid, message_issues}`
-- [ ] GR-065e: Config wiring — all new keys in `GitReinsDefaults`, `overlay()`, `to_config_dict()`, pipeline step reading
+- [x] GR-065a: Review system prompt — write a `COMMIT_REVIEW_SYSTEM_PROMPT` that instructs the LLM to act like a senior code reviewer. Covers all review_checks categories with examples.
+- [x] GR-065b: `review_mode` implementation — wire `review` mode as a single-call path alongside existing `message` mode. Same `CommitAuditor`, new code path.
+- [x] GR-065c: `agent` mode — reuse existing `_tool_loop()` from commit audit. Let the LLM explore files before rendering verdict.
+- [x] GR-065d: Review result structure — `CommitReviewResult` with `{issues: [{file, line, severity, category, message, suggestion}], summary, message_valid, message_issues}`
+- [x] GR-065e: Config wiring — all new keys in `GitReinsDefaults`, `overlay()`, `to_config_dict()`, pipeline step reading
 - [ ] GR-065f: CLI output — `gitreins commit-audit` shows review findings with file:line references, severity markers, and fix suggestions
 - [ ] GR-065g: Tests — mock LLM review responses, verify structured parsing, test config defaults, test all severity levels
 
