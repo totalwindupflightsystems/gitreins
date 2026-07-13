@@ -34,6 +34,7 @@ may drift slightly above the cap.
 """
 
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass
@@ -458,5 +459,27 @@ def eval_cap_from_config(config: dict) -> EvalCap:
 
     if "tool_call_weight" in ev:
         cap.tool_call_weight = float(ev["tool_call_weight"])
+
+    # ── Env var overrides (v0.10.2) — highest priority, always win ──
+    # For CI/docker/one-off runs where editing config.yaml is impractical.
+    if os.getenv("GITREINS_MAX_ITERATIONS"):
+        val = float(os.environ["GITREINS_MAX_ITERATIONS"])
+        cap.max_iterations = val if val > 0 else -1.0
+        cap.source = f"{cap.source} + GITREINS_MAX_ITERATIONS={int(val)}"
+    if os.getenv("GITREINS_MAX_TIME"):
+        t = _parse_time(os.environ["GITREINS_MAX_TIME"])
+        if t is not None:
+            cap.max_seconds = float(t)
+            cap.source = f"{cap.source} + GITREINS_MAX_TIME"
+    if os.getenv("GITREINS_MAX_INPUT_TOKENS"):
+        tok = _parse_tokens(os.environ["GITREINS_MAX_INPUT_TOKENS"])
+        if tok is not None:
+            cap.max_input_tokens = tok
+            cap.source = f"{cap.source} + GITREINS_MAX_INPUT_TOKENS"
+    if os.getenv("GITREINS_MAX_OUTPUT_TOKENS"):
+        tok = _parse_tokens(os.environ["GITREINS_MAX_OUTPUT_TOKENS"])
+        if tok is not None:
+            cap.max_output_tokens = tok
+            cap.source = f"{cap.source} + GITREINS_MAX_OUTPUT_TOKENS"
 
     return cap
