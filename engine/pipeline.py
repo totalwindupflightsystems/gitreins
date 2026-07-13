@@ -352,6 +352,10 @@ class Pipeline:
             strictness=config.get("strictness", "standard"),
             max_iterations=config.get("max_iterations", 3),
             suggest_message=config.get("suggest_message", True),
+            review_mode=config.get("review_mode", "message"),
+            review_checks=config.get("review_checks", None),
+            review_severity=config.get("review_severity", "standard"),
+            review_suggest_fix=config.get("review_suggest_fix", True),
         )
 
         message = task.get("commit_message", "")

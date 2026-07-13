@@ -212,6 +212,23 @@ INSTRUCTIONS_BY_STRICTNESS = {
 }
 
 
+REVIEW_USER_PROMPT = """\
+## COMMIT MESSAGE
+{message}
+
+## STAGED DIFF
+{diff}
+
+## REVIEW CONFIGURATION
+Active checks: {checks}
+Severity filter: {severity}
+Fix suggestions: {fix}
+
+## INSTRUCTIONS
+Review the staged diff for issues. Check ONLY the categories listed above.
+Respect the severity filter. {fix}"""
+
+
 # ── Audit tools — same pattern as evaluator tools ────────────────
 
 COMMIT_AUDIT_TOOLS: list[dict[str, Any]] = [
@@ -276,6 +293,42 @@ class CommitAuditResult:
         return "block"  # block maps to reject; mode determines warn vs block upstream
 
 
+@dataclass
+class ReviewIssue:
+    """A single issue found during code review (GR-065)."""
+    file: str
+    line: int
+    severity: str   # critical|high|medium|low|info
+    category: str   # bugs|security|anti_patterns|style|performance
+    title: str
+    description: str = ""
+    suggestion: str = ""
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ReviewIssue":
+        return cls(
+            file=d.get("file", ""),
+            line=int(d.get("line", 0)),
+            severity=d.get("severity", "info"),
+            category=d.get("category", "style"),
+            title=d.get("title", ""),
+            description=d.get("description", ""),
+            suggestion=d.get("suggestion", ""),
+        )
+
+
+@dataclass
+class CommitReviewResult:
+    """Result of a CodeRabbit-style commit review (GR-065)."""
+    valid: bool
+    summary: str = ""
+    issues: list[ReviewIssue] = field(default_factory=list)
+    message_valid: bool = True
+    message_issues: list[str] = field(default_factory=list)
+    suggested_message: str = ""
+    iterations_used: int = 0
+
+
 # ═════════════════════════════════════════════════════════════════
 # CommitAuditor
 # ═════════════════════════════════════════════════════════════════
@@ -295,12 +348,23 @@ class CommitAuditor:
         strictness: str = "standard",
         max_iterations: int = 3,
         suggest_message: bool = True,
+        review_mode: str = "message",
+        review_checks: dict | None = None,
+        review_severity: str = "standard",
+        review_suggest_fix: bool = True,
     ):
         self.llm = llm
         self.workdir = os.path.abspath(workdir)
         self.strictness = strictness
         self.max_iterations = max_iterations
         self.suggest_message = suggest_message
+        self.review_mode = review_mode
+        self.review_checks = review_checks or {
+            "bugs": True, "security": True, "anti_patterns": True,
+            "style": False, "performance": False,
+        }
+        self.review_severity = review_severity
+        self.review_suggest_fix = review_suggest_fix
 
     # ── Public API ──────────────────────────────────────────────
 
@@ -318,11 +382,14 @@ class CommitAuditor:
         Returns:
             CommitAuditResult with valid/issue/suggested_message.
         """
+        if self.review_mode != "message":
+            # Code review mode — returns CommitReviewResult
+            return self._run_review(message, diff)
+
         if diff is None:
             diff = self._capture_diff()
 
         if not diff.strip():
-            # No diff — nothing to audit
             return CommitAuditResult(valid=True)
 
         if not message.strip():
@@ -340,6 +407,163 @@ class CommitAuditor:
 
         # Tool-enabled path: LLM wants to explore before judging
         return self._tool_loop(message, diff)
+
+    # ── Review mode (GR-065: CodeRabbit-style) ──────────────────
+
+    def review(
+        self,
+        message: str,
+        diff: str | None = None,
+    ) -> "CommitReviewResult":
+        """Run a CodeRabbit-style commit review."""
+        if diff is None:
+            diff = self._capture_diff()
+        if not diff.strip():
+            return CommitReviewResult(valid=True, summary="No changes to review.")
+
+        # Build review prompt
+        active_checks = [k for k, v in self.review_checks.items() if v]
+        checks_str = ", ".join(active_checks)
+
+        severity_map = {
+            "critical-only": "Only report critical and high severity issues. Skip medium, low, and info.",
+            "standard": "Report critical, high, and medium severity issues. Skip low and info.",
+            "all": "Report all issues regardless of severity.",
+        }
+        severity_instr = severity_map.get(self.review_severity, severity_map["standard"])
+
+        fix_instr = (
+            "Include specific, actionable fix suggestions for every issue."
+            if self.review_suggest_fix else "Do NOT include fix suggestions — just identify issues."
+        )
+
+        review_prompt = REVIEW_USER_PROMPT.format(
+            message=message,
+            diff=diff[:15000],
+            checks=checks_str,
+            severity=severity_instr,
+            fix=fix_instr,
+        )
+
+        if self.review_mode == "agent":
+            return self._review_tool_loop(message, diff, review_prompt)
+
+        # Single-call review
+        return self._review_single_call(review_prompt)
+
+    def _review_single_call(self, review_prompt: str) -> "CommitReviewResult":
+        """Single LLM call for code review."""
+        try:
+            response = self.llm.chat(
+                messages=[
+                    {"role": "system", "content": COMMIT_REVIEW_SYSTEM_PROMPT},
+                    {"role": "user", "content": review_prompt},
+                ],
+                temperature=0.1,
+                max_tokens=2048,
+            )
+        except Exception as e:
+            logger.warning("Code review LLM call failed: %s", e)
+            return CommitReviewResult(
+                valid=True, summary=f"Review unavailable: {e}",
+                iterations_used=1,
+            )
+
+        return self._parse_review_result(response, iteration=1)
+
+    def _review_tool_loop(self, message: str, diff: str, review_prompt: str) -> "CommitReviewResult":
+        """Multi-turn review with tool access."""
+        # Stub for agent mode — reuses existing tool loop pattern
+        messages: list[dict] = [
+            {"role": "system", "content": COMMIT_REVIEW_SYSTEM_PROMPT},
+            {"role": "user", "content": review_prompt},
+        ]
+
+        for iteration in range(1, self.max_iterations + 1):
+            try:
+                response = self.llm.chat(
+                    messages=messages,
+                    tools=COMMIT_AUDIT_TOOLS,
+                    temperature=0.1,
+                    max_tokens=2048,
+                )
+            except Exception as e:
+                return CommitReviewResult(
+                    valid=True,
+                    summary=f"Review error on iteration {iteration}: {e}",
+                    iterations_used=iteration,
+                )
+
+            if not response.tool_calls:
+                if response.content:
+                    return self._parse_review_result(response, iteration=iteration)
+                return CommitReviewResult(valid=True, summary="No issues found.", iterations_used=iteration)
+
+            assistant_msg = {
+                "role": "assistant",
+                "content": response.content,
+                "tool_calls": [
+                    {"id": tc.id, "type": "function", "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)}}
+                    for tc in response.tool_calls
+                ],
+            }
+            messages.append(assistant_msg)
+
+            for tc in response.tool_calls:
+                tool_result = self._execute_tool(tc)
+                messages.append({"role": "tool", "tool_call_id": tc.id, "content": tool_result})
+
+        return CommitReviewResult(
+            valid=True,
+            summary=f"Review exhausted {self.max_iterations} iterations without verdict",
+            iterations_used=self.max_iterations,
+        )
+
+    def _parse_review_result(self, response: LLMResponse, iteration: int = 1) -> "CommitReviewResult":
+        """Parse the structured review JSON from the LLM."""
+        content = (response.content or "").strip()
+        if content.startswith("```"):
+            content = re.sub(r"^```(?:json)?\s*", "", content)
+            content = re.sub(r"\s*```$", "", content)
+
+        try:
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            match = re.search(r"\{[\s\S]*\}", content)
+            if match:
+                try:
+                    data = json.loads(match.group(0))
+                except json.JSONDecodeError:
+                    return CommitReviewResult(
+                        valid=True, summary=f"Could not parse review: {content[:200]}",
+                        iterations_used=iteration,
+                    )
+            else:
+                return CommitReviewResult(
+                    valid=True, summary=f"Could not parse review: {content[:200]}",
+                    iterations_used=iteration,
+                )
+
+        issues = [ReviewIssue.from_dict(i) for i in data.get("issues", [])]
+        return CommitReviewResult(
+            valid=data.get("valid", True),
+            summary=data.get("summary", ""),
+            issues=issues,
+            message_valid=data.get("message_valid", True),
+            message_issues=data.get("message_issues", []),
+            suggested_message=data.get("suggested_message", ""),
+            iterations_used=iteration,
+        )
+
+    def _run_review(self, message: str, diff: str | None = None) -> CommitAuditResult:
+        """Bridge: run review mode and convert to CommitAuditResult for compatibility."""
+        rev = self.review(message, diff)
+        return CommitAuditResult(
+            valid=rev.valid and rev.message_valid,
+            issues=[f"[{i.severity}][{i.category}] {i.file}:{i.line}: {i.title}" for i in rev.issues],
+            suggested_message=rev.suggested_message,
+            iterations_used=rev.iterations_used,
+        )
 
     # ── Fast path: one LLM call ─────────────────────────────────
 
