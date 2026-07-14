@@ -247,53 +247,10 @@ commit_audit:
 - [x] GR-065f: CLI output — `gitreins commit-audit` shows review findings with file:line references, severity markers, and fix suggestions
 - [x] GR-065g: Tests — mock LLM review responses, verify structured parsing, test config defaults, test all severity levels
 
-## [ ] GR-066: CVE-style scored severity system for commit review
+## [x] GR-066: CVE-style scored severity system for commit review
 - **Priority:** high
-- **Model:** deepseek-v4-flash (coding-hermes cron)
-- **Files:** `engine/commit_audit.py`, `engine/config.py`, `tests/test_commit_audit.py`
-- **Dependencies:** None
-
-### Why
-
-Different models have different aggression levels. Gemini might flag every style nit as critical; DeepSeek might miss real bugs. Users need per-model calibration without changing thresholds by hand every time they switch providers.
-
-### Spec
-
-Each `ReviewIssue` gets a numeric `score` (1-10). The review engine also returns an `overall_score` (worst issue score in the report).
-
-Two new config keys:
-
-```yaml
-commit_audit:
-  review_score_threshold: 8.0    # issues with score >= threshold BLOCK the commit
-  review_score_offset: 1.0       # multiplier: 0.5 = half severity, 2.0 = double
-```
-
-**Formula:** `effective_score = issue.score * review_score_offset`
-
-**Behavior:**
-| effective_score | Action |
-|----------------|--------|
-| >= threshold | BLOCK commit |
-| >= threshold * 0.75 | WARN (document, let through) |
-| < threshold * 0.75 | INFO only (log, don't block or warn) |
-
-**Per-model calibration (future):** A `review_model_offsets` dict:
-```yaml
-commit_audit:
-  review_model_offsets:
-    deepseek-v4-pro: 1.2     # it's too lenient, boost scores
-    glm-5.2: 0.65            # too aggressive, dampen
-    claude-sonnet-4: 1.0     # just right
-```
-
-### Tasks:
-- [ ] GR-066a: `ReviewIssue.score` field — add `score: float = 0.0` to the dataclass, update `from_dict()`
-- [ ] GR-066b: Scoring in system prompt — add CVE-style 1-10 severity scale to `COMMIT_REVIEW_SYSTEM_PROMPT`. Map `critical=9-10`, `high=7-8`, `medium=4-6`, `low=1-3`, `info=0`
-- [ ] GR-066c: Threshold + offset config — `review_score_threshold` (default 8.0) + `review_score_offset` (default 1.0) in `GitReinsDefaults`, `overlay()`, `to_config_dict()`
-- [ ] GR-066d: BLOCK/WARN/INFO routing — pipeline's `_run_commit_audit()` uses effective_score to decide action. Returns `passed=False` when any issue exceeds threshold.
-- [ ] GR-066e: CLI output — show score per issue, show overall_score, show whether blocked/warned
-- [ ] GR-066f: Tests — verify threshold blocking, offset multiplication, edge cases (0 score, all info)
+- **Commit:** `86b14fa`
+- **Result:** 504 insertions, 10 deletions across 4 files. 81 commit_audit tests pass (41 existing + 40 new covering dataclass, config, routing, output).
 
 ## [ ] GR-067: Anthropic Messages API endpoint support
 - **Priority:** medium
