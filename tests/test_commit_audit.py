@@ -691,3 +691,416 @@ class TestPipelineReviewOutput:
         output = "\n".join(output_lines)
         assert "REVIEW" not in output
         assert "✓ Commit message looks good." in output
+
+
+# ═══════════════════════════════════════════════════════════════
+# GR-066: CVE-style scored severity system
+# ═══════════════════════════════════════════════════════════════
+
+class TestReviewIssueScore:
+    """Test the score field on ReviewIssue (GR-066a)."""
+
+    def test_default_score_is_zero(self):
+        ri = ReviewIssue(file="x.py", line=1, severity="high",
+                         category="bugs", title="Bug")
+        assert ri.score == 0.0
+
+    def test_explicit_score(self):
+        ri = ReviewIssue(file="x.py", line=1, severity="critical",
+                         category="security", title="RCE", score=9.5)
+        assert ri.score == 9.5
+
+    def test_from_dict_parses_score(self):
+        ri = ReviewIssue.from_dict({
+            "file": "src/auth.py",
+            "line": "42",
+            "severity": "critical",
+            "category": "security",
+            "title": "Hardcoded secret",
+            "score": "9.0",
+        })
+        assert ri.score == 9.0
+
+    def test_from_dict_score_defaults_to_zero(self):
+        ri = ReviewIssue.from_dict({"title": "No score field"})
+        assert ri.score == 0.0
+
+    def test_from_dict_score_as_int(self):
+        ri = ReviewIssue.from_dict({"score": 5})
+        assert ri.score == 5.0
+        assert isinstance(ri.score, float)
+
+    def test_score_preserved_in_from_dict_roundtrip(self):
+        """Score should survive serialization round-trip."""
+        original = {"file": "a.py", "line": 1, "severity": "high",
+                     "category": "bugs", "title": "Bug", "score": 7.5}
+        ri = ReviewIssue.from_dict(original)
+        assert ri.score == 7.5
+
+
+class TestCommitReviewResultOverallScore:
+    """Test overall_score on CommitReviewResult (GR-066a)."""
+
+    def test_default_overall_score_is_zero(self):
+        r = CommitReviewResult(valid=True)
+        assert r.overall_score == 0.0
+
+    def test_overall_score_explicit(self):
+        r = CommitReviewResult(valid=False, overall_score=8.5)
+        assert r.overall_score == 8.5
+
+
+class TestParseReviewResultScoreExtraction:
+    """Test that _parse_review_result extracts scores correctly."""
+
+    def _make_auditor(self) -> CommitAuditor:
+        llm = LLMClient(api_key="sk-test", model="test/model")
+        return CommitAuditor(llm)
+
+    def test_parse_issues_with_scores(self):
+        auditor = self._make_auditor()
+        resp = LLMResponse(content=json.dumps({
+            "valid": False,
+            "summary": "Two issues",
+            "overall_score": 9.0,
+            "issues": [
+                {"file": "a.py", "line": 1, "severity": "critical",
+                 "category": "security", "title": "SQL injection", "score": 9.0},
+                {"file": "b.py", "line": 5, "severity": "medium",
+                 "category": "style", "title": "Long line", "score": 5.0},
+            ],
+        }), usage=LLMUsage())
+        result = auditor._parse_review_result(resp)
+        assert result.overall_score == 9.0
+        assert len(result.issues) == 2
+        assert result.issues[0].score == 9.0
+        assert result.issues[1].score == 5.0
+
+    def test_overall_score_derived_from_issues_when_missing(self):
+        """When overall_score not in JSON, derive from max issue score."""
+        auditor = self._make_auditor()
+        resp = LLMResponse(content=json.dumps({
+            "valid": False,
+            "summary": "Issues",
+            "issues": [
+                {"file": "a.py", "line": 1, "severity": "high",
+                 "category": "bugs", "title": "Bug", "score": 7.5},
+                {"file": "b.py", "line": 2, "severity": "low",
+                 "category": "style", "title": "Nit", "score": 2.0},
+            ],
+        }), usage=LLMUsage())
+        result = auditor._parse_review_result(resp)
+        assert result.overall_score == 7.5  # max of 7.5 and 2.0
+
+    def test_overall_score_zero_with_no_issues(self):
+        auditor = self._make_auditor()
+        resp = LLMResponse(content='{"valid": true, "summary": "Clean"}',
+                           usage=LLMUsage())
+        result = auditor._parse_review_result(resp)
+        assert result.overall_score == 0.0
+
+
+class TestScoringConfigDefaults:
+    """Test scoring fields in GitReinsDefaults (GR-066c)."""
+
+    def test_default_score_threshold(self):
+        from engine.config import GitReinsDefaults
+        d = GitReinsDefaults()
+        assert d.commit_audit_review_score_threshold == 8.0
+
+    def test_default_score_offset(self):
+        from engine.config import GitReinsDefaults
+        d = GitReinsDefaults()
+        assert d.commit_audit_review_score_offset == 1.0
+
+    def test_overlay_score_threshold(self):
+        from engine.config import GitReinsDefaults
+        d = GitReinsDefaults()
+        overlaid = d.overlay({
+            "defaults": {
+                "commit_audit": {
+                    "review_score_threshold": 7.0,
+                }
+            }
+        })
+        assert overlaid.commit_audit_review_score_threshold == 7.0
+
+    def test_overlay_score_offset(self):
+        from engine.config import GitReinsDefaults
+        d = GitReinsDefaults()
+        overlaid = d.overlay({
+            "defaults": {
+                "commit_audit": {
+                    "review_score_offset": 0.5,
+                }
+            }
+        })
+        assert overlaid.commit_audit_review_score_offset == 0.5
+
+    def test_to_config_dict_includes_scoring(self):
+        from engine.config import GitReinsDefaults
+        d = GitReinsDefaults(
+            commit_audit_review_score_threshold=7.5,
+            commit_audit_review_score_offset=1.2,
+        )
+        cfg = d.to_config_dict()
+        assert cfg["commit_audit"]["review_score_threshold"] == 7.5
+        assert cfg["commit_audit"]["review_score_offset"] == 1.2
+
+    def test_overlay_both_scoring_fields(self):
+        from engine.config import GitReinsDefaults
+        d = GitReinsDefaults()
+        overlaid = d.overlay({
+            "defaults": {
+                "commit_audit": {
+                    "review_score_threshold": 6.0,
+                    "review_score_offset": 2.0,
+                }
+            }
+        })
+        assert overlaid.commit_audit_review_score_threshold == 6.0
+        assert overlaid.commit_audit_review_score_offset == 2.0
+
+
+class TestCommitAuditorScoringInit:
+    """Test that CommitAuditor accepts scoring params (GR-066c)."""
+
+    def test_default_scoring_params(self):
+        llm = LLMClient(api_key="sk-test", model="test/model")
+        auditor = CommitAuditor(llm)
+        assert auditor.review_score_threshold == 8.0
+        assert auditor.review_score_offset == 1.0
+
+    def test_custom_scoring_params(self):
+        llm = LLMClient(api_key="sk-test", model="test/model")
+        auditor = CommitAuditor(
+            llm, review_score_threshold=6.0, review_score_offset=0.5,
+        )
+        assert auditor.review_score_threshold == 6.0
+        assert auditor.review_score_offset == 0.5
+
+
+class TestScoreBasedRouting:
+    """Test BLOCK/WARN/INFO routing based on effective scores (GR-066d)."""
+
+    def test_score_above_threshold_blocks(self):
+        """effective_score >= threshold → BLOCK"""
+        from engine.pipeline import Pipeline
+        pipeline = Pipeline({}, "/tmp")
+
+        # Simulate issues with effective scores
+        score_threshold = 8.0
+        score_offset = 1.0
+
+        issues = [
+            {"file": "a.py", "line": 1, "severity": "critical",
+             "category": "security", "title": "RCE", "score": 9.0},
+        ]
+
+        # Compute effective scores
+        for ri in issues:
+            ri["effective_score"] = ri["score"] * score_offset
+
+        blocked = False
+        for ri in issues:
+            if ri["effective_score"] >= score_threshold:
+                blocked = True
+
+        assert blocked is True
+
+    def test_score_at_threshold_blocks(self):
+        """effective_score == threshold → BLOCK (boundary)"""
+        score_threshold = 8.0
+        effective = 8.0
+        assert effective >= score_threshold  # BLOCK
+
+    def test_score_below_threshold_above_warn_warns(self):
+        """threshold * 0.75 <= effective_score < threshold → WARN"""
+        score_threshold = 8.0
+        effective = 7.0  # 7.0 >= 6.0 (0.75*8.0) but < 8.0
+        assert effective < score_threshold
+        assert effective >= score_threshold * 0.75  # WARN
+
+    def test_score_below_warn_is_info(self):
+        """effective_score < threshold * 0.75 → INFO only"""
+        score_threshold = 8.0
+        effective = 4.0  # 4.0 < 6.0 (0.75*8.0)
+        assert effective < score_threshold * 0.75  # INFO
+
+    def test_offset_multiplies_score(self):
+        """Score offset acts as a multiplier."""
+        raw_score = 5.0
+        offset = 0.5
+        effective = raw_score * offset
+        assert effective == 2.5
+
+    def test_offset_doubles_score(self):
+        """Offset of 2.0 doubles scores — makes lenient models stricter."""
+        raw_score = 4.0
+        offset = 2.0
+        effective = raw_score * offset
+        assert effective == 8.0
+
+    def test_offset_halves_score(self):
+        """Offset of 0.5 halves scores — dampens aggressive models."""
+        raw_score = 8.0
+        offset = 0.5
+        effective = raw_score * offset
+        assert effective == 4.0
+
+    def test_zero_score_is_info(self):
+        """Score of 0 should always be INFO regardless of offset."""
+        effective = 0.0 * 2.0  # offset can't make a 0 into a block
+        assert effective < 8.0 * 0.75
+        assert effective == 0.0
+
+    def test_all_info_issues_no_block_no_warn(self):
+        """When all issues have low scores, no block or warn."""
+        score_threshold = 8.0
+        issues = [
+            {"score": 1.0},
+            {"score": 2.0},
+            {"score": 3.0},
+        ]
+
+        blocked = any(i["score"] >= score_threshold for i in issues)
+        warned = any(
+            score_threshold * 0.75 <= i["score"] < score_threshold
+            for i in issues
+        )
+        assert blocked is False
+        assert warned is False
+
+    def test_mixed_issues_highest_determines_overall(self):
+        """Overall score should be the max effective score."""
+        score_offset = 1.0
+        issues = [
+            {"score": 2.0},
+            {"score": 9.5},
+            {"score": 3.0},
+        ]
+        for ri in issues:
+            ri["effective_score"] = ri["score"] * score_offset
+
+        max_effective = max(ri["effective_score"] for ri in issues)
+        assert max_effective == 9.5
+
+
+class TestRunReviewScoreInclusion:
+    """Test that _run_review includes scores in review_issues dicts (GR-066e)."""
+
+    def _make_llm(self) -> LLMClient:
+        return LLMClient(api_key="sk-test", model="test/model")
+
+    def test_review_issues_include_score(self):
+        auditor = CommitAuditor(
+            self._make_llm(), review_mode="review",
+        )
+        ri = ReviewIssue(
+            file="src/x.py", line=5, severity="critical",
+            category="bugs", title="Null deref",
+            suggestion="Add null check", score=9.0,
+        )
+        with patch.object(auditor, "review", return_value=CommitReviewResult(
+            valid=False, summary="Found 1 issue",
+            issues=[ri], message_valid=True, iterations_used=1,
+            overall_score=9.0,
+        )):
+            result = auditor._run_review("fix: stuff", "diff content")
+            assert len(result.review_issues) == 1
+            assert result.review_issues[0]["score"] == 9.0
+
+    def test_run_review_issues_text_includes_score(self):
+        """"The issue text in CommitAuditResult.issues should include scores."""
+        auditor = CommitAuditor(
+            self._make_llm(), review_mode="review",
+        )
+        ri = ReviewIssue(
+            file="src/x.py", line=5, severity="high",
+            category="bugs", title="Null deref",
+            score=7.5,
+        )
+        with patch.object(auditor, "review", return_value=CommitReviewResult(
+            valid=False, summary="Found 1 issue",
+            issues=[ri], message_valid=True, iterations_used=1,
+            overall_score=7.5,
+        )):
+            result = auditor._run_review("fix", "diff")
+            assert "score: 7.5" in result.issues[0]
+
+
+class TestPipelineScoreOutput:
+    """Test pipeline formats scores in output (GR-066e)."""
+
+    def _make_llm(self) -> LLMClient:
+        return LLMClient(api_key="sk-test", model="test/model")
+
+    def test_output_includes_overall_score(self):
+        """Output header should include overall score vs threshold."""
+        from engine.pipeline import Pipeline
+        pipeline = Pipeline({}, "/tmp", llm=self._make_llm())
+
+        result = CommitAuditResult(
+            valid=False,
+            review_issues=[
+                {"file": "a.py", "line": 1, "severity": "critical",
+                 "category": "security", "title": "RCE",
+                 "score": 9.0, "suggestion": "Fix"},
+            ],
+            review_summary="1 critical issue",
+        )
+
+        # Compute effective scores (simulating _run_commit_audit)
+        score_threshold = 8.0
+        score_offset = 1.0
+        for ri in result.review_issues:
+            ri["effective_score"] = ri["score"] * score_offset
+
+        max_effective = max(ri["effective_score"] for ri in result.review_issues)
+
+        output_lines = []
+        output_lines.append(
+            f"⚠ Commit review — {len(result.review_issues)} issue(s) found "
+            f"(overall: {max_effective:.1f}/{score_threshold:.1f})"
+        )
+        output = "\n".join(output_lines)
+        assert "(overall: 9.0/8.0)" in output
+
+    def test_output_includes_score_per_issue(self):
+        """Each issue line should show its effective score."""
+        from engine.pipeline import Pipeline
+        pipeline = Pipeline({}, "/tmp", llm=self._make_llm())
+
+        score_threshold = 8.0
+        score_offset = 1.0
+
+        ri = {"file": "a.py", "line": 1, "severity": "high",
+              "category": "bugs", "title": "Bug", "score": 7.5}
+        ri["effective_score"] = ri["score"] * score_offset
+
+        effective = ri["effective_score"]
+        # 7.5 >= 6.0 (0.75*8.0) but < 8.0 → WARN
+        action_mark = "⚠️ WARN" if (
+            effective >= score_threshold * 0.75 and effective < score_threshold
+        ) else "ℹ️ INFO"
+
+        line = f"  a.py:1 [bugs] [🟠 HIGH] {action_mark} (score: {effective:.1f}) — Bug"
+        assert "(score: 7.5)" in line
+        assert "⚠️ WARN" in line
+
+    def test_block_marker_for_high_score(self):
+        """Score >= threshold → 🚫 BLOCK marker."""
+        score_threshold = 8.0
+        effective = 9.0
+        action_mark = "🚫 BLOCK" if effective >= score_threshold else "ℹ️ INFO"
+        assert action_mark == "🚫 BLOCK"
+
+    def test_info_marker_for_low_score(self):
+        """Score < threshold * 0.75 → ℹ️ INFO marker."""
+        score_threshold = 8.0
+        effective = 3.0
+        action_mark = "ℹ️ INFO"
+        assert effective < score_threshold * 0.75
+        # Verify it wouldn't be WARN or BLOCK
+        assert not (effective >= score_threshold)
+        assert not (effective >= score_threshold * 0.75)

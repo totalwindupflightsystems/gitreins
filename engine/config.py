@@ -71,6 +71,10 @@ class GitReinsDefaults:
     commit_audit_review_suggest_fix: bool = True
     commit_audit_review_max_tokens: int = 2048
 
+    # ── Commit review scoring (GR-066: CVE-style) ──
+    commit_audit_review_score_threshold: float = 8.0
+    commit_audit_review_score_offset: float = 1.0
+
     # ── Update checking ──
     check_for_updates: bool = True
     update_check_ttl_hours: float = 24.0  # re-check after this many hours
@@ -166,6 +170,13 @@ class GitReinsDefaults:
             commit_audit_review_max_tokens=int(defaults.get(
                 "commit_audit", {}).get("review_max_tokens", self.commit_audit_review_max_tokens
             )),
+            # Scoring (GR-066)
+            commit_audit_review_score_threshold=float(defaults.get(
+                "commit_audit", {}).get("review_score_threshold", self.commit_audit_review_score_threshold
+            )),
+            commit_audit_review_score_offset=float(defaults.get(
+                "commit_audit", {}).get("review_score_offset", self.commit_audit_review_score_offset
+            )),
             check_for_updates=bool(defaults.get(
                 "check_for_updates", self.check_for_updates
             )),
@@ -234,6 +245,8 @@ class GitReinsDefaults:
                 "review_severity": self.commit_audit_review_severity,
                 "review_suggest_fix": self.commit_audit_review_suggest_fix,
                 "review_max_tokens": self.commit_audit_review_max_tokens,
+                "review_score_threshold": self.commit_audit_review_score_threshold,
+                "review_score_offset": self.commit_audit_review_score_offset,
             },
             "check_for_updates": self.check_for_updates,
             "update_check_ttl": f"{int(self.update_check_ttl_hours)}h",

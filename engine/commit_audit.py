@@ -73,11 +73,13 @@ For code with issues:
 {
   "valid": false,
   "summary": "Brief overall assessment (1 sentence).",
+  "overall_score": 8.5,
   "issues": [
     {
       "file": "relative/path/file.py",
       "line": 42,
       "severity": "critical|high|medium|low|info",
+      "score": 9.0,
       "category": "bugs|security|anti_patterns|style|performance",
       "title": "Short issue title (5-10 words)",
       "description": "What's wrong and why it matters.",
@@ -85,6 +87,20 @@ For code with issues:
     }
   ]
 }
+
+**CVE-Style Severity Scoring (1-10 numeric):**
+
+Each issue MUST include a numeric ``score`` (1.0–10.0) reflecting real-world impact:
+
+| Score Range | Severity Label | Description |
+|:-----------:|:--------------:|-------------|
+| 9.0–10.0 | critical | Remote code execution, data breach, auth bypass, production outage guaranteed. |
+| 7.0–8.9  | high | User-visible bug, data corruption, security vulnerability with known exploit pattern, incident-likely. |
+| 4.0–6.9  | medium | Code smell, anti-pattern, maintenance burden, potential future bug, tech debt. |
+| 1.0–3.9  | low | Style nit, naming convention, minor readability improvement, informational. |
+| 0.0       | info | Observation — not a problem, just something to be aware of. |
+
+The ``overall_score`` MUST equal the highest single issue score in the report (worst case). If no issues: ``overall_score = 0.0``.
 
 **Review Categories (which ones to check are passed in the prompt):**
 
@@ -302,7 +318,7 @@ class CommitAuditResult:
 
 @dataclass
 class ReviewIssue:
-    """A single issue found during code review (GR-065)."""
+    """A single issue found during code review (GR-065, GR-066)."""
     file: str
     line: int
     severity: str   # critical|high|medium|low|info
@@ -310,6 +326,7 @@ class ReviewIssue:
     title: str
     description: str = ""
     suggestion: str = ""
+    score: float = 0.0  # GR-066: CVE-style 1-10 score
 
     @classmethod
     def from_dict(cls, d: dict) -> "ReviewIssue":
@@ -321,12 +338,13 @@ class ReviewIssue:
             title=d.get("title", ""),
             description=d.get("description", ""),
             suggestion=d.get("suggestion", ""),
+            score=float(d.get("score", 0.0)),
         )
 
 
 @dataclass
 class CommitReviewResult:
-    """Result of a CodeRabbit-style commit review (GR-065)."""
+    """Result of a CodeRabbit-style commit review (GR-065, GR-066)."""
     valid: bool
     summary: str = ""
     issues: list[ReviewIssue] = field(default_factory=list)
@@ -334,6 +352,7 @@ class CommitReviewResult:
     message_issues: list[str] = field(default_factory=list)
     suggested_message: str = ""
     iterations_used: int = 0
+    overall_score: float = 0.0  # GR-066: worst issue score, 0 if no issues
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -359,6 +378,8 @@ class CommitAuditor:
         review_checks: dict | None = None,
         review_severity: str = "standard",
         review_suggest_fix: bool = True,
+        review_score_threshold: float = 8.0,
+        review_score_offset: float = 1.0,
     ):
         self.llm = llm
         self.workdir = os.path.abspath(workdir)
@@ -372,6 +393,8 @@ class CommitAuditor:
         }
         self.review_severity = review_severity
         self.review_suggest_fix = review_suggest_fix
+        self.review_score_threshold = review_score_threshold
+        self.review_score_offset = review_score_offset
 
     # ── Public API ──────────────────────────────────────────────
 
@@ -553,6 +576,9 @@ class CommitAuditor:
                 )
 
         issues = [ReviewIssue.from_dict(i) for i in data.get("issues", [])]
+        overall_score = float(data.get("overall_score", 0.0))
+        if not overall_score and issues:
+            overall_score = max(i.score for i in issues)
         return CommitReviewResult(
             valid=data.get("valid", True),
             summary=data.get("summary", ""),
@@ -561,6 +587,7 @@ class CommitAuditor:
             message_issues=data.get("message_issues", []),
             suggested_message=data.get("suggested_message", ""),
             iterations_used=iteration,
+            overall_score=overall_score,
         )
 
     def _run_review(self, message: str, diff: str | None = None) -> CommitAuditResult:
@@ -568,7 +595,7 @@ class CommitAuditor:
         rev = self.review(message, diff)
         return CommitAuditResult(
             valid=rev.valid and rev.message_valid,
-            issues=[f"[{i.severity}][{i.category}] {i.file}:{i.line}: {i.title}" for i in rev.issues],
+            issues=[f"[{i.severity}][{i.category}] {i.file}:{i.line}: {i.title} (score: {i.score:.1f})" for i in rev.issues],
             suggested_message=rev.suggested_message,
             iterations_used=rev.iterations_used,
             review_issues=[
@@ -580,6 +607,7 @@ class CommitAuditor:
                     "title": i.title,
                     "description": i.description,
                     "suggestion": i.suggestion,
+                    "score": i.score,
                 }
                 for i in rev.issues
             ],
