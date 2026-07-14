@@ -556,7 +556,7 @@ class TestFixtureFiles:
         assert len(matches) == 0
 
     def test_negative_shell_vars_clean(self):
-        matches = _scan_file("tests/fixtures/secrets/negative_shell_vars.py")
+        matches = _scan_file("tests/fixtures/secrets/negative_shell_vars.sh")
         assert len(matches) == 0
 
     def test_negative_template_vars_clean(self):

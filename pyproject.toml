@@ -56,6 +56,9 @@ include = ["engine*", "gitreins*", "gitreins_mcp*"]
 testpaths = ["tests"]
 pythonpath = ["."]
 
+[tool.mypy]
+exclude = ["^tests/", "^website/", "^sandbox/"]
+
 [tool.ruff]
 line-length = 100
 
