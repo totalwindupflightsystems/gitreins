@@ -16,6 +16,8 @@ Usage:
 """
 
 import argparse
+import contextlib
+import io
 import logging
 import os
 import sys
@@ -847,10 +849,17 @@ def _persist_result(workdir: str, task, result) -> None:
 
 def cmd_report(args):
     """Show recent verdict history."""
-    from engine.persist import build_report
+    from engine.persist import build_report, VerdictPersister
 
     workdir = get_workdir()
     n = args.n if hasattr(args, "n") else 10
+
+    if getattr(args, "json_output", False):
+        from engine.evidence import dumps_evidence, report_evidence
+        persister = VerdictPersister(workdir)
+        entries = persister.list_verdicts(n=n) if persister.enabled else []
+        print(dumps_evidence(report_evidence(entries, persister.storage_mode)))
+        return
 
     # Interactive TUI mode
     if args.interactive:
@@ -931,17 +940,26 @@ def _cmd_report_tui(workdir: str, n: int = 20):
 
 
 def cmd_guard_run(args):
-    _check_for_updates()
+    if not getattr(args, "json_output", False):
+        _check_for_updates()
     from engine.guard_manager import GuardManager
     workdir = get_workdir()
     config = load_config(workdir)
-    gm = GuardManager(workdir, config=config)
+    scope = getattr(args, "scope", "staged")
+    gm = GuardManager(workdir, config=config, scope=scope)
     result = gm.run_all(force_dead_code=getattr(args, 'dead_code', False))
+
+    if getattr(args, "json_output", False):
+        from engine.evidence import dumps_evidence, guard_evidence
+        print(dumps_evidence(guard_evidence(result, scope)))
+        if not result.passed:
+            sys.exit(1)
+        return
 
     # Build mode note
     mode = gm.test_mode
     extra = result.extra
-    mode_note = f"  (test mode: {mode}"
+    mode_note = f"  (test mode: {mode}, scope: {scope}"
     if extra.get("test_targets"):
         mode_note += f", {extra['test_targets']} test file(s)"
     elif extra.get("test_targets") is None and mode == "diff":
@@ -958,25 +976,57 @@ def cmd_guard_run(args):
 
 
 def cmd_judge(args):
-    _check_for_updates()
-    from engine.task_manager import TaskManager
+    if not getattr(args, "json_output", False):
+        _check_for_updates()
+    from engine.task_manager import Task, TaskManager
     from engine.llm import LLMClient
     from engine.judge import Judge
 
     workdir = get_workdir()
-    tm = TaskManager(workdir)
-    task = tm.get(args.id)
-    if not task:
-        print(f"Task not found: {args.id}")
-        sys.exit(1)
+    ephemeral = bool(getattr(args, "ephemeral", False))
+    scope = getattr(args, "scope", "staged")
+
+    if ephemeral:
+        task_id = args.id or "rorca-ephemeral"
+        title = (getattr(args, "title", None) or "Ephemeral Rorca evaluation").strip()
+        criteria = list(getattr(args, "criteria", []) or [])
+        if not criteria:
+            print("Ephemeral judge requires at least one --criterion", file=sys.stderr)
+            sys.exit(2)
+        if len(task_id) > 128 or len(title) > 512 or len(criteria) > 50 or any(len(item) > 2000 for item in criteria):
+            print("Ephemeral task input exceeds contract limits", file=sys.stderr)
+            sys.exit(2)
+        task = Task(id=task_id, title=title, criteria=criteria, status="in_progress")
+    else:
+        if not args.id:
+            print("Task id is required unless --ephemeral is used", file=sys.stderr)
+            sys.exit(2)
+        tm = TaskManager(workdir)
+        task = tm.get(args.id)
+        if not task:
+            print(f"Task not found: {args.id}")
+            sys.exit(1)
 
     llm = LLMClient()
-    judge = Judge(llm, workdir)
-    result = judge.evaluate_task(task)
-    print(result.summary)
+    judge = Judge(llm, workdir, scope=scope)
+    if getattr(args, "json_output", False):
+        # Legacy evaluators print progress. Keep stdout as one parseable JSON
+        # document for automation consumers.
+        with contextlib.redirect_stdout(io.StringIO()):
+            result = judge.evaluate_task(task)
+        from engine.evidence import dumps_evidence, judge_evidence
+        print(dumps_evidence(judge_evidence(result, task, scope, ephemeral)))
+    else:
+        result = judge.evaluate_task(task)
+        print(result.summary)
 
-    # Persist verdict
-    _persist_result(workdir, task, result)
+    # Ephemeral judging intentionally never creates task/history files and never
+    # invokes VerdictPersister (which may maintain a git history branch).
+    if not ephemeral:
+        _persist_result(workdir, task, result)
+
+    if not result.passed:
+        sys.exit(1)
 
 
 def cmd_commit(args):
@@ -1141,10 +1191,17 @@ def main():
     # guard
     guard_p = sub.add_parser("guard", help="Run Tier 1 guards")
     guard_p.add_argument("--dead-code", action="store_true", help="Enable Python dead-code detection (overrides config)")
+    guard_p.add_argument("--scope", choices=["staged", "working-tree"], default="staged", help="Select staged-only or staged+unstaged+untracked changes")
+    guard_p.add_argument("--json", dest="json_output", action="store_true", help="Emit bounded GitReins evidence v1 JSON")
 
     # judge
     judge_p = sub.add_parser("judge", help="Evaluate a task")
-    judge_p.add_argument("id")
+    judge_p.add_argument("id", nargs="?")
+    judge_p.add_argument("--scope", choices=["staged", "working-tree"], default="staged", help="Select the guard change scope")
+    judge_p.add_argument("--json", dest="json_output", action="store_true", help="Emit bounded GitReins evidence v1 JSON")
+    judge_p.add_argument("--ephemeral", action="store_true", help="Evaluate inline task criteria without task/history/git persistence")
+    judge_p.add_argument("--title", help="Inline task title for --ephemeral")
+    judge_p.add_argument("--criterion", dest="criteria", action="append", default=[], help="Inline acceptance criterion (repeatable)")
 
     # commit
     commit_p = sub.add_parser("commit", help="Commit with guard checks")
@@ -1162,8 +1219,9 @@ def main():
 
     # report
     report_p = sub.add_parser("report", help="Show verdict history")
-    report_p.add_argument("-n", type=int, default=10, help="Number of recent verdicts to show")
+    report_p.add_argument("-n", type=int, choices=range(1, 51), default=10, help="Number of recent verdicts to show (1-50)")
     report_p.add_argument("--interactive", "-i", action="store_true", help="Interactive TUI mode")
+    report_p.add_argument("--json", dest="json_output", action="store_true", help="Emit bounded GitReins evidence v1 JSON")
 
     args = parser.parse_args()
 

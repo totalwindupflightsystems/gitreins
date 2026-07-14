@@ -64,7 +64,8 @@ class TestWorkdirDetection:
         from gitreins.cli import get_workdir
         workdir = get_workdir()
         assert os.path.isdir(workdir)
-        assert os.path.isdir(os.path.join(workdir, ".git"))
+        # Linked worktrees use a .git pointer file; primary checkouts use a directory.
+        assert os.path.exists(os.path.join(workdir, ".git"))
 
     def test_get_workdir_outside_git_repo(self, tmp_path):
         """Outside git repo, git rev-parse fails, returns os.getcwd()."""

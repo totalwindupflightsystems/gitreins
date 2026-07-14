@@ -322,6 +322,14 @@ class AgenticEvaluator:
             for line in unstaged.stdout.strip().splitlines():
                 if line:
                     changed_files.add(line)
+            # Non-ignored untracked files are part of working-tree scope.
+            untracked = subprocess.run(
+                ["git", "ls-files", "--others", "--exclude-standard"],
+                capture_output=True, text=True, timeout=10, cwd=self.workdir,
+            )
+            for line in untracked.stdout.strip().splitlines():
+                if line:
+                    changed_files.add(line)
         except Exception:
             pass
 
@@ -352,7 +360,23 @@ class AgenticEvaluator:
                     diff_lines.append(f"... [truncated at 500 lines, {len(diff_text.splitlines())} total]")
                 lines.append("\n".join(diff_lines))
             else:
-                lines.append("(no changes detected)")
+                lines.append("(no tracked diff detected)")
+            # Git diff omits untracked content. Include a bounded snapshot so an
+            # ephemeral working-tree judge can evaluate newly created files.
+            tracked_names: set[str] = set()
+            for args in (["git", "diff", "--cached", "--name-only"], ["git", "diff", "--name-only"]):
+                result = subprocess.run(
+                    args, capture_output=True, text=True, timeout=10, cwd=self.workdir,
+                )
+                tracked_names.update(result.stdout.strip().splitlines())
+            untracked_names = sorted(changed_files - tracked_names)[:10]
+            for fname in untracked_names:
+                fpath = os.path.join(self.workdir, fname)
+                if not os.path.isfile(fpath) or os.path.getsize(fpath) > 500_000:
+                    continue
+                with open(fpath, "r", errors="replace") as handle:
+                    untracked_lines = handle.read().splitlines()[:200]
+                lines.extend([f"### Untracked: {fname}", "```", *untracked_lines, "```"])
             lines.append("")
 
         else:
@@ -423,7 +447,11 @@ class AgenticEvaluator:
         allowed: set[str] = set()
 
         try:
-            for args in (["git", "diff", "--cached", "--name-only"], ["git", "diff", "--name-only"]):
+            for args in (
+                ["git", "diff", "--cached", "--name-only"],
+                ["git", "diff", "--name-only"],
+                ["git", "ls-files", "--others", "--exclude-standard"],
+            ):
                 result = subprocess.run(
                     args, capture_output=True, text=True,
                     timeout=10, cwd=self.workdir,
@@ -1103,9 +1131,14 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 ["git", "diff", "--stat"],
                 capture_output=True, text=True, timeout=10, cwd=self.workdir,
             )
+            untracked = subprocess.run(
+                ["git", "ls-files", "--others", "--exclude-standard"],
+                capture_output=True, text=True, timeout=10, cwd=self.workdir,
+            )
             return {
                 "staged": staged.stdout.strip() or "(no staged changes)",
                 "unstaged": unstaged.stdout.strip() or "(no unstaged changes)",
+                "untracked": untracked.stdout.strip() or "(no untracked changes)",
             }
         except Exception as e:
             return {"error": str(e)}
