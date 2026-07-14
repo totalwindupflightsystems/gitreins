@@ -239,9 +239,9 @@ class TestLspHeaderParsing:
 
 # ── Integration tests with real pylsp server ────────────────────
 
-pytestmark_integration = pytest.mark.skipif(
-    shutil.which("pylsp") is None,
-    reason="pylsp not installed — integration test skipped",
+real_lsp_integration = pytest.mark.skipif(
+    os.getenv("GITREINS_REAL_LSP_TESTS") != "1",
+    reason="GITREINS_REAL_LSP_TESTS=1 not set — real LSP integration test skipped",
 )
 
 
@@ -251,6 +251,7 @@ def lsp_workdir(tmp_path):
     return str(tmp_path)
 
 
+@real_lsp_integration
 class TestLspIntegration:
     """Integration tests that exercise real pylsp server communication.
 
@@ -362,6 +363,7 @@ class TestLspJudgeIntegration:
         subprocess.run(["git", "config", "user.name", "Test"],
                        cwd=workdir, capture_output=True)
 
+    @real_lsp_integration
     def test_lsp_roundtrip_format_parse(self, tmp_path):
         """Real pylsp output → formatted like GuardManager → parsed back by Judge.
 
@@ -597,6 +599,7 @@ edition = "2021"
             diags = run_lsp_check("rust-analyzer", lsp_workdir, files=[path])
         assert diags == []
 
+    @real_lsp_integration
     def test_rust_analyzer_detects_type_error(self, lsp_workdir):
         """rust-analyzer detects type mismatches when available."""
         if shutil.which("rust-analyzer") is None:
@@ -611,6 +614,7 @@ edition = "2021"
             f"No type error diagnostics from rust-analyzer: {messages}"
         )
 
+    @real_lsp_integration
     def test_rust_analyzer_clean_code_no_diagnostics(self, lsp_workdir):
         """Clean Rust code produces no error diagnostics."""
         if shutil.which("rust-analyzer") is None:

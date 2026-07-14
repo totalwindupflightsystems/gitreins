@@ -418,8 +418,8 @@ class TestGuardRunMCP:
 class TestJudgeEvaluateMCP:
     """Test judge.evaluate — step-2-3-1-3."""
 
-    def test_judge_evaluate_nonexistent_task_returns_error(self, mcp_server):
-        """judge.evaluate on nonexistent task returns error response."""
+    def test_judge_evaluate_without_llm_fails_closed(self, mcp_server):
+        """judge.evaluate fails closed before evaluation when no LLM is configured."""
         response = mcp_server.handle_request({
             "jsonrpc": "2.0",
             "id": 1,
@@ -428,8 +428,7 @@ class TestJudgeEvaluateMCP:
         })
         text = response["result"]["content"][0]["text"]
         result = json.loads(text)
-        assert "error" in result
-        assert "Task not found" in result["error"]
+        assert result == {"error": "LLM not configured — set GITREINS_LLM_API_KEY"}
 
     def test_judge_evaluate_existing_task(self, mcp_server, tmp_workdir):
         """judge.evaluate on existing task returns response with error or result.

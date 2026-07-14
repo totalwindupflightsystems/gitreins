@@ -332,6 +332,19 @@ def _tool_supports_language(tool: str, lang: str) -> bool:
     return lang in supported
 
 
+def select_lsp_files(tool: str, workdir: str, files: list[str]) -> list[str]:
+    """Return existing files supported by an LSP tool, as absolute paths."""
+    selected: list[str] = []
+    for item in files:
+        full = item if os.path.isabs(item) else os.path.join(workdir, item)
+        if not os.path.isfile(full):
+            continue
+        lang = _LANGUAGE_MAP.get(os.path.splitext(item)[1].lower())
+        if lang and _tool_supports_language(tool, lang):
+            selected.append(full)
+    return selected
+
+
 def run_lsp_check(
     tool: str,
     workdir: str,

@@ -21,16 +21,17 @@ def is_go_project(workdir: str) -> bool:
     return os.path.isfile(os.path.join(workdir, "go.mod"))
 
 
-def check_go_lint(workdir: str) -> GoGuardResult:
-    """Run go vet on staged Go files. Fall back to golangci-lint if available."""
-    # Get staged Go files
-    staged = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-        capture_output=True, text=True, timeout=10, cwd=workdir
-    )
-    go_files = [f for f in staged.stdout.strip().split("\n") if f.endswith(".go")]
+def check_go_lint(workdir: str, changed_files: list[str] | None = None) -> GoGuardResult:
+    """Run Go lint checks for the selected change scope."""
+    if changed_files is None:
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+            capture_output=True, text=True, timeout=10, cwd=workdir
+        )
+        changed_files = staged.stdout.strip().split("\n")
+    go_files = [f for f in changed_files if f.endswith(".go")]
     if not go_files:
-        return GoGuardResult(name="go_lint", passed=True, output="No Go files staged")
+        return GoGuardResult(name="go_lint", passed=True, output="No Go files in scope")
 
     # Try golangci-lint first
     try:
@@ -60,15 +61,17 @@ def check_go_lint(workdir: str) -> GoGuardResult:
         return GoGuardResult(name="go_lint", passed=False, error=str(e))
 
 
-def check_go_tests(workdir: str) -> GoGuardResult:
-    """Run go test on staged Go files."""
-    staged = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-        capture_output=True, text=True, timeout=10, cwd=workdir
-    )
-    go_files = [f for f in staged.stdout.strip().split("\n") if f.endswith(".go")]
+def check_go_tests(workdir: str, changed_files: list[str] | None = None) -> GoGuardResult:
+    """Run Go tests when Go files are present in the selected change scope."""
+    if changed_files is None:
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+            capture_output=True, text=True, timeout=10, cwd=workdir
+        )
+        changed_files = staged.stdout.strip().split("\n")
+    go_files = [f for f in changed_files if f.endswith(".go")]
     if not go_files:
-        return GoGuardResult(name="go_tests", passed=True, output="No Go files staged")
+        return GoGuardResult(name="go_tests", passed=True, output="No Go files in scope")
 
     try:
         result = subprocess.run(
@@ -87,15 +90,17 @@ def check_go_tests(workdir: str) -> GoGuardResult:
         return GoGuardResult(name="go_tests", passed=False, error=str(e))
 
 
-def check_go_build(workdir: str) -> GoGuardResult:
-    """Run go build on staged Go files to catch compile errors."""
-    staged = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-        capture_output=True, text=True, timeout=10, cwd=workdir
-    )
-    go_files = [f for f in staged.stdout.strip().split("\n") if f.endswith(".go")]
+def check_go_build(workdir: str, changed_files: list[str] | None = None) -> GoGuardResult:
+    """Run Go build when Go files are present in the selected change scope."""
+    if changed_files is None:
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+            capture_output=True, text=True, timeout=10, cwd=workdir
+        )
+        changed_files = staged.stdout.strip().split("\n")
+    go_files = [f for f in changed_files if f.endswith(".go")]
     if not go_files:
-        return GoGuardResult(name="go_build", passed=True, output="No Go files staged")
+        return GoGuardResult(name="go_build", passed=True, output="No Go files in scope")
 
     try:
         result = subprocess.run(

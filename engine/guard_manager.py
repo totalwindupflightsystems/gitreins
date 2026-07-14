@@ -24,7 +24,7 @@ import os
 import re
 import subprocess
 from engine.guards import check_go_lint, check_go_tests, check_go_build
-from engine.lsp import run_lsp_check
+from engine.lsp import run_lsp_check, select_lsp_files
 from engine.types import GuardResult, Tier1Result
 
 logger = logging.getLogger("gitreins.guard")
@@ -44,7 +44,7 @@ _FORCE_FULL_TEST_GLOBS = [
 ]
 
 
-def _discover_test_targets(workdir: str) -> list[str] | None:
+def _discover_test_targets(workdir: str, scope: str = "staged") -> list[str] | None:
     """Return a list of test file paths to run, or None for full suite.
 
     None means "full suite" — returned when:
@@ -54,13 +54,12 @@ def _discover_test_targets(workdir: str) -> list[str] | None:
 
     Returns absolute paths to test files.
     """
-    # Get staged files
-    staged = _get_staged_files(workdir)
-    if not staged:
+    changed = _get_changed_files(workdir, scope)
+    if not changed:
         return None
 
     # Check force-full triggers
-    for staged_file in staged:
+    for staged_file in changed:
         for glob in _FORCE_FULL_TEST_GLOBS:
             if fnmatch.fnmatch(staged_file, glob):
                 logger.debug("Force-full trigger: %s matches %s", staged_file, glob)
@@ -68,7 +67,7 @@ def _discover_test_targets(workdir: str) -> list[str] | None:
 
     # Map staged source files to test files using basename matching
     test_files: set[str] = set()
-    for staged_file in staged:
+    for staged_file in changed:
         # If a test file itself changed, always include it
         basename = os.path.basename(staged_file)
         if basename.startswith("test_") and basename.endswith(".py"):
@@ -127,13 +126,43 @@ def _get_staged_files(workdir: str) -> list[str]:
             )
         else:
             result = subprocess.run(
-                ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+                ["git", "diff", "--cached", "--name-only", "--diff-filter=ACMRD"],
                 capture_output=True, text=True, timeout=10,
                 cwd=workdir,
             )
-        return [f.strip() for f in result.stdout.split("\n") if f.strip()]
+        return sorted({f.strip() for f in result.stdout.split("\n") if f.strip()})
     except Exception:
         return []
+
+
+def _get_working_tree_files(workdir: str) -> list[str]:
+    """Return staged, unstaged, and untracked files without changing the index."""
+    files: set[str] = set()
+    commands = (
+        ["git", "diff", "--name-only", "--diff-filter=ACMRD", "HEAD"],
+        ["git", "ls-files", "--others", "--exclude-standard"],
+    )
+    for command in commands:
+        try:
+            result = subprocess.run(
+                command, capture_output=True, text=True, timeout=10, cwd=workdir,
+            )
+            if result.returncode == 0:
+                files.update(line.strip() for line in result.stdout.splitlines() if line.strip())
+        except Exception:
+            continue
+    # Repositories without an initial commit have no HEAD. Include index files
+    # as a fallback while still avoiding all index writes.
+    files.update(_get_staged_files(workdir))
+    return sorted(files)
+
+
+def _get_changed_files(workdir: str, scope: str) -> list[str]:
+    if scope == "staged":
+        return _get_staged_files(workdir)
+    if scope == "working-tree":
+        return _get_working_tree_files(workdir)
+    raise ValueError("scope must be 'staged' or 'working-tree'")
 
 
 def _build_diff_test_command(test_command: str, test_files: list[str], workdir: str) -> str:
@@ -184,8 +213,16 @@ def _load_guard_config(workdir: str) -> dict:
 class GuardManager:
     """Run static checks against staged changes."""
 
-    def __init__(self, workdir: str = ".", config: dict | None = None):
+    def __init__(
+        self,
+        workdir: str = ".",
+        config: dict | None = None,
+        scope: str = "staged",
+    ):
         self.workdir = os.path.abspath(workdir)
+        if scope not in ("staged", "working-tree"):
+            raise ValueError("scope must be 'staged' or 'working-tree'")
+        self.scope = scope
         if config is None:
             config = _load_guard_config(self.workdir)
         self.config = config
@@ -213,7 +250,7 @@ class GuardManager:
         self._is_ruby = os.path.isfile(os.path.join(self.workdir, "Gemfile"))
         self._is_php = os.path.isfile(os.path.join(self.workdir, "composer.json"))
         self._has_sql = any(
-            f.endswith(".sql") for f in _get_staged_files(self.workdir)
+            f.endswith(".sql") for f in self.changed_files
         ) or os.path.isdir(os.path.join(self.workdir, "migrations"))
 
     def run_all(self, force_dead_code: bool = False) -> Tier1Result:
@@ -261,13 +298,14 @@ class GuardManager:
         passed = all(r.passed for r in results)
         extra = {
             "test_mode": self._test_mode,
+            "scope": self.scope,
+            "changed_count": len(self.changed_files),
         }
         if self._test_mode == "diff" and self._enabled.get("tests"):
-            staged = _get_staged_files(self.workdir)
-            targets = _discover_test_targets(self.workdir)
+            targets = _discover_test_targets(self.workdir, self.scope)
             if targets:
                 extra["test_targets"] = len(targets)
-                extra["staged_count"] = len(staged)
+                extra["changed_count"] = len(self.changed_files)
             else:
                 extra["test_targets"] = None  # full suite triggered
         return Tier1Result(passed=passed, results=results, extra=extra)
@@ -276,11 +314,21 @@ class GuardManager:
     def test_mode(self) -> str:
         return self._test_mode
 
+    @property
+    def changed_files(self) -> list[str]:
+        """Read the selected scope on demand so retries see newly written files."""
+        return _get_changed_files(self.workdir, self.scope)
+
     def _check_secrets(self) -> GuardResult:
-        """Scan staged changes for secrets using gitleaks or built-in scanner."""
+        """Scan selected changes for secrets using gitleaks or built-in scanner."""
+        # gitleaks --no-git scans the entire checkout, not a bounded change set.
+        # Use the built-in file-scoped scanner for working-tree automation.
+        if self.scope == "working-tree":
+            return self._builtin_secrets_scan()
+
         # Try gitleaks first
         try:
-            cmd = ["gitleaks", "detect", "--source", ".", "--no-git", "--verbose"]
+            cmd = ["gitleaks", "protect", "--staged", "--redact=100", "--no-banner"]
             config_path = os.path.join(self.workdir, ".gitleaks.toml")
             if os.path.isfile(config_path):
                 cmd.extend(["--config", config_path])
@@ -359,13 +407,13 @@ class GuardManager:
 
         findings = []
         try:
-            # Get staged files
-            staged_files = _get_staged_files(self.workdir)
+            changed_files = self.changed_files
 
-            if not staged_files:
-                return GuardResult(name="secrets", passed=True, output="No staged files to scan")
+            if not changed_files:
+                label = "No staged files to scan" if self.scope == "staged" else "No files in scope to scan"
+                return GuardResult(name="secrets", passed=True, output=label)
 
-            for fpath in staged_files:
+            for fpath in changed_files:
                 full = os.path.join(self.workdir, fpath)
                 if not os.path.isfile(full):
                     continue
@@ -407,7 +455,7 @@ class GuardManager:
                     passed=False,
                     output="Potential secrets found:\n" + "\n".join(findings[:20]),
                 )
-            return GuardResult(name="secrets", passed=True, output=f"Scanned {len(staged_files)} files — clean")
+            return GuardResult(name="secrets", passed=True, output=f"Scanned {len(changed_files)} files — clean")
 
         except Exception as e:
             logger.exception("Secrets scan failed")
@@ -418,11 +466,9 @@ class GuardManager:
         linters = ["ruff", "flake8"]
         for linter in linters:
             try:
-                # Get staged Python files
-                staged_files = _get_staged_files(self.workdir)
-                py_files = [f for f in staged_files if f.endswith(".py")]
+                py_files = [f for f in self.changed_files if f.endswith(".py")]
                 if not py_files:
-                    return GuardResult(name="lint", passed=True, output="No Python files staged")
+                    return GuardResult(name="lint", passed=True, output="No Python files in scope")
 
                 lint_result = subprocess.run(
                     [linter, "check", *py_files] if linter == "ruff" else [linter, *py_files],
@@ -451,13 +497,12 @@ class GuardManager:
         """
         test_command = self.config.get("guards", {}).get("test_command", "pytest -x --tb=short")
 
-        # Skip if nothing is staged — nothing to test
-        staged = _get_staged_files(self.workdir)
-        if not staged:
-            return GuardResult(name="tests", passed=True, output="No files staged — skipped")
+        # Skip if nothing changed in the selected scope — nothing to test
+        if not self.changed_files:
+            return GuardResult(name="tests", passed=True, output="No files in scope — skipped")
 
         if self._test_mode == "diff":
-            test_files = _discover_test_targets(self.workdir)
+            test_files = _discover_test_targets(self.workdir, self.scope)
             if test_files is not None:
                 if not test_files:
                     # No test files map to the changed sources — skip
@@ -684,7 +729,8 @@ class GuardManager:
 
         for tool in self._lsp_tools:
             try:
-                diags = run_lsp_check(tool, self.workdir)
+                files = select_lsp_files(tool, self.workdir, self.changed_files)
+                diags = run_lsp_check(tool, self.workdir, files=files)
             except Exception as exc:
                 logger.warning("lsp %s failed: %s", tool, exc)
                 continue
@@ -721,15 +767,15 @@ class GuardManager:
 
     def _check_go_lint(self) -> GuardResult:
         """Run Go lint checks (delegates to engine.guards)."""
-        r = check_go_lint(self.workdir)
+        r = check_go_lint(self.workdir, self.changed_files)
         return GuardResult(name=r.name, passed=r.passed, output=r.output, error=r.error)
 
     def _check_go_tests(self) -> GuardResult:
         """Run Go tests (delegates to engine.guards)."""
-        r = check_go_tests(self.workdir)
+        r = check_go_tests(self.workdir, self.changed_files)
         return GuardResult(name=r.name, passed=r.passed, output=r.output, error=r.error)
 
     def _check_go_build(self) -> GuardResult:
         """Run Go build (delegates to engine.guards)."""
-        r = check_go_build(self.workdir)
+        r = check_go_build(self.workdir, self.changed_files)
         return GuardResult(name=r.name, passed=r.passed, output=r.output, error=r.error)

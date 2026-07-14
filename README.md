@@ -47,9 +47,14 @@ gitreins task complete <id> [--force]
 gitreins task list [--status pending|in_progress|complete]
 gitreins task delete <id>
 gitreins judge <id>                   # Evaluate a task
+gitreins guard --scope working-tree --json  # Bounded/redacted evidence v1
+gitreins judge <id> --ephemeral --title <title> --criterion <text> --scope working-tree --json
+gitreins report --json                # Versioned history evidence
 gitreins commit <message>             # Commit with guard checks
 gitreins mcp-server                   # Run MCP stdio server (for AI agents)
 ```
+
+Automation consumers should use the [GitReins evidence v1 contract](docs/evidence-contract-v1.md). `working-tree` includes staged, unstaged, and non-ignored untracked files without mutating the index. `judge --ephemeral` evaluates inline criteria without task, history, stash, or branch persistence.
 
 ---
 
