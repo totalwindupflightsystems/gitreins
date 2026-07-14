@@ -446,3 +446,156 @@ class TestExtendedLLM:
         monkeypatch.setenv("OPENAI_API_KEY", "secondary")
         client = LLMClient(base_url="https://test.local/v1")
         assert client.api_key == "primary"
+
+
+# ── GR-068: DeepSeek thinking mode control + cache telemetry ──
+
+
+class TestGR068ThinkingMode:
+    """Test DeepSeek thinking/reasoning mode control (GR-068)."""
+
+    def test_is_deepseek_from_model_name(self):
+        """_is_deepseek() returns True when model contains 'deepseek'."""
+        c = LLMClient(base_url="https://api.openai.com/v1", api_key="k", model="deepseek-v4-flash")
+        assert c._is_deepseek() is True
+
+    def test_is_deepseek_from_provider(self):
+        """_is_deepseek() returns True when provider is deepseek."""
+        # URL-based detection
+        c = LLMClient(base_url="https://api.deepseek.com/v1", api_key="k")
+        assert c._is_deepseek() is True
+
+    def test_is_not_deepseek(self):
+        """_is_deepseek() returns False for non-DeepSeek model/provider."""
+        c = LLMClient(base_url="https://api.openai.com/v1", api_key="k", model="gpt-4")
+        assert c._is_deepseek() is False
+
+    def test_reasoning_default_disabled(self):
+        """llm_reasoning defaults to 'disabled'."""
+        c = LLMClient(base_url="https://api.deepseek.com/v1", api_key="k")
+        assert c.llm_reasoning == "disabled"
+
+    def test_reasoning_explicit_enabled(self):
+        """llm_reasoning can be set to 'enabled' via constructor."""
+        c = LLMClient(base_url="https://api.deepseek.com/v1", api_key="k", llm_reasoning="enabled")
+        assert c.llm_reasoning == "enabled"
+
+    def test_reasoning_env_var(self, monkeypatch):
+        """GITREINS_LLM_REASONING env var controls reasoning mode."""
+        monkeypatch.setenv("GITREINS_LLM_REASONING", "enabled")
+        c = LLMClient(base_url="https://api.deepseek.com/v1", api_key="k")
+        assert c.llm_reasoning == "enabled"
+
+    def test_thinking_disabled_in_payload(self, monkeypatch):
+        """When reasoning=disabled, payload includes thinking.type=disabled for DeepSeek."""
+        monkeypatch.delenv("GITREINS_LLM_BASE_URL", raising=False)
+        c = LLMClient(base_url="https://api.deepseek.com/v1", api_key="test-key", llm_reasoning="disabled")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
+        captured = {}
+
+        def _capture(url, **kwargs):
+            captured["json"] = kwargs.get("json", {})
+            return mock_resp
+
+        with patch("requests.post", side_effect=_capture):
+            c.chat([{"role": "user", "content": "hi"}])
+        assert "thinking" in captured["json"]
+        assert captured["json"]["thinking"] == {"type": "disabled"}
+
+    def test_thinking_enabled_in_payload(self, monkeypatch):
+        """When reasoning=enabled, payload includes thinking.type=enabled for DeepSeek."""
+        monkeypatch.delenv("GITREINS_LLM_BASE_URL", raising=False)
+        c = LLMClient(base_url="https://api.deepseek.com/v1", api_key="test-key", llm_reasoning="enabled")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
+        captured = {}
+
+        def _capture(url, **kwargs):
+            captured["json"] = kwargs.get("json", {})
+            return mock_resp
+
+        with patch("requests.post", side_effect=_capture):
+            c.chat([{"role": "user", "content": "hi"}])
+        assert "thinking" in captured["json"]
+        assert captured["json"]["thinking"] == {"type": "enabled"}
+
+    def test_no_thinking_for_non_deepseek(self, monkeypatch):
+        """No thinking field in payload for non-DeepSeek providers."""
+        monkeypatch.delenv("GITREINS_LLM_BASE_URL", raising=False)
+        c = LLMClient(base_url="https://api.openai.com/v1", api_key="test-key", model="gpt-4")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
+        captured = {}
+
+        def _capture(url, **kwargs):
+            captured["json"] = kwargs.get("json", {})
+            return mock_resp
+
+        with patch("requests.post", side_effect=_capture):
+            c.chat([{"role": "user", "content": "hi"}])
+        assert "thinking" not in captured["json"]
+
+    def test_cache_telemetry_in_usage(self, monkeypatch):
+        """DeepSeek cache hit tokens are captured in LLMUsage."""
+        monkeypatch.delenv("GITREINS_LLM_BASE_URL", raising=False)
+        c = LLMClient(base_url="https://api.deepseek.com/v1", api_key="test-key")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "cached response"}}],
+            "usage": {
+                "prompt_tokens": 100,
+                "prompt_cache_hit_tokens": 5000,
+                "prompt_cache_miss_tokens": 200,
+                "completion_tokens": 50,
+                "total_tokens": 5350,
+            },
+        }
+        with patch("requests.post", return_value=mock_resp):
+            result = c.chat([{"role": "user", "content": "hi"}])
+        assert result.usage is not None
+        assert result.usage.cache_read_tokens == 5000
+        assert result.usage.cache_write_tokens == 200
+        assert result.usage.prompt_tokens == 100
+        # all_input_tokens includes cache
+        assert result.usage.all_input_tokens == 5300  # 100 + 5000 + 200
+
+    def test_cache_telemetry_zero_when_missing(self, monkeypatch):
+        """Cache fields default to 0 when not present in response."""
+        monkeypatch.delenv("GITREINS_LLM_BASE_URL", raising=False)
+        c = LLMClient(base_url="https://api.deepseek.com/v1", api_key="test-key")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "no cache"}}],
+        }
+        with patch("requests.post", return_value=mock_resp):
+            result = c.chat([{"role": "user", "content": "hi"}])
+        assert result.usage is None  # no usage block means None
+
+    def test_anthropic_cache_telemetry(self, monkeypatch):
+        """Anthropic cache tokens parsed from usage block."""
+        monkeypatch.delenv("GITREINS_LLM_BASE_URL", raising=False)
+        c = LLMClient(base_url="https://api.anthropic.com/v1", api_key="test-key")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "content": [{"type": "text", "text": "cached"}],
+            "usage": {
+                "input_tokens": 6000,
+                "output_tokens": 100,
+                "cache_read_input_tokens": 5000,
+                "cache_creation_input_tokens": 200,
+            },
+        }
+        with patch("requests.post", return_value=mock_resp):
+            result = c.chat([{"role": "user", "content": "hi"}])
+        assert result.usage is not None
+        assert result.usage.cache_read_tokens == 5000
+        assert result.usage.cache_write_tokens == 200
+        # Regular input = total - cache
+        assert result.usage.prompt_tokens == 800  # 6000 - 5000 - 200

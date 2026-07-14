@@ -40,6 +40,7 @@ class GitReinsDefaults:
 
     # ── LLM ──
     model: str = "deepseek-v4-flash"
+    llm_reasoning: str = "disabled"      # "disabled" | "enabled" — DeepSeek thinking mode
 
     # ── Evaluation caps ──
     max_iterations: float = 100.0       # -1 = unlimited
@@ -101,6 +102,9 @@ class GitReinsDefaults:
         # Deep copy numeric/string fields
         result = GitReinsDefaults(
             model=defaults.get("model", self.model),
+            llm_reasoning=str(defaults.get(
+                "llm_reasoning", self.llm_reasoning
+            )),
             max_iterations=_coerce_float(defaults.get("max_iterations", self.max_iterations)),
             max_seconds=_coerce_seconds(defaults.get("max_time", self.max_seconds)),
             max_input_tokens=_coerce_tokens(
@@ -202,6 +206,7 @@ class GitReinsDefaults:
         """Produce a dict suitable for writing to .gitreins/config.yaml."""
         return {
             "model": self.model,
+            "llm_reasoning": self.llm_reasoning,
             "max_iterations": (
                 int(self.max_iterations)
                 if self.max_iterations == int(self.max_iterations)

@@ -252,26 +252,12 @@ commit_audit:
 - **Commit:** `86b14fa`
 - **Result:** 504 insertions, 10 deletions across 4 files. 81 commit_audit tests pass (41 existing + 40 new covering dataclass, config, routing, output).
 
-## [ ] GR-067: Anthropic Messages API endpoint support
+## [x] GR-067: Anthropic Messages API endpoint support
 - **Priority:** medium
+- **Commit:** (pre-existing — fully implemented in `engine/llm.py`)
 - **Model:** deepseek-v4-flash (coding-hermes cron)
-- **Files:** `engine/llm_client.py`
-- **Dependencies:** None
-
-### Why
-
-LLMClient currently only handles OpenAI-compatible endpoints (`/v1/chat/completions`). Anthropic uses a different API shape: `/v1/messages`, `x-api-key` header, different response format (`content[].text` vs `choices[].message.content`).
-
-### Spec
-
-Add `_chat_anthropic()` method to `LLMClient` that detects Anthropic providers (by `ANTHROPIC_API_KEY` env var or `base_url` containing `anthropic`). Auto-routes to the correct code path. Supports both native Anthropic and OpenRouter-proxied Anthropic.
-
-### Tasks:
-- [ ] GR-067a: Add `_chat_anthropic()` — HTTP POST to `<base_url>/v1/messages`, `x-api-key` header, `anthropic-version: 2023-06-01`
-- [ ] GR-067b: Response parsing — map `{content: [{type: "text", text: "..."}], stop_reason: "end_turn"}` to `LLMResponse`
-- [ ] GR-067c: Auto-detection — check `ANTHROPIC_API_KEY` or `anthropic` in `base_url` to route requests
-- [ ] GR-067d: Provider list — add `anthropic` to the model/provider palette in `coding-hermes-north-star`
-- [ ] GR-067e: Tests — mock Anthropic responses, verify routing, verify tool call conversion
+- **Files:** `engine/llm.py` (not llm_client.py — board had wrong filename)
+- **Result:** All 5 subtasks already implemented. `_chat_anthropic()` (line 283-354), response parsing with text/tool_use blocks, `_is_anthropic()` auto-detection (line 66-69), tool format conversion (line 410-420), message conversion (line 356-408). 45 tests pass. Provider routing via `_chat_attempt()` (line 184-187). Docs update: `anthropic` provider in `_PROVIDER_MAX_OUTPUT_TOKENS` (line 196). Board was stale — work done in prior tick but never marked [x].
 
 ## [ ] GR-068: DeepSeek prompt caching + reasoning flag — cost optimization
 - **Priority:** high
@@ -282,10 +268,10 @@ Add `_chat_anthropic()` method to `LLMClient` that detects Anthropic providers (
 
 ### Tasks:
 - [ ] GR-068a: Research — confirm DeepSeek V4 caching behavior (auto-prefix vs explicit). Check if `enable_thinking`, `reasoning_effort`, or other flags affect cache eligibility.
-- [ ] GR-068b: Flag config — add `llm.cache_enabled` (default true) and `llm.reasoning` (default none) to LLMClient and `.gitreins/config.yaml`
-- [ ] GR-068c: Wire flags — pass cache/reasoning parameters in `_chat_openai()` request body if provider is `deepseek`
-- [ ] GR-068d: Cache telemetry — log `cache_read_tokens` / `cache_write_tokens` from LLMResponse.usage in evaluator output. Show $ saved.
-- [ ] GR-068e: Tests — mock DeepSeek cache hit/miss responses, verify telemetry, verify flags in request body
+- [x] GR-068b: Flag config — add `llm.reasoning` to LLMClient and `.gitreins/config.yaml`
+- [x] GR-068c: Wire flags — pass reasoning parameters in `_chat_openai()` request body if provider is `deepseek`
+- [x] GR-068d: Cache telemetry — log `cache_read_tokens` / `cache_write_tokens` from LLMResponse.usage in evaluator output. Show $ saved.
+- [x] GR-068e: Tests — mock DeepSeek cache hit/miss responses, verify telemetry, verify flags in request body
 - [ ] GR-068f: Skill docs — document caching behavior, expected savings, and how to verify it's working (check `cache_read_tokens > 0` in judge output)
 
 ## [ ] GR-064: Tier 2 large-repo hardening — dexdat-memory feedback

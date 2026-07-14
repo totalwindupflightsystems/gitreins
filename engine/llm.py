@@ -79,6 +79,7 @@ class LLMClient:
         model: str | None = None,
         provider: str | None = None,
         max_retries: int = 3,
+        llm_reasoning: str | None = None,
     ):
         base_url = (base_url or os.getenv("GITREINS_LLM_BASE_URL", "https://api.openai.com/v1")).rstrip("/")
         self.api_key = api_key or os.getenv("GITREINS_LLM_API_KEY", "")
@@ -94,6 +95,12 @@ class LLMClient:
                     break
         self.model = model or os.getenv("GITREINS_LLM_MODEL") or _default_model()
         self.max_retries = max_retries
+
+        # Reasoning mode (DeepSeek thinking control)
+        if llm_reasoning is not None:
+            self.llm_reasoning = llm_reasoning
+        else:
+            self.llm_reasoning = os.getenv("GITREINS_LLM_REASONING", "disabled")
 
         # Auto-detect provider if not forced
         if provider:
@@ -186,6 +193,10 @@ class LLMClient:
         else:
             return self._chat_openai(messages, tools, temperature, max_tokens)
 
+    def _is_deepseek(self) -> bool:
+        """Detect DeepSeek from model name or base URL."""
+        return "deepseek" in self.model.lower() or "deepseek" in self.provider.lower()
+
     # ── OpenAI path ──────────────────────────────────────────────
 
     # Provider output token caps (max_tokens in chat/completions).
@@ -231,6 +242,13 @@ class LLMClient:
         if tools:
             payload["tools"] = self._convert_tools_for_openai(tools)
             payload["tool_choice"] = "auto"
+
+        # DeepSeek thinking mode control (GR-068)
+        if self._is_deepseek():
+            if self.llm_reasoning == "enabled":
+                payload["thinking"] = {"type": "enabled"}
+            else:
+                payload["thinking"] = {"type": "disabled"}
 
         headers = {
             "Content-Type": "application/json",

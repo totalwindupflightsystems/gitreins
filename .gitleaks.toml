@@ -20,6 +20,7 @@ paths = [
   '''tests/test_secrets_completeness\.py''',
   '''tests/test_guard_exit\.py''',
   '''tests/test_config_priority\.py''',
+  '''tests/test_llm\.py''',
   '''tests/fixtures/secrets/.*''',
   '''\.hermes/.*''',
   '''tests/reliability/secret-leak/.*''',
