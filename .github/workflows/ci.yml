@@ -21,7 +21,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
-      - name: Run tests
-        run: pytest tests/ -q -x --tb=short --timeout=60
+      - name: Run bounded test files
+        run: |
+          set -euo pipefail
+          for test_file in tests/test_*.py; do
+            echo "::group::${test_file}"
+            timeout --signal=TERM --kill-after=10s 180s \
+              pytest "$test_file" -q -x --tb=short --timeout=60
+            echo "::endgroup::"
+          done
       - name: Run guards
         run: gitreins guard
