@@ -204,7 +204,7 @@
 - **Commit:** `23baf7a`
 - **Result:** uv.lock version synced with pyproject.toml/engine/version.py. Pushed to GitHub. 699 passed, 6 skipped (1 flaky LSP integration test).
 
-## [ ] GR-065: CodeRabbit-style commit review agent (mini-harness for Tier 2)
+## [x] GR-065: CodeRabbit-style commit review agent (mini-harness for Tier 2)
 - **Priority:** high
 - **Model:** deepseek-v4-flash (coding-hermes cron)
 - **Files:** `engine/commit_audit.py`, `engine/config.py`, `engine/pipeline.py`, `gitreins/cli.py`, `tests/test_commit_audit.py`
@@ -244,8 +244,8 @@ commit_audit:
 - [x] GR-065c: `agent` mode — reuse existing `_tool_loop()` from commit audit. Let the LLM explore files before rendering verdict.
 - [x] GR-065d: Review result structure — `CommitReviewResult` with `{issues: [{file, line, severity, category, message, suggestion}], summary, message_valid, message_issues}`
 - [x] GR-065e: Config wiring — all new keys in `GitReinsDefaults`, `overlay()`, `to_config_dict()`, pipeline step reading
-- [ ] GR-065f: CLI output — `gitreins commit-audit` shows review findings with file:line references, severity markers, and fix suggestions
-- [ ] GR-065g: Tests — mock LLM review responses, verify structured parsing, test config defaults, test all severity levels
+- [x] GR-065f: CLI output — `gitreins commit-audit` shows review findings with file:line references, severity markers, and fix suggestions
+- [x] GR-065g: Tests — mock LLM review responses, verify structured parsing, test config defaults, test all severity levels
 
 ## [ ] GR-066: CVE-style scored severity system for commit review
 - **Priority:** high
