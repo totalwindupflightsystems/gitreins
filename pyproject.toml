@@ -34,6 +34,10 @@ dev = [
     "pytest>=7.0",
     "twine>=5.0",
     "build>=1.0",
+    "mypy>=1.10",
+    "pyright>=1.1.350",
+    "python-lsp-server>=1.11",
+    "ruff>=0.5",
 ]
 
 [project.scripts]

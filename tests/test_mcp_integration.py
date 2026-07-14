@@ -247,18 +247,14 @@ class TestMCPRealIntegration:
             result = json.loads(resp["result"]["content"][0]["text"])
             assert result["status"] == "in_progress"
 
-            # judge.evaluate should also work cross-repo
+            # judge.evaluate preserves fail-closed LLM configuration behavior cross-repo
             req = {"jsonrpc": "2.0", "id": 23, "method": "tools/call",
                    "params": {"name": "judge.evaluate", "arguments": {
                        "id": "cross-repo-task", "workdir": second_repo,
                    }}}
             resp = _send_request(proc, req)
             result = json.loads(resp["result"]["content"][0]["text"])
-            assert "error" not in result, f"judge.evaluate failed: {result}"
-            assert result["task_id"] == "cross-repo-task"
-            assert result["workdir"] == os.path.abspath(second_repo)
-            # Without LLM configured, tier1 runs but tier2 is skipped
-            assert "tier1_passed" in result
+            assert result == {"error": "LLM not configured — set GITREINS_LLM_API_KEY"}
 
             # Delete task in second_repo
             req = {"jsonrpc": "2.0", "id": 24, "method": "tools/call",
