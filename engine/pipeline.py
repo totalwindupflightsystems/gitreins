@@ -393,6 +393,32 @@ class Pipeline:
         passed = result.valid or mode != "block"
 
         output_lines: list[str] = []
+        # ── Review findings (GR-065) ──
+        review_issues = getattr(result, "review_issues", [])
+        review_summary = getattr(result, "review_summary", "")
+        if review_issues:
+            sev_marker = {
+                "critical": "🔴 CRITICAL", "high": "🟠 HIGH",
+                "medium": "🟡 MEDIUM", "low": "🟢 LOW", "info": "ℹ️ INFO",
+            }
+            output_lines.append(f"⚠ Commit review — {len(review_issues)} issue(s) found")
+            if review_summary:
+                output_lines.append(f"   {review_summary}")
+            output_lines.append("")
+            for ri in review_issues:
+                sev = sev_marker.get(ri.get("severity", "info"), "ℹ️ INFO")
+                cat = ri.get("category", "unknown")
+                file_ref = f"{ri.get('file', '')}:{ri.get('line', 0)}"
+                title = ri.get("title", "")
+                desc = ri.get("description", "")
+                sugg = ri.get("suggestion", "")
+                output_lines.append(f"  {file_ref} [{cat}] [{sev}] — {title}")
+                if desc:
+                    output_lines.append(f"    {desc}")
+                if sugg:
+                    output_lines.append(f"    Fix: {sugg}")
+                output_lines.append("")
+        # ── Message audit ──
         if result.valid:
             output_lines.append("✓ Commit message looks good.")
         else:
@@ -416,6 +442,8 @@ class Pipeline:
                 "suggested_message": result.suggested_message,
                 "mode": mode,
                 "iterations_used": result.iterations_used,
+                "review_issues": getattr(result, "review_issues", []),
+                "review_summary": getattr(result, "review_summary", ""),
             },
         )
 

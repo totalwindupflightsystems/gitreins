@@ -285,6 +285,13 @@ class CommitAuditResult:
     iterations_used: int = 0
     """How many LLM iterations were consumed."""
 
+    review_issues: list = field(default_factory=list)
+    """Full ReviewIssue dicts from CodeRabbit-style review (GR-065).
+    Each dict has: file, line, severity, category, title, description, suggestion."""
+
+    review_summary: str = ""
+    """Summary from the review (GR-065)."""
+
     @property
     def action(self) -> str:
         """The action the hook should take: 'pass', 'warn', or 'block'."""
@@ -564,6 +571,19 @@ class CommitAuditor:
             issues=[f"[{i.severity}][{i.category}] {i.file}:{i.line}: {i.title}" for i in rev.issues],
             suggested_message=rev.suggested_message,
             iterations_used=rev.iterations_used,
+            review_issues=[
+                {
+                    "file": i.file,
+                    "line": i.line,
+                    "severity": i.severity,
+                    "category": i.category,
+                    "title": i.title,
+                    "description": i.description,
+                    "suggestion": i.suggestion,
+                }
+                for i in rev.issues
+            ],
+            review_summary=rev.summary,
         )
 
     # ── Fast path: one LLM call ─────────────────────────────────

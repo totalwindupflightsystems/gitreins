@@ -27,5 +27,6 @@ paths = [
   '''\.memory-bank/.*''',
   '''__pycache__/.*''',
   '''\.env''',
-  '''\.gitreins-sandbox/.*''',
+  '''.gitreins-sandbox/.*''',
+  '''sandbox/.*''',
 ]
