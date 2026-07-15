@@ -259,7 +259,7 @@ commit_audit:
 - **Files:** `engine/llm.py` (not llm_client.py — board had wrong filename)
 - **Result:** All 5 subtasks already implemented. `_chat_anthropic()` (line 283-354), response parsing with text/tool_use blocks, `_is_anthropic()` auto-detection (line 66-69), tool format conversion (line 410-420), message conversion (line 356-408). 45 tests pass. Provider routing via `_chat_attempt()` (line 184-187). Docs update: `anthropic` provider in `_PROVIDER_MAX_OUTPUT_TOKENS` (line 196). Board was stale — work done in prior tick but never marked [x].
 
-## [ ] GR-068: DeepSeek prompt caching + reasoning flag — cost optimization
+## [x] GR-068: DeepSeek prompt caching + reasoning flag — cost optimization
 - **Priority:** high
 - **Model:** deepseek-v4-flash (coding-hermes cron)
 - **Goal:** Use DeepSeek's automatic prompt caching to reduce evaluator costs by 50-90% on cache hits. Set reasoning/thinking flag appropriately for the task type.
@@ -267,12 +267,12 @@ commit_audit:
 - **Impact:** Each evaluator run currently sends the full system prompt + code context (~50K-200K tokens). With caching, subsequent runs on the same codebase only pay for the diff.
 
 ### Tasks:
-- [ ] GR-068a: Research — confirm DeepSeek V4 caching behavior (auto-prefix vs explicit). Check if `enable_thinking`, `reasoning_effort`, or other flags affect cache eligibility.
+- [x] GR-068a: Research — confirm DeepSeek V4 caching behavior (auto-prefix vs explicit). Check if `enable_thinking`, `reasoning_effort`, or other flags affect cache eligibility.
 - [x] GR-068b: Flag config — add `llm.reasoning` to LLMClient and `.gitreins/config.yaml`
 - [x] GR-068c: Wire flags — pass reasoning parameters in `_chat_openai()` request body if provider is `deepseek`
 - [x] GR-068d: Cache telemetry — log `cache_read_tokens` / `cache_write_tokens` from LLMResponse.usage in evaluator output. Show $ saved.
 - [x] GR-068e: Tests — mock DeepSeek cache hit/miss responses, verify telemetry, verify flags in request body
-- [ ] GR-068f: Skill docs — document caching behavior, expected savings, and how to verify it's working (check `cache_read_tokens > 0` in judge output)
+- [x] GR-068f: Skill docs — document caching behavior, expected savings, and how to verify it's working (check `cache_read_tokens > 0` in judge output)
 
 ## [ ] GR-064: Tier 2 large-repo hardening — dexdat-memory feedback
 - **Priority:** high
@@ -287,7 +287,8 @@ commit_audit:
 - `file_scope: changed` wasn't aggressive enough — LLM still chased call graphs
 
 ### Tasks:
-- [ ] GR-064a: **Fast-track mode** — skip full call-graph analysis on large repos; verify only changed lines + immediate callers. Add `evaluator.fast_track` config (default: auto-detect based on package count)
+- [x] GR-064a: **Fast-track mode** — skip full call-graph analysis on large repos; verify only changed lines + immediate callers. Add `evaluator.fast_track` config (default: auto-detect based on package count)
+- **Commit:** `24e9dc8`
 - [ ] GR-064b: **Aggressive timeout respect** — return partial findings when deadline hits instead of failing silently. Wire `max_time` into the tool-call loop so `read_file`/`search_pattern` check remaining budget before executing
 - [ ] GR-064c: **`--skip-tier2` flag** — CLI flag for config/docs/ops commits that bypasses Tier 2 entirely. Also configurable per-commit via `gitreins.skip-tier2` trailer in commit message body
 - [ ] GR-064d: **Token budget overflow protection** — cap individual `read_file` results proportional to remaining budget. Don't let one 2MB file eat the entire context window. Add `max_file_bytes` config (default: 128KB per file in evaluator context)
