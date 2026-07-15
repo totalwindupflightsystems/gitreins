@@ -294,7 +294,8 @@ commit_audit:
 - [x] GR-064c: **`--skip-tier2` flag** — CLI flag for config/docs/ops commits that bypasses Tier 2 entirely. Also configurable per-commit via `gitreins.skip-tier2` trailer in commit message body
 - **Commit:** `6e8d3e5`
 - **Result:** 4 files (+165/-5): `engine/commit_audit.py` (+89: trailer parsing + has_skip_tier2_trailer), `engine/judge.py` (+51: skip_tier2 param + _run_legacy_skip_tier2), `engine/pipeline.py` (+9: "not task.skip_tier2" + "false" conditions), `gitreins/cli.py` (+21: --skip-tier2 flag on judge/commit, trailer wiring in commit-audit). 185 tests pass, guard PASS.
-- [ ] GR-064d: **Token budget overflow protection** — cap individual `read_file` results proportional to remaining budget. Don't let one 2MB file eat the entire context window. Add `max_file_bytes` config (default: 128KB per file in evaluator context)
+- [x] GR-064d: **Token budget overflow protection** — cap individual `read_file` results proportional to remaining budget. Don't let one 2MB file eat the entire context window. Add `max_file_bytes` config (default: 128KB per file in evaluator context)
+  - **Commit:** `861ba52`
 - [ ] GR-064e: **Pre-commit hook timeout** — add configurable `hook_timeout` (default: 120s). If exceeded, fail open with warning (don't block the push indefinitely)
 
 ## [ ] GR-063: Expand language coverage across all tool subsystems
