@@ -33,7 +33,7 @@ class Judge:
         self.guard_manager = GuardManager(workdir, self.guard_config)
         self.eval_cap = eval_cap
 
-    def evaluate_task(self, task: Task) -> "JudgeResult":
+    def evaluate_task(self, task: Task, skip_tier2: bool = False) -> "JudgeResult":
         """Run the pipeline against a task.
 
         Uses the configurable pipeline from .gitreins/config.yaml.
@@ -42,13 +42,21 @@ class Judge:
         When ``pass_on_error`` is True in config, Tier 2 (LLM evaluator)
         is skipped if the LLM is unavailable — the task passes on Tier 1
         alone.  Useful for CI environments or when the LLM provider is down.
+
+        When ``skip_tier2`` is True, the ``task.skip_tier2`` flag is set on
+        the task dict before the pipeline runs.  Pipeline stages with the
+        condition ``not task.skip_tier2`` will be skipped (GR-064c).
         """
         config = load_pipeline_config(self.workdir)
         self._pass_on_error = self._read_pass_on_error()
 
         if config.get("pipeline", {}).get("stages"):
-            return self._run_pipeline(task, config)
+            return self._run_pipeline(task, config, skip_tier2=skip_tier2)
         else:
+            if skip_tier2:
+                # Legacy path doesn't use the condition system — just run
+                # Tier 1 and return a pass-on-tier1 result.
+                return self._run_legacy_skip_tier2(task)
             return self._run_legacy(task)
 
     def _read_pass_on_error(self) -> bool:
@@ -65,9 +73,19 @@ class Judge:
                 pass
         return False
 
-    def _run_pipeline(self, task: Task, config: dict) -> "JudgeResult":
+    def _run_pipeline(self, task: Task, config: dict, skip_tier2: bool = False) -> "JudgeResult":
         """Run the configurable pipeline."""
         from engine.pipeline import Pipeline
+
+        # When skip_tier2 is requested via CLI/trailer, force every stage
+        # whose type is ai_eval to be skipped by overriding its condition.
+        # This works regardless of how the user's config defines the
+        # tier2 stage (condition: "true" or condition: "stage.tier1.any_failed").
+        if skip_tier2:
+            stages = config.get("pipeline", {}).get("stages", [])
+            for stage in stages:
+                if stage.get("type") == "ai_eval":
+                    stage["condition"] = "false"
 
         pipeline = Pipeline(config, self.workdir, llm=self.llm)
 
@@ -77,6 +95,10 @@ class Judge:
             "criteria": task.criteria,
             "status": task.status,
         }
+        if skip_tier2:
+            # Propagate flag to task dict so pipeline conditions
+            # like "not task.skip_tier2" can skip the tier2 stage.
+            task_dict["skip_tier2"] = True
 
         try:
             result = pipeline.run(task_dict, trigger="pre-eval")
@@ -150,6 +172,29 @@ class Judge:
             else:
                 logger.exception("Tier 2 evaluator failed")
                 result.passed = False
+        return result
+
+    def _run_legacy_skip_tier2(self, task: Task) -> "JudgeResult":
+        """Legacy path when --skip-tier2 is set but no pipeline config exists.
+
+        Runs Tier 1 only and returns a pass-on-tier1 result without
+        invoking the AgenticEvaluator.  Mirrors the spirit of the
+        pipeline condition ``not task.skip_tier2``.
+        """
+        from engine.guard_manager import Tier1Result
+
+        result = JudgeResult(task_id=task.id)
+        print("  Tier 1: Running static guards...")
+        tier1 = self.guard_manager.run_all()
+        result.tier1 = tier1
+        if not tier1.passed:
+            print("  Tier 1 FAILED — skipping evaluator")
+            result.passed = False
+            return result
+        print("  Tier 1 PASSED")
+        print("  Tier 2 SKIPPED (--skip-tier2 flag)")
+        result.passed = True
+        result.pipeline_result = {"skipped_tier2": True, "tier1_passed": True}
         return result
 
     def _extract_lsp_diagnostics(self, tier1: Tier1Result) -> list[dict]:

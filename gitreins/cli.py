@@ -970,9 +970,12 @@ def cmd_judge(args):
         print(f"Task not found: {args.id}")
         sys.exit(1)
 
+    if getattr(args, "skip_tier2", False):
+        print("Tier 2 skipped (--skip-tier2 flag)")
+
     llm = LLMClient()
     judge = Judge(llm, workdir)
-    result = judge.evaluate_task(task)
+    result = judge.evaluate_task(task, skip_tier2=getattr(args, "skip_tier2", False))
     print(result.summary)
 
     # Persist verdict
@@ -993,7 +996,10 @@ def cmd_commit(args):
         print(tier1.summary)
         sys.exit(1)
 
-    print("Tier 1 PASSED — committing...")
+    if getattr(args, "skip_tier2", False):
+        print("Tier 1 PASSED — Tier 2 skipped (--skip-tier2 flag) — committing...")
+    else:
+        print("Tier 1 PASSED — committing...")
     result = subprocess.run(
         ["git", "commit", "-m", args.message],
         capture_output=True, text=True,
@@ -1029,6 +1035,13 @@ def cmd_commit_audit(args):
 
     if not message:
         print("No commit message to audit.")
+        sys.exit(0)
+
+    # Check for gitreins.skip-tier2 trailer before running audit
+    from engine.commit_audit import has_skip_tier2_trailer
+
+    if has_skip_tier2_trailer(message):
+        print("Commit audit skipped (gitreins.skip-tier2 trailer)")
         sys.exit(0)
 
     # Load config and run commit_audit stage
@@ -1145,10 +1158,14 @@ def main():
     # judge
     judge_p = sub.add_parser("judge", help="Evaluate a task")
     judge_p.add_argument("id")
+    judge_p.add_argument("--skip-tier2", action="store_true",
+                         help="Skip Tier 2 LLM evaluation; Tier 1 guards only")
 
     # commit
     commit_p = sub.add_parser("commit", help="Commit with guard checks")
     commit_p.add_argument("message")
+    commit_p.add_argument("--skip-tier2", action="store_true",
+                          help="Skip any Tier 2 processing; Tier 1 guards only")
 
     # commit-audit
     audit_p = sub.add_parser("commit-audit", help="Validate commit message against staged diff (commit-msg hook)")

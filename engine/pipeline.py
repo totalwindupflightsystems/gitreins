@@ -145,13 +145,18 @@ class Pipeline:
             - "stage.X.any_failed" → true if stage X had failures
             - "stage.X.passed" → true if stage X passed
             - "task.has_criteria" → true if task has criteria
+            - "task.skip_tier2" → true if task has skip_tier2 flag set
+            - "not task.skip_tier2" → true if task does NOT have skip_tier2 flag
             - "true" / "always" → always true
+            - "false" → always false
             - Expressions with AND/OR: "stage.tier1.any_failed or task.has_criteria"
         """
         if not condition:
             return True
         if condition in ("true", "always"):
             return True
+        if condition == "false":
+            return False
 
         # Parse simple expressions
         condition = condition.strip()
@@ -169,6 +174,10 @@ class Pipeline:
         # Handle individual predicates
         if condition == "task.has_criteria":
             return bool(task.get("criteria"))
+        if condition == "task.skip_tier2":
+            return bool(task.get("skip_tier2", False))
+        if condition == "not task.skip_tier2":
+            return not bool(task.get("skip_tier2", False))
         if condition.startswith("stage."):
             # stage.tier1.any_failed
             parts = condition.split(".")

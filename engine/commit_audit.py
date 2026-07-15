@@ -26,6 +26,95 @@ from engine.llm import LLMClient, LLMResponse
 logger = logging.getLogger("gitreins.commit_audit")
 
 
+# ── Trailer parsing (GR-064c) ────────────────────────────────────
+
+# Standard git trailer format: ``Key: value`` on its own line at the
+# end of the commit message body, after a blank-line separator from the
+# body.  See https://git-scm.com/docs/git-interpret-trailers for the
+# full grammar.  We deliberately support a minimal subset:
+#   * Lines look like ``Token: value`` (Token followed by colon+space)
+#   * The trailer block starts after the last blank line in the message
+#   * Tokens may contain alphanumerics, dots, hyphens, slashes (the
+#     ``gitreins.skip-tier2`` token is a non-standard but allowed form)
+
+_TRAILER_PATTERN = re.compile(
+    r"^(?P<key>[A-Za-z][A-Za-z0-9._-]*[A-Za-z0-9._/-]|[A-Za-z])\s*:\s*(?P<value>.+)$"
+)
+
+
+def parse_trailers(message: str) -> dict[str, str]:
+    """Parse git-style trailers from a commit message body.
+
+    Returns a dict mapping trailer key (lower-cased) to value.  Trailing
+    whitespace and a trailing newline are tolerated.  Unknown / blank
+    lines are ignored.  If the message has no trailer block, returns
+    an empty dict.
+
+    The trailer block is defined as the contiguous run of ``Key: value``
+    lines at the end of the message after a blank-line separator from
+    the body (this matches git's own ``git interpret-trailers``
+    behaviour for the common case of footer trailers).
+    """
+    if not message:
+        return {}
+
+    # Normalise line endings, strip trailing whitespace per-line
+    lines = message.replace("\r\n", "\n").rstrip().split("\n")
+
+    # Walk backwards: collect trailer-like lines, stop at first non-trailer.
+    # git's actual rules allow continuation lines (indented) inside the
+    # block, but for our supported trailer (a single boolean toggle) we
+    # require a contiguous run of ``Key: value`` lines at the end of the
+    # message after a blank-line separator.
+    trailers: dict[str, str] = {}
+    body_done = False
+
+    for line in reversed(lines):
+        stripped = line.strip()
+        if not stripped:
+            # Blank line — keep walking back; the body must end before trailers.
+            body_done = True
+            continue
+        if body_done:
+            # We're past the blank-line separator — anything that isn't
+            # a trailer-like line means there are no trailers.
+            pass
+
+        m = _TRAILER_PATTERN.match(line)
+        if not m:
+            if body_done:
+                # Trailer block ended; this line is body or junk.
+                break
+            # No blank line yet — assume the entire end is trailer block.
+            break
+
+        key = m.group("key").strip().lower()
+        value = m.group("value").strip()
+        trailers[key] = value
+
+    return trailers
+
+
+def has_skip_tier2_trailer(message: str) -> bool:
+    """Return True iff the commit message body contains the trailer
+    ``gitreins.skip-tier2: true`` (case-insensitive trailer key, value
+    parsed as truthy: ``true``/``yes``/``on``/``1``).
+
+    Per GR-064c, this trailer lets users bypass Tier 2 LLM evaluation
+    on a per-commit basis without modifying config or using a CLI flag.
+    """
+    if not message:
+        return False
+    trailers = parse_trailers(message)
+    # Accept several possible token forms — be lenient.
+    for key in ("gitreins.skip-tier2", "gitreins.skiptier2", "skip-tier2", "skiptier2"):
+        if key in trailers:
+            value = trailers[key].strip().lower()
+            if value in ("true", "yes", "on", "1"):
+                return True
+    return False
+
+
 # ── System prompt ───────────────────────────────────────────────
 
 COMMIT_AUDIT_SYSTEM_PROMPT = """\
