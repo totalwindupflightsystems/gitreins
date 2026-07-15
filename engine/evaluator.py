@@ -289,6 +289,15 @@ class AgenticEvaluator:
         # Resolve fast_track from config. "auto" = detect based on package count.
         self.fast_track: bool = self._resolve_fast_track()
 
+        # ── Max file bytes (GR-064d) ──
+        # Cap read_file results to prevent a single large file from eating
+        # the entire evaluator context window.
+        config = self._load_config()
+        evaluator_cfg = config.get("evaluator", {})
+        self.max_file_bytes: int = int(evaluator_cfg.get(
+            "max_file_bytes", 131_072
+        ))
+
     def _resolve_fast_track(self) -> bool:
         """Resolve fast_track setting: 'on'→True, 'off'→False, 'auto'→detect.
 
@@ -1114,6 +1123,17 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 content = raw.decode("utf-8", errors="replace")
                 shown_bytes = len(raw)
                 has_more = (byte_offset + shown_bytes) < total_bytes if byte_limit > 0 else False
+
+                # ── Byte cap (GR-064d) ──
+                max_bytes = getattr(self, 'max_file_bytes', 131072)
+                content_bytes = content.encode("utf-8")
+                if len(content_bytes) > max_bytes:
+                    capped = content_bytes[:max_bytes].decode("utf-8", errors="replace")
+                    content = capped + (
+                        f"\n\n... [capped at {max_bytes} bytes, {total_bytes} total. "
+                        "Use offset/limit or byte_offset/byte_limit to read specific ranges.]"
+                    )
+
                 return {
                     "path": path,
                     "content": content,
@@ -1146,6 +1166,17 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             if not offset and not limit and total_chars > 12000:
                 content = "".join(lines[:400])  # First 400 lines
                 content += f"\n\n... [showing first 400 of {total_lines} lines, {total_chars} chars. Use offset/limit to read specific ranges.]"
+
+            # ── Byte cap (GR-064d) ──
+            # Prevent individual read_file from consuming entire context window
+            max_bytes = getattr(self, 'max_file_bytes', 131072)
+            content_bytes = content.encode("utf-8")
+            if len(content_bytes) > max_bytes:
+                capped = content_bytes[:max_bytes].decode("utf-8", errors="replace")
+                content = capped + (
+                    f"\n\n... [capped at {max_bytes} bytes, {total_bytes} total. "
+                    "Use offset/limit or byte_offset/byte_limit to read specific ranges.]"
+                )
 
             return {
                 "path": path,

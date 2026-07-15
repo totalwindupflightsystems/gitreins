@@ -853,6 +853,18 @@ class CommitAuditor:
             start = max(0, offset - 1)
             end = min(total, start + limit)
             content = "".join(lines[start:end])
+
+            # ── Byte cap (GR-064d) ──
+            max_bytes = getattr(self, 'max_file_bytes', 131072)
+            content_bytes = content.encode("utf-8")
+            total_bytes = os.path.getsize(full_path)
+            if len(content_bytes) > max_bytes:
+                capped = content_bytes[:max_bytes].decode("utf-8", errors="replace")
+                content = capped + (
+                    f"\n\n... [capped at {max_bytes} bytes, {total_bytes} total. "
+                    "Use offset/limit to read specific ranges.]"
+                )
+
             header = f"// {path} (lines {start+1}-{end}/{total})\n"
             return header + content
         except Exception as e:
