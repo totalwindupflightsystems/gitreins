@@ -23,6 +23,7 @@ evaluator:
   compaction_threshold: 0.9
   code_context_budget: 0.7
   file_scope: changed
+  fast_track: auto
 defaults:
   model: deepseek-v4-flash
 history:

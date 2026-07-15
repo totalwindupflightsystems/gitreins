@@ -61,6 +61,7 @@ For each criterion:
 - **Token budget: {token_budget}.** You have {token_budget} input tokens and {output_budget} output tokens. The code context pre-loaded below consumes part of this — be selective about what you re-read. Prioritize criteria-driven investigation over exhaustive file reading.
 - **Code context is pre-loaded.** The changed code is already included in this prompt — you do NOT need to call read_file() on files shown below unless you need a specific line range not included.
 - **File scope: {file_scope}.** When scope is 'changed', you can ONLY access modified files (plus their tests and config files). read_file() and search_pattern() will reject files outside this set. This prevents context explosion on large repos.
+- **Fast-track mode: {fast_track_mode}.** {fast_track_instruction}
 - **Do not re-read the same file twice.** If read_file returned content, you already have it.
 - **Do not re-run the same command.** Check previous results before running again.
 - **Do not search for the same pattern twice.** Use sandbox to track what you've checked.
@@ -283,6 +284,49 @@ class AgenticEvaluator:
         self._searches_done: set[str] = set()
         self._tier1_diagnostics: list[dict] = []
         self._allowed_files: set[str] | None = None  # None = full scope, set = restricted
+    
+        # ── Fast-track mode (GR-064a) ──
+        # Resolve fast_track from config. "auto" = detect based on package count.
+        self.fast_track: bool = self._resolve_fast_track()
+
+    def _resolve_fast_track(self) -> bool:
+        """Resolve fast_track setting: 'on'→True, 'off'→False, 'auto'→detect.
+
+        Auto-detection: counts source packages (*.py files in non-test dirs).
+        Returns True (fast_track ON) if >= 20 packages are found.
+        """
+        config = self._load_config()
+        evaluator_cfg = config.get("evaluator", {})
+        setting = str(evaluator_cfg.get("fast_track", "auto")).lower()
+
+        if setting in ("on", "true"):
+            return True
+        if setting in ("off", "false"):
+            return False
+
+        # "auto" — detect based on package count
+        try:
+            package_count = 0
+            seen_dirs: set[str] = set()
+            for root, dirs, files in os.walk(self.workdir):
+                # Skip hidden, test, venv, and build dirs
+                dirs[:] = [d for d in dirs if not d.startswith(".")
+                          and d not in ("venv", "__pycache__", "node_modules",
+                                        "build", "dist", "target", ".git")]
+                has_py = any(f.endswith(".py") and not f.startswith("test_")
+                            and f != "__init__.py" for f in files)
+                if has_py and root != self.workdir:
+                    rel = os.path.relpath(root, self.workdir)
+                    # Count top-level package dirs only
+                    top = rel.split(os.sep)[0]
+                    if top not in seen_dirs:
+                        seen_dirs.add(top)
+                        package_count += 1
+            logger.debug("Fast-track auto-detect: %d packages → %s",
+                        package_count, "ON" if package_count >= 20 else "OFF")
+            return package_count >= 20
+        except Exception:
+            return False
 
     def _build_code_context(self, config: dict) -> str:
         """Build a compact code-context block to pre-load into the evaluator prompt.
@@ -598,6 +642,13 @@ class AgenticEvaluator:
                 .replace("{token_budget}", _fmt_tokens(self.eval_cap.max_input_tokens) if self.eval_cap.max_input_tokens > 0 else "unlimited")
                 .replace("{output_budget}", _fmt_tokens(self.eval_cap.max_output_tokens) if self.eval_cap.max_output_tokens > 0 else "unlimited")
                 .replace("{file_scope}", self._allowed_files is not None and "changed" or "full")
+                .replace("{fast_track_mode}", "ON" if self.fast_track else "OFF")
+                .replace("{fast_track_instruction}",
+                    "ON — Verify ONLY changed lines and immediate callers. Skip deep call-graph analysis. "
+                    "Trust the diff: if a criterion references code outside changed files, check only the "
+                    "interface boundary (function signature, type) — do NOT trace into unchanged code."
+                    if self.fast_track else
+                    "OFF — Normal mode. Read surrounding code as needed to verify criteria.")
             },
             {"role": "user", "content": compacted_prompt},
         ]
@@ -685,6 +736,13 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 .replace("{token_budget}", _fmt_tokens(self.eval_cap.max_input_tokens) if self.eval_cap.max_input_tokens > 0 else "unlimited")
                 .replace("{output_budget}", _fmt_tokens(self.eval_cap.max_output_tokens) if self.eval_cap.max_output_tokens > 0 else "unlimited")
                 .replace("{file_scope}", self._allowed_files is not None and "changed" or "full")
+                .replace("{fast_track_mode}", "ON" if self.fast_track else "OFF")
+                .replace("{fast_track_instruction}",
+                    "ON — Verify ONLY changed lines and immediate callers. Skip deep call-graph analysis. "
+                    "Trust the diff: if a criterion references code outside changed files, check only the "
+                    "interface boundary (function signature, type) — do NOT trace into unchanged code."
+                    if self.fast_track else
+                    "OFF — Normal mode. Read surrounding code as needed to verify criteria.")
             },
             {"role": "user", "content": task_prompt},
         ]

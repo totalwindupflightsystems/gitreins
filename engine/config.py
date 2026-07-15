@@ -52,6 +52,7 @@ class GitReinsDefaults:
     compaction_threshold: float = 0.90  # compact when 90% of input budget used (10% remaining)
     code_context_budget: float = 0.70   # cap pre-loaded code context to 70% of input budget
     file_scope: str = "changed"         # "changed" = only changed files + tests, "full" = entire codebase
+    fast_track: str = "auto"            # skip full call-graph on large repos (GR-064a)
     pass_on_error: bool = False          # skip Tier 2 when LLM is unavailable (advisory-only mode)
 
     # ── Commit audit ──
@@ -127,6 +128,9 @@ class GitReinsDefaults:
             )),
             file_scope=str(defaults.get(
                 "file_scope", self.file_scope
+            )),
+            fast_track=str(defaults.get(
+                "fast_track", self.fast_track
             )),
             pass_on_error=bool(defaults.get(
                 "pass_on_error", self.pass_on_error
@@ -232,6 +236,7 @@ class GitReinsDefaults:
             "compaction_threshold": self.compaction_threshold,
             "code_context_budget": self.code_context_budget,
             "file_scope": self.file_scope,
+            "fast_track": self.fast_track,
             "pass_on_error": self.pass_on_error,
             "commit_audit": {
                 "enabled": self.commit_audit_enabled,
