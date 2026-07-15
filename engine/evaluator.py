@@ -772,6 +772,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             cap_error = self.eval_cap.check()
             if cap_error:
                 logger.warning("Eval cap exceeded: %s", cap_error)
+                partial = self._extract_partial_verdict(criteria_list)
+                if partial is not None:
+                    return partial
                 return Verdict(
                     verdict="INCOMPLETE",
                     summary=f"Cap exceeded: {cap_error}",
@@ -859,6 +862,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             )
             if cap_error:
                 logger.warning("Eval cap exceeded: %s", cap_error)
+                partial = self._extract_partial_verdict(criteria_list)
+                if partial is not None:
+                    return partial
                 return Verdict(
                     verdict="INCOMPLETE",
                     summary=f"Cap exceeded: {cap_error}",
@@ -899,6 +905,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 cap_error = self.eval_cap.record_tool_call()
                 if cap_error:
                     logger.warning("Eval cap exceeded during tool call: %s", cap_error)
+                    partial = self._extract_partial_verdict(criteria_list)
+                    if partial is not None:
+                        return partial
                     return Verdict(
                         verdict="INCOMPLETE",
                         summary=f"Cap exceeded: {cap_error}",
@@ -932,8 +941,76 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         logger.warning(msg)
         return Verdict(verdict="INCOMPLETE", summary=msg)
 
+    def _extract_partial_verdict(self, criteria_list: list[str]) -> Verdict | None:
+        """Extract a best-effort verdict from sandbox when caps are exceeded.
+
+        Returns a Verdict with verdict="COMPLETE" if ANY criterion was
+        verified (partial findings are still a signal), or None if NO
+        criteria were verified (caller should fall through to INCOMPLETE).
+        """
+        items: list[VerdictItem] = []
+        has_any = False
+        for i, criterion in enumerate(criteria_list):
+            key = f"verified_{i}"
+            if key in self._sandbox:
+                has_any = True
+                evidence = self._sandbox[key]
+                status = "PASS" if evidence.startswith("PASS") else "FAIL"
+                items.append(VerdictItem(
+                    criterion=criterion, status=status, detail=evidence,
+                ))
+            else:
+                items.append(VerdictItem(
+                    criterion=criterion, status="FAIL",
+                    detail="Not verified — evaluation terminated before this criterion was checked",
+                ))
+        if not has_any:
+            return None
+        return Verdict(
+            verdict="COMPLETE",
+            items=items,
+            summary="Partial verdict — evaluation hit resource cap before all criteria verified",
+        )
+
     def _execute_tool_with_dedup(self, tc: ToolCall) -> tuple[dict, bool]:
-        """Execute a tool and return (result, was_duplicate)."""
+        """Execute a tool and return (result, was_duplicate).
+
+        Time-budget check: before running an expensive tool
+        (read_file, run_command, search_pattern), verify the time cap
+        is not critical. If <10s remain, skip the tool and return a
+        TIME_CRITICAL error so the LLM can deliver a verdict immediately.
+        If over budget, return TIME_EXCEEDED.
+        """
+        # ── Time-budget pre-check (BEFORE dedup tracking) ─────────
+        # When time is critical we want to intercept quickly — don't
+        # pollute dedup state with skipped calls.
+        # remaining_seconds() returns -1.0 when no time budget is
+        # configured (unlimited) — we must NOT block in that case.
+        if tc.name in ("read_file", "run_command", "search_pattern"):
+            try:
+                remaining = self.eval_cap.remaining_seconds()
+            except Exception:
+                remaining = -1.0
+
+            if remaining < 0 and remaining != -1.0:
+                # Real negative remaining = over a configured budget
+                return (
+                    {"error": (
+                        "TIME_EXCEEDED: Time budget exhausted. "
+                        "Deliver your verdict immediately based on what is in the sandbox."
+                    )},
+                    False,
+                )
+            if 0 < remaining < 10:
+                return (
+                    {"error": (
+                        f"TIME_CRITICAL: Only {int(remaining)} seconds remaining. "
+                        "Deliver your verdict NOW with what you have. "
+                        "Use sandbox_write to save any verified criteria first."
+                    )},
+                    False,
+                )
+
         was_dup = False
 
         if tc.name == "read_file":

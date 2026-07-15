@@ -139,6 +139,21 @@ class EvalCap:
         # Also check time/token caps (tool calls consume real time)
         return self._check_hard_caps()
 
+    def remaining_seconds(self) -> float:
+        """Return remaining time budget in seconds.
+
+        States:
+          - max_seconds <= 0          → -1 (unlimited, time is not tracked)
+          - start_time == 0           → max_seconds (timer not started yet)
+          - mid-evaluation            → max_seconds - (time.time() - start_time)
+          - over budget               → negative float
+        """
+        if self.max_seconds <= 0:
+            return -1.0
+        if self.start_time == 0:
+            return float(self.max_seconds)
+        return self.max_seconds - (time.time() - self.start_time)
+
     def check(self) -> str | None:
         """Check all caps. Hard stop — used before starting a new LLM call."""
         return self._check_hard_caps()

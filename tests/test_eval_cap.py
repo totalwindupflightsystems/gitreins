@@ -292,6 +292,52 @@ class TestEvalCapChecking:
 
 
 # ═══════════════════════════════════════════════════════════════
+# remaining_seconds() — time-budget introspection (GR-064b)
+# ═══════════════════════════════════════════════════════════════
+
+class TestRemainingSeconds:
+    """remaining_seconds() reports the live time budget for the evaluator."""
+
+    def test_unlimited_returns_negative_one(self):
+        """When max_seconds <= 0 (default), remaining_seconds() returns -1.0."""
+        cap = EvalCap()
+        assert cap.remaining_seconds() == -1.0
+        cap.start()
+        assert cap.remaining_seconds() == -1.0  # still unlimited after start
+
+    def test_explicit_negative_is_unlimited(self):
+        """Explicit max_seconds=-1 is treated as unlimited."""
+        cap = EvalCap(max_seconds=-1)
+        assert cap.remaining_seconds() == -1.0
+
+    def test_not_started_returns_max(self):
+        """When start() has not been called, remaining_seconds() returns max_seconds."""
+        cap = EvalCap(max_seconds=300)
+        assert cap.remaining_seconds() == 300.0
+
+    def test_mid_evaluation_decreases(self):
+        """While running, remaining_seconds() decreases toward 0 as time passes."""
+        cap = EvalCap(max_seconds=10)
+        cap.start()
+        before = cap.remaining_seconds()
+        time.sleep(0.5)
+        after = cap.remaining_seconds()
+        assert before > after
+        # ~0.5s elapsed — should be roughly 9.5s remaining (give some margin)
+        assert 8.5 < after < 10.0
+
+    def test_over_budget_returns_negative(self):
+        """After max_seconds has elapsed, remaining_seconds() goes negative."""
+        cap = EvalCap(max_seconds=1)
+        cap.start()
+        time.sleep(1.2)
+        remaining = cap.remaining_seconds()
+        assert remaining < 0
+        # Should be roughly -0.2s — give some margin
+        assert -0.5 < remaining < 0.0
+
+
+# ═══════════════════════════════════════════════════════════════
 # Evaluator integration tests
 # ═══════════════════════════════════════════════════════════════
 
