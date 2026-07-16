@@ -274,7 +274,7 @@ commit_audit:
 - [x] GR-068e: Tests — mock DeepSeek cache hit/miss responses, verify telemetry, verify flags in request body
 - [x] GR-068f: Skill docs — document caching behavior, expected savings, and how to verify it's working (check `cache_read_tokens > 0` in judge output)
 
-## [ ] GR-064: Tier 2 large-repo hardening — dexdat-memory feedback
+## [x] GR-064: Tier 2 large-repo hardening — dexdat-memory feedback
 - **Priority:** high
 - **Model:** deepseek-v4-flash (coding-hermes cron)
 - **Source:** Real-world test on dexdat-memory (147 Go packages, 40+ tested)
@@ -296,7 +296,9 @@ commit_audit:
 - **Result:** 4 files (+165/-5): `engine/commit_audit.py` (+89: trailer parsing + has_skip_tier2_trailer), `engine/judge.py` (+51: skip_tier2 param + _run_legacy_skip_tier2), `engine/pipeline.py` (+9: "not task.skip_tier2" + "false" conditions), `gitreins/cli.py` (+21: --skip-tier2 flag on judge/commit, trailer wiring in commit-audit). 185 tests pass, guard PASS.
 - [x] GR-064d: **Token budget overflow protection** — cap individual `read_file` results proportional to remaining budget. Don't let one 2MB file eat the entire context window. Add `max_file_bytes` config (default: 128KB per file in evaluator context)
   - **Commit:** `861ba52`
-- [ ] GR-064e: **Pre-commit hook timeout** — add configurable `hook_timeout` (default: 120s). If exceeded, fail open with warning (don't block the push indefinitely)
+- [x] GR-064e: **Pre-commit hook timeout** — add configurable `hook_timeout` (default: 120s). If exceeded, fail open with warning (don't block the push indefinitely)
+  - **Commit:** `4a4d14c`
+  - **Result:** hook_timeout=120s default in GitReinsDefaults, time.monotonic() checks after each guard, fail-open returns Tier1Result(passed=True) with warnings list. warnings field added to Tier1Result dataclass, CLI output shows yellow warnings. All 50 guard_manager tests pass. Guard PASS (pre-existing E501 lint in overlay() noted — unrelated). 4 files (+97/-1).
 
 ## [ ] GR-063: Expand language coverage across all tool subsystems
 - **Priority:** high
