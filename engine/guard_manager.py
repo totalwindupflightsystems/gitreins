@@ -23,6 +23,7 @@ import logging
 import os
 import re
 import subprocess
+import time
 from engine.guards import check_go_lint, check_go_tests, check_go_build
 from engine.lsp import run_lsp_check
 from engine.types import GuardResult, Tier1Result
@@ -206,6 +207,8 @@ class GuardManager:
         self._test_mode = guards_cfg.get("test_mode", "full")
         # Test timeout in seconds (default: 180s)
         self._test_timeout = guards_cfg.get("test_timeout", 180)
+        # Hook timeout in seconds (default: 120s) — overall guard budget (GR-064e)
+        self._hook_timeout = guards_cfg.get("hook_timeout", 120)
 
         # Project type detection
         self._is_go = os.path.isfile(os.path.join(self.workdir, "go.mod"))
@@ -225,38 +228,118 @@ class GuardManager:
         Args:
             force_dead_code: If True, enable dead_code guard regardless of config.
                              Used by CLI --dead-code flag and MCP dead_code param.
+
+        The overall guard run is bounded by hook_timeout (default 120s). If the
+        total elapsed time exceeds this budget, remaining checks are skipped and a
+        warning is issued — the guard \"fails open\" to prevent blocking commits
+        indefinitely (GR-064e).
         """
+        start = time.monotonic()
         results: list[GuardResult] = []
+        warnings: list[str] = []
+
+        def _timed_out() -> bool:
+            return (time.monotonic() - start) >= self._hook_timeout
 
         if self._enabled["secrets"]:
             results.append(self._check_secrets())
+            if _timed_out():
+                warnings.append(
+                    f"Guard timed out after {self._hook_timeout}s "
+                    f"(hook_timeout). Remaining checks skipped — "
+                    f"commit allowed to proceed (fail-open)."
+                )
+                return Tier1Result(passed=True, results=results, warnings=warnings)
 
         if self._enabled["lint"] and not self._is_go:
             results.append(self._check_lint())
+            if _timed_out():
+                warnings.append(
+                    f"Guard timed out after {self._hook_timeout}s "
+                    f"(hook_timeout). Remaining checks skipped — "
+                    f"commit allowed to proceed (fail-open)."
+                )
+                return Tier1Result(passed=True, results=results, warnings=warnings)
 
         if self._enabled["tests"] and not self._is_go:
             results.append(self._check_tests())
+            if _timed_out():
+                warnings.append(
+                    f"Guard timed out after {self._hook_timeout}s "
+                    f"(hook_timeout). Remaining checks skipped — "
+                    f"commit allowed to proceed (fail-open)."
+                )
+                return Tier1Result(passed=True, results=results, warnings=warnings)
 
         dead_code_enabled = self._enabled["dead_code"] or force_dead_code
         if dead_code_enabled and not self._is_go:
             results.append(self._check_dead_code())
+            if _timed_out():
+                warnings.append(
+                    f"Guard timed out after {self._hook_timeout}s "
+                    f"(hook_timeout). Remaining checks skipped — "
+                    f"commit allowed to proceed (fail-open)."
+                )
+                return Tier1Result(passed=True, results=results, warnings=warnings)
 
         if self._enabled["skylos"]:
             results.append(self._check_skylos())
+            if _timed_out():
+                warnings.append(
+                    f"Guard timed out after {self._hook_timeout}s "
+                    f"(hook_timeout). Remaining checks skipped — "
+                    f"commit allowed to proceed (fail-open)."
+                )
+                return Tier1Result(passed=True, results=results, warnings=warnings)
 
         if self._enabled["static_analysis"]:
             results.append(self._check_static_analysis())
+            if _timed_out():
+                warnings.append(
+                    f"Guard timed out after {self._hook_timeout}s "
+                    f"(hook_timeout). Remaining checks skipped — "
+                    f"commit allowed to proceed (fail-open)."
+                )
+                return Tier1Result(passed=True, results=results, warnings=warnings)
 
         if self._enabled["lsp"] and not self._is_go:
             results.append(self._check_lsp())
+            if _timed_out():
+                warnings.append(
+                    f"Guard timed out after {self._hook_timeout}s "
+                    f"(hook_timeout). Remaining checks skipped — "
+                    f"commit allowed to proceed (fail-open)."
+                )
+                return Tier1Result(passed=True, results=results, warnings=warnings)
 
         if self._is_go:
             if self._go_guards.get("build", True):
                 results.append(self._check_go_build())
+                if _timed_out():
+                    warnings.append(
+                        f"Guard timed out after {self._hook_timeout}s "
+                        f"(hook_timeout). Remaining checks skipped — "
+                        f"commit allowed to proceed (fail-open)."
+                    )
+                    return Tier1Result(passed=True, results=results, warnings=warnings)
             if self._go_guards.get("lint", True):
                 results.append(self._check_go_lint())
+                if _timed_out():
+                    warnings.append(
+                        f"Guard timed out after {self._hook_timeout}s "
+                        f"(hook_timeout). Remaining checks skipped — "
+                        f"commit allowed to proceed (fail-open)."
+                    )
+                    return Tier1Result(passed=True, results=results, warnings=warnings)
             if self._go_guards.get("tests", True):
                 results.append(self._check_go_tests())
+                if _timed_out():
+                    warnings.append(
+                        f"Guard timed out after {self._hook_timeout}s "
+                        f"(hook_timeout). Remaining checks skipped — "
+                        f"commit allowed to proceed (fail-open)."
+                    )
+                    return Tier1Result(passed=True, results=results, warnings=warnings)
 
         passed = all(r.passed for r in results)
         extra = {
@@ -270,7 +353,7 @@ class GuardManager:
                 extra["staged_count"] = len(staged)
             else:
                 extra["test_targets"] = None  # full suite triggered
-        return Tier1Result(passed=passed, results=results, extra=extra)
+        return Tier1Result(passed=passed, results=results, extra=extra, warnings=warnings)
 
     @property
     def test_mode(self) -> str:

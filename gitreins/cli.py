@@ -951,6 +951,11 @@ def cmd_guard_run(args):
     print(f"Tier 1 Guards: {'PASS' if result.passed else 'FAIL'}{mode_note}")
     print(result.summary)
 
+    if result.warnings:
+        print()
+        for warning in result.warnings:
+            print(f"\033[33m⚠ {warning}\033[0m", file=sys.stderr)
+
     if not result.passed:
         print()
         print("Fix the issues above and re-run: gitreins guard")

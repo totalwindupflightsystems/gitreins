@@ -28,6 +28,7 @@ class Tier1Result:
     passed: bool
     results: list[GuardResult] = field(default_factory=list)
     extra: dict = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
 
     @property
     def summary(self) -> str:

@@ -56,6 +56,9 @@ class GitReinsDefaults:
     max_file_bytes: int = 131_072       # 128KB — cap read_file results to prevent context explosion (GR-064d)
     pass_on_error: bool = False          # skip Tier 2 when LLM is unavailable (advisory-only mode)
 
+    # ── Guard defaults ──
+    hook_timeout: int = 120               # overall pre-commit hook timeout (GR-064e)
+
     # ── Commit audit ──
     commit_audit_enabled: bool = True      # validate commit messages against staged diff
     commit_audit_mode: str = "warn"        # "warn" | "block" | "suggest"
@@ -138,6 +141,9 @@ class GitReinsDefaults:
             )),
             pass_on_error=bool(defaults.get(
                 "pass_on_error", self.pass_on_error
+            )),
+            hook_timeout=int(defaults.get(
+                "hook_timeout", self.hook_timeout
             )),
             commit_audit_enabled=bool(defaults.get(
                 "commit_audit", {}).get("enabled", self.commit_audit_enabled
@@ -243,6 +249,7 @@ class GitReinsDefaults:
             "fast_track": self.fast_track,
             "max_file_bytes": self.max_file_bytes,
             "pass_on_error": self.pass_on_error,
+            "hook_timeout": self.hook_timeout,
             "commit_audit": {
                 "enabled": self.commit_audit_enabled,
                 "mode": self.commit_audit_mode,
