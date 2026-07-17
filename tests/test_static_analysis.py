@@ -17,6 +17,7 @@ from engine.static_analysis import (
     _parse_sorbet,
     _parse_sqlfluff_json,
     _parse_phpstan_json,
+    _parse_cppcheck,
     find_tool,
     list_available_tools,
     run_static_check,
@@ -130,6 +131,29 @@ def phpstan_output() -> dict:
     }
 
 
+@pytest.fixture
+def cppcheck_output_errors() -> str:
+    """Simulated cppcheck output with --template format (mypy-compatible)."""
+    return (
+        "Checking test.cpp ...\n"
+        "test.cpp:3: error: Uninitialized variable: x [uninitvar]\n"
+        "test.cpp:5: warning: Possible null pointer dereference: ptr "
+        "[nullPointer]\n"
+        "test.cpp:10: style: Variable 'y' is assigned a value that is never "
+        "used. [unreadVariable]\n"
+        "test.cpp:15: performance: Prefer prefix ++/-- operators for "
+        "non-primitive types. [postfixOperator]\n"
+        "test.cpp:20: portability: scanf without field width limits can crash "
+        "with huge input data. [invalidscanf]\n"
+        "test.cpp:25: information: Cppcheck cannot find all the include files. "
+        "Cppcheck can check the code without the include files, but the "
+        "results will be more accurate if the headers are available. "
+        "[missingInclude]\n"
+        "nofile:0: information: Active checkers: 173/975 "
+        "[checkersReport]\n"
+    )
+
+
 # ══════════════════════════════════════════════════════════════════
 # StaticDiag
 # ══════════════════════════════════════════════════════════════════
@@ -230,6 +254,10 @@ class TestListAvailableTools:
     def test_list_empty_language(self):
         tools = list_available_tools("")
         assert tools == []
+
+    def test_list_cpp_tools(self):
+        tools = list_available_tools("cpp")
+        assert "cppcheck" in tools
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -439,6 +467,82 @@ class TestParsePhpstanJson:
 
 
 # ══════════════════════════════════════════════════════════════════
+# _parse_cppcheck
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestParseCppcheck:
+    """Test parsing of cppcheck text output (--template format)."""
+
+    def test_parse_cppcheck_all_severities(self, cppcheck_output_errors):
+        """Cppcheck output with error, warning, style, performance,
+        portability, and information — six diagnostics, header lines
+        (Checking…, nofile:…) are skipped."""
+        diags = _parse_cppcheck(cppcheck_output_errors)
+        assert len(diags) == 6
+
+        # error stays error
+        assert diags[0].file == "test.cpp"
+        assert diags[0].line == 3
+        assert diags[0].severity == "error"
+        assert diags[0].code == "uninitvar"
+        assert diags[0].tool == "cppcheck"
+
+        # warning stays warning
+        assert diags[1].file == "test.cpp"
+        assert diags[1].line == 5
+        assert diags[1].severity == "warning"
+        assert diags[1].code == "nullPointer"
+
+        # style → note
+        assert diags[2].file == "test.cpp"
+        assert diags[2].line == 10
+        assert diags[2].severity == "note"
+        assert diags[2].code == "unreadVariable"
+
+        # performance → note
+        assert diags[3].severity == "note"
+        assert diags[3].code == "postfixOperator"
+
+        # portability → note
+        assert diags[4].severity == "note"
+        assert diags[4].code == "invalidscanf"
+
+        # information → note
+        assert diags[5].severity == "note"
+        assert diags[5].code == "missingInclude"
+
+    def test_parse_cppcheck_empty(self):
+        diags = _parse_cppcheck("")
+        assert diags == []
+
+    def test_parse_cppcheck_no_errors(self):
+        diags = _parse_cppcheck("Checking test.cpp ...\n")
+        assert diags == []
+
+    def test_parse_cppcheck_with_code(self):
+        text = "app.cpp:5: error: Incompatible types [typeError]\n"
+        diags = _parse_cppcheck(text)
+        assert len(diags) == 1
+        assert diags[0].code == "typeError"
+        assert diags[0].severity == "error"
+
+    def test_parse_cppcheck_no_code(self):
+        text = "app.cpp:5: error: Something went wrong\n"
+        diags = _parse_cppcheck(text)
+        assert len(diags) == 1
+        assert diags[0].code == ""
+
+    def test_parse_cppcheck_skips_header(self):
+        text = (
+            "Checking test.cpp ...\n"
+            "nofile:0: information: Active checkers: 173/975 [checkersReport]\n"
+        )
+        diags = _parse_cppcheck(text)
+        assert diags == []
+
+
+# ══════════════════════════════════════════════════════════════════
 # _build_command
 # ══════════════════════════════════════════════════════════════════
 
@@ -468,6 +572,14 @@ class TestBuildCommand:
         cmd = _build_command("phpstan", "/usr/bin/phpstan", "/tmp/work")
         assert cmd == ["/usr/bin/phpstan", "analyse",
                         "--error-format=json", "--no-progress", "/tmp/work"]
+
+    def test_build_command_cppcheck(self):
+        cmd = _build_command("cppcheck", "/usr/bin/cppcheck", "/tmp/work")
+        assert cmd[0] == "/usr/bin/cppcheck"
+        assert "--enable=all" in cmd
+        assert "--suppress=missingIncludeSystem" in cmd
+        assert any("--template=" in a for a in cmd)
+        assert cmd[-1] == "/tmp/work"
 
     def test_build_command_unknown(self):
         cmd = _build_command("unknown", "/usr/bin/unknown", "/tmp/work")
@@ -588,3 +700,21 @@ class TestRunStaticCheck:
         assert len(result) == 2
         assert result[0]["file"] == "main.rb"
         assert result[0]["tool"] == "sorbet"
+
+    def test_run_static_check_cppcheck(self, cppcheck_output_errors):
+        """Cppcheck text output parsed through the text-parser path."""
+        mock_result = MagicMock()
+        mock_result.stdout = cppcheck_output_errors
+        mock_result.stderr = ""
+
+        with patch("engine.static_analysis.find_tool",
+                   return_value="/usr/bin/cppcheck"):
+            with patch("engine.static_analysis.subprocess.run",
+                       return_value=mock_result):
+                result = run_static_check("cppcheck", "/tmp/workdir")
+
+        assert len(result) == 6
+        assert result[0]["file"] == "test.cpp"
+        assert result[0]["severity"] == "error"
+        assert result[0]["tool"] == "cppcheck"
+        assert result[0]["code"] == "uninitvar"

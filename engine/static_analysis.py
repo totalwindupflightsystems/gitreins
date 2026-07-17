@@ -1,7 +1,7 @@
 """
 Static Analysis Runner — Invoke type checkers and parse structured output.
 
-Supports: mypy, pyright, sorbet, sqlfluff, phpstan
+Supports: mypy, pyright, sorbet, sqlfluff, phpstan, cppcheck
 All backends produce the same normalized diagnostic shape:
     {file, line, severity, message, code, tool}
 
@@ -66,6 +66,7 @@ _TOOL_BINARIES = {
     "sorbet": ["srb", "bundle exec srb"],
     "sqlfluff": ["sqlfluff"],
     "phpstan": ["phpstan", "vendor/bin/phpstan"],
+    "cppcheck": ["cppcheck"],
 }
 
 _TOOL_INSTALL_GUIDE = {
@@ -74,6 +75,7 @@ _TOOL_INSTALL_GUIDE = {
     "sorbet": "gem install sorbet && srb init",
     "sqlfluff": "pip install sqlfluff",
     "phpstan": "composer require --dev phpstan/phpstan",
+    "cppcheck": "apt install cppcheck  (or: brew install cppcheck)",
 }
 
 
@@ -109,6 +111,7 @@ def list_available_tools(language: str) -> list[str]:
         "ruby": ["sorbet"],
         "sql": ["sqlfluff"],
         "php": ["phpstan"],
+        "cpp": ["cppcheck"],
     }
     available = []
     for tool in language_tools.get(language, []):
@@ -186,6 +189,48 @@ def _parse_sorbet(text: str, tool: str = "sorbet") -> list[StaticDiag]:
     return diagnostics
 
 
+# Cppcheck: "file.cpp:line: severity: message [code]" (with --template)
+_CPPCHECK_LINE_RE = re.compile(
+    r"^(.+?):(\d+):\s+(error|warning|style|performance|portability|information):"
+    r"\s+(.+?)(?:\s+\[(.+?)\])?\s*$"
+)
+
+
+def _parse_cppcheck(text: str, tool: str = "cppcheck") -> list[StaticDiag]:
+    """Parse cppcheck text output (--template format, mypy-compatible).
+
+    Cppcheck uses a wider severity vocabulary than mypy.  We normalise
+    ``error`` / ``warning`` as-is and map everything else (style,
+    performance, portability, information) to ``note`` so downstream
+    consumers get a consistent three-level scheme.
+    """
+    diagnostics: list[StaticDiag] = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        # Skip header lines
+        if line.startswith("Checking ") or line.startswith("nofile:"):
+            continue
+        m = _CPPCHECK_LINE_RE.match(line)
+        if m:
+            raw_severity = m.group(3)
+            severity = (
+                raw_severity if raw_severity in ("error", "warning") else "note"
+            )
+            diagnostics.append(StaticDiag(
+                file=m.group(1),
+                line=int(m.group(2)),
+                severity=severity,
+                message=m.group(4).strip(),
+                code=m.group(5) or "",
+                tool=tool,
+            ))
+        else:
+            logger.debug("cppcheck: unparsed line: %s", line[:120])
+    return diagnostics
+
+
 # ── JSON output parsers ─────────────────────────────────────────────────
 
 
@@ -248,6 +293,7 @@ _JSON_PARSERS = {
 _TEXT_PARSERS = {
     "mypy": _parse_mypy,
     "sorbet": _parse_sorbet,
+    "cppcheck": _parse_cppcheck,
 }
 
 
@@ -368,6 +414,13 @@ def _build_command(tool: str, binary: str, workdir: str) -> list[str]:
             "analyse",
             "--error-format=json",
             "--no-progress",
+            workdir,
+        ]
+    elif tool == "cppcheck":
+        return cmd_parts + [
+            "--enable=all",
+            "--suppress=missingIncludeSystem",
+            "--template={file}:{line}: {severity}: {message} [{id}]",
             workdir,
         ]
     else:
