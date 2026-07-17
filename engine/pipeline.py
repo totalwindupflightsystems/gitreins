@@ -645,6 +645,7 @@ def _default_tier1_steps(workdir: str) -> list[dict]:
         "js":     ("npx eslint . 2>/dev/null || true",            "npm test 2>/dev/null || true"),
         "java":   ("mvn checkstyle:check 2>/dev/null || true",    "mvn test -q 2>/dev/null || true"),
         "c":      ("make lint 2>/dev/null || true",               "make test 2>/dev/null || true"),
+        "cpp":    ("make lint 2>/dev/null || true",               "make test 2>/dev/null || true"),
         "ruby":   ("rubocop 2>/dev/null || true",                 "bundle exec rspec 2>/dev/null || true"),
         "php":    ("php vendor/bin/phpcs 2>/dev/null || true",    "php vendor/bin/phpunit 2>/dev/null || true"),
     }
@@ -659,7 +660,7 @@ def _default_tier1_steps(workdir: str) -> list[dict]:
         ("package.json", "js"),
         ("pom.xml", "java"),
         ("build.gradle", "java"),
-        ("CMakeLists.txt", "c"),
+        ("CMakeLists.txt", "cpp"),
         ("Makefile", "c"),
         ("Gemfile", "ruby"),
         ("composer.json", "php"),

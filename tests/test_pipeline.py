@@ -430,3 +430,91 @@ class TestLoadPipelineConfigFallback:
         assert tier1 is not None
         assert tier2 is not None
         assert tier2["type"] == "ai_eval"
+
+
+# ── GR-063c: C++ pipeline — split "c" from "cpp" ───────────────────────────
+
+
+class TestCppLanguageDetection:
+    """Verify C++ pipeline detection: CMakeLists.txt → cpp, Makefile → c."""
+
+    def test_cmake_lists_txt_detected_as_cpp(self, tmp_workdir):
+        """CMakeLists.txt alone → primary language is cpp."""
+        from engine.pipeline import _default_tier1_steps
+        cmake_path = os.path.join(tmp_workdir, "CMakeLists.txt")
+        with open(cmake_path, "w") as f:
+            f.write("project(test)\n")
+        steps = _default_tier1_steps(tmp_workdir)
+        step_ids = [s["id"] for s in steps]
+        assert "secrets" in step_ids, "secrets step should always be present"
+
+    def test_makefile_only_detected_as_c(self, tmp_workdir):
+        """Makefile alone (no CMakeLists.txt) → primary language is c."""
+        from engine.pipeline import _default_tier1_steps
+        makefile_path = os.path.join(tmp_workdir, "Makefile")
+        with open(makefile_path, "w") as f:
+            f.write("all:\n\techo ok\n")
+        steps = _default_tier1_steps(tmp_workdir)
+        step_ids = [s["id"] for s in steps]
+        assert "lint" in step_ids
+        assert "tests" in step_ids
+
+    def test_cmake_takes_priority_over_makefile(self, tmp_workdir):
+        """Both CMakeLists.txt and Makefile present → CMakeLists.txt wins (cpp)."""
+        from engine.pipeline import _default_tier1_steps
+        cmake_path = os.path.join(tmp_workdir, "CMakeLists.txt")
+        with open(cmake_path, "w") as f:
+            f.write("project(test)\n")
+        makefile_path = os.path.join(tmp_workdir, "Makefile")
+        with open(makefile_path, "w") as f:
+            f.write("all:\n\techo ok\n")
+        steps = _default_tier1_steps(tmp_workdir)
+        step_ids = [s["id"] for s in steps]
+        assert "lint" in step_ids
+        assert "tests" in step_ids
+
+    def test_cpp_lang_commands_produces_lint_and_test(self, tmp_workdir):
+        """C++ pipeline produces lint + test steps (via make)."""
+        from engine.pipeline import _default_tier1_steps
+        cmake_path = os.path.join(tmp_workdir, "CMakeLists.txt")
+        with open(cmake_path, "w") as f:
+            f.write("project(test)\n")
+        steps = _default_tier1_steps(tmp_workdir)
+        lint_step = next((s for s in steps if s["id"] == "lint"), None)
+        test_step = next((s for s in steps if s["id"] == "tests"), None)
+        assert lint_step is not None, "lint step missing for C++ project"
+        assert test_step is not None, "tests step missing for C++ project"
+        assert "make" in lint_step["run"], f"Expected make lint, got {lint_step['run']}"
+        assert "make" in test_step["run"], f"Expected make test, got {test_step['run']}"
+
+    def test_c_and_cpp_both_produce_steps(self, tmp_workdir):
+        """Both C (Makefile) and C++ (CMakeLists.txt) produce lint+test steps."""
+        from engine.pipeline import _default_tier1_steps
+        # Test C
+        with open(os.path.join(tmp_workdir, "Makefile"), "w") as f:
+            f.write("all:\n\techo ok\n")
+        c_steps = _default_tier1_steps(tmp_workdir)
+        c_ids = [s["id"] for s in c_steps]
+        assert "lint" in c_ids, f"C project missing lint: {c_ids}"
+        assert "tests" in c_ids, f"C project missing tests: {c_ids}"
+        # Remove Makefile, test C++
+        os.remove(os.path.join(tmp_workdir, "Makefile"))
+        with open(os.path.join(tmp_workdir, "CMakeLists.txt"), "w") as f:
+            f.write("project(test)\n")
+        cpp_steps = _default_tier1_steps(tmp_workdir)
+        cpp_ids = [s["id"] for s in cpp_steps]
+        assert "lint" in cpp_ids, f"C++ project missing lint: {cpp_ids}"
+        assert "tests" in cpp_ids, f"C++ project missing tests: {cpp_ids}"
+
+    def test_no_cmake_or_makefile_skips_c_and_cpp(self, tmp_workdir):
+        """No CMakeLists.txt or Makefile → falls back to secrets-only."""
+        from engine.pipeline import _default_tier1_steps
+        steps = _default_tier1_steps(tmp_workdir)
+        step_ids = [s["id"] for s in steps]
+        assert "lint" not in step_ids, (
+            f"No C/C++ signature → should not have lint step: {step_ids}"
+        )
+        assert "tests" not in step_ids, (
+            f"No C/C++ signature → should not have tests step: {step_ids}"
+        )
+        assert "secrets" in step_ids, "secrets step should always be present"
