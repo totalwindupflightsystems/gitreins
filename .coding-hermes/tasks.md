@@ -309,7 +309,7 @@ commit_audit:
 
 ### Phase 1 — C++ (most requested)
 - [x] GR-063a: C++ LSP — add clangd to `_TOOL_BINARIES`, map `.cpp`/`.hpp`/`.cc`/`.cxx`/`.h` to `cpp` in `_LANGUAGE_MAP`
-- [ ] GR-063b: C++ static analysis — add `cppcheck` or `clang-tidy` to `_TOOL_BINARIES` + `_TOOL_INSTALL_GUIDE`
+- [x] GR-063b: C++ static analysis — add `cppcheck` or `clang-tidy` to `_TOOL_BINARIES` + `_TOOL_INSTALL_GUIDE`
 - [ ] GR-063c: C++ pipeline — split "c" from "cpp" in `_LANG_COMMANDS`, add `CMakeLists.txt` → `cpp` detection
 
 ### Phase 2 — Go (widely used, missing LSP+static)
@@ -348,8 +348,8 @@ commit_audit:
 - **Priority:** high
 - **Model:** deepseek-v4-flash (coding-hermes)
 - **Files:** `engine/config.py`, `engine/commit_audit.py`, `engine/pipeline.py`, `gitreins/cli.py`, `tests/test_commit_audit.py`
-- **Result:** All 6 AC items already implemented. `CommitAuditResult.diff` field (commit_audit.py:161), pipeline diff output with 40-line truncation (pipeline.py:394-404), `commit_audit_show_diff` config key (config.py:61), CLI diff display (cli.py:1059-1070), 7 diff-specific tests in `TestCommitAuditDiffOutput`. 38/38 tests pass.
-- **Commit:** (pending)
+- **Result:** All 6 AC items already implemented. `CommitAuditResult.diff` field (commit_audit.py:161), pipeline diff output with 40-line truncation (pipeline.py:394-404), `commit_audit_show_diff` config key (config.py:61), CLI diff display (cli.py:1059-1070), 7 diff-specific tests in `TestCommitAuditDiffOutput`. 38/38 tests pass. Feature verified pre-existing — no code change needed.
+- **Commit:** `4ae8189` (board verification)
 
 ## [ ] GR-061: Catch-up — LSP process-group isolation + sk-api-key rule + init template sync
 - **Priority:** medium
