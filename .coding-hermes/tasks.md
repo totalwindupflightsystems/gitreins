@@ -310,7 +310,8 @@ commit_audit:
 ### Phase 1 — C++ (most requested)
 - [x] GR-063a: C++ LSP — add clangd to `_TOOL_BINARIES`, map `.cpp`/`.hpp`/`.cc`/`.cxx`/`.h` to `cpp` in `_LANGUAGE_MAP`
 - [x] GR-063b: C++ static analysis — add `cppcheck` or `clang-tidy` to `_TOOL_BINARIES` + `_TOOL_INSTALL_GUIDE`
-- [ ] GR-063c: C++ pipeline — split "c" from "cpp" in `_LANG_COMMANDS`, add `CMakeLists.txt` → `cpp` detection
+- [x] GR-063c: C++ pipeline — split "c" from "cpp" in `_LANG_COMMANDS`, add `CMakeLists.txt` → `cpp` detection
+- **Commit:** `d3151d1`
 
 ### Phase 2 — Go (widely used, missing LSP+static)
 - [ ] GR-063d: Go LSP — add gopls to `_TOOL_BINARIES`, map `.go` → `go` in `_LANGUAGE_MAP`
