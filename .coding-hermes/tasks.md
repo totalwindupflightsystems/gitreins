@@ -300,7 +300,7 @@ commit_audit:
   - **Commit:** `4a4d14c`
   - **Result:** hook_timeout=120s default in GitReinsDefaults, time.monotonic() checks after each guard, fail-open returns Tier1Result(passed=True) with warnings list. warnings field added to Tier1Result dataclass, CLI output shows yellow warnings. All 50 guard_manager tests pass. Guard PASS (pre-existing E501 lint in overlay() noted — unrelated). 4 files (+97/-1).
 
-## [ ] GR-063: Expand language coverage across all tool subsystems
+## [x] GR-063: Expand language coverage across all tool subsystems
 - **Priority:** high
 - **Model:** deepseek-v4-flash (coding-hermes cron)
 - **Files:** `engine/pipeline.py`, `engine/lsp.py`, `engine/static_analysis.py`, `engine/config.py`, `tests/`
@@ -372,7 +372,9 @@ commit_audit:
 - [x] GR-063p: JS/TS static analysis — add eslint as static analysis tool
   - **Commit:** `a38dd1d`
   - **Result:** Added eslint to _TOOL_BINARIES, _TOOL_INSTALL_GUIDE, list_available_tools, _JSON_PARSERS, _build_command. New _parse_eslint_json function. 4 new tests (TestParseEslint). 72/72 static analysis tests pass (4 pre-existing staticcheck failures from duplicate _parse_staticcheck).
-- [ ] GR-063q: Ruby LSP — add solargraph or ruby-lsp to `_TOOL_BINARIES`
+- [x] GR-063q: Ruby LSP — add solargraph or ruby-lsp to `_TOOL_BINARIES`
+  - **Commit:** `317d8d1`
+  - **Result:** Added ruby-lsp + solargraph to _TOOL_BINARIES, _LANGUAGE_MAP, _TOOL_LANGUAGES in engine/lsp.py. 8 new tests (4 discovery + 1 map + 3 integration). Pipeline (_LANG_COMMANDS + _SIGNATURE_FILES) and static analysis (sorbet) already had Ruby entries from prior work. 62 non-integration LSP tests pass. Guard PASS.
 
 **Per-subtask pattern:**
 1. Add binary detection + install guide
