@@ -67,6 +67,7 @@ _TOOL_BINARIES = {
     "sqlfluff": ["sqlfluff"],
     "phpstan": ["phpstan", "vendor/bin/phpstan"],
     "cppcheck": ["cppcheck"],
+    "staticcheck": ["staticcheck"],
 }
 
 _TOOL_INSTALL_GUIDE = {
@@ -76,6 +77,7 @@ _TOOL_INSTALL_GUIDE = {
     "sqlfluff": "pip install sqlfluff",
     "phpstan": "composer require --dev phpstan/phpstan",
     "cppcheck": "apt install cppcheck  (or: brew install cppcheck)",
+    "staticcheck": "go install honnef.co/go/tools/cmd/staticcheck@latest",
 }
 
 
@@ -112,6 +114,7 @@ def list_available_tools(language: str) -> list[str]:
         "sql": ["sqlfluff"],
         "php": ["phpstan"],
         "cpp": ["cppcheck"],
+        "go": ["staticcheck"],
     }
     available = []
     for tool in language_tools.get(language, []):
@@ -267,6 +270,47 @@ def _parse_sqlfluff_json(data, tool: str = "sqlfluff") -> list[StaticDiag]:
     return diagnostics
 
 
+def _parse_staticcheck(text: str, tool: str = "staticcheck") -> list[StaticDiag]:
+    """Parse staticcheck text output.
+
+    staticcheck output format:
+        file.go:line:col: message (SAxxxx)
+    Multi-line messages (rare) use a continuation indent.
+    """
+    diagnostics: list[StaticDiag] = []
+    import re
+
+    # Pattern: file.go:line:col: message (XXXXNNNN)
+    # Check codes can be SAxxxx, STxxxx, Sxxxx, Uxxxx (1-2 letter prefix + 4 digits)
+    _STATICCHECK_LINE_RE = re.compile(
+        r"^(.+?):(\d+):(\d+):\s+(.+?)\s*\(([A-Z]{1,2}\d{4})\)\s*$"
+    )
+
+    current = None
+    for line in text.split("\n"):
+        m = _STATICCHECK_LINE_RE.match(line.strip())
+        if m:
+            # Flush previous
+            if current:
+                diagnostics.append(current)
+            current = StaticDiag(
+                file=m.group(1),
+                line=int(m.group(2)),
+                severity="warning",
+                message=m.group(4).strip(),
+                code=m.group(5),
+                tool=tool,
+            )
+        elif current and line.strip():
+            # Continuation line — append to previous message
+            current.message += " " + line.strip()
+
+    if current:
+        diagnostics.append(current)
+
+    return diagnostics
+
+
 def _parse_phpstan_json(data: dict, tool: str = "phpstan") -> list[StaticDiag]:
     diagnostics: list[StaticDiag] = []
     for filepath, file_data in data.get("files", {}).items():
@@ -294,6 +338,7 @@ _TEXT_PARSERS = {
     "mypy": _parse_mypy,
     "sorbet": _parse_sorbet,
     "cppcheck": _parse_cppcheck,
+    "staticcheck": _parse_staticcheck,
 }
 
 
@@ -422,6 +467,10 @@ def _build_command(tool: str, binary: str, workdir: str) -> list[str]:
             "--suppress=missingIncludeSystem",
             "--template={file}:{line}: {severity}: {message} [{id}]",
             workdir,
+        ]
+    elif tool == "staticcheck":
+        return cmd_parts + [
+            "./...",
         ]
     else:
         # Generic fallback

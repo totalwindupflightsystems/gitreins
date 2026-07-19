@@ -135,6 +135,18 @@ class TestFindLspTool:
             result = find_lsp_tool("ts-lsp")
         assert result == "/usr/bin/typescript-language-server"
 
+    def test_find_lsp_tool_gopls_not_found(self):
+        """gopls not found returns None."""
+        with patch("shutil.which", return_value=None):
+            result = find_lsp_tool("gopls")
+        assert result is None
+
+    def test_find_lsp_tool_gopls_found(self):
+        """gopls found returns its path."""
+        with patch("shutil.which", return_value="/home/user/go/bin/gopls"):
+            result = find_lsp_tool("gopls")
+        assert result == "/home/user/go/bin/gopls"
+
 
 class TestRunLspCheck:
     """Test run_lsp_check entry point."""
@@ -169,8 +181,11 @@ class TestRunLspCheck:
                 mock_proc.kill = MagicMock()
                 with patch("engine.lsp._get_staged_files", return_value=["test.py"]):
                     with patch("os.path.isfile", return_value=True):
-                        result = run_lsp_check("pylsp", "/tmp")
+                        with patch("engine.lsp.os.killpg") as mock_killpg:
+                            result = run_lsp_check("pylsp", "/tmp")
         assert result == []
+        mock_killpg.assert_not_called()
+        mock_proc.kill.assert_called_once()
 
     def test_run_lsp_check_startup_failure_returns_empty(self):
         """When LSP process can't start, returns empty list."""
@@ -561,6 +576,13 @@ class TestStagedFilesByLanguage:
             "typescript": ["/tmp/c.ts"],
         }
 
+    def test_maps_go_files(self):
+        """.go files map to go language."""
+        with patch("engine.lsp._get_staged_files", return_value=["file.go"]):
+            with patch("os.path.isfile", return_value=True):
+                result = _staged_files_by_language("/tmp")
+        assert result == {"go": ["/tmp/file.go"]}
+
 
 # ── Integration tests with real rust-analyzer server ──────────────
 
@@ -635,3 +657,31 @@ class TestTsLspIntegration:
             f.write("const x: number = 'hello';\n")
         diags = run_lsp_check("ts-lsp", lsp_workdir, files=[path])
         assert diags == [], "ts-lsp should return empty diagnostics when not installed"
+
+
+# ── Integration tests: gopls ────────────────────────────────────────
+
+
+class TestGoplsIntegration:
+    """Integration tests for Go LSP with gopls."""
+
+    def test_gopls_detects_go_errors(self, lsp_workdir):
+        """gopls detects type errors in Go code when installed."""
+        if not shutil.which("gopls"):
+            pytest.skip("gopls not installed")
+        # gopls needs a go.mod for module context
+        import subprocess
+        subprocess.run(["go", "mod", "init", "example.com/test"],
+                       cwd=lsp_workdir, capture_output=True)
+        path = os.path.join(lsp_workdir, "test.go")
+        with open(path, "w") as f:
+            f.write("package main\n\nfunc main() {\n\tvar x int = \"hello\"\n}\n")
+        diags = run_lsp_check("gopls", lsp_workdir, files=[path])
+        # gopls should detect at least the type mismatch
+        assert len(diags) > 0, "gopls should produce diagnostics on bad Go code"
+
+    def test_gopls_skip_gracefully_when_not_installed(self, lsp_workdir):
+        """gopls not found returns empty diagnostics."""
+        with patch("shutil.which", return_value=None):
+            diags = run_lsp_check("gopls", lsp_workdir, files=[])
+        assert diags == [], "gopls should return empty diagnostics when not installed"

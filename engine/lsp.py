@@ -25,6 +25,7 @@ _TOOL_BINARIES = {
     "lua-lsp": ["lua-lsp"],
     "ts-lsp": ["typescript-language-server"],
     "rust-analyzer": ["rust-analyzer"],
+    "gopls": ["gopls"],
 }
 
 _LANGUAGE_MAP: dict[str, str] = {
@@ -36,6 +37,7 @@ _LANGUAGE_MAP: dict[str, str] = {
     ".tsx": "typescriptreact",
     ".js": "javascript",
     ".jsx": "javascriptreact",
+    ".go": "go",
 }
 
 _TOOL_LANGUAGES: dict[str, list[str]] = {
@@ -45,6 +47,7 @@ _TOOL_LANGUAGES: dict[str, list[str]] = {
     "lua-lsp": ["lua"],
     "ts-lsp": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
     "rust-analyzer": ["rust"],
+    "gopls": ["go"],
 }
 
 
@@ -401,15 +404,18 @@ def run_lsp_check(
                 logger.warning("LSP tool '%s' (pid %d) did not exit — killing process group", tool, proc.pid)
                 try:
                     import signal as _signal
-                    lsp_pgid = os.getpgid(proc.pid)
+                    lsp_pid = proc.pid
+                    if not isinstance(lsp_pid, int) or isinstance(lsp_pid, bool) or lsp_pid <= 1:
+                        raise ValueError(f"unsafe LSP pid: {lsp_pid!r}")
+                    lsp_pgid = os.getpgid(lsp_pid)
                     our_pgid = os.getpgid(os.getpid())
-                    if lsp_pgid != our_pgid:
+                    if lsp_pgid == lsp_pid and lsp_pgid != our_pgid:
                         os.killpg(lsp_pgid, _signal.SIGKILL)
                     else:
                         logger.error(
-                            "LSP tool '%s' is in our process group (pgid=%d) — "
-                            "start_new_session may have failed. Falling back to proc.kill()",
-                            tool, lsp_pgid,
+                            "LSP tool '%s' has unsafe process group (pid=%d, pgid=%d, ours=%d) — "
+                            "falling back to proc.kill()",
+                            tool, lsp_pid, lsp_pgid, our_pgid,
                         )
                         proc.kill()
                     proc.wait(timeout=2)

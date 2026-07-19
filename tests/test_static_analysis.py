@@ -18,6 +18,7 @@ from engine.static_analysis import (
     _parse_sqlfluff_json,
     _parse_phpstan_json,
     _parse_cppcheck,
+    _parse_staticcheck,
     find_tool,
     list_available_tools,
     run_static_check,
@@ -154,6 +155,17 @@ def cppcheck_output_errors() -> str:
     )
 
 
+@pytest.fixture
+def staticcheck_output_errors() -> str:
+    """Simulated staticcheck output with standard file:line:col: message (code) format."""
+    return (
+        "main.go:10:2: error strings should not be capitalized (ST1005)\n"
+        "main.go:15:5: should omit nil check; len() for nil slices is defined as zero (S1009)\n"
+        "main.go:23:7: func unusedHelper is unused (U1000)\n"
+        "helpers.go:8:1: package comment should be of the form \"Package helpers ...\" (ST1000)\n"
+    )
+
+
 # ══════════════════════════════════════════════════════════════════
 # StaticDiag
 # ══════════════════════════════════════════════════════════════════
@@ -258,6 +270,10 @@ class TestListAvailableTools:
     def test_list_cpp_tools(self):
         tools = list_available_tools("cpp")
         assert "cppcheck" in tools
+
+    def test_list_go_tools(self):
+        tools = list_available_tools("go")
+        assert "staticcheck" in tools
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -543,6 +559,55 @@ class TestParseCppcheck:
 
 
 # ══════════════════════════════════════════════════════════════════
+# _parse_staticcheck
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestParseStaticcheck:
+    """Test parsing of staticcheck text output."""
+
+    def test_parse_staticcheck_all_checks(self, staticcheck_output_errors):
+        """staticcheck output with ST, S, U checks — four diagnostics."""
+        diags = _parse_staticcheck(staticcheck_output_errors)
+        assert len(diags) == 4
+
+        assert diags[0].file == "main.go"
+        assert diags[0].line == 10
+        assert diags[0].severity == "warning"
+        assert diags[0].code == "ST1005"
+        assert diags[0].tool == "staticcheck"
+
+        assert diags[1].file == "main.go"
+        assert diags[1].line == 15
+        assert diags[1].code == "S1009"
+
+        assert diags[2].file == "main.go"
+        assert diags[2].line == 23
+        assert diags[2].code == "U1000"
+
+        assert diags[3].file == "helpers.go"
+        assert diags[3].line == 8
+        assert diags[3].code == "ST1000"
+
+    def test_parse_staticcheck_empty(self):
+        diags = _parse_staticcheck("")
+        assert diags == []
+
+    def test_parse_staticcheck_no_errors(self):
+        diags = _parse_staticcheck("go: downloading ...\n")
+        assert diags == []
+
+    def test_parse_staticcheck_single(self):
+        text = "pkg/handler.go:42:12: this value of err is never used (SA4006)\n"
+        diags = _parse_staticcheck(text)
+        assert len(diags) == 1
+        assert diags[0].file == "pkg/handler.go"
+        assert diags[0].line == 42
+        assert diags[0].code == "SA4006"
+        assert diags[0].severity == "warning"
+
+
+# ══════════════════════════════════════════════════════════════════
 # _build_command
 # ══════════════════════════════════════════════════════════════════
 
@@ -588,6 +653,10 @@ class TestBuildCommand:
     def test_build_command_compound(self):
         cmd = _build_command("pyright", "npx pyright", "/tmp/work")
         assert cmd == ["npx", "pyright", "--outputjson", "/tmp/work"]
+
+    def test_build_command_staticcheck(self):
+        cmd = _build_command("staticcheck", "/usr/bin/staticcheck", "/tmp/work")
+        assert cmd == ["/usr/bin/staticcheck", "./..."]
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -718,3 +787,28 @@ class TestRunStaticCheck:
         assert result[0]["severity"] == "error"
         assert result[0]["tool"] == "cppcheck"
         assert result[0]["code"] == "uninitvar"
+
+    def test_run_static_check_staticcheck(self, staticcheck_output_errors):
+        """staticcheck text output parsed through the text-parser path."""
+        mock_result = MagicMock()
+        mock_result.stdout = staticcheck_output_errors
+        mock_result.stderr = ""
+
+        with patch("engine.static_analysis.find_tool",
+                   return_value="/usr/bin/staticcheck"):
+            with patch("engine.static_analysis.subprocess.run",
+                       return_value=mock_result):
+                result = run_static_check("staticcheck", "/tmp/workdir")
+
+        assert len(result) == 4
+        assert result[0]["file"] == "main.go"
+        assert result[0]["line"] == 10
+        assert result[0]["severity"] == "warning"
+        assert result[0]["tool"] == "staticcheck"
+        assert result[0]["code"] == "ST1005"
+
+    def test_run_static_check_staticcheck_not_found(self):
+        """staticcheck not installed returns empty list."""
+        with patch("engine.static_analysis.find_tool", return_value=None):
+            result = run_static_check("staticcheck", "/tmp/workdir")
+        assert result == []
