@@ -234,6 +234,30 @@ class TestFindLspTool:
             result = find_lsp_tool("metals")
         assert result == "/usr/bin/metals"
 
+    def test_find_lsp_tool_ruby_lsp_not_found(self):
+        """ruby-lsp not found returns None."""
+        with patch("shutil.which", return_value=None):
+            result = find_lsp_tool("ruby-lsp")
+        assert result is None
+
+    def test_find_lsp_tool_ruby_lsp_found(self):
+        """ruby-lsp found returns its path."""
+        with patch("shutil.which", return_value="/usr/bin/ruby-lsp"):
+            result = find_lsp_tool("ruby-lsp")
+        assert result == "/usr/bin/ruby-lsp"
+
+    def test_find_lsp_tool_solargraph_not_found(self):
+        """solargraph not found returns None."""
+        with patch("shutil.which", return_value=None):
+            result = find_lsp_tool("solargraph")
+        assert result is None
+
+    def test_find_lsp_tool_solargraph_found(self):
+        """solargraph found returns its path."""
+        with patch("shutil.which", return_value="/usr/bin/solargraph"):
+            result = find_lsp_tool("solargraph")
+        assert result == "/usr/bin/solargraph"
+
 
 class TestRunLspCheck:
     """Test run_lsp_check entry point."""
@@ -729,6 +753,14 @@ class TestStagedFilesByLanguage:
                 result = _staged_files_by_language("/tmp")
         assert result == {"scala": ["/tmp/src/main.scala", "/tmp/src/helper.sc"]}
 
+    def test_maps_ruby_files(self):
+        """.rb files map to ruby language."""
+        with patch("engine.lsp._get_staged_files",
+                   return_value=["lib/foo.rb", "spec/foo_spec.rb"]):
+            with patch("os.path.isfile", return_value=True):
+                result = _staged_files_by_language("/tmp")
+        assert result == {"ruby": ["/tmp/lib/foo.rb", "/tmp/spec/foo_spec.rb"]}
+
 
 # ── Integration tests with real rust-analyzer server ──────────────
 
@@ -991,3 +1023,33 @@ class TestMetalsIntegration:
                 result = _staged_files_by_language(lsp_workdir)
         assert "scala" in result
         assert any("main.scala" in f for f in result["scala"])
+
+
+# ── Integration tests: ruby-lsp ───────────────────────────────────
+
+
+class TestRubyLspIntegration:
+    """Integration tests for Ruby LSP with ruby-lsp and solargraph."""
+
+    def test_ruby_lsp_skip_gracefully_when_not_installed(self, lsp_workdir):
+        """ruby-lsp not found returns empty diagnostics."""
+        with patch("engine.lsp.find_lsp_tool", return_value=None):
+            diags = run_lsp_check("ruby-lsp", lsp_workdir,
+                                  files=[os.path.join(lsp_workdir, "main.rb")])
+        assert diags == [], "ruby-lsp should return empty diagnostics when not installed"
+
+    def test_solargraph_skip_gracefully_when_not_installed(self, lsp_workdir):
+        """solargraph not found returns empty diagnostics."""
+        with patch("engine.lsp.find_lsp_tool", return_value=None):
+            diags = run_lsp_check("solargraph", lsp_workdir,
+                                  files=[os.path.join(lsp_workdir, "main.rb")])
+        assert diags == [], "solargraph should return empty diagnostics when not installed"
+
+    def test_ruby_lsp_language_mapping(self, lsp_workdir):
+        """.rb files are mapped to ruby via _LANGUAGE_MAP."""
+        from engine.lsp import _staged_files_by_language
+        with patch("engine.lsp._get_staged_files", return_value=["main.rb"]):
+            with patch("os.path.isfile", return_value=True):
+                result = _staged_files_by_language(lsp_workdir)
+        assert "ruby" in result
+        assert any("main.rb" in f for f in result["ruby"])

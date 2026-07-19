@@ -33,6 +33,8 @@ _TOOL_BINARIES = {
     "dart": ["dart"],
     "elixir-ls": ["elixir-ls"],
     "metals": ["metals"],
+    "ruby-lsp": ["ruby-lsp"],
+    "solargraph": ["solargraph"],
 }
 
 _LANGUAGE_MAP: dict[str, str] = {
@@ -55,6 +57,7 @@ _LANGUAGE_MAP: dict[str, str] = {
     ".exs": "elixir",
     ".scala": "scala",
     ".sc": "scala",
+    ".rb": "ruby",
 }
 
 _TOOL_LANGUAGES: dict[str, list[str]] = {
@@ -72,6 +75,8 @@ _TOOL_LANGUAGES: dict[str, list[str]] = {
     "dart": ["dart"],
     "elixir-ls": ["elixir"],
     "metals": ["scala"],
+    "ruby-lsp": ["ruby"],
+    "solargraph": ["ruby"],
 }
 
 
