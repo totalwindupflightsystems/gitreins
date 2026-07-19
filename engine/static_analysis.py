@@ -500,7 +500,7 @@ def run_static_check(tool: str, workdir: str) -> list[dict]:
             logger.warning("%s returned invalid JSON", tool)
             return []
     elif tool in _TEXT_PARSERS:
-        parser = _TEXT_PARSERS[tool]
+        parser = _TEXT_PARSERS[tool]  # type: ignore[assignment]
         diags = parser(output, tool=tool)
     else:
         logger.warning("No parser available for tool '%s'", tool)

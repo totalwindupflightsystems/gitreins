@@ -89,7 +89,7 @@ class Judge:
 
         pipeline = Pipeline(config, self.workdir, llm=self.llm)
 
-        task_dict = {
+        task_dict: dict[str, object] = {
             "id": task.id,
             "title": task.title,
             "criteria": task.criteria,
@@ -159,7 +159,7 @@ class Judge:
         print("  Tier 2: Running agentic evaluator...")
 
         evaluator = AgenticEvaluator(self.llm, self.workdir, eval_cap=self.eval_cap)
-        task_dict = {
+        task_dict: dict[str, object] = {
             "id": task.id,
             "title": task.title,
             "criteria": task.criteria,

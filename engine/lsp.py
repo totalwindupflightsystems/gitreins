@@ -108,7 +108,8 @@ def normalize_severity(severity: int) -> str:
 def find_lsp_tool(tool_name: str) -> str | None:
     binaries = _TOOL_BINARIES.get(tool_name, [tool_name])
     for binary in binaries:
-        path = os.path.abspath(shutil.which(binary)) if shutil.which(binary) else None
+        resolved = shutil.which(binary)
+        path = os.path.abspath(resolved) if resolved else None
         if path:
             return path
     return None
@@ -135,7 +136,7 @@ def _lsp_read_response(proc: subprocess.Popen, timeout: float = 60.0) -> dict | 
 
     # Determine fd — use fileno() for real pipes, None for BytesIO
     try:
-        fd = proc.stdout.fileno()
+        fd = proc.stdout.fileno() if proc.stdout else None
     except Exception:
         fd = None
 
@@ -147,7 +148,8 @@ def _lsp_read_response(proc: subprocess.Popen, timeout: float = 60.0) -> dict | 
         nonlocal buffer
         if fd is None:
             # BytesIO / mock — use normal read
-            chunk = proc.stdout.read(4096) if hasattr(proc.stdout, "read") else b""
+            stdout = proc.stdout
+            chunk = stdout.read(4096) if stdout and hasattr(stdout, "read") else b""
             buffer += chunk
             return len(chunk)
         # Real pipe — select with deadline, then os.read
@@ -266,6 +268,7 @@ def _lsp_initialize(proc: subprocess.Popen, workdir: str) -> bool:
             "capabilities": {},
         },
     }
+    assert proc.stdin is not None
     proc.stdin.write(_lsp_encode_message(init_msg))
     proc.stdin.flush()
 
@@ -278,12 +281,13 @@ def _lsp_initialize(proc: subprocess.Popen, workdir: str) -> bool:
         "method": "initialized",
         "params": {},
     }
+    assert proc.stdin is not None
     proc.stdin.write(_lsp_encode_message(initialized_msg))
     proc.stdin.flush()
     return True
 
 
-def _lsp_did_open(proc: subprocess.Popen, filepath: str, language_id: str) -> None:
+def _lsp_did_open(proc: subprocess.Popen[bytes], filepath: str, language_id: str) -> None:
     file_uri = Path(filepath).as_uri()
     try:
         with open(filepath, "r", errors="replace") as f:
@@ -303,11 +307,12 @@ def _lsp_did_open(proc: subprocess.Popen, filepath: str, language_id: str) -> No
             },
         },
     }
+    assert proc.stdin is not None
     proc.stdin.write(_lsp_encode_message(did_open_msg))
     proc.stdin.flush()
 
 
-def _lsp_shutdown(proc: subprocess.Popen) -> None:
+def _lsp_shutdown(proc: subprocess.Popen[bytes]) -> None:
     shutdown_msg = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -315,6 +320,7 @@ def _lsp_shutdown(proc: subprocess.Popen) -> None:
         "params": {},
     }
     try:
+        assert proc.stdin is not None
         proc.stdin.write(_lsp_encode_message(shutdown_msg))
         proc.stdin.flush()
         _lsp_read_response(proc, timeout=30.0)
@@ -327,6 +333,7 @@ def _lsp_shutdown(proc: subprocess.Popen) -> None:
         "params": {},
     }
     try:
+        assert proc.stdin is not None
         proc.stdin.write(_lsp_encode_message(exit_msg))
         proc.stdin.flush()
     except Exception:

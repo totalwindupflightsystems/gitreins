@@ -719,9 +719,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
 
         # Compute file scope — which files the evaluator is allowed to touch
         file_scope = evaluator_cfg.get("file_scope", "changed")
-        self._allowed_files: set[str] | None = None  # None = full scope
-        if file_scope == "changed":
-            self._allowed_files = self._compute_allowed_files()
+        self._allowed_files = self._compute_allowed_files() if file_scope == "changed" else None  # None = full scope
 
         # Inject code context (changed files or diffs) into the initial prompt
         # so the LLM has relevant code upfront — reduces read_file() calls
@@ -761,7 +759,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
 
         tools = list(EVALUATOR_TOOLS)  # copy
         if not evaluator_cfg.get("static_analysis_diagnostics", False):
-            tools = [t for t in tools if t["function"]["name"] != "read_static_analysis"]
+            tools = [t for t in tools if t["function"]["name"] != "read_static_analysis"]  # type: ignore[index]
 
         # Start tracking
         self.eval_cap.start()

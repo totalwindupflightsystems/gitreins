@@ -397,7 +397,7 @@ class GitReinsMCPServer:
         import yaml
         wd = os.path.abspath(workdir) if workdir else self.workdir
         # Load config from .gitreins/config.yaml (same pattern as CLI)
-        config = {}
+        config: dict[str, object] = {}
         config_path = os.path.join(wd, ".gitreins", "config.yaml")
         if os.path.isfile(config_path):
             try:
@@ -538,8 +538,8 @@ class GitReinsMCPServer:
             elif method == "tools/call":
                 tool_name = params.get("name", "")
                 tool_args = params.get("arguments", {}) or {}
-                handler = self._tools.get(tool_name)
-                if not handler:
+                handler: object = self._tools.get(tool_name)
+                if not callable(handler):
                     return {
                         "jsonrpc": "2.0",
                         "id": req_id,

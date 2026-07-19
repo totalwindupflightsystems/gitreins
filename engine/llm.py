@@ -81,7 +81,7 @@ class LLMClient:
         max_retries: int = 3,
         llm_reasoning: str | None = None,
     ):
-        base_url = (base_url or os.getenv("GITREINS_LLM_BASE_URL", "https://api.openai.com/v1")).rstrip("/")
+        base_url = (base_url or os.getenv("GITREINS_LLM_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
         self.api_key = api_key or os.getenv("GITREINS_LLM_API_KEY", "")
         if not self.api_key:
             # Fallback: try common provider keys
@@ -155,7 +155,7 @@ class LLMClient:
                 ) for tc in tool_calls_raw]
             return LLMResponse(content=content, tool_calls=tool_calls, usage=LLMUsage())
 
-        last_error = None
+        last_error: Exception | None = None
         for attempt in range(self.max_retries):
             try:
                 return self._chat_attempt(messages, tools, temperature, max_tokens)
@@ -329,9 +329,10 @@ class LLMClient:
         if anthropic_tools:
             payload["tools"] = anthropic_tools
 
-        headers = {
+        api_key = self.api_key or ""
+        headers: dict[str, str] = {
             "Content-Type": "application/json",
-            "x-api-key": self.api_key,
+            "x-api-key": api_key,
             "anthropic-version": self._api_version,
         }
 
