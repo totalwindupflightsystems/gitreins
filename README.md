@@ -11,7 +11,7 @@
 
 GitReins lives inside your git repository as a quality harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ✅ **v0.7.0** — Verdict persistence, task dependencies, smart init, diff/full test modes, ~410 tests pass.
+> ✅ **v0.10.2** — LSP diagnostics (14 languages), static analysis (9 tools), commit audit with CVE-scored severity, DeepSeek prompt caching, large-repo hardening, 1088 tests pass.
 
 ---
 

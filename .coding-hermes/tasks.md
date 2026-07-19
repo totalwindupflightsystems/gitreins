@@ -520,3 +520,44 @@ Reran full 11-point audit. Previous tick (GR-074–GR-077) updated 4/11 specs an
 - **Commit:** NEXT
 - **Source:** Never-Done Audit Check 6 (Performance)
 - **Result:** pytest-xdist installed + added to dev deps. With `-n auto`: 1081 passed, 7 skipped in 154.80s (was timing out at 180s+ without xdist). Slowest tests: test_rust_analyzer_detects_type_error (60.01s), test_rust_analyzer_clean_code (60.00s), test_cross_repo_task_workdir (42.57s), test_ts_lsp_skip_gracefully (30.09s), test_full_task_lifecycle_subprocess (20.13s). LSP integration tests dominate — future optimization could skip these in guard context.
+
+---
+
+## Phase: Never-Done Audit — 2026-07-19 Tick 3
+
+Reran full 11-point audit. Board empty, all tasks [x]. Found 4 gaps:
+
+## [ ] GR-085: SPEC — Update 08-Test-Strategy.md (stale since Jun 20)
+- **Priority:** low
+- **Source:** Never-Done Audit Check 1 (Spec Coverage)
+- **Issue:** Claims "411 tests across 26 test files." Current: 1088 tests, 28 test files. No mention of LSP, static_analysis, commit_audit features.
+- **AC:**
+  - Update test counts to current values
+  - Add sections for LSP guard, static analysis, commit audit testing
+
+## [ ] GR-086: DOC — Update README.md from v0.7.0 to v0.10.2
+- **Priority:** low
+- **Source:** Never-Done Audit Check 2 (Doc Coverage)
+- **Issue:** README header says "v0.7.0 — ~410 tests pass." Current is v0.10.2 with 1088 tests.
+- **AC:**
+  - Update version badge and status line
+  - Update test count
+  - Add mention of LSP + static_analysis features
+
+## [ ] GR-087: DEPS — Fix pydantic-core 2.46.4 → 2.47.0 upgrade (GR-082 regression)
+- **Priority:** low
+- **Source:** Never-Done Audit Check 4 (Package Upgrades)
+- **Issue:** GR-082 claimed upgrade to 2.47.0 but importlib.metadata.version shows 2.46.4. Likely VIRTUAL_ENV contamination from chimera-v2 venv during GR-082.
+- **AC:**
+  - `uv pip install --python .venv/bin/python3 --upgrade 'pydantic-core>=2.47.0'`
+  - Verify: `.venv/bin/python3 -c "import importlib.metadata; assert importlib.metadata.version('pydantic-core') == '2.47.0'"`
+  - Guard passes after upgrade
+
+## [ ] GR-088: QUALITY — Install ruff in dev venv
+- **Priority:** low
+- **Source:** Never-Done Audit Check 10 (Quality)
+- **Issue:** `ruff` not available in venv. Guard uses it via PATH but manual `ruff check` fails.
+- **AC:**
+  - `uv pip install --python .venv/bin/python3 ruff`
+  - Verify: `.venv/bin/python3 -m ruff check engine/` passes
+  - Add ruff to dev deps in pyproject.toml if missing
