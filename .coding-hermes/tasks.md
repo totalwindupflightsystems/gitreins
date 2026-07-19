@@ -319,7 +319,8 @@ commit_audit:
 - **Commit:** `4d5f01a`
 
 ### Phase 3 — Java/Kotlin
-- [ ] GR-063f: Java LSP — add jdtls to `_TOOL_BINARIES`
+- [x] GR-063f: Java LSP — add jdtls to `_TOOL_BINARIES`
+- **Commit:** `426679a`
 - [ ] GR-063g: Kotlin LSP — add kotlin-language-server, map `.kt`/`.kts`
 - [ ] GR-063h: Java/Kotlin pipeline — add kotlin to `_LANG_COMMANDS` (gradle), add `settings.gradle.kts` detection
 
