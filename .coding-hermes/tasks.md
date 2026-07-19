@@ -406,3 +406,33 @@ commit_audit:
   - If fixable: fix and verify 3 consecutive runs pass
   - If environment-dependent: add skip guard with explanatory message
 - **Result:** Root cause: `_lsp_read_response`'s select() cap at 1.0s per call caused early bail when the global deadline was 10s. Server response occasionally took >1s (cold start, system load), hitting the cap and returning None prematurely. Fix: (1) Header and body read loops now retry on select timeout until global deadline is reached. (2) `_collect_diagnostics` uses absolute deadline instead of per-call reset, so each file gets at most `timeout_per_file` seconds total. (3) Break after receiving `publishDiagnostics` for the target file instead of waiting for full timeout. 10/10 consecutive runs pass, full suite 752 passed, 7 skipped.
+
+## [x] GR-069: Bugfix — duplicate `_parse_staticcheck` + CVE-2026-59950 mcp bump
+- **Priority:** high
+- **Commit:** `34c188e`
+- **Source:** Discovery sweep 2026-07-19
+- **Files:** `engine/static_analysis.py`, `uv.lock`
+- **Result:** Removed shadowing duplicate function (lines 316-356, from commit 4d5f01a) that hardcoded severity="warning" and required parenthesized codes in regex. Reverted to first definition (line 250) with proper SA→error|ST→warning mapping and optional-code regex. 3 previously-failing parse_staticcheck tests now pass (6/6). Bumped mcp 1.28.0→1.28.1 for CVE-2026-59950 (Cross-Site WebSocket Hijacking, CVSS 7.6). 833 tests pass, guard PASS.
+
+## [ ] GR-070: CI — Install LSP + static analysis tools in CI runner
+- **Priority:** medium
+- **Source:** Discovery sweep 2026-07-19 — CI failing 9 tests due to missing tools
+- **Files:** `.github/workflows/ci.yml`, `pyproject.toml`
+- **Problem:** pylsp, mypy, cppcheck, staticcheck not installed in GitHub Actions runner. Python tools (pylsp, mypy) should be in dev deps. System tools (cppcheck) needs `apt-get`. staticcheck needs `go install`.
+- **AC:**
+  - Add `python-lsp-server` and `mypy` to `[project.optional-dependencies] dev` in pyproject.toml
+  - Add `sudo apt-get install -y cppcheck` step to CI workflow
+  - Add `go install honnef.co/go/tools/cmd/staticcheck@latest` step to CI workflow
+  - CI: 5 LSP integration tests pass (or skip gracefully if pylsp still has timeout issues)
+  - CI: 4 static analysis tool-discovery tests pass
+  - Guard PASS
+
+## [ ] GR-071: CI — Skip judge integration tests when LLM key not configured
+- **Priority:** low
+- **Source:** Discovery sweep 2026-07-19 — 2 tests fail in CI
+- **Files:** `tests/test_mcp_integration.py`, `tests/test_mcp_server.py`
+- **Problem:** `test_cross_repo_task_workdir` and `test_judge_evaluate_nonexistent_task_returns_error` fail in CI because `GITREINS_LLM_API_KEY` is not set. The MCP server initializes the LLM client eagerly on startup.
+- **AC:**
+  - Tests skip gracefully when `GITREINS_LLM_API_KEY` is not set (pytest.skip)
+  - CI: 0 LLM-key-dependent test failures
+  - Guard PASS
