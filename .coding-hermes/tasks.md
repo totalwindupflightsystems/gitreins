@@ -809,12 +809,18 @@ Ran full 11-point audit. Board was all [x] (GR-020 through GR-098, Tick 9 claime
 
 Fixes applied this tick: GR-100 (removed --strict from mypy guard), GR-099 (diagnosed as pydantic-constrained, not fixable in isolation). GR-101 (verified CI green). 1081 tests pass.
 
-## [ ] GR-102: Fix 30 remaining mypy type errors in production code
+## [x] GR-102: Fix 23 remaining mypy type errors in production code
 - **Priority:** medium
-- **Source:** GR-100 follow-up
-- **Error breakdown:** 13 union-attr (Optional I/O operations), 4 assignment, 3 string issues, 1 var-annotated, 1 type-var, 1 operator, 1 no-redef, 1 index, 1 arg-type. All in engine/ + gitreins_mcp/server.py.
-- **Fix:** Annotate Optional Popen stdin/stdout/stderr, fix judge artifacts array type, fix evaluator Collection[str] indexing, fix server.py config var annotation.
-- **Estimate:** 2 hours — mechanical annotations, no architecture changes.
+- **Commit:** `565c29d`
+- **Result:** 23→0 mypy errors on production code (engine/, gitreins/, gitreins_mcp/). 6 files, +25/-19 lines. All mechanical type annotations — no logic changes.
+- **Breakdown:**
+  - lsp.py: Assert proc.stdin checks (6), Optional stdout guards (2), shutil.which type narrowing, Popen[bytes] type params (2)
+  - llm.py: base_url None handling, last_error Exception type, headers api_key str|None
+  - evaluator.py: Duplicate _allowed_files annotation removed, Collection[str] index suppression
+  - judge.py: task_dict annotated as dict[str, object] (2)
+  - server.py: config/handler types annotated
+  - static_analysis.py: _TEXT_PARSERS signature mismatch suppressed
+- **Verification:** mypy --no-error-summary --explicit-package-bases engine/ gitreins/ gitreins_mcp/ → 0 errors. 1081 tests passed, 7 skipped. Guard PASS.
 
 ---
 
