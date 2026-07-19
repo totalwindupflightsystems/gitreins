@@ -504,15 +504,10 @@ Reran full 11-point audit. Previous tick (GR-074–GR-077) updated 4/11 specs an
 - **Source:** Never-Done Audit Check 2 (Doc Coverage)
 - **Result:** 282-line CHANGELOG.md covering v0.1.0–v0.10.2 + Unreleased. Keep a Changelog format. Version comparison links for every release.
 
-## [ ] GR-082: DEPS — Update pydantic-core 2.46.4 → 2.47.0
+## [x] GR-082: DEPS — Update pydantic-core 2.46.4 → 2.47.0
 - **Priority:** low
 - **Source:** Never-Done Audit Check 4 (Package Upgrades)
-- **Note:** Previous tick (GR-074) claimed this was upgraded but `uv pip list` confirms 2.46.4 still installed. GR-074's claim was inflated — the upgrade was listed but not actually installed.
-- **Verified (2026-07-19):** `python3 -c "import importlib.metadata; print(importlib.metadata.version('pydantic-core'))"` → 2.46.4
-- **AC:**
-  - pydantic-core updated to 2.47.0
-  - Full test suite passes
-  - guard passes
+- **Result:** uv pip install --python .venv/bin/python3 --upgrade pydantic-core>=2.47.0 → 2.46.4 → 2.47.0. Guard PASS (tests + lint + secrets + static_analysis + lsp). No code changes tracked (venv only).
 
 ## [ ] GR-083: CRUFT — Remove untracked artifacts
 - **Priority:** low
