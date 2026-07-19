@@ -484,15 +484,19 @@ Reran full 11-point audit. Previous tick (GR-074–GR-077) updated 4/11 specs an
 - **Commit:** `efa93b8`
 - **Result:** 216 insertions across all 6 spec files. Feature mentions added: propagate, dead_code, LSP, static_analysis, commit_audit (all now >0 in every file). Guard PASS.
 
-## [ ] GR-080: TEST — 9 source files without dedicated test files
+## [x] GR-080: TEST — 9 source files without dedicated test files
 - **Priority:** medium
-- **Source:** Never-Done Audit Check 3 (Test Gaps)
-- **Files:** engine/config.py, engine/guards.py, engine/__init__.py, engine/persist.py, engine/propagate.py, engine/types.py, engine/version.py, gitreins_mcp/__init__.py, gitreins_mcp/server.py
-- **Note:** Some tested indirectly (e.g., config through evaluator tests, types through guard tests), but no dedicated test file exists.
-- **AC:**
-  - Audit which files have adequate indirect coverage vs truly untested
-  - Add dedicated test files for files with <80% coverage
-  - Skip trivial files (version.py, __init__.py with no logic)
+- **Commits:** `49812db`, `74351ce`, `8721eab`, `69309cf`, `db5b086`
+- **Result:** 5 dedicated test files created (+938 lines, 109 tests):
+  - `tests/test_types.py` (14 tests) — GuardResult, Tier1Result, frozen immutability, summary
+  - `tests/test_guards.py` (15 tests) — GoGuardResult, is_go_project, check_go_lint/tests/build, subprocess mocking, truncation, timeout
+  - `tests/test_propagate.py` (15 tests) — _should_override, _merge_dicts, propagate copy/merge, error handling
+  - `tests/test_persist.py` (19 tests) — VerdictPersister, persist/list/count, build_report, summary generation
+  - `tests/test_config.py` (46 tests) — GitReinsDefaults, overlay, to_config_dict, coercion/formatters, _version_greater
+- **Skipped (trivial):** engine/__init__.py, engine/version.py, gitreins_mcp/__init__.py
+- **Already covered:** gitreins_mcp/server.py (test_mcp_server.py + test_mcp_integration.py)
+- Full suite: 1081 passed, 7 skipped.
+- **Models:** MiniMax-M3 (worker — types, guards), foreman (propagate, persist, config)
 
 ## [ ] GR-081: DOC — Add CHANGELOG.md
 - **Priority:** low
