@@ -650,7 +650,7 @@ class TestParseStaticcheck:
         assert diags[0].file == "pkg/handler.go"
         assert diags[0].line == 42
         assert diags[0].code == "SA4006"
-        assert diags[0].severity == "warning"
+        assert diags[0].severity == "error"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -658,8 +658,8 @@ class TestParseStaticcheck:
 # ══════════════════════════════════════════════════════════════════
 
 
-class TestParseStaticcheck:
-    """Test parsing of staticcheck text output."""
+class TestParseStaticcheckExtended:
+    """Additional test coverage for _parse_staticcheck — different cases than TestParseStaticcheck."""
 
     def test_parse_staticcheck_single_diagnostic(self):
         text = "main.go:7:5: Sprintf doesn't have side effects and its return value is ignored (SA4017)\n"

@@ -544,7 +544,7 @@ class TestLspJudgeIntegration:
         assert len(parsed) == len(diags), (
             f"Roundtrip lost diagnostics: {len(diags)} → {len(parsed)}"
         )
-        for p, d in zip(parsed, diags):
+        for p, d in zip(parsed, diags, strict=False):
             assert p["severity"] == d.get("severity", "warning")
             assert p["message"] == d["message"]
             assert p["line"] == d["line"]

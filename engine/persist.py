@@ -442,7 +442,7 @@ def build_report(workdir: str, n: int = 10) -> str:
     lines.append(f"Fail:   {fail_count} ({_pct(fail_count, total)})")
     lines.append("")
 
-    for i, entry in enumerate(entries):
+    for _i, entry in enumerate(entries):
         icon = "✓" if entry.get("passed") else "✗"
         task_id = entry.get("task_id", "?")
         date = entry.get("_date", "?")

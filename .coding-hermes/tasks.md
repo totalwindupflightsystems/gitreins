@@ -441,3 +441,43 @@ commit_audit:
 - **AC:**
   - `uv run ruff check --select F,E,W` shows 0 errors in engine/, gitreins/, gitreins_mcp/, tests/
   - All 542+ tests still pass
+
+---
+
+## Phase: Never-Done Audit — 2026-07-19
+
+11-point never-done audit. Board had 2 pending tasks (GR-072, GR-073). Additional gaps found:
+
+### [ ] GR-074: DEPS — Update outdated packages
+- **Priority:** low
+- **Scope:** fastapi 0.139.0→0.139.2, filelock 3.30.2→3.31.0, pydantic_core 2.46.4→2.47.0
+- **AC:**
+  - `uv pip list --outdated` returns 0 outdated packages
+  - All 833+ tests still pass
+  - Guard still passes
+
+### [ ] GR-075: CRUFT — Remove nested pip venv at gitreins/.venv/
+- **Priority:** low
+- **Root cause:** 29MB `gitreins/.venv/` is a pip-based venv leftover from before the project switched to uv. The active venv is `.venv/` (112MB, uv-managed).
+- **AC:**
+  - Remove `gitreins/.venv/` (saves 29MB)
+  - `gitreins` command still works via `.venv/bin/gitreins`
+  - No breakage in git hooks or scripts
+
+### [ ] GR-076: DOC — specs last touched 2026-07-11, post-LSP/static-analysis features
+- **Priority:** low
+- **Estimate:** 1 hour
+- **Root cause:** 11 spec files (00-PRD.md through 10-Deployment.md) all date from 2026-07-11. Since then: LSP guard (GR-050-053), multi-language LSP expansion (GR-063, 14 languages), static analysis (GR-063), CodeRabbit-style commit review (GR-065-066), CVE severity system (GR-066), Anthropic API (GR-067), DeepSeek caching (GR-068), large-repo hardening (GR-064). No spec files updated for any of these.
+- **AC:**
+  - Update 04-Guard-System.md: document LSP guard + multi-language support
+  - Update 03-Evaluator-Design.md: document CodeRabbit review modes, CVE severity, DeepSeek caching
+  - Update 06-Pipeline.md: document static_analysis tools, language coverage (14+ languages)
+  - Update 07-Config-System.md: document new config keys (commit_audit, lsp_tools, static_analysis_tools)
+
+### [ ] GR-077: PITFALL — Double-venv confusion risk
+- **Priority:** low
+- **Root cause:** `gitreins/.venv/` and `.venv/` both exist. `VIRTUAL_ENV` currently points to `/home/kara/get-h3/shim/.venv` (wrong project!). Could cause mysterious import errors.
+- **AC:**
+  - Remove `gitreins/.venv/` (covered by GR-075)
+  - Document preferred venv setup in CONTRIBUTING.md
+  - Verify: `uv run pytest -x -q` resolves to correct venv

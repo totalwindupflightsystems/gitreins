@@ -6,19 +6,14 @@ a live LLM — uses mocking for the LLM client and real git
 operations for diff capture and message reading.
 """
 import json
-import os
-import subprocess
-import tempfile
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 
 from engine.commit_audit import (
     CommitAuditor,
     CommitAuditResult,
     CommitReviewResult,
     ReviewIssue,
-    COMMIT_AUDIT_SYSTEM_PROMPT,
     COMMIT_AUDIT_TOOLS,
 )
 from engine.llm import LLMClient, LLMResponse, LLMUsage

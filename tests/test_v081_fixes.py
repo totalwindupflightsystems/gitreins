@@ -9,7 +9,6 @@ Regression tests for v0.8.1 bug fixes.
 import os
 import tempfile
 
-import pytest
 
 from engine.config import GitReinsDefaults
 from engine.llm import LLMClient

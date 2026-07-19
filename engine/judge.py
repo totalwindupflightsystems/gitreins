@@ -126,8 +126,14 @@ class Judge:
                 logger.warning(
                     "Pipeline execution failed but pass_on_error=True — returning pass",
                 )
-                return JudgeResult(task_id=task.id, passed=True,
-                                   tier1=Tier1Result(passed=True, results=[], extra={"pass_on_error": True}),
+            return JudgeResult(
+                task_id=task.id,
+                passed=True,
+                tier1=Tier1Result(
+                    passed=True,
+                    results=[],
+                    extra={"pass_on_error": True},
+                ),
                                    pipeline_result={"error": str(e), "pass_on_error": True})
             logger.exception("Pipeline execution failed")
             return JudgeResult(task_id=task.id, passed=False, pipeline_result={"error": str(e)})
@@ -165,7 +171,7 @@ class Judge:
             result.tier2 = tier2
             result.passed = tier2.verdict == "COMPLETE"
             result.verdict = tier2
-        except Exception as e:
+        except Exception:
             if self._pass_on_error:
                 logger.warning("Tier 2 failed but pass_on_error=True — task passes on Tier 1 alone")
                 result.passed = True
@@ -181,7 +187,6 @@ class Judge:
         invoking the AgenticEvaluator.  Mirrors the spirit of the
         pipeline condition ``not task.skip_tier2``.
         """
-        from engine.guard_manager import Tier1Result
 
         result = JudgeResult(task_id=task.id)
         print("  Tier 1: Running static guards...")

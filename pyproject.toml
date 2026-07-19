@@ -55,6 +55,9 @@ pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100
+extend-exclude = [
+    "tests/fixtures/secrets/*.py",  # intentionally malformed: shell scripts, templates, not valid Python
+]
 
 [tool.ruff.lint]
 select = [
@@ -66,8 +69,11 @@ select = [
 [tool.ruff.lint.per-file-ignores]
 # LLM system prompts — breaking lines changes the prompt text sent to the model
 "engine/evaluator.py" = ["E501"]
-# Test files — long assertion lines, fixtures, and test data strings
-"tests/**/*.py" = ["E501"]
+# Commit audit — LLM review prompts in docstrings; config — inline comments on dataclass fields
+"engine/commit_audit.py" = ["E501"]
+"engine/config.py" = ["E501"]
+# Test files — long assertion lines, fixtures, and test data strings; unused variables often check imports
+"tests/**/*.py" = ["E501", "F841"]
 # Secrets scanner fixtures — intentionally malformed Python (shell scripts, templates, etc.)
 "tests/fixtures/secrets/**" = ["ALL"]
 # gitreins_mcp JSON-RPC handler — long JSON schema strings

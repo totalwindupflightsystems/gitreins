@@ -1042,7 +1042,9 @@ class TestCodeContextPreloading:
 
     def test_file_scope_integration_with_evaluate(self, evaluator, llm_client, tmp_workdir):
         """End-to-end: evaluator with 'changed' scope works correctly."""
-        import os, yaml, subprocess
+        import os
+        import yaml
+        import subprocess
         from engine.llm import LLMResponse, ToolCall
 
         cdir = os.path.join(tmp_workdir, '.gitreins')

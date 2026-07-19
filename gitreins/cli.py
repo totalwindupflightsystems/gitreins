@@ -425,7 +425,7 @@ def _detect_language(workdir: str) -> dict:
 
     # SQL detection: check for .sql files or migrations dir
     try:
-        for root, dirs, files in os.walk(workdir):
+        for _root, dirs, files in os.walk(workdir):
             dirs[:] = [d for d in dirs if d not in (".git", ".venv", "node_modules", ".gitreins")]
             if any(f.endswith(".sql") for f in files):
                 info["has_sql"] = True

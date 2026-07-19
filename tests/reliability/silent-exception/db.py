@@ -118,6 +118,6 @@ def fetch_one(query: str, params: tuple = ()) -> dict[str, Any] | None:
         if row is None:
             return None
         cols = [d[0] for d in cur.description]
-        return dict(zip(cols, row))
+        return dict(zip(cols, row, strict=False))
     except Exception:
         return None

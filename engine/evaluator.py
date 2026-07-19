@@ -284,7 +284,7 @@ class AgenticEvaluator:
         self._searches_done: set[str] = set()
         self._tier1_diagnostics: list[dict] = []
         self._allowed_files: set[str] | None = None  # None = full scope, set = restricted
-    
+
         # ── Fast-track mode (GR-064a) ──
         # Resolve fast_track from config. "auto" = detect based on package count.
         self.fast_track: bool = self._resolve_fast_track()
@@ -1290,7 +1290,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
 
         # Determine which language tools to run
         lang_tools: list[str] = []
-        for lang, tools in static_tools.items():
+        for _lang, tools in static_tools.items():
             lang_tools.extend(tools)
 
         if not lang_tools:
