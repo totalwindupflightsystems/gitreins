@@ -319,9 +319,20 @@ commit_audit:
 - **Commit:** `4d5f01a`
 
 ### Phase 3 — Java/Kotlin
-- [x] GR-063f: Java LSP — add jdtls to `_TOOL_BINARIES`
+## [x] GR-063f: Java LSP — add jdtls to `_TOOL_BINARIES`
+- **Status:** Verified already implemented (code + tests)
+- **_TOOL_BINARIES:** jdtls ✓ (line 29)
+- **_LANGUAGE_MAP:** .java→java ✓ (line 42)
+- **_TOOL_LANGUAGES:** jdtls→[java] ✓ (line 53)
+- **Tests:** test_find_lsp_tool_jdtls_not_found, test_find_lsp_tool_jdtls_found, test_maps_java_files — all passing
 - **Commit:** `426679a`
-- [ ] GR-063g: Kotlin LSP — add kotlin-language-server, map `.kt`/`.kts`
+- [x] GR-063g: Kotlin LSP — add kotlin-language-server, map `.kt`/`.kts`
+- **Commit:** `2f07095` (engine), `15deae3` (tests)
+- **Status:** Verified already implemented (code + tests)
+- **_TOOL_BINARIES:** kotlin-language-server ✓ (line 30)
+- **_LANGUAGE_MAP:** .kt→kotlin, .kts→kotlin ✓ (lines 44-45)
+- **_TOOL_LANGUAGES:** kotlin-language-server→[kotlin] ✓ (line 57)
+- **Tests:** test_find_lsp_tool_kotlin_ls_not_found, test_find_lsp_tool_kotlin_ls_found, test_maps_kotlin_files, TestKotlinLsIntegration — all passing
 - [ ] GR-063h: Java/Kotlin pipeline — add kotlin to `_LANG_COMMANDS` (gradle), add `settings.gradle.kts` detection
 
 ### Phase 4 — C# / .NET
