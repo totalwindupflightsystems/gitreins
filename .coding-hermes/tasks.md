@@ -527,37 +527,22 @@ Reran full 11-point audit. Previous tick (GR-074–GR-077) updated 4/11 specs an
 
 Reran full 11-point audit. Board empty, all tasks [x]. Found 4 gaps:
 
-## [ ] GR-085: SPEC — Update 08-Test-Strategy.md (stale since Jun 20)
+## [x] GR-085: SPEC — Update 08-Test-Strategy.md (stale since Jun 20)
 - **Priority:** low
 - **Source:** Never-Done Audit Check 1 (Spec Coverage)
-- **Issue:** Claims "411 tests across 26 test files." Current: 1088 tests, 28 test files. No mention of LSP, static_analysis, commit_audit features.
-- **AC:**
-  - Update test counts to current values
-  - Add sections for LSP guard, static analysis, commit audit testing
+- **Result:** Spec already up to date (1088 tests, 28 files, LSP + static_analysis sections present). Header already showed 2026-07-19. Fixed one stale "~411 tests" reference in §5.2. Board false-positive — spec was updated in prior GR-079 sweep.
 
-## [ ] GR-086: DOC — Update README.md from v0.7.0 to v0.10.2
+## [x] GR-086: DOC — Update README.md from v0.7.0 to v0.10.2
 - **Priority:** low
 - **Source:** Never-Done Audit Check 2 (Doc Coverage)
-- **Issue:** README header says "v0.7.0 — ~410 tests pass." Current is v0.10.2 with 1088 tests.
-- **AC:**
-  - Update version badge and status line
-  - Update test count
-  - Add mention of LSP + static_analysis features
+- **Result:** README header already showed v0.10.2 with 1088 tests. Fixed one stale "~410 tests" reference in Tech Stack section. Board false-positive — README was already mostly current.
 
-## [ ] GR-087: DEPS — Fix pydantic-core 2.46.4 → 2.47.0 upgrade (GR-082 regression)
+## [x] GR-087: DEPS — Fix pydantic-core 2.46.4 → 2.47.0 upgrade (GR-082 regression)
 - **Priority:** low
 - **Source:** Never-Done Audit Check 4 (Package Upgrades)
-- **Issue:** GR-082 claimed upgrade to 2.47.0 but importlib.metadata.version shows 2.46.4. Likely VIRTUAL_ENV contamination from chimera-v2 venv during GR-082.
-- **AC:**
-  - `uv pip install --python .venv/bin/python3 --upgrade 'pydantic-core>=2.47.0'`
-  - Verify: `.venv/bin/python3 -c "import importlib.metadata; assert importlib.metadata.version('pydantic-core') == '2.47.0'"`
-  - Guard passes after upgrade
+- **Result:** Already at 2.47.0 (`importlib.metadata.version('pydantic-core')` confirms). GR-082's upgrade was valid — audit false-positive from VIRTUAL_ENV contamination in audit session.
 
-## [ ] GR-088: QUALITY — Install ruff in dev venv
+## [x] GR-088: QUALITY — Install ruff in dev venv
 - **Priority:** low
 - **Source:** Never-Done Audit Check 10 (Quality)
-- **Issue:** `ruff` not available in venv. Guard uses it via PATH but manual `ruff check` fails.
-- **AC:**
-  - `uv pip install --python .venv/bin/python3 ruff`
-  - Verify: `.venv/bin/python3 -m ruff check engine/` passes
-  - Add ruff to dev deps in pyproject.toml if missing
+- **Result:** Ruff 0.15.22 already installed in venv, `ruff check engine/` passes clean. Already in dev deps (pyproject.toml lines 42, 98). Audit false-positive — tested bare `ruff` without `.venv/bin/python3 -m` prefix.

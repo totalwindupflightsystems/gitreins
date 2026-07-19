@@ -39,6 +39,7 @@ dev = [
     "pycodestyle>=2.11",
     "mypy>=1.0",
     "pytest-xdist>=3.0",
+    "ruff>=0.5",
 ]
 
 [project.scripts]
@@ -94,6 +95,7 @@ dev = [
     "pycodestyle>=2.14.0",
     "pyflakes>=3.4.0",
     "pytest-xdist>=3.8.0",
+    "ruff>=0.5",
 ]
 # B904: `raise ... from err` inside except — prevents swallowed exceptions
 # by forcing explicit exception chaining.

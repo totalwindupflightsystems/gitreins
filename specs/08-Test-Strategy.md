@@ -1,14 +1,14 @@
 # 08-Test-Strategy.md — Test Strategy
 
-> **Document Status:** Draft | **Last Updated:** 2026-06-20 | **Author:** GitReins Test Strategy Spec
+> **Document Status:** Active | **Last Updated:** 2026-07-19 | **Author:** GitReins Test Strategy Spec
 
 ---
 
 ## 1. Overview
 
-GitReins maintains a comprehensive test suite that validates every layer of the system: unit tests for individual engine modules, integration tests for CLI and MCP interactions, and real-LLM integration tests for cap enforcement. The test suite runs in under a minute for the fast path and provides confidence that changes do not break existing behavior.
+GitReins maintains a comprehensive test suite that validates every layer of the system: unit tests for individual engine modules, integration tests for CLI and MCP interactions, LSP diagnostics (14 languages), static analysis (9 tools), commit audit with CVE-scored severity, and real-LLM integration tests for cap enforcement.
 
-**Current state:** 411 tests across 26 test files (including 4 real-LLM integration tests). Core engine tests complete in ~58 seconds.
+**Current state:** 1088 tests across 28 test files (including 4 real-LLM integration tests). Full suite with pytest-xdist completes in ~154s.
 
 ---
 
@@ -18,25 +18,27 @@ GitReins maintains a comprehensive test suite that validates every layer of the 
 
 | Category | Count | Files |
 |----------|-------|-------|
-| Unit tests (engine) | ~270 | 7 files |
+| Unit tests (engine) | ~350 | 8 files |
+| LSP tests (unit + integration) | 42 | `tests/test_lsp.py` |
+| Static analysis tests | 72 | `tests/test_static_analysis.py` |
+| Commit audit tests | 81 | `tests/test_commit_audit.py` |
 | Integration tests (CLI) | 53 | `tests/test_cli.py` |
 | Integration tests (MCP) | 5 | `tests/test_mcp_integration.py` |
-| MCP server tests | ~30 | `tests/test_mcp_server.py` |
-| v0.7 feature tests | ~18 | `tests/test_v07_features.py` |
+| MCP server tests | ~50 | `tests/test_mcp_server.py` |
+| v0.7/v0.8 feature tests | ~18 | `tests/test_v07_features.py`, `tests/test_v081_fixes.py` |
 | Eval cap tests (fast) | 38 | `tests/test_eval_cap.py` (non-LLM) |
 | Eval cap tests (LLM) | 4 | `tests/test_eval_cap.py` (real LLM) |
-| **Total** | **411** | **11 files** |
+| Config tests | 46 | `tests/test_config.py` |
+| Types tests | 14 | `tests/test_types.py` |
+| Guards tests | 15 | `tests/test_guards.py` |
+| Propagate tests | 15 | `tests/test_propagate.py` |
+| Persist tests | 19 | `tests/test_persist.py` |
+| Pipeline tests | ~10 | `tests/test_pipeline.py` |
+| **Total** | **~1088** | **28 files** |
 
 ### 2.2 Core Engine Test Timing
 
-The 270 core engine tests (evaluator, judge, LLM, task manager, guard manager, pipeline, eval cap) complete in approximately 58 seconds on a standard Linux development machine.
-
-```
-pytest tests/test_evaluator.py tests/test_judge.py tests/test_llm.py \
-  tests/test_task_manager.py tests/test_guard_manager.py \
-  tests/test_pipeline.py tests/test_eval_cap.py
-# 270 passed in 58.45s
-```
+Full suite with pytest-xdist (`-n auto`) completes in approximately 154 seconds. Slowest tests are LSP integration tests (rust-analyzer: 60s, ts-lsp: 30s) which dominate runtime. Without LSP integration tests, the fast path completes in ~60s.
 
 ---
 
@@ -216,7 +218,7 @@ Runs all tests except real-LLM integration tests. ~407 tests, ~60 seconds. Used 
 pytest
 ```
 
-Runs the complete suite including LLM integration tests if API keys are available. ~411 tests. Used in CI pipelines for comprehensive validation.
+Runs the complete suite including LLM integration tests if API keys are available. ~1088 tests. Used in CI pipelines for comprehensive validation.
 
 ### 5.3 LLM-Only Mode (Cap Validation)
 
@@ -339,12 +341,47 @@ The test suite has grown steadily as features were added:
 | Initial | 221 | v0.3.x | Core engine + basic CLI |
 | v0.5 expansion | 322 | v0.5.x | MCP integration, pipeline, eval cap |
 | v0.6 current | 411 | v0.6.0 | v0.7 features, extended CLI tests |
+| v0.10 LSP + static analysis | 833 | v0.10.0 | LSP (14 languages), static analysis (9 tools), commit audit |
+| v0.10.2 current | 1088 | v0.10.2 | Config/propagate/persist/types/guards test files, pytest-xdist |
 
 Test count is tracked per-module in the acceptance criteria (AC-019). The goal is to maintain or increase coverage with each feature addition.
 
 ---
 
-## 10. Verification Checklist
+## 10. LSP Guard Testing
+
+LSP (Language Server Protocol) integration tests validate diagnostics from live language servers across 14 languages.
+
+### Supported languages
+Python (pylsp), Rust (rust-analyzer), TypeScript/JavaScript (typescript-language-server), Go (gopls), C/C++ (clangd), Java (jdtls), Kotlin (kotlin-language-server), C# (omnisharp-roslyn), Swift (sourcekit-lsp), Dart (dart), Elixir (elixir-ls), Scala (metals), Ruby (ruby-lsp/solargraph).
+
+### Test patterns
+- Discovery: `test_find_lsp_tool_<tool>_found` / `_not_found`
+- Language mapping: `test_maps_<lang>_files`
+- Integration: live server start → open file → read diagnostics → verify
+- Graceful skip if LSP server not installed
+
+### CI considerations
+LSP servers must be installed in CI (`python-lsp-server`, `pyflakes`, `pycodestyle` in dev deps). Rust-analyzer and clangd installed via apt-get.
+
+---
+
+## 11. Static Analysis Testing
+
+Static analysis tools validate code without execution across 9 tools.
+
+### Supported tools
+Python: pylint, mypy, ruff. JavaScript/TypeScript: eslint. Go: staticcheck. Rust: clippy. C/C++: cppcheck. Ruby: sorbet. Generic: dead_code (Python AST-based).
+
+### Test patterns
+- `test_parse_<tool>`: JSON/text output parsing with severity mapping
+- `test_run_static_check_<tool>`: live tool invocation
+- `test_list_available_tools`: registry correctness
+- `test_skip_when_tool_missing`: graceful degradation
+
+---
+
+## 12. Verification Checklist
 
 | # | Check | Verification |
 |---|-------|------------|
@@ -359,12 +396,12 @@ Test count is tracked per-module in the acceptance criteria (AC-019). The goal i
 
 ---
 
-## 11. Document Status
+## 13. Document Status
 
 | Field | Value |
 |-------|-------|
-| **Version** | v0.6.0 |
-| **Status** | Draft |
-| **Last updated** | 2026-06-20 |
+| **Version** | v0.10.2 |
+| **Status** | Active |
+| **Last updated** | 2026-07-19 |
 | **Author** | totalwindupflightsystems <totalwindupflightsystems@gmail.com> |
 | **Co-author** | wojons <wojonstech@gmail.com> |
