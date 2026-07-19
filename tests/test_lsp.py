@@ -746,3 +746,26 @@ class TestJdtlsIntegration:
                 result = _staged_files_by_language(lsp_workdir)
         assert "java" in result
         assert any("Main.java" in f for f in result["java"])
+
+
+# ── Integration tests: kotlin-language-server ─────────────────────
+
+
+class TestKotlinLsIntegration:
+    """Integration tests for Kotlin LSP with kotlin-language-server."""
+
+    def test_kotlin_ls_skip_gracefully_when_not_installed(self, lsp_workdir):
+        """kotlin-language-server not found returns empty diagnostics."""
+        with patch("engine.lsp.find_lsp_tool", return_value=None):
+            diags = run_lsp_check("kotlin-language-server", lsp_workdir,
+                                  files=[os.path.join(lsp_workdir, "Main.kt")])
+        assert diags == [], "kotlin-language-server should return empty diagnostics when not installed"
+
+    def test_kotlin_ls_kts_language_mapping(self, lsp_workdir):
+        """.kts files are mapped to kotlin via _LANGUAGE_MAP."""
+        from engine.lsp import _staged_files_by_language
+        with patch("engine.lsp._get_staged_files", return_value=["build.gradle.kts"]):
+            with patch("os.path.isfile", return_value=True):
+                result = _staged_files_by_language(lsp_workdir)
+        assert "kotlin" in result
+        assert any("build.gradle.kts" in f for f in result["kotlin"])
