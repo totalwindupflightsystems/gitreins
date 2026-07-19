@@ -1,7 +1,7 @@
 """
 Static Analysis Runner — Invoke type checkers and parse structured output.
 
-Supports: mypy, pyright, sorbet, sqlfluff, phpstan, cppcheck
+Supports: mypy, pyright, sorbet, sqlfluff, phpstan, cppcheck, staticcheck
 All backends produce the same normalized diagnostic shape:
     {file, line, severity, message, code, tool}
 
@@ -78,6 +78,8 @@ _TOOL_INSTALL_GUIDE = {
     "phpstan": "composer require --dev phpstan/phpstan",
     "cppcheck": "apt install cppcheck  (or: brew install cppcheck)",
     "staticcheck": "go install honnef.co/go/tools/cmd/staticcheck@latest",
+    "cppcheck": "sudo apt install cppcheck  (or: brew install cppcheck)",
+    "staticcheck": "go install honnef.co/go/tools/cmd/staticcheck@latest  (add ~/go/bin to PATH)",
 }
 
 
@@ -231,6 +233,44 @@ def _parse_cppcheck(text: str, tool: str = "cppcheck") -> list[StaticDiag]:
             ))
         else:
             logger.debug("cppcheck: unparsed line: %s", line[:120])
+    return diagnostics
+
+
+# Staticcheck: "file.go:line:col: message (SAxxxx)"
+_STATICCHECK_LINE_RE = re.compile(
+    r"^(.+?):(\d+):\d+:\s+(.+?)(?:\s+\((.+?)\))?\s*$"
+)
+
+
+def _parse_staticcheck(text: str, tool: str = "staticcheck") -> list[StaticDiag]:
+    """Parse staticcheck text output.
+
+    Staticcheck uses its own diagnostic codes (SAxxxx, STxxxx).  We map
+    SA codes (static analysis) to ``error`` or ``warning`` and everything
+    else to ``note``.
+    """
+    diagnostics: list[StaticDiag] = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        # Skip non-file lines (compile errors from the toolchain, etc.)
+        if line.startswith("-:") or line.startswith("# "):
+            continue
+        m = _STATICCHECK_LINE_RE.match(line)
+        if m:
+            code = m.group(4) or ""
+            severity = "error" if code.startswith("SA") else "warning"
+            diagnostics.append(StaticDiag(
+                file=m.group(1),
+                line=int(m.group(2)),
+                severity=severity,
+                message=m.group(3).strip(),
+                code=code,
+                tool=tool,
+            ))
+        else:
+            logger.debug("staticcheck: unparsed line: %s", line[:120])
     return diagnostics
 
 

@@ -612,6 +612,53 @@ class TestParseStaticcheck:
 # ══════════════════════════════════════════════════════════════════
 
 
+class TestParseStaticcheck:
+    """Test parsing of staticcheck text output."""
+
+    def test_parse_staticcheck_single_diagnostic(self):
+        text = "main.go:7:5: Sprintf doesn't have side effects and its return value is ignored (SA4017)\n"
+        diags = _parse_staticcheck(text)
+        assert len(diags) == 1
+        assert diags[0].file == "main.go"
+        assert diags[0].line == 7
+        assert diags[0].severity == "error"
+        assert "Sprintf" in diags[0].message
+        assert diags[0].code == "SA4017"
+        assert diags[0].tool == "staticcheck"
+
+    def test_parse_staticcheck_multiple_diagnostics(self):
+        text = (
+            "pkg/handler.go:12:2: should replace loop with call to slices.Contains (SA6005)\n"
+            "pkg/handler.go:25:7: func unusedFunc is unused (U1000)\n"
+        )
+        diags = _parse_staticcheck(text)
+        assert len(diags) == 2
+        assert diags[0].severity == "error"
+        assert diags[1].severity == "warning"
+        assert diags[1].code == "U1000"
+
+    def test_parse_staticcheck_empty(self):
+        diags = _parse_staticcheck("")
+        assert diags == []
+
+    def test_parse_staticcheck_no_errors(self):
+        text = "  \n  \n"
+        diags = _parse_staticcheck(text)
+        assert diags == []
+
+    def test_parse_staticcheck_skips_compile_line(self):
+        text = "-: # command-line-arguments\n"
+        diags = _parse_staticcheck(text)
+        assert diags == []
+
+    def test_parse_staticcheck_no_code(self):
+        text = "main.go:10:3: something is wrong\n"
+        diags = _parse_staticcheck(text)
+        assert len(diags) == 1
+        assert diags[0].code == ""
+        assert diags[0].severity == "warning"
+
+
 class TestBuildCommand:
     """Test _build_command constructs correct subprocess args."""
 

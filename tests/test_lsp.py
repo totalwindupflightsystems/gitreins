@@ -206,6 +206,9 @@ class TestFindLspTool:
         with patch("shutil.which", return_value="/usr/bin/dart"):
             result = find_lsp_tool("dart")
         assert result == "/usr/bin/dart"
+        with patch("shutil.which", return_value="/usr/local/bin/gopls"):
+            result = find_lsp_tool("gopls")
+        assert result == "/usr/local/bin/gopls"
 
 
 class TestRunLspCheck:
@@ -681,6 +684,10 @@ class TestStagedFilesByLanguage:
             with patch("os.path.isfile", return_value=True):
                 result = _staged_files_by_language("/tmp")
         assert result == {"dart": ["/tmp/lib/main.dart"]}
+        with patch("engine.lsp._get_staged_files", return_value=["main.go", "util.go"]):
+            with patch("os.path.isfile", return_value=True):
+                result = _staged_files_by_language("/tmp")
+        assert result == {"go": ["/tmp/main.go", "/tmp/util.go"]}
 
 
 # ── Integration tests with real rust-analyzer server ──────────────
