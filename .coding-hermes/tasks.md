@@ -333,7 +333,8 @@ commit_audit:
 - **_LANGUAGE_MAP:** .kt→kotlin, .kts→kotlin ✓ (lines 44-45)
 - **_TOOL_LANGUAGES:** kotlin-language-server→[kotlin] ✓ (line 57)
 - **Tests:** test_find_lsp_tool_kotlin_ls_not_found, test_find_lsp_tool_kotlin_ls_found, test_maps_kotlin_files, TestKotlinLsIntegration — all passing
-- [ ] GR-063h: Java/Kotlin pipeline — add kotlin to `_LANG_COMMANDS` (gradle), add `settings.gradle.kts` detection
+- [x] GR-063h: Java/Kotlin pipeline — add kotlin to `_LANG_COMMANDS` (gradle), add `settings.gradle.kts` detection
+- **Commit:** `e6661f5`
 
 ### Phase 4 — C# / .NET
 - [ ] GR-063i: C# LSP — add omnisharp-roslyn or csharp-ls
