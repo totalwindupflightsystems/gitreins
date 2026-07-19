@@ -480,23 +480,9 @@ Reran full 11-point audit. Previous tick (GR-074–GR-077) updated 4/11 specs an
 - **Fix 2:** Added `@pytest.mark.skipif(sys.version_info < (3, 11))` to 5 affected tests as defense-in-depth — if the plugins fail again, tests skip gracefully instead of failing.
 - **Result:** CI verification pending on next run.
 
-## [ ] GR-079: SPEC — 6 stale spec files need post-Jul-11 feature coverage
-- **Priority:** medium
-- **Source:** Never-Done Audit Check 1 (Spec Alignment). GR-076 only updated 4/11 specs.
-- **Stale specs (last touched Jul 11, missing feature mentions):**
-  - `02-MCP-Protocol.md` — 0 mentions of propagate, dead_code, lsp static_analysis tools
-  - `05-Security-Model.md` — 0 mentions of LSP, static analysis, commit audit
-  - `09-CLI-Design.md` — 0 mentions of lsp, dead-code, propagate, commit-audit CLI
-  - `10-Deployment.md` — 0 mentions of LSP tools install, static analysis deps
-  - `00-PRD.md` — 2 mentions (minimal coverage)
-  - `01-Architecture.md` — 3 mentions (minimal coverage)
-- **AC:**
-  - Each spec updated with relevant post-Jul-11 features
-  - MCP protocol: propagate, dead_code, lsp, static_analysis tool docs
-  - Security model: LSP/static analysis attack surface
-  - CLI design: new subcommands and flags
-  - Deployment: LSP server + static analysis tool prerequisites
-  - PRD + Architecture: reference new subsystems
+## [x] GR-079: SPEC — 6 stale spec files need post-Jul-11 feature coverage
+- **Commit:** `efa93b8`
+- **Result:** 216 insertions across all 6 spec files. Feature mentions added: propagate, dead_code, LSP, static_analysis, commit_audit (all now >0 in every file). Guard PASS.
 
 ## [ ] GR-080: TEST — 9 source files without dedicated test files
 - **Priority:** medium
