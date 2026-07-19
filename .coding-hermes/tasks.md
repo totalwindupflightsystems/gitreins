@@ -697,3 +697,35 @@ Ran full 11-point audit. Board all [x] (GR-020 through GR-094). Found 1 gap — 
 
 Fixes applied this tick: GR-095 (mypy exclude tests/reliability/), GR-095B (pydantic-core upgrade re-executed). Both verified: guard PASS, mypy clean, importlib confirms 2.47.0.
 
+---
+
+## Phase: Never-Done Audit — 2026-07-19 Tick 8
+
+Ran full 11-point audit. Tick 7 committed GR-095/GR-095B before this tick ran. Board all [x] (GR-020 through GR-095B). Found 1 CI gap — error-chain masking: GR-095 fixed reliability/ exclude but unmasked tests/fixtures/lsp/ mypy error.
+
+| Check | Status | Finding |
+|-------|--------|---------|
+| 1. Spec Coverage | ✅ | 10 spec files, all updated 2026-07-19 |
+| 2. Doc Coverage | ✅ | CHANGELOG.md + README.md current |
+| 3. Test Coverage | ✅ | 1081 pass, 7 skip |
+| 4. Package Upgrades | ✅ | pydantic-core 2.47.0 confirmed, outdated list clean |
+| 5. Pitfalls | ✅ | .gitleaksignore + .gitleaks.toml present |
+| 6. Performance | ✅ | pytest-xdist working, 165s isolated |
+| 7. Endpoints/CLI | ✅ | gitreins 0.10.2, guard PASS |
+| 8. CI/CD | ❌ GR-096 | 7 consecutive failures — static_analysis: mypy chokes on `tests/fixtures/lsp/python/main.py:5` (missing dict type args). Error-chain: GR-091 fixed secrets/, GR-093 fixed yaml stubs, GR-095 fixed reliability/, THIS was the next masked error. |
+| 9. DuckBrain | ⚠️ | Namespace has memories but semantic search unavailable (Phase 2 embedding) |
+| 10. Quality | ✅ | Ruff all clean, 0 errors |
+| 11. Middle-out | ✅ | Hilo: 417 edges, 78 files |
+
+## [x] GR-096: CI — Widen mypy exclude from tests/fixtures/secrets/ to tests/fixtures/
+
+- **Priority:** high
+- **Source:** Never-Done Audit Tick 8 — CI static_analysis error-chain unmasking
+- **Root cause:** `gitreins guard` runs `mypy --strict ...` on ALL Python files. After GR-095 excluded `tests/reliability/`, mypy advanced to the NEXT error: `tests/fixtures/lsp/python/main.py:5 [mypy] Missing type arguments for generic type "dict"`. The LSP test fixtures contain simple Python files with intentional type errors for LSP diagnostic testing — not real code. The incremental exclude approach (adding one subdirectory per CI failure) is unsustainable — each fix unmasks the next fixture directory.
+- **Fix:** Replaced `"^tests/fixtures/secrets/"` with `"^tests/fixtures/"` in `[tool.mypy] exclude` — one broad exclude for ALL test fixtures instead of per-subdirectory. This stops the error-chain masking pattern permanently for fixtures.
+- **Verification:** `mypy --strict ...` runs clean. `gitreins guard` PASS (all 5 Tier 1 checks). CI verification pending next run.
+- **Commit:** `222bb66`
+- **Files:** pyproject.toml
+
+Fixes applied this tick: GR-096 (broad mypy exclude for tests/fixtures/). Verified locally: mypy clean, guard PASS, 1081 tests pass.
+
