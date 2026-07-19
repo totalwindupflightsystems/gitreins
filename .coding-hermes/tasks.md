@@ -498,13 +498,11 @@ Reran full 11-point audit. Previous tick (GR-074–GR-077) updated 4/11 specs an
 - Full suite: 1081 passed, 7 skipped.
 - **Models:** MiniMax-M3 (worker — types, guards), foreman (propagate, persist, config)
 
-## [ ] GR-081: DOC — Add CHANGELOG.md
+## [x] GR-081: DOC — Add CHANGELOG.md
 - **Priority:** low
+- **Commit:** `3cbb96d`
 - **Source:** Never-Done Audit Check 2 (Doc Coverage)
-- **AC:**
-  - CHANGELOG.md with versions v0.1.0 through current
-  - Follows Keep a Changelog format
-  - Links to relevant PRs/commits for each version
+- **Result:** 282-line CHANGELOG.md covering v0.1.0–v0.10.2 + Unreleased. Keep a Changelog format. Version comparison links for every release.
 
 ## [ ] GR-082: DEPS — Update pydantic-core 2.46.4 → 2.47.0
 - **Priority:** low
