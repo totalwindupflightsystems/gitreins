@@ -147,6 +147,18 @@ class TestFindLspTool:
             result = find_lsp_tool("gopls")
         assert result == "/home/user/go/bin/gopls"
 
+    def test_find_lsp_tool_jdtls_not_found(self):
+        """jdtls not found returns None."""
+        with patch("shutil.which", return_value=None):
+            result = find_lsp_tool("jdtls")
+        assert result is None
+
+    def test_find_lsp_tool_jdtls_found(self):
+        """jdtls found returns its path."""
+        with patch("shutil.which", return_value="/usr/bin/jdtls"):
+            result = find_lsp_tool("jdtls")
+        assert result == "/usr/bin/jdtls"
+
 
 class TestRunLspCheck:
     """Test run_lsp_check entry point."""
@@ -583,6 +595,13 @@ class TestStagedFilesByLanguage:
                 result = _staged_files_by_language("/tmp")
         assert result == {"go": ["/tmp/file.go"]}
 
+    def test_maps_java_files(self):
+        """.java files map to java language."""
+        with patch("engine.lsp._get_staged_files", return_value=["File.java"]):
+            with patch("os.path.isfile", return_value=True):
+                result = _staged_files_by_language("/tmp")
+        assert result == {"java": ["/tmp/File.java"]}
+
 
 # ── Integration tests with real rust-analyzer server ──────────────
 
@@ -685,3 +704,25 @@ class TestGoplsIntegration:
         with patch("shutil.which", return_value=None):
             diags = run_lsp_check("gopls", lsp_workdir, files=[])
         assert diags == [], "gopls should return empty diagnostics when not installed"
+
+
+# ── Integration tests: jdtls ──────────────────────────────────────────
+
+
+class TestJdtlsIntegration:
+    """Integration tests for Java LSP with jdtls."""
+
+    def test_jdtls_skip_gracefully_when_not_installed(self, lsp_workdir):
+        """jdtls not found returns empty diagnostics (skip, not crash)."""
+        with patch("engine.lsp.find_lsp_tool", return_value=None):
+            diags = run_lsp_check("jdtls", lsp_workdir, files=[os.path.join(lsp_workdir, "Main.java")])
+        assert diags == [], "jdtls should return empty diagnostics when not installed"
+
+    def test_jdtls_java_file_language_mapping(self, lsp_workdir):
+        """.java files are mapped to 'java' language via _LANGUAGE_MAP."""
+        from engine.lsp import _staged_files_by_language
+        with patch("engine.lsp._get_staged_files", return_value=["src/Main.java"]):
+            with patch("os.path.isfile", return_value=True):
+                result = _staged_files_by_language(lsp_workdir)
+        assert "java" in result
+        assert any("Main.java" in f for f in result["java"])

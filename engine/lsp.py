@@ -26,6 +26,7 @@ _TOOL_BINARIES = {
     "ts-lsp": ["typescript-language-server"],
     "rust-analyzer": ["rust-analyzer"],
     "gopls": ["gopls"],
+    "jdtls": ["jdtls"],
 }
 
 _LANGUAGE_MAP: dict[str, str] = {
@@ -38,6 +39,7 @@ _LANGUAGE_MAP: dict[str, str] = {
     ".js": "javascript",
     ".jsx": "javascriptreact",
     ".go": "go",
+    ".java": "java",
 }
 
 _TOOL_LANGUAGES: dict[str, list[str]] = {
@@ -48,6 +50,7 @@ _TOOL_LANGUAGES: dict[str, list[str]] = {
     "ts-lsp": ["typescript", "typescriptreact", "javascript", "javascriptreact"],
     "rust-analyzer": ["rust"],
     "gopls": ["go"],
+    "jdtls": ["java"],
 }
 
 
@@ -401,7 +404,10 @@ def run_lsp_check(
             try:
                 proc.wait(timeout=3)
             except subprocess.TimeoutExpired:
-                logger.warning("LSP tool '%s' (pid %d) did not exit — killing process group", tool, proc.pid)
+                logger.warning(
+                    "LSP tool '%s' (pid %d) did not exit — killing process group",
+                    tool, proc.pid,
+                )
                 try:
                     import signal as _signal
                     lsp_pid = proc.pid
