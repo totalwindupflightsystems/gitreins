@@ -49,6 +49,11 @@ hivemind-audit.md
 .gitreins/.gitreins/
 .gitreins/config.yaml.bak
 
+# Hilo — local cache files (rebuildable)
+.vfs/graph/graph.db
+.vfs/graph/graph.db.wal
+.vfs/graph/.last_warm
+
 # Demo nested git dirs (demo projects have their own git repos)
 demo-calc/.git/
 demo-calc/calc/.git/
