@@ -43,6 +43,7 @@ pipeline:
 """
 
 import concurrent.futures
+import glob
 import json
 import logging
 import os
@@ -618,6 +619,14 @@ def _fix_on_key(obj):
     return obj
 
 
+def _has_sig_file(workdir: str, sig_file: str) -> bool:
+    """Check if a signature file exists, supporting wildcard patterns."""
+    if any(c in sig_file for c in "*?["):
+        matches = glob.glob(os.path.join(workdir, sig_file))
+        return len(matches) > 0
+    return os.path.isfile(os.path.join(workdir, sig_file))
+
+
 def _default_tier1_steps(workdir: str) -> list[dict]:
     """Return language-appropriate default Tier 1 pipeline steps.
 
@@ -649,6 +658,7 @@ def _default_tier1_steps(workdir: str) -> list[dict]:
         "ruby":   ("rubocop 2>/dev/null || true",                 "bundle exec rspec 2>/dev/null || true"),
         "php":    ("php vendor/bin/phpcs 2>/dev/null || true",    "php vendor/bin/phpunit 2>/dev/null || true"),
         "kotlin": ("./gradlew lint 2>/dev/null || true",       "./gradlew test 2>/dev/null || true"),
+        "csharp": ("dotnet format --verify-no-changes 2>/dev/null || true", "dotnet test 2>/dev/null || true"),
     }
 
     # Detection order — first match becomes the primary language
@@ -666,11 +676,13 @@ def _default_tier1_steps(workdir: str) -> list[dict]:
         ("Makefile", "c"),
         ("Gemfile", "ruby"),
         ("composer.json", "php"),
+        ("*.csproj", "csharp"),
+        ("*.sln", "csharp"),
     ]
 
     primary = None
     for sig_file, lang in _SIGNATURE_FILES:
-        if os.path.isfile(os.path.join(workdir, sig_file)):
+        if _has_sig_file(workdir, sig_file):
             primary = lang
             break
 

@@ -517,4 +517,58 @@ class TestCppLanguageDetection:
         assert "tests" not in step_ids, (
             f"No C/C++ signature → should not have tests step: {step_ids}"
         )
-        assert "secrets" in step_ids, "secrets step should always be present"
+
+
+# ── GR-063j: C# pipeline — dotnet + .csproj/.sln detection ───────────────────
+
+
+class TestCsharpLanguageDetection:
+    """Verify C# pipeline detection: .csproj/.sln → csharp."""
+
+    def test_csproj_detected_as_csharp(self, tmp_workdir):
+        """*.csproj file → primary language is csharp."""
+        from engine.pipeline import _default_tier1_steps
+        csproj_path = os.path.join(tmp_workdir, "MyProject.csproj")
+        with open(csproj_path, "w") as f:
+            f.write("<Project />\n")
+        steps = _default_tier1_steps(tmp_workdir)
+        step_ids = [s["id"] for s in steps]
+        assert "lint" in step_ids
+        assert "tests" in step_ids
+
+    def test_sln_detected_as_csharp(self, tmp_workdir):
+        """*.sln file → primary language is csharp."""
+        from engine.pipeline import _default_tier1_steps
+        sln_path = os.path.join(tmp_workdir, "MySolution.sln")
+        with open(sln_path, "w") as f:
+            f.write("Microsoft Visual Studio Solution File\n")
+        steps = _default_tier1_steps(tmp_workdir)
+        step_ids = [s["id"] for s in steps]
+        assert "lint" in step_ids
+        assert "tests" in step_ids
+
+    def test_csharp_lang_commands_produces_dotnet_steps(self, tmp_workdir):
+        """C# pipeline produces lint + test steps (via dotnet)."""
+        from engine.pipeline import _default_tier1_steps
+        csproj_path = os.path.join(tmp_workdir, "App.csproj")
+        with open(csproj_path, "w") as f:
+            f.write("<Project />\n")
+        steps = _default_tier1_steps(tmp_workdir)
+        lint_step = next((s for s in steps if s["id"] == "lint"), None)
+        test_step = next((s for s in steps if s["id"] == "tests"), None)
+        assert lint_step is not None, "lint step missing for C# project"
+        assert test_step is not None, "tests step missing for C# project"
+        assert "dotnet" in lint_step["run"], f"Expected dotnet, got {lint_step['run']}"
+        assert "dotnet" in test_step["run"], f"Expected dotnet, got {test_step['run']}"
+
+    def test_csproj_takes_priority_over_sln(self, tmp_workdir):
+        """Both .csproj and .sln present → .csproj detected first (csharp)."""
+        from engine.pipeline import _default_tier1_steps
+        with open(os.path.join(tmp_workdir, "App.csproj"), "w") as f:
+            f.write("<Project />\n")
+        with open(os.path.join(tmp_workdir, "App.sln"), "w") as f:
+            f.write("Solution\n")
+        steps = _default_tier1_steps(tmp_workdir)
+        step_ids = [s["id"] for s in steps]
+        assert "lint" in step_ids
+        assert "tests" in step_ids

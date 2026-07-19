@@ -171,6 +171,18 @@ class TestFindLspTool:
             result = find_lsp_tool("kotlin-language-server")
         assert result == "/usr/bin/kotlin-language-server"
 
+    def test_find_lsp_tool_csharp_ls_not_found(self):
+        """csharp-ls not found returns None."""
+        with patch("shutil.which", return_value=None):
+            result = find_lsp_tool("csharp-ls")
+        assert result is None
+
+    def test_find_lsp_tool_csharp_ls_found(self):
+        """csharp-ls found returns its path."""
+        with patch("shutil.which", return_value="/usr/bin/csharp-ls"):
+            result = find_lsp_tool("csharp-ls")
+        assert result == "/usr/bin/csharp-ls"
+
 
 class TestRunLspCheck:
     """Test run_lsp_check entry point."""
@@ -622,6 +634,14 @@ class TestStagedFilesByLanguage:
                 result = _staged_files_by_language("/tmp")
         assert result == {"kotlin": ["/tmp/src/Main.kt", "/tmp/build.gradle.kts"]}
 
+    def test_maps_csharp_files(self):
+        """.cs files map to csharp language."""
+        with patch("engine.lsp._get_staged_files",
+                   return_value=["src/Program.cs"]):
+            with patch("os.path.isfile", return_value=True):
+                result = _staged_files_by_language("/tmp")
+        assert result == {"csharp": ["/tmp/src/Program.cs"]}
+
 
 # ── Integration tests with real rust-analyzer server ──────────────
 
@@ -769,3 +789,26 @@ class TestKotlinLsIntegration:
                 result = _staged_files_by_language(lsp_workdir)
         assert "kotlin" in result
         assert any("build.gradle.kts" in f for f in result["kotlin"])
+
+
+# ── Integration tests: csharp-ls ──────────────────────────────────
+
+
+class TestCsharpLsIntegration:
+    """Integration tests for C# LSP with csharp-ls."""
+
+    def test_csharp_ls_skip_gracefully_when_not_installed(self, lsp_workdir):
+        """csharp-ls not found returns empty diagnostics."""
+        with patch("engine.lsp.find_lsp_tool", return_value=None):
+            diags = run_lsp_check("csharp-ls", lsp_workdir,
+                                  files=[os.path.join(lsp_workdir, "Program.cs")])
+        assert diags == [], "csharp-ls should return empty diagnostics when not installed"
+
+    def test_csharp_ls_cs_language_mapping(self, lsp_workdir):
+        """.cs files are mapped to csharp via _LANGUAGE_MAP."""
+        from engine.lsp import _staged_files_by_language
+        with patch("engine.lsp._get_staged_files", return_value=["Program.cs"]):
+            with patch("os.path.isfile", return_value=True):
+                result = _staged_files_by_language(lsp_workdir)
+        assert "csharp" in result
+        assert any("Program.cs" in f for f in result["csharp"])
