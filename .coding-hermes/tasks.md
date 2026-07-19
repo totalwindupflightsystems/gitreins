@@ -314,8 +314,9 @@ commit_audit:
 - **Commit:** `d3151d1`
 
 ### Phase 2 — Go (widely used, missing LSP+static)
-- [ ] GR-063d: Go LSP — add gopls to `_TOOL_BINARIES`, map `.go` → `go` in `_LANGUAGE_MAP`
-- [ ] GR-063e: Go static analysis — add staticcheck to `_TOOL_BINARIES` + `_TOOL_INSTALL_GUIDE`
+- [x] GR-063d: Go LSP — add gopls to `_TOOL_BINARIES`, map `.go` → `go` in `_LANGUAGE_MAP`
+- [x] GR-063e: Go static analysis — add staticcheck to `_TOOL_BINARIES` + `_TOOL_INSTALL_GUIDE`
+- **Commit:** `4d5f01a`
 
 ### Phase 3 — Java/Kotlin
 - [ ] GR-063f: Java LSP — add jdtls to `_TOOL_BINARIES`
@@ -352,18 +353,10 @@ commit_audit:
 - **Result:** All 6 AC items already implemented. `CommitAuditResult.diff` field (commit_audit.py:161), pipeline diff output with 40-line truncation (pipeline.py:394-404), `commit_audit_show_diff` config key (config.py:61), CLI diff display (cli.py:1059-1070), 7 diff-specific tests in `TestCommitAuditDiffOutput`. 38/38 tests pass. Feature verified pre-existing — no code change needed.
 - **Commit:** `4ae8189` (board verification)
 
-## [ ] GR-061: Catch-up — LSP process-group isolation + sk-api-key rule + init template sync
+## [x] GR-061: Catch-up — LSP process-group isolation + sk-api-key rule + init template sync
 - **Priority:** medium
-- **Model:** deepseek-v4-pro (direct — catch-up commit)
-- **Files:** `.gitleaks.toml`, `engine/guard_manager.py`, `engine/lsp.py`, `gitreins/cli.py`, `tests/test_guard_manager.py`, `.hermes/acceptance-criteria.md`, `uv.lock`
-- **AC:**
-  - LSP server shutdown uses os.killpg for clean process-group termination
-  - `_get_staged_files` handles fresh repos with no HEAD
-  - sk-api-key gitleaks rule uses 20+ char minimum (not 32+)
-  - `gitreins init` template includes sk-api-key rule
-  - Tests updated for new subprocess.run call pattern
-  - Full test suite passes
-- **Status:** ready
+- **Commit:** `4d5f01a`
+- **Result:** All AC verified. LSP process-group killpg with pid validation (reject non-int/bool/pid<=1, only killpg when pgid==pid≠our_pgid). _get_staged_files already handles fresh repos (HEAD check → ls-files fallback). sk-api-key rule uses 20+ (confirmed in .gitleaks.toml + init template). Tests updated.
 
 ## [x] GR-060: Investigate flaky LSP integration test
 - **Priority:** low
