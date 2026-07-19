@@ -50,6 +50,7 @@ flowchart LR
         A3[MCP tool abuse]
         A4[Config poisoning]
         A5[Evaluator prompt injection]
+        A6[Cross-repo config spread]
     end
     
     subgraph Defense["Defenses"]
@@ -58,6 +59,7 @@ flowchart LR
         D3[JSON-RPC validation + workdir check]
         D4[Local config only + defaults]
         D5[JSON-only output enforcement]
+        D6[Target-preserving recursive merge]
     end
     
     A1 --> D1
@@ -65,6 +67,7 @@ flowchart LR
     A3 --> D3
     A4 --> D4
     A5 --> D5
+    A6 --> D6
 ```
 
 #### Vector 1: Malicious AI Agent Committing Secrets
@@ -129,6 +132,19 @@ flowchart LR
 
 **Residual risk:** Advanced prompt injection against the LLM provider could bypass these controls. This is a fundamental limitation of LLM-based evaluation.
 
+#### Vector 6: Cross-Repository Guard Configuration Spread
+
+**Scenario:** An agent calls the MCP `propagate` tool with an untrusted or overly broad source configuration, spreading disabled guards or unsafe thresholds to sibling repositories.
+
+**Defense:**
+1. **Explicit target list** — `propagate` requires caller-supplied targets; it does not discover or traverse repositories automatically.
+2. **Source existence check** — propagation stops before writes if the source `.gitreins/config.yaml` is absent or unreadable.
+3. **Recursive target-preserving merge** — source-only keys are added, but target scalar values and nested overrides win on conflict.
+4. **Auditable results** — each target reports whether it was created or merged and which keys were added or preserved.
+5. **Repository review** — propagated config remains normal version-controlled YAML and should be reviewed like any other guard-policy change.
+
+**Residual risk:** A caller authorized to modify a target repository can still deliberately weaken an unset guard key by supplying it in the source config. Branch protection and review policy remain the control for malicious repository owners.
+
 ---
 
 ## 4. Attack Surface
@@ -141,12 +157,16 @@ flowchart LR
 | **git hooks** | Local repo only | Low — runs as current user | Pre-commit hook is bash script, no setuid |
 | **CLI commands** | Local shell only | Low — runs as current user | No privilege escalation in CLI code |
 | **`.gitreins/` files** | Local filesystem | Low — standard file permissions | Config and tasks are YAML, not executable |
+| **LSP servers** | Local stdio subprocesses | Medium — parses repository files and runs server binaries | Explicit opt-in, PATH discovery, per-run timeout, and validated PID/process-group cleanup |
+| **Static-analysis tools** | Local subprocesses | Medium — execute configured analyzers over repository files | Explicit opt-in, PATH discovery, normalized diagnostics, and trusted package-manager installation |
+| **`propagate` MCP tool** | Local filesystem writes to listed targets | Medium — can change sibling-repo guard policy | Explicit target list, source existence check, target-preserving recursive merge, and result reporting |
 
 ### 4.2 Network Interfaces (Medium Risk)
 
 | Interface | Exposure | Risk | Mitigation |
 |-----------|----------|------|------------|
 | **LLM API calls** | Outbound HTTPS to provider | Medium — API key exfiltration if compromised | API key from env var, not hardcoded; key never logged |
+| **Commit-audit review** | Outbound HTTPS to provider with staged diff | Medium — diff and commit message are sent to configured LLM | Use the same provider/data-handling review as Tier 2 evaluation; configure review mode and threshold deliberately |
 | **PyPI install** | Outbound HTTPS to pypi.org | Medium — supply chain attack | Pin versions, verify hashes, use private index |
 | **Update check** | Outbound HTTPS to pypi.org | Low — metadata only | Disabled via `check_for_updates: false` |
 
@@ -157,6 +177,7 @@ flowchart LR
 | **PyPI package** | Compromised release with backdoor | Pin to specific version, verify SHA256 |
 | **Dependencies** (`mcp`, `pyyaml`, `requests`) | Transitive vulnerability | Regular `pip audit`, dependabot |
 | **Optional tools** (`gitleaks`, `ruff`, `skylos`) | Compromised binary | Install via trusted package manager, verify signatures |
+| **LSP/static-analysis tools** (`pylsp`, `gopls`, `mypy`, `staticcheck`, etc.) | Compromised or vulnerable analyzer binary | Pin or verify tool releases; install through trusted language/package managers |
 
 ---
 
@@ -191,10 +212,11 @@ GitReins explicitly does NOT defend against the following threats. Users requiri
 
 | Control | Implementation | File |
 |---------|---------------|------|
-| Tool name whitelist | `_tools` dict with 9 known keys | `gitreins_mcp/server.py` |
+| Tool name whitelist | `_tools` dict with 10 known keys, including `propagate` | `gitreins_mcp/server.py` |
 | JSON-RPC validation | `jsonrpc == "2.0"` check, `-32600` on failure | `gitreins_mcp/server.py` |
 | Workdir validation | `os.path.abspath` + existence check | `gitreins_mcp/server.py` |
 | No arbitrary command execution | `run_command` is NOT an MCP tool | `gitreins_mcp/server.py` |
+| Propagate merge preservation | Target keys and nested overrides win during recursive merge | `engine/propagate.py` |
 | Error sanitization | Python tracebacks logged internally, sanitized message returned | `gitreins_mcp/server.py` |
 | Stdio-only transport | No HTTP, WebSocket, or TCP listener | `gitreins_mcp/server.py` |
 
@@ -226,6 +248,9 @@ GitReins explicitly does NOT defend against the following threats. Users requiri
 | Guard gate on commit | `gitreins commit` runs guards before `git commit` | `gitreins/cli.py` |
 | Pre-commit hook | `.git/hooks/pre-commit` auto-runs on every commit | `gitreins/cli.py` |
 | No `--no-verify` bypass | CLI does not expose a skip-guards flag | `gitreins/cli.py` |
+| LSP process isolation | stdio LSP subprocesses use timeout handling and validated process-group cleanup | `engine/lsp.py` |
+| Static-analysis tool discovery | Only configured analyzers found on PATH are executed | `engine/static_analysis.py` |
+| Commit-audit scoring | LLM review findings receive CVE-style 1–10 scores; effective score is thresholded after the configured multiplier | `engine/commit_audit.py`, `engine/pipeline.py` |
 
 ---
 

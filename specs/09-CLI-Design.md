@@ -67,9 +67,13 @@ gitreins
 ├── guard            Run Tier 1 static guards
 ├── judge            Evaluate a task (Tier 1 + Tier 2)
 ├── commit           Commit with guard gate
+├── commit-audit     Run configured Tier 2 commit-message/code review
 ├── mcp-server       Start MCP stdio server
+├── setup-tools      Show static-analysis tool availability and install guidance
 └── report           Show verdict history
 ```
+
+`propagate` is currently exposed as the MCP `propagate` tool rather than a CLI parser subcommand. `gitreins propagate` is therefore not a supported local command in this release; use the MCP tool when an agent must merge guard configuration into sibling repositories.
 
 ### 3.1 install
 
@@ -207,13 +211,18 @@ Deleted: fix-auth
 
 ### 3.8 guard
 
-**Usage:** `gitreins guard`
+**Usage:** `gitreins guard [--dead-code]`
 
 **Behavior:**
 1. Checks for updates (non-blocking, stderr notice if available)
 2. Loads `.gitreins/config.yaml`
 3. Runs all enabled Tier 1 guards
 4. Prints pass/fail summary with test mode details
+
+**Flags and configured guards:**
+- `--dead-code` — Enable the Python AST dead-code detector for this invocation, overriding `guards.dead_code`.
+- LSP diagnostics are enabled by configuration (`guards.lsp: true`, `guards.lsp_tools: [...]`) and run as part of `gitreins guard`. There is no `gitreins guard --lsp` parser flag in this release; use the config flag so LSP checks are reproducible in hooks and CI.
+- Static analysis is likewise configured with `guards.static_analysis: true` and `guards.static_analysis_tools`; `gitreins setup-tools` reports available analyzers and installation guidance.
 
 **Output (pass):**
 ```
@@ -235,13 +244,15 @@ Fix the issues above and re-run: gitreins guard
 
 ### 3.9 judge
 
-**Usage:** `gitreins judge <id>`
+**Usage:** `gitreins judge <id> [--skip-tier2]`
 
 **Behavior:**
 1. Loads task by ID
 2. Runs full evaluation pipeline (Tier 1 + Tier 2)
 3. Prints verdict summary
 4. Persists verdict to history
+
+**Flag:** `--skip-tier2` runs the Tier 1 guard portion only and skips the LLM evaluator. Use it for configuration, documentation, or operational changes that do not require a Tier 2 assessment.
 
 **Output:**
 ```
@@ -275,7 +286,20 @@ Secrets: FAIL — found potential secret in config.py:42
 
 **Exit code:** 0 on success, 1 on guard failure or git error
 
-### 3.11 mcp-server
+### 3.11 commit-audit
+
+**Usage:** `gitreins commit-audit [message]`
+
+Runs the configured `commit_audit` pipeline stage against the staged diff. With no `message`, it reads `.git/COMMIT_EDITMSG`; a `gitreins.skip-tier2` trailer skips the audit.
+
+**Review modes** (configured under `commit_audit.review_mode`):
+- `message` — validate the commit message against the diff.
+- `review` — one-pass CodeRabbit-style LLM review.
+- `agent` — multi-turn review with read-file and search tools.
+
+Each code-review finding includes a CVE-style 1–10 score. The pipeline computes `effective_score = issue.score × review_score_offset` and compares it with `review_score_threshold`; block-mode audits reject findings at or above the threshold.
+
+### 3.12 mcp-server
 
 **Usage:** `gitreins mcp-server`
 
@@ -283,7 +307,13 @@ Secrets: FAIL — found potential secret in config.py:42
 
 **No output** under normal operation (all communication is JSON-RPC over stdio).
 
-### 3.12 report
+### 3.13 setup-tools
+
+**Usage:** `gitreins setup-tools`
+
+Shows available static-analysis tools for the detected project language and prints the documented install command for missing tools. It does not install packages or modify configuration.
+
+### 3.14 report
 
 **Usage:** `gitreins report [-n N] [--interactive]`
 

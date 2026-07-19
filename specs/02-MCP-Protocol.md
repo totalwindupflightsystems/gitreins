@@ -6,7 +6,7 @@ Document Status: Draft v0.1 — Specification only, no code.
 
 ## 1. Mission
 
-Define the Model Context Protocol (MCP) interface exposed by GitReins' stdio JSON-RPC 2.0 server. Primary AI coding agents (Pi, Claude, Hermes, Codex) connect via stdio and use these 9 tools to manage tasks, run guards, evaluate work, and commit code through the harness. This specification covers the wire protocol, tool catalog, cross-repository semantics, evaluator caps, error taxonomy, server lifecycle, and security model.
+Define the Model Context Protocol (MCP) interface exposed by GitReins' stdio JSON-RPC 2.0 server. Primary AI coding agents (Pi, Claude, Hermes, Codex) connect via stdio and use these 10 tools to manage tasks, run guards, evaluate work, commit code, and propagate guard configuration through the harness. This specification covers the wire protocol, tool catalog, cross-repository semantics, evaluator caps, error taxonomy, server lifecycle, and security model.
 
 ---
 
@@ -114,7 +114,7 @@ python -m gitreins_mcp.server [workdir]
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
 │  │  JSON-RPC   │  │  Tool       │  │  Cross-Repo         │  │
 │  │  Dispatcher │──│  Handlers   │──│  TaskManager        │  │
-│  │             │  │  (9 tools)  │  │  Resolution         │  │
+│  │             │  │ (10 tools)  │  │  Resolution         │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘  │
 │         │                  │                  │               │
 │         ▼                  ▼                  ▼               │
@@ -611,12 +611,12 @@ Create a git commit. Runs guards first. Rejects if guards fail or tasks are in-p
 
 ### 8.8 guard.run
 
-Run Tier 1 static guards (secrets, lint, tests). Optional workdir for cross-repo use.
+Run Tier 1 static guards (secrets, lint, tests, and configured static-analysis/LSP checks). Optional `dead_code` enables the Python AST detector for this invocation; optional workdir supports cross-repo use.
 
 | Property | Value |
 |----------|-------|
 | **Name** | `guard.run` |
-| **Description** | Run Tier 1 static guards (secrets, lint, tests). Optional workdir for cross-repo use. |
+| **Description** | Run Tier 1 static guards. `dead_code` enables the Python AST detector; configured `static_analysis` and `lsp` guards report normalized diagnostics. Optional workdir supports cross-repo use. |
 
 **inputSchema:**
 
@@ -627,6 +627,11 @@ Run Tier 1 static guards (secrets, lint, tests). Optional workdir for cross-repo
     "workdir": {
       "type": "string",
       "description": "Absolute path to the repo to guard. Defaults to the MCP server's workdir."
+    },
+    "dead_code": {
+      "type": "boolean",
+      "description": "Enable Python AST-based dead-code detection for this run, overriding the repository guard config.",
+      "default": false
     }
   }
 }
@@ -636,8 +641,9 @@ Run Tier 1 static guards (secrets, lint, tests). Optional workdir for cross-repo
 - Resolves `workdir` (default: server workdir).
 - Loads config from `<workdir>/.gitreins/config.yaml` (if exists).
 - Creates `GuardManager(wd, config=config)`.
-- Runs `gm.run_all()`.
+- Runs `gm.run_all(force_dead_code=dead_code)`.
 - Returns pass/fail status, workdir, and truncated results (output capped at 500 chars per guard).
+- When enabled in `guards`, the result list can include `dead_code`, `static_analysis`, and `lsp`. Static-analysis and LSP output contains normalized `file:line`, tool, and diagnostic-message evidence; an error diagnostic makes that guard fail.
 
 **Return shape:**
 
@@ -655,6 +661,16 @@ Run Tier 1 static guards (secrets, lint, tests). Optional workdir for cross-repo
       "name": "lint",
       "passed": false,
       "output": "main.go:42: error: ..."
+    },
+    {
+      "name": "lsp",
+      "passed": true,
+      "output": "  pylsp — clean"
+    },
+    {
+      "name": "static_analysis",
+      "passed": false,
+      "output": "  ✗ src/auth.py:42 [mypy] Incompatible return value type"
     }
   ]
 }
@@ -724,6 +740,7 @@ Run full evaluation pipeline (Tier 1 + Tier 2) on a task. Caps can be set indivi
 - Looks up task by ID in target workdir.
 - Creates a fresh `Judge` for the target workdir with the computed `EvalCap`.
 - Runs `Judge.evaluate_task(task)` (Tier 1 guards + Tier 2 LLM evaluation).
+- A Tier 2 pipeline may additionally run the `commit_audit` stage. It supports message validation, single-pass CodeRabbit-style review, or tool-using agent review; review findings include CVE-style 1–10 scores and are evaluated against the configured score threshold and multiplier.
 - Returns evaluation result.
 
 **Return shape:**
@@ -745,6 +762,48 @@ Run full evaluation pipeline (Tier 1 + Tier 2) on a task. Caps can be set indivi
 **Error conditions:**
 - Task not found → `{"error": "Task not found: <id> in <workdir>"}` (cross-repo) or `{"error": "Task not found: <id>"}` (default workdir).
 - Evaluation exception → bubbles up as JSON-RPC `-32000` server error.
+
+---
+
+### 8.10 propagate
+
+Copy `.gitreins/config.yaml` guard configuration from one repository to sibling repositories. The target config is merged recursively: source-only keys are added while existing target keys and nested overrides win on conflicts.
+
+| Property | Value |
+|----------|-------|
+| **Name** | `propagate` |
+| **Description** | Propagate guard configuration to sibling repositories without clobbering target overrides. |
+
+**inputSchema:**
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "source": {
+      "type": "string",
+      "description": "Source repo path. Defaults to the MCP server's workdir."
+    },
+    "targets": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Target repository paths to receive the merged guard configuration."
+    }
+  },
+  "required": ["targets"]
+}
+```
+
+**Behavior:**
+- Resolves `source` (default: server workdir) and requires at least one target.
+- Reads `<source>/.gitreins/config.yaml`; returns an error without changing targets if the source config is absent or unreadable.
+- Creates `<target>/.gitreins/` when needed.
+- Creates a target config when missing; otherwise recursively merges source keys into it, preserving target scalar values and nested overrides.
+- Returns `source` and one result per target with `action` (`created` or `merged`), `keys_added`, and `keys_preserved`.
+
+**Error conditions:**
+- Missing or empty `targets` → `{"error": "targets list is required"}`.
+- Missing/unreadable source config → an error result identifying the expected source config path; no target is updated.
 
 ---
 
@@ -1033,7 +1092,7 @@ gitreins-poc/
 - [x] Assumptions listed
 - [x] Architecture diagram and layering rules
 - [x] Protocol specified (transport, brace parser, lifecycle, response format)
-- [x] Tool Catalog complete (all 9 tools with schemas, behavior, returns, errors)
+- [x] Tool Catalog complete (all 10 tools with schemas, behavior, returns, errors)
 - [x] Cross-Repo Workdir documented
 - [x] Evaluator Caps documented (params, priority chain, legacy format, accounting)
 - [x] Error Taxonomy (JSON-RPC + domain + exit codes)

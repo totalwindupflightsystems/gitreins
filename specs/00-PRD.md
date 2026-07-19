@@ -33,6 +33,8 @@ Runs on every commit. Configurable via `.gitreins/config.yaml`:
 - **Lint** — Python (ruff), Go (`go vet`), TypeScript (configurable)
 - **Tests** — full suite or diff-mode smart selection
 - **Dead code detection** — opt-in Python AST-based unused function/import detection
+- **LSP diagnostics** — opt-in language-server diagnostics from staged files (undefined names, type errors, imports, and syntax issues)
+- **Static analysis** — opt-in language-specific tools such as mypy, pyright, staticcheck, cppcheck, clippy, and eslint
 - **Build verification** — Go projects get `go build` check
 
 Diff-mode test selection: when `test_mode: "diff"`, GitReins maps staged source files to their corresponding test files using basename matching (`engine/foo.py` → `tests/test_foo.py`). Force-full triggers (`pyproject.toml`, `conftest.py`, config changes) run the full suite for safety.
@@ -76,7 +78,7 @@ Creates:
 
 ## 4. Key Capabilities
 
-### 4.1 MCP Server (9 Tools)
+### 4.1 MCP Server (10 Tools)
 
 Primary AI agents connect via stdio JSON-RPC 2.0:
 
@@ -91,6 +93,7 @@ Primary AI agents connect via stdio JSON-RPC 2.0:
 | `commit` | Create git commit; runs guards first; rejects if guards fail |
 | `guard.run` | Run Tier 1 static guards; optional `workdir` for cross-repo use |
 | `judge.evaluate` | Run full evaluation pipeline (Tier 1 + Tier 2) on a task; supports individual caps or legacy `eval_cap` string |
+| `propagate` | Copy guard configuration to sibling repositories with recursive merging that preserves target overrides |
 
 Cross-repo `workdir`: every tool accepts an optional `workdir` parameter, enabling a single MCP server instance to manage tasks and run guards across multiple repositories.
 
@@ -105,11 +108,14 @@ gitreins task start <id>
 gitreins task complete <id>
 gitreins task list [--status pending|in_progress|complete]
 gitreins task delete <id>
-gitreins guard run            # Run static guards manually
-gitreins judge <id>           # Run evaluator on a task
+gitreins guard --dead-code    # Run static guards; enable AST dead-code detection on demand
+gitreins judge <id> [--skip-tier2]  # Run evaluator, or Tier 1 only
 gitreins commit <message>     # Commit with guard gate
+gitreins commit-audit [message]  # Run configured commit-message/code review
 gitreins mcp-server           # Start MCP stdio server
 ```
+
+`propagate` is an MCP tool for agents rather than a local `gitreins propagate` command. It creates or recursively merges `.gitreins/config.yaml` into explicit sibling-repository targets while preserving target overrides.
 
 ### 4.3 Diff-Mode Test Selection
 
@@ -164,7 +170,11 @@ pipeline:
 
 Features: conditional execution (`stage.tier1.any_failed or task.has_criteria`), result piping between stages, parallel step execution via ThreadPoolExecutor.
 
-### 4.6 PyPI Distribution
+### 4.6 Commit Audit and CVE-Style Severity
+
+The optional Tier 2 `commit_audit` stage validates a proposed commit message and can review the staged diff in CodeRabbit-style `review` or tool-using `agent` mode. Each review finding has a CVE-style numeric score from 1 to 10. GitReins calculates `effective_score = issue.score × review_score_offset`; block-mode reviews reject scores at or above `review_score_threshold`.
+
+### 4.7 PyPI Distribution
 
 ```bash
 pip install gitreins
@@ -183,7 +193,7 @@ pip install gitreins
 
 | Out of Scope | Rationale |
 |--------------|-----------|
-| **Code review** | GitReins judges task criteria ("does this code meet the acceptance criteria?"), not code quality ("is this code well-written?"). Code review is a human or separate tool concern. |
+| **Full pull-request review workflow** | GitReins can run a scoped CodeRabbit-style staged-diff commit audit, but it is not a replacement for human PR review, ownership rules, or hosted review workflow. |
 | **Deployment** | GitReins operates at the commit boundary. CI/CD pipelines handle deployment. |
 | **Monitoring / observability** | No runtime metrics, no log aggregation, no alerting. GitReins is a pre-commit quality gate, not a production monitoring system. |
 | **Issue tracking** | Tasks are lightweight YAML entries with criteria. For full issue tracking, use GitHub Issues, Jira, or Linear. |
@@ -228,7 +238,7 @@ pip install gitreins
 | **Test suite** | 384 tests across 26 test files |
 | **Eval cap tests** | 39 tests including real LLM calls (integration) |
 | **Production projects** | 16 repos actively using GitReins |
-| **MCP tools** | 9 tools exposed via stdio JSON-RPC 2.0 |
+| **MCP tools** | 10 tools exposed via stdio JSON-RPC 2.0 |
 | **Supported languages** | Python, Go, TypeScript (configurable for any) |
 | **Python versions** | 3.10, 3.11, 3.12 |
 | **License** | MIT |
@@ -245,8 +255,13 @@ pip install gitreins
 | `engine/llm.py` | Multi-provider LLM client (OpenAI-compatible + Anthropic native) with retry |
 | `engine/pipeline.py` | Configurable evaluation pipelines with sequential/parallel stages |
 | `engine/config.py` | Unified defaults, config.yaml overlay, update checking |
+| `engine/dead_code.py` | Python AST detector for unused functions/imports, unreachable code, and empty stubs |
+| `engine/lsp.py` | Tier 1 language-server diagnostics over stdio subprocesses |
+| `engine/static_analysis.py` | Tier 1 normalized diagnostics from configured language-specific analyzers |
+| `engine/commit_audit.py` | Tier 2 commit-message validation and CodeRabbit-style review with scored findings |
+| `engine/propagate.py` | Cross-repository guard-config propagation with target-preserving recursive merge |
 | `engine/task_manager.py` | YAML-backed task lifecycle (create, start, complete, delete) |
-| `gitreins_mcp/server.py` | MCP stdio server exposing 9 tools to primary AI agents |
+| `gitreins_mcp/server.py` | MCP stdio server exposing 10 tools to primary AI agents |
 | `gitreins/cli.py` | Human-facing CLI with install, task, guard, judge, commit commands |
 
 ---

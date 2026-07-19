@@ -23,13 +23,19 @@ C4Container
 
     System_Boundary(gitreins, "GitReins") {
         Container(cli, "CLI", "Python", "Human interface: task CRUD, guard run, judge, commit")
-        Container(mcp, "MCP Server", "Python", "JSON-RPC 2.0 stdio: task.*, judge.evaluate, commit, guard.run")
+        Container(mcp, "MCP Server", "Python", "JSON-RPC 2.0 stdio: task.*, judge.evaluate, commit, guard.run, propagate")
+
         
         Container(engine, "Engine", "Python", "Shared evaluation core") {
-            Component(gm, "GuardManager", "Static checks: secrets, lint, tests, Go guards")
+            Component(gm, "GuardManager", "Static checks: secrets, lint, tests, dead code, LSP, static analysis, Go guards")
+            Component(dead, "DeadCodeDetector", "Python AST unused-code and unreachable-code findings")
+            Component(lsp, "LSP Guard", "Language-server diagnostics over stdio")
+            Component(static, "Static Analysis", "Normalized language-specific analyzer diagnostics")
             Component(eval, "AgenticEvaluator", "Iterative LLM loop with tool calls")
             Component(judge, "Judge", "Orchestrates Tier 1 + Tier 2 / pipeline")
             Component(pipe, "Pipeline", "Config-driven stage execution")
+            Component(audit, "CommitAuditor", "Tier 2 message validation and CodeRabbit-style review")
+            Component(propagate, "Propagator", "Cross-repo guard-config recursive merge")
             Component(cap, "EvalCap", "Iteration/time/token/tool caps")
             Component(cfg, "Config", "Unified defaults + overlay")
             Component(llm, "LLMClient", "Multi-provider with retry")
@@ -42,6 +48,7 @@ C4Container
     Rel(agent, mcp, "Connects via stdio", "JSON-RPC 2.0")
     Rel(cli, engine, "Invokes", "Python import")
     Rel(mcp, engine, "Invokes", "Python import")
+    Rel(mcp, propagate, "Invokes", "Python import")
     Rel(engine, tasks_yaml, "Reads/Writes", "YAML")
     Rel(engine, config_yaml, "Reads", "YAML")
     Rel(engine, history, "Writes verdicts", "Git or filesystem")
@@ -49,8 +56,8 @@ C4Container
 ```
 
 **Runtime surfaces:**
-- **CLI** (`gitreins/cli.py`, 546 lines) — Human-facing commands: `install`, `task create/start/complete/list/delete`, `guard run`, `judge <id>`, `commit <msg>`, `mcp-server`
-- **MCP Server** (`gitreins_mcp/server.py`, 517 lines) — AI agent interface via JSON-RPC 2.0 over stdio. Exposes 8 tools: `task.create`, `task.start`, `task.complete`, `task.list`, `task.get`, `task.delete`, `commit`, `guard.run`, `judge.evaluate`
+- **CLI** (`gitreins/cli.py`) — Human-facing commands: `install`, `task create/start/complete/list/delete`, `guard`, `judge <id>`, `commit <msg>`, `commit-audit`, `setup-tools`, and `mcp-server`
+- **MCP Server** (`gitreins_mcp/server.py`) — AI agent interface via JSON-RPC 2.0 over stdio. Exposes 10 tools: `task.create`, `task.start`, `task.complete`, `task.list`, `task.get`, `task.delete`, `commit`, `guard.run`, `judge.evaluate`, and `propagate`
 - **Engine** — Shared Python modules imported by both CLI and MCP server. No network service; all execution is in-process.
 
 **Data stores:**
@@ -78,7 +85,7 @@ sequenceDiagram
 
     Human->>Git: git commit -m "..."
     Git->>Hook: invoke pre-commit hook
-    Hook->>GM: gitreins guard run
+    Hook->>GM: gitreins guard
     
     par Parallel Checks
         GM->>Secrets: _check_secrets()
@@ -118,6 +125,9 @@ sequenceDiagram
 | Secrets | gitleaks or built-in patterns | `guards.secrets` | `true` |
 | Lint | ruff / flake8 | `guards.lint` | `true` |
 | Tests | pytest (full or diff-mode) | `guards.tests` | `true` |
+| Dead Code | Python AST detector | `guards.dead_code` | `false` |
+| LSP | Configured language server over stdio | `guards.lsp` / `guards.lsp_tools` | `false` |
+| Static Analysis | Configured language-specific analyzer | `guards.static_analysis` / `guards.static_analysis_tools` | `false` |
 | Go Lint | golangci-lint / go vet | auto-detected | — |
 | Go Tests | `go test` | auto-detected | — |
 | Go Build | `go build` | auto-detected | — |
@@ -215,7 +225,7 @@ sequenceDiagram
 
 | Module | File | Lines | Responsibility | Key Classes/Functions |
 |--------|------|-------|----------------|---------------------|
-| **GuardManager** | `engine/guard_manager.py` | 551 | Tier 1 static checks: secrets, lint, tests, Go guards | `GuardResult`, `Tier1Result`, `GuardManager.run_all()` |
+| **GuardManager** | `engine/guard_manager.py` | 818 | Tier 1 checks: secrets, lint, tests, dead code, LSP, static analysis, Go guards | `GuardResult`, `Tier1Result`, `GuardManager.run_all()` |
 | **AgenticEvaluator** | `engine/evaluator.py` | 739 | Iterative LLM evaluation loop with 7 tools | `AgenticEvaluator`, `EVALUATOR_TOOLS`, `EVALUATOR_SYSTEM_PROMPT` |
 | **EvalCap** | `engine/eval_cap.py` | 442 | Flexible caps: iterations, time, tokens, tool weight | `EvalCap`, `parse_eval_cap()`, `eval_cap_from_config()` |
 | **LLMClient** | `engine/llm.py` | 353 | Multi-provider LLM client with retry | `LLMClient`, `LLMResponse`, `ToolCall`, `LLMUsage` |
@@ -226,7 +236,11 @@ sequenceDiagram
 | **MCP Server** | `gitreins_mcp/server.py` | 517 | JSON-RPC 2.0 stdio MCP server | `GitReinsMCPServer`, `_tool_schemas()` |
 | **CLI** | `gitreins/cli.py` | 546 | Human-facing command line | `main()`, `load_config()`, `PRE_COMMIT_HOOK` |
 | **Guards (Go)** | `engine/guards.py` | 112 | Go-specific guard checks | `is_go_project()`, `check_go_lint()`, `check_go_tests()`, `check_go_build()` |
-| **Dead Code** | `engine/dead_code.py` | 280 | AST-based dead code detection | `DeadCodeDetector`, `DeadCodeFinding`, `DeadCodeReport` |
+| **Dead Code** | `engine/dead_code.py` | 289 | AST-based dead code detection | `DeadCodeDetector`, `DeadCodeFinding`, `DeadCodeReport` |
+| **LSP Guard** | `engine/lsp.py` | 461 | Starts configured language servers over stdio and normalizes diagnostics | `LspDiag`, `run_lsp_check()` |
+| **Static Analysis** | `engine/static_analysis.py` | 578 | Runs configured analyzers and normalizes their diagnostics | `StaticDiag`, `run_static_check()` |
+| **Commit Audit** | `engine/commit_audit.py` | 1,005 | Tier 2 message validation and CodeRabbit-style code review with CVE-style scores | `CommitAuditor`, `CommitReviewResult` |
+| **Propagate** | `engine/propagate.py` | 180 | Copies guard config across sibling repos while preserving target overrides | `Propagator`, `Propagator.propagate()` |
 | **Persist** | `engine/persist.py` | 483 | Verdict persistence (git/FS) | `VerdictPersister`, `load_history_config()` |
 | **Version** | `engine/version.py` | 1 | Package version | `__version__` |
 
@@ -375,7 +389,7 @@ sequenceDiagram
 gitreins-poc/
 ├── engine/                     # Core evaluation engine
 │   ├── __init__.py
-│   ├── guard_manager.py        # 551 lines — Tier 1 static checks
+│   ├── guard_manager.py        # 818 lines — Tier 1 static checks
 │   ├── evaluator.py            # 739 lines — Agentic LLM loop
 │   ├── eval_cap.py             # 442 lines — Flexible caps
 │   ├── llm.py                  # 353 lines — Multi-provider client
@@ -384,7 +398,11 @@ gitreins-poc/
 │   ├── config.py               # 318 lines — Unified defaults
 │   ├── task_manager.py         # 174 lines — Task CRUD
 │   ├── guards.py               # 112 lines — Go-specific checks
-│   ├── dead_code.py            # 280 lines — AST dead code detection
+│   ├── dead_code.py            # 289 lines — AST dead code detection
+│   ├── lsp.py                  # 461 lines — LSP diagnostics guard
+│   ├── static_analysis.py      # 578 lines — Analyzer diagnostics guard
+│   ├── commit_audit.py         # 1,005 lines — Tier 2 commit review
+│   ├── propagate.py            # 180 lines — Cross-repo config merge
 │   ├── persist.py              # 483 lines — Verdict persistence
 │   └── version.py              # 1 line — Package version
 │
@@ -477,7 +495,11 @@ gitreins-poc/
 | `engine/config.py` | 318 | 2026-06-20 |
 | `engine/task_manager.py` | 174 | 2026-06-20 |
 | `engine/guards.py` | 112 | 2026-06-20 |
-| `engine/dead_code.py` | 280 | 2026-06-20 |
+| `engine/dead_code.py` | 289 | 2026-07-19 |
+| `engine/lsp.py` | 461 | 2026-07-19 |
+| `engine/static_analysis.py` | 578 | 2026-07-19 |
+| `engine/commit_audit.py` | 1,005 | 2026-07-19 |
+| `engine/propagate.py` | 180 | 2026-07-19 |
 | `engine/persist.py` | 483 | 2026-06-20 |
 | `engine/version.py` | 1 | 2026-06-20 |
 | `gitreins_mcp/server.py` | 517 | 2026-06-20 |

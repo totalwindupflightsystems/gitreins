@@ -157,6 +157,8 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+          # Optional Tier 1 diagnostics for repositories that enable them:
+          python -m pip install mypy pyright
       - name: Run tests
         run: pytest tests/ -v --tb=short
       - name: Run guards
@@ -176,7 +178,7 @@ The current single-job CI is planned to split into two jobs with different cost 
 | **Runtime** | ~30-60 seconds |
 | **Steps** | `pip install -e ".[dev]"` → `bash .gitreins/pre-commit` |
 
-This job runs the Tier 1 static guards (secrets, lint, tests) on every commit. It does not invoke the agentic evaluator and therefore consumes no LLM API tokens. It is the fast path that blocks obviously broken changes before they reach the merge queue.
+This job runs the Tier 1 static guards (secrets, lint, tests, plus any enabled dead-code, LSP, or static-analysis checks) on every commit. It does not invoke the agentic evaluator and therefore consumes no LLM API tokens. It is the fast path that blocks obviously broken changes before they reach the merge queue.
 
 The `.gitreins/pre-commit` script (created by `gitreins install`) is equivalent to running `gitreins guard` but executed as a standalone bash script for CI portability.
 
@@ -419,7 +421,34 @@ pip install -e ".[dev]"
 gitreins guard
 ```
 
-### 7.3 Per-Project Activation
+### 7.3 Optional LSP and Static-Analysis Prerequisites
+
+LSP and static-analysis guards are opt-in. Install only the servers and analyzers enabled in the target repository's `guards.lsp_tools` and `guards.static_analysis_tools` configuration; GitReins skips tools that are not on `PATH`.
+
+| Language | LSP server install | Static-analysis install |
+|----------|--------------------|-------------------------|
+| Python | `python -m pip install python-lsp-server pyflakes pycodestyle` | `python -m pip install mypy pyright` |
+| Go | `go install golang.org/x/tools/gopls@latest` | `go install honnef.co/go/tools/cmd/staticcheck@latest` |
+| Rust | `rustup component add rust-analyzer` | `rustup component add clippy` |
+| TypeScript/JavaScript | `npm install -g typescript typescript-language-server` | `npm install -g eslint` |
+| C/C++ | Install `clangd` through the system package manager | `sudo apt install cppcheck` (or `brew install cppcheck`) |
+| Java/Kotlin | Install `jdtls` or `kotlin-language-server` through the system package manager | Configure a language-native analyzer as needed |
+| Ruby | `gem install ruby-lsp` or `gem install solargraph` | `gem install sorbet && srb init` |
+
+**CI example:**
+
+```yaml
+- name: Install configured diagnostic tools
+  run: |
+    python -m pip install python-lsp-server pyflakes pycodestyle mypy pyright
+    go install golang.org/x/tools/gopls@latest
+    go install honnef.co/go/tools/cmd/staticcheck@latest
+    npm install -g typescript typescript-language-server eslint
+```
+
+**Extras note:** the current package manifest declares the `dev` extra, which includes `python-lsp-server` and `mypy`; use `pip install -e ".[dev]"` for the supported development bundle. `pip install "gitreins[full]"` is not currently a supported installation because no `full` extra is declared; consumers requiring a full diagnostics profile must install the selected tools explicitly as shown above.
+
+### 7.4 Per-Project Activation
 
 After installing the package, activate GitReins in any repository:
 
@@ -434,7 +463,7 @@ This creates:
 - `.git/hooks/pre-commit` — executable hook that runs `gitreins guard`
 - `.gitignore` entry for `.gitreins/tasks.yaml` (if `.gitignore` exists)
 
-### 7.4 Verify Installation
+### 7.5 Verify Installation
 
 ```bash
 # Check guards run correctly
