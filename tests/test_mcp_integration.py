@@ -191,6 +191,8 @@ class TestMCPRealIntegration:
 
     def test_cross_repo_task_workdir(self, tmp_git_repo):
         """Tasks with workdir land in the target repo, not the MCP server's dir."""
+        if not os.getenv("GITREINS_LLM_API_KEY"):
+            pytest.skip("GITREINS_LLM_API_KEY not set — LLM-dependent test")
         proc = _start_mcp_server(tmp_git_repo)
 
         # Create a second temp directory (simulating a different repo)

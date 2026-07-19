@@ -420,6 +420,8 @@ class TestJudgeEvaluateMCP:
 
     def test_judge_evaluate_nonexistent_task_returns_error(self, mcp_server):
         """judge.evaluate on nonexistent task returns error response."""
+        if not os.getenv("GITREINS_LLM_API_KEY"):
+            pytest.skip("GITREINS_LLM_API_KEY not set — LLM-dependent test")
         response = mcp_server.handle_request({
             "jsonrpc": "2.0",
             "id": 1,
