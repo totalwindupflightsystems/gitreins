@@ -53,6 +53,7 @@ Issues = "https://github.com/totalwindupflightsystems/gitreins/issues"
 include = ["engine*", "gitreins*", "gitreins_mcp*"]
 
 [tool.pytest.ini_options]
+addopts = "-n 4"
 testpaths = ["tests"]
 pythonpath = ["."]
 
@@ -92,6 +93,7 @@ select = [
 dev = [
     "pycodestyle>=2.14.0",
     "pyflakes>=3.4.0",
+    "pytest-xdist>=3.8.0",
 ]
 # B904: `raise ... from err` inside except — prevents swallowed exceptions
 # by forcing explicit exception chaining.
