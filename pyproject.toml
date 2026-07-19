@@ -35,6 +35,8 @@ dev = [
     "twine>=5.0",
     "build>=1.0",
     "python-lsp-server>=1.10",
+    "pyflakes>=3.0",
+    "pycodestyle>=2.11",
     "mypy>=1.0",
 ]
 
