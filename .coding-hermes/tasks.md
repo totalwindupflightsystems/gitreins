@@ -515,11 +515,8 @@ Reran full 11-point audit. Previous tick (GR-074–GR-077) updated 4/11 specs an
 - **Source:** Never-Done Audit Check 5 (Pitfalls)
 - **Result:** demo-calc/ + demo-slugify/ gitignored (top-level dirs). .vfs/ graph.db gitignored (pre-existing), edges.jsonl (618 edges) committed. .coding-hermes/references/ already removed.
 
-## [ ] GR-084: PERF — Test suite exceeds 120s timeout (979 tests)
+## [x] GR-084: PERF — Test suite exceeds 120s timeout (979 tests)
 - **Priority:** low
+- **Commit:** NEXT
 - **Source:** Never-Done Audit Check 6 (Performance)
-- **Symptom:** `uv run pytest -x --durations=5 -q` times out at 120s.
-- **AC:**
-  - Full test suite completes in <120s OR test parallelization enabled
-  - Evaluate pytest-xdist for parallel execution
-  - Identify slowest 10 tests via --durations=10
+- **Result:** pytest-xdist installed + added to dev deps. With `-n auto`: 1081 passed, 7 skipped in 154.80s (was timing out at 180s+ without xdist). Slowest tests: test_rust_analyzer_detects_type_error (60.01s), test_rust_analyzer_clean_code (60.00s), test_cross_repo_task_workdir (42.57s), test_ts_lsp_skip_gracefully (30.09s), test_full_task_lifecycle_subprocess (20.13s). LSP integration tests dominate — future optimization could skip these in guard context.

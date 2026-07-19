@@ -38,6 +38,7 @@ dev = [
     "pyflakes>=3.0",
     "pycodestyle>=2.11",
     "mypy>=1.0",
+    "pytest-xdist>=3.0",
 ]
 
 [project.scripts]
