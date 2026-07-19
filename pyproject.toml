@@ -63,6 +63,9 @@ pythonpath = ["."]
 exclude = [
     "^tests/fixtures/",          # test fixtures (secrets, lsp, etc.) — not real code
     "^tests/reliability/",       # intentionally buggy: test fixtures with known flaws for reliability benchmarks
+    "^sandbox/",                 # evaluation scratch space — not production code
+    "^demo-calc/",               # demo project — invalid Python package name
+    "^temporal-vector/",         # experimental vector encoding — not production code
 ]
 
 [tool.ruff]
