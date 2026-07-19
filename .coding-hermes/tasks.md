@@ -360,7 +360,8 @@ commit_audit:
 - **_TOOL_LANGUAGES:** dart→[dart] ✓
 - **Tests:** 5 tests (2 find_tool + 1 staged_files + 2 integration) — all passing
 - **Commit:** `6e2eb7c` (Swift) + next
-- [ ] GR-063m: Elixir LSP — elixir-ls, map `.ex`/`.exs`, detect `mix.exs`
+- [x] GR-063m: Elixir LSP — elixir-ls, map `.ex`/`.exs`, detect `mix.exs`
+- **Commit:** `7cd7c25`
 - [ ] GR-063n: Scala LSP — metals, map `.scala`/`.sc`, detect `build.sbt`
 
 ### Phase 6 — Rust, Python, JS/TS gap fill
