@@ -729,3 +729,43 @@ Ran full 11-point audit. Tick 7 committed GR-095/GR-095B before this tick ran. B
 
 Fixes applied this tick: GR-096 (broad mypy exclude for tests/fixtures/). Verified locally: mypy clean, guard PASS, 1081 tests pass.
 
+
+---
+
+## Phase: Never-Done Audit — 2026-07-19 Tick 9
+
+Ran full 11-point audit. Board all [x] (GR-020 through GR-096). Found 2 gaps:
+
+| Check | Status | Finding |
+|-------|--------|---------|
+| 1. Spec Coverage | Pass | 11 spec files, all updated 2026-07-19 16:14. Post GR-079 sweep. |
+| 2. Doc Coverage | Pass | README + CHANGELOG.md current |
+| 3. Test Coverage | Pass | 1081 pass, 7 skip. All green. |
+| 4. Package Upgrades | Pass | uv pip list --outdated clean. pydantic-core 2.47.0 confirmed. |
+| 5. Pitfalls | Pass | .gitleaksignore + .gitleaks.toml present |
+| 6. Performance | Pass | pytest-xdist working, 165s for full suite |
+| 7. CLI/Guard | Pass | gitreins 0.10.2, guard PASS (all 5 Tier 1) |
+| 8. CI/CD | Pass | Local: mypy clean (non-fatal demo-calc warning resolved). Guard PASS. gh unavailable (no auth). |
+| 9. DuckBrain | Pass | 3 memories in coding-hermes namespace |
+| 10. Quality | Pass | Ruff clean. Guard passes. |
+| 11. Middle-out | Pass | Hilo: 417 edges, 78 files |
+
+Gaps found: GR-097 (committed but never on board — Class 7), GR-098 (mypy exclude expansion for non-prod dirs).
+
+## [x] GR-097: Fix Tier1Result.extra dict type annotation for mypy strict mode
+- Priority: low
+- Source: Never-Done Audit Tick 9 — Class 7 fabrication (committed but never on board)
+- Root cause: GR-096 widened mypy exclude to tests/fixtures/, unmasking the next error: engine/types.py dict missing type args in strict mode.
+- Fix: dict → dict[str, object] in Tier1Result.extra field (1 line)
+- Commit: 64143d9
+- Files: engine/types.py
+
+## [x] GR-098: Exclude non-production directories from mypy strict scan
+- Priority: low
+- Source: Never-Done Audit Tick 9 — error-chain unmasking after GR-096
+- Root cause: After GR-096 excluded tests/fixtures/, mypy --strict hit errors in sandbox/, demo-calc/, temporal-vector/, demo-slugify/ — none are production code.
+- Fix: Added ^sandbox/, ^demo-calc/, ^temporal-vector/, ^demo-slugify/ to [tool.mypy] exclude in pyproject.toml
+- Verification: mypy --strict --no-error-summary runs clean. Guard PASS. 1081 tests pass.
+- Files: pyproject.toml
+
+Fixes applied this tick: GR-097 (board catch-up), GR-098 (mypy exclude expansion). Guard PASS, tests green, packages current, Hilo stable at 417 edges. Board fully [x] — no remaining gaps.

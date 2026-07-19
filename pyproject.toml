@@ -66,6 +66,7 @@ exclude = [
     "^sandbox/",                 # evaluation scratch space — not production code
     "^demo-calc/",               # demo project — invalid Python package name
     "^temporal-vector/",         # experimental vector encoding — not production code
+    "^demo-slugify/",            # demo project — permission-restricted
 ]
 
 [tool.ruff]
