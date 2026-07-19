@@ -353,7 +353,13 @@ commit_audit:
 - **_LANGUAGE_MAP:** .swift→swift ✓
 - **_TOOL_LANGUAGES:** sourcekit-lsp→[swift] ✓
 - **Tests:** 5 tests (2 find_tool + 1 staged_files + 2 integration) — all passing
-- [ ] GR-063l: Dart LSP — dart, map `.dart`, detect `pubspec.yaml`
+- [x] GR-063l: Dart LSP — dart, map `.dart`, detect `pubspec.yaml`
+- **Status:** Implemented
+- **_TOOL_BINARIES:** dart ✓
+- **_LANGUAGE_MAP:** .dart→dart ✓
+- **_TOOL_LANGUAGES:** dart→[dart] ✓
+- **Tests:** 5 tests (2 find_tool + 1 staged_files + 2 integration) — all passing
+- **Commit:** `6e2eb7c` (Swift) + next
 - [ ] GR-063m: Elixir LSP — elixir-ls, map `.ex`/`.exs`, detect `mix.exs`
 - [ ] GR-063n: Scala LSP — metals, map `.scala`/`.sc`, detect `build.sbt`
 

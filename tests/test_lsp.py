@@ -195,6 +195,18 @@ class TestFindLspTool:
             result = find_lsp_tool("sourcekit-lsp")
         assert result == "/usr/bin/sourcekit-lsp"
 
+    def test_find_lsp_tool_dart_not_found(self):
+        """dart not found returns None."""
+        with patch("shutil.which", return_value=None):
+            result = find_lsp_tool("dart")
+        assert result is None
+
+    def test_find_lsp_tool_dart_found(self):
+        """dart found returns its path."""
+        with patch("shutil.which", return_value="/usr/bin/dart"):
+            result = find_lsp_tool("dart")
+        assert result == "/usr/bin/dart"
+
 
 class TestRunLspCheck:
     """Test run_lsp_check entry point."""
@@ -662,6 +674,14 @@ class TestStagedFilesByLanguage:
                 result = _staged_files_by_language("/tmp")
         assert result == {"swift": ["/tmp/Sources/main.swift"]}
 
+    def test_maps_dart_files(self):
+        """.dart files map to dart language."""
+        with patch("engine.lsp._get_staged_files",
+                   return_value=["lib/main.dart"]):
+            with patch("os.path.isfile", return_value=True):
+                result = _staged_files_by_language("/tmp")
+        assert result == {"dart": ["/tmp/lib/main.dart"]}
+
 
 # ── Integration tests with real rust-analyzer server ──────────────
 
@@ -855,3 +875,26 @@ class TestSourcekitLsIntegration:
                 result = _staged_files_by_language(lsp_workdir)
         assert "swift" in result
         assert any("main.swift" in f for f in result["swift"])
+
+
+# ── Integration tests: dart ───────────────────────────────────────
+
+
+class TestDartLsIntegration:
+    """Integration tests for Dart LSP with dart."""
+
+    def test_dart_ls_skip_gracefully_when_not_installed(self, lsp_workdir):
+        """dart not found returns empty diagnostics."""
+        with patch("engine.lsp.find_lsp_tool", return_value=None):
+            diags = run_lsp_check("dart", lsp_workdir,
+                                  files=[os.path.join(lsp_workdir, "main.dart")])
+        assert diags == [], "dart should return empty diagnostics when not installed"
+
+    def test_dart_ls_dart_language_mapping(self, lsp_workdir):
+        """.dart files are mapped to dart via _LANGUAGE_MAP."""
+        from engine.lsp import _staged_files_by_language
+        with patch("engine.lsp._get_staged_files", return_value=["main.dart"]):
+            with patch("os.path.isfile", return_value=True):
+                result = _staged_files_by_language(lsp_workdir)
+        assert "dart" in result
+        assert any("main.dart" in f for f in result["dart"])
