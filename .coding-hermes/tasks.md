@@ -362,7 +362,8 @@ commit_audit:
 - **Commit:** `6e2eb7c` (Swift) + next
 - [x] GR-063m: Elixir LSP — elixir-ls, map `.ex`/`.exs`, detect `mix.exs`
 - **Commit:** `7cd7c25`
-- [ ] GR-063n: Scala LSP — metals, map `.scala`/`.sc`, detect `build.sbt`
+- [x] GR-063n: Scala LSP — metals, map `.scala`/`.sc`, detect `build.sbt`
+- **Commit:** `b6f7c75`
 
 ### Phase 6 — Rust, Python, JS/TS gap fill
 - [ ] GR-063o: Rust static analysis — add clippy as static analysis (reuse from pipeline)
