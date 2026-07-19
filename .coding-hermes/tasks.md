@@ -463,4 +463,4 @@ commit_audit:
   - Document preferred venv setup in CONTRIBUTING.md ✓ (uv as preferred, pip as alternative, single-venv convention)
   - Verify: `uv run pytest -x -q` resolves to correct venv ✓ (warning emitted: VIRTUAL_ENV mismatch detected, project .venv used)
 
-## [ ] NEVER-DONE — Run 11-point self-improvement audit
+## [x] NEVER-DONE — Run 11-point self-improvement audit
