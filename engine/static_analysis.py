@@ -68,6 +68,8 @@ _TOOL_BINARIES = {
     "phpstan": ["phpstan", "vendor/bin/phpstan"],
     "cppcheck": ["cppcheck"],
     "staticcheck": ["staticcheck"],
+    "clippy": ["cargo"],
+    "eslint": ["eslint", "npx eslint"],
 }
 
 _TOOL_INSTALL_GUIDE = {
@@ -76,10 +78,10 @@ _TOOL_INSTALL_GUIDE = {
     "sorbet": "gem install sorbet && srb init",
     "sqlfluff": "pip install sqlfluff",
     "phpstan": "composer require --dev phpstan/phpstan",
-    "cppcheck": "apt install cppcheck  (or: brew install cppcheck)",
-    "staticcheck": "go install honnef.co/go/tools/cmd/staticcheck@latest",
     "cppcheck": "sudo apt install cppcheck  (or: brew install cppcheck)",
     "staticcheck": "go install honnef.co/go/tools/cmd/staticcheck@latest  (add ~/go/bin to PATH)",
+    "clippy": "rustup component add clippy",
+    "eslint": "npm install -g eslint  (or: npx eslint --init)",
 }
 
 
@@ -117,6 +119,9 @@ def list_available_tools(language: str) -> list[str]:
         "php": ["phpstan"],
         "cpp": ["cppcheck"],
         "go": ["staticcheck"],
+        "rust": ["clippy"],
+        "javascript": ["eslint"],
+        "typescript": ["eslint"],
     }
     available = []
     for tool in language_tools.get(language, []):
@@ -351,6 +356,91 @@ def _parse_staticcheck(text: str, tool: str = "staticcheck") -> list[StaticDiag]
     return diagnostics
 
 
+def _parse_clippy_json(text: str, tool: str = "clippy") -> list[StaticDiag]:
+    """Parse cargo clippy --message-format=json output.
+
+    Clippy outputs one JSON object per line.  Compiler messages (warnings,
+    errors) carry ``reason: "compiler-message"`` with per-span file / line /
+    column info.  We extract the primary span from each message and normalise
+    clippy severity levels (``error`` / ``warning``) into the standard
+    three-level scheme.
+    """
+    diagnostics: list[StaticDiag] = []
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            logger.debug("clippy: invalid JSON line: %s", line[:120])
+            continue
+
+        if obj.get("reason") != "compiler-message":
+            continue
+
+        msg = obj.get("message", {})
+        level = msg.get("level", "warning")
+        severity = level if level in ("error", "warning") else "note"
+        code_obj = msg.get("code") or {}
+        code = code_obj.get("code", "") if isinstance(code_obj, dict) else str(code_obj)
+
+        # Use the primary span (is_primary: true), or the first span
+        primary_span = None
+        for span in msg.get("spans", []):
+            if span.get("is_primary"):
+                primary_span = span
+                break
+        if primary_span is None and msg.get("spans"):
+            primary_span = msg["spans"][0]
+
+        if primary_span:
+            diagnostics.append(StaticDiag(
+                file=primary_span.get("file_name", "unknown"),
+                line=primary_span.get("line_start", 1),
+                severity=severity,
+                message=msg.get("message", ""),
+                code=code,
+                tool=tool,
+            ))
+        else:
+            # No span — use rendered message with unknown location
+            diagnostics.append(StaticDiag(
+                file="unknown",
+                line=1,
+                severity=severity,
+                message=msg.get("rendered", msg.get("message", "")),
+                code=code,
+                tool=tool,
+            ))
+
+    return diagnostics
+
+
+def _parse_eslint_json(data, tool: str = "eslint") -> list[StaticDiag]:
+    """Parse eslint --format=json output.
+
+    ESLint JSON output is a list of file results, each with ``filePath``
+    and ``messages``.  Severity 2 = error, 1 = warning, 0 = off (ignored).
+    """
+    diagnostics: list[StaticDiag] = []
+    files = data if isinstance(data, list) else [data]
+    for file_result in files:
+        filepath = file_result.get("filePath", "unknown")
+        for msg in file_result.get("messages", []):
+            sev = msg.get("severity", 1)
+            severity = "error" if sev >= 2 else "warning"
+            diagnostics.append(StaticDiag(
+                file=filepath,
+                line=msg.get("line", 1),
+                severity=severity,
+                message=msg.get("message", ""),
+                code=msg.get("ruleId", ""),
+                tool=tool,
+            ))
+    return diagnostics
+
+
 def _parse_phpstan_json(data: dict, tool: str = "phpstan") -> list[StaticDiag]:
     diagnostics: list[StaticDiag] = []
     for filepath, file_data in data.get("files", {}).items():
@@ -372,6 +462,7 @@ _JSON_PARSERS = {
     "pyright": _parse_pyright_json,
     "sqlfluff": _parse_sqlfluff_json,
     "phpstan": _parse_phpstan_json,
+    "eslint": _parse_eslint_json,
 }
 
 _TEXT_PARSERS = {
@@ -379,6 +470,7 @@ _TEXT_PARSERS = {
     "sorbet": _parse_sorbet,
     "cppcheck": _parse_cppcheck,
     "staticcheck": _parse_staticcheck,
+    "clippy": _parse_clippy_json,
 }
 
 
@@ -511,6 +603,16 @@ def _build_command(tool: str, binary: str, workdir: str) -> list[str]:
     elif tool == "staticcheck":
         return cmd_parts + [
             "./...",
+        ]
+    elif tool == "clippy":
+        return cmd_parts + [
+            "clippy",
+            "--message-format=json",
+        ]
+    elif tool == "eslint":
+        return cmd_parts + [
+            "--format=json",
+            workdir,
         ]
     else:
         # Generic fallback

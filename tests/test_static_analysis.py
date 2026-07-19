@@ -19,6 +19,8 @@ from engine.static_analysis import (
     _parse_phpstan_json,
     _parse_cppcheck,
     _parse_staticcheck,
+    _parse_clippy_json,
+    _parse_eslint_json,
     find_tool,
     list_available_tools,
     run_static_check,
@@ -166,6 +168,44 @@ def staticcheck_output_errors() -> str:
     )
 
 
+@pytest.fixture
+def clippy_output() -> str:
+    """Simulated cargo clippy --message-format=json output (two diagnostics)."""
+    msgs = [
+        {
+            "reason": "compiler-message",
+            "message": {
+                "rendered": "warning: unneeded `return` statement",
+                "spans": [{
+                    "file_name": "src/main.rs", "byte_start": 100, "byte_end": 110,
+                    "line_start": 5, "line_end": 5,
+                    "column_start": 1, "column_end": 10,
+                    "is_primary": True,
+                }],
+                "level": "warning",
+                "code": {"code": "clippy::needless_return"},
+                "message": "unneeded `return` statement",
+            },
+        },
+        {
+            "reason": "compiler-message",
+            "message": {
+                "rendered": "error: unused variable: `x`",
+                "spans": [{
+                    "file_name": "src/lib.rs", "byte_start": 50, "byte_end": 51,
+                    "line_start": 10, "line_end": 10,
+                    "column_start": 9, "column_end": 10,
+                    "is_primary": True,
+                }],
+                "level": "error",
+                "code": {"code": "unused_variables"},
+                "message": "unused variable: `x`",
+            },
+        },
+    ]
+    return "\n".join(json.dumps(m) for m in msgs)
+
+
 # ══════════════════════════════════════════════════════════════════
 # StaticDiag
 # ══════════════════════════════════════════════════════════════════
@@ -274,6 +314,12 @@ class TestListAvailableTools:
     def test_list_go_tools(self):
         tools = list_available_tools("go")
         assert "staticcheck" in tools
+
+    def test_list_rust_tools(self):
+        """Rust maps to clippy — verify mapping exists (mock PATH)."""
+        with patch("engine.static_analysis.find_tool", return_value="/usr/bin/cargo"):
+            tools = list_available_tools("rust")
+        assert "clippy" in tools
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -659,6 +705,125 @@ class TestParseStaticcheck:
         assert diags[0].severity == "warning"
 
 
+# ══════════════════════════════════════════════════════════════════
+# _parse_clippy_json
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestParseClippy:
+    """Test parsing of cargo clippy --message-format=json output."""
+
+    def test_parse_clippy_two_diagnostics(self, clippy_output):
+        """Two compiler messages produce two diagnostics."""
+        diags = _parse_clippy_json(clippy_output)
+        assert len(diags) == 2
+
+        assert diags[0].file == "src/main.rs"
+        assert diags[0].line == 5
+        assert diags[0].severity == "warning"
+        assert diags[0].code == "clippy::needless_return"
+        assert diags[0].tool == "clippy"
+        assert "return" in diags[0].message
+
+        assert diags[1].file == "src/lib.rs"
+        assert diags[1].line == 10
+        assert diags[1].severity == "error"
+        assert diags[1].code == "unused_variables"
+
+    def test_parse_clippy_empty(self):
+        """Empty input returns empty list."""
+        assert _parse_clippy_json("") == []
+
+    def test_parse_clippy_blank_lines(self):
+        """Blank lines are skipped."""
+        assert _parse_clippy_json("   \n  \n") == []
+
+    def test_parse_clippy_skips_non_compiler_messages(self, clippy_output):
+        """Non-compiler-message lines (build-script-executed etc.) are skipped."""
+        extra = json.dumps({"reason": "build-script-executed", "package_id": "foo 1.0.0"})
+        diags = _parse_clippy_json(clippy_output + "\n" + extra)
+        assert len(diags) == 2  # still only the two compiler messages
+
+    def test_parse_clippy_no_spans(self):
+        """Message with no spans uses rendered text with unknown file."""
+        msg = json.dumps({
+            "reason": "compiler-message",
+            "message": {
+                "rendered": "error: could not compile `foo`",
+                "level": "error",
+                "code": {"code": "E0001"},
+                "message": "could not compile `foo`",
+                "spans": [],
+            },
+        })
+        diags = _parse_clippy_json(msg)
+        assert len(diags) == 1
+        assert diags[0].file == "unknown"
+        assert "compile" in diags[0].message
+
+
+class TestParseEslint:
+    """Test parsing of eslint --format=json output."""
+
+    def test_parse_eslint_two_diagnostics(self):
+        """Two messages across one file produce two diagnostics."""
+        sample = json.dumps([{
+            "filePath": "src/app.js",
+            "messages": [
+                {"ruleId": "no-unused-vars", "severity": 2,
+                 "message": "'x' is assigned but never used",
+                 "line": 5, "column": 10},
+                {"ruleId": "semi", "severity": 1,
+                 "message": "Missing semicolon",
+                 "line": 10, "column": 1},
+            ]
+        }])
+        diags = _parse_eslint_json(json.loads(sample))
+        assert len(diags) == 2
+
+        assert diags[0].file == "src/app.js"
+        assert diags[0].line == 5
+        assert diags[0].severity == "error"
+        assert diags[0].code == "no-unused-vars"
+        assert diags[0].tool == "eslint"
+        assert "never used" in diags[0].message
+
+        assert diags[1].severity == "warning"
+        assert diags[1].code == "semi"
+
+    def test_parse_eslint_empty(self):
+        """Empty list returns empty list."""
+        assert _parse_eslint_json([]) == []
+
+    def test_parse_eslint_no_messages(self):
+        """File with no messages produces no diagnostics."""
+        sample = json.dumps([{
+            "filePath": "src/app.js",
+            "messages": [],
+        }])
+        diags = _parse_eslint_json(json.loads(sample))
+        assert diags == []
+
+    def test_parse_eslint_multi_file(self):
+        """Diagnostics from multiple files are flattened."""
+        sample = json.dumps([
+            {"filePath": "a.js", "messages": [
+                {"ruleId": "no-console", "severity": 1,
+                 "message": "Unexpected console statement",
+                 "line": 1, "column": 1},
+            ]},
+            {"filePath": "b.js", "messages": [
+                {"ruleId": "no-undef", "severity": 2,
+                 "message": "'foo' is not defined",
+                 "line": 3, "column": 5},
+            ]},
+        ])
+        diags = _parse_eslint_json(json.loads(sample))
+        assert len(diags) == 2
+        assert diags[0].file == "a.js"
+        assert diags[1].file == "b.js"
+
+
 class TestBuildCommand:
     """Test _build_command constructs correct subprocess args."""
 
@@ -704,6 +869,10 @@ class TestBuildCommand:
     def test_build_command_staticcheck(self):
         cmd = _build_command("staticcheck", "/usr/bin/staticcheck", "/tmp/work")
         assert cmd == ["/usr/bin/staticcheck", "./..."]
+
+    def test_build_command_clippy(self):
+        cmd = _build_command("clippy", "/usr/bin/cargo", "/tmp/work")
+        assert cmd == ["/usr/bin/cargo", "clippy", "--message-format=json"]
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -858,4 +1027,29 @@ class TestRunStaticCheck:
         """staticcheck not installed returns empty list."""
         with patch("engine.static_analysis.find_tool", return_value=None):
             result = run_static_check("staticcheck", "/tmp/workdir")
+        assert result == []
+
+    def test_run_static_check_clippy(self, clippy_output):
+        """Clippy JSON output parsed through the JSON-parser path."""
+        mock_result = MagicMock()
+        mock_result.stdout = clippy_output
+        mock_result.stderr = ""
+
+        with patch("engine.static_analysis.find_tool",
+                   return_value="/usr/bin/cargo"):
+            with patch("engine.static_analysis.subprocess.run",
+                       return_value=mock_result):
+                result = run_static_check("clippy", "/tmp/workdir")
+
+        assert len(result) == 2
+        assert result[0]["file"] == "src/main.rs"
+        assert result[0]["line"] == 5
+        assert result[0]["severity"] == "warning"
+        assert result[0]["tool"] == "clippy"
+        assert result[0]["code"] == "clippy::needless_return"
+
+    def test_run_static_check_clippy_not_found(self):
+        """clippy not installed returns empty list."""
+        with patch("engine.static_analysis.find_tool", return_value=None):
+            result = run_static_check("clippy", "/tmp/workdir")
         assert result == []

@@ -367,8 +367,10 @@ commit_audit:
 - **Result:** 830 passed, 2 pipeline tests + 2 LSP tool tests + 2 LSP integration tests. Full GR-063 spec satisfied.
 
 ### Phase 6 — Rust, Python, JS/TS gap fill
-- [ ] GR-063o: Rust static analysis — add clippy as static analysis (reuse from pipeline)
-- [ ] GR-063p: JS/TS static analysis — add eslint as static analysis tool
+- [x] GR-063o: Rust static analysis — add clippy as static analysis (reuse from pipeline)
+  - **Status:** Already fully implemented. `_TOOL_BINARIES`, `_TOOL_INSTALL_GUIDE`, `list_available_tools`, `_parse_clippy_json`, `_build_command` all in place. Tests: TestParseClippy (5 tests), TestRunStaticCheck.test_run_static_check_clippy.
+- [x] GR-063p: JS/TS static analysis — add eslint as static analysis tool
+  - **Commit:** (pending)
 - [ ] GR-063q: Ruby LSP — add solargraph or ruby-lsp to `_TOOL_BINARIES`
 
 **Per-subtask pattern:**
