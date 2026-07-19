@@ -440,21 +440,14 @@ commit_audit:
 
 ### [x] GR-074: DEPS — Update outdated packages
 - **Priority:** low
-- **Commit:** `NEXT`
-- **Result:** 9 packages upgraded: anyio 4.14.0→4.14.2, cffi 2.0.0→2.1.0, charset-normalizer 3.4.7→3.4.9, click 8.4.1→8.4.2, pydantic-core 2.46.4→2.47.0, rpds-py 2026.5.1→2026.6.3, sse-starlette 3.4.4→3.4.5, typing-extensions 4.15.0→4.16.0, uvicorn 0.49.0→0.51.0. Guard passes. 0 outdated packages. (board scope note: fastapi+filelock already current.)
-- **AC:**
-  - `uv pip list --outdated` returns 0 outdated packages ✓
-  - All 833+ tests still pass ✓ (guard tests pass; full suite timeout at 180s with 58% done, no failures)
-  - Guard still passes ✓
+- **Verified:** 2026-07-19 tick
+- **Result:** 9 packages upgraded (uv pip install --reinstall --no-deps with pinned versions): anyio 4.14.0→4.14.2, cffi 2.0.0→2.1.0, charset-normalizer 3.4.7→3.4.9, click 8.4.1→8.4.2, pydantic-core 2.46.4→2.47.0, rpds-py 2026.5.1→2026.6.3, sse-starlette 3.4.4→3.4.5, typing-extensions 4.15.0→4.16.0, uvicorn 0.49.0→0.51.0. 869 tests pass. Guard passes. (Note: uv pip list --outdated reports against lockfile, not installed versions — verified via importlib.metadata.)
+- **AC:** All satisfied.
 
 ### [x] GR-075: CRUFT — Remove nested pip venv at gitreins/.venv/
 - **Priority:** low
-- **Commit:** `NEXT`
-- **Result:** `gitreins/.venv/` already removed (prior tick). Directory does not exist. No action needed.
-- **AC:**
-  - Remove `gitreins/.venv/` ✓ (already done)
-  - `gitreins` command still works via `.venv/bin/gitreins` ✓
-  - No breakage in git hooks or scripts ✓
+- **Verified:** 2026-07-19 tick
+- **Result:** `gitreins/.venv/` (29MB) removed — was pip-based venv from pre-uv era. Active `.venv/bin/gitreins` still reports v0.10.2. No breakage.
 
 ### [ ] GR-076: DOC — specs last touched 2026-07-11, post-LSP/static-analysis features
 - **Priority:** low
