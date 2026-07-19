@@ -31,6 +31,7 @@ _TOOL_BINARIES = {
     "csharp-ls": ["csharp-ls", "omnisharp"],
     "sourcekit-lsp": ["sourcekit-lsp"],
     "dart": ["dart"],
+    "elixir-ls": ["elixir-ls"],
 }
 
 _LANGUAGE_MAP: dict[str, str] = {
@@ -49,6 +50,8 @@ _LANGUAGE_MAP: dict[str, str] = {
     ".cs": "csharp",
     ".swift": "swift",
     ".dart": "dart",
+    ".ex": "elixir",
+    ".exs": "elixir",
 }
 
 _TOOL_LANGUAGES: dict[str, list[str]] = {
@@ -64,6 +67,7 @@ _TOOL_LANGUAGES: dict[str, list[str]] = {
     "csharp-ls": ["csharp"],
     "sourcekit-lsp": ["swift"],
     "dart": ["dart"],
+    "elixir-ls": ["elixir"],
 }
 
 

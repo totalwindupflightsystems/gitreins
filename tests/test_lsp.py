@@ -210,6 +210,18 @@ class TestFindLspTool:
             result = find_lsp_tool("gopls")
         assert result == "/usr/local/bin/gopls"
 
+    def test_find_lsp_tool_elixir_ls_not_found(self):
+        """elixir-ls not found returns None."""
+        with patch("shutil.which", return_value=None):
+            result = find_lsp_tool("elixir-ls")
+        assert result is None
+
+    def test_find_lsp_tool_elixir_ls_found(self):
+        """elixir-ls found returns its path."""
+        with patch("shutil.which", return_value="/usr/bin/elixir-ls"):
+            result = find_lsp_tool("elixir-ls")
+        assert result == "/usr/bin/elixir-ls"
+
 
 class TestRunLspCheck:
     """Test run_lsp_check entry point."""
@@ -689,6 +701,14 @@ class TestStagedFilesByLanguage:
                 result = _staged_files_by_language("/tmp")
         assert result == {"go": ["/tmp/main.go", "/tmp/util.go"]}
 
+    def test_maps_elixir_files(self):
+        """.ex and .exs files map to elixir language."""
+        with patch("engine.lsp._get_staged_files",
+                   return_value=["lib/my_module.ex", "lib/helper.exs"]):
+            with patch("os.path.isfile", return_value=True):
+                result = _staged_files_by_language("/tmp")
+        assert result == {"elixir": ["/tmp/lib/my_module.ex", "/tmp/lib/helper.exs"]}
+
 
 # ── Integration tests with real rust-analyzer server ──────────────
 
@@ -905,3 +925,26 @@ class TestDartLsIntegration:
                 result = _staged_files_by_language(lsp_workdir)
         assert "dart" in result
         assert any("main.dart" in f for f in result["dart"])
+
+
+# ── Integration tests: elixir-ls ───────────────────────────────────
+
+
+class TestElixirLsIntegration:
+    """Integration tests for Elixir LSP with elixir-ls."""
+
+    def test_elixir_ls_skip_gracefully_when_not_installed(self, lsp_workdir):
+        """elixir-ls not found returns empty diagnostics."""
+        with patch("engine.lsp.find_lsp_tool", return_value=None):
+            diags = run_lsp_check("elixir-ls", lsp_workdir,
+                                  files=[os.path.join(lsp_workdir, "main.ex")])
+        assert diags == [], "elixir-ls should return empty diagnostics when not installed"
+
+    def test_elixir_ls_elixir_language_mapping(self, lsp_workdir):
+        """.ex files are mapped to elixir via _LANGUAGE_MAP."""
+        from engine.lsp import _staged_files_by_language
+        with patch("engine.lsp._get_staged_files", return_value=["main.ex"]):
+            with patch("os.path.isfile", return_value=True):
+                result = _staged_files_by_language(lsp_workdir)
+        assert "elixir" in result
+        assert any("main.ex" in f for f in result["elixir"])
