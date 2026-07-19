@@ -78,6 +78,12 @@ select = [
 "engine/pipeline.py" = ["E501"]
 # CLI — long help strings and argument definitions
 "gitreins/cli.py" = ["E501"]
+
+[dependency-groups]
+dev = [
+    "pycodestyle>=2.14.0",
+    "pyflakes>=3.4.0",
+]
 # B904: `raise ... from err` inside except — prevents swallowed exceptions
 # by forcing explicit exception chaining.
 #
