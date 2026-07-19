@@ -509,18 +509,11 @@ Reran full 11-point audit. Previous tick (GR-074–GR-077) updated 4/11 specs an
 - **Source:** Never-Done Audit Check 4 (Package Upgrades)
 - **Result:** uv pip install --python .venv/bin/python3 --upgrade pydantic-core>=2.47.0 → 2.46.4 → 2.47.0. Guard PASS (tests + lint + secrets + static_analysis + lsp). No code changes tracked (venv only).
 
-## [ ] GR-083: CRUFT — Remove untracked artifacts
+## [x] GR-083: CRUFT — Remove untracked artifacts
 - **Priority:** low
+- **Commit:** NEXT
 - **Source:** Never-Done Audit Check 5 (Pitfalls)
-- **Items:**
-  - `demo-calc/` — demo project, untracked
-  - `demo-slugify/` — demo project, untracked
-  - `.coding-hermes/references/deepseek-cache-optimization.md` — ad-hoc reference, untracked
-  - `.vfs/` — Hilo graph data, needs .gitignore or tracking
-- **AC:**
-  - demo dirs either .gitignored or removed
-  - deepseek-cache-optimization.md either moved to proper skill reference or removed
-  - .vfs/ graph.db + .last_warm gitignored, edges.jsonl committed
+- **Result:** demo-calc/ + demo-slugify/ gitignored (top-level dirs). .vfs/ graph.db gitignored (pre-existing), edges.jsonl (618 edges) committed. .coding-hermes/references/ already removed.
 
 ## [ ] GR-084: PERF — Test suite exceeds 120s timeout (979 tests)
 - **Priority:** low

@@ -54,7 +54,6 @@ hivemind-audit.md
 .vfs/graph/graph.db.wal
 .vfs/graph/.last_warm
 
-# Demo nested git dirs (demo projects have their own git repos)
-demo-calc/.git/
-demo-calc/calc/.git/
-demo-slugify/.git/
+# Demo projects (own git repos, not part of GitReins source)
+demo-calc/
+demo-slugify/
