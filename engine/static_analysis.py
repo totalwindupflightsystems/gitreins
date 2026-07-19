@@ -315,47 +315,6 @@ def _parse_sqlfluff_json(data, tool: str = "sqlfluff") -> list[StaticDiag]:
     return diagnostics
 
 
-def _parse_staticcheck(text: str, tool: str = "staticcheck") -> list[StaticDiag]:
-    """Parse staticcheck text output.
-
-    staticcheck output format:
-        file.go:line:col: message (SAxxxx)
-    Multi-line messages (rare) use a continuation indent.
-    """
-    diagnostics: list[StaticDiag] = []
-    import re
-
-    # Pattern: file.go:line:col: message (XXXXNNNN)
-    # Check codes can be SAxxxx, STxxxx, Sxxxx, Uxxxx (1-2 letter prefix + 4 digits)
-    _STATICCHECK_LINE_RE = re.compile(
-        r"^(.+?):(\d+):(\d+):\s+(.+?)\s*\(([A-Z]{1,2}\d{4})\)\s*$"
-    )
-
-    current = None
-    for line in text.split("\n"):
-        m = _STATICCHECK_LINE_RE.match(line.strip())
-        if m:
-            # Flush previous
-            if current:
-                diagnostics.append(current)
-            current = StaticDiag(
-                file=m.group(1),
-                line=int(m.group(2)),
-                severity="warning",
-                message=m.group(4).strip(),
-                code=m.group(5),
-                tool=tool,
-            )
-        elif current and line.strip():
-            # Continuation line — append to previous message
-            current.message += " " + line.strip()
-
-    if current:
-        diagnostics.append(current)
-
-    return diagnostics
-
-
 def _parse_clippy_json(text: str, tool: str = "clippy") -> list[StaticDiag]:
     """Parse cargo clippy --message-format=json output.
 
