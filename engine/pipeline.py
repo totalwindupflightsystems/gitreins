@@ -648,6 +648,7 @@ def _default_tier1_steps(workdir: str) -> list[dict]:
         "cpp":    ("make lint 2>/dev/null || true",               "make test 2>/dev/null || true"),
         "ruby":   ("rubocop 2>/dev/null || true",                 "bundle exec rspec 2>/dev/null || true"),
         "php":    ("php vendor/bin/phpcs 2>/dev/null || true",    "php vendor/bin/phpunit 2>/dev/null || true"),
+        "kotlin": ("./gradlew lint 2>/dev/null || true",       "./gradlew test 2>/dev/null || true"),
     }
 
     # Detection order — first match becomes the primary language
@@ -659,6 +660,7 @@ def _default_tier1_steps(workdir: str) -> list[dict]:
         ("requirements.txt", "python"),
         ("package.json", "js"),
         ("pom.xml", "java"),
+        ("settings.gradle.kts", "kotlin"),
         ("build.gradle", "java"),
         ("CMakeLists.txt", "cpp"),
         ("Makefile", "c"),
