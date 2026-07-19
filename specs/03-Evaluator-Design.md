@@ -1061,9 +1061,105 @@ gitreins/
     └── task_manager.py       # Task storage (dependency)
 ```
 
-## 17. Document Status
+## 17. Commit Audit & CodeRabbit-Style Review (GR-065, GR-066)
 
-| Field | Value |
+**File:** `engine/commit_audit.py`
+
+The commit audit system (Tier 2) was expanded in v0.10.0 from message-only validation to full CodeRabbit-style code review. v0.11.0 added CVE-style scored severity.
+
+### Review Modes
+
+| Mode | Latency | Iterations | Description |
+|------|---------|-----------|-------------|
+| `message` | <2s | 1 | Validate commit message vs diff (pre-v0.10.0 behavior) |
+| `review` | <10s | 1 | Single-pass code review — structured findings |
+| `agent` | ~30s | 3–5 | Multi-turn LLM with read_file/search_pattern tools |
+
+### Review Checks
+
+Configurable categories in `commit_audit.review_checks`:
+
+| Check | Default | What it catches |
+|-------|---------|-----------------|
+| `bugs` | `true` | Logic errors, edge cases, nil pointer, race conditions |
+| `security` | `true` | Injection, hardcoded keys, auth bypass, unsafe deserialization |
+| `anti_patterns` | `true` | Mutable defaults, bare except, god objects |
+| `style` | `false` | Deferred to linter |
+| `performance` | `false` | N+1 queries, O(n²), unnecessary allocations |
+
+### CVE-Style Severity Scoring (GR-066)
+
+Every review issue gets a numeric 1–10 score. Configurable threshold + per-model offset multiplier:
+
+```yaml
+commit_audit:
+  review_score_threshold: 8.0    # issues ≥ threshold BLOCK
+  review_score_offset: 1.0       # multiplier: 0.5 dampens, 2.0 amplifies
+```
+
+| Range | Severity | Description |
+|-------|----------|-------------|
+| 9.0–10.0 | critical | RCE, data breach, auth bypass, guaranteed outage |
+| 7.0–8.9 | high | User-visible bug, data corruption, incident-likely |
+| 4.0–6.9 | medium | Code smell, anti-pattern, maintenance burden |
+| 1.0–3.9 | low | Style nit, naming, readability |
+| 0.0 | info | Observation, not a problem |
+
+**Effective score:** `issue.score × review_score_offset`. Compared against threshold:
+- ≥ threshold → 🚫 BLOCK
+- ≥ threshold × 0.75 → ⚠️ WARN
+- < threshold × 0.75 → ℹ️ INFO
+
+**Per-model calibration:** boost lenient models (DeepSeek: `1.2`), dampen aggressive ones (GLM: `0.65`).
+
+**Result structure:** `CommitReviewResult` with `{issues: [{file, line, severity, category, message, suggestion, score}], summary, message_valid, message_issues, overall_score}`.
+
+### Review Output (commit-msg hook)
+
+```
+⚠ Commit review — 2 issue(s) found (overall: 9.0/8.0)
+
+src/auth.py:42 [security] [🔴 CRITICAL] 🚫 BLOCK (score: 9.0) — SQL injection in login
+  Fix: use parameterized query
+
+src/utils.py:15 [anti_patterns] [🟡 MEDIUM] ℹ️ INFO (score: 5.0) — Mutable default arg
+```
+
+## 18. DeepSeek Prompt Caching (GR-068)
+
+**Implemented:** v0.8.2+
+
+DeepSeek V4 auto-caches repeated prompt prefixes. The evaluator's system prompt + code context is identical across multiple judge calls — subsequent evaluations on the same codebase only pay for the diff.
+
+**Cache telemetry:** `LLMResponse.usage` includes `cache_read_tokens` and `cache_write_tokens`. Evaluator output shows cache savings:
+
+```
+Caps: iterations: 12.4/100, time: 34s/30m, in: 45k/200k (cache-hit 32k, cache-write 8k), out: 4.2k/50k
+```
+
+**Expected savings:** 50–90% on cache hits (system prompt + code context typically 80%+ of input tokens). Evaluator costs drop from ~$0.02/judge to ~$0.003–$0.01/judge.
+
+**Reasoning flag:** Evaluator sets `reasoning_effort` via `llm.reasoning` config key (default: off for coding tasks, on for design tasks).
+
+## 19. Large-Repo Hardening (GR-064)
+
+Hardening from real-world use on dexdat-memory (147 Go packages):
+
+**Fast-track mode:** Skips full call-graph analysis on large repos. Config: `evaluator.fast_track` (default: auto-detect based on package count > 50).
+
+**Aggressive timeout respect:** Returns partial findings when deadline hits instead of failing silently. `max_time` wired into the tool-call loop — `read_file`/`search_pattern` check remaining budget before executing.
+
+**Skip Tier 2 flag:** `gitreins judge --skip-tier2` or `gitreins.skip-tier2` trailer in commit message body. For config/docs/ops commits that don't need LLM evaluation.
+
+**Token budget overflow protection:** Cap individual `read_file` results proportional to remaining budget. Config: `max_file_bytes` (default: 128KB per file in evaluator context).
+
+**Pre-commit hook timeout:** Configurable `hook_timeout` (default: 120s). If exceeded, fail open with warning rather than blocking the push indefinitely.
+
+**Config:** `evaluator.fast_track`, `evaluator.max_file_bytes`, `hook_timeout`, `--skip-tier2` flag.
+
+---
+
+## 20. Document Status
 |-------|-------|
 | **Version** | v0.6.0 |
 | **Status** | Active — fully implemented |

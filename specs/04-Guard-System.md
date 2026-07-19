@@ -516,6 +516,70 @@ Timeout: 120 seconds. If `skylos` is not installed, returns `passed=True` with i
 
 ---
 
+### 8.10 LSP Guard (GR-050–GR-053, GR-063)
+
+**Opt-in:** `guards.lsp: true` (default: `false`)
+
+The LSP guard runs real language servers against staged files and reports diagnostics (undefined variables, type errors, unused imports, etc.). Multi-language support was added in GR-063.
+
+**Configuration:**
+
+```yaml
+guards:
+  lsp: true
+  lsp_tools: [pylsp, gopls, rust-analyzer, typescript-language-server, clangd, jdtls, kotlin-language-server, csharp-ls, sourcekit-lsp, dart, elixir-ls, metals, ruby-lsp]
+```
+
+**Supported languages (14 total):**
+
+| Language | LSP Server | File Extensions | Notes |
+|----------|-----------|-----------------|-------|
+| Python | pylsp (`python-lsp-server`) | `.py` | Requires pyflakes + pycodestyle for diagnostics |
+| Go | gopls | `.go` | Requires `go mod init` for module resolution |
+| Rust | rust-analyzer | `.rs` | Requires Cargo.toml for type checking |
+| TypeScript/JavaScript | typescript-language-server | `.ts`, `.tsx`, `.js`, `.jsx` | |
+| C/C++ | clangd | `.c`, `.cpp`, `.h`, `.hpp`, `.cc`, `.cxx` | Requires compile_commands.json for C++ |
+| Java | jdtls | `.java` | |
+| Kotlin | kotlin-language-server | `.kt`, `.kts` | |
+| C# | csharp-ls / omnisharp-roslyn | `.cs` | Requires .csproj or .sln |
+| Swift | sourcekit-lsp | `.swift` | macOS only (native tool) |
+| Dart | dart | `.dart` | Requires pubspec.yaml |
+| Elixir | elixir-ls | `.ex`, `.exs` | Requires mix.exs |
+| Scala | metals | `.scala`, `.sc` | Requires build.sbt |
+| Ruby | ruby-lsp / solargraph | `.rb` | |
+
+**LSP integration tests:** 34+ tests covering tool discovery, language mapping, graceful skip when tools not installed, and end-to-end diagnostic collection.
+
+**Architecture:** `engine/lsp.py` (~430 lines) — server spawning, stdin/stdout communication, OS-level pipe reading, absolute deadline-based timeout with per-file budget allocation.
+
+**Process group isolation (GR-061):** LSP servers are killed via process group (`os.killpg()`) with PID validation — rejects non-integer/bool/pid≤1 values. Guards against init-kill bug.
+
+### 8.11 Static Analysis Guard (GR-063)
+
+**Opt-in:** `guards.static_analysis: true` (default: `false`)
+
+Runs language-specific static analysis tools against staged files and collects structured diagnostics.
+
+**Supported tools:**
+
+| Language | Tool | Output Format |
+|----------|------|---------------|
+| Python | mypy, pyright | JSON |
+| Go | staticcheck | Text (line regex) |
+| C/C++ | cppcheck, clang-tidy | Text/XML |
+| TypeScript/JS | eslint | JSON |
+| Ruby | sorbet | Text |
+| PHP | phpstan | Text |
+| SQL | sqlfluff | Text |
+
+**Tool configuration:** `guards.static_analysis_tools: [mypy, staticcheck, eslint, ...]`
+
+All static analysis runs with `on_fail: continue` — surfaces issues without blocking commits. Diagnostics feed into Tier 2 evaluator for context-enhanced judging.
+
+**Multi-language detection:** `engine/static_analysis.py` (~578 lines) — auto-detects language from file extensions, discovers available tools, and runs appropriate analyzers per staged file.
+
+---
+
 ## 9. Error Taxonomy
 
 | Error | Cause | Guard Behavior |

@@ -449,15 +449,10 @@ commit_audit:
 - **Verified:** 2026-07-19 tick
 - **Result:** `gitreins/.venv/` (29MB) removed — was pip-based venv from pre-uv era. Active `.venv/bin/gitreins` still reports v0.10.2. No breakage.
 
-### [ ] GR-076: DOC — specs last touched 2026-07-11, post-LSP/static-analysis features
+### [x] GR-076: DOC — specs last touched 2026-07-11, post-LSP/static-analysis features
 - **Priority:** low
 - **Estimate:** 1 hour
-- **Root cause:** 11 spec files (00-PRD.md through 10-Deployment.md) all date from 2026-07-11. Since then: LSP guard (GR-050-053), multi-language LSP expansion (GR-063, 14 languages), static analysis (GR-063), CodeRabbit-style commit review (GR-065-066), CVE severity system (GR-066), Anthropic API (GR-067), DeepSeek caching (GR-068), large-repo hardening (GR-064). No spec files updated for any of these.
-- **AC:**
-  - Update 04-Guard-System.md: document LSP guard + multi-language support
-  - Update 03-Evaluator-Design.md: document CodeRabbit review modes, CVE severity, DeepSeek caching
-  - Update 06-Pipeline.md: document static_analysis tools, language coverage (14+ languages)
-  - Update 07-Config-System.md: document new config keys (commit_audit, lsp_tools, static_analysis_tools)
+- **Result:** Updated 4 spec files: 04-Guard-System.md (+LSP guard §8.10, +Static Analysis §8.11, +14-language table), 03-Evaluator-Design.md (+Commit Audit/CodeRabbit §17, +CVE severity §17, +DeepSeek caching §18, +Large-repo hardening §19), 06-Pipeline.md (+Language registry §11, 17 languages + 9 static analysis tools), 07-Config-System.md (+commit_audit/lsp/lsp_tools/static_analysis/static_analysis_tools fields)
 
 ### [x] GR-077: PITFALL — Double-venv confusion risk
 - **Priority:** low

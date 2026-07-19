@@ -555,7 +555,55 @@ evaluator:
 
 ---
 
-## 11. Document Status
+## 11. Language Command Registry (GR-063)
+
+The pipeline's `_LANG_COMMANDS` registry maps languages to canonical build/lint/test commands and `_SIGNATURE_FILES` maps signature files to language detection. 17 languages and 8 static analysis tools supported.
+
+### Supported Languages
+
+| Language | Build | Lint | Test | Signature Files |
+|----------|-------|------|------|-----------------|
+| Python | — | ruff | pytest | pyproject.toml, setup.py |
+| Go | go build | golangci-lint | go test | go.mod |
+| TypeScript | npm build | eslint | vitest | package.json |
+| Rust | cargo build | clippy | cargo test | Cargo.toml |
+| C | make | — | make test | Makefile |
+| C++ | cmake | cppcheck | make test | CMakeLists.txt |
+| Java | gradle | — | gradle test | build.gradle |
+| Kotlin | gradle | — | gradle test | build.gradle.kts |
+| C# | dotnet | dotnet format | dotnet test | *.csproj, *.sln |
+| Swift | swift | — | swift test | Package.swift |
+| Dart | dart | dart analyze | dart test | pubspec.yaml |
+| Elixir | mix | — | mix test | mix.exs |
+| Scala | sbt | — | sbt test | build.sbt |
+| Ruby | — | rubocop | rspec | Gemfile |
+| PHP | — | phpstan | phpunit | composer.json |
+| SQL | — | sqlfluff | — | *.sql |
+| Shell | — | shellcheck | — | *.sh |
+
+### Static Analysis Tools (GR-063p)
+
+8 tools feed diagnostics into Tier 2 evaluator. All run with `on_fail: continue` — informational only.
+
+| Tool | Language | Format |
+|------|----------|--------|
+| mypy | Python | JSON |
+| pyright | Python | JSON |
+| staticcheck | Go | Text/regex |
+| eslint | TypeScript/JS | JSON |
+| cppcheck | C/C++ | Text |
+| clang-tidy | C/C++ | Text |
+| sorbet | Ruby | Text |
+| phpstan | PHP | Text |
+| sqlfluff | SQL | Text |
+
+### Language Coverage Summary
+
+Total: **17 languages** in pipeline commands, **14 languages** in LSP, **9 tools** in static analysis. All expandable via `_TOOL_BINARIES` + `_LANGUAGE_MAP` + `_LANG_COMMANDS` registries.
+
+---
+
+## 12. Document Status
 
 | Field | Value |
 |-------|-------|
