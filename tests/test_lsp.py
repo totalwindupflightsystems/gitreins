@@ -159,6 +159,18 @@ class TestFindLspTool:
             result = find_lsp_tool("jdtls")
         assert result == "/usr/bin/jdtls"
 
+    def test_find_lsp_tool_kotlin_ls_not_found(self):
+        """kotlin-language-server not found returns None."""
+        with patch("shutil.which", return_value=None):
+            result = find_lsp_tool("kotlin-language-server")
+        assert result is None
+
+    def test_find_lsp_tool_kotlin_ls_found(self):
+        """kotlin-language-server found returns its path."""
+        with patch("shutil.which", return_value="/usr/bin/kotlin-language-server"):
+            result = find_lsp_tool("kotlin-language-server")
+        assert result == "/usr/bin/kotlin-language-server"
+
 
 class TestRunLspCheck:
     """Test run_lsp_check entry point."""
@@ -601,6 +613,14 @@ class TestStagedFilesByLanguage:
             with patch("os.path.isfile", return_value=True):
                 result = _staged_files_by_language("/tmp")
         assert result == {"java": ["/tmp/File.java"]}
+
+    def test_maps_kotlin_files(self):
+        """.kt and .kts files map to kotlin language."""
+        with patch("engine.lsp._get_staged_files",
+                   return_value=["src/Main.kt", "build.gradle.kts"]):
+            with patch("os.path.isfile", return_value=True):
+                result = _staged_files_by_language("/tmp")
+        assert result == {"kotlin": ["/tmp/src/Main.kt", "/tmp/build.gradle.kts"]}
 
 
 # ── Integration tests with real rust-analyzer server ──────────────

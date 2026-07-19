@@ -52,3 +52,6 @@ gitreins judge fix-auth
 - Skip guards with `--no-verify` for code changes
 - Push if guards failed (let CI catch it if you must, but fix locally)
 - Commit `.gitreins/tasks.yaml` — it's local task state
+- **Use `os.kill()` or `os.killpg()` without PID validation** — `int(mock.pid)` == 1 kills init.
+  Always validate: `isinstance(pid, int) and not isinstance(pid, bool) and pid > 1`.
+  This bug took down Kara's entire session every 2-5 minutes for 30+ hours. See `engine/lsp.py:408-428`.

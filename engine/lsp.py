@@ -27,6 +27,7 @@ _TOOL_BINARIES = {
     "rust-analyzer": ["rust-analyzer"],
     "gopls": ["gopls"],
     "jdtls": ["jdtls"],
+    "kotlin-language-server": ["kotlin-language-server"],
 }
 
 _LANGUAGE_MAP: dict[str, str] = {
@@ -40,6 +41,8 @@ _LANGUAGE_MAP: dict[str, str] = {
     ".jsx": "javascriptreact",
     ".go": "go",
     ".java": "java",
+    ".kt": "kotlin",
+    ".kts": "kotlin",
 }
 
 _TOOL_LANGUAGES: dict[str, list[str]] = {
@@ -51,6 +54,7 @@ _TOOL_LANGUAGES: dict[str, list[str]] = {
     "rust-analyzer": ["rust"],
     "gopls": ["go"],
     "jdtls": ["java"],
+    "kotlin-language-server": ["kotlin"],
 }
 
 
