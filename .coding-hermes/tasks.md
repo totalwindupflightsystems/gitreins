@@ -339,7 +339,12 @@ commit_audit:
 ### Phase 4 — C# / .NET
 - [x] GR-063i: C# LSP — add omnisharp-roslyn or csharp-ls
 - **Commit:** `3ab93f3`
-- [ ] GR-063j: C# pipeline — add to `_LANG_COMMANDS` (dotnet), detect `.csproj`/`.sln`
+- [x] GR-063j: C# pipeline — add to `_LANG_COMMANDS` (dotnet), detect `.csproj`/`.sln`
+- **Status:** Already implemented in `3ab93f3` + glob support fix
+- **_LANG_COMMANDS:** csharp → (`dotnet format`, `dotnet test`) ✓
+- **_SIGNATURE_FILES:** `*.csproj` → csharp, `*.sln` → csharp ✓
+- **Tests:** TestCsharpLanguageDetection (4 tests) — all passing
+- **Commit:** `f341862`
 
 ### Phase 5 — Swift, Dart, Elixir, Scala
 - [ ] GR-063k: Swift LSP — sourcekit-lsp, map `.swift`
