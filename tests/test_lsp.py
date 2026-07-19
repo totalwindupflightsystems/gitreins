@@ -183,6 +183,18 @@ class TestFindLspTool:
             result = find_lsp_tool("csharp-ls")
         assert result == "/usr/bin/csharp-ls"
 
+    def test_find_lsp_tool_sourcekit_not_found(self):
+        """sourcekit-lsp not found returns None."""
+        with patch("shutil.which", return_value=None):
+            result = find_lsp_tool("sourcekit-lsp")
+        assert result is None
+
+    def test_find_lsp_tool_sourcekit_found(self):
+        """sourcekit-lsp found returns its path."""
+        with patch("shutil.which", return_value="/usr/bin/sourcekit-lsp"):
+            result = find_lsp_tool("sourcekit-lsp")
+        assert result == "/usr/bin/sourcekit-lsp"
+
 
 class TestRunLspCheck:
     """Test run_lsp_check entry point."""
@@ -642,6 +654,14 @@ class TestStagedFilesByLanguage:
                 result = _staged_files_by_language("/tmp")
         assert result == {"csharp": ["/tmp/src/Program.cs"]}
 
+    def test_maps_swift_files(self):
+        """.swift files map to swift language."""
+        with patch("engine.lsp._get_staged_files",
+                   return_value=["Sources/main.swift"]):
+            with patch("os.path.isfile", return_value=True):
+                result = _staged_files_by_language("/tmp")
+        assert result == {"swift": ["/tmp/Sources/main.swift"]}
+
 
 # ── Integration tests with real rust-analyzer server ──────────────
 
@@ -812,3 +832,26 @@ class TestCsharpLsIntegration:
                 result = _staged_files_by_language(lsp_workdir)
         assert "csharp" in result
         assert any("Program.cs" in f for f in result["csharp"])
+
+
+# ── Integration tests: sourcekit-lsp ──────────────────────────────
+
+
+class TestSourcekitLsIntegration:
+    """Integration tests for Swift LSP with sourcekit-lsp."""
+
+    def test_sourcekit_ls_skip_gracefully_when_not_installed(self, lsp_workdir):
+        """sourcekit-lsp not found returns empty diagnostics."""
+        with patch("engine.lsp.find_lsp_tool", return_value=None):
+            diags = run_lsp_check("sourcekit-lsp", lsp_workdir,
+                                  files=[os.path.join(lsp_workdir, "main.swift")])
+        assert diags == [], "sourcekit-lsp should return empty diagnostics when not installed"
+
+    def test_sourcekit_ls_swift_language_mapping(self, lsp_workdir):
+        """.swift files are mapped to swift via _LANGUAGE_MAP."""
+        from engine.lsp import _staged_files_by_language
+        with patch("engine.lsp._get_staged_files", return_value=["main.swift"]):
+            with patch("os.path.isfile", return_value=True):
+                result = _staged_files_by_language(lsp_workdir)
+        assert "swift" in result
+        assert any("main.swift" in f for f in result["swift"])

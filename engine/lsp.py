@@ -29,6 +29,7 @@ _TOOL_BINARIES = {
     "jdtls": ["jdtls"],
     "kotlin-language-server": ["kotlin-language-server"],
     "csharp-ls": ["csharp-ls", "omnisharp"],
+    "sourcekit-lsp": ["sourcekit-lsp"],
 }
 
 _LANGUAGE_MAP: dict[str, str] = {
@@ -45,6 +46,7 @@ _LANGUAGE_MAP: dict[str, str] = {
     ".kt": "kotlin",
     ".kts": "kotlin",
     ".cs": "csharp",
+    ".swift": "swift",
 }
 
 _TOOL_LANGUAGES: dict[str, list[str]] = {
@@ -58,6 +60,7 @@ _TOOL_LANGUAGES: dict[str, list[str]] = {
     "jdtls": ["java"],
     "kotlin-language-server": ["kotlin"],
     "csharp-ls": ["csharp"],
+    "sourcekit-lsp": ["swift"],
 }
 
 

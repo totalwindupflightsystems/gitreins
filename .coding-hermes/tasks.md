@@ -347,7 +347,12 @@ commit_audit:
 - **Commit:** `f341862`
 
 ### Phase 5 — Swift, Dart, Elixir, Scala
-- [ ] GR-063k: Swift LSP — sourcekit-lsp, map `.swift`
+- [x] GR-063k: Swift LSP — sourcekit-lsp, map `.swift`
+- **Status:** Implemented
+- **_TOOL_BINARIES:** sourcekit-lsp ✓
+- **_LANGUAGE_MAP:** .swift→swift ✓
+- **_TOOL_LANGUAGES:** sourcekit-lsp→[swift] ✓
+- **Tests:** 5 tests (2 find_tool + 1 staged_files + 2 integration) — all passing
 - [ ] GR-063l: Dart LSP — dart, map `.dart`, detect `pubspec.yaml`
 - [ ] GR-063m: Elixir LSP — elixir-ls, map `.ex`/`.exs`, detect `mix.exs`
 - [ ] GR-063n: Scala LSP — metals, map `.scala`/`.sc`, detect `build.sbt`
