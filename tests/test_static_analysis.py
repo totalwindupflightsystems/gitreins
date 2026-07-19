@@ -829,7 +829,7 @@ class TestBuildCommand:
 
     def test_build_command_mypy(self):
         cmd = _build_command("mypy", "/usr/bin/mypy", "/tmp/work")
-        assert cmd == ["/usr/bin/mypy", "--strict", "--no-error-summary",
+        assert cmd == ["/usr/bin/mypy", "--no-error-summary",
                         "--explicit-package-bases", "."]
 
     def test_build_command_pyright(self):

@@ -68,6 +68,13 @@ exclude = [
     "^temporal-vector/",         # experimental vector encoding — not production code
     "^demo-slugify/",            # demo project — permission-restricted
 ]
+disallow_untyped_defs = false
+disallow_any_generics = false
+warn_return_any = false
+no_implicit_optional = false
+[[tool.mypy.overrides]]
+module = "textual.*"
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 100

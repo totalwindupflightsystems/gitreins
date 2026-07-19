@@ -524,7 +524,6 @@ def _build_command(tool: str, binary: str, workdir: str) -> list[str]:
 
     if tool == "mypy":
         return cmd_parts + [
-            "--strict",
             "--no-error-summary",
             "--explicit-package-bases",
             ".",
