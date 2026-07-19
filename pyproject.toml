@@ -58,6 +58,11 @@ addopts = "-n 4"
 testpaths = ["tests"]
 pythonpath = ["."]
 
+[tool.mypy]
+exclude = [
+    "^tests/fixtures/secrets/",  # intentionally malformed: shell scripts, templates, not valid Python
+]
+
 [tool.ruff]
 line-length = 100
 extend-exclude = [
