@@ -222,6 +222,18 @@ class TestFindLspTool:
             result = find_lsp_tool("elixir-ls")
         assert result == "/usr/bin/elixir-ls"
 
+    def test_find_lsp_tool_metals_not_found(self):
+        """metals not found returns None."""
+        with patch("shutil.which", return_value=None):
+            result = find_lsp_tool("metals")
+        assert result is None
+
+    def test_find_lsp_tool_metals_found(self):
+        """metals found returns its path."""
+        with patch("shutil.which", return_value="/usr/bin/metals"):
+            result = find_lsp_tool("metals")
+        assert result == "/usr/bin/metals"
+
 
 class TestRunLspCheck:
     """Test run_lsp_check entry point."""
@@ -709,6 +721,14 @@ class TestStagedFilesByLanguage:
                 result = _staged_files_by_language("/tmp")
         assert result == {"elixir": ["/tmp/lib/my_module.ex", "/tmp/lib/helper.exs"]}
 
+    def test_maps_scala_files(self):
+        """.scala and .sc files map to scala language."""
+        with patch("engine.lsp._get_staged_files",
+                   return_value=["src/main.scala", "src/helper.sc"]):
+            with patch("os.path.isfile", return_value=True):
+                result = _staged_files_by_language("/tmp")
+        assert result == {"scala": ["/tmp/src/main.scala", "/tmp/src/helper.sc"]}
+
 
 # ── Integration tests with real rust-analyzer server ──────────────
 
@@ -948,3 +968,26 @@ class TestElixirLsIntegration:
                 result = _staged_files_by_language(lsp_workdir)
         assert "elixir" in result
         assert any("main.ex" in f for f in result["elixir"])
+
+
+# ── Integration tests: metals ─────────────────────────────────────
+
+
+class TestMetalsIntegration:
+    """Integration tests for Scala LSP with metals."""
+
+    def test_metals_skip_gracefully_when_not_installed(self, lsp_workdir):
+        """metals not found returns empty diagnostics."""
+        with patch("engine.lsp.find_lsp_tool", return_value=None):
+            diags = run_lsp_check("metals", lsp_workdir,
+                                  files=[os.path.join(lsp_workdir, "main.scala")])
+        assert diags == [], "metals should return empty diagnostics when not installed"
+
+    def test_metals_scala_language_mapping(self, lsp_workdir):
+        """.scala files are mapped to scala via _LANGUAGE_MAP."""
+        from engine.lsp import _staged_files_by_language
+        with patch("engine.lsp._get_staged_files", return_value=["main.scala"]):
+            with patch("os.path.isfile", return_value=True):
+                result = _staged_files_by_language(lsp_workdir)
+        assert "scala" in result
+        assert any("main.scala" in f for f in result["scala"])

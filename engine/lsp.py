@@ -32,6 +32,7 @@ _TOOL_BINARIES = {
     "sourcekit-lsp": ["sourcekit-lsp"],
     "dart": ["dart"],
     "elixir-ls": ["elixir-ls"],
+    "metals": ["metals"],
 }
 
 _LANGUAGE_MAP: dict[str, str] = {
@@ -52,6 +53,8 @@ _LANGUAGE_MAP: dict[str, str] = {
     ".dart": "dart",
     ".ex": "elixir",
     ".exs": "elixir",
+    ".scala": "scala",
+    ".sc": "scala",
 }
 
 _TOOL_LANGUAGES: dict[str, list[str]] = {
@@ -68,6 +71,7 @@ _TOOL_LANGUAGES: dict[str, list[str]] = {
     "sourcekit-lsp": ["swift"],
     "dart": ["dart"],
     "elixir-ls": ["elixir"],
+    "metals": ["scala"],
 }
 
 
