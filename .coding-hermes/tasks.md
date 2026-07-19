@@ -546,3 +546,21 @@ Reran full 11-point audit. Board empty, all tasks [x]. Found 4 gaps:
 - **Priority:** low
 - **Source:** Never-Done Audit Check 10 (Quality)
 - **Result:** Ruff 0.15.22 already installed in venv, `ruff check engine/` passes clean. Already in dev deps (pyproject.toml lines 42, 98). Audit false-positive — tested bare `ruff` without `.venv/bin/python3 -m` prefix.
+
+---
+
+## [ ] GR-089: CI — Fix test_judge_evaluate_nonexistent_over_stdio (needs LLM key skipif)
+- **Priority:** low
+- **Source:** Discovery sweep — CI run 29703852545
+- **Symptom:** `test_judge_evaluate_nonexistent_over_stdio` expects "Task not found" but gets "LLM not configured" when no API key in CI environment. 1072 passed, 1 failed in CI Python 3.10.
+- **AC:**
+  - Add `@pytest.mark.skipif` for GITREINS_LLM_API_KEY not set
+  - Verify CI goes green on next run
+
+## [ ] NEVER-DONE — Run coding-hermes-never-done 11-point audit
+
+Load coding-hermes-never-done skill. Run ALL 11 checks: spec alignment,
+doc coverage, test gaps, package upgrades, pitfall hunt, performance audit,
+endpoint verification, CI/CD health, DuckBrain sync, code quality,
+middle-out wiring. Create a task for EVERY gap found. This task is never
+complete — the audit always finds something.
