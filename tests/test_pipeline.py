@@ -572,3 +572,32 @@ class TestCsharpLanguageDetection:
         step_ids = [s["id"] for s in steps]
         assert "lint" in step_ids
         assert "tests" in step_ids
+
+
+class TestScalaLanguageDetection:
+    """Verify Scala pipeline detection: build.sbt → scala."""
+
+    def test_build_sbt_detected_as_scala(self, tmp_workdir):
+        """build.sbt file → primary language is scala."""
+        from engine.pipeline import _default_tier1_steps
+        sbt_path = os.path.join(tmp_workdir, "build.sbt")
+        with open(sbt_path, "w") as f:
+            f.write("name := \"test\"\n")
+        steps = _default_tier1_steps(tmp_workdir)
+        step_ids = [s["id"] for s in steps]
+        assert "lint" in step_ids
+        assert "tests" in step_ids
+
+    def test_scala_lang_commands_produces_sbt_steps(self, tmp_workdir):
+        """Scala pipeline produces lint + test steps (via sbt)."""
+        from engine.pipeline import _default_tier1_steps
+        sbt_path = os.path.join(tmp_workdir, "build.sbt")
+        with open(sbt_path, "w") as f:
+            f.write("name := \"test\"\n")
+        steps = _default_tier1_steps(tmp_workdir)
+        lint_step = next((s for s in steps if s["id"] == "lint"), None)
+        test_step = next((s for s in steps if s["id"] == "tests"), None)
+        assert lint_step is not None, "lint step missing for Scala project"
+        assert test_step is not None, "tests step missing for Scala project"
+        assert "sbt" in lint_step["run"], f"Expected sbt, got {lint_step['run']}"
+        assert "sbt" in test_step["run"], f"Expected sbt, got {test_step['run']}"

@@ -659,6 +659,7 @@ def _default_tier1_steps(workdir: str) -> list[dict]:
         "php":    ("php vendor/bin/phpcs 2>/dev/null || true",    "php vendor/bin/phpunit 2>/dev/null || true"),
         "kotlin": ("./gradlew lint 2>/dev/null || true",       "./gradlew test 2>/dev/null || true"),
         "csharp": ("dotnet format --verify-no-changes 2>/dev/null || true", "dotnet test 2>/dev/null || true"),
+        "scala":  ("sbt scalafmtCheck 2>/dev/null || true",            "sbt test 2>/dev/null || true"),
     }
 
     # Detection order — first match becomes the primary language
@@ -678,6 +679,7 @@ def _default_tier1_steps(workdir: str) -> list[dict]:
         ("composer.json", "php"),
         ("*.csproj", "csharp"),
         ("*.sln", "csharp"),
+        ("build.sbt", "scala"),
     ]
 
     primary = None
