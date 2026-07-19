@@ -463,4 +463,89 @@ commit_audit:
   - Document preferred venv setup in CONTRIBUTING.md ✓ (uv as preferred, pip as alternative, single-venv convention)
   - Verify: `uv run pytest -x -q` resolves to correct venv ✓ (warning emitted: VIRTUAL_ENV mismatch detected, project .venv used)
 
-## [x] NEVER-DONE — Run 11-point self-improvement audit
+## [x] NEVER-DONE — Run 11-point self-improvement audit (2026-07-19 tick 1)
+- **Result:** Marked complete but 6 checks had gaps. New audit executed 2026-07-19 tick 2 finds additional issues below.
+
+---
+
+## Phase: Never-Done Audit — 2026-07-19 Tick 2
+
+Reran full 11-point audit. Previous tick (GR-074–GR-077) updated 4/11 specs and fixed deps/cruft/venv, but missed CI failures and 5 other stale specs. Findings below.
+
+## [ ] GR-078: CI — Fix 5 failing LSP integration tests on Python 3.10 (CI RED)
+- **Priority:** high
+- **Source:** Never-Done Audit Check 8 (CI/CD). 3 consecutive CI failures on main.
+- **Symptom:** 5 LSP integration tests fail on Python 3.10 matrix job with `len([]) == 0` — pylsp produces zero diagnostics. Tests pass locally on 3.12.
+- **Likely root:** pylsp installs but pyflakes/pycodestyle plugins may not activate on Python 3.10, or diagnostic collection timeout differs.
+- **AC:**
+  - CI `test (3.10)` job passes — all 5 failing tests green or properly skipped with `@pytest.mark.skipif`
+  - Root cause identified (version-specific pylsp behavior, missing deps, or env issue)
+  - If unfixable: add skip guard with `sys.version_info < (3, 11)` check
+  - Verify: 3 consecutive CI runs green on all Python versions
+
+## [ ] GR-079: SPEC — 6 stale spec files need post-Jul-11 feature coverage
+- **Priority:** medium
+- **Source:** Never-Done Audit Check 1 (Spec Alignment). GR-076 only updated 4/11 specs.
+- **Stale specs (last touched Jul 11, missing feature mentions):**
+  - `02-MCP-Protocol.md` — 0 mentions of propagate, dead_code, lsp static_analysis tools
+  - `05-Security-Model.md` — 0 mentions of LSP, static analysis, commit audit
+  - `09-CLI-Design.md` — 0 mentions of lsp, dead-code, propagate, commit-audit CLI
+  - `10-Deployment.md` — 0 mentions of LSP tools install, static analysis deps
+  - `00-PRD.md` — 2 mentions (minimal coverage)
+  - `01-Architecture.md` — 3 mentions (minimal coverage)
+- **AC:**
+  - Each spec updated with relevant post-Jul-11 features
+  - MCP protocol: propagate, dead_code, lsp, static_analysis tool docs
+  - Security model: LSP/static analysis attack surface
+  - CLI design: new subcommands and flags
+  - Deployment: LSP server + static analysis tool prerequisites
+  - PRD + Architecture: reference new subsystems
+
+## [ ] GR-080: TEST — 9 source files without dedicated test files
+- **Priority:** medium
+- **Source:** Never-Done Audit Check 3 (Test Gaps)
+- **Files:** engine/config.py, engine/guards.py, engine/__init__.py, engine/persist.py, engine/propagate.py, engine/types.py, engine/version.py, gitreins_mcp/__init__.py, gitreins_mcp/server.py
+- **Note:** Some tested indirectly (e.g., config through evaluator tests, types through guard tests), but no dedicated test file exists.
+- **AC:**
+  - Audit which files have adequate indirect coverage vs truly untested
+  - Add dedicated test files for files with <80% coverage
+  - Skip trivial files (version.py, __init__.py with no logic)
+
+## [ ] GR-081: DOC — Add CHANGELOG.md
+- **Priority:** low
+- **Source:** Never-Done Audit Check 2 (Doc Coverage)
+- **AC:**
+  - CHANGELOG.md with versions v0.1.0 through current
+  - Follows Keep a Changelog format
+  - Links to relevant PRs/commits for each version
+
+## [ ] GR-082: DEPS — Update pydantic-core 2.46.4 → 2.47.0
+- **Priority:** low
+- **Source:** Never-Done Audit Check 4 (Package Upgrades)
+- **Note:** Previous tick claimed this was upgraded (GR-074) but `uv pip list --outdated` still shows it.
+- **AC:**
+  - pydantic-core updated to 2.47.0
+  - Full test suite passes
+  - guard passes
+
+## [ ] GR-083: CRUFT — Remove untracked artifacts
+- **Priority:** low
+- **Source:** Never-Done Audit Check 5 (Pitfalls)
+- **Items:**
+  - `demo-calc/` — demo project, untracked
+  - `demo-slugify/` — demo project, untracked
+  - `.coding-hermes/references/deepseek-cache-optimization.md` — ad-hoc reference, untracked
+  - `.vfs/` — Hilo graph data, needs .gitignore or tracking
+- **AC:**
+  - demo dirs either .gitignored or removed
+  - deepseek-cache-optimization.md either moved to proper skill reference or removed
+  - .vfs/ graph.db + .last_warm gitignored, edges.jsonl committed
+
+## [ ] GR-084: PERF — Test suite exceeds 120s timeout (979 tests)
+- **Priority:** low
+- **Source:** Never-Done Audit Check 6 (Performance)
+- **Symptom:** `uv run pytest -x --durations=5 -q` times out at 120s.
+- **AC:**
+  - Full test suite completes in <120s OR test parallelization enabled
+  - Evaluate pytest-xdist for parallel execution
+  - Identify slowest 10 tests via --durations=10
