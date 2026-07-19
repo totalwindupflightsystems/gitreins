@@ -62,6 +62,7 @@ pythonpath = ["."]
 [tool.mypy]
 exclude = [
     "^tests/fixtures/secrets/",  # intentionally malformed: shell scripts, templates, not valid Python
+    "^tests/reliability/",       # intentionally buggy: test fixtures with known flaws for reliability benchmarks
 ]
 
 [tool.ruff]
