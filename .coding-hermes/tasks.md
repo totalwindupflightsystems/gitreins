@@ -363,7 +363,8 @@ commit_audit:
 - [x] GR-063m: Elixir LSP — elixir-ls, map `.ex`/`.exs`, detect `mix.exs`
 - **Commit:** `7cd7c25`
 - [x] GR-063n: Scala LSP — metals, map `.scala`/`.sc`, detect `build.sbt`
-- **Commit:** `b6f7c75`
+- **Commits:** `b6f7c75` (LSP+tests), `6e81e65` (pipeline: _LANG_COMMANDS + _SIGNATURE_FILES + tests)
+- **Result:** 830 passed, 2 pipeline tests + 2 LSP tool tests + 2 LSP integration tests. Full GR-063 spec satisfied.
 
 ### Phase 6 — Rust, Python, JS/TS gap fill
 - [ ] GR-063o: Rust static analysis — add clippy as static analysis (reuse from pipeline)
