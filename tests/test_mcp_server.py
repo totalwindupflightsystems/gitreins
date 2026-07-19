@@ -952,6 +952,8 @@ class TestMCPStdioIntegration:
 
     def test_judge_evaluate_nonexistent_over_stdio(self, mcp_proc):
         """judge.evaluate on nonexistent task returns error."""
+        if not os.getenv("GITREINS_LLM_API_KEY"):
+            pytest.skip("GITREINS_LLM_API_KEY not set — LLM-dependent test")
         resp = self._send_recv(mcp_proc, {
             "jsonrpc": "2.0", "id": 1, "method": "tools/call",
             "params": {"name": "judge.evaluate", "arguments": {"id": "nope"}},
