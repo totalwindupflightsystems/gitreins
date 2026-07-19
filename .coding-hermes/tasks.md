@@ -337,7 +337,8 @@ commit_audit:
 - **Commit:** `e6661f5`
 
 ### Phase 4 — C# / .NET
-- [ ] GR-063i: C# LSP — add omnisharp-roslyn or csharp-ls
+- [x] GR-063i: C# LSP — add omnisharp-roslyn or csharp-ls
+- **Commit:** `3ab93f3`
 - [ ] GR-063j: C# pipeline — add to `_LANG_COMMANDS` (dotnet), detect `.csproj`/`.sln`
 
 ### Phase 5 — Swift, Dart, Elixir, Scala
