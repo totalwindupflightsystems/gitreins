@@ -438,7 +438,7 @@ commit_audit:
 
 11-point never-done audit. Board had 2 pending tasks (GR-072, GR-073). Additional gaps found:
 
-### [x] GR-074: DEPS — Update outdated packages
+## [x] GR-074: DEPS — Update outdated packages
 - **Priority:** low
 - **Verified:** 2026-07-19 tick
 - **Result:** 9 packages upgraded (uv pip install --reinstall --no-deps with pinned versions): anyio 4.14.0→4.14.2, cffi 2.0.0→2.1.0, charset-normalizer 3.4.7→3.4.9, click 8.4.1→8.4.2, pydantic-core 2.46.4→2.47.0, rpds-py 2026.5.1→2026.6.3, sse-starlette 3.4.4→3.4.5, typing-extensions 4.15.0→4.16.0, uvicorn 0.49.0→0.51.0. 869 tests pass. Guard passes. (Note: uv pip list --outdated reports against lockfile, not installed versions — verified via importlib.metadata.)
@@ -467,3 +467,5 @@ commit_audit:
   - Remove `gitreins/.venv/` ✓ (already done)
   - Document preferred venv setup in CONTRIBUTING.md ✓ (uv as preferred, pip as alternative, single-venv convention)
   - Verify: `uv run pytest -x -q` resolves to correct venv ✓ (warning emitted: VIRTUAL_ENV mismatch detected, project .venv used)
+
+## [ ] NEVER-DONE — Run 11-point self-improvement audit
