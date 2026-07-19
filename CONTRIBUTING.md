@@ -2,9 +2,18 @@
 
 ## Setup
 
+**Preferred: uv (fast, deterministic)**
+
 ```bash
 git clone https://github.com/totalwindupflightsystems/gitreins.git
 cd gitreins
+uv venv
+uv pip install -e ".[dev]"
+```
+
+**Alternative: pip + venv**
+
+```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
 ```
@@ -14,6 +23,8 @@ Or install from PyPI:
 ```bash
 pip install gitreins
 ```
+
+**Venv convention:** Use a single `.venv/` at the project root. Do NOT create nested venvs (e.g., `gitreins/.venv/`). All commands (`uv run`, `gitreins guard`, `gitreins` CLI entry) resolve against the project root `.venv/`. `uv run` automatically detects and ignores mismatched `VIRTUAL_ENV` from other projects.
 
 ## Running Tests
 
