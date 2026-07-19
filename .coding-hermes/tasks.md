@@ -370,7 +370,8 @@ commit_audit:
 - [x] GR-063o: Rust static analysis — add clippy as static analysis (reuse from pipeline)
   - **Status:** Already fully implemented. `_TOOL_BINARIES`, `_TOOL_INSTALL_GUIDE`, `list_available_tools`, `_parse_clippy_json`, `_build_command` all in place. Tests: TestParseClippy (5 tests), TestRunStaticCheck.test_run_static_check_clippy.
 - [x] GR-063p: JS/TS static analysis — add eslint as static analysis tool
-  - **Commit:** (pending)
+  - **Commit:** `a38dd1d`
+  - **Result:** Added eslint to _TOOL_BINARIES, _TOOL_INSTALL_GUIDE, list_available_tools, _JSON_PARSERS, _build_command. New _parse_eslint_json function. 4 new tests (TestParseEslint). 72/72 static analysis tests pass (4 pre-existing staticcheck failures from duplicate _parse_staticcheck).
 - [ ] GR-063q: Ruby LSP — add solargraph or ruby-lsp to `_TOOL_BINARIES`
 
 **Per-subtask pattern:**
