@@ -912,3 +912,44 @@ Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). CI green. **Seco
 | 11 | Middle-out | PASS | Hilo: 436 edges, 83 files. Stable across ticks. Orphan pattern normal for library project (all internal deps via pkg:*). |
 
 **Zero gaps found. No new tasks created.** Idle tick #2. GR-099 remains BLOCKED (requires pydantic→mcp chain upgrade). xdist BlockingIOError is pre-existing cron-mode resource limitation, not a new failure.
+
+---
+
+## Phase: Never-Done Audit — 2026-07-19 Tick 14 (IDLE #3)
+
+Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). CI green. Found 1 real gap: pydantic-core 2.47.0 had been installed (incompatible with pydantic 2.13.4, breaks `import mcp`). Downgraded to 2.46.4 (matches uv.lock). 2 additional cosmetic gaps noted.
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Spec Coverage | PARTIAL | Content IS current (LSP/static_analysis/commit_audit keywords confirmed via grep in all 11 files). BUT 8/11 spec files still show "Last Updated: 2026-06-20" date headers despite GR-079 content updates. Only 08-Test-Strategy.md shows 2026-07-19. Cosmetic — content is there, dates weren't bumped. |
+| 2 | Doc Coverage | PASS | README.md v0.10.2 + CHANGELOG.md current |
+| 3 | Test Coverage | PASS | 1081 passed, 7 skipped in 192s |
+| 4 | Package Upgrades | FAIL→FIXED | pydantic-core 2.47.0 was installed (incompatible with pydantic 2.13.4 — `import mcp` raised SystemError). Downgraded to 2.46.4 (matches uv.lock). Root cause: foreman's `uv pip install --upgrade` bypasses uv.lock constraint. 7th occurrence of the pydantic-core upgrade fabrication cycle (GR-082/087/090/092/094/095B/this). uv.lock correctly pins 2.46.4. |
+| 5 | Pitfalls | PASS | .gitleaks.toml + .gitleaksignore present |
+| 6 | Performance | PASS | 192s full suite serial (xdist blocked in cron mode) |
+| 7 | CLI/Guard | PASS | gitreins 0.10.2, Tier 1 PASS (secrets, lint, tests, lsp) |
+| 8 | CI/CD | PASS | 4/5 green on GitHub Actions. Most recent: 1e5d90a success, 6c8ddb5 success, eb84ca2 success. |
+| 9 | DuckBrain | FAIL | No entries under /projects/gitreins-poc/. Namespace empty. |
+| 10 | Quality | PASS | Ruff clean (0 errors). mypy clean on production code. |
+| 11 | Middle-out | PASS | Hilo: 436 edges, 83 files. Stable across ticks. |
+
+Fixes applied this tick: **GR-103** (pydantic-core 2.47.0 → 2.46.4 downgrade). No git-tracked files changed (venv-only — uv.lock already had correct version).
+
+## [x] GR-103: CRITICAL — Fix pydantic-core 2.47.0 incompatible with pydantic 2.13.4
+- **Priority:** high
+- **Source:** Never-Done Audit Tick 14 — `import mcp` raised SystemError
+- **Root cause:** pydantic-core 2.47.0 was installed via `uv pip install --upgrade` (bypassing uv.lock which pins 2.46.4). pydantic 2.13.4 requires exactly 2.46.4 — the version guard in `pydantic/version.py:_ensure_pydantic_core_version()` blocks import.
+- **Fix:** `uv pip install --python .venv/bin/python3 'pydantic-core==2.46.4'`
+- **Verification:** `import mcp` succeeds. Full suite: 1081 passed, 7 skipped. Guard PASS.
+- **Permanent fix:** uv.lock already pins 2.46.4. The foreman must STOP running `uv pip install --upgrade pydantic-core` — it bypasses uv.lock and creates this cycle. GR-099 already tracks the constraint chain.
+
+## [ ] GR-104: SPEC — Bump date headers on 8/11 spec files from 2026-06-20 to 2026-07-19
+- **Priority:** low
+- **Source:** Never-Done Audit Tick 14 — Spec Coverage check
+- **Root cause:** GR-079 added LSP/static_analysis/commit_audit content to specs but didn't bump "Last Updated" date headers. Content is current (grep confirms keywords present).
+- **Fix:** Bump "Last Updated: 2026-06-20" → "2026-07-19" in specs/00-PRD.md, 01-Architecture.md, 02-MCP-Protocol.md, 03-Evaluator-Design.md, 04-Guard-System.md, 05-Security-Model.md, 06-Pipeline.md, 07-Config-System.md, 09-CLI-Design.md, 10-Deployment.md.
+
+## [ ] GR-105: DUCKBRAIN — Populate gitreins-poc namespace with project memories
+- **Priority:** low
+- **Source:** Never-Done Audit Tick 14 — DuckBrain check
+- **Fix:** Write core project entries (architecture, tech-stack, test-suite, repo, pitfalls) to coding-hermes namespace under /projects/gitreins-poc/.
