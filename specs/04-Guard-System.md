@@ -1,6 +1,6 @@
 # 04-Guard-System.md — Guard System Design
 
-> **Document Status:** Draft | **Last Updated:** 2026-06-20 | **Author:** GitReins Guard System Spec
+> **Document Status:** Draft | **Last Updated:** 2026-07-19 | **Author:** GitReins Guard System Spec
 
 ---
 
@@ -620,7 +620,7 @@ All static analysis runs with `on_fail: continue` — surfaces issues without bl
 |-------|-------|
 | **Version** | v0.6.0 |
 | **Status** | Draft — specification only |
-| **Last updated** | 2026-06-20 |
+| **Last updated** | 2026-07-19 |
 | **Author** | totalwindupflightsystems <totalwindupflightsystems@gmail.com> |
 | **Co-author** | wojons <wojonstech@gmail.com> |
 

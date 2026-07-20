@@ -1,6 +1,6 @@
 # 05-Security-Model.md — Security & Threat Model
 
-> **Document Status:** Draft | **Last Updated:** 2026-06-20 | **Author:** GitReins Security Spec
+> **Document Status:** Draft | **Last Updated:** 2026-07-19 | **Author:** GitReins Security Spec
 
 ---
 
@@ -291,7 +291,7 @@ All 5 ASCE (Agentic Software Construction Ethics) implementation gates are verif
 |-------|-------|
 | **Version** | v0.6.0 |
 | **Status** | Draft — specification only |
-| **Last updated** | 2026-06-20 |
+| **Last updated** | 2026-07-19 |
 | **Author** | totalwindupflightsystems <totalwindupflightsystems@gmail.com> |
 | **Co-author** | wojons <wojonstech@gmail.com> |
 

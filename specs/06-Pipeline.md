@@ -1,6 +1,6 @@
 # 06-Pipeline.md — Pipeline Engine
 
-> **Document Status:** Draft | **Last Updated:** 2026-06-20 | **Author:** GitReins Pipeline Spec
+> **Document Status:** Draft | **Last Updated:** 2026-07-19 | **Author:** GitReins Pipeline Spec
 
 ---
 
@@ -609,7 +609,7 @@ Total: **17 languages** in pipeline commands, **14 languages** in LSP, **9 tools
 |-------|-------|
 | **Version** | v0.6.0 |
 | **Status** | Draft — specification only |
-| **Last updated** | 2026-06-20 |
+| **Last updated** | 2026-07-19 |
 | **Author** | totalwindupflightsystems <totalwindupflightsystems@gmail.com> |
 | **Co-author** | wojons <wojonstech@gmail.com> |
 

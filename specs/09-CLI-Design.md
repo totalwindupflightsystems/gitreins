@@ -1,6 +1,6 @@
 # 09-CLI-Design.md — CLI Design
 
-> **Document Status:** Draft | **Last Updated:** 2026-06-20 | **Author:** GitReins CLI Design Spec
+> **Document Status:** Draft | **Last Updated:** 2026-07-19 | **Author:** GitReins CLI Design Spec
 
 ---
 
@@ -506,6 +506,6 @@ Limited color usage for human readability:
 |-------|-------|
 | **Version** | v0.6.0 |
 | **Status** | Draft |
-| **Last updated** | 2026-06-20 |
+| **Last updated** | 2026-07-19 |
 | **Author** | totalwindupflightsystems <totalwindupflightsystems@gmail.com> |
 | **Co-author** | wojons <wojonstech@gmail.com> |

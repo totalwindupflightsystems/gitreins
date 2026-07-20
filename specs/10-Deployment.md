@@ -1,6 +1,6 @@
 # 10-Deployment.md — Deployment & Release
 
-> **Document Status:** Draft | **Last Updated:** 2026-06-20 | **Author:** GitReins Deployment Spec
+> **Document Status:** Draft | **Last Updated:** 2026-07-19 | **Author:** GitReins Deployment Spec
 
 ---
 

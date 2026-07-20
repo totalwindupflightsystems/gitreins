@@ -1,6 +1,6 @@
 # 07-Config-System.md — Configuration System
 
-> **Document Status:** Draft | **Last Updated:** 2026-06-20 | **Author:** GitReins Configuration Spec
+> **Document Status:** Draft | **Last Updated:** 2026-07-19 | **Author:** GitReins Configuration Spec
 
 ---
 
@@ -327,6 +327,6 @@ Extra keys in `.gitreins/config.yaml` are ignored. They do not cause errors. Thi
 |-------|-------|
 | **Version** | v0.6.0 |
 | **Status** | Draft |
-| **Last updated** | 2026-06-20 |
+| **Last updated** | 2026-07-19 |
 | **Author** | totalwindupflightsystems <totalwindupflightsystems@gmail.com> |
 | **Co-author** | wojons <wojonstech@gmail.com> |

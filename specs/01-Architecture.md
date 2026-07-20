@@ -1,6 +1,6 @@
 # 01-Architecture.md — System Architecture
 
-> **Document Status:** Draft | **Last Updated:** 2026-06-20 | **Author:** GitReins Architecture Spec
+> **Document Status:** Draft | **Last Updated:** 2026-07-19 | **Author:** GitReins Architecture Spec
 
 ---
 

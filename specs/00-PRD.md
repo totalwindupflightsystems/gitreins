@@ -272,6 +272,6 @@ pip install gitreins
 |-------|-------|
 | **Version** | v0.6.0 |
 | **Status** | Active — shipping on PyPI |
-| **Last updated** | 2026-06-20 |
+| **Last updated** | 2026-07-19 |
 | **Author** | totalwindupflightsystems <totalwindupflightsystems@gmail.com> |
 | **Co-author** | wojons <wojonstech@gmail.com> |
