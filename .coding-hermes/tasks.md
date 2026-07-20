@@ -943,13 +943,28 @@ Fixes applied this tick: **GR-103** (pydantic-core 2.47.0 → 2.46.4 downgrade).
 - **Verification:** `import mcp` succeeds. Full suite: 1081 passed, 7 skipped. Guard PASS.
 - **Permanent fix:** uv.lock already pins 2.46.4. The foreman must STOP running `uv pip install --upgrade pydantic-core` — it bypasses uv.lock and creates this cycle. GR-099 already tracks the constraint chain.
 
-## [ ] GR-104: SPEC — Bump date headers on 8/11 spec files from 2026-06-20 to 2026-07-19
+## [x] GR-104: SPEC — Bump date headers on 9/11 spec files from 2026-06-20 to 2026-07-19
 - **Priority:** low
-- **Source:** Never-Done Audit Tick 14 — Spec Coverage check
-- **Root cause:** GR-079 added LSP/static_analysis/commit_audit content to specs but didn't bump "Last Updated" date headers. Content is current (grep confirms keywords present).
-- **Fix:** Bump "Last Updated: 2026-06-20" → "2026-07-19" in specs/00-PRD.md, 01-Architecture.md, 02-MCP-Protocol.md, 03-Evaluator-Design.md, 04-Guard-System.md, 05-Security-Model.md, 06-Pipeline.md, 07-Config-System.md, 09-CLI-Design.md, 10-Deployment.md.
+- **Commit:** `9f584b4`
+- **Result:** 9 files updated (00, 01, 03, 04, 05, 06, 07, 09, 10). 02-MCP-Protocol.md has no date header (template-style). 08-Test-Strategy.md already at 2026-07-19. Verified zero remaining stale headers. Guard PASS.
 
-## [ ] GR-105: DUCKBRAIN — Populate gitreins-poc namespace with project memories
+## [x] GR-105: DUCKBRAIN — Populate gitreins-poc namespace with project memories
 - **Priority:** low
-- **Source:** Never-Done Audit Tick 14 — DuckBrain check
-- **Fix:** Write core project entries (architecture, tech-stack, test-suite, repo, pitfalls) to coding-hermes namespace under /projects/gitreins-poc/.
+- **Result:** 5 entries written to coding-hermes namespace under /projects/gitreins-poc/: identity, tech-stack, test-suite, architecture, pitfalls. 5/5 successful.
+
+---
+
+## Phase: Tick 15 — GR-104 + GR-105 cleanup (2026-07-19 21:35)
+
+Picked up 2 pending tasks from Tick 14 audit. Both completed in one tick.
+
+| # | Task | Status | Commit |
+|---|------|--------|--------|
+| GR-104 | Spec date headers | [x] | `9f584b4` — 9 files bumped |
+| GR-105 | DuckBrain population | [x] | 5 memories in coding-hermes |
+
+**Board status:** All [x] except GR-099 (BLOCKED — pydantic-core constraint chain).
+
+**Idle tick counter:** RESET to 0 — this tick had productive work.
+
+**Guard:** PASS. **CI:** green (last 3 runs). **Hilo:** 436 edges, 83 files.
