@@ -968,3 +968,33 @@ Picked up 2 pending tasks from Tick 14 audit. Both completed in one tick.
 **Idle tick counter:** RESET to 0 — this tick had productive work.
 
 **Guard:** PASS. **CI:** green (last 3 runs). **Hilo:** 436 edges, 83 files.
+
+---
+
+## Phase: Never-Done Audit — 2026-07-19 Tick 16
+
+Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). CI green, tests green, guard PASS. Found 1 minor gap — filelock patch upgrade.
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Spec Coverage | PASS | 11 spec files, 9 with 2026-07-19 headers, 2 template-style (00-PRD, 02-MCP) |
+| 2 | Doc Coverage | PASS | README.md v0.10.2 + CHANGELOG.md current |
+| 3 | Test Coverage | PASS | 1081 passed, 7 skipped in 164s (serial). 1 flaky LSP test (gopls) passes on re-run — known cron-mode issue. |
+| 4 | Package Upgrades | PASS→FIXED | filelock 3.31.0→3.31.1 (GR-106). pydantic-core 2.46.4 correct (GR-099 blocked). Outdated list now clean except pydantic-core. |
+| 5 | Pitfalls | PASS | .gitleaks.toml + .gitleaksignore present |
+| 6 | Performance | PASS | 164s full suite serial (xdist BlockingIOError in cron mode — known limitation) |
+| 7 | CLI/Guard | PASS | gitreins 0.10.2, Tier 1 PASS (secrets, lint, tests, lsp) |
+| 8 | CI/CD | PASS | 5 most recent runs ALL green (success): 77affa3, 1e5d90a, 6c8ddb5, eb84ca2, 862de39 |
+| 9 | DuckBrain | PASS | 5 entries in coding-hermes namespace under /projects/gitreins-poc/ |
+| 10 | Quality | PASS | Ruff all clean, 0 errors |
+| 11 | Middle-out | PASS | Hilo: 436 edges, 83 files. Stable across ticks. Orphan pattern normal for library project. |
+
+## [x] GR-106: DEPS — Upgrade filelock 3.31.0 → 3.31.1
+- **Priority:** low
+- **Source:** Never-Done Audit Tick 16 — Package Upgrades check
+- **Result:** `uv pip install --python .venv/bin/python3 --upgrade 'filelock>=3.31.1'` → 3.31.0→3.31.1. Patch bump, no API changes. 1081 tests pass (1 flaky LSP test passes on re-run — pre-existing). Guard PASS. No git-tracked files changed (venv-only).
+- **Verification:** `uv pip list --python .venv/bin/python3 --outdated` — filelock no longer listed. Only pydantic-core remains (GR-099 blocked).
+
+**Zero remaining gaps.** Idle tick counter: RESET to 0 — this tick had productive work (GR-106 filelock upgrade).
+
+**Guard:** PASS. **CI:** 5/5 green. **Hilo:** 436 edges, 83 files.
