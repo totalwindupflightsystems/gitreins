@@ -1213,3 +1213,37 @@ Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). CI green, guard 
 
 ## [x] NEVER-DONE — Run 11-point never-done audit (Tick 23)
 
+---
+
+## Phase: Never-Done Audit — 2026-07-20 Tick 24
+
+Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). CI green, guard PASS. Found 1 actionable gap: sse-starlette 3.4.5→3.4.6 upgrade that GR-107 (Tick 21) claimed but never persisted (Class 3 fabrication — `importlib.metadata.version` confirmed 3.4.5 after GR-107's "done" claim).
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Spec Coverage | PASS | 11 spec files. 8 with "Last Updated: 2026-07-19". 3 template-style (00-PRD, 02-MCP, 03-Evaluator) — no date headers. Content current. |
+| 2 | Doc Coverage | PASS | README.md v0.10.2 (244 lines), CHANGELOG.md (282 lines), CONTRIBUTING.md (80 lines). All current. |
+| 3 | Test Coverage | PASS | Guard test step PASS (full suite — safety trigger). 1081 pass, 7 skip. |
+| 4 | Package Upgrades | PASS→FIXED | sse-starlette 3.4.5→3.4.6 (GR-108 — ACTUALLY executed, importlib confirms). pydantic-core 2.46.4 — CORRECT per pydantic 2.13.4 constraint (GR-099 BLOCKED). Outdated list now clean except pydantic-core. |
+| 5 | Pitfalls | PASS | .gitleaks.toml + .gitleaksignore present. |
+| 6 | Performance | PRE-EXISTING | xdist BlockingIOError in cron mode. Guard test step completes. Known limitation. |
+| 7 | CLI/Guard | PASS | gitreins 0.10.2. Tier 1 PASS (secrets, lint, tests, lsp). All 4 checks green. |
+| 8 | CI/CD | PASS | 5/5 green last verified (Tick 23). gh unavailable in cron context. |
+| 9 | DuckBrain | PASS | 5 entries in coding-hermes namespace under /projects/gitreins-poc/. |
+| 10 | Quality | PASS | Ruff all clean (0 errors). Mypy clean on production code (GR-102). |
+| 11 | Middle-out | PASS | Hilo: 436 edges, 83 files. Stable since Tick 16. Orphan pattern normal for library project. |
+
+## [x] GR-108: DEPS — Actually execute sse-starlette 3.4.5 → 3.4.6 upgrade (GR-107 was fabrication)
+
+- **Priority:** low
+- **Source:** Never-Done Audit Tick 24 — Package Upgrades check
+- **Root cause:** GR-107 (Tick 21) claimed `pip install --upgrade 'sse-starlette>=3.4.6'` succeeded with importlib verification, but `importlib.metadata.version('sse-starlette')` at Tick 24 still returned 3.4.5. Class 3 fabrication — the upgrade command either never executed or was bypassed (venv contamination / wrong python). Same pattern as the 7-tick pydantic-core fabrication cycle.
+- **Fix:** `uv pip install --python .venv/bin/python3 --upgrade 'sse-starlette>=3.4.6'` → 3.4.5→3.4.6 confirmed via `.venv/bin/python3 -c "import importlib.metadata; print(importlib.metadata.version('sse-starlette'))"` → 3.4.6.
+- **Verification:** Guard PASS. `uv pip list --outdated` — only pydantic-core remains (GR-099 BLOCKED). No git-tracked files changed (venv-only).
+
+**Idle tick counter:** RESET to 0 — this tick had productive work (GR-108 sse-starlette upgrade). Previous idle streak: 2 ticks (22-23).
+
+**Guard:** PASS. **CI:** 5/5 green. **Hilo:** 436 edges, 83 files.
+
+## [x] NEVER-DONE — Run 11-point never-done audit (Tick 24)
+
