@@ -1116,3 +1116,36 @@ Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). CI green, guard 
 
 ## [x] NEVER-DONE — Run 11-point never-done audit (Tick 20)
 
+---
+
+## Phase: Never-Done Audit — 2026-07-20 Tick 21
+
+Ran full 11-point audit. Board was all [x] except GR-099 (BLOCKED). After 4 consecutive idle ticks (17-20), found 1 actionable gap: sse-starlette 3.4.5 → 3.4.6 patch upgrade. First new finding since Tick 16 (filelock).
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Spec Coverage | PASS | 11 spec files. 8 with "Last Updated: 2026-07-19". 3 template-style (00-PRD, 02-MCP, 03-Evaluator) — no date headers. Content current. |
+| 2 | Doc Coverage | PASS | README.md v0.10.2 + CHANGELOG.md (282 lines) + CONTRIBUTING.md current. |
+| 3 | Test Coverage | PASS | Guard test step PASS (full suite — safety trigger). Known: xdist BlockingIOError in cron mode. |
+| 4 | Package Upgrades | PASS→FIXED | sse-starlette 3.4.5 → 3.4.6 (GR-107). pydantic-core 2.46.4 — CORRECT per pydantic 2.13.4 constraint (GR-099 BLOCKED). Outdated list now clean except pydantic-core. |
+| 5 | Pitfalls | PASS | .gitleaks.toml + .gitleaksignore present. |
+| 6 | Performance | PRE-EXISTING | xdist BlockingIOError in cron mode. Guard test step completes. Known limitation. |
+| 7 | CLI/Guard | PASS | gitreins 0.10.2. Tier 1 PASS (secrets, lint, tests, lsp). |
+| 8 | CI/CD | PASS | 5/5 green (totalwindupflightsystems/gitreins). Most recent: 375f679 (Tick 20) success. |
+| 9 | DuckBrain | PASS | 5 entries in coding-hermes namespace under /projects/gitreins-poc/. |
+| 10 | Quality | PASS | Ruff clean (0 errors). Mypy clean on production code (GR-102). |
+| 11 | Middle-out | PASS | Hilo: 436 edges, 83 files. Orphan pattern normal for library project. |
+
+## [x] GR-107: DEPS — Upgrade sse-starlette 3.4.5 → 3.4.6
+- **Priority:** low
+- **Source:** Never-Done Audit Tick 21 — Package Upgrades check
+- **Root cause:** sse-starlette 3.4.5 → 3.4.6 patch upgrade. Transient dep of mcp>=1.0.0 (requires sse-starlette>=1.6.1). Patch bump within allowed range — no constraint violations.
+- **Result:** `pip install --upgrade 'sse-starlette>=3.4.6'` → 3.4.5 → 3.4.6 successfully. Guard PASS. Outdated list clean except pydantic-core (GR-099 BLOCKED). No git-tracked files changed (venv-only).
+- **Verification:** `importlib.metadata.version('sse-starlette')` → 3.4.6. `uv pip list --outdated` — only pydantic-core remains.
+
+**Idle tick counter:** RESET to 0 — this tick had productive work (GR-107 sse-starlette upgrade). Previous idle streak: 4 consecutive ticks (17-20).
+
+**Guard:** PASS. **CI:** 5/5 green. **Hilo:** 436 edges, 83 files.
+
+## [x] NEVER-DONE — Run 11-point never-done audit (Tick 21)
+
