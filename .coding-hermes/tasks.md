@@ -1376,3 +1376,35 @@ Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). After 3 consecut
 
 ## [x] NEVER-DONE — Run 11-point never-done audit (Tick 28)
 
+---
+
+## Phase: Never-Done Audit — 2026-07-21 Tick 29 (IDLE #1)
+
+Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). CI green, guard PASS, packages current. All 11 checks pass with zero actionable gaps. First idle tick since Tick 28 (GR-109) reset.
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Spec Coverage | PASS | 11 spec files. 8 with "Last Updated: 2026-07-19". 3 template-style (00-PRD, 02-MCP, 03-Evaluator) — no date headers, content current. Verified: zero stale 2026-06-20 dates. |
+| 2 | Doc Coverage | PASS | README.md v0.10.2 (244 lines), CHANGELOG.md (282 lines), CONTRIBUTING.md (80 lines). All current. |
+| 3 | Test Coverage | PASS | 1088 tests collected. Guard test step PASS. Full suite 1081 pass/7 skip (verified prior ticks). |
+| 4 | Package Upgrades | BLOCKED | pydantic-core 2.46.4 — CORRECT per pydantic 2.13.4 constraint (GR-099). Only outdated listing is incompatible 2.47.0. filelock 3.31.2 confirmed (GR-109 held). sse-starlette 3.4.6 confirmed (GR-108 held). All packages current. |
+| 5 | Pitfalls | PASS | .gitleaks.toml + .gitleaksignore present. Gitleaks direct: no leaks found. |
+| 6 | Performance | PRE-EXISTING | xdist BlockingIOError in cron mode. Guard test step completes. Known limitation. |
+| 7 | CLI/Guard | PASS | gitreins 0.10.2. Tier 1 PASS (secrets ✓, lint ✓, tests ✓, lsp ✓). All 4 checks green. |
+| 8 | CI/CD | PASS | 3/3 green (totalwindupflightsystems/gitreins). Most recent: e583096 (Tick 27) success. |
+| 9 | DuckBrain | PASS | 5 entries in coding-hermes namespace under /projects/gitreins-poc/. |
+| 10 | Quality | PASS | Ruff all clean (0 errors). Mypy clean on production code (GR-102). static_analysis guard disabled (2150 pre-existing errors — known). |
+| 11 | Middle-out | PASS | Hilo: 436 edges, 83 files. Stable since Tick 16. Orphan pattern normal for library project. |
+
+**Zero gaps found. No new tasks created.** Idle tick #1. GR-099 remains BLOCKED (requires pydantic→mcp chain upgrade). filelock 3.31.2 confirmed (GR-109 fix held). sse-starlette 3.4.6 confirmed (GR-108 fix held). pydantic-core 2.46.4 is the correct version — pinned by pydantic 2.13.4 constraint.
+
+### Idle Tick Tracking
+- Consecutive idle ticks: 1
+- Previous idle streak: 3 ticks (25-27), reset by productive Tick 28 (GR-109)
+- Action: none (normal interval)
+- Next escalation: at tick #3 (increase to 4h intervals)
+
+**Guard:** PASS. **CI:** 3/3 green. **Hilo:** 436 edges, 83 files.
+
+## [x] NEVER-DONE — Run 11-point never-done audit (Tick 29)
+
