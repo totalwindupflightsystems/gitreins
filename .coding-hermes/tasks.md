@@ -1343,3 +1343,36 @@ Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). CI green, guard 
 
 ## [x] NEVER-DONE — Run 11-point never-done audit (Tick 27)
 
+
+---
+
+## Phase: Never-Done Audit — 2026-07-21 Tick 28
+
+Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). After 3 consecutive idle ticks (25-27), found 1 actionable gap: filelock 3.31.1 → 3.31.2 patch upgrade. First new finding since Tick 24 (GR-108 sse-starlette).
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Spec Coverage | PASS | 8 specs with 2026-07-19 headers (01, 04-10). 3 template-style (00-PRD, 02-MCP, 03-Evaluator) — no date headers, content current. Verified: zero stale 2026-06-20 dates. |
+| 2 | Doc Coverage | PASS | README.md v0.10.2, CHANGELOG.md 282 lines, CONTRIBUTING.md 80 lines. All current. |
+| 3 | Test Coverage | PASS | 1088 tests collected. Guard test step PASS. Full suite 1081 pass/7 skip (verified prior ticks). |
+| 4 | Package Upgrades | PASS→FIXED | filelock 3.31.1 → 3.31.2 (GR-109 — importlib confirms). pydantic-core 2.46.4 — CORRECT per pydantic 2.13.4 constraint (GR-099 BLOCKED). Outdated list now clean except pydantic-core. |
+| 5 | Pitfalls | PASS | .gitleaks.toml + .gitleaksignore present. |
+| 6 | Performance | PRE-EXISTING | xdist BlockingIOError in cron mode. Guard test step completes. Known limitation. |
+| 7 | CLI/Guard | PASS | gitreins 0.10.2. Tier 1 PASS (secrets ✓, lint ✓, tests ✓, lsp ✓). All 4 checks green. |
+| 8 | CI/CD | PASS | 5/5 green (totalwindupflightsystems/gitreins). Most recent: e583096 (Tick 27) success. |
+| 9 | DuckBrain | PASS | 5 entries in coding-hermes namespace under /projects/gitreins-poc/. |
+| 10 | Quality | PASS | Ruff all clean (0 errors). Mypy clean on production code (GR-102). |
+| 11 | Middle-out | PASS | Hilo: 436 edges, 83 files. Stable since Tick 16. Orphan pattern normal for library project. |
+
+## [x] GR-109: DEPS — Upgrade filelock 3.31.1 → 3.31.2
+- **Priority:** low
+- **Source:** Never-Done Audit Tick 28 — Package Upgrades check
+- **Result:** `uv pip install --python .venv/bin/python3 --upgrade 'filelock>=3.31.2'` → 3.31.1 → 3.31.2. Patch bump, no API changes. importlib confirms 3.31.2. Guard PASS. Outdated list clean except pydantic-core (GR-099 BLOCKED). No git-tracked files changed (venv-only).
+- **Verification:** `importlib.metadata.version('filelock')` → 3.31.2.
+
+**Idle tick counter:** RESET to 0 — this tick had productive work (GR-109 filelock upgrade). Previous idle streak: 3 ticks (25-27).
+
+**Guard:** PASS. **CI:** 5/5 green. **Hilo:** 436 edges, 83 files.
+
+## [x] NEVER-DONE — Run 11-point never-done audit (Tick 28)
+
