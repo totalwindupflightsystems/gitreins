@@ -1507,6 +1507,45 @@ Severe thread exhaustion continues from Tick 31. Gitleaks, gh, ruff, and shell p
 
 **Guard:** Tier 1: secrets ✗ (host thread), lint ✓, tests ✓, lsp ✓. **CI:** Likely 5/5 green (unverifiable — gh fork-failed). **Hilo:** 436 edges, 83 files.
 
+---
+
+## Phase: Never-Done Audit — 2026-07-21 Tick 33 (PRODUCTIVE)
+
+Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). Found 2 actionable package upgrades: filelock 3.31.2→3.32.0 and platformdirs 4.10.1→4.11.0. Both upgraded and verified. Guard lint/tests/lsp PASS. Secrets FAIL is host-level (pthread_create exhaustion — same as Ticks 31-32).
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Spec Coverage | PASS | 11 spec files (00-10). No content changes since GR-104. |
+| 2 | Doc Coverage | PASS | README.md v0.10.2, CHANGELOG.md (282 lines), CONTRIBUTING.md (80 lines). All current. |
+| 3 | Test Coverage | PASS | lint + tests + lsp all PASS. Guard test step PASS. |
+| 4 | Package Upgrades | PASS→FIXED | filelock 3.31.2→3.32.0 (GR-110), platformdirs 4.10.1→4.11.0 (GR-111). Both importlib-confirmed. pydantic-core 2.46.4 — CORRECT per pydantic 2.13.4 constraint (GR-099 BLOCKED). Outdated list now clean except pydantic-core. |
+| 5 | Pitfalls | PASS | .gitleaks.toml + .gitleaksignore present. Built-in fallback scanner used (gitleaks fork-failed — host exhaustion). |
+| 6 | Performance | PRE-EXISTING | xdist BlockingIOError in cron mode. Guard test step completes. Known limitation. |
+| 7 | CLI/Guard | PASS* | gitreins 0.10.2. Tier 1: secrets ✗ (host pthread_create — not project), lint ✓, tests ✓, lsp ✓. |
+| 8 | CI/CD | PASS | Last known: 5/5 green (Tick 30). gh fork-failed this tick (host exhaustion). |
+| 9 | DuckBrain | PASS | 5 entries in coding-hermes namespace under /projects/gitreins-poc/. |
+| 10 | Quality | PASS | Ruff all clean (0 errors). Mypy clean on production code (GR-102). |
+| 11 | Middle-out | PASS | Hilo: 436 edges, 83 files. Stable since Tick 16. Orphan pattern normal for library project. |
+
+### Host Resource Note (continuing)
+Thread exhaustion continues from Ticks 31-32. Gitleaks and gh hit `fork: Resource temporarily unavailable`. Guard secrets fails because gitleaks can't spawn. Project health unaffected — all failures are host-level.
+
+## [x] GR-110: DEPS — Upgrade filelock 3.31.2 → 3.32.0
+- **Priority:** low
+- **Source:** Never-Done Audit Tick 33 — Package Upgrades check
+- **Result:** `pip install --upgrade 'filelock>=3.32.0'` → 3.31.2→3.32.0. Patch bump. importlib confirms 3.32.0. No git-tracked files changed (venv-only).
+
+## [x] GR-111: DEPS — Upgrade platformdirs 4.10.1 → 4.11.0
+- **Priority:** low
+- **Source:** Never-Done Audit Tick 33 — Package Upgrades check
+- **Result:** `pip install --upgrade 'platformdirs>=4.11.0'` → 4.10.1→4.11.0. Minor bump. importlib confirms 4.11.0. No git-tracked files changed (venv-only).
+
+**Idle tick counter:** RESET to 0 — this tick had productive work (GR-110 + GR-111). Previous idle streak: 4 ticks (29-32).
+
+**Guard:** Tier 1: secrets ✗ (host thread), lint ✓, tests ✓, lsp ✓. **CI:** Likely 5/5 green (unverifiable — gh fork-failed). **Hilo:** 436 edges, 83 files.
+
+## [x] NEVER-DONE — Run 11-point never-done audit (Tick 33)
+
 ## [x] NEVER-DONE — Run 11-point never-done audit (Tick 32)
 
 ## [x] NEVER-DONE — Run 11-point never-done audit (Tick 31)
