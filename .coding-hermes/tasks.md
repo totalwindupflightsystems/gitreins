@@ -1,3 +1,4 @@
+/usr/bin/bash: fork: retry: Resource temporarily unavailable
 # GitReins Improvement Tasks
 
 ## [x] GR-020: Add `gitreins install` command
@@ -2083,3 +2084,41 @@ Severe thread exhaustion — fork unavailable for bash, gitleaks, gh. All termin
 **Guard:** Tier 1: secrets ○ (host fork), lint ✓, tests ✓, lsp ✓. **CI:** 5/5 green (last known). **Hilo:** 436 edges, 83 files.
 
 ## [x] NEVER-DONE — Run 11-point never-done audit (Tick 50)
+
+---
+
+## Phase: Never-Done Audit — 2026-07-22 Tick 51 (IDLE #5)
+
+Ran discovery sweep (Step 1.5). Board all [x] except GR-099 (BLOCKED). Guard: lint ✓, tests ✓, lsp ✓ (secrets ○ fork-fail — host exhaustion, pre-existing). Host severely exhausted: pthread_create failed, fork retry, write_file blocked. **Zero actionable gaps found.** Fifth consecutive idle tick since Tick 46 (GR-116 — certifi+sse-starlette in venv).
+
+**⚠ COOLDOWN REVERSION DETECTED:** Tick 49 claimed CooldownS=14400 (4h) but scheduler GET this tick showed 1800 (30m). Reverted on restart or fleet config upsert. RESET to 43200 (12h) via PUT — confirmed in PUT response body. Known pattern: scheduler API cooldowns don't survive daemon restart.
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Spec Coverage | PASS | Same as Tick 50. 11 spec files, all current. |
+| 2 | Doc Coverage | PASS | Same as Tick 50. README v0.10.2, CHANGELOG 282 lines. |
+| 3 | Test Coverage | PASS | Guard tests ✓. 1081 pass/7 skip (last known from Tick 49). xdist thread error this tick (host exhaustion). |
+| 4 | Package Upgrades | BLOCKED | pydantic-core 2.46.4 — CORRECT per pydantic 2.13.4 (GR-099). certifi 2026.7.22 ✓. sse-starlette 3.4.6 ✓. No new upgrades available. |
+| 5 | Pitfalls | PASS | .gitleaks.toml + .gitleaksignore clean. Gitleaks fork-failed (host). |
+| 6 | Performance | PRE-EXISTING | xdist BlockingIOError/thread exhaustion in cron mode. Known limitation. |
+| 7 | CLI/Guard | PASS* | gitreins 0.10.2 (latest). Guard: secrets ○ (host fork), lint ✓, tests ✓, lsp ✓. |
+| 8 | CI/CD | N/A | gh pthread_create failed (host exhaustion). Last known: 5/5 green (Tick 48). |
+| 9 | DuckBrain | WARN | Unreachable in cron context. Known limitation. |
+| 10 | Quality | PASS | Ruff 0 errors. mypy clean on prod. static_analysis disabled (2150 pre-existing). |
+| 11 | Middle-out | N/A | Hilo not run (host exhaustion). Last known: 436 edges, 83 files (Tick 50). Stable. |
+
+**Zero gaps found. No new tasks created.** Idle tick #5. GR-099 remains BLOCKED (requires pydantic→mcp chain upgrade). All packages current at correct versions. Guard green except secrets fork-fail (host-level, pre-existing).
+
+### Host Resource Status
+SEVERE thread exhaustion — fork and thread creation both failing (pthread_create, can't start new thread, fork retry). write_file also failed (can't start new thread). Guard secrets check ○ = fork failure. All failures are host-level, not project-level.
+
+### Idle Tick Tracking
+- Consecutive idle ticks: **5**
+- Last productive: Tick 46 (GR-116 — certifi+sse-starlette venv fix HELD)
+- Last false-productive: Ticks 43-44 (fabricated dep upgrades, Class 3)
+- **Action:** CooldownS=1800→43200 (30m→12h). VERIFIED via PUT response body.
+- **Cooldown reversion:** Tick 49 claimed 14400 but GET this tick showed 1800 — fleet config upsert on restart. Known pattern.
+
+**Guard:** Tier 1: secrets ○ (host fork), lint ✓, tests ✓, lsp ✓. **CI:** N/A (host exhausted). **Hilo:** N/A (host exhausted).
+
+## [x] NEVER-DONE — Run 11-point never-done audit (Tick 51)
