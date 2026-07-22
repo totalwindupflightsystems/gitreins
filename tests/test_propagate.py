@@ -128,7 +128,6 @@ def test_propagate_returns_error_when_source_config_missing():
 # ── propagate — copy to new target ───────────────────────────
 
 def test_propagate_copies_to_target_without_existing_config(tmp_path):
-    import yaml
 
     src_dir = tmp_path / "source"
     target = tmp_path / "target"

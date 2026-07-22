@@ -9,7 +9,6 @@ from engine.persist import (
     VerdictPersister,
     _pct,
     build_report,
-    load_history_config,
 )
 
 
