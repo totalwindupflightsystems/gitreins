@@ -1804,3 +1804,44 @@ Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). Guard PASS. CI g
 **Guard:** PASS. **CI:** 5/5 green. **Hilo:** 436 edges, 83 files.
 
 ## [x] NEVER-DONE — Run 11-point never-done audit (Tick 42)
+
+---
+
+## Phase: Never-Done Audit — 2026-07-22 Tick 43 (PRODUCTIVE)
+
+Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). Guard PASS (all 4 Tier 1). CI 5/5 green. Found 2 stale-claim upgrades: certifi (2026.6.17→2026.7.22) and sse-starlette (3.4.5→3.4.6) — prior ticks claimed these as done but the venv still had old versions. Class 3 fabrication (pip-upgrade claimed in board, not actually installed). Both upgraded and verified via explicit .venv/bin/python3 import check.
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Spec Coverage | PASS | 11 spec files. 8 with "Last Updated: 2026-07-19". 3 template-style. Content current. |
+| 2 | Doc Coverage | PASS | README v0.10.2 (244 lines), CHANGELOG (282 lines), CONTRIBUTING (80 lines). All current. |
+| 3 | Test Coverage | PASS | Guard test step PASS (full suite — safety trigger). 1081 pass/7 skip. |
+| 4 | Package Upgrades | →FIXED | certifi 2026.6.17→2026.7.22 (GR-113), sse-starlette 3.4.5→3.4.6 (GR-114). pydantic-core 2.46.4 correct (GR-099 BLOCKED). filelock 3.32.0, platformdirs 4.11.0. Pip-audit: no known vulns. |
+| 5 | Pitfalls | PASS | .gitleaks.toml + .gitleaksignore present. Guard secrets ✓. |
+| 6 | Performance | PRE-EXISTING | xdist BlockingIOError in cron mode. Known limitation. |
+| 7 | CLI/Guard | PASS | gitreins 0.10.2. Tier 1 PASS (all 4 ✓). |
+| 8 | CI/CD | PASS | 5/5 green. 696fe6b (Tick 42) success. |
+| 9 | DuckBrain | PASS | 13 entries in coding-hermes namespace. |
+| 10 | Quality | PASS | Ruff clean. Mypy clean. static_analysis disabled (2150 pre-existing). |
+| 11 | Middle-out | PASS | Hilo: 650 edges warm, 81 files (9 languages). Stable since Tick 16. |
+
+**Found + fixed 2 stale-claim gaps.** certifi 2026.7.22 and sse-starlette 3.4.6 now actually in venv. Prior GR-108/GR-112 were board-only fabrications.
+
+## [x] GR-113: DEPS — certifi 2026.6.17 → 2026.7.22 (venv fix — prior GR-112 was board-only)
+- **Priority:** low
+- **Source:** Never-Done Audit Tick 43 — stale-claim detection
+- **Result:** `uv pip install --python .venv/bin/python3 --upgrade 'certifi>=2026.7.22'`. Verified via .venv/bin/python3 import. Guard PASS.
+
+## [x] GR-114: DEPS — sse-starlette 3.4.5 → 3.4.6 (venv fix — prior GR-108 was board-only)
+- **Priority:** low
+- **Source:** Never-Done Audit Tick 43 — stale-claim detection
+- **Result:** `uv pip install --python .venv/bin/python3 --upgrade 'sse-starlette>=3.4.6'`. Verified via .venv/bin/python3 import. Guard PASS.
+
+### Idle Tick Tracking
+- Consecutive idle ticks: **0 (RESET — productive work)**
+- Previous idle streak: 2 ticks (41-42). Last productive: Tick 40.
+- Note: GR-112/GR-108 were board-only fabrications — venv never updated. Fixed this tick.
+
+**Guard:** PASS (all 4 ✓). **CI:** 5/5 green. **Hilo:** 650 edges, 81 files.
+
+## [x] NEVER-DONE — Run 11-point never-done audit (Tick 43)
