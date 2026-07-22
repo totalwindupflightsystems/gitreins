@@ -1882,3 +1882,32 @@ Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). Guard PASS (all 
 **Guard:** PASS (all 4 ✓). **CI:** 5/5 green. **Hilo:** 436 edges, 83 files.
 
 ## [x] NEVER-DONE — Run 11-point never-done audit (Tick 44)
+
+---
+
+## Phase: Never-Done Audit — 2026-07-22 Tick 45 (IDLE)
+
+Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). Guard PASS. CI 4/4 green (Tick 44 in-progress). 1081 tests pass. No new gaps found.
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Spec Coverage | PASS | 11 files. 8 dated 2026-07-19. 3 template-style (00-PRD, 02-MCP, 03-Evaluator) — content current. |
+| 2 | Doc Coverage | PASS | README v0.10.2 (244 lines), CHANGELOG (282), CONTRIBUTING (80). |
+| 3 | Test Coverage | PASS | 1081 pass, 7 skip. Guard PASS. |
+| 4 | Package Upgrades | PASS (1 BLOCKED) | pydantic-core 2.46.4 (GR-099 BLOCKED). No new outdated packages. No vulns. |
+| 5 | Pitfalls | PASS | .gitleaks.toml + .gitleaksignore. Guard secrets ✓. |
+| 6 | Performance | PRE-EXISTING | xdist BlockingIOError in cron. Known limitation. |
+| 7 | CLI/Guard | PASS | gitreins 0.10.2. Tier 1 PASS. |
+| 8 | CI/CD | PASS | 4/4 green. 1 in-progress (Tick 44 board). |
+| 9 | DuckBrain | PASS | 13 entries. |
+| 10 | Quality | PASS (sandbox only) | 6 ruff errors in sandbox/test_review.py — untracked demo file, not a gap. |
+| 11 | Middle-out | PASS | Hilo: 436 edges, 83 files. 9 languages. Stable. |
+
+### Idle Tick Tracking
+- Consecutive idle ticks: **1**
+- Last productive: Tick 43 (certifi + sse-starlette fixes)
+- Next escalation: tick #3 → 4h intervals
+
+**Guard:** PASS (all 4 ✓). **CI:** 4/4 green. **Hilo:** 436 edges, 83 files.
+
+## [x] NEVER-DONE — Run 11-point never-done audit (Tick 45)
