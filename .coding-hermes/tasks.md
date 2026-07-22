@@ -1677,3 +1677,33 @@ Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). Guard PASS (all 
 
 ## [x] NEVER-DONE — Run 11-point never-done audit (Tick 37)
 
+---
+
+## Phase: Never-Done Audit — 2026-07-21 Tick 38 (PRODUCTIVE)
+
+Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). Guard PASS (all 4 Tier 1). CI 5/5 green. Found 1 real gap: sse-starlette 3.4.5→3.4.6 — prior ticks (21-37) all claimed 3.4.6 was "confirmed/held" but the actual venv had 3.4.5 installed. Upgraded and verified.
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Spec Coverage | PASS | 11 spec files (00-10). All "Last Updated: 2026-07-19". Zero stale dates. |
+| 2 | Doc Coverage | PASS | README.md v0.10.2 (244 lines), CHANGELOG.md (282 lines), CONTRIBUTING.md (80 lines). All current. |
+| 3 | Test Coverage | PASS | Guard test step PASS (full suite — safety trigger). 1081 pass/7 skip. |
+| 4 | Package Upgrades | →FIXED | sse-starlette 3.4.5→3.4.6 (GR-108 was never actually applied — only board claimed it). pydantic-core 2.46.4 — CORRECT per pydantic 2.13.4 constraint (GR-099 BLOCKED). filelock 3.32.0 (GR-110 held). platformdirs 4.11.0 (GR-111 held). Outdated list now shows only incompatible pydantic-core 2.47.0. |
+| 5 | Pitfalls | PASS | .gitleaks.toml + .gitleaksignore present. Guard secrets ✓. |
+| 6 | Performance | PRE-EXISTING | xdist BlockingIOError in cron mode. Known limitation. |
+| 7 | CLI/Guard | PASS | gitreins 0.10.2. Tier 1 PASS (secrets ✓, lint ✓, tests ✓, lsp ✓). All 4 green. |
+| 8 | CI/CD | PASS | 3/3 most recent ALL green. Tick 37 (c3e3c3a) success. |
+| 9 | DuckBrain | PASS | 6 entries in coding-hermes namespace under /projects/gitreins-poc/. |
+| 10 | Quality | PASS | Ruff clean (0 errors). Mypy clean on production code (GR-102). static_analysis disabled (2150 pre-existing errors). |
+| 11 | Middle-out | PASS | Hilo: 650 edges, 81 files (9 languages). Stable. Orphan pattern normal for library project. |
+
+**Found and fixed:** sse-starlette 3.4.5→3.4.6 — this was a stale-claim gap. Prior foreman ticks (21-37) claimed this upgrade was done (GR-108), but only the board was updated — the venv still had 3.4.5. Upgraded via `pip install --upgrade sse-starlette>=3.4.6`. No git-tracked files changed (venv-only). Guard PASS after upgrade.
+
+### Idle Tick Tracking
+- Consecutive idle ticks: 0 (RESET — productive work this tick)
+- Previous idle streak: 4 ticks (34-37), last productive was Tick 33 (GR-110+GR-111)
+- Action: none (normal interval)
+
+**Guard:** PASS (all 4 ✓). **CI:** 5/5 green. **Hilo:** 650 edges, 81 files.
+
+## [x] NEVER-DONE — Run 11-point never-done audit (Tick 38)
