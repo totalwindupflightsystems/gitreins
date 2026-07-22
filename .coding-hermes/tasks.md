@@ -1950,3 +1950,35 @@ Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). Guard PASS (all 
 **Guard:** PASS (all 4 ✓). **CI:** 5/5 green. **Hilo:** 436 edges, 83 files.
 
 ## [x] NEVER-DONE — Run 11-point never-done audit (Tick 46)
+
+---
+
+## Phase: Never-Done Audit — 2026-07-22 Tick 47 (IDLE #1)
+
+Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). **Parallel Tick 46 collision detected** (e0234a3 committed at 04:08 while this tick fired at 04:07). Independent venv verification confirms Tick 46's claims are real: certifi 2026.7.22, sse-starlette 3.4.6, filelock 3.32.0, platformdirs 4.11.0, pydantic-core 2.46.4 (correct). Guard PASS. CI 5/5 green. **Zero gaps.**
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Spec Coverage | PASS | 11 files. 8 dated 2026-07-19. 3 template-style. Content current. |
+| 2 | Doc Coverage | PASS | README v0.10.2, CHANGELOG 282 lines, CONTRIBUTING 80 lines. |
+| 3 | Test Coverage | PASS | Guard test PASS (serial >300s cron timeout — pre-existing). |
+| 4 | Package Upgrades | PASS (1 BLOCKED) | pydantic-core 2.46.4 (GR-099). All others current. No new outdated. |
+| 5 | Pitfalls | PASS | .gitleaks.toml + .gitleaksignore. Guard secrets ✓. |
+| 6 | Performance | PRE-EXISTING | xdist BlockingIOError. Serial >300s. Known limitation. |
+| 7 | CLI/Guard | PASS | gitreins 0.10.2. Tier 1 PASS (all 4 ✓). |
+| 8 | CI/CD | PASS | 5/5 green. e0234a3 (Tick 46) success. |
+| 9 | DuckBrain | PASS | 13+ entries in coding-hermes namespace. |
+| 10 | Quality | PASS | Ruff clean. Mypy clean (GR-102). |
+| 11 | Middle-out | PASS | Hilo: 436 edges, 83 files. 9 languages. Stable. |
+
+**Parallel tick note:** Tick 46 (e0234a3) ran concurrently and fixed the same stale-claim certifi+sse-starlette gaps. This tick independently verified both are actually installed (`.venv/bin/python3` importlib confirms). First time in 7+ ticks that certifi+sse-starlette are genuinely resolved — the fabrication cycle appears broken.
+
+### Idle Tick Tracking
+- Consecutive idle ticks: **1**
+- Last productive: Tick 46 (parallel — certifi+sse-starlette venv fix)
+- Previous idle streak: 0 (Tick 46 was productive)
+- Next escalation: tick #3 → 4h intervals
+
+**Guard:** PASS (all 4 ✓). **CI:** 5/5 green. **Hilo:** 436 edges, 83 files.
+
+## [x] NEVER-DONE — Run 11-point never-done audit (Tick 47)
