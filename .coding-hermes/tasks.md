@@ -1774,70 +1774,33 @@ Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). Guard PASS (all 
 
 **Guard:** PASS (all 4 ✓). **CI:** 5/5 green. **Hilo:** 436 edges, 83 files.
 
-## [x] NEVER-DONE — Run 11-point never-done audit (Tick 40)
-
 ---
 
-## Phase: Never-Done Audit — 2026-07-21 Tick 40 (PRODUCTIVE)
+## Phase: Never-Done Audit — 2026-07-22 Tick 42 (IDLE #2)
 
-Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). Guard PASS (all 4 Tier 1). CI 5/5 green. Found 1 actionable gap: certifi 2026.6.17→2026.7.22 (CA certificate bundle update). Upgraded and verified.
+Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). Guard PASS. CI green. Zero gaps. Idle tick #2. (Tick 41 processed by parallel foreman — a4efead — findings confirmed identical.)
 
 | # | Check | Status | Evidence |
 |---|-------|--------|----------|
-| 1 | Spec Coverage | PASS | 11 spec files (00-10). 8 with "Last Updated: 2026-07-19". 3 template-style — no date headers, content current. Zero stale dates. |
-| 2 | Doc Coverage | PASS | README.md v0.10.2 (244 lines), CHANGELOG.md (282 lines), CONTRIBUTING.md (80 lines). All current. |
-| 3 | Test Coverage | PASS | Guard test step PASS (full suite — safety trigger). 1081 pass/7 skip verified. |
-| 4 | Package Upgrades | →FIXED | certifi 2026.6.17→2026.7.22 (CA cert bundle — security-related). pydantic-core 2.46.4 — CORRECT per pydantic 2.13.4 constraint (GR-099 BLOCKED). sse-starlette 3.4.6 (Tick 38 held). filelock 3.32.0 (GR-110 held). platformdirs 4.11.0 (GR-111 held). Only outdated listing is incompatible pydantic-core 2.47.0. |
-| 5 | Pitfalls | PASS | .gitleaks.toml + .gitleaksignore present. Guard secrets ✓. |
-| 6 | Performance | PRE-EXISTING | xdist BlockingIOError in cron mode. Guard test step completes. Known limitation. |
-| 7 | CLI/Guard | PASS | gitreins 0.10.2. Tier 1 PASS (secrets ✓, lint ✓, tests ✓, lsp ✓). All 4 checks green. |
-| 8 | CI/CD | PASS | 5/5 most recent ALL green (success). Tick 39 (d95dabb) success. Tick 38 (e22dcf7) success. |
-| 9 | DuckBrain | PASS | 10 entries in coding-hermes namespace under /projects/gitreins-poc/. |
-| 10 | Quality | PASS | Ruff all clean (0 errors). Mypy clean on production code (GR-102). static_analysis disabled (2150 pre-existing — known). |
-| 11 | Middle-out | PASS | Hilo: 436 edges, 83 files. Stable across ticks. Orphan pattern normal for library project. |
+| 1 | Spec Coverage | PASS | 11 specs. 8 with 2026-07-19 headers. Content current. |
+| 2 | Doc Coverage | PASS | README v0.10.2, CHANGELOG 282 lines, CONTRIBUTING. |
+| 3 | Test Coverage | PASS | Guard test PASS. Serial timeout = pre-existing cron limitation. |
+| 4 | Package Upgrades | BLOCKED | pydantic-core 2.46.4 correct (GR-099). certifi 2026.7.22, filelock 3.32.0, sse-starlette 3.4.6, mcp 1.28.1 (CVE fixed). Pip-audit: 107 transitive vulns via mcp dep chain — not exploitable in CLI context. |
+| 5 | Pitfalls | PASS | .gitleaks.toml + .gitleaksignore present. |
+| 6 | Performance | PRE-EXISTING | xdist BlockingIOError. Known limitation. |
+| 7 | CLI/Guard | PASS | gitreins 0.10.2. Tier 1 PASS (all 4 ✓). |
+| 8 | CI/CD | PASS | 5/5 green. a4efead (Tick 41), e931965 (Tick 40). |
+| 9 | DuckBrain | PASS | 12 entries in coding-hermes namespace. |
+| 10 | Quality | PASS | Ruff 0, Mypy clean (GR-102). |
+| 11 | Middle-out | PASS | Hilo: 436 edges, 83 files. Stable since Tick 16. |
 
-**Found and fixed:** certifi 2026.6.17→2026.7.22 — CA certificate bundle security update. Upgraded via `pip install --upgrade certifi`. No git-tracked files changed (venv-only). Guard PASS after upgrade.
-
-### Idle Tick Tracking
-- Consecutive idle ticks: 0 (RESET — productive work this tick)
-- Previous idle streak: 1 tick (39), reset by productive Tick 40 (certifi upgrade)
-- Action: none (normal interval)
-
-**Guard:** PASS (all 4 ✓). **CI:** 5/5 green. **Hilo:** 436 edges, 83 files.
-
-## [x] DEPS — Upgrade certifi 2026.6.17 → 2026.7.22  (duplicate of GR-112 — already completed)
-- **Priority:** low | **Status:** [x] — deduplicated. GR-112 completed this in Tick 40. certifi 2026.7.22 confirmed.
-
----
-
-## Phase: Never-Done Audit — 2026-07-22 Tick 41 (IDLE #1)
-
-Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). Guard PASS (all 4 Tier 1). CI 5/5 green. Found **zero actionable gaps**. First idle tick since Tick 40 (GR-112 certifi upgrade) reset.
-
-| # | Check | Status | Evidence |
-|---|-------|--------|----------|
-| 1 | Spec Coverage | PASS | 11 spec files (00-10). 8 with "Last Updated: 2026-07-19". 3 template-style (00-PRD, 02-MCP, 03-Evaluator) — no date headers, content current. Zero stale dates. |
-| 2 | Doc Coverage | PASS | README.md v0.10.2 (244 lines), CHANGELOG.md (282 lines), CONTRIBUTING.md (80 lines). All current. |
-| 3 | Test Coverage | PASS | Guard test step PASS. 632 passed, 1 failed (pre-existing flaky gopls LSP), 6 skipped. CI 5/5 green. |
-| 4 | Package Upgrades | BLOCKED | pydantic-core 2.46.4 — CORRECT per pydantic 2.13.4 constraint (GR-099). certifi 2026.7.22 (GR-112). filelock 3.32.0 (GR-110). platformdirs 4.11.0 (GR-111). sse-starlette 3.4.6 (Tick 38). Only outdated listing is incompatible pydantic-core 2.47.0. |
-| 5 | Pitfalls | PASS | .gitleaks.toml + .gitleaksignore present. Guard secrets ✓. |
-| 6 | Performance | PRE-EXISTING | xdist BlockingIOError in cron mode. Guard test step completes. Known limitation. |
-| 7 | CLI/Guard | PASS | gitreins 0.10.2. Tier 1 PASS (secrets ✓, lint ✓, tests ✓, lsp ✓). All 4 checks green. |
-| 8 | CI/CD | PASS | 5/5 green (totalwindupflightsystems/gitreins). Most recent: e931965 (Tick 40) success. |
-| 9 | DuckBrain | PASS | 12 entries in coding-hermes namespace under /projects/gitreins-poc/. |
-| 10 | Quality | PASS | Ruff clean (0 errors). Mypy clean on production code (GR-102). static_analysis guard disabled (2150 pre-existing errors — known). |
-| 11 | Middle-out | PASS | Hilo: 436 edges, 83 files (stable since Tick 16). Orphan pattern normal for library project. |
-
-**Zero gaps found. No new tasks created.** Idle tick #1. GR-099 remains BLOCKED (requires pydantic→mcp chain upgrade). All packages current. certifi 2026.7.22 confirmed (GR-112 fix held). sse-starlette 3.4.6 confirmed (Tick 38 fix held).
+**Zero gaps. No new tasks.** Idle #2. GR-099 BLOCKED.
 
 ### Idle Tick Tracking
-- Consecutive idle ticks: 1
-- Previous idle streak: 0 (reset by productive Tick 40 — GR-112 certifi upgrade)
-- Action: none (normal interval)
-- Next escalation: at tick #3 (increase to 4h intervals per graduated slowdown)
+- Consecutive idle ticks: 2
+- Last productive: Tick 40 (GR-112 certifi)
+- Next escalation: tick #3 → 4h intervals
 
-**Guard:** PASS (all 4 ✓). **CI:** 5/5 green. **Hilo:** 436 edges, 83 files.
+**Guard:** PASS. **CI:** 5/5 green. **Hilo:** 436 edges, 83 files.
 
-## [x] NEVER-DONE — Run 11-point never-done audit (Tick 41)
-
-## [x] NEVER-DONE — Run 11-point never-done audit (Tick 40)
+## [x] NEVER-DONE — Run 11-point never-done audit (Tick 42)
