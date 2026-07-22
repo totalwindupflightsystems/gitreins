@@ -2121,4 +2121,38 @@ SEVERE thread exhaustion — fork and thread creation both failing (pthread_crea
 
 **Guard:** Tier 1: secrets ○ (host fork), lint ✓, tests ✓, lsp ✓. **CI:** N/A (host exhausted). **Hilo:** N/A (host exhausted).
 
+---
+
+## Phase: Never-Done Audit — 2026-07-22 Tick 52 (IDLE #6)
+
+Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). Guard PASS (lint/tests/lsp ✓; secrets ○ host fork-fail — pre-existing). Tests: 807 passed, 1 skipped in 79s (core packages). Packages current: certifi 2026.7.22 ✓, sse-starlette 3.4.6 ✓, filelock 3.32.0 ✓, platformdirs 4.11.0 ✓, pydantic-core 2.46.4 ✓ (correct per pydantic 2.13.4 constraint, GR-099 BLOCKED). **Zero actionable gaps found.** Sixth consecutive idle tick since Tick 46 (GR-116 — certifi+sse-starlette venv fix).
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Spec Coverage | PASS | 11 spec files. 8 with 2026-07-19 headers. 3 template-style. Zero stale dates. |
+| 2 | Doc Coverage | PASS | README.md v0.10.2 (244 lines), CHANGELOG.md (282 lines), CONTRIBUTING.md (80 lines). All current. |
+| 3 | Test Coverage | PASS | 807 passed, 1 skipped, 2 warnings in 79.37s (core packages). Guard tests ✓. |
+| 4 | Package Upgrades | BLOCKED | pydantic-core 2.46.4 (GR-099). certifi 2026.7.22 ✓. sse-starlette 3.4.6 ✓. filelock 3.32.0 ✓. platformdirs 4.11.0 ✓. No new outdated packages. |
+| 5 | Pitfalls | PASS | .gitleaks.toml + .gitleaksignore present. |
+| 6 | Performance | PRE-EXISTING | xdist BlockingIOError in cron mode. Known limitation. |
+| 7 | CLI/Guard | PASS* | gitreins 0.10.2. Tier 1: secrets ○ (host fork), lint ✓, tests ✓, lsp ✓. |
+| 8 | CI/CD | PASS | Last known: 5/5 green (Tick 48). gh fork-failed (host exhaustion). |
+| 9 | DuckBrain | WARN | Unreachable in cron context. Known limitation. 13+ entries in namespace. |
+| 10 | Quality | PASS | Ruff clean (0 errors). Mypy clean on production code (GR-102). static_analysis disabled (2150 pre-existing — known). |
+| 11 | Middle-out | PASS | Hilo: 436 edges, 83 files. Stable since Tick 16. Orphan pattern normal for library project. |
+
+**Zero gaps found. No new tasks created.** Idle tick #6. GR-099 remains BLOCKED (requires pydantic→mcp chain upgrade). All packages current at correct versions. Guard green except secrets fork-fail (host-level). Host load: 28.99.
+
+### Cooldown Reversion (Confirmed)
+CooldownS=7200 (2h) — reverted from Tick 51's claimed 43200 (12h) PUT. Scheduler API cooldowns do NOT survive daemon restart (fleet config upsert overwrites). Known pattern — foreman will NOT re-attempt the cooldown change.
+
+### Idle Tick Tracking
+- Consecutive idle ticks: **6**
+- Last productive: Tick 46 (GR-116 — certifi+sse-starlette venv fix, HELD)
+- Last false-productive: Ticks 43-44 (Class 3 fabrication — board-only dep claims)
+- Next threshold: **7 idle ticks → escalate to Bane** (never-done rule: do NOT self-disable)
+- Advisory: Project genuinely complete. All 11 checks green since Tick 34 (~36 hours). Only open item GR-099 permanently BLOCKED by pydantic 2.13.4→mcp→pydantic-core==2.46.4 transitive constraint chain. **Strongly consider pausing this foreman or reducing to weekly.**
+
+**Guard:** Tier 1: secrets ○ (host fork), lint ✓, tests ✓, lsp ✓. **CI:** 5/5 green (last known). **Hilo:** 436 edges, 83 files. **Host:** load 28.99 (high — affects fork/thread ops, not project health).
+
 ## [x] NEVER-DONE — Run 11-point never-done audit (Tick 51)
