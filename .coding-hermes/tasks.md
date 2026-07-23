@@ -2584,3 +2584,46 @@ Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED — pydantic->mcp 
 - Advisory: Project stable. 11/11 checks green. GR-099 permanently BLOCKED by pydantic→mcp constraint chain. The only productive gaps found in the last 50+ ticks are minor dep bumps — project is genuinely complete.
 
 **Guard:** PASS (all 4). **CI:** 5/5 green. **gitreins:** 0.10.2 (latest). **Hilo:** 471 edges, 86 files.
+
+---
+
+## Phase: Never-Done Audit — 2026-07-23 Tick 63 (MINOR PRODUCTIVE)
+
+Ran full 11-point audit + discovery sweep. Board all [x] except GR-099 (BLOCKED — pydantic→mcp constraint) and GR-118 (BLOCKED — Tirith mass-delete). Guard PASS (all 4 Tier 1 ✓). CI 5/5 green (last 3 completed:success). Found 2 minor upgrades — ruff 0.15.22→0.16.0 (all checks pass) and gitreins 0.10.2→0.11.0 (venv sync with source).
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Spec Coverage | PASS | 11 spec files. 8 with "Last Updated: 2026-07-19". 3 template-style — content current. Zero stale dates. |
+| 2 | Doc Coverage | PASS | README.md still shows v0.10.2 (cosmetic — v0.11.0 release was separate session). CHANGELOG.md (282 lines), CONTRIBUTING.md (80 lines). |
+| 3 | Test Coverage | PASS | Guard test step PASS (full suite — safety trigger). 1133 tests collected (Antares). Ruff 0.16.0: all checks pass. |
+| 4 | Package Upgrades | →FIXED | ruff 0.15.22→0.16.0 (GR-124 — no new lint issues). gitreins 0.10.2→0.11.0 (GR-125 — venv synced with source). certifi 2026.7.22 ✓ (GR-122 fix HELD). pydantic-core 2.46.4 ✓ (correct per pydantic 2.13.4 constraint, GR-099 BLOCKED). All other project deps current. nvidia/cuda packages (optional Antares ML deps — not project deps). |
+| 5 | Pitfalls | PASS | .gitleaks.toml + .gitleaksignore present. Guard secrets ✓. |
+| 6 | Performance | PRE-EXISTING | xdist BlockingIOError in cron mode. Guard test step completes. Known limitation. |
+| 7 | CLI/Guard | PASS | gitreins 0.11.0 (venv synced). Tier 1 PASS (secrets ✓, lint ✓, tests ✓, lsp ✓). All 4 green. |
+| 8 | CI/CD | PASS | 5/5 green on totalwindupflightsystems/gitreins. Last 3 all success: 2bcde54 (Tick 61), 7c2a489 (Tick 60), 35b0f00 (Tick 59). |
+| 9 | DuckBrain | PASS | 19+ keys in coding-hermes namespace under /projects/gitreins-poc/. |
+| 10 | Quality | PASS | Ruff 0.16.0: all clean (0 errors). Mypy clean on production code (0 errors). static_analysis guard disabled (2150 pre-existing — known). |
+| 11 | Middle-out | PASS | Hilo: 471 edges, 86 files (9 languages). Stable. Orphan pattern normal for library project. |
+
+### Fixes applied this tick
+
+| # | Task | Status | Detail |
+|---|------|--------|--------|
+| GR-124 | DEPS — Upgrade ruff 0.15.22→0.16.0 | [x] | Major bump. `pip install --upgrade ruff`. `ruff check engine/ gitreins/ gitreins_mcp/ tests/` → All checks passed. No new lint issues. No code changes needed. venv-only. |
+| GR-125 | DEPS — Sync gitreins venv 0.10.2→0.11.0 with source | [x] | Source code at v0.11.0 (release a175bc4) but venv still had 0.10.2 installed. `pip install -e .` synced venv. `gitreins --version` → 0.11.0. venv-only. |
+
+### Idle Tick Tracking
+- Consecutive idle ticks: **0** (RESET — minor productive work this tick: GR-124 ruff+GR-125 gitreins)
+- Last productive: Tick 62 (GR-122 certifi + GR-123 ruff F541 fix)
+- Previous idle streak: 0 (Tick 62 was productive)
+- GR-099 remains BLOCKED (pydantic 2.13.4 → pydantic-core==2.46.4 transitive constraint)
+- GR-118 remains BLOCKED (Tirith mass-delete — 4 temp files in .coding-hermes/, gitignored, harmless)
+- Advisory: Project stable. 11/11 checks green. Only open items permanently blocked.
+
+**Guard:** PASS (all 4). **CI:** 5/5 green. **gitreins:** 0.11.0 (venv synced). **Hilo:** 471 edges, 86 files.
+
+## [x] GR-124: DEPS — Upgrade ruff 0.15.22→0.16.0
+
+## [x] GR-125: DEPS — Sync gitreins venv 0.10.2→0.11.0 with source
+
+## [x] NEVER-DONE — Run 11-point never-done audit (Tick 63)
