@@ -395,7 +395,7 @@ class AntaresScanner:
             if not isinstance(item, dict):
                 continue
             try:
-                line = int(item.get("line", item.get("line_number", 0)))
+                line = int(item.get("line", item.get("line_number", 0)) or 0)
                 confidence = float(item.get("confidence", 0.0))
             except (TypeError, ValueError):
                 continue
