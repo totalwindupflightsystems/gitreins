@@ -1,4 +1,3 @@
-/usr/bin/bash: fork: retry: Resource temporarily unavailable
 # GitReins Improvement Tasks
 
 ## [x] GR-020: Add `gitreins install` command
@@ -2156,3 +2155,36 @@ CooldownS=7200 (2h) — reverted from Tick 51's claimed 43200 (12h) PUT. Schedul
 **Guard:** Tier 1: secrets ○ (host fork), lint ✓, tests ✓, lsp ✓. **CI:** 5/5 green (last known). **Hilo:** 436 edges, 83 files. **Host:** load 28.99 (high — affects fork/thread ops, not project health).
 
 ## [x] NEVER-DONE — Run 11-point never-done audit (Tick 51)
+
+---
+
+## Phase: Never-Done Audit — 2026-07-22 Tick 53 (IDLE #7)
+
+Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). Guard PASS (all 4 Tier 1 ✓ — thread exhaustion fully resolved). CI 5/5 green. Packages current. **Zero actionable gaps found.**
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Spec Coverage | PASS | 11 spec files. 8 with "Last Updated: 2026-07-19". 3 template-style (00-PRD, 02-MCP, 03-Evaluator) — no date headers, content current. Zero stale dates. |
+| 2 | Doc Coverage | PASS | README.md v0.10.2 (244 lines), CHANGELOG.md (282 lines), CONTRIBUTING.md (80 lines). All current. |
+| 3 | Test Coverage | PASS | Guard test step PASS (full suite — safety trigger). 1081 pass/7 skip verified prior ticks. |
+| 4 | Package Upgrades | BLOCKED | pydantic-core 2.46.4 — CORRECT per pydantic 2.13.4 constraint (GR-099). certifi 2026.7.22 ✓, sse-starlette 3.4.6 ✓, filelock 3.32.0 ✓, platformdirs 4.11.0 ✓. Only outdated listing is incompatible pydantic-core 2.47.0. |
+| 5 | Pitfalls | PASS | .gitleaks.toml + .gitleaksignore present. Guard secrets ✓ (thread exhaustion resolved — gitleaks spawns cleanly). |
+| 6 | Performance | PRE-EXISTING | xdist BlockingIOError in cron mode. Guard test step completes. Known limitation. |
+| 7 | CLI/Guard | PASS | gitreins 0.10.2. Tier 1 PASS (secrets ✓, lint ✓, tests ✓, lsp ✓). All 4 checks green. Thread exhaustion resolved. |
+| 8 | CI/CD | PASS | 5/5 green on totalwindupflightsystems/gitreins: 221061b (Tick 52), f1effdd (Tick 49), 2d8a390 (Tick 48), a154a45 (Tick 47), e0234a3 (Tick 46). All completed:success. |
+| 9 | DuckBrain | WARN | Unreachable in cron context. Prior ticks confirmed 13+ entries. |
+| 10 | Quality | PASS | Ruff clean (0 errors). Mypy clean on production code (GR-102). static_analysis guard disabled (2150 pre-existing — known). |
+| 11 | Middle-out | PASS | Hilo: 436 edges, 83 files (9 languages). Stable since Tick 16. Orphan pattern normal for library project. |
+
+**Zero gaps found. No new tasks created.** Idle tick #7. GR-099 remains BLOCKED (requires pydantic→mcp chain upgrade — pydantic 2.13.4 → mcp → pydantic-core==2.46.4 transitive constraint). All packages current at correct versions. Guard fully green (thread exhaustion resolved). CI 5/5 green. Hilo stable.
+
+### Idle Tick Tracking
+- Consecutive idle ticks: **7**
+- Last productive: Tick 46 (GR-116 — certifi+sse-starlette venv fix, HELD)
+- Last false-productive: Ticks 43-44 (Class 3 fabrication — board-only dep claims)
+- **Action: ESCALATE TO BANE** — at 7+ consecutive idle ticks per graduated slowdown rules. Project has been in zero-gap idle for ~40 hours across 7+ ticks since Tick 46. Only open item GR-099 permanently blocked by upstream transitive constraint chain.
+
+### Host Resource Note
+Thread exhaustion from Ticks 31-33 and 50-52 fully resolved this tick. Gitleaks spawns cleanly, gh run list works, write_file succeeds. All host-level failures were transient.
+
+**Guard:** PASS (all 4 ✓). **CI:** 5/5 green. **Hilo:** 436 edges, 83 files.
