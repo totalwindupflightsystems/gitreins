@@ -2300,3 +2300,40 @@ Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). Guard PASS (all 
 - [x] **GR-117f:** CLI — `gitreins security-scan` standalone command. `gitreins init` offers setup. **Commit:** `2822ff2` — gitreins/cli.py (+127 lines).
 - [x] **GR-117g:** Tests — test AntaresScanner (keyword scanner), CVE feed, CLI command, guard integration. **Commit:** `2822ff2` — tests/test_antares.py (607 lines, 45 tests pass).
 - [x] **GR-117h:** Docs — install guide, CVE feed setup, model size, example output. **Commit:** `2822ff2` — README.md (+82 lines).
+
+---
+
+## Phase: Never-Done Audit — 2026-07-23 Tick 57 (IDLE #11)
+
+Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). After 10 consecutive idle ticks (47-56), found 3 actionable gaps. This breaks the idle streak — project status: active.
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Spec Coverage | PASS | 11 spec files. 8 with "Last Updated: 2026-07-19". 3 template-style — content current. |
+| 2 | Doc Coverage | PASS | README.md v0.10.2, CHANGELOG.md (282 lines), CONTRIBUTING.md (80 lines). All current. |
+| 3 | Test Coverage | PASS | Guard test PASS (full suite — safety trigger). 1081 pass/7 skip. |
+| 4 | Package Upgrades | FIXED | certifi 2026.6.17→2026.7.22, sse-starlette 3.4.5→3.4.6 (GR-108 fabrication cycle — claimed fixed in Tick 24 but reverted). pydantic-core 2.46.4 — CORRECT per pydantic 2.13.4 constraint (GR-099 BLOCKED). Outdated list now: nvidia/cuda (from GR-117c ML deps, temp) + pydantic-core (blocked). |
+| 5 | Pitfalls | PASS | .gitleaks.toml + .gitleaksignore present. Guard secrets ✓. |
+| 6 | Performance | PRE-EXISTING | xdist BlockingIOError in cron mode. Guard test step completes. Known limitation. |
+| 7 | CLI/Guard | PASS | gitreins 0.10.2. Tier 1 PASS (secrets ✓, lint ✓, tests ✓, lsp ✓). All 4 green. |
+| 8 | CI/CD | PASS | 5/5 green (totalwindupflightsystems/gitreins). All completed:success. |
+| 9 | DuckBrain | PASS | 21 keys in coding-hermes namespace under /projects/gitreins-poc/. |
+| 10 | Quality | FIXED | Ruff clean (0 errors). Mypy: 1 error in engine/antares.py:398 from GR-117c (Any|None → int cast). Fixed: added `or 0` guard. Now 0 errors. |
+| 11 | Middle-out | PASS | Hilo: 650 edges, 81 files (9 languages). Stable. Orphan pattern normal for library project. |
+
+### Fixes applied this tick
+
+| # | Task | Status | Commit |
+|---|------|--------|--------|
+| GR-118 | CLEANUP — Remove temp worker files from prior tick (_commit_msg_57.txt, _fix_test.py, _worker_GR117c_prompt.txt) | [~] BLOCKED | Tirith mass-deletion detector blocking rm. Files in .coding-hermes/ (gitignored) — harmless. |
+| GR-119 | QUALITY — Fix mypy `Any|None` int() cast in engine/antares.py:398 | [x] | `56fdc6c` — 1 line fix |
+| GR-120 | DEPS — Upgrade certifi 2026.6.17→2026.7.22 | [x] | venv-only |
+| GR-121 | DEPS — Upgrade sse-starlette 3.4.5→3.4.6 (ACTUALLY executed) | [x] | venv-only — GR-108 fabrication cycle broken |
+
+### Idle Tick Tracking
+- Consecutive idle ticks: **0** — RESET (3 actionable gaps found + fixed)
+- Previous streak: 10 ticks (47-56)
+- GR-099 remains BLOCKED (pydantic 2.13.4 → pydantic-core==2.46.4 transitive constraint)
+- nvidia/cuda packages from GR-117c's ML deps show as outdated — these are temporary (Antares runtime deps, not project deps). Not creating upgrade tasks.
+
+**Guard:** PASS (all 4 ✓). **CI:** 5/5 green. **Mypy:** 0 errors. **Hilo:** 650 edges, 81 files.
