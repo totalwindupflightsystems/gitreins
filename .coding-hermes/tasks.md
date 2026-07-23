@@ -2270,7 +2270,7 @@ Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). Guard PASS (all 
 
 **Guard:** PASS (all 4 ✓). **CI:** 5/5 green. **Hilo:** 650 edges, 81 files.
 
-## [ ] GR-117: Antares CVE localization guard — optional Tier 1 security scanner
+## [x] GR-117: Antares CVE localization guard — optional Tier 1 security scanner
 - **Priority:** high
 - **Model:** local (Antares-1B via ONNX/transformers, no API)
 - **Source:** Cisco Foundation AI — open-weight 1B model purpose-built for vulnerability localization (2026-07-21 release)
@@ -2294,7 +2294,7 @@ Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). Guard PASS (all 
 
 - [x] **GR-117a:** Model loader — `engine/antares.py` with AntaresScanner class, model download/cache, keyword-based scaffold. Implemented in Tick 57.
 - [x] **GR-117b:** CVE feed — pull from NVD API or GitHub Advisory Database. Cache locally. Configurable `security_scan.cve_source` (nvd|github|both). **Commit:** `2822ff2` — engine/cve_feed.py (493 lines).
-- [ ] **GR-117c:** Scanner — real ML inference (transformers/ONNX). Scaffold keyword heuristic already in place — replace with model inference.
+- [x] **GR-117c:** Scanner — real ML inference (transformers/ONNX). Scaffold keyword heuristic already in place — replace with model inference. **Commit:** `af3addd` — engine/antares.py (+361/-83), full ML pipeline with _scan_with_model, _chunk_source, _infer_chunk, _parse_inference_response. Fallback to keyword heuristic on any ML failure.
 - [x] **GR-117d:** Guard integration — `_check_security_scan()` in GuardManager. Step order: secrets → lint → tests → lsp → security_scan. Implemented in Tick 57.
 - [x] **GR-117e:** Config — `security_scan.enabled` (default false), `security_scan.model`, `security_scan.min_confidence`, `security_scan.cve_source` in `engine/config.py` + overlay loading. Implemented in Tick 57.
 - [x] **GR-117f:** CLI — `gitreins security-scan` standalone command. `gitreins init` offers setup. **Commit:** `2822ff2` — gitreins/cli.py (+127 lines).
