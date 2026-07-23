@@ -2405,4 +2405,26 @@ Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED — pydantic→mcp
 
 ## [x] NEVER-DONE — Run 11-point never-done audit (Tick 59)
 
+---
+
+## Phase: Never-Done Audit — 2026-07-23 Tick 59 (IDLE #2) — Re-verified
+
+Re-ran full discovery sweep + 11-point audit. Board all [x] except GR-099 (BLOCKED — pydantic→mcp constraint) and GR-118 (BLOCKED — Tirith). Guard PASS (all 4 Tier 1 ✓). CI 5/5 green. 1126 tests pass, 7 skip.
+
+**Additional checks vs prior Tick 59 audit:**
+- GitReins tasks.yaml: All 16 tasks `status: complete` (MCP `task_list` shows ● due to stale in-memory state — known MCP quirk, not a real gap)
+- gitleaks direct scan: no leaks found (4.87 MB, 926ms)
+- pip-audit: No known vulnerabilities
+- TODOs: Only false positives (regex patterns in guard config)
+
+**Zero actionable gaps confirmed.** Idle tick #2.
+
+### Idle Tick Tracking
+- Consecutive idle ticks: **2**
+- Last productive: Tick 57 (GR-119 mypy fix, GR-120 certifi, GR-121 sse-starlette)
+- Action: none (normal interval)
+- Next escalation: tick #3 → 4h intervals per graduated slowdown
+
+**Guard:** PASS (all 4 ✓). **CI:** 5/5 green. **gitreins:** 0.10.2 (latest). **Hilo:** 441 edges, 84 files.
+
 ## [x] NEVER-DONE — Run 11-point never-done audit (Tick 58)
