@@ -2293,10 +2293,10 @@ Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). Guard PASS (all 
 ### Subtasks
 
 - [x] **GR-117a:** Model loader — `engine/antares.py` with AntaresScanner class, model download/cache, keyword-based scaffold. Implemented in Tick 57.
-- [ ] **GR-117b:** CVE feed — pull from NVD API or GitHub Advisory Database. Cache locally. Configurable `security_scan.cve_source` (nvd|github|both).
+- [x] **GR-117b:** CVE feed — pull from NVD API or GitHub Advisory Database. Cache locally. Configurable `security_scan.cve_source` (nvd|github|both). **Commit:** `2822ff2` — engine/cve_feed.py (493 lines).
 - [ ] **GR-117c:** Scanner — real ML inference (transformers/ONNX). Scaffold keyword heuristic already in place — replace with model inference.
 - [x] **GR-117d:** Guard integration — `_check_security_scan()` in GuardManager. Step order: secrets → lint → tests → lsp → security_scan. Implemented in Tick 57.
 - [x] **GR-117e:** Config — `security_scan.enabled` (default false), `security_scan.model`, `security_scan.min_confidence`, `security_scan.cve_source` in `engine/config.py` + overlay loading. Implemented in Tick 57.
-- [ ] **GR-117f:** CLI — `gitreins security-scan` standalone command. `gitreins init` offers setup.
-- [ ] **GR-117g:** Tests — test AntaresScanner (keyword scanner), CVE feed, CLI command, guard integration.
-- [ ] **GR-117h:** Docs — install guide, CVE feed setup, model size, example output.
+- [x] **GR-117f:** CLI — `gitreins security-scan` standalone command. `gitreins init` offers setup. **Commit:** `2822ff2` — gitreins/cli.py (+127 lines).
+- [x] **GR-117g:** Tests — test AntaresScanner (keyword scanner), CVE feed, CLI command, guard integration. **Commit:** `2822ff2` — tests/test_antares.py (607 lines, 45 tests pass).
+- [x] **GR-117h:** Docs — install guide, CVE feed setup, model size, example output. **Commit:** `2822ff2` — README.md (+82 lines).
