@@ -59,6 +59,12 @@ class GitReinsDefaults:
     # ── Guard defaults ──
     hook_timeout: int = 120               # overall pre-commit hook timeout (GR-064e)
 
+    # ── Security scan (Antares) ──
+    security_scan_enabled: bool = False
+    security_scan_model: str = "antares-1b"       # "antares-1b" | "antares-350m"
+    security_scan_min_confidence: float = 0.7
+    security_scan_cve_source: str = "nvd"          # "nvd" | "github" | "both"
+
     # ── Commit audit ──
     commit_audit_enabled: bool = True      # validate commit messages against staged diff
     commit_audit_mode: str = "warn"        # "warn" | "block" | "suggest"
@@ -144,6 +150,18 @@ class GitReinsDefaults:
             )),
             hook_timeout=int(defaults.get(
                 "hook_timeout", self.hook_timeout
+            )),
+            security_scan_enabled=bool(defaults.get(
+                "security_scan", {}).get("enabled", self.security_scan_enabled
+            )),
+            security_scan_model=str(defaults.get(
+                "security_scan", {}).get("model", self.security_scan_model
+            )),
+            security_scan_min_confidence=float(defaults.get(
+                "security_scan", {}).get("min_confidence", self.security_scan_min_confidence
+            )),
+            security_scan_cve_source=str(defaults.get(
+                "security_scan", {}).get("cve_source", self.security_scan_cve_source
             )),
             commit_audit_enabled=bool(defaults.get(
                 "commit_audit", {}).get("enabled", self.commit_audit_enabled

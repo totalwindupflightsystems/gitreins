@@ -199,6 +199,7 @@ class GuardManager:
             "skylos": guards_cfg.get("skylos", False),  # opt-in: needs pip install
             "static_analysis": guards_cfg.get("static_analysis", False),  # opt-in: type checkers
             "lsp": guards_cfg.get("lsp", False),  # opt-in: LSP servers
+            "security_scan": guards_cfg.get("security_scan", {}).get("enabled", False),  # opt-in: Antares CVE scanner
         }
         self._static_tools = guards_cfg.get("static_analysis_tools", {})
         self._lsp_tools = guards_cfg.get("lsp_tools", ["pylsp"])
@@ -304,6 +305,16 @@ class GuardManager:
 
         if self._enabled["lsp"] and not self._is_go:
             results.append(self._check_lsp())
+            if _timed_out():
+                warnings.append(
+                    f"Guard timed out after {self._hook_timeout}s "
+                    f"(hook_timeout). Remaining checks skipped — "
+                    f"commit allowed to proceed (fail-open)."
+                )
+                return Tier1Result(passed=True, results=results, warnings=warnings)
+
+        if self._enabled.get("security_scan", False):
+            results.append(self._check_security_scan())
             if _timed_out():
                 warnings.append(
                     f"Guard timed out after {self._hook_timeout}s "
@@ -800,6 +811,50 @@ class GuardManager:
             passed=not had_errors,
             output=output,
         )
+
+
+    def _check_security_scan(self) -> GuardResult:
+        """Run Antares CVE localization scan against staged files.
+
+        Opt-in guard. SCAFFOLD (GR-117a/d): the scanner falls back to a
+        keyword-based heuristic that produces zero-confidence
+        "CVE-SIMULATED" findings until GR-117c wires in the real model.
+        Returns FAIL if any finding is produced; PASS otherwise. If the
+        optional huggingface_hub/transformers stack isn't installed and
+        the scanner can't be imported at all, returns PASS with a
+        "not available" note — the guard is opt-in and must never block
+        commits when its dependencies are missing.
+        """
+        try:
+            from engine.antares import AntaresScanner
+        except ImportError as exc:
+            logger.debug("Antares scanner import failed: %s", exc)
+            return GuardResult(
+                name="security_scan", passed=True,
+                output="Antares: not available — install huggingface_hub and transformers",
+            )
+
+        try:
+            scanner = AntaresScanner(self.workdir)
+            findings = scanner.scan_staged_files()
+        except Exception as exc:
+            logger.warning("Antares scan raised: %s", exc)
+            return GuardResult(name="security_scan", passed=False, error=str(exc))
+
+        if not findings:
+            return GuardResult(name="security_scan", passed=True, output="Antares: clean")
+
+        # Format: one line per finding, capped to keep output bounded.
+        lines = [f"  • {f.file}:{f.line} [{f.cve_id} conf={f.confidence:.2f}] {f.description}"
+                 for f in findings[:20]]
+        if len(findings) > 20:
+            lines.append(f"  ... and {len(findings) - 20} more")
+
+        output = f"Antares: {len(findings)} potential finding(s):\n" + "\n".join(lines)
+        if len(output) > 2000:
+            output = output[:2000] + "\n... [truncated]"
+
+        return GuardResult(name="security_scan", passed=False, output=output)
 
 
     def _check_go_lint(self) -> GuardResult:

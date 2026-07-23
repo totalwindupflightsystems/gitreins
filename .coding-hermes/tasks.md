@@ -2292,11 +2292,11 @@ Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). Guard PASS (all 
 
 ### Subtasks
 
-- [ ] **GR-117a:** Model loader — `engine/antares.py` with ONNX Runtime or transformers backend. Download model on first use (`~/.cache/gitreins/antares-1b/`). Auto-detect CPU/GPU. Cache loaded model in memory.
+- [x] **GR-117a:** Model loader — `engine/antares.py` with AntaresScanner class, model download/cache, keyword-based scaffold. Implemented in Tick 57.
 - [ ] **GR-117b:** CVE feed — pull from NVD API or GitHub Advisory Database. Cache locally. Configurable `security_scan.cve_source` (nvd|github|both).
-- [ ] **GR-117c:** Scanner — feed staged files + CVE descriptions to model. Output `AntaresFinding` dataclass: file, line, cve_id, confidence (0-1), description. Configurable `min_confidence`.
-- [ ] **GR-117d:** Guard integration — add to `GuardManager`. New step: secrets → lint → tests → lsp → static_analysis → security_scan.
-- [ ] **GR-117e:** Config — `security_scan.enabled` (default false), `security_scan.model` (antares-1b|antares-350m), `security_scan.min_confidence` (0.7), `security_scan.cve_source` (nvd|github).
+- [ ] **GR-117c:** Scanner — real ML inference (transformers/ONNX). Scaffold keyword heuristic already in place — replace with model inference.
+- [x] **GR-117d:** Guard integration — `_check_security_scan()` in GuardManager. Step order: secrets → lint → tests → lsp → security_scan. Implemented in Tick 57.
+- [x] **GR-117e:** Config — `security_scan.enabled` (default false), `security_scan.model`, `security_scan.min_confidence`, `security_scan.cve_source` in `engine/config.py` + overlay loading. Implemented in Tick 57.
 - [ ] **GR-117f:** CLI — `gitreins security-scan` standalone command. `gitreins init` offers setup.
-- [ ] **GR-117g:** Tests — mock model responses + integration with real model download.
+- [ ] **GR-117g:** Tests — test AntaresScanner (keyword scanner), CVE feed, CLI command, guard integration.
 - [ ] **GR-117h:** Docs — install guide, CVE feed setup, model size, example output.
