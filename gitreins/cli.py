@@ -1074,6 +1074,113 @@ def cmd_commit_audit(args):
     sys.exit(0)
 
 
+def cmd_security_scan(args):
+    """Run the Antares CVE localization scanner (GR-117f).
+
+    Default target: staged Python files (``git diff --cached``). With
+    ``--directory DIR`` the scanner recurses into DIR instead. Output
+    is human-readable by default; ``--output json`` emits a
+    machine-readable report. ``--force-ml`` requires the optional
+    ``huggingface_hub``/``transformers`` stack — if either is missing
+    the command exits non-zero instead of falling back to the
+    keyword heuristic.
+
+    Exit codes:
+        0  — clean (no findings)
+        1  — one or more findings produced
+        2  — forced ML mode but dependencies missing
+    """
+    import json as _json
+
+    workdir = get_workdir()
+    config = load_config(workdir)
+    security_cfg = (
+        (config or {}).get("defaults", {}).get("security_scan", {}) or {}
+    )
+
+    force_ml = bool(getattr(args, "force_ml", False))
+    output_fmt = getattr(args, "output", "text") or "text"
+    directory = getattr(args, "directory", None)
+
+    try:
+        from engine.antares import AntaresScanner
+    except ImportError as exc:
+        print(f"Antares scanner unavailable: {exc}", file=sys.stderr)
+        if force_ml:
+            sys.exit(2)
+        sys.exit(1)
+
+    model_map = {
+        "antares-1b": "fdtn-ai/antares-1b",
+        "antares-350m": "fdtn-ai/antares-350m",
+    }
+    model_id = model_map.get(security_cfg.get("model", "antares-1b"), "fdtn-ai/antares-1b")
+
+    if force_ml:
+        # When ML is required, both download and inference deps must
+        # be present. We check huggingface_hub (for the snapshot) and
+        # transformers (for inference). The scanner itself enforces
+        # this contract; here we just pre-flight a friendlier error.
+        for mod_name, install_hint in (
+            ("huggingface_hub", "pip install huggingface_hub"),
+            ("transformers", "pip install transformers"),
+        ):
+            try:
+                __import__(mod_name)
+            except ImportError as exc:
+                print(
+                    f"Antares ML mode requires {mod_name}: {exc}\n"
+                    f"Install with: {install_hint}",
+                    file=sys.stderr,
+                )
+                sys.exit(2)
+
+    scanner = AntaresScanner(workdir, model_id=model_id, use_ml=force_ml)
+
+    try:
+        if directory:
+            findings = scanner.scan_directory(directory)
+        else:
+            findings = scanner.scan_staged_files()
+    except ImportError as exc:
+        # Raised by the scanner when force_ml=True and the ML stack
+        # couldn't be reached. Already covered above, but stay safe
+        # in case the failure happens after pre-flight.
+        print(f"Antares ML dependencies missing: {exc}", file=sys.stderr)
+        if force_ml:
+            sys.exit(2)
+        findings = []
+    except Exception as exc:  # noqa: BLE001
+        logger = logging.getLogger("gitreins")
+        logger.warning("Antares scan failed: %s", exc)
+        print(f"Antares scan failed: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    if output_fmt == "json":
+        payload = [f.to_dict() if hasattr(f, "to_dict") else {
+            "file": getattr(f, "file", ""),
+            "line": getattr(f, "line", 0),
+            "cve_id": getattr(f, "cve_id", ""),
+            "confidence": getattr(f, "confidence", 0.0),
+            "description": getattr(f, "description", ""),
+        } for f in findings]
+        print(_json.dumps(payload, indent=2))
+    else:
+        if not findings:
+            target = directory or "staged files"
+            print(f"Antares: clean — no findings in {target}")
+        else:
+            target = directory or "staged files"
+            print(f"Antares: {len(findings)} potential finding(s) in {target}:")
+            for f in findings:
+                print(
+                    f"  • {f.file}:{f.line} [{f.cve_id} conf={f.confidence:.2f}] "
+                    f"{f.description}"
+                )
+
+    sys.exit(1 if findings else 0)
+
+
 def cmd_setup_tools(args):
     """Show available static analysis tools and install instructions for missing ones."""
     from engine.static_analysis import find_tool, _TOOL_INSTALL_GUIDE
@@ -1179,6 +1286,24 @@ def main():
     # mcp-server
     sub.add_parser("mcp-server", help="Run MCP stdio server")
 
+    # security-scan
+    security_p = sub.add_parser(
+        "security-scan",
+        help="Run the Antares CVE localization scanner (opt-in)",
+    )
+    security_p.add_argument(
+        "--directory", "-d",
+        help="Scan a directory recursively instead of staged files",
+    )
+    security_p.add_argument(
+        "--output", choices=["text", "json"], default="text",
+        help="Output format (default: text)",
+    )
+    security_p.add_argument(
+        "--force-ml", action="store_true",
+        help="Require ML inference (fails if huggingface_hub/transformers missing)",
+    )
+
     # setup-tools
     sub.add_parser("setup-tools", help="Show available static analysis tools and install instructions")
 
@@ -1222,6 +1347,8 @@ def main():
         cmd_commit_audit(args)
     elif args.command == "mcp-server":
         cmd_mcp_server(args)
+    elif args.command == "security-scan":
+        cmd_security_scan(args)
     elif args.command == "setup-tools":
         cmd_setup_tools(args)
     elif args.command == "report":

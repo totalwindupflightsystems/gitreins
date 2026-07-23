@@ -11,7 +11,7 @@
 
 GitReins lives inside your git repository as a quality harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ✅ **v0.10.2** — LSP diagnostics (14 languages), static analysis (9 tools), commit audit with CVE-scored severity, DeepSeek prompt caching, large-repo hardening, 1088 tests pass.
+> ✅ **v0.10.2** — LSP diagnostics (14 languages), static analysis (9 tools), commit audit with CVE-scored severity, optional Antares CVE-localization guard, DeepSeek prompt caching, large-repo hardening, 1088 tests pass.
 
 ---
 
@@ -40,6 +40,8 @@ gitreins init           # smart init — detects language, size, optimal config
 gitreins install                      # Install hooks + config
 gitreins init                         # Smart init (language, size, optimal config)
 gitreins guard                        # Run Tier 1 static checks
+gitreins security-scan [-d DIR] [--output text|json] [--force-ml]
+                                       # Run the Antares CVE localization scanner
 gitreins report [-n N] [--interactive]  # Browse verdict history
 gitreins task create <id> <title> [criteria...] [--depends-on ...]
 gitreins task start <id>
@@ -50,6 +52,84 @@ gitreins judge <id>                   # Evaluate a task
 gitreins commit <message>             # Commit with guard checks
 gitreins mcp-server                   # Run MCP stdio server (for AI agents)
 ```
+
+---
+
+## Security Scan (optional)
+
+GitReins ships an **opt-in** Tier 1 security guard that localizes
+known CVEs against your staged Python code. It is built on the
+[Antares CVE localization framework](https://huggingface.co/fdtn-ai/antares-1b)
+(FDTN-AI's 1B-parameter model fine-tuned for code-level vulnerability
+localization). Until the optional ML stack is installed, the guard
+falls back to a keyword-based heuristic that produces
+`CVE-SIMULATED` findings so the wiring can be exercised end-to-end.
+
+### CLI
+
+```bash
+# Scan staged Python files (default; used by `gitreins guard`).
+gitreins security-scan
+
+# Recursively scan a directory instead of staged files.
+gitreins security-scan --directory engine/
+
+# Machine-readable output for piping into other tools.
+gitreins security-scan --output json
+
+# Require real ML inference — fail if huggingface_hub/transformers
+# are not installed (exit code 2). Without this flag the heuristic
+# fallback is used.
+gitreins security-scan --force-ml
+```
+
+Exit codes:
+
+| Code | Meaning |
+|---|---|
+| 0 | Clean — no findings |
+| 1 | One or more findings produced |
+| 2 | `--force-ml` requested but ML dependencies are missing |
+
+### Install requirements
+
+The heuristic scanner has no extra dependencies. Real ML inference
+requires the optional ML stack:
+
+```bash
+pip install huggingface_hub transformers
+# Optional, for GPU inference:
+pip install torch        # or onnxruntime
+```
+
+The model is downloaded on first use into
+`~/.cache/gitreins/antares-1b/` and reused on subsequent runs.
+
+### Configuration
+
+Enable the guard in `.gitreins/config.yaml`:
+
+```yaml
+defaults:
+  security_scan:
+    enabled: true              # opt-in: default false
+    model: antares-1b          # "antares-1b" | "antares-350m"
+    min_confidence: 0.7        # filter by CVSS severity score
+    cve_source: nvd            # "nvd" | "github" | "both"
+```
+
+| Key | Default | Notes |
+|---|---|---|
+| `enabled` | `false` | When `true`, the security_scan guard runs alongside other Tier 1 checks |
+| `model` | `antares-1b` | HuggingFace model id; `antares-350m` is a smaller variant |
+| `min_confidence` | `0.7` | Drop entries whose CVSS score is below this. Severity→score: CRITICAL=1.0, HIGH=0.85, MEDIUM=0.6, LOW=0.3 |
+| `cve_source` | `nvd` | `nvd` uses the NVD REST API, `github` uses the GitHub Advisory Database, `both` merges the two |
+
+The CVE feed is cached at `~/.cache/gitreins/cve_feed/` with a
+24-hour TTL. When the network is unreachable the feed serves stale
+cache; when both cache and network are unavailable the feed returns
+an empty list and the guard exits clean (it is **opt-in** and must
+never block a commit on missing infrastructure).
 
 ---
 
