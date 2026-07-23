@@ -551,14 +551,22 @@ class TestSecurityScanCLI:
         assert payload[0]["file"].endswith("vuln.py")
         assert payload[0]["line"] == 1
 
-    @patch.object(requests, "get", side_effect=Exception("nope"))
-    def test_force_ml_exits_2_when_huggingface_missing(self, _mock, tmp_workdir, tmp_path, capsys):
+    def test_force_ml_exits_2_when_huggingface_missing(self, tmp_workdir, tmp_path, capsys):
         """--force-ml + missing huggingface_hub → exit 2, not fallback."""
+        import builtins
+        _orig_import = builtins.__import__
+
+        def _block_hf(name, *args, **kwargs):
+            if name == "huggingface_hub":
+                raise ImportError("No huggingface_hub (test simulation)")
+            return _orig_import(name, *args, **kwargs)
+
         from gitreins.cli import cmd_security_scan
         args = _make_args(force_ml=True)
-        with patch("gitreins.cli.get_workdir", return_value=tmp_workdir):
-            with pytest.raises(SystemExit) as exc:
-                cmd_security_scan(args)
+        with patch("builtins.__import__", side_effect=_block_hf):
+            with patch("gitreins.cli.get_workdir", return_value=tmp_workdir):
+                with pytest.raises(SystemExit) as exc:
+                    cmd_security_scan(args)
         assert exc.value.code == 2
         err = capsys.readouterr().err
         # Should mention at least one missing dep name.
