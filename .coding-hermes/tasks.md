@@ -2269,3 +2269,34 @@ Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). Guard PASS (all 
 - **Recommendation:** Project has been in zero-gap idle for ~48 hours across 10+ ticks. Only open item (GR-099) permanently blocked by upstream deps. Strongly recommend pausing this foreman cron.
 
 **Guard:** PASS (all 4 ✓). **CI:** 5/5 green. **Hilo:** 650 edges, 81 files.
+
+## [ ] GR-117: Antares CVE localization guard — optional Tier 1 security scanner
+- **Priority:** high
+- **Model:** local (Antares-1B via ONNX/transformers, no API)
+- **Source:** Cisco Foundation AI — open-weight 1B model purpose-built for vulnerability localization (2026-07-21 release)
+- **Goal:** Add an optional `security_scan` guard that runs Antares locally on staged files, mapping known CVE patterns to code locations. Runs entirely offline — no cloud, no API key, no token costs.
+
+### What Antares is
+- **350M + 1B parameter** models trained to localize known CVEs in source code
+- **Apache 2.0 license** — open-weight on Hugging Face (`fdtn-ai/antares-1b`)
+- **Runs on CPU** — compact enough for pre-commit hooks (50-200 line diffs in seconds)
+- **Outperforms** models 10-50x its size at this specific task
+- **3B model** coming soon
+
+### Where it fits in GitReins
+| Current Guard | What it catches | Gap |
+|---|---|---|
+| gitleaks (secrets) | Regex: API keys, tokens, passwords | Pattern-based only |
+| CodeRabbit (review) | LLM: bugs, anti-patterns, logic issues | General, not CVE-aware |
+| **Antares (NEW)** | **CVE → source line mapping** | **Fills the gap** |
+
+### Subtasks
+
+- [ ] **GR-117a:** Model loader — `engine/antares.py` with ONNX Runtime or transformers backend. Download model on first use (`~/.cache/gitreins/antares-1b/`). Auto-detect CPU/GPU. Cache loaded model in memory.
+- [ ] **GR-117b:** CVE feed — pull from NVD API or GitHub Advisory Database. Cache locally. Configurable `security_scan.cve_source` (nvd|github|both).
+- [ ] **GR-117c:** Scanner — feed staged files + CVE descriptions to model. Output `AntaresFinding` dataclass: file, line, cve_id, confidence (0-1), description. Configurable `min_confidence`.
+- [ ] **GR-117d:** Guard integration — add to `GuardManager`. New step: secrets → lint → tests → lsp → static_analysis → security_scan.
+- [ ] **GR-117e:** Config — `security_scan.enabled` (default false), `security_scan.model` (antares-1b|antares-350m), `security_scan.min_confidence` (0.7), `security_scan.cve_source` (nvd|github).
+- [ ] **GR-117f:** CLI — `gitreins security-scan` standalone command. `gitreins init` offers setup.
+- [ ] **GR-117g:** Tests — mock model responses + integration with real model download.
+- [ ] **GR-117h:** Docs — install guide, CVE feed setup, model size, example output.
