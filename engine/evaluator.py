@@ -1284,10 +1284,12 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         self, regex: str, file_glob: str, grep_path: str
     ) -> dict:
         """Search using GNU grep (slower than rg, faster than Python)."""
-        cmd = [grep_path, "-rnI", "--include=*",
+        cmd = [grep_path, "-rnI", "--exclude-dir=__pycache__",
+               "--include=*",
                "-e", regex, "."]
         if file_glob != "*":
             cmd = [grep_path, "-rnI",
+                   "--exclude-dir=__pycache__",
                    f"--include={file_glob}",
                    "-e", regex, "."]
         try:

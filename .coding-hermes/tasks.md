@@ -2627,3 +2627,46 @@ Ran full 11-point audit + discovery sweep. Board all [x] except GR-099 (BLOCKED 
 ## [x] GR-125: DEPS — Sync gitreins venv 0.10.2→0.11.0 with source
 
 ## [x] NEVER-DONE — Run 11-point never-done audit (Tick 63)
+
+---
+
+## Phase: Never-Done Audit — 2026-07-23 Tick 64 (PRODUCTIVE)
+
+Ran full 11-point audit + discovery sweep. Board all [x] except GR-099 (BLOCKED — pydantic->mcp constraint chain) and GR-118 (BLOCKED — Tirith mass-delete). Guard PASS (all 4 Tier 1). Found 1 gap: Tick 63 board-only commit (45fd09b) CI failed on `test_search_skips_dot_dirs` — pre-existing grep fallback flake in xdist CI. Root cause fixed: grep fallback in `engine/evaluator.py:_tool_search_pattern_grep` was missing `--exclude-dir=__pycache__`. Now excluded in both grep code paths.
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Spec Coverage | PASS | 11 spec files. 8 with "Last Updated: 2026-07-19". 3 template-style. Content current. Zero stale dates. |
+| 2 | Doc Coverage | PASS | README v0.10.2 (244L), CHANGELOG (282L), CONTRIBUTING (80L). All current. |
+| 3 | Test Coverage | PASS | Guard test step PASS (full suite). 1081 pass/7 skip. |
+| 4 | Package Upgrades | BLOCKED | pydantic-core 2.46.4 (GR-099). certifi 2026.7.22, sse-starlette 3.4.6, filelock 3.32.0, platformdirs 4.11.0, mcp 1.28.1. Only outdated: incompatible pydantic-core 2.47.0 + nvidia/cuda (Antares deps). |
+| 5 | Pitfalls | PASS | .gitleaks.toml + .gitleaksignore present. Guard secrets. |
+| 6 | Performance | PRE-EXISTING | xdist BlockingIOError in cron. Guard test completes. Known limitation. |
+| 7 | CLI/Guard | PASS | gitreins 0.11.0 (source). Ruff 0.16.0. Tier 1 PASS (secrets/lint/tests/lsp). |
+| 8 | CI/CD | FIXED | Tick 63 (45fd09b) failed on test_search_skips_dot_dirs flake. Root: grep fallback missing --exclude-dir=__pycache__. Fixed in GR-126. Prior 5 green. |
+| 9 | DuckBrain | PASS | 19+ keys in coding-hermes namespace. |
+| 10 | Quality | PASS | Ruff 0.16.0: 0 errors. Mypy: 0 errors on prod. static_analysis disabled (2150 pre-existing). |
+| 11 | Middle-out | PASS | Hilo: 471 edges, 86 files (9 langs). Stable. Orphan pattern normal. |
+
+### Fixes applied this tick
+
+| # | Task | Status | Detail |
+|---|------|--------|--------|
+| GR-126 | CI — Fix test_search_skips_dot_dirs flake (grep fallback missing --exclude-dir=__pycache__) | [x] | Added --exclude-dir=__pycache__ to both grep code paths in engine/evaluator.py. rg path already had it. |
+
+### Idle Tick Tracking
+- Consecutive idle ticks: **0** (RESET — productive: GR-126)
+- GR-099 remains BLOCKED (pydantic 2.13.4 → pydantic-core==2.46.4)
+- GR-118 remains BLOCKED (Tirith mass-delete — 4 temp files, gitignored, harmless)
+
+**Guard:** PASS (all 4). **CI:** Fixed (GR-126). **gitreins:** 0.11.0. **Hilo:** 471 edges, 86 files.
+
+## [x] GR-126: CI — Fix test_search_skips_dot_dirs flake (grep fallback missing __pycache__ exclude)
+- **Priority:** medium
+- **Source:** Never-Done Audit Tick 64 — CI check
+- **Root cause:** `_tool_search_pattern_grep` used bare `grep -rnI` without `--exclude-dir=__pycache__`. When ripgrep was unavailable in CI, grep fallback searched all dirs including `__pycache__/` created by xdist. The `rg` path already had `--glob "!__pycache__/**"`.
+- **Fix:** Added `--exclude-dir=__pycache__` to both grep code paths.
+- **Verification:** Test passes locally (1 passed, 0.46s). All 4 TestSearchPattern tests pass. Guard PASS.
+- **Files:** `engine/evaluator.py`
+
+## [x] NEVER-DONE — Run 11-point never-done audit (Tick 64)
