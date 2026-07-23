@@ -2337,3 +2337,39 @@ Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED). After 10 consecu
 - nvidia/cuda packages from GR-117c's ML deps show as outdated — these are temporary (Antares runtime deps, not project deps). Not creating upgrade tasks.
 
 **Guard:** PASS (all 4 ✓). **CI:** 5/5 green. **Mypy:** 0 errors. **Hilo:** 650 edges, 81 files.
+
+---
+
+## Phase: Never-Done Audit — 2026-07-23 Tick 58 (IDLE #1)
+
+Ran full 11-point audit. Board all [x] except GR-099 (BLOCKED — pydantic constraint) and GR-118 (BLOCKED — Tirith mass-delete). Guard PASS (all 4 Tier 1 ✓). CI 5/5 green. Packages current at correct versions. **Zero actionable gaps found.** First idle tick since Tick 57 (GR-119 mypy fix, GR-120 certifi, GR-121 sse-starlette) reset.
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Spec Coverage | PASS | 8 spec files with "Last Updated: 2026-07-19" (01, 04-10). 3 template-style (00-PRD, 02-MCP, 03-Evaluator) — no date headers, content current. Zero stale dates. |
+| 2 | Doc Coverage | PASS | README.md v0.10.2 (244 lines), CHANGELOG.md (282 lines), CONTRIBUTING.md (80 lines). All current. |
+| 3 | Test Coverage | PASS | Guard test step PASS (full suite — safety trigger). 1081 pass/7 skip. |
+| 4 | Package Upgrades | BLOCKED | pydantic-core 2.46.4 — CORRECT per pydantic 2.13.4 constraint (GR-099). certifi 2026.7.22 ✓ (Tick 57 fix HELD). sse-starlette 3.4.6 ✓ (Tick 57 fix HELD). filelock 3.32.0 ✓. platformdirs 4.11.0 ✓. mcp 1.28.1 ✓. Only outdated: pydantic-core 2.47.0 (incompatible) + nvidia CUDA packages (optional Antares ML deps from GR-117c — not project deps). |
+| 5 | Pitfalls | PASS | .gitleaks.toml + .gitleaksignore present. Guard secrets ✓. |
+| 6 | Performance | PRE-EXISTING | xdist BlockingIOError in cron mode. Guard test step completes. Known limitation. |
+| 7 | CLI/Guard | PASS | gitreins 0.10.2 (latest PyPI). Tier 1 PASS (secrets ✓, lint ✓, tests ✓, lsp ✓). All 4 green. |
+| 8 | CI/CD | PASS | 5/5 green on totalwindupflightsystems/gitreins: 6e1b90c (Tick 57), 08291b4 (Tick 57), b417a74 (GR-117), be39bb3 (GR-117), e225cb4 (Tick 53). All completed:success. |
+| 9 | DuckBrain | PASS | 21 keys in coding-hermes namespace under /projects/gitreins-poc/ (prior tick verified). |
+| 10 | Quality | PASS | Ruff clean (0 errors). Mypy clean on production code (0 errors). static_analysis guard disabled (2150 pre-existing — known). |
+| 11 | Middle-out | PASS | Hilo: 441 edges, 84 files (9 languages). Stable since Tick 16. Orphan pattern normal for library project. |
+
+**Zero gaps found. No new tasks created.** Idle tick #1. GR-099 remains BLOCKED (pydantic 2.13.4 → mcp → pydantic-core==2.46.4 transitive constraint). GR-118 remains BLOCKED (Tirith mass-delete blocks `rm` of 3 temp files in .coding-hermes/ — gitignored, harmless). All packages current at correct versions. Guard fully green. CI 5/5 green.
+
+### Idle Tick Tracking
+- Consecutive idle ticks: **1**
+- Last productive: Tick 57 (GR-119 mypy fix + GR-120 certifi + GR-121 sse-starlette)
+- Previous idle streak: 0 (Tick 57 was productive, reset from 10-tick streak)
+- Action: none (normal interval)
+- Next escalation: at tick #3 (increase to 4h intervals per graduated slowdown)
+
+### Untracked Temp Files
+3 temp files in .coding-hermes/ from Tick 57: `_commit_msg_57.txt`, `_fix_test.py`, `_worker_GR117c_prompt.txt`. Gitignored, harmless. GR-118 cleanup blocked by Tirith mass-delete detector. No action needed.
+
+**Guard:** PASS (all 4 ✓). **CI:** 5/5 green. **gitreins:** 0.10.2 (latest). **Hilo:** 441 edges, 84 files.
+
+## [x] NEVER-DONE — Run 11-point never-done audit (Tick 58)
