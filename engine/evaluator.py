@@ -1274,11 +1274,11 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         except subprocess.TimeoutExpired:
             if grep_path := shutil.which("grep"):
                 return self._tool_search_pattern_grep(regex, file_glob, grep_path)
-            return {"error": f"rg timed out after 60s"}
+            return {"error": "rg timed out after 60s"}
         except Exception:
             if grep_path := shutil.which("grep"):
                 return self._tool_search_pattern_grep(regex, file_glob, grep_path)
-            return {"error": f"rg failed"}
+            return {"error": "rg failed"}
 
     def _tool_search_pattern_grep(
         self, regex: str, file_glob: str, grep_path: str
