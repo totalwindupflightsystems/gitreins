@@ -21,6 +21,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 from dataclasses import dataclass, field
 
@@ -1217,7 +1218,92 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             return {"cmd": cmd, "error": str(e)}
 
     def _tool_search_pattern(self, regex: str, file_glob: str = "*") -> dict:
-        """Search the codebase for a regex pattern."""
+        """Search the codebase for a regex pattern using ripgrep (rg) with fallback."""
+        # Validate regex first — catch invalid patterns before shelling out
+        try:
+            re.compile(regex)
+        except re.error as e:
+            return {"error": f"Invalid regex: {e}", "matches": [], "count": 0}
+
+        # When file scope is restricted, use Python (rg can't filter by file list)
+        if self._allowed_files is not None:
+            return self._tool_search_pattern_python(regex, file_glob)
+
+        # ── Ripgrep primary path ──
+        if rg_path := shutil.which("rg"):
+            return self._tool_search_pattern_rg(regex, file_glob, rg_path)
+
+        # ── GNU grep fallback ──
+        if grep_path := shutil.which("grep"):
+            return self._tool_search_pattern_grep(regex, file_glob, grep_path)
+
+        # ── Pure Python last resort ──
+        return self._tool_search_pattern_python(regex, file_glob)
+
+    def _tool_search_pattern_rg(
+        self, regex: str, file_glob: str, rg_path: str
+    ) -> dict:
+        """Search using ripgrep (fast, respects .gitignore)."""
+        cmd = [rg_path, "--line-number", "--no-heading", "--smart-case",
+               "-e", regex,
+               "--glob", "!__pycache__/**",
+               "--glob", "!.git/**",
+               "--glob", "!venv/**",
+               "--glob", "!.venv/**",
+               "--glob", "!node_modules/**",
+               "--glob", "!.pytest_cache/**"]
+        if file_glob != "*":
+            cmd.extend(["--glob", file_glob])
+        # Restrict to allowed files scope
+        if self._allowed_files is not None:
+            # rg doesn't support file lists natively — filter post-hoc
+            pass
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=60,
+                cwd=self.workdir,
+            )
+            if result.returncode == 2 and "No files were searched" in result.stderr:
+                return {"matches": [], "count": 0}
+            if result.returncode > 1:
+                raise subprocess.CalledProcessError(result.returncode, cmd,
+                                                    result.stdout, result.stderr)
+            # rg returns 0=matches, 1=no matches, >1=error
+            lines = result.stdout.strip().split("\n") if result.stdout else []
+            return {"matches": lines[:200], "count": min(len(lines), 200)}
+        except subprocess.TimeoutExpired:
+            if grep_path := shutil.which("grep"):
+                return self._tool_search_pattern_grep(regex, file_glob, grep_path)
+            return {"error": f"rg timed out after 60s"}
+        except Exception:
+            if grep_path := shutil.which("grep"):
+                return self._tool_search_pattern_grep(regex, file_glob, grep_path)
+            return {"error": f"rg failed"}
+
+    def _tool_search_pattern_grep(
+        self, regex: str, file_glob: str, grep_path: str
+    ) -> dict:
+        """Search using GNU grep (slower than rg, faster than Python)."""
+        cmd = [grep_path, "-rnI", "--include=*",
+               "-e", regex, "."]
+        if file_glob != "*":
+            cmd = [grep_path, "-rnI",
+                   f"--include={file_glob}",
+                   "-e", regex, "."]
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=60,
+                cwd=self.workdir,
+            )
+            lines = result.stdout.strip().split("\n") if result.stdout else []
+            return {"matches": lines[:200], "count": min(len(lines), 200)}
+        except subprocess.TimeoutExpired:
+            return self._tool_search_pattern_python(regex, file_glob)
+        except Exception:
+            return self._tool_search_pattern_python(regex, file_glob)
+
+    def _tool_search_pattern_python(self, regex: str, file_glob: str = "*") -> dict:
+        """Pure Python search — last resort fallback (slow, no .gitignore)."""
         matches: list[str] = []
         try:
             pattern = re.compile(regex)

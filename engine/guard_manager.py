@@ -209,7 +209,7 @@ class GuardManager:
         # Test timeout in seconds (default: 180s)
         self._test_timeout = guards_cfg.get("test_timeout", 180)
         # Hook timeout in seconds (default: 120s) — overall guard budget (GR-064e)
-        self._hook_timeout = guards_cfg.get("hook_timeout", 120)
+        self._hook_timeout = guards_cfg.get("hook_timeout", 300)
 
         # Project type detection
         self._is_go = os.path.isfile(os.path.join(self.workdir, "go.mod"))

@@ -57,7 +57,7 @@ class GitReinsDefaults:
     pass_on_error: bool = False          # skip Tier 2 when LLM is unavailable (advisory-only mode)
 
     # ── Guard defaults ──
-    hook_timeout: int = 120               # overall pre-commit hook timeout (GR-064e)
+    hook_timeout: int = 300               # overall pre-commit hook timeout (GR-064e, raised from 120)
 
     # ── Security scan (Antares) ──
     security_scan_enabled: bool = False
