@@ -42,6 +42,11 @@ dev = [
     "ruff>=0.5",
     "types-PyYAML>=6.0",
 ]
+antares = [
+    "huggingface_hub>=0.28",
+    "transformers>=4.50",
+    "onnxruntime>=1.19",
+]
 
 [project.scripts]
 gitreins = "gitreins.cli:main"
