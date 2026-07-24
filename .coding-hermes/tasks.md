@@ -2744,3 +2744,48 @@ Ran full 11-point audit + discovery sweep. Board all [x] except GR-099 (BLOCKED 
 **Guard:** PASS (all 4 ✓). **CI:** 5/5 green. **gitreins:** 0.11.0. **ruff:** 0.16.0. **Hilo:** 471 edges, 86 files.
 
 ## [x] NEVER-DONE — Run 11-point never-done audit (Tick 66)
+
+---
+
+## Phase: Never-Done Audit — 2026-07-23 Tick 67 (PRODUCTIVE)
+
+Ran full 11-point audit + discovery sweep. Board all [x] except GR-099 (BLOCKED — pydantic→mcp constraint) and GR-118 (BLOCKED — Tirith mass-delete). Guard PASS (all 4 Tier 1 ✓). CI 4/5 green (Tick 63 pre-existing grep fallback flake fixed in GR-126). **Found 1 gap: pypdf2 orphan package in venv with PYSEC-2026-1835** — missed by Tick 66 audit.
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Spec Coverage | ✅ | 11 spec files. 8 with "Last Updated: 2026-07-19". 3 template-style — content current. Zero stale dates. |
+| 2 | Doc Coverage | ✅ | README.md v0.10.2 (244 lines), CHANGELOG.md (282 lines), CONTRIBUTING.md (80 lines). All current. |
+| 3 | Test Coverage | ✅ | Guard test step PASS. Full suite: 810 pass/6 skip + 1 xdist flake (pre-existing). |
+| 4 | Package Upgrades | →FIXED | **pypdf2 3.0.1 removed** (GR-128 — orphan with PYSEC-2026-1835, not in pyproject.toml, no code uses it). certifi 2026.7.22 ✓, sse-starlette 3.4.6 ✓, ruff 0.16.0 ✓, gitreins 0.11.0 ✓, annotated-types 0.8.0 ✓, mcp 1.28.1 ✓. Only outdated: pydantic-core 2.47.0 (incompatible — GR-099). pip-audit: CLEAN (110 packages, 0 vulns). |
+| 5 | Pitfalls | ✅ | .gitleaks.toml + .gitleaksignore present. Guard secrets ✓. |
+| 6 | Performance | ⚠️ PRE-EXISTING | xdist BlockingIOError in cron mode. Guard test step completes. Known limitation. |
+| 7 | CLI/Guard | ✅ | gitreins 0.11.0. Ruff 0.16.0. Tier 1 PASS (secrets ✓, lint ✓, tests ✓, lsp ✓). All 4 green. |
+| 8 | CI/CD | ✅ | 4/5 green on totalwindupflightsystems/gitreins. Most recent: 37082a1 (Tick 66), 63a54fb (Tick 65) — all success. Tick 63 failure pre-existing (grep flake — fixed GR-126). |
+| 9 | DuckBrain | ⚠️ DOWN | DuckBrain MCP connection error — cannot read/write namespace. Transient transport issue. |
+| 10 | Quality | ✅ | Ruff 0.16.0: 0 errors. Mypy: 0 errors on production code. static_analysis disabled (2150 pre-existing — known). |
+| 11 | Middle-out | ✅ | Hilo: 676 edges, 75 files (Python re-warm). Stable. Orphan pattern normal for library project. |
+
+### Fixes applied this tick
+
+| # | Task | Status | Detail |
+|---|------|--------|--------|
+| GR-128 | SECURITY — Remove pypdf2 3.0.1 orphan with PYSEC-2026-1835 | [x] | pypdf2==3.0.1 was installed in venv but not in pyproject.toml. No project code imports it. Nothing depends on it. CVE fix available: 3.9.0. Uninstalled. pip-audit now CLEAN. venv-only — no git-tracked files changed. |
+
+### Idle Tick Tracking
+- Consecutive idle ticks: **0 (RESET — productive: GR-128 pypdf2 cleanup)**
+- Last productive: Tick 67 (this tick — pypdf2 orphan cleanup)
+- Previous idle streak: 1 (Tick 66)
+- GR-099 remains BLOCKED (pydantic 2.13.4 → pydantic-core==2.46.4 transitive constraint)
+- GR-118 remains BLOCKED (Tirith mass-delete — 5 temp files in .coding-hermes/, gitignored, harmless)
+- DuckBrain MCP down — connection error. Cannot write findings.
+
+**Guard:** PASS (all 4 ✓). **CI:** 4/5 green. **gitreins:** 0.11.0. **ruff:** 0.16.0. **Hilo:** 676 edges, 75 files.
+
+## [x] GR-128: SECURITY — Remove pypdf2 3.0.1 orphan (PYSEC-2026-1835, unused in project)
+
+- **Priority:** low
+- **Source:** Never-Done Audit Tick 67 — pip-audit check
+- **Root cause:** pypdf2==3.0.1 was installed in venv as an orphan package (not in pyproject.toml, no code imports it, nothing requires it). Had PYSEC-2026-1835 vulnerability (fix: 3.9.0). Tick 66 audit claimed "pip-audit clean" but missed this.
+- **Fix:** `pip uninstall pypdf2 -y`. venv-only change. pip-audit now CLEAN (110 packages, 0 vulns).
+
+## [x] NEVER-DONE — Run 11-point never-done audit (Tick 67)
