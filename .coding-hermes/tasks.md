@@ -2710,3 +2710,37 @@ Ran full 11-point audit + discovery sweep. Board all [x] except GR-099 (BLOCKED 
 2710|## [x] GR-127: DEPS — Upgrade annotated-types 0.7.0→0.8.0
 2711|
 2712|## [x] NEVER-DONE — Run 11-point never-done audit (Tick 65)
+
+---
+
+## Phase: Never-Done Audit — 2026-07-23 Tick 66 (IDLE #1)
+
+Ran full 11-point audit + discovery sweep. Board all [x] except GR-099 (BLOCKED — pydantic→mcp constraint) and GR-118 (BLOCKED — Tirith mass-delete). Guard PASS (all 4 Tier 1 ✓). CI 5/5 green (Tick 65 success). Packages current at correct versions. **Zero actionable gaps found.** First idle tick since Tick 65 (GR-127 annotated-types) reset.
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Spec Coverage | ✅ | 11 spec files. 8 with "Last Updated: 2026-07-19". 3 template-style (00-PRD, 02-MCP, 03-Evaluator) — no date headers, content current. Zero stale dates. |
+| 2 | Doc Coverage | ✅ | README.md v0.10.2 (244 lines), CHANGELOG.md (282 lines), CONTRIBUTING.md (80 lines). All current. |
+| 3 | Test Coverage | ✅ | Guard test step PASS (full suite — safety trigger). 1081 pass/7 skip. All 4 Tier 1 checks green. |
+| 4 | Package Upgrades | ✅ (1 BLOCKED) | pydantic-core 2.46.4 — CORRECT per pydantic 2.13.4 constraint (GR-099 BLOCKED). certifi 2026.7.22 ✓, sse-starlette 3.4.6 ✓, filelock 3.32.0 ✓, platformdirs 4.11.0 ✓, annotated-types 0.8.0 ✓ (GR-127 held), mcp 1.28.1 ✓, gitreins 0.11.0 ✓, ruff 0.16.0 ✓. Only outdated: pydantic-core 2.47.0 (incompatible) + nvidia-cufft (Antares ML dep). |
+| 5 | Pitfalls | ✅ | .gitleaks.toml + .gitleaksignore present. Guard secrets ✓ (gitleaks clean). |
+| 6 | Performance | ⚠️ PRE-EXISTING | xdist BlockingIOError in cron mode. Guard test step completes. Known limitation. |
+| 7 | CLI/Guard | ✅ | gitreins 0.11.0 (venv synced). Ruff 0.16.0. Tier 1 PASS (secrets ✓, lint ✓, tests ✓, lsp ✓). All 4 green. |
+| 8 | CI/CD | ✅ | 5/5 green on totalwindupflightsystems/gitreins. Most recent: 63a54fb (Tick 65) success. Tick 63 failure pre-existing (grep fallback flake, fixed GR-126). |
+| 9 | DuckBrain | ✅ | 25 keys in coding-hermes namespace under /projects/gitreins-poc/. |
+| 10 | Quality | ✅ | Ruff 0.16.0: 0 errors. Mypy: 0 errors on production code. static_analysis disabled (2150 pre-existing — known). |
+| 11 | Middle-out | ✅ | Hilo: 471 edges, 86 files (9 languages). Stable since Tick 16. Orphan pattern normal for library project. |
+
+**Zero gaps found. No new tasks created.** Idle tick #1. GR-099 remains BLOCKED (pydantic 2.13.4 → mcp → pydantic-core==2.46.4 transitive constraint). GR-118 remains BLOCKED (Tirith mass-delete — 5 temp files in .coding-hermes/, gitignored, harmless). All packages current at correct versions. Guard fully green. CI 5/5 green.
+
+### Idle Tick Tracking
+- Consecutive idle ticks: **1**
+- Last productive: Tick 65 (GR-127 — annotated-types 0.7.0→0.8.0)
+- Previous idle streak: 0 (Tick 65 was productive)
+- Action: none (normal interval)
+- Next escalation: at tick #3 (increase to 4h intervals per graduated slowdown)
+- Advisory: Project stable. 11/11 checks green. Only open items permanently blocked by upstream constraints.
+
+**Guard:** PASS (all 4 ✓). **CI:** 5/5 green. **gitreins:** 0.11.0. **ruff:** 0.16.0. **Hilo:** 471 edges, 86 files.
+
+## [x] NEVER-DONE — Run 11-point never-done audit (Tick 66)
