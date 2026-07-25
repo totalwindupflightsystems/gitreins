@@ -1,6 +1,7 @@
 """
 Tests for evaluator's read_static_analysis tool (AC-160, sa-eval-tests).
 """
+
 import os
 import yaml
 from unittest.mock import patch, MagicMock
@@ -32,13 +33,22 @@ class TestReadStaticAnalysis:
     # Test 3: mypy configured with diagnostics
     @patch("engine.static_analysis.run_static_check")
     def test_mypy_configured(self, mock_run, evaluator, tmp_workdir):
-        self._write_config(tmp_workdir, {
-            "evaluator": {"static_analysis_diagnostics": True},
-            "guards": {"static_analysis_tools": {"python": ["mypy"]}},
-        })
+        self._write_config(
+            tmp_workdir,
+            {
+                "evaluator": {"static_analysis_diagnostics": True},
+                "guards": {"static_analysis_tools": {"python": ["mypy"]}},
+            },
+        )
         mock_run.return_value = [
-            {"file": "main.py", "line": 10, "severity": "error",
-             "message": "Incompatible types", "code": "", "tool": "mypy"},
+            {
+                "file": "main.py",
+                "line": 10,
+                "severity": "error",
+                "message": "Incompatible types",
+                "code": "",
+                "tool": "mypy",
+            },
         ]
         result = evaluator._tool_read_static_analysis()
         assert result["count"] == 1
@@ -50,10 +60,13 @@ class TestReadStaticAnalysis:
     # Test 4: path arg scopes to specific directory
     @patch("engine.static_analysis.run_static_check")
     def test_with_path_arg(self, mock_run, evaluator, tmp_workdir):
-        self._write_config(tmp_workdir, {
-            "evaluator": {"static_analysis_diagnostics": True},
-            "guards": {"static_analysis_tools": {"python": ["mypy"]}},
-        })
+        self._write_config(
+            tmp_workdir,
+            {
+                "evaluator": {"static_analysis_diagnostics": True},
+                "guards": {"static_analysis_tools": {"python": ["mypy"]}},
+            },
+        )
         subdir = os.path.join(tmp_workdir, "src")
         os.makedirs(subdir)
         mock_run.return_value = []
@@ -64,10 +77,13 @@ class TestReadStaticAnalysis:
     # Test 5: tool failure handled gracefully
     @patch("engine.static_analysis.run_static_check")
     def test_tool_failure(self, mock_run, evaluator, tmp_workdir):
-        self._write_config(tmp_workdir, {
-            "evaluator": {"static_analysis_diagnostics": True},
-            "guards": {"static_analysis_tools": {"python": ["mypy"]}},
-        })
+        self._write_config(
+            tmp_workdir,
+            {
+                "evaluator": {"static_analysis_diagnostics": True},
+                "guards": {"static_analysis_tools": {"python": ["mypy"]}},
+            },
+        )
         mock_run.side_effect = RuntimeError("mypy crashed")
         result = evaluator._tool_read_static_analysis()
         assert result["count"] == 1
@@ -80,8 +96,11 @@ class TestReadStaticAnalysis:
     def test_tool_definition(self):
         tool_names = [t["function"]["name"] for t in EVALUATOR_TOOLS]
         assert "read_static_analysis" in tool_names
-        func = [t["function"] for t in EVALUATOR_TOOLS
-                if t["function"]["name"] == "read_static_analysis"][0]
+        func = [
+            t["function"]
+            for t in EVALUATOR_TOOLS
+            if t["function"]["name"] == "read_static_analysis"
+        ][0]
         assert func["name"] == "read_static_analysis"
         assert "path" in func["parameters"]["properties"]
         assert func["parameters"]["properties"]["path"]["type"] == "string"
@@ -102,11 +121,13 @@ class TestReadStaticAnalysis:
             return mock_response
 
         with patch.object(evaluator.llm, "chat", capture_chat):
-            evaluator.evaluate({
-                "id": "test-1",
-                "title": "Test",
-                "criteria": ["criterion 1"],
-            })
+            evaluator.evaluate(
+                {
+                    "id": "test-1",
+                    "title": "Test",
+                    "criteria": ["criterion 1"],
+                }
+            )
 
         assert len(captured_tools) >= 1
         tool_names = [t["function"]["name"] for t in captured_tools[0]]
@@ -115,13 +136,22 @@ class TestReadStaticAnalysis:
     # Test 8: pyright configured via mock
     @patch("engine.static_analysis.run_static_check")
     def test_pyright_configured(self, mock_run, evaluator, tmp_workdir):
-        self._write_config(tmp_workdir, {
-            "evaluator": {"static_analysis_diagnostics": True},
-            "guards": {"static_analysis_tools": {"python": ["pyright"]}},
-        })
+        self._write_config(
+            tmp_workdir,
+            {
+                "evaluator": {"static_analysis_diagnostics": True},
+                "guards": {"static_analysis_tools": {"python": ["pyright"]}},
+            },
+        )
         mock_run.return_value = [
-            {"file": "app.py", "line": 5, "severity": "warning",
-             "message": "Type not declared", "code": "", "tool": "pyright"},
+            {
+                "file": "app.py",
+                "line": 5,
+                "severity": "warning",
+                "message": "Type not declared",
+                "code": "",
+                "tool": "pyright",
+            },
         ]
         result = evaluator._tool_read_static_analysis()
         assert result["count"] == 1
@@ -132,10 +162,13 @@ class TestReadStaticAnalysis:
     # Test 9: return structure has correct keys
     @patch("engine.static_analysis.run_static_check")
     def test_return_structure(self, mock_run, evaluator, tmp_workdir):
-        self._write_config(tmp_workdir, {
-            "evaluator": {"static_analysis_diagnostics": True},
-            "guards": {"static_analysis_tools": {"python": ["mypy"]}},
-        })
+        self._write_config(
+            tmp_workdir,
+            {
+                "evaluator": {"static_analysis_diagnostics": True},
+                "guards": {"static_analysis_tools": {"python": ["mypy"]}},
+            },
+        )
         mock_run.return_value = []
         result = evaluator._tool_read_static_analysis()
         assert isinstance(result, dict)
@@ -149,15 +182,34 @@ class TestReadStaticAnalysis:
     # Test 10: multiple tools configured
     @patch("engine.static_analysis.run_static_check")
     def test_multiple_tools(self, mock_run, evaluator, tmp_workdir):
-        self._write_config(tmp_workdir, {
-            "evaluator": {"static_analysis_diagnostics": True},
-            "guards": {"static_analysis_tools": {"python": ["mypy", "pyright"]}},
-        })
+        self._write_config(
+            tmp_workdir,
+            {
+                "evaluator": {"static_analysis_diagnostics": True},
+                "guards": {"static_analysis_tools": {"python": ["mypy", "pyright"]}},
+            },
+        )
         mock_run.side_effect = [
-            [{"file": "a.py", "line": 1, "severity": "error",
-              "message": "err1", "code": "", "tool": "mypy"}],
-            [{"file": "b.py", "line": 2, "severity": "warning",
-              "message": "warn1", "code": "", "tool": "pyright"}],
+            [
+                {
+                    "file": "a.py",
+                    "line": 1,
+                    "severity": "error",
+                    "message": "err1",
+                    "code": "",
+                    "tool": "mypy",
+                }
+            ],
+            [
+                {
+                    "file": "b.py",
+                    "line": 2,
+                    "severity": "warning",
+                    "message": "warn1",
+                    "code": "",
+                    "tool": "pyright",
+                }
+            ],
         ]
         result = evaluator._tool_read_static_analysis()
         assert result["count"] == 2

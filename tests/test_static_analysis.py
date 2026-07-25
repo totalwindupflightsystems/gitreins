@@ -38,8 +38,8 @@ if _local_bin not in os.environ.get("PATH", ""):
 @pytest.fixture
 def mypy_output_errors() -> str:
     return (
-        "main.py:9: error: Argument 1 to \"get_user\" has incompatible "
-        "type \"str\"; expected \"int\"  [arg-type]\n"
+        'main.py:9: error: Argument 1 to "get_user" has incompatible '
+        'type "str"; expected "int"  [arg-type]\n'
         "main.py:15: warning: Returning Any from function declared "
         'to return "str"  [no-any-return]\n'
         "main.py:22: note: By default the bodies of untyped functions "
@@ -58,8 +58,7 @@ def pyright_json_output() -> dict:
             {
                 "file": "/tmp/workdir/main.py",
                 "severity": "error",
-                "message": 'Argument of type "str" cannot be assigned '
-                    'to parameter of type "int"',
+                "message": 'Argument of type "str" cannot be assigned to parameter of type "int"',
                 "range": {
                     "start": {"line": 8, "character": 12},
                     "end": {"line": 8, "character": 20},
@@ -126,7 +125,7 @@ def phpstan_output() -> dict:
                     {
                         "line": 27,
                         "message": "Parameter #1 $id of class App\\User "
-                            "constructor expects int, string given.",
+                        "constructor expects int, string given.",
                     }
                 ],
             }
@@ -164,7 +163,7 @@ def staticcheck_output_errors() -> str:
         "main.go:10:2: error strings should not be capitalized (ST1005)\n"
         "main.go:15:5: should omit nil check; len() for nil slices is defined as zero (S1009)\n"
         "main.go:23:7: func unusedHelper is unused (U1000)\n"
-        "helpers.go:8:1: package comment should be of the form \"Package helpers ...\" (ST1000)\n"
+        'helpers.go:8:1: package comment should be of the form "Package helpers ..." (ST1000)\n'
     )
 
 
@@ -176,12 +175,18 @@ def clippy_output() -> str:
             "reason": "compiler-message",
             "message": {
                 "rendered": "warning: unneeded `return` statement",
-                "spans": [{
-                    "file_name": "src/main.rs", "byte_start": 100, "byte_end": 110,
-                    "line_start": 5, "line_end": 5,
-                    "column_start": 1, "column_end": 10,
-                    "is_primary": True,
-                }],
+                "spans": [
+                    {
+                        "file_name": "src/main.rs",
+                        "byte_start": 100,
+                        "byte_end": 110,
+                        "line_start": 5,
+                        "line_end": 5,
+                        "column_start": 1,
+                        "column_end": 10,
+                        "is_primary": True,
+                    }
+                ],
                 "level": "warning",
                 "code": {"code": "clippy::needless_return"},
                 "message": "unneeded `return` statement",
@@ -191,12 +196,18 @@ def clippy_output() -> str:
             "reason": "compiler-message",
             "message": {
                 "rendered": "error: unused variable: `x`",
-                "spans": [{
-                    "file_name": "src/lib.rs", "byte_start": 50, "byte_end": 51,
-                    "line_start": 10, "line_end": 10,
-                    "column_start": 9, "column_end": 10,
-                    "is_primary": True,
-                }],
+                "spans": [
+                    {
+                        "file_name": "src/lib.rs",
+                        "byte_start": 50,
+                        "byte_end": 51,
+                        "line_start": 10,
+                        "line_end": 10,
+                        "column_start": 9,
+                        "column_end": 10,
+                        "is_primary": True,
+                    }
+                ],
                 "level": "error",
                 "code": {"code": "unused_variables"},
                 "message": "unused variable: `x`",
@@ -216,8 +227,12 @@ class TestStaticDiag:
 
     def test_static_diag_creation(self):
         d = StaticDiag(
-            file="test.py", line=5, severity="error",
-            message="Undefined variable", code="E001", tool="mypy",
+            file="test.py",
+            line=5,
+            severity="error",
+            message="Undefined variable",
+            code="E001",
+            tool="mypy",
         )
         assert d.file == "test.py"
         assert d.line == 5
@@ -233,8 +248,12 @@ class TestStaticDiag:
 
     def test_static_diag_to_dict(self):
         d = StaticDiag(
-            file="f.py", line=3, severity="warning",
-            message="unused import", code="F401", tool="pyright",
+            file="f.py",
+            line=3,
+            severity="warning",
+            message="unused import",
+            code="F401",
+            tool="pyright",
         )
         result = d.to_dict()
         assert result["file"] == "f.py"
@@ -246,8 +265,12 @@ class TestStaticDiag:
 
     def test_static_diag_serialization_roundtrip(self):
         d1 = StaticDiag(
-            file="a.py", line=10, severity="error",
-            message="bad", code="F401", tool="mypy",
+            file="a.py",
+            line=10,
+            severity="error",
+            message="bad",
+            code="F401",
+            tool="mypy",
         )
         d2 = StaticDiag(**d1.to_dict())
         assert d1 == d2
@@ -363,7 +386,7 @@ class TestParseMypy:
         assert diags == []
 
     def test_parse_mypy_with_code(self):
-        text = "app.py:5: error: Incompatible return value type (got \"str\", expected \"int\")  [return-value]\n"
+        text = 'app.py:5: error: Incompatible return value type (got "str", expected "int")  [return-value]\n'
         diags = _parse_mypy(text)
         assert len(diags) == 1
         assert diags[0].code == "return-value"
@@ -746,16 +769,18 @@ class TestParseClippy:
 
     def test_parse_clippy_no_spans(self):
         """Message with no spans uses rendered text with unknown file."""
-        msg = json.dumps({
-            "reason": "compiler-message",
-            "message": {
-                "rendered": "error: could not compile `foo`",
-                "level": "error",
-                "code": {"code": "E0001"},
-                "message": "could not compile `foo`",
-                "spans": [],
-            },
-        })
+        msg = json.dumps(
+            {
+                "reason": "compiler-message",
+                "message": {
+                    "rendered": "error: could not compile `foo`",
+                    "level": "error",
+                    "code": {"code": "E0001"},
+                    "message": "could not compile `foo`",
+                    "spans": [],
+                },
+            }
+        )
         diags = _parse_clippy_json(msg)
         assert len(diags) == 1
         assert diags[0].file == "unknown"
@@ -767,17 +792,29 @@ class TestParseEslint:
 
     def test_parse_eslint_two_diagnostics(self):
         """Two messages across one file produce two diagnostics."""
-        sample = json.dumps([{
-            "filePath": "src/app.js",
-            "messages": [
-                {"ruleId": "no-unused-vars", "severity": 2,
-                 "message": "'x' is assigned but never used",
-                 "line": 5, "column": 10},
-                {"ruleId": "semi", "severity": 1,
-                 "message": "Missing semicolon",
-                 "line": 10, "column": 1},
+        sample = json.dumps(
+            [
+                {
+                    "filePath": "src/app.js",
+                    "messages": [
+                        {
+                            "ruleId": "no-unused-vars",
+                            "severity": 2,
+                            "message": "'x' is assigned but never used",
+                            "line": 5,
+                            "column": 10,
+                        },
+                        {
+                            "ruleId": "semi",
+                            "severity": 1,
+                            "message": "Missing semicolon",
+                            "line": 10,
+                            "column": 1,
+                        },
+                    ],
+                }
             ]
-        }])
+        )
         diags = _parse_eslint_json(json.loads(sample))
         assert len(diags) == 2
 
@@ -797,27 +834,47 @@ class TestParseEslint:
 
     def test_parse_eslint_no_messages(self):
         """File with no messages produces no diagnostics."""
-        sample = json.dumps([{
-            "filePath": "src/app.js",
-            "messages": [],
-        }])
+        sample = json.dumps(
+            [
+                {
+                    "filePath": "src/app.js",
+                    "messages": [],
+                }
+            ]
+        )
         diags = _parse_eslint_json(json.loads(sample))
         assert diags == []
 
     def test_parse_eslint_multi_file(self):
         """Diagnostics from multiple files are flattened."""
-        sample = json.dumps([
-            {"filePath": "a.js", "messages": [
-                {"ruleId": "no-console", "severity": 1,
-                 "message": "Unexpected console statement",
-                 "line": 1, "column": 1},
-            ]},
-            {"filePath": "b.js", "messages": [
-                {"ruleId": "no-undef", "severity": 2,
-                 "message": "'foo' is not defined",
-                 "line": 3, "column": 5},
-            ]},
-        ])
+        sample = json.dumps(
+            [
+                {
+                    "filePath": "a.js",
+                    "messages": [
+                        {
+                            "ruleId": "no-console",
+                            "severity": 1,
+                            "message": "Unexpected console statement",
+                            "line": 1,
+                            "column": 1,
+                        },
+                    ],
+                },
+                {
+                    "filePath": "b.js",
+                    "messages": [
+                        {
+                            "ruleId": "no-undef",
+                            "severity": 2,
+                            "message": "'foo' is not defined",
+                            "line": 3,
+                            "column": 5,
+                        },
+                    ],
+                },
+            ]
+        )
         diags = _parse_eslint_json(json.loads(sample))
         assert len(diags) == 2
         assert diags[0].file == "a.js"
@@ -829,8 +886,7 @@ class TestBuildCommand:
 
     def test_build_command_mypy(self):
         cmd = _build_command("mypy", "/usr/bin/mypy", "/tmp/work")
-        assert cmd == ["/usr/bin/mypy", "--no-error-summary",
-                        "--explicit-package-bases", "."]
+        assert cmd == ["/usr/bin/mypy", "--no-error-summary", "--explicit-package-bases", "."]
 
     def test_build_command_pyright(self):
         cmd = _build_command("pyright", "/usr/bin/pyright", "/tmp/work")
@@ -842,13 +898,17 @@ class TestBuildCommand:
 
     def test_build_command_sqlfluff(self):
         cmd = _build_command("sqlfluff", "/usr/bin/sqlfluff", "/tmp/work")
-        assert cmd == ["/usr/bin/sqlfluff", "lint", "--format", "json",
-                        "/tmp/work"]
+        assert cmd == ["/usr/bin/sqlfluff", "lint", "--format", "json", "/tmp/work"]
 
     def test_build_command_phpstan(self):
         cmd = _build_command("phpstan", "/usr/bin/phpstan", "/tmp/work")
-        assert cmd == ["/usr/bin/phpstan", "analyse",
-                        "--error-format=json", "--no-progress", "/tmp/work"]
+        assert cmd == [
+            "/usr/bin/phpstan",
+            "analyse",
+            "--error-format=json",
+            "--no-progress",
+            "/tmp/work",
+        ]
 
     def test_build_command_cppcheck(self):
         cmd = _build_command("cppcheck", "/usr/bin/cppcheck", "/tmp/work")
@@ -889,10 +949,8 @@ class TestRunStaticCheck:
         mock_result.stdout = mypy_output_errors
         mock_result.stderr = ""
 
-        with patch("engine.static_analysis.find_tool",
-                   return_value="/usr/bin/mypy"):
-            with patch("engine.static_analysis.subprocess.run",
-                       return_value=mock_result):
+        with patch("engine.static_analysis.find_tool", return_value="/usr/bin/mypy"):
+            with patch("engine.static_analysis.subprocess.run", return_value=mock_result):
                 result = run_static_check("mypy", "/tmp/workdir")
 
         assert len(result) == 3
@@ -909,10 +967,8 @@ class TestRunStaticCheck:
         mock_result.stdout = json.dumps(pyright_json_output)
         mock_result.stderr = ""
 
-        with patch("engine.static_analysis.find_tool",
-                   return_value="/usr/bin/pyright"):
-            with patch("engine.static_analysis.subprocess.run",
-                       return_value=mock_result):
+        with patch("engine.static_analysis.find_tool", return_value="/usr/bin/pyright"):
+            with patch("engine.static_analysis.subprocess.run", return_value=mock_result):
                 result = run_static_check("pyright", "/tmp/workdir")
 
         assert len(result) == 2
@@ -931,29 +987,27 @@ class TestRunStaticCheck:
 
     def test_run_static_check_timeout(self):
         """When subprocess times out, returns empty list."""
-        with patch("engine.static_analysis.find_tool",
-                   return_value="/usr/bin/mypy"):
-            with patch("engine.static_analysis.subprocess.run",
-                       side_effect=subprocess.TimeoutExpired(
-                           cmd="mypy", timeout=120)):
+        with patch("engine.static_analysis.find_tool", return_value="/usr/bin/mypy"):
+            with patch(
+                "engine.static_analysis.subprocess.run",
+                side_effect=subprocess.TimeoutExpired(cmd="mypy", timeout=120),
+            ):
                 result = run_static_check("mypy", "/tmp/workdir")
         assert result == []
 
     def test_run_static_check_file_not_found(self):
         """When subprocess raises FileNotFoundError, returns empty list."""
-        with patch("engine.static_analysis.find_tool",
-                   return_value="/usr/bin/mypy"):
-            with patch("engine.static_analysis.subprocess.run",
-                       side_effect=FileNotFoundError):
+        with patch("engine.static_analysis.find_tool", return_value="/usr/bin/mypy"):
+            with patch("engine.static_analysis.subprocess.run", side_effect=FileNotFoundError):
                 result = run_static_check("mypy", "/tmp/workdir")
         assert result == []
 
     def test_run_static_check_generic_exception(self):
         """When subprocess raises generic exception, returns empty list."""
-        with patch("engine.static_analysis.find_tool",
-                   return_value="/usr/bin/mypy"):
-            with patch("engine.static_analysis.subprocess.run",
-                       side_effect=PermissionError("denied")):
+        with patch("engine.static_analysis.find_tool", return_value="/usr/bin/mypy"):
+            with patch(
+                "engine.static_analysis.subprocess.run", side_effect=PermissionError("denied")
+            ):
                 result = run_static_check("mypy", "/tmp/workdir")
         assert result == []
 
@@ -963,10 +1017,8 @@ class TestRunStaticCheck:
         mock_result.stdout = "not valid json"
         mock_result.stderr = ""
 
-        with patch("engine.static_analysis.find_tool",
-                   return_value="/usr/bin/pyright"):
-            with patch("engine.static_analysis.subprocess.run",
-                       return_value=mock_result):
+        with patch("engine.static_analysis.find_tool", return_value="/usr/bin/pyright"):
+            with patch("engine.static_analysis.subprocess.run", return_value=mock_result):
                 result = run_static_check("pyright", "/tmp/workdir")
         assert result == []
 
@@ -976,10 +1028,8 @@ class TestRunStaticCheck:
         mock_result.stdout = ""
         mock_result.stderr = sorbet_output_errors
 
-        with patch("engine.static_analysis.find_tool",
-                   return_value="/usr/bin/srb"):
-            with patch("engine.static_analysis.subprocess.run",
-                       return_value=mock_result):
+        with patch("engine.static_analysis.find_tool", return_value="/usr/bin/srb"):
+            with patch("engine.static_analysis.subprocess.run", return_value=mock_result):
                 result = run_static_check("sorbet", "/tmp/workdir")
 
         assert len(result) == 2
@@ -992,10 +1042,8 @@ class TestRunStaticCheck:
         mock_result.stdout = cppcheck_output_errors
         mock_result.stderr = ""
 
-        with patch("engine.static_analysis.find_tool",
-                   return_value="/usr/bin/cppcheck"):
-            with patch("engine.static_analysis.subprocess.run",
-                       return_value=mock_result):
+        with patch("engine.static_analysis.find_tool", return_value="/usr/bin/cppcheck"):
+            with patch("engine.static_analysis.subprocess.run", return_value=mock_result):
                 result = run_static_check("cppcheck", "/tmp/workdir")
 
         assert len(result) == 6
@@ -1010,10 +1058,8 @@ class TestRunStaticCheck:
         mock_result.stdout = staticcheck_output_errors
         mock_result.stderr = ""
 
-        with patch("engine.static_analysis.find_tool",
-                   return_value="/usr/bin/staticcheck"):
-            with patch("engine.static_analysis.subprocess.run",
-                       return_value=mock_result):
+        with patch("engine.static_analysis.find_tool", return_value="/usr/bin/staticcheck"):
+            with patch("engine.static_analysis.subprocess.run", return_value=mock_result):
                 result = run_static_check("staticcheck", "/tmp/workdir")
 
         assert len(result) == 4
@@ -1035,10 +1081,8 @@ class TestRunStaticCheck:
         mock_result.stdout = clippy_output
         mock_result.stderr = ""
 
-        with patch("engine.static_analysis.find_tool",
-                   return_value="/usr/bin/cargo"):
-            with patch("engine.static_analysis.subprocess.run",
-                       return_value=mock_result):
+        with patch("engine.static_analysis.find_tool", return_value="/usr/bin/cargo"):
+            with patch("engine.static_analysis.subprocess.run", return_value=mock_result):
                 result = run_static_check("clippy", "/tmp/workdir")
 
         assert len(result) == 2

@@ -31,7 +31,8 @@ logger = logging.getLogger("gitreins.antares")
 # in engine/config.py (UPDATE_CACHE_DIR = ~/.cache/gitreins/).
 _DEFAULT_CACHE_DIR = os.path.join(
     os.environ.get("HOME", os.path.expanduser("~")),
-    ".cache", "gitreins",
+    ".cache",
+    "gitreins",
 )
 
 # HuggingFace model id. Antares-1B is the FDTN-AI 1B-parameter model
@@ -249,16 +250,18 @@ class AntaresScanner:
             lowered = line.lower()
             for kw in _SIMULATED_KEYWORDS:
                 if kw.lower() in lowered:
-                    findings.append(AntaresFinding(
-                        file=rel,
-                        line=lineno,
-                        cve_id="CVE-SIMULATED",
-                        confidence=0.0,
-                        description=(
-                            f"Heuristic match on keyword '{kw}' — "
-                            "real ML inference pending GR-117c"
-                        ),
-                    ))
+                    findings.append(
+                        AntaresFinding(
+                            file=rel,
+                            line=lineno,
+                            cve_id="CVE-SIMULATED",
+                            confidence=0.0,
+                            description=(
+                                f"Heuristic match on keyword '{kw}' — "
+                                "real ML inference pending GR-117c"
+                            ),
+                        )
+                    )
                     # One finding per line keeps output readable.
                     break
         return findings
@@ -326,8 +329,7 @@ class AntaresScanner:
         assert tokenizer is not None and model is not None and torch is not None
 
         numbered_source = "\n".join(
-            f"{start_line + offset}: {line}"
-            for offset, line in enumerate(chunk_text.splitlines())
+            f"{start_line + offset}: {line}" for offset, line in enumerate(chunk_text.splitlines())
         )
         prompt = (
             "You are a source-code vulnerability localization engine. Analyze "
@@ -374,7 +376,7 @@ class AntaresScanner:
         payload: Any = None
         for match in re.finditer(r"[\[{]", response):
             try:
-                payload, _ = decoder.raw_decode(response[match.start():])
+                payload, _ = decoder.raw_decode(response[match.start() :])
                 break
             except json.JSONDecodeError:
                 continue
@@ -412,12 +414,14 @@ class AntaresScanner:
             ).strip()
             if not cve_id or not description:
                 continue
-            findings.append({
-                "cve_id": cve_id,
-                "line": line,
-                "confidence": confidence,
-                "description": description,
-            })
+            findings.append(
+                {
+                    "cve_id": cve_id,
+                    "line": line,
+                    "confidence": confidence,
+                    "description": description,
+                }
+            )
         return findings
 
     # ── Public scanning API ──────────────────────────────────────
@@ -453,8 +457,9 @@ class AntaresScanner:
             try:
                 ml_findings = self._scan_with_model(source)
             except (ImportError, RuntimeError, OSError, ValueError) as exc:
-                logger.warning("Antares ML inference unavailable for %s: %s",
-                               self._relpath(filepath), exc)
+                logger.warning(
+                    "Antares ML inference unavailable for %s: %s", self._relpath(filepath), exc
+                )
             else:
                 rel = self._relpath(filepath)
                 for finding in ml_findings:
@@ -492,9 +497,18 @@ class AntaresScanner:
 
         # Skip the same noise dirs as engine.dead_code.DeadCodeDetector.
         skip_dirs = {
-            ".git", "__pycache__", ".venv", "venv", "node_modules",
-            ".tox", ".eggs", "build", "dist", ".pytest_cache",
-            ".gitreins", "temporal-vector",
+            ".git",
+            "__pycache__",
+            ".venv",
+            "venv",
+            "node_modules",
+            ".tox",
+            ".eggs",
+            "build",
+            "dist",
+            ".pytest_cache",
+            ".gitreins",
+            "temporal-vector",
         }
         for root, dirs, filenames in os.walk(directory):
             dirs[:] = [d for d in dirs if d not in skip_dirs]
@@ -518,7 +532,9 @@ class AntaresScanner:
         try:
             result = subprocess.run(
                 ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
                 cwd=self.workdir,
             )
             return [f.strip() for f in result.stdout.split("\n") if f.strip()]

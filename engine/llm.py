@@ -27,6 +27,7 @@ logger = logging.getLogger("gitreins.llm")
 def _default_model() -> str:
     """Return the default model from GitReinsDefaults (lazy import)."""
     from engine.config import GitReinsDefaults
+
     return GitReinsDefaults().model
 
 
@@ -44,11 +45,12 @@ class LLMUsage:
     Distinguishes regular input from cached input. Cache hits are
     cheaper — most providers charge 10-50% of the regular price.
     """
-    prompt_tokens: int = 0         # Regular (uncached) input tokens
-    cache_read_tokens: int = 0     # Cache hit — tokens served from cache
-    cache_write_tokens: int = 0    # New tokens written to cache
-    completion_tokens: int = 0     # Output tokens generated
-    total_tokens: int = 0          # Sum of all (for display)
+
+    prompt_tokens: int = 0  # Regular (uncached) input tokens
+    cache_read_tokens: int = 0  # Cache hit — tokens served from cache
+    cache_write_tokens: int = 0  # New tokens written to cache
+    completion_tokens: int = 0  # Output tokens generated
+    total_tokens: int = 0  # Sum of all (for display)
 
     @property
     def all_input_tokens(self) -> int:
@@ -81,14 +83,20 @@ class LLMClient:
         max_retries: int = 3,
         llm_reasoning: str | None = None,
     ):
-        base_url = (base_url or os.getenv("GITREINS_LLM_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+        base_url = (
+            base_url or os.getenv("GITREINS_LLM_BASE_URL") or "https://api.openai.com/v1"
+        ).rstrip("/")
         self.api_key = api_key or os.getenv("GITREINS_LLM_API_KEY", "")
         if not self.api_key:
             # Fallback: try common provider keys
             for env_key in (
-                "NEURALWATT_API_KEY", "OPENAI_API_KEY",
-                "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY",
-                "KIMI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY",
+                "NEURALWATT_API_KEY",
+                "OPENAI_API_KEY",
+                "ANTHROPIC_API_KEY",
+                "DEEPSEEK_API_KEY",
+                "KIMI_API_KEY",
+                "GROQ_API_KEY",
+                "OPENROUTER_API_KEY",
             ):
                 self.api_key = os.getenv(env_key, "")
                 if self.api_key:
@@ -119,8 +127,7 @@ class LLMClient:
             self._chat_url = f"{base_url}/chat/completions"
 
         logger.debug(
-            "LLM client: provider=%s model=%s url=%s",
-            self.provider, self.model, self._chat_url
+            "LLM client: provider=%s model=%s url=%s", self.provider, self.model, self._chat_url
         )
 
     def chat(
@@ -139,8 +146,10 @@ class LLMClient:
         """
         # Log warning when default is used — config should be driving this
         if max_tokens == 131072:
-            logger.debug("LLM chat using default max_tokens=131072 — "
-                         "consider setting evaluator.max_output_tokens in config")
+            logger.debug(
+                "LLM chat using default max_tokens=131072 — "
+                "consider setting evaluator.max_output_tokens in config"
+            )
         mock_resp_json = os.getenv("GITREINS_MOCK_LLM_RESPONSE")
         if mock_resp_json:
             data = json.loads(mock_resp_json)
@@ -148,11 +157,14 @@ class LLMClient:
             tool_calls_raw = data.get("tool_calls")
             tool_calls = []
             if tool_calls_raw is not None:
-                tool_calls = [ToolCall(
-                    id=tc.get("id", ""),
-                    name=tc.get("name", ""),
-                    arguments=tc.get("arguments", {}),
-                ) for tc in tool_calls_raw]
+                tool_calls = [
+                    ToolCall(
+                        id=tc.get("id", ""),
+                        name=tc.get("name", ""),
+                        arguments=tc.get("arguments", {}),
+                    )
+                    for tc in tool_calls_raw
+                ]
             return LLMResponse(content=content, tool_calls=tool_calls, usage=LLMUsage())
 
         last_error: Exception | None = None
@@ -169,12 +181,11 @@ class LLMClient:
             except requests.RequestException as e:
                 last_error = e
                 logger.warning(
-                    "Network error (attempt %d/%d): %s",
-                    attempt + 1, self.max_retries, e
+                    "Network error (attempt %d/%d): %s", attempt + 1, self.max_retries, e
                 )
 
             if attempt < self.max_retries - 1:
-                wait = 2 ** attempt
+                wait = 2**attempt
                 logger.debug("Retrying in %ds...", wait)
                 time.sleep(wait)
 
@@ -202,8 +213,8 @@ class LLMClient:
     # Provider output token caps (max_tokens in chat/completions).
     # Values sourced from provider docs as of 2026-06.
     _PROVIDER_MAX_OUTPUT_TOKENS: dict[str, int] = {
-        "deepseek": 393_216,     # DeepSeek V4 API: max_tokens range [1, 393216]
-        "openai": 1_000_000,     # OpenAI varies by model; safe ceiling
+        "deepseek": 393_216,  # DeepSeek V4 API: max_tokens range [1, 393216]
+        "openai": 1_000_000,  # OpenAI varies by model; safe ceiling
         "anthropic": 1_000_000,  # Anthropic varies by model; safe ceiling
         "openrouter": 1_000_000,  # OpenRouter — pass-through; no known hard cap
     }
@@ -220,7 +231,9 @@ class LLMClient:
         if limit is not None and max_tokens > limit:
             logger.warning(
                 "clamping max_tokens %d → %d (provider %s API limit)",
-                max_tokens, limit, provider_hint,
+                max_tokens,
+                limit,
+                provider_hint,
             )
             return limit
         return max_tokens
@@ -347,11 +360,13 @@ class LLMClient:
             if block["type"] == "text":
                 content = block.get("text", "")
             elif block["type"] == "tool_use":
-                tool_calls.append(ToolCall(
-                    id=block["id"],
-                    name=block["name"],
-                    arguments=block.get("input", {}),
-                ))
+                tool_calls.append(
+                    ToolCall(
+                        id=block["id"],
+                        name=block["name"],
+                        arguments=block.get("input", {}),
+                    )
+                )
 
         # Extract token usage (Anthropic distinguishes cache reads/writes)
         usage = None
@@ -391,14 +406,18 @@ class LLMClient:
 
             if role == "tool":
                 # Anthropic: tool results go in a user message as tool_result content blocks
-                result.append({
-                    "role": "user",
-                    "content": [{
-                        "type": "tool_result",
-                        "tool_use_id": msg.get("tool_call_id", ""),
-                        "content": msg.get("content", ""),
-                    }],
-                })
+                result.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": msg.get("tool_call_id", ""),
+                                "content": msg.get("content", ""),
+                            }
+                        ],
+                    }
+                )
                 continue
 
             # For user/assistant roles
@@ -408,18 +427,18 @@ class LLMClient:
                 if msg.get("content"):
                     content_blocks.append({"type": "text", "text": msg["content"]})
                 for tc in msg["tool_calls"]:
-                    content_blocks.append({
-                        "type": "tool_use",
-                        "id": tc["id"],
-                        "name": tc["function"]["name"],
-                        "input": (
-                            json.loads(tc["function"]["arguments"])
-                            if isinstance(
-                                tc["function"]["arguments"], str
-                            )
-                            else tc["function"]["arguments"]
-                        ),
-                    })
+                    content_blocks.append(
+                        {
+                            "type": "tool_use",
+                            "id": tc["id"],
+                            "name": tc["function"]["name"],
+                            "input": (
+                                json.loads(tc["function"]["arguments"])
+                                if isinstance(tc["function"]["arguments"], str)
+                                else tc["function"]["arguments"]
+                            ),
+                        }
+                    )
                 result.append({"role": "assistant", "content": content_blocks})
             else:
                 result.append({"role": role, "content": msg.get("content", "")})
@@ -431,9 +450,11 @@ class LLMClient:
         result = []
         for tool in tools:
             func = tool.get("function", tool)
-            result.append({
-                "name": func["name"],
-                "description": func.get("description", ""),
-                "input_schema": func.get("parameters", {"type": "object", "properties": {}}),
-            })
+            result.append(
+                {
+                    "name": func["name"],
+                    "description": func.get("description", ""),
+                    "input_schema": func.get("parameters", {"type": "object", "properties": {}}),
+                }
+            )
         return result

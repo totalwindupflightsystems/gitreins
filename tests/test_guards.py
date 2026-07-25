@@ -66,9 +66,7 @@ def test_check_go_lint_uses_golangci_lint_when_it_passes():
     ) as run:
         result = check_go_lint("/repo")
 
-    assert result == GoGuardResult(
-        name="go_lint", passed=True, output="golangci-lint: clean"
-    )
+    assert result == GoGuardResult(name="go_lint", passed=True, output="golangci-lint: clean")
     assert run.call_args_list[1] == call(
         [
             "golangci-lint",

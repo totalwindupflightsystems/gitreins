@@ -30,7 +30,7 @@ def upper(s: str | None) -> str:
     `s.upper()` without checking for None. AttributeError propagates
     for None input.
     """
-    return s.upper()                                # ← no None check
+    return s.upper()  # ← no None check
 
 
 # ── Flaw 2: SQL query without parameter binding or try/except ────────────────
@@ -46,7 +46,7 @@ def fetch_user_by_id(conn: sqlite3.Connection, user_id: int) -> tuple:
     all propagate.
     """
     sql = f"SELECT id, name, email FROM users WHERE id = {user_id}"
-    cur = conn.execute(sql)                         # ← no try/except, no bind
+    cur = conn.execute(sql)  # ← no try/except, no bind
     return cur.fetchone()
 
 
@@ -61,7 +61,7 @@ def write_report(directory: str, filename: str, body: str) -> None:
     exist_ok=True)` call.
     """
     path = os.path.join(directory, filename)
-    with open(path, "w", encoding="utf-8") as f:    # ← no makedirs
+    with open(path, "w", encoding="utf-8") as f:  # ← no makedirs
         f.write(body)
 
 
@@ -74,7 +74,7 @@ def last_item(items: list[Any]) -> Any:
     FLAW: `items[-1]` raises IndexError on an empty list. There is
     no `if not items:` guard, no try/except, no fallback return.
     """
-    return items[-1]                                # ← no empty check
+    return items[-1]  # ← no empty check
 
 
 # ── Flaw 5: subprocess-style call with no error handling on the path ─────────
@@ -88,7 +88,7 @@ def ensure_directory(directory: str) -> bool:
     function is "ensure" (idempotent). There is no `exist_ok=True`
     flag and no try/except.
     """
-    os.makedirs(directory)                          # ← missing exist_ok=True
+    os.makedirs(directory)  # ← missing exist_ok=True
     return True
 
 
@@ -106,7 +106,7 @@ def config_value(config: dict, dotted_key: str) -> Any:
     """
     cur: Any = config
     for part in dotted_key.split("."):
-        cur = cur[part]                             # ← no .get, no None check
+        cur = cur[part]  # ← no .get, no None check
     return cur
 
 
@@ -119,4 +119,4 @@ def percent_change(old: float, new: float) -> float:
     FLAW: divides by `old` without checking whether `old == 0` or
     `None`. Also does not handle None inputs (TypeError).
     """
-    return (new - old) / old * 100                  # ← no validation
+    return (new - old) / old * 100  # ← no validation

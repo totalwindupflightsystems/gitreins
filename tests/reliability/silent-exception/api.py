@@ -91,7 +91,9 @@ def update_user_email(user_id: int, new_email: str) -> bool:
     payload = json.dumps({"email": new_email}).encode("utf-8")
     url = f"https://api.example.com/users/{user_id}"
     req = urllib.request.Request(
-        url, data=payload, method="PATCH",
+        url,
+        data=payload,
+        method="PATCH",
         headers={"Content-Type": "application/json"},
     )
     try:

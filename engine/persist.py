@@ -46,6 +46,7 @@ def load_history_config(workdir: str) -> dict:
     if os.path.isfile(config_path):
         try:
             import yaml
+
             with open(config_path, "r") as f:
                 raw = yaml.safe_load(f) or {}
             config = raw.get("history", {})
@@ -61,6 +62,7 @@ def load_history_config(workdir: str) -> dict:
 
 
 # ── Persister ──────────────────────────────────────────────────
+
 
 class VerdictPersister:
     """Persist verdict results and provide history lookup for reports."""
@@ -164,10 +166,9 @@ class VerdictPersister:
         for date_dir in os.listdir(self.history_dir):
             date_path = os.path.join(self.history_dir, date_dir)
             if os.path.isdir(date_path):
-                count += len([
-                    d for d in os.listdir(date_path)
-                    if os.path.isdir(os.path.join(date_path, d))
-                ])
+                count += len(
+                    [d for d in os.listdir(date_path) if os.path.isdir(os.path.join(date_path, d))]
+                )
         return count
 
     # ── Internal ─────────────────────────────────────────────
@@ -247,7 +248,9 @@ class VerdictPersister:
             # Check if gitreins branch exists
             result = subprocess.run(
                 ["git", "rev-parse", "--verify", "gitreins"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
                 cwd=self.workdir,
             )
             branch_exists = result.returncode == 0
@@ -269,7 +272,9 @@ class VerdictPersister:
         # Remember current branch
         result = subprocess.run(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
             cwd=self.workdir,
         )
         current_branch = result.stdout.strip()
@@ -277,14 +282,18 @@ class VerdictPersister:
         # Check for uncommitted changes
         status = subprocess.run(
             ["git", "status", "--porcelain"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
             cwd=self.workdir,
         )
         stashed = False
         if status.stdout.strip():
             subprocess.run(
                 ["git", "stash", "push", "-m", "gitreins-persist"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
                 cwd=self.workdir,
             )
             stashed = True
@@ -292,28 +301,37 @@ class VerdictPersister:
         try:
             subprocess.run(
                 ["git", "checkout", "--orphan", "gitreins"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
                 cwd=self.workdir,
             )
             subprocess.run(
                 ["git", "rm", "-rf", "."],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
                 cwd=self.workdir,
             )
             subprocess.run(
                 ["git", "add", rel_path],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
                 cwd=self.workdir,
             )
             subprocess.run(
-                ["git", "commit", "-m",
-                 f"verdict: {task_id} — {'PASS' if passed else 'FAIL'}"],
-                capture_output=True, text=True, timeout=10,
+                ["git", "commit", "-m", f"verdict: {task_id} — {'PASS' if passed else 'FAIL'}"],
+                capture_output=True,
+                text=True,
+                timeout=10,
                 cwd=self.workdir,
             )
             hash_result = subprocess.run(
                 ["git", "rev-parse", "HEAD"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
                 cwd=self.workdir,
             )
             commit_hash = hash_result.stdout.strip()[:8]
@@ -322,7 +340,9 @@ class VerdictPersister:
             restore = current_branch if current_branch not in ("HEAD", "") else "main"
             subprocess.run(
                 ["git", "checkout", restore],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
                 cwd=self.workdir,
             )
 
@@ -332,7 +352,9 @@ class VerdictPersister:
             if stashed:
                 subprocess.run(
                     ["git", "stash", "pop"],
-                    capture_output=True, text=True, timeout=10,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
                     cwd=self.workdir,
                 )
 
@@ -342,7 +364,9 @@ class VerdictPersister:
         try:
             subprocess.run(
                 ["git", "worktree", "add", worktree_dir, "gitreins"],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True,
+                text=True,
+                timeout=30,
                 cwd=self.workdir,
             )
 
@@ -354,18 +378,23 @@ class VerdictPersister:
 
             subprocess.run(
                 ["git", "add", rel_path],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
                 cwd=worktree_dir,
             )
             subprocess.run(
-                ["git", "commit", "-m",
-                 f"verdict: {task_id} — {'PASS' if passed else 'FAIL'}"],
-                capture_output=True, text=True, timeout=10,
+                ["git", "commit", "-m", f"verdict: {task_id} — {'PASS' if passed else 'FAIL'}"],
+                capture_output=True,
+                text=True,
+                timeout=10,
                 cwd=worktree_dir,
             )
             hash_result = subprocess.run(
                 ["git", "rev-parse", "HEAD"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
                 cwd=worktree_dir,
             )
             commit_hash = hash_result.stdout.strip()[:8]
@@ -379,7 +408,9 @@ class VerdictPersister:
             try:
                 subprocess.run(
                     ["git", "worktree", "remove", "--force", worktree_dir],
-                    capture_output=True, text=True, timeout=10,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
                     cwd=self.workdir,
                 )
             except Exception:
@@ -418,6 +449,7 @@ class VerdictPersister:
 
 
 # ── Report builder (shared between CLI and TUI) ────────────────
+
 
 def build_report(workdir: str, n: int = 10) -> str:
     """Build a text report of recent verdicts."""

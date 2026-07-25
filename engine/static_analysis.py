@@ -40,12 +40,13 @@ logger = logging.getLogger("gitreins.static_analysis")
 @dataclass
 class StaticDiag:
     """Normalized diagnostic from any static analysis tool."""
+
     file: str
     line: int
-    severity: str       # "error" | "warning" | "note"
+    severity: str  # "error" | "warning" | "note"
     message: str
-    code: str = ""      # mypy error code, pyright rule, etc.
-    tool: str = ""      # "mypy", "pyright", "sorbet", etc.
+    code: str = ""  # mypy error code, pyright rule, etc.
+    tool: str = ""  # "mypy", "pyright", "sorbet", etc.
 
     def to_dict(self) -> dict:
         return {
@@ -133,9 +134,7 @@ def list_available_tools(language: str) -> list[str]:
 # ── Text output parsers ─────────────────────────────────────────────────
 
 # Mypy: "file.py:line: severity: message  [code]"
-_MYPY_LINE_RE = re.compile(
-    r"^(.+?):(\d+):\s+(error|warning|note):\s+(.+?)(?:\s+\[(.+?)\])?\s*$"
-)
+_MYPY_LINE_RE = re.compile(r"^(.+?):(\d+):\s+(error|warning|note):\s+(.+?)(?:\s+\[(.+?)\])?\s*$")
 
 
 def _parse_mypy(text: str, tool: str = "mypy") -> list[StaticDiag]:
@@ -151,23 +150,23 @@ def _parse_mypy(text: str, tool: str = "mypy") -> list[StaticDiag]:
             continue
         m = _MYPY_LINE_RE.match(line)
         if m:
-            diagnostics.append(StaticDiag(
-                file=m.group(1),
-                line=int(m.group(2)),
-                severity=m.group(3),
-                message=m.group(4).strip(),
-                code=m.group(5) or "",
-                tool=tool,
-            ))
+            diagnostics.append(
+                StaticDiag(
+                    file=m.group(1),
+                    line=int(m.group(2)),
+                    severity=m.group(3),
+                    message=m.group(4).strip(),
+                    code=m.group(5) or "",
+                    tool=tool,
+                )
+            )
         else:
             logger.debug("mypy: unparsed line: %s", line[:120])
     return diagnostics
 
 
 # Sorbet: "file.rb:line: message https://srb.help/CODE"
-_SORBET_LINE_RE = re.compile(
-    r"^(.+?):(\d+):\s+(.+?)(?:\s+https://srb\.help/(\d+))?\s*$"
-)
+_SORBET_LINE_RE = re.compile(r"^(.+?):(\d+):\s+(.+?)(?:\s+https://srb\.help/(\d+))?\s*$")
 
 
 def _parse_sorbet(text: str, tool: str = "sorbet") -> list[StaticDiag]:
@@ -186,14 +185,16 @@ def _parse_sorbet(text: str, tool: str = "sorbet") -> list[StaticDiag]:
             severity = "error"
             if msg.lower().startswith("warning"):
                 severity = "warning"
-            diagnostics.append(StaticDiag(
-                file=m.group(1),
-                line=int(m.group(2)),
-                severity=severity,
-                message=msg,
-                code=m.group(4) or "",
-                tool=tool,
-            ))
+            diagnostics.append(
+                StaticDiag(
+                    file=m.group(1),
+                    line=int(m.group(2)),
+                    severity=severity,
+                    message=msg,
+                    code=m.group(4) or "",
+                    tool=tool,
+                )
+            )
         else:
             logger.debug("sorbet: unparsed line: %s", line[:120])
     return diagnostics
@@ -225,26 +226,24 @@ def _parse_cppcheck(text: str, tool: str = "cppcheck") -> list[StaticDiag]:
         m = _CPPCHECK_LINE_RE.match(line)
         if m:
             raw_severity = m.group(3)
-            severity = (
-                raw_severity if raw_severity in ("error", "warning") else "note"
+            severity = raw_severity if raw_severity in ("error", "warning") else "note"
+            diagnostics.append(
+                StaticDiag(
+                    file=m.group(1),
+                    line=int(m.group(2)),
+                    severity=severity,
+                    message=m.group(4).strip(),
+                    code=m.group(5) or "",
+                    tool=tool,
+                )
             )
-            diagnostics.append(StaticDiag(
-                file=m.group(1),
-                line=int(m.group(2)),
-                severity=severity,
-                message=m.group(4).strip(),
-                code=m.group(5) or "",
-                tool=tool,
-            ))
         else:
             logger.debug("cppcheck: unparsed line: %s", line[:120])
     return diagnostics
 
 
 # Staticcheck: "file.go:line:col: message (SAxxxx)"
-_STATICCHECK_LINE_RE = re.compile(
-    r"^(.+?):(\d+):\d+:\s+(.+?)(?:\s+\((.+?)\))?\s*$"
-)
+_STATICCHECK_LINE_RE = re.compile(r"^(.+?):(\d+):\d+:\s+(.+?)(?:\s+\((.+?)\))?\s*$")
 
 
 def _parse_staticcheck(text: str, tool: str = "staticcheck") -> list[StaticDiag]:
@@ -266,14 +265,16 @@ def _parse_staticcheck(text: str, tool: str = "staticcheck") -> list[StaticDiag]
         if m:
             code = m.group(4) or ""
             severity = "error" if code.startswith("SA") else "warning"
-            diagnostics.append(StaticDiag(
-                file=m.group(1),
-                line=int(m.group(2)),
-                severity=severity,
-                message=m.group(3).strip(),
-                code=code,
-                tool=tool,
-            ))
+            diagnostics.append(
+                StaticDiag(
+                    file=m.group(1),
+                    line=int(m.group(2)),
+                    severity=severity,
+                    message=m.group(3).strip(),
+                    code=code,
+                    tool=tool,
+                )
+            )
         else:
             logger.debug("staticcheck: unparsed line: %s", line[:120])
     return diagnostics
@@ -286,14 +287,16 @@ def _parse_pyright_json(data: dict, tool: str = "pyright") -> list[StaticDiag]:
     diagnostics: list[StaticDiag] = []
     for diag in data.get("generalDiagnostics", []):
         start = diag.get("range", {}).get("start", {})
-        diagnostics.append(StaticDiag(
-            file=diag.get("file", "unknown"),
-            line=start.get("line", 0) + 1,  # pyright uses 0-indexed lines
-            severity=diag.get("severity", "error"),
-            message=diag.get("message", ""),
-            code=diag.get("rule", ""),
-            tool=tool,
-        ))
+        diagnostics.append(
+            StaticDiag(
+                file=diag.get("file", "unknown"),
+                line=start.get("line", 0) + 1,  # pyright uses 0-indexed lines
+                severity=diag.get("severity", "error"),
+                message=diag.get("message", ""),
+                code=diag.get("rule", ""),
+                tool=tool,
+            )
+        )
     return diagnostics
 
 
@@ -304,14 +307,16 @@ def _parse_sqlfluff_json(data, tool: str = "sqlfluff") -> list[StaticDiag]:
     for file_result in files:
         filepath = file_result.get("filepath", "unknown")
         for violation in file_result.get("violations", []):
-            diagnostics.append(StaticDiag(
-                file=filepath,
-                line=violation.get("line_no", 0),
-                severity="error" if violation.get("severity") in ("error", None) else "warning",
-                message=violation.get("description", ""),
-                code=violation.get("code", ""),
-                tool=tool,
-            ))
+            diagnostics.append(
+                StaticDiag(
+                    file=filepath,
+                    line=violation.get("line_no", 0),
+                    severity="error" if violation.get("severity") in ("error", None) else "warning",
+                    message=violation.get("description", ""),
+                    code=violation.get("code", ""),
+                    tool=tool,
+                )
+            )
     return diagnostics
 
 
@@ -354,24 +359,28 @@ def _parse_clippy_json(text: str, tool: str = "clippy") -> list[StaticDiag]:
             primary_span = msg["spans"][0]
 
         if primary_span:
-            diagnostics.append(StaticDiag(
-                file=primary_span.get("file_name", "unknown"),
-                line=primary_span.get("line_start", 1),
-                severity=severity,
-                message=msg.get("message", ""),
-                code=code,
-                tool=tool,
-            ))
+            diagnostics.append(
+                StaticDiag(
+                    file=primary_span.get("file_name", "unknown"),
+                    line=primary_span.get("line_start", 1),
+                    severity=severity,
+                    message=msg.get("message", ""),
+                    code=code,
+                    tool=tool,
+                )
+            )
         else:
             # No span — use rendered message with unknown location
-            diagnostics.append(StaticDiag(
-                file="unknown",
-                line=1,
-                severity=severity,
-                message=msg.get("rendered", msg.get("message", "")),
-                code=code,
-                tool=tool,
-            ))
+            diagnostics.append(
+                StaticDiag(
+                    file="unknown",
+                    line=1,
+                    severity=severity,
+                    message=msg.get("rendered", msg.get("message", "")),
+                    code=code,
+                    tool=tool,
+                )
+            )
 
     return diagnostics
 
@@ -389,14 +398,16 @@ def _parse_eslint_json(data, tool: str = "eslint") -> list[StaticDiag]:
         for msg in file_result.get("messages", []):
             sev = msg.get("severity", 1)
             severity = "error" if sev >= 2 else "warning"
-            diagnostics.append(StaticDiag(
-                file=filepath,
-                line=msg.get("line", 1),
-                severity=severity,
-                message=msg.get("message", ""),
-                code=msg.get("ruleId", ""),
-                tool=tool,
-            ))
+            diagnostics.append(
+                StaticDiag(
+                    file=filepath,
+                    line=msg.get("line", 1),
+                    severity=severity,
+                    message=msg.get("message", ""),
+                    code=msg.get("ruleId", ""),
+                    tool=tool,
+                )
+            )
     return diagnostics
 
 
@@ -404,14 +415,16 @@ def _parse_phpstan_json(data: dict, tool: str = "phpstan") -> list[StaticDiag]:
     diagnostics: list[StaticDiag] = []
     for filepath, file_data in data.get("files", {}).items():
         for msg in file_data.get("messages", []):
-            diagnostics.append(StaticDiag(
-                file=filepath,
-                line=msg.get("line", 0),
-                severity="error",
-                message=msg.get("message", ""),
-                code="",
-                tool=tool,
-            ))
+            diagnostics.append(
+                StaticDiag(
+                    file=filepath,
+                    line=msg.get("line", 0),
+                    severity="error",
+                    message=msg.get("message", ""),
+                    code="",
+                    tool=tool,
+                )
+            )
     return diagnostics
 
 
@@ -451,7 +464,8 @@ def run_static_check(tool: str, workdir: str) -> list[dict]:
             "Static analysis tool '%s' not found on PATH. "
             "Install with: %s. "
             "Skipping — no diagnostics returned.",
-            tool, _install_help(tool),
+            tool,
+            _install_help(tool),
         )
         return []
 
@@ -541,7 +555,8 @@ def _build_command(tool: str, binary: str, workdir: str) -> list[str]:
     elif tool == "sqlfluff":
         return cmd_parts + [
             "lint",
-            "--format", "json",
+            "--format",
+            "json",
             workdir,
         ]
     elif tool == "phpstan":

@@ -22,14 +22,14 @@ SENDGRID_API_KEY: str = "SG.pEu5WPhRRYm3rUJBB8xvFw.K3exampleKEYnotreal7q2example
 
 # ── Flaw 3: Slack bot token in a config object ────────────────────────────────
 SLACK_CONFIG: dict = {
-    "bot_token":   "xoxb-GITREINS-BENCHMARK-FAKE-TOKEN-not-real",
+    "bot_token": "xoxb-GITREINS-BENCHMARK-FAKE-TOKEN-not-real",
     "signing_secret": "a]z]B]C]D]E]F]G]H]I]J]K]L]M]N]O]P]Q]R]S]T]U",
     "default_channel": "#general",
 }
 
 # ── Flaw 4: Twilio account SID + auth token as constants ──────────────────────
 TWILIO_ACCOUNT_SID: str = "AC00000000000000000000000000000000"
-TWILIO_AUTH_TOKEN:  str = "00000000000000000000000000000000"
+TWILIO_AUTH_TOKEN: str = "00000000000000000000000000000000"
 
 # ── Flaw 5: `password = "..."` inside an integration function ─────────────────
 
@@ -42,8 +42,9 @@ def connect_to_smtp():
     integration" typically writes them inline.
     """
     import smtplib
+
     username = "alerts@example.com"
-    password = "Smtp-P@ssw0rd-2024!"     # ← hardcoded
+    password = "Smtp-P@ssw0rd-2024!"  # ← hardcoded
     server = smtplib.SMTP("smtp.example.com", 587)
     server.login(username, password)
     return server
@@ -60,6 +61,7 @@ def fetch_billing_report() -> dict:
     source has the credential.
     """
     import urllib.request
+
     api_token = "Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
     req = urllib.request.Request(
         "https://billing.internal.example.com/api/v1/report",
@@ -67,12 +69,13 @@ def fetch_billing_report() -> dict:
     )
     with urllib.request.urlopen(req) as resp:
         import json
+
         return json.loads(resp.read().decode("utf-8"))
 
 
 # ── Flaw 7: oauth client_secret as a tuple in a constants block ──────────────
 GOOGLE_OAUTH: tuple = (
     "my-google-client-id-9999.apps.googleusercontent.com",
-    "GOCSPX-AbCdEf1234567890_FAKE",        # ← client secret
+    "GOCSPX-AbCdEf1234567890_FAKE",  # ← client secret
     "https://auth.example.com/callback",
 )

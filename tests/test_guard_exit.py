@@ -6,6 +6,7 @@ Verifies:
   - gitreins guard exits 1 when a guard fails (secret, lint)
   - gitreins commit blocks (non-zero) when secrets are staged
 """
+
 import os
 import subprocess
 import sys
@@ -32,7 +33,9 @@ def _run_cli(*args, cwd=None, extra_env=None):
 def _init_repo(workdir):
     """Initialize a minimal git repo with identity."""
     subprocess.run(["git", "init", "-q"], cwd=workdir, capture_output=True)
-    subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=workdir, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"], cwd=workdir, capture_output=True
+    )
     subprocess.run(["git", "config", "user.name", "Test"], cwd=workdir, capture_output=True)
 
 
@@ -151,8 +154,7 @@ class TestGuardExitLint:
         result = _run_cli("guard", cwd=d)
 
         assert result.returncode == 0 or result.returncode == 1, (
-            f"guard must run, got {result.returncode}. "
-            f"stdout: {result.stdout[:200]}"
+            f"guard must run, got {result.returncode}. stdout: {result.stdout[:200]}"
         )
 
 
@@ -172,8 +174,7 @@ class TestCommitBlocksSecret:
 
         output = result.stdout + result.stderr
         assert result.returncode != 0, (
-            f"commit must exit non-zero on secret, got {result.returncode}. "
-            f"output: {output[:300]}"
+            f"commit must exit non-zero on secret, got {result.returncode}. output: {output[:300]}"
         )
         assert "FAIL" in output or "cannot commit" in output.lower()
 
@@ -182,13 +183,22 @@ class TestCommitBlocksSecret:
         d = str(tmp_path / "repo")
         os.makedirs(d)
         _init_repo(d)
-        _write_config(d, {"guards": {"secrets": False, "lint": False, "tests": False, "test_command": "echo ok"}})
+        _write_config(
+            d,
+            {
+                "guards": {
+                    "secrets": False,
+                    "lint": False,
+                    "tests": False,
+                    "test_command": "echo ok",
+                }
+            },
+        )
         _stage_file(d, "ok.py", "x = 1\n")
 
         result = _run_cli("commit", "test message", cwd=d)
 
         output = result.stdout + result.stderr
         assert result.returncode == 0, (
-            f"commit must exit 0 on clean, got {result.returncode}. "
-            f"output: {output[:300]}"
+            f"commit must exit 0 on clean, got {result.returncode}. output: {output[:300]}"
         )

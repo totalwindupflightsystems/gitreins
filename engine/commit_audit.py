@@ -11,6 +11,7 @@ Config keys (under ``commit_audit`` in .gitreins/config.yaml):
   ``max_iterations`` — int, default 3 (LLM exploration rounds)
   ``suggest_message`` — bool, default True (suggest better message on block/warn)
 """
+
 from __future__ import annotations
 
 import json
@@ -362,8 +363,14 @@ COMMIT_AUDIT_TOOLS: list[dict[str, Any]] = [
                 "type": "object",
                 "properties": {
                     "pattern": {"type": "string", "description": "Regex pattern to search for."},
-                    "path": {"type": "string", "description": "Directory to search in (default: .)."},
-                    "file_glob": {"type": "string", "description": "Filter by file glob (e.g. '*.py')."},
+                    "path": {
+                        "type": "string",
+                        "description": "Directory to search in (default: .).",
+                    },
+                    "file_glob": {
+                        "type": "string",
+                        "description": "Filter by file glob (e.g. '*.py').",
+                    },
                 },
                 "required": ["pattern"],
             },
@@ -373,6 +380,7 @@ COMMIT_AUDIT_TOOLS: list[dict[str, Any]] = [
 
 
 # ── Result dataclasses ───────────────────────────────────────────
+
 
 @dataclass
 class CommitAuditResult:
@@ -408,10 +416,11 @@ class CommitAuditResult:
 @dataclass
 class ReviewIssue:
     """A single issue found during code review (GR-065, GR-066)."""
+
     file: str
     line: int
-    severity: str   # critical|high|medium|low|info
-    category: str   # bugs|security|anti_patterns|style|performance
+    severity: str  # critical|high|medium|low|info
+    category: str  # bugs|security|anti_patterns|style|performance
     title: str
     description: str = ""
     suggestion: str = ""
@@ -434,6 +443,7 @@ class ReviewIssue:
 @dataclass
 class CommitReviewResult:
     """Result of a CodeRabbit-style commit review (GR-065, GR-066)."""
+
     valid: bool
     summary: str = ""
     issues: list[ReviewIssue] = field(default_factory=list)
@@ -447,6 +457,7 @@ class CommitReviewResult:
 # ═════════════════════════════════════════════════════════════════
 # CommitAuditor
 # ═════════════════════════════════════════════════════════════════
+
 
 class CommitAuditor:
     """LLM-powered commit message validator.
@@ -477,8 +488,11 @@ class CommitAuditor:
         self.suggest_message = suggest_message
         self.review_mode = review_mode
         self.review_checks = review_checks or {
-            "bugs": True, "security": True, "anti_patterns": True,
-            "style": False, "performance": False,
+            "bugs": True,
+            "security": True,
+            "anti_patterns": True,
+            "style": False,
+            "performance": False,
         }
         self.review_severity = review_severity
         self.review_suggest_fix = review_suggest_fix
@@ -515,7 +529,9 @@ class CommitAuditor:
             return CommitAuditResult(
                 valid=False,
                 issues=["Empty commit message."],
-                suggested_message=self._generate_fallback_message(diff) if self.suggest_message else "",
+                suggested_message=self._generate_fallback_message(diff)
+                if self.suggest_message
+                else "",
             )
 
         # Fast path: single LLM call (no tools needed for simple diffs)
@@ -553,7 +569,8 @@ class CommitAuditor:
 
         fix_instr = (
             "Include specific, actionable fix suggestions for every issue."
-            if self.review_suggest_fix else "Do NOT include fix suggestions — just identify issues."
+            if self.review_suggest_fix
+            else "Do NOT include fix suggestions — just identify issues."
         )
 
         review_prompt = REVIEW_USER_PROMPT.format(
@@ -584,13 +601,16 @@ class CommitAuditor:
         except Exception as e:
             logger.warning("Code review LLM call failed: %s", e)
             return CommitReviewResult(
-                valid=True, summary=f"Review unavailable: {e}",
+                valid=True,
+                summary=f"Review unavailable: {e}",
                 iterations_used=1,
             )
 
         return self._parse_review_result(response, iteration=1)
 
-    def _review_tool_loop(self, message: str, diff: str, review_prompt: str) -> "CommitReviewResult":
+    def _review_tool_loop(
+        self, message: str, diff: str, review_prompt: str
+    ) -> "CommitReviewResult":
         """Multi-turn review with tool access."""
         # Stub for agent mode — reuses existing tool loop pattern
         messages: list[dict] = [
@@ -616,13 +636,19 @@ class CommitAuditor:
             if not response.tool_calls:
                 if response.content:
                     return self._parse_review_result(response, iteration=iteration)
-                return CommitReviewResult(valid=True, summary="No issues found.", iterations_used=iteration)
+                return CommitReviewResult(
+                    valid=True, summary="No issues found.", iterations_used=iteration
+                )
 
             assistant_msg = {
                 "role": "assistant",
                 "content": response.content,
                 "tool_calls": [
-                    {"id": tc.id, "type": "function", "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)}}
+                    {
+                        "id": tc.id,
+                        "type": "function",
+                        "function": {"name": tc.name, "arguments": json.dumps(tc.arguments)},
+                    }
                     for tc in response.tool_calls
                 ],
             }
@@ -638,7 +664,9 @@ class CommitAuditor:
             iterations_used=self.max_iterations,
         )
 
-    def _parse_review_result(self, response: LLMResponse, iteration: int = 1) -> "CommitReviewResult":
+    def _parse_review_result(
+        self, response: LLMResponse, iteration: int = 1
+    ) -> "CommitReviewResult":
         """Parse the structured review JSON from the LLM."""
         content = (response.content or "").strip()
         if content.startswith("```"):
@@ -655,12 +683,14 @@ class CommitAuditor:
                     data = json.loads(match.group(0))
                 except json.JSONDecodeError:
                     return CommitReviewResult(
-                        valid=True, summary=f"Could not parse review: {content[:200]}",
+                        valid=True,
+                        summary=f"Could not parse review: {content[:200]}",
                         iterations_used=iteration,
                     )
             else:
                 return CommitReviewResult(
-                    valid=True, summary=f"Could not parse review: {content[:200]}",
+                    valid=True,
+                    summary=f"Could not parse review: {content[:200]}",
                     iterations_used=iteration,
                 )
 
@@ -684,7 +714,10 @@ class CommitAuditor:
         rev = self.review(message, diff)
         return CommitAuditResult(
             valid=rev.valid and rev.message_valid,
-            issues=[f"[{i.severity}][{i.category}] {i.file}:{i.line}: {i.title} (score: {i.score:.1f})" for i in rev.issues],
+            issues=[
+                f"[{i.severity}][{i.category}] {i.file}:{i.line}: {i.title} (score: {i.score:.1f})"
+                for i in rev.issues
+            ],
             suggested_message=rev.suggested_message,
             iterations_used=rev.iterations_used,
             review_issues=[
@@ -707,9 +740,7 @@ class CommitAuditor:
 
     def _single_pass(self, message: str, diff: str) -> CommitAuditResult | None:
         """Try a single LLM call. Returns None if the LLM wants tools."""
-        instructions = INSTRUCTIONS_BY_STRICTNESS.get(
-            self.strictness, INSTRUCTIONS_STANDARD
-        )
+        instructions = INSTRUCTIONS_BY_STRICTNESS.get(self.strictness, INSTRUCTIONS_STANDARD)
 
         prompt = COMMIT_AUDIT_USER_PROMPT.format(
             strictness=self.strictness.upper(),
@@ -745,9 +776,7 @@ class CommitAuditor:
 
     def _tool_loop(self, message: str, diff: str) -> CommitAuditResult:
         """Run a tool-enabled evaluation loop (max N iterations)."""
-        instructions = INSTRUCTIONS_BY_STRICTNESS.get(
-            self.strictness, INSTRUCTIONS_STANDARD
-        )
+        instructions = INSTRUCTIONS_BY_STRICTNESS.get(self.strictness, INSTRUCTIONS_STANDARD)
 
         prompt = COMMIT_AUDIT_USER_PROMPT.format(
             strictness=self.strictness.upper(),
@@ -805,11 +834,13 @@ class CommitAuditor:
             # Execute tool calls
             for tc in response.tool_calls:
                 tool_result = self._execute_tool(tc)
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": tool_result,
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": tool_result,
+                    }
+                )
 
         # Exhausted iterations without verdict
         return CommitAuditResult(
@@ -855,7 +886,7 @@ class CommitAuditor:
             content = "".join(lines[start:end])
 
             # ── Byte cap (GR-064d) ──
-            max_bytes = getattr(self, 'max_file_bytes', 131072)
+            max_bytes = getattr(self, "max_file_bytes", 131072)
             content_bytes = content.encode("utf-8")
             total_bytes = os.path.getsize(full_path)
             if len(content_bytes) > max_bytes:
@@ -865,7 +896,7 @@ class CommitAuditor:
                     "Use offset/limit to read specific ranges.]"
                 )
 
-            header = f"// {path} (lines {start+1}-{end}/{total})\n"
+            header = f"// {path} (lines {start + 1}-{end}/{total})\n"
             return header + content
         except Exception as e:
             return json.dumps({"error": str(e)})
@@ -875,6 +906,7 @@ class CommitAuditor:
     ) -> str:
         """Search for a regex pattern in the codebase."""
         import re as _re
+
         search_dir = os.path.join(self.workdir, path)
         if not os.path.isdir(search_dir):
             return json.dumps({"error": f"Directory not found: {path}"})
@@ -887,10 +919,15 @@ class CommitAuditor:
 
         for root, dirs, files in os.walk(search_dir):
             # Skip hidden dirs and venvs
-            dirs[:] = [d for d in dirs if not d.startswith(".") and d not in ("venv", "node_modules", "__pycache__")]
+            dirs[:] = [
+                d
+                for d in dirs
+                if not d.startswith(".") and d not in ("venv", "node_modules", "__pycache__")
+            ]
             for fname in files:
                 if file_glob:
                     import fnmatch
+
                     if not fnmatch.fnmatch(fname, file_glob):
                         continue
                 fpath = os.path.join(root, fname)
@@ -921,7 +958,9 @@ class CommitAuditor:
         try:
             result = subprocess.run(
                 ["git", "diff", "--cached"],
-                capture_output=True, text=True, timeout=60,
+                capture_output=True,
+                text=True,
+                timeout=60,
                 cwd=self.workdir,
             )
             if result.returncode == 0:
@@ -929,7 +968,9 @@ class CommitAuditor:
             # No HEAD yet — try diff against empty tree
             result = subprocess.run(
                 ["git", "diff", "--cached", "4b825dc642cb6eb9a060e54bf899d92e65bfb3a0"],
-                capture_output=True, text=True, timeout=60,
+                capture_output=True,
+                text=True,
+                timeout=60,
                 cwd=self.workdir,
             )
             return result.stdout
@@ -938,7 +979,9 @@ class CommitAuditor:
             try:
                 result = subprocess.run(
                     ["git", "diff", "--cached", "--stat"],
-                    capture_output=True, text=True, timeout=60,
+                    capture_output=True,
+                    text=True,
+                    timeout=60,
                     cwd=self.workdir,
                 )
                 return result.stdout
@@ -991,7 +1034,9 @@ class CommitAuditor:
         try:
             result = subprocess.run(
                 ["git", "diff", "--cached", "--stat"],
-                capture_output=True, text=True, timeout=60,
+                capture_output=True,
+                text=True,
+                timeout=60,
                 cwd=self.workdir,
             )
             stat = result.stdout.strip()

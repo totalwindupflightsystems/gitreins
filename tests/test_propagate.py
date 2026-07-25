@@ -10,6 +10,7 @@ from engine.propagate import Propagator
 
 # ── _should_override ─────────────────────────────────────────
 
+
 @pytest.mark.parametrize(
     ("key", "target", "expected"),
     [
@@ -23,6 +24,7 @@ def test_should_override(key, target, expected):
 
 
 # ── _create_gitreins_dir ─────────────────────────────────────
+
 
 def test_create_gitreins_dir_creates_path(tmp_path):
     target = str(tmp_path / "my-repo")
@@ -38,6 +40,7 @@ def test_create_gitreins_dir_idempotent(tmp_path):
 
 
 # ── _merge_dicts ─────────────────────────────────────────────
+
 
 def test_merge_dicts_adds_source_only_keys():
     source = {"pipeline": {"stages": []}, "version": 1}
@@ -98,6 +101,7 @@ def test_merge_dicts_handles_empty_target():
 
 # ── _load_source_config ──────────────────────────────────────
 
+
 def test_load_source_config_returns_none_when_missing():
     with patch("os.path.isfile", return_value=False):
         prop = Propagator("/nonexistent")
@@ -117,6 +121,7 @@ def test_load_source_config_returns_none_on_yaml_error():
 
 # ── propagate — missing source config ────────────────────────
 
+
 def test_propagate_returns_error_when_source_config_missing():
     with patch("os.path.isfile", return_value=False):
         prop = Propagator("/nonexistent")
@@ -126,6 +131,7 @@ def test_propagate_returns_error_when_source_config_missing():
 
 
 # ── propagate — copy to new target ───────────────────────────
+
 
 def test_propagate_copies_to_target_without_existing_config(tmp_path):
 
@@ -145,6 +151,7 @@ def test_propagate_copies_to_target_without_existing_config(tmp_path):
 
 
 # ── propagate — merge to existing target ─────────────────────
+
 
 def test_propagate_merges_to_target_with_existing_config(tmp_path):
     import yaml

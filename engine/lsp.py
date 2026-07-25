@@ -241,14 +241,16 @@ def _collect_diagnostics(
                 for d in msg.get("params", {}).get("diagnostics", []):
                     range_start = d.get("range", {}).get("start", {})
                     line_0based = range_start.get("line", 0)
-                    diags.append({
-                        "file": file_uri,
-                        "line": line_0based + 1,
-                        "severity": normalize_severity(d.get("severity", 1)),
-                        "message": d.get("message", ""),
-                        "code": str(d.get("code", "")),
-                        "tool": tool,
-                    })
+                    diags.append(
+                        {
+                            "file": file_uri,
+                            "line": line_0based + 1,
+                            "severity": normalize_severity(d.get("severity", 1)),
+                            "message": d.get("message", ""),
+                            "code": str(d.get("code", "")),
+                            "tool": tool,
+                        }
+                    )
                 break  # got diagnostics for this file — done
     except Exception:
         pass
@@ -344,7 +346,9 @@ def _get_staged_files(workdir: str) -> list[str]:
     try:
         result = subprocess.run(
             ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
             cwd=workdir,
         )
         return [f.strip() for f in result.stdout.split("\n") if f.strip()]
@@ -400,6 +404,7 @@ def run_lsp_check(
 
     try:
         import signal as _signal
+
         proc = subprocess.Popen(
             [tool_path],
             stdin=subprocess.PIPE,
@@ -439,10 +444,12 @@ def run_lsp_check(
             except subprocess.TimeoutExpired:
                 logger.warning(
                     "LSP tool '%s' (pid %d) did not exit — killing process group",
-                    tool, proc.pid,
+                    tool,
+                    proc.pid,
                 )
                 try:
                     import signal as _signal
+
                     lsp_pid = proc.pid
                     if not isinstance(lsp_pid, int) or isinstance(lsp_pid, bool) or lsp_pid <= 1:
                         raise ValueError(f"unsafe LSP pid: {lsp_pid!r}")
@@ -454,7 +461,10 @@ def run_lsp_check(
                         logger.error(
                             "LSP tool '%s' has unsafe process group (pid=%d, pgid=%d, ours=%d) — "
                             "falling back to proc.kill()",
-                            tool, lsp_pid, lsp_pgid, our_pgid,
+                            tool,
+                            lsp_pid,
+                            lsp_pgid,
+                            our_pgid,
                         )
                         proc.kill()
                     proc.wait(timeout=2)

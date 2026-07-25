@@ -21,7 +21,9 @@ def _scan_text(text: str) -> list[tuple[str, str]]:
 
     with tempfile.TemporaryDirectory() as tmp:
         subprocess.run(["git", "init", "-q"], cwd=tmp, capture_output=True)
-        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"], cwd=tmp, capture_output=True
+        )
         subprocess.run(["git", "config", "user.name", "test"], cwd=tmp, capture_output=True)
 
         os.makedirs(os.path.join(tmp, ".gitreins"), exist_ok=True)
@@ -71,6 +73,7 @@ def _any_match(matches: list, *labels: str) -> bool:
 # Existing patterns (regression)
 # ══════════════════════════════════════════════════════════════════
 
+
 class TestExistingPatterns:
     def test_github_token(self):
         matches = _scan_text('GITHUB_TOKEN = "ghp_abc123def456ghi789jkl012mno345pqr678stu"')
@@ -78,11 +81,15 @@ class TestExistingPatterns:
 
     def test_openai_key(self):
         """sk-proj- key may be caught by api_key pattern (generic) or sk- pattern (specific). Both are correct."""
-        matches = _scan_text('OPENAI_API_KEY = "sk-proj-abc123def456ghi789jkl012mno345pqr678stuvwxyz"')
+        matches = _scan_text(
+            'OPENAI_API_KEY = "sk-proj-abc123def456ghi789jkl012mno345pqr678stuvwxyz"'
+        )
         assert _any_match(matches, "OpenAI/OpenRouter API key", "hardcoded API key")
 
     def test_openrouter_key(self):
-        matches = _scan_text('OPENROUTER_API_KEY = "sk-or-v1-abc123def456ghi789jkl012mno345pqr678stuvwxyz1234"')
+        matches = _scan_text(
+            'OPENROUTER_API_KEY = "sk-or-v1-abc123def456ghi789jkl012mno345pqr678stuvwxyz1234"'
+        )
         assert _any_match(matches, "OpenAI/OpenRouter API key", "hardcoded API key")
 
     def test_aws_access_key(self):
@@ -96,7 +103,9 @@ class TestExistingPatterns:
         assert _any_match(matches, "AWS access key")
 
     def test_hardcoded_jwt(self):
-        matches = _scan_text('token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"')
+        matches = _scan_text(
+            'token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"'
+        )
         assert _any_match(matches, "hardcoded JWT")
 
     def test_env_var_not_flagged(self):
@@ -114,13 +123,14 @@ class TestExistingPatterns:
 
     def test_example_comment_not_flagged(self):
         """TODO/FIXME comments should not be flagged."""
-        matches = _scan_text('# TODO: sk-add-real-key-here for testing')
+        matches = _scan_text("# TODO: sk-add-real-key-here for testing")
         assert len(matches) == 0
 
 
 # ══════════════════════════════════════════════════════════════════
 # NEW patterns (v0.7.1)
 # ══════════════════════════════════════════════════════════════════
+
 
 class TestSSHPrivateKeys:
     def test_rsa_private_key(self):
@@ -157,15 +167,21 @@ lQdGBGcX9hEBEAC8Nq3k5J7mP2sV0wX4yB6cR8tU1nA3dF5hG9iK2lM4oQ6rS7vW0xZ
 
 class TestAWSSecretKeys:
     def test_aws_secret_key(self):
-        matches = _scan_text('AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMIK7MDENGbPxRfiCYZ9a4pQ3sT0vK2nL5mH8rD1wF6xJ3"')
+        matches = _scan_text(
+            'AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMIK7MDENGbPxRfiCYZ9a4pQ3sT0vK2nL5mH8rD1wF6xJ3"'
+        )
         assert _any_match(matches, "AWS secret access key")
 
     def test_aws_secret_key_underscore_variant(self):
-        matches = _scan_text('aws_secret = "wJalrXUtnFEMIK7MDENGbPxRfiCYZ9a4pQ3sT0vK2nL5mH8rD1wF6xJ3"')
+        matches = _scan_text(
+            'aws_secret = "wJalrXUtnFEMIK7MDENGbPxRfiCYZ9a4pQ3sT0vK2nL5mH8rD1wF6xJ3"'
+        )
         assert _any_match(matches, "AWS secret access key")
 
     def test_aws_secret_in_yaml(self):
-        matches = _scan_text('secret_access_key: "wJalrXUtnFEMIK7MDENGbPxRfiCYZ9a4pQ3sT0vK2nL5mH8rD1wF6xJ3"')
+        matches = _scan_text(
+            'secret_access_key: "wJalrXUtnFEMIK7MDENGbPxRfiCYZ9a4pQ3sT0vK2nL5mH8rD1wF6xJ3"'
+        )
         assert _any_match(matches, "AWS secret access key")
 
 
@@ -181,7 +197,9 @@ class TestGCPKeys:
 
 class TestDigitalOcean:
     def test_do_token(self):
-        matches = _scan_text('DO_TOKEN = "dop_v1_abc123def456ghi789jkl012mno345pqr678stuvwxyz9012abcdef3456ghij7890klmn"')
+        matches = _scan_text(
+            'DO_TOKEN = "dop_v1_abc123def456ghi789jkl012mno345pqr678stuvwxyz9012abcdef3456ghij7890klmn"'
+        )
         assert _any_match(matches, "DigitalOcean access token")
 
 
@@ -207,11 +225,15 @@ class TestStripe:
 
 class TestAzure:
     def test_azure_connection_string(self):
-        matches = _scan_text('CONN_STR = "DefaultEndpointsProtocol=https;AccountName=mystorage;AccountKey=abcdefghijklmnopqrstuvwxyz1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890=="')
+        matches = _scan_text(
+            'CONN_STR = "DefaultEndpointsProtocol=https;AccountName=mystorage;AccountKey=abcdefghijklmnopqrstuvwxyz1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890=="'
+        )
         assert _any_match(matches, "Azure storage connection string")
 
     def test_azure_account_key(self):
-        matches = _scan_text('AccountKey = "abcdefghijklmnopqrstuvwxyz1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890=="')
+        matches = _scan_text(
+            'AccountKey = "abcdefghijklmnopqrstuvwxyz1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890=="'
+        )
         assert _any_match(matches, "Azure storage account key")
 
 

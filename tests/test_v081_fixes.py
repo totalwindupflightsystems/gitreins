@@ -6,6 +6,7 @@ Regression tests for v0.8.1 bug fixes.
 - Bug #3: pass_on_error config key gates Tier 2
 - Bug #4: API key fallback chain includes KIMI/GROQ/OPENROUTER
 """
+
 import os
 import tempfile
 
@@ -18,6 +19,7 @@ from engine.pipeline import _default_tier1_steps, load_pipeline_config
 # ═══════════════════════════════════════════════════════════════
 # Bug #1: max_output_tokens default + provider clamping
 # ═══════════════════════════════════════════════════════════════
+
 
 class TestMaxOutputTokensDefault:
     """Bug #1: Default max_output_tokens should be a safe floor."""
@@ -64,6 +66,7 @@ class TestMaxOutputTokensDefault:
 # Bug #2: Language-aware default pipeline
 # ═══════════════════════════════════════════════════════════════
 
+
 class TestDefaultPipelineLanguageDetection:
     """Bug #2: Default pipeline should detect project language."""
 
@@ -88,6 +91,7 @@ class TestDefaultPipelineLanguageDetection:
             assert "pytest" in test_cmd
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)
 
     def test_go_project_defaults(self):
@@ -101,6 +105,7 @@ class TestDefaultPipelineLanguageDetection:
             assert "go test" in test_cmd
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)
 
     def test_rust_project_defaults(self):
@@ -114,6 +119,7 @@ class TestDefaultPipelineLanguageDetection:
             assert "cargo test" in test_cmd
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)
 
     def test_js_project_defaults(self):
@@ -127,6 +133,7 @@ class TestDefaultPipelineLanguageDetection:
             assert "npm test" in test_cmd
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)
 
     def test_unknown_project_secrets_only(self):
@@ -138,6 +145,7 @@ class TestDefaultPipelineLanguageDetection:
             assert steps[0]["id"] == "secrets"
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)
 
     def test_secrets_step_always_present(self):
@@ -151,6 +159,7 @@ class TestDefaultPipelineLanguageDetection:
                 )
             finally:
                 import shutil
+
                 shutil.rmtree(d, ignore_errors=True)
 
     def test_primary_language_is_first_match(self):
@@ -167,6 +176,7 @@ class TestDefaultPipelineLanguageDetection:
             assert "go vet" in lint_cmd, "go.mod should take priority over pyproject.toml"
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)
 
     def test_load_pipeline_config_returns_language_aware_default(self):
@@ -179,12 +189,14 @@ class TestDefaultPipelineLanguageDetection:
             assert any("ruff" in s.get("run", "") for s in steps if s["id"] == "lint")
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)
 
 
 # ═══════════════════════════════════════════════════════════════
 # Bug #3: pass_on_error config key
 # ═══════════════════════════════════════════════════════════════
+
 
 class TestPassOnError:
     """Bug #3: pass_on_error gates Tier 2 when LLM is unavailable."""
@@ -197,9 +209,7 @@ class TestPassOnError:
     def test_overlay_picks_up_pass_on_error(self):
         """Config overlay reads pass_on_error from YAML."""
         defaults = GitReinsDefaults()
-        overlaid = defaults.overlay({
-            "defaults": {"pass_on_error": True}
-        })
+        overlaid = defaults.overlay({"defaults": {"pass_on_error": True}})
         assert overlaid.pass_on_error is True
 
     def test_overlay_false_when_not_set(self):
@@ -225,17 +235,20 @@ class TestPassOnError:
         d = tempfile.mkdtemp(prefix="gitreins-test-")
         try:
             import yaml
+
             os.makedirs(os.path.join(d, ".gitreins"))
             with open(os.path.join(d, ".gitreins", "config.yaml"), "w") as f:
                 yaml.dump({"defaults": {"pass_on_error": True}}, f)
 
             from engine.judge import Judge
             from engine.llm import LLMClient
+
             llm = LLMClient(api_key="sk-test", model="test/model")
             judge = Judge(llm=llm, workdir=d)
             assert judge._read_pass_on_error() is True
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)
 
     def test_judge_pass_on_error_default_false_no_config(self):
@@ -244,11 +257,13 @@ class TestPassOnError:
         try:
             from engine.judge import Judge
             from engine.llm import LLMClient
+
             llm = LLMClient(api_key="sk-test", model="test/model")
             judge = Judge(llm=llm, workdir=d)
             assert judge._read_pass_on_error() is False
         finally:
             import shutil
+
             shutil.rmtree(d, ignore_errors=True)
 
 
@@ -256,12 +271,14 @@ class TestPassOnError:
 # Bug #4: API key fallback chain
 # ═══════════════════════════════════════════════════════════════
 
+
 class TestApiKeyFallbackChain:
     """Bug #4: API key fallback chain includes KIMI/GROQ/OPENROUTER."""
 
     def test_kimi_key_in_fallback(self):
         """KIMI_API_KEY is picked up when GITREINS_LLM_API_KEY unset."""
         import os
+
         os.environ.pop("GITREINS_LLM_API_KEY", None)
         os.environ.pop("NEURALWATT_API_KEY", None)
         os.environ.pop("OPENAI_API_KEY", None)
@@ -277,8 +294,15 @@ class TestApiKeyFallbackChain:
     def test_groq_key_in_fallback(self):
         """GROQ_API_KEY is picked up."""
         import os
-        for k in ("GITREINS_LLM_API_KEY", "NEURALWATT_API_KEY", "OPENAI_API_KEY",
-                  "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "KIMI_API_KEY"):
+
+        for k in (
+            "GITREINS_LLM_API_KEY",
+            "NEURALWATT_API_KEY",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "KIMI_API_KEY",
+        ):
             os.environ.pop(k, None)
         os.environ["GROQ_API_KEY"] = "sk-groq-test"
         try:
@@ -290,9 +314,16 @@ class TestApiKeyFallbackChain:
     def test_openrouter_key_in_fallback(self):
         """OPENROUTER_API_KEY is picked up."""
         import os
-        for k in ("GITREINS_LLM_API_KEY", "NEURALWATT_API_KEY", "OPENAI_API_KEY",
-                  "ANTHROPIC_API_KEY", "DEEPSEEK_API_KEY", "KIMI_API_KEY",
-                  "GROQ_API_KEY"):
+
+        for k in (
+            "GITREINS_LLM_API_KEY",
+            "NEURALWATT_API_KEY",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "KIMI_API_KEY",
+            "GROQ_API_KEY",
+        ):
             os.environ.pop(k, None)
         os.environ["OPENROUTER_API_KEY"] = "sk-or-test"
         try:
@@ -304,6 +335,7 @@ class TestApiKeyFallbackChain:
     def test_existing_keys_take_priority(self):
         """GITREINS_LLM_API_KEY takes priority over fallback keys."""
         import os
+
         os.environ["GITREINS_LLM_API_KEY"] = "sk-primary"
         os.environ["KIMI_API_KEY"] = "sk-kimi-backup"
         try:

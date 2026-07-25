@@ -17,6 +17,7 @@ from engine.config import (
 
 # ── GitReinsDefaults — built-in values ───────────────────────
 
+
 def test_defaults_model():
     d = GitReinsDefaults()
     assert d.model == "deepseek-v4-flash"
@@ -44,6 +45,7 @@ def test_defaults_source_is_builtin():
 
 
 # ── overlay ──────────────────────────────────────────────────
+
 
 def test_overlay_with_none_returns_self():
     d = GitReinsDefaults()
@@ -90,12 +92,16 @@ def test_overlay_sets_source_to_config_yaml():
 
 def test_overlay_nested_commit_audit():
     d = GitReinsDefaults()
-    result = d.overlay({"defaults": {
-        "commit_audit": {
-            "mode": "block",
-            "review_checks": {"style": True},
+    result = d.overlay(
+        {
+            "defaults": {
+                "commit_audit": {
+                    "mode": "block",
+                    "review_checks": {"style": True},
+                }
+            }
         }
-    }})
+    )
     assert result.commit_audit_mode == "block"
     assert result.commit_audit_review_checks_style is True
     # unchanged defaults remain
@@ -103,6 +109,7 @@ def test_overlay_nested_commit_audit():
 
 
 # ── to_config_dict ───────────────────────────────────────────
+
 
 def test_to_config_dict_includes_model():
     d = GitReinsDefaults()
@@ -134,6 +141,7 @@ def test_to_config_dict_format_none_for_unlimited():
 
 # ── _coerce_float ────────────────────────────────────────────
 
+
 def test_coerce_float_from_int():
     assert _coerce_float(100) == 100.0
 
@@ -147,6 +155,7 @@ def test_coerce_float_from_invalid_string():
 
 
 # ── _coerce_seconds ──────────────────────────────────────────
+
 
 @pytest.mark.parametrize(
     ("val", "expected"),
@@ -169,6 +178,7 @@ def test_coerce_seconds_invalid_returns_negative():
 
 # ── _coerce_tokens ───────────────────────────────────────────
 
+
 @pytest.mark.parametrize(
     ("val", "expected"),
     [
@@ -189,6 +199,7 @@ def test_coerce_tokens_bad_string():
 
 # ── _fmt_seconds ─────────────────────────────────────────────
 
+
 def test_fmt_seconds_under_60():
     assert _fmt_seconds(30) == "30s"
 
@@ -208,6 +219,7 @@ def test_fmt_seconds_hours():
 
 # ── _fmt_tokens ──────────────────────────────────────────────
 
+
 def test_fmt_tokens_millions():
     assert _fmt_tokens(1_000_000) == "1.0M"
 
@@ -221,6 +233,7 @@ def test_fmt_tokens_small():
 
 
 # ── _version_greater ─────────────────────────────────────────
+
 
 def test_version_greater_true():
     assert _version_greater("0.11.0", "0.10.2") is True
@@ -236,6 +249,7 @@ def test_version_greater_equal():
 
 # ── _pypi_url ────────────────────────────────────────────────
 
+
 def test_pypi_url_returns_project_link():
     url = _pypi_url()
     assert "pypi.org" in url
@@ -243,6 +257,7 @@ def test_pypi_url_returns_project_link():
 
 
 # ── load_raw_config ──────────────────────────────────────────
+
 
 def test_load_raw_config_returns_empty_for_none_workdir():
     assert load_raw_config(None) == {}

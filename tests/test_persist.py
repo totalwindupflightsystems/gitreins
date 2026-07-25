@@ -14,6 +14,7 @@ from engine.persist import (
 
 # ── _pct ─────────────────────────────────────────────────────
 
+
 def test_pct_formats_ratio():
     assert _pct(0, 10) == "0%"
     assert _pct(5, 10) == "50%"
@@ -23,6 +24,7 @@ def test_pct_formats_ratio():
 
 # ── DEFAULT_HISTORY_CONFIG ───────────────────────────────────
 
+
 def test_default_history_config_has_expected_keys():
     assert DEFAULT_HISTORY_CONFIG["enabled"] is True
     assert DEFAULT_HISTORY_CONFIG["storage"] == "git"
@@ -31,6 +33,7 @@ def test_default_history_config_has_expected_keys():
 
 
 # ── VerdictPersister init ────────────────────────────────────
+
 
 def test_persister_uses_absolute_workdir(tmp_path):
     p = VerdictPersister(str(tmp_path))
@@ -53,6 +56,7 @@ def test_persister_storage_mode_is_git_by_default(tmp_path):
 
 
 # ── persist (non-git path) ───────────────────────────────────
+
 
 def test_persist_returns_disabled_when_history_disabled(tmp_path):
     p = VerdictPersister(str(tmp_path))
@@ -93,6 +97,7 @@ def test_persist_creates_verdict_json_and_summary_md(tmp_path):
 
 
 # ── list_verdicts ────────────────────────────────────────────
+
 
 def test_list_verdicts_returns_empty_when_no_history(tmp_path):
     p = VerdictPersister(str(tmp_path))
@@ -140,6 +145,7 @@ def test_list_verdicts_limits_to_n(tmp_path):
 
 # ── count_verdicts ───────────────────────────────────────────
 
+
 def test_count_verdicts_returns_zero_for_no_history(tmp_path):
     p = VerdictPersister(str(tmp_path))
     assert p.count_verdicts() == 0
@@ -157,6 +163,7 @@ def test_count_verdicts_counts_all_entries(tmp_path):
 
 
 # ── build_report ─────────────────────────────────────────────
+
 
 def test_build_report_returns_disabled_message_when_history_off(tmp_path):
     p = VerdictPersister(str(tmp_path))
@@ -188,6 +195,7 @@ def test_build_report_includes_summary_stats(tmp_path):
 
 
 # ── _build_summary edge cases ────────────────────────────────
+
 
 def test_build_summary_handles_dict_items(tmp_path):
     """Summary generation works with dict-format criteria items (MCP)."""

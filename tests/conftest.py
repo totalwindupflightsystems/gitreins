@@ -29,6 +29,7 @@ def tmp_workdir(tmp_path):
 def task_manager(tmp_workdir):
     """Create a TaskManager with a clean temp directory."""
     from engine.task_manager import TaskManager
+
     tm = TaskManager(tmp_workdir)
     return tm
 
@@ -51,6 +52,7 @@ def sample_task_dict():
 def guard_manager(tmp_workdir):
     """Create a GuardManager with a clean temp directory."""
     from engine.guard_manager import GuardManager
+
     return GuardManager(tmp_workdir)
 
 
@@ -61,6 +63,7 @@ def llm_client():
     Tests that use this must mock requests.post to avoid real HTTP calls.
     """
     from engine.llm import LLMClient
+
     return LLMClient(base_url="https://test.local/v1", api_key="test-key-12345")
 
 
@@ -68,6 +71,7 @@ def llm_client():
 def evaluator(llm_client, tmp_workdir):
     """Create an AgenticEvaluator with a real workdir and mockable LLM."""
     from engine.evaluator import AgenticEvaluator
+
     return AgenticEvaluator(llm_client, tmp_workdir, max_iterations=5)
 
 
@@ -75,6 +79,7 @@ def evaluator(llm_client, tmp_workdir):
 def judge(llm_client, tmp_workdir):
     """Create a Judge with a clean temp directory."""
     from engine.judge import Judge
+
     return Judge(llm_client, tmp_workdir)
 
 
@@ -89,7 +94,12 @@ def pipeline_config_default():
                     "parallel": True,
                     "on": ["pre-commit", "pre-eval"],
                     "steps": [
-                        {"id": "secrets", "type": "script", "run": "echo ok", "on_fail": "continue"},
+                        {
+                            "id": "secrets",
+                            "type": "script",
+                            "run": "echo ok",
+                            "on_fail": "continue",
+                        },
                         {"id": "lint", "type": "script", "run": "echo ok"},
                         {"id": "tests", "type": "script", "run": "echo ok"},
                     ],

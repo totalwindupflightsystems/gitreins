@@ -2,6 +2,7 @@
 Unit tests for engine/task_manager.py — YAML-backed task CRUD and lifecycle.
 axiom:trace work_item=GR-001 spec=specs/05-Task-Manager.md plan=.memory-bank/work-items/GR-001/plan.yaml
 """
+
 import os
 import pytest
 from datetime import datetime
@@ -53,7 +54,11 @@ class TestTaskManagerCreate:
         )
         assert task.id == "test-task-1"
         assert task.title == "Implement login endpoint"
-        assert task.criteria == ["Accepts email+password", "Returns JWT on success", "Returns 401 on failure"]
+        assert task.criteria == [
+            "Accepts email+password",
+            "Returns JWT on success",
+            "Returns 401 on failure",
+        ]
         assert task.status == "pending"
         # created_at must be ISO format with timezone
         assert "T" in task.created_at
@@ -68,7 +73,9 @@ class TestTaskManagerCreate:
 
     def test_create_task_persists_to_yaml(self, task_manager, sample_task_dict):
         """create() writes task to .gitreins/tasks.yaml."""
-        task_manager.create(sample_task_dict["id"], sample_task_dict["title"], sample_task_dict["criteria"])
+        task_manager.create(
+            sample_task_dict["id"], sample_task_dict["title"], sample_task_dict["criteria"]
+        )
         yaml_path = os.path.join(task_manager.workdir, ".gitreins", "tasks.yaml")
         assert os.path.exists(yaml_path), "tasks.yaml should exist after create"
         content = open(yaml_path).read()
@@ -86,6 +93,7 @@ class TestTaskManagerCreate:
     def test_create_then_get_from_new_manager(self, tmp_workdir):
         """Task survives persist + reload (new TaskManager instance)."""
         from engine.task_manager import TaskManager
+
         tm1 = TaskManager(tmp_workdir)
         tm1.create("persisted", "Persisted Task", ["c1", "c2"])
         tm2 = TaskManager(tmp_workdir)
@@ -100,7 +108,9 @@ class TestTaskManagerLifecycle:
 
     def test_start_changes_status_to_in_progress(self, task_manager, sample_task_dict):
         """start() changes status from 'pending' to 'in_progress'."""
-        task_manager.create(sample_task_dict["id"], sample_task_dict["title"], sample_task_dict["criteria"])
+        task_manager.create(
+            sample_task_dict["id"], sample_task_dict["title"], sample_task_dict["criteria"]
+        )
         task = task_manager.start("test-task-1")
         assert task.status == "in_progress"
 
@@ -111,7 +121,9 @@ class TestTaskManagerLifecycle:
 
     def test_complete_sets_status_and_completed_at(self, task_manager, sample_task_dict):
         """complete() sets status='complete' and completed_at to ISO timestamp."""
-        task_manager.create(sample_task_dict["id"], sample_task_dict["title"], sample_task_dict["criteria"])
+        task_manager.create(
+            sample_task_dict["id"], sample_task_dict["title"], sample_task_dict["criteria"]
+        )
         task_manager.start("test-task-1")
         task = task_manager.complete("test-task-1")
         assert task.status == "complete"
@@ -126,7 +138,10 @@ class TestTaskManagerLifecycle:
     def test_start_then_complete_persisted(self, task_manager, sample_task_dict):
         """Status transitions are persisted to YAML."""
         from engine.task_manager import TaskManager
-        task_manager.create(sample_task_dict["id"], sample_task_dict["title"], sample_task_dict["criteria"])
+
+        task_manager.create(
+            sample_task_dict["id"], sample_task_dict["title"], sample_task_dict["criteria"]
+        )
         task_manager.start("test-task-1")
         task_manager.complete("test-task-1")
 
@@ -172,7 +187,9 @@ class TestTaskManagerList:
 
     def test_get_existing_returns_task(self, task_manager, sample_task_dict):
         """get() returns the Task object for an existing ID."""
-        task_manager.create(sample_task_dict["id"], sample_task_dict["title"], sample_task_dict["criteria"])
+        task_manager.create(
+            sample_task_dict["id"], sample_task_dict["title"], sample_task_dict["criteria"]
+        )
         task = task_manager.get("test-task-1")
         assert task is not None
         assert task.title == "Implement login endpoint"
@@ -187,7 +204,9 @@ class TestTaskManagerDelete:
 
     def test_delete_existing_removes_from_index(self, task_manager, sample_task_dict):
         """delete() removes task from internal dict and get() returns None."""
-        task_manager.create(sample_task_dict["id"], sample_task_dict["title"], sample_task_dict["criteria"])
+        task_manager.create(
+            sample_task_dict["id"], sample_task_dict["title"], sample_task_dict["criteria"]
+        )
         task_manager.delete("test-task-1")
         assert task_manager.get("test-task-1") is None
 
@@ -198,15 +217,20 @@ class TestTaskManagerDelete:
 
     def test_delete_persisted(self, task_manager, sample_task_dict):
         """Delete is persisted so a new TaskManager doesn't see the task."""
-        task_manager.create(sample_task_dict["id"], sample_task_dict["title"], sample_task_dict["criteria"])
+        task_manager.create(
+            sample_task_dict["id"], sample_task_dict["title"], sample_task_dict["criteria"]
+        )
         task_manager.delete("test-task-1")
         from engine.task_manager import TaskManager
+
         tm2 = TaskManager(task_manager.workdir)
         assert tm2.get("test-task-1") is None
 
     def test_to_dict_all_keys_present(self, task_manager, sample_task_dict):
         """to_dict() returns all 6 keys: id, title, criteria, status, created_at, completed_at."""
-        task = task_manager.create(sample_task_dict["id"], sample_task_dict["title"], sample_task_dict["criteria"])
+        task = task_manager.create(
+            sample_task_dict["id"], sample_task_dict["title"], sample_task_dict["criteria"]
+        )
         d = task_manager.to_dict(task)
         assert set(d.keys()) == {"id", "title", "criteria", "status", "created_at", "completed_at"}
         assert d["id"] == "test-task-1"
@@ -214,7 +238,9 @@ class TestTaskManagerDelete:
 
     def test_to_dict_after_complete_includes_completed_at(self, task_manager, sample_task_dict):
         """to_dict() includes completed_at after task is completed."""
-        task_manager.create(sample_task_dict["id"], sample_task_dict["title"], sample_task_dict["criteria"])
+        task_manager.create(
+            sample_task_dict["id"], sample_task_dict["title"], sample_task_dict["criteria"]
+        )
         task_manager.start("test-task-1")
         task = task_manager.complete("test-task-1")
         d = task_manager.to_dict(task)
@@ -243,8 +269,11 @@ class TestTaskManagerEdgeCases:
         """_save() creates .gitreins/ directory if it doesn't exist."""
         # Delete the config dir
         import shutil
+
         shutil.rmtree(os.path.join(task_manager.workdir, ".gitreins"), ignore_errors=True)
-        task_manager.create(sample_task_dict["id"], sample_task_dict["title"], sample_task_dict["criteria"])
+        task_manager.create(
+            sample_task_dict["id"], sample_task_dict["title"], sample_task_dict["criteria"]
+        )
         assert os.path.exists(os.path.join(task_manager.workdir, ".gitreins", "tasks.yaml"))
 
 
@@ -261,6 +290,7 @@ class TestTaskManagerExtendedEdgeCases:
     def test_created_at_is_close_to_now(self, task_manager, sample_task_dict):
         """created_at timestamp is within 5 seconds of task creation."""
         from datetime import timezone
+
         before = datetime.now(timezone.utc)
         task = task_manager.create(
             sample_task_dict["id"],
@@ -280,6 +310,7 @@ class TestTaskManagerExtendedEdgeCases:
     def test_load_empty_yaml_graceful(self, tmp_workdir):
         """TaskManager._load handles empty YAML dict gracefully."""
         import yaml
+
         config_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
         with open(os.path.join(config_dir, "tasks.yaml"), "w") as f:
@@ -290,6 +321,7 @@ class TestTaskManagerExtendedEdgeCases:
     def test_load_yaml_missing_task_id(self, tmp_workdir):
         """TaskManager._load gracefully skips task entries missing 'id'."""
         import yaml
+
         config_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
         with open(os.path.join(config_dir, "tasks.yaml"), "w") as f:

@@ -62,10 +62,12 @@ class Judge:
     def _read_pass_on_error(self) -> bool:
         """Read pass_on_error from .gitreins/config.yaml, defaulting to False."""
         import os
+
         config_path = os.path.join(self.workdir, ".gitreins", "config.yaml")
         if os.path.exists(config_path):
             try:
                 import yaml
+
                 with open(config_path, "r") as f:
                     cfg = yaml.safe_load(f) or {}
                 return bool((cfg.get("defaults") or {}).get("pass_on_error", False))
@@ -134,7 +136,8 @@ class Judge:
                     results=[],
                     extra={"pass_on_error": True},
                 ),
-                                   pipeline_result={"error": str(e), "pass_on_error": True})
+                pipeline_result={"error": str(e), "pass_on_error": True},
+            )
             logger.exception("Pipeline execution failed")
             return JudgeResult(task_id=task.id, passed=False, pipeline_result={"error": str(e)})
 
@@ -225,18 +228,20 @@ class Judge:
           tool — clean
         """
         diags: list[dict] = []
-        pattern = re.compile(r'^  [✗⚠] (.+?):(\d+) \[(.+?)\] (.+)')
+        pattern = re.compile(r"^  [✗⚠] (.+?):(\d+) \[(.+?)\] (.+)")
         for line in output.split("\n"):
             m = pattern.match(line)
             if m:
                 severity = "error" if line.startswith("  ✗") else "warning"
-                diags.append({
-                    "file": m.group(1),
-                    "line": int(m.group(2)),
-                    "severity": severity,
-                    "message": m.group(4),
-                    "tool": m.group(3),
-                })
+                diags.append(
+                    {
+                        "file": m.group(1),
+                        "line": int(m.group(2)),
+                        "severity": severity,
+                        "message": m.group(4),
+                        "tool": m.group(3),
+                    }
+                )
         return diags
 
     def run_precommit(self) -> bool:
@@ -244,8 +249,7 @@ class Judge:
         config = load_pipeline_config(self.workdir)
         pipeline = Pipeline(config, self.workdir, llm=self.llm)
         result = pipeline.run(
-            {"id": "_precommit", "title": "pre-commit", "criteria": []},
-            trigger="pre-commit"
+            {"id": "_precommit", "title": "pre-commit", "criteria": []}, trigger="pre-commit"
         )
         return result.get("passed", True)
 
@@ -254,16 +258,20 @@ class JudgeResult:
     """Result of running the judge pipeline."""
 
     def __init__(
-        self, task_id: str, passed: bool = False,
-        pipeline_result: dict = None, verdict=None,
-        tier1=None, tier2=None
+        self,
+        task_id: str,
+        passed: bool = False,
+        pipeline_result: dict = None,
+        verdict=None,
+        tier1=None,
+        tier2=None,
     ):
         self.task_id = task_id
         self.passed = passed
         self.pipeline_result = pipeline_result or {}
         self.verdict = verdict
-        self.tier1 = tier1   # Tier1Result from guard_manager.run_all()
-        self.tier2 = tier2   # Verdict from AgenticEvaluator.evaluate()
+        self.tier1 = tier1  # Tier1Result from guard_manager.run_all()
+        self.tier2 = tier2  # Verdict from AgenticEvaluator.evaluate()
 
     @property
     def summary(self) -> str:

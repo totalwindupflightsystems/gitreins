@@ -2,6 +2,7 @@
 Unit tests for engine/judge.py — Judge orchestrator and pipeline dispatch.
 axiom:trace work_item=GR-001 spec=specs/07-Judge-Orchestrator.md plan=.memory-bank/work-items/GR-001/plan.yaml
 """
+
 from unittest import mock
 from unittest.mock import patch
 
@@ -24,7 +25,7 @@ class TestJudgeResult:
                 "tier1": {
                     "id": "tier1",
                     "passed": True,
-                    "summary": "  ✓ secrets: ok\n  ✓ lint: ok"
+                    "summary": "  ✓ secrets: ok\n  ✓ lint: ok",
                 },
             },
         }
@@ -73,22 +74,30 @@ class TestJudgeLegacyPath:
     def test_legacy_guards_pass_tier2_runs(self, judge, llm_client):
         """When guards pass, Tier 2 evaluator is called."""
         from engine.task_manager import Task
+
         task = Task(id="t1", title="Test", criteria=["c1"])
 
         # Mock guards to pass
-        tier1_pass = Tier1Result(passed=True, results=[
-            GuardResult("secrets", True, "ok"),
-            GuardResult("lint", True, "ok"),
-            GuardResult("tests", True, "ok"),
-        ])
-        with patch.object(judge.guard_manager, 'run_all', return_value=tier1_pass):
+        tier1_pass = Tier1Result(
+            passed=True,
+            results=[
+                GuardResult("secrets", True, "ok"),
+                GuardResult("lint", True, "ok"),
+                GuardResult("tests", True, "ok"),
+            ],
+        )
+        with patch.object(judge.guard_manager, "run_all", return_value=tier1_pass):
             # Mock evaluator to return COMPLETE
             verdict_json = '{"verdict":"COMPLETE","items":[{"criterion":"c1","status":"PASS","detail":"verified"}],"summary":"good"}'
-            mock_usage = mock.MagicMock(prompt_tokens=0, completion_tokens=0,
-                                        cache_read_tokens=0, cache_write_tokens=0,
-                                        total_tokens=0)
+            mock_usage = mock.MagicMock(
+                prompt_tokens=0,
+                completion_tokens=0,
+                cache_read_tokens=0,
+                cache_write_tokens=0,
+                total_tokens=0,
+            )
             mock_resp = mock.MagicMock(content=verdict_json, tool_calls=None, usage=mock_usage)
-            with patch.object(llm_client, 'chat', return_value=mock_resp):
+            with patch.object(llm_client, "chat", return_value=mock_resp):
                 result = judge._run_legacy(task)
         assert result.passed is True
         assert result.verdict is not None
@@ -102,13 +111,17 @@ class TestJudgeLegacyPath:
     def test_legacy_guards_fail_tier2_skipped(self, judge):
         """When guards fail, Tier 2 is skipped, result.passed=False."""
         from engine.task_manager import Task
+
         task = Task(id="t1", title="Test", criteria=["c1"])
 
         # Mock guards to fail
-        tier1_fail = Tier1Result(passed=False, results=[
-            GuardResult("secrets", False, "key detected"),
-        ])
-        with patch.object(judge.guard_manager, 'run_all', return_value=tier1_fail):
+        tier1_fail = Tier1Result(
+            passed=False,
+            results=[
+                GuardResult("secrets", False, "key detected"),
+            ],
+        )
+        with patch.object(judge.guard_manager, "run_all", return_value=tier1_fail):
             result = judge._run_legacy(task)
         assert result.passed is False
         assert result.pipeline_result == {}
@@ -123,9 +136,11 @@ class TestJudgeEvaluateTask:
     def test_evaluate_task_uses_pipeline_when_config_has_stages(self, judge, tmp_workdir):
         """evaluate_task runs pipeline when pipeline config has stages."""
         from engine.task_manager import Task
+
         # Write a config with pipeline stages
         import os
         import yaml
+
         config_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
         config = {
@@ -136,8 +151,12 @@ class TestJudgeEvaluateTask:
                         "parallel": True,
                         "on": ["pre-eval"],
                         "steps": [
-                            {"id": "secrets", "type": "script",
-                             "run": "echo clean", "on_fail": "continue"},
+                            {
+                                "id": "secrets",
+                                "type": "script",
+                                "run": "echo clean",
+                                "on_fail": "continue",
+                            },
                         ],
                     },
                 ],
@@ -155,20 +174,28 @@ class TestJudgeEvaluateTask:
     def test_evaluate_task_falls_back_to_legacy_without_config(self, judge, llm_client):
         """evaluate_task falls back to legacy when no pipeline config exists."""
         from engine.task_manager import Task
+
         task = Task(id="t1", title="Test", criteria=["c1"])
 
-        tier1_pass = Tier1Result(passed=True, results=[
-            GuardResult("secrets", True, "ok"),
-            GuardResult("lint", True, "ok"),
-            GuardResult("tests", True, "ok"),
-        ])
-        with patch.object(judge.guard_manager, 'run_all', return_value=tier1_pass):
+        tier1_pass = Tier1Result(
+            passed=True,
+            results=[
+                GuardResult("secrets", True, "ok"),
+                GuardResult("lint", True, "ok"),
+                GuardResult("tests", True, "ok"),
+            ],
+        )
+        with patch.object(judge.guard_manager, "run_all", return_value=tier1_pass):
             verdict_json = '{"verdict":"COMPLETE","items":[{"criterion":"c1","status":"PASS","detail":"ok"}],"summary":"done"}'
-            mock_usage = mock.MagicMock(prompt_tokens=0, completion_tokens=0,
-                                        cache_read_tokens=0, cache_write_tokens=0,
-                                        total_tokens=0)
+            mock_usage = mock.MagicMock(
+                prompt_tokens=0,
+                completion_tokens=0,
+                cache_read_tokens=0,
+                cache_write_tokens=0,
+                total_tokens=0,
+            )
             mock_resp = mock.MagicMock(content=verdict_json, tool_calls=None, usage=mock_usage)
-            with patch.object(llm_client, 'chat', return_value=mock_resp):
+            with patch.object(llm_client, "chat", return_value=mock_resp):
                 result = judge.evaluate_task(task)
         assert result.passed is True
 
@@ -176,6 +203,7 @@ class TestJudgeEvaluateTask:
         """run_precommit runs pipeline with trigger='pre-commit'."""
         import os
         import yaml
+
         config_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
         config = {
@@ -186,8 +214,12 @@ class TestJudgeEvaluateTask:
                         "parallel": True,
                         "on": ["pre-commit"],
                         "steps": [
-                            {"id": "secrets", "type": "script",
-                             "run": "echo clean", "on_fail": "continue"},
+                            {
+                                "id": "secrets",
+                                "type": "script",
+                                "run": "echo clean",
+                                "on_fail": "continue",
+                            },
                         ],
                     },
                 ],
@@ -236,13 +268,18 @@ class TestExtendedJudge:
         from engine.task_manager import Task
         import os
         import yaml
+
         config_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
         config = {
             "pipeline": {
                 "stages": [
-                    {"id": "bad", "parallel": True, "on": ["pre-eval"],
-                     "steps": [{"id": "x", "type": "script", "run": "exit 1"}]},
+                    {
+                        "id": "bad",
+                        "parallel": True,
+                        "on": ["pre-eval"],
+                        "steps": [{"id": "x", "type": "script", "run": "exit 1"}],
+                    },
                 ],
             }
         }
@@ -287,12 +324,14 @@ class TestExtendedJudge:
         """BUGFIX: JudgeResult.tier1 and .tier2 are populated by _run_legacy."""
         from engine.judge import JudgeResult
 
-        verdict = Verdict(verdict="COMPLETE", items=[
-            VerdictItem(criterion="c1", status="PASS", detail="ok")
-        ], summary="all good")
-        tier1 = Tier1Result(passed=True, results=[
-            GuardResult(name="secrets", passed=True, output="clean")
-        ])
+        verdict = Verdict(
+            verdict="COMPLETE",
+            items=[VerdictItem(criterion="c1", status="PASS", detail="ok")],
+            summary="all good",
+        )
+        tier1 = Tier1Result(
+            passed=True, results=[GuardResult(name="secrets", passed=True, output="clean")]
+        )
 
         result = JudgeResult(task_id="t4", passed=True, tier1=tier1, tier2=verdict)
         assert result.tier1 is not None
@@ -376,14 +415,16 @@ class TestLspDiagnosticsParsing:
         from engine.guard_manager import Tier1Result, GuardResult
 
         lsp_result = GuardResult(
-            name="lsp", passed=False,
-            output="  ✗ /path/to/file.py:5 [pylsp] Undefined variable 'x'"
+            name="lsp", passed=False, output="  ✗ /path/to/file.py:5 [pylsp] Undefined variable 'x'"
         )
-        tier1 = Tier1Result(passed=False, results=[
-            GuardResult("secrets", True, "ok"),
-            lsp_result,
-            GuardResult("lint", True, "ok"),
-        ])
+        tier1 = Tier1Result(
+            passed=False,
+            results=[
+                GuardResult("secrets", True, "ok"),
+                lsp_result,
+                GuardResult("lint", True, "ok"),
+            ],
+        )
         diags = judge._extract_lsp_diagnostics(tier1)
         assert len(diags) == 1
         assert diags[0]["file"] == "/path/to/file.py"
@@ -393,10 +434,13 @@ class TestLspDiagnosticsParsing:
         """No lsp guard → empty list, no crash."""
         from engine.guard_manager import Tier1Result, GuardResult
 
-        tier1 = Tier1Result(passed=True, results=[
-            GuardResult("secrets", True, "ok"),
-            GuardResult("lint", True, "ok"),
-        ])
+        tier1 = Tier1Result(
+            passed=True,
+            results=[
+                GuardResult("secrets", True, "ok"),
+                GuardResult("lint", True, "ok"),
+            ],
+        )
         diags = judge._extract_lsp_diagnostics(tier1)
         assert diags == []
 
@@ -404,8 +448,11 @@ class TestLspDiagnosticsParsing:
         """LSP guard with empty output → empty list."""
         from engine.guard_manager import Tier1Result, GuardResult
 
-        tier1 = Tier1Result(passed=True, results=[
-            GuardResult("lsp", True, "  pylsp — clean"),
-        ])
+        tier1 = Tier1Result(
+            passed=True,
+            results=[
+                GuardResult("lsp", True, "  pylsp — clean"),
+            ],
+        )
         diags = judge._extract_lsp_diagnostics(tier1)
         assert diags == []

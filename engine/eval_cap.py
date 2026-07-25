@@ -53,19 +53,19 @@ class EvalCap:
     only 0.1 iterations. The LLM's reasoning turn costs 1.0.
     """
 
-    max_iterations: float = -1.0       # -1 = unlimited, supports fractional
-    max_seconds: float = -1.0          # -1 = unlimited
-    max_input_tokens: int = -1         # -1 = unlimited
-    max_output_tokens: int = -1        # -1 = unlimited
-    tool_call_weight: float = 0.1      # fraction of an iteration per tool call
+    max_iterations: float = -1.0  # -1 = unlimited, supports fractional
+    max_seconds: float = -1.0  # -1 = unlimited
+    max_input_tokens: int = -1  # -1 = unlimited
+    max_output_tokens: int = -1  # -1 = unlimited
+    tool_call_weight: float = 0.1  # fraction of an iteration per tool call
 
     # Runtime tracking
     iteration_credit: float = 0.0
     start_time: float = 0.0
-    cumulative_input_tokens: int = 0      # total input (regular + cache)
-    cumulative_output_tokens: int = 0     # output tokens
-    cumulative_cache_read: int = 0        # tokens served from cache
-    cumulative_cache_write: int = 0       # tokens written to cache
+    cumulative_input_tokens: int = 0  # total input (regular + cache)
+    cumulative_output_tokens: int = 0  # output tokens
+    cumulative_cache_read: int = 0  # tokens served from cache
+    cumulative_cache_write: int = 0  # tokens written to cache
 
     # Display
     source: str = ""
@@ -97,8 +97,13 @@ class EvalCap:
         self.cumulative_cache_read = 0
         self.cumulative_cache_write = 0
 
-    def record_llm_call(self, prompt_tokens: int = 0, completion_tokens: int = 0,
-                        cache_read_tokens: int = 0, cache_write_tokens: int = 0) -> str | None:
+    def record_llm_call(
+        self,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        cache_read_tokens: int = 0,
+        cache_write_tokens: int = 0,
+    ) -> str | None:
         """Record a full LLM reasoning call (costs 1.0 iterations).
 
         The cap is checked BEFORE the call — so at 99.9/100, a 1.0
@@ -190,8 +195,7 @@ class EvalCap:
         parts = []
         if self.max_iterations > 0:
             parts.append(
-                f"iterations: {_fmt_num(self.iteration_credit)}"
-                f"/{_fmt_num(self.max_iterations)}"
+                f"iterations: {_fmt_num(self.iteration_credit)}/{_fmt_num(self.max_iterations)}"
             )
         elif self.max_iterations == -1:
             parts.append("iterations: unlimited")
@@ -212,10 +216,7 @@ class EvalCap:
             parts.append(in_str)
             parts.append(
                 f"out: {_fmt_tokens(self.cumulative_output_tokens)}"
-                + (
-                    f"/{_fmt_tokens(self.max_output_tokens)}"
-                    if self.max_output_tokens > 0 else ""
-                )
+                + (f"/{_fmt_tokens(self.max_output_tokens)}" if self.max_output_tokens > 0 else "")
             )
         if not parts:
             return "no caps (unlimited)"
@@ -231,7 +232,9 @@ class EvalCap:
 
 # ── Parsing helpers ────────────────────────────────────────
 
-_TIME_RE = re.compile(r"^(\d+)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours)$")  # noqa: E501
+_TIME_RE = re.compile(
+    r"^(\d+)\s*(s|sec|secs|second|seconds|m|min|mins|minute|minutes|h|hr|hrs|hour|hours)$"
+)  # noqa: E501
 _TOKEN_RE = re.compile(r"^(\d+\.?\d*)(k|m|K|M)?$")
 _SLASH_TOKEN_RE = re.compile(r"^(\d+\.?\d*)(k|m|K|M)?\s*/\s*(\d+\.?\d*)(k|m|K|M)?$")
 
@@ -317,6 +320,7 @@ def _fmt_num(n: float) -> str:
 
 
 # ── Public constructors ─────────────────────────────────────
+
 
 def parse_eval_cap(raw: str) -> EvalCap:
     """Parse a legacy combined cap string like '100/30m/200k/50k'.

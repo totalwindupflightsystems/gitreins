@@ -62,9 +62,9 @@ def clamp(value: int, lo: int, hi: int) -> int:
     `clamp(15, 0, 10)` returns 0 instead of 10.
     """
     if value < lo:
-        return hi                # ← swapped: should be `lo`
+        return hi  # ← swapped: should be `lo`
     if value > hi:
-        return lo                # ← swapped: should be `hi`
+        return lo  # ← swapped: should be `hi`
     return value
 
 
@@ -90,4 +90,4 @@ def mean(values: list[float]) -> float:
     rather than total / count. Repeated in a second file so the
     evaluator catches it across multiple modules.
     """
-    return sum(values)            # ← missing `/ len(values)`
+    return sum(values)  # ← missing `/ len(values)`

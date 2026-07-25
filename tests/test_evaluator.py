@@ -2,11 +2,14 @@
 Unit tests for engine/evaluator.py — agentic LLM loop with tools and dedup.
 axiom:trace work_item=GR-001 spec=specs/03-Agentic-Evaluator.md plan=.memory-bank/work-items/GR-001/plan.yaml
 """
+
 import os
 from unittest.mock import MagicMock, patch
 
 from engine.evaluator import (
-    AgenticEvaluator, Verdict, VerdictItem,
+    AgenticEvaluator,
+    Verdict,
+    VerdictItem,
 )
 from engine.llm import LLMResponse, ToolCall
 
@@ -227,7 +230,7 @@ class TestSandbox:
         evaluator._tool_sandbox_write("persist", "data")
         # Mock LLM to immediately return verdict
         verdict_json = '{"verdict":"COMPLETE","items":[],"summary":"done"}'
-        with patch.object(llm_client, 'chat', return_value=LLMResponse(content=verdict_json)):
+        with patch.object(llm_client, "chat", return_value=LLMResponse(content=verdict_json)):
             evaluator.evaluate({"id": "t1", "title": "x", "criteria": []})
         # Sandbox should be cleared
         result = evaluator._tool_sandbox_read("persist")
@@ -331,14 +334,14 @@ class TestVerdictParsing:
 
     def test_keyword_complete_detected(self, evaluator):
         """Content with 'all criteria pass' → keyword parse yields COMPLETE."""
-        content = 'I have verified all criteria, everything passes and is complete.'
+        content = "I have verified all criteria, everything passes and is complete."
         verdict = evaluator._parse_verdict(content)
         # Keyword fallback: "all criteria" + "pass" → COMPLETE
         assert verdict.verdict == "COMPLETE"
 
     def test_keyword_all_criteria_pass(self, evaluator):
         """Content with 'all criteria' and 'pass' → COMPLETE."""
-        content = 'After reviewing, all criteria pass.'
+        content = "After reviewing, all criteria pass."
         verdict = evaluator._parse_verdict(content)
         assert verdict.verdict == "COMPLETE"
 
@@ -360,8 +363,9 @@ class TestMaxIterationsAndErrors:
             tc = ToolCall(id=f"tc{i}", name="read_file", arguments={"path": f"f{i}.txt"})
             calls.append(LLMResponse(content="working", tool_calls=[tc]))
         mock_chat = MagicMock(side_effect=calls)
-        with patch.object(llm_client, 'chat', mock_chat):
+        with patch.object(llm_client, "chat", mock_chat):
             from engine.evaluator import AgenticEvaluator
+
             fast_eval = AgenticEvaluator(llm_client, evaluator.workdir, max_iterations=2)
             verdict = fast_eval.evaluate({"id": "loop", "title": "x", "criteria": ["c1"]})
         assert verdict.verdict == "INCOMPLETE"
@@ -370,12 +374,17 @@ class TestMaxIterationsAndErrors:
 
     def test_max_iterations_error_message_actionable(self, evaluator, llm_client):
         """Error message on cap tells user exactly how to fix it."""
-        calls = [LLMResponse(content="working", tool_calls=[
-            ToolCall(id="t0", name="read_file", arguments={"path": "x.txt"})
-        ]) for _ in range(5)]
+        calls = [
+            LLMResponse(
+                content="working",
+                tool_calls=[ToolCall(id="t0", name="read_file", arguments={"path": "x.txt"})],
+            )
+            for _ in range(5)
+        ]
         mock_chat = MagicMock(side_effect=calls)
-        with patch.object(llm_client, 'chat', mock_chat):
+        with patch.object(llm_client, "chat", mock_chat):
             from engine.evaluator import AgenticEvaluator
+
             fast_eval = AgenticEvaluator(llm_client, evaluator.workdir, max_iterations=1)
             verdict = fast_eval.evaluate({"id": "t", "title": "x", "criteria": ["c1"]})
         assert "max_iterations" in verdict.summary
@@ -389,7 +398,7 @@ class TestMaxIterationsAndErrors:
 
     def test_llm_exception_returns_incomplete(self, evaluator, llm_client):
         """LLM exception → INCOMPLETE with error summary."""
-        with patch.object(llm_client, 'chat', side_effect=RuntimeError("LLM crashed")):
+        with patch.object(llm_client, "chat", side_effect=RuntimeError("LLM crashed")):
             verdict = evaluator.evaluate({"id": "err", "title": "x", "criteria": []})
         assert verdict.verdict == "INCOMPLETE"
         assert "LLM call failed" in verdict.summary or "LLM crashed" in verdict.summary
@@ -437,7 +446,7 @@ class TestEvaluatorEvaluate:
     def test_evaluate_with_empty_criteria_returns_complete(self, evaluator, llm_client):
         """Task with no criteria — LLM should return COMPLETE immediately."""
         verdict_json = '{"verdict":"COMPLETE","items":[],"summary":"no criteria to check"}'
-        with patch.object(llm_client, 'chat', return_value=LLMResponse(content=verdict_json)):
+        with patch.object(llm_client, "chat", return_value=LLMResponse(content=verdict_json)):
             verdict = evaluator.evaluate({"id": "empty", "title": "x", "criteria": []})
         assert verdict.verdict == "COMPLETE"
 
@@ -505,7 +514,7 @@ class TestExtendedEvaluator:
             LLMResponse(content="checking again", tool_calls=[tc2]),
             LLMResponse(content=verdict_json),
         ]
-        with patch.object(llm_client, 'chat', mock):
+        with patch.object(llm_client, "chat", mock):
             evaluator.max_iterations = 5
             verdict = evaluator.evaluate({"id": "dt", "title": "x", "criteria": ["c1"]})
         assert verdict.verdict == "COMPLETE"
@@ -522,7 +531,7 @@ class TestExtendedEvaluator:
             LLMResponse(content="reading", tool_calls=[tc]),
             LLMResponse(content=verdict_json),
         ]
-        with patch.object(llm_client, 'chat', mock):
+        with patch.object(llm_client, "chat", mock):
             evaluator.max_iterations = 5
             verdict = evaluator.evaluate({"id": "et", "title": "x", "criteria": ["c1"]})
         assert verdict.verdict == "COMPLETE"
@@ -536,7 +545,7 @@ class TestExtendedEvaluator:
 
     def test_verdict_missing_items_falls_to_keyword(self, evaluator):
         """JSON with verdict but missing items falls back to keyword parse."""
-        content = 'The task is complete. All criteria pass.'
+        content = "The task is complete. All criteria pass."
         verdict = evaluator._parse_verdict(content)
         assert verdict.verdict == "COMPLETE"
 
@@ -565,7 +574,7 @@ class TestExtendedEvaluator:
 
     def test_evaluate_empty_response_no_tool_calls(self, evaluator, llm_client):
         """evaluate() returns INCOMPLETE when LLM returns empty content with no tool calls."""
-        with patch.object(llm_client, 'chat', return_value=LLMResponse(content=None)):
+        with patch.object(llm_client, "chat", return_value=LLMResponse(content=None)):
             verdict = evaluator.evaluate({"id": "empty", "title": "x", "criteria": ["c1"]})
         assert verdict.verdict == "INCOMPLETE"
         assert "empty response" in verdict.summary.lower()
@@ -573,10 +582,14 @@ class TestExtendedEvaluator:
     def test_evaluate_tool_exception_returns_error(self, evaluator, llm_client):
         """evaluate() returns INCOMPLETE when a tool call raises an exception."""
         tc = ToolCall(id="bad", name="read_file", arguments={"path": "/nonexistent"})
-        with patch.object(llm_client, 'chat', side_effect=[
-            LLMResponse(content="checking", tool_calls=[tc]),
-            LLMResponse(content='{"verdict":"INCOMPLETE","items":[],"summary":"error"}'),
-        ]):
+        with patch.object(
+            llm_client,
+            "chat",
+            side_effect=[
+                LLMResponse(content="checking", tool_calls=[tc]),
+                LLMResponse(content='{"verdict":"INCOMPLETE","items":[],"summary":"error"}'),
+            ],
+        ):
             verdict = evaluator.evaluate({"id": "err", "title": "x", "criteria": ["c1"]})
         assert verdict.verdict == "INCOMPLETE"
 
@@ -597,6 +610,7 @@ class TestExtendedEvaluator:
 
 
 # ── v0.7.5: Compaction checkpoint + resume loop ──────────────────────
+
 
 class TestCompaction:
     """Tests for context compaction: checkpoint, resume, sandbox survival."""
@@ -655,6 +669,7 @@ class TestCompaction:
     def test_compaction_triggered_on_http_400(self, evaluator, llm_client):
         """HTTP 400 with 'context' keyword triggers compaction, not immediate failure."""
         import requests
+
         # Build a fake HTTPError with status 400
         fake_response = MagicMock()
         fake_response.status_code = 400
@@ -663,16 +678,22 @@ class TestCompaction:
         # First call: HTTP 400 → compact
         # Second call: verdict (after compaction, fresh context)
         evaluator._sandbox["verified_0"] = "PASS"
-        with patch.object(llm_client, 'chat', side_effect=[
-            http_err,
-            LLMResponse(content='{"verdict":"COMPLETE","items":[{"criterion":"c0","status":"PASS","detail":"x"}],"summary":"ok"}'),
-        ]):
+        with patch.object(
+            llm_client,
+            "chat",
+            side_effect=[
+                http_err,
+                LLMResponse(
+                    content='{"verdict":"COMPLETE","items":[{"criterion":"c0","status":"PASS","detail":"x"}],"summary":"ok"}'
+                ),
+            ],
+        ):
             verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
         assert verdict.verdict == "COMPLETE"
 
     def test_compaction_not_triggered_on_other_error(self, evaluator, llm_client):
         """Non-context errors (like ValueError) return INCOMPLETE immediately."""
-        with patch.object(llm_client, 'chat', side_effect=ValueError("some other error")):
+        with patch.object(llm_client, "chat", side_effect=ValueError("some other error")):
             verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
         assert verdict.verdict == "INCOMPLETE"
         assert "other error" in verdict.summary.lower()
@@ -687,12 +708,21 @@ class TestCompaction:
             call_count[0] += 1
             if call_count[0] <= 2:
                 # Build up context: 950 prompt tokens > 900 (90% of 1000)
-                tc = ToolCall(id=f"tc{call_count[0]}", name="read_file", arguments={"path": f"f{call_count[0]}.py"})
+                tc = ToolCall(
+                    id=f"tc{call_count[0]}",
+                    name="read_file",
+                    arguments={"path": f"f{call_count[0]}.py"},
+                )
                 return LLMResponse(
                     content="checking",
                     tool_calls=[tc],
-                    usage=MagicMock(prompt_tokens=950, completion_tokens=10,
-                                    cache_read_tokens=0, cache_write_tokens=0, total_tokens=910),
+                    usage=MagicMock(
+                        prompt_tokens=950,
+                        completion_tokens=10,
+                        cache_read_tokens=0,
+                        cache_write_tokens=0,
+                        total_tokens=910,
+                    ),
                 )
             else:
                 # After compaction: deliver verdict
@@ -700,19 +730,22 @@ class TestCompaction:
                     content='{"verdict":"COMPLETE","items":[{"criterion":"c0","status":"PASS","detail":"ok"}],"summary":"done"}',
                 )
 
-        with patch.object(llm_client, 'chat', side_effect=fake_chat):
-            with patch.object(evaluator, '_tool_read_file', return_value={"content": "test", "total_lines": 1}):
+        with patch.object(llm_client, "chat", side_effect=fake_chat):
+            with patch.object(
+                evaluator, "_tool_read_file", return_value={"content": "test", "total_lines": 1}
+            ):
                 verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
         assert verdict.verdict == "COMPLETE"
 
     def test_max_compactions_limit(self, evaluator, llm_client):
         """After MAX_COMPACTIONS (3), HTTP 400 returns INCOMPLETE."""
         import requests
+
         fake_response = MagicMock()
         fake_response.status_code = 400
         http_err = requests.HTTPError("context length exceeded", response=fake_response)
 
-        with patch.object(llm_client, 'chat', side_effect=http_err):
+        with patch.object(llm_client, "chat", side_effect=http_err):
             verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
         assert verdict.verdict == "INCOMPLETE"
         # Should have failed after 3 compaction attempts
@@ -721,6 +754,7 @@ class TestCompaction:
     def test_compaction_threshold_config_override(self, evaluator, llm_client, tmp_workdir):
         """When config sets compaction_threshold to 0.50, compaction triggers at 50%."""
         import yaml
+
         cdir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(cdir, exist_ok=True)
         with open(os.path.join(cdir, "config.yaml"), "w") as f:
@@ -734,26 +768,38 @@ class TestCompaction:
             call_count[0] += 1
             if call_count[0] <= 2:
                 # 600 prompt tokens > 500 (50% of 1000) — should trigger compaction
-                tc = ToolCall(id=f"tc{call_count[0]}", name="read_file", arguments={"path": f"f{call_count[0]}.py"})
+                tc = ToolCall(
+                    id=f"tc{call_count[0]}",
+                    name="read_file",
+                    arguments={"path": f"f{call_count[0]}.py"},
+                )
                 return LLMResponse(
                     content="checking",
                     tool_calls=[tc],
-                    usage=MagicMock(prompt_tokens=600, completion_tokens=10,
-                                    cache_read_tokens=0, cache_write_tokens=0, total_tokens=610),
+                    usage=MagicMock(
+                        prompt_tokens=600,
+                        completion_tokens=10,
+                        cache_read_tokens=0,
+                        cache_write_tokens=0,
+                        total_tokens=610,
+                    ),
                 )
             else:
                 return LLMResponse(
                     content='{"verdict":"COMPLETE","items":[{"criterion":"c0","status":"PASS","detail":"ok"}],"summary":"done"}',
                 )
 
-        with patch.object(llm_client, 'chat', side_effect=fake_chat):
-            with patch.object(evaluator, '_tool_read_file', return_value={"content": "test", "total_lines": 1}):
+        with patch.object(llm_client, "chat", side_effect=fake_chat):
+            with patch.object(
+                evaluator, "_tool_read_file", return_value={"content": "test", "total_lines": 1}
+            ):
                 verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
         assert verdict.verdict == "COMPLETE"
 
     def test_compaction_threshold_not_triggered_below(self, evaluator, llm_client, tmp_workdir):
         """When prompt tokens are below the configured threshold, no compaction occurs."""
         import yaml
+
         cdir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(cdir, exist_ok=True)
         with open(os.path.join(cdir, "config.yaml"), "w") as f:
@@ -767,20 +813,31 @@ class TestCompaction:
             call_count[0] += 1
             if call_count[0] <= 2:
                 # 400 prompt tokens < 5000 (50% of 10000) — should NOT trigger compaction
-                tc = ToolCall(id=f"tc{call_count[0]}", name="read_file", arguments={"path": f"f{call_count[0]}.py"})
+                tc = ToolCall(
+                    id=f"tc{call_count[0]}",
+                    name="read_file",
+                    arguments={"path": f"f{call_count[0]}.py"},
+                )
                 return LLMResponse(
                     content="checking",
                     tool_calls=[tc],
-                    usage=MagicMock(prompt_tokens=400, completion_tokens=10,
-                                    cache_read_tokens=0, cache_write_tokens=0, total_tokens=410),
+                    usage=MagicMock(
+                        prompt_tokens=400,
+                        completion_tokens=10,
+                        cache_read_tokens=0,
+                        cache_write_tokens=0,
+                        total_tokens=410,
+                    ),
                 )
             else:
                 return LLMResponse(
                     content='{"verdict":"COMPLETE","items":[{"criterion":"c0","status":"PASS","detail":"ok"}],"summary":"done"}',
                 )
 
-        with patch.object(llm_client, 'chat', side_effect=fake_chat):
-            with patch.object(evaluator, '_tool_read_file', return_value={"content": "test", "total_lines": 1}):
+        with patch.object(llm_client, "chat", side_effect=fake_chat):
+            with patch.object(
+                evaluator, "_tool_read_file", return_value={"content": "test", "total_lines": 1}
+            ):
                 verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
         assert verdict.verdict == "COMPLETE"
         # Should have completed without compaction — all 3 calls direct
@@ -789,6 +846,7 @@ class TestCompaction:
     def test_code_context_budget_config_override(self, evaluator, llm_client, tmp_workdir):
         """When config sets code_context_budget to 0.20, code context is capped at 20%."""
         import yaml
+
         cdir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(cdir, exist_ok=True)
         with open(os.path.join(cdir, "config.yaml"), "w") as f:
@@ -799,14 +857,14 @@ class TestCompaction:
         # Build a very large code context — ~3000 chars (~1000 tokens)
         large_ctx = "x" * 3000
 
-        with patch.object(evaluator, '_build_code_context', return_value=large_ctx):
+        with patch.object(evaluator, "_build_code_context", return_value=large_ctx):
             captured_prompt = []
 
             def capture_chat(messages, tools=None, max_tokens=None, temperature=0.1):
                 captured_prompt.append(messages[1]["content"] if len(messages) > 1 else "")
                 return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
 
-            with patch.object(llm_client, 'chat', capture_chat):
+            with patch.object(llm_client, "chat", capture_chat):
                 evaluator.evaluate({"id": "t", "title": "ct", "criteria": ["x"]})
 
         assert captured_prompt, "chat() was never called"
@@ -821,14 +879,14 @@ class TestCompaction:
 
         large_ctx = "x" * 3000  # ~1000 tokens
 
-        with patch.object(evaluator, '_build_code_context', return_value=large_ctx):
+        with patch.object(evaluator, "_build_code_context", return_value=large_ctx):
             captured_prompt = []
 
             def capture_chat(messages, tools=None, max_tokens=None, temperature=0.1):
                 captured_prompt.append(messages[1]["content"] if len(messages) > 1 else "")
                 return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
 
-            with patch.object(llm_client, 'chat', capture_chat):
+            with patch.object(llm_client, "chat", capture_chat):
                 evaluator.evaluate({"id": "t", "title": "ct", "criteria": ["x"]})
 
         assert captured_prompt, "chat() was never called"
@@ -852,12 +910,14 @@ class TestCompaction:
 
 # ── v0.7.4: Code context pre-loading ─────────────────────────────────
 
+
 class TestCodeContextPreloading:
     """Tests for _build_code_context: full mode vs diff mode."""
 
     def test_diff_mode_returns_git_diff(self, evaluator, tmp_workdir):
         """In diff mode, _build_code_context returns git diff hunks."""
         import subprocess
+
         os.chdir(tmp_workdir)
         subprocess.run(["git", "init", "-q"], cwd=tmp_workdir)
         subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp_workdir)
@@ -867,8 +927,17 @@ class TestCodeContextPreloading:
         with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
             f.write("print('hello')\n")
         subprocess.run(["git", "add", "main.py"], cwd=tmp_workdir)
-        subprocess.run(["git", "commit", "-m", "initial", "--no-verify"],
-                       cwd=tmp_workdir, env={**os.environ, "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "t@t.com", "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "t@t.com"})
+        subprocess.run(
+            ["git", "commit", "-m", "initial", "--no-verify"],
+            cwd=tmp_workdir,
+            env={
+                **os.environ,
+                "GIT_AUTHOR_NAME": "Test",
+                "GIT_AUTHOR_EMAIL": "t@t.com",
+                "GIT_COMMITTER_NAME": "Test",
+                "GIT_COMMITTER_EMAIL": "t@t.com",
+            },
+        )
 
         with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
             f.write("print('hello world')\n")
@@ -881,6 +950,7 @@ class TestCodeContextPreloading:
     def test_full_mode_returns_file_contents(self, evaluator, tmp_workdir):
         """In full mode, _build_code_context returns full changed file content."""
         import subprocess
+
         os.chdir(tmp_workdir)
         subprocess.run(["git", "init", "-q"], cwd=tmp_workdir)
         subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp_workdir)
@@ -889,8 +959,17 @@ class TestCodeContextPreloading:
         with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
             f.write("def foo():\n    return 42\n")
         subprocess.run(["git", "add", "main.py"], cwd=tmp_workdir)
-        subprocess.run(["git", "commit", "-m", "initial", "--no-verify"],
-                       cwd=tmp_workdir, env={**os.environ, "GIT_AUTHOR_NAME": "Test", "GIT_AUTHOR_EMAIL": "t@t.com", "GIT_COMMITTER_NAME": "Test", "GIT_COMMITTER_EMAIL": "t@t.com"})
+        subprocess.run(
+            ["git", "commit", "-m", "initial", "--no-verify"],
+            cwd=tmp_workdir,
+            env={
+                **os.environ,
+                "GIT_AUTHOR_NAME": "Test",
+                "GIT_AUTHOR_EMAIL": "t@t.com",
+                "GIT_COMMITTER_NAME": "Test",
+                "GIT_COMMITTER_EMAIL": "t@t.com",
+            },
+        )
 
         with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
             f.write("def foo():\n    return 99\n")
@@ -905,6 +984,7 @@ class TestCodeContextPreloading:
     def test_no_changes_returns_empty(self, evaluator, tmp_workdir):
         """When nothing changed, _build_code_context returns empty string."""
         import subprocess
+
         os.chdir(tmp_workdir)
         subprocess.run(["git", "init", "-q"], cwd=tmp_workdir)
         config = {"guards": {"test_mode": "full"}}
@@ -926,7 +1006,7 @@ class TestCodeContextPreloading:
             captured_tokens.append(max_tokens)
             return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
 
-        with patch.object(llm_client, 'chat', capture_chat):
+        with patch.object(llm_client, "chat", capture_chat):
             evaluator.evaluate({"id": "t", "title": "token test", "criteria": ["x"]})
 
         assert captured_tokens, "chat() was never called"
@@ -950,7 +1030,7 @@ class TestCodeContextPreloading:
             captured.append(max_tokens)
             return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
 
-        with patch.object(llm_client, 'chat', capture_chat):
+        with patch.object(llm_client, "chat", capture_chat):
             evaluator.evaluate({"id": "t", "title": "unlimited", "criteria": ["x"]})
 
         assert captured, "chat() was never called"
@@ -973,7 +1053,7 @@ class TestCodeContextPreloading:
             captured.append(max_tokens)
             return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
 
-        with patch.object(llm_client, 'chat', capture_chat):
+        with patch.object(llm_client, "chat", capture_chat):
             evaluator.evaluate({"id": "t", "title": "uncorrupted", "criteria": ["x"]})
 
         assert captured, "chat() was never called"
@@ -988,57 +1068,60 @@ class TestCodeContextPreloading:
 
     def test_file_scope_changed_rejects_outside_file(self, evaluator, tmp_workdir):
         """In 'changed' scope, read_file on non-allowed file returns error."""
-        evaluator._allowed_files = {'src/main.py', 'tests/test_main.py', 'pyproject.toml'}
+        evaluator._allowed_files = {"src/main.py", "tests/test_main.py", "pyproject.toml"}
 
-        result = evaluator._tool_read_file('other/unrelated.py')
-        assert 'error' in result
-        assert 'File not in scope' in result['error']
-        assert 'unrelated.py' in result['error']
+        result = evaluator._tool_read_file("other/unrelated.py")
+        assert "error" in result
+        assert "File not in scope" in result["error"]
+        assert "unrelated.py" in result["error"]
 
     def test_file_scope_changed_allows_allowed_file(self, evaluator, tmp_workdir):
         """In 'changed' scope, read_file on allowed file succeeds."""
         import os
-        os.makedirs(os.path.join(tmp_workdir, 'src'), exist_ok=True)
-        with open(os.path.join(tmp_workdir, 'src', 'main.py'), 'w') as f:
-            f.write('def hello(): pass\n')
 
-        evaluator._allowed_files = {'src/main.py', 'tests/test_main.py'}
+        os.makedirs(os.path.join(tmp_workdir, "src"), exist_ok=True)
+        with open(os.path.join(tmp_workdir, "src", "main.py"), "w") as f:
+            f.write("def hello(): pass\n")
 
-        result = evaluator._tool_read_file('src/main.py')
-        assert 'content' in result
-        assert 'hello' in result['content']
+        evaluator._allowed_files = {"src/main.py", "tests/test_main.py"}
+
+        result = evaluator._tool_read_file("src/main.py")
+        assert "content" in result
+        assert "hello" in result["content"]
 
     def test_file_scope_full_allows_any_file(self, evaluator, tmp_workdir):
         """In 'full' scope (None), read_file on any file succeeds."""
         import os
-        os.makedirs(os.path.join(tmp_workdir, 'anywhere'), exist_ok=True)
-        with open(os.path.join(tmp_workdir, 'anywhere', 'deep.py'), 'w') as f:
-            f.write('x=1\n')
+
+        os.makedirs(os.path.join(tmp_workdir, "anywhere"), exist_ok=True)
+        with open(os.path.join(tmp_workdir, "anywhere", "deep.py"), "w") as f:
+            f.write("x=1\n")
 
         evaluator._allowed_files = None  # full scope
 
-        result = evaluator._tool_read_file('anywhere/deep.py')
-        assert 'content' in result
-        assert 'x=1' in result['content']
+        result = evaluator._tool_read_file("anywhere/deep.py")
+        assert "content" in result
+        assert "x=1" in result["content"]
 
     def test_search_pattern_respects_file_scope(self, evaluator, tmp_workdir):
         """In 'changed' scope, search_pattern only finds results in allowed files."""
         import os
-        os.makedirs(os.path.join(tmp_workdir, 'src'), exist_ok=True)
-        os.makedirs(os.path.join(tmp_workdir, 'vendor'), exist_ok=True)
-        with open(os.path.join(tmp_workdir, 'src', 'main.py'), 'w') as f:
-            f.write('TODO: implement\n')
-        with open(os.path.join(tmp_workdir, 'vendor', 'lib.py'), 'w') as f:
-            f.write('TODO: fix this\n')
 
-        evaluator._allowed_files = {'src/main.py', 'Makefile'}
+        os.makedirs(os.path.join(tmp_workdir, "src"), exist_ok=True)
+        os.makedirs(os.path.join(tmp_workdir, "vendor"), exist_ok=True)
+        with open(os.path.join(tmp_workdir, "src", "main.py"), "w") as f:
+            f.write("TODO: implement\n")
+        with open(os.path.join(tmp_workdir, "vendor", "lib.py"), "w") as f:
+            f.write("TODO: fix this\n")
 
-        result = evaluator._tool_search_pattern('TODO')
-        assert result['count'] == 1, (
+        evaluator._allowed_files = {"src/main.py", "Makefile"}
+
+        result = evaluator._tool_search_pattern("TODO")
+        assert result["count"] == 1, (
             f"Expected 1 match in allowed files, got {result['count']}: {result['matches']}"
         )
-        assert 'src/main.py' in str(result['matches'])
-        assert 'vendor/lib.py' not in str(result['matches'])
+        assert "src/main.py" in str(result["matches"])
+        assert "vendor/lib.py" not in str(result["matches"])
 
     def test_file_scope_integration_with_evaluate(self, evaluator, llm_client, tmp_workdir):
         """End-to-end: evaluator with 'changed' scope works correctly."""
@@ -1047,50 +1130,59 @@ class TestCodeContextPreloading:
         import subprocess
         from engine.llm import LLMResponse, ToolCall
 
-        cdir = os.path.join(tmp_workdir, '.gitreins')
+        cdir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(cdir, exist_ok=True)
-        with open(os.path.join(cdir, 'config.yaml'), 'w') as f:
-            yaml.dump({'evaluator': {'file_scope': 'changed'}}, f)
+        with open(os.path.join(cdir, "config.yaml"), "w") as f:
+            yaml.dump({"evaluator": {"file_scope": "changed"}}, f)
 
-        os.makedirs(os.path.join(tmp_workdir, 'src'), exist_ok=True)
-        with open(os.path.join(tmp_workdir, 'src', 'main.py'), 'w') as f:
+        os.makedirs(os.path.join(tmp_workdir, "src"), exist_ok=True)
+        with open(os.path.join(tmp_workdir, "src", "main.py"), "w") as f:
             f.write("print('ok')\n")
-        subprocess.run(['git', 'init'], cwd=tmp_workdir, capture_output=True)
-        subprocess.run(['git', 'add', '-A'], cwd=tmp_workdir, capture_output=True)
-        subprocess.run(['git', 'commit', '-m', 'initial'], cwd=tmp_workdir, capture_output=True)
-        with open(os.path.join(tmp_workdir, 'src', 'main.py'), 'a') as f:
-            f.write('# change\n')
+        subprocess.run(["git", "init"], cwd=tmp_workdir, capture_output=True)
+        subprocess.run(["git", "add", "-A"], cwd=tmp_workdir, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "initial"], cwd=tmp_workdir, capture_output=True)
+        with open(os.path.join(tmp_workdir, "src", "main.py"), "a") as f:
+            f.write("# change\n")
 
         captured = []
+
         def fake_chat(messages, tools=None, max_tokens=None):
             captured.append(len(messages))
             if len(captured) == 1:
                 return LLMResponse(
-                    content='checking',
-                    tool_calls=[ToolCall(id='tc1', name='read_file', arguments={'path': 'nonexistent_outside.py'})],
+                    content="checking",
+                    tool_calls=[
+                        ToolCall(
+                            id="tc1", name="read_file", arguments={"path": "nonexistent_outside.py"}
+                        )
+                    ],
                 )
             return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
 
-        with patch.object(llm_client, 'chat', side_effect=fake_chat):
-            verdict = evaluator.evaluate({'id': 't', 'title': 'scope test', 'criteria': ['c0']})
-        assert verdict.verdict == 'COMPLETE'
+        with patch.object(llm_client, "chat", side_effect=fake_chat):
+            verdict = evaluator.evaluate({"id": "t", "title": "scope test", "criteria": ["c0"]})
+        assert verdict.verdict == "COMPLETE"
 
     def test_file_scope_default_is_changed(self, evaluator, tmp_workdir):
         """Without config override, file_scope defaults to 'changed'."""
         import os
+
         # Ensure no config.yaml exists
-        cdir = os.path.join(tmp_workdir, '.gitreins')
-        cfg = os.path.join(cdir, 'config.yaml')
+        cdir = os.path.join(tmp_workdir, ".gitreins")
+        cfg = os.path.join(cdir, "config.yaml")
         if os.path.exists(cfg):
             os.remove(cfg)
 
         # In a fresh git repo with no changes, _allowed_files will be empty
         import subprocess
-        subprocess.run(['git', 'init'], cwd=tmp_workdir, capture_output=True)
-        subprocess.run(['git', 'commit', '--allow-empty', '-m', 'init'], cwd=tmp_workdir, capture_output=True)
+
+        subprocess.run(["git", "init"], cwd=tmp_workdir, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "--allow-empty", "-m", "init"], cwd=tmp_workdir, capture_output=True
+        )
 
         evaluator._allowed_files = evaluator._compute_allowed_files()
         # In a clean repo with no uncommitted changes, set should be empty (or just config files)
-        assert 'src/main.py' not in evaluator._allowed_files, (
-            'No changed files should be in scope for a clean repo'
+        assert "src/main.py" not in evaluator._allowed_files, (
+            "No changed files should be in scope for a clean repo"
         )

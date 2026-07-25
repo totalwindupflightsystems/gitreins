@@ -114,7 +114,9 @@ def _get_staged_files(workdir: str) -> list[str]:
     try:
         head_check = subprocess.run(
             ["git", "rev-parse", "--verify", "-q", "HEAD"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
             cwd=workdir,
         )
         if head_check.returncode != 0:
@@ -123,13 +125,17 @@ def _get_staged_files(workdir: str) -> list[str]:
             # guard should still scan them for secrets/lint/etc.
             result = subprocess.run(
                 ["git", "ls-files", "--cached"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
                 cwd=workdir,
             )
         else:
             result = subprocess.run(
                 ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-                capture_output=True, text=True, timeout=10,
+                capture_output=True,
+                text=True,
+                timeout=10,
                 cwd=workdir,
             )
         return [f.strip() for f in result.stdout.split("\n") if f.strip()]
@@ -155,7 +161,6 @@ def _build_diff_test_command(test_command: str, test_files: list[str], workdir: 
     return cmd
 
 
-
 def _load_guard_config(workdir: str) -> dict:
     """Load .gitreins/config.yaml and extract the guards section.
 
@@ -169,6 +174,7 @@ def _load_guard_config(workdir: str) -> dict:
         return {}
     try:
         import yaml as _yaml
+
         with open(config_path, "r") as f:
             return _yaml.safe_load(f) or {}
     except ImportError:
@@ -199,7 +205,9 @@ class GuardManager:
             "skylos": guards_cfg.get("skylos", False),  # opt-in: needs pip install
             "static_analysis": guards_cfg.get("static_analysis", False),  # opt-in: type checkers
             "lsp": guards_cfg.get("lsp", False),  # opt-in: LSP servers
-            "security_scan": guards_cfg.get("security_scan", {}).get("enabled", False),  # opt-in: Antares CVE scanner
+            "security_scan": guards_cfg.get("security_scan", {}).get(
+                "enabled", False
+            ),  # opt-in: Antares CVE scanner
         }
         self._static_tools = guards_cfg.get("static_analysis_tools", {})
         self._lsp_tools = guards_cfg.get("lsp_tools", ["pylsp"])
@@ -380,13 +388,18 @@ class GuardManager:
                 cmd.extend(["--config", config_path])
             result = subprocess.run(
                 cmd,
-                capture_output=True, text=True, timeout=30,
-                cwd=self.workdir, errors='replace',
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=self.workdir,
+                errors="replace",
             )
             if result.returncode == 0:
                 return GuardResult(name="secrets", passed=True, output="gitleaks: clean")
             else:
-                return GuardResult(name="secrets", passed=False, output=result.stdout + result.stderr)
+                return GuardResult(
+                    name="secrets", passed=False, output=result.stdout + result.stderr
+                )
         except FileNotFoundError:
             logger.debug("gitleaks not found — using built-in scanner")
         except Exception as e:
@@ -405,33 +418,48 @@ class GuardManager:
         # Patterns that LIKELY represent actual secrets (high confidence)
         danger_patterns = [
             # Private key blocks (SSH, SSL, PGP, PKCS#8)
-            (r'(?i)-----BEGIN\s+(RSA|DSA|EC|OPENSSH|PGP|ENCRYPTED\s+)?\s*PRIVATE\s+KEY(\s+BLOCK)?', "private key block"),
+            (
+                r"(?i)-----BEGIN\s+(RSA|DSA|EC|OPENSSH|PGP|ENCRYPTED\s+)?\s*PRIVATE\s+KEY(\s+BLOCK)?",
+                "private key block",
+            ),
             # GitHub tokens
-            (r'ghp_[A-Za-z0-9]{36,}', "GitHub personal access token"),
-            (r'gho_[A-Za-z0-9]{36,}', "GitHub OAuth token"),
+            (r"ghp_[A-Za-z0-9]{36,}", "GitHub personal access token"),
+            (r"gho_[A-Za-z0-9]{36,}", "GitHub OAuth token"),
             # GitLab tokens
-            (r'glpat-[A-Za-z0-9_\-]{20,}', "GitLab personal access token"),
+            (r"glpat-[A-Za-z0-9_\-]{20,}", "GitLab personal access token"),
             # OpenAI/OpenRouter keys (20+ chars — catches all sk- variants)
-            (r'sk-[A-Za-z0-9_\-]{20,}', "OpenAI/OpenRouter API key"),
+            (r"sk-[A-Za-z0-9_\-]{20,}", "OpenAI/OpenRouter API key"),
             # AWS keys
-            (r'(?i)AKIA[0-9A-Z]{16}', "AWS access key"),
-            (r'(?i)(aws[_-]?secret[_-]?access[_-]?key|aws[_-]?secret|secret[_-]?access[_-]?key)\s*[:=]\s*["\'][A-Za-z0-9+/]{40,}["\']', "AWS secret access key"),
+            (r"(?i)AKIA[0-9A-Z]{16}", "AWS access key"),
+            (
+                r'(?i)(aws[_-]?secret[_-]?access[_-]?key|aws[_-]?secret|secret[_-]?access[_-]?key)\s*[:=]\s*["\'][A-Za-z0-9+/]{40,}["\']',
+                "AWS secret access key",
+            ),
             # GCP API keys
-            (r'AIza[0-9A-Za-z\-_]{35,}', "GCP API key"),
+            (r"AIza[0-9A-Za-z\-_]{35,}", "GCP API key"),
             # DigitalOcean tokens
-            (r'dop_v1_[a-z0-9]{64}', "DigitalOcean access token"),
+            (r"dop_v1_[a-z0-9]{64}", "DigitalOcean access token"),
             # Stripe live keys
-            (r'sk_live_[0-9a-zA-Z]{24,}', "Stripe live secret key"),
-            (r'rk_live_[0-9a-zA-Z]{24,}', "Stripe restricted key"),
+            (r"sk_live_[0-9a-zA-Z]{24,}", "Stripe live secret key"),
+            (r"rk_live_[0-9a-zA-Z]{24,}", "Stripe restricted key"),
             # Azure storage
-            (r'(?i)DefaultEndpointsProtocol=https;AccountName=[^;]+;AccountKey=[A-Za-z0-9+/=]{60,}', "Azure storage connection string"),
+            (
+                r"(?i)DefaultEndpointsProtocol=https;AccountName=[^;]+;AccountKey=[A-Za-z0-9+/=]{60,}",
+                "Azure storage connection string",
+            ),
             (r'(?i)AccountKey\s*=\s*["\']?[A-Za-z0-9+/=]{60,}["\']?', "Azure storage account key"),
             # Slack API tokens
-            (r'xox[baprs]-[0-9a-zA-Z\-]{20,}', "Slack API token"),
+            (r"xox[baprs]-[0-9a-zA-Z\-]{20,}", "Slack API token"),
             # Generic patterns (check LAST — specific providers above)
-            (r'(?i)(api[_-]?key|apikey)\s*[:=]\s*["\']([A-Za-z0-9_\-]{20,})["\']', "hardcoded API key"),
+            (
+                r'(?i)(api[_-]?key|apikey)\s*[:=]\s*["\']([A-Za-z0-9_\-]{20,})["\']',
+                "hardcoded API key",
+            ),
             # JWTs assigned as literal strings
-            (r'(?i)(token|jwt)\s*[:=]\s*["\']eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{10,}["\']', "hardcoded JWT"),
+            (
+                r'(?i)(token|jwt)\s*[:=]\s*["\']eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-]{10,}["\']',
+                "hardcoded JWT",
+            ),
             # Passwords with literal-looking values
             (r'(?i)(password|passwd|pwd)\s*[:=]\s*["\'][^"\'$]{8,}["\']', "hardcoded password"),
             # Generic tokens/secrets (check LAST)
@@ -440,15 +468,15 @@ class GuardManager:
 
         # Patterns we explicitly IGNORE (common false positives)
         whitelist_patterns = [
-            r'(?i)(api[_-]?key|apikey|secret|token|password|passwd|pwd)\s*[:=]\s*(os\.getenv|os\.environ|getenv|environ\[|request\.form|request\.args|\.env|config\[|settings\[)',
-            r'(?i)\$\{[A-Z_]+\}',                     # Shell variable substitution
-            r'(?i)\$\w+',                              # Shell variable reference ($KEY)
-            r'(?i)\{\{[^}]*\}\}',                     # Template variables ({{ }})
-            r'(?i)\{%[^}]*%\}',                       # Template variables ({% %})
-            r'(?i)(password|passwd|pwd)\s*[:=]\s*""', # Empty password assignments
-            r'(?i)EXAMPLE|PLACEHOLDER|TODO|FIXME|xxx+|<your-[-a-z]+>|changeme',  # Placeholders
-            r'(?i)jwt\.encode|jwt\.decode|b64encode', # JWT construction, not hardcoded
-            r'(?i)generate|random|uuid|hash',         # Generated values
+            r"(?i)(api[_-]?key|apikey|secret|token|password|passwd|pwd)\s*[:=]\s*(os\.getenv|os\.environ|getenv|environ\[|request\.form|request\.args|\.env|config\[|settings\[)",
+            r"(?i)\$\{[A-Z_]+\}",  # Shell variable substitution
+            r"(?i)\$\w+",  # Shell variable reference ($KEY)
+            r"(?i)\{\{[^}]*\}\}",  # Template variables ({{ }})
+            r"(?i)\{%[^}]*%\}",  # Template variables ({% %})
+            r'(?i)(password|passwd|pwd)\s*[:=]\s*""',  # Empty password assignments
+            r"(?i)EXAMPLE|PLACEHOLDER|TODO|FIXME|xxx+|<your-[-a-z]+>|changeme",  # Placeholders
+            r"(?i)jwt\.encode|jwt\.decode|b64encode",  # JWT construction, not hardcoded
+            r"(?i)generate|random|uuid|hash",  # Generated values
         ]
 
         findings = []
@@ -469,10 +497,10 @@ class GuardManager:
                 # Skip documentation files — they routinely contain
                 # example API keys, placeholder tokens, and credential
                 # snippets that are not actual secrets.
-                if (
-                    any(skip in fpath for skip in ('.memory-bank/', 'docs/', 'CONTRIBUTING.md', 'SECURITY.md'))
-                    or fpath.endswith('.md')
-                ):
+                if any(
+                    skip in fpath
+                    for skip in (".memory-bank/", "docs/", "CONTRIBUTING.md", "SECURITY.md")
+                ) or fpath.endswith(".md"):
                     continue
 
                 try:
@@ -501,7 +529,9 @@ class GuardManager:
                     passed=False,
                     output="Potential secrets found:\n" + "\n".join(findings[:20]),
                 )
-            return GuardResult(name="secrets", passed=True, output=f"Scanned {len(staged_files)} files — clean")
+            return GuardResult(
+                name="secrets", passed=True, output=f"Scanned {len(staged_files)} files — clean"
+            )
 
         except Exception as e:
             logger.exception("Secrets scan failed")
@@ -520,7 +550,9 @@ class GuardManager:
 
                 lint_result = subprocess.run(
                     [linter, "check", *py_files] if linter == "ruff" else [linter, *py_files],
-                    capture_output=True, text=True, timeout=120,
+                    capture_output=True,
+                    text=True,
+                    timeout=120,
                     cwd=self.workdir,
                 )
                 output = lint_result.stdout + lint_result.stderr
@@ -556,7 +588,8 @@ class GuardManager:
                 if not test_files:
                     # No test files map to the changed sources — skip
                     return GuardResult(
-                        name="tests", passed=True,
+                        name="tests",
+                        passed=True,
                         output="No matching test files — skipped (diff mode)",
                     )
                 # Narrowed — only run relevant tests
@@ -572,7 +605,11 @@ class GuardManager:
         """Execute a test command and return a GuardResult."""
         try:
             result = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True, timeout=self._test_timeout,
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=self._test_timeout,
                 cwd=self.workdir,
             )
             output = result.stdout + result.stderr
@@ -583,11 +620,15 @@ class GuardManager:
             else:
                 return GuardResult(name=label, passed=False, output=output)
         except subprocess.TimeoutExpired:
-            return GuardResult(name=label, passed=False, output=(
-                f"Tests timed out after {self._test_timeout}s. "
-                f"To raise the limit: set guards.test_timeout in "
-                f".gitreins/config.yaml (e.g. test_timeout: 300)."
-            ))
+            return GuardResult(
+                name=label,
+                passed=False,
+                output=(
+                    f"Tests timed out after {self._test_timeout}s. "
+                    f"To raise the limit: set guards.test_timeout in "
+                    f".gitreins/config.yaml (e.g. test_timeout: 300)."
+                ),
+            )
         except Exception as e:
             return GuardResult(name=label, passed=False, error=str(e))
 
@@ -613,7 +654,9 @@ class GuardManager:
 
             return GuardResult(name="dead_code", passed=False, output=output)
         except ImportError:
-            return GuardResult(name="dead_code", passed=True, output="Dead code detector unavailable — skipped")
+            return GuardResult(
+                name="dead_code", passed=True, output="Dead code detector unavailable — skipped"
+            )
         except Exception as e:
             return GuardResult(name="dead_code", passed=False, error=str(e))
 
@@ -628,12 +671,15 @@ class GuardManager:
         try:
             result = subprocess.run(
                 ["skylos", self.workdir, "--format", "json", "--no-grep-verify"],
-                capture_output=True, text=True, timeout=120,
+                capture_output=True,
+                text=True,
+                timeout=120,
                 cwd=self.workdir,
             )
             if result.returncode != 0:
                 return GuardResult(
-                    name="skylos", passed=True,
+                    name="skylos",
+                    passed=True,
                     output=f"skylos exited {result.returncode}: {result.stderr[:200]}",
                 )
 
@@ -658,7 +704,8 @@ class GuardManager:
 
             if not findings:
                 return GuardResult(
-                    name="skylos", passed=True,
+                    name="skylos",
+                    passed=True,
                     output=f"Skylos grade {letter} ({score}) — no dead code found",
                 )
 
@@ -674,7 +721,8 @@ class GuardManager:
 
         except FileNotFoundError:
             return GuardResult(
-                name="skylos", passed=True,
+                name="skylos",
+                passed=True,
                 output="skylos not installed — install with: pip install skylos",
             )
         except json.JSONDecodeError:
@@ -692,14 +740,17 @@ class GuardManager:
         """
         if self._is_go:
             return GuardResult(
-                name="static_analysis", passed=True,
-                output="Go compiler covers static analysis — skipped"
+                name="static_analysis",
+                passed=True,
+                output="Go compiler covers static analysis — skipped",
             )
         # Check for Python, Ruby, PHP, SQL
         lang_tools: list[str] = []
-        if os.path.isfile(os.path.join(self.workdir, "pyproject.toml")) or \
-           os.path.isfile(os.path.join(self.workdir, "setup.py")) or \
-           os.path.isfile(os.path.join(self.workdir, "setup.cfg")):
+        if (
+            os.path.isfile(os.path.join(self.workdir, "pyproject.toml"))
+            or os.path.isfile(os.path.join(self.workdir, "setup.py"))
+            or os.path.isfile(os.path.join(self.workdir, "setup.cfg"))
+        ):
             lang_tools = self._static_tools.get("python", [])
         elif self._is_ruby:
             lang_tools = self._static_tools.get("ruby", [])
@@ -710,8 +761,9 @@ class GuardManager:
 
         if not lang_tools:
             return GuardResult(
-                name="static_analysis", passed=True,
-                output="No static analysis tools configured for this language"
+                name="static_analysis",
+                passed=True,
+                output="No static analysis tools configured for this language",
             )
 
         all_diagnostics: list[str] = []
@@ -720,6 +772,7 @@ class GuardManager:
         for tool in lang_tools:
             try:
                 from engine.static_analysis import run_static_check
+
                 diags = run_static_check(tool, self.workdir)
             except Exception as exc:
                 logger.warning("static_analysis %s failed: %s", tool, exc)
@@ -740,8 +793,9 @@ class GuardManager:
 
         if not all_diagnostics:
             return GuardResult(
-                name="static_analysis", passed=True,
-                output="No tools ran — check static_analysis_tools config"
+                name="static_analysis",
+                passed=True,
+                output="No tools ran — check static_analysis_tools config",
             )
 
         output = "\n".join(all_diagnostics)
@@ -754,7 +808,6 @@ class GuardManager:
             output=output,
         )
 
-
     def _check_lsp(self) -> GuardResult:
         """Run configured LSP servers against staged files.
 
@@ -763,15 +816,11 @@ class GuardManager:
         """
         if self._is_go:
             return GuardResult(
-                name="lsp", passed=True,
-                output="Go compiler covers static analysis — skipped"
+                name="lsp", passed=True, output="Go compiler covers static analysis — skipped"
             )
 
         if not self._lsp_tools:
-            return GuardResult(
-                name="lsp", passed=True,
-                output="No LSP tools configured"
-            )
+            return GuardResult(name="lsp", passed=True, output="No LSP tools configured")
 
         all_diagnostics: list[str] = []
         had_errors = False
@@ -798,8 +847,7 @@ class GuardManager:
 
         if not all_diagnostics:
             return GuardResult(
-                name="lsp", passed=True,
-                output="No LSP tools ran — check lsp_tools config"
+                name="lsp", passed=True, output="No LSP tools ran — check lsp_tools config"
             )
 
         output = "\n".join(all_diagnostics)
@@ -811,7 +859,6 @@ class GuardManager:
             passed=not had_errors,
             output=output,
         )
-
 
     def _check_security_scan(self) -> GuardResult:
         """Run Antares CVE localization scan against staged files.
@@ -830,7 +877,8 @@ class GuardManager:
         except ImportError as exc:
             logger.debug("Antares scanner import failed: %s", exc)
             return GuardResult(
-                name="security_scan", passed=True,
+                name="security_scan",
+                passed=True,
                 output="Antares: not available — install huggingface_hub and transformers",
             )
 
@@ -845,8 +893,10 @@ class GuardManager:
             return GuardResult(name="security_scan", passed=True, output="Antares: clean")
 
         # Format: one line per finding, capped to keep output bounded.
-        lines = [f"  • {f.file}:{f.line} [{f.cve_id} conf={f.confidence:.2f}] {f.description}"
-                 for f in findings[:20]]
+        lines = [
+            f"  • {f.file}:{f.line} [{f.cve_id} conf={f.confidence:.2f}] {f.description}"
+            for f in findings[:20]
+        ]
         if len(findings) > 20:
             lines.append(f"  ... and {len(findings) - 20} more")
 
@@ -855,7 +905,6 @@ class GuardManager:
             output = output[:2000] + "\n... [truncated]"
 
         return GuardResult(name="security_scan", passed=False, output=output)
-
 
     def _check_go_lint(self) -> GuardResult:
         """Run Go lint checks (delegates to engine.guards)."""

@@ -6,6 +6,7 @@ Verifies config loading priority chain:
   3. .gitreins/config.yaml evaluator: individual keys override defaults section
   4. Explicit EvalCap constructor params override all
 """
+
 import os
 
 import yaml
@@ -94,6 +95,7 @@ class TestEvaluatorSectionOverridesDefaults:
             yaml.safe_dump(config, f)
 
         from engine.eval_cap import eval_cap_from_config
+
         cap = eval_cap_from_config(config)
         assert cap.max_iterations == 50.0, (
             f"evaluator.max_iterations should override defaults, got {cap.max_iterations}"
@@ -107,6 +109,7 @@ class TestEvaluatorSectionOverridesDefaults:
         }
 
         from engine.eval_cap import eval_cap_from_config
+
         cap = eval_cap_from_config(config)
         assert cap.max_seconds == 1800.0
 
@@ -117,6 +120,7 @@ class TestEvaluatorSectionOverridesDefaults:
         }
 
         from engine.eval_cap import eval_cap_from_config
+
         cap = eval_cap_from_config(config)
         assert cap.max_iterations == 75.0
         assert cap.max_seconds == 300.0
@@ -126,6 +130,7 @@ class TestEvaluatorSectionOverridesDefaults:
         config = {"evaluator": {}}
 
         from engine.eval_cap import eval_cap_from_config
+
         cap = eval_cap_from_config(config)
         assert cap.max_iterations == 100.0
         assert cap.max_input_tokens == 10_000_000
@@ -139,6 +144,7 @@ class TestEvaluatorSectionOverridesDefaults:
         }
 
         from engine.eval_cap import eval_cap_from_config
+
         cap = eval_cap_from_config(config)
         assert cap.max_iterations == 30.0
         assert cap.max_seconds == 600.0

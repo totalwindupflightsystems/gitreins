@@ -27,7 +27,9 @@ def _scan_text(text: str) -> list[tuple[str, str]]:
 
     with tempfile.TemporaryDirectory() as tmp:
         subprocess.run(["git", "init", "-q"], cwd=tmp, capture_output=True)
-        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"], cwd=tmp, capture_output=True
+        )
         subprocess.run(["git", "config", "user.name", "test"], cwd=tmp, capture_output=True)
 
         os.makedirs(os.path.join(tmp, ".gitreins"), exist_ok=True)
@@ -79,7 +81,9 @@ def _scan_file(fixture_relpath: str) -> list[tuple[str, str]]:
 
     with tempfile.TemporaryDirectory() as tmp:
         subprocess.run(["git", "init", "-q"], cwd=tmp, capture_output=True)
-        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"], cwd=tmp, capture_output=True
+        )
         subprocess.run(["git", "config", "user.name", "test"], cwd=tmp, capture_output=True)
 
         os.makedirs(os.path.join(tmp, ".gitreins"), exist_ok=True)
@@ -133,6 +137,7 @@ def _any_match(matches: list, *labels: str) -> bool:
 # ══════════════════════════════════════════════════════════════════
 #   PATTERN COMPLETENESS — every danger type must be detected
 # ══════════════════════════════════════════════════════════════════
+
 
 class TestPatternCompleteness:
     """All 11+ danger pattern types must be detected."""
@@ -276,6 +281,7 @@ lQdGBGcX9hEBEAC8Nq3k5J7mP2sV0wX4yB6cR8tU1nA3dF5hG9iK2lM4oQ6rS7vW0xZ
 #   WHITELIST CORRECTNESS — false positives must NOT be flagged
 # ══════════════════════════════════════════════════════════════════
 
+
 class TestWhitelist:
     """All whitelisted patterns must be ignored."""
 
@@ -306,26 +312,26 @@ class TestWhitelist:
         assert len(matches) == 0
 
     def test_b64encode_not_flagged(self):
-        matches = _scan_text('encoded = b64encode(data)')
+        matches = _scan_text("encoded = b64encode(data)")
         assert len(matches) == 0
 
     def test_shell_var_braces_not_flagged(self):
-        matches = _scan_text('export API_KEY=${SECRET_KEY}')
+        matches = _scan_text("export API_KEY=${SECRET_KEY}")
         assert len(matches) == 0
 
     def test_shell_var_no_braces_not_flagged(self):
         """$KEY (without braces) must not trigger."""
-        matches = _scan_text('export PASSWORD=$DB_PASS')
+        matches = _scan_text("export PASSWORD=$DB_PASS")
         assert len(matches) == 0
 
     def test_template_double_braces_not_flagged(self):
         """{{ key }} must not trigger."""
-        matches = _scan_text('api_key: {{ secrets.API_KEY }}')
+        matches = _scan_text("api_key: {{ secrets.API_KEY }}")
         assert len(matches) == 0
 
     def test_template_percent_braces_not_flagged(self):
         """{% key %} must not trigger."""
-        matches = _scan_text('password: {% raw %}{{ DB_PASSWORD }}{% endraw %}')
+        matches = _scan_text("password: {% raw %}{{ DB_PASSWORD }}{% endraw %}")
         assert len(matches) == 0
 
     def test_placeholder_not_flagged(self):
@@ -359,11 +365,11 @@ class TestWhitelist:
         assert len(matches) == 0
 
     def test_todo_comment_not_flagged(self):
-        matches = _scan_text('# TODO: sk-add-real-key-here for testing')
+        matches = _scan_text("# TODO: sk-add-real-key-here for testing")
         assert len(matches) == 0
 
     def test_fixme_comment_not_flagged(self):
-        matches = _scan_text('# FIXME: add-real-api-key-12345678901234567890')
+        matches = _scan_text("# FIXME: add-real-api-key-12345678901234567890")
         assert len(matches) == 0
 
     def test_example_label_not_flagged(self):
@@ -375,6 +381,7 @@ class TestWhitelist:
 #   OUTPUT SANITIZATION — actual key values must be ***'d out
 # ══════════════════════════════════════════════════════════════════
 
+
 class TestOutputSanitization:
     """Guard output must replace secret values with ***."""
 
@@ -384,7 +391,9 @@ class TestOutputSanitization:
 
         with tempfile.TemporaryDirectory() as tmp:
             subprocess.run(["git", "init", "-q"], cwd=tmp, capture_output=True)
-            subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp, capture_output=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@test.com"], cwd=tmp, capture_output=True
+            )
             subprocess.run(["git", "config", "user.name", "test"], cwd=tmp, capture_output=True)
 
             os.makedirs(os.path.join(tmp, ".gitreins"), exist_ok=True)
@@ -410,7 +419,9 @@ class TestOutputSanitization:
 
         with tempfile.TemporaryDirectory() as tmp:
             subprocess.run(["git", "init", "-q"], cwd=tmp, capture_output=True)
-            subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp, capture_output=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@test.com"], cwd=tmp, capture_output=True
+            )
             subprocess.run(["git", "config", "user.name", "test"], cwd=tmp, capture_output=True)
 
             os.makedirs(os.path.join(tmp, ".gitreins"), exist_ok=True)
@@ -419,9 +430,7 @@ class TestOutputSanitization:
 
             fpath = os.path.join(tmp, "test.py")
             with open(fpath, "w") as f:
-                f.write(
-                    'AWS_SECRET = "wJalrXUtnFEMIK7MDENGbPxRfiCYZ9a4pQ3sT0vK2nL5mH8rD1wF6xJ3"'
-                )
+                f.write('AWS_SECRET = "wJalrXUtnFEMIK7MDENGbPxRfiCYZ9a4pQ3sT0vK2nL5mH8rD1wF6xJ3"')
             subprocess.run(["git", "add", "test.py"], cwd=tmp, capture_output=True)
 
             gm = GuardManager(tmp)
@@ -434,6 +443,7 @@ class TestOutputSanitization:
 # ══════════════════════════════════════════════════════════════════
 #   DOCUMENTATION SKIP — .md, .memory-bank/, docs/ must be skipped
 # ══════════════════════════════════════════════════════════════════
+
 
 class TestDocumentationSkip:
     """Documentation files must not trigger false positives."""
@@ -450,7 +460,9 @@ class TestDocumentationSkip:
 
         with tempfile.TemporaryDirectory() as tmp:
             subprocess.run(["git", "init", "-q"], cwd=tmp, capture_output=True)
-            subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp, capture_output=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@test.com"], cwd=tmp, capture_output=True
+            )
             subprocess.run(["git", "config", "user.name", "test"], cwd=tmp, capture_output=True)
 
             os.makedirs(os.path.join(tmp, "docs"), exist_ok=True)
@@ -476,7 +488,9 @@ class TestDocumentationSkip:
 
         with tempfile.TemporaryDirectory() as tmp:
             subprocess.run(["git", "init", "-q"], cwd=tmp, capture_output=True)
-            subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp, capture_output=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@test.com"], cwd=tmp, capture_output=True
+            )
             subprocess.run(["git", "config", "user.name", "test"], cwd=tmp, capture_output=True)
 
             os.makedirs(os.path.join(tmp, ".memory-bank"), exist_ok=True)
@@ -499,6 +513,7 @@ class TestDocumentationSkip:
 # ══════════════════════════════════════════════════════════════════
 #   FIXTURE FILE TESTS — scan real fixture files
 # ══════════════════════════════════════════════════════════════════
+
 
 class TestFixtureFiles:
     """Positive fixture files must produce findings; negative must not."""

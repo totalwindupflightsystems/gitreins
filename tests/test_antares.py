@@ -11,6 +11,7 @@ GR-117g. Covers:
     - engine.guard_manager.GuardManager security_scan guard
       integration
 """
+
 import argparse
 import json
 import os
@@ -39,7 +40,10 @@ def _stage_file(workdir: str, relpath: str, content: str) -> str:
     full = os.path.join(workdir, relpath)
     _write_file(full, content)
     subprocess.run(
-        ["git", "add", relpath], cwd=workdir, capture_output=True, timeout=5,
+        ["git", "add", relpath],
+        cwd=workdir,
+        capture_output=True,
+        timeout=5,
     )
     return full
 
@@ -181,11 +185,15 @@ class TestAntaresScannerModel:
         scanner = AntaresScanner(tmp_workdir, use_ml=True)
         with patch.dict(sys.modules, {"huggingface_hub": None}):
             # Force the inner import to fail in a controlled way.
-            real_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
+            real_import = (
+                __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
+            )
+
             def fake_import(name, *args, **kwargs):
                 if name == "huggingface_hub":
                     raise ImportError("simulated missing dep")
                 return real_import(name, *args, **kwargs)
+
             with patch("builtins.__import__", side_effect=fake_import):
                 with pytest.raises(ImportError):
                     scanner._ensure_model()
@@ -194,10 +202,12 @@ class TestAntaresScannerModel:
         """use_ml=False and no HF → returns None, no exception."""
         scanner = AntaresScanner(tmp_workdir, use_ml=False)
         real_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
+
         def fake_import(name, *args, **kwargs):
             if name == "huggingface_hub":
                 raise ImportError("simulated missing dep")
             return real_import(name, *args, **kwargs)
+
         with patch("builtins.__import__", side_effect=fake_import):
             with patch("os.path.isdir", return_value=False):
                 assert scanner._ensure_model() is None
@@ -206,7 +216,9 @@ class TestAntaresScannerModel:
         """An existing, non-empty model cache dir is reused without network."""
         cache = os.path.join(
             os.environ.get("HOME", os.path.expanduser("~")),
-            ".cache", "gitreins", "antares-1b",
+            ".cache",
+            "gitreins",
+            "antares-1b",
         )
         os.makedirs(cache, exist_ok=True)
         try:
@@ -252,7 +264,9 @@ class TestCveFeedBasic:
         """CveFeed.init() pulls cve_source + min_confidence from config."""
         os.makedirs(os.path.join(tmp_workdir, ".gitreins"), exist_ok=True)
         with open(os.path.join(tmp_workdir, ".gitreins", "config.yaml"), "w") as f:
-            f.write("defaults:\n  security_scan:\n    cve_source: github\n    min_confidence: 0.4\n")
+            f.write(
+                "defaults:\n  security_scan:\n    cve_source: github\n    min_confidence: 0.4\n"
+            )
         feed = CveFeed.init(tmp_workdir)
         assert feed.source == "github"
         assert feed.min_confidence == 0.4
@@ -288,15 +302,17 @@ NVD_PAYLOAD = {
                 "descriptions": [{"lang": "en", "value": "requests SSRF"}],
                 "published": "2024-01-01T00:00:00Z",
                 "lastModified": "2024-01-15T00:00:00Z",
-                "metrics": {
-                    "cvssMetricV31": [
-                        {"cvssData": {"baseSeverity": "HIGH"}}
-                    ]
-                },
+                "metrics": {"cvssMetricV31": [{"cvssData": {"baseSeverity": "HIGH"}}]},
                 "configurations": [
-                    {"nodes": [{"cpeMatch": [
-                        {"criteria": "cpe:2.3:a:requests:requests:2.31.0:*:*:*:*:*:*:*"}
-                    ]}]}
+                    {
+                        "nodes": [
+                            {
+                                "cpeMatch": [
+                                    {"criteria": "cpe:2.3:a:requests:requests:2.31.0:*:*:*:*:*:*:*"}
+                                ]
+                            }
+                        ]
+                    }
                 ],
             }
         },
@@ -312,9 +328,7 @@ GITHUB_PAYLOAD = [
         "description": "Django ORM injection in lookup expressions",
         "published_at": "2024-02-01T00:00:00Z",
         "updated_at": "2024-02-05T00:00:00Z",
-        "vulnerabilities": [
-            {"package": {"name": "django", "ecosystem": "pip"}}
-        ],
+        "vulnerabilities": [{"package": {"name": "django", "ecosystem": "pip"}}],
     }
 ]
 
@@ -333,16 +347,21 @@ class TestCveFeedNetworkAndCache:
     def test_get_recent_parses_nvd(self, tmp_workdir, tmp_path):
         feed = _isolated_feed(tmp_workdir, tmp_path, source="nvd", min_confidence=0.5)
         # Pre-populate cache so we don't hit the network.
-        feed._write_cache({"entries": [
-            CveEntry(
-                cve_id="CVE-2024-0001",
-                description="requests SSRF",
-                severity="HIGH",
-                affected_packages=["requests"],
-                published_date="2024-01-01",
-                last_modified_date="2024-01-15",
-            ).to_dict()
-        ], "fetched_at": 10**12})  # far in the future → fresh
+        feed._write_cache(
+            {
+                "entries": [
+                    CveEntry(
+                        cve_id="CVE-2024-0001",
+                        description="requests SSRF",
+                        severity="HIGH",
+                        affected_packages=["requests"],
+                        published_date="2024-01-01",
+                        last_modified_date="2024-01-15",
+                    ).to_dict()
+                ],
+                "fetched_at": 10**12,
+            }
+        )  # far in the future → fresh
         recent = feed.get_recent(limit=10)
         assert len(recent) == 1
         assert recent[0].cve_id == "CVE-2024-0001"
@@ -350,15 +369,22 @@ class TestCveFeedNetworkAndCache:
 
     def test_get_recent_filters_by_min_confidence(self, tmp_workdir, tmp_path):
         feed = _isolated_feed(tmp_workdir, tmp_path, source="nvd", min_confidence=0.9)
-        feed._write_cache({"entries": [
-            CveEntry("CVE-1", "low", "LOW", [], "", "").to_dict(),
-            CveEntry("CVE-2", "crit", "CRITICAL", [], "", "").to_dict(),
-        ], "fetched_at": 10**12})
+        feed._write_cache(
+            {
+                "entries": [
+                    CveEntry("CVE-1", "low", "LOW", [], "", "").to_dict(),
+                    CveEntry("CVE-2", "crit", "CRITICAL", [], "", "").to_dict(),
+                ],
+                "fetched_at": 10**12,
+            }
+        )
         # Only CRITICAL passes the 0.9 threshold.
         recent = feed.get_recent(limit=10)
         assert [e.cve_id for e in recent] == ["CVE-2"]
 
-    def test_get_recent_returns_empty_when_nothing_cached_and_no_network(self, tmp_workdir, tmp_path):
+    def test_get_recent_returns_empty_when_nothing_cached_and_no_network(
+        self, tmp_workdir, tmp_path
+    ):
         """Without cache or network, never raises — returns []. (GR-117b)"""
         feed = _isolated_feed(tmp_workdir, tmp_path, source="nvd", min_confidence=0.7)
         with patch.object(requests, "get", side_effect=Exception("offline")):
@@ -367,44 +393,61 @@ class TestCveFeedNetworkAndCache:
     def test_get_recent_falls_back_to_stale_cache_when_offline(self, tmp_workdir, tmp_path):
         """Stale cache is served when the network is unavailable."""
         feed = _isolated_feed(tmp_workdir, tmp_path, source="nvd", min_confidence=0.0)
-        feed._write_cache({"entries": [
-            CveEntry("CVE-stale", "stale entry", "MEDIUM", [], "", "2024-01-01").to_dict()
-        ], "fetched_at": 0})  # very old → stale
+        feed._write_cache(
+            {
+                "entries": [
+                    CveEntry("CVE-stale", "stale entry", "MEDIUM", [], "", "2024-01-01").to_dict()
+                ],
+                "fetched_at": 0,
+            }
+        )  # very old → stale
         with patch.object(requests, "get", side_effect=Exception("offline")):
             recent = feed.get_recent(limit=10)
         assert [e.cve_id for e in recent] == ["CVE-stale"]
 
     def test_search_matches_cve_id(self, tmp_workdir, tmp_path):
         feed = _isolated_feed(tmp_workdir, tmp_path, source="nvd", min_confidence=0.0)
-        feed._write_cache({"entries": [
-            CveEntry("CVE-2024-1234", "Some vulnerability", "HIGH").to_dict()
-        ], "fetched_at": 10**12})
+        feed._write_cache(
+            {
+                "entries": [CveEntry("CVE-2024-1234", "Some vulnerability", "HIGH").to_dict()],
+                "fetched_at": 10**12,
+            }
+        )
         out = feed.search("CVE-2024-1234")
         assert len(out) == 1
         assert out[0].cve_id == "CVE-2024-1234"
 
     def test_search_matches_description(self, tmp_workdir, tmp_path):
         feed = _isolated_feed(tmp_workdir, tmp_path, source="nvd", min_confidence=0.0)
-        feed._write_cache({"entries": [
-            CveEntry("CVE-X", "SQL injection in foo", "HIGH").to_dict()
-        ], "fetched_at": 10**12})
+        feed._write_cache(
+            {
+                "entries": [CveEntry("CVE-X", "SQL injection in foo", "HIGH").to_dict()],
+                "fetched_at": 10**12,
+            }
+        )
         out = feed.search("SQL")
         assert len(out) == 1
 
     def test_search_matches_package_regex(self, tmp_workdir, tmp_path):
         feed = _isolated_feed(tmp_workdir, tmp_path, source="nvd", min_confidence=0.0)
-        feed._write_cache({"entries": [
-            CveEntry("CVE-Y", "Django issue", "HIGH",
-                     affected_packages=[r"^requests$"]).to_dict()
-        ], "fetched_at": 10**12})
+        feed._write_cache(
+            {
+                "entries": [
+                    CveEntry(
+                        "CVE-Y", "Django issue", "HIGH", affected_packages=[r"^requests$"]
+                    ).to_dict()
+                ],
+                "fetched_at": 10**12,
+            }
+        )
         out = feed.search("requests")
         assert len(out) == 1
 
     def test_search_empty_query_returns_empty(self, tmp_workdir, tmp_path):
         feed = _isolated_feed(tmp_workdir, tmp_path, source="nvd", min_confidence=0.0)
-        feed._write_cache({"entries": [
-            CveEntry("CVE-Z", "anything", "HIGH").to_dict()
-        ], "fetched_at": 10**12})
+        feed._write_cache(
+            {"entries": [CveEntry("CVE-Z", "anything", "HIGH").to_dict()], "fetched_at": 10**12}
+        )
         assert feed.search("") == []
         assert feed.search("   ") == []
 
@@ -417,8 +460,7 @@ class TestCveFeedNetworkAndCache:
     def test_get_recent_nvd_parses_payload(self, tmp_workdir, tmp_path):
         """NVD response parsing: severity, description, package regex."""
         feed = _isolated_feed(tmp_workdir, tmp_path, source="nvd", min_confidence=0.0)
-        with patch.object(requests, "get",
-                   return_value=self._make_response(NVD_PAYLOAD)):
+        with patch.object(requests, "get", return_value=self._make_response(NVD_PAYLOAD)):
             entries = feed._fetch_nvd()
         assert len(entries) == 1
         assert entries[0].cve_id == "CVE-2024-0001"
@@ -429,8 +471,7 @@ class TestCveFeedNetworkAndCache:
 
     def test_get_recent_github_parses_payload(self, tmp_workdir, tmp_path):
         feed = _isolated_feed(tmp_workdir, tmp_path, source="github", min_confidence=0.0)
-        with patch.object(requests, "get",
-                   return_value=self._make_response(GITHUB_PAYLOAD)):
+        with patch.object(requests, "get", return_value=self._make_response(GITHUB_PAYLOAD)):
             entries = feed._fetch_github()
         assert len(entries) == 1
         assert entries[0].cve_id == "CVE-2024-0002"
@@ -439,21 +480,23 @@ class TestCveFeedNetworkAndCache:
 
     def test_github_unknown_severity_normalised_to_none(self, tmp_workdir, tmp_path):
         feed = _isolated_feed(tmp_workdir, tmp_path, source="github", min_confidence=0.0)
-        payload = [{
-            "cve_id": "CVE-2024-9999",
-            "severity": "banana",
-            "summary": "odd",
-            "vulnerabilities": [],
-        }]
-        with patch.object(requests, "get",
-                   return_value=self._make_response(payload)):
+        payload = [
+            {
+                "cve_id": "CVE-2024-9999",
+                "severity": "banana",
+                "summary": "odd",
+                "vulnerabilities": [],
+            }
+        ]
+        with patch.object(requests, "get", return_value=self._make_response(payload)):
             entries = feed._fetch_github()
         assert entries[0].severity == "NONE"
 
     def test_github_handles_non_list_payload(self, tmp_workdir, tmp_path):
         feed = _isolated_feed(tmp_workdir, tmp_path, source="github", min_confidence=0.0)
-        with patch.object(requests, "get",
-                   return_value=self._make_response({"oops": "wrong shape"})):
+        with patch.object(
+            requests, "get", return_value=self._make_response({"oops": "wrong shape"})
+        ):
             assert feed._fetch_github() == []
 
     def test_both_sources_merge(self, tmp_workdir, tmp_path):
@@ -462,11 +505,13 @@ class TestCveFeedNetworkAndCache:
             "nvd.nist": self._make_response(NVD_PAYLOAD),
             "api.github": self._make_response(GITHUB_PAYLOAD),
         }
+
         def route(url, *args, **kwargs):
             for key, resp in responses.items():
                 if key in url:
                     return resp
             raise AssertionError(f"unexpected URL: {url}")
+
         with patch.object(requests, "get", side_effect=route):
             entries = feed._load_entries()
         ids = {e.cve_id for e in entries}
@@ -503,14 +548,17 @@ class TestSecurityScanCLI:
     def test_help_lists_command(self):
         """`gitreins security-scan --help` runs without error and shows flags."""
         from gitreins.cli import main as cli_main  # noqa: F401 — ensure importable
+
         # Use the parser directly to avoid sys.exit side-effects.
         # Quick sanity: import-time wiring works.
         import gitreins.cli
+
         assert callable(gitreins.cli.cmd_security_scan)
 
     def test_directory_arg_recurses(self, tmp_workdir, tmp_path, capsys):
         """--directory triggers scan_directory(), produces a clean report."""
         from gitreins.cli import cmd_security_scan
+
         _write_file(
             os.path.join(tmp_workdir, "vuln.py"),
             "x = 'exploit'\n",
@@ -526,6 +574,7 @@ class TestSecurityScanCLI:
 
     def test_text_output_clean_returns_zero(self, tmp_workdir, tmp_path, capsys):
         from gitreins.cli import cmd_security_scan
+
         # No staged files in tmp_workdir fixture, no directory → clean.
         args = _make_args()
         with patch("gitreins.cli.get_workdir", return_value=tmp_workdir):
@@ -536,6 +585,7 @@ class TestSecurityScanCLI:
 
     def test_json_output_format(self, tmp_workdir, tmp_path, capsys):
         from gitreins.cli import cmd_security_scan
+
         _write_file(
             os.path.join(tmp_workdir, "vuln.py"),
             "v = 'exploit'\n",
@@ -554,6 +604,7 @@ class TestSecurityScanCLI:
     def test_force_ml_exits_2_when_huggingface_missing(self, tmp_workdir, tmp_path, capsys):
         """--force-ml + missing huggingface_hub → exit 2, not fallback."""
         import builtins
+
         _orig_import = builtins.__import__
 
         def _block_hf(name, *args, **kwargs):
@@ -562,6 +613,7 @@ class TestSecurityScanCLI:
             return _orig_import(name, *args, **kwargs)
 
         from gitreins.cli import cmd_security_scan
+
         args = _make_args(force_ml=True)
         with patch("builtins.__import__", side_effect=_block_hf):
             with patch("gitreins.cli.get_workdir", return_value=tmp_workdir):
@@ -581,9 +633,8 @@ class TestGuardSecurityScanIntegration:
 
     def test_security_scan_guard_runs_when_enabled(self, tmp_workdir, tmp_path):
         from engine.guard_manager import GuardManager, GuardResult
-        gm = GuardManager(tmp_workdir, {
-            "guards": {"security_scan": {"enabled": True}}
-        })
+
+        gm = GuardManager(tmp_workdir, {"guards": {"security_scan": {"enabled": True}}})
         assert gm._enabled.get("security_scan") is True
         # Don't actually trigger a network/ML run — mock the scanner
         # to return a clean result.
@@ -596,18 +647,21 @@ class TestGuardSecurityScanIntegration:
 
     def test_security_scan_guard_skipped_when_disabled(self, tmp_workdir, tmp_path):
         from engine.guard_manager import GuardManager
+
         gm = GuardManager(tmp_workdir, {"guards": {"security_scan": {"enabled": False}}})
         assert gm._enabled.get("security_scan") is False
 
     def test_security_scan_guard_skipped_when_config_absent(self, tmp_workdir, tmp_path):
         """No config key at all → guard is off by default (opt-in)."""
         from engine.guard_manager import GuardManager
+
         gm = GuardManager(tmp_workdir, {"guards": {"secrets": True}})
         assert gm._enabled.get("security_scan") is False
 
     def test_check_security_scan_clean_run(self, tmp_workdir, tmp_path):
         """Real _check_security_scan against a clean tmp repo → PASS."""
         from engine.guard_manager import GuardManager
+
         gm = GuardManager(tmp_workdir, {"guards": {"security_scan": {"enabled": True}}})
         # No staged files in the fixture → clean.
         result = gm._check_security_scan()

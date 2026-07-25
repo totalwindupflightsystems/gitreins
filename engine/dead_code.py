@@ -50,16 +50,45 @@ class DeadCodeDetector:
 
     WHITELIST_FUNCTIONS = {
         # Standard dunder methods
-        "__init__", "__repr__", "__str__", "__eq__", "__hash__", "__lt__",
-        "__le__", "__gt__", "__ge__", "__add__", "__sub__", "__mul__",
-        "__call__", "__getitem__", "__setitem__", "__delitem__",
-        "__enter__", "__exit__", "__iter__", "__next__", "__len__",
-        "__contains__", "__getattr__", "__setattr__", "__delattr__",
-        "__post_init__", "__new__",
+        "__init__",
+        "__repr__",
+        "__str__",
+        "__eq__",
+        "__hash__",
+        "__lt__",
+        "__le__",
+        "__gt__",
+        "__ge__",
+        "__add__",
+        "__sub__",
+        "__mul__",
+        "__call__",
+        "__getitem__",
+        "__setitem__",
+        "__delitem__",
+        "__enter__",
+        "__exit__",
+        "__iter__",
+        "__next__",
+        "__len__",
+        "__contains__",
+        "__getattr__",
+        "__setattr__",
+        "__delattr__",
+        "__post_init__",
+        "__new__",
         # Test functions
-        "setUp", "tearDown", "setUpClass", "tearDownClass",
+        "setUp",
+        "tearDown",
+        "setUpClass",
+        "tearDownClass",
         # Common framework hooks
-        "main", "run", "handle", "process", "execute", "dispatch",
+        "main",
+        "run",
+        "handle",
+        "process",
+        "execute",
+        "dispatch",
     }
     # Decorators that mean a function IS called (just not via Call AST node)
     CALLED_VIA_DECORATOR = {"property", "cached_property", "staticmethod", "classmethod"}
@@ -97,9 +126,20 @@ class DeadCodeDetector:
     def _find_python_files(self) -> list[str]:
         """Find all Python files in the project (excluding venv, node_modules, etc.)."""
         py_files = []
-        skip_dirs = {".git", "__pycache__", ".venv", "venv", "node_modules",
-                      ".tox", ".eggs", "build", "dist", ".pytest_cache",
-                      ".gitreins", "temporal-vector"}
+        skip_dirs = {
+            ".git",
+            "__pycache__",
+            ".venv",
+            "venv",
+            "node_modules",
+            ".tox",
+            ".eggs",
+            "build",
+            "dist",
+            ".pytest_cache",
+            ".gitreins",
+            "temporal-vector",
+        }
         for root, dirs, filenames in os.walk(self.workdir):
             dirs[:] = [d for d in dirs if d not in skip_dirs]
             for fname in filenames:
@@ -204,30 +244,38 @@ class DeadCodeDetector:
                             next_sib.value, ast.Constant
                         ):
                             continue  # Skip docstrings
-                        findings.append(DeadCodeFinding(
-                            file=rel, line=next_sib.lineno,
-                            category="unreachable",
-                            message=(
-                                f"Code after {type(child).__name__.lower()} "
-                                f"on line {child.lineno} is unreachable"
-                            ),
-                        ))
+                        findings.append(
+                            DeadCodeFinding(
+                                file=rel,
+                                line=next_sib.lineno,
+                                category="unreachable",
+                                message=(
+                                    f"Code after {type(child).__name__.lower()} "
+                                    f"on line {child.lineno} is unreachable"
+                                ),
+                            )
+                        )
 
         # --- EMPTY FUNCTIONS ---
         for node in ast.walk(tree):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 body = node.body
                 # Strip docstrings
-                if body and isinstance(body[0], ast.Expr) and isinstance(
-                    body[0].value, ast.Constant
+                if (
+                    body
+                    and isinstance(body[0], ast.Expr)
+                    and isinstance(body[0].value, ast.Constant)
                 ):
                     body = body[1:]
                 if len(body) == 0 or (len(body) == 1 and isinstance(body[0], ast.Pass)):
-                    findings.append(DeadCodeFinding(
-                        file=rel, line=node.lineno,
-                        category="empty_function",
-                        message=f"Function '{node.name}' has no implementation (empty body)",
-                    ))
+                    findings.append(
+                        DeadCodeFinding(
+                            file=rel,
+                            line=node.lineno,
+                            category="empty_function",
+                            message=f"Function '{node.name}' has no implementation (empty body)",
+                        )
+                    )
 
         # --- UNUSED IMPORTS ---
         if rel in self._imports:
@@ -249,20 +297,26 @@ class DeadCodeDetector:
                             for alias in node.names:
                                 name = alias.asname or alias.name
                                 if name == imp_name:
-                                    findings.append(DeadCodeFinding(
-                                        file=rel, line=node.lineno,
-                                        category="unused_import",
-                                        message=f"Import '{imp_name}' is never used",
-                                    ))
+                                    findings.append(
+                                        DeadCodeFinding(
+                                            file=rel,
+                                            line=node.lineno,
+                                            category="unused_import",
+                                            message=f"Import '{imp_name}' is never used",
+                                        )
+                                    )
                         elif isinstance(node, ast.ImportFrom):
                             for alias in node.names:
                                 name = alias.asname or alias.name
                                 if name == imp_name:
-                                    findings.append(DeadCodeFinding(
-                                        file=rel, line=node.lineno,
-                                        category="unused_import",
-                                        message=f"Import '{imp_name}' is never used",
-                                    ))
+                                    findings.append(
+                                        DeadCodeFinding(
+                                            file=rel,
+                                            line=node.lineno,
+                                            category="unused_import",
+                                            message=f"Import '{imp_name}' is never used",
+                                        )
+                                    )
 
         return findings
 
@@ -278,12 +332,14 @@ class DeadCodeDetector:
                 continue
             if func_name not in self._func_calls:
                 for file, line in defs:
-                    findings.append(DeadCodeFinding(
-                        file=file, line=line,
-                        category="unused_function",
-                        message=(
-                            f"Function '{func_name}' is defined "
-                            "but never called in the project"
-                        ),
-                    ))
+                    findings.append(
+                        DeadCodeFinding(
+                            file=file,
+                            line=line,
+                            category="unused_function",
+                            message=(
+                                f"Function '{func_name}' is defined but never called in the project"
+                            ),
+                        )
+                    )
         return findings

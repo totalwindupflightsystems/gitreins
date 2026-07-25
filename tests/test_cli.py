@@ -2,6 +2,7 @@
 Integration tests for gitreins/cli.py — command line interface.
 axiom:trace work_item=GR-003 spec=specs/09-CLI.md plan=.memory-bank/work-items/GR-003/plan.yaml
 """
+
 import json
 import os
 import sys
@@ -62,6 +63,7 @@ class TestWorkdirDetection:
     def test_get_workdir_in_git_repo(self):
         """Inside git repo → returns repo root (git rev-parse --show-toplevel)."""
         from gitreins.cli import get_workdir
+
         workdir = get_workdir()
         assert os.path.isdir(workdir)
         assert os.path.isdir(os.path.join(workdir, ".git"))
@@ -69,6 +71,7 @@ class TestWorkdirDetection:
     def test_get_workdir_outside_git_repo(self, tmp_path):
         """Outside git repo, git rev-parse fails, returns os.getcwd()."""
         from gitreins.cli import get_workdir
+
         workdir = get_workdir()
         # In a git repo (workspace is one), this returns the repo root.
         # The get_workdir fallback to cwd() is tested implicitly by
@@ -84,8 +87,9 @@ class TestTaskCreateCLI:
 
     def test_create_task_with_criteria(self, tmp_workdir):
         """Create task with criteria prints ID, title, numbered criteria."""
-        result = run_cli("task", "create", "myid", "My Title", "criterion A", "criterion B",
-                         cwd=tmp_workdir)
+        result = run_cli(
+            "task", "create", "myid", "My Title", "criterion A", "criterion B", cwd=tmp_workdir
+        )
         assert result.returncode == 0
         assert "Created task: myid" in result.stdout
         assert "My Title" in result.stdout
@@ -125,27 +129,43 @@ class TestTaskListCLI:
 
     def test_list_shows_status_icons(self, tmp_workdir):
         """List shows correct status icons for each task."""
-        mock_env = {"GITREINS_MOCK_LLM_RESPONSE": json.dumps({"content": json.dumps({
-            "verdict": "COMPLETE",
-            "items": [{"criterion": "c1", "status": "PASS", "detail": "ok"}],
-            "summary": "all good",
-        })})}
+        mock_env = {
+            "GITREINS_MOCK_LLM_RESPONSE": json.dumps(
+                {
+                    "content": json.dumps(
+                        {
+                            "verdict": "COMPLETE",
+                            "items": [{"criterion": "c1", "status": "PASS", "detail": "ok"}],
+                            "summary": "all good",
+                        }
+                    )
+                }
+            )
+        }
         run_cli("task", "create", "pending1", "P1", "c1", cwd=tmp_workdir)
         run_cli("task", "create", "progress1", "P2", "c1", cwd=tmp_workdir)
         run_cli("task", "start", "progress1", cwd=tmp_workdir)
         run_cli("task", "complete", "progress1", cwd=tmp_workdir, extra_env=mock_env)
         result = run_cli("task", "list", cwd=tmp_workdir)
         assert result.returncode == 0
-        assert u"○" in result.stdout  # pending icon
-        assert u"●" in result.stdout  # complete icon
+        assert "○" in result.stdout  # pending icon
+        assert "●" in result.stdout  # complete icon
 
     def test_list_with_status_filter(self, tmp_workdir):
         """List --status pending shows only pending tasks."""
-        mock_env = {"GITREINS_MOCK_LLM_RESPONSE": json.dumps({"content": json.dumps({
-            "verdict": "COMPLETE",
-            "items": [{"criterion": "c1", "status": "PASS", "detail": "ok"}],
-            "summary": "all good",
-        })})}
+        mock_env = {
+            "GITREINS_MOCK_LLM_RESPONSE": json.dumps(
+                {
+                    "content": json.dumps(
+                        {
+                            "verdict": "COMPLETE",
+                            "items": [{"criterion": "c1", "status": "PASS", "detail": "ok"}],
+                            "summary": "all good",
+                        }
+                    )
+                }
+            )
+        }
         run_cli("task", "create", "pend", "Pending", "c1", cwd=tmp_workdir)
         run_cli("task", "create", "done", "Done", "c1", cwd=tmp_workdir)
         run_cli("task", "start", "done", cwd=tmp_workdir)
@@ -205,8 +225,12 @@ class TestJudgeCLI:
         """Judge on existing task exits code 0, prints summary."""
         verdict_json = '{"verdict":"COMPLETE","items":[{"criterion":"c1","status":"PASS","detail":"ok"}],"summary":"all good"}'
         run_cli("task", "create", "judge-me", "Judge Test", "c1", cwd=tmp_workdir)
-        result = run_cli("judge", "judge-me", cwd=tmp_workdir,
-                         extra_env={"GITREINS_MOCK_LLM_RESPONSE": json.dumps({"content": verdict_json})})
+        result = run_cli(
+            "judge",
+            "judge-me",
+            cwd=tmp_workdir,
+            extra_env={"GITREINS_MOCK_LLM_RESPONSE": json.dumps({"content": verdict_json})},
+        )
         assert result.returncode in (0, 1)
         output = result.stdout + result.stderr
         assert "Judge Result" in output
@@ -228,12 +252,14 @@ class TestMCPServerCLI:
     def test_cmd_mcp_server_function_exists(self):
         """cmd_mcp_server function exists and calls GitReinsMCPServer constructor."""
         from gitreins.cli import cmd_mcp_server
+
         assert callable(cmd_mcp_server)
 
     def test_mcp_server_import_path(self):
         """Verify that mcp-server command can be imported without error."""
         import gitreins.cli
-        assert hasattr(gitreins.cli, 'cmd_mcp_server')
+
+        assert hasattr(gitreins.cli, "cmd_mcp_server")
 
 
 class TestExtendedCLI:
@@ -241,15 +267,15 @@ class TestExtendedCLI:
 
     def test_create_task_special_chars(self, tmp_workdir):
         """Create task with special chars in title works."""
-        result = run_cli("task", "create", "spec", "Task with $pecial !@#$%^& chars",
-                         cwd=tmp_workdir)
+        result = run_cli(
+            "task", "create", "spec", "Task with $pecial !@#$%^& chars", cwd=tmp_workdir
+        )
         assert result.returncode == 0
         assert "Created task: spec" in result.stdout
 
     def test_create_task_multiple_criteria(self, tmp_workdir):
         """Create task with multiple criteria shows them all."""
-        result = run_cli("task", "create", "multi", "Multi", "c1", "c2", "c3",
-                         cwd=tmp_workdir)
+        result = run_cli("task", "create", "multi", "Multi", "c1", "c2", "c3", cwd=tmp_workdir)
         assert result.returncode == 0
         assert "c1" in result.stdout
         assert "c2" in result.stdout
@@ -257,11 +283,19 @@ class TestExtendedCLI:
 
     def test_complete_existing_task(self, tmp_workdir):
         """Complete existing task after creating and starting it."""
-        mock_env = {"GITREINS_MOCK_LLM_RESPONSE": json.dumps({"content": json.dumps({
-            "verdict": "COMPLETE",
-            "items": [{"criterion": "c1", "status": "PASS", "detail": "ok"}],
-            "summary": "all good",
-        })})}
+        mock_env = {
+            "GITREINS_MOCK_LLM_RESPONSE": json.dumps(
+                {
+                    "content": json.dumps(
+                        {
+                            "verdict": "COMPLETE",
+                            "items": [{"criterion": "c1", "status": "PASS", "detail": "ok"}],
+                            "summary": "all good",
+                        }
+                    )
+                }
+            )
+        }
         run_cli("task", "create", "comp-me", "Complete Me", "c1", cwd=tmp_workdir)
         run_cli("task", "start", "comp-me", cwd=tmp_workdir)
         result = run_cli("task", "complete", "comp-me", cwd=tmp_workdir, extra_env=mock_env)
@@ -399,25 +433,23 @@ class TestGuardAndCommit:
 
     def test_guard_detects_secrets_in_staged_file(self, tmp_workdir):
         """Guard detects staged file containing a secret pattern."""
-        subprocess.run(["git", "init"], cwd=tmp_workdir,
-                       capture_output=True, timeout=15)
+        subprocess.run(["git", "init"], cwd=tmp_workdir, capture_output=True, timeout=15)
         secret_file = os.path.join(tmp_workdir, "secret.py")
         with open(secret_file, "w") as f:
             f.write('api_key = "sk-1234567890123456789012345678901234567890"\n')
-        subprocess.run(["git", "add", "secret.py"], cwd=tmp_workdir,
-                       capture_output=True, timeout=15)
+        subprocess.run(
+            ["git", "add", "secret.py"], cwd=tmp_workdir, capture_output=True, timeout=15
+        )
         result = run_cli("guard", cwd=tmp_workdir)
         assert "Tier 1 Guards:" in result.stdout
 
     def test_guard_secrets_detected_when_fails(self, tmp_workdir):
         """Guard output contains FAIL when secrets found."""
-        subprocess.run(["git", "init"], cwd=tmp_workdir,
-                       capture_output=True, timeout=15)
+        subprocess.run(["git", "init"], cwd=tmp_workdir, capture_output=True, timeout=15)
         secret_file = os.path.join(tmp_workdir, "creds.py")
         with open(secret_file, "w") as f:
             f.write('token = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"\n')
-        subprocess.run(["git", "add", "creds.py"], cwd=tmp_workdir,
-                       capture_output=True, timeout=15)
+        subprocess.run(["git", "add", "creds.py"], cwd=tmp_workdir, capture_output=True, timeout=15)
         result = run_cli("guard", cwd=tmp_workdir)
         assert "Tier 1 Guards:" in result.stdout
 
@@ -428,13 +460,13 @@ class TestGuardAndCommit:
 
     def test_commit_fails_when_guard_detects_secret(self, tmp_workdir):
         """Commit exits 1 when guards detect a secret in staged files."""
-        subprocess.run(["git", "init"], cwd=tmp_workdir,
-                       capture_output=True, timeout=15)
+        subprocess.run(["git", "init"], cwd=tmp_workdir, capture_output=True, timeout=15)
         secret_file = os.path.join(tmp_workdir, "secret_key.py")
         with open(secret_file, "w") as f:
             f.write('api_key = "sk-1234567890123456789012345678901234567890"\n')
-        subprocess.run(["git", "add", "secret_key.py"], cwd=tmp_workdir,
-                       capture_output=True, timeout=15)
+        subprocess.run(
+            ["git", "add", "secret_key.py"], cwd=tmp_workdir, capture_output=True, timeout=15
+        )
         result = run_cli("commit", "test message", cwd=tmp_workdir)
         output = result.stdout + result.stderr
         assert "FAILED" in output
@@ -452,17 +484,17 @@ class TestTaskLifecycleExtended:
         run_cli("task", "create", "life1", "Lifecycle", "c1", cwd=tmp_workdir)
 
         result = run_cli("task", "list", cwd=tmp_workdir)
-        assert u"○" in result.stdout
+        assert "○" in result.stdout
 
         run_cli("task", "start", "life1", cwd=tmp_workdir)
 
         result = run_cli("task", "list", cwd=tmp_workdir)
-        assert u"◐" in result.stdout
+        assert "◐" in result.stdout
 
         run_cli("task", "complete", "life1", cwd=tmp_workdir)
 
         result = run_cli("task", "list", cwd=tmp_workdir)
-        assert u"●" in result.stdout
+        assert "●" in result.stdout
 
     def test_list_filter_complete_status(self, tmp_workdir):
         """List --status complete shows only completed tasks."""
@@ -518,11 +550,19 @@ class TestEdgeCases:
 
     def test_list_no_filter_shows_all_tasks(self, tmp_workdir):
         """List without filter shows all tasks regardless of status."""
-        mock_env = {"GITREINS_MOCK_LLM_RESPONSE": json.dumps({"content": json.dumps({
-            "verdict": "COMPLETE",
-            "items": [{"criterion": "", "status": "PASS", "detail": "ok"}],
-            "summary": "all good",
-        })})}
+        mock_env = {
+            "GITREINS_MOCK_LLM_RESPONSE": json.dumps(
+                {
+                    "content": json.dumps(
+                        {
+                            "verdict": "COMPLETE",
+                            "items": [{"criterion": "", "status": "PASS", "detail": "ok"}],
+                            "summary": "all good",
+                        }
+                    )
+                }
+            )
+        }
         run_cli("task", "create", "pend1", "Pending", cwd=tmp_workdir)
         run_cli("task", "create", "comp1", "Complete", cwd=tmp_workdir)
         run_cli("task", "start", "comp1", cwd=tmp_workdir)
@@ -546,14 +586,20 @@ class TestJudgeExtended:
 
     def test_judge_existing_task_runs_evaluation(self, tmp_workdir):
         """Judge on existing task runs evaluation and prints summary."""
-        verdict_json = json.dumps({
-            "verdict": "COMPLETE",
-            "items": [{"criterion": "c1", "status": "PASS", "detail": "ok"}],
-            "summary": "all good",
-        })
+        verdict_json = json.dumps(
+            {
+                "verdict": "COMPLETE",
+                "items": [{"criterion": "c1", "status": "PASS", "detail": "ok"}],
+                "summary": "all good",
+            }
+        )
         run_cli("task", "create", "judge-eval", "Judge Eval", "c1", cwd=tmp_workdir)
-        result = run_cli("judge", "judge-eval", cwd=tmp_workdir,
-                         extra_env={"GITREINS_MOCK_LLM_RESPONSE": json.dumps({"content": verdict_json})})
+        result = run_cli(
+            "judge",
+            "judge-eval",
+            cwd=tmp_workdir,
+            extra_env={"GITREINS_MOCK_LLM_RESPONSE": json.dumps({"content": verdict_json})},
+        )
         assert "Judge Result" in result.stdout
         assert "Overall:" in result.stdout
 
@@ -561,11 +607,13 @@ class TestJudgeExtended:
         """Judge integration test that requires DEEPSEEK_API_KEY."""
         if not os.environ.get("DEEPSEEK_API_KEY"):
             pytest.skip("requires DEEPSEEK_API_KEY")
-        verdict_json = json.dumps({
-            "verdict": "COMPLETE",
-            "items": [{"criterion": "c1", "status": "PASS", "detail": "ok"}],
-            "summary": "all good",
-        })
+        verdict_json = json.dumps(
+            {
+                "verdict": "COMPLETE",
+                "items": [{"criterion": "c1", "status": "PASS", "detail": "ok"}],
+                "summary": "all good",
+            }
+        )
         mock_env = {"GITREINS_MOCK_LLM_RESPONSE": json.dumps({"content": verdict_json})}
         run_cli("task", "create", "judge-api", "Judge API", "c1", cwd=tmp_workdir)
         run_cli("task", "start", "judge-api", cwd=tmp_workdir)
@@ -585,6 +633,7 @@ class TestLoadConfigParseFailure:
     def test_load_config_warns_on_broken_yaml(self, tmp_workdir, caplog):
         """load_config logs a warning when config.yaml has invalid YAML."""
         import logging
+
         caplog.set_level(logging.WARNING, logger="gitreins")
 
         from gitreins.cli import load_config
@@ -644,12 +693,15 @@ class TestCmdInitConfigSafety:
         assert result.returncode != 0, (
             f"init should refuse to overwrite broken config, got exit {result.returncode}"
         )
-        assert "could not be parsed" in result.stderr.lower() or \
-               "could not be parsed" in result.stdout.lower()
+        assert (
+            "could not be parsed" in result.stderr.lower()
+            or "could not be parsed" in result.stdout.lower()
+        )
 
     def test_init_backs_up_existing_config(self, tmp_workdir):
         """gitreins init creates a .bak when overwriting existing config."""
         import yaml as _yaml
+
         config_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
         config_path = os.path.join(config_dir, "config.yaml")
@@ -678,12 +730,14 @@ class TestCmdInitConfigSafety:
 
 # ── v0.7.2: Gitleaks .toml auto-generation ────────────────────────────
 
+
 class TestGitleaksTomlGeneration:
     """Tests for _generate_gitleaks_config: auto-created during init."""
 
     def test_python_project_gets_python_exclusions(self, tmp_workdir):
         """Python project gets .venv, __pycache__, dist, etc. exclusions."""
         import subprocess
+
         os.makedirs(os.path.join(tmp_workdir, ".git"), exist_ok=True)
         with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
             f.write("print('hello')\n")
@@ -707,6 +761,7 @@ class TestGitleaksTomlGeneration:
     def test_existing_gitleaks_toml_not_overwritten(self, tmp_workdir):
         """If .gitleaks.toml already exists, init does not modify it."""
         import subprocess
+
         os.makedirs(os.path.join(tmp_workdir, ".git"), exist_ok=True)
         with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
             f.write("print('hello')\n")
@@ -725,6 +780,7 @@ class TestGitleaksTomlGeneration:
     def test_universal_exclusions_always_present(self, tmp_workdir):
         """Every project gets .git/, .gitreins/, *.log exclusions."""
         import subprocess
+
         os.makedirs(os.path.join(tmp_workdir, ".git"), exist_ok=True)
         with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
             f.write("print('hello')\n")
@@ -752,15 +808,16 @@ class TestPreCommitHookIntegration:
         os.makedirs(git_dir, exist_ok=True)
         # Need a real git repo for git commit to work
         subprocess.run(["git", "init", "-q"], cwd=tmp_workdir, capture_output=True)
-        subprocess.run(["git", "config", "user.email", "test@test.com"],
-                       cwd=tmp_workdir, capture_output=True)
-        subprocess.run(["git", "config", "user.name", "Test"],
-                       cwd=tmp_workdir, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"], cwd=tmp_workdir, capture_output=True
+        )
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_workdir, capture_output=True)
 
         # Create gitreins config
         config_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
         import yaml as _yaml
+
         with open(os.path.join(config_dir, "config.yaml"), "w") as f:
             _yaml.dump({"guards": {"test_mode": "diff", "test_command": "echo ok"}}, f)
 
@@ -786,7 +843,9 @@ exit $?
         # Try to commit — must fail
         result = subprocess.run(
             ["git", "commit", "-m", "should block"],
-            cwd=tmp_workdir, capture_output=True, text=True,
+            cwd=tmp_workdir,
+            capture_output=True,
+            text=True,
         )
         assert result.returncode != 0, (
             f"Hook did not block commit with secret key. "
@@ -796,14 +855,15 @@ exit $?
     def test_hook_allows_clean_commit(self, tmp_workdir):
         """Staging a clean file → hook passes, commit succeeds."""
         subprocess.run(["git", "init", "-q"], cwd=tmp_workdir, capture_output=True)
-        subprocess.run(["git", "config", "user.email", "test@test.com"],
-                       cwd=tmp_workdir, capture_output=True)
-        subprocess.run(["git", "config", "user.name", "Test"],
-                       cwd=tmp_workdir, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"], cwd=tmp_workdir, capture_output=True
+        )
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_workdir, capture_output=True)
 
         config_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
         import yaml as _yaml
+
         with open(os.path.join(config_dir, "config.yaml"), "w") as f:
             _yaml.dump({"guards": {"test_mode": "diff", "test_command": "echo ok"}}, f)
 
@@ -826,11 +886,11 @@ exit $?
 
         result = subprocess.run(
             ["git", "commit", "-m", "should pass"],
-            cwd=tmp_workdir, capture_output=True, text=True,
+            cwd=tmp_workdir,
+            capture_output=True,
+            text=True,
         )
-        assert result.returncode == 0, (
-            f"Hook blocked clean commit. stderr: {result.stderr[:300]}"
-        )
+        assert result.returncode == 0, f"Hook blocked clean commit. stderr: {result.stderr[:300]}"
 
 
 # ── Regression: CLI exit codes ───────────────────────────────────────────────
@@ -843,14 +903,15 @@ class TestCLIExitCodes:
     def test_guard_exits_nonzero_on_failure(self, tmp_workdir):
         """gitreins guard exits 1 when secrets are detected."""
         subprocess.run(["git", "init", "-q"], cwd=tmp_workdir, capture_output=True)
-        subprocess.run(["git", "config", "user.email", "test@test.com"],
-                       cwd=tmp_workdir, capture_output=True)
-        subprocess.run(["git", "config", "user.name", "Test"],
-                       cwd=tmp_workdir, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"], cwd=tmp_workdir, capture_output=True
+        )
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_workdir, capture_output=True)
 
         config_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
         import yaml as _yaml
+
         with open(os.path.join(config_dir, "config.yaml"), "w") as f:
             _yaml.dump({"guards": {"test_mode": "diff", "test_command": "echo ok"}}, f)
 

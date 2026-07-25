@@ -2,6 +2,7 @@
 Unit tests for engine/llm.py — multi-provider LLM client with retry logic.
 axiom:trace work_item=GR-001 spec=specs/02-LLM-Interface.md plan=.memory-bank/work-items/GR-001/plan.yaml
 """
+
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -139,10 +140,12 @@ class TestAnthropicConversion:
     def test_system_message_extracted(self):
         """System messages are extracted to separate key, not in message list."""
         client = LLMClient(base_url="https://api.anthropic.com/v1", api_key="k")
-        result = client._convert_messages_for_anthropic([
-            {"role": "system", "content": "You are helpful."},
-            {"role": "user", "content": "Hello"},
-        ])
+        result = client._convert_messages_for_anthropic(
+            [
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": "Hello"},
+            ]
+        )
         # System should be excluded from result
         assert len(result) == 1
         assert result[0]["role"] == "user"
@@ -150,9 +153,11 @@ class TestAnthropicConversion:
     def test_tool_message_converted_to_user_tool_result(self):
         """Tool role messages are converted to user messages with tool_result blocks."""
         client = LLMClient(base_url="https://api.anthropic.com/v1", api_key="k")
-        result = client._convert_messages_for_anthropic([
-            {"role": "tool", "tool_call_id": "call_1", "content": '{"result": "ok"}'},
-        ])
+        result = client._convert_messages_for_anthropic(
+            [
+                {"role": "tool", "tool_call_id": "call_1", "content": '{"result": "ok"}'},
+            ]
+        )
         assert len(result) == 1
         assert result[0]["role"] == "user"
         assert result[0]["content"][0]["type"] == "tool_result"
@@ -161,11 +166,21 @@ class TestAnthropicConversion:
     def test_assistant_with_tool_calls_converted(self):
         """Assistant with tool_calls converted to Anthropic format with text + tool_use blocks."""
         client = LLMClient(base_url="https://api.anthropic.com/v1", api_key="k")
-        result = client._convert_messages_for_anthropic([
-            {"role": "assistant", "content": "Let me check.", "tool_calls": [
-                {"id": "call_1", "type": "function", "function": {"name": "read_file", "arguments": '{"path":"f.py"}'}}
-            ]},
-        ])
+        result = client._convert_messages_for_anthropic(
+            [
+                {
+                    "role": "assistant",
+                    "content": "Let me check.",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {"name": "read_file", "arguments": '{"path":"f.py"}'},
+                        }
+                    ],
+                },
+            ]
+        )
         assert len(result) == 1
         assert result[0]["role"] == "assistant"
         content_blocks = result[0]["content"]
@@ -179,11 +194,18 @@ class TestAnthropicConversion:
         """OpenAI tools are converted to Anthropic name/description/input_schema format."""
         client = LLMClient(base_url="https://api.anthropic.com/v1", api_key="k")
         openai_tools = [
-            {"type": "function", "function": {
-                "name": "read_file",
-                "description": "Read a file",
-                "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
-            }},
+            {
+                "type": "function",
+                "function": {
+                    "name": "read_file",
+                    "description": "Read a file",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"path": {"type": "string"}},
+                        "required": ["path"],
+                    },
+                },
+            },
         ]
         result = client._convert_tools_for_anthropic(openai_tools)
         assert len(result) == 1
@@ -195,10 +217,12 @@ class TestAnthropicConversion:
     def test_user_assistant_passthrough(self):
         """User and assistant messages without tool_calls pass through."""
         client = LLMClient(base_url="https://api.anthropic.com/v1", api_key="k")
-        result = client._convert_messages_for_anthropic([
-            {"role": "user", "content": "Hi"},
-            {"role": "assistant", "content": "Hello!"},
-        ])
+        result = client._convert_messages_for_anthropic(
+            [
+                {"role": "user", "content": "Hi"},
+                {"role": "assistant", "content": "Hello!"},
+            ]
+        )
         assert len(result) == 2
         assert result[0]["role"] == "user"
         assert result[1]["role"] == "assistant"
@@ -214,8 +238,8 @@ class TestRetryLogic:
             requests.HTTPError(response=MagicMock(status_code=429)),
             LLMResponse(content="success"),
         ]
-        with patch.object(llm_client, '_chat_attempt', mock_attempt):
-            with patch('time.sleep', return_value=None):
+        with patch.object(llm_client, "_chat_attempt", mock_attempt):
+            with patch("time.sleep", return_value=None):
                 result = llm_client.chat([{"role": "user", "content": "hi"}])
         assert result.content == "success"
         assert mock_attempt.call_count == 2
@@ -227,8 +251,8 @@ class TestRetryLogic:
             requests.HTTPError(response=MagicMock(status_code=503)),
             LLMResponse(content="recovered"),
         ]
-        with patch.object(llm_client, '_chat_attempt', mock_attempt):
-            with patch('time.sleep', return_value=None):
+        with patch.object(llm_client, "_chat_attempt", mock_attempt):
+            with patch("time.sleep", return_value=None):
                 result = llm_client.chat([{"role": "user", "content": "hi"}])
         assert result.content == "recovered"
 
@@ -236,9 +260,10 @@ class TestRetryLogic:
         """HTTP 400 (client error) does NOT retry — raised immediately."""
         response_400 = MagicMock()
         response_400.status_code = 400
-        with patch.object(llm_client, '_chat_attempt',
-                          side_effect=requests.HTTPError(response=response_400)):
-            with patch('time.sleep', return_value=None):
+        with patch.object(
+            llm_client, "_chat_attempt", side_effect=requests.HTTPError(response=response_400)
+        ):
+            with patch("time.sleep", return_value=None):
                 with pytest.raises(requests.HTTPError):
                     llm_client.chat([{"role": "user", "content": "hi"}])
 
@@ -249,16 +274,17 @@ class TestRetryLogic:
             requests.RequestException("Connection refused"),
             LLMResponse(content="ok"),
         ]
-        with patch.object(llm_client, '_chat_attempt', mock_attempt):
-            with patch('time.sleep', return_value=None):
+        with patch.object(llm_client, "_chat_attempt", mock_attempt):
+            with patch("time.sleep", return_value=None):
                 result = llm_client.chat([{"role": "user", "content": "hi"}])
         assert result.content == "ok"
 
     def test_three_consecutive_failures_raises_runtimeerror(self, llm_client):
         """3 consecutive failures → RuntimeError raised."""
-        with patch.object(llm_client, '_chat_attempt',
-                          side_effect=requests.RequestException("fail")):
-            with patch('time.sleep', return_value=None):
+        with patch.object(
+            llm_client, "_chat_attempt", side_effect=requests.RequestException("fail")
+        ):
+            with patch("time.sleep", return_value=None):
                 with pytest.raises(RuntimeError, match="LLM request failed after 3 attempts"):
                     llm_client.chat([{"role": "user", "content": "hi"}])
 
@@ -271,8 +297,8 @@ class TestRetryLogic:
             LLMResponse(content="ok"),
         ]
         sleep_times = []
-        with patch.object(llm_client, '_chat_attempt', mock_attempt):
-            with patch('time.sleep', side_effect=lambda t: sleep_times.append(t)):
+        with patch.object(llm_client, "_chat_attempt", mock_attempt):
+            with patch("time.sleep", side_effect=lambda t: sleep_times.append(t)):
                 llm_client.chat([{"role": "user", "content": "hi"}])
         assert sleep_times == [1, 2]
 
@@ -341,7 +367,7 @@ class TestExtendedLLM:
         mock_resp.json.return_value = {
             "choices": [{"message": {"content": "Hello!", "role": "assistant"}}]
         }
-        with patch('requests.post', return_value=mock_resp):
+        with patch("requests.post", return_value=mock_resp):
             result = client.chat([{"role": "user", "content": "hi"}])
         assert result.content == "Hello!"
         assert result.tool_calls == []
@@ -353,19 +379,23 @@ class TestExtendedLLM:
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
-            "choices": [{
-                "message": {
-                    "content": "Let me check",
-                    "role": "assistant",
-                    "tool_calls": [{
-                        "id": "call_1",
-                        "type": "function",
-                        "function": {"name": "read_file", "arguments": '{"path":"f.py"}'},
-                    }],
+            "choices": [
+                {
+                    "message": {
+                        "content": "Let me check",
+                        "role": "assistant",
+                        "tool_calls": [
+                            {
+                                "id": "call_1",
+                                "type": "function",
+                                "function": {"name": "read_file", "arguments": '{"path":"f.py"}'},
+                            }
+                        ],
+                    }
                 }
-            }]
+            ]
         }
-        with patch('requests.post', return_value=mock_resp):
+        with patch("requests.post", return_value=mock_resp):
             result = client.chat([{"role": "user", "content": "read"}])
         assert len(result.tool_calls) == 1
         assert result.tool_calls[0].name == "read_file"
@@ -380,7 +410,7 @@ class TestExtendedLLM:
         mock_resp.json.return_value = {
             "content": [{"type": "text", "text": "Hello from Claude!"}],
         }
-        with patch('requests.post', return_value=mock_resp):
+        with patch("requests.post", return_value=mock_resp):
             result = client.chat([{"role": "user", "content": "hi"}])
         assert result.content == "Hello from Claude!"
 
@@ -399,9 +429,11 @@ class TestExtendedLLM:
     def test_anthropic_convert_tool_msg_no_call_id(self):
         """Tool message without tool_call_id still produces a tool_result block."""
         client = LLMClient(base_url="https://api.anthropic.com/v1", api_key="k")
-        result = client._convert_messages_for_anthropic([
-            {"role": "tool", "content": "some output"},
-        ])
+        result = client._convert_messages_for_anthropic(
+            [
+                {"role": "tool", "content": "some output"},
+            ]
+        )
         assert len(result) == 1
         assert result[0]["role"] == "user"
         assert result[0]["content"][0]["type"] == "tool_result"
@@ -416,8 +448,8 @@ class TestExtendedLLM:
             requests.RequestException("fail3"),
         ]
         sleep_times = []
-        with patch.object(llm_client, '_chat_attempt', mock_attempt):
-            with patch('time.sleep', side_effect=lambda t: sleep_times.append(t)):
+        with patch.object(llm_client, "_chat_attempt", mock_attempt):
+            with patch("time.sleep", side_effect=lambda t: sleep_times.append(t)):
                 with pytest.raises(RuntimeError):
                     llm_client.chat([{"role": "user", "content": "hi"}])
         # max_retries=3: sleeps after first 2 failures (attempts 0 and 1)
@@ -435,8 +467,8 @@ class TestExtendedLLM:
         resp_ok.json.return_value = {
             "choices": [{"message": {"content": "ok", "role": "assistant"}}]
         }
-        with patch('requests.post', side_effect=[resp_429, resp_ok]):
-            with patch('time.sleep', return_value=None):
+        with patch("requests.post", side_effect=[resp_429, resp_ok]):
+            with patch("time.sleep", return_value=None):
                 result = client.chat([{"role": "user", "content": "hi"}])
         assert result.content == "ok"
 
@@ -489,7 +521,9 @@ class TestGR068ThinkingMode:
     def test_thinking_disabled_in_payload(self, monkeypatch):
         """When reasoning=disabled, payload includes thinking.type=disabled for DeepSeek."""
         monkeypatch.delenv("GITREINS_LLM_BASE_URL", raising=False)
-        c = LLMClient(base_url="https://api.deepseek.com/v1", api_key="test-key", llm_reasoning="disabled")
+        c = LLMClient(
+            base_url="https://api.deepseek.com/v1", api_key="test-key", llm_reasoning="disabled"
+        )
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
@@ -507,7 +541,9 @@ class TestGR068ThinkingMode:
     def test_thinking_enabled_in_payload(self, monkeypatch):
         """When reasoning=enabled, payload includes thinking.type=enabled for DeepSeek."""
         monkeypatch.delenv("GITREINS_LLM_BASE_URL", raising=False)
-        c = LLMClient(base_url="https://api.deepseek.com/v1", api_key="test-key", llm_reasoning="enabled")
+        c = LLMClient(
+            base_url="https://api.deepseek.com/v1", api_key="test-key", llm_reasoning="enabled"
+        )
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"choices": [{"message": {"content": "ok"}}]}

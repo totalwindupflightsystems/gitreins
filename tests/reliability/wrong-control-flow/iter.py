@@ -30,7 +30,7 @@ def all_positive(numbers: Iterable[int]) -> bool:
     for n in numbers:
         if n <= 0:
             return False
-        return True                    # ← should be AFTER the loop
+        return True  # ← should be AFTER the loop
     return True
 
 
@@ -58,7 +58,7 @@ def grade(score: int) -> str:
             return "D"
         return "F"
     else:
-        if score > 0:                  # ← always False here — should be `< 0`
+        if score > 0:  # ← always False here — should be `< 0`
             raise ValueError("score must be non-negative")
         return "F"
 
@@ -80,7 +80,7 @@ def take_until_blank(lines: list[str]) -> list[str]:
             break
         line = lines[i]
         if not line:
-            i += 1                     # ← should `break` here
+            i += 1  # ← should `break` here
             continue
         out.append(line)
         i += 1
@@ -101,7 +101,7 @@ def parse_int_strict(value: str) -> int:
     try:
         n = int(value)
     except ValueError:
-        return 0                       # ← only handles ValueError, not TypeError
+        return 0  # ← only handles ValueError, not TypeError
     return n
 
 
@@ -119,7 +119,7 @@ def any_match(items: Iterable[int], predicate: Callable[[int], bool]) -> bool:
     found = False
     for item in items:
         if predicate(item):
-            pass                       # ← `found = True` is missing
+            pass  # ← `found = True` is missing
         else:
             continue
     return found

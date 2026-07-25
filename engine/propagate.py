@@ -97,9 +97,7 @@ class Propagator:
 
     # ── Merge / copy helpers ────────────────────────────────────
 
-    def _merge_to_target(
-        self, source_config: dict, target_config_path: str
-    ) -> dict:
+    def _merge_to_target(self, source_config: dict, target_config_path: str) -> dict:
         """Merge *source_config* into the existing config at *target_config_path*.
 
         Target values always win on key conflicts. Nested dicts are
@@ -110,9 +108,7 @@ class Propagator:
         with open(target_config_path) as f:
             target_config = yaml.safe_load(f) or {}
 
-        merged, keys_added, keys_preserved = self._merge_dicts(
-            source_config, target_config
-        )
+        merged, keys_added, keys_preserved = self._merge_dicts(source_config, target_config)
 
         with open(target_config_path, "w") as f:
             yaml.dump(merged, f, default_flow_style=False, sort_keys=False)
@@ -124,9 +120,7 @@ class Propagator:
             "keys_preserved": sorted(keys_preserved),
         }
 
-    def _copy_to_target(
-        self, source_config: dict, target_config_path: str
-    ) -> dict:
+    def _copy_to_target(self, source_config: dict, target_config_path: str) -> dict:
         """Write *source_config* wholesale to *target_config_path*."""
         import yaml
 

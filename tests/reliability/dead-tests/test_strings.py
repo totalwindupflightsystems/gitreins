@@ -33,9 +33,9 @@ def is_palindrome(s: str) -> bool:
 
 def test_reverse_string_empty_body():
     """Verify reverse_string('hello') == 'olleh'."""
-    reverse_string("hello")            # result discarded
-    pass                               # ← no assertion; pytest sees an
-                                       #   "empty" test as a PASS
+    reverse_string("hello")  # result discarded
+    pass  # ← no assertion; pytest sees an
+    #   "empty" test as a PASS
 
 
 # ── Flaw 2: assertion is `assert True, "always passes"` ──────────────────────
@@ -43,8 +43,8 @@ def test_reverse_string_empty_body():
 
 def test_is_palindrome_with_message():
     """Verify is_palindrome('racecar') is True."""
-    is_palindrome("racecar")           # result discarded
-    assert True, "this should never fail"   # ← tautology with a message
+    is_palindrome("racecar")  # result discarded
+    assert True, "this should never fail"  # ← tautology with a message
 
 
 # ── Flaw 3: `assert` on a literal that does not exercise the SUT ─────────────
@@ -52,7 +52,7 @@ def test_is_palindrome_with_message():
 
 def test_concat_uses_literal():
     """Verify 'a' + 'b' == 'ab'."""
-    assert "a" + "b" == "ab"           # ← never calls any SUT function
+    assert "a" + "b" == "ab"  # ← never calls any SUT function
     # The real test would have been:
     #     assert concat_strings("a", "b") == "ab"
 
@@ -71,9 +71,9 @@ def test_reverse_against_wrong_value():
     dead).
     """
     out = reverse_string("abc")
-    ok = (out == "abc")                # ← ok is False
-    return ok                          # ← pytest ignores return value
-    assert out == "abc"                # ← unreachable
+    ok = out == "abc"  # ← ok is False
+    return ok  # ← pytest ignores return value
+    assert out == "abc"  # ← unreachable
 
 
 # ── Flaw 5: `assert` is wrapped in a decorator that suppresses failures ─────
@@ -81,17 +81,19 @@ def test_reverse_against_wrong_value():
 
 def test_decorator_swallows_assert():
     """Verify divide-precise(10, 3) ≈ 3.333."""
+
     def ignore_failures(fn: Callable) -> Callable:
         def wrapper(*args, **kwargs):
             try:
                 return fn(*args, **kwargs)
             except AssertionError:
-                return None            # ← swallow AssertionError
+                return None  # ← swallow AssertionError
+
         return wrapper
 
     @ignore_failures
     def real_test():
-        assert 1 / 3 == 0.5            # ← this is FALSE but the
-                                       #   decorator catches it
+        assert 1 / 3 == 0.5  # ← this is FALSE but the
+        #   decorator catches it
 
-    real_test()                        # ← result discarded
+    real_test()  # ← result discarded

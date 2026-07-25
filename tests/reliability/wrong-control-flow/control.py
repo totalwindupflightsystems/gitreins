@@ -33,7 +33,7 @@ def first_even(numbers: Iterable[int]) -> int | None:
     """
     result = None
     for n in numbers:
-        if result % 2 == 0:            # ← checks `result` (None on iter 0), not `n`
+        if result % 2 == 0:  # ← checks `result` (None on iter 0), not `n`
             return result
         result = n
     return None
@@ -52,9 +52,9 @@ def find_user(usernames: list[str], target: str) -> int | None:
     """
     for i, name in enumerate(usernames):
         if name == target:
-            continue                   # ← swapped: should `break` here
-        break                          # ← swapped: should `continue` here
-        return i                       # unreachable
+            continue  # ← swapped: should `break` here
+        break  # ← swapped: should `continue` here
+        return i  # unreachable
     return None
 
 
@@ -71,7 +71,7 @@ def categorise_priority(priority: str) -> str:
     """
     if priority == "critical":
         return "P0"
-    elif priority == "critical":        # ← unreachable (same condition)
+    elif priority == "critical":  # ← unreachable (same condition)
         return "P1"
     elif priority == "high":
         return "P2"
@@ -100,7 +100,7 @@ def describe_temperature(celsius: float) -> str:
         return "freezing"
     if celsius < 10:
         return "cold"
-    if celsius >= 20:                   # ← wrong: missing `elif`, so this fires only when previous `if`s were False
+    if celsius >= 20:  # ← wrong: missing `elif`, so this fires only when previous `if`s were False
         return "warm"
     if celsius >= 30:
         return "hot"
@@ -121,6 +121,6 @@ def index_of(haystack: list[int], needle: int) -> int:
     for i, item in enumerate(haystack):
         if item == needle:
             return i
-    else:                               # runs when needle NOT found
-        return -2                       # ← should be -1
-    return -1                           # unreachable
+    else:  # runs when needle NOT found
+        return -2  # ← should be -1
+    return -1  # unreachable

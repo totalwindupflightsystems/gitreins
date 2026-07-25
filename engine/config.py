@@ -22,13 +22,13 @@ logger = logging.getLogger("gitreins.config")
 # ── Constants ─────────────────────────────────────────────────
 
 UPDATE_CACHE_DIR = os.path.join(
-    os.environ.get("HOME", os.path.expanduser("~")),
-    ".cache", "gitreins"
+    os.environ.get("HOME", os.path.expanduser("~")), ".cache", "gitreins"
 )
 UPDATE_CACHE_FILE = os.path.join(UPDATE_CACHE_DIR, "update-check.json")
 
 
 # ── Defaults dataclass ────────────────────────────────────────
+
 
 @dataclass
 class GitReinsDefaults:
@@ -40,36 +40,38 @@ class GitReinsDefaults:
 
     # ── LLM ──
     model: str = "deepseek-v4-flash"
-    llm_reasoning: str = "disabled"      # "disabled" | "enabled" — DeepSeek thinking mode
+    llm_reasoning: str = "disabled"  # "disabled" | "enabled" — DeepSeek thinking mode
 
     # ── Evaluation caps ──
-    max_iterations: float = 100.0       # -1 = unlimited
-    max_seconds: float = -1.0           # -1 = unlimited
+    max_iterations: float = 100.0  # -1 = unlimited
+    max_seconds: float = -1.0  # -1 = unlimited
     max_input_tokens: int = 10_000_000  # 10M
-    max_output_tokens: int = 131_072   # 128K — safe floor below most provider caps
-    max_tokens_per_call: int = 16384   # Per-LLM-call cap (session budget is separate)
+    max_output_tokens: int = 131_072  # 128K — safe floor below most provider caps
+    max_tokens_per_call: int = 16384  # Per-LLM-call cap (session budget is separate)
     tool_call_weight: float = 0.1
     compaction_threshold: float = 0.90  # compact when 90% of input budget used (10% remaining)
-    code_context_budget: float = 0.70   # cap pre-loaded code context to 70% of input budget
-    file_scope: str = "changed"         # "changed" = only changed files + tests, "full" = entire codebase
-    fast_track: str = "auto"            # skip full call-graph on large repos (GR-064a)
-    max_file_bytes: int = 131_072       # 128KB — cap read_file results to prevent context explosion (GR-064d)
-    pass_on_error: bool = False          # skip Tier 2 when LLM is unavailable (advisory-only mode)
+    code_context_budget: float = 0.70  # cap pre-loaded code context to 70% of input budget
+    file_scope: str = "changed"  # "changed" = only changed files + tests, "full" = entire codebase
+    fast_track: str = "auto"  # skip full call-graph on large repos (GR-064a)
+    max_file_bytes: int = (
+        131_072  # 128KB — cap read_file results to prevent context explosion (GR-064d)
+    )
+    pass_on_error: bool = False  # skip Tier 2 when LLM is unavailable (advisory-only mode)
 
     # ── Guard defaults ──
-    hook_timeout: int = 300               # overall pre-commit hook timeout (GR-064e, raised from 120)
+    hook_timeout: int = 300  # overall pre-commit hook timeout (GR-064e, raised from 120)
 
     # ── Security scan (Antares) ──
     security_scan_enabled: bool = False
-    security_scan_model: str = "antares-1b"       # "antares-1b" | "antares-350m"
+    security_scan_model: str = "antares-1b"  # "antares-1b" | "antares-350m"
     security_scan_min_confidence: float = 0.7
-    security_scan_cve_source: str = "nvd"          # "nvd" | "github" | "both"
+    security_scan_cve_source: str = "nvd"  # "nvd" | "github" | "both"
 
     # ── Commit audit ──
-    commit_audit_enabled: bool = True      # validate commit messages against staged diff
-    commit_audit_mode: str = "warn"        # "warn" | "block" | "suggest"
+    commit_audit_enabled: bool = True  # validate commit messages against staged diff
+    commit_audit_mode: str = "warn"  # "warn" | "block" | "suggest"
     commit_audit_strictness: str = "standard"  # "lenient" | "standard" | "strict"
-    commit_audit_max_iterations: int = 3   # LLM exploration rounds (0 = no tools, single call)
+    commit_audit_max_iterations: int = 3  # LLM exploration rounds (0 = no tools, single call)
     commit_audit_suggest_message: bool = True  # suggest better message on rejection
 
     # ── Commit review (GR-065: CodeRabbit-style) ──
@@ -94,7 +96,7 @@ class GitReinsDefaults:
     # ── History / verdict persistence ──
     history_enabled: bool = True
     history_path: str = ".gitreins/history"
-    history_storage: str = "git"         # "git" or "filesystem"
+    history_storage: str = "git"  # "git" or "filesystem"
     history_max_verdicts: int = 1000
 
     # Metadata
@@ -113,9 +115,7 @@ class GitReinsDefaults:
         # Deep copy numeric/string fields
         result = GitReinsDefaults(
             model=defaults.get("model", self.model),
-            llm_reasoning=str(defaults.get(
-                "llm_reasoning", self.llm_reasoning
-            )),
+            llm_reasoning=str(defaults.get("llm_reasoning", self.llm_reasoning)),
             max_iterations=_coerce_float(defaults.get("max_iterations", self.max_iterations)),
             max_seconds=_coerce_seconds(defaults.get("max_time", self.max_seconds)),
             max_input_tokens=_coerce_tokens(
@@ -124,111 +124,117 @@ class GitReinsDefaults:
             max_output_tokens=_coerce_tokens(
                 defaults.get("max_output_tokens", self.max_output_tokens)
             ),
-            max_tokens_per_call=int(defaults.get(
-                "max_tokens_per_call", self.max_tokens_per_call
-            )),
-            tool_call_weight=float(defaults.get(
-                "tool_call_weight", self.tool_call_weight
-            )),
-            compaction_threshold=float(defaults.get(
-                "compaction_threshold", self.compaction_threshold
-            )),
-            code_context_budget=float(defaults.get(
-                "code_context_budget", self.code_context_budget
-            )),
-            file_scope=str(defaults.get(
-                "file_scope", self.file_scope
-            )),
-            fast_track=str(defaults.get(
-                "fast_track", self.fast_track
-            )),
-            max_file_bytes=int(defaults.get(
-                "max_file_bytes", self.max_file_bytes
-            )),
-            pass_on_error=bool(defaults.get(
-                "pass_on_error", self.pass_on_error
-            )),
-            hook_timeout=int(defaults.get(
-                "hook_timeout", self.hook_timeout
-            )),
-            security_scan_enabled=bool(defaults.get(
-                "security_scan", {}).get("enabled", self.security_scan_enabled
-            )),
-            security_scan_model=str(defaults.get(
-                "security_scan", {}).get("model", self.security_scan_model
-            )),
-            security_scan_min_confidence=float(defaults.get(
-                "security_scan", {}).get("min_confidence", self.security_scan_min_confidence
-            )),
-            security_scan_cve_source=str(defaults.get(
-                "security_scan", {}).get("cve_source", self.security_scan_cve_source
-            )),
-            commit_audit_enabled=bool(defaults.get(
-                "commit_audit", {}).get("enabled", self.commit_audit_enabled
-            )),
-            commit_audit_mode=str(defaults.get(
-                "commit_audit", {}).get("mode", self.commit_audit_mode
-            )),
-            commit_audit_strictness=str(defaults.get(
-                "commit_audit", {}).get("strictness", self.commit_audit_strictness
-            )),
-            commit_audit_max_iterations=int(defaults.get(
-                "commit_audit", {}).get("max_iterations", self.commit_audit_max_iterations
-            )),
-            commit_audit_suggest_message=bool(defaults.get(
-                "commit_audit", {}).get("suggest_message", self.commit_audit_suggest_message
-            )),
+            max_tokens_per_call=int(defaults.get("max_tokens_per_call", self.max_tokens_per_call)),
+            tool_call_weight=float(defaults.get("tool_call_weight", self.tool_call_weight)),
+            compaction_threshold=float(
+                defaults.get("compaction_threshold", self.compaction_threshold)
+            ),
+            code_context_budget=float(
+                defaults.get("code_context_budget", self.code_context_budget)
+            ),
+            file_scope=str(defaults.get("file_scope", self.file_scope)),
+            fast_track=str(defaults.get("fast_track", self.fast_track)),
+            max_file_bytes=int(defaults.get("max_file_bytes", self.max_file_bytes)),
+            pass_on_error=bool(defaults.get("pass_on_error", self.pass_on_error)),
+            hook_timeout=int(defaults.get("hook_timeout", self.hook_timeout)),
+            security_scan_enabled=bool(
+                defaults.get("security_scan", {}).get("enabled", self.security_scan_enabled)
+            ),
+            security_scan_model=str(
+                defaults.get("security_scan", {}).get("model", self.security_scan_model)
+            ),
+            security_scan_min_confidence=float(
+                defaults.get("security_scan", {}).get(
+                    "min_confidence", self.security_scan_min_confidence
+                )
+            ),
+            security_scan_cve_source=str(
+                defaults.get("security_scan", {}).get("cve_source", self.security_scan_cve_source)
+            ),
+            commit_audit_enabled=bool(
+                defaults.get("commit_audit", {}).get("enabled", self.commit_audit_enabled)
+            ),
+            commit_audit_mode=str(
+                defaults.get("commit_audit", {}).get("mode", self.commit_audit_mode)
+            ),
+            commit_audit_strictness=str(
+                defaults.get("commit_audit", {}).get("strictness", self.commit_audit_strictness)
+            ),
+            commit_audit_max_iterations=int(
+                defaults.get("commit_audit", {}).get(
+                    "max_iterations", self.commit_audit_max_iterations
+                )
+            ),
+            commit_audit_suggest_message=bool(
+                defaults.get("commit_audit", {}).get(
+                    "suggest_message", self.commit_audit_suggest_message
+                )
+            ),
             # Review fields
-            commit_audit_review_mode=str(defaults.get(
-                "commit_audit", {}).get("review_mode", self.commit_audit_review_mode
-            )),
-            commit_audit_review_checks_bugs=bool(defaults.get(
-                "commit_audit", {}).get("review_checks", {}).get("bugs", self.commit_audit_review_checks_bugs
-            )),
-            commit_audit_review_checks_security=bool(defaults.get(
-                "commit_audit", {}).get("review_checks", {}).get("security", self.commit_audit_review_checks_security
-            )),
-            commit_audit_review_checks_style=bool(defaults.get(
-                "commit_audit", {}).get("review_checks", {}).get("style", self.commit_audit_review_checks_style
-            )),
-            commit_audit_review_checks_performance=bool(defaults.get(
-                "commit_audit", {}).get("review_checks", {}).get("performance", self.commit_audit_review_checks_performance
-            )),
-            commit_audit_review_checks_anti_patterns=bool(defaults.get(
-                "commit_audit", {}).get("review_checks", {}).get("anti_patterns", self.commit_audit_review_checks_anti_patterns
-            )),
-            commit_audit_review_severity=str(defaults.get(
-                "commit_audit", {}).get("review_severity", self.commit_audit_review_severity
-            )),
-            commit_audit_review_suggest_fix=bool(defaults.get(
-                "commit_audit", {}).get("review_suggest_fix", self.commit_audit_review_suggest_fix
-            )),
-            commit_audit_review_max_tokens=int(defaults.get(
-                "commit_audit", {}).get("review_max_tokens", self.commit_audit_review_max_tokens
-            )),
+            commit_audit_review_mode=str(
+                defaults.get("commit_audit", {}).get("review_mode", self.commit_audit_review_mode)
+            ),
+            commit_audit_review_checks_bugs=bool(
+                defaults.get("commit_audit", {})
+                .get("review_checks", {})
+                .get("bugs", self.commit_audit_review_checks_bugs)
+            ),
+            commit_audit_review_checks_security=bool(
+                defaults.get("commit_audit", {})
+                .get("review_checks", {})
+                .get("security", self.commit_audit_review_checks_security)
+            ),
+            commit_audit_review_checks_style=bool(
+                defaults.get("commit_audit", {})
+                .get("review_checks", {})
+                .get("style", self.commit_audit_review_checks_style)
+            ),
+            commit_audit_review_checks_performance=bool(
+                defaults.get("commit_audit", {})
+                .get("review_checks", {})
+                .get("performance", self.commit_audit_review_checks_performance)
+            ),
+            commit_audit_review_checks_anti_patterns=bool(
+                defaults.get("commit_audit", {})
+                .get("review_checks", {})
+                .get("anti_patterns", self.commit_audit_review_checks_anti_patterns)
+            ),
+            commit_audit_review_severity=str(
+                defaults.get("commit_audit", {}).get(
+                    "review_severity", self.commit_audit_review_severity
+                )
+            ),
+            commit_audit_review_suggest_fix=bool(
+                defaults.get("commit_audit", {}).get(
+                    "review_suggest_fix", self.commit_audit_review_suggest_fix
+                )
+            ),
+            commit_audit_review_max_tokens=int(
+                defaults.get("commit_audit", {}).get(
+                    "review_max_tokens", self.commit_audit_review_max_tokens
+                )
+            ),
             # Scoring (GR-066)
-            commit_audit_review_score_threshold=float(defaults.get(
-                "commit_audit", {}).get("review_score_threshold", self.commit_audit_review_score_threshold
-            )),
-            commit_audit_review_score_offset=float(defaults.get(
-                "commit_audit", {}).get("review_score_offset", self.commit_audit_review_score_offset
-            )),
-            check_for_updates=bool(defaults.get(
-                "check_for_updates", self.check_for_updates
-            )),
-            update_check_ttl_hours=_coerce_float(defaults.get(
-                "update_check_ttl", self.update_check_ttl_hours
-            )),
-            history_enabled=bool(defaults.get(
-                "history_enabled", self.history_enabled
-            )),
+            commit_audit_review_score_threshold=float(
+                defaults.get("commit_audit", {}).get(
+                    "review_score_threshold", self.commit_audit_review_score_threshold
+                )
+            ),
+            commit_audit_review_score_offset=float(
+                defaults.get("commit_audit", {}).get(
+                    "review_score_offset", self.commit_audit_review_score_offset
+                )
+            ),
+            check_for_updates=bool(defaults.get("check_for_updates", self.check_for_updates)),
+            update_check_ttl_hours=_coerce_float(
+                defaults.get("update_check_ttl", self.update_check_ttl_hours)
+            ),
+            history_enabled=bool(defaults.get("history_enabled", self.history_enabled)),
             history_path=str(defaults.get("history_path", self.history_path)),
-            history_storage=str(defaults.get(
-                "history_storage", self.history_storage
-            )),
-            history_max_verdicts=int(defaults.get(
-                "history_max_verdicts", self.history_max_verdicts
-            )),
+            history_storage=str(defaults.get("history_storage", self.history_storage)),
+            history_max_verdicts=int(
+                defaults.get("history_max_verdicts", self.history_max_verdicts)
+            ),
             _source=".gitreins/config.yaml" if defaults else self._source,
         )
 
@@ -244,21 +250,15 @@ class GitReinsDefaults:
                 if self.max_iterations == int(self.max_iterations)
                 else self.max_iterations
             ),
-            "max_time": (
-                _fmt_seconds(self.max_seconds)
-                if self.max_seconds > 0 else None
-            ),
+            "max_time": (_fmt_seconds(self.max_seconds) if self.max_seconds > 0 else None),
             "max_input_tokens": (
-                _fmt_tokens(self.max_input_tokens)
-                if self.max_input_tokens > 0 else None
+                _fmt_tokens(self.max_input_tokens) if self.max_input_tokens > 0 else None
             ),
             "max_output_tokens": (
-                _fmt_tokens(self.max_output_tokens)
-                if self.max_output_tokens > 0 else None
+                _fmt_tokens(self.max_output_tokens) if self.max_output_tokens > 0 else None
             ),
             "max_tokens_per_call": (
-                _fmt_tokens(self.max_tokens_per_call)
-                if self.max_tokens_per_call > 0 else None
+                _fmt_tokens(self.max_tokens_per_call) if self.max_tokens_per_call > 0 else None
             ),
             "tool_call_weight": self.tool_call_weight,
             "compaction_threshold": self.compaction_threshold,
@@ -295,6 +295,7 @@ class GitReinsDefaults:
 
 # ── Factory ───────────────────────────────────────────────────
 
+
 def load_defaults(workdir: str | None = None) -> GitReinsDefaults:
     """Load defaults, overlaid with .gitreins/config.yaml if present.
 
@@ -310,6 +311,7 @@ def load_defaults(workdir: str | None = None) -> GitReinsDefaults:
         return base
 
     import yaml
+
     config_path = os.path.join(workdir, ".gitreins", "config.yaml")
     if os.path.isfile(config_path):
         try:
@@ -327,6 +329,7 @@ def load_raw_config(workdir: str | None = None) -> dict:
     if not workdir:
         return {}
     import yaml
+
     config_path = os.path.join(workdir, ".gitreins", "config.yaml")
     if os.path.isfile(config_path):
         try:
@@ -338,6 +341,7 @@ def load_raw_config(workdir: str | None = None) -> dict:
 
 
 # ── Update checker ────────────────────────────────────────────
+
 
 def check_for_update(workdir: str | None = None, force: bool = False) -> str | None:
     """Check PyPI for a newer version of GitReins.
@@ -387,12 +391,14 @@ def check_for_update(workdir: str | None = None, force: bool = False) -> str | N
 
 # ── Internal helpers ──────────────────────────────────────────
 
+
 def _read_cache() -> dict:
     try:
         with open(UPDATE_CACHE_FILE) as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
+
 
 def _write_cache(data: dict) -> None:
     try:
@@ -406,6 +412,7 @@ def _write_cache(data: dict) -> None:
 def _fetch_latest_version() -> str | None:
     """Fetch the latest version string from PyPI JSON API."""
     import requests
+
     try:
         resp = requests.get("https://pypi.org/pypi/gitreins/json", timeout=15)
         resp.raise_for_status()
@@ -418,6 +425,7 @@ def _fetch_latest_version() -> str | None:
 def _version_greater(newer: str, current: str) -> bool:
     """Compare two semantic version strings. True if newer > current."""
     from packaging.version import parse as parse_version
+
     try:
         return parse_version(newer) > parse_version(current)
     except Exception:
@@ -430,6 +438,7 @@ def _pypi_url() -> str:
 
 
 # ── Type coercion helpers ─────────────────────────────────────
+
 
 def _coerce_float(val) -> float:
     """Coerce a config value to float, handling strings like '100'."""
@@ -446,19 +455,20 @@ def _coerce_float(val) -> float:
 def _coerce_seconds(val) -> float:
     """Coerce a time string like '30m' or '2h' to seconds."""
     import re
+
     if isinstance(val, (int, float)):
         return float(val)
     if isinstance(val, str):
         val = val.strip()
-        m = re.match(r'^(\d+\.?\d*)\s*(s|sec|secs|m|min|mins|h|hr|hrs)$', val.lower())
+        m = re.match(r"^(\d+\.?\d*)\s*(s|sec|secs|m|min|mins|h|hr|hrs)$", val.lower())
         if m:
             num = float(m.group(1))
             unit = m.group(2)
-            if unit in ('s', 'sec', 'secs'):
+            if unit in ("s", "sec", "secs"):
                 return num
-            elif unit in ('m', 'min', 'mins'):
+            elif unit in ("m", "min", "mins"):
                 return num * 60
-            elif unit in ('h', 'hr', 'hrs'):
+            elif unit in ("h", "hr", "hrs"):
                 return num * 3600
         # Try plain number
         try:
@@ -471,17 +481,18 @@ def _coerce_seconds(val) -> float:
 def _coerce_tokens(val) -> int:
     """Coerce a token string like '10M', '200k', or '500' to int."""
     import re
+
     if isinstance(val, int):
         return val
     if isinstance(val, str):
         val = val.strip()
-        m = re.match(r'^(\d+\.?\d*)(k|m|K|M)?$', val)
+        m = re.match(r"^(\d+\.?\d*)(k|m|K|M)?$", val)
         if m:
             num = float(m.group(1))
-            suffix = (m.group(2) or '').lower()
-            if suffix == 'k':
+            suffix = (m.group(2) or "").lower()
+            if suffix == "k":
                 num *= 1_000
-            elif suffix == 'm':
+            elif suffix == "m":
                 num *= 1_000_000
             return int(num)
     return int(val) if isinstance(val, (int, float)) else -1

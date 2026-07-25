@@ -36,7 +36,7 @@ def read_text_file(path: str) -> str:
     PermissionError to the caller. There is no `if not
     os.path.exists(path)` check, no fallback, no domain exception.
     """
-    with open(path, "r", encoding="utf-8") as f:    # ← no try/except
+    with open(path, "r", encoding="utf-8") as f:  # ← no try/except
         return f.read()
 
 
@@ -50,7 +50,7 @@ def parse_json(text: str) -> Any:
     input. The function does not catch it, validate `text` first,
     or wrap the call in try/except.
     """
-    return json.loads(text)                          # ← no try/except
+    return json.loads(text)  # ← no try/except
 
 
 # ── Flaw 3: HTTP GET without try/except — URLError propagates ────────────────
@@ -64,7 +64,7 @@ def fetch_url(url: str) -> bytes:
     responses. The function does not catch any of these or wrap
     them in a domain exception.
     """
-    with urllib.request.urlopen(url) as resp:        # ← no try/except
+    with urllib.request.urlopen(url) as resp:  # ← no try/except
         return resp.read()
 
 
@@ -78,7 +78,7 @@ def get_user_email(users: dict, user_id: int) -> str:
     is missing or has no email field. There is no `.get(...)`,
     no `if user_id in users:` guard, no try/except.
     """
-    return users[user_id]["email"]                   # ← no KeyError handling
+    return users[user_id]["email"]  # ← no KeyError handling
 
 
 # ── Flaw 5: division without ZeroDivisionError check ─────────────────────────
@@ -91,7 +91,7 @@ def safe_divide(a: float, b: float) -> float:
     `a / b` without checking `b == 0`. ZeroDivisionError propagates
     — the function is anything but safe.
     """
-    return a / b                                    # ← no b == 0 check
+    return a / b  # ← no b == 0 check
 
 
 # ── Flaw 6: environment variable lookup without default ──────────────────────
@@ -105,7 +105,7 @@ def get_required_env(name: str) -> str:
     raises. There is no `os.environ.get(name, default)` and no
     try/except.
     """
-    return os.environ[name]                         # ← no .get(...) fallback
+    return os.environ[name]  # ← no .get(...) fallback
 
 
 # ── Flaw 7: int() conversion without ValueError handling ─────────────────────
@@ -118,4 +118,4 @@ def parse_age(raw: str) -> int:
     function does not catch it, does not validate `raw`, and does
     not wrap the call in try/except.
     """
-    return int(raw)                                 # ← no try/except
+    return int(raw)  # ← no try/except

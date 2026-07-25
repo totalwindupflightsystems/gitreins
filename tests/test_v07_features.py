@@ -21,12 +21,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Verdict persistence
 # ══════════════════════════════════════════════════════════════════
 
+
 class TestVerdictPersistence:
     """Tests for engine/persist.py — verdict storage and reporting."""
 
     def test_config_defaults(self):
         """Verifies default history config values."""
         from engine.persist import DEFAULT_HISTORY_CONFIG
+
         assert DEFAULT_HISTORY_CONFIG["enabled"] is True
         assert DEFAULT_HISTORY_CONFIG["storage"] == "git"
         assert DEFAULT_HISTORY_CONFIG["max_verdicts"] == 1000
@@ -35,6 +37,7 @@ class TestVerdictPersistence:
     def test_load_history_config_defaults(self, tmp_path):
         """load_history_config returns defaults when no config file exists."""
         from engine.persist import load_history_config
+
         config = load_history_config(str(tmp_path))
         assert config["enabled"] is True
         assert config["storage"] == "git"
@@ -116,10 +119,15 @@ class TestVerdictPersistence:
         persister.config["storage"] = "filesystem"
 
         # Persist two verdicts
-        persister.persist("task-a", {"task_id": "task-a", "task_title": "A", "passed": True, "items": []})
+        persister.persist(
+            "task-a", {"task_id": "task-a", "task_title": "A", "passed": True, "items": []}
+        )
         import time
+
         time.sleep(0.1)  # ensure different timestamps/hashes
-        persister.persist("task-b", {"task_id": "task-b", "task_title": "B", "passed": False, "items": []})
+        persister.persist(
+            "task-b", {"task_id": "task-b", "task_title": "B", "passed": False, "items": []}
+        )
 
         verdicts = persister.list_verdicts(n=10)
         assert len(verdicts) == 2
@@ -135,7 +143,10 @@ class TestVerdictPersistence:
 
         persister = VerdictPersister(workdir=str(tmp_path))
         persister.config["storage"] = "filesystem"
-        persister.persist("test-report", {"task_id": "test-report", "task_title": "Report Test", "passed": True, "items": []})
+        persister.persist(
+            "test-report",
+            {"task_id": "test-report", "task_title": "Report Test", "passed": True, "items": []},
+        )
 
         report = build_report(str(tmp_path), n=10)
         assert "test-report" in report
@@ -147,12 +158,14 @@ class TestVerdictPersistence:
 # Task dependencies
 # ══════════════════════════════════════════════════════════════════
 
+
 class TestTaskDependencies:
     """Tests for task dependencies (--depends-on flag)."""
 
     def test_task_has_depends_on_field(self):
         """Task dataclass includes depends_on field."""
         from engine.task_manager import Task
+
         task = Task(id="test", title="Test", depends_on=["other-task"])
         assert task.depends_on == ["other-task"]
 
@@ -251,6 +264,7 @@ class TestTaskDependencies:
 # ══════════════════════════════════════════════════════════════════
 # gitreins init
 # ══════════════════════════════════════════════════════════════════
+
 
 class TestInit:
     """Tests for gitreins init command."""
@@ -447,6 +461,7 @@ class TestInit:
 # Cleaner guard output
 # ══════════════════════════════════════════════════════════════════
 
+
 class TestGuardOutput:
     """Tests for the cleaner guard output formatting."""
 
@@ -478,8 +493,10 @@ class TestGuardOutput:
             passed=False,
             results=[
                 GuardResult(name="secrets", passed=True, output="clean"),
-                GuardResult(name="tests", passed=False, output="FAILED test_a\nFAILED test_b\nFAILED test_c"),
-            ]
+                GuardResult(
+                    name="tests", passed=False, output="FAILED test_a\nFAILED test_b\nFAILED test_c"
+                ),
+            ],
         )
         summary = result.summary
         assert "✓ secrets" in summary

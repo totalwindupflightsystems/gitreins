@@ -5,6 +5,7 @@ Tests the LLM-powered commit message audit without requiring
 a live LLM — uses mocking for the LLM client and real git
 operations for diff capture and message reading.
 """
+
 import json
 from unittest.mock import patch
 
@@ -22,6 +23,7 @@ from engine.llm import LLMClient, LLMResponse, LLMUsage
 # ═══════════════════════════════════════════════════════════════
 # CommitAuditResult
 # ═══════════════════════════════════════════════════════════════
+
 
 class TestCommitAuditResult:
     """Test the result dataclass."""
@@ -53,6 +55,7 @@ class TestCommitAuditResult:
 # CommitAuditor — parse_result (no LLM needed)
 # ═══════════════════════════════════════════════════════════════
 
+
 class TestCommitAuditorParseResult:
     """Test result parsing with mocked LLM responses."""
 
@@ -70,11 +73,13 @@ class TestCommitAuditorParseResult:
     def test_parse_invalid_with_suggestion(self):
         auditor = self._make_auditor()
         resp = LLMResponse(
-            content=json.dumps({
-                "valid": False,
-                "issues": ["Message is too vague"],
-                "suggested_message": "fix(auth): correct login redirect",
-            }),
+            content=json.dumps(
+                {
+                    "valid": False,
+                    "issues": ["Message is too vague"],
+                    "suggested_message": "fix(auth): correct login redirect",
+                }
+            ),
             usage=LLMUsage(),
         )
         result = auditor._parse_result(resp)
@@ -116,6 +121,7 @@ class TestCommitAuditorParseResult:
 # CommitAuditor — audit (mocked LLM)
 # ═══════════════════════════════════════════════════════════════
 
+
 class TestCommitAuditorAudit:
     """Test the full audit flow with mocked LLM."""
 
@@ -128,11 +134,13 @@ class TestCommitAuditorAudit:
 
     def _invalid_response(self, issues=None, suggestion=None):
         return LLMResponse(
-            content=json.dumps({
-                "valid": False,
-                "issues": issues or ["Message too vague."],
-                "suggested_message": suggestion or "fix: update code",
-            }),
+            content=json.dumps(
+                {
+                    "valid": False,
+                    "issues": issues or ["Message too vague."],
+                    "suggested_message": suggestion or "fix: update code",
+                }
+            ),
             usage=LLMUsage(),
         )
 
@@ -156,7 +164,7 @@ class TestCommitAuditorAudit:
         result = auditor.audit("", diff="+some change")
         assert result.suggested_message != ""
 
-    @patch.object(LLMClient, 'chat')
+    @patch.object(LLMClient, "chat")
     def test_single_pass_valid(self, mock_chat):
         """LLM returns valid on first call."""
         mock_chat.return_value = self._valid_response()
@@ -165,7 +173,7 @@ class TestCommitAuditorAudit:
         assert result.valid is True
         assert mock_chat.call_count == 1
 
-    @patch.object(LLMClient, 'chat')
+    @patch.object(LLMClient, "chat")
     def test_single_pass_invalid_with_suggestion(self, mock_chat):
         """LLM returns invalid with a suggested better message."""
         mock_chat.return_value = self._invalid_response(
@@ -177,7 +185,7 @@ class TestCommitAuditorAudit:
         assert result.valid is False
         assert "feat(api)" in result.suggested_message
 
-    @patch.object(LLMClient, 'chat')
+    @patch.object(LLMClient, "chat")
     def test_llm_error_returns_valid(self, mock_chat):
         """LLM failures should not block commits (safe default)."""
         mock_chat.side_effect = RuntimeError("API down")
@@ -189,6 +197,7 @@ class TestCommitAuditorAudit:
 # ═══════════════════════════════════════════════════════════════
 # CommitAuditor — strictness levels
 # ═══════════════════════════════════════════════════════════════
+
 
 class TestCommitAuditorStrictness:
     """Test that strictness affects prompt construction."""
@@ -215,11 +224,13 @@ class TestCommitAuditorStrictness:
     def test_lenient_single_word_allowed(self):
         """Lenient mode instructions allow short messages."""
         from engine.commit_audit import INSTRUCTIONS_LENIENT
+
         assert "short messages" in INSTRUCTIONS_LENIENT.lower()
 
     def test_strict_requires_conventional_commits(self):
         """Strict mode requires conventional commits format."""
         from engine.commit_audit import INSTRUCTIONS_STRICT
+
         assert "conventional commits" in INSTRUCTIONS_STRICT.lower()
         assert "type(scope):" in INSTRUCTIONS_STRICT
 
@@ -227,6 +238,7 @@ class TestCommitAuditorStrictness:
 # ═══════════════════════════════════════════════════════════════
 # CommitAuditor — diff capture
 # ═══════════════════════════════════════════════════════════════
+
 
 class TestCommitAuditorDiffCapture:
     """Test the git diff capture mechanism."""
@@ -246,6 +258,7 @@ class TestCommitAuditorDiffCapture:
 # ═══════════════════════════════════════════════════════════════
 # CommitAuditor — tool execution
 # ═══════════════════════════════════════════════════════════════
+
 
 class TestCommitAuditorTools:
     """Test the tool execution methods."""
@@ -270,7 +283,9 @@ class TestCommitAuditorTools:
     def test_search_pattern_finds_matches(self):
         """_tool_search_pattern finds real matches."""
         auditor = self._make_auditor()
-        result = auditor._tool_search_pattern(r"class CommitAuditor", path="engine", file_glob="*.py")
+        result = auditor._tool_search_pattern(
+            r"class CommitAuditor", path="engine", file_glob="*.py"
+        )
         assert "CommitAuditor" in result
 
     def test_search_pattern_no_matches(self):
@@ -298,6 +313,7 @@ class TestCommitAuditorTools:
 # CommitAuditor — fallback message generation
 # ═══════════════════════════════════════════════════════════════
 
+
 class TestCommitAuditorFallbackMessage:
     """Test fallback commit message generation from diff stats."""
 
@@ -321,11 +337,13 @@ class TestCommitAuditorFallbackMessage:
 # Config integration
 # ═══════════════════════════════════════════════════════════════
 
+
 class TestCommitAuditConfig:
     """Test that commit_audit config is wired into GitReinsDefaults."""
 
     def test_defaults_have_commit_audit_fields(self):
         from engine.config import GitReinsDefaults
+
         defaults = GitReinsDefaults()
         assert defaults.commit_audit_enabled is True
         assert defaults.commit_audit_mode == "warn"
@@ -335,15 +353,18 @@ class TestCommitAuditConfig:
 
     def test_overlay_reads_commit_audit_section(self):
         from engine.config import GitReinsDefaults
+
         defaults = GitReinsDefaults()
-        overlaid = defaults.overlay({
-            "defaults": {
-                "commit_audit": {
-                    "mode": "block",
-                    "strictness": "strict",
+        overlaid = defaults.overlay(
+            {
+                "defaults": {
+                    "commit_audit": {
+                        "mode": "block",
+                        "strictness": "strict",
+                    }
                 }
             }
-        })
+        )
         assert overlaid.commit_audit_mode == "block"
         assert overlaid.commit_audit_strictness == "strict"
         # Unset fields keep defaults
@@ -351,6 +372,7 @@ class TestCommitAuditConfig:
 
     def test_to_config_dict_includes_commit_audit(self):
         from engine.config import GitReinsDefaults
+
         defaults = GitReinsDefaults(
             commit_audit_mode="block",
             commit_audit_strictness="strict",
@@ -366,19 +388,22 @@ class TestCommitAuditConfig:
 # ReviewIssue (GR-065g)
 # ═══════════════════════════════════════════════════════════════
 
+
 class TestReviewIssue:
     """Test the ReviewIssue dataclass and from_dict factory."""
 
     def test_from_dict_full(self):
-        ri = ReviewIssue.from_dict({
-            "file": "src/auth.py",
-            "line": "42",
-            "severity": "high",
-            "category": "security",
-            "title": "Hardcoded secret",
-            "description": "API key is in source code",
-            "suggestion": "Use environment variable via os.getenv()",
-        })
+        ri = ReviewIssue.from_dict(
+            {
+                "file": "src/auth.py",
+                "line": "42",
+                "severity": "high",
+                "category": "security",
+                "title": "Hardcoded secret",
+                "description": "API key is in source code",
+                "suggestion": "Use environment variable via os.getenv()",
+            }
+        )
         assert ri.file == "src/auth.py"
         assert ri.line == 42
         assert ri.severity == "high"
@@ -413,6 +438,7 @@ class TestReviewIssue:
 # CommitAuditResult — review_issues + review_summary (GR-065g)
 # ═══════════════════════════════════════════════════════════════
 
+
 class TestCommitAuditResultReviewFields:
     """Test the new review_issues and review_summary fields on CommitAuditResult."""
 
@@ -425,8 +451,14 @@ class TestCommitAuditResultReviewFields:
         r = CommitAuditResult(
             valid=False,
             review_issues=[
-                {"file": "src/a.py", "line": 1, "severity": "high",
-                 "category": "bugs", "title": "Bug", "suggestion": "Fix it"},
+                {
+                    "file": "src/a.py",
+                    "line": 1,
+                    "severity": "high",
+                    "category": "bugs",
+                    "title": "Bug",
+                    "suggestion": "Fix it",
+                },
             ],
             review_summary="One issue found",
         )
@@ -447,6 +479,7 @@ class TestCommitAuditResultReviewFields:
 # CommitReviewResult (GR-065g)
 # ═══════════════════════════════════════════════════════════════
 
+
 class TestCommitReviewResult:
     """Test the CommitReviewResult dataclass."""
 
@@ -462,13 +495,18 @@ class TestCommitReviewResult:
 
     def test_with_issues(self):
         ri = ReviewIssue(
-            file="src/x.py", line=10, severity="medium",
-            category="anti_patterns", title="Mutable default",
+            file="src/x.py",
+            line=10,
+            severity="medium",
+            category="anti_patterns",
+            title="Mutable default",
             suggestion="Use None and set default in body",
         )
         r = CommitReviewResult(
-            valid=False, summary="1 issue",
-            issues=[ri], message_valid=True,
+            valid=False,
+            summary="1 issue",
+            issues=[ri],
+            message_valid=True,
             iterations_used=2,
         )
         assert len(r.issues) == 1
@@ -479,6 +517,7 @@ class TestCommitReviewResult:
 # ═══════════════════════════════════════════════════════════════
 # CommitAuditor — _run_review review fields (GR-065g)
 # ═══════════════════════════════════════════════════════════════
+
 
 class TestCommitAuditorRunReview:
     """Test _run_review populates review_issues and review_summary."""
@@ -495,15 +534,24 @@ class TestCommitAuditorRunReview:
         )
         # Mock the review() call to return a CommitReviewResult with issues
         review_issue = ReviewIssue(
-            file="src/x.py", line=5, severity="critical",
-            category="bugs", title="Null deref",
+            file="src/x.py",
+            line=5,
+            severity="critical",
+            category="bugs",
+            title="Null deref",
             suggestion="Add null check",
         )
-        with patch.object(auditor, "review", return_value=CommitReviewResult(
-            valid=False, summary="Found 1 issue",
-            issues=[review_issue], message_valid=True,
-            iterations_used=1,
-        )):
+        with patch.object(
+            auditor,
+            "review",
+            return_value=CommitReviewResult(
+                valid=False,
+                summary="Found 1 issue",
+                issues=[review_issue],
+                message_valid=True,
+                iterations_used=1,
+            ),
+        ):
             result = auditor._run_review("fix: stuff", "diff content")
             assert len(result.review_issues) == 1
             assert result.review_issues[0]["file"] == "src/x.py"
@@ -519,9 +567,16 @@ class TestCommitAuditorRunReview:
             self._make_llm(),
             review_mode="review",
         )
-        with patch.object(auditor, "review", return_value=CommitReviewResult(
-            valid=True, summary="No issues", issues=[], iterations_used=1,
-        )):
+        with patch.object(
+            auditor,
+            "review",
+            return_value=CommitReviewResult(
+                valid=True,
+                summary="No issues",
+                issues=[],
+                iterations_used=1,
+            ),
+        ):
             result = auditor._run_review("fix: stuff", "diff content")
             assert result.review_issues == []
             assert result.review_summary == "No issues"
@@ -535,14 +590,24 @@ class TestCommitAuditorRunReview:
             review_suggest_fix=True,
         )
         ri = ReviewIssue(
-            file="src/y.py", line=20, severity="medium",
-            category="anti_patterns", title="God object",
+            file="src/y.py",
+            line=20,
+            severity="medium",
+            category="anti_patterns",
+            title="God object",
             description="Too many responsibilities",
             suggestion="Split into smaller classes",
         )
-        with patch.object(auditor, "review", return_value=CommitReviewResult(
-            valid=False, summary="1 anti-pattern", issues=[ri], iterations_used=1,
-        )):
+        with patch.object(
+            auditor,
+            "review",
+            return_value=CommitReviewResult(
+                valid=False,
+                summary="1 anti-pattern",
+                issues=[ri],
+                iterations_used=1,
+            ),
+        ):
             result = auditor._run_review("feat: add module", "diff content")
             assert len(result.review_issues) == 1
             assert result.review_issues[0]["description"] == "Too many responsibilities"
@@ -554,14 +619,25 @@ class TestCommitAuditorRunReview:
             self._make_llm(),
             review_mode="review",
         )
-        with patch.object(auditor, "_run_review", return_value=CommitAuditResult(
-            valid=False, issues=["[high][bugs] src/a.py:1: Bug"],
-            review_issues=[
-                {"file": "src/a.py", "line": 1, "severity": "high",
-                 "category": "bugs", "title": "Bug", "suggestion": "Fix"},
-            ],
-            review_summary="One bug",
-        )) as mock_run:
+        with patch.object(
+            auditor,
+            "_run_review",
+            return_value=CommitAuditResult(
+                valid=False,
+                issues=["[high][bugs] src/a.py:1: Bug"],
+                review_issues=[
+                    {
+                        "file": "src/a.py",
+                        "line": 1,
+                        "severity": "high",
+                        "category": "bugs",
+                        "title": "Bug",
+                        "suggestion": "Fix",
+                    },
+                ],
+                review_summary="One bug",
+            ),
+        ) as mock_run:
             result = auditor.audit("fix: bug")
             mock_run.assert_called_once()
             assert len(result.review_issues) == 1
@@ -571,6 +647,7 @@ class TestCommitAuditorRunReview:
 # ═══════════════════════════════════════════════════════════════
 # Pipeline — review output formatting (GR-065g)
 # ═══════════════════════════════════════════════════════════════
+
 
 class TestPipelineReviewOutput:
     """Test that pipeline formats review findings correctly."""
@@ -589,9 +666,15 @@ class TestPipelineReviewOutput:
             valid=False,
             issues=["[critical][security] src/auth.py:42: Hardcoded secret"],
             review_issues=[
-                {"file": "src/auth.py", "line": 42, "severity": "critical",
-                 "category": "security", "title": "Hardcoded secret",
-                 "description": "API key in source", "suggestion": "Use env var"},
+                {
+                    "file": "src/auth.py",
+                    "line": 42,
+                    "severity": "critical",
+                    "category": "security",
+                    "title": "Hardcoded secret",
+                    "description": "API key in source",
+                    "suggestion": "Use env var",
+                },
             ],
             review_summary="1 critical issue found",
             iterations_used=1,
@@ -599,11 +682,13 @@ class TestPipelineReviewOutput:
 
         # Manually construct the StepResult as _run_commit_audit would
         sr = StepResult(
-            id="commit_audit", type="commit_audit", passed=True,
+            id="commit_audit",
+            type="commit_audit",
+            passed=True,
             output="⚠ Commit review — 1 issue(s) found\n\n"
-                   "  src/auth.py:42 [security] [🔴 CRITICAL] — Hardcoded secret\n"
-                   "    API key in source\n"
-                   "    Fix: Use env var\n\n",
+            "  src/auth.py:42 [security] [🔴 CRITICAL] — Hardcoded secret\n"
+            "    API key in source\n"
+            "    Fix: Use env var\n\n",
             data={
                 "valid": result.valid,
                 "issues": result.issues,
@@ -622,15 +707,28 @@ class TestPipelineReviewOutput:
     def test_output_includes_file_line_and_severity(self):
         """Output text should contain file:line references and severity markers."""
         from engine.pipeline import Pipeline
+
         pipeline = Pipeline({}, "/tmp", llm=self._make_llm())
 
         result = CommitAuditResult(
             valid=False,
             review_issues=[
-                {"file": "src/a.py", "line": 10, "severity": "critical",
-                 "category": "bugs", "title": "NPE", "suggestion": "Add guard"},
-                {"file": "src/b.py", "line": 20, "severity": "low",
-                 "category": "style", "title": "Long line", "suggestion": "Wrap"},
+                {
+                    "file": "src/a.py",
+                    "line": 10,
+                    "severity": "critical",
+                    "category": "bugs",
+                    "title": "NPE",
+                    "suggestion": "Add guard",
+                },
+                {
+                    "file": "src/b.py",
+                    "line": 20,
+                    "severity": "low",
+                    "category": "style",
+                    "title": "Long line",
+                    "suggestion": "Wrap",
+                },
             ],
             review_summary="2 issues found",
         )
@@ -641,8 +739,11 @@ class TestPipelineReviewOutput:
         output_lines = []
         if review_issues:
             sev_marker = {
-                "critical": "🔴 CRITICAL", "high": "🟠 HIGH",
-                "medium": "🟡 MEDIUM", "low": "🟢 LOW", "info": "ℹ️ INFO",
+                "critical": "🔴 CRITICAL",
+                "high": "🟠 HIGH",
+                "medium": "🟡 MEDIUM",
+                "low": "🟢 LOW",
+                "info": "ℹ️ INFO",
             }
             output_lines.append(f"⚠ Commit review — {len(review_issues)} issue(s) found")
             if review_summary:
@@ -692,28 +793,31 @@ class TestPipelineReviewOutput:
 # GR-066: CVE-style scored severity system
 # ═══════════════════════════════════════════════════════════════
 
+
 class TestReviewIssueScore:
     """Test the score field on ReviewIssue (GR-066a)."""
 
     def test_default_score_is_zero(self):
-        ri = ReviewIssue(file="x.py", line=1, severity="high",
-                         category="bugs", title="Bug")
+        ri = ReviewIssue(file="x.py", line=1, severity="high", category="bugs", title="Bug")
         assert ri.score == 0.0
 
     def test_explicit_score(self):
-        ri = ReviewIssue(file="x.py", line=1, severity="critical",
-                         category="security", title="RCE", score=9.5)
+        ri = ReviewIssue(
+            file="x.py", line=1, severity="critical", category="security", title="RCE", score=9.5
+        )
         assert ri.score == 9.5
 
     def test_from_dict_parses_score(self):
-        ri = ReviewIssue.from_dict({
-            "file": "src/auth.py",
-            "line": "42",
-            "severity": "critical",
-            "category": "security",
-            "title": "Hardcoded secret",
-            "score": "9.0",
-        })
+        ri = ReviewIssue.from_dict(
+            {
+                "file": "src/auth.py",
+                "line": "42",
+                "severity": "critical",
+                "category": "security",
+                "title": "Hardcoded secret",
+                "score": "9.0",
+            }
+        )
         assert ri.score == 9.0
 
     def test_from_dict_score_defaults_to_zero(self):
@@ -727,8 +831,14 @@ class TestReviewIssueScore:
 
     def test_score_preserved_in_from_dict_roundtrip(self):
         """Score should survive serialization round-trip."""
-        original = {"file": "a.py", "line": 1, "severity": "high",
-                     "category": "bugs", "title": "Bug", "score": 7.5}
+        original = {
+            "file": "a.py",
+            "line": 1,
+            "severity": "high",
+            "category": "bugs",
+            "title": "Bug",
+            "score": 7.5,
+        }
         ri = ReviewIssue.from_dict(original)
         assert ri.score == 7.5
 
@@ -754,17 +864,34 @@ class TestParseReviewResultScoreExtraction:
 
     def test_parse_issues_with_scores(self):
         auditor = self._make_auditor()
-        resp = LLMResponse(content=json.dumps({
-            "valid": False,
-            "summary": "Two issues",
-            "overall_score": 9.0,
-            "issues": [
-                {"file": "a.py", "line": 1, "severity": "critical",
-                 "category": "security", "title": "SQL injection", "score": 9.0},
-                {"file": "b.py", "line": 5, "severity": "medium",
-                 "category": "style", "title": "Long line", "score": 5.0},
-            ],
-        }), usage=LLMUsage())
+        resp = LLMResponse(
+            content=json.dumps(
+                {
+                    "valid": False,
+                    "summary": "Two issues",
+                    "overall_score": 9.0,
+                    "issues": [
+                        {
+                            "file": "a.py",
+                            "line": 1,
+                            "severity": "critical",
+                            "category": "security",
+                            "title": "SQL injection",
+                            "score": 9.0,
+                        },
+                        {
+                            "file": "b.py",
+                            "line": 5,
+                            "severity": "medium",
+                            "category": "style",
+                            "title": "Long line",
+                            "score": 5.0,
+                        },
+                    ],
+                }
+            ),
+            usage=LLMUsage(),
+        )
         result = auditor._parse_review_result(resp)
         assert result.overall_score == 9.0
         assert len(result.issues) == 2
@@ -774,23 +901,39 @@ class TestParseReviewResultScoreExtraction:
     def test_overall_score_derived_from_issues_when_missing(self):
         """When overall_score not in JSON, derive from max issue score."""
         auditor = self._make_auditor()
-        resp = LLMResponse(content=json.dumps({
-            "valid": False,
-            "summary": "Issues",
-            "issues": [
-                {"file": "a.py", "line": 1, "severity": "high",
-                 "category": "bugs", "title": "Bug", "score": 7.5},
-                {"file": "b.py", "line": 2, "severity": "low",
-                 "category": "style", "title": "Nit", "score": 2.0},
-            ],
-        }), usage=LLMUsage())
+        resp = LLMResponse(
+            content=json.dumps(
+                {
+                    "valid": False,
+                    "summary": "Issues",
+                    "issues": [
+                        {
+                            "file": "a.py",
+                            "line": 1,
+                            "severity": "high",
+                            "category": "bugs",
+                            "title": "Bug",
+                            "score": 7.5,
+                        },
+                        {
+                            "file": "b.py",
+                            "line": 2,
+                            "severity": "low",
+                            "category": "style",
+                            "title": "Nit",
+                            "score": 2.0,
+                        },
+                    ],
+                }
+            ),
+            usage=LLMUsage(),
+        )
         result = auditor._parse_review_result(resp)
         assert result.overall_score == 7.5  # max of 7.5 and 2.0
 
     def test_overall_score_zero_with_no_issues(self):
         auditor = self._make_auditor()
-        resp = LLMResponse(content='{"valid": true, "summary": "Clean"}',
-                           usage=LLMUsage())
+        resp = LLMResponse(content='{"valid": true, "summary": "Clean"}', usage=LLMUsage())
         result = auditor._parse_review_result(resp)
         assert result.overall_score == 0.0
 
@@ -800,40 +943,49 @@ class TestScoringConfigDefaults:
 
     def test_default_score_threshold(self):
         from engine.config import GitReinsDefaults
+
         d = GitReinsDefaults()
         assert d.commit_audit_review_score_threshold == 8.0
 
     def test_default_score_offset(self):
         from engine.config import GitReinsDefaults
+
         d = GitReinsDefaults()
         assert d.commit_audit_review_score_offset == 1.0
 
     def test_overlay_score_threshold(self):
         from engine.config import GitReinsDefaults
+
         d = GitReinsDefaults()
-        overlaid = d.overlay({
-            "defaults": {
-                "commit_audit": {
-                    "review_score_threshold": 7.0,
+        overlaid = d.overlay(
+            {
+                "defaults": {
+                    "commit_audit": {
+                        "review_score_threshold": 7.0,
+                    }
                 }
             }
-        })
+        )
         assert overlaid.commit_audit_review_score_threshold == 7.0
 
     def test_overlay_score_offset(self):
         from engine.config import GitReinsDefaults
+
         d = GitReinsDefaults()
-        overlaid = d.overlay({
-            "defaults": {
-                "commit_audit": {
-                    "review_score_offset": 0.5,
+        overlaid = d.overlay(
+            {
+                "defaults": {
+                    "commit_audit": {
+                        "review_score_offset": 0.5,
+                    }
                 }
             }
-        })
+        )
         assert overlaid.commit_audit_review_score_offset == 0.5
 
     def test_to_config_dict_includes_scoring(self):
         from engine.config import GitReinsDefaults
+
         d = GitReinsDefaults(
             commit_audit_review_score_threshold=7.5,
             commit_audit_review_score_offset=1.2,
@@ -844,15 +996,18 @@ class TestScoringConfigDefaults:
 
     def test_overlay_both_scoring_fields(self):
         from engine.config import GitReinsDefaults
+
         d = GitReinsDefaults()
-        overlaid = d.overlay({
-            "defaults": {
-                "commit_audit": {
-                    "review_score_threshold": 6.0,
-                    "review_score_offset": 2.0,
+        overlaid = d.overlay(
+            {
+                "defaults": {
+                    "commit_audit": {
+                        "review_score_threshold": 6.0,
+                        "review_score_offset": 2.0,
+                    }
                 }
             }
-        })
+        )
         assert overlaid.commit_audit_review_score_threshold == 6.0
         assert overlaid.commit_audit_review_score_offset == 2.0
 
@@ -869,7 +1024,9 @@ class TestCommitAuditorScoringInit:
     def test_custom_scoring_params(self):
         llm = LLMClient(api_key="sk-test", model="test/model")
         auditor = CommitAuditor(
-            llm, review_score_threshold=6.0, review_score_offset=0.5,
+            llm,
+            review_score_threshold=6.0,
+            review_score_offset=0.5,
         )
         assert auditor.review_score_threshold == 6.0
         assert auditor.review_score_offset == 0.5
@@ -881,6 +1038,7 @@ class TestScoreBasedRouting:
     def test_score_above_threshold_blocks(self):
         """effective_score >= threshold → BLOCK"""
         from engine.pipeline import Pipeline
+
         pipeline = Pipeline({}, "/tmp")
 
         # Simulate issues with effective scores
@@ -888,8 +1046,14 @@ class TestScoreBasedRouting:
         score_offset = 1.0
 
         issues = [
-            {"file": "a.py", "line": 1, "severity": "critical",
-             "category": "security", "title": "RCE", "score": 9.0},
+            {
+                "file": "a.py",
+                "line": 1,
+                "severity": "critical",
+                "category": "security",
+                "title": "RCE",
+                "score": 9.0,
+            },
         ]
 
         # Compute effective scores
@@ -959,10 +1123,7 @@ class TestScoreBasedRouting:
         ]
 
         blocked = any(i["score"] >= score_threshold for i in issues)
-        warned = any(
-            score_threshold * 0.75 <= i["score"] < score_threshold
-            for i in issues
-        )
+        warned = any(score_threshold * 0.75 <= i["score"] < score_threshold for i in issues)
         assert blocked is False
         assert warned is False
 
@@ -989,37 +1150,60 @@ class TestRunReviewScoreInclusion:
 
     def test_review_issues_include_score(self):
         auditor = CommitAuditor(
-            self._make_llm(), review_mode="review",
+            self._make_llm(),
+            review_mode="review",
         )
         ri = ReviewIssue(
-            file="src/x.py", line=5, severity="critical",
-            category="bugs", title="Null deref",
-            suggestion="Add null check", score=9.0,
+            file="src/x.py",
+            line=5,
+            severity="critical",
+            category="bugs",
+            title="Null deref",
+            suggestion="Add null check",
+            score=9.0,
         )
-        with patch.object(auditor, "review", return_value=CommitReviewResult(
-            valid=False, summary="Found 1 issue",
-            issues=[ri], message_valid=True, iterations_used=1,
-            overall_score=9.0,
-        )):
+        with patch.object(
+            auditor,
+            "review",
+            return_value=CommitReviewResult(
+                valid=False,
+                summary="Found 1 issue",
+                issues=[ri],
+                message_valid=True,
+                iterations_used=1,
+                overall_score=9.0,
+            ),
+        ):
             result = auditor._run_review("fix: stuff", "diff content")
             assert len(result.review_issues) == 1
             assert result.review_issues[0]["score"] == 9.0
 
     def test_run_review_issues_text_includes_score(self):
-        """"The issue text in CommitAuditResult.issues should include scores."""
+        """ "The issue text in CommitAuditResult.issues should include scores."""
         auditor = CommitAuditor(
-            self._make_llm(), review_mode="review",
+            self._make_llm(),
+            review_mode="review",
         )
         ri = ReviewIssue(
-            file="src/x.py", line=5, severity="high",
-            category="bugs", title="Null deref",
+            file="src/x.py",
+            line=5,
+            severity="high",
+            category="bugs",
+            title="Null deref",
             score=7.5,
         )
-        with patch.object(auditor, "review", return_value=CommitReviewResult(
-            valid=False, summary="Found 1 issue",
-            issues=[ri], message_valid=True, iterations_used=1,
-            overall_score=7.5,
-        )):
+        with patch.object(
+            auditor,
+            "review",
+            return_value=CommitReviewResult(
+                valid=False,
+                summary="Found 1 issue",
+                issues=[ri],
+                message_valid=True,
+                iterations_used=1,
+                overall_score=7.5,
+            ),
+        ):
             result = auditor._run_review("fix", "diff")
             assert "score: 7.5" in result.issues[0]
 
@@ -1033,14 +1217,21 @@ class TestPipelineScoreOutput:
     def test_output_includes_overall_score(self):
         """Output header should include overall score vs threshold."""
         from engine.pipeline import Pipeline
+
         pipeline = Pipeline({}, "/tmp", llm=self._make_llm())
 
         result = CommitAuditResult(
             valid=False,
             review_issues=[
-                {"file": "a.py", "line": 1, "severity": "critical",
-                 "category": "security", "title": "RCE",
-                 "score": 9.0, "suggestion": "Fix"},
+                {
+                    "file": "a.py",
+                    "line": 1,
+                    "severity": "critical",
+                    "category": "security",
+                    "title": "RCE",
+                    "score": 9.0,
+                    "suggestion": "Fix",
+                },
             ],
             review_summary="1 critical issue",
         )
@@ -1064,20 +1255,29 @@ class TestPipelineScoreOutput:
     def test_output_includes_score_per_issue(self):
         """Each issue line should show its effective score."""
         from engine.pipeline import Pipeline
+
         pipeline = Pipeline({}, "/tmp", llm=self._make_llm())
 
         score_threshold = 8.0
         score_offset = 1.0
 
-        ri = {"file": "a.py", "line": 1, "severity": "high",
-              "category": "bugs", "title": "Bug", "score": 7.5}
+        ri = {
+            "file": "a.py",
+            "line": 1,
+            "severity": "high",
+            "category": "bugs",
+            "title": "Bug",
+            "score": 7.5,
+        }
         ri["effective_score"] = ri["score"] * score_offset
 
         effective = ri["effective_score"]
         # 7.5 >= 6.0 (0.75*8.0) but < 8.0 → WARN
-        action_mark = "⚠️ WARN" if (
-            effective >= score_threshold * 0.75 and effective < score_threshold
-        ) else "ℹ️ INFO"
+        action_mark = (
+            "⚠️ WARN"
+            if (effective >= score_threshold * 0.75 and effective < score_threshold)
+            else "ℹ️ INFO"
+        )
 
         line = f"  a.py:1 [bugs] [🟠 HIGH] {action_mark} (score: {effective:.1f}) — Bug"
         assert "(score: 7.5)" in line

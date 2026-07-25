@@ -3,6 +3,7 @@ Tests for EvalCap: parser, limit checking, tool-call weighting, and real LLM int
 
 Run fast tests only:  pytest tests/test_eval_cap.py -m "not llm"
 """
+
 import os
 import time
 
@@ -10,7 +11,9 @@ import pytest
 import yaml
 
 from engine.eval_cap import (
-    EvalCap, parse_eval_cap, eval_cap_from_config,
+    EvalCap,
+    parse_eval_cap,
+    eval_cap_from_config,
 )
 from engine.evaluator import AgenticEvaluator
 from engine.llm import LLMClient
@@ -19,6 +22,7 @@ from engine.llm import LLMClient
 # ═══════════════════════════════════════════════════════════════
 # Parser tests
 # ═══════════════════════════════════════════════════════════════
+
 
 class TestEvalCapParser:
     """Parse individual values and legacy combined strings."""
@@ -81,6 +85,7 @@ class TestEvalCapParser:
 # Individual config key tests (v0.3.0+)
 # ═══════════════════════════════════════════════════════════════
 
+
 class TestEvalCapFromConfig:
     """New individual config keys + backward compat."""
 
@@ -140,6 +145,7 @@ class TestEvalCapFromConfig:
 # Cap checking and tool-call weighting
 # ═══════════════════════════════════════════════════════════════
 
+
 class TestEvalCapChecking:
     """Test the new record_llm_call / record_tool_call API."""
 
@@ -166,7 +172,7 @@ class TestEvalCapChecking:
         cap.record_llm_call()  # 1.0
         cap.record_tool_call()  # 1.1
         cap.record_tool_call()  # 1.2
-        cap.record_llm_call()   # 2.2
+        cap.record_llm_call()  # 2.2
         assert cap.iteration_credit == 2.2
 
     def test_tool_call_custom_weight(self):
@@ -230,9 +236,13 @@ class TestEvalCapChecking:
             assert cap.record_tool_call() is None
 
     def test_summary_format(self):
-        cap = EvalCap(max_iterations=100, max_seconds=300,
-                       max_input_tokens=200000, max_output_tokens=50000,
-                       tool_call_weight=0.1)
+        cap = EvalCap(
+            max_iterations=100,
+            max_seconds=300,
+            max_input_tokens=200000,
+            max_output_tokens=50000,
+            tool_call_weight=0.1,
+        )
         cap.start()
         cap.record_llm_call(prompt_tokens=50000, completion_tokens=10000)
         cap.record_tool_call()
@@ -295,6 +305,7 @@ class TestEvalCapChecking:
 # remaining_seconds() — time-budget introspection (GR-064b)
 # ═══════════════════════════════════════════════════════════════
 
+
 class TestRemainingSeconds:
     """remaining_seconds() reports the live time budget for the evaluator."""
 
@@ -340,6 +351,7 @@ class TestRemainingSeconds:
 # ═══════════════════════════════════════════════════════════════
 # Evaluator integration tests
 # ═══════════════════════════════════════════════════════════════
+
 
 class TestAgenticEvaluatorCapIntegration:
     """AgenticEvaluator accepts EvalCap objects and strings."""
@@ -394,6 +406,7 @@ class TestAgenticEvaluatorCapIntegration:
 # Real LLM integration — caps actually stop the evaluator
 # ═══════════════════════════════════════════════════════════════
 
+
 class TestEvalCapRealEvaluator:
     """These run the full evaluator loop with a real LLM and tight caps.
 
@@ -410,13 +423,24 @@ class TestEvalCapRealEvaluator:
 
     def _make_repo(self, tmp_path):
         import subprocess
+
         d = str(tmp_path)
         subprocess.run(["git", "init"], cwd=d, capture_output=True)
-        subprocess.run(["git", "config", "user.email", "test@evalcap.test"], cwd=d, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@evalcap.test"], cwd=d, capture_output=True
+        )
         subprocess.run(["git", "config", "user.name", "EvalCap Test"], cwd=d, capture_output=True)
         gitreins_dir = os.path.join(d, ".gitreins")
         os.makedirs(gitreins_dir, exist_ok=True)
-        config = {"guards": {"secrets": False, "lint": False, "tests": False, "dead_code": False, "skylos": False}}
+        config = {
+            "guards": {
+                "secrets": False,
+                "lint": False,
+                "tests": False,
+                "dead_code": False,
+                "skylos": False,
+            }
+        }
         with open(os.path.join(gitreins_dir, "config.yaml"), "w") as f:
             yaml.dump(config, f)
         with open(os.path.join(d, "README.md"), "w") as f:
@@ -478,8 +502,10 @@ class TestEvalCapRealEvaluator:
         several tool calls before hitting the limit (vs 2 full LLM calls)."""
         d, task = self._make_repo(tmp_path)
         task["criteria"] = [
-            "README.md exists", "The file .gitreins/config.yaml exists",
-            "Repo has at least one git commit", "README.md contains text",
+            "README.md exists",
+            "The file .gitreins/config.yaml exists",
+            "Repo has at least one git commit",
+            "README.md contains text",
             "The repo directory exists",
         ]
         llm = LLMClient()
@@ -488,8 +514,9 @@ class TestEvalCapRealEvaluator:
         verdict = evaluator.evaluate(task)
         # With 3.0 cap and 0.1 per tool call, the evaluator should
         # make 3 LLM calls + several tool calls before stopping
-        assert evaluator.eval_cap.iteration_credit > 3.0, \
+        assert evaluator.eval_cap.iteration_credit > 3.0, (
             f"Expected > 3.0 (tool calls add fractional cost), got {evaluator.eval_cap.iteration_credit}"
+        )
         # Should have stopped because of cap
         assert "Cap exceeded" in verdict.summary or verdict.verdict == "COMPLETE"
 
@@ -497,6 +524,7 @@ class TestEvalCapRealEvaluator:
 # ═══════════════════════════════════════════════════════════════
 # Pipeline caps regression tests — prevent hardcoded defaults
 # ═══════════════════════════════════════════════════════════════
+
 
 class TestPipelineCapRegression:
     """Verify Pipeline tier2 and _run_ai_eval respect evaluator caps.
@@ -511,30 +539,36 @@ class TestPipelineCapRegression:
         exists) must have max_iterations=-1 so evaluator config takes over."""
         from engine.pipeline import load_pipeline_config
         import tempfile
+
         with tempfile.TemporaryDirectory() as d:
             config = load_pipeline_config(d)
             tier2 = [s for s in config["pipeline"]["stages"] if s["id"] == "tier2"]
             assert len(tier2) == 1, "Default pipeline missing tier2 stage"
-            assert tier2[0].get("max_iterations") == -1, \
+            assert tier2[0].get("max_iterations") == -1, (
                 f"Default pipeline tier2 max_iterations must be -1, got {tier2[0].get('max_iterations')}"
+            )
 
     def test_run_ai_eval_default_is_negative(self):
         """_run_ai_eval's default for max_iterations must be -1."""
         from engine.pipeline import Pipeline
+
         p = Pipeline({}, workdir=".")
         # Simulate a minimal step_def with no max_iterations key
         # The _run_ai_eval method defaults to -1
         # (We verify via code inspection — the method reads step_def.get("max_iterations", -1))
         # This test is here to document and assert the contract.
         import inspect
+
         source = inspect.getsource(p._run_ai_eval)
-        assert 'step_def.get("max_iterations", -1)' in source, \
+        assert 'step_def.get("max_iterations", -1)' in source, (
             "_run_ai_eval must default max_iterations to -1, not 20"
+        )
 
     def test_pipeline_passes_max_iterations_negative_to_evaluator(self, tmp_path):
         """Pipeline._run_ai_eval passes max_iterations=-1 to AgenticEvaluator
         when the step doesn't set it, and the evaluator reads config."""
         import subprocess
+
         d = str(tmp_path)
         subprocess.run(["git", "init"], cwd=d, capture_output=True)
         subprocess.run(["git", "config", "user.email", "t@t"], cwd=d, capture_output=True)
@@ -548,7 +582,13 @@ class TestPipelineCapRegression:
                 "max_time": "10m",
                 "tool_call_weight": 0.05,
             },
-            "guards": {"secrets": False, "lint": False, "tests": False, "dead_code": False, "skylos": False},
+            "guards": {
+                "secrets": False,
+                "lint": False,
+                "tests": False,
+                "dead_code": False,
+                "skylos": False,
+            },
         }
         with open(os.path.join(gitreins_dir, "config.yaml"), "w") as f:
             yaml.dump(config, f)
@@ -561,8 +601,9 @@ class TestPipelineCapRegression:
         llm = LLMClient()
         evaluator = AgenticEvaluator(llm, workdir=d, max_iterations=-1)
         # The evaluator should have read config caps, not created an unlimited cap
-        assert evaluator.eval_cap.max_iterations == 30, \
+        assert evaluator.eval_cap.max_iterations == 30, (
             f"Evaluator should read config max_iterations=30, got {evaluator.eval_cap.max_iterations}"
+        )
         assert evaluator.eval_cap.max_seconds == 600
         assert evaluator.eval_cap.tool_call_weight == 0.05
 
@@ -570,6 +611,7 @@ class TestPipelineCapRegression:
         """When pipeline step explicitly sets max_iterations, it IS used
         (not overridden by config)."""
         import subprocess
+
         d = str(tmp_path)
         subprocess.run(["git", "init"], cwd=d, capture_output=True)
         subprocess.run(["git", "config", "user.email", "t@t"], cwd=d, capture_output=True)
@@ -585,5 +627,6 @@ class TestPipelineCapRegression:
         llm = LLMClient()
         # Pipeline step sets max_iterations=5 explicitly — evaluator should use it
         evaluator = AgenticEvaluator(llm, workdir=d, max_iterations=5)
-        assert evaluator.eval_cap.max_iterations == 5, \
+        assert evaluator.eval_cap.max_iterations == 5, (
             f"Explicit max_iterations=5 should win, got {evaluator.eval_cap.max_iterations}"
+        )

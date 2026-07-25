@@ -2,6 +2,7 @@
 Integration tests for gitreins_mcp/server.py — JSON-RPC protocol handling.
 axiom:trace work_item=GR-002 spec=specs/08-MCP-Server.md plan=.memory-bank/work-items/GR-002/plan.yaml
 """
+
 import json
 import os
 import select
@@ -27,16 +28,18 @@ class TestInitializeHandshake:
 
     def test_initialize_returns_protocol_version(self, mcp_server):
         """initialize returns jsonrpc 2.0, protocolVersion 2024-11-05, serverInfo."""
-        response = mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "test-client", "version": "1.0"},
-            },
-        })
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test-client", "version": "1.0"},
+                },
+            }
+        )
         assert response is not None
         assert response["jsonrpc"] == "2.0"
         assert response["id"] == 1
@@ -48,19 +51,23 @@ class TestInitializeHandshake:
 
     def test_initialized_notification_returns_none(self, mcp_server):
         """Notifications/initialized returns None (no response)."""
-        response = mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "method": "notifications/initialized",
-        })
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+            }
+        )
         assert response is None
 
     def test_unknown_method_returns_error(self, mcp_server):
         """Unknown method returns error code -32601."""
-        response = mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "unknown.method",
-        })
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "unknown.method",
+            }
+        )
         assert response["error"]["code"] == -32601
         assert "Unknown method" in response["error"]["message"]
 
@@ -70,11 +77,13 @@ class TestToolsList:
 
     def test_tools_list_returns_nine_tools(self, mcp_server):
         """tools/list returns exactly 11 tool schemas."""
-        response = mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/list",
-        })
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+            }
+        )
         assert response is not None
         tools = response["result"]["tools"]
         assert len(tools) == 11
@@ -82,17 +91,25 @@ class TestToolsList:
     def test_all_expected_tool_names_present(self, mcp_server):
         """All expected tool names: task.create, task.start, task.complete,
         task.list, task.get, task.delete, commit, guard.run, judge.evaluate."""
-        response = mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/list",
-        })
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+            }
+        )
         names = [t["name"] for t in response["result"]["tools"]]
         expected = [
             "configure",
-            "task.create", "task.start", "task.complete",
-            "task.list", "task.get", "task.delete",
-            "commit", "guard.run", "judge.evaluate",
+            "task.create",
+            "task.start",
+            "task.complete",
+            "task.list",
+            "task.get",
+            "task.delete",
+            "commit",
+            "guard.run",
+            "judge.evaluate",
             "propagate",
         ]
         for name in expected:
@@ -100,11 +117,13 @@ class TestToolsList:
 
     def test_each_tool_has_name_description_inputschema(self, mcp_server):
         """Each tool schema has name, description, inputSchema."""
-        response = mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/list",
-        })
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+            }
+        )
         for tool in response["result"]["tools"]:
             assert "name" in tool
             assert "description" in tool
@@ -116,15 +135,17 @@ class TestToolsCall:
 
     def test_unknown_tool_returns_error(self, mcp_server):
         """tools/call with unknown tool name returns error code -32601."""
-        response = mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {
-                "name": "nonexistent.tool",
-                "arguments": {},
-            },
-        })
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "nonexistent.tool",
+                    "arguments": {},
+                },
+            }
+        )
         assert response["error"]["code"] == -32601
         assert "Unknown tool" in response["error"]["message"]
 
@@ -138,15 +159,17 @@ class TestToolsCall:
 
     def test_tools_call_wraps_result_in_content(self, mcp_server, tmp_workdir):
         """tools/call response wraps result in content[0].text."""
-        response = mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {
-                "name": "task.create",
-                "arguments": {"id": "test-ct", "title": "Content Test", "criteria": ["c1"]},
-            },
-        })
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "task.create",
+                    "arguments": {"id": "test-ct", "title": "Content Test", "criteria": ["c1"]},
+                },
+            }
+        )
         assert "result" in response
         assert "content" in response["result"]
         assert response["result"]["content"][0]["type"] == "text"
@@ -162,19 +185,21 @@ class TestTaskCreateMCP:
 
     def test_task_create_returns_task_dict(self, mcp_server, tmp_workdir):
         """task.create returns correct task dict."""
-        response = mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {
-                "name": "task.create",
-                "arguments": {
-                    "id": "login-endpoint",
-                    "title": "Implement POST /login",
-                    "criteria": ["Accepts JSON", "Returns JWT"],
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "task.create",
+                    "arguments": {
+                        "id": "login-endpoint",
+                        "title": "Implement POST /login",
+                        "criteria": ["Accepts JSON", "Returns JWT"],
+                    },
                 },
-            },
-        })
+            }
+        )
         assert response is not None
         text = response["result"]["content"][0]["text"]
         task = json.loads(text)
@@ -185,15 +210,17 @@ class TestTaskCreateMCP:
 
     def test_task_create_persists_to_yaml(self, mcp_server, tmp_workdir):
         """Task is persisted to .gitreins/tasks.yaml."""
-        mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {
-                "name": "task.create",
-                "arguments": {"id": "persist-me", "title": "Persist", "criteria": ["c1"]},
-            },
-        })
+        mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "task.create",
+                    "arguments": {"id": "persist-me", "title": "Persist", "criteria": ["c1"]},
+                },
+            }
+        )
         yaml_path = os.path.join(tmp_workdir, ".gitreins", "tasks.yaml")
         assert os.path.exists(yaml_path)
         content = open(yaml_path).read()
@@ -206,16 +233,25 @@ class TestTaskStartComplete:
     def test_task_start_sets_in_progress(self, mcp_server, tmp_workdir):
         """task.start transitions status to in_progress."""
         # Create first
-        mcp_server.handle_request({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {"name": "task.create", "arguments": {"id": "t1", "title": "T1", "criteria": []}},
-        })
-        response = mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/call",
-            "params": {"name": "task.start", "arguments": {"id": "t1"}},
-        })
+        mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "task.create",
+                    "arguments": {"id": "t1", "title": "T1", "criteria": []},
+                },
+            }
+        )
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "task.start", "arguments": {"id": "t1"}},
+            }
+        )
         text = response["result"]["content"][0]["text"]
         task = json.loads(text)
         assert task["status"] == "in_progress"
@@ -224,20 +260,33 @@ class TestTaskStartComplete:
         """task.complete without LLM key returns note about LLM not configured."""
         monkeypatch.delenv("GITREINS_LLM_API_KEY", raising=False)
         # Create and start
-        mcp_server.handle_request({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {"name": "task.create", "arguments": {"id": "t2", "title": "T2", "criteria": []}},
-        })
-        mcp_server.handle_request({
-            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-            "params": {"name": "task.start", "arguments": {"id": "t2"}},
-        })
-        response = mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 3,
-            "method": "tools/call",
-            "params": {"name": "task.complete", "arguments": {"id": "t2"}},
-        })
+        mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "task.create",
+                    "arguments": {"id": "t2", "title": "T2", "criteria": []},
+                },
+            }
+        )
+        mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "task.start", "arguments": {"id": "t2"}},
+            }
+        )
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {"name": "task.complete", "arguments": {"id": "t2"}},
+            }
+        )
         text = response["result"]["content"][0]["text"]
         result = json.loads(text)
         assert result["task"]["status"] == "complete"
@@ -245,23 +294,27 @@ class TestTaskStartComplete:
 
     def test_task_start_nonexistent_returns_error(self, mcp_server):
         """task.start on nonexistent task returns error response."""
-        response = mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {"name": "task.start", "arguments": {"id": "nope"}},
-        })
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "task.start", "arguments": {"id": "nope"}},
+            }
+        )
         # Handler raises KeyError which is caught by the generic exception handler
         assert response["error"] is not None
 
     def test_task_complete_nonexistent_returns_error(self, mcp_server):
         """task.complete on nonexistent task returns error response."""
-        response = mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {"name": "task.complete", "arguments": {"id": "nope"}},
-        })
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "task.complete", "arguments": {"id": "nope"}},
+            }
+        )
         assert response["error"] is not None
 
 
@@ -270,52 +323,83 @@ class TestTaskCRUDMCP:
 
     def test_task_get_existing(self, mcp_server, tmp_workdir):
         """task.get returns existing task."""
-        mcp_server.handle_request({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {"name": "task.create", "arguments": {"id": "g1", "title": "G1", "criteria": ["c1"]}},
-        })
-        response = mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/call",
-            "params": {"name": "task.get", "arguments": {"id": "g1"}},
-        })
+        mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "task.create",
+                    "arguments": {"id": "g1", "title": "G1", "criteria": ["c1"]},
+                },
+            }
+        )
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "task.get", "arguments": {"id": "g1"}},
+            }
+        )
         text = response["result"]["content"][0]["text"]
         task = json.loads(text)
         assert task["id"] == "g1"
 
     def test_task_get_nonexistent_returns_error(self, mcp_server):
         """task.get on nonexistent returns error dict."""
-        response = mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {"name": "task.get", "arguments": {"id": "nope"}},
-        })
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "task.get", "arguments": {"id": "nope"}},
+            }
+        )
         text = response["result"]["content"][0]["text"]
         result = json.loads(text)
         assert "error" in result
 
     def test_task_list_with_status_filter(self, mcp_server, tmp_workdir):
         """task.list with status filter returns filtered tasks."""
-        mcp_server.handle_request({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {"name": "task.create", "arguments": {"id": "l1", "title": "L1", "criteria": []}},
-        })
-        mcp_server.handle_request({
-            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-            "params": {"name": "task.create", "arguments": {"id": "l2", "title": "L2", "criteria": []}},
-        })
-        mcp_server.handle_request({
-            "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-            "params": {"name": "task.start", "arguments": {"id": "l2"}},
-        })
-        response = mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 4,
-            "method": "tools/call",
-            "params": {"name": "task.list", "arguments": {"status": "pending"}},
-        })
+        mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "task.create",
+                    "arguments": {"id": "l1", "title": "L1", "criteria": []},
+                },
+            }
+        )
+        mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "task.create",
+                    "arguments": {"id": "l2", "title": "L2", "criteria": []},
+                },
+            }
+        )
+        mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {"name": "task.start", "arguments": {"id": "l2"}},
+            }
+        )
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "tools/call",
+                "params": {"name": "task.list", "arguments": {"status": "pending"}},
+            }
+        )
         text = response["result"]["content"][0]["text"]
         result = json.loads(text)
         tasks = result["tasks"]
@@ -324,28 +408,39 @@ class TestTaskCRUDMCP:
 
     def test_task_delete_existing(self, mcp_server, tmp_workdir):
         """task.delete returns {deleted: id}."""
-        mcp_server.handle_request({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {"name": "task.create", "arguments": {"id": "d1", "title": "D1", "criteria": []}},
-        })
-        response = mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/call",
-            "params": {"name": "task.delete", "arguments": {"id": "d1"}},
-        })
+        mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "task.create",
+                    "arguments": {"id": "d1", "title": "D1", "criteria": []},
+                },
+            }
+        )
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "task.delete", "arguments": {"id": "d1"}},
+            }
+        )
         text = response["result"]["content"][0]["text"]
         result = json.loads(text)
         assert result["deleted"] == "d1"
 
     def test_task_delete_nonexistent_returns_error(self, mcp_server):
         """task.delete on nonexistent returns error dict."""
-        response = mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {"name": "task.delete", "arguments": {"id": "nope"}},
-        })
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "task.delete", "arguments": {"id": "nope"}},
+            }
+        )
         text = response["result"]["content"][0]["text"]
         result = json.loads(text)
         assert "error" in result
@@ -359,12 +454,14 @@ class TestCommitMCP:
 
     def test_commit_with_clean_repo_rejected(self, mcp_server, tmp_workdir):
         """Commit in clean repo (no staged changes) is rejected by git."""
-        response = mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {"name": "commit", "arguments": {"message": "test commit"}},
-        })
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "commit", "arguments": {"message": "test commit"}},
+            }
+        )
         # Response should indicate failure (git commit with nothing staged)
         text = response["result"]["content"][0]["text"]
         result = json.loads(text)
@@ -373,20 +470,33 @@ class TestCommitMCP:
 
     def test_commit_with_in_progress_task_rejected(self, mcp_server, tmp_workdir):
         """Commit is rejected when tasks are in-progress."""
-        mcp_server.handle_request({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {"name": "task.create", "arguments": {"id": "progress", "title": "P", "criteria": []}},
-        })
-        mcp_server.handle_request({
-            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-            "params": {"name": "task.start", "arguments": {"id": "progress"}},
-        })
-        response = mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 3,
-            "method": "tools/call",
-            "params": {"name": "commit", "arguments": {"message": "test"}},
-        })
+        mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "task.create",
+                    "arguments": {"id": "progress", "title": "P", "criteria": []},
+                },
+            }
+        )
+        mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "task.start", "arguments": {"id": "progress"}},
+            }
+        )
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {"name": "commit", "arguments": {"message": "test"}},
+            }
+        )
         text = response["result"]["content"][0]["text"]
         result = json.loads(text)
         assert "error" in result
@@ -399,12 +509,14 @@ class TestGuardRunMCP:
 
     def test_guard_run_returns_passed_and_results(self, mcp_server):
         """guard.run returns passed bool and result list with name/passed/output."""
-        response = mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {"name": "guard.run", "arguments": {}},
-        })
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "guard.run", "arguments": {}},
+            }
+        )
         text = response["result"]["content"][0]["text"]
         result = json.loads(text)
         assert "passed" in result
@@ -422,12 +534,14 @@ class TestJudgeEvaluateMCP:
         """judge.evaluate on nonexistent task returns error response."""
         if not os.getenv("GITREINS_LLM_API_KEY"):
             pytest.skip("GITREINS_LLM_API_KEY not set — LLM-dependent test")
-        response = mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "tools/call",
-            "params": {"name": "judge.evaluate", "arguments": {"id": "nope"}},
-        })
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "judge.evaluate", "arguments": {"id": "nope"}},
+            }
+        )
         text = response["result"]["content"][0]["text"]
         result = json.loads(text)
         assert "error" in result
@@ -440,21 +554,31 @@ class TestJudgeEvaluateMCP:
         crash due to JudgeResult.tier1 attribute access bug in server.py.
         The test verifies that the function produces a JSON-RPC response.
         """
-        mcp_server.handle_request({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {"name": "task.create", "arguments": {"id": "judge-me", "title": "Judge", "criteria": ["c1"]}},
-        })
-        response = mcp_server.handle_request({
-            "jsonrpc": "2.0",
-            "id": 2,
-            "method": "tools/call",
-            "params": {"name": "judge.evaluate", "arguments": {"id": "judge-me"}},
-        })
+        mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "task.create",
+                    "arguments": {"id": "judge-me", "title": "Judge", "criteria": ["c1"]},
+                },
+            }
+        )
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "judge.evaluate", "arguments": {"id": "judge-me"}},
+            }
+        )
         assert response is not None
         assert "result" in response or "error" in response
 
 
 # ── v0.7.3: Configure MCP tool ───────────────────────────────────────────────
+
 
 class TestConfigureMCP:
     """Tests for the configure tool: hot-reload LLM config at runtime."""
@@ -475,7 +599,10 @@ class TestConfigureMCP:
     def test_configure_sets_base_url(self, mcp_server):
         """configure with base_url changes the API endpoint."""
         result = mcp_server._configure(base_url="https://api.anthropic.com/v1")
-        assert "anthropic" in result["current"]["base_url"] or "api.anthropic.com" in result["current"]["base_url"]
+        assert (
+            "anthropic" in result["current"]["base_url"]
+            or "api.anthropic.com" in result["current"]["base_url"]
+        )
 
     def test_configure_reports_previous_and_current(self, mcp_server):
         """configure returns old and new config snapshots."""
@@ -524,7 +651,18 @@ class TestStdioBuffering:
 
     def test_two_messages_in_one_buffer(self, mcp_server):
         """Two JSON messages in one buffer are both parsed."""
-        msg1 = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}})
+        msg1 = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "t", "version": "1"},
+                },
+            }
+        )
         msg2 = json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
         buffer = msg1 + msg2
 
@@ -533,16 +671,16 @@ class TestStdioBuffering:
         in_string = False
         split_at = -1
         for i, ch in enumerate(buffer):
-            if ch == '\\':
+            if ch == "\\":
                 continue
             if ch == '"':
                 in_string = not in_string
                 continue
             if in_string:
                 continue
-            if ch in '{[':
+            if ch in "{[":
                 depth += 1
-            elif ch in '}]':
+            elif ch in "}]":
                 depth -= 1
                 if depth == 0 and i > 0:
                     split_at = i + 1
@@ -570,9 +708,9 @@ class TestStdioBuffering:
                 continue
             if in_string:
                 continue
-            if ch in '{[':
+            if ch in "{[":
                 depth += 1
-            elif ch in '}]':
+            elif ch in "}]":
                 depth -= 1
         assert depth > 0  # Unbalanced — need more data
 
@@ -594,9 +732,7 @@ class TestMCPStdioIntegration:
         git_dir = workdir / ".git"
         git_dir.mkdir()
         (git_dir / "HEAD").write_text("ref: refs/heads/main\n")
-        (git_dir / "config").write_text(
-            "[core]\n\trepositoryformatversion = 0\n\tbare = false\n"
-        )
+        (git_dir / "config").write_text("[core]\n\trepositoryformatversion = 0\n\tbare = false\n")
         (git_dir / "objects").mkdir()
         (git_dir / "refs").mkdir()
         (git_dir / "refs" / "heads").mkdir()
@@ -637,9 +773,7 @@ class TestMCPStdioIntegration:
         fd = proc.stdout.fileno()
         r, _, _ = select.select([fd], [], [], timeout)
         if not r:
-            pytest.fail(
-                f"No response from server (timeout={timeout}s)"
-            )
+            pytest.fail(f"No response from server (timeout={timeout}s)")
         line = os.read(fd, 65536)
         if not line:
             return None
@@ -658,16 +792,19 @@ class TestMCPStdioIntegration:
 
     def test_initialize_handshake_over_stdio(self, mcp_proc):
         """Send initialize → response has protocolVersion 2024-11-05."""
-        resp = self._send_recv(mcp_proc, {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "test", "version": "1.0"},
+        resp = self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "test", "version": "1.0"},
+                },
             },
-        })
+        )
         assert resp["jsonrpc"] == "2.0"
         assert resp["id"] == 1
         assert resp["result"]["protocolVersion"] == "2024-11-05"
@@ -677,42 +814,60 @@ class TestMCPStdioIntegration:
 
     def test_initialized_notification_over_stdio(self, mcp_proc):
         """Send notifications/initialized → no response; next request works."""
-        self._send_recv(mcp_proc, {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "t", "version": "1"},
+        self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {},
+                    "clientInfo": {"name": "t", "version": "1"},
+                },
             },
-        })
+        )
         # Notification — server sends no response
         self._send(
             mcp_proc,
-            json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"})
-            + "\n",
+            json.dumps({"jsonrpc": "2.0", "method": "notifications/initialized"}) + "\n",
         )
         # Next request's response proves the notification was handled
-        resp = self._send_recv(mcp_proc, {
-            "jsonrpc": "2.0", "id": 2, "method": "tools/list",
-        })
+        resp = self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/list",
+            },
+        )
         assert resp["id"] == 2
         assert "tools" in resp["result"]
 
     def test_tools_list_over_stdio(self, mcp_proc):
         """tools/list returns exactly 11 tools with correct names and schemas."""
-        resp = self._send_recv(mcp_proc, {
-            "jsonrpc": "2.0", "id": 1, "method": "tools/list",
-        })
+        resp = self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/list",
+            },
+        )
         tools = resp["result"]["tools"]
         assert len(tools) == 11
         names = [t["name"] for t in tools]
         expected = [
             "configure",
-            "task.create", "task.start", "task.complete",
-            "task.list", "task.get", "task.delete",
-            "commit", "guard.run", "judge.evaluate",
+            "task.create",
+            "task.start",
+            "task.complete",
+            "task.list",
+            "task.get",
+            "task.delete",
+            "commit",
+            "guard.run",
+            "judge.evaluate",
             "propagate",
         ]
         for name in expected:
@@ -729,52 +884,80 @@ class TestMCPStdioIntegration:
         # NOTE: This test may time out on the host due to stdout buffering
         # in the subprocess. Works reliably inside Docker container.
         import platform
+
         if platform.system() == "Linux" and not os.path.exists("/.dockerenv"):
             pytest.skip("Host-specific stdio buffering; passes in Docker container")
         # create
-        resp = self._send_recv(mcp_proc, {
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {
-                "name": "task.create",
-                "arguments": {
-                    "id": "lifecycle", "title": "Lifecycle", "criteria": ["c1", "c2"],
+        resp = self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "task.create",
+                    "arguments": {
+                        "id": "lifecycle",
+                        "title": "Lifecycle",
+                        "criteria": ["c1", "c2"],
+                    },
                 },
             },
-        })
+        )
         task = json.loads(resp["result"]["content"][0]["text"])
         assert task["id"] == "lifecycle"
         assert task["status"] == "pending"
 
         # start
-        resp = self._send_recv(mcp_proc, {
-            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-            "params": {"name": "task.start", "arguments": {"id": "lifecycle"}},
-        })
+        resp = self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "task.start", "arguments": {"id": "lifecycle"}},
+            },
+        )
         task = json.loads(resp["result"]["content"][0]["text"])
         assert task["status"] == "in_progress"
 
         # complete
-        resp = self._send_recv(mcp_proc, {
-            "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-            "params": {"name": "task.complete", "arguments": {"id": "lifecycle"}},
-        })
+        resp = self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {"name": "task.complete", "arguments": {"id": "lifecycle"}},
+            },
+        )
         result = json.loads(resp["result"]["content"][0]["text"])
         assert result["task"]["status"] == "complete"
 
         # get
-        resp = self._send_recv(mcp_proc, {
-            "jsonrpc": "2.0", "id": 4, "method": "tools/call",
-            "params": {"name": "task.get", "arguments": {"id": "lifecycle"}},
-        })
+        resp = self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "tools/call",
+                "params": {"name": "task.get", "arguments": {"id": "lifecycle"}},
+            },
+        )
         task = json.loads(resp["result"]["content"][0]["text"])
         assert task["id"] == "lifecycle"
         assert task["status"] == "complete"
 
         # delete
-        resp = self._send_recv(mcp_proc, {
-            "jsonrpc": "2.0", "id": 5, "method": "tools/call",
-            "params": {"name": "task.delete", "arguments": {"id": "lifecycle"}},
-        })
+        resp = self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 5,
+                "method": "tools/call",
+                "params": {"name": "task.delete", "arguments": {"id": "lifecycle"}},
+            },
+        )
         result = json.loads(resp["result"]["content"][0]["text"])
         assert result["deleted"] == "lifecycle"
 
@@ -782,18 +965,28 @@ class TestMCPStdioIntegration:
 
     def test_unknown_method_over_stdio(self, mcp_proc):
         """Unknown method → error code -32601."""
-        resp = self._send_recv(mcp_proc, {
-            "jsonrpc": "2.0", "id": 1, "method": "unknown.method",
-        })
+        resp = self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "unknown.method",
+            },
+        )
         assert resp["error"]["code"] == -32601
         assert "Unknown method" in resp["error"]["message"]
 
     def test_unknown_tool_over_stdio(self, mcp_proc):
         """tools/call with unknown tool → error code -32601."""
-        resp = self._send_recv(mcp_proc, {
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {"name": "nonexistent.tool", "arguments": {}},
-        })
+        resp = self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "nonexistent.tool", "arguments": {}},
+            },
+        )
         assert resp["error"]["code"] == -32601
         assert "Unknown tool" in resp["error"]["message"]
 
@@ -809,9 +1002,13 @@ class TestMCPStdioIntegration:
 
     def test_missing_jsonrpc_field(self, mcp_proc):
         """Missing jsonrpc field → invalid request error (-32600)."""
-        resp = self._send_recv(mcp_proc, {
-            "id": 1, "method": "tools/list",
-        })
+        resp = self._send_recv(
+            mcp_proc,
+            {
+                "id": 1,
+                "method": "tools/list",
+            },
+        )
         assert resp["error"]["code"] == -32600
         assert "Invalid Request" in resp["error"]["message"]
 
@@ -819,10 +1016,7 @@ class TestMCPStdioIntegration:
 
     def test_multi_request_session(self, mcp_proc):
         """5 requests in sequence — server processes all without crashing."""
-        requests = [
-            {"jsonrpc": "2.0", "id": i, "method": "tools/list"}
-            for i in range(1, 6)
-        ]
+        requests = [{"jsonrpc": "2.0", "id": i, "method": "tools/list"} for i in range(1, 6)]
         for req in requests:
             resp = self._send_recv(mcp_proc, req)
             assert resp["id"] == req["id"]
@@ -833,115 +1027,176 @@ class TestMCPStdioIntegration:
     def test_very_long_task_title(self, mcp_proc):
         """Task with 1000+ character title is created successfully."""
         long_title = "A" * 1000
-        resp = self._send_recv(mcp_proc, {
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {
-                "name": "task.create",
-                "arguments": {
-                    "id": "long-title", "title": long_title, "criteria": ["c1"],
+        resp = self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "task.create",
+                    "arguments": {
+                        "id": "long-title",
+                        "title": long_title,
+                        "criteria": ["c1"],
+                    },
                 },
             },
-        })
+        )
         task = json.loads(resp["result"]["content"][0]["text"])
         assert task["title"] == long_title
 
     def test_unicode_in_task_criteria(self, mcp_proc):
         """Unicode characters in task criteria are handled."""
-        resp = self._send_recv(mcp_proc, {
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {
-                "name": "task.create",
-                "arguments": {
-                    "id": "unicode-test",
-                    "title": "Unicode",
-                    "criteria": ["Café", "résumé", "中文", "日本語", "😊"],
+        resp = self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "task.create",
+                    "arguments": {
+                        "id": "unicode-test",
+                        "title": "Unicode",
+                        "criteria": ["Café", "résumé", "中文", "日本語", "😊"],
+                    },
                 },
             },
-        })
+        )
         task = json.loads(resp["result"]["content"][0]["text"])
         assert "Café" in task["criteria"]
         assert "😊" in task["criteria"]
 
     def test_empty_criteria_list(self, mcp_proc):
         """Task with empty criteria list is created."""
-        resp = self._send_recv(mcp_proc, {
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {
-                "name": "task.create",
-                "arguments": {
-                    "id": "empty-criteria", "title": "Empty", "criteria": [],
+        resp = self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "task.create",
+                    "arguments": {
+                        "id": "empty-criteria",
+                        "title": "Empty",
+                        "criteria": [],
+                    },
                 },
             },
-        })
+        )
         task = json.loads(resp["result"]["content"][0]["text"])
         assert task["criteria"] == []
 
     def test_task_with_no_title(self, mcp_proc):
         """Task with empty title string is created."""
-        resp = self._send_recv(mcp_proc, {
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {
-                "name": "task.create",
-                "arguments": {
-                    "id": "no-title", "title": "", "criteria": ["c1"],
+        resp = self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "task.create",
+                    "arguments": {
+                        "id": "no-title",
+                        "title": "",
+                        "criteria": ["c1"],
+                    },
                 },
             },
-        })
+        )
         task = json.loads(resp["result"]["content"][0]["text"])
         assert task["title"] == ""
 
     def test_task_get_nonexistent_over_stdio(self, mcp_proc):
         """task.get on nonexistent task returns error."""
-        resp = self._send_recv(mcp_proc, {
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {"name": "task.get", "arguments": {"id": "nope"}},
-        })
+        resp = self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "task.get", "arguments": {"id": "nope"}},
+            },
+        )
         result = json.loads(resp["result"]["content"][0]["text"])
         assert "error" in result
 
     def test_task_delete_nonexistent_over_stdio(self, mcp_proc):
         """task.delete on nonexistent task returns error."""
-        resp = self._send_recv(mcp_proc, {
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {"name": "task.delete", "arguments": {"id": "nope"}},
-        })
+        resp = self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "task.delete", "arguments": {"id": "nope"}},
+            },
+        )
         result = json.loads(resp["result"]["content"][0]["text"])
         assert "error" in result
 
     def test_task_list_with_status_filter_over_stdio(self, mcp_proc):
         """task.list with status filter returns filtered results."""
-        self._send_recv(mcp_proc, {
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {
-                "name": "task.create",
-                "arguments": {"id": "f1", "title": "Filter1", "criteria": []},
+        self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "task.create",
+                    "arguments": {"id": "f1", "title": "Filter1", "criteria": []},
+                },
             },
-        })
-        self._send_recv(mcp_proc, {
-            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-            "params": {
-                "name": "task.create",
-                "arguments": {"id": "f2", "title": "Filter2", "criteria": []},
+        )
+        self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {
+                    "name": "task.create",
+                    "arguments": {"id": "f2", "title": "Filter2", "criteria": []},
+                },
             },
-        })
-        self._send_recv(mcp_proc, {
-            "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-            "params": {"name": "task.start", "arguments": {"id": "f2"}},
-        })
-        resp = self._send_recv(mcp_proc, {
-            "jsonrpc": "2.0", "id": 4, "method": "tools/call",
-            "params": {"name": "task.list", "arguments": {"status": "pending"}},
-        })
+        )
+        self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {"name": "task.start", "arguments": {"id": "f2"}},
+            },
+        )
+        resp = self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "tools/call",
+                "params": {"name": "task.list", "arguments": {"status": "pending"}},
+            },
+        )
         result = json.loads(resp["result"]["content"][0]["text"])
         assert len(result["tasks"]) == 1
         assert result["tasks"][0]["id"] == "f1"
 
     def test_guard_run_over_stdio(self, mcp_proc):
         """guard.run returns passed bool and results list."""
-        resp = self._send_recv(mcp_proc, {
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {"name": "guard.run", "arguments": {}},
-        })
+        resp = self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "guard.run", "arguments": {}},
+            },
+        )
         result = json.loads(resp["result"]["content"][0]["text"])
         assert "passed" in result
         assert "results" in result
@@ -954,10 +1209,15 @@ class TestMCPStdioIntegration:
         """judge.evaluate on nonexistent task returns error."""
         if not os.getenv("GITREINS_LLM_API_KEY"):
             pytest.skip("GITREINS_LLM_API_KEY not set — LLM-dependent test")
-        resp = self._send_recv(mcp_proc, {
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {"name": "judge.evaluate", "arguments": {"id": "nope"}},
-        })
+        resp = self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "judge.evaluate", "arguments": {"id": "nope"}},
+            },
+        )
         result = json.loads(resp["result"]["content"][0]["text"])
         assert "error" in result
         assert "Task not found" in result["error"]
@@ -973,6 +1233,7 @@ class TestPropagateMCP:
     def source_with_config(self, tmp_workdir):
         """Create a source repo with a .gitreins/config.yaml."""
         import yaml
+
         gitreins_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(gitreins_dir, exist_ok=True)
         config = {
@@ -1021,6 +1282,7 @@ class TestPropagateMCP:
 
         # Config file exists and is valid YAML
         import yaml
+
         config_path = os.path.join(target, ".gitreins", "config.yaml")
         assert os.path.isfile(config_path)
         with open(config_path) as f:
@@ -1110,6 +1372,7 @@ class TestPropagateMCP:
         from engine.propagate import Propagator
 
         import tempfile
+
         nonexistent = os.path.join(tempfile.mkdtemp(), "new-repo")
         assert not os.path.exists(nonexistent)
 
@@ -1131,10 +1394,14 @@ class TestPropagateMCP:
 
         target = os.path.join(str(tmp_path), "mcp-target")
         mcp = GitReinsMCPServer(source_with_config)
-        response = mcp.handle_request({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {"name": "propagate", "arguments": {"targets": [target]}},
-        })
+        response = mcp.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "propagate", "arguments": {"targets": [target]}},
+            }
+        )
         assert response is not None
         assert "result" in response
         text = response["result"]["content"][0]["text"]
@@ -1153,10 +1420,14 @@ class TestPropagateMCP:
         from gitreins_mcp.server import GitReinsMCPServer
 
         mcp = GitReinsMCPServer(source_with_config)
-        response = mcp.handle_request({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": {"name": "propagate", "arguments": {"targets": []}},
-        })
+        response = mcp.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "propagate", "arguments": {"targets": []}},
+            }
+        )
         text = response["result"]["content"][0]["text"]
         result = json.loads(text)
         assert "error" in result
@@ -1165,5 +1436,6 @@ class TestPropagateMCP:
 def _temp_target(base: str, name: str) -> str:
     """Create a temporary target repo directory and return its path."""
     import tempfile
+
     target = os.path.join(tempfile.mkdtemp(dir=os.path.dirname(base)), name)
     return target

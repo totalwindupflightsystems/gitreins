@@ -33,7 +33,9 @@ logger = logging.getLogger("gitreins.cve_feed")
 
 _DEFAULT_CACHE_DIR = os.path.join(
     os.environ.get("HOME", os.path.expanduser("~")),
-    ".cache", "gitreins", "cve_feed",
+    ".cache",
+    "gitreins",
+    "cve_feed",
 )
 
 # Default TTL matches the existing update-check default in config.py
@@ -144,6 +146,7 @@ class CveFeed:
         cfg: dict[str, Any] = {}
         try:
             import yaml  # local import — pyyaml is an optional dep
+
             config_path = os.path.join(workdir, ".gitreins", "config.yaml")
             if os.path.isfile(config_path):
                 with open(config_path, "r") as f:
@@ -220,9 +223,7 @@ class CveFeed:
     def _load_entries(self) -> list[CveEntry]:
         """Return merged entries, refreshing stale cache when needed."""
         cached = self._read_cache()
-        cached_entries = (
-            self._coerce_entries(cached.get("entries", [])) if cached else []
-        )
+        cached_entries = self._coerce_entries(cached.get("entries", [])) if cached else []
         if cached and cached_entries and not self._cache_is_stale(cached):
             return cached_entries
 
@@ -238,10 +239,7 @@ class CveFeed:
             logger.warning("CVE feed refresh failed: %s", exc)
 
         if refreshed:
-            payload_entries = [
-                e.to_dict() if isinstance(e, CveEntry) else e
-                for e in refreshed
-            ]
+            payload_entries = [e.to_dict() if isinstance(e, CveEntry) else e for e in refreshed]
             self._write_cache({"entries": payload_entries, "fetched_at": int(time.time())})
             return refreshed
 
@@ -347,14 +345,16 @@ class CveFeed:
             published = cve.get("published", "") or ""
             modified = cve.get("lastModified", "") or ""
             affected = _extract_nvd_packages(cve)
-            entries.append(CveEntry(
-                cve_id=cve_id,
-                description=description,
-                severity=severity,
-                affected_packages=affected,
-                published_date=published,
-                last_modified_date=modified,
-            ))
+            entries.append(
+                CveEntry(
+                    cve_id=cve_id,
+                    description=description,
+                    severity=severity,
+                    affected_packages=affected,
+                    published_date=published,
+                    last_modified_date=modified,
+                )
+            )
         return entries
 
     # ── Source: GitHub ─────────────────────────────────────────
@@ -401,14 +401,16 @@ class CveFeed:
             published = str(item.get("published_at", "") or "")
             modified = str(item.get("updated_at", "") or "")
             affected = _extract_github_packages(item)
-            entries.append(CveEntry(
-                cve_id=cve_id,
-                description=description,
-                severity=severity,
-                affected_packages=affected,
-                published_date=published,
-                last_modified_date=modified,
-            ))
+            entries.append(
+                CveEntry(
+                    cve_id=cve_id,
+                    description=description,
+                    severity=severity,
+                    affected_packages=affected,
+                    published_date=published,
+                    last_modified_date=modified,
+                )
+            )
         return entries
 
 

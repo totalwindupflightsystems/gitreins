@@ -6,6 +6,7 @@ Verifies:
 2. guard.run scans correct directory (BUG 3)
 3. End-to-end: create task → evaluate → verify tier1/tier2 populated
 """
+
 import json
 import os
 import subprocess
@@ -17,7 +18,8 @@ import pytest
 
 MCP_SERVER_SCRIPT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "gitreins_mcp", "server.py",
+    "gitreins_mcp",
+    "server.py",
 )
 
 
@@ -40,13 +42,23 @@ def _start_mcp_server(workdir: str):
     env["PYTHONPATH"] = project_root + (":" + existing if existing else "")
     proc = subprocess.Popen(
         [sys.executable, MCP_SERVER_SCRIPT, str(workdir)],
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        text=True, cwd=workdir, env=env,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        cwd=workdir,
+        env=env,
     )
     # Initialize
     init_req = {
-        "jsonrpc": "2.0", "id": 1, "method": "initialize",
-        "params": {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "test", "version": "1.0"}},
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "test", "version": "1.0"},
+        },
     }
     resp = _send_request(proc, init_req)
     assert "result" in resp, f"Initialize failed: {resp}"
@@ -65,19 +77,26 @@ def tmp_git_repo():
         # Create .gitreins/ with a task and config
         os.makedirs(os.path.join(d, ".gitreins"), exist_ok=True)
         with open(os.path.join(d, ".gitreins", "config.yaml"), "w") as f:
-            f.write("guards:\n  secrets: true\n  lint: false\n  tests: false\n  dead_code: false\n  skylos: false\n")
+            f.write(
+                "guards:\n  secrets: true\n  lint: false\n  tests: false\n  dead_code: false\n  skylos: false\n"
+            )
         tasks_yaml = os.path.join(d, ".gitreins", "tasks.yaml")
         with open(tasks_yaml, "w") as f:
-            json.dump({
-                "tasks": [{
-                    "id": "test-build",
-                    "title": "Test build gate",
-                    "criteria": [
-                        "A file called hello.txt exists in the repo root with content 'hello world'"
-                    ],
-                    "status": "pending",
-                }]
-            }, f)
+            json.dump(
+                {
+                    "tasks": [
+                        {
+                            "id": "test-build",
+                            "title": "Test build gate",
+                            "criteria": [
+                                "A file called hello.txt exists in the repo root with content 'hello world'"
+                            ],
+                            "status": "pending",
+                        }
+                    ]
+                },
+                f,
+            )
 
         # Create hello.txt so the criterion passes
         with open(os.path.join(d, "hello.txt"), "w") as f:
@@ -97,8 +116,12 @@ class TestMCPRealIntegration:
         """BUG 3 fix: guard.run scans the target repo, not the MCP server's dir."""
         proc = _start_mcp_server(tmp_git_repo)
         try:
-            req = {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
-                   "params": {"name": "guard.run", "arguments": {"workdir": tmp_git_repo}}}
+            req = {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "tools/call",
+                "params": {"name": "guard.run", "arguments": {"workdir": tmp_git_repo}},
+            }
             resp = _send_request(proc, req)
             result = json.loads(resp["result"]["content"][0]["text"])
             assert result["passed"] is True
@@ -117,14 +140,22 @@ class TestMCPRealIntegration:
         proc = _start_mcp_server(tmp_git_repo)
         try:
             # Start the task
-            req = {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
-                   "params": {"name": "task.start", "arguments": {"id": "test-build"}}}
+            req = {
+                "jsonrpc": "2.0",
+                "id": 3,
+                "method": "tools/call",
+                "params": {"name": "task.start", "arguments": {"id": "test-build"}},
+            }
             resp = _send_request(proc, req)
             assert "error" not in resp
 
             # Complete + evaluate (skips LLM if no API key)
-            req = {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
-                   "params": {"name": "task.complete", "arguments": {"id": "test-build"}}}
+            req = {
+                "jsonrpc": "2.0",
+                "id": 4,
+                "method": "tools/call",
+                "params": {"name": "task.complete", "arguments": {"id": "test-build"}},
+            }
             resp = _send_request(proc, req)
             result = json.loads(resp["result"]["content"][0]["text"])
             assert "task" in result
@@ -142,8 +173,17 @@ class TestMCPRealIntegration:
             tools = resp["result"]["tools"]
             tool_names = [t["name"] for t in tools]
             assert len(tool_names) >= 9
-            for name in ["task.create", "task.start", "task.complete", "task.list",
-                         "task.get", "task.delete", "commit", "guard.run", "judge.evaluate"]:
+            for name in [
+                "task.create",
+                "task.start",
+                "task.complete",
+                "task.list",
+                "task.get",
+                "task.delete",
+                "commit",
+                "guard.run",
+                "judge.evaluate",
+            ]:
                 assert name in tool_names, f"Missing tool: {name}"
         finally:
             proc.terminate()
@@ -154,33 +194,53 @@ class TestMCPRealIntegration:
         proc = _start_mcp_server(tmp_git_repo)
         try:
             # Create
-            req = {"jsonrpc": "2.0", "id": 10, "method": "tools/call",
-                   "params": {"name": "task.create", "arguments": {
-                       "id": "roundtrip", "title": "Roundtrip test",
-                       "criteria": ["criterion 1", "criterion 2"],
-                   }}}
+            req = {
+                "jsonrpc": "2.0",
+                "id": 10,
+                "method": "tools/call",
+                "params": {
+                    "name": "task.create",
+                    "arguments": {
+                        "id": "roundtrip",
+                        "title": "Roundtrip test",
+                        "criteria": ["criterion 1", "criterion 2"],
+                    },
+                },
+            }
             resp = _send_request(proc, req)
             result = json.loads(resp["result"]["content"][0]["text"])
             assert result["id"] == "roundtrip"
             assert result["status"] == "pending"
 
             # Start
-            req = {"jsonrpc": "2.0", "id": 11, "method": "tools/call",
-                   "params": {"name": "task.start", "arguments": {"id": "roundtrip"}}}
+            req = {
+                "jsonrpc": "2.0",
+                "id": 11,
+                "method": "tools/call",
+                "params": {"name": "task.start", "arguments": {"id": "roundtrip"}},
+            }
             resp = _send_request(proc, req)
             result = json.loads(resp["result"]["content"][0]["text"])
             assert result["status"] == "in_progress"
 
             # Complete
-            req = {"jsonrpc": "2.0", "id": 12, "method": "tools/call",
-                   "params": {"name": "task.complete", "arguments": {"id": "roundtrip"}}}
+            req = {
+                "jsonrpc": "2.0",
+                "id": 12,
+                "method": "tools/call",
+                "params": {"name": "task.complete", "arguments": {"id": "roundtrip"}},
+            }
             resp = _send_request(proc, req)
             result = json.loads(resp["result"]["content"][0]["text"])
             assert result["task"]["status"] == "complete"
 
             # Get
-            req = {"jsonrpc": "2.0", "id": 13, "method": "tools/call",
-                   "params": {"name": "task.get", "arguments": {"id": "roundtrip"}}}
+            req = {
+                "jsonrpc": "2.0",
+                "id": 13,
+                "method": "tools/call",
+                "params": {"name": "task.get", "arguments": {"id": "roundtrip"}},
+            }
             resp = _send_request(proc, req)
             result = json.loads(resp["result"]["content"][0]["text"])
             assert result["id"] == "roundtrip"
@@ -199,8 +259,14 @@ class TestMCPRealIntegration:
         second_repo = tempfile.mkdtemp()
         try:
             subprocess.run(["git", "init"], cwd=second_repo, capture_output=True)
-            subprocess.run(["git", "config", "user.email", "cross@test.com"], cwd=second_repo, capture_output=True)
-            subprocess.run(["git", "config", "user.name", "CrossRepo"], cwd=second_repo, capture_output=True)
+            subprocess.run(
+                ["git", "config", "user.email", "cross@test.com"],
+                cwd=second_repo,
+                capture_output=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "CrossRepo"], cwd=second_repo, capture_output=True
+            )
             # Need a commit so git diff --cached works for guard.run
             with open(os.path.join(second_repo, "README.md"), "w") as f:
                 f.write("# Second Repo\n")
@@ -208,13 +274,20 @@ class TestMCPRealIntegration:
             subprocess.run(["git", "commit", "-m", "init"], cwd=second_repo, capture_output=True)
 
             # Create task in second_repo via workdir
-            req = {"jsonrpc": "2.0", "id": 20, "method": "tools/call",
-                   "params": {"name": "task.create", "arguments": {
-                       "id": "cross-repo-task",
-                       "title": "Cross repo test",
-                       "criteria": ["README.md exists with content '# Second Repo'"],
-                       "workdir": second_repo,
-                   }}}
+            req = {
+                "jsonrpc": "2.0",
+                "id": 20,
+                "method": "tools/call",
+                "params": {
+                    "name": "task.create",
+                    "arguments": {
+                        "id": "cross-repo-task",
+                        "title": "Cross repo test",
+                        "criteria": ["README.md exists with content '# Second Repo'"],
+                        "workdir": second_repo,
+                    },
+                },
+            }
             resp = _send_request(proc, req)
             result = json.loads(resp["result"]["content"][0]["text"])
             assert result["id"] == "cross-repo-task"
@@ -229,31 +302,50 @@ class TestMCPRealIntegration:
             if os.path.isfile(main_tasks):
                 with open(main_tasks) as f:
                     content = f.read()
-                assert "cross-repo-task" not in content, \
-                    "Task leaked into MCP server workdir"
+                assert "cross-repo-task" not in content, "Task leaked into MCP server workdir"
 
             # List tasks from second_repo
-            req = {"jsonrpc": "2.0", "id": 21, "method": "tools/call",
-                   "params": {"name": "task.list", "arguments": {"workdir": second_repo}}}
+            req = {
+                "jsonrpc": "2.0",
+                "id": 21,
+                "method": "tools/call",
+                "params": {"name": "task.list", "arguments": {"workdir": second_repo}},
+            }
             resp = _send_request(proc, req)
             result = json.loads(resp["result"]["content"][0]["text"])
             assert len(result["tasks"]) == 1
             assert result["tasks"][0]["id"] == "cross-repo-task"
 
             # Start task in second_repo
-            req = {"jsonrpc": "2.0", "id": 22, "method": "tools/call",
-                   "params": {"name": "task.start", "arguments": {
-                       "id": "cross-repo-task", "workdir": second_repo,
-                   }}}
+            req = {
+                "jsonrpc": "2.0",
+                "id": 22,
+                "method": "tools/call",
+                "params": {
+                    "name": "task.start",
+                    "arguments": {
+                        "id": "cross-repo-task",
+                        "workdir": second_repo,
+                    },
+                },
+            }
             resp = _send_request(proc, req)
             result = json.loads(resp["result"]["content"][0]["text"])
             assert result["status"] == "in_progress"
 
             # judge.evaluate should also work cross-repo
-            req = {"jsonrpc": "2.0", "id": 23, "method": "tools/call",
-                   "params": {"name": "judge.evaluate", "arguments": {
-                       "id": "cross-repo-task", "workdir": second_repo,
-                   }}}
+            req = {
+                "jsonrpc": "2.0",
+                "id": 23,
+                "method": "tools/call",
+                "params": {
+                    "name": "judge.evaluate",
+                    "arguments": {
+                        "id": "cross-repo-task",
+                        "workdir": second_repo,
+                    },
+                },
+            }
             resp = _send_request(proc, req)
             result = json.loads(resp["result"]["content"][0]["text"])
             assert "error" not in result, f"judge.evaluate failed: {result}"
@@ -263,17 +355,29 @@ class TestMCPRealIntegration:
             assert "tier1_passed" in result
 
             # Delete task in second_repo
-            req = {"jsonrpc": "2.0", "id": 24, "method": "tools/call",
-                   "params": {"name": "task.delete", "arguments": {
-                       "id": "cross-repo-task", "workdir": second_repo,
-                   }}}
+            req = {
+                "jsonrpc": "2.0",
+                "id": 24,
+                "method": "tools/call",
+                "params": {
+                    "name": "task.delete",
+                    "arguments": {
+                        "id": "cross-repo-task",
+                        "workdir": second_repo,
+                    },
+                },
+            }
             resp = _send_request(proc, req)
             result = json.loads(resp["result"]["content"][0]["text"])
             assert result["deleted"] == "cross-repo-task"
 
             # Verify task list is empty in second_repo
-            req = {"jsonrpc": "2.0", "id": 25, "method": "tools/call",
-                   "params": {"name": "task.list", "arguments": {"workdir": second_repo}}}
+            req = {
+                "jsonrpc": "2.0",
+                "id": 25,
+                "method": "tools/call",
+                "params": {"name": "task.list", "arguments": {"workdir": second_repo}},
+            }
             resp = _send_request(proc, req)
             result = json.loads(resp["result"]["content"][0]["text"])
             assert len(result["tasks"]) == 0
@@ -283,4 +387,5 @@ class TestMCPRealIntegration:
             proc.wait(timeout=5)
             # Clean up second repo
             import shutil
+
             shutil.rmtree(second_repo, ignore_errors=True)

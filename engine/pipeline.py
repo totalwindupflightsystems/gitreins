@@ -118,7 +118,9 @@ class Pipeline:
             # Check if this stage should run for this trigger
             stage_on = stage_def.get("on", ["pre-eval", "pre-commit"])
             if trigger not in stage_on:
-                logger.debug("Skipping stage %s (trigger mismatch: %s)", stage_def.get("id"), trigger)
+                logger.debug(
+                    "Skipping stage %s (trigger mismatch: %s)", stage_def.get("id"), trigger
+                )
                 continue
 
             # Check condition
@@ -201,10 +203,7 @@ class Pipeline:
         result = StageResult(id=stage_id)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(steps)) as executor:
-            futures = {
-                executor.submit(self._run_step, step, task): step
-                for step in steps
-            }
+            futures = {executor.submit(self._run_step, step, task): step for step in steps}
             for future in concurrent.futures.as_completed(futures):
                 step_result = future.result()
                 result.steps.append(step_result)
@@ -250,7 +249,9 @@ class Pipeline:
         elif step_type == "output":
             return self._run_output(step_def, task)
         else:
-            return StepResult(id=step_id, type=step_type, passed=False, error=f"Unknown step type: {step_type}")
+            return StepResult(
+                id=step_id, type=step_type, passed=False, error=f"Unknown step type: {step_type}"
+            )
 
     def _run_script_step(self, step_def: dict, task: dict) -> StepResult:
         """Execute a shell command."""
@@ -267,22 +268,31 @@ class Pipeline:
         logger.debug("Running script: %s", cmd)
         try:
             result = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True,
-                timeout=120, cwd=self.workdir,
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                cwd=self.workdir,
             )
             output = (result.stdout + result.stderr)[:2000]
             passed = result.returncode == 0 or on_fail == "continue"
 
             return StepResult(
-                id=step_id, type="script", passed=passed,
-                output=output, data={"exit_code": result.returncode},
+                id=step_id,
+                type="script",
+                passed=passed,
+                output=output,
+                data={"exit_code": result.returncode},
             )
         except subprocess.TimeoutExpired:
-            return StepResult(id=step_id, type="script", passed=(on_fail == "continue"),
-                            error="Command timed out")
+            return StepResult(
+                id=step_id, type="script", passed=(on_fail == "continue"), error="Command timed out"
+            )
         except Exception as e:
-            return StepResult(id=step_id, type="script", passed=(on_fail == "continue"),
-                            error=str(e))
+            return StepResult(
+                id=step_id, type="script", passed=(on_fail == "continue"), error=str(e)
+            )
 
     def _run_ai_eval(self, step_def: dict, task: dict) -> StepResult:
         """Run the AI evaluator as a pipeline step."""
@@ -293,12 +303,14 @@ class Pipeline:
         # Lazy init LLM client
         if self._llm is None:
             from engine.llm import LLMClient
+
             if model:
                 self._llm = LLMClient(model=model)
             else:
                 self._llm = LLMClient()
 
         from engine.evaluator import AgenticEvaluator
+
         evaluator = AgenticEvaluator(self._llm, self.workdir, max_iterations=max_iterations)
 
         # Build prompt with template substitution
@@ -319,12 +331,18 @@ class Pipeline:
             )
 
             return StepResult(
-                id=step_id, type="ai_eval", passed=passed,
+                id=step_id,
+                type="ai_eval",
+                passed=passed,
                 output=f"{verdict.verdict}\n{items_output}\n{verdict.summary}",
-                data={"verdict": verdict.verdict, "items": [
-                    {"criterion": i.criterion, "status": i.status, "detail": i.detail}
-                    for i in verdict.items
-                ], "summary": verdict.summary},
+                data={
+                    "verdict": verdict.verdict,
+                    "items": [
+                        {"criterion": i.criterion, "status": i.status, "detail": i.detail}
+                        for i in verdict.items
+                    ],
+                    "summary": verdict.summary,
+                },
             )
         except Exception as e:
             logger.exception("AI eval failed")
@@ -351,6 +369,7 @@ class Pipeline:
         # Lazy init LLM client
         if self._llm is None:
             from engine.llm import LLMClient
+
             self._llm = LLMClient()
 
         from engine.commit_audit import CommitAuditor
@@ -385,15 +404,16 @@ class Pipeline:
                         raw = f.read().strip()
                     # Strip comment lines
                     message = "\n".join(
-                        line for line in raw.split("\n")
-                        if not line.startswith("#")
+                        line for line in raw.split("\n") if not line.startswith("#")
                     ).strip()
                 except Exception:
                     pass
 
         if not message:
             return StepResult(
-                id=step_id, type="commit_audit", passed=True,
+                id=step_id,
+                type="commit_audit",
+                passed=True,
                 output="No commit message to audit.",
             )
 
@@ -402,7 +422,9 @@ class Pipeline:
         except Exception as e:
             logger.warning("Commit audit failed: %s", e)
             return StepResult(
-                id=step_id, type="commit_audit", passed=True,
+                id=step_id,
+                type="commit_audit",
+                passed=True,
                 output=f"Audit error (passing): {e}",
             )
 
@@ -423,10 +445,15 @@ class Pipeline:
                     max_effective = effective
 
             sev_marker = {
-                "critical": "🔴 CRITICAL", "high": "🟠 HIGH",
-                "medium": "🟡 MEDIUM", "low": "🟢 LOW", "info": "ℹ️ INFO",
+                "critical": "🔴 CRITICAL",
+                "high": "🟠 HIGH",
+                "medium": "🟡 MEDIUM",
+                "low": "🟢 LOW",
+                "info": "ℹ️ INFO",
             }
-            output_lines.append(f"⚠ Commit review — {len(all_review_issues)} issue(s) found (overall: {max_effective:.1f}/{score_threshold:.1f})")
+            output_lines.append(
+                f"⚠ Commit review — {len(all_review_issues)} issue(s) found (overall: {max_effective:.1f}/{score_threshold:.1f})"
+            )
             review_summary = getattr(result, "review_summary", "")
             if review_summary:
                 output_lines.append(f"   {review_summary}")
@@ -453,7 +480,9 @@ class Pipeline:
                 else:
                     action_mark = "ℹ️ INFO"
 
-                output_lines.append(f"  {file_ref} [{cat}] [{sev}] {action_mark} (score: {effective:.1f}) — {title}")
+                output_lines.append(
+                    f"  {file_ref} [{cat}] [{sev}] {action_mark} (score: {effective:.1f}) — {title}"
+                )
                 if desc:
                     output_lines.append(f"    {desc}")
                 if sugg:
@@ -478,12 +507,15 @@ class Pipeline:
             if result.suggested_message:
                 output_lines.append(f"\nSuggested message: {result.suggested_message}")
             if mode == "block":
-                output_lines.append("\n(Commit BLOCKED — fix message or set commit_audit.mode=warn)")
+                output_lines.append(
+                    "\n(Commit BLOCKED — fix message or set commit_audit.mode=warn)"
+                )
             elif mode == "warn":
                 output_lines.append("\n(Warning only — commit will proceed)")
 
         return StepResult(
-            id=step_id, type="commit_audit",
+            id=step_id,
+            type="commit_audit",
             passed=passed,
             output="\n".join(output_lines),
             data={
@@ -500,6 +532,7 @@ class Pipeline:
     def _load_commit_audit_config(self) -> dict:
         """Read commit_audit section from .gitreins/config.yaml."""
         import yaml
+
         config_path = os.path.join(self.workdir, ".gitreins", "config.yaml")
         if os.path.exists(config_path):
             try:
@@ -560,7 +593,9 @@ class Pipeline:
         lines = []
         for step in stage.steps:
             status = "✓" if step.passed else "✗"
-            lines.append(f"  {status} {step.id}: {step.output[:100] if step.output else step.error[:100]}")
+            lines.append(
+                f"  {status} {step.id}: {step.output[:100] if step.output else step.error[:100]}"
+            )
         return "\n".join(lines)
 
     def _compile_results(self) -> dict:
@@ -636,30 +671,45 @@ def _default_tier1_steps(workdir: str) -> list[dict]:
     Falls back to a secrets-only step when no language is detected.
     """
     steps: list[dict] = [
-        {"id": "secrets", "type": "script",
-         "run": (
-             "gitleaks detect --source . --no-git || "
-             "python3 -c \"from engine.guard_manager import GuardManager; "
-             "import sys; gm = GuardManager('.'); "
-             "r = gm._check_secrets(); sys.exit(0 if r.passed else 1)\""
-         ),
-         "on_fail": "continue"},
+        {
+            "id": "secrets",
+            "type": "script",
+            "run": (
+                "gitleaks detect --source . --no-git || "
+                'python3 -c "from engine.guard_manager import GuardManager; '
+                "import sys; gm = GuardManager('.'); "
+                'r = gm._check_secrets(); sys.exit(0 if r.passed else 1)"'
+            ),
+            "on_fail": "continue",
+        },
     ]
 
     # Lint + test commands per language ecosystem
     _LANG_COMMANDS: dict[str, tuple[str, str]] = {
-        "go":     ("go vet ./...",                                "go test ./..."),
-        "rust":   ("cargo clippy -- -D warnings 2>/dev/null || true", "cargo test --no-fail-fast 2>/dev/null || true"),
-        "python": ("ruff check . --quiet 2>/dev/null || true",    "pytest -x --tb=short 2>/dev/null || true"),
-        "js":     ("npx eslint . 2>/dev/null || true",            "npm test 2>/dev/null || true"),
-        "java":   ("mvn checkstyle:check 2>/dev/null || true",    "mvn test -q 2>/dev/null || true"),
-        "c":      ("make lint 2>/dev/null || true",               "make test 2>/dev/null || true"),
-        "cpp":    ("make lint 2>/dev/null || true",               "make test 2>/dev/null || true"),
-        "ruby":   ("rubocop 2>/dev/null || true",                 "bundle exec rspec 2>/dev/null || true"),
-        "php":    ("php vendor/bin/phpcs 2>/dev/null || true",    "php vendor/bin/phpunit 2>/dev/null || true"),
-        "kotlin": ("./gradlew lint 2>/dev/null || true",       "./gradlew test 2>/dev/null || true"),
-        "csharp": ("dotnet format --verify-no-changes 2>/dev/null || true", "dotnet test 2>/dev/null || true"),
-        "scala":  ("sbt scalafmtCheck 2>/dev/null || true",            "sbt test 2>/dev/null || true"),
+        "go": ("go vet ./...", "go test ./..."),
+        "rust": (
+            "cargo clippy -- -D warnings 2>/dev/null || true",
+            "cargo test --no-fail-fast 2>/dev/null || true",
+        ),
+        "python": (
+            "ruff check . --quiet 2>/dev/null || true",
+            "pytest -x --tb=short 2>/dev/null || true",
+        ),
+        "js": ("npx eslint . 2>/dev/null || true", "npm test 2>/dev/null || true"),
+        "java": ("mvn checkstyle:check 2>/dev/null || true", "mvn test -q 2>/dev/null || true"),
+        "c": ("make lint 2>/dev/null || true", "make test 2>/dev/null || true"),
+        "cpp": ("make lint 2>/dev/null || true", "make test 2>/dev/null || true"),
+        "ruby": ("rubocop 2>/dev/null || true", "bundle exec rspec 2>/dev/null || true"),
+        "php": (
+            "php vendor/bin/phpcs 2>/dev/null || true",
+            "php vendor/bin/phpunit 2>/dev/null || true",
+        ),
+        "kotlin": ("./gradlew lint 2>/dev/null || true", "./gradlew test 2>/dev/null || true"),
+        "csharp": (
+            "dotnet format --verify-no-changes 2>/dev/null || true",
+            "dotnet test 2>/dev/null || true",
+        ),
+        "scala": ("sbt scalafmtCheck 2>/dev/null || true", "sbt test 2>/dev/null || true"),
     }
 
     # Detection order — first match becomes the primary language
@@ -690,10 +740,8 @@ def _default_tier1_steps(workdir: str) -> list[dict]:
 
     if primary is not None:
         lint_cmd, test_cmd = _LANG_COMMANDS[primary]
-        steps.append({"id": "lint", "type": "script",
-                       "run": lint_cmd})
-        steps.append({"id": "tests", "type": "script",
-                       "run": test_cmd})
+        steps.append({"id": "lint", "type": "script", "run": lint_cmd})
+        steps.append({"id": "tests", "type": "script", "run": test_cmd})
 
     return steps
 
@@ -718,7 +766,13 @@ def load_pipeline_config(workdir: str = ".") -> dict:
                         "on": ["pre-eval"],
                         "condition": "true",
                         "max_iterations": -1,
-                        "tools": ["read_file", "run_command", "search_pattern", "read_diff", "sandbox"],
+                        "tools": [
+                            "read_file",
+                            "run_command",
+                            "search_pattern",
+                            "read_diff",
+                            "sandbox",
+                        ],
                     },
                 ]
             }
@@ -745,7 +799,13 @@ def load_pipeline_config(workdir: str = ".") -> dict:
                         "on": ["pre-eval"],
                         "condition": "true",
                         "max_iterations": -1,
-                        "tools": ["read_file", "run_command", "search_pattern", "read_diff", "sandbox"],
+                        "tools": [
+                            "read_file",
+                            "run_command",
+                            "search_pattern",
+                            "read_diff",
+                            "sandbox",
+                        ],
                     },
                 ]
             }

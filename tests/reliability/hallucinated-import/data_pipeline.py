@@ -56,8 +56,11 @@ def compute_irr(cashflows: list[float]) -> float:
 def build_keras_model(input_dim: int, output_dim: int):
     """Build a tiny Keras Sequential model."""
     from tensorflow.keras.layers import Dense  # type: ignore[import-not-found]
-    model = Sequential([  # type: ignore[name-defined]
-        Dense(64, activation="relu", input_dim=input_dim),
-        Dense(output_dim, activation="softmax"),
-    ])
+
+    model = Sequential(
+        [  # type: ignore[name-defined]
+            Dense(64, activation="relu", input_dim=input_dim),
+            Dense(output_dim, activation="softmax"),
+        ]
+    )
     return model

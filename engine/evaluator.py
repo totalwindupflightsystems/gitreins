@@ -92,11 +92,26 @@ EVALUATOR_TOOLS = [
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "Path relative to repo root."},
-                    "offset": {"type": "integer", "description": "Line number to start from (1-indexed). Omit to read from beginning."},
-                    "limit": {"type": "integer", "description": "Max lines to return. Omit for full file."},
-                    "byte_offset": {"type": "integer", "description": "Byte position to start from (0-indexed). Requires mode='bytes'."},
-                    "byte_limit": {"type": "integer", "description": "Max bytes to return. Requires mode='bytes'."},
-                    "mode": {"type": "string", "description": "'lines' (default) or 'bytes' for byte-level reads."},
+                    "offset": {
+                        "type": "integer",
+                        "description": "Line number to start from (1-indexed). Omit to read from beginning.",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Max lines to return. Omit for full file.",
+                    },
+                    "byte_offset": {
+                        "type": "integer",
+                        "description": "Byte position to start from (0-indexed). Requires mode='bytes'.",
+                    },
+                    "byte_limit": {
+                        "type": "integer",
+                        "description": "Max bytes to return. Requires mode='bytes'.",
+                    },
+                    "mode": {
+                        "type": "string",
+                        "description": "'lines' (default) or 'bytes' for byte-level reads.",
+                    },
                 },
                 "required": ["path"],
             },
@@ -109,9 +124,7 @@ EVALUATOR_TOOLS = [
             "description": "Run a shell command. Returns exit code, stdout, and stderr. Use for tests, lint, build. Do NOT re-run the same command.",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "cmd": {"type": "string", "description": "Shell command to run."}
-                },
+                "properties": {"cmd": {"type": "string", "description": "Shell command to run."}},
                 "required": ["cmd"],
             },
         },
@@ -125,7 +138,10 @@ EVALUATOR_TOOLS = [
                 "type": "object",
                 "properties": {
                     "regex": {"type": "string", "description": "Python regex pattern."},
-                    "file_glob": {"type": "string", "description": "Optional: glob to filter files (e.g., '*.py')."},
+                    "file_glob": {
+                        "type": "string",
+                        "description": "Optional: glob to filter files (e.g., '*.py').",
+                    },
                 },
                 "required": ["regex"],
             },
@@ -139,7 +155,10 @@ EVALUATOR_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Optional: specific file or directory path. Omit to get diagnostics for all files."},
+                    "path": {
+                        "type": "string",
+                        "description": "Optional: specific file or directory path. Omit to get diagnostics for all files.",
+                    },
                 },
             },
         },
@@ -167,9 +186,7 @@ EVALUATOR_TOOLS = [
             "description": "Get the full definition of a task including ALL criteria. Always call this first to know what to check.",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "id": {"type": "string", "description": "Task ID to fetch."}
-                },
+                "properties": {"id": {"type": "string", "description": "Task ID to fetch."}},
                 "required": ["id"],
             },
         },
@@ -182,7 +199,10 @@ EVALUATOR_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "key": {"type": "string", "description": "Key to store under (e.g., 'checked', 'evidence')."},
+                    "key": {
+                        "type": "string",
+                        "description": "Key to store under (e.g., 'checked', 'evidence').",
+                    },
                     "content": {"type": "string", "description": "Content to write."},
                 },
                 "required": ["key", "content"],
@@ -196,9 +216,7 @@ EVALUATOR_TOOLS = [
             "description": "Read from the evaluator's scratch space to check what you've already verified.",
             "parameters": {
                 "type": "object",
-                "properties": {
-                    "key": {"type": "string", "description": "Key to read."}
-                },
+                "properties": {"key": {"type": "string", "description": "Key to read."}},
                 "required": ["key"],
             },
         },
@@ -266,14 +284,18 @@ class AgenticEvaluator:
             self.eval_cap = parse_eval_cap(eval_cap)
         elif max_iterations is not None and max_iterations > 0:
             # Explicit positive value — use it directly
-            self.eval_cap = EvalCap(max_iterations=max_iterations, source=f"max_iterations={max_iterations}")
+            self.eval_cap = EvalCap(
+                max_iterations=max_iterations, source=f"max_iterations={max_iterations}"
+            )
         else:
             # max_iterations=None or max_iterations<=0 — read from config.yaml
             config = self._load_config()
             self.eval_cap = eval_cap_from_config(config)
 
         # max_iterations from EvalCap is authoritative — 100 by default, -1 for unlimited
-        self.max_iterations = self.eval_cap.max_iterations if self.eval_cap.max_iterations > 0 else 10_000
+        self.max_iterations = (
+            self.eval_cap.max_iterations if self.eval_cap.max_iterations > 0 else 10_000
+        )
 
         # Command timeout for tool calls — configurable for tests
         self.command_timeout = command_timeout
@@ -295,9 +317,7 @@ class AgenticEvaluator:
         # the entire evaluator context window.
         config = self._load_config()
         evaluator_cfg = config.get("evaluator", {})
-        self.max_file_bytes: int = int(evaluator_cfg.get(
-            "max_file_bytes", 131_072
-        ))
+        self.max_file_bytes: int = int(evaluator_cfg.get("max_file_bytes", 131_072))
 
     def _resolve_fast_track(self) -> bool:
         """Resolve fast_track setting: 'on'→True, 'off'→False, 'auto'→detect.
@@ -320,11 +340,25 @@ class AgenticEvaluator:
             seen_dirs: set[str] = set()
             for root, dirs, files in os.walk(self.workdir):
                 # Skip hidden, test, venv, and build dirs
-                dirs[:] = [d for d in dirs if not d.startswith(".")
-                          and d not in ("venv", "__pycache__", "node_modules",
-                                        "build", "dist", "target", ".git")]
-                has_py = any(f.endswith(".py") and not f.startswith("test_")
-                            and f != "__init__.py" for f in files)
+                dirs[:] = [
+                    d
+                    for d in dirs
+                    if not d.startswith(".")
+                    and d
+                    not in (
+                        "venv",
+                        "__pycache__",
+                        "node_modules",
+                        "build",
+                        "dist",
+                        "target",
+                        ".git",
+                    )
+                ]
+                has_py = any(
+                    f.endswith(".py") and not f.startswith("test_") and f != "__init__.py"
+                    for f in files
+                )
                 if has_py and root != self.workdir:
                     rel = os.path.relpath(root, self.workdir)
                     # Count top-level package dirs only
@@ -332,8 +366,11 @@ class AgenticEvaluator:
                     if top not in seen_dirs:
                         seen_dirs.add(top)
                         package_count += 1
-            logger.debug("Fast-track auto-detect: %d packages → %s",
-                        package_count, "ON" if package_count >= 20 else "OFF")
+            logger.debug(
+                "Fast-track auto-detect: %d packages → %s",
+                package_count,
+                "ON" if package_count >= 20 else "OFF",
+            )
             return package_count >= 20
         except Exception:
             return False
@@ -353,9 +390,7 @@ class AgenticEvaluator:
         import subprocess
         import os
 
-        test_mode = (config.get("guards", {}).get("test_mode") or
-                     config.get("test_mode") or
-                     "full")
+        test_mode = config.get("guards", {}).get("test_mode") or config.get("test_mode") or "full"
 
         # Find changed files: staged + unstaged
         changed_files: set[str] = set()
@@ -363,7 +398,10 @@ class AgenticEvaluator:
             # Staged changes
             staged = subprocess.run(
                 ["git", "diff", "--cached", "--name-only"],
-                capture_output=True, text=True, timeout=10, cwd=self.workdir,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                cwd=self.workdir,
             )
             for line in staged.stdout.strip().splitlines():
                 if line:
@@ -371,7 +409,10 @@ class AgenticEvaluator:
             # Unstaged changes
             unstaged = subprocess.run(
                 ["git", "diff", "--name-only"],
-                capture_output=True, text=True, timeout=10, cwd=self.workdir,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                cwd=self.workdir,
             )
             for line in unstaged.stdout.strip().splitlines():
                 if line:
@@ -383,7 +424,10 @@ class AgenticEvaluator:
         try:
             diff_result = subprocess.run(
                 ["git", "diff", "HEAD"],
-                capture_output=True, text=True, timeout=10, cwd=self.workdir,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                cwd=self.workdir,
             )
             diff_text = diff_result.stdout.strip()
         except Exception:
@@ -403,7 +447,9 @@ class AgenticEvaluator:
                 diff_lines = diff_text.splitlines()
                 if len(diff_lines) > 500:
                     diff_lines = diff_lines[:500]
-                    diff_lines.append(f"... [truncated at 500 lines, {len(diff_text.splitlines())} total]")
+                    diff_lines.append(
+                        f"... [truncated at 500 lines, {len(diff_text.splitlines())} total]"
+                    )
                 lines.append("\n".join(diff_lines))
             else:
                 lines.append("(no changes detected)")
@@ -443,7 +489,9 @@ class AgenticEvaluator:
                 file_lines = content.splitlines()
                 if len(file_lines) > max_lines_per_file:
                     file_lines = file_lines[:max_lines_per_file]
-                    file_lines.append(f"... [truncated at {max_lines_per_file} lines, {len(content.splitlines())} total]")
+                    file_lines.append(
+                        f"... [truncated at {max_lines_per_file} lines, {len(content.splitlines())} total]"
+                    )
 
                 lines.append(f"### {fname}")
                 lines.append("```")
@@ -474,13 +522,20 @@ class AgenticEvaluator:
         context explosion on large monorepos.
         """
         import subprocess
+
         allowed: set[str] = set()
 
         try:
-            for args in (["git", "diff", "--cached", "--name-only"], ["git", "diff", "--name-only"]):
+            for args in (
+                ["git", "diff", "--cached", "--name-only"],
+                ["git", "diff", "--name-only"],
+            ):
                 result = subprocess.run(
-                    args, capture_output=True, text=True,
-                    timeout=10, cwd=self.workdir,
+                    args,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    cwd=self.workdir,
                 )
                 for line in result.stdout.strip().splitlines():
                     if line:
@@ -490,10 +545,16 @@ class AgenticEvaluator:
 
         # Also include test files that map to changed source files
         test_substitutions = [
-            ("src/", "tests/"), ("lib/", "test/"), ("pkg/", "test/"),
-            (".py", "_test.py"), (".go", "_test.go"), (".rs", "_test.rs"),
-            (".ts", ".test.ts"), (".tsx", ".test.tsx"),
-            (".js", ".test.js"), (".rb", "_test.rb"),
+            ("src/", "tests/"),
+            ("lib/", "test/"),
+            ("pkg/", "test/"),
+            (".py", "_test.py"),
+            (".go", "_test.go"),
+            (".rs", "_test.rs"),
+            (".ts", ".test.ts"),
+            (".tsx", ".test.tsx"),
+            (".js", ".test.js"),
+            (".rb", "_test.rb"),
         ]
         expanded: set[str] = set(allowed)
         for f in allowed:
@@ -507,16 +568,27 @@ class AgenticEvaluator:
 
         # Always allow common config files
         always_allow = [
-            "pyproject.toml", "setup.cfg", "setup.py", "conftest.py",
-            "go.mod", "go.sum", "Cargo.toml", "package.json",
-            "Makefile", "Dockerfile", ".gitreins/config.yaml",
+            "pyproject.toml",
+            "setup.cfg",
+            "setup.py",
+            "conftest.py",
+            "go.mod",
+            "go.sum",
+            "Cargo.toml",
+            "package.json",
+            "Makefile",
+            "Dockerfile",
+            ".gitreins/config.yaml",
         ]
         for af in always_allow:
             if os.path.isfile(os.path.join(self.workdir, af)):
                 expanded.add(af)
 
-        logger.debug("File scope 'changed': %d files allowed (%d changed + tests/config)",
-                     len(expanded), len(allowed))
+        logger.debug(
+            "File scope 'changed': %d files allowed (%d changed + tests/config)",
+            len(expanded),
+            len(allowed),
+        )
         return expanded
 
     def _path_in_scope(self, path: str) -> bool:
@@ -529,6 +601,7 @@ class AgenticEvaluator:
     def _load_config(self) -> dict:
         """Load .gitreins/config.yaml if present."""
         import yaml
+
         config_path = os.path.join(self.workdir, ".gitreins", "config.yaml")
         if os.path.isfile(config_path):
             try:
@@ -593,7 +666,7 @@ class AgenticEvaluator:
         if remaining_indices:
             lines.append(f"### Still to verify ({len(remaining_indices)}/{criteria_total}):")
             for i in remaining_indices:
-                lines.append(f"  {i+1}. {criteria_list[i]}")
+                lines.append(f"  {i + 1}. {criteria_list[i]}")
             lines.append("")
 
         lines.append("## INSTRUCTIONS (continued evaluation)")
@@ -606,7 +679,9 @@ class AgenticEvaluator:
         lines.append('  sandbox_write("verified_N", "PASS: evidence from file:line")')
         lines.append("")
         lines.append("When ALL remaining criteria are verified, output the JSON verdict for ALL")
-        lines.append(f"criteria (both the {len(verified)} already verified and the {len(remaining_indices)} you just checked).")
+        lines.append(
+            f"criteria (both the {len(verified)} already verified and the {len(remaining_indices)} you just checked)."
+        )
         lines.append("Output ONLY the JSON verdict — no markdown fences, no extra text.")
 
         prompt = "\n".join(lines)
@@ -616,9 +691,7 @@ class AgenticEvaluator:
             prompt += f"\n\n{code_context}"
 
         # Append the full task criteria list for the JSON verdict
-        criteria_text = "\n".join(
-            f"  {i+1}. {c}" for i, c in enumerate(criteria_list)
-        )
+        criteria_text = "\n".join(f"  {i + 1}. {c}" for i, c in enumerate(criteria_list))
         prompt += f"\n\n## FULL CRITERIA LIST (for verdict JSON)\n{criteria_text}"
 
         return prompt
@@ -639,26 +712,42 @@ class AgenticEvaluator:
         """
         logger.info(
             "Compacting evaluator context (compaction #%d, %d messages → clean slate)",
-            compaction_count + 1, len(messages),
+            compaction_count + 1,
+            len(messages),
         )
 
         compacted_prompt = self._build_compacted_prompt(
-            task, code_context, criteria_total,
+            task,
+            code_context,
+            criteria_total,
         )
 
         # Fresh conversation: system prompt + compacted task
         new_messages: list[dict] = [
-            {"role": "system", "content": EVALUATOR_SYSTEM_PROMPT
-                .replace("{token_budget}", _fmt_tokens(self.eval_cap.max_input_tokens) if self.eval_cap.max_input_tokens > 0 else "unlimited")
-                .replace("{output_budget}", _fmt_tokens(self.eval_cap.max_output_tokens) if self.eval_cap.max_output_tokens > 0 else "unlimited")
+            {
+                "role": "system",
+                "content": EVALUATOR_SYSTEM_PROMPT.replace(
+                    "{token_budget}",
+                    _fmt_tokens(self.eval_cap.max_input_tokens)
+                    if self.eval_cap.max_input_tokens > 0
+                    else "unlimited",
+                )
+                .replace(
+                    "{output_budget}",
+                    _fmt_tokens(self.eval_cap.max_output_tokens)
+                    if self.eval_cap.max_output_tokens > 0
+                    else "unlimited",
+                )
                 .replace("{file_scope}", self._allowed_files is not None and "changed" or "full")
                 .replace("{fast_track_mode}", "ON" if self.fast_track else "OFF")
-                .replace("{fast_track_instruction}",
+                .replace(
+                    "{fast_track_instruction}",
                     "ON — Verify ONLY changed lines and immediate callers. Skip deep call-graph analysis. "
                     "Trust the diff: if a criterion references code outside changed files, check only the "
                     "interface boundary (function signature, type) — do NOT trace into unchanged code."
-                    if self.fast_track else
-                    "OFF — Normal mode. Read surrounding code as needed to verify criteria.")
+                    if self.fast_track
+                    else "OFF — Normal mode. Read surrounding code as needed to verify criteria.",
+                ),
             },
             {"role": "user", "content": compacted_prompt},
         ]
@@ -682,18 +771,16 @@ class AgenticEvaluator:
 
         # Build the task prompt
         criteria_list = task.get("criteria", [])
-        criteria_text = "\n".join(
-            f"  {i+1}. {c}" for i, c in enumerate(criteria_list)
-        )
+        criteria_text = "\n".join(f"  {i + 1}. {c}" for i, c in enumerate(criteria_list))
         task_prompt = f"""Evaluate this completed task:
 
-TASK: {task.get('title', task.get('id', 'unnamed'))}
-ID: {task.get('id', 'unknown')}
+TASK: {task.get("title", task.get("id", "unnamed"))}
+ID: {task.get("id", "unknown")}
 
 CRITERIA TO VERIFY (all {len(criteria_list)} must be checked):
 {criteria_text}
 
-Start by calling get_task_item("{task.get('id', 'unknown')}") to see the full task definition.
+Start by calling get_task_item("{task.get("id", "unknown")}") to see the full task definition.
 Then read the relevant code, run tests, and search for patterns.
 Use sandbox_write to track which criteria you have verified.
 Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
@@ -720,7 +807,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
 
         # Compute file scope — which files the evaluator is allowed to touch
         file_scope = evaluator_cfg.get("file_scope", "changed")
-        self._allowed_files = self._compute_allowed_files() if file_scope == "changed" else None  # None = full scope
+        self._allowed_files = (
+            self._compute_allowed_files() if file_scope == "changed" else None
+        )  # None = full scope
 
         # Inject code context (changed files or diffs) into the initial prompt
         # so the LLM has relevant code upfront — reduces read_file() calls
@@ -729,7 +818,11 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         if code_context:
             # Cap code context to configured budget (default 70% of input budget)
             ctx_budget = evaluator_cfg.get("code_context_budget", 0.70)
-            max_ctx_tokens = int(self.eval_cap.max_input_tokens * ctx_budget) if self.eval_cap.max_input_tokens > 0 else None
+            max_ctx_tokens = (
+                int(self.eval_cap.max_input_tokens * ctx_budget)
+                if self.eval_cap.max_input_tokens > 0
+                else None
+            )
             if max_ctx_tokens:
                 ctx_est = len(code_context) // 3  # rough char→token: ~3 chars/token
                 if ctx_est > max_ctx_tokens:
@@ -740,17 +833,30 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             task_prompt += f"\n\n{code_context}"
 
         messages: list[dict] = [
-            {"role": "system", "content": EVALUATOR_SYSTEM_PROMPT
-                .replace("{token_budget}", _fmt_tokens(self.eval_cap.max_input_tokens) if self.eval_cap.max_input_tokens > 0 else "unlimited")
-                .replace("{output_budget}", _fmt_tokens(self.eval_cap.max_output_tokens) if self.eval_cap.max_output_tokens > 0 else "unlimited")
+            {
+                "role": "system",
+                "content": EVALUATOR_SYSTEM_PROMPT.replace(
+                    "{token_budget}",
+                    _fmt_tokens(self.eval_cap.max_input_tokens)
+                    if self.eval_cap.max_input_tokens > 0
+                    else "unlimited",
+                )
+                .replace(
+                    "{output_budget}",
+                    _fmt_tokens(self.eval_cap.max_output_tokens)
+                    if self.eval_cap.max_output_tokens > 0
+                    else "unlimited",
+                )
                 .replace("{file_scope}", self._allowed_files is not None and "changed" or "full")
                 .replace("{fast_track_mode}", "ON" if self.fast_track else "OFF")
-                .replace("{fast_track_instruction}",
+                .replace(
+                    "{fast_track_instruction}",
                     "ON — Verify ONLY changed lines and immediate callers. Skip deep call-graph analysis. "
                     "Trust the diff: if a criterion references code outside changed files, check only the "
                     "interface boundary (function signature, type) — do NOT trace into unchanged code."
-                    if self.fast_track else
-                    "OFF — Normal mode. Read surrounding code as needed to verify criteria.")
+                    if self.fast_track
+                    else "OFF — Normal mode. Read surrounding code as needed to verify criteria.",
+                ),
             },
             {"role": "user", "content": task_prompt},
         ]
@@ -796,11 +902,16 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 if cumulative_prompt_tok > threshold:
                     logger.warning(
                         "Context near limit (%d/%d tokens) — compacting (compaction #%d)",
-                        cumulative_prompt_tok, self.eval_cap.max_input_tokens,
+                        cumulative_prompt_tok,
+                        self.eval_cap.max_input_tokens,
                         compaction_count + 1,
                     )
                     messages, compaction_count = self._compact_context(
-                        messages, task, code_context, criteria_total, compaction_count,
+                        messages,
+                        task,
+                        code_context,
+                        criteria_total,
+                        compaction_count,
                     )
                     iteration = 0  # Reset — clean conversation
                     cumulative_prompt_tok = 0
@@ -809,7 +920,8 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
 
             try:
                 response = self.llm.chat(
-                    messages, tools=tools,
+                    messages,
+                    tools=tools,
                     max_tokens=max_tokens_per_call,
                 )
             except Exception as e:
@@ -817,6 +929,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 is_context_error = False
                 try:
                     import requests
+
                     if isinstance(e, requests.HTTPError):
                         if hasattr(e, "response") and e.response is not None:
                             status = e.response.status_code
@@ -830,17 +943,30 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 if not is_context_error:
                     is_context_error = any(
                         kw in err_msg
-                        for kw in ("context", "token", "maximum", "exceeded",
-                                   "window", "truncat", "length")
+                        for kw in (
+                            "context",
+                            "token",
+                            "maximum",
+                            "exceeded",
+                            "window",
+                            "truncat",
+                            "length",
+                        )
                     )
 
                 if is_context_error and compaction_count < MAX_COMPACTIONS:
                     logger.warning(
                         "Context error on iteration %d (compacting #%d): %s",
-                        iteration, compaction_count + 1, str(e)[:200],
+                        iteration,
+                        compaction_count + 1,
+                        str(e)[:200],
                     )
                     messages, compaction_count = self._compact_context(
-                        messages, task, code_context, criteria_total, compaction_count,
+                        messages,
+                        task,
+                        code_context,
+                        criteria_total,
+                        compaction_count,
                     )
                     iteration = 0  # Reset — fresh context
                     cumulative_prompt_tok = 0
@@ -929,14 +1055,20 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                             "See previous result above. Move on to unchecked criteria."
                         )
 
-                messages.append({
-                    "role": "tool",
-                    "tool_call_id": tc.id,
-                    "content": json.dumps(result),
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": tc.id,
+                        "content": json.dumps(result),
+                    }
+                )
 
-            logger.debug("Evaluator iteration %d: %d tool calls, %d messages",
-                         iteration + 1, len(response.tool_calls), len(messages))
+            logger.debug(
+                "Evaluator iteration %d: %d tool calls, %d messages",
+                iteration + 1,
+                len(response.tool_calls),
+                len(messages),
+            )
 
             iteration += 1
 
@@ -964,14 +1096,21 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 has_any = True
                 evidence = self._sandbox[key]
                 status = "PASS" if evidence.startswith("PASS") else "FAIL"
-                items.append(VerdictItem(
-                    criterion=criterion, status=status, detail=evidence,
-                ))
+                items.append(
+                    VerdictItem(
+                        criterion=criterion,
+                        status=status,
+                        detail=evidence,
+                    )
+                )
             else:
-                items.append(VerdictItem(
-                    criterion=criterion, status="FAIL",
-                    detail="Not verified — evaluation terminated before this criterion was checked",
-                ))
+                items.append(
+                    VerdictItem(
+                        criterion=criterion,
+                        status="FAIL",
+                        detail="Not verified — evaluation terminated before this criterion was checked",
+                    )
+                )
         if not has_any:
             return None
         return Verdict(
@@ -1003,19 +1142,23 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             if remaining < 0 and remaining != -1.0:
                 # Real negative remaining = over a configured budget
                 return (
-                    {"error": (
-                        "TIME_EXCEEDED: Time budget exhausted. "
-                        "Deliver your verdict immediately based on what is in the sandbox."
-                    )},
+                    {
+                        "error": (
+                            "TIME_EXCEEDED: Time budget exhausted. "
+                            "Deliver your verdict immediately based on what is in the sandbox."
+                        )
+                    },
                     False,
                 )
             if 0 < remaining < 10:
                 return (
-                    {"error": (
-                        f"TIME_CRITICAL: Only {int(remaining)} seconds remaining. "
-                        "Deliver your verdict NOW with what you have. "
-                        "Use sandbox_write to save any verified criteria first."
-                    )},
+                    {
+                        "error": (
+                            f"TIME_CRITICAL: Only {int(remaining)} seconds remaining. "
+                            "Deliver your verdict NOW with what you have. "
+                            "Use sandbox_write to save any verified criteria first."
+                        )
+                    },
                     False,
                 )
 
@@ -1076,9 +1219,15 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
 
     # ── Tool implementations ──────────────────────────────────────
 
-    def _tool_read_file(self, path: str, offset: int = 0, limit: int = 0,
-                         byte_offset: int = 0, byte_limit: int = 0,
-                         mode: str = "lines") -> dict:
+    def _tool_read_file(
+        self,
+        path: str,
+        offset: int = 0,
+        limit: int = 0,
+        byte_offset: int = 0,
+        byte_limit: int = 0,
+        mode: str = "lines",
+    ) -> dict:
         """Read a file from the working tree with line or byte range support.
 
         Args:
@@ -1096,7 +1245,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         # Enforce file scope BEFORE existence check — reject out-of-scope files
         # even if they exist, so the LLM knows why it can't access them
         if not self._path_in_scope(path):
-            return {"error": f"File not in scope: {path}. Evaluator is scoped to changed files only. Set evaluator.file_scope: full in .gitreins/config.yaml to allow all files."}
+            return {
+                "error": f"File not in scope: {path}. Evaluator is scoped to changed files only. Set evaluator.file_scope: full in .gitreins/config.yaml to allow all files."
+            }
         if not os.path.exists(real):
             return {"error": f"File not found: {path}"}
         if os.path.isdir(real):
@@ -1111,7 +1262,8 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                         if byte_offset >= total_bytes:
                             return {
                                 "error": f"Byte offset {byte_offset} exceeds file size ({total_bytes} bytes)",
-                                "path": path, "total_bytes": total_bytes,
+                                "path": path,
+                                "total_bytes": total_bytes,
                             }
                         f.seek(byte_offset)
                     if byte_limit > 0:
@@ -1124,7 +1276,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 has_more = (byte_offset + shown_bytes) < total_bytes if byte_limit > 0 else False
 
                 # ── Byte cap (GR-064d) ──
-                max_bytes = getattr(self, 'max_file_bytes', 131072)
+                max_bytes = getattr(self, "max_file_bytes", 131072)
                 content_bytes = content.encode("utf-8")
                 if len(content_bytes) > max_bytes:
                     capped = content_bytes[:max_bytes].decode("utf-8", errors="replace")
@@ -1154,7 +1306,11 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             if offset > 0:
                 start_idx = offset - 1
                 if start_idx >= total_lines:
-                    return {"error": f"Offset {offset} exceeds file length ({total_lines} lines)", "path": path, "total_lines": total_lines}
+                    return {
+                        "error": f"Offset {offset} exceeds file length ({total_lines} lines)",
+                        "path": path,
+                        "total_lines": total_lines,
+                    }
                 lines = lines[start_idx:]
             if limit > 0:
                 lines = lines[:limit]
@@ -1168,7 +1324,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
 
             # ── Byte cap (GR-064d) ──
             # Prevent individual read_file from consuming entire context window
-            max_bytes = getattr(self, 'max_file_bytes', 131072)
+            max_bytes = getattr(self, "max_file_bytes", 131072)
             content_bytes = content.encode("utf-8")
             if len(content_bytes) > max_bytes:
                 capped = content_bytes[:max_bytes].decode("utf-8", errors="replace")
@@ -1184,7 +1340,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 "total_chars": total_chars,
                 "total_bytes": total_bytes,
                 "shown_lines": len(lines),
-                "has_more": (offset > 0 and (offset - 1 + limit < total_lines)) or (not offset and not limit and total_chars > 12000) or (offset > 0 and not limit),
+                "has_more": (offset > 0 and (offset - 1 + limit < total_lines))
+                or (not offset and not limit and total_chars > 12000)
+                or (offset > 0 and not limit),
                 "mode": "lines",
             }
         except Exception as e:
@@ -1240,18 +1398,28 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         # ── Pure Python last resort ──
         return self._tool_search_pattern_python(regex, file_glob)
 
-    def _tool_search_pattern_rg(
-        self, regex: str, file_glob: str, rg_path: str
-    ) -> dict:
+    def _tool_search_pattern_rg(self, regex: str, file_glob: str, rg_path: str) -> dict:
         """Search using ripgrep (fast, respects .gitignore)."""
-        cmd = [rg_path, "--line-number", "--no-heading", "--smart-case",
-               "-e", regex,
-               "--glob", "!__pycache__/**",
-               "--glob", "!.git/**",
-               "--glob", "!venv/**",
-               "--glob", "!.venv/**",
-               "--glob", "!node_modules/**",
-               "--glob", "!.pytest_cache/**"]
+        cmd = [
+            rg_path,
+            "--line-number",
+            "--no-heading",
+            "--smart-case",
+            "-e",
+            regex,
+            "--glob",
+            "!__pycache__/**",
+            "--glob",
+            "!.git/**",
+            "--glob",
+            "!venv/**",
+            "--glob",
+            "!.venv/**",
+            "--glob",
+            "!node_modules/**",
+            "--glob",
+            "!.pytest_cache/**",
+        ]
         if file_glob != "*":
             cmd.extend(["--glob", file_glob])
         # Restrict to allowed files scope
@@ -1260,14 +1428,18 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             pass
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=60,
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60,
                 cwd=self.workdir,
             )
             if result.returncode == 2 and "No files were searched" in result.stderr:
                 return {"matches": [], "count": 0}
             if result.returncode > 1:
-                raise subprocess.CalledProcessError(result.returncode, cmd,
-                                                    result.stdout, result.stderr)
+                raise subprocess.CalledProcessError(
+                    result.returncode, cmd, result.stdout, result.stderr
+                )
             # rg returns 0=matches, 1=no matches, >1=error
             lines = result.stdout.strip().split("\n") if result.stdout else []
             return {"matches": lines[:200], "count": min(len(lines), 200)}
@@ -1280,21 +1452,25 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 return self._tool_search_pattern_grep(regex, file_glob, grep_path)
             return {"error": "rg failed"}
 
-    def _tool_search_pattern_grep(
-        self, regex: str, file_glob: str, grep_path: str
-    ) -> dict:
+    def _tool_search_pattern_grep(self, regex: str, file_glob: str, grep_path: str) -> dict:
         """Search using GNU grep (slower than rg, faster than Python)."""
-        cmd = [grep_path, "-rnI", "--exclude-dir=__pycache__",
-               "--include=*",
-               "-e", regex, "."]
+        cmd = [grep_path, "-rnI", "--exclude-dir=__pycache__", "--include=*", "-e", regex, "."]
         if file_glob != "*":
-            cmd = [grep_path, "-rnI",
-                   "--exclude-dir=__pycache__",
-                   f"--include={file_glob}",
-                   "-e", regex, "."]
+            cmd = [
+                grep_path,
+                "-rnI",
+                "--exclude-dir=__pycache__",
+                f"--include={file_glob}",
+                "-e",
+                regex,
+                ".",
+            ]
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=60,
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=60,
                 cwd=self.workdir,
             )
             lines = result.stdout.strip().split("\n") if result.stdout else []
@@ -1312,13 +1488,22 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         except re.error as e:
             return {"error": f"Invalid regex: {e}"}
 
-        skip_dirs = {".git", "venv", ".venv", "node_modules", "__pycache__", ".gitreins-sandbox", ".pytest_cache"}
+        skip_dirs = {
+            ".git",
+            "venv",
+            ".venv",
+            "node_modules",
+            "__pycache__",
+            ".gitreins-sandbox",
+            ".pytest_cache",
+        }
         files_searched = 0
         for root, dirs, files in os.walk(self.workdir):
             dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith(".")]
             for fname in files:
                 if file_glob != "*":
                     import fnmatch
+
                     if not fnmatch.fnmatch(fname, file_glob):
                         continue
                 fpath = os.path.join(root, fname)
@@ -1349,11 +1534,17 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         try:
             staged = subprocess.run(
                 ["git", "diff", "--cached", "--stat"],
-                capture_output=True, text=True, timeout=10, cwd=self.workdir,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                cwd=self.workdir,
             )
             unstaged = subprocess.run(
                 ["git", "diff", "--stat"],
-                capture_output=True, text=True, timeout=10, cwd=self.workdir,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                cwd=self.workdir,
             )
             return {
                 "staged": staged.stdout.strip() or "(no staged changes)",
@@ -1384,6 +1575,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
 
         # Determine workdir: if path is provided, use its parent; otherwise project root
         import os
+
         target_dir = self.workdir
         if path:
             abs_path = os.path.join(self.workdir, path)
@@ -1398,11 +1590,17 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 diags = run_static_check(tool, target_dir)
                 all_diagnostics.extend(diags)
             except Exception as exc:
-                all_diagnostics.append({
-                    "tool": tool, "error": str(exc),
-                    "file": "", "line": 0, "severity": "error",
-                    "message": f"Tool failed: {exc}", "code": "",
-                })
+                all_diagnostics.append(
+                    {
+                        "tool": tool,
+                        "error": str(exc),
+                        "file": "",
+                        "line": 0,
+                        "severity": "error",
+                        "message": f"Tool failed: {exc}",
+                        "code": "",
+                    }
+                )
 
         return {
             "diagnostics": all_diagnostics,
@@ -1459,7 +1657,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         start = cleaned.find("{")
         end = cleaned.rfind("}")
         if start >= 0 and end > start:
-            json_str = cleaned[start:end + 1]
+            json_str = cleaned[start : end + 1]
             try:
                 data = json.loads(json_str)
 
@@ -1476,11 +1674,13 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                     status = str(item.get("status", "FAIL")).upper()
                     if status not in ("PASS", "FAIL"):
                         status = "FAIL"
-                    items.append(VerdictItem(
-                        criterion=item.get("criterion", "unknown"),
-                        status=status,
-                        detail=item.get("detail", ""),
-                    ))
+                    items.append(
+                        VerdictItem(
+                            criterion=item.get("criterion", "unknown"),
+                            status=status,
+                            detail=item.get("detail", ""),
+                        )
+                    )
                 return Verdict(
                     verdict=verdict_val,
                     items=items,
@@ -1516,11 +1716,13 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
 
             by_category: dict[str, list[dict]] = {}
             for f in report.findings:
-                by_category.setdefault(f.category, []).append({
-                    "file": f.file,
-                    "line": f.line,
-                    "message": f.message,
-                })
+                by_category.setdefault(f.category, []).append(
+                    {
+                        "file": f.file,
+                        "line": f.line,
+                        "message": f.message,
+                    }
+                )
 
             return {
                 "total_findings": len(report.findings),
@@ -1543,11 +1745,16 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
 
             result = _sp.run(
                 ["skylos", self.workdir, "--format", "json", "--no-grep-verify"],
-                capture_output=True, text=True, timeout=120,
+                capture_output=True,
+                text=True,
+                timeout=120,
                 cwd=self.workdir,
             )
             if result.returncode != 0:
-                return {"error": f"skylos exited {result.returncode}", "stderr": result.stderr[:500]}
+                return {
+                    "error": f"skylos exited {result.returncode}",
+                    "stderr": result.stderr[:500],
+                }
 
             data = _json.loads(result.stdout)
 

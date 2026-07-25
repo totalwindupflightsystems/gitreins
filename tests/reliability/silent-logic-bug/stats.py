@@ -58,7 +58,7 @@ def find_max(items: Iterable[int]) -> int:
     iterator = iter(items)
     best = next(iterator)
     for item in iterator:
-        if item < best:           # ← inverted: should be `>`
+        if item < best:  # ← inverted: should be `>`
             best = item
     return best
 
@@ -74,7 +74,7 @@ def is_adult(age: int) -> bool:
     `is_adult(30)` returns False. Real-world consequence: every
     age-gated feature inverts.
     """
-    if age < 18:                 # ← inverted: should be `age >= 18`
+    if age < 18:  # ← inverted: should be `age >= 18`
         return True
     return False
 
@@ -93,6 +93,6 @@ def factorial(n: int) -> int:
     if n < 0:
         raise ValueError("factorial undefined for negative integers")
     result = 1
-    for i in range(2, n):        # ← off-by-one: should be `range(2, n + 1)`
+    for i in range(2, n):  # ← off-by-one: should be `range(2, n + 1)`
         result *= i
     return result

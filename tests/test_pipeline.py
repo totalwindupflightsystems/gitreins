@@ -2,13 +2,17 @@
 Unit tests for engine/pipeline.py — configurable evaluation pipeline.
 axiom:trace work_item=GR-001 spec=specs/06-Pipeline-Engine.md plan=.memory-bank/work-items/GR-001/plan.yaml
 """
+
 import os
 from unittest.mock import MagicMock, patch
 
 import yaml
 
 from engine.pipeline import (
-    Pipeline, StageResult, StepResult, load_pipeline_config,
+    Pipeline,
+    StageResult,
+    StepResult,
+    load_pipeline_config,
 )
 
 
@@ -105,7 +109,9 @@ class TestPipelineConditions:
         p = Pipeline(pipeline_config_default, tmp_workdir)
         # Inject a failed stage result
         p._stage_results["tier1"] = StageResult(
-            id="tier1", passed=False, any_failed=True,
+            id="tier1",
+            passed=False,
+            any_failed=True,
             steps=[StepResult(id="s1", type="script", passed=False, error="fail")],
         )
         assert p._check_condition("stage.tier1.any_failed", {}) is True
@@ -114,7 +120,9 @@ class TestPipelineConditions:
         """condition='stage.tier1.passed' with tier1 passed → True."""
         p = Pipeline(pipeline_config_default, tmp_workdir)
         p._stage_results["tier1"] = StageResult(
-            id="tier1", passed=True, any_failed=False,
+            id="tier1",
+            passed=True,
+            any_failed=False,
             steps=[StepResult(id="s1", type="script", passed=True, output="ok")],
         )
         assert p._check_condition("stage.tier1.passed", {}) is True
@@ -179,7 +187,9 @@ class TestPipelineTemplate:
         """{{ stages }} replaced with full JSON."""
         p = Pipeline(pipeline_config_default, tmp_workdir)
         p._stage_results["tier1"] = StageResult(
-            id="tier1", passed=True, any_failed=False,
+            id="tier1",
+            passed=True,
+            any_failed=False,
             steps=[StepResult(id="s1", type="script", passed=True, output="ok")],
         )
         result = p._template("{{ stages }}", {})
@@ -202,6 +212,7 @@ class TestLoadPipelineConfig:
     def test_config_file_no_pipeline_key_returns_default(self, tmp_workdir):
         """Config file exists but no 'pipeline' key → returns default."""
         import os
+
         config_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
         with open(os.path.join(config_dir, "config.yaml"), "w") as f:
@@ -213,6 +224,7 @@ class TestLoadPipelineConfig:
         """Config file has pipeline but no stages → returns minimal default pipeline
         with tier1+secrets stage."""
         import os
+
         config_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
         with open(os.path.join(config_dir, "config.yaml"), "w") as f:
@@ -226,6 +238,7 @@ class TestLoadPipelineConfig:
     def test_malformed_yaml_returns_safe_minimal(self, tmp_workdir):
         """Malformed YAML returns safe minimal pipeline."""
         import os
+
         config_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
         with open(os.path.join(config_dir, "config.yaml"), "w") as f:
@@ -261,8 +274,11 @@ class TestPipelineRun:
         """Pipeline with LLM injected runs ai_eval stage."""
         p = Pipeline(pipeline_config_default, tmp_workdir, llm=llm_client)
         task = {"id": "t1", "title": "Test", "criteria": ["c1"]}
-        with patch.object(llm_client, 'chat',
-                          return_value=MagicMock(content='{"verdict":"COMPLETE","items":[],"summary":"done"}')):
+        with patch.object(
+            llm_client,
+            "chat",
+            return_value=MagicMock(content='{"verdict":"COMPLETE","items":[],"summary":"done"}'),
+        ):
             result = p.run(task, trigger="pre-eval")
         assert "stages" in result
 
@@ -284,9 +300,13 @@ class TestPipelineRun:
 
     def test_unknown_step_type_returns_error(self, pipeline_config_default, tmp_workdir):
         """Unknown step type produces error result."""
-        config = {"pipeline": {"stages": [
-            {"id": "bad", "steps": [{"id": "x", "type": "unknown_type"}], "parallel": True}
-        ]}}
+        config = {
+            "pipeline": {
+                "stages": [
+                    {"id": "bad", "steps": [{"id": "x", "type": "unknown_type"}], "parallel": True}
+                ]
+            }
+        }
         p = Pipeline(config, tmp_workdir)
         result = p.run({"id": "t1", "title": "x", "criteria": []}, trigger="pre-eval")
         assert "bad" in result["stages"]
@@ -296,9 +316,13 @@ class TestPipelineRun:
 
     def test_script_no_command_returns_error(self, pipeline_config_default, tmp_workdir):
         """Script step with no command returns error."""
-        config = {"pipeline": {"stages": [
-            {"id": "empty", "parallel": True, "steps": [{"id": "x", "type": "script"}]}
-        ]}}
+        config = {
+            "pipeline": {
+                "stages": [
+                    {"id": "empty", "parallel": True, "steps": [{"id": "x", "type": "script"}]}
+                ]
+            }
+        }
         p = Pipeline(config, tmp_workdir)
         result = p.run({"id": "t1", "title": "x", "criteria": []}, trigger="pre-eval")
         assert "empty" in result["stages"]
@@ -313,6 +337,7 @@ class TestExtendedPipeline:
     def test_step_result_to_dict_all_fields(self):
         """StepResult.to_dict() includes id, type, passed, output, error."""
         from engine.pipeline import StepResult
+
         sr = StepResult(id="lint", type="script", passed=True, output="clean", error="")
         d = sr.to_dict()
         assert d["id"] == "lint"
@@ -324,6 +349,7 @@ class TestExtendedPipeline:
     def test_stage_result_all_failed_true_any_failed(self):
         """StageResult with failed steps has any_failed=True."""
         from engine.pipeline import StageResult, StepResult
+
         srs = [StepResult(id="s1", type="script", passed=False, output="err")]
         stage = StageResult(id="tier1", passed=False, any_failed=True, steps=srs)
         assert stage.any_failed is True
@@ -332,11 +358,16 @@ class TestExtendedPipeline:
     def test_template_unknown_var_unchanged(self, pipeline_config_default, tmp_workdir):
         """Template with unknown variable leaves braces unchanged."""
         from engine.pipeline import Pipeline
+
         config = {
             "pipeline": {
                 "stages": [
-                    {"id": "t1", "parallel": True, "on": ["pre-eval"],
-                     "steps": [{"id": "x", "type": "script", "run": "echo {{nonexistent}}"}]},
+                    {
+                        "id": "t1",
+                        "parallel": True,
+                        "on": ["pre-eval"],
+                        "steps": [{"id": "x", "type": "script", "run": "echo {{nonexistent}}"}],
+                    },
                 ],
             }
         }
@@ -349,11 +380,16 @@ class TestExtendedPipeline:
     def test_run_with_no_matching_trigger(self, pipeline_config_default, tmp_workdir):
         """Pipeline skips stage when trigger doesn't match."""
         from engine.pipeline import Pipeline
+
         config = {
             "pipeline": {
                 "stages": [
-                    {"id": "t1", "parallel": True, "on": ["pre-commit"],
-                     "steps": [{"id": "x", "type": "script", "run": "echo hi"}]},
+                    {
+                        "id": "t1",
+                        "parallel": True,
+                        "on": ["pre-commit"],
+                        "steps": [{"id": "x", "type": "script", "run": "echo hi"}],
+                    },
                 ],
             }
         }
@@ -441,6 +477,7 @@ class TestCppLanguageDetection:
     def test_cmake_lists_txt_detected_as_cpp(self, tmp_workdir):
         """CMakeLists.txt alone → primary language is cpp."""
         from engine.pipeline import _default_tier1_steps
+
         cmake_path = os.path.join(tmp_workdir, "CMakeLists.txt")
         with open(cmake_path, "w") as f:
             f.write("project(test)\n")
@@ -451,6 +488,7 @@ class TestCppLanguageDetection:
     def test_makefile_only_detected_as_c(self, tmp_workdir):
         """Makefile alone (no CMakeLists.txt) → primary language is c."""
         from engine.pipeline import _default_tier1_steps
+
         makefile_path = os.path.join(tmp_workdir, "Makefile")
         with open(makefile_path, "w") as f:
             f.write("all:\n\techo ok\n")
@@ -462,6 +500,7 @@ class TestCppLanguageDetection:
     def test_cmake_takes_priority_over_makefile(self, tmp_workdir):
         """Both CMakeLists.txt and Makefile present → CMakeLists.txt wins (cpp)."""
         from engine.pipeline import _default_tier1_steps
+
         cmake_path = os.path.join(tmp_workdir, "CMakeLists.txt")
         with open(cmake_path, "w") as f:
             f.write("project(test)\n")
@@ -476,6 +515,7 @@ class TestCppLanguageDetection:
     def test_cpp_lang_commands_produces_lint_and_test(self, tmp_workdir):
         """C++ pipeline produces lint + test steps (via make)."""
         from engine.pipeline import _default_tier1_steps
+
         cmake_path = os.path.join(tmp_workdir, "CMakeLists.txt")
         with open(cmake_path, "w") as f:
             f.write("project(test)\n")
@@ -490,6 +530,7 @@ class TestCppLanguageDetection:
     def test_c_and_cpp_both_produce_steps(self, tmp_workdir):
         """Both C (Makefile) and C++ (CMakeLists.txt) produce lint+test steps."""
         from engine.pipeline import _default_tier1_steps
+
         # Test C
         with open(os.path.join(tmp_workdir, "Makefile"), "w") as f:
             f.write("all:\n\techo ok\n")
@@ -509,11 +550,10 @@ class TestCppLanguageDetection:
     def test_no_cmake_or_makefile_skips_c_and_cpp(self, tmp_workdir):
         """No CMakeLists.txt or Makefile → falls back to secrets-only."""
         from engine.pipeline import _default_tier1_steps
+
         steps = _default_tier1_steps(tmp_workdir)
         step_ids = [s["id"] for s in steps]
-        assert "lint" not in step_ids, (
-            f"No C/C++ signature → should not have lint step: {step_ids}"
-        )
+        assert "lint" not in step_ids, f"No C/C++ signature → should not have lint step: {step_ids}"
         assert "tests" not in step_ids, (
             f"No C/C++ signature → should not have tests step: {step_ids}"
         )
@@ -528,6 +568,7 @@ class TestCsharpLanguageDetection:
     def test_csproj_detected_as_csharp(self, tmp_workdir):
         """*.csproj file → primary language is csharp."""
         from engine.pipeline import _default_tier1_steps
+
         csproj_path = os.path.join(tmp_workdir, "MyProject.csproj")
         with open(csproj_path, "w") as f:
             f.write("<Project />\n")
@@ -539,6 +580,7 @@ class TestCsharpLanguageDetection:
     def test_sln_detected_as_csharp(self, tmp_workdir):
         """*.sln file → primary language is csharp."""
         from engine.pipeline import _default_tier1_steps
+
         sln_path = os.path.join(tmp_workdir, "MySolution.sln")
         with open(sln_path, "w") as f:
             f.write("Microsoft Visual Studio Solution File\n")
@@ -550,6 +592,7 @@ class TestCsharpLanguageDetection:
     def test_csharp_lang_commands_produces_dotnet_steps(self, tmp_workdir):
         """C# pipeline produces lint + test steps (via dotnet)."""
         from engine.pipeline import _default_tier1_steps
+
         csproj_path = os.path.join(tmp_workdir, "App.csproj")
         with open(csproj_path, "w") as f:
             f.write("<Project />\n")
@@ -564,6 +607,7 @@ class TestCsharpLanguageDetection:
     def test_csproj_takes_priority_over_sln(self, tmp_workdir):
         """Both .csproj and .sln present → .csproj detected first (csharp)."""
         from engine.pipeline import _default_tier1_steps
+
         with open(os.path.join(tmp_workdir, "App.csproj"), "w") as f:
             f.write("<Project />\n")
         with open(os.path.join(tmp_workdir, "App.sln"), "w") as f:
@@ -580,9 +624,10 @@ class TestScalaLanguageDetection:
     def test_build_sbt_detected_as_scala(self, tmp_workdir):
         """build.sbt file → primary language is scala."""
         from engine.pipeline import _default_tier1_steps
+
         sbt_path = os.path.join(tmp_workdir, "build.sbt")
         with open(sbt_path, "w") as f:
-            f.write("name := \"test\"\n")
+            f.write('name := "test"\n')
         steps = _default_tier1_steps(tmp_workdir)
         step_ids = [s["id"] for s in steps]
         assert "lint" in step_ids
@@ -591,9 +636,10 @@ class TestScalaLanguageDetection:
     def test_scala_lang_commands_produces_sbt_steps(self, tmp_workdir):
         """Scala pipeline produces lint + test steps (via sbt)."""
         from engine.pipeline import _default_tier1_steps
+
         sbt_path = os.path.join(tmp_workdir, "build.sbt")
         with open(sbt_path, "w") as f:
-            f.write("name := \"test\"\n")
+            f.write('name := "test"\n')
         steps = _default_tier1_steps(tmp_workdir)
         lint_step = next((s for s in steps if s["id"] == "lint"), None)
         test_step = next((s for s in steps if s["id"] == "tests"), None)

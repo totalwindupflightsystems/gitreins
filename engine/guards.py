@@ -26,7 +26,10 @@ def check_go_lint(workdir: str) -> GoGuardResult:
     # Get staged Go files
     staged = subprocess.run(
         ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-        capture_output=True, text=True, timeout=10, cwd=workdir
+        capture_output=True,
+        text=True,
+        timeout=10,
+        cwd=workdir,
     )
     go_files = [f for f in staged.stdout.strip().split("\n") if f.endswith(".go")]
     if not go_files:
@@ -36,7 +39,10 @@ def check_go_lint(workdir: str) -> GoGuardResult:
     try:
         result = subprocess.run(
             ["golangci-lint", "run", "--new-from-rev=HEAD~1", *go_files],
-            capture_output=True, text=True, timeout=60, cwd=workdir
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=workdir,
         )
         if result.returncode == 0:
             return GoGuardResult(name="go_lint", passed=True, output="golangci-lint: clean")
@@ -47,8 +53,7 @@ def check_go_lint(workdir: str) -> GoGuardResult:
     # Fallback: go vet (per package or per file)
     try:
         result = subprocess.run(
-            ["go", "vet", "./..."],
-            capture_output=True, text=True, timeout=60, cwd=workdir
+            ["go", "vet", "./..."], capture_output=True, text=True, timeout=60, cwd=workdir
         )
         output = result.stdout + result.stderr
         if len(output) > 2000:
@@ -64,7 +69,10 @@ def check_go_tests(workdir: str) -> GoGuardResult:
     """Run go test on staged Go files."""
     staged = subprocess.run(
         ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-        capture_output=True, text=True, timeout=10, cwd=workdir
+        capture_output=True,
+        text=True,
+        timeout=10,
+        cwd=workdir,
     )
     go_files = [f for f in staged.stdout.strip().split("\n") if f.endswith(".go")]
     if not go_files:
@@ -73,7 +81,10 @@ def check_go_tests(workdir: str) -> GoGuardResult:
     try:
         result = subprocess.run(
             ["go", "test", "-count=1", "-short", "./..."],
-            capture_output=True, text=True, timeout=180, cwd=workdir
+            capture_output=True,
+            text=True,
+            timeout=180,
+            cwd=workdir,
         )
         output = result.stdout + result.stderr
         if len(output) > 2000:
@@ -91,7 +102,10 @@ def check_go_build(workdir: str) -> GoGuardResult:
     """Run go build on staged Go files to catch compile errors."""
     staged = subprocess.run(
         ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-        capture_output=True, text=True, timeout=10, cwd=workdir
+        capture_output=True,
+        text=True,
+        timeout=10,
+        cwd=workdir,
     )
     go_files = [f for f in staged.stdout.strip().split("\n") if f.endswith(".go")]
     if not go_files:
@@ -100,7 +114,10 @@ def check_go_build(workdir: str) -> GoGuardResult:
     try:
         result = subprocess.run(
             ["go", "build", "-buildvcs=false", "./..."],
-            capture_output=True, text=True, timeout=120, cwd=workdir
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=workdir,
         )
         output = result.stdout + result.stderr
         if len(output) > 2000:

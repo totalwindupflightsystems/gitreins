@@ -2,6 +2,7 @@
 Unit tests for engine/guard_manager.py — pre-commit static checks.
 axiom:trace work_item=GR-001 spec=specs/04-Guard-Manager.md plan=.memory-bank/work-items/GR-001/plan.yaml
 """
+
 import os
 import subprocess
 from unittest.mock import MagicMock, patch
@@ -9,7 +10,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from engine.guard_manager import (
-    GuardManager, GuardResult, Tier1Result,
+    GuardManager,
+    GuardResult,
+    Tier1Result,
     _discover_test_targets,
 )
 
@@ -30,7 +33,9 @@ class TestGuardResult:
 
     def test_guard_result_passed_false(self):
         """GuardResult with passed=False has output/error captured."""
-        gr = GuardResult(name="lint", passed=False, output="E501 line too long", error="exit code 1")
+        gr = GuardResult(
+            name="lint", passed=False, output="E501 line too long", error="exit code 1"
+        )
         assert gr.passed is False
         assert "E501" in gr.output
         assert "exit code 1" in gr.error
@@ -38,6 +43,7 @@ class TestGuardResult:
     def test_guardresult_is_frozen(self):
         """GuardResult fields cannot be mutated after construction."""
         from dataclasses import FrozenInstanceError
+
         gr = GuardResult(name="secrets", passed=True, output="clean")
         with pytest.raises(FrozenInstanceError):
             gr.passed = False
@@ -75,6 +81,7 @@ class TestTier1Result:
     def test_tier1result_is_frozen(self):
         """Tier1Result fields cannot be mutated after construction."""
         from dataclasses import FrozenInstanceError
+
         t1 = Tier1Result(passed=True, results=[])
         with pytest.raises(FrozenInstanceError):
             t1.passed = False
@@ -98,7 +105,9 @@ class TestGuardManagerInit:
 
     def test_tests_disabled_with_custom_command(self, tmp_workdir):
         """Config with guards.tests=false + custom test_command → tests disabled, command saved."""
-        gm = GuardManager(tmp_workdir, {"guards": {"tests": False, "test_command": "pytest custom/"}})
+        gm = GuardManager(
+            tmp_workdir, {"guards": {"tests": False, "test_command": "pytest custom/"}}
+        )
         assert gm._enabled["tests"] is False
         assert gm.config.get("guards", {}).get("test_command") == "pytest custom/"
 
@@ -129,7 +138,9 @@ class TestBuiltinSecretsScan:
 
     def test_openai_key_detected(self, tmp_workdir):
         """OpenAI key (sk-...) is detected as a hardcoded API key."""
-        _write_staged_file(tmp_workdir, "config.py", 'OPENAI_API_KEY = "sk-12345678901234567890123456789012"')
+        _write_staged_file(
+            tmp_workdir, "config.py", 'OPENAI_API_KEY = "sk-12345678901234567890123456789012"'
+        )
         gm = GuardManager(tmp_workdir)
         result = gm._builtin_secrets_scan()
         assert result.passed is False
@@ -138,7 +149,9 @@ class TestBuiltinSecretsScan:
 
     def test_github_token_detected(self, tmp_workdir):
         """GitHub token (ghp_...) is detected."""
-        _write_staged_file(tmp_workdir, "main.py", 'GITHUB_TOKEN = "ghp_123456789012345678901234567890123456"')
+        _write_staged_file(
+            tmp_workdir, "main.py", 'GITHUB_TOKEN = "ghp_123456789012345678901234567890123456"'
+        )
         gm = GuardManager(tmp_workdir)
         result = gm._builtin_secrets_scan()
         assert result.passed is False
@@ -146,8 +159,11 @@ class TestBuiltinSecretsScan:
 
     def test_private_key_block_detected(self, tmp_workdir):
         """Private key block (BEGIN RSA PRIVATE KEY) is detected."""
-        _write_staged_file(tmp_workdir, "key.pem",
-                           '-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----')
+        _write_staged_file(
+            tmp_workdir,
+            "key.pem",
+            "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----",
+        )
         gm = GuardManager(tmp_workdir)
         result = gm._builtin_secrets_scan()
         assert result.passed is False
@@ -176,7 +192,7 @@ class TestBuiltinSecretsScan:
 
     def test_todo_placeholder_whitelisted(self, tmp_workdir):
         """TODO/PLACEHOLDER comment is NOT flagged."""
-        _write_staged_file(tmp_workdir, "todo.py", '# TODO: sk-add-real-key-here (placeholder)')
+        _write_staged_file(tmp_workdir, "todo.py", "# TODO: sk-add-real-key-here (placeholder)")
         gm = GuardManager(tmp_workdir)
         result = gm._builtin_secrets_scan()
         # May or may not flag depending on exact match — just verify no crash
@@ -184,7 +200,9 @@ class TestBuiltinSecretsScan:
 
     def test_jwt_encode_whitelisted(self, tmp_workdir):
         """JWT in jwt.encode() call is NOT flagged."""
-        _write_staged_file(tmp_workdir, "auth.py", 'token = jwt.encode(payload, secret, algorithm="HS256")')
+        _write_staged_file(
+            tmp_workdir, "auth.py", 'token = jwt.encode(payload, secret, algorithm="HS256")'
+        )
         gm = GuardManager(tmp_workdir)
         result = gm._builtin_secrets_scan()
         assert result.passed is True
@@ -210,7 +228,9 @@ class TestSecretsSanitization:
 
     def test_secret_value_redacted(self, tmp_workdir):
         """Secret value is replaced with *** in output."""
-        _write_staged_file(tmp_workdir, "secrets.py", 'api_key = "sk-abc123def456789012345678901234"')
+        _write_staged_file(
+            tmp_workdir, "secrets.py", 'api_key = "sk-abc123def456789012345678901234"'
+        )
         gm = GuardManager(tmp_workdir)
         result = gm._builtin_secrets_scan()
         assert result.passed is False
@@ -225,9 +245,15 @@ class TestGuardToggling:
 
     def test_run_all_three_guards(self, guard_manager):
         """All guards enabled → run_all() returns 3 results."""
-        with patch.object(guard_manager, '_check_secrets', return_value=GuardResult("secrets", True, "ok")):
-            with patch.object(guard_manager, '_check_lint', return_value=GuardResult("lint", True, "ok")):
-                with patch.object(guard_manager, '_check_tests', return_value=GuardResult("tests", True, "ok")):
+        with patch.object(
+            guard_manager, "_check_secrets", return_value=GuardResult("secrets", True, "ok")
+        ):
+            with patch.object(
+                guard_manager, "_check_lint", return_value=GuardResult("lint", True, "ok")
+            ):
+                with patch.object(
+                    guard_manager, "_check_tests", return_value=GuardResult("tests", True, "ok")
+                ):
                     result = guard_manager.run_all()
         assert len(result.results) == 3
         assert result.passed is True
@@ -235,22 +261,30 @@ class TestGuardToggling:
     def test_only_secrets_enabled(self, tmp_workdir):
         """Only secrets enabled → run_all() returns 1 result."""
         gm = GuardManager(tmp_workdir, {"guards": {"secrets": True, "lint": False, "tests": False}})
-        with patch.object(gm, '_check_secrets', return_value=GuardResult("secrets", True, "ok")):
+        with patch.object(gm, "_check_secrets", return_value=GuardResult("secrets", True, "ok")):
             result = gm.run_all()
         assert len(result.results) == 1
 
     def test_no_guards_enabled(self, tmp_workdir):
         """No guards enabled → run_all() returns 0 results, passed=True."""
-        gm = GuardManager(tmp_workdir, {"guards": {"secrets": False, "lint": False, "tests": False}})
+        gm = GuardManager(
+            tmp_workdir, {"guards": {"secrets": False, "lint": False, "tests": False}}
+        )
         result = gm.run_all()
         assert len(result.results) == 0
         assert result.passed is True
 
     def test_run_all_sets_passed_false_on_any_failure(self, guard_manager):
         """If any guard fails, passed is False."""
-        with patch.object(guard_manager, '_check_secrets', return_value=GuardResult("secrets", True, "ok")):
-            with patch.object(guard_manager, '_check_lint', return_value=GuardResult("lint", False, "error")):
-                with patch.object(guard_manager, '_check_tests', return_value=GuardResult("tests", True, "ok")):
+        with patch.object(
+            guard_manager, "_check_secrets", return_value=GuardResult("secrets", True, "ok")
+        ):
+            with patch.object(
+                guard_manager, "_check_lint", return_value=GuardResult("lint", False, "error")
+            ):
+                with patch.object(
+                    guard_manager, "_check_tests", return_value=GuardResult("tests", True, "ok")
+                ):
                     result = guard_manager.run_all()
         assert result.passed is False
 
@@ -265,7 +299,7 @@ class TestLintGuard:
 
     def test_gitleaks_missing_falls_back(self, guard_manager):
         """When gitleaks not found, falls back to built-in scanner."""
-        with patch('subprocess.run', side_effect=FileNotFoundError("gitleaks")):
+        with patch("subprocess.run", side_effect=FileNotFoundError("gitleaks")):
             result = guard_manager._check_secrets()
         # Falls through to built-in scanner; should return a result
         assert result is not None
@@ -278,8 +312,8 @@ class TestTestsGuard:
         """Tests guard returns failure when test command can't run."""
         # Since v0.1.2, _check_tests runs test_command directly (no pytest gate).
         # If the command can't be found, subprocess.run raises an exception.
-        with patch('engine.guard_manager._get_staged_files', return_value=["dummy.py"]):
-            with patch('subprocess.run', side_effect=FileNotFoundError("go")):
+        with patch("engine.guard_manager._get_staged_files", return_value=["dummy.py"]):
+            with patch("subprocess.run", side_effect=FileNotFoundError("go")):
                 result = guard_manager._check_tests()
         assert result.passed is False
         assert "go" in str(result.error) or "FileNotFound" in str(result.error)
@@ -298,19 +332,24 @@ class TestExtendedGuardManager:
         mock_run.return_value.returncode = 0
         mock_run.return_value.stdout = "custom output"
         mock_run.return_value.stderr = ""
-        with patch('subprocess.run', side_effect=[
-            MagicMock(returncode=0, stdout="abc1234...", stderr=""),  # git rev-parse HEAD
-            MagicMock(returncode=0, stdout="test.py\n", stderr=""),   # git diff --cached
-            MagicMock(returncode=0, stdout="pytest 7.0", stderr=""),  # pytest --version
-            mock_run.return_value,                                     # echo custom-test-run
-        ]):
+        with patch(
+            "subprocess.run",
+            side_effect=[
+                MagicMock(returncode=0, stdout="abc1234...", stderr=""),  # git rev-parse HEAD
+                MagicMock(returncode=0, stdout="test.py\n", stderr=""),  # git diff --cached
+                MagicMock(returncode=0, stdout="pytest 7.0", stderr=""),  # pytest --version
+                mock_run.return_value,  # echo custom-test-run
+            ],
+        ):
             result = gm._check_tests()
         assert result.passed is True
 
     def test_check_tests_timeout_returns_failure(self, guard_manager):
         """_check_tests handles subprocess timeout."""
-        with patch('engine.guard_manager._get_staged_files', return_value=["dummy.py"]):
-            with patch('subprocess.run', side_effect=subprocess.TimeoutExpired(cmd="go test", timeout=120)):
+        with patch("engine.guard_manager._get_staged_files", return_value=["dummy.py"]):
+            with patch(
+                "subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="go test", timeout=120)
+            ):
                 result = guard_manager._check_tests()
         assert result.passed is False
         assert "timed out" in result.output
@@ -322,7 +361,7 @@ class TestExtendedGuardManager:
         mock_run.returncode = 0
         mock_run.stdout = "gitleaks: clean"
         mock_run.stderr = ""
-        with patch('subprocess.run', return_value=mock_run):
+        with patch("subprocess.run", return_value=mock_run):
             result = gm._check_secrets()
         assert "gitleaks" in result.output
         assert result.passed is True
@@ -334,7 +373,7 @@ class TestExtendedGuardManager:
         mock_run.returncode = 1
         mock_run.stdout = "leak detected in config.py"
         mock_run.stderr = ""
-        with patch('subprocess.run', return_value=mock_run):
+        with patch("subprocess.run", return_value=mock_run):
             result = gm._check_secrets()
         assert result.passed is False
 
@@ -354,7 +393,7 @@ class TestExtendedGuardManager:
         mock_ruff.returncode = 0
         mock_ruff.stdout = "ruff: clean"
         mock_ruff.stderr = ""
-        with patch('subprocess.run', side_effect=[mock_git_rev, mock_git_diff, mock_ruff]):
+        with patch("subprocess.run", side_effect=[mock_git_rev, mock_git_diff, mock_ruff]):
             result = gm._check_lint()
         assert result.passed is True
         assert "ruff" in result.output
@@ -396,7 +435,9 @@ class TestExtendedGuardManager:
 
     def test_gho_token_detected(self, tmp_workdir):
         """GitHub OAuth token (gho_) is detected."""
-        _write_staged_file(tmp_workdir, "github.py", 'oauth = "gho_abcdef123456789012345678901234567890"')
+        _write_staged_file(
+            tmp_workdir, "github.py", 'oauth = "gho_abcdef123456789012345678901234567890"'
+        )
         gm = GuardManager(tmp_workdir)
         result = gm._builtin_secrets_scan()
         assert result.passed is False
@@ -424,6 +465,7 @@ class TestGuardManagerConfigAutoLoad:
     def test_auto_loads_test_mode_from_config(self, tmp_workdir):
         """GuardManager() with no config dict reads test_mode from .gitreins/config.yaml."""
         import yaml
+
         workdir = tmp_workdir
         config_dir = os.path.join(workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
@@ -441,13 +483,12 @@ class TestGuardManagerConfigAutoLoad:
     def test_auto_loads_defaults_when_config_missing(self, tmp_workdir):
         """GuardManager() defaults to test_mode='full' when no config file exists."""
         gm = GuardManager(tmp_workdir)
-        assert gm.test_mode == "full", (
-            f"Default test_mode should be 'full', got '{gm.test_mode}'"
-        )
+        assert gm.test_mode == "full", f"Default test_mode should be 'full', got '{gm.test_mode}'"
 
     def test_auto_load_does_not_override_explicit_config(self, tmp_workdir):
         """Explicit config dict takes priority over .gitreins/config.yaml."""
         import yaml
+
         workdir = tmp_workdir
         config_dir = os.path.join(workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
@@ -464,6 +505,7 @@ class TestGuardManagerConfigAutoLoad:
     def test_auto_load_picks_up_secrets_flags(self, tmp_workdir):
         """GuardManager reads enabled flags (secrets, lint, tests) from config."""
         import yaml
+
         workdir = tmp_workdir
         config_dir = os.path.join(workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
@@ -492,6 +534,7 @@ class TestDiscoverTestTargetsDiffMode:
         """_discover_test_targets returns [] when staged file has no matching
         test file, NOT None (which caused fallthrough to full suite)."""
         import os
+
         workdir = tmp_workdir
         # Create a source file with NO corresponding test file
         src_dir = os.path.join(workdir, "src")
@@ -510,6 +553,7 @@ class TestDiscoverTestTargetsDiffMode:
     def test_returns_test_file_when_match_exists(self, tmp_workdir):
         """_discover_test_targets returns the matching test file when it exists."""
         import os
+
         workdir = tmp_workdir
         # Create a source file AND a matching test file
         src_dir = os.path.join(workdir, "engine")
@@ -535,6 +579,7 @@ class TestDiscoverTestTargetsDiffMode:
         """When .gitreins/config.yaml is staged, _discover_test_targets returns None
         (force-full trigger) to run the full test suite."""
         import os
+
         workdir = tmp_workdir
         config_dir = os.path.join(workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
@@ -552,11 +597,13 @@ class TestDiscoverTestTargetsDiffMode:
         """_check_tests in diff mode returns PASS when no test files match,
         instead of falling through to full suite (and timing out)."""
         import os
+
         workdir = tmp_workdir
         # Create .gitreins/config.yaml with test_mode=diff
         config_dir = os.path.join(workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
         import yaml
+
         with open(os.path.join(config_dir, "config.yaml"), "w") as f:
             yaml.safe_dump({"guards": {"test_mode": "diff", "test_command": "echo ok"}}, f)
 
@@ -581,12 +628,14 @@ class TestDiscoverTestTargetsDiffMode:
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
+
 def _write_staged_file(workdir, filename, content):
     """Create a file and stage it in a real git repo, for secrets scan testing.
 
     Uses git init + git add to create a realistic staged file.
     """
     import os
+
     filepath = os.path.join(workdir, filename)
     os.makedirs(os.path.dirname(filepath), exist_ok=True)
     with open(filepath, "w") as f:

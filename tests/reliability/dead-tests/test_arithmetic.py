@@ -19,7 +19,6 @@ Do not use as a template — these tests are deliberately broken.
 """
 
 
-
 # ── The system under test (SUT) — intentionally trivial so the tests
 #    are forced to engage with it. Any real failure here would surface.
 
@@ -44,7 +43,7 @@ def test_add_with_assert_true():
     0 or raise and this test would still pass.
     """
     add(2, 3)
-    assert True                        # ← tautology — passes for any result
+    assert True  # ← tautology — passes for any result
 
 
 # ── Flaw 2: `assert 1 == 1` — also a tautology ───────────────────────────────
@@ -57,8 +56,8 @@ def test_divide_with_trivial_equality():
     reference to `divide(...)` in the assertion. Even if `divide`
     was deleted from the module, this test would pass.
     """
-    divide(10, 2)                      # result discarded
-    assert 1 == 1                      # ← tautology
+    divide(10, 2)  # result discarded
+    assert 1 == 1  # ← tautology
 
 
 # ── Flaw 3: no assertion at all — function body computes and returns ────────
@@ -67,8 +66,8 @@ def test_divide_with_trivial_equality():
 def test_subtract_no_assertion():
     """Verify (5 - 3) == 2."""
     x = 5 - 3
-    return x                           # ← pytest ignores return values; the
-                                       #   test passes regardless of x
+    return x  # ← pytest ignores return values; the
+    #   test passes regardless of x
 
 
 # ── Flaw 4: assertion is in a try/except that swallows AssertionError ────────
@@ -82,11 +81,11 @@ def test_passes_when_it_should_fail():
     inside the SUT would be invisible.
     """
     try:
-        assert divide(1, 0) == 0       # ← this should fail but is caught
+        assert divide(1, 0) == 0  # ← this should fail but is caught
     except AssertionError:
-        pass                           # ← swallowed silently
+        pass  # ← swallowed silently
     except ZeroDivisionError:
-        pass                           # ← the actual behaviour is also swallowed
+        pass  # ← the actual behaviour is also swallowed
 
 
 # ── Flaw 5: assertion uses a literal that is not produced by the SUT ──────────
@@ -100,7 +99,7 @@ def test_uses_hardcoded_literal():
     instead of calling `add(2, 2)` — but the assertion still passes
     because both sides match.
     """
-    assert 4 == 4                      # ← tautology; never calls add()
+    assert 4 == 4  # ← tautology; never calls add()
     # The real check would have been:
     #     assert add(2, 2) == 5
     # which would have FAILED, exposing a real bug.

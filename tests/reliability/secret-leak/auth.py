@@ -20,9 +20,9 @@ OPENAI_API_KEY: str = "sk-proj-AbCdEf1234567890aBcDeF1234567890aBcDeF1234567890X
 
 # ── Flaw 2: AWS access key + secret in a CONFIG dict literal ─────────────────
 AWS_CREDENTIALS: dict = {
-    "aws_access_key_id":     "AKIAIOSFODNN7EXAMPLE",
+    "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
     "aws_secret_access_key": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-    "region":                "us-east-1",
+    "region": "us-east-1",
 }
 
 # ── Flaw 3: JWT signing secret as a top-level constant ────────────────────────
@@ -38,7 +38,7 @@ def get_admin_password() -> str:
     "admin123" — there is no environment lookup, no vault, no
     prompt. The secret is shipped in the binary.
     """
-    password = "admin123"                  # ← hardcoded
+    password = "admin123"  # ← hardcoded
     return password
 
 

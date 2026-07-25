@@ -101,7 +101,8 @@ def load_config(workdir: str) -> dict:
             "Failed to parse %s: %s — config file exists but YAML is invalid. "
             "Callers: do NOT overwrite this file with defaults. "
             "User: fix the YAML syntax before running 'gitreins init'.",
-            config_path, e,
+            config_path,
+            e,
         )
         return {}
     except Exception as e:
@@ -125,6 +126,7 @@ def _safe_overwrite(path: str, content_func) -> str | None:
     Returns the bak_path if a backup was created, else None.
     """
     import shutil
+
     bak_path = None
     if os.path.isfile(path) and os.path.getsize(path) > 0:
         bak_path = path + ".bak"
@@ -138,10 +140,13 @@ def _safe_overwrite(path: str, content_func) -> str | None:
 def get_workdir() -> str:
     """Find the git repo root."""
     import subprocess
+
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
         return result.stdout.strip()
     except Exception:
@@ -152,6 +157,7 @@ def _check_for_updates():
     """Check PyPI for a newer version. Prints notice to stderr if available."""
     try:
         from engine.config import check_for_update
+
         msg = check_for_update(workdir=get_workdir())
         if msg:
             print(f"  \033[33m{msg}\033[0m", file=sys.stderr)
@@ -209,10 +215,7 @@ def cmd_install(args):
     if os.path.isfile(gitignore_path):
         with open(gitignore_path, "r") as f:
             existing_gitignore = f.read()
-    already_present = any(
-        line.strip() == tasks_entry
-        for line in existing_gitignore.splitlines()
-    )
+    already_present = any(line.strip() == tasks_entry for line in existing_gitignore.splitlines())
     if already_present:
         skipped.append(f"{tasks_entry} already in .gitignore")
     else:
@@ -274,7 +277,6 @@ def cmd_init(args):
             sys.exit(1)
         existing = {}
 
-
     # Build or update sections
     changed = []
 
@@ -310,9 +312,15 @@ def cmd_init(args):
 
     # Write config
     os.makedirs(gitreins_dir, exist_ok=True)
-    bak = _safe_overwrite(config_path, lambda f: yaml.dump(
-        existing, f, default_flow_style=False, sort_keys=False,
-    ))
+    bak = _safe_overwrite(
+        config_path,
+        lambda f: yaml.dump(
+            existing,
+            f,
+            default_flow_style=False,
+            sort_keys=False,
+        ),
+    )
     if bak:
         changed.append(f"backup: {os.path.basename(bak)}")
 
@@ -339,8 +347,10 @@ def cmd_init(args):
     print(f"  Test cmd:    {test_cmd}")
     print(f"  Test mode:   {existing['guards'].get('test_mode', 'full')}")
     print(f"  Eval cap:    {existing['evaluator'].get('max_iterations', 100)} iterations")
-    print(f"  History:     {existing.get('history', {}).get('enabled', True) and 'enabled' or 'disabled'}")
-    sa_enabled = existing.get('guards', {}).get('static_analysis', False)
+    print(
+        f"  History:     {existing.get('history', {}).get('enabled', True) and 'enabled' or 'disabled'}"
+    )
+    sa_enabled = existing.get("guards", {}).get("static_analysis", False)
     sa_status = []
     if sa_enabled and static_tools:
         sa_status.append(f"enabled ({', '.join(static_tools)})")
@@ -375,9 +385,14 @@ def _detect_language(workdir: str) -> dict:
     'type' is the primary language (first detected), 'name' aggregates all found.
     """
     info = {
-        "name": "unknown", "type": "unknown",
-        "is_go": False, "is_python": False, "is_ts": False,
-        "is_ruby": False, "is_php": False, "is_rust": False,
+        "name": "unknown",
+        "type": "unknown",
+        "is_go": False,
+        "is_python": False,
+        "is_ts": False,
+        "is_ruby": False,
+        "is_php": False,
+        "is_rust": False,
         "has_sql": False,
     }
     langs_found: list[str] = []
@@ -388,24 +403,30 @@ def _detect_language(workdir: str) -> dict:
         if info["type"] == "unknown":
             info["type"] = "go"
 
-    if os.path.isfile(os.path.join(workdir, "pyproject.toml")) or \
-       os.path.isfile(os.path.join(workdir, "setup.py")) or \
-       os.path.isfile(os.path.join(workdir, "setup.cfg")) or \
-       os.path.isfile(os.path.join(workdir, "requirements.txt")):
+    if (
+        os.path.isfile(os.path.join(workdir, "pyproject.toml"))
+        or os.path.isfile(os.path.join(workdir, "setup.py"))
+        or os.path.isfile(os.path.join(workdir, "setup.cfg"))
+        or os.path.isfile(os.path.join(workdir, "requirements.txt"))
+    ):
         info["is_python"] = True
         langs_found.append("Python")
         if info["type"] == "unknown":
             info["type"] = "python"
 
-    if os.path.isfile(os.path.join(workdir, "package.json")) or \
-       os.path.isfile(os.path.join(workdir, "tsconfig.json")):
+    if os.path.isfile(os.path.join(workdir, "package.json")) or os.path.isfile(
+        os.path.join(workdir, "tsconfig.json")
+    ):
         info["is_ts"] = True
         langs_found.append("TypeScript")
         if info["type"] == "unknown":
             info["type"] = "typescript"
 
-    if os.path.isfile(os.path.join(workdir, "Gemfile")) or \
-       any(f.endswith(".gemspec") for f in os.listdir(workdir) if os.path.isfile(os.path.join(workdir, f))):
+    if os.path.isfile(os.path.join(workdir, "Gemfile")) or any(
+        f.endswith(".gemspec")
+        for f in os.listdir(workdir)
+        if os.path.isfile(os.path.join(workdir, f))
+    ):
         info["is_ruby"] = True
         langs_found.append("Ruby")
         if info["type"] == "unknown":
@@ -482,6 +503,7 @@ def _detect_test_command(workdir: str, lang: dict) -> str:
         if os.path.isfile(pkg):
             try:
                 import json
+
                 with open(pkg) as f:
                     data = json.load(f)
                 if data.get("scripts", {}).get("test"):
@@ -508,7 +530,11 @@ def _detect_project_size(workdir: str, lang: dict) -> dict:
     elif lang["is_python"]:
         py_pkgs = set()
         for root, dirs, files in os.walk(workdir):
-            dirs[:] = [d for d in dirs if d not in (".git", ".venv", "node_modules", ".gitreins", "__pycache__")]
+            dirs[:] = [
+                d
+                for d in dirs
+                if d not in (".git", ".venv", "node_modules", ".gitreins", "__pycache__")
+            ]
             if "__init__.py" in files:
                 py_pkgs.add(os.path.relpath(root, workdir))
         packages = len(py_pkgs) or 1
@@ -551,7 +577,7 @@ def _build_guards_section(lang: dict, test_cmd: str, static_tools: list[str] | N
             "tests": True,
             "test_mode": "full",
             "test_command": test_cmd,
-            "static_analysis": True,   # ON: dynamic language, no compiler
+            "static_analysis": True,  # ON: dynamic language, no compiler
         }
         if static_tools:
             section["static_analysis_tools"] = {"python": static_tools}
@@ -572,7 +598,7 @@ def _build_guards_section(lang: dict, test_cmd: str, static_tools: list[str] | N
             "tests": False,
             "test_mode": "full",
             "test_command": "bundle exec rspec",
-            "static_analysis": True,   # ON: dynamic language, no compiler
+            "static_analysis": True,  # ON: dynamic language, no compiler
         }
     elif lang["is_php"]:
         return {
@@ -581,7 +607,7 @@ def _build_guards_section(lang: dict, test_cmd: str, static_tools: list[str] | N
             "tests": False,
             "test_mode": "full",
             "test_command": "vendor/bin/phpunit",
-            "static_analysis": True,   # ON: dynamic language, no compiler
+            "static_analysis": True,  # ON: dynamic language, no compiler
         }
     elif lang["is_rust"]:
         return {
@@ -599,7 +625,7 @@ def _build_guards_section(lang: dict, test_cmd: str, static_tools: list[str] | N
             "tests": False,
             "test_mode": "full",
             "test_command": "echo 'No SQL test runner configured'",
-            "static_analysis": True,   # ON: no compiler for SQL
+            "static_analysis": True,  # ON: no compiler for SQL
         }
     else:
         return {
@@ -654,52 +680,64 @@ def _generate_gitleaks_config(workdir: str, lang: dict, target_path: str) -> Non
 
     # Language/ecosystem-specific exclusions
     if lang["is_python"]:
-        paths.extend([
-            ".venv/",
-            "venv/",
-            "__pycache__/",
-            "*.egg-info/",
-            "dist/",
-            "build/",
-            ".mypy_cache/",
-            ".pytest_cache/",
-            ".ruff_cache/",
-        ])
+        paths.extend(
+            [
+                ".venv/",
+                "venv/",
+                "__pycache__/",
+                "*.egg-info/",
+                "dist/",
+                "build/",
+                ".mypy_cache/",
+                ".pytest_cache/",
+                ".ruff_cache/",
+            ]
+        )
     elif lang["is_ts"]:
-        paths.extend([
-            "node_modules/",
-            ".pnpm-store/",
-            "apps/*/node_modules/",
-            "packages/*/node_modules/",
-            "apps/*/dist/",
-            "packages/*/dist/",
-            "dist/",
-            "build/",
-            ".turbo/",
-            ".next/",
-            "coverage/",
-        ])
+        paths.extend(
+            [
+                "node_modules/",
+                ".pnpm-store/",
+                "apps/*/node_modules/",
+                "packages/*/node_modules/",
+                "apps/*/dist/",
+                "packages/*/dist/",
+                "dist/",
+                "build/",
+                ".turbo/",
+                ".next/",
+                "coverage/",
+            ]
+        )
     elif lang["is_go"]:
-        paths.extend([
-            "vendor/",
-        ])
+        paths.extend(
+            [
+                "vendor/",
+            ]
+        )
     elif lang["is_ruby"]:
-        paths.extend([
-            "vendor/bundle/",
-            ".bundle/",
-        ])
+        paths.extend(
+            [
+                "vendor/bundle/",
+                ".bundle/",
+            ]
+        )
     elif lang["is_rust"]:
-        paths.extend([
-            "target/",
-        ])
+        paths.extend(
+            [
+                "target/",
+            ]
+        )
 
     # Documentation/spec files (often contain example keys)
-    paths.extend([
-        "specs/",
-        "docs/",
-        "*.spec.md",
-        "*.md",
-    ])
+    paths.extend(
+        [
+            "specs/",
+            "docs/",
+            "*.spec.md",
+            "*.md",
+        ]
+    )
 
     # Build TOML
     lines = [
@@ -712,7 +750,7 @@ def _generate_gitleaks_config(workdir: str, lang: dict, target_path: str) -> Non
         "[[rules]]",
         'id = "sk-api-key"',
         'description = "OpenAI/OpenRouter/DeepSeek API key (sk- prefix)"',
-        'regex = \'\'\'(?i)sk-[a-zA-Z0-9_-]{20,}\'\'\'',
+        "regex = '''(?i)sk-[a-zA-Z0-9_-]{20,}'''",
         "",
         "[allowlist]",
         'description = "Auto-generated by gitreins init — skip dependency dirs, docs, specs"',
@@ -732,6 +770,7 @@ def _generate_gitleaks_config(workdir: str, lang: dict, target_path: str) -> Non
 
 def cmd_task_create(args):
     from engine.task_manager import TaskManager
+
     tm = TaskManager(get_workdir())
     criteria = args.criteria if args.criteria else []
     depends_on = args.depends_on if hasattr(args, "depends_on") and args.depends_on else []
@@ -745,6 +784,7 @@ def cmd_task_create(args):
 
 def cmd_task_start(args):
     from engine.task_manager import TaskManager
+
     tm = TaskManager(get_workdir())
     task = tm.start(args.id)
     print(f"Started: {task.id} → {task.status}")
@@ -764,7 +804,9 @@ def cmd_task_complete(args):
     if not force:
         blocked = tm.check_dependencies(args.id)
         if blocked:
-            print(f"Cannot complete '{args.id}' — depends on incomplete tasks: {', '.join(blocked)}")
+            print(
+                f"Cannot complete '{args.id}' — depends on incomplete tasks: {', '.join(blocked)}"
+            )
             print("Complete those tasks first, or use --force to skip dependency checks.")
             sys.exit(1)
 
@@ -783,6 +825,7 @@ def cmd_task_complete(args):
 
 def cmd_task_list(args):
     from engine.task_manager import TaskManager
+
     tm = TaskManager(get_workdir())
     tasks = tm.list_tasks(args.status)
     if not tasks:
@@ -795,6 +838,7 @@ def cmd_task_list(args):
 
 def cmd_task_delete(args):
     from engine.task_manager import TaskManager
+
     tm = TaskManager(get_workdir())
     tm.delete(args.id)
     print(f"Deleted: {args.id}")
@@ -867,6 +911,7 @@ def _cmd_report_tui(workdir: str, n: int = 20):
 
     try:
         from importlib.util import find_spec
+
         if not find_spec("textual"):
             raise ImportError
     except ImportError:
@@ -933,10 +978,11 @@ def _cmd_report_tui(workdir: str, n: int = 20):
 def cmd_guard_run(args):
     _check_for_updates()
     from engine.guard_manager import GuardManager
+
     workdir = get_workdir()
     config = load_config(workdir)
     gm = GuardManager(workdir, config=config)
-    result = gm.run_all(force_dead_code=getattr(args, 'dead_code', False))
+    result = gm.run_all(force_dead_code=getattr(args, "dead_code", False))
 
     # Build mode note
     mode = gm.test_mode
@@ -1007,7 +1053,8 @@ def cmd_commit(args):
         print("Tier 1 PASSED — committing...")
     result = subprocess.run(
         ["git", "commit", "-m", args.message],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
         cwd=workdir,
     )
     print(result.stdout + result.stderr)
@@ -1034,8 +1081,7 @@ def cmd_commit_audit(args):
             with open(msg_path, "r") as f:
                 raw = f.read().strip()
             message = "\n".join(
-                line for line in raw.split("\n")
-                if not line.startswith("#")
+                line for line in raw.split("\n") if not line.startswith("#")
             ).strip()
 
     if not message:
@@ -1094,9 +1140,7 @@ def cmd_security_scan(args):
 
     workdir = get_workdir()
     config = load_config(workdir)
-    security_cfg = (
-        (config or {}).get("defaults", {}).get("security_scan", {}) or {}
-    )
+    security_cfg = (config or {}).get("defaults", {}).get("security_scan", {}) or {}
 
     force_ml = bool(getattr(args, "force_ml", False))
     output_fmt = getattr(args, "output", "text") or "text"
@@ -1129,8 +1173,7 @@ def cmd_security_scan(args):
                 __import__(mod_name)
             except ImportError as exc:
                 print(
-                    f"Antares ML mode requires {mod_name}: {exc}\n"
-                    f"Install with: {install_hint}",
+                    f"Antares ML mode requires {mod_name}: {exc}\nInstall with: {install_hint}",
                     file=sys.stderr,
                 )
                 sys.exit(2)
@@ -1157,13 +1200,18 @@ def cmd_security_scan(args):
         sys.exit(1)
 
     if output_fmt == "json":
-        payload = [f.to_dict() if hasattr(f, "to_dict") else {
-            "file": getattr(f, "file", ""),
-            "line": getattr(f, "line", 0),
-            "cve_id": getattr(f, "cve_id", ""),
-            "confidence": getattr(f, "confidence", 0.0),
-            "description": getattr(f, "description", ""),
-        } for f in findings]
+        payload = [
+            f.to_dict()
+            if hasattr(f, "to_dict")
+            else {
+                "file": getattr(f, "file", ""),
+                "line": getattr(f, "line", 0),
+                "cve_id": getattr(f, "cve_id", ""),
+                "confidence": getattr(f, "confidence", 0.0),
+                "description": getattr(f, "description", ""),
+            }
+            for f in findings
+        ]
         print(_json.dumps(payload, indent=2))
     else:
         if not findings:
@@ -1173,10 +1221,7 @@ def cmd_security_scan(args):
             target = directory or "staged files"
             print(f"Antares: {len(findings)} potential finding(s) in {target}:")
             for f in findings:
-                print(
-                    f"  • {f.file}:{f.line} [{f.cve_id} conf={f.confidence:.2f}] "
-                    f"{f.description}"
-                )
+                print(f"  • {f.file}:{f.line} [{f.cve_id} conf={f.confidence:.2f}] {f.description}")
 
     sys.exit(1 if findings else 0)
 
@@ -1212,7 +1257,8 @@ def cmd_setup_tools(args):
         else:
             missing += 1
             install = _TOOL_INSTALL_GUIDE.get(
-                tool, f"Install {tool} from your package manager",
+                tool,
+                f"Install {tool} from your package manager",
             )
             print(f"  {tool:<12} ✗ not installed — install: {install}")
 
@@ -1222,8 +1268,10 @@ def cmd_setup_tools(args):
 
 def cmd_mcp_server(args):
     import sys
+
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from gitreins_mcp.server import GitReinsMCPServer
+
     server = GitReinsMCPServer(get_workdir())
     server.run_stdio()
 
@@ -1248,7 +1296,12 @@ def main():
     create_p.add_argument("id")
     create_p.add_argument("title")
     create_p.add_argument("criteria", nargs="*")
-    create_p.add_argument("--depends-on", action="append", default=[], help="Task ID that must complete first (repeatable)")
+    create_p.add_argument(
+        "--depends-on",
+        action="append",
+        default=[],
+        help="Task ID that must complete first (repeatable)",
+    )
 
     start_p = task_sub.add_parser("start", help="Start a task")
     start_p.add_argument("id")
@@ -1265,23 +1318,33 @@ def main():
 
     # guard
     guard_p = sub.add_parser("guard", help="Run Tier 1 guards")
-    guard_p.add_argument("--dead-code", action="store_true", help="Enable Python dead-code detection (overrides config)")
+    guard_p.add_argument(
+        "--dead-code",
+        action="store_true",
+        help="Enable Python dead-code detection (overrides config)",
+    )
 
     # judge
     judge_p = sub.add_parser("judge", help="Evaluate a task")
     judge_p.add_argument("id")
-    judge_p.add_argument("--skip-tier2", action="store_true",
-                         help="Skip Tier 2 LLM evaluation; Tier 1 guards only")
+    judge_p.add_argument(
+        "--skip-tier2", action="store_true", help="Skip Tier 2 LLM evaluation; Tier 1 guards only"
+    )
 
     # commit
     commit_p = sub.add_parser("commit", help="Commit with guard checks")
     commit_p.add_argument("message")
-    commit_p.add_argument("--skip-tier2", action="store_true",
-                          help="Skip any Tier 2 processing; Tier 1 guards only")
+    commit_p.add_argument(
+        "--skip-tier2", action="store_true", help="Skip any Tier 2 processing; Tier 1 guards only"
+    )
 
     # commit-audit
-    audit_p = sub.add_parser("commit-audit", help="Validate commit message against staged diff (commit-msg hook)")
-    audit_p.add_argument("message", nargs="?", help="Commit message (reads from COMMIT_EDITMSG if omitted)")
+    audit_p = sub.add_parser(
+        "commit-audit", help="Validate commit message against staged diff (commit-msg hook)"
+    )
+    audit_p.add_argument(
+        "message", nargs="?", help="Commit message (reads from COMMIT_EDITMSG if omitted)"
+    )
 
     # mcp-server
     sub.add_parser("mcp-server", help="Run MCP stdio server")
@@ -1292,20 +1355,26 @@ def main():
         help="Run the Antares CVE localization scanner (opt-in)",
     )
     security_p.add_argument(
-        "--directory", "-d",
+        "--directory",
+        "-d",
         help="Scan a directory recursively instead of staged files",
     )
     security_p.add_argument(
-        "--output", choices=["text", "json"], default="text",
+        "--output",
+        choices=["text", "json"],
+        default="text",
         help="Output format (default: text)",
     )
     security_p.add_argument(
-        "--force-ml", action="store_true",
+        "--force-ml",
+        action="store_true",
         help="Require ML inference (fails if huggingface_hub/transformers missing)",
     )
 
     # setup-tools
-    sub.add_parser("setup-tools", help="Show available static analysis tools and install instructions")
+    sub.add_parser(
+        "setup-tools", help="Show available static analysis tools and install instructions"
+    )
 
     # report
     report_p = sub.add_parser("report", help="Show verdict history")
