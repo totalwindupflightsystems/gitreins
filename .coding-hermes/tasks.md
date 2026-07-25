@@ -2846,3 +2846,46 @@ Ran full 11-point audit + discovery sweep. Board all [x] except GR-099 (BLOCKED 
 **Guard:** PASS (all 4 ✓). **CI:** 5/5 green. **gitreins:** 0.11.0. **ruff:** 0.16.0. **Hilo:** 471 edges, 86 files.
 
 ## [x] NEVER-DONE — Run 11-point never-done audit (Tick 69)
+
+---
+
+## Phase: Never-Done Audit — 2026-07-25 Tick 72 (PRODUCTIVE — formatter + CODEOWNERS gaps fixed)
+
+Ran full 14-point audit (expanded from 11-point). Board all [x] except GR-099 (BLOCKED — pydantic→mcp constraint chain) and GR-118 (BLOCKED — Tirith mass-delete). Guard PASS (all 4 Tier 1 ✓). CI 5/5 green. **Found 2 actionable gaps that had persisted across 6+ ticks.** Prior ticks (#66-69) all claimed "zero actionable gaps" but never checked the formatter gate.
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Build | ✅ | import OK |
+| 2 | Tests | ✅ | 1126 passed, 7 skipped, 2 warnings |
+| 3 | Vet/Lint | ✅ | ruff check: All checks passed |
+| 4 | Formatter | →FIXED | **GAP: 58 files not formatted** (persisted across 6+ ticks — prior audits only ran `ruff check`, never `ruff format --check`). FIXED: `ruff format engine/ tests/ gitreins/` → 58 files reformatted, 70 files already formatted after fix. |
+| 5 | TODOs/FIXMEs | ✅ | 1 non-test TODO in commit_audit.py:226 (pattern detection, not real TODO) |
+| 6 | Hilo | ✅ | 471 edges, 86 files (9 languages). Stable. Orphan pattern normal for library. |
+| 7 | GitReins | ✅ | Guard PASS (secrets ✓, lint ✓, tests ✓, lsp ✓). All tasks complete. Evaluator configured (deepseek-v4-flash, 100/30m/10M/1M caps). |
+| 8 | DuckBrain | ✅ | 1 key in gitreins-poc namespace. Thinner than prior-tick claims (Tick 66 claimed 25 keys in coding-hermes namespace — cross-namespace mismatch). |
+| 9 | CI | ✅ | 5/5 green on totalwindupflightsystems/gitreins. Most recent: Tick 71 success (3m21s). |
+| 10 | Deps | ✅ (3 non-blocked stale) | pydantic-core 2.46.4 (blocked per GR-099). types-PyYAML 6.0.12.20260518→20260724 (stub-only). tokenizers 0.22.2→0.23.1 (Antares ML dep). onnxruntime 1.27.0→1.28.0 (Antares ML dep). pip-audit: CLEAN. |
+| 11 | Security | →FIXED | **GAP: CODEOWNERS missing.** FIXED: created CODEOWNERS with `* @wojonstech`. SECURITY.md present ✓. |
+| 12 | Middle-out | ✅ | Python project — skip Go-style wiring check. Entry points: gitreins/cli.py, gitreins_mcp/server.py. |
+| 13 | E2E | ⚠️ DUE | No e2e-output/ directory exists. E2E-001 is overdue (5+ ticks since last run). Non-blocking — marked for next tick or worker dispatch. |
+| 14 | GitReins Judge | ✅ | Evaluator section in .gitreins/config.yaml: model=deepseek-v4-flash, 100/30m/10M/1M caps. |
+
+### Fixes applied this tick
+
+| # | Task | Status | Detail |
+|---|------|--------|--------|
+| FORMAT | ruff format — 58 files reformatted | [x] | `ruff format engine/ tests/ gitreins/`. Gap: prior audits only ran `ruff check` (lint), never `ruff format --check` (formatter). 6+ idle ticks claimed "zero gaps" while format drift accumulated. Per pitfall in foreman-tick-fallback reference: linters and formatters are separate tools. |
+| CODEOWNERS | Create CODEOWNERS file | [x] | Missing entirely. Created with `* @wojonstech`. Required for OSS governance. |
+
+### Idle Tick Tracking
+- Consecutive idle ticks: **0 (RESET — productive: formatter + CODEOWNERS fixes)**
+- Last productive: Tick 72 (this tick)
+- Previous idle streak: 2 (Ticks 68-69), reset by productive Tick 71 (GR-129 mpmath), then Tick 72 productive
+- GR-099 remains BLOCKED (pydantic 2.13.4 → pydantic-core==2.46.4 transitive constraint)
+- GR-118 remains BLOCKED (Tirith mass-delete — 5 temp files in .coding-hermes/, gitignored, harmless)
+
+**Prior-tick cross-namespace fabrication note:** Tick 66 claimed "25 keys in coding-hermes namespace under /projects/gitreins-poc/" but DuckBrain `list_keys(namespace="gitreins-poc")` returns 1 key. Prior audits queried the wrong namespace (coding-hermes instead of gitreins-poc). This is the DuckBrain namespace false-zero pitfall documented in self-heal Step 0.5 pattern #5.
+
+**Guard:** PASS (all 4 ✓). **CI:** 5/5 green. **gitreins:** 0.11.0. **ruff:** 0.16.0. **Hilo:** 471 edges, 86 files.
+
+## [x] NEVER-DONE — Run 14-point never-done audit (Tick 72)
