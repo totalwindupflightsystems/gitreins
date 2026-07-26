@@ -63,7 +63,7 @@ class GitReinsMCPServer:
                     "properties": {
                         "env": {
                             "type": "object",
-                            "description": "Dict of environment variables to set (e.g. {\"DEEPSEEK_API_KEY\": \"sk-xxx\", \"OPENROUTER_API_KEY\": \"sk-xxx\"}). These are pushed into os.environ so the LLM client picks them up on next init.",
+                            "description": 'Dict of environment variables to set (e.g. {"DEEPSEEK_API_KEY": "sk-xxx", "OPENROUTER_API_KEY": "sk-xxx"}). These are pushed into os.environ so the LLM client picks them up on next init.',
                             "additionalProperties": {"type": "string"},
                         },
                         "model": {
@@ -88,14 +88,20 @@ class GitReinsMCPServer:
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "id": {"type": "string", "description": "Unique task ID (e.g., 'login-endpoint')"},
+                        "id": {
+                            "type": "string",
+                            "description": "Unique task ID (e.g., 'login-endpoint')",
+                        },
                         "title": {"type": "string", "description": "Human-readable title"},
                         "criteria": {
                             "type": "array",
                             "items": {"type": "string"},
                             "description": "List of completion criteria — each must be verified",
                         },
-                        "workdir": {"type": "string", "description": "Absolute path to the repo. Tasks are stored in <workdir>/.gitreins/tasks.yaml. Defaults to the MCP server's workdir."},
+                        "workdir": {
+                            "type": "string",
+                            "description": "Absolute path to the repo. Tasks are stored in <workdir>/.gitreins/tasks.yaml. Defaults to the MCP server's workdir.",
+                        },
                     },
                     "required": ["id", "title", "criteria"],
                 },
@@ -107,7 +113,10 @@ class GitReinsMCPServer:
                     "type": "object",
                     "properties": {
                         "id": {"type": "string", "description": "Task ID to start"},
-                        "workdir": {"type": "string", "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir."},
+                        "workdir": {
+                            "type": "string",
+                            "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir.",
+                        },
                     },
                     "required": ["id"],
                 },
@@ -119,7 +128,10 @@ class GitReinsMCPServer:
                     "type": "object",
                     "properties": {
                         "id": {"type": "string", "description": "Task ID to complete"},
-                        "workdir": {"type": "string", "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir."},
+                        "workdir": {
+                            "type": "string",
+                            "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir.",
+                        },
                     },
                     "required": ["id"],
                 },
@@ -135,7 +147,10 @@ class GitReinsMCPServer:
                             "enum": ["pending", "in_progress", "complete"],
                             "description": "Filter by status",
                         },
-                        "workdir": {"type": "string", "description": "Absolute path to the repo. Defaults to the MCP server's workdir."},
+                        "workdir": {
+                            "type": "string",
+                            "description": "Absolute path to the repo. Defaults to the MCP server's workdir.",
+                        },
                     },
                 },
             },
@@ -146,7 +161,10 @@ class GitReinsMCPServer:
                     "type": "object",
                     "properties": {
                         "id": {"type": "string", "description": "Task ID"},
-                        "workdir": {"type": "string", "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir."},
+                        "workdir": {
+                            "type": "string",
+                            "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir.",
+                        },
                     },
                     "required": ["id"],
                 },
@@ -158,7 +176,10 @@ class GitReinsMCPServer:
                     "type": "object",
                     "properties": {
                         "id": {"type": "string", "description": "Task ID to delete"},
-                        "workdir": {"type": "string", "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir."},
+                        "workdir": {
+                            "type": "string",
+                            "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir.",
+                        },
                     },
                     "required": ["id"],
                 },
@@ -180,8 +201,15 @@ class GitReinsMCPServer:
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "workdir": {"type": "string", "description": "Absolute path to the repo to guard. Defaults to the MCP server's workdir."},
-                        "dead_code": {"type": "boolean", "description": "Enable dead-code detection (Python AST-based). Overrides config.", "default": False},
+                        "workdir": {
+                            "type": "string",
+                            "description": "Absolute path to the repo to guard. Defaults to the MCP server's workdir.",
+                        },
+                        "dead_code": {
+                            "type": "boolean",
+                            "description": "Enable dead-code detection (Python AST-based). Overrides config.",
+                            "default": False,
+                        },
                     },
                 },
             },
@@ -192,13 +220,34 @@ class GitReinsMCPServer:
                     "type": "object",
                     "properties": {
                         "id": {"type": "string", "description": "Task ID to evaluate"},
-                        "workdir": {"type": "string", "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir."},
-                        "max_iterations": {"type": "number", "description": "Max LLM reasoning turns (-1 = unlimited). Tool calls cost 0.1 by default."},
-                        "max_time": {"type": "string", "description": "Wall-clock cap: '30s', '5m', '2h'."},
-                        "max_input_tokens": {"type": "string", "description": "Input token budget: '200k', '0.1M'."},
-                        "max_output_tokens": {"type": "string", "description": "Output token budget: '50k', '0.05M'."},
-                        "tool_call_weight": {"type": "number", "description": "Fraction of an iteration each tool call costs (default 0.1)."},
-                        "eval_cap": {"type": "string", "description": "Legacy combined cap string: '100/30m/200k/50k'. Individual params take priority if both are set."},
+                        "workdir": {
+                            "type": "string",
+                            "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir.",
+                        },
+                        "max_iterations": {
+                            "type": "number",
+                            "description": "Max LLM reasoning turns (-1 = unlimited). Tool calls cost 0.1 by default.",
+                        },
+                        "max_time": {
+                            "type": "string",
+                            "description": "Wall-clock cap: '30s', '5m', '2h'.",
+                        },
+                        "max_input_tokens": {
+                            "type": "string",
+                            "description": "Input token budget: '200k', '0.1M'.",
+                        },
+                        "max_output_tokens": {
+                            "type": "string",
+                            "description": "Output token budget: '50k', '0.05M'.",
+                        },
+                        "tool_call_weight": {
+                            "type": "number",
+                            "description": "Fraction of an iteration each tool call costs (default 0.1).",
+                        },
+                        "eval_cap": {
+                            "type": "string",
+                            "description": "Legacy combined cap string: '100/30m/200k/50k'. Individual params take priority if both are set.",
+                        },
                     },
                     "required": ["id"],
                 },
@@ -209,7 +258,10 @@ class GitReinsMCPServer:
                 "inputSchema": {
                     "type": "object",
                     "properties": {
-                        "source": {"type": "string", "description": "Source repo path. Defaults to server workdir."},
+                        "source": {
+                            "type": "string",
+                            "description": "Source repo path. Defaults to server workdir.",
+                        },
                         "targets": {
                             "type": "array",
                             "items": {"type": "string"},
@@ -223,11 +275,13 @@ class GitReinsMCPServer:
 
     # ── Tool handlers ────────────────────────────────────────────
 
-    def _configure(self,
-                   env: dict[str, str] | None = None,
-                   model: str | None = None,
-                   base_url: str | None = None,
-                   provider: str | None = None) -> dict:
+    def _configure(
+        self,
+        env: dict[str, str] | None = None,
+        model: str | None = None,
+        base_url: str | None = None,
+        provider: str | None = None,
+    ) -> dict:
         """Hot-reload the MCP server's LLM configuration at runtime.
 
         Sets environment variables and recreates the LLM client and Judge
@@ -296,7 +350,9 @@ class GitReinsMCPServer:
                 return TaskManager(wd)
         return self.tasks
 
-    def _task_create(self, id: str, title: str, criteria: list[str], workdir: str | None = None) -> dict:
+    def _task_create(
+        self, id: str, title: str, criteria: list[str], workdir: str | None = None
+    ) -> dict:
         tm = self._task_manager_for(workdir)
         task = tm.create(id, title, criteria)
         logger.info("Task created: %s (workdir=%s)", id, tm.workdir)
@@ -381,7 +437,9 @@ class GitReinsMCPServer:
         try:
             result = subprocess.run(
                 ["git", "commit", "-m", message],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True,
+                text=True,
+                timeout=30,
                 cwd=self.workdir,
             )
             return {
@@ -395,6 +453,7 @@ class GitReinsMCPServer:
         """Run Tier 1 static guards. Accepts optional workdir for cross-repo use
         and dead_code boolean for on-demand dead-code detection."""
         import yaml
+
         wd = os.path.abspath(workdir) if workdir else self.workdir
         # Load config from .gitreins/config.yaml (same pattern as CLI)
         config: dict[str, object] = {}
@@ -416,13 +475,17 @@ class GitReinsMCPServer:
             ],
         }
 
-    def _judge_evaluate(self, id: str, workdir: str | None = None,
-                        max_iterations: float | None = None,
-                        max_time: str | None = None,
-                        max_input_tokens: str | None = None,
-                        max_output_tokens: str | None = None,
-                        tool_call_weight: float | None = None,
-                        eval_cap: str | None = None) -> dict:
+    def _judge_evaluate(
+        self,
+        id: str,
+        workdir: str | None = None,
+        max_iterations: float | None = None,
+        max_time: str | None = None,
+        max_input_tokens: str | None = None,
+        max_output_tokens: str | None = None,
+        tool_call_weight: float | None = None,
+        eval_cap: str | None = None,
+    ) -> dict:
         """Run full evaluation pipeline. Accepts individual cap params or legacy eval_cap string."""
         from engine.eval_cap import EvalCap
 
@@ -434,21 +497,25 @@ class GitReinsMCPServer:
         cap = EvalCap()
         if eval_cap:
             from engine.eval_cap import parse_eval_cap
+
             cap = parse_eval_cap(eval_cap)
         if max_iterations is not None:
             cap.max_iterations = -1.0 if max_iterations <= 0 else float(max_iterations)
         if max_time is not None:
             from engine.eval_cap import _parse_time
+
             t = _parse_time(max_time)
             if t is not None:
                 cap.max_seconds = float(t)
         if max_input_tokens is not None:
             from engine.eval_cap import _parse_tokens
+
             tok = _parse_tokens(max_input_tokens)
             if tok is not None:
                 cap.max_input_tokens = tok
         if max_output_tokens is not None:
             from engine.eval_cap import _parse_tokens
+
             tok = _parse_tokens(max_output_tokens)
             if tok is not None:
                 cap.max_output_tokens = tok
@@ -467,10 +534,20 @@ class GitReinsMCPServer:
             task = self.tasks.get(id)
             if not task:
                 return {"error": f"Task not found: {id}"}
-            j = Judge(self.llm, self.workdir, eval_cap=cap) if any([
-                max_iterations is not None, max_time, max_input_tokens,
-                max_output_tokens, tool_call_weight, eval_cap,
-            ]) else self.judge
+            j = (
+                Judge(self.llm, self.workdir, eval_cap=cap)
+                if any(
+                    [
+                        max_iterations is not None,
+                        max_time,
+                        max_input_tokens,
+                        max_output_tokens,
+                        tool_call_weight,
+                        eval_cap,
+                    ]
+                )
+                else self.judge
+            )
             result = j.evaluate_task(task)
         d = {
             "task_id": id,
@@ -514,7 +591,10 @@ class GitReinsMCPServer:
             return {
                 "jsonrpc": "2.0",
                 "id": req_id,
-                "error": {"code": -32600, "message": "Invalid Request: jsonrpc field must be '2.0'"},
+                "error": {
+                    "code": -32600,
+                    "message": "Invalid Request: jsonrpc field must be '2.0'",
+                },
             }
 
         try:
@@ -600,7 +680,7 @@ class GitReinsMCPServer:
                         if escape:
                             escape = False
                             continue
-                        if ch == '\\':
+                        if ch == "\\":
                             escape = True
                             continue
                         if ch == '"' and not escape:
@@ -608,11 +688,11 @@ class GitReinsMCPServer:
                             continue
                         if in_string:
                             continue
-                        if ch in '{[':
+                        if ch in "{[":
                             if depth == 0:
                                 first_brace = i
                             depth += 1
-                        elif ch in '}]':
+                        elif ch in "}]":
                             depth -= 1
                             if depth == 0 and first_brace >= 0:
                                 split_at = i + 1
