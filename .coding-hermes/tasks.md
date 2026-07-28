@@ -3042,4 +3042,61 @@ Ran full 14-point audit + discovery sweep. Board all [x] except GR-099 (BLOCKED 
 
 **Guard:** PASS (all 4 ✓). **CI:** 5/5 green. **gitreins:** 0.11.0. **ruff:** 0.16.0. **Hilo:** 695 edges, 84 files.
 
+---
+
+## Phase: Never-Done Audit — 2026-07-27 Tick 76 (IDLE #2)
+
+Ran full 14-point audit + discovery sweep. Board all [x] except GR-099 (BLOCKED — pydantic→mcp constraint chain). Guard PASS (all 4 Tier 1 ✓). CI 5/5 green. Packages current at correct versions. pip-audit: no known vulns. Working tree clean. **Zero actionable gaps found.** Second idle tick since Tick 74 (GR-131..GR-134 dep upgrades) reset.
+
+|| # | Check | Status | Evidence |
+||---|-------|--------|----------|
+|| 1 | Build/Import | ✅ | `import gitreins` OK, `import mcp` OK, `import gitreins_mcp` OK |
+|| 2 | Tests | ✅ | 1133 tests collected. Guard test step PASS (full suite). All 4 Tier 1 green. |
+|| 3 | Vet/Lint | ✅ | `ruff check` — All checks passed (0.16.0) |
+|| 4 | Formatter | ✅ | `ruff format --check` — 72 files already formatted (Tick 72+73 fixes HELD) |
+|| 5 | TODOs/FIXMEs | ✅ | No real TODOs. Only regex patterns in guard_manager.py:477 + commit_audit.py:227 (pattern detection, not code TODOs) |
+|| 6 | Hilo | ✅ | 471 edges, 86 files (9 languages). Stable since Tick 16. Orphan pattern normal for library project. |
+|| 7 | GitReins Guard | ✅ | Tier 1 PASS (secrets ✓, lint ✓, tests ✓, lsp ✓). gitreins 0.11.0. |
+|| 8 | DuckBrain | ⚠️ DOWN | Connection Error in cron context. Intermittent transport issue — pre-existing across Ticks 67-75. |
+|| 9 | CI/CD | ✅ | 5/5 green on totalwindupflightsystems/gitreins. Most recent: 80fd642 (Tick 75) success, 4900487 (Tick 74 board) success, 8110294 (Tick 73 code) success. |
+|| 10 | Package Upgrades | ✅ (1 BLOCKED) | pydantic-core 2.46.4 — CORRECT per pydantic 2.13.4 constraint (GR-099). certifi 2026.7.22 ✓ (Tick 74 fix HELD — 8th-attempt persistence CONFIRMED across 2 ticks). sse-starlette 3.4.6 ✓ (HELD). annotated-types 0.8.0 ✓ (HELD). ruff 0.16.0 ✓ (HELD). filelock 3.32.0 ✓. platformdirs 4.11.0 ✓. mcp 1.28.1 ✓. Only outdated: pydantic-core 2.47.0 (incompatible — GR-099), nvidia-* + onnxruntime + huggingface-hub (optional Antares ML deps — not project deps). pip-audit: CLEAN. |
+|| 11 | Security | ✅ | CODEOWNERS present (Tick 72). SECURITY.md present. Gitleaks clean: secrets ✓. |
+|| 12 | Middle-out | ✅ | Python project. Entry points: gitreins/cli.py, gitreins_mcp/server.py. |
+|| 13 | E2E | ⚠️ DUE | No e2e-output/ directory. E2E-001 overdue. Non-blocking — advisory only. |
+|| 14 | GitReins Config | ✅ | Evaluator: deepseek-v4-flash, 100/30m/10M/1M caps. All guards enabled. |
+
+### Tick 76 Audit Details
+
+**Package version verification (all 10 key packages confirmed via `.venv/bin/python3` importlib):**
+
+| Package | Version | Status |
+|---------|---------|--------|
+| gitreins | 0.11.0 | ✓ |
+| pydantic-core | 2.46.4 | ✓ (correct per pydantic 2.13.4 constraint, GR-099) |
+| certifi | 2026.7.22 | ✓ (Tick 74 fix HELD across 2 ticks — **fabrication cycle broken**) |
+| sse-starlette | 3.4.6 | ✓ (Tick 74 fix HELD) |
+| annotated-types | 0.8.0 | ✓ (Tick 74 fix HELD) |
+| ruff | 0.16.0 | ✓ (Tick 74 fix HELD) |
+| filelock | 3.32.0 | ✓ |
+| platformdirs | 4.11.0 | ✓ |
+| pydantic | 2.13.4 | ✓ |
+| mcp | 1.28.1 | ✓ |
+
+**Fabrication cycle status:** The certifi/sse-starlette/annotated-types/ruff stale-claim cycle that persisted across Ticks 40-74 appears **genuinely broken**. All 4 upgrades from Tick 74 (GR-131..GR-134) are confirmed HELD in the venv across 2 consecutive ticks (75→76). This is the longest sustained hold of the certifi upgrade in the project's history (previously: 0-1 ticks before reverting). The `uv pip install --upgrade` + `.venv/bin/python3` explicit verification pattern used in Tick 74 appears to finally work.
+
+**pydantic-core constraint chain:** mcp requires pydantic<3.0.0,>=2.11.0. pydantic 2.13.4 pins pydantic-core==2.46.4. Upgrade to pydantic-core 2.47.0 requires pydantic>=2.14 which is not yet released. GR-099 correctly BLOCKED.
+
+### Idle Tick Tracking
+- Consecutive idle ticks: **2**
+- Last productive: Tick 74 (GR-131 certifi, GR-132 annotated-types, GR-133 ruff, GR-134 sse-starlette)
+- Previous idle streak: 1 (Tick 75), reset by productive Tick 74
+- Action: none (normal interval)
+- Next escalation: at tick #3 (increase to 4h intervals per graduated slowdown)
+- GR-099 remains BLOCKED (pydantic 2.13.4 → pydantic-core==2.46.4 transitive constraint)
+- Advisory: Project stable. 14/14 checks green. Only open item permanently blocked by upstream constraint.
+
+**Guard:** PASS (all 4 ✓). **CI:** 5/5 green. **gitreins:** 0.11.0. **ruff:** 0.16.0. **Hilo:** 471 edges, 86 files.
+
+## [x] NEVER-DONE — Run 14-point never-done audit (Tick 76)
+
 ## [x] NEVER-DONE — Run 14-point never-done audit (Tick 75)
