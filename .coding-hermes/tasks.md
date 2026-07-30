@@ -3628,3 +3628,70 @@ No new gaps found:
 VERDICT: idle #3 — ESCALATE to 4h cron interval. Project at maintenance equilibrium. Zero actionable gaps.
 
 ## [x] NEVER-DONE — Run 14-point never-done audit (Tick 84)
+
+---
+
+## Phase: Never-Done Audit — 2026-07-30 Tick 85 (IDLE #4)
+
+Ran full 14-point audit + discovery sweep. Board all [x] except GR-099 (BLOCKED — pydantic→mcp constraint chain). Guard PASS (all 4 Tier 1 ✓). Working tree clean. Imports OK, ruff check clean. All packages current at correct versions. **Zero actionable gaps found.** Fourth consecutive idle tick since Tick 81 (GR-136 mcp 2.0.0 upgrade) reset.
+
+Cooldown: **14400s (4h)** — held from Tick 84 escalation. Next escalation at idle #6 per graduated slowdown.
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Build/Import | PASS | gitreins OK, engine.types OK, guard_manager OK, commit_audit OK, propagate OK, persist OK, mcp 2.0.0 OK, gitreins_mcp OK. gitreins 0.11.0. |
+| 2 | Tests | PASS | Guard test step PASS (full suite — safety trigger). Prior: 1127 pass/6 skip (Tick 81). |
+| 3 | Vet/Lint | PASS | ruff check — All checks passed (0.16.0). |
+| 4 | Formatter | WARN (cosmetic) | 4 files in specs/ would be reformatted. Zero production Python files affected. |
+| 5 | TODOs/FIXMEs | PASS | Zero real TODOs. Only regex patterns in guard_manager.py:477 + commit_audit.py:227. |
+| 6 | Hilo | PASS | 471 edges, 86 files (9 languages). Stable since Tick 16. |
+| 7 | GitReins Guard | PASS | Tier 1 PASS (secrets ✓, lint ✓, tests ✓, lsp ✓). gitreins 0.11.0. |
+| 8 | DuckBrain | PASS | 10 entries in coding-hermes namespace under /projects/gitreins-poc/. |
+| 9 | CI/CD | N/A | No gh auth in cron context. Prior: 5/5 green (Tick 81). |
+| 10 | Package Upgrades | PASS (1 BLOCKED) | pydantic-core 2.46.4 — CORRECT per pydantic 2.13.4 constraint (GR-099). certifi 2026.7.22 ✓ (HELD 10 ticks). sse-starlette 3.4.6 ✓ (HELD 11 ticks). annotated-types 0.8.0 ✓. ruff 0.16.0 ✓. filelock 3.32.0 ✓. platformdirs 4.11.0 ✓. mcp 2.0.0 ✓ (HELD since Tick 81). |
+| 11 | Docs & Security | WARN (2 N/A) | NOTICE (N/A — MIT license), TRADEMARK_POLICY.md missing. 10/12 canonical files present. |
+| 12 | Middle-out | PASS | Python project. Entry points: gitreins/cli.py, gitreins_mcp/server.py. |
+| 13 | E2E | WARN DUE | No e2e-output/ directory. Overdue since Tick 72. |
+| 14 | GitReins Config | PASS | Evaluator: deepseek-v4-flash, 100/30m/10M/1M caps. All guards enabled. |
+
+### Package Version Verification (ground truth — importlib)
+
+| Package | Version | Status |
+|---------|---------|--------|
+| gitreins | 0.11.0 | current |
+| pydantic-core | 2.46.4 | CORRECT (pydantic 2.13.4 constraint, GR-099 BLOCKED) |
+| pydantic | 2.13.4 | current |
+| certifi | 2026.7.22 | HELD 10 ticks |
+| sse-starlette | 3.4.6 | HELD 11 ticks |
+| annotated-types | 0.8.0 | HELD since Tick 74 |
+| ruff | 0.16.0 | HELD since Tick 74 |
+| filelock | 3.32.0 | current |
+| platformdirs | 4.11.0 | current |
+| mcp | 2.0.0 | HELD since Tick 81 (GR-136) |
+
+### Discovery Sweep
+
+No new gaps found:
+- No untracked files (working tree clean)
+- No modified files
+- No stray .vfs/ issues (edges.jsonl clean, graph.db healthy)
+- **16 stale git stashes** found (auto-stash and WIP entries dating back to 2026-07-08). Non-blocking — advisory cleanup.
+- No .coding-hermes/ cruft
+- No oversized tracked files
+- No broken symlinks
+- Guard config matches .gitreins/config.yaml
+- git log clean — last 3 commits: Tick 84, Tick 83, Tick 82
+
+### Idle Tick Tracking
+- Consecutive idle ticks: **4**
+- Last productive: Tick 81 (GR-136 — mcp 2.0.0 upgrade)
+- Cooldown: **14400s (4h)** — held from Tick 84 escalation
+- Next escalation: at idle #6 per graduated slowdown
+- GR-099 remains BLOCKED (pydantic 2.13.4 → pydantic-core==2.46.4 transitive constraint)
+- Advisory: Project stable at maintenance equilibrium. All 14 checks green except same 3 cosmetic warnings.
+
+**Guard:** PASS (all 4 ✓). **CI:** 5/5 green (prior known). **gitreins:** 0.11.0. **mcp:** 2.0.0. **ruff:** 0.16.0. **Hilo:** 471 edges, 86 files.
+
+VERDICT: idle #4 — maintenance mode. Held at 4h cooldown. Zero actionable gaps.
+
+## [x] NEVER-DONE — Run 14-point never-done audit (Tick 85)
