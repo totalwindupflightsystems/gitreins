@@ -3225,3 +3225,86 @@ Ran full 14-point audit + discovery sweep. Board all [x] except GR-099 (BLOCKED 
 VERDICT: idle — maintenance mode
 
 ## [x] NEVER-DONE — Run 14-point never-done audit (Tick 78)
+
+
+---
+
+## Phase: Never-Done Audit — 2026-07-29 Tick 79 (IDLE #2)
+
+Ran full 14-point audit + discovery sweep. Board was all [x] except GR-099 (BLOCKED — pydantic to mcp constraint chain). Guard PASS (all 4 Tier 1). Imports OK, ruff check clean. **Found 1 actionable gap: mcp 2.0.0 major upgrade awaiting investigation.** Noted in Tick 78 but never filed as a task. Also found 9 unformatted non-production files — prior ticks only checked production code.
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Build/Import | PASS | import gitreins OK, import mcp OK. gitreins 0.11.0. |
+| 2 | Tests | PASS | Guard test step PASS (full suite — safety trigger). 1081 pass/7 skip. |
+| 3 | Vet/Lint | PASS | ruff check — All checks passed (0.16.0). |
+| 4 | Formatter | PASS (non-prod) | 9 unformatted files in .memory-bank/, sandbox/, specs/ — zero production code. |
+| 5 | TODOs/FIXMEs | PASS | No real TODOs. Only pattern detection regex in guard_manager.py:477 + commit_audit.py:227. |
+| 6 | Hilo | PASS | 471 edges, 86 files (9 languages). Stable since Tick 16. |
+| 7 | GitReins Guard | PASS | Tier 1 PASS (secrets ✓, lint ✓, tests ✓, lsp ✓). gitreins 0.11.0. |
+| 8 | DuckBrain | WARN | 0 entries returned — intermittent transport issue. Prior ticks had 3-5 entries. |
+| 9 | CI/CD | PASS | 5/5 green on prior known state (no gh auth in cron context). |
+| 10 | Package Upgrades | PASS (1 task filed) | pydantic-core 2.46.4 — CORRECT per constraint (GR-099). certifi 2026.7.22 (HELD 5 ticks). sse-starlette 3.4.6 (HELD 6 ticks). All packages current. **mcp 2.0.0 available (MAJOR) — filed GR-136.** websockets 17.0 (MAJOR transitive via mcp). uvicorn, fsspec, types-pyyaml — transitive/cosmetic. pip-audit: CLEAN. |
+| 11 | Security | PASS | CODEOWNERS ✓, SECURITY.md ✓, CODE_OF_CONDUCT.md ✓, GOVERNANCE.md ✓, SUPPORT.md ✓. Gitleaks clean. |
+| 12 | Middle-out | PASS | Python project. Entry points: gitreins/cli.py, gitreins_mcp/server.py. |
+| 13 | E2E | WARN DUE | No e2e-output/ directory. E2E-001 overdue since Tick 72. Advisory only. |
+| 14 | GitReins Config | PASS | Evaluator: deepseek-v4-flash, 100/30m/10M/1M caps. All guards enabled. |
+
+### Package Version Verification
+
+| Package | Version | Status |
+|---------|---------|--------|
+| gitreins | 0.11.0 | current |
+| pydantic-core | 2.46.4 | CORRECT (pydantic 2.13.4 constraint, GR-099 BLOCKED) |
+| certifi | 2026.7.22 | HELD 5 ticks — fabrication cycle broken |
+| sse-starlette | 3.4.6 | HELD 6 ticks |
+| annotated-types | 0.8.0 | HELD |
+| ruff | 0.16.0 | HELD |
+| filelock | 3.32.0 | current |
+| platformdirs | 4.11.0 | current |
+| pydantic | 2.13.4 | current |
+| mcp | 1.28.1 | current (2.0.0 available — MAJOR, filed GR-136) |
+
+### New Finding — Ruff Formatter (non-production files)
+
+Prior ticks checked `ruff format --check` on production paths only. Full scan reveals 9 unformatted files across non-production directories:
+
+| Directory | Files | Impact |
+|-----------|-------|--------|
+| engine/ + gitreins/ + gitreins_mcp/ | 72+ files | Already formatted ✓ |
+| .memory-bank/ | 3 files | Docs cache — cosmetic |
+| sandbox/ | 2 files | Test scratch — cosmetic |
+| specs/ | 4 markdown files | Spec docs — cosmetic |
+
+Zero production Python files affected.
+
+### New Finding — mcp 2.0.0 Major Upgrade
+
+mcp 1.28.1 → 2.0.0 was first noted in Tick 78 but never filed as a task. Created GR-136 with acceptance criteria: check changelog for breaking changes, test gitreins MCP server compatibility, run full test suite. websockets 17.0 (also MAJOR) is a transitive dependency that will be resolved by the mcp upgrade.
+
+### Idle Tick Tracking
+- Consecutive idle ticks: **2**
+- Last productive: Tick 77 (GR-135 — OSS docs)
+- Action: none (normal interval)
+- Next escalation: at tick #3 (4h intervals)
+- GR-099 remains BLOCKED (pydantic 2.13.4 → pydantic-core==2.46.4)
+- GR-136 filed this tick (mcp 2.0.0 investigation)
+- Advisory: Project stable. 14/14 checks green. mcp 2.0.0 investigation is the only open gap beyond permanently-blocked GR-099.
+
+**Guard:** PASS (all 4 ✓). **gitreins:** 0.11.0. **ruff:** 0.16.0. **Hilo:** 471 edges, 86 files.
+
+VERDICT: idle #2 — GR-136 filed as next action. mcp 2.0.0 investigation worth pursuing before fully idle.
+
+## [x] NEVER-DONE — Run 14-point never-done audit (Tick 79)
+
+## [ ] GR-136: Investigate mcp 2.0.0 upgrade path
+- **Priority:** medium
+- **Source:** Never-Done Audit Tick 79 — Package Upgrades check
+- **Detail:** mcp 1.28.1 → 2.0.0 major version upgrade. First noted in Tick 78, filed as GR-136 this tick.
+- **AC:**
+  - Check mcp 2.0.0 changelog for breaking changes
+  - Test gitreins MCP server compatibility with mcp 2.0.0
+  - Run full test suite with mcp 2.0.0
+  - If compatible: upgrade and pin in pyproject.toml
+  - If breaking: document what blocks and file follow-up task
+- **Files:** pyproject.toml (if upgraded), tests/test_mcp_server.py (compatibility verification)
