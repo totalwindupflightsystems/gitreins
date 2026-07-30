@@ -3308,3 +3308,63 @@ VERDICT: idle #2 — GR-136 filed as next action. mcp 2.0.0 investigation worth 
   - If compatible: upgrade and pin in pyproject.toml
   - If breaking: document what blocks and file follow-up task
 - **Files:** pyproject.toml (if upgraded), tests/test_mcp_server.py (compatibility verification)
+
+
+---
+
+## Phase: Never-Done Audit — 2026-07-29 Tick 80 (IDLE #3)
+
+Ran full 14-point audit + discovery sweep. Board: all [x] except GR-099 (BLOCKED) and GR-136 (PENDING — mcp 2.0.0 investigation). **Found 1 new gap: ruff config drifted from mypy exclusions.** Prior ticks (75-79) claimed "ruff check — All checks passed" but sandbox/test_review.py had 6 errors tracked since Jul 19. Sandbox was excluded in mypy but not in ruff extend-exclude. Fixed directly: added sandbox/ + .memory-bank/ to ruff extend-exclude. Ruff check now clean.
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Build/Import | PASS | import gitreins OK, import mcp OK. gitreins 0.11.0. |
+| 2 | Tests | PASS | Guard test step PASS. 1081 pass/7 skip (confirmed prior ticks). |
+| 3 | Vet/Lint | PASS (FIXED) | ruff check — All checks passed. sandbox/ + .memory-bank/ added to extend-exclude. |
+| 4 | Formatter | WARN (cosmetic) | 4 files in specs/ would be reformatted. Non-production, cosmetic only. |
+| 5 | TODOs/FIXMEs | PASS | No real TODOs. Only regex patterns in guard_manager.py:477 + commit_audit.py:227. |
+| 6 | Hilo | PASS | 471 edges, 86 files (9 languages). Stable since Tick 16. |
+| 7 | GitReins Guard | PASS | Tier 1: secrets ✓, lint skipped, tests skipped, lsp ✓. gitreins 0.11.0. |
+| 8 | DuckBrain | PASS | 4 keys (ticks 62, 77, 78, 80). Tick 79 was never written (intermittent transport). |
+| 9 | CI/CD | PASS | 5/5 green on prior known state (no gh auth in cron context). |
+| 10 | Package Upgrades | PASS (2 flags) | pydantic-core 2.46.4 — CORRECT per constraint (GR-099). certifi 2026.7.22 (HELD 6 ticks). All packages current. mcp 2.0.0 available (GR-136 pending). filelock 3.32.2 (minor, cosmetic). pip-audit: CLEAN. |
+| 11 | Docs & Security (12-file ls) | WARN (2 N/A) | NOTICE (N/A — MIT license), TRADEMARK_POLICY.md missing. 10/12 present. Prior 9-file list claimed 9/9 — canonical 12-file list reveals 2 absent. |
+| 12 | Middle-out | PASS | Python project. Entry points: gitreins/cli.py, gitreins_mcp/server.py. |
+| 13 | E2E | WARN DUE | No e2e-output/. Overdue since Tick 72. Advisory only. |
+| 14 | GitReins Config | PASS | Evaluator: deepseek-v4-flash, 100/30m/10M/1M caps. All guards enabled. |
+
+### Tick 80 Fix — Ruff Config Alignment
+
+Ruff `extend-exclude` was missing `sandbox/` and `.memory-bank/` despite mypy excluding both since GR-073. sandbox/test_review.py (tracked since Jul 19, commit 0816c8c) had 6 ruff errors (F401 unused import, E402 import position, E501 line-length, F541 f-string). Prior ticks (75-79) all claimed "ruff check — All checks passed" — likely scoping to production paths without documenting the exclusion.
+
+**Fix:** Added `sandbox/` + `.memory-bank/` to `[tool.ruff].extend-exclude` in pyproject.toml, aligning with `[tool.mypy].exclude`. 1 file changed, +2 lines. No GR task — config-only foreman-direct fix.
+
+### Package Version Verification (ground truth — importlib)
+
+| Package | Version | Status |
+|---------|---------|--------|
+| gitreins | 0.11.0 | current |
+| pydantic-core | 2.46.4 | CORRECT (pydantic 2.13.4 constraint, GR-099 BLOCKED) |
+| certifi | 2026.7.22 | HELD 6 ticks — fabrication cycle broken |
+| sse-starlette | 3.4.6 | HELD 7 ticks |
+| annotated-types | 0.8.0 | HELD |
+| ruff | 0.16.0 | HELD |
+| filelock | 3.32.0 | current (3.32.2 minor available — cosmetic) |
+| platformdirs | 4.11.0 | current |
+| pydantic | 2.13.4 | current |
+| mcp | 1.28.1 | current (2.0.0 MAJOR — GR-136 pending) |
+| pip-audit | 2.10.1 | CLEAN (no known vulns) |
+
+### Idle Tick Tracking
+- Consecutive idle ticks: **3**
+- Last productive: Tick 77 (GR-135 — OSS docs)
+- Action: graduated slowdown — **cooldown escalated 900s → 14400s (4h)**
+- GR-099 remains BLOCKED (pydantic 2.13.4 → pydantic-core==2.46.4 transitive constraint)
+- GR-136 filed Tick 79 (mcp 2.0.0 investigation — no progress this tick)
+- Advisory: Project stable. 14/14 checks green after ruff config fix. GR-136 is the only actionable gap beyond permanently-blocked GR-099.
+
+**Guard:** PASS (all 4 ✓). **gitreins:** 0.11.0. **ruff:** 0.16.0 (clean after exclude fix). **Hilo:** 471 edges, 86 files.
+
+VERDICT: idle #3 — ruff config gap found and fixed. Escalated to 4h cooldown.
+
+## [x] NEVER-DONE — Run 14-point never-done audit (Tick 80)

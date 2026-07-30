@@ -85,6 +85,8 @@ ignore_missing_imports = true
 line-length = 100
 extend-exclude = [
     "tests/fixtures/secrets/*.py",  # intentionally malformed: shell scripts, templates, not valid Python
+    "sandbox/",                     # evaluation scratch space — not production code
+    ".memory-bank/",                # foreman docs cache — not production code
 ]
 
 [tool.ruff.lint]
