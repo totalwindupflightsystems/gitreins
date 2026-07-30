@@ -3297,17 +3297,11 @@ VERDICT: idle #2 — GR-136 filed as next action. mcp 2.0.0 investigation worth 
 
 ## [x] NEVER-DONE — Run 14-point never-done audit (Tick 79)
 
-## [ ] GR-136: Investigate mcp 2.0.0 upgrade path
+## [x] GR-136: Upgrade mcp 1.28.1 → 2.0.0 (fully compatible)
 - **Priority:** medium
-- **Source:** Never-Done Audit Tick 79 — Package Upgrades check
-- **Detail:** mcp 1.28.1 → 2.0.0 major version upgrade. First noted in Tick 78, filed as GR-136 this tick.
-- **AC:**
-  - Check mcp 2.0.0 changelog for breaking changes
-  - Test gitreins MCP server compatibility with mcp 2.0.0
-  - Run full test suite with mcp 2.0.0
-  - If compatible: upgrade and pin in pyproject.toml
-  - If breaking: document what blocks and file follow-up task
-- **Files:** pyproject.toml (if upgraded), tests/test_mcp_server.py (compatibility verification)
+- **Commit:** `90e502f`
+- **Result:** mcp 2.0.0 (stable, 2026-07-28) installed and tested. gitreins does NOT import from the `mcp` package — its MCP server (`gitreins_mcp/server.py`) is a standalone JSON-RPC stdio implementation. The `mcp` dep exists only as a transitively-required package. Full test suite: 1127 passed, 6 skipped (231s). Guard PASS (all 4 ✓). pyproject.toml: `mcp>=1.0.0` → `mcp>=2.0.0,<3`. New transitive deps: httpx2, opentelemetry-api, mcp-types, truststore. Removed: pydantic-settings, python-dotenv. Zero code changes needed.
+- **Files:** pyproject.toml, uv.lock
 
 
 ---
@@ -3368,3 +3362,60 @@ Ruff `extend-exclude` was missing `sandbox/` and `.memory-bank/` despite mypy ex
 VERDICT: idle #3 — ruff config gap found and fixed. Escalated to 4h cooldown.
 
 ## [x] NEVER-DONE — Run 14-point never-done audit (Tick 80)
+
+
+---
+
+## Phase: Never-Done Audit — 2026-07-30 Tick 81 (PRODUCTIVE)
+
+Ran full 14-point audit. Board was: GR-099 (BLOCKED), GR-136 (PENDING). Picked up GR-136 — mcp 2.0.0 upgrade investigation.
+
+**Key finding: gitreins does NOT import from the `mcp` package.** The `gitreins_mcp/server.py` is a standalone JSON-RPC stdio implementation — zero code changes needed for mcp 2.0.0.
+
+mcp 2.0.0 is a major breaking-change release (2026-07-28). Migration guide confirms changes: FastMCP→MCPServer, camelCase→snake_case, httpx→httpx2, new mcp-types package, etc. None of these affect gitreins since it doesn't use the SDK.
+
+### Upgrade Executed
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Build/Import | PASS | import gitreins OK, import mcp 2.0.0 OK. gitreins 0.11.0 |
+| 2 | Tests (full suite) | PASS | 1127 passed, 6 skipped in 231s (vs 1081/7 with mcp 1.x) |
+| 3 | Vet/Lint | PASS | ruff check — All checks passed. sandbox/memory-bank excluded (Tick 80 fix held) |
+| 4 | Formatter | WARN (cosmetic) | 4 files in specs/ would be reformatted. Non-production. |
+| 5 | TODOs/FIXMEs | PASS | Zero real TODOs. Regex patterns only. |
+| 6 | Hilo | PASS | 471 edges, 86 files (9 languages). Stable since Tick 16. |
+| 7 | GitReins Guard | PASS | Tier 1: secrets ✓, lint ✓, tests ✓, lsp ✓. All 4 green. |
+| 8 | DuckBrain | PASS | 5 keys in coding-hermes namespace |
+| 9 | CI/CD | N/A | No gh auth in cron context. Prior: 5/5 green. |
+| 10 | Package Upgrades | PASS (FIXED) | mcp 1.28.1 → 2.0.0 (GR-136). pydantic-core 2.46.4 (CORRECT, GR-099 BLOCKED). filelock 3.32.0 (3.32.2 minor, cosmetic). pip-audit: CLEAN. |
+| 11 | Docs & Security | WARN (2 N/A) | NOTICE (N/A — MIT), TRADEMARK_POLICY.md missing. 10/12 present. |
+| 12 | Middle-out | PASS | Entry points: cli.py, server.py. |
+| 13 | E2E | WARN DUE | No e2e-output/. Advisory only. |
+| 14 | GitReins Config | PASS | Evaluator: deepseek-v4-flash, 100/30m/10M/1M caps. |
+
+### Dependency Changes (mcp 2.0.0)
+
+| Package | Before | After | Notes |
+|---------|--------|-------|-------|
+| mcp | 1.28.1 | 2.0.0 | MAJOR upgrade — zero code changes needed |
+| httpx | transitive from mcp v1 | REMOVED | Replaced by httpx2 |
+| httpx-sse | transitive | REMOVED | SSE now built into httpx2 |
+| httpx2 | — | 2.9.1 | New — drop-in httpx replacement |
+| httpcore2 | — | 2.9.1 | New — httpx2 backend |
+| mcp-types | — | 2.0.0 | New — standalone protocol types |
+| opentelemetry-api | — | 1.44.0 | New — default tracing |
+| truststore | — | 0.10.4 | New — OS cert store for httpx2 |
+| pydantic-settings | transitive | REMOVED | No longer required |
+| python-dotenv | transitive | REMOVED | No longer required |
+
+### Idle Tick Tracking
+- Consecutive idle ticks: **RESET to 0** — productive tick (GR-136 completed)
+- Last productive: Tick 81 (GR-136 — mcp 2.0.0 upgrade)
+- GR-099 remains BLOCKED (pydantic 2.13.4 → pydantic-core==2.46.4 transitive constraint)
+- Advisory: Only gap now is cosmetic (TRADEMARK_POLICY.md, specs formatting, e2e-output/)
+
+**Guard:** PASS (all 4 ✓). **gitreins:** 0.11.0. **mcp:** 2.0.0. **Tests:** 1127 pass/6 skip. **Hilo:** 471 edges, 86 files.
+
+VERDICT: productive — GR-136 completed. mcp 2.0.0 upgrade safe, zero breaking changes for gitreins.
+
+## [x] NEVER-DONE — Run 14-point never-done audit (Tick 81)
