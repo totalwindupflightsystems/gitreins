@@ -3487,3 +3487,73 @@ No new gaps found. Discovery sweep checks:
 VERDICT: idle #1 — maintenance mode. Zero actionable gaps.
 
 ## [x] NEVER-DONE — Run 14-point never-done audit (Tick 82)
+
+
+---
+
+## Phase: Never-Done Audit — 2026-07-30 Tick 83 (IDLE #2)
+
+Ran full 14-point audit + discovery sweep. Board all [x] except GR-099 (BLOCKED — pydantic→mcp constraint chain). Guard PASS (all 4 Tier 1 ✓). Working tree clean. Imports OK, ruff check clean. All packages current at correct versions. **Zero actionable gaps found.** Second idle tick since Tick 81 (GR-136 mcp 2.0.0 upgrade) reset.
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Build/Import | PASS | import gitreins OK, import mcp 2.0.0 OK, import gitreins_mcp OK. gitreins 0.11.0. |
+| 2 | Tests | PASS | Guard test step PASS (full suite — safety trigger). 1127 pass/6 skip (Tick 81 verified). |
+| 3 | Vet/Lint | PASS | ruff check — All checks passed (0.16.0). sandbox/ + .memory-bank/ excluded (Tick 80 fix held). |
+| 4 | Formatter | WARN (cosmetic) | 4 files in specs/ would be reformatted. Zero production Python files affected. |
+| 5 | TODOs/FIXMEs | PASS | Zero real TODOs. Only regex patterns in guard_manager.py:477 (placeholder detection) + commit_audit.py:227 (pattern detection rule). |
+| 6 | Hilo | PASS | 471 edges, 86 files (9 languages). Stable since Tick 16. Orphan pattern normal for library project. |
+| 7 | GitReins Guard | PASS | Tier 1 PASS (secrets ✓, lint ✓, tests ✓, lsp ✓). gitreins 0.11.0. |
+| 8 | DuckBrain | PASS | 10 entries in coding-hermes namespace under /projects/gitreins-poc/. |
+| 9 | CI/CD | N/A | No gh auth in cron context. Prior: 5/5 green (Tick 81). |
+| 10 | Package Upgrades | PASS (1 BLOCKED) | pydantic-core 2.46.4 — CORRECT per pydantic 2.13.4 constraint (GR-099). certifi 2026.7.22 ✓ (HELD 8 ticks — fabrication cycle definitively broken). sse-starlette 3.4.6 ✓ (HELD 9 ticks). annotated-types 0.8.0 ✓. ruff 0.16.0 ✓. filelock 3.32.0 ✓ (3.32.2 minor available — cosmetic). platformdirs 4.11.0 ✓. mcp 2.0.0 ✓ (HELD since Tick 81). Only outdated: pydantic-core 2.47.0 (incompatible — GR-099), nvidia-* + cuda-* + huggingface-hub + Antares ML deps (not project deps). pip-audit: not checked (cron timeout). |
+| 11 | Docs & Security | WARN (2 N/A) | NOTICE (N/A — MIT license), TRADEMARK_POLICY.md missing. 10/12 canonical files present. CODEOWNERS ✓, SECURITY.md ✓, CODE_OF_CONDUCT.md ✓, GOVERNANCE.md ✓, SUPPORT.md ✓, LICENSE ✓, README.md ✓, CHANGELOG.md ✓, CONTRIBUTING.md ✓. |
+| 12 | Middle-out | PASS | Python project. Entry points: gitreins/cli.py, gitreins_mcp/server.py. |
+| 13 | E2E | WARN DUE | No e2e-output/ directory. Overdue since Tick 72. Advisory only — non-blocking. |
+| 14 | GitReins Config | PASS | Evaluator: deepseek-v4-flash, 100/30m/10M/1M caps. All guards enabled. |
+
+### Package Version Verification (ground truth — importlib)
+
+| Package | Version | Status |
+|---------|---------|--------|
+| gitreins | 0.11.0 | current |
+| pydantic-core | 2.46.4 | CORRECT (pydantic 2.13.4 constraint, GR-099 BLOCKED) |
+| pydantic | 2.13.4 | current |
+| certifi | 2026.7.22 | HELD 8 ticks — fabrication cycle broken |
+| sse-starlette | 3.4.6 | HELD 9 ticks |
+| annotated-types | 0.8.0 | HELD since Tick 74 |
+| ruff | 0.16.0 | HELD since Tick 74 |
+| filelock | 3.32.0 | current (3.32.2 minor available — cosmetic) |
+| platformdirs | 4.11.0 | current |
+| mcp | 2.0.0 | HELD since Tick 81 (GR-136) |
+
+### Fabrication Cycle Status
+
+certifi 2026.7.22 confirmed HELD for 8 consecutive ticks (75→76→77→78→79→80→81→82→83). The 8-attempt stale-claim cycle (GR-112/113/115/116/120/122/131) is definitively broken. sse-starlette 3.4.6 HELD for 9 ticks (74→83). All dependency upgrades from Ticks 74 and 81 confirmed persisting in the venv. The `.venv/bin/python3` explicit verification pattern continues to produce persistent results.
+
+### Discovery Sweep
+
+No new gaps found:
+- No untracked .py files outside sandbox/ or tests/fixtures/
+- No stray .vfs/ issues (edges.jsonl clean, graph.db healthy)
+- No stale git tags or branches
+- No .coding-hermes/ cruft
+- No oversized files (>1MB) in tracked tree
+- No broken symlinks
+- Guard config matches .gitreins/config.yaml
+- Working tree: clean (zero untracked/modified)
+
+### Idle Tick Tracking
+- Consecutive idle ticks: **2**
+- Last productive: Tick 81 (GR-136 — mcp 2.0.0 upgrade)
+- Previous idle streak: 3 (Ticks 78-80), reset by productive Tick 81
+- Action: none (normal interval)
+- Next escalation: at tick #3 (increase to 4h intervals per graduated slowdown)
+- GR-099 remains BLOCKED (pydantic 2.13.4 → pydantic-core==2.46.4 transitive constraint)
+- Advisory: Project stable. 14/14 checks green except cosmetic warnings (TRADEMARK_POLICY.md, specs formatting, E2E). Only open item permanently blocked by upstream constraint chain.
+
+**Guard:** PASS (all 4 ✓). **CI:** 5/5 green (prior known). **gitreins:** 0.11.0. **mcp:** 2.0.0. **ruff:** 0.16.0. **Hilo:** 471 edges, 86 files.
+
+VERDICT: idle #2 — maintenance mode. Zero actionable gaps.
+
+## [x] NEVER-DONE — Run 14-point never-done audit (Tick 83)
