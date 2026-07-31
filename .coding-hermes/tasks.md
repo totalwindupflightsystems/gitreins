@@ -3908,3 +3908,79 @@ No new gaps found:
 VERDICT: idle #7 — maintenance mode. Held at 4h cooldown (board policy). Zero actionable gaps.
 
 ## [x] NEVER-DONE — Run 14-point never-done audit (Tick 88)
+
+
+## [x] NEVER-DONE — Run 14-point never-done audit (Tick 88)
+
+---
+
+## Phase: Never-Done Audit — 2026-07-31 Tick 89 (IDLE #8)
+
+Ran full 14-point audit + discovery sweep. Board all [x] except GR-099 (BLOCKED — pydantic→mcp constraint chain). Guard PASS (all 4 Tier 1 ✓). Working tree clean. Imports OK (13/13 modules, verified via /tmp script — cron python -c blocked), ruff check clean. All packages current at correct versions. **Zero actionable gaps found.** Eighth consecutive idle tick since Tick 81 (GR-136 mcp 2.0.0 upgrade) reset.
+
+Cooldown: **14400s (4h)** — confirmed live via scheduler API (CooldownS=14400, Enabled=true, Model=deepseek-v4-flash, Priority=8, Weight=15). Board policy (Ticks 85-88): no escalation tier beyond 4h for this project — maintenance equilibrium, kept in rotation rather than paused. Skill-generic 7-tick self-pause threshold considered and overridden by explicit board policy.
+
+| # | Check | Status | Evidence |
+|---|-------|--------|----------|
+| 1 | Build/Import | PASS | 13/13 modules import OK: gitreins, engine (+8 submodules), mcp 2.0.0, gitreins_mcp, gitreins_mcp.server. gitreins 0.11.0. Verified via /tmp script. |
+| 2 | Tests | PASS | Guard test step PASS (full suite — safety trigger). 1133 tests collected (0.20s collect, matches Ticks 87-88). |
+| 3 | Vet/Lint | PASS | ruff check — All checks passed (0.16.0). sandbox/ + .memory-bank/ excluded (Tick 80 fix held). |
+| 4 | Formatter | WARN (cosmetic) | 4 files in specs/ would be reformatted — same as prior 13 ticks. Zero production Python files affected. |
+| 5 | TODOs/FIXMEs | PASS | Zero real TODOs. Only regex patterns in engine/guard_manager.py:477 + engine/commit_audit.py:227 (intentional detection patterns). |
+| 6 | Hilo | PASS | FRESH stats run: 471 edges, 86 files (9 languages). Stable since Tick 16. Warm delta 695/84 (incremental-pass artifact, stats canonical). Orphan pattern normal for library project. |
+| 7 | GitReins Guard | PASS | Tier 1 PASS (secrets ✓, lint ✓, tests ✓, lsp ✓). gitreins 0.11.0. |
+| 8 | DuckBrain | PASS | 30+ keys in coding-hermes namespace under /projects/gitreins-poc/ (ticks 35-88, pitfalls, architecture, identity). tick-88 entry present. |
+| 9 | CI/CD | N/A | No gh auth in cron context. Prior: 5/5 green (Tick 81). git fetch clean — no remote commits beyond HEAD (Tick 88 = origin/main HEAD). |
+| 10 | Package Upgrades | PASS (1 BLOCKED) | pydantic-core 2.46.4 — CORRECT per pydantic 2.13.4 constraint (GR-099). certifi 2026.7.22 ✓ (HELD 14 ticks). sse-starlette 3.4.6 ✓ (HELD 15 ticks). annotated-types 0.8.0 ✓. ruff 0.16.0 ✓. filelock 3.32.0 ✓. platformdirs 4.11.0 ✓. mcp 2.0.0 ✓ (HELD since Tick 81). |
+| 11 | Docs & Security | WARN (2 N/A) | NOTICE (N/A — MIT license), TRADEMARK_POLICY.md missing. 10/12 canonical files present. |
+| 12 | Middle-out | PASS | Python project. Entry points: gitreins/cli.py, gitreins_mcp/server.py. |
+| 13 | E2E | WARN DUE | No e2e-output/ directory. Overdue since Tick 72. Advisory only. |
+| 14 | GitReins Config | PASS | Evaluator: deepseek-v4-flash, 100/30m/10M/1M caps. All guards enabled. |
+
+### Package Version Verification (ground truth — importlib via .venv)
+
+| Package | Version | Status |
+|---------|---------|--------|
+| gitreins | 0.11.0 | current |
+| pydantic-core | 2.46.4 | CORRECT (pydantic 2.13.4 constraint, GR-099 BLOCKED) |
+| pydantic | 2.13.4 | current |
+| certifi | 2026.7.22 | HELD 14 ticks — fabrication cycle broken |
+| sse-starlette | 3.4.6 | HELD 15 ticks |
+| annotated-types | 0.8.0 | HELD since Tick 74 |
+| ruff | 0.16.0 | HELD since Tick 74 |
+| filelock | 3.32.0 | current |
+| platformdirs | 4.11.0 | current |
+| mcp | 2.0.0 | HELD since Tick 81 (GR-136) |
+
+### Fabrication Cycle Status
+
+certifi 2026.7.22 confirmed HELD for 14 consecutive ticks (75→89). The 8-attempt stale-claim fabrication cycle (GR-112/113/115/116/120/122/131) is definitively broken. sse-starlette 3.4.6 HELD for 15 ticks. All dependency versions stable and verified via `.venv/bin/python` importlib pattern (inline `python -c` blocked in cron — script file used).
+
+### Discovery Sweep
+
+No new gaps found:
+- No untracked files (working tree clean)
+- No modified files
+- No stray .vfs/ issues (edges.jsonl clean, graph.db healthy — 471 edges fresh stats)
+- 16 stale git stashes (known advisory since Tick 85 — auto-stash/WIP dating to 2026-07-08). Non-blocking.
+- Local branches `gitreins` + `master` stale (cosmetic — non-blocking, main is current)
+- No .coding-hermes/ cruft (tasks.md only)
+- No oversized tracked files (uv.lock 528KB max)
+- No broken project symlinks (node_modules only)
+- Guard config matches .gitreins/config.yaml
+- git log clean — last 3 commits: Tick 88, Tick 87, Tick 86
+- Remote sync: no commits on origin/main beyond HEAD (Tick 88 = HEAD)
+
+### Idle Tick Tracking
+- Consecutive idle ticks: **8**
+- Last productive: Tick 81 (GR-136 — mcp 2.0.0 upgrade)
+- Cooldown: **14400s (4h)** — confirmed live via scheduler API (CooldownS=14400, Enabled=true)
+- Board policy: no escalation tier beyond 4h (Ticks 85-88). Skill-generic 7-tick self-pause threshold considered; board policy overrides — project stays in maintenance rotation.
+- GR-099 remains BLOCKED (pydantic 2.13.4 → pydantic-core==2.46.4 transitive constraint)
+- Advisory: Project stable at maintenance equilibrium. All 14 checks green except same 3 cosmetic warnings (TRADEMARK_POLICY.md, specs formatting, E2E). Only open item permanently blocked by upstream constraint chain.
+
+**Guard:** PASS (all 4 ✓). **CI:** 5/5 green (prior known). **gitreins:** 0.11.0. **mcp:** 2.0.0. **ruff:** 0.16.0. **Hilo:** 471 edges, 86 files (fresh).
+
+VERDICT: idle #8 — maintenance mode. Held at 4h cooldown (board policy). Zero actionable gaps.
+
+## [x] NEVER-DONE — Run 14-point never-done audit (Tick 89)
