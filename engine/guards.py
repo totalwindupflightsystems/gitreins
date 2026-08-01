@@ -65,8 +65,12 @@ def check_go_lint(workdir: str) -> GoGuardResult:
         return GoGuardResult(name="go_lint", passed=False, error=str(e))
 
 
-def check_go_tests(workdir: str) -> GoGuardResult:
-    """Run go test on staged Go files."""
+def check_go_tests(workdir: str, timeout: int = 180) -> GoGuardResult:
+    """Run go test on staged Go files.
+
+    timeout is configurable so large Go projects (slow integration
+    suites) can raise it via guards.test_timeout in .gitreins/config.yaml.
+    """
     staged = subprocess.run(
         ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
         capture_output=True,
@@ -83,7 +87,7 @@ def check_go_tests(workdir: str) -> GoGuardResult:
             ["go", "test", "-count=1", "-short", "./..."],
             capture_output=True,
             text=True,
-            timeout=180,
+            timeout=timeout,
             cwd=workdir,
         )
         output = result.stdout + result.stderr

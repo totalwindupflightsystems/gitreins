@@ -146,13 +146,16 @@ def _get_staged_files(workdir: str) -> list[str]:
 def _build_diff_test_command(test_command: str, test_files: list[str], workdir: str) -> str:
     """Build a test command targeting specific test files.
 
-    If test_command starts with 'pytest', appends the test file paths.
-    Otherwise returns the original command (custom runners can't be
-    narrowed without user config).
+    If test_command is a pytest invocation (bare `pytest ...` or
+    `uv run pytest ...` / `python -m pytest ...`), appends the test
+    file paths. Otherwise returns the original command (custom runners
+    can't be narrowed without user config).
     """
     cmd = test_command.strip()
 
-    if cmd.startswith("pytest"):
+    # Match pytest invocations regardless of runner prefix:
+    #   pytest ... | uv run pytest ... | python -m pytest ... | .venv/bin/pytest ...
+    if re.search(r"(^|\s)((uv\s+run\s+)?pytest|python\s+-m\s+pytest)(\s|$)", cmd):
         # Convert absolute paths to relative for cleaner output
         rel_paths = [os.path.relpath(f, workdir) for f in test_files]
         return f"{cmd} {' '.join(rel_paths)}"
@@ -913,7 +916,7 @@ class GuardManager:
 
     def _check_go_tests(self) -> GuardResult:
         """Run Go tests (delegates to engine.guards)."""
-        r = check_go_tests(self.workdir)
+        r = check_go_tests(self.workdir, timeout=self._test_timeout)
         return GuardResult(name=r.name, passed=r.passed, output=r.output, error=r.error)
 
     def _check_go_build(self) -> GuardResult:
