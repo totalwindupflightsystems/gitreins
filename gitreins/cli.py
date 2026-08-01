@@ -1025,7 +1025,8 @@ def cmd_judge(args):
         print("Tier 2 skipped (--skip-tier2 flag)")
 
     llm = LLMClient()
-    judge = Judge(llm, workdir)
+    config = load_config(workdir)
+    judge = Judge(llm, workdir, guard_config=config)
     result = judge.evaluate_task(task, skip_tier2=getattr(args, "skip_tier2", False))
     print(result.summary)
 

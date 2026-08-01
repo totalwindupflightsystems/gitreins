@@ -272,7 +272,7 @@ class Pipeline:
                 shell=True,
                 capture_output=True,
                 text=True,
-                timeout=120,
+                timeout=step_def.get("timeout", 120),
                 cwd=self.workdir,
             )
             output = (result.stdout + result.stderr)[:2000]
@@ -662,14 +662,21 @@ def _has_sig_file(workdir: str, sig_file: str) -> bool:
     return os.path.isfile(os.path.join(workdir, sig_file))
 
 
-def _default_tier1_steps(workdir: str) -> list[dict]:
+def _default_tier1_steps(workdir: str, config: dict | None = None) -> list[dict]:
     """Return language-appropriate default Tier 1 pipeline steps.
 
     Detects the project language(s) by checking for ecosystem files
     (go.mod, pyproject.toml, Cargo.toml, package.json, etc.) and
     returns lint + test commands for the primary language found.
     Falls back to a secrets-only step when no language is detected.
+
+    Honors .gitreins/config.yaml overrides: ``guards.test_command`` and
+    ``guards.test_timeout`` replace the language-default test command and
+    the 120s script timeout (large Go suites exceed 120s).
     """
+    guards_cfg = (config or {}).get("guards", {})
+    configured_test_cmd = guards_cfg.get("test_command")
+    test_timeout = int(guards_cfg.get("test_timeout", 120))
     steps: list[dict] = [
         {
             "id": "secrets",
@@ -741,7 +748,12 @@ def _default_tier1_steps(workdir: str) -> list[dict]:
     if primary is not None:
         lint_cmd, test_cmd = _LANG_COMMANDS[primary]
         steps.append({"id": "lint", "type": "script", "run": lint_cmd})
-        steps.append({"id": "tests", "type": "script", "run": test_cmd})
+        test_step: dict = {"id": "tests", "type": "script", "run": test_cmd}
+        if configured_test_cmd:
+            test_step["run"] = configured_test_cmd
+        if test_timeout > 0:
+            test_step["timeout"] = test_timeout
+        steps.append(test_step)
 
     return steps
 
@@ -791,7 +803,7 @@ def load_pipeline_config(workdir: str = ".") -> dict:
                         "id": "tier1",
                         "parallel": True,
                         "on": ["pre-commit", "pre-eval"],
-                        "steps": _default_tier1_steps(workdir),
+                        "steps": _default_tier1_steps(workdir, config),
                     },
                     {
                         "id": "tier2",
