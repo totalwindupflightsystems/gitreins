@@ -1,5 +1,8 @@
 # GitReins Improvement Tasks
 
+## [ ] BOARD-V2: Migrate board to DuckDB v2.1 — run `python3 ~/.hermes/scripts/migrate-board-to-duckdb.py .` (load skill coding-hermes-board first). Creates .coding-hermes/board/ (schema.sql, tasks.parquet, events.parquet), archives tasks.md → tasks.md.bak, commit. Same pattern as DuckBrain.
+- **Priority:** high
+
 ## [x] GR-020: Add `gitreins install` command
 - **Priority:** high
 - **Commit:** `015a0c1`
@@ -158,7 +161,7 @@
 ## [x] GR-055: Suppress MCP debug spam from mcp package
 - **Priority:** low
 - **Commit:** `d99f8ad`
-- **Model:** deepseek-v4-pro (direct)
+- **Model:** deepseek-v4-flash (direct)
 - **Files:** `gitreins_mcp/server.py`
 - **AC:**
   - mcp package debug-level logging is suppressed at import time
@@ -168,7 +171,7 @@
 
 ## [x] GR-056: Add MCP guard tool — dead_code boolean
 - **Priority:** medium
-- **Model:** deepseek-v4-pro (direct — 2-file mechanical wiring)
+- **Model:** deepseek-v4-flash (direct — 2-file mechanical wiring)
 - **Provider:** deepseek
 - **Files:** `gitreins_mcp/server.py`, `engine/guard_manager.py`, `gitreins/cli.py`
 - **AC:**
@@ -398,7 +401,7 @@ commit_audit:
 
 ## [x] GR-060: Investigate flaky LSP integration test
 - **Priority:** low
-- **Model:** deepseek-v4-pro (direct)
+- **Model:** deepseek-v4-flash (direct)
 - **Files:** `engine/lsp.py`, `tests/test_lsp.py`
 - **AC:**
   - `test_pylsp_detects_undefined_variable` passes reliably or is marked skip with clear reason
@@ -3984,3 +3987,4 @@ No new gaps found:
 VERDICT: idle #8 — maintenance mode. Held at 4h cooldown (board policy). Zero actionable gaps.
 
 ## [x] NEVER-DONE — Run 14-point never-done audit (Tick 89)
+
