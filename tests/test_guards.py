@@ -158,7 +158,9 @@ def test_check_go_tests_handles_timeout_and_other_exceptions():
         errored = check_go_tests("/repo")
 
     assert timed_out == GoGuardResult(
-        name="go_tests", passed=False, output="Tests timed out after 180s"
+        name="go_tests",
+        passed=False,
+        output="Tests timed out after 180s (guards.test_timeout). Raise it in .gitreins/config.yaml — e.g. test_timeout: 900 for large projects with slow integration suites.",
     )
     assert errored == GoGuardResult(name="go_tests", passed=False, error="go unavailable")
 

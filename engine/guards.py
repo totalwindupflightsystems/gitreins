@@ -97,7 +97,13 @@ def check_go_tests(workdir: str, timeout: int = 180) -> GoGuardResult:
             return GoGuardResult(name="go_tests", passed=True, output=output[:500])
         return GoGuardResult(name="go_tests", passed=False, output=output)
     except subprocess.TimeoutExpired:
-        return GoGuardResult(name="go_tests", passed=False, output="Tests timed out after 180s")
+        return GoGuardResult(
+            name="go_tests",
+            passed=False,
+            output=f"Tests timed out after {timeout}s (guards.test_timeout). "
+            "Raise it in .gitreins/config.yaml — e.g. test_timeout: 900 for "
+            "large projects with slow integration suites.",
+        )
     except Exception as e:
         return GoGuardResult(name="go_tests", passed=False, error=str(e))
 
