@@ -446,7 +446,7 @@ _TEXT_PARSERS = {
 }
 
 
-def run_static_check(tool: str, workdir: str) -> list[dict]:
+def run_static_check(tool: str, workdir: str, timeout: float = 120.0) -> list[dict]:
     """Run a static analysis tool against a directory and return diagnostics.
 
     Args:
@@ -479,11 +479,11 @@ def run_static_check(tool: str, workdir: str) -> list[dict]:
             cmd,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=timeout,
             cwd=workdir if tool != "pyright" else workdir,  # pyright uses CWD for root
         )
     except subprocess.TimeoutExpired:
-        logger.warning("%s timed out after 120s", tool)
+        logger.warning("%s timed out after %ss", tool, timeout)
         return []
     except FileNotFoundError:
         logger.warning("%s binary not found: %s", tool, binary)

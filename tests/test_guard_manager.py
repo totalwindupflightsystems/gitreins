@@ -123,6 +123,52 @@ class TestGuardManagerInit:
         gm = GuardManager(tmp_workdir, None)
         assert gm._enabled["secrets"] is True
 
+    def test_cpp_repo_detected(self, tmp_workdir):
+        """CMakeLists.txt → _is_cpp True (triggers C++-aware timeouts)."""
+        import os
+
+        os.makedirs(tmp_workdir, exist_ok=True)
+        with open(os.path.join(tmp_workdir, "CMakeLists.txt"), "w") as f:
+            f.write("cmake_minimum_required(VERSION 3.16)\n")
+        gm = GuardManager(tmp_workdir, {})
+        assert gm._is_cpp is True
+
+    def test_cpp_staged_files_detected(self, tmp_workdir):
+        """Staged .cpp file → _is_cpp True."""
+        _write_staged_file(tmp_workdir, "src/main.cpp", "int main() { return 0; }\n")
+        gm = GuardManager(tmp_workdir, {})
+        assert gm._is_cpp is True
+
+    def test_rust_repo_detected(self, tmp_workdir):
+        """Cargo.toml → _is_rust True."""
+        import os
+
+        os.makedirs(tmp_workdir, exist_ok=True)
+        with open(os.path.join(tmp_workdir, "Cargo.toml"), "w") as f:
+            f.write('[package]\nname = "demo"\n')
+        gm = GuardManager(tmp_workdir, {})
+        assert gm._is_rust is True
+
+    def test_python_repo_not_cpp(self, tmp_workdir):
+        """Plain Python repo → _is_cpp False."""
+        gm = GuardManager(tmp_workdir, {})
+        assert gm._is_cpp is False
+        assert gm._is_rust is False
+
+    def test_lsp_timeout_config_parsed(self, tmp_workdir):
+        """guards.lsp_timeouts.{init,per_file} are parsed into manager."""
+        gm = GuardManager(
+            tmp_workdir, {"guards": {"lsp_timeouts": {"init": 600, "per_file": 240}}}
+        )
+        assert gm._lsp_init_timeout == 600
+        assert gm._lsp_per_file_timeout == 240
+
+    def test_lsp_timeout_config_defaults_none(self, tmp_workdir):
+        """No lsp_timeouts config → None (language-aware defaults kick in)."""
+        gm = GuardManager(tmp_workdir, {})
+        assert gm._lsp_init_timeout is None
+        assert gm._lsp_per_file_timeout is None
+
 
 class TestBuiltinSecretsScan:
     """Test built-in secrets scanner patterns — step-1-3-1-3."""

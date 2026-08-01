@@ -214,6 +214,11 @@ class GuardManager:
         }
         self._static_tools = guards_cfg.get("static_analysis_tools", {})
         self._lsp_tools = guards_cfg.get("lsp_tools", ["pylsp"])
+        # LSP timeouts (seconds). None = language-aware defaults
+        # (clangd/cpp repos get 300s init / 120s per-file automatically).
+        lsp_cfg = guards_cfg.get("lsp_timeouts", {})
+        self._lsp_init_timeout: float | None = lsp_cfg.get("init")
+        self._lsp_per_file_timeout: float | None = lsp_cfg.get("per_file")
 
         # Test mode: "full" (default) or "diff"
         self._test_mode = guards_cfg.get("test_mode", "full")
@@ -227,6 +232,16 @@ class GuardManager:
         self._go_guards = guards_cfg.get("go", {})
         self._is_ruby = os.path.isfile(os.path.join(self.workdir, "Gemfile"))
         self._is_php = os.path.isfile(os.path.join(self.workdir, "composer.json"))
+        self._is_cpp = (
+            os.path.isfile(os.path.join(self.workdir, "CMakeLists.txt"))
+            or os.path.isfile(os.path.join(self.workdir, "Makefile"))
+            or os.path.isfile(os.path.join(self.workdir, "compile_commands.json"))
+            or any(
+                f.endswith((".cpp", ".cc", ".cxx", ".hpp", ".h", ".c"))
+                for f in _get_staged_files(self.workdir)
+            )
+        )
+        self._is_rust = os.path.isfile(os.path.join(self.workdir, "Cargo.toml"))
         self._has_sql = any(
             f.endswith(".sql") for f in _get_staged_files(self.workdir)
         ) or os.path.isdir(os.path.join(self.workdir, "migrations"))
@@ -747,7 +762,7 @@ class GuardManager:
                 passed=True,
                 output="Go compiler covers static analysis — skipped",
             )
-        # Check for Python, Ruby, PHP, SQL
+        # Check for Python, Ruby, PHP, SQL, C/C++, Rust, Go
         lang_tools: list[str] = []
         if (
             os.path.isfile(os.path.join(self.workdir, "pyproject.toml"))
@@ -761,6 +776,10 @@ class GuardManager:
             lang_tools = self._static_tools.get("php", [])
         elif self._has_sql:
             lang_tools = self._static_tools.get("sql", [])
+        elif self._is_cpp:
+            lang_tools = self._static_tools.get("cpp", ["cppcheck"])
+        elif self._is_rust:
+            lang_tools = self._static_tools.get("rust", ["clippy"])
 
         if not lang_tools:
             return GuardResult(
@@ -776,7 +795,10 @@ class GuardManager:
             try:
                 from engine.static_analysis import run_static_check
 
-                diags = run_static_check(tool, self.workdir)
+                # cppcheck on a real C++ repo can exceed the default 120s —
+                # grant C++/Rust tools the same generous budget as clangd.
+                tool_timeout = 300.0 if (self._is_cpp or self._is_rust) else 120.0
+                diags = run_static_check(tool, self.workdir, timeout=tool_timeout)
             except Exception as exc:
                 logger.warning("static_analysis %s failed: %s", tool, exc)
                 continue
@@ -830,7 +852,12 @@ class GuardManager:
 
         for tool in self._lsp_tools:
             try:
-                diags = run_lsp_check(tool, self.workdir)
+                diags = run_lsp_check(
+                    tool,
+                    self.workdir,
+                    timeout_per_file=self._lsp_per_file_timeout,
+                    init_timeout=self._lsp_init_timeout,
+                )
             except Exception as exc:
                 logger.warning("lsp %s failed: %s", tool, exc)
                 continue

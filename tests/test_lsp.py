@@ -334,6 +334,49 @@ class TestRunLspCheck:
         mock_shutdown.assert_called_once()
 
 
+class TestToolDefaultTimeouts:
+    """Test C++-aware LSP timeout defaults (GR: C++ repo timeout fix)."""
+
+    def test_clangd_gets_generous_budget(self):
+        """clangd is always treated as heavy — it builds a project index."""
+        from engine.lsp import _tool_default_timeouts
+
+        init_t, per_file_t = _tool_default_timeouts("clangd", "/tmp/empty")
+        assert init_t >= 300
+        assert per_file_t >= 120
+
+    def test_rust_analyzer_gets_generous_budget(self):
+        from engine.lsp import _tool_default_timeouts
+
+        init_t, per_file_t = _tool_default_timeouts("rust-analyzer", "/tmp/empty")
+        assert init_t >= 300
+        assert per_file_t >= 120
+
+    def test_pylsp_gets_default_budget(self):
+        from engine.lsp import _tool_default_timeouts
+
+        init_t, per_file_t = _tool_default_timeouts("pylsp", "/tmp/empty")
+        assert init_t == 60.0
+        assert per_file_t == 30.0
+
+    def test_cpp_staged_files_trigger_heavy_budget(self):
+        """Repo with staged .cpp files gets the C++ budget even for non-clangd tools."""
+        from engine.lsp import _tool_default_timeouts
+
+        with patch("engine.lsp._get_staged_files", return_value=["src/main.cpp"]):
+            init_t, per_file_t = _tool_default_timeouts("ccls", "/tmp/cpprepo")
+        assert init_t >= 180
+        assert per_file_t >= 90
+
+    def test_python_staged_files_stay_default(self):
+        from engine.lsp import _tool_default_timeouts
+
+        with patch("engine.lsp._get_staged_files", return_value=["app.py"]):
+            init_t, per_file_t = _tool_default_timeouts("pylsp", "/tmp/pyrepo")
+        assert init_t == 60.0
+        assert per_file_t == 30.0
+
+
 class TestLspHeaderParsing:
     """Test Content-Length header parsing via _lsp_encode_message/_lsp_read_response."""
 

@@ -258,7 +258,7 @@ def _collect_diagnostics(
     return diags
 
 
-def _lsp_initialize(proc: subprocess.Popen, workdir: str) -> bool:
+def _lsp_initialize(proc: subprocess.Popen, workdir: str, timeout: float = 60.0) -> bool:
     root_uri = Path(workdir).as_uri()
     init_msg = {
         "jsonrpc": "2.0",
@@ -274,7 +274,7 @@ def _lsp_initialize(proc: subprocess.Popen, workdir: str) -> bool:
     proc.stdin.write(_lsp_encode_message(init_msg))
     proc.stdin.flush()
 
-    response = _lsp_read_response(proc, timeout=60.0)
+    response = _lsp_read_response(proc, timeout=timeout)
     if response is None:
         return False
 
@@ -375,12 +375,44 @@ def _tool_supports_language(tool: str, lang: str) -> bool:
     return lang in supported
 
 
+def _tool_default_timeouts(tool: str, workdir: str) -> tuple[float, float]:
+    """Return (init_timeout, per_file_timeout) tuned for the tool/project.
+
+    C++ (clangd) and Rust (rust-analyzer) LSP servers build a project-wide
+    index on first run and parse full translation units per file — 30-60s
+    caps are far too tight for real C++ repos (compile_commands.json,
+    heavy header includes). Heuristic: if the tool is clangd or the repo
+    contains C/C++ files, grant generous budgets.
+    """
+    heavy = {"clangd", "ccls", "rust-analyzer"}
+    if tool in heavy:
+        return (300.0, 120.0)
+    # Repo-level sniff: any staged or on-disk C/C++/Rust sources?
+    try:
+        staged = _get_staged_files(workdir)
+    except Exception:
+        staged = []
+    cpp_hint = any(
+        os.path.splitext(f)[1].lower() in {".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".rs"}
+        for f in staged
+    )
+    if cpp_hint:
+        return (180.0, 90.0)
+    return (60.0, 30.0)
+
+
 def run_lsp_check(
     tool: str,
     workdir: str,
     files: list[str] | None = None,
-    timeout_per_file: float = 30.0,
+    timeout_per_file: float | None = None,
+    init_timeout: float | None = None,
 ) -> list[dict]:
+    init_t, per_file_t = _tool_default_timeouts(tool, workdir)
+    if init_timeout is None:
+        init_timeout = init_t
+    if timeout_per_file is None:
+        timeout_per_file = per_file_t
     tool_path = find_lsp_tool(tool)
     if not tool_path:
         logger.warning("LSP tool '%s' not found on PATH — skipping", tool)
@@ -418,7 +450,7 @@ def run_lsp_check(
         return []
 
     try:
-        if not _lsp_initialize(proc, workdir):
+        if not _lsp_initialize(proc, workdir, timeout=init_timeout):
             logger.warning("LSP tool '%s' failed to initialize", tool)
             return []
 
