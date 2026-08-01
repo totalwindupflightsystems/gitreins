@@ -215,9 +215,22 @@ class Pipeline:
         return result
 
     def _run_sequential_stage(self, stage_id: str, stage_def: dict, task: dict) -> StageResult:
-        """Run steps sequentially — for single-step stages like ai_eval."""
-        # For non-parallel stages, the stage IS the step
+        """Run steps sequentially — in order, no concurrency."""
         result = StageResult(id=stage_id)
+
+        steps = stage_def.get("steps", [])
+        if steps:
+            # Multi-step sequential stage (e.g. tier1 with secrets→lint→tests)
+            for step_def in steps:
+                step_result = self._run_step(step_def, task)
+                result.steps.append(step_result)
+                if not step_result.passed and step_def.get("on_fail") != "continue":
+                    # Stop at first hard failure — later steps won't change the verdict
+                    break
+            result.any_failed = any(not s.passed for s in result.steps)
+            result.passed = not result.any_failed
+            result.summary = self._summarize_stage(result)
+            return result
 
         if stage_def.get("type") == "ai_eval":
             step_result = self._run_ai_eval(stage_def, task)
