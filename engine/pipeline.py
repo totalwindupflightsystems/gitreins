@@ -323,8 +323,62 @@ class Pipeline:
                 self._llm = LLMClient()
 
         from engine.evaluator import AgenticEvaluator
+        from engine.eval_cap import (
+            EvalCap,
+            _parse_time,
+            _parse_tokens,
+            eval_cap_from_config,
+        )
 
-        evaluator = AgenticEvaluator(self._llm, self.workdir, max_iterations=max_iterations)
+        # Cap resolution: config.yaml evaluator: section is the base;
+        # caps EXPLICITLY set in the step config override it. A step that
+        # sets nothing (or only max_iterations: -1 = "defer to evaluator
+        # config", the default) passes eval_cap=None so AgenticEvaluator
+        # reads the config itself — the documented working path (helix
+        # tick 60: -1 → full caps from config, zero compaction cycles).
+        #
+        # Do NOT build an explicit EvalCap with -1 defaults for token
+        # caps: compaction threshold int(-1*0.9)=0 → the evaluator
+        # compacts on every turn and never produces a verdict (fleet-wide
+        # tier2 INCOMPLETE 'Context near limit (N/-1 tokens)', 2026-08).
+        explicit_caps: dict[str, float | int] = {}
+        if max_iterations not in (None, -1):
+            explicit_caps["max_iterations"] = max_iterations
+        max_time = step_def.get("max_time")
+        if max_time:
+            max_seconds = _parse_time(str(max_time))
+            if max_seconds is not None:
+                explicit_caps["max_seconds"] = float(max_seconds)
+        for key in ("max_input_tokens", "max_output_tokens"):
+            raw = step_def.get(key)
+            if raw in (None, -1):
+                continue
+            if isinstance(raw, str):
+                parsed = _parse_tokens(raw)
+                if parsed is None:
+                    logger.warning("Unparseable %s=%r in step %s — ignoring", key, raw, step_id)
+                    continue
+                explicit_caps[key] = parsed
+            else:
+                explicit_caps[key] = int(raw)
+        if step_def.get("tool_call_weight") is not None:
+            explicit_caps["tool_call_weight"] = float(step_def["tool_call_weight"])
+
+        if explicit_caps:
+            # Merge step overrides over the config base so unset caps
+            # never fall back to unlimited.
+            base = eval_cap_from_config(self.config)
+            eval_cap = EvalCap(
+                max_iterations=float(explicit_caps.get("max_iterations", base.max_iterations)),
+                max_seconds=float(explicit_caps.get("max_seconds", base.max_seconds)),
+                max_input_tokens=int(explicit_caps.get("max_input_tokens", base.max_input_tokens)),
+                max_output_tokens=int(explicit_caps.get("max_output_tokens", base.max_output_tokens)),
+                tool_call_weight=float(explicit_caps.get("tool_call_weight", base.tool_call_weight)),
+            )
+            evaluator = AgenticEvaluator(self._llm, self.workdir, eval_cap=eval_cap)
+        else:
+            # Nothing set in the step — defer to .gitreins/config.yaml
+            evaluator = AgenticEvaluator(self._llm, self.workdir)
 
         # Build prompt with template substitution
         prompt_template = step_def.get("prompt_template", "")

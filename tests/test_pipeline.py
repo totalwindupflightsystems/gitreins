@@ -647,3 +647,134 @@ class TestScalaLanguageDetection:
         assert test_step is not None, "tests step missing for Scala project"
         assert "sbt" in lint_step["run"], f"Expected sbt, got {lint_step['run']}"
         assert "sbt" in test_step["run"], f"Expected sbt, got {test_step['run']}"
+
+
+class TestAiEvalCapForwarding:
+    """_run_ai_eval cap resolution: step overrides over config base.
+
+    Regression coverage for the fleet-wide tier2 compaction loop
+    ('Context near limit (N/-1 tokens)' — token caps at -1 made the
+    compaction threshold int(-1*0.9)=0, so the evaluator compacted on
+    every turn and never produced a verdict, 2026-08).
+    """
+
+    def _make_verdict(self):
+        v = MagicMock()
+        v.verdict = "COMPLETE"
+        v.summary = "ok"
+        v.items = []
+        return v
+
+    def test_no_step_caps_defers_to_config(self, tmp_workdir, llm_client):
+        """Step with only max_iterations: -1 defers — no explicit EvalCap."""
+        from engine.pipeline import Pipeline
+
+        config = {
+            "evaluator": {
+                "max_iterations": 100,
+                "max_time": "30m",
+                "max_input_tokens": "10M",
+                "max_output_tokens": "1M",
+            },
+            "pipeline": {
+                "stages": [
+                    {
+                        "id": "tier2",
+                        "type": "ai_eval",
+                        "on": ["pre-eval"],
+                        "condition": "true",
+                        "max_iterations": -1,  # defer to evaluator config
+                    }
+                ]
+            },
+        }
+        p = Pipeline(config, tmp_workdir, llm=llm_client)
+        with patch("engine.evaluator.AgenticEvaluator") as mock_eval:
+            mock_eval.return_value.evaluate.return_value = self._make_verdict()
+            result = p.run({"id": "t1", "title": "x", "criteria": ["c1"]}, trigger="pre-eval")
+        assert result["passed"] is True
+        # Deferral: AgenticEvaluator called WITHOUT an explicit eval_cap,
+        # so it reads .gitreins/config.yaml itself (documented working path).
+        _, kwargs = mock_eval.call_args
+        assert "eval_cap" not in kwargs, (
+            "deferral step must not pass an explicit EvalCap — all -1 caps "
+            "would make compaction threshold 0 (compaction loop)"
+        )
+
+    def test_step_explicit_caps_override_config(self, tmp_workdir, llm_client):
+        """Step-level caps are forwarded (parsed) over the config base."""
+        from engine.pipeline import Pipeline
+
+        config = {
+            "evaluator": {
+                "max_iterations": 100,
+                "max_time": "30m",
+                "max_input_tokens": "10M",
+                "max_output_tokens": "1M",
+            },
+            "pipeline": {
+                "stages": [
+                    {
+                        "id": "tier2",
+                        "type": "ai_eval",
+                        "on": ["pre-eval"],
+                        "condition": "true",
+                        "max_iterations": 25,
+                        "max_time": "5m",
+                        "max_input_tokens": "200k",
+                        "max_output_tokens": "50k",
+                        "tool_call_weight": 0.2,
+                    }
+                ]
+            },
+        }
+        p = Pipeline(config, tmp_workdir, llm=llm_client)
+        with patch("engine.evaluator.AgenticEvaluator") as mock_eval:
+            mock_eval.return_value.evaluate.return_value = self._make_verdict()
+            result = p.run({"id": "t1", "title": "x", "criteria": ["c1"]}, trigger="pre-eval")
+        assert result["passed"] is True
+        _, kwargs = mock_eval.call_args
+        cap = kwargs["eval_cap"]
+        assert cap.max_iterations == 25
+        assert cap.max_seconds == 300.0
+        assert cap.max_input_tokens == 200_000
+        assert cap.max_output_tokens == 50_000
+        assert cap.tool_call_weight == 0.2
+        assert not cap.is_unlimited
+
+    def test_partial_step_caps_merge_config_base(self, tmp_workdir, llm_client):
+        """Unset caps fall back to the config base, not to unlimited."""
+        from engine.pipeline import Pipeline
+
+        config = {
+            "evaluator": {
+                "max_iterations": 100,
+                "max_time": "30m",
+                "max_input_tokens": "10M",
+                "max_output_tokens": "1M",
+            },
+            "pipeline": {
+                "stages": [
+                    {
+                        "id": "tier2",
+                        "type": "ai_eval",
+                        "on": ["pre-eval"],
+                        "condition": "true",
+                        "max_iterations": 25,  # only iterations pinned
+                    }
+                ]
+            },
+        }
+        p = Pipeline(config, tmp_workdir, llm=llm_client)
+        with patch("engine.evaluator.AgenticEvaluator") as mock_eval:
+            mock_eval.return_value.evaluate.return_value = self._make_verdict()
+            result = p.run({"id": "t1", "title": "x", "criteria": ["c1"]}, trigger="pre-eval")
+        assert result["passed"] is True
+        _, kwargs = mock_eval.call_args
+        cap = kwargs["eval_cap"]
+        assert cap.max_iterations == 25
+        # Token caps from config base — NOT -1 (compaction loop guard)
+        assert cap.max_input_tokens == 10_000_000
+        assert cap.max_output_tokens == 1_000_000
+        assert cap.max_seconds == 1800.0
+        assert not cap.is_unlimited
