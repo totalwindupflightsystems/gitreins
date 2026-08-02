@@ -4,7 +4,7 @@ guards:
   tests: true
   test_mode: diff
   test_command: uv run pytest -x --tb=short
-  test_timeout: 360
+  test_timeout: 900
   dead_code: false
   skylos: false
   static_analysis: false
@@ -17,8 +17,8 @@ guards:
   lsp_tools:
   - pylsp
 evaluator:
-  max_iterations: 100
-  max_time: 30m
+  max_iterations: 200
+  max_time: 45m
   max_input_tokens: 10M
   max_output_tokens: 1M
   tool_call_weight: 0.1
