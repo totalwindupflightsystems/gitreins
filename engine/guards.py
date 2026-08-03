@@ -8,6 +8,19 @@ from dataclasses import dataclass
 logger = logging.getLogger("gitreins.guards.go")
 
 
+def _sanitized_env() -> dict[str, str]:
+    """Return the current environment with every GIT_* variable removed.
+
+    Git exports GIT_INDEX_FILE (plus GIT_DIR, GIT_WORK_TREE, and friends) to
+    pre-commit hooks. Leaking them into `go test` subprocesses breaks tests
+    that exec git in temp repos or worktrees — the relative GIT_INDEX_FILE
+    resolves against the wrong directory and `git worktree add` fails with
+    `fatal: .git/index: index file open failed: Not a directory`. Same
+    class as DF-008 (guard_manager.py, c24f29e) — the Go guards missed it.
+    """
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
 @dataclass
 class GoGuardResult:
     name: str
@@ -30,6 +43,7 @@ def check_go_lint(workdir: str) -> GoGuardResult:
         text=True,
         timeout=10,
         cwd=workdir,
+        env=_sanitized_env(),
     )
     go_files = [f for f in staged.stdout.strip().split("\n") if f.endswith(".go")]
     if not go_files:
@@ -43,6 +57,7 @@ def check_go_lint(workdir: str) -> GoGuardResult:
             text=True,
             timeout=60,
             cwd=workdir,
+            env=_sanitized_env(),
         )
         if result.returncode == 0:
             return GoGuardResult(name="go_lint", passed=True, output="golangci-lint: clean")
@@ -53,7 +68,12 @@ def check_go_lint(workdir: str) -> GoGuardResult:
     # Fallback: go vet (per package or per file)
     try:
         result = subprocess.run(
-            ["go", "vet", "./..."], capture_output=True, text=True, timeout=60, cwd=workdir
+            ["go", "vet", "./..."],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=workdir,
+            env=_sanitized_env(),
         )
         output = result.stdout + result.stderr
         if len(output) > 2000:
@@ -77,6 +97,7 @@ def check_go_tests(workdir: str, timeout: int = 180) -> GoGuardResult:
         text=True,
         timeout=10,
         cwd=workdir,
+        env=_sanitized_env(),
     )
     go_files = [f for f in staged.stdout.strip().split("\n") if f.endswith(".go")]
     if not go_files:
@@ -89,6 +110,7 @@ def check_go_tests(workdir: str, timeout: int = 180) -> GoGuardResult:
             text=True,
             timeout=timeout,
             cwd=workdir,
+            env=_sanitized_env(),
         )
         output = result.stdout + result.stderr
         if len(output) > 2000:
@@ -116,6 +138,7 @@ def check_go_build(workdir: str) -> GoGuardResult:
         text=True,
         timeout=10,
         cwd=workdir,
+        env=_sanitized_env(),
     )
     go_files = [f for f in staged.stdout.strip().split("\n") if f.endswith(".go")]
     if not go_files:
@@ -128,6 +151,7 @@ def check_go_build(workdir: str) -> GoGuardResult:
             text=True,
             timeout=120,
             cwd=workdir,
+            env=_sanitized_env(),
         )
         output = result.stdout + result.stderr
         if len(output) > 2000:

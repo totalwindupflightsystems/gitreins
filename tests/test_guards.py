@@ -1,5 +1,6 @@
 """Dedicated tests for Go guard checks."""
 
+import os
 import subprocess
 from types import SimpleNamespace
 from unittest.mock import call, patch
@@ -8,6 +9,7 @@ import pytest
 
 from engine.guards import (
     GoGuardResult,
+    _sanitized_env,
     check_go_build,
     check_go_lint,
     check_go_tests,
@@ -56,6 +58,7 @@ def test_checkers_skip_when_no_go_files_are_staged(checker, name):
         text=True,
         timeout=10,
         cwd="/repo",
+        env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
     )
 
 
@@ -79,6 +82,7 @@ def test_check_go_lint_uses_golangci_lint_when_it_passes():
         text=True,
         timeout=60,
         cwd="/repo",
+        env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
     )
 
 
@@ -97,6 +101,7 @@ def test_check_go_lint_falls_back_to_go_vet(lint_result):
         text=True,
         timeout=60,
         cwd="/repo",
+        env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
     )
 
 
@@ -179,7 +184,39 @@ def test_check_go_build_returns_success_and_expected_command():
         text=True,
         timeout=120,
         cwd="/repo",
+        env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
     )
+
+
+def test_sanitized_env_strips_all_git_vars():
+    """GIT_* leaked by the pre-commit hook must not reach go subprocesses."""
+    with patch.dict(
+        os.environ,
+        {
+            "GIT_INDEX_FILE": "/repo/.git/index",
+            "GIT_DIR": "/repo/.git",
+            "GIT_WORK_TREE": "/repo",
+            "PATH": "/usr/bin",
+            "HOME": "/home/test",
+        },
+        clear=True,
+    ):
+        env = _sanitized_env()
+    assert "GIT_INDEX_FILE" not in env
+    assert "GIT_DIR" not in env
+    assert "GIT_WORK_TREE" not in env
+    assert env["PATH"] == "/usr/bin"
+    assert env["HOME"] == "/home/test"
+
+
+def test_go_tests_sanitizes_env_even_with_git_index_file_leak():
+    """DF-008 Go variant: go test subprocess must not inherit GIT_INDEX_FILE
+    (breaks worktree tests: 'fatal: .git/index: index file open failed')."""
+    with patch("engine.guards.subprocess.run", return_value=completed("main.go\n")) as run:
+        check_go_tests("/repo")
+    _, kwargs = run.call_args_list[0]
+    assert "GIT_INDEX_FILE" not in kwargs["env"]
+    assert "GIT_DIR" not in kwargs["env"]
 
 
 def test_check_go_build_returns_truncated_failure_or_exception():
