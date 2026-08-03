@@ -280,6 +280,10 @@ class Pipeline:
 
         logger.debug("Running script: %s", cmd)
         try:
+            # Strip GIT_* env vars (GIT_INDEX_FILE etc.) leaked by the
+            # pre-commit hook — they poison nested git commands in tests
+            # (same class as DF-008; guards.py got this in 3cad082).
+            sanitized_env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
             result = subprocess.run(
                 cmd,
                 shell=True,
@@ -287,6 +291,7 @@ class Pipeline:
                 text=True,
                 timeout=step_def.get("timeout", 120),
                 cwd=self.workdir,
+                env=sanitized_env,
             )
             output = (result.stdout + result.stderr)[:2000]
             passed = result.returncode == 0 or on_fail == "continue"
