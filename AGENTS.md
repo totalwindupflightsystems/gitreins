@@ -40,6 +40,10 @@ gitreins task complete fix-auth    # triggers LLM evaluation
 gitreins judge fix-auth
 ```
 
+**MCP commit rule:** the MCP `commit` tool is blocked while any task is
+`in_progress` — complete tasks (`task.complete`) or delete them
+(`task.delete`) first, then retry the commit.
+
 ### If guards fail:
 1. READ the output — the guard tells you exactly what failed and where
 2. Fix the issues. Do NOT commit with `--no-verify` unless it's a docs-only

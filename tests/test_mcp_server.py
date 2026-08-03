@@ -506,6 +506,11 @@ class TestCommitMCP:
         assert "error" in result
         assert "in progress" in result["error"]
         assert "progress" in str(result.get("tasks", []))
+        # DF-005: error names the in-progress task id inline, explains why
+        # commits are blocked, and tells the agent what to do about it.
+        assert "progress" in result["error"]
+        assert "task.complete" in result["error"] or "task.delete" in result["error"]
+        assert "judge" in result["error"]
 
 
 class TestGuardRunMCP:

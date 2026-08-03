@@ -442,11 +442,19 @@ class GitReinsMCPServer:
             return {"error": f"Task not found: {id}"}
 
     def _commit(self, message: str) -> dict:
+        """Commit staged changes; blocked while any task is in_progress."""
         # Check all in-progress tasks first
         in_progress = self.tasks.list_tasks("in_progress")
         if in_progress:
+            ids = ", ".join(t.id for t in in_progress)
             return {
-                "error": "Tasks still in progress — complete or delete them first",
+                "error": (
+                    f"Tasks still in progress: {ids} — commits are blocked while "
+                    "a task is in_progress because task.complete runs the quality "
+                    "judge against the committed state. Complete them via "
+                    "task.complete, or delete them via task.delete, then retry "
+                    "commit."
+                ),
                 "tasks": [t.id for t in in_progress],
             }
 

@@ -34,6 +34,11 @@ gitreins init           # smart init — detects language, size, optimal config
 6. **Verdicts persisted** — stored in `.gitreins/history/`, browsable via `gitreins report`
 7. **Commit through harness** — pre-commit hook runs guards, blocks if checks fail
 
+> **MCP commit rule:** the MCP `commit` tool refuses while any task is
+> `in_progress` — completed work must be judged against the task's criteria
+> first. Finish tasks with `task.complete` (which runs the quality judge) or
+> remove them with `task.delete`, then retry the commit.
+
 ## Commands
 
 ```
