@@ -23,6 +23,49 @@ class GuardResult:
         return ""
 
 
+def _truncate_line(line: str, limit: int = 100) -> str:
+    """Truncate a single-line detail to *limit* chars with a trailing ellipsis."""
+    if len(line) > limit:
+        return line[: limit - 3] + "..."
+    return line
+
+
+def _secrets_findings_detail(output: str, limit: int = 100) -> str:
+    """Extract gitleaks File:/Line: fields into a compact findings detail.
+
+    Returns "" when the output has no File: fields (the built-in scanner's
+    output already embeds ``path:line`` per finding line). Pairs are kept
+    whole so a path is never cut mid-value; overflow pairs are dropped with
+    a trailing ellipsis.
+    """
+    files = []
+    lines = []
+    for ln in output.split("\n"):
+        stripped = ln.strip()
+        if stripped.startswith("File:"):
+            value = stripped.removeprefix("File:").strip()
+            if value:
+                files.append(value)
+        elif stripped.startswith("Line:"):
+            value = stripped.removeprefix("Line:").strip()
+            if value:
+                lines.append(value)
+    if not files:
+        return ""
+    pairs = [f"{f}:{ln}" if ln else f for f, ln in zip(files, lines)]
+    label = f"{len(pairs)} finding(s): "
+    detail = label + ", ".join(pairs)
+    if len(detail) <= limit:
+        return detail
+    detail = label
+    for pair in pairs:
+        sep = ", " if detail != label else ""
+        if len(detail) + len(sep) + len(pair) > limit:
+            return detail + "…"
+        detail += sep + pair
+    return detail
+
+
 @dataclass(frozen=True)
 class Tier1Result:
     passed: bool
@@ -38,14 +81,16 @@ class Tier1Result:
             detail = ""
             if not r.passed and r.output:
                 out_lines = [ln for ln in r.output.split("\n") if ln.strip()]
-                if out_lines:
-                    first = out_lines[0].strip()
-                    if len(first) > 100:
-                        first = first[:97] + "..."
-                    detail = f" — {first}"
+                tail = _truncate_line(out_lines[-1].strip()) if out_lines else ""
+                if r.name == "secrets":
+                    findings = _secrets_findings_detail(r.output)
+                    if findings:
+                        detail = f" — {findings}"
+                if not detail and tail:
+                    detail = f" — {tail}"
                 fail_count = len([ln for ln in out_lines if "FAIL" in ln or "FAILED" in ln])
                 if fail_count:
-                    detail = f" — {fail_count} failure(s)"
+                    detail = f" — {fail_count} failure(s); {tail}"
             elif r.passed:
                 detail = r._pass_detail()
             lines.append(f"  {status} {r.name}{detail}")
