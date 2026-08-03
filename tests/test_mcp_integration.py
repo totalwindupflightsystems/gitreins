@@ -333,7 +333,10 @@ class TestMCPRealIntegration:
             result = json.loads(resp["result"]["content"][0]["text"])
             assert result["status"] == "in_progress"
 
-            # judge.evaluate should also work cross-repo
+            # judge.evaluate should also work cross-repo. wait=true keeps the
+            # legacy synchronous contract (full result dict) — the default
+            # async path returns a job_id + "running" and is covered by
+            # unit-level tests in test_mcp_server.py.
             req = {
                 "jsonrpc": "2.0",
                 "id": 23,
@@ -343,6 +346,7 @@ class TestMCPRealIntegration:
                     "arguments": {
                         "id": "cross-repo-task",
                         "workdir": second_repo,
+                        "wait": True,
                     },
                 },
             }

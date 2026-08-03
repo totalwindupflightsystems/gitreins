@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dedicated test files for types, guards, propagate, persist, config (+109 tests)
 
 ### Changed
+- MCP: judge.evaluate/task.complete now run evaluations asynchronously (judge.status to poll) — fixes 300s client-side tool-call timeouts
 - `max_input_tokens: -1` treated as unlimited (use with care — can hang on large repos)
 - Default `code_context_budget: 0.70`, `compaction_threshold: 0.90`
 

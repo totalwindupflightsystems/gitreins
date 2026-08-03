@@ -13,6 +13,9 @@ import logging
 import os
 import subprocess
 import sys
+import threading
+import time
+import uuid
 
 from engine.task_manager import TaskManager
 from engine.judge import Judge
@@ -39,6 +42,18 @@ class GitReinsMCPServer:
         # Runtime-configurable state (hot-reloaded via configure tool)
         self._configured = False
 
+        # Background evaluation jobs (DF-003): judge.evaluate / task.complete
+        # dispatch the full pipeline here so tool calls return well under the
+        # ~300s client-side cap. Job record shape:
+        #   {"id", "status": running|complete|error, "task_id", "workdir",
+        #    "result": dict|None, "error": str|None, "started_at": float}
+        self._jobs: dict[str, dict] = {}
+        self._jobs_lock = threading.Lock()
+        # Serializes the actual evaluate_task call — evaluation jobs run ONE
+        # at a time per server instance (parallel judges contend on
+        # ports/tmp and on the shared .gitreins/history git storage).
+        self._eval_lock = threading.Lock()
+
         self._tools = {
             "configure": self._configure,
             "task.create": self._task_create,
@@ -50,6 +65,7 @@ class GitReinsMCPServer:
             "commit": self._commit,
             "guard.run": self._guard_run,
             "judge.evaluate": self._judge_evaluate,
+            "judge.status": self._judge_status,
             "propagate": self._propagate,
         }
 
@@ -215,7 +231,7 @@ class GitReinsMCPServer:
             },
             {
                 "name": "judge.evaluate",
-                "description": "Run full evaluation pipeline (Tier 1 + Tier 2) on a task. Caps can be set individually or via legacy eval_cap string.",
+                "description": "Run full evaluation pipeline (Tier 1 + Tier 2) on a task. By default the evaluation runs in a background job and the call returns immediately with a job_id — poll judge.status for the result. Pass wait=true for the legacy synchronous behavior (block until done, return the full result). Caps can be set individually or via legacy eval_cap string.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -223,6 +239,11 @@ class GitReinsMCPServer:
                         "workdir": {
                             "type": "string",
                             "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir.",
+                        },
+                        "wait": {
+                            "type": "boolean",
+                            "description": "If true, block until the evaluation finishes and return the full result dict (legacy synchronous behavior). If false (default), dispatch a background job and return immediately — poll judge.status with the returned job_id.",
+                            "default": False,
                         },
                         "max_iterations": {
                             "type": "number",
@@ -250,6 +271,20 @@ class GitReinsMCPServer:
                         },
                     },
                     "required": ["id"],
+                },
+            },
+            {
+                "name": "judge.status",
+                "description": "Poll the status of a background evaluation job started by judge.evaluate (async) or task.complete (with LLM configured). Returns 'running', 'complete' (with the full result dict: task_id/passed/workdir/tier1_passed/verdict/items/summary), or 'error'.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "job_id": {
+                            "type": "string",
+                            "description": "Job ID returned by judge.evaluate or task.complete",
+                        },
+                    },
+                    "required": ["job_id"],
                 },
             },
             {
@@ -369,30 +404,19 @@ class GitReinsMCPServer:
         task = tm.complete(id)
         logger.info("Task completed: %s (workdir=%s)", id, tm.workdir)
 
-        # Trigger evaluation if LLM is configured
+        # Trigger evaluation if LLM is configured — dispatched as a background
+        # job so the tool call returns immediately (MCP clients cap tool-call
+        # duration at ~300s; a full evaluation takes ~14 min). Evaluation
+        # errors land in the job record, not in this response.
         api_key = os.getenv("GITREINS_LLM_API_KEY", "")
         if api_key:
-            try:
-                j = self.judge if tm is self.tasks else Judge(self.llm, tm.workdir)
-                judge_result = j.evaluate_task(task)
-                return {
-                    "task": tm.to_dict(task),
-                    "verdict": {
-                        "passed": judge_result.passed,
-                        "tier1_passed": judge_result.tier1.passed if judge_result.tier1 else None,
-                        "tier2_verdict": judge_result.tier2.verdict if judge_result.tier2 else None,
-                        "details": [
-                            {"criterion": i.criterion, "status": i.status, "detail": i.detail}
-                            for i in (judge_result.tier2.items if judge_result.tier2 else [])
-                        ],
-                    },
-                }
-            except Exception as e:
-                logger.exception("Evaluation failed for %s", id)
-                return {
-                    "task": tm.to_dict(task),
-                    "verdict": {"error": str(e)},
-                }
+            job_id = self._submit_eval_job(id, tm.workdir, task)
+            return {
+                "task": tm.to_dict(task),
+                "job_id": job_id,
+                "status": "running",
+                "note": "evaluation running in background — poll judge.status",
+            }
 
         return {"task": tm.to_dict(task), "note": "LLM not configured — skipping evaluation"}
 
@@ -485,8 +509,18 @@ class GitReinsMCPServer:
         max_output_tokens: str | None = None,
         tool_call_weight: float | None = None,
         eval_cap: str | None = None,
+        wait: bool = False,
     ) -> dict:
-        """Run full evaluation pipeline. Accepts individual cap params or legacy eval_cap string."""
+        """Run the full evaluation pipeline on a task.
+
+        By default (``wait=False``) the evaluation is dispatched to a
+        background job and this returns immediately with
+        ``{"job_id": ..., "status": "running", ...}`` — poll
+        ``judge.status`` for the result. With ``wait=True`` the call
+        blocks until the evaluation finishes and returns the full result
+        dict (legacy synchronous behavior, unchanged shape). Accepts
+        individual cap params or the legacy eval_cap string.
+        """
         from engine.eval_cap import EvalCap
 
         # Skip LLM evaluation if no API key configured (avoid hanging in tests)
@@ -522,35 +556,58 @@ class GitReinsMCPServer:
         if tool_call_weight is not None:
             cap.tool_call_weight = float(tool_call_weight)
 
+        # Resolve the task up front (fast) so not-found errors are returned
+        # immediately instead of surfacing from a background job.
         wd = os.path.abspath(workdir) if workdir else self.workdir
         if wd != self.workdir:
             tm = TaskManager(wd)
             task = tm.get(id)
             if not task:
                 return {"error": f"Task not found: {id} in {wd}"}
-            j = Judge(self.llm, wd, eval_cap=cap)
-            result = j.evaluate_task(task)
         else:
             task = self.tasks.get(id)
             if not task:
                 return {"error": f"Task not found: {id}"}
+
+        # Mirror the legacy judge construction: the shared self.judge
+        # (eval_cap=None → config-driven caps) is only equivalent when
+        # running on the server workdir with no explicit cap params.
+        # Jobs always build a FRESH Judge from the captured eval_cap —
+        # the shared self.judge is never touched from a worker thread.
+        has_cap_params = any(
+            [
+                max_iterations is not None,
+                max_time,
+                max_input_tokens,
+                max_output_tokens,
+                tool_call_weight,
+                eval_cap,
+            ]
+        )
+        job_cap = cap if (wd != self.workdir or has_cap_params) else None
+
+        if wait:
             j = (
-                Judge(self.llm, self.workdir, eval_cap=cap)
-                if any(
-                    [
-                        max_iterations is not None,
-                        max_time,
-                        max_input_tokens,
-                        max_output_tokens,
-                        tool_call_weight,
-                        eval_cap,
-                    ]
-                )
+                Judge(self.llm, wd, eval_cap=job_cap)
+                if wd != self.workdir or has_cap_params
                 else self.judge
             )
             result = j.evaluate_task(task)
-        d = {
+            return self._judge_result_dict(id, wd, result)
+
+        # Async path: dispatch a background job and return immediately.
+        job_id = self._submit_eval_job(id, wd, task, eval_cap=job_cap)
+        return {
+            "job_id": job_id,
+            "status": "running",
             "task_id": id,
+            "workdir": wd,
+        }
+
+    def _judge_result_dict(self, task_id: str, wd: str, result) -> dict:
+        """Build the standard judge.evaluate result dict from a JudgeResult."""
+        d = {
+            "task_id": task_id,
             "passed": result.passed,
             "workdir": wd,
             "tier1_passed": result.tier1.passed if result.tier1 else None,
@@ -563,6 +620,68 @@ class GitReinsMCPServer:
             ]
             d["summary"] = result.tier2.summary
         return d
+
+    def _submit_eval_job(
+        self, task_id: str, wd: str, task, eval_cap=None
+    ) -> str:
+        """Register and start a background evaluation job.
+
+        Evaluation jobs run ONE at a time per server instance: a lock
+        serializes the actual ``evaluate_task`` call so concurrent judges
+        can't contend on ports/tmp (LSP integration tests run real
+        servers) or on the shared ``.gitreins/history`` git storage. A
+        fresh ``Judge`` is built inside the job from the captured params.
+
+        Returns the new job id; the caller returns immediately while the
+        job runs. Poll ``judge.status`` with the job id for the result.
+        """
+        job_id = f"job-{uuid.uuid4().hex}"
+        job = {
+            "id": job_id,
+            "status": "running",
+            "task_id": task_id,
+            "workdir": wd,
+            "result": None,
+            "error": None,
+            "started_at": time.time(),
+        }
+        with self._jobs_lock:
+            self._jobs[job_id] = job
+
+        def _run_job() -> None:
+            try:
+                j = Judge(self.llm, wd, eval_cap=eval_cap)
+                with self._eval_lock:
+                    result = j.evaluate_task(task)
+                d = self._judge_result_dict(task_id, wd, result)
+                with self._jobs_lock:
+                    job["result"] = d
+                    job["status"] = "complete"
+            except Exception as e:
+                logger.exception("Background evaluation job %s failed", job_id)
+                with self._jobs_lock:
+                    job["status"] = "error"
+                    job["error"] = str(e)
+
+        threading.Thread(
+            target=_run_job, name=f"judge-job-{job_id}", daemon=True
+        ).start()
+        return job_id
+
+    def _judge_status(self, job_id: str) -> dict:
+        """Return the status of a background evaluation job."""
+        with self._jobs_lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return {"error": f"Job not found: {job_id}"}
+            return {
+                "job_id": job["id"],
+                "status": job["status"],
+                "task_id": job["task_id"],
+                "workdir": job["workdir"],
+                "result": job["result"],
+                "error": job["error"],
+            }
 
     def _propagate(self, source: str | None = None, targets: list[str] | None = None) -> dict:
         """Propagate guard configuration to sibling repos.

@@ -8,9 +8,11 @@ import os
 import select
 import subprocess
 import sys
+import time
 
 import pytest
 
+from engine.judge import Judge
 from gitreins_mcp.server import GitReinsMCPServer
 
 
@@ -75,8 +77,8 @@ class TestInitializeHandshake:
 class TestToolsList:
     """Test tools/list — step-2-1-1-2."""
 
-    def test_tools_list_returns_nine_tools(self, mcp_server):
-        """tools/list returns exactly 11 tool schemas."""
+    def test_tools_list_returns_twelve_tools(self, mcp_server):
+        """tools/list returns exactly 12 tool schemas."""
         response = mcp_server.handle_request(
             {
                 "jsonrpc": "2.0",
@@ -86,11 +88,12 @@ class TestToolsList:
         )
         assert response is not None
         tools = response["result"]["tools"]
-        assert len(tools) == 11
+        assert len(tools) == 12
 
     def test_all_expected_tool_names_present(self, mcp_server):
         """All expected tool names: task.create, task.start, task.complete,
-        task.list, task.get, task.delete, commit, guard.run, judge.evaluate."""
+        task.list, task.get, task.delete, commit, guard.run, judge.evaluate,
+        judge.status."""
         response = mcp_server.handle_request(
             {
                 "jsonrpc": "2.0",
@@ -110,6 +113,7 @@ class TestToolsList:
             "commit",
             "guard.run",
             "judge.evaluate",
+            "judge.status",
             "propagate",
         ]
         for name in expected:
@@ -577,6 +581,190 @@ class TestJudgeEvaluateMCP:
         assert "result" in response or "error" in response
 
 
+# ── DF-003: async judge.evaluate / judge.status / task.complete ─────────────
+
+
+class _FakeTier1:
+    """Minimal stand-in for engine.guard_manager.Tier1Result."""
+
+    passed = True
+
+
+class _FakeItem:
+    """Minimal stand-in for an evaluator verdict item."""
+
+    def __init__(self, criterion, status, detail):
+        self.criterion = criterion
+        self.status = status
+        self.detail = detail
+
+
+class _FakeTier2:
+    """Minimal stand-in for an AgenticEvaluator verdict."""
+
+    def __init__(self):
+        self.verdict = "COMPLETE"
+        self.items = [_FakeItem("c1", "PASS", "ok")]
+        self.summary = "all criteria met"
+
+
+class _FakeJudgeResult:
+    """Minimal stand-in for engine.judge.JudgeResult."""
+
+    def __init__(self, passed=True):
+        self.passed = passed
+        self.tier1 = _FakeTier1()
+        self.tier2 = _FakeTier2()
+
+
+def _stub_judge_evaluate(monkeypatch, sleep=0.0, passed=True):
+    """Stub Judge.evaluate_task so async tests never need a real LLM or suite."""
+
+    def _fake(self, task):
+        if sleep:
+            time.sleep(sleep)
+        return _FakeJudgeResult(passed=passed)
+
+    monkeypatch.setattr(Judge, "evaluate_task", _fake)
+
+
+class TestJudgeAsyncMCP:
+    """Background-job behavior for judge.evaluate / judge.status / task.complete (DF-003).
+
+    All evaluation is stubbed via ``Judge.evaluate_task`` — no real LLM key
+    or test-suite run. The server is created per-test with a fake
+    ``GITREINS_LLM_API_KEY`` so the tests are hermetic regardless of the
+    host environment.
+    """
+
+    def _call(self, server, name, arguments):
+        response = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+            }
+        )
+        assert "result" in response, f"tools/call {name} failed: {response}"
+        return json.loads(response["result"]["content"][0]["text"])
+
+    def _create_task(self, server, task_id):
+        self._call(
+            server,
+            "task.create",
+            {"id": task_id, "title": task_id, "criteria": ["c1"]},
+        )
+
+    def _poll_status(self, server, job_id, deadline=5.0):
+        """Poll judge.status until the job finishes (or fail after deadline)."""
+        end = time.monotonic() + deadline
+        last = None
+        while time.monotonic() < end:
+            last = self._call(server, "judge.status", {"job_id": job_id})
+            if last["status"] in ("complete", "error"):
+                return last
+            time.sleep(0.02)
+        pytest.fail(f"job {job_id} did not finish within {deadline}s — last status: {last}")
+
+    def test_judge_evaluate_async_returns_immediately(self, mcp_server, monkeypatch):
+        """Default judge.evaluate (no wait) returns job_id + running without blocking."""
+        monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
+        monkeypatch.setattr(mcp_server.llm, "api_key", "sk-test")
+        _stub_judge_evaluate(monkeypatch, sleep=0.5)
+        self._create_task(mcp_server, "async-me")
+
+        t0 = time.monotonic()
+        result = self._call(mcp_server, "judge.evaluate", {"id": "async-me"})
+        elapsed = time.monotonic() - t0
+
+        assert set(result.keys()) == {"job_id", "status", "task_id", "workdir"}
+        assert result["status"] == "running"
+        assert result["task_id"] == "async-me"
+        assert result["workdir"] == mcp_server.workdir
+        # The stubbed evaluation sleeps 0.5s — a blocking call could never
+        # return this fast with status still "running".
+        assert elapsed < 0.3, f"judge.evaluate blocked for {elapsed:.2f}s — expected async return"
+
+    def test_judge_status_polls_to_complete(self, mcp_server, monkeypatch):
+        """judge.status polls a background job to 'complete' with the full result."""
+        monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
+        monkeypatch.setattr(mcp_server.llm, "api_key", "sk-test")
+        _stub_judge_evaluate(monkeypatch, sleep=0.1)
+        self._create_task(mcp_server, "poll-me")
+
+        result = self._call(mcp_server, "judge.evaluate", {"id": "poll-me"})
+        job_id = result["job_id"]
+
+        status = self._poll_status(mcp_server, job_id)
+        assert status["status"] == "complete"
+        assert status["job_id"] == job_id
+        assert status["task_id"] == "poll-me"
+        assert status["workdir"] == mcp_server.workdir
+        assert status["error"] is None
+        assert status["result"]["passed"] is True
+        assert status["result"]["tier1_passed"] is True
+        assert status["result"]["verdict"] == "COMPLETE"
+        assert status["result"]["items"][0]["criterion"] == "c1"
+        assert status["result"]["summary"] == "all criteria met"
+
+    def test_judge_status_unknown_job_returns_error(self, mcp_server):
+        """judge.status with an unknown job_id returns an error dict (no crash)."""
+        result = self._call(mcp_server, "judge.status", {"job_id": "job-nope"})
+        assert result["error"] == "Job not found: job-nope"
+
+    def test_judge_evaluate_wait_true_blocks_for_result(self, mcp_server, monkeypatch):
+        """judge.evaluate with wait=True returns the full result synchronously."""
+        monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
+        monkeypatch.setattr(mcp_server.llm, "api_key", "sk-test")
+        _stub_judge_evaluate(monkeypatch, sleep=0.05)
+        self._create_task(mcp_server, "sync-me")
+
+        result = self._call(mcp_server, "judge.evaluate", {"id": "sync-me", "wait": True})
+        assert result["task_id"] == "sync-me"
+        assert result["passed"] is True
+        assert result["tier1_passed"] is True
+        assert result["verdict"] == "COMPLETE"
+        assert result["items"][0]["criterion"] == "c1"
+        assert result["summary"] == "all criteria met"
+        assert result["workdir"] == mcp_server.workdir
+        assert "job_id" not in result
+
+    def test_task_complete_dispatches_async_job_when_llm_configured(
+        self, mcp_server, monkeypatch
+    ):
+        """task.complete with LLM key flips the task, then dispatches a background job."""
+        monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
+        _stub_judge_evaluate(monkeypatch, sleep=0.1)
+        self._create_task(mcp_server, "tc-job")
+        self._call(mcp_server, "task.start", {"id": "tc-job"})
+
+        t0 = time.monotonic()
+        result = self._call(mcp_server, "task.complete", {"id": "tc-job"})
+        elapsed = time.monotonic() - t0
+
+        assert result["task"]["status"] == "complete"
+        assert "job_id" in result
+        assert result["status"] == "running"
+        assert "poll judge.status" in result["note"]
+        assert elapsed < 0.5, f"task.complete blocked for {elapsed:.2f}s — expected async return"
+
+        status = self._poll_status(mcp_server, result["job_id"])
+        assert status["status"] == "complete"
+        assert status["result"]["passed"] is True
+        assert status["task_id"] == "tc-job"
+
+    def test_task_complete_no_llm_key_skips_evaluation(self, mcp_server, monkeypatch):
+        """task.complete without LLM key returns task + note and no job_id."""
+        monkeypatch.delenv("GITREINS_LLM_API_KEY", raising=False)
+        self._create_task(mcp_server, "tc-skip")
+
+        result = self._call(mcp_server, "task.complete", {"id": "tc-skip"})
+        assert result["task"]["status"] == "complete"
+        assert "job_id" not in result
+        assert "LLM not configured" in result["note"]
+
+
 # ── v0.7.3: Configure MCP tool ───────────────────────────────────────────────
 
 
@@ -845,7 +1033,7 @@ class TestMCPStdioIntegration:
         assert "tools" in resp["result"]
 
     def test_tools_list_over_stdio(self, mcp_proc):
-        """tools/list returns exactly 11 tools with correct names and schemas."""
+        """tools/list returns exactly 12 tools with correct names and schemas."""
         resp = self._send_recv(
             mcp_proc,
             {
@@ -855,7 +1043,7 @@ class TestMCPStdioIntegration:
             },
         )
         tools = resp["result"]["tools"]
-        assert len(tools) == 11
+        assert len(tools) == 12
         names = [t["name"] for t in tools]
         expected = [
             "configure",
@@ -868,6 +1056,7 @@ class TestMCPStdioIntegration:
             "commit",
             "guard.run",
             "judge.evaluate",
+            "judge.status",
             "propagate",
         ]
         for name in expected:
@@ -998,7 +1187,7 @@ class TestMCPStdioIntegration:
         mcp_proc.stdin.flush()
         resp = self._read_response(mcp_proc)
         assert resp["id"] == 1
-        assert len(resp["result"]["tools"]) == 11
+        assert len(resp["result"]["tools"]) == 12
 
     def test_missing_jsonrpc_field(self, mcp_proc):
         """Missing jsonrpc field → invalid request error (-32600)."""
