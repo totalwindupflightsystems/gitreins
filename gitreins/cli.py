@@ -550,15 +550,16 @@ def _has_pytest_pythonpath_config(workdir: str) -> bool:
     pyproject = os.path.join(workdir, "pyproject.toml")
     if os.path.isfile(pyproject):
         try:
-            import tomllib  # Python 3.11+
+            try:
+                import tomllib  # Python 3.11+
+            except ImportError:  # pragma: no cover — Python 3.10 fallback
+                import tomli as tomllib  # type: ignore[no-redef]
 
             with open(pyproject, "rb") as f:
                 data = tomllib.load(f)
             ini_options = data.get("tool", {}).get("pytest", {}).get("ini_options", {})
             if "pythonpath" in ini_options:
                 return True
-        except ImportError:
-            pass  # Python 3.10 — skip pyproject check; python3 -m pytest stays safe
         except Exception:
             pass  # unparseable pyproject — treat as unconfigured
 

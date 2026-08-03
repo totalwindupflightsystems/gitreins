@@ -527,6 +527,7 @@ dependencies = [
     { name = "packaging" },
     { name = "pyyaml" },
     { name = "requests" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
 ]
 
 [package.optional-dependencies]
@@ -573,6 +574,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "requests", specifier = ">=2.28" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.5" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2.0" },
     { name = "transformers", marker = "extra == 'antares'", specifier = ">=4.50" },
     { name = "twine", marker = "extra == 'dev'", specifier = ">=5.0" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },

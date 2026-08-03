@@ -31,6 +31,18 @@ from engine.types import GuardResult, Tier1Result
 logger = logging.getLogger("gitreins.guard")
 
 
+def _sanitized_env() -> dict[str, str]:
+    """Return the current environment with every GIT_* variable removed.
+
+    Git exports GIT_INDEX_FILE (plus GIT_DIR, GIT_WORK_TREE, and friends) to
+    pre-commit hooks. Leaking them into subprocesses the guard spawns —
+    pytest, linters, nested guards — makes those processes read the OUTER
+    repository's index instead of the workdir's own, which breaks
+    nested-guard tests and diff-mode test selection. (DF-008)
+    """
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
 # ── Diff-based test discovery ──────────────────────────────────
 
 # Files that, when changed, force a full test run (too broad to narrow)
@@ -118,6 +130,7 @@ def _get_staged_files(workdir: str) -> list[str]:
             text=True,
             timeout=5,
             cwd=workdir,
+            env=_sanitized_env(),
         )
         if head_check.returncode != 0:
             # No HEAD — use ls-files to list all staged files.
@@ -129,6 +142,7 @@ def _get_staged_files(workdir: str) -> list[str]:
                 text=True,
                 timeout=10,
                 cwd=workdir,
+                env=_sanitized_env(),
             )
         else:
             result = subprocess.run(
@@ -137,6 +151,7 @@ def _get_staged_files(workdir: str) -> list[str]:
                 text=True,
                 timeout=10,
                 cwd=workdir,
+                env=_sanitized_env(),
             )
         return [f.strip() for f in result.stdout.split("\n") if f.strip()]
     except Exception:
@@ -412,6 +427,7 @@ class GuardManager:
                 timeout=30,
                 cwd=self.workdir,
                 errors="replace",
+                env=_sanitized_env(),
             )
             if result.returncode == 0:
                 return GuardResult(name="secrets", passed=True, output="gitleaks: clean")
@@ -573,6 +589,7 @@ class GuardManager:
                     text=True,
                     timeout=120,
                     cwd=self.workdir,
+                    env=_sanitized_env(),
                 )
                 output = lint_result.stdout + lint_result.stderr
                 if len(output) > 2000:
@@ -630,6 +647,7 @@ class GuardManager:
                 text=True,
                 timeout=self._test_timeout,
                 cwd=self.workdir,
+                env=_sanitized_env(),
             )
             output = result.stdout + result.stderr
             if len(output) > 2000:
@@ -694,6 +712,7 @@ class GuardManager:
                 text=True,
                 timeout=120,
                 cwd=self.workdir,
+                env=_sanitized_env(),
             )
             if result.returncode != 0:
                 return GuardResult(

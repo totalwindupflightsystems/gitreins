@@ -372,6 +372,46 @@ class TestInit:
         lang = _detect_language(str(tmp_path))
         assert _detect_test_command(str(tmp_path), lang) == "pytest -x --tb=short"
 
+    def test_pythonpath_detection_falls_back_to_tomli_on_py310(self, monkeypatch, tmp_path):
+        """Simulate Python 3.10 (no tomllib): the tomli backport must be used.
+
+        Regression for DF-009: on 3.10 the old code swallowed ImportError and
+        skipped the pyproject.toml pythonpath check, so _detect_test_command
+        wrongly returned 'python3 -m pytest ...' for pythonpath-configured
+        projects (CI 3.10 job went red on the bare-pytest assertion).
+        """
+        import builtins
+        import sys
+        import types
+
+        try:
+            import tomllib as real_tomllib
+        except ImportError:  # pragma: no cover — real Python 3.10
+            import tomli as real_tomllib
+
+        # Provide a fake tomli so the fallback resolves even on 3.11+, where
+        # the backport is not installed (marker: python_version < "3.11").
+        fake_tomli = types.ModuleType("tomli")
+        setattr(fake_tomli, "load", real_tomllib.load)
+        monkeypatch.setitem(sys.modules, "tomli", fake_tomli)
+
+        real_import = builtins.__import__
+
+        def fake_import(name, *args, **kwargs):
+            if name == "tomllib":
+                raise ImportError("No module named 'tomllib' (simulated Python 3.10)")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", fake_import)
+
+        from gitreins.cli import _has_pytest_pythonpath_config
+
+        (tmp_path / "pyproject.toml").write_text(
+            "[project]\nname='todo'\n"
+            "[tool.pytest.ini_options]\npythonpath = [\".\"]\n"
+        )
+        assert _has_pytest_pythonpath_config(str(tmp_path)) is True
+
     def test_python_root_package_with_pytest_ini_pythonpath_uses_bare_pytest(self, tmp_path):
         """Root-package + tests/ but pytest.ini configures pythonpath → bare pytest."""
         from gitreins.cli import _detect_language, _detect_test_command

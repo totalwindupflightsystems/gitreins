@@ -724,6 +724,69 @@ class TestBuildDiffTestCommand:
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
+def _make_skeleton_git(path):
+    """Create a minimal .git skeleton like the tmp_workdir fixture."""
+    git_dir = os.path.join(path, ".git")
+    os.makedirs(os.path.join(git_dir, "objects"))
+    os.makedirs(os.path.join(git_dir, "refs", "heads"))
+    with open(os.path.join(git_dir, "HEAD"), "w") as f:
+        f.write("ref: refs/heads/main\n")
+    with open(os.path.join(git_dir, "config"), "w") as f:
+        f.write("[core]\n\trepositoryformatversion = 0\n\tbare = false\n")
+
+
+# ── DF-008: GIT_* env must not leak into guard subprocesses ──────────────────
+
+
+class TestSanitizedEnv:
+    """DF-008: git exports GIT_INDEX_FILE (and friends) to pre-commit hooks.
+
+    If the guard passes them through to its subprocesses, a nested guard
+    reads the OUTER repo's index instead of its own workdir's index.
+    """
+
+    def test_sanitized_env_strips_all_git_vars(self, monkeypatch):
+        """_sanitized_env() removes every GIT_* variable and keeps the rest."""
+        from engine.guard_manager import _sanitized_env
+
+        monkeypatch.setenv("GIT_INDEX_FILE", "/tmp/outer/.git/index")
+        monkeypatch.setenv("GIT_DIR", "/tmp/outer/.git")
+        monkeypatch.setenv("GIT_WORK_TREE", "/tmp/outer")
+        monkeypatch.setenv("GIT_OBJECT_DIRECTORY", "/tmp/outer/.git/objects")
+        monkeypatch.setenv("GIT_ALTERNATE_OBJECT_DIRECTORIES", "/tmp/outer/.git/objects")
+        monkeypatch.setenv("PATH", "/usr/bin:/bin")
+        monkeypatch.setenv("HOME", "/home/tester")
+
+        env = _sanitized_env()
+        assert "GIT_INDEX_FILE" not in env
+        assert "GIT_DIR" not in env
+        assert "GIT_WORK_TREE" not in env
+        assert "GIT_OBJECT_DIRECTORY" not in env
+        assert "GIT_ALTERNATE_OBJECT_DIRECTORIES" not in env
+        assert env["PATH"] == "/usr/bin:/bin"
+        assert env["HOME"] == "/home/tester"
+
+    def test_get_staged_files_ignores_leaked_git_index_file(
+        self, tmp_workdir, tmp_path, monkeypatch
+    ):
+        """Staged-file discovery uses the workdir's own index even when a
+        pre-commit hook leaked GIT_INDEX_FILE pointing at a foreign repo."""
+        from engine.guard_manager import _get_staged_files
+
+        _write_staged_file(tmp_workdir, "app.py", "def main(): pass\n")
+
+        # Foreign repo whose index holds a file that does NOT exist in
+        # tmp_workdir — simulates the outer repo's index in a nested guard.
+        foreign = str(tmp_path / "foreign")
+        os.makedirs(foreign)
+        _make_skeleton_git(foreign)
+        _write_staged_file(foreign, "phantom.py", "x = 1\n")
+
+        monkeypatch.setenv("GIT_INDEX_FILE", os.path.join(foreign, ".git", "index"))
+
+        assert _get_staged_files(tmp_workdir) == ["app.py"]
+
+
 def _write_staged_file(workdir, filename, content):
     """Create a file and stage it in a real git repo, for secrets scan testing.
 

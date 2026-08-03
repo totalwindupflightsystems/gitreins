@@ -417,6 +417,38 @@ class TestConfigAndWorkdir:
         assert result.returncode == 0
         assert "Tier 1 Guards:" in result.stdout
 
+    def test_guard_run_ignores_leaked_git_index_file(self, tmp_path):
+        """Nested guard must not read a GIT_INDEX_FILE leaked by a pre-commit hook.
+
+        Git exports GIT_INDEX_FILE to hooks; if the guard passes it through to
+        its own subprocesses, a nested `gitreins guard` reads the OUTER repo's
+        index and lints phantom files. Regression: DF-008.
+        """
+        repo = tmp_path / "repo"
+        (repo / "tests").mkdir(parents=True)
+        (repo / "tests" / "test_x.py").write_text("def test_x(): pass\n")
+        (repo / "app.py").write_text("def main(): pass\n")
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        subprocess.run(
+            ["git", "-C", str(repo), "add", "app.py", "tests/test_x.py"], check=True
+        )
+
+        # Foreign index holding a path that does NOT exist in repo/ — simulates
+        # the outer repo's index leaking into the nested guard.
+        foreign = tmp_path / "foreign"
+        foreign.mkdir()
+        (foreign / "phantom.py").write_text("x = 1\n")
+        subprocess.run(["git", "init", "-q", str(foreign)], check=True)
+        subprocess.run(["git", "-C", str(foreign), "add", "phantom.py"], check=True)
+
+        result = run_cli(
+            "guard",
+            cwd=str(repo),
+            extra_env={"GIT_INDEX_FILE": str(foreign / ".git" / "index")},
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "Tier 1 Guards: PASS" in result.stdout
+
     def test_start_task_uses_existing_gitreins_dir(self, tmp_workdir):
         """Starting a task uses existing .gitreins/ directory."""
         gitreins = os.path.join(tmp_workdir, ".gitreins")
