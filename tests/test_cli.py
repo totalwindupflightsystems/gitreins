@@ -5,6 +5,8 @@ axiom:trace work_item=GR-003 spec=specs/09-CLI.md plan=.memory-bank/work-items/G
 
 import json
 import os
+import re
+import shutil
 import sys
 import subprocess
 import pytest
@@ -751,12 +753,12 @@ class TestGitleaksTomlGeneration:
         toml_path = os.path.join(tmp_workdir, ".gitleaks.toml")
         assert os.path.isfile(toml_path), "gitleaks.toml should be created"
         content = open(toml_path).read()
-        assert ".venv/" in content
+        assert r"\.venv/" in content
         assert "__pycache__/" in content
-        assert ".mypy_cache/" in content
-        assert ".pytest_cache/" in content
+        assert r"\.mypy_cache/" in content
+        assert r"\.pytest_cache/" in content
         assert "dist/" in content
-        assert ".git/" in content
+        assert r"\.git/" in content
 
     def test_existing_gitleaks_toml_not_overwritten(self, tmp_workdir):
         """If .gitleaks.toml already exists, init does not modify it."""
@@ -778,7 +780,7 @@ class TestGitleaksTomlGeneration:
         assert "test-key" in content
 
     def test_universal_exclusions_always_present(self, tmp_workdir):
-        """Every project gets .git/, .gitreins/, *.log exclusions."""
+        """Every project gets .git/, .gitreins/, *.log exclusions (as regexps)."""
         import subprocess
 
         os.makedirs(os.path.join(tmp_workdir, ".git"), exist_ok=True)
@@ -791,9 +793,105 @@ class TestGitleaksTomlGeneration:
         assert result.returncode == 0
 
         content = open(os.path.join(tmp_workdir, ".gitleaks.toml")).read()
-        assert ".git/" in content
-        assert ".gitreins/" in content
-        assert "*.log" in content
+        assert r"\.git/" in content
+        assert r"\.gitreins/" in content
+        assert r".*\.log" in content
+
+    def test_glob_to_regex_helper(self):
+        """_glob_to_regex converts glob paths to valid Go regexps (DF-001)."""
+        from gitreins.cli import _glob_to_regex
+
+        assert _glob_to_regex(".git/") == r"\.git/"
+        assert _glob_to_regex(".gitreins/") == r"\.gitreins/"
+        assert _glob_to_regex("*.log") == r".*\.log"
+        assert _glob_to_regex("*.egg-info/") == r".*\.egg-info/"
+        assert _glob_to_regex("*.spec.md") == r".*\.spec\.md"
+        assert _glob_to_regex("*.md") == r".*\.md"
+        assert _glob_to_regex("apps/*/node_modules/") == r"apps/.*/node_modules/"
+        assert _glob_to_regex("packages/*/dist/") == r"packages/.*/dist/"
+        assert _glob_to_regex("node_modules/") == "node_modules/"
+        assert _glob_to_regex("docs/") == "docs/"
+        assert _glob_to_regex("vendor/") == "vendor/"
+        # every output must itself compile as a regex
+        for out in (
+            r"\.git/",
+            r".*\.log",
+            r".*\.egg-info/",
+            r".*\.spec\.md",
+            r"apps/.*/node_modules/",
+        ):
+            re.compile(out)
+
+    def test_generated_allowlist_entries_are_valid_regexes(self, tmp_workdir):
+        """Every allowlist path in the generated .gitleaks.toml is a valid regexp.
+
+        gitleaks compiles each [allowlist] paths entry as a Go regexp; bare
+        globs like '*.log' panic it with 'missing argument to repetition
+        operator'. Regression for DF-001.
+        """
+        import subprocess
+
+        os.makedirs(os.path.join(tmp_workdir, ".git"), exist_ok=True)
+        with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
+            f.write("print('hello')\n")
+        with open(os.path.join(tmp_workdir, "setup.py"), "w") as f:
+            f.write("# placeholder\n")
+        subprocess.run(["git", "init", "-q"], cwd=tmp_workdir)
+        result = run_cli("init", cwd=tmp_workdir)
+        assert result.returncode == 0
+
+        content = open(os.path.join(tmp_workdir, ".gitleaks.toml")).read()
+        entries = re.findall(r"^\s*'''(.*?)''',\s*$", content, re.MULTILINE)
+        assert entries, "no allowlist path entries found in generated config"
+        for entry in entries:
+            re.compile(entry)  # must not raise — gitleaks compiles it as a regexp
+            assert "*" not in entry.replace(".*", ""), (
+                f"bare '*' (not part of '.*') in allowlist entry: {entry!r}"
+            )
+
+    def test_generated_config_does_not_panic_gitleaks(self, tmp_workdir):
+        """gitleaks detect runs cleanly against the generated config (DF-001).
+
+        Pre-fix, every generated config panicked gitleaks v8.30.1 ('missing
+        argument to repetition operator', exit code 2). Skipped when gitleaks
+        is not installed.
+        """
+        import subprocess
+
+        gitleaks = shutil.which("gitleaks")
+        if gitleaks is None:
+            pytest.skip("gitleaks not installed")
+
+        os.makedirs(os.path.join(tmp_workdir, ".git"), exist_ok=True)
+        with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
+            f.write("print('hello')\n")
+        with open(os.path.join(tmp_workdir, "setup.py"), "w") as f:
+            f.write("# placeholder\n")
+        subprocess.run(["git", "init", "-q"], cwd=tmp_workdir)
+        result = run_cli("init", cwd=tmp_workdir)
+        assert result.returncode == 0
+
+        toml_path = os.path.join(tmp_workdir, ".gitleaks.toml")
+        scan = subprocess.run(
+            [
+                gitleaks,
+                "detect",
+                "--source",
+                tmp_workdir,
+                "--no-git",
+                "--verbose",
+                "--config",
+                toml_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert "panic:" not in scan.stderr, f"gitleaks panicked:\n{scan.stderr}"
+        assert scan.returncode != 2, f"gitleaks exited {scan.returncode}:\n{scan.stderr}"
+        assert scan.returncode == 0, (
+            f"gitleaks scan not clean (rc={scan.returncode}):\n{scan.stderr}"
+        )
 
 
 class TestPreCommitHookIntegration:

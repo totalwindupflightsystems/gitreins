@@ -663,12 +663,34 @@ def _build_evaluator_section(size: dict) -> dict:
     }
 
 
+def _glob_to_regex(path: str) -> str:
+    """Convert a plain-glob path into a valid Go (RE2) regexp.
+
+    gitleaks compiles every [allowlist] paths entry as a Go regexp, so bare
+    globs like '*.log' panic with 'missing argument to repetition operator'
+    (DF-001). Glob '*' becomes regex '.*' and literal regex metacharacters are
+    escaped: '.venv/' -> '\\.venv/', '*.egg-info/' -> '.*\\.egg-info/',
+    'apps/*/node_modules/' -> 'apps/.*/node_modules/'.
+    """
+    out: list[str] = []
+    for ch in path:
+        if ch == "*":
+            out.append(".*")
+        elif ch in ".+()[]{}^$|\\?":
+            out.append("\\" + ch)
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
 def _generate_gitleaks_config(workdir: str, lang: dict, target_path: str) -> None:
     """Generate a .gitleaks.toml with sensible path exclusions.
 
     Prevents gitleaks from scanning dependency directories (node_modules,
     .venv, vendor, etc.) which can cause 30-second timeouts on large projects.
     Never overwrites existing .gitleaks.toml — caller checks before invoking.
+    Allowlist path entries are emitted as Go regexps (via _glob_to_regex) —
+    gitleaks compiles each entry as a regexp, not a glob.
     """
     # Universal exclusions for all projects
     paths = [
@@ -758,7 +780,7 @@ def _generate_gitleaks_config(workdir: str, lang: dict, target_path: str) -> Non
         "paths = [",
     ]
     for p in paths:
-        lines.append(f"  '''{p}''',")
+        lines.append(f"  '''{_glob_to_regex(p)}''',")
     lines.append("]")
     lines.append("")
 
