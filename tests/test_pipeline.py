@@ -467,6 +467,23 @@ class TestLoadPipelineConfigFallback:
         assert tier2 is not None
         assert tier2["type"] == "ai_eval"
 
+    def test_default_tier1_secrets_step_suppresses_gitleaks_banner(self, tmp_workdir):
+        """The default pipeline's tier1 secrets step runs gitleaks with
+        --no-banner (DF-006): the banner must not leak into captured tier1
+        output that reaches judge verdicts."""
+        workdir = tmp_workdir
+        config_dir = os.path.join(workdir, ".gitreins")
+        os.makedirs(config_dir, exist_ok=True)
+        with open(os.path.join(config_dir, "config.yaml"), "w") as f:
+            yaml.dump({"guards": {"secrets": True}}, f)
+
+        result = load_pipeline_config(workdir)
+        tier1 = next(s for s in result["pipeline"]["stages"] if s["id"] == "tier1")
+        secrets_step = next(s for s in tier1["steps"] if s["id"] == "secrets")
+        assert "--no-banner" in secrets_step["run"], (
+            "tier1 secrets step must pass --no-banner to gitleaks"
+        )
+
 
 # ── GR-063c: C++ pipeline — split "c" from "cpp" ───────────────────────────
 

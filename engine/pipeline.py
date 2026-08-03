@@ -754,7 +754,7 @@ def _default_tier1_steps(workdir: str, config: dict | None = None) -> list[dict]
             "id": "secrets",
             "type": "script",
             "run": (
-                "gitleaks detect --source . --no-git || "
+                "gitleaks detect --source . --no-git --no-banner || "
                 'python3 -c "from engine.guard_manager import GuardManager; '
                 "import sys; gm = GuardManager('.'); "
                 'r = gm._check_secrets(); sys.exit(0 if r.passed else 1)"'
