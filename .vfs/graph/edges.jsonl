@@ -696,3 +696,5 @@
 {"from":"gitreins_mcp/server.py","to":"pkg:threading","rel":"imports","provenance":"ast_exact","confidence":1.0}
 {"from":"gitreins_mcp/server.py","to":"pkg:time","rel":"imports","provenance":"ast_exact","confidence":1.0}
 {"from":"gitreins_mcp/server.py","to":"pkg:uuid","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_persist.py","to":"pkg:shutil","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_persist.py","to":"pkg:subprocess","rel":"imports","provenance":"ast_exact","confidence":1.0}
