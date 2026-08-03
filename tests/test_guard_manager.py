@@ -424,6 +424,27 @@ class TestExtendedGuardManager:
             result = gm._check_secrets()
         assert result.passed is False
 
+    def test_gitleaks_findings_output_excludes_banner(self, tmp_workdir):
+        """gitleaks is invoked with --no-banner so captured guard output
+        (which feeds judge verdicts) stays free of the ASCII logo banner."""
+        gm = GuardManager(tmp_workdir)
+        mock_run = MagicMock()
+        mock_run.returncode = 1
+        mock_run.stdout = ""
+        # Simulate gitleaks run WITH --no-banner: findings on stderr, no logo.
+        mock_run.stderr = "Finding: config.py:5:6  generic-api-key  AWS API key\n"
+        with patch("subprocess.run", return_value=mock_run) as mock_patch:
+            result = gm._check_secrets()
+        # The banner-suppression flag must actually be passed to gitleaks.
+        cmd = mock_patch.call_args.args[0]
+        assert "--no-banner" in cmd
+        # Finding detail still surfaces in the guard output...
+        assert result.passed is False
+        assert "Finding: config.py" in result.output
+        # ...but the gitleaks logo banner must not pollute it.
+        assert "gitleaks v" not in result.output
+        assert "○" not in result.output
+
     def test_lint_ruff_available(self, tmp_workdir):
         """_check_lint uses ruff when available with Python files staged."""
         _write_staged_file(tmp_workdir, "code.py", "x = 1\n")
