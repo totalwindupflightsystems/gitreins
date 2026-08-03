@@ -243,6 +243,36 @@ gitreins report -n 20        # last 20
 gitreins report --interactive  # TUI with arrow-key navigation (requires textual)
 ```
 
+### Branch mechanics (git storage)
+
+With `storage: "git"` (the default), every verdict is auto-committed to a
+dedicated orphan `gitreins` branch — never to `main`. The branch is only
+checked out transiently (or updated via a temporary worktree), so your
+working tree is never disturbed. `.gitreins/history/` is intentionally
+gitignored: the verdict files are runtime artifacts whose canonical home is
+the `gitreins` branch, and a fresh clone therefore has no local
+`.gitreins/history/` directory.
+
+`gitreins report` reads verdicts in this order:
+
+1. **Local filesystem** — `.gitreins/history/` in the working tree (used
+   when present, e.g. right after a judge run in the same checkout).
+2. **`gitreins` branch fallback** — when the local directory is missing or
+   empty and storage is `"git"`, verdicts are read straight from the branch
+   (`git ls-tree` / `git show`), so a fresh clone can still browse the full
+   verdict history.
+
+To inspect the branch directly:
+
+```bash
+git log --oneline gitreins                                            # verdict commits
+git ls-tree -r --name-only gitreins -- .gitreins/history              # stored files
+git show gitreins:.gitreins/history/<date>/<hash>/verdict.json        # one verdict
+```
+
+With `storage: "filesystem"`, verdicts are written locally only — no branch
+is created and the fallback is skipped.
+
 ## Task Dependencies
 
 Tasks can depend on other tasks. Evaluation is blocked until dependencies pass:

@@ -2,6 +2,8 @@
 
 import json
 import os
+import shutil
+import subprocess
 from unittest.mock import patch
 
 from engine.persist import (
@@ -221,3 +223,205 @@ def test_build_summary_handles_pipeline_stages(tmp_path):
     }
     summary = p._build_summary("task-x", data)
     assert "tier1" in summary
+
+
+# ── git-branch fallback (DF-007) ─────────────────────────────
+
+
+def _git_env() -> dict:
+    """Env with a deterministic git identity for subprocess git calls."""
+    env = dict(os.environ)
+    env.update(
+        GIT_AUTHOR_NAME="Test Runner",
+        GIT_AUTHOR_EMAIL="test@example.com",
+        GIT_COMMITTER_NAME="Test Runner",
+        GIT_COMMITTER_EMAIL="test@example.com",
+    )
+    return env
+
+
+def _make_gitreins_branch_repo(repo, verdicts):
+    """Init a temp git repo with verdicts committed on a `gitreins` branch.
+
+    verdicts: iterable of (date, hash, task_id, passed). After committing,
+    the local .gitreins/history/ dir is removed from the working tree so the
+    repo looks like a fresh clone — the branch holds the files, the working
+    tree does not.
+    """
+    env = _git_env()
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "gitreins", str(repo)], check=True, env=env)
+    for date, hash_, task_id, passed in verdicts:
+        entry = repo / ".gitreins" / "history" / date / hash_
+        entry.mkdir(parents=True)
+        (entry / "verdict.json").write_text(
+            json.dumps({"task_id": task_id, "passed": passed, "evaluated_at": f"{date}T00:00:00"})
+        )
+        (entry / "summary.md").write_text(f"# {task_id}")
+    subprocess.run(
+        ["git", "add", ".gitreins"], check=True, capture_output=True, cwd=str(repo), env=env
+    )
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "verdicts"], check=True, capture_output=True, cwd=str(repo), env=env
+    )
+    shutil.rmtree(repo / ".gitreins")
+    return env
+
+
+def test_list_verdicts_falls_back_to_gitreins_branch(tmp_path):
+    repo = tmp_path / "repo"
+    _make_gitreins_branch_repo(
+        repo,
+        [
+            ("2026-06-21", "aaaa1111", "old-task", True),
+            ("2026-06-22", "bbbb2222", "new-task", False),
+        ],
+    )
+
+    p = VerdictPersister(str(repo))
+    assert p.storage_mode == "git"
+    assert not os.path.isdir(p.history_dir)  # fresh-clone shape
+
+    entries = p.list_verdicts()
+    assert [e["task_id"] for e in entries] == ["new-task", "old-task"]
+    assert entries[0]["_date"] == "2026-06-22"
+    assert entries[0]["_hash"] == "bbbb2222"
+    assert entries[0]["passed"] is False
+    assert entries[1]["_date"] == "2026-06-21"
+    assert entries[1]["_hash"] == "aaaa1111"
+
+
+def test_list_verdicts_branch_fallback_respects_n_limit(tmp_path):
+    repo = tmp_path / "repo"
+    _make_gitreins_branch_repo(
+        repo, [("2026-07-01", f"h000000{i}", f"task-{i}", True) for i in range(5)]
+    )
+
+    p = VerdictPersister(str(repo))
+    entries = p.list_verdicts(n=2)
+    assert len(entries) == 2
+    assert [e["task_id"] for e in entries] == ["task-4", "task-3"]
+
+
+def test_list_verdicts_branch_fallback_filters_by_task_id(tmp_path):
+    repo = tmp_path / "repo"
+    _make_gitreins_branch_repo(
+        repo,
+        [
+            ("2026-07-01", "h0000001", "task-a", True),
+            ("2026-07-01", "h0000002", "task-b", True),
+        ],
+    )
+
+    p = VerdictPersister(str(repo))
+    assert [e["task_id"] for e in p.list_verdicts(task_id="task-b")] == ["task-b"]
+
+
+def test_list_verdicts_branch_fallback_skips_non_json(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    env = _git_env()
+    subprocess.run(["git", "init", "-q", "-b", "gitreins", str(repo)], check=True, env=env)
+    good = repo / ".gitreins" / "history" / "2026-06-21" / "aaaa1111"
+    good.mkdir(parents=True)
+    (good / "verdict.json").write_text(json.dumps({"task_id": "good-task", "passed": True}))
+    bad = repo / ".gitreins" / "history" / "2026-06-22" / "bbbb2222"
+    bad.mkdir(parents=True)
+    (bad / "verdict.json").write_text("{not json")
+    subprocess.run(
+        ["git", "add", ".gitreins"], check=True, capture_output=True, cwd=str(repo), env=env
+    )
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "verdicts"], check=True, capture_output=True, cwd=str(repo), env=env
+    )
+    shutil.rmtree(repo / ".gitreins")
+
+    p = VerdictPersister(str(repo))
+    assert [e["task_id"] for e in p.list_verdicts()] == ["good-task"]
+
+
+def test_list_verdicts_no_gitreins_branch_returns_empty(tmp_path):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    env = _git_env()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True, env=env)
+    (repo / "readme.txt").write_text("hello")
+    subprocess.run(
+        ["git", "add", "readme.txt"], check=True, capture_output=True, cwd=str(repo), env=env
+    )
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "init"], check=True, capture_output=True, cwd=str(repo), env=env
+    )
+
+    p = VerdictPersister(str(repo))
+    assert p.list_verdicts() == []
+    assert p.count_verdicts() == 0
+    assert "No verdict history found" in build_report(str(repo))
+
+
+def test_list_verdicts_branch_fallback_graceful_without_git(tmp_path):
+    p = VerdictPersister(str(tmp_path))  # no .git anywhere up the tree
+    assert p.list_verdicts() == []
+    assert p.count_verdicts() == 0
+    assert "No verdict history found" in build_report(str(tmp_path))
+
+
+def test_list_verdicts_local_entries_take_precedence_over_branch(tmp_path):
+    repo = tmp_path / "repo"
+    _make_gitreins_branch_repo(repo, [("2026-06-21", "aaaa1111", "branch-task", True)])
+    # A later judge run wrote a local verdict with a different task.
+    local = repo / ".gitreins" / "history" / "2026-08-03" / "cccc3333"
+    local.mkdir(parents=True)
+    (local / "verdict.json").write_text(json.dumps({"task_id": "local-task", "passed": True}))
+    (local / "summary.md").write_text("# local-task")
+
+    p = VerdictPersister(str(repo))
+    with patch.object(p, "_list_branch_verdicts", return_value=[]) as mocked:
+        entries = p.list_verdicts()
+        mocked.assert_not_called()
+    assert [e["task_id"] for e in entries] == ["local-task"]
+    assert p.count_verdicts() == 1
+
+
+def test_list_verdicts_filesystem_mode_never_consults_branch(tmp_path):
+    repo = tmp_path / "repo"
+    _make_gitreins_branch_repo(repo, [("2026-06-21", "aaaa1111", "branch-task", True)])
+
+    p = VerdictPersister(str(repo))
+    p.config["storage"] = "filesystem"
+    with patch.object(p, "_list_branch_verdicts", return_value=[]) as mocked:
+        assert p.list_verdicts() == []
+        mocked.assert_not_called()
+    assert p.count_verdicts() == 0
+
+
+def test_count_verdicts_falls_back_to_branch(tmp_path):
+    repo = tmp_path / "repo"
+    _make_gitreins_branch_repo(
+        repo,
+        [
+            ("2026-06-21", "aaaa1111", "t1", True),
+            ("2026-06-22", "bbbb2222", "t2", False),
+            ("2026-06-23", "cccc3333", "t3", True),
+        ],
+    )
+
+    p = VerdictPersister(str(repo))
+    assert p.count_verdicts() == 3
+
+
+def test_build_report_reads_verdicts_from_gitreins_branch(tmp_path):
+    repo = tmp_path / "repo"
+    _make_gitreins_branch_repo(
+        repo,
+        [
+            ("2026-06-21", "aaaa1111", "old-task", True),
+            ("2026-06-22", "bbbb2222", "new-task", False),
+        ],
+    )
+
+    report = build_report(str(repo))
+    assert "No verdict history found" not in report
+    assert "old-task" in report
+    assert "new-task" in report
+    assert "Total entries: 2" in report

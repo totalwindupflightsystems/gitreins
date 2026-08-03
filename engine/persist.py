@@ -5,6 +5,12 @@ Storage modes:
     "git"        — auto-commit to a `gitreins` orphan branch (default)
     "filesystem" — write files to .gitreins/history/ only, no git commits
 
+Reads: list_verdicts()/count_verdicts() prefer the local .gitreins/history/
+files. When the local dir is missing or holds no entries and storage is
+"git", they fall back to the verdicts committed on the `gitreins` branch —
+so a fresh clone (whose working tree has no .gitreins/history/, since it is
+gitignored) can still browse the full verdict history via `gitreins report`.
+
 Config (.gitreins/config.yaml):
     history:
       enabled: true               # false = no persistence at all
@@ -128,7 +134,27 @@ class VerdictPersister:
     # ── List / Report ────────────────────────────────────────
 
     def list_verdicts(self, n: int = 20, task_id: str | None = None) -> list[dict]:
-        """Return recent verdicts as a list of dicts, newest first."""
+        """Return recent verdicts as a list of dicts, newest first.
+
+        Local filesystem entries take precedence. When the local history
+        dir is missing or holds no verdict.json files at all and storage
+        mode is "git", falls back to verdicts committed on the `gitreins`
+        branch — fresh clones (no local .gitreins/history/, it is
+        gitignored) can still browse history via `gitreins report`.
+        """
+        entries = self._list_local_verdicts(n=n, task_id=task_id)
+        if entries:
+            return entries
+        # Local pass yielded nothing: fall back to the `gitreins` branch
+        # only when git storage is active AND the local dir holds no
+        # verdict.json files at all (a task_id filter that matches nothing
+        # locally must not pull branch entries in — sources are never merged).
+        if self.storage_mode == "git" and not self._local_history_has_entries():
+            return self._list_branch_verdicts(n=n, task_id=task_id)
+        return []
+
+    def _list_local_verdicts(self, n: int = 20, task_id: str | None = None) -> list[dict]:
+        """Read verdict entries from the local filesystem (original behavior)."""
         if not os.path.isdir(self.history_dir):
             return []
 
@@ -157,19 +183,136 @@ class VerdictPersister:
 
         return entries
 
-    def count_verdicts(self) -> int:
-        """Return total number of stored verdict entries."""
+    def _local_history_has_entries(self) -> bool:
+        """True when the local history dir holds at least one verdict.json."""
         if not os.path.isdir(self.history_dir):
-            return 0
-
-        count = 0
+            return False
         for date_dir in os.listdir(self.history_dir):
             date_path = os.path.join(self.history_dir, date_dir)
-            if os.path.isdir(date_path):
-                count += len(
-                    [d for d in os.listdir(date_path) if os.path.isdir(os.path.join(date_path, d))]
+            if not os.path.isdir(date_path):
+                continue
+            for hash_dir in os.listdir(date_path):
+                if os.path.isfile(os.path.join(date_path, hash_dir, "verdict.json")):
+                    return True
+        return False
+
+    def _branch_history_prefix(self) -> str:
+        """History path relative to workdir, git-style (forward slashes).
+
+        Verdicts are committed to the `gitreins` branch at the path
+        relative to the repo root (persist() commits os.path.relpath of the
+        entry dir), so this is the prefix to enumerate on the branch.
+        """
+        return os.path.relpath(self.history_dir, self.workdir).replace(os.sep, "/")
+
+    def _list_branch_verdicts(self, n: int = 20, task_id: str | None = None) -> list[dict]:
+        """Read verdict entries committed to the `gitreins` branch.
+
+        Enumerates verdict.json files under the history path with
+        `git ls-tree -r --name-only gitreins -- <prefix>` and reads each
+        via `git show gitreins:<path>`. Returns [] on any git failure
+        (branch absent, not a git repo, timeout) — callers degrade to
+        "No verdict history found." exactly as before.
+        """
+        prefix = self._branch_history_prefix()
+        try:
+            result = subprocess.run(
+                ["git", "ls-tree", "-r", "--name-only", "gitreins", "--", prefix],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                cwd=self.workdir,
+            )
+        except (subprocess.TimeoutExpired, OSError) as e:
+            logger.warning("git ls-tree failed on gitreins branch (non-fatal): %s", e)
+            return []
+        if result.returncode != 0:
+            return []  # branch missing or not a git repo
+
+        # Paths are <prefix>/<date>/<hash>/verdict.json — reverse lexical
+        # order matches the local reader's newest-first (date desc, hash desc).
+        paths = sorted(
+            (
+                line.strip()
+                for line in result.stdout.splitlines()
+                if line.strip().endswith("/verdict.json")
+            ),
+            reverse=True,
+        )
+
+        entries = []
+        rel_prefix = prefix.rstrip("/") + "/"
+        for path in paths:
+            rel = path[len(rel_prefix):] if path.startswith(rel_prefix) else path
+            parts = rel.split("/")
+            if len(parts) != 3 or parts[2] != "verdict.json":
+                continue
+            date_dir, hash_dir = parts[0], parts[1]
+            try:
+                show = subprocess.run(
+                    ["git", "show", f"gitreins:{path}"],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    cwd=self.workdir,
                 )
+                if show.returncode != 0:
+                    continue
+                data = json.loads(show.stdout)
+            except (
+                subprocess.TimeoutExpired,
+                OSError,
+                json.JSONDecodeError,
+                UnicodeDecodeError,
+            ) as e:
+                logger.warning("Failed to read verdict %s from gitreins branch (non-fatal): %s", path, e)
+                continue
+            if task_id and data.get("task_id") != task_id:
+                continue
+            data["_date"] = date_dir
+            data["_hash"] = hash_dir
+            entries.append(data)
+            if len(entries) >= n:
+                break
+
+        return entries
+
+    def count_verdicts(self) -> int:
+        """Return total number of stored verdict entries.
+
+        Local filesystem entries take precedence; when the local history
+        dir is missing or empty and storage mode is "git", counts the
+        verdict.json files on the `gitreins` branch instead.
+        """
+        count = 0
+        if os.path.isdir(self.history_dir):
+            for date_dir in os.listdir(self.history_dir):
+                date_path = os.path.join(self.history_dir, date_dir)
+                if os.path.isdir(date_path):
+                    count += len(
+                        [d for d in os.listdir(date_path) if os.path.isdir(os.path.join(date_path, d))]
+                    )
+        if count == 0 and self.storage_mode == "git":
+            return self._count_branch_verdicts()
         return count
+
+    def _count_branch_verdicts(self) -> int:
+        """Count verdict.json files on the `gitreins` branch (no content reads)."""
+        prefix = self._branch_history_prefix()
+        try:
+            result = subprocess.run(
+                ["git", "ls-tree", "-r", "--name-only", "gitreins", "--", prefix],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                cwd=self.workdir,
+            )
+        except (subprocess.TimeoutExpired, OSError) as e:
+            logger.warning("git ls-tree failed on gitreins branch (non-fatal): %s", e)
+            return 0
+        if result.returncode != 0:
+            return 0
+        return sum(1 for line in result.stdout.splitlines() if line.strip().endswith("/verdict.json"))
 
     # ── Internal ─────────────────────────────────────────────
 
