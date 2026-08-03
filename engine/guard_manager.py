@@ -147,15 +147,16 @@ def _build_diff_test_command(test_command: str, test_files: list[str], workdir: 
     """Build a test command targeting specific test files.
 
     If test_command is a pytest invocation (bare `pytest ...` or
-    `uv run pytest ...` / `python -m pytest ...`), appends the test
-    file paths. Otherwise returns the original command (custom runners
-    can't be narrowed without user config).
+    `uv run pytest ...` / `python -m pytest ...` / `python3 -m pytest ...`),
+    appends the test file paths. Otherwise returns the original command
+    (custom runners can't be narrowed without user config).
     """
     cmd = test_command.strip()
 
     # Match pytest invocations regardless of runner prefix:
-    #   pytest ... | uv run pytest ... | python -m pytest ... | .venv/bin/pytest ...
-    if re.search(r"(^|\s)((uv\s+run\s+)?pytest|python\s+-m\s+pytest)(\s|$)", cmd):
+    #   pytest ... | uv run pytest ... | python -m pytest ... | python3 -m pytest ...
+    #   | .venv/bin/pytest ...
+    if re.search(r"(^|\s)((uv\s+run\s+)?pytest|python3?\s+-m\s+pytest)(\s|$)", cmd):
         # Convert absolute paths to relative for cleaner output
         rel_paths = [os.path.relpath(f, workdir) for f in test_files]
         return f"{cmd} {' '.join(rel_paths)}"

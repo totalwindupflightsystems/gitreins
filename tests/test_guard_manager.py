@@ -13,6 +13,7 @@ from engine.guard_manager import (
     GuardManager,
     GuardResult,
     Tier1Result,
+    _build_diff_test_command,
     _discover_test_targets,
 )
 
@@ -670,6 +671,54 @@ class TestDiscoverTestTargetsDiffMode:
         assert "skipped" in result.output.lower(), (
             f"Output should mention skip, got: {result.output}"
         )
+
+
+class TestBuildDiffTestCommand:
+    """_build_diff_test_command narrows pytest invocations to specific test files."""
+
+    def test_narrows_python3_m_pytest(self, tmp_path):
+        """`python3 -m pytest` is recognized and narrowed to the test file path.
+
+        Regression for DF-002: init now generates `python3 -m pytest ...`
+        for root-package layouts, and diff-mode narrowing must still append
+        the test file paths instead of running the full suite.
+        """
+        import os
+
+        workdir = str(tmp_path)
+        abs_test = os.path.join(workdir, "tests", "test_a.py")
+        cmd = _build_diff_test_command(
+            "python3 -m pytest -x --tb=short", [abs_test], workdir
+        )
+        assert cmd == "python3 -m pytest -x --tb=short tests/test_a.py"
+        assert cmd.endswith("tests/test_a.py")
+
+    def test_narrows_python_m_pytest(self, tmp_path):
+        """`python -m pytest` keeps narrowing (existing behavior unchanged)."""
+        import os
+
+        workdir = str(tmp_path)
+        abs_test = os.path.join(workdir, "tests", "test_a.py")
+        cmd = _build_diff_test_command("python -m pytest -x --tb=short", [abs_test], workdir)
+        assert cmd == "python -m pytest -x --tb=short tests/test_a.py"
+
+    def test_narrows_bare_pytest(self, tmp_path):
+        """Bare `pytest` keeps narrowing (existing behavior unchanged)."""
+        import os
+
+        workdir = str(tmp_path)
+        abs_test = os.path.join(workdir, "tests", "test_a.py")
+        cmd = _build_diff_test_command("pytest -x --tb=short", [abs_test], workdir)
+        assert cmd == "pytest -x --tb=short tests/test_a.py"
+
+    def test_leaves_non_pytest_runner_untouched(self, tmp_path):
+        """Custom runners can't be narrowed — original command is returned."""
+        import os
+
+        workdir = str(tmp_path)
+        abs_test = os.path.join(workdir, "tests", "test_a.py")
+        cmd = _build_diff_test_command("npm test", [abs_test], workdir)
+        assert cmd == "npm test"
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────

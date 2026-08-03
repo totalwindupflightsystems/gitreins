@@ -345,6 +345,12 @@ def cmd_init(args):
     print(f"  Language:    {lang_info['name']}")
     print(f"  Packages:    {size['packages']}")
     print(f"  Test cmd:    {test_cmd}")
+    if test_cmd == "python3 -m pytest -x --tb=short":
+        print(
+            "  Note: using 'python3 -m pytest' — root-package layout without pytest pythonpath "
+            "config; add [tool.pytest.ini_options] pythonpath = [\".\"] to pyproject.toml "
+            "to use bare pytest"
+        )
     print(f"  Test mode:   {existing['guards'].get('test_mode', 'full')}")
     print(f"  Eval cap:    {existing['evaluator'].get('max_iterations', 100)} iterations")
     print(
@@ -375,6 +381,31 @@ def cmd_init(args):
         print(f"Updated: {', '.join(changed)}")
     else:
         print("No changes needed — config is up to date.")
+
+
+def _looks_like_python(workdir: str) -> bool:
+    """Narrow Python fallback for marker-less repos (DF-002).
+
+    True when the repo root has any top-level *.py file, or any top-level
+    package dir (contains __init__.py) outside well-known non-package dirs.
+    Keeps the root-package probe in _detect_test_command reachable for
+    fresh repos that have no pyproject.toml/setup.py/setup.cfg/
+    requirements.txt yet.
+    """
+    excluded = {"tests", ".venv", "node_modules", ".git", ".gitreins", "__pycache__"}
+    try:
+        entries = os.listdir(workdir)
+    except OSError:
+        return False
+    for entry in entries:
+        full = os.path.join(workdir, entry)
+        if os.path.isfile(full) and entry.endswith(".py"):
+            return True
+        if entry in excluded:
+            continue
+        if os.path.isdir(full) and os.path.isfile(os.path.join(full, "__init__.py")):
+            return True
+    return False
 
 
 def _detect_language(workdir: str) -> dict:
@@ -408,6 +439,10 @@ def _detect_language(workdir: str) -> dict:
         or os.path.isfile(os.path.join(workdir, "setup.py"))
         or os.path.isfile(os.path.join(workdir, "setup.cfg"))
         or os.path.isfile(os.path.join(workdir, "requirements.txt"))
+        # Narrow fallback (DF-002): root-package layouts without any of the
+        # marker files above are still Python — a top-level *.py file or a
+        # top-level package dir (contains __init__.py) is enough.
+        or _looks_like_python(workdir)
     ):
         info["is_python"] = True
         langs_found.append("Python")
@@ -484,6 +519,85 @@ def _detect_static_analysis_tools(workdir: str, lang: dict) -> list[str]:
     return tools
 
 
+def _detect_root_package_layout(workdir: str) -> bool:
+    """True when the repo root has one or more top-level package dirs.
+
+    A top-level package dir is a directory directly under the repo root
+    that contains __init__.py, excluding well-known non-package dirs
+    (tests/, .venv, node_modules, .git, .gitreins, __pycache__).
+    """
+    excluded = {"tests", ".venv", "node_modules", ".git", ".gitreins", "__pycache__"}
+    try:
+        entries = os.listdir(workdir)
+    except OSError:
+        return False
+    for entry in entries:
+        if entry in excluded:
+            continue
+        full = os.path.join(workdir, entry)
+        if os.path.isdir(full) and os.path.isfile(os.path.join(full, "__init__.py")):
+            return True
+    return False
+
+
+def _has_pytest_pythonpath_config(workdir: str) -> bool:
+    """True when the project already configures pytest's pythonpath.
+
+    Checks the standard locations pytest reads: pyproject.toml
+    ([tool.pytest.ini_options] pythonpath), pytest.ini / tox.ini
+    ([pytest] pythonpath), and setup.cfg ([tool:pytest] pythonpath).
+    """
+    pyproject = os.path.join(workdir, "pyproject.toml")
+    if os.path.isfile(pyproject):
+        try:
+            import tomllib  # Python 3.11+
+
+            with open(pyproject, "rb") as f:
+                data = tomllib.load(f)
+            ini_options = data.get("tool", {}).get("pytest", {}).get("ini_options", {})
+            if "pythonpath" in ini_options:
+                return True
+        except ImportError:
+            pass  # Python 3.10 — skip pyproject check; python3 -m pytest stays safe
+        except Exception:
+            pass  # unparseable pyproject — treat as unconfigured
+
+    import configparser
+
+    for path, section in (
+        (os.path.join(workdir, "pytest.ini"), "pytest"),
+        (os.path.join(workdir, "tox.ini"), "pytest"),
+        (os.path.join(workdir, "setup.cfg"), "tool:pytest"),
+    ):
+        if not os.path.isfile(path):
+            continue
+        try:
+            parser = configparser.ConfigParser()
+            parser.read(path)
+            if parser.has_option(section, "pythonpath"):
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _needs_python_module_pytest(workdir: str) -> bool:
+    """True when bare `pytest` cannot import the project's root packages.
+
+    pytest 9 importlib mode no longer adds the repo root to sys.path, so a
+    root-package layout (top-level __init__.py dirs) with a tests/ dir only
+    works under `python3 -m pytest` — unless the user already configured
+    pytest's pythonpath (pyproject.toml / pytest.ini / setup.cfg).
+    """
+    if not os.path.isdir(os.path.join(workdir, "tests")):
+        return False
+    if not _detect_root_package_layout(workdir):
+        return False
+    if _has_pytest_pythonpath_config(workdir):
+        return False
+    return True
+
+
 def _detect_test_command(workdir: str, lang: dict) -> str:
     """Detect the right test command for the project."""
     if lang["is_go"]:
@@ -496,6 +610,8 @@ def _detect_test_command(workdir: str, lang: dict) -> str:
                 return "go test -short -count=1 ./..."
         return "go test -short -count=1 ./..."
     elif lang["is_python"]:
+        if _needs_python_module_pytest(workdir):
+            return "python3 -m pytest -x --tb=short"
         return "pytest -x --tb=short"
     elif lang["is_ts"]:
         # Check package.json for test script

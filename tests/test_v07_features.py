@@ -313,6 +313,99 @@ class TestInit:
         assert info["is_python"]
         assert info["name"] == "Python"
 
+    def test_detect_python_from_root_package_layout(self, tmp_path):
+        """Detects Python from a root package dir with __init__.py (no pyproject)."""
+        from gitreins.cli import _detect_language
+
+        (tmp_path / "todo_stats").mkdir()
+        (tmp_path / "todo_stats" / "__init__.py").write_text("")
+        info = _detect_language(str(tmp_path))
+        assert info["is_python"]
+
+    def test_detect_python_from_top_level_py_file(self, tmp_path):
+        """Detects Python from a top-level *.py file (no pyproject)."""
+        from gitreins.cli import _detect_language
+
+        (tmp_path / "main.py").write_text("print('hi')\n")
+        info = _detect_language(str(tmp_path))
+        assert info["is_python"]
+
+    def test_tests_dir_alone_is_not_python(self, tmp_path):
+        """A lone tests/ dir is NOT enough for Python detection (fallback is narrow)."""
+        from gitreins.cli import _detect_language
+
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_x.py").write_text("def test_x(): pass\n")
+        info = _detect_language(str(tmp_path))
+        assert not info["is_python"]
+
+    def test_python_root_package_with_tests_uses_python3_m_pytest(self, tmp_path):
+        """Root-package + tests/ + no pytest pythonpath config → python3 -m pytest.
+
+        pytest 9 importlib mode doesn't put the repo root on sys.path, so
+        bare `pytest` cannot import the root package. (DF-002)
+        """
+        from gitreins.cli import _detect_language, _detect_test_command
+
+        (tmp_path / "todo_stats").mkdir()
+        (tmp_path / "todo_stats" / "__init__.py").write_text("")
+        (tmp_path / "todo_stats" / "todo.py").write_text("def add(): pass\n")
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_todo.py").write_text("def test_add(): pass\n")
+
+        lang = _detect_language(str(tmp_path))
+        assert _detect_test_command(str(tmp_path), lang) == "python3 -m pytest -x --tb=short"
+
+    def test_python_root_package_with_pythonpath_config_uses_bare_pytest(self, tmp_path):
+        """Root-package + tests/ but pyproject configures pytest pythonpath → bare pytest."""
+        from gitreins.cli import _detect_language, _detect_test_command
+
+        (tmp_path / "todo_stats").mkdir()
+        (tmp_path / "todo_stats" / "__init__.py").write_text("")
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_todo.py").write_text("def test_add(): pass\n")
+        (tmp_path / "pyproject.toml").write_text(
+            "[project]\nname='todo'\n"
+            "[tool.pytest.ini_options]\npythonpath = [\".\"]\n"
+        )
+
+        lang = _detect_language(str(tmp_path))
+        assert _detect_test_command(str(tmp_path), lang) == "pytest -x --tb=short"
+
+    def test_python_root_package_with_pytest_ini_pythonpath_uses_bare_pytest(self, tmp_path):
+        """Root-package + tests/ but pytest.ini configures pythonpath → bare pytest."""
+        from gitreins.cli import _detect_language, _detect_test_command
+
+        (tmp_path / "todo_stats").mkdir()
+        (tmp_path / "todo_stats" / "__init__.py").write_text("")
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_todo.py").write_text("def test_add(): pass\n")
+        (tmp_path / "pytest.ini").write_text("[pytest]\npythonpath = .\n")
+
+        lang = _detect_language(str(tmp_path))
+        assert _detect_test_command(str(tmp_path), lang) == "pytest -x --tb=short"
+
+    def test_python_root_package_without_tests_uses_bare_pytest(self, tmp_path):
+        """Root-package layout but NO tests/ dir → bare pytest (nothing to import)."""
+        from gitreins.cli import _detect_language, _detect_test_command
+
+        (tmp_path / "todo_stats").mkdir()
+        (tmp_path / "todo_stats" / "__init__.py").write_text("")
+
+        lang = _detect_language(str(tmp_path))
+        assert _detect_test_command(str(tmp_path), lang) == "pytest -x --tb=short"
+
+    def test_pyproject_only_no_root_package_uses_bare_pytest(self, tmp_path):
+        """pyproject-based project without root package dirs → bare pytest."""
+        from gitreins.cli import _detect_language, _detect_test_command
+
+        (tmp_path / "pyproject.toml").write_text("[project]\nname='app'\n")
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_x.py").write_text("def test_x(): pass\n")
+
+        lang = _detect_language(str(tmp_path))
+        assert _detect_test_command(str(tmp_path), lang) == "pytest -x --tb=short"
+
     def test_detect_ts_from_tsconfig(self, tmp_path):
         """Detects TypeScript from tsconfig.json (no package.json)."""
         from gitreins.cli import _detect_language
