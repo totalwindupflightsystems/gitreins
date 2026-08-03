@@ -690,3 +690,9 @@
 {"from":"tests/test_v07_features.py","to":"pkg:types","rel":"imports","provenance":"ast_exact","confidence":1.0}
 {"from":"tests/test_v07_features.py","to":"pkg:tomllib","rel":"imports","provenance":"ast_exact","confidence":1.0}
 {"from":"tests/test_v07_features.py","to":"pkg:tomli","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_guards.py","to":"pkg:os","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_mcp_server.py","to":"pkg:time","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_mcp_server.py","to":"pkg:engine.judge","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"gitreins_mcp/server.py","to":"pkg:threading","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"gitreins_mcp/server.py","to":"pkg:time","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"gitreins_mcp/server.py","to":"pkg:uuid","rel":"imports","provenance":"ast_exact","confidence":1.0}
