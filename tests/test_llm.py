@@ -576,7 +576,12 @@ class TestGR068ThinkingMode:
         assert "thinking" not in captured["json"]
 
     def test_cache_telemetry_in_usage(self, monkeypatch):
-        """DeepSeek cache hit tokens are captured in LLMUsage."""
+        """DeepSeek usage is normalized: prompt_tokens is the TOTAL input.
+
+        DeepSeek's prompt_tokens already includes prompt_cache_hit_tokens +
+        prompt_cache_miss_tokens, so the cache fields are zeroed at the source
+        to prevent double-counting in budget accounting (JUDGE-CONTEXT-001).
+        """
         monkeypatch.delenv("GITREINS_LLM_BASE_URL", raising=False)
         c = LLMClient(base_url="https://api.deepseek.com/v1", api_key="test-key")
         mock_resp = MagicMock()
@@ -584,21 +589,48 @@ class TestGR068ThinkingMode:
         mock_resp.json.return_value = {
             "choices": [{"message": {"content": "cached response"}}],
             "usage": {
-                "prompt_tokens": 100,
+                # Real DeepSeek semantics: prompt_tokens = hit + miss = 5200
+                "prompt_tokens": 5200,
                 "prompt_cache_hit_tokens": 5000,
                 "prompt_cache_miss_tokens": 200,
                 "completion_tokens": 50,
-                "total_tokens": 5350,
+                "total_tokens": 5250,
             },
         }
         with patch("requests.post", return_value=mock_resp):
             result = c.chat([{"role": "user", "content": "hi"}])
         assert result.usage is not None
-        assert result.usage.cache_read_tokens == 5000
-        assert result.usage.cache_write_tokens == 200
-        assert result.usage.prompt_tokens == 100
-        # all_input_tokens includes cache
-        assert result.usage.all_input_tokens == 5300  # 100 + 5000 + 200
+        # Cache breakdown is informational only — zeroed so it can't be
+        # added on top of prompt_tokens (which already includes it).
+        assert result.usage.cache_read_tokens == 0
+        assert result.usage.cache_write_tokens == 0
+        assert result.usage.prompt_tokens == 5200
+        # all_input_tokens is the total input exactly once — no double-count
+        assert result.usage.all_input_tokens == 5200
+
+    def test_deepseek_usage_not_double_counted(self, monkeypatch):
+        """Regression (JUDGE-CONTEXT-001): a 140K prompt with 100K cache hits
+        must account 140K input tokens, not 240K+."""
+        monkeypatch.delenv("GITREINS_LLM_BASE_URL", raising=False)
+        c = LLMClient(base_url="https://api.deepseek.com/v1", api_key="test-key")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "choices": [{"message": {"content": "ok"}}],
+            "usage": {
+                "prompt_tokens": 140_000,
+                "prompt_cache_hit_tokens": 100_000,
+                "prompt_cache_miss_tokens": 40_000,
+                "completion_tokens": 1_000,
+                "total_tokens": 141_000,
+            },
+        }
+        with patch("requests.post", return_value=mock_resp):
+            result = c.chat([{"role": "user", "content": "hi"}])
+        assert result.usage is not None
+        assert result.usage.all_input_tokens == 140_000
+        assert result.usage.cache_read_tokens == 0
+        assert result.usage.cache_write_tokens == 0
 
     def test_cache_telemetry_zero_when_missing(self, monkeypatch):
         """Cache fields default to 0 when not present in response."""

@@ -286,14 +286,21 @@ class LLMClient:
                     ToolCall(id=tc["id"], name=tc["function"]["name"], arguments=args)
                 )
 
-        # Extract token usage (with cache detection for DeepSeek)
+        # Extract token usage (OpenAI/DeepSeek path).
+        # DeepSeek's prompt_tokens is the TOTAL input — it already includes
+        # prompt_cache_hit_tokens + prompt_cache_miss_tokens (those fields are
+        # an informational breakdown of the same total, not additive). Keep the
+        # cache fields at 0 here so downstream budget accounting
+        # (EvalCap.record_llm_call: prompt + cache_read + cache_write) does not
+        # double-count cached tokens. The Anthropic path below is different:
+        # its input_tokens excludes cache, so cache stays separate there.
         usage = None
         if "usage" in data:
             u = data["usage"]
             usage = LLMUsage(
                 prompt_tokens=u.get("prompt_tokens", 0),
-                cache_read_tokens=u.get("prompt_cache_hit_tokens", 0),
-                cache_write_tokens=u.get("prompt_cache_miss_tokens", 0),
+                cache_read_tokens=0,
+                cache_write_tokens=0,
                 completion_tokens=u.get("completion_tokens", 0),
                 total_tokens=u.get("total_tokens", 0),
             )

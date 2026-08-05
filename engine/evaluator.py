@@ -30,6 +30,74 @@ from engine.eval_cap import EvalCap, parse_eval_cap, eval_cap_from_config, _fmt_
 
 logger = logging.getLogger("gitreins.evaluator")
 
+# Non-code/data paths excluded from judge code context (JUDGE-CONTEXT-001).
+# Tracked board/data files (e.g. .coding-hermes/board/events.jsonl with
+# multi-KB single-line JSON records) were inflating the tier2 judge prompt to
+# ~140K tokens per call. Entries ending in "/" match directory prefixes
+# (any path position); other entries match filename suffixes.
+DATA_FILE_PATTERNS: tuple[str, ...] = (
+    ".coding-hermes/",
+    ".jsonl",
+    ".json",
+    ".parquet",
+    ".db",
+    ".sqlite",
+    ".bak",
+    ".log",
+    "bin/",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".pdf",
+    ".git/",
+)
+
+# Files whose average line length exceeds this are treated as data files and
+# get only a short preview in FULL mode (single-line JSON records etc.).
+DATA_FILE_AVG_LINE_CHARS = 500
+
+# Number of preview lines included for data-smelling files in FULL mode.
+DATA_FILE_PREVIEW_LINES = 5
+
+
+def _is_data_file_path(path: str) -> bool:
+    """Return True when a repo-relative path is a non-code/data file.
+
+    Matches against DATA_FILE_PATTERNS: directory prefixes (trailing "/")
+    match at any path position; other patterns match the filename suffix.
+    """
+    p = path.replace("\\", "/").lower()
+    for pat in DATA_FILE_PATTERNS:
+        if pat.endswith("/"):
+            if p.startswith(pat) or f"/{pat}" in p:
+                return True
+        elif p.endswith(pat):
+            return True
+    return False
+
+
+def _filter_diff_text(diff_text: str) -> str:
+    """Drop per-file sections of a unified diff that belong to data files."""
+    if not diff_text:
+        return diff_text
+    kept: list[str] = []
+    current: list[str] = []
+    keep_current = True
+    for line in diff_text.splitlines():
+        if line.startswith("diff --git "):
+            if current and keep_current:
+                kept.append("\n".join(current))
+            current = [line]
+            # Format: "diff --git a/<path> b/<path>"
+            parts = line.split(" b/", 1)
+            bpath = parts[1] if len(parts) == 2 else line
+            keep_current = not _is_data_file_path(bpath)
+        else:
+            current.append(line)
+    if current and keep_current:
+        kept.append("\n".join(current))
+    return "\n".join(kept)
+
 EVALUATOR_SYSTEM_PROMPT = """You are a code quality evaluator. Your job is to judge whether a completed task meets ALL of its defined criteria.
 
 ## YOUR TOOLS
@@ -392,7 +460,8 @@ class AgenticEvaluator:
 
         test_mode = config.get("guards", {}).get("test_mode") or config.get("test_mode") or "full"
 
-        # Find changed files: staged + unstaged
+        # Find changed files: staged + unstaged (data files excluded — they
+        # carry no reviewable code and blow up the prompt, JUDGE-CONTEXT-001)
         changed_files: set[str] = set()
         try:
             # Staged changes
@@ -404,7 +473,7 @@ class AgenticEvaluator:
                 cwd=self.workdir,
             )
             for line in staged.stdout.strip().splitlines():
-                if line:
+                if line and not _is_data_file_path(line):
                     changed_files.add(line)
             # Unstaged changes
             unstaged = subprocess.run(
@@ -415,12 +484,13 @@ class AgenticEvaluator:
                 cwd=self.workdir,
             )
             for line in unstaged.stdout.strip().splitlines():
-                if line:
+                if line and not _is_data_file_path(line):
                     changed_files.add(line)
         except Exception:
             pass
 
-        # Unified diff for changed files (always useful)
+        # Unified diff for changed files (always useful). Data-file hunks are
+        # dropped — a board JSONL hunk can be hundreds of KB on its own.
         try:
             diff_result = subprocess.run(
                 ["git", "diff", "HEAD"],
@@ -429,7 +499,7 @@ class AgenticEvaluator:
                 timeout=10,
                 cwd=self.workdir,
             )
-            diff_text = diff_result.stdout.strip()
+            diff_text = _filter_diff_text(diff_result.stdout.strip())
         except Exception:
             diff_text = ""
 
@@ -467,6 +537,8 @@ class AgenticEvaluator:
                 if shown >= max_files:
                     lines.append(f"... [{len(changed_files) - max_files} more files truncated]")
                     break
+                if _is_data_file_path(fname):
+                    continue
                 fpath = os.path.join(self.workdir, fname)
                 if not os.path.isfile(fpath):
                     continue
@@ -487,6 +559,21 @@ class AgenticEvaluator:
                     continue
 
                 file_lines = content.splitlines()
+                # Data-file smell: extremely long average lines (single-line
+                # JSON records, minified blobs) — preview only, never 200 lines.
+                avg_line_len = len(content) / len(file_lines) if file_lines else 0
+                if avg_line_len > DATA_FILE_AVG_LINE_CHARS:
+                    preview = file_lines[:DATA_FILE_PREVIEW_LINES]
+                    lines.append(
+                        f"### {fname} [data-like — {len(file_lines)} lines, "
+                        f"avg {int(avg_line_len)} chars/line — {DATA_FILE_PREVIEW_LINES}-line preview]"
+                    )
+                    lines.append("```")
+                    lines.extend(preview)
+                    lines.append("```")
+                    lines.append("")
+                    shown += 1
+                    continue
                 if len(file_lines) > max_lines_per_file:
                     file_lines = file_lines[:max_lines_per_file]
                     file_lines.append(

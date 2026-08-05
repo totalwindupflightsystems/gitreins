@@ -300,6 +300,40 @@ class TestEvalCapChecking:
         assert cap.cumulative_cache_write == 35_000
         assert cap.cumulative_input_tokens == 305_000  # 175k (call1) + 130k (call2) = 305k
 
+    def test_deepseek_usage_records_total_input_once(self):
+        """Regression (JUDGE-CONTEXT-001): normalized DeepSeek usage must not
+        double-count cache tokens.
+
+        DeepSeek's prompt_tokens is the TOTAL input (cache hit + miss already
+        included) and llm.py zeroes the cache fields, so the LLMUsage →
+        record_llm_call path used by the evaluator must record 140k — NOT
+        140k + 100k + 40k = 280k. The Anthropic path keeps cache separate and
+        is unaffected (see test_cache_tokens_count_toward_input_budget).
+        """
+        from engine.llm import LLMUsage
+
+        # Mirrors the DeepSeek parsing in llm.py after normalization:
+        # usage.prompt_tokens=140000 (total), cache fields zeroed.
+        usage = LLMUsage(
+            prompt_tokens=140_000,
+            cache_read_tokens=0,
+            cache_write_tokens=0,
+            completion_tokens=1_000,
+            total_tokens=141_000,
+        )
+        cap = EvalCap(max_input_tokens=1_000_000)
+        cap.start()
+        # Same call shape as AgenticEvaluator._evaluate_once
+        err = cap.record_llm_call(
+            prompt_tokens=usage.prompt_tokens,
+            completion_tokens=usage.completion_tokens,
+            cache_read_tokens=usage.cache_read_tokens,
+            cache_write_tokens=usage.cache_write_tokens,
+        )
+        assert err is None
+        assert cap.cumulative_input_tokens == 140_000  # NOT 280_000
+        assert cap.cumulative_input_tokens == usage.all_input_tokens
+
 
 # ═══════════════════════════════════════════════════════════════
 # remaining_seconds() — time-budget introspection (GR-064b)

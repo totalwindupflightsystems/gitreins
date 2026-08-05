@@ -6,6 +6,8 @@ axiom:trace work_item=GR-001 spec=specs/03-Agentic-Evaluator.md plan=.memory-ban
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from engine.evaluator import (
     AgenticEvaluator,
     Verdict,
@@ -991,6 +993,131 @@ class TestCodeContextPreloading:
         ctx = evaluator._build_code_context(config)
         assert ctx == ""
 
+    def _init_repo_with_commit(self, tmp_workdir, files: dict[str, str]):
+        """Helper: git init + commit the given {path: content} files."""
+        import subprocess
+
+        os.chdir(tmp_workdir)
+        subprocess.run(["git", "init", "-q"], cwd=tmp_workdir)
+        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp_workdir)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_workdir)
+        env = {
+            **os.environ,
+            "GIT_AUTHOR_NAME": "Test",
+            "GIT_AUTHOR_EMAIL": "t@t.com",
+            "GIT_COMMITTER_NAME": "Test",
+            "GIT_COMMITTER_EMAIL": "t@t.com",
+        }
+        for path, content in files.items():
+            full = os.path.join(tmp_workdir, path)
+            os.makedirs(os.path.dirname(full), exist_ok=True)
+            with open(full, "w") as f:
+                f.write(content)
+        subprocess.run(["git", "add", "-A"], cwd=tmp_workdir)
+        subprocess.run(
+            ["git", "commit", "-m", "initial", "--no-verify"],
+            cwd=tmp_workdir,
+            env=env,
+        )
+
+    def _write(self, tmp_workdir, path: str, content: str):
+        full = os.path.join(tmp_workdir, path)
+        os.makedirs(os.path.dirname(full), exist_ok=True)
+        with open(full, "w") as f:
+            f.write(content)
+
+    def test_data_files_excluded_from_context(self, evaluator, tmp_workdir):
+        """Regression (JUDGE-CONTEXT-001): tracked board JSONL files must not
+        appear in the judge code context — neither as full-file sections nor
+        as diff hunks."""
+        self._init_repo_with_commit(
+            tmp_workdir,
+            {
+                "main.py": "def foo():\n    return 42\n",
+                ".coding-hermes/board/events.jsonl": '{"event": "init", "pad": "'
+                + "x" * 2000
+                + '"}\n',
+            },
+        )
+        # Modify both files (unstaged) — the board file changes every tick
+        self._write(tmp_workdir, "main.py", "def foo():\n    return 99\n")
+        self._write(
+            tmp_workdir,
+            ".coding-hermes/board/events.jsonl",
+            '{"event": "tick-SECRET-marker", "pad": "' + "y" * 2000 + '"}\n',
+        )
+
+        config = {"guards": {"test_mode": "full"}}
+        ctx = evaluator._build_code_context(config)
+
+        # Code file present
+        assert "CHANGED FILES (FULL)" in ctx
+        assert "main.py" in ctx
+        assert "return 99" in ctx
+        # Board data file absent — path and content must not leak anywhere
+        assert "events.jsonl" not in ctx
+        assert ".coding-hermes" not in ctx
+        assert "tick-SECRET-marker" not in ctx
+
+    def test_data_files_excluded_in_diff_mode(self, evaluator, tmp_workdir):
+        """Diff mode also drops data-file hunks (JUDGE-CONTEXT-001)."""
+        self._init_repo_with_commit(
+            tmp_workdir,
+            {
+                "main.py": "print('a')\n",
+                "tasks.jsonl": '{"task": "one", "pad": "' + "z" * 1500 + '"}\n',
+            },
+        )
+        self._write(tmp_workdir, "main.py", "print('b')\n")
+        self._write(
+            tmp_workdir,
+            "tasks.jsonl",
+            '{"task": "two-SECRET-marker", "pad": "' + "z" * 1500 + '"}\n',
+        )
+
+        config = {"guards": {"test_mode": "diff"}}
+        ctx = evaluator._build_code_context(config)
+
+        assert "CHANGED CODE (DIFF)" in ctx
+        assert "main.py" in ctx
+        assert "tasks.jsonl" not in ctx
+        assert "two-SECRET-marker" not in ctx
+
+    def test_long_line_data_file_gets_preview_only(self, evaluator, tmp_workdir):
+        """Files with >500 chars/line average are capped to a 5-line preview
+        in FULL mode (JUDGE-CONTEXT-001)."""
+        lines = [f"line-{i}-" + "x" * 1000 for i in range(10)]
+        self._init_repo_with_commit(tmp_workdir, {"metrics.txt": "\n".join(lines[:5]) + "\n"})
+        self._write(tmp_workdir, "metrics.txt", "\n".join(lines) + "\n")
+
+        config = {"guards": {"test_mode": "full"}}
+        ctx = evaluator._build_code_context(config)
+
+        assert "metrics.txt" in ctx
+        assert "data-like" in ctx  # preview marker, not full inclusion
+        assert "5-line preview" in ctx
+        # The full-file section holds only the first 5 lines (the trailing
+        # diff summary may still show the other added lines — that's the
+        # compact hunk view, not the file content).
+        section = ctx.split("### metrics.txt")[1].split("```")[1]
+        assert "line-0-" in section
+        assert "line-4-" in section
+        assert "line-5-" not in section
+        assert "line-9-" not in section
+
+    def test_normal_code_file_not_previewed(self, evaluator, tmp_workdir):
+        """A normal code file (short lines) is NOT subject to the data-file
+        preview cap even when it exceeds 200 lines."""
+        body = "\n".join(f"# comment {i}" for i in range(250)) + "\n"
+        self._init_repo_with_commit(tmp_workdir, {"big.py": "# v1\n"})
+        self._write(tmp_workdir, "big.py", body)
+
+        config = {"guards": {"test_mode": "full"}}
+        ctx = evaluator._build_code_context(config)
+
+        assert "data-like" not in ctx
+        assert "truncated at 200 lines" in ctx  # normal 200-line cap applies
+
     def test_max_output_tokens_passed_to_llm(self, evaluator, llm_client):
         """Per-request max_tokens is always capped at 16384 — session budget is separate."""
         from engine.eval_cap import EvalCap
@@ -1186,3 +1313,81 @@ class TestCodeContextPreloading:
         assert "src/main.py" not in evaluator._allowed_files, (
             "No changed files should be in scope for a clean repo"
         )
+
+
+class TestDataFileHelpers:
+    """Unit tests for the DATA_FILE_PATTERNS matcher and diff filter
+    (JUDGE-CONTEXT-001)."""
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            ".coding-hermes/board/events.jsonl",
+            ".coding-hermes/tasks.md",
+            "events.jsonl",
+            "board/tasks.json",
+            "data.parquet",
+            "state.db",
+            "db.sqlite",
+            "backup.bak",
+            "server.log",
+            "bin/tool",
+            "sub/bin/tool",
+            "img.png",
+            "photo.jpg",
+            "photo.jpeg",
+            "doc.pdf",
+            ".git/index",
+        ],
+    )
+    def test_data_paths_match(self, path):
+        from engine.evaluator import _is_data_file_path
+
+        assert _is_data_file_path(path) is True
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "engine/evaluator.py",
+            "main.go",
+            "src/index.ts",
+            "schema.sql",
+            "README.md",
+            "binary_search.py",  # 'bin' substring is not 'bin/' dir
+            "data.jsonnet",  # suffix must match exactly
+        ],
+    )
+    def test_code_paths_do_not_match(self, path):
+        from engine.evaluator import _is_data_file_path
+
+        assert _is_data_file_path(path) is False
+
+    def test_filter_diff_text_drops_data_sections(self):
+        from engine.evaluator import _filter_diff_text
+
+        diff = (
+            "diff --git a/main.py b/main.py\n"
+            "index 111..222 100644\n"
+            "--- a/main.py\n"
+            "+++ b/main.py\n"
+            "@@ -1 +1 @@\n"
+            "-old\n"
+            "+new\n"
+            "diff --git a/.coding-hermes/board/events.jsonl b/.coding-hermes/board/events.jsonl\n"
+            "index 333..444 100644\n"
+            "--- a/.coding-hermes/board/events.jsonl\n"
+            "+++ b/.coding-hermes/board/events.jsonl\n"
+            "@@ -1 +1 @@\n"
+            '-{"event": "SECRET", "pad": "xxxx"}\n'
+            '+{"event": "SECRET2", "pad": "yyyy"}\n'
+        )
+        out = _filter_diff_text(diff)
+        assert "main.py" in out
+        assert "+new" in out
+        assert "events.jsonl" not in out
+        assert "SECRET" not in out
+
+    def test_filter_diff_text_empty(self):
+        from engine.evaluator import _filter_diff_text
+
+        assert _filter_diff_text("") == ""
