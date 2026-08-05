@@ -16,7 +16,7 @@ PATH="$HOME/go/bin:$HOME/gitreins-poc/.venv/bin:$PATH" gitreins guard
 - **lint** — ruff (WARNS on fail)
 - **tests** — pytest for changed packages (BLOCKS on fail)
 
-### Test mode: full
+### Test mode: diff
 Only packages with staged changes are tested. Pre-existing failures in
 untouched code will NOT block your commit. If you change pyproject.toml,
 Makefile, .gitreins/config.yaml, or a config file, the full suite runs
@@ -58,4 +58,6 @@ gitreins judge fix-auth
 - Commit `.gitreins/tasks.yaml` — it's local task state
 - **Use `os.kill()` or `os.killpg()` without PID validation** — `int(mock.pid)` == 1 kills init.
   Always validate: `isinstance(pid, int) and not isinstance(pid, bool) and pid > 1`.
-  This bug took down Kara's entire session every 2-5 minutes for 30+ hours. See `engine/lsp.py:408-428`.
+  This bug took down Kara's entire session every 2-5 minutes for 30+ hours. The fix is
+  ALREADY applied in `engine/lsp.py:482-502` (validation at :486, `os.killpg` guarded at :491,
+  `proc.kill()` fallback at :495) — do not regress it.

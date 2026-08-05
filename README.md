@@ -11,7 +11,7 @@
 
 GitReins lives inside your git repository as a quality harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ✅ **v0.10.2** — LSP diagnostics (14 languages), static analysis (9 tools), commit audit with CVE-scored severity, optional Antares CVE-localization guard, DeepSeek prompt caching, large-repo hardening, 1088 tests pass.
+> ✅ **v0.11.0** — LSP diagnostics (14 languages), static analysis (9 tools), commit audit with CVE-scored severity, optional Antares CVE-localization guard, Anthropic Messages API support, DeepSeek prompt caching telemetry, large-repo hardening (fast-track + `--skip-tier2`), MCP `propagate`, 1222 tests pass.
 
 ---
 
@@ -23,6 +23,11 @@ cd /path/to/your-project
 gitreins install        # creates .gitreins/config.yaml + pre-commit hook
 gitreins init           # smart init — detects language, size, optimal config
 ```
+
+New to GitReins? Read the [Onboarding Guide](docs/onboarding.md) — full
+install → init → first guard run → task workflow, plus troubleshooting for
+the most common first-run failures (gitleaks regex config, Python import
+setup).
 
 ## How It Works
 
@@ -344,7 +349,7 @@ history:
 - **MCP Transport:** stdio (26 tools)
 - **Config:** YAML in `.gitreins/` directory
 - **Evaluator Default Model:** DeepSeek V4 Flash (~$0.01/eval)
-- **Test suite:** ~1088 tests across 28 test files (parallelized with pytest-xdist)
+- **Test suite:** ~1222 tests across 27 test files (parallelized with pytest-xdist)
 
 ## Architecture & Docs
 
