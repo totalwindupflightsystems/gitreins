@@ -27,7 +27,6 @@ paths = [
   '''tests/__pycache__/.*''',
   '''\.memory-bank/.*''',
   '''__pycache__/.*''',
-  '''\.env''',
   '''.gitreins-sandbox/.*''',
   '''sandbox/.*''',
   '''\.coding-hermes/.*''',

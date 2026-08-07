@@ -416,7 +416,15 @@ class GuardManager:
         """Scan staged changes for secrets using gitleaks or built-in scanner."""
         # Try gitleaks first
         try:
-            cmd = ["gitleaks", "detect", "--source", ".", "--no-git", "--verbose", "--no-banner"]
+            cmd = [
+                "gitleaks",
+                "protect",
+                "--staged",
+                "--source",
+                ".",
+                "--verbose",
+                "--no-banner",
+            ]
             config_path = os.path.join(self.workdir, ".gitleaks.toml")
             if os.path.isfile(config_path):
                 cmd.extend(["--config", config_path])

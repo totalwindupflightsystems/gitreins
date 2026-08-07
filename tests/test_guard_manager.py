@@ -479,6 +479,31 @@ class TestExtendedGuardManager:
         assert "gitleaks v" not in result.output
         assert "○" not in result.output
 
+    def test_gitleaks_scans_staged_not_whole_tree(self, tmp_workdir):
+        """GR-GAP-007: gitleaks runs `protect --staged` (staged blobs only),
+        NOT `detect --no-git` (whole tree). Whole-tree scanning flags
+        gitignored local config (e.g. .env holding a live key) on EVERY
+        commit; staged-only scanning matches the guard's diff-mode contract
+        while still catching force-staged .env files."""
+        gm = GuardManager(tmp_workdir)
+        mock_run = MagicMock()
+        mock_run.returncode = 0
+        mock_run.stdout = "gitleaks: clean"
+        mock_run.stderr = ""
+        with patch("subprocess.run", return_value=mock_run) as mock_patch:
+            with patch.object(
+                gm,
+                "_builtin_secrets_scan",
+                return_value=GuardResult("secrets", True, "Scanned 0 files — clean"),
+            ):
+                result = gm._check_secrets()
+        cmd = mock_patch.call_args.args[0]
+        assert "protect" in cmd
+        assert "--staged" in cmd
+        assert "--no-git" not in cmd
+        assert "--no-banner" in cmd
+        assert result.passed is True
+
     def test_lint_ruff_available(self, tmp_workdir):
         """_check_lint uses ruff when available with Python files staged."""
         _write_staged_file(tmp_workdir, "code.py", "x = 1\n")
