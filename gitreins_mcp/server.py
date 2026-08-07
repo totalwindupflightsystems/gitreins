@@ -652,23 +652,45 @@ class GitReinsMCPServer:
     def _start_job_thread(self, job: dict, wd: str, task, eval_cap=None) -> None:
         """Spawn the worker thread for a job record (fresh or resumed)."""
 
+        def _finish(update: dict) -> None:
+            # Disk-before-memory ordering: persist the terminal state FIRST so
+            # a fresh server reading the job store sees complete/error even
+            # while this instance's memory record still says running. A
+            # memory-complete read must never precede the disk write — the
+            # disk record is the only state a restarted server can see, and
+            # the test test_completed_job_survives_server_restart asserts the
+            # fresh server sees "complete" on its FIRST disk read.
+            done = dict(job)
+            done.update(update)
+            try:
+                save_job(done)
+            except OSError as e:
+                logger.error("Failed to persist job %s terminal state: %s", job["id"], e)
+            with self._jobs_lock:
+                job.update(update)
+
         def _run_job() -> None:
             try:
                 j = Judge(self.llm, wd, eval_cap=eval_cap)
                 with self._eval_lock:
                     result = j.evaluate_task(task)
                 d = self._judge_result_dict(job["task_id"], wd, result)
-                with self._jobs_lock:
-                    job["result"] = d
-                    job["status"] = "complete"
-                    job["finished_at"] = time.time()
+                _finish(
+                    {
+                        "result": d,
+                        "status": "complete",
+                        "finished_at": time.time(),
+                    }
+                )
             except Exception as e:
                 logger.exception("Background evaluation job %s failed", job["id"])
-                with self._jobs_lock:
-                    job["status"] = "error"
-                    job["error"] = str(e)
-                    job["finished_at"] = time.time()
-            save_job(job)
+                _finish(
+                    {
+                        "status": "error",
+                        "error": str(e),
+                        "finished_at": time.time(),
+                    }
+                )
 
         threading.Thread(target=_run_job, name=f"judge-job-{job['id']}", daemon=True).start()
 
