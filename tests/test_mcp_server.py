@@ -735,9 +735,7 @@ class TestJudgeAsyncMCP:
         assert result["workdir"] == mcp_server.workdir
         assert "job_id" not in result
 
-    def test_task_complete_dispatches_async_job_when_llm_configured(
-        self, mcp_server, monkeypatch
-    ):
+    def test_task_complete_dispatches_async_job_when_llm_configured(self, mcp_server, monkeypatch):
         """task.complete with LLM key flips the task, then dispatches a background job."""
         monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
         _stub_judge_evaluate(monkeypatch, sleep=0.1)
@@ -768,6 +766,133 @@ class TestJudgeAsyncMCP:
         assert result["task"]["status"] == "complete"
         assert "job_id" not in result
         assert "LLM not configured" in result["note"]
+
+
+# ── DF-006: disk-backed jobs — survive restarts, auto-resume ────────────────
+
+
+def _mcp_call(server, name, arguments):
+    """Call a tool on an MCP server and return the parsed text payload."""
+    response = server.handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": name, "arguments": arguments},
+        }
+    )
+    assert "result" in response, f"tools/call {name} failed: {response}"
+    return json.loads(response["result"]["content"][0]["text"])
+
+
+class TestJudgeAsyncPersistence:
+    """Disk-backed jobs (DF-006): complete jobs survive server restarts and
+    orphaned running jobs are resumed automatically on the next poll.
+
+    The shared job store is pointed at a temp dir by the autouse
+    ``isolated_job_store`` conftest fixture.
+    """
+
+    def _create_task(self, server, task_id):
+        _mcp_call(
+            server,
+            "task.create",
+            {"id": task_id, "title": task_id, "criteria": ["c1"]},
+        )
+
+    def _poll_status(self, server, job_id, deadline=5.0) -> dict:
+        end = time.monotonic() + deadline
+        last: dict = {"status": "pending"}
+        while time.monotonic() < end:
+            last = _mcp_call(server, "judge.status", {"job_id": job_id})
+            if last["status"] in ("complete", "error"):
+                return last
+            time.sleep(0.02)
+        pytest.fail(f"job {job_id} did not finish within {deadline}s — last status: {last}")
+        return last  # unreachable — pytest.fail raises
+
+    def test_completed_job_survives_server_restart(self, mcp_server, monkeypatch):
+        """A job completed on server A is retrievable on a NEW server instance."""
+        monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
+        monkeypatch.setattr(mcp_server.llm, "api_key", "sk-test")
+        _stub_judge_evaluate(monkeypatch, sleep=0.05)
+        self._create_task(mcp_server, "restart-me")
+
+        result = _mcp_call(mcp_server, "judge.evaluate", {"id": "restart-me"})
+        job_id = result["job_id"]
+        self._poll_status(mcp_server, job_id)
+
+        # "Restart": a brand-new server instance with empty memory.
+        server_b = GitReinsMCPServer(mcp_server.workdir)
+        assert job_id not in server_b._jobs
+        status = _mcp_call(server_b, "judge.status", {"job_id": job_id})
+        assert status["status"] == "complete"
+        assert status["job_id"] == job_id
+        assert status["task_id"] == "restart-me"
+        assert status["workdir"] == mcp_server.workdir
+        assert status["error"] is None
+        assert status["result"] is not None
+        assert status["result"]["passed"] is True
+        assert status["result"]["verdict"] == "COMPLETE"
+        assert status["result"]["items"][0]["criterion"] == "c1"
+        assert status["result"]["summary"] == "all criteria met"
+
+    def test_orphaned_running_job_is_resumed_on_status(self, mcp_server, monkeypatch):
+        """A running job whose process died (dead pid on disk) is resumed."""
+        monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
+        monkeypatch.setattr(mcp_server.llm, "api_key", "sk-test")
+        _stub_judge_evaluate(monkeypatch, sleep=0.05)
+        self._create_task(mcp_server, "orphan-me")
+
+        # Fabricate an orphaned job directly in the disk store: dead pid,
+        # task exists, no in-memory record anywhere.
+        from engine.job_store import make_job, save_job
+
+        job = make_job("orphan-me", mcp_server.workdir)
+        job["pid"] = 99999999
+        save_job(job)
+        job_id = job["id"]
+
+        status = _mcp_call(mcp_server, "judge.status", {"job_id": job_id})
+        assert status["status"] == "running", f"expected resume, got: {status}"
+
+        status = self._poll_status(mcp_server, job_id)
+        assert status["status"] == "complete"
+        assert status["result"] is not None
+        assert status["result"]["passed"] is True
+        assert status["result"]["task_id"] == "orphan-me"
+        assert status["result"]["verdict"] == "COMPLETE"
+
+    def test_orphaned_job_with_missing_task_becomes_error(self, mcp_server):
+        """Resume of a job whose task was deleted lands in a clear error."""
+        from engine.job_store import make_job, save_job
+
+        job = make_job("ghost-task", mcp_server.workdir)
+        job["pid"] = 99999999
+        save_job(job)
+
+        status = _mcp_call(mcp_server, "judge.status", {"job_id": job["id"]})
+        assert status["status"] == "error"
+        assert "no longer exists" in status["error"]
+
+    def test_unknown_job_still_errors_from_disk(self, mcp_server):
+        """Unknown job ids error cleanly even when memory is empty."""
+        status = _mcp_call(mcp_server, "judge.status", {"job_id": "job-unknown-xyz"})
+        assert status["error"] == "Job not found: job-unknown-xyz"
+
+    def test_running_job_reports_pid_and_started_at(self, mcp_server, monkeypatch):
+        """Running responses carry pid/started_at for monitoring."""
+        monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
+        monkeypatch.setattr(mcp_server.llm, "api_key", "sk-test")
+        _stub_judge_evaluate(monkeypatch, sleep=0.5)
+        self._create_task(mcp_server, "pid-me")
+
+        result = _mcp_call(mcp_server, "judge.evaluate", {"id": "pid-me"})
+        status = _mcp_call(mcp_server, "judge.status", {"job_id": result["job_id"]})
+        assert status["status"] == "running"
+        assert status["pid"] == os.getpid()
+        assert isinstance(status["started_at"], (int, float))
+        self._poll_status(mcp_server, result["job_id"])
 
 
 # ── v0.7.3: Configure MCP tool ───────────────────────────────────────────────

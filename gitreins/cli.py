@@ -19,6 +19,7 @@ import argparse
 import logging
 import os
 import sys
+import time
 import yaml
 
 from engine.version import __version__
@@ -348,7 +349,7 @@ def cmd_init(args):
     if test_cmd == "python3 -m pytest -x --tb=short":
         print(
             "  Note: using 'python3 -m pytest' — root-package layout without pytest pythonpath "
-            "config; add [tool.pytest.ini_options] pythonpath = [\".\"] to pyproject.toml "
+            'config; add [tool.pytest.ini_options] pythonpath = ["."] to pyproject.toml '
             "to use bare pytest"
         )
     print(f"  Test mode:   {existing['guards'].get('test_mode', 'full')}")
@@ -1152,6 +1153,24 @@ def cmd_guard_run(args):
 
 
 def cmd_judge(args):
+    """Evaluate a task — sync (default), or dispatch a background job.
+
+    ``--async`` detaches a worker process and returns a job id; the job
+    record lives in the shared disk store, so it survives this CLI
+    exiting and can be polled with ``gitreins judge --status <job_id>``
+    (or the MCP ``judge.status`` tool). ``--run-job`` is the internal
+    worker mode executed by the detached child.
+    """
+    if getattr(args, "status", False):
+        _cmd_judge_status(args.id)
+        return
+    if getattr(args, "run_job", False):
+        _cmd_judge_worker(args.id)
+        return
+    if getattr(args, "async_dispatch", False):
+        _cmd_judge_async(args.id)
+        return
+
     _check_for_updates()
     from engine.task_manager import TaskManager
     from engine.llm import LLMClient
@@ -1175,6 +1194,168 @@ def cmd_judge(args):
 
     # Persist verdict
     _persist_result(workdir, task, result)
+
+
+def _cmd_judge_async(task_id: str) -> None:
+    """Dispatch the evaluation as a detached background job (DF-006).
+
+    The worker is a detached child process that survives this CLI
+    exiting; the job record lives in the shared disk store, so it can be
+    polled with ``gitreins judge --status <job_id>`` and from the MCP
+    server's ``judge.status`` tool.
+    """
+    import subprocess
+
+    from engine.job_store import job_log_path, make_job, save_job
+    from engine.task_manager import TaskManager
+
+    workdir = get_workdir()
+    tm = TaskManager(workdir)
+    task = tm.get(task_id)
+    if not task:
+        print(f"Task not found: {task_id}")
+        sys.exit(1)
+
+    job = make_job(task_id, workdir)
+    save_job(job)
+
+    log_path = job_log_path(job["id"])
+    try:
+        logf = open(log_path, "ab")
+    except OSError as e:
+        print(f"Could not open job log {log_path}: {e}")
+        sys.exit(1)
+
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "gitreins.cli", "judge", "--run-job", job["id"]],
+            cwd=workdir,
+            start_new_session=True,
+            stdout=logf,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+        )
+    except OSError as e:
+        logf.close()
+        job["status"] = "error"
+        job["error"] = f"worker spawn failed: {e}"
+        job["finished_at"] = time.time()
+        save_job(job)
+        print(f"Could not start background job: {e}")
+        sys.exit(1)
+
+    job["pid"] = proc.pid
+    save_job(job)
+    print(f"Async job dispatched: {job['id']}")
+    print(f"  task:    {task_id}")
+    print(f"  workdir: {workdir}")
+    print(f"  log:     {log_path}")
+    print(f"  poll:    gitreins judge --status {job['id']}")
+
+
+def _cmd_judge_worker(job_id: str) -> None:
+    """Internal worker mode: run the evaluation for a disk job record.
+
+    Executed by the detached child spawned from ``judge --async`` (and
+    directly by tests). Writes the result back to the job record and
+    persists the verdict exactly like a synchronous run.
+    """
+    from engine.job_store import load_job, save_job
+    from engine.task_manager import TaskManager
+    from engine.llm import LLMClient
+    from engine.judge import Judge, judge_result_to_dict
+
+    job = load_job(job_id)
+    if job is None:
+        print(f"Job not found: {job_id}")
+        sys.exit(1)
+    if job["status"] != "running":
+        print(f"Job {job_id} already {job['status']} — nothing to do")
+        sys.exit(0)
+
+    job["pid"] = os.getpid()
+    save_job(job)
+
+    wd = job["workdir"]
+    tm = TaskManager(wd)
+    task = tm.get(job["task_id"])
+    if not task:
+        job["status"] = "error"
+        job["error"] = f"task {job['task_id']} not found in {wd}"
+        job["finished_at"] = time.time()
+        save_job(job)
+        print(job["error"])
+        sys.exit(1)
+
+    try:
+        llm = LLMClient()
+        config = load_config(wd)
+        judge = Judge(llm, wd, guard_config=config)
+        result = judge.evaluate_task(task)
+        job["result"] = judge_result_to_dict(job["task_id"], wd, result)
+        job["status"] = "complete"
+        job["finished_at"] = time.time()
+        save_job(job)
+        # Same verdict persistence as a synchronous run
+        _persist_result(wd, task, result)
+        print(result.summary)
+    except Exception as e:
+        job["status"] = "error"
+        job["error"] = str(e)
+        job["finished_at"] = time.time()
+        save_job(job)
+        print(f"Evaluation failed: {e}", file=sys.stderr)
+        sys.exit(1)
+
+
+def _cmd_judge_status(job_id: str) -> None:
+    """Print the status/result of a background job.
+
+    Exit codes: 0 complete, 2 still running, 1 error/not found.
+    """
+    from engine.job_store import job_log_path, load_job
+
+    job = load_job(job_id)
+    if job is None:
+        print(f"Job not found: {job_id}")
+        sys.exit(1)
+
+    status = job["status"]
+    print(f"Job:      {job['id']}")
+    print(f"Status:   {status}")
+    print(f"Task:     {job['task_id']}")
+    print(f"Workdir:  {job['workdir']}")
+    if job.get("pid"):
+        print(f"Pid:      {job['pid']}")
+    if job.get("started_at"):
+        print("Started:  " + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(job["started_at"])))
+    if job.get("finished_at"):
+        print("Finished: " + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(job["finished_at"])))
+    print()
+
+    if status == "running":
+        print(f"Job is still running (pid {job.get('pid') or 'unknown'}). Poll again later.")
+        sys.exit(2)
+    if status == "error":
+        print(f"Error: {job.get('error')}")
+        log = job_log_path(job_id)
+        if os.path.exists(log):
+            print(f"Log: {log}")
+        sys.exit(1)
+
+    result = job.get("result") or {}
+    print(f"Result:   {'PASS ✓' if result.get('passed') else 'FAIL ✗'}")
+    if result.get("tier1_passed") is not None:
+        print(f"Tier 1:   {'PASS' if result['tier1_passed'] else 'FAIL'}")
+    if result.get("verdict"):
+        print(f"Verdict:  {result['verdict']}")
+        for item in result.get("items", []):
+            mark = "✓" if item.get("status") == "PASS" else "✗"
+            print(f"  {mark} {item.get('criterion')}: {item.get('detail')}")
+    if result.get("summary"):
+        print()
+        print(result["summary"])
+    sys.exit(0)
 
 
 def cmd_commit(args):
@@ -1473,6 +1654,23 @@ def main():
     judge_p.add_argument("id")
     judge_p.add_argument(
         "--skip-tier2", action="store_true", help="Skip Tier 2 LLM evaluation; Tier 1 guards only"
+    )
+    judge_p.add_argument(
+        "--async",
+        dest="async_dispatch",
+        action="store_true",
+        help="Dispatch the evaluation as a detached background job (survives this CLI exiting); poll with `gitreins judge --status <job_id>`",
+    )
+    judge_p.add_argument(
+        "--status",
+        action="store_true",
+        help="Show the status/result of a background job (id = job id, not task id)",
+    )
+    judge_p.add_argument(
+        "--run-job",
+        dest="run_job",
+        action="store_true",
+        help=argparse.SUPPRESS,
     )
 
     # commit

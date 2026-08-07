@@ -15,13 +15,20 @@ import subprocess
 import sys
 import threading
 import time
-import uuid
 
 from engine.task_manager import TaskManager
-from engine.judge import Judge
+from engine.judge import Judge, judge_result_to_dict
 from engine.llm import LLMClient
 from engine.guard_manager import GuardManager
 from engine.propagate import Propagator
+from engine.job_store import (
+    cap_from_dict,
+    cap_to_dict,
+    load_job,
+    make_job,
+    pid_alive,
+    save_job,
+)
 
 # MCP_NOISE_FIX: suppress debug spam from mcp package
 logging.basicConfig(level=logging.WARNING, stream=sys.stderr, force=True)
@@ -275,7 +282,7 @@ class GitReinsMCPServer:
             },
             {
                 "name": "judge.status",
-                "description": "Poll the status of a background evaluation job started by judge.evaluate (async) or task.complete (with LLM configured). Returns 'running', 'complete' (with the full result dict: task_id/passed/workdir/tier1_passed/verdict/items/summary), or 'error'.",
+                "description": "Poll the status of a background evaluation job started by judge.evaluate (async) or task.complete (with LLM configured). Returns 'running', 'complete' (with the full result dict: task_id/passed/workdir/tier1_passed/verdict/items/summary), or 'error'. Jobs are disk-backed: they survive MCP server restarts and CLI 'gitreins judge --async' dispatches are visible here; a 'running' job whose process died is resumed automatically on poll.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -614,24 +621,9 @@ class GitReinsMCPServer:
 
     def _judge_result_dict(self, task_id: str, wd: str, result) -> dict:
         """Build the standard judge.evaluate result dict from a JudgeResult."""
-        d = {
-            "task_id": task_id,
-            "passed": result.passed,
-            "workdir": wd,
-            "tier1_passed": result.tier1.passed if result.tier1 else None,
-        }
-        if result.tier2:
-            d["verdict"] = result.tier2.verdict
-            d["items"] = [
-                {"criterion": i.criterion, "status": i.status, "detail": i.detail}
-                for i in result.tier2.items
-            ]
-            d["summary"] = result.tier2.summary
-        return d
+        return judge_result_to_dict(task_id, wd, result)
 
-    def _submit_eval_job(
-        self, task_id: str, wd: str, task, eval_cap=None
-    ) -> str:
+    def _submit_eval_job(self, task_id: str, wd: str, task, eval_cap=None) -> str:
         """Register and start a background evaluation job.
 
         Evaluation jobs run ONE at a time per server instance: a lock
@@ -640,56 +632,120 @@ class GitReinsMCPServer:
         servers) or on the shared ``.gitreins/history`` git storage. A
         fresh ``Judge`` is built inside the job from the captured params.
 
+        Jobs are persisted to the shared disk job store (DF-006) so they
+        survive server restarts; an orphaned ``running`` job is resumed
+        automatically on the next ``judge.status`` poll.
+
         Returns the new job id; the caller returns immediately while the
         job runs. Poll ``judge.status`` with the job id for the result.
         """
-        job_id = f"job-{uuid.uuid4().hex}"
-        job = {
-            "id": job_id,
-            "status": "running",
-            "task_id": task_id,
-            "workdir": wd,
-            "result": None,
-            "error": None,
-            "started_at": time.time(),
-        }
+        job = make_job(task_id, wd, caps=cap_to_dict(eval_cap))
+        job["pid"] = os.getpid()
+        job_id = job["id"]
         with self._jobs_lock:
             self._jobs[job_id] = job
+        save_job(job)
+
+        self._start_job_thread(job, wd, task, eval_cap)
+        return job_id
+
+    def _start_job_thread(self, job: dict, wd: str, task, eval_cap=None) -> None:
+        """Spawn the worker thread for a job record (fresh or resumed)."""
 
         def _run_job() -> None:
             try:
                 j = Judge(self.llm, wd, eval_cap=eval_cap)
                 with self._eval_lock:
                     result = j.evaluate_task(task)
-                d = self._judge_result_dict(task_id, wd, result)
+                d = self._judge_result_dict(job["task_id"], wd, result)
                 with self._jobs_lock:
                     job["result"] = d
                     job["status"] = "complete"
+                    job["finished_at"] = time.time()
             except Exception as e:
-                logger.exception("Background evaluation job %s failed", job_id)
+                logger.exception("Background evaluation job %s failed", job["id"])
                 with self._jobs_lock:
                     job["status"] = "error"
                     job["error"] = str(e)
+                    job["finished_at"] = time.time()
+            save_job(job)
 
-        threading.Thread(
-            target=_run_job, name=f"judge-job-{job_id}", daemon=True
-        ).start()
-        return job_id
+        threading.Thread(target=_run_job, name=f"judge-job-{job['id']}", daemon=True).start()
+
+    def _load_or_resume_disk_job(self, job_id: str) -> dict | None:
+        """Load a job from the shared disk store, resuming it if orphaned.
+
+        Jobs found in ``running`` state whose owning process is gone
+        (server restarted, CLI worker died) are re-dispatched as a fresh
+        worker thread in this server instance — the job is remembered and
+        keeps running. Polls during the resume return ``running`` until
+        the fresh evaluation finishes.
+        """
+        job = load_job(job_id)
+        if job is None:
+            return None
+        if job.get("status") == "running" and not pid_alive(job.get("pid")):
+            job = self._resume_disk_job(job)
+        elif job.get("status") == "running" and job.get("pid") == os.getpid():
+            # Record written by this instance but evicted from memory
+            # (should not happen — keep memory consistent regardless).
+            with self._jobs_lock:
+                self._jobs[job_id] = job
+        with self._jobs_lock:
+            if job.get("status") == "running":
+                self._jobs[job_id] = job
+        return job
+
+    def _resume_disk_job(self, job: dict) -> dict:
+        """Re-dispatch an orphaned running job in this server instance."""
+        wd = job.get("workdir") or self.workdir
+        task = TaskManager(wd).get(job.get("task_id", ""))
+        if task is None:
+            job["status"] = "error"
+            job["error"] = (
+                f"task {job.get('task_id')} no longer exists in {wd} — job could not be resumed"
+            )
+            job["finished_at"] = time.time()
+            save_job(job)
+            return job
+        logger.info(
+            "Resuming orphaned job %s (task=%s workdir=%s)",
+            job["id"],
+            job["task_id"],
+            wd,
+        )
+        job["pid"] = os.getpid()
+        job["resumed_at"] = time.time()
+        save_job(job)
+        self._start_job_thread(job, wd, task, eval_cap=cap_from_dict(job.get("caps")))
+        return job
 
     def _judge_status(self, job_id: str) -> dict:
-        """Return the status of a background evaluation job."""
+        """Return the status of a background evaluation job.
+
+        Memory first, then the shared disk store — so jobs survive MCP
+        server restarts and jobs started by ``gitreins judge --async``
+        (CLI) are visible here too. A ``running`` job whose process died
+        is resumed automatically.
+        """
         with self._jobs_lock:
             job = self._jobs.get(job_id)
+        if job is None:
+            job = self._load_or_resume_disk_job(job_id)
             if job is None:
                 return {"error": f"Job not found: {job_id}"}
-            return {
-                "job_id": job["id"],
-                "status": job["status"],
-                "task_id": job["task_id"],
-                "workdir": job["workdir"],
-                "result": job["result"],
-                "error": job["error"],
-            }
+        d = {
+            "job_id": job["id"],
+            "status": job["status"],
+            "task_id": job["task_id"],
+            "workdir": job["workdir"],
+            "result": job.get("result"),
+            "error": job.get("error"),
+        }
+        if job["status"] == "running":
+            d["pid"] = job.get("pid")
+            d["started_at"] = job.get("started_at")
+        return d
 
     def _propagate(self, source: str | None = None, targets: list[str] | None = None) -> dict:
         """Propagate guard configuration to sibling repos.

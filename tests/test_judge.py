@@ -456,3 +456,90 @@ class TestLspDiagnosticsParsing:
         )
         diags = judge._extract_lsp_diagnostics(tier1)
         assert diags == []
+
+
+# ── DF-006: judge_result_to_dict — legacy + pipeline shapes ──────────────────
+
+
+class TestJudgeResultToDict:
+    """judge_result_to_dict covers both result shapes (legacy tier2 and
+    pipeline-path verdicts buried in pipeline_result stages)."""
+
+    def _legacy_result(self, passed=True):
+        from engine.judge import judge_result_to_dict
+
+        tier1 = Tier1Result(passed=True, results=[])
+        tier2 = Verdict(
+            verdict="COMPLETE",
+            items=[VerdictItem("c1", "PASS", "ok")],
+            summary="all good",
+        )
+        result = JudgeResult(task_id="t1", passed=passed, tier1=tier1, tier2=tier2, verdict=tier2)
+        return judge_result_to_dict("t1", "/wd", result)
+
+    def _pipeline_result(self, passed=True):
+        from engine.judge import judge_result_to_dict
+
+        tier1 = Tier1Result(passed=True, results=[])
+        result = JudgeResult(
+            task_id="t1",
+            passed=passed,
+            tier1=tier1,
+            pipeline_result={
+                "passed": passed,
+                "stages": {
+                    "tier1": {"passed": True, "steps": []},
+                    "tier2": {
+                        "passed": True,
+                        "steps": [
+                            {
+                                "id": "eval",
+                                "type": "ai_eval",
+                                "passed": True,
+                                "output": "COMPLETE\n  ✓ c1: ok\nall good",
+                                "data": {
+                                    "verdict": "COMPLETE",
+                                    "items": [
+                                        {"criterion": "c1", "status": "PASS", "detail": "ok"}
+                                    ],
+                                    "summary": "all good",
+                                },
+                            }
+                        ],
+                    },
+                },
+            },
+        )
+        return judge_result_to_dict("t1", "/wd", result)
+
+    def test_legacy_shape(self):
+        d = self._legacy_result()
+        assert d["passed"] is True
+        assert d["tier1_passed"] is True
+        assert d["verdict"] == "COMPLETE"
+        assert d["items"][0]["criterion"] == "c1"
+        assert d["summary"] == "all good"
+
+    def test_pipeline_shape(self):
+        d = self._pipeline_result()
+        assert d["passed"] is True
+        assert d["tier1_passed"] is True
+        assert d["verdict"] == "COMPLETE"
+        assert d["items"][0]["criterion"] == "c1"
+        assert d["items"][0]["status"] == "PASS"
+        assert d["summary"] == "all good"
+
+    def test_pipeline_shape_no_ai_eval_data(self):
+        from engine.judge import judge_result_to_dict
+
+        tier1 = Tier1Result(passed=True, results=[])
+        result = JudgeResult(
+            task_id="t1",
+            passed=True,
+            tier1=tier1,
+            pipeline_result={"passed": True, "stages": {}},
+        )
+        d = judge_result_to_dict("t1", "/wd", result)
+        assert d["passed"] is True
+        assert "verdict" not in d
+        assert "items" not in d

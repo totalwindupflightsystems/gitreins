@@ -295,3 +295,53 @@ class JudgeResult:
 
         lines.append(f"\nOverall: {'PASS ✓' if self.passed else 'FAIL ✗'}")
         return "\n".join(lines)
+
+
+def judge_result_to_dict(task_id: str, workdir: str, result) -> dict:
+    """Standard judge result dict shared by MCP judge.status and CLI --status.
+
+    Shape: task_id / passed / workdir / tier1_passed / verdict / items /
+    summary (items only present when a Tier 2 verdict exists). Handles
+    both result shapes: the legacy path (``result.tier2``) and the
+    pipeline path (verdict buried in ``pipeline_result.stages[].steps[].data``).
+    """
+    d = {
+        "task_id": task_id,
+        "passed": result.passed,
+        "workdir": workdir,
+        "tier1_passed": result.tier1.passed if result.tier1 else None,
+    }
+    tier2 = result.tier2
+    if tier2 is None and result.pipeline_result:
+        tier2 = _find_pipeline_verdict(result.pipeline_result)
+    if tier2:
+        d["verdict"] = tier2.verdict
+        d["items"] = [
+            {"criterion": i.criterion, "status": i.status, "detail": i.detail} for i in tier2.items
+        ]
+        d["summary"] = tier2.summary
+    return d
+
+
+def _find_pipeline_verdict(pipeline_result: dict):
+    """Extract the structured ai_eval verdict from a compiled pipeline result."""
+    from types import SimpleNamespace
+
+    for stage in (pipeline_result.get("stages") or {}).values():
+        for step in stage.get("steps") or []:
+            data = step.get("data") or {}
+            if data.get("verdict"):
+                items = [
+                    SimpleNamespace(
+                        criterion=i.get("criterion"),
+                        status=i.get("status"),
+                        detail=i.get("detail"),
+                    )
+                    for i in (data.get("items") or [])
+                ]
+                return SimpleNamespace(
+                    verdict=data.get("verdict"),
+                    items=items,
+                    summary=data.get("summary", ""),
+                )
+    return None

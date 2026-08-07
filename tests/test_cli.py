@@ -9,6 +9,7 @@ import re
 import shutil
 import sys
 import subprocess
+import time
 import pytest
 
 
@@ -429,9 +430,7 @@ class TestConfigAndWorkdir:
         (repo / "tests" / "test_x.py").write_text("def test_x(): pass\n")
         (repo / "app.py").write_text("def main(): pass\n")
         subprocess.run(["git", "init", "-q", str(repo)], check=True)
-        subprocess.run(
-            ["git", "-C", str(repo), "add", "app.py", "tests/test_x.py"], check=True
-        )
+        subprocess.run(["git", "-C", str(repo), "add", "app.py", "tests/test_x.py"], check=True)
 
         # Foreign index holding a path that does NOT exist in repo/ — simulates
         # the outer repo's index leaking into the nested guard.
@@ -655,6 +654,89 @@ class TestJudgeExtended:
         result = run_cli("judge", "judge-api", cwd=tmp_workdir, extra_env=mock_env)
         assert result.returncode in (0, 1)
         assert "Judge Result" in result.stdout or "Judge" in result.stdout
+
+
+# ── DF-006: CLI async judge — --async / --status / --run-job ────────────────
+
+
+class TestJudgeAsyncCLI:
+    """CLI background jobs (DF-006): dispatch, poll, survive the parent exiting.
+
+    The detached worker inherits GITREINS_MOCK_LLM_RESPONSE (set via
+    extra_env), so the whole roundtrip runs hermetically as real
+    subprocesses. The job store is isolated by the autouse
+    ``isolated_job_store`` conftest fixture.
+    """
+
+    _MOCK = {
+        "GITREINS_MOCK_LLM_RESPONSE": json.dumps(
+            {
+                "content": json.dumps(
+                    {
+                        "verdict": "COMPLETE",
+                        "items": [{"criterion": "c1", "status": "PASS", "detail": "ok"}],
+                        "summary": "all good",
+                    }
+                )
+            }
+        )
+    }
+
+    def _poll_job(self, job_id, cwd, deadline=30.0):
+        """Poll `gitreins judge --status <job_id>` until complete or error."""
+        end = time.monotonic() + deadline
+        last = None
+        while time.monotonic() < end:
+            last = run_cli("judge", job_id, "--status", cwd=cwd)
+            if last.returncode in (0, 1):
+                return last
+            time.sleep(0.3)
+        pytest.fail(
+            f"job {job_id} did not finish within {deadline}s — last: {getattr(last, 'stdout', None)}"
+        )
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    def test_async_dispatch_poll_and_result(self, tmp_workdir):
+        """--async dispatches a detached worker; --status polls to complete."""
+        run_cli(
+            "task",
+            "create",
+            "async-cli",
+            "Async CLI",
+            "c1",
+            cwd=tmp_workdir,
+            extra_env=self._MOCK,
+        )
+        dispatched = run_cli(
+            "judge",
+            "async-cli",
+            "--async",
+            cwd=tmp_workdir,
+            extra_env=self._MOCK,
+        )
+        assert dispatched.returncode == 0, dispatched.stdout + dispatched.stderr
+        m = re.search(r"Async job dispatched: (job-[0-9a-f]+)", dispatched.stdout)
+        assert m, dispatched.stdout
+        job_id = m.group(1)
+        assert "gitreins judge --status" in dispatched.stdout
+
+        # The dispatching CLI has long exited — the detached worker keeps
+        # running and the job record persists on disk.
+        polled = self._poll_job(job_id, tmp_workdir)
+        assert polled.returncode == 0, polled.stdout + polled.stderr
+        assert "Status:   complete" in polled.stdout
+        assert "PASS" in polled.stdout
+        assert "all good" in polled.stdout
+
+    def test_async_unknown_task_exits_1(self, tmp_workdir):
+        result = run_cli("judge", "ghost-task", "--async", cwd=tmp_workdir)
+        assert result.returncode == 1
+        assert "Task not found" in result.stdout
+
+    def test_status_unknown_job_exits_1(self, tmp_workdir):
+        result = run_cli("judge", "job-nonexistent", "--status", cwd=tmp_workdir)
+        assert result.returncode == 1
+        assert "Job not found" in result.stdout
 
 
 # ── Regression: config deletion via silent parse failure ──────────────────────

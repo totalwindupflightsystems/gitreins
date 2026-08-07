@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Disk-backed async judge jobs (DF-006)** — background evaluation jobs are persisted to a shared job store (`~/.local/share/gitreins/jobs/`, override with `GITREINS_JOB_DIR`) instead of living only in MCP server memory. Jobs survive MCP server restarts; an orphaned `running` job whose process died is resumed automatically on the next `judge.status` poll. New CLI flow: `gitreins judge <task> --async` dispatches a detached worker process (survives the CLI exiting), `gitreins judge <job_id> --status` polls it (exit codes: 0 complete / 1 error / 2 running). MCP `judge.status` sees CLI-started jobs and vice versa; running responses include `pid`/`started_at`. `StepResult.to_dict()` now serializes structured `data` (verdict/items/summary) so pipeline-path results are included in judge result dicts.
 - CVE-style scored severity system for commit review (`review_score_threshold`, `review_score_offset`)
 - Anthropic Messages API endpoint support (auto-detected provider routing)
 - DeepSeek prompt caching telemetry (`cache_read_tokens` / `cache_write_tokens` in evaluator output)

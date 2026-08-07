@@ -25,6 +25,19 @@ def tmp_workdir(tmp_path):
     return str(workdir)
 
 
+@pytest.fixture(autouse=True)
+def isolated_job_store(tmp_path, monkeypatch):
+    """Point the shared disk job store (DF-006) at a temp dir.
+
+    Autouse so no test ever reads/writes real jobs under
+    ~/.local/share/gitreins/jobs — including subprocess children, which
+    inherit the overridden GITREINS_JOB_DIR from the environment.
+    """
+    d = str(tmp_path / "gitreins-jobs")
+    monkeypatch.setenv("GITREINS_JOB_DIR", d)
+    return d
+
+
 @pytest.fixture
 def task_manager(tmp_workdir):
     """Create a TaskManager with a clean temp directory."""

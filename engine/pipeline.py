@@ -71,6 +71,7 @@ class StepResult:
             "passed": self.passed,
             "output": self.output[:500],
             "error": self.error,
+            "data": self.data,
         }
 
 
@@ -377,8 +378,12 @@ class Pipeline:
                 max_iterations=float(explicit_caps.get("max_iterations", base.max_iterations)),
                 max_seconds=float(explicit_caps.get("max_seconds", base.max_seconds)),
                 max_input_tokens=int(explicit_caps.get("max_input_tokens", base.max_input_tokens)),
-                max_output_tokens=int(explicit_caps.get("max_output_tokens", base.max_output_tokens)),
-                tool_call_weight=float(explicit_caps.get("tool_call_weight", base.tool_call_weight)),
+                max_output_tokens=int(
+                    explicit_caps.get("max_output_tokens", base.max_output_tokens)
+                ),
+                tool_call_weight=float(
+                    explicit_caps.get("tool_call_weight", base.tool_call_weight)
+                ),
             )
             evaluator = AgenticEvaluator(self._llm, self.workdir, eval_cap=eval_cap)
         else:
