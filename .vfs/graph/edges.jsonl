@@ -708,3 +708,12 @@
 {"from":"tests/test_job_store.py","to":"pkg:pytest","rel":"imports","provenance":"ast_exact","confidence":1.0}
 {"from":"tests/test_job_store.py","to":"pkg:engine.eval_cap","rel":"imports","provenance":"ast_exact","confidence":1.0}
 {"from":"tests/test_job_store.py","to":"pkg:engine.job_store","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"engine/judge.py","to":"pkg:types","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"gitreins/cli.py","to":"pkg:time","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"gitreins/cli.py","to":"pkg:engine.job_store","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"gitreins/cli.py","to":"pkg:engine.job_store","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"gitreins/cli.py","to":"pkg:engine.job_store","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_cli.py","to":"pkg:time","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_mcp_server.py","to":"pkg:engine.job_store","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_mcp_server.py","to":"pkg:engine.job_store","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"gitreins_mcp/server.py","to":"pkg:engine.job_store","rel":"imports","provenance":"ast_exact","confidence":1.0}
