@@ -430,6 +430,14 @@ class GuardManager:
                 env=_sanitized_env(),
             )
             if result.returncode == 0:
+                # gitleaks clean — ALSO run the built-in scanner. gitleaks'
+                # default rules carry entropy thresholds that skip low-entropy
+                # keys (e.g. an AKIA-prefixed key in test fixtures), and the
+                # built-in scanner catches provider patterns without that
+                # filter (GR-GAP-005). gitleaks OR builtin must both be clean.
+                builtin = self._builtin_secrets_scan()
+                if not builtin.passed:
+                    return builtin
                 return GuardResult(name="secrets", passed=True, output="gitleaks: clean")
             else:
                 return GuardResult(
@@ -515,6 +523,7 @@ class GuardManager:
         ]
 
         findings = []
+        allowlist = self._load_gitleaks_allowlist()
         try:
             # Get staged files
             staged_files = _get_staged_files(self.workdir)
@@ -523,6 +532,10 @@ class GuardManager:
                 return GuardResult(name="secrets", passed=True, output="No staged files to scan")
 
             for fpath in staged_files:
+                # Respect .gitleaks.toml [allowlist] paths — same exemptions
+                # gitleaks applies (test fixtures with deliberate fake keys).
+                if any(rx.search(fpath) for rx in allowlist):
+                    continue
                 full = os.path.join(self.workdir, fpath)
                 if not os.path.isfile(full):
                     continue
@@ -571,6 +584,30 @@ class GuardManager:
         except Exception as e:
             logger.exception("Secrets scan failed")
             return GuardResult(name="secrets", passed=False, error=str(e))
+
+    def _load_gitleaks_allowlist(self) -> list:
+        """Load path allowlist regexes from .gitleaks.toml, if present.
+
+        The built-in scanner applies the same path exemptions gitleaks gets
+        via the repo's [allowlist] (test fixtures with deliberate fake keys,
+        docs, generated dirs). Entries are emitted as Go-style regexps inside
+        '''...''' quotes.
+        """
+        allowed = []
+        cfg = os.path.join(self.workdir, ".gitleaks.toml")
+        if not os.path.isfile(cfg):
+            return allowed
+        try:
+            with open(cfg, "r", errors="replace") as f:
+                text = f.read()
+            for m in re.finditer(r"'''(.+?)'''", text):
+                try:
+                    allowed.append(re.compile(m.group(1)))
+                except re.error:
+                    continue
+        except Exception:
+            logger.debug("Could not parse %s allowlist", cfg)
+        return allowed
 
     def _check_lint(self) -> GuardResult:
         """Run linter on staged Python files."""

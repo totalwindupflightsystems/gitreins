@@ -811,6 +811,28 @@ class TestGitleaksTomlGeneration:
         assert "Custom exclusions" in content
         assert "test-key" in content
 
+    def test_generated_config_extends_default_ruleset(self, tmp_workdir):
+        """Generated config must extend gitleaks' default rules (GR-GAP-005).
+
+        Without [extend] useDefault = true, the custom sk-api-key rule replaces
+        gitleaks' built-in rules (AWS, GitHub, GitLab, etc.) and the guard
+        silently misses non-sk- secrets.
+        """
+        import subprocess
+
+        os.makedirs(os.path.join(tmp_workdir, ".git"), exist_ok=True)
+        with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
+            f.write("print('hello')\n")
+        with open(os.path.join(tmp_workdir, "setup.py"), "w") as f:
+            f.write("# placeholder\n")
+        subprocess.run(["git", "init", "-q"], cwd=tmp_workdir)
+        result = run_cli("init", cwd=tmp_workdir)
+        assert result.returncode == 0
+
+        content = open(os.path.join(tmp_workdir, ".gitleaks.toml")).read()
+        assert "[extend]" in content, "generated config must contain [extend]"
+        assert "useDefault = true" in content, "generated config must extend default ruleset"
+
     def test_universal_exclusions_always_present(self, tmp_workdir):
         """Every project gets .git/, .gitreins/, *.log exclusions (as regexps)."""
         import subprocess

@@ -30,4 +30,5 @@ paths = [
   '''\.env''',
   '''.gitreins-sandbox/.*''',
   '''sandbox/.*''',
+  '''\.coding-hermes/.*''',
 ]

@@ -449,6 +449,8 @@ class TestLspIntegration:
     to bypass git-staging logic and pass file paths directly.
     """
 
+    pytestmark = pytestmark_integration
+
     BAD_CODE_UNDEFINED = "x = undefined_variable\n"
 
     BAD_CODE_SYNTAX = "if True\n    pass\n"  # missing colon + unexpected indent → syntax error

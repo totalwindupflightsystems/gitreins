@@ -183,6 +183,17 @@ class TestBuiltinSecretsScan:
         assert result.passed is False
         assert "AWS access key" in result.output
 
+    def test_gitleaks_allowlist_respected(self, tmp_workdir):
+        """Files matched by .gitleaks.toml [allowlist] paths are exempt
+        (GR-GAP-005 — builtin scanner mirrors gitleaks' allowlist so test
+        fixtures with deliberate fake keys don't fail the guard)."""
+        _write_staged_file(tmp_workdir, "test.py", 'AWS_ACCESS_KEY = "AKIA1234567890ABCDEF"')
+        with open(os.path.join(tmp_workdir, ".gitleaks.toml"), "w") as f:
+            f.write("[allowlist]\npaths = [\n  '''test\\.py''',\n]\n")
+        gm = GuardManager(tmp_workdir)
+        result = gm._builtin_secrets_scan()
+        assert result.passed is True
+
     def test_openai_key_detected(self, tmp_workdir):
         """OpenAI key (sk-...) is detected as a hardcoded API key."""
         _write_staged_file(
@@ -409,9 +420,32 @@ class TestExtendedGuardManager:
         mock_run.stdout = "gitleaks: clean"
         mock_run.stderr = ""
         with patch("subprocess.run", return_value=mock_run):
-            result = gm._check_secrets()
+            with patch.object(
+                gm,
+                "_builtin_secrets_scan",
+                return_value=GuardResult("secrets", True, "Scanned 0 files — clean"),
+            ):
+                result = gm._check_secrets()
         assert "gitleaks" in result.output
         assert result.passed is True
+
+    def test_gitleaks_clean_builtin_findings_fail(self, tmp_workdir):
+        """GR-GAP-005: gitleaks clean but built-in scanner finds a secret
+        (low-entropy key gitleaks' entropy filter skips) → secrets guard fails."""
+        gm = GuardManager(tmp_workdir)
+        mock_run = MagicMock()
+        mock_run.returncode = 0
+        mock_run.stdout = "gitleaks: clean"
+        mock_run.stderr = ""
+        with patch("subprocess.run", return_value=mock_run):
+            with patch.object(
+                gm,
+                "_builtin_secrets_scan",
+                return_value=GuardResult("secrets", False, "Potential secrets found:\n.env:1: [AWS access key] AWS_ACCESS_KEY_ID=\"***\""),
+            ):
+                result = gm._check_secrets()
+        assert result.passed is False
+        assert "Potential secrets found" in result.output
 
     def test_gitleaks_returns_findings(self, tmp_workdir):
         """When gitleaks reports findings, secrets guard fails."""
