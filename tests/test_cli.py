@@ -264,6 +264,19 @@ class TestMCPServerCLI:
 
         assert hasattr(gitreins.cli, "cmd_mcp_server")
 
+    def test_mcp_server_help_documents_env_config(self):
+        """mcp-server --help documents env-var config and the configure tool."""
+        result = run_cli("mcp-server", "--help")
+        assert result.returncode == 0
+        for var in (
+            "GITREINS_LLM_API_KEY",
+            "GITREINS_LLM_BASE_URL",
+            "GITREINS_LLM_MODEL",
+            "GITREINS_LLM_REASONING",
+        ):
+            assert var in result.stdout
+        assert "mcp_gitreins_configure" in result.stdout
+
 
 class TestExtendedCLI:
     """Extended CLI coverage."""

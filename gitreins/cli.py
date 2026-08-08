@@ -1689,7 +1689,23 @@ def main():
     )
 
     # mcp-server
-    sub.add_parser("mcp-server", help="Run MCP stdio server")
+    sub.add_parser(
+        "mcp-server",
+        help="Run MCP stdio server",
+        description="Run the MCP stdio server (no flags required).",
+        epilog=(
+            "Configuration is via environment variables:\n"
+            "  GITREINS_LLM_API_KEY   API key for the LLM provider\n"
+            "  GITREINS_LLM_BASE_URL  Base URL of the LLM API (default: https://api.openai.com/v1)\n"
+            "  GITREINS_LLM_MODEL     Model name (default varies by provider)\n"
+            "  GITREINS_LLM_REASONING Reasoning mode: 'enabled' or 'disabled' (default: disabled)\n"
+            "\n"
+            "The MCP tool mcp_gitreins_configure can hot-reload the LLM config at runtime.\n"
+            "\n"
+            "Example:\n"
+            "  export GITREINS_LLM_API_KEY=sk-...\n"
+        ),
+    )
 
     # security-scan
     security_p = sub.add_parser(
