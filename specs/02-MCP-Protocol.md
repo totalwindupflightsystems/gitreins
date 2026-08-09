@@ -6,7 +6,7 @@ Document Status: Draft v0.1 — Specification only, no code.
 
 ## 1. Mission
 
-Define the Model Context Protocol (MCP) interface exposed by GitReins' stdio JSON-RPC 2.0 server. Primary AI coding agents (Pi, Claude, Hermes, Codex) connect via stdio and use these 10 tools to manage tasks, run guards, evaluate work, commit code, and propagate guard configuration through the harness. This specification covers the wire protocol, tool catalog, cross-repository semantics, evaluator caps, error taxonomy, server lifecycle, and security model.
+Define the Model Context Protocol (MCP) interface exposed by GitReins' stdio JSON-RPC 2.0 server. Primary AI coding agents (Pi, Claude, Hermes, Codex) connect via stdio and use these 12 tools to manage tasks, run guards, evaluate work, commit code, and propagate guard configuration through the harness. This specification covers the wire protocol, tool catalog, cross-repository semantics, evaluator caps, error taxonomy, server lifecycle, and security model.
 
 ---
 
@@ -114,7 +114,7 @@ python -m gitreins_mcp.server [workdir]
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐  │
 │  │  JSON-RPC   │  │  Tool       │  │  Cross-Repo         │  │
 │  │  Dispatcher │──│  Handlers   │──│  TaskManager        │  │
-│  │             │  │ (10 tools)  │  │  Resolution         │  │
+│  │             │  │ (12 tools)  │  │  Resolution         │  │
 │  └─────────────┘  └─────────────┘  └─────────────────────┘  │
 │         │                  │                  │               │
 │         ▼                  ▼                  ▼               │
@@ -1092,7 +1092,7 @@ gitreins-poc/
 - [x] Assumptions listed
 - [x] Architecture diagram and layering rules
 - [x] Protocol specified (transport, brace parser, lifecycle, response format)
-- [x] Tool Catalog complete (all 10 tools with schemas, behavior, returns, errors)
+- [x] Tool Catalog complete (all 12 tools with schemas, behavior, returns, errors)
 - [x] Cross-Repo Workdir documented
 - [x] Evaluator Caps documented (params, priority chain, legacy format, accounting)
 - [x] Error Taxonomy (JSON-RPC + domain + exit codes)

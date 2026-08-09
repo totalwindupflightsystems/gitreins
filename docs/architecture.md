@@ -31,12 +31,15 @@ Git Repository (main + .gitreins/ directory)
 Any MCP-compatible coding agent (Pi, Claude Code, Hermes, Codex CLI). Interacts with GitReins MCP tools. Has no direct git access — commit must go through the harness.
 
 ### 2. MCP Server
-stdio transport (`gitreins_mcp/server.py`) exposing 9 tools:
+stdio transport (`gitreins_mcp/server.py`) exposing 12 tools:
+- `configure` — hot-reload LLM config at runtime
 - `task.create`, `task.start`, `task.complete` — task lifecycle
 - `task.list`, `task.get`, `task.delete` — task queries
 - `commit` — the only path to a git commit (runs guards, rejects if fails)
 - `guard.run` — run Tier 1 static guards
-- `judge.evaluate` — run full evaluation pipeline on a task
+- `judge.evaluate` — run full evaluation pipeline on a task (async job by default)
+- `judge.status` — poll a background evaluation job
+- `propagate` — propagate guard config to sibling repos
 
 ### 3. Task Manager
 Manages TODO items as structured tasks with nesting and dependencies (`engine/task_manager.py`). Tasks stored in `.gitreins/tasks.yaml`. Tracks state, progress, and completion criteria. The TODO items ARE the guardrails.
