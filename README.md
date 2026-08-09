@@ -317,7 +317,7 @@ guards:
   lint: true
   tests: true
   test_mode: "full"          # "full" or "diff"
-  test_command: "pytest -x --tb=short"
+  test_command: "uv run pytest -x --tb=short"
 
   # Go projects (auto-detected via go.mod):
   go:
