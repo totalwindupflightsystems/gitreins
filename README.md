@@ -60,6 +60,8 @@ gitreins task list [--status pending|in_progress|complete]
 gitreins task delete <id>
 gitreins judge <id>                   # Evaluate a task
 gitreins commit <message>             # Commit with guard checks
+gitreins commit-audit [message]       # Validate commit message against staged diff (commit-msg hook)
+gitreins setup-tools                  # Show available static analysis tools and install instructions
 gitreins mcp-server                   # Run MCP stdio server (for AI agents)
 ```
 
