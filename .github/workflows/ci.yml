@@ -28,5 +28,12 @@ jobs:
           echo "$HOME/go/bin" >> $GITHUB_PATH
       - name: Run tests
         run: pytest tests/ -v --tb=short
+      - name: Verify README test-count drift
+        run: |
+          COUNT=$(pytest --collect-only -q --override-ini=addopts= 2>/dev/null | tail -1 | grep -oE '^[0-9]+')
+          FILES=$(pytest --collect-only -q --override-ini=addopts= 2>/dev/null | grep -oE '^tests/[a-zA-Z0-9_./-]+\.py' | sort -u | wc -l)
+          grep -q "${COUNT} tests pass" README.md || { echo "README test-count drift: README says '$(grep -oE '[0-9]+ tests pass' README.md | head -1)', pytest collects ${COUNT}"; exit 1; }
+          grep -q "${FILES} test files" README.md || { echo "README test-file-count drift: README says '$(grep -oE '[0-9]+ test files' README.md | head -1)', pytest collects ${FILES} files"; exit 1; }
+          echo "README test counts match: ${COUNT} tests / ${FILES} files"
       - name: Run guards
         run: gitreins guard
