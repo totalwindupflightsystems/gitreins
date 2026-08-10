@@ -238,6 +238,10 @@ class GuardManager:
 
         # Test mode: "full" (default) or "diff"
         self._test_mode = guards_cfg.get("test_mode", "full")
+        # Run the full test_command even when nothing is staged (AUDIT-GAP-002 /
+        # GR-GAP-009): chained suites (e.g. totalstack ACM parity) otherwise
+        # never execute on clean-tree guard runs → vacuous green audits.
+        self._test_on_clean = guards_cfg.get("test_on_clean", False)
         # Test timeout in seconds (default: 180s)
         self._test_timeout = guards_cfg.get("test_timeout", 180)
         # Hook timeout in seconds (default: 120s) — overall guard budget (GR-064e)
@@ -654,14 +658,18 @@ class GuardManager:
 
         In 'diff' mode, only runs tests relevant to staged changes.
         In 'full' mode (default), runs the entire test suite.
-        When no files are staged, tests are skipped entirely.
+        When no files are staged, tests are skipped unless guards.test_on_clean
+        is true (then the full test_command runs — chained suites execute on
+        clean-tree guard runs instead of silently passing).
         """
         test_command = self.config.get("guards", {}).get("test_command", "pytest -x --tb=short")
 
         # Skip if nothing is staged — nothing to test
         staged = _get_staged_files(self.workdir)
         if not staged:
-            return GuardResult(name="tests", passed=True, output="No files staged — skipped")
+            if not self._test_on_clean:
+                return GuardResult(name="tests", passed=True, output="No files staged — skipped")
+            logger.info("test_on_clean: no files staged — running full test_command")
 
         if self._test_mode == "diff":
             test_files = _discover_test_targets(self.workdir)

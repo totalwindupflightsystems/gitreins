@@ -376,6 +376,62 @@ class TestTestsGuard:
         assert result.passed is False
         assert "go" in str(result.error) or "FileNotFound" in str(result.error)
 
+    def test_clean_tree_skips_without_flag(self, guard_manager):
+        """No staged files + test_on_clean unset → PASS with explicit skip note.
+
+        This is the pre-AUDIT-GAP-002 behavior: a vacuous green on clean
+        trees that let chained suites (ACM parity) silently never run.
+        """
+        with patch("engine.guard_manager._get_staged_files", return_value=[]):
+            result = guard_manager._check_tests()
+        assert result.passed is True
+        assert "No files staged" in result.output
+
+    def test_clean_tree_runs_command_with_flag(self, tmp_workdir):
+        """test_on_clean: true → full test_command executes with nothing staged."""
+        gm = GuardManager(
+            tmp_workdir,
+            {"guards": {"test_command": "echo clean-tree-run", "test_on_clean": True}},
+        )
+        mock_run = MagicMock()
+        mock_run.returncode = 0
+        mock_run.stdout = "clean-tree output"
+        mock_run.stderr = ""
+        with patch("engine.guard_manager._get_staged_files", return_value=[]):
+            with patch("subprocess.run", return_value=mock_run) as mock_subprocess:
+                result = gm._check_tests()
+        assert result.passed is True
+        assert "clean-tree" in result.output
+        # The configured test command must actually have been executed
+        assert "echo clean-tree-run" in mock_subprocess.call_args.args[0]
+
+    def test_clean_tree_diff_mode_runs_command_with_flag(self, tmp_workdir):
+        """test_on_clean: true + test_mode: diff → full command runs on clean tree.
+
+        _discover_test_targets returns None with no staged files (full-suite
+        fallback), so the chained command executes instead of a vacuous skip.
+        """
+        gm = GuardManager(
+            tmp_workdir,
+            {
+                "guards": {
+                    "test_command": "echo clean-tree-diff-run",
+                    "test_on_clean": True,
+                    "test_mode": "diff",
+                }
+            },
+        )
+        mock_run = MagicMock()
+        mock_run.returncode = 0
+        mock_run.stdout = "diff clean-tree output"
+        mock_run.stderr = ""
+        with patch("engine.guard_manager._get_staged_files", return_value=[]):
+            with patch("subprocess.run", return_value=mock_run) as mock_subprocess:
+                result = gm._check_tests()
+        assert result.passed is True
+        assert "clean-tree" in result.output
+        assert "echo clean-tree-diff-run" in mock_subprocess.call_args.args[0]
+
 
 class TestExtendedGuardManager:
     """Extended edge case coverage for GuardManager."""
