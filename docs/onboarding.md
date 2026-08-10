@@ -37,30 +37,13 @@ writes an optimized `.gitreins/config.yaml` (guard set, test mode, evaluator
 budgets). Run it after `install` — `install` writes only the default config,
 `init` tailors it to your repo.
 
-## 3. Fix the gitleaks allowlist before your first guard
+## 3. Gitleaks allowlist (no action needed)
 
-`gitreins init` generates a `.gitleaks.toml` allowlist. **The generated
-regexes are invalid for common Python layouts** — they look like:
-
-```toml
-allowlist = [
-  "*.log",          # invalid regex — bare glob
-  "*.egg-info/",    # invalid regex
-]
-```
-
-gitleaks rejects these and the secrets guard fails with a Go panic dump on
-every run (`✗ secrets — ○`). Fix them to anchored regexes:
-
-```toml
-allowlist = [
-  ".*\\.log",
-  ".*\\.egg-info/",
-]
-```
-
-Or, if you don't need an allowlist at all, **delete `.gitleaks.toml`** — the
-built-in pattern scanner takes over and the guard passes cleanly.
+`gitreins init` generates a `.gitleaks.toml` allowlist with valid anchored
+Go regexes. **Since v0.11.0 (DF-001, commit 9a54e79) the generated entries
+are valid — fresh installs need no manual fix here.** Users carrying over a
+`.gitleaks.toml` written by an older init (glob-style entries like `*.log`)
+should see T1 in Troubleshooting below.
 
 ## 4. First guard run
 
@@ -69,7 +52,8 @@ gitreins guard
 ```
 
 This runs Tier 1 static guards: secrets (gitleaks or built-in scanner),
-lint (ruff), tests (pytest), and LSP diagnostics (if configured). Each guard
+lint (ruff), tests (pytest), static analysis (mypy and friends, if
+configured), and LSP diagnostics (if configured). Each guard
 reports PASS/FAIL. The secrets guard BLOCKS on failure — no exceptions.
 
 The pre-commit hook runs the same guard automatically on `git commit`, so a
@@ -104,14 +88,19 @@ stored in `.gitreins/history/<date>/<hash>/verdict.json` and browsable with
 
 ### T1. Secrets guard fails with a Go panic dump every run
 
-**Symptom:** `✗ secrets — ○` plus a Go panic traceback on every guard, even
-with no secrets present.
+**Status: FIXED in v0.11.0** (DF-001, commit 9a54e79) — `gitreins init` now
+generates valid anchored regexes, so fresh installs never hit this. This
+entry is kept for users with a `.gitleaks.toml` written by an older init.
 
-**Cause:** the generated `.gitleaks.toml` contains invalid regexes (bare
-globs like `*.log`, `*.egg-info/`, `*.spec.md`, `*.md`).
+**Symptom (pre-fix):** `✗ secrets — ○` plus a Go panic traceback on every
+guard, even with no secrets present.
 
-**Fix:** rewrite each entry as an anchored regex (`.*\\.log`), or delete
-`.gitleaks.toml` entirely — the built-in scanner then runs instead of
+**Cause (pre-fix):** the generated `.gitleaks.toml` contained invalid regexes
+(glob-style entries like `*.log`, `*.egg-info/`, `*.spec.md`, `*.md`).
+
+**Fix:** upgrade gitreins and re-run `gitreins init` to regenerate
+`.gitleaks.toml`; or rewrite each entry as an anchored regex (`.*\.log`); or
+delete `.gitleaks.toml` entirely — the built-in scanner then runs instead of
 gitleaks.
 
 ### T2. `✗ tests (full)` but `python3 -m pytest` passes locally
@@ -146,7 +135,8 @@ python3 -m pytest tests/ -x -q
 
 ## Checklist: done when
 
-- [ ] `gitreins guard` passes 4/4 (secrets, lint, tests, LSP)
+- [ ] `gitreins guard` passes (default guard set: secrets, lint, tests, and
+  static analysis where detected; LSP is opt-in)
 - [ ] `git commit` works without `--no-verify`
 - [ ] A task with criteria gets a judge verdict in `.gitreins/history/`
 - [ ] `.gitreins/tasks.yaml` is in `.gitignore`
