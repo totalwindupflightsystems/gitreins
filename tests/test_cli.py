@@ -906,6 +906,111 @@ class TestGitleaksTomlGeneration:
         assert "Custom exclusions" in content
         assert "test-key" in content
 
+
+# ── GR-GAP-024/025/026: init runner detection, .gitignore, inconclusive-detection warning ──
+
+
+class TestInitRunnerGitignoreAndWarning:
+    """Regression tests for the stand-in PM gap tasks (2026-08-11)."""
+
+    def _make_python_repo(self, tmp_workdir):
+        """setup.py + main.py → detected as Python (no tests/ dir)."""
+        with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
+            f.write("print('hello')\n")
+        with open(os.path.join(tmp_workdir, "setup.py"), "w") as f:
+            f.write("# placeholder\n")
+
+    # ── GR-GAP-024: runner-aware test command ─────────────────────────────
+
+    def test_detect_test_command_uses_uv_run_when_uv_installed(self, monkeypatch, tmp_path):
+        """Python repo + uv on PATH → `uv run pytest -x --tb=short` (not bare pytest)."""
+        import shutil
+
+        from gitreins.cli import _detect_language, _detect_test_command
+
+        monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/uv" if name == "uv" else None)
+        (tmp_path / "pyproject.toml").write_text("[project]\nname='app'\n")
+        lang = _detect_language(str(tmp_path))
+        assert lang["is_python"]
+        assert _detect_test_command(str(tmp_path), lang) == "uv run pytest -x --tb=short"
+
+    def test_detect_test_command_prefers_module_pytest_over_uv(self, monkeypatch, tmp_path):
+        """Root-package + tests/ layout keeps `python3 -m pytest` even with uv (import correctness)."""
+        import shutil
+
+        from gitreins.cli import _detect_language, _detect_test_command
+
+        monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/uv" if name == "uv" else None)
+        (tmp_path / "todo_stats").mkdir()
+        (tmp_path / "todo_stats" / "__init__.py").write_text("")
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_todo.py").write_text("def test_add(): pass\n")
+        lang = _detect_language(str(tmp_path))
+        assert _detect_test_command(str(tmp_path), lang) == "python3 -m pytest -x --tb=short"
+
+    def test_detect_test_command_pipenv_runner(self, monkeypatch, tmp_path):
+        """Pipfile + pipenv on PATH → `pipenv run pytest ...`."""
+        import shutil
+
+        from gitreins.cli import _detect_language, _detect_test_command
+
+        def fake_which(name):
+            return "/usr/bin/pipenv" if name == "pipenv" else None
+
+        monkeypatch.setattr(shutil, "which", fake_which)
+        (tmp_path / "Pipfile").write_text("[packages]\n")
+        (tmp_path / "setup.py").write_text("# placeholder\n")
+        lang = _detect_language(str(tmp_path))
+        assert lang["is_python"]
+        assert _detect_test_command(str(tmp_path), lang) == "pipenv run pytest -x --tb=short"
+
+    # ── GR-GAP-025: init ensures .gitignore entry ─────────────────────────
+
+    def test_init_creates_gitignore_with_tasks_entry(self, tmp_workdir):
+        """init on a repo without .gitignore creates one with .gitreins/tasks.yaml."""
+        self._make_python_repo(tmp_workdir)
+        result = run_cli("init", cwd=tmp_workdir)
+        assert result.returncode == 0
+        gi_path = os.path.join(tmp_workdir, ".gitignore")
+        assert os.path.isfile(gi_path), ".gitignore should be created by init"
+        content = open(gi_path).read()
+        assert ".gitreins/tasks.yaml" in content
+
+    def test_init_appends_gitignore_entry_when_missing(self, tmp_workdir):
+        """init appends the entry to an existing .gitignore that lacks it."""
+        self._make_python_repo(tmp_workdir)
+        gi_path = os.path.join(tmp_workdir, ".gitignore")
+        with open(gi_path, "w") as f:
+            f.write("__pycache__/\n")
+        result = run_cli("init", cwd=tmp_workdir)
+        assert result.returncode == 0
+        content = open(gi_path).read()
+        assert ".gitreins/tasks.yaml" in content
+        assert content.startswith("__pycache__/\n"), "existing entries must be preserved"
+
+    def test_init_does_not_duplicate_gitignore_entry(self, tmp_workdir):
+        """init leaves an existing .gitreins/tasks.yaml entry untouched."""
+        self._make_python_repo(tmp_workdir)
+        gi_path = os.path.join(tmp_workdir, ".gitignore")
+        with open(gi_path, "w") as f:
+            f.write(".gitreins/tasks.yaml\n__pycache__/\n")
+        result = run_cli("init", cwd=tmp_workdir)
+        assert result.returncode == 0
+        content = open(gi_path).read()
+        assert content.count(".gitreins/tasks.yaml") == 1, "entry must not be duplicated"
+
+    # ── GR-GAP-026: inconclusive-detection warning ────────────────────────
+
+    def test_init_warns_on_undetectable_repo(self, tmp_workdir):
+        """init on an empty repo prints a warning advising re-run after adding source files."""
+        result = run_cli("init", cwd=tmp_workdir)
+        assert result.returncode == 0
+        combined = result.stdout + result.stderr
+        assert "Language:    unknown" in result.stdout
+        assert "re-run 'gitreins init'" in combined, (
+            f"expected inconclusive-detection warning in output, got:\n{combined}"
+        )
+
     def test_generated_config_extends_default_ruleset(self, tmp_workdir):
         """Generated config must extend gitleaks' default rules (GR-GAP-005).
 

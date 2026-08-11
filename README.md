@@ -49,7 +49,7 @@ setup).
 ```
 gitreins install                      # Install hooks + config
 gitreins init                         # Smart init (language, size, optimal config)
-gitreins guard                        # Run Tier 1 static checks
+gitreins guard [--dead-code]          # Run Tier 1 static checks (--dead-code: opt-in Python dead-code detection)
 gitreins security-scan [-d DIR] [--output text|json] [--force-ml]
                                        # Run the Antares CVE localization scanner
 gitreins report [-n N] [--interactive]  # Browse verdict history

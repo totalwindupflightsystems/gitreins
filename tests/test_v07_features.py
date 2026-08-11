@@ -356,9 +356,15 @@ class TestInit:
         lang = _detect_language(str(tmp_path))
         assert _detect_test_command(str(tmp_path), lang) == "python3 -m pytest -x --tb=short"
 
-    def test_python_root_package_with_pythonpath_config_uses_bare_pytest(self, tmp_path):
+    def test_python_root_package_with_pythonpath_config_uses_bare_pytest(self, monkeypatch, tmp_path):
         """Root-package + tests/ but pyproject configures pytest pythonpath → bare pytest."""
+        import shutil
+
         from gitreins.cli import _detect_language, _detect_test_command
+
+        # GR-GAP-024: pin "no runner installed" so this stays host-independent
+        # (hosts with uv on PATH would otherwise get `uv run pytest ...`).
+        monkeypatch.setattr(shutil, "which", lambda _: None)
 
         (tmp_path / "todo_stats").mkdir()
         (tmp_path / "todo_stats" / "__init__.py").write_text("")
@@ -412,9 +418,13 @@ class TestInit:
         )
         assert _has_pytest_pythonpath_config(str(tmp_path)) is True
 
-    def test_python_root_package_with_pytest_ini_pythonpath_uses_bare_pytest(self, tmp_path):
+    def test_python_root_package_with_pytest_ini_pythonpath_uses_bare_pytest(self, monkeypatch, tmp_path):
         """Root-package + tests/ but pytest.ini configures pythonpath → bare pytest."""
+        import shutil
+
         from gitreins.cli import _detect_language, _detect_test_command
+
+        monkeypatch.setattr(shutil, "which", lambda _: None)
 
         (tmp_path / "todo_stats").mkdir()
         (tmp_path / "todo_stats" / "__init__.py").write_text("")
@@ -425,9 +435,13 @@ class TestInit:
         lang = _detect_language(str(tmp_path))
         assert _detect_test_command(str(tmp_path), lang) == "pytest -x --tb=short"
 
-    def test_python_root_package_without_tests_uses_bare_pytest(self, tmp_path):
+    def test_python_root_package_without_tests_uses_bare_pytest(self, monkeypatch, tmp_path):
         """Root-package layout but NO tests/ dir → bare pytest (nothing to import)."""
+        import shutil
+
         from gitreins.cli import _detect_language, _detect_test_command
+
+        monkeypatch.setattr(shutil, "which", lambda _: None)
 
         (tmp_path / "todo_stats").mkdir()
         (tmp_path / "todo_stats" / "__init__.py").write_text("")
@@ -435,9 +449,13 @@ class TestInit:
         lang = _detect_language(str(tmp_path))
         assert _detect_test_command(str(tmp_path), lang) == "pytest -x --tb=short"
 
-    def test_pyproject_only_no_root_package_uses_bare_pytest(self, tmp_path):
+    def test_pyproject_only_no_root_package_uses_bare_pytest(self, monkeypatch, tmp_path):
         """pyproject-based project without root package dirs → bare pytest."""
+        import shutil
+
         from gitreins.cli import _detect_language, _detect_test_command
+
+        monkeypatch.setattr(shutil, "which", lambda _: None)
 
         (tmp_path / "pyproject.toml").write_text("[project]\nname='app'\n")
         (tmp_path / "tests").mkdir()

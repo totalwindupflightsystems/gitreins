@@ -166,6 +166,28 @@ def _check_for_updates():
         pass  # never block on update check failures
 
 
+def _ensure_gitignore_entry(workdir: str, entry: str) -> tuple[bool, str]:
+    """Ensure `entry` is present in <workdir>/.gitignore (create if absent).
+
+    Returns (changed, message). Shared by cmd_install and cmd_init so both
+    activation paths protect `.gitreins/tasks.yaml` from accidental commits
+    (GR-GAP-025).
+    """
+    gitignore_path = os.path.join(workdir, ".gitignore")
+    existing = ""
+    if os.path.isfile(gitignore_path):
+        with open(gitignore_path, "r") as f:
+            existing = f.read()
+    already_present = any(line.strip() == entry for line in existing.splitlines())
+    if already_present:
+        return False, f"{entry} already in .gitignore"
+    with open(gitignore_path, "a") as f:
+        if existing and not existing.endswith("\n"):
+            f.write("\n")
+        f.write(entry + "\n")
+    return True, f".gitignore (added {entry})"
+
+
 def cmd_install(args):
     """One-command GitReins activation for the current repo.
 
@@ -183,7 +205,6 @@ def cmd_install(args):
     gitreins_dir = os.path.join(workdir, ".gitreins")
     config_path = os.path.join(gitreins_dir, "config.yaml")
     hook_path = os.path.join(hooks_dir, "pre-commit")
-    gitignore_path = os.path.join(workdir, ".gitignore")
     tasks_entry = ".gitreins/tasks.yaml"
 
     if not os.path.isdir(git_dir):
@@ -212,19 +233,11 @@ def cmd_install(args):
     created.append(hook_path + ("" if not hook_existed else " (overwritten)"))
 
     # 3. .gitignore — add .gitreins/tasks.yaml if not present
-    existing_gitignore = ""
-    if os.path.isfile(gitignore_path):
-        with open(gitignore_path, "r") as f:
-            existing_gitignore = f.read()
-    already_present = any(line.strip() == tasks_entry for line in existing_gitignore.splitlines())
-    if already_present:
-        skipped.append(f"{tasks_entry} already in .gitignore")
+    gitignore_changed, gitignore_msg = _ensure_gitignore_entry(workdir, tasks_entry)
+    if gitignore_changed:
+        created.append(gitignore_msg)
     else:
-        with open(gitignore_path, "a") as f:
-            if existing_gitignore and not existing_gitignore.endswith("\n"):
-                f.write("\n")
-            f.write(tasks_entry + "\n")
-        created.append(f".gitignore (added {tasks_entry})")
+        skipped.append(gitignore_msg)
 
     # 4. Success summary
     print(f"GitReins installed in {workdir}")
@@ -341,9 +354,25 @@ def cmd_init(args):
         _generate_gitleaks_config(workdir, lang_info, gitleaks_path)
         changed.append(".gitleaks.toml")
 
+    # Ensure .gitignore ignores local task state (GR-GAP-025) — matches
+    # cmd_install so `init` standalone can't lead to committing tasks.yaml.
+    gi_changed, gi_msg = _ensure_gitignore_entry(workdir, ".gitreins/tasks.yaml")
+    if gi_changed:
+        changed.append(gi_msg)
+
     # Summary
     print(f"GitReins init: {workdir}")
     print(f"  Language:    {lang_info['name']}")
+    if lang_info["name"] == "unknown":
+        # GR-GAP-026: empty/source-less repos can't be detected — warn loudly
+        # instead of silently writing a gutted config the user discovers later.
+        print(
+            "  Warning: no source files detected — language detection was\n"
+            "  inconclusive, so static_analysis stays disabled and language-specific\n"
+            "  guards (ruff, mypy, go vet, ...) will NOT be configured.\n"
+            "  Add your source files, then re-run 'gitreins init'.",
+            file=sys.stderr,
+        )
     print(f"  Packages:    {size['packages']}")
     print(f"  Test cmd:    {test_cmd}")
     if test_cmd == "python3 -m pytest -x --tb=short":
@@ -614,6 +643,12 @@ def _detect_test_command(workdir: str, lang: dict) -> str:
     elif lang["is_python"]:
         if _needs_python_module_pytest(workdir):
             return "python3 -m pytest -x --tb=short"
+        # GR-GAP-024: prefer a runner the user actually has installed —
+        # bare `pytest` fails on layouts where the runner isn't on PATH
+        # (uv/pipenv/poetry virtualenvs install pytest into their own env).
+        runner = _detect_python_runner(workdir)
+        if runner:
+            return f"{runner} pytest -x --tb=short"
         return "pytest -x --tb=short"
     elif lang["is_ts"]:
         # Check package.json for test script
@@ -630,6 +665,32 @@ def _detect_test_command(workdir: str, lang: dict) -> str:
                 pass
         return "npx vitest run"
     return "pytest -x --tb=short"
+
+
+def _detect_python_runner(workdir: str) -> str | None:
+    """Detect a Python test runner available on PATH (GR-GAP-024).
+
+    Returns e.g. "uv run" / "pipenv run" / "poetry run", or None when no
+    supported runner is installed (callers fall back to bare `pytest`).
+    Runner binaries are checked via shutil.which so virtualenv-only
+    installs (uv/pipenv/poetry put pytest in their own env, not on PATH)
+    produce a command that actually works.
+    """
+    import shutil
+
+    if shutil.which("uv"):
+        return "uv run"
+    if shutil.which("pipenv") and os.path.isfile(os.path.join(workdir, "Pipfile")):
+        return "pipenv run"
+    if shutil.which("poetry") and os.path.isfile(os.path.join(workdir, "pyproject.toml")):
+        pyproject = os.path.join(workdir, "pyproject.toml")
+        try:
+            with open(pyproject) as f:
+                if "[tool.poetry]" in f.read():
+                    return "poetry run"
+        except OSError:
+            pass
+    return None
 
 
 def _detect_project_size(workdir: str, lang: dict) -> dict:

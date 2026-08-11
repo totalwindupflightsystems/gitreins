@@ -56,6 +56,9 @@ lint (ruff), tests (pytest), static analysis (mypy and friends, if
 configured), and LSP diagnostics (if configured). Each guard
 reports PASS/FAIL. The secrets guard BLOCKS on failure — no exceptions.
 
+`gitreins guard --dead-code` also runs opt-in Python dead-code detection
+(AST-based, flag or `dead_code: true` in `.gitreins/config.yaml`).
+
 The pre-commit hook runs the same guard automatically on `git commit`, so a
 blocked commit and a blocked guard are the same failure.
 
