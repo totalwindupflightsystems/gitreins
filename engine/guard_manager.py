@@ -24,7 +24,12 @@ import os
 import re
 import subprocess
 import time
-from engine.guards import check_go_lint, check_go_tests, check_go_build
+from engine.guards import (
+    _coerce_timeout,
+    check_go_lint,
+    check_go_tests,
+    check_go_build,
+)
 from engine.lsp import run_lsp_check
 from engine.types import GuardResult, Tier1Result
 
@@ -242,10 +247,18 @@ class GuardManager:
         # GR-GAP-009): chained suites (e.g. totalstack ACM parity) otherwise
         # never execute on clean-tree guard runs → vacuous green audits.
         self._test_on_clean = guards_cfg.get("test_on_clean", False)
-        # Test timeout in seconds (default: 180s)
-        self._test_timeout = guards_cfg.get("test_timeout", 180)
-        # Hook timeout in seconds (default: 120s) — overall guard budget (GR-064e)
-        self._hook_timeout = guards_cfg.get("hook_timeout", 300)
+        # Test timeout in seconds (default: 180s). Coerced to int — string
+        # config values like '300s' crash subprocess.run(timeout=...) with a
+        # TypeError (GR-GAP-028, Kobayashi-Maru ticks 240-242).
+        self._test_timeout = _coerce_timeout(
+            guards_cfg.get("test_timeout", 180), "test_timeout", 180
+        )
+        # Hook timeout in seconds (default: 300s) — overall guard budget (GR-064e).
+        # Same coercion as test_timeout: a string here breaks the _timed_out()
+        # monotonic comparison with a TypeError.
+        self._hook_timeout = _coerce_timeout(
+            guards_cfg.get("hook_timeout", 300), "hook_timeout", 300
+        )
 
         # Project type detection
         self._is_go = os.path.isfile(os.path.join(self.workdir, "go.mod"))

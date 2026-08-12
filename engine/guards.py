@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 
@@ -19,6 +20,50 @@ def _sanitized_env() -> dict[str, str]:
     class as DF-008 (guard_manager.py, c24f29e) — the Go guards missed it.
     """
     return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
+def _coerce_timeout(value, name: str, default: int) -> int:
+    """Coerce a guard timeout config value to a positive int of seconds.
+
+    YAML durations are commonly written with a unit suffix
+    (``test_timeout: 300s``). Passing that string straight into
+    subprocess.run(timeout=...) raises TypeError — not a clean
+    TimeoutExpired — which crashed the full-suite go_tests stage and judge
+    tier1 fleet-wide (Kobayashi-Maru ticks 240-242, GR-GAP-028).
+
+    Leading digits are parsed ('300s' -> 300, '300' -> 300); None/missing
+    -> default; garbage (no leading digits, <= 0, bool) -> ValueError with
+    a message naming the config key.
+    """
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        raise ValueError(
+            f"guards.{name} must be a positive number of seconds "
+            f"(e.g. {name}: 300), got {value!r}"
+        )
+    if isinstance(value, str):
+        match = re.match(r"^\s*(\d+)", value)
+        if not match:
+            raise ValueError(
+                f"guards.{name} must be a positive number of seconds "
+                f"(e.g. {name}: 300), got {value!r}"
+            )
+        value = int(match.group(1))
+    else:
+        try:
+            value = int(value)
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError(
+                f"guards.{name} must be a positive number of seconds "
+                f"(e.g. {name}: 300), got {value!r}"
+            ) from None
+    if value <= 0:
+        raise ValueError(
+            f"guards.{name} must be a positive number of seconds "
+            f"(e.g. {name}: 300), got {value!r}"
+        )
+    return value
 
 
 @dataclass
@@ -85,12 +130,17 @@ def check_go_lint(workdir: str) -> GoGuardResult:
         return GoGuardResult(name="go_lint", passed=False, error=str(e))
 
 
-def check_go_tests(workdir: str, timeout: int = 180) -> GoGuardResult:
+def check_go_tests(workdir: str, timeout: int | str = 180) -> GoGuardResult:
     """Run go test on staged Go files.
 
     timeout is configurable so large Go projects (slow integration
     suites) can raise it via guards.test_timeout in .gitreins/config.yaml.
     """
+    # Belt-and-braces: consumers may pass a raw string config value (e.g.
+    # '300s'); subprocess.run(timeout='300s') raises TypeError instead of
+    # timing out (GR-GAP-028). GuardManager already coerces at init — this
+    # protects direct callers.
+    timeout = _coerce_timeout(timeout, "test_timeout", 180)
     staged = subprocess.run(
         ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
         capture_output=True,

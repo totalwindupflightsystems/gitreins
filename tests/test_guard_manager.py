@@ -4,6 +4,7 @@ axiom:trace work_item=GR-001 spec=specs/04-Guard-Manager.md plan=.memory-bank/wo
 """
 
 import os
+import shutil
 import subprocess
 from unittest.mock import MagicMock, patch
 
@@ -169,6 +170,90 @@ class TestGuardManagerInit:
         gm = GuardManager(tmp_workdir, {})
         assert gm._lsp_init_timeout is None
         assert gm._lsp_per_file_timeout is None
+
+
+class TestTimeoutCoercion:
+    """GR-GAP-028: guards.test_timeout / hook_timeout must be coerced to int.
+
+    String config values (e.g. ``test_timeout: 300s`` in .gitreins/config.yaml)
+    crashed subprocess.run(timeout=...) with TypeError fleet-wide
+    (Kobayashi-Maru ticks 240-242). Leading digits are parsed; garbage
+    raises a clear ValueError naming the config key.
+    """
+
+    def test_test_timeout_string_with_unit_coerced(self, tmp_workdir):
+        """'300s' → 300 (the GR-GAP-028 repro config)."""
+        gm = GuardManager(tmp_workdir, {"guards": {"test_timeout": "300s"}})
+        assert gm._test_timeout == 300
+
+    def test_test_timeout_numeric_string_coerced(self, tmp_workdir):
+        """'300' (quoted) → 300."""
+        gm = GuardManager(tmp_workdir, {"guards": {"test_timeout": "300"}})
+        assert gm._test_timeout == 300
+
+    def test_test_timeout_int_passthrough(self, tmp_workdir):
+        """Existing int configs are unchanged."""
+        gm = GuardManager(tmp_workdir, {"guards": {"test_timeout": 900}})
+        assert gm._test_timeout == 900
+
+    def test_test_timeout_missing_uses_default(self, tmp_workdir):
+        """No test_timeout key → default 180."""
+        gm = GuardManager(tmp_workdir, {})
+        assert gm._test_timeout == 180
+
+    def test_test_timeout_none_uses_default(self, tmp_workdir):
+        """Explicit null → default 180."""
+        gm = GuardManager(tmp_workdir, {"guards": {"test_timeout": None}})
+        assert gm._test_timeout == 180
+
+    def test_test_timeout_garbage_raises_value_error(self, tmp_workdir):
+        """Non-numeric garbage → clear ValueError, not a subprocess TypeError."""
+        with pytest.raises(ValueError, match="test_timeout"):
+            GuardManager(tmp_workdir, {"guards": {"test_timeout": "asap"}})
+
+    def test_test_timeout_zero_raises_value_error(self, tmp_workdir):
+        """'0' → ValueError (a 0s timeout is never valid)."""
+        with pytest.raises(ValueError, match="test_timeout"):
+            GuardManager(tmp_workdir, {"guards": {"test_timeout": "0"}})
+
+    def test_hook_timeout_string_coerced(self, tmp_workdir):
+        """hook_timeout is the same bug class — '120s' → 120."""
+        gm = GuardManager(tmp_workdir, {"guards": {"hook_timeout": "120s"}})
+        assert gm._hook_timeout == 120
+
+    def test_hook_timeout_garbage_raises_value_error(self, tmp_workdir):
+        """Garbage hook_timeout → clear ValueError naming hook_timeout."""
+        with pytest.raises(ValueError, match="hook_timeout"):
+            GuardManager(tmp_workdir, {"guards": {"hook_timeout": "fast"}})
+
+    @pytest.mark.skipif(shutil.which("go") is None, reason="go toolchain not installed")
+    def test_go_tests_stage_runs_with_string_test_timeout(self, tmp_workdir):
+        """GR-GAP-028 live regression: a consumer repo with
+        ``test_timeout: 300s`` runs the go_tests stage — coerced to 300 —
+        with NO TypeError.
+
+        Tiny Go module + .gitreins/config.yaml loaded through the real
+        config-loading path; the go_tests stage must complete and PASS.
+        """
+        with open(os.path.join(tmp_workdir, "go.mod"), "w") as f:
+            f.write("module example.com/gap028\n\ngo 1.26\n")
+        with open(os.path.join(tmp_workdir, "main.go"), "w") as f:
+            f.write("package main\n\nfunc main() {}\n")
+        with open(os.path.join(tmp_workdir, "main_test.go"), "w") as f:
+            f.write(
+                "package main\n\n"
+                'import "testing"\n\n'
+                "func TestMainSmoke(t *testing.T) {}\n"
+            )
+        os.makedirs(os.path.join(tmp_workdir, ".gitreins"))
+        with open(os.path.join(tmp_workdir, ".gitreins", "config.yaml"), "w") as f:
+            f.write("guards:\n  test_timeout: 300s\n")
+        _write_staged_file(tmp_workdir, "main.go", "package main\n\nfunc main() {}\n")
+
+        gm = GuardManager(tmp_workdir)  # loads .gitreins/config.yaml from disk
+        assert gm._test_timeout == 300
+        result = gm._check_go_tests()
+        assert result.passed is True, result.output
 
 
 class TestBuiltinSecretsScan:

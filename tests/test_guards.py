@@ -170,6 +170,28 @@ def test_check_go_tests_handles_timeout_and_other_exceptions():
     assert errored == GoGuardResult(name="go_tests", passed=False, error="go unavailable")
 
 
+def test_check_go_tests_coerces_string_timeout():
+    """GR-GAP-028: a string timeout ('300s') must be coerced to int before
+    subprocess.run — the raw string raises TypeError, not TimeoutExpired
+    (Kobayashi-Maru ticks 240-242 crashed fleet-wide on test_timeout: 300s)."""
+    with patch(
+        "engine.guards.subprocess.run",
+        side_effect=[completed("main.go\n"), completed("ok")],
+    ) as run:
+        result = check_go_tests("/repo", timeout="300s")
+
+    assert result == GoGuardResult(name="go_tests", passed=True, output="ok")
+    # Second call is the actual `go test` — timeout must be the coerced int
+    assert run.call_args_list[1].kwargs["timeout"] == 300
+
+
+def test_check_go_tests_rejects_garbage_timeout():
+    """GR-GAP-028: non-numeric timeout values raise a clear ValueError
+    naming the config key instead of crashing deep inside subprocess."""
+    with pytest.raises(ValueError, match="test_timeout"):
+        check_go_tests("/repo", timeout="asap")
+
+
 def test_check_go_build_returns_success_and_expected_command():
     with patch(
         "engine.guards.subprocess.run",
