@@ -496,7 +496,7 @@ class GuardManager:
             # GitLab tokens
             (r"glpat-[A-Za-z0-9_\-]{20,}", "GitLab personal access token"),
             # OpenAI/OpenRouter keys (20+ chars — catches all sk- variants)
-            (r"sk-[A-Za-z0-9_\-]{20,}", "OpenAI/OpenRouter API key"),
+            (r"\bsk-[A-Za-z0-9_\-]{20,}", "OpenAI/OpenRouter API key"),
             # AWS keys
             (r"(?i)AKIA[0-9A-Z]{16}", "AWS access key"),
             (
