@@ -723,3 +723,4 @@
 {"from":"tests/test_v07_features.py","to":"pkg:shutil","rel":"imports","provenance":"ast_exact","confidence":1.0}
 {"from":"engine/guards.py","to":"pkg:re","rel":"imports","provenance":"ast_exact","confidence":1.0}
 {"from":"tests/test_guard_manager.py","to":"pkg:shutil","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_evaluator.py","to":"pkg:pytest","rel":"imports","provenance":"ast_exact","confidence":1.0}
