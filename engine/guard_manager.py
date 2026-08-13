@@ -491,12 +491,13 @@ class GuardManager:
                 "private key block",
             ),
             # GitHub tokens
-            (r"ghp_[A-Za-z0-9]{36,}", "GitHub personal access token"),
-            (r"gho_[A-Za-z0-9]{36,}", "GitHub OAuth token"),
+            (r"\bghp_[A-Za-z0-9]{36,}", "GitHub personal access token"),
+            (r"\bgho_[A-Za-z0-9]{36,}", "GitHub OAuth token"),
             # GitLab tokens
-            (r"glpat-[A-Za-z0-9_\-]{20,}", "GitLab personal access token"),
-            # OpenAI/OpenRouter keys (20+ chars — catches all sk- variants)
-            (r"\bsk-[A-Za-z0-9_\-]{20,}", "OpenAI/OpenRouter API key"),
+            (r"\bglpat-[A-Za-z0-9_\-]{20,}", "GitLab personal access token"),
+            # OpenAI/OpenRouter keys (20+ chars, at least one uppercase/digit —
+            # real keys are hex/base64; quoted doc strings like 'sk-premise-verification' are all-lowercase)
+            (r"\bsk-(?=[A-Za-z0-9_\-]{20,})[A-Za-z0-9_\-]*[A-Z0-9][A-Za-z0-9_\-]*", "OpenAI/OpenRouter API key"),
             # AWS keys
             (r"(?i)AKIA[0-9A-Z]{16}", "AWS access key"),
             (
