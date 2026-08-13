@@ -58,7 +58,7 @@ hivemind-audit.md
 demo-calc/
 demo-slugify/
 
-# Board JSONL mirrors — this project tracks parquet only (see gitreins-poc-foreman-ops)
+# Board JSONL canonical store (5b6df60/JSONL-NORM-001) — cache binaries untracked; JSONL files are the tracked store
 
 .coding-hermes/board/board.db
 .coding-hermes/board/board.db.wal
