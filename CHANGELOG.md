@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] — 2026-08-14
+
 ### Added
 - **Disk-backed async judge jobs (DF-006)** — background evaluation jobs are persisted to a shared job store (`~/.local/share/gitreins/jobs/`, override with `GITREINS_JOB_DIR`) instead of living only in MCP server memory. Jobs survive MCP server restarts; an orphaned `running` job whose process died is resumed automatically on the next `judge.status` poll. New CLI flow: `gitreins judge <task> --async` dispatches a detached worker process (survives the CLI exiting), `gitreins judge <job_id> --status` polls it (exit codes: 0 complete / 1 error / 2 running). MCP `judge.status` sees CLI-started jobs and vice versa; running responses include `pid`/`started_at`. `StepResult.to_dict()` now serializes structured `data` (verdict/items/summary) so pipeline-path results are included in judge result dicts.
 - CVE-style scored severity system for commit review (`review_score_threshold`, `review_score_offset`)
@@ -31,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Flaky LSP integration test: `_lsp_read_response` retry on select timeout
 - Pre-commit hook now pins the gitreins binary that ran `install` (absolute path or `python -m gitreins`) — PATH shadowing can no longer silently run a different version that skips guards (DF-011)
 - Secrets guard cross-checks gitleaks-clean results against the built-in scanner in the judge pipeline tier1 (workdir mode), and the generated `.gitleaks.toml` now includes ghp_/glpat-/AIza rules (DF-012)
+- Generated `.gitleaks.toml` allowlists now emit escaped regexes (`.*\.log`) instead of bare globs — bare globs made gitleaks panic and the secrets guard fail forever on fresh installs (DF-001, fixed 9a54e79, first shipped in this release)
+- `gitreins init` now detects Python for plain-Python repos without a pyproject.toml (previously reported `Language: unknown` and disabled static analysis without warning — GR-GAP-026, first shipped in this release)
 
 ## [0.10.2] — 2026-07-14
 
