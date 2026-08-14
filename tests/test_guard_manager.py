@@ -300,6 +300,42 @@ class TestBuiltinSecretsScan:
         assert result.passed is False
         assert "GitHub personal access token" in result.output
 
+    def test_check_secrets_blocks_sk_key(self, tmp_workdir):
+        """DF-012: _check_secrets blocks sk- keys even when gitleaks is
+        installed — gitleaks-clean triggers the built-in cross-check."""
+        secret = "sk-" + "A1" * 12  # runtime-constructed, never a literal
+        _write_staged_file(tmp_workdir, "secrets.py", f'OPENAI_KEY = "{secret}"\n')
+        gm = GuardManager(tmp_workdir)
+        result = gm._check_secrets()
+        assert result.passed is False
+
+    def test_check_secrets_blocks_github_pat(self, tmp_workdir):
+        """DF-012: _check_secrets blocks ghp_ tokens even when gitleaks
+        reports clean (the 2026-08-14 dogfood committed a ghp_ token
+        through a gitleaks-clean hook)."""
+        token = "ghp_" + "aB3" * 12  # runtime-constructed, never a literal
+        _write_staged_file(tmp_workdir, "tokens.py", f'GITHUB_TOKEN = "{token}"\n')
+        gm = GuardManager(tmp_workdir)
+        result = gm._check_secrets()
+        assert result.passed is False
+
+    def test_builtin_workdir_scan_catches_committed_secrets(self, tmp_workdir):
+        """DF-012: _builtin_secrets_scan(staged_only=False) scans the whole
+        workdir — the judge/pipeline path where changes are committed, not
+        staged."""
+        sk_secret = "sk-" + "B2" * 12
+        gh_secret = "ghp_" + "cD4" * 12
+        # Committed (not staged) files — nothing in the index
+        with open(os.path.join(tmp_workdir, "app.py"), "w") as f:
+            f.write(f'OPENAI_KEY = "{sk_secret}"\n')
+        with open(os.path.join(tmp_workdir, "tok.txt"), "w") as f:
+            f.write(f"token={gh_secret}\n")
+        gm = GuardManager(tmp_workdir)
+        result = gm._builtin_secrets_scan(staged_only=False)
+        assert result.passed is False
+        assert "app.py:1" in result.output
+        assert "tok.txt:1" in result.output
+
     def test_private_key_block_detected(self, tmp_workdir):
         """Private key block (BEGIN RSA PRIVATE KEY) is detected."""
         _write_staged_file(

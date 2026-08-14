@@ -475,13 +475,17 @@ class GuardManager:
 
         return self._builtin_secrets_scan()
 
-    def _builtin_secrets_scan(self) -> GuardResult:
+    def _builtin_secrets_scan(self, staged_only: bool = True) -> GuardResult:
         """
         Built-in secrets scanner with whitelist patterns.
 
         Detects likely secrets (API keys, tokens, private keys) while
         ignoring common false positives like environment variable loading,
         form field access, and credential construction.
+
+        ``staged_only=True`` scans the staged diff (pre-commit hook path).
+        ``staged_only=False`` scans the whole workdir (judge/pipeline path,
+        where the changes under evaluation are already committed — DF-012).
         """
         # Patterns that LIKELY represent actual secrets (high confidence)
         danger_patterns = [
@@ -551,13 +555,18 @@ class GuardManager:
         findings = []
         allowlist = self._load_gitleaks_allowlist()
         try:
-            # Get staged files
-            staged_files = _get_staged_files(self.workdir)
+            if staged_only:
+                files = _get_staged_files(self.workdir)
+            else:
+                files = self._workdir_files()
 
-            if not staged_files:
-                return GuardResult(name="secrets", passed=True, output="No staged files to scan")
+            if not files:
+                scope = "staged" if staged_only else "workdir"
+                return GuardResult(
+                    name="secrets", passed=True, output=f"No {scope} files to scan"
+                )
 
-            for fpath in staged_files:
+            for fpath in files:
                 # Respect .gitleaks.toml [allowlist] paths — same exemptions
                 # gitleaks applies (test fixtures with deliberate fake keys).
                 if any(rx.search(fpath) for rx in allowlist):
@@ -604,12 +613,46 @@ class GuardManager:
                     output="Potential secrets found:\n" + "\n".join(findings[:20]),
                 )
             return GuardResult(
-                name="secrets", passed=True, output=f"Scanned {len(staged_files)} files — clean"
+                name="secrets", passed=True, output=f"Scanned {len(files)} files — clean"
             )
 
         except Exception as e:
             logger.exception("Secrets scan failed")
             return GuardResult(name="secrets", passed=False, error=str(e))
+
+    def _workdir_files(self) -> list[str]:
+        """Relative paths of all non-ignored files in the workdir.
+
+        Used by the judge/pipeline secrets cross-check (DF-012), where the
+        changes under evaluation are already committed — nothing is staged.
+        Mirrors the directories gitleaks' generated config allowlists.
+        """
+        skip_dirs = {
+            ".git",
+            ".gitreins",
+            ".venv",
+            "venv",
+            "node_modules",
+            "__pycache__",
+            ".mypy_cache",
+            ".pytest_cache",
+            ".ruff_cache",
+            ".vfs",
+            "dist",
+            "build",
+            "vendor",
+            "target",
+            "coverage",
+            ".next",
+            ".turbo",
+            ".pnpm-store",
+        }
+        files: list[str] = []
+        for root, dirs, names in os.walk(self.workdir):
+            dirs[:] = [d for d in dirs if d not in skip_dirs]
+            for name in names:
+                files.append(os.path.relpath(os.path.join(root, name), self.workdir))
+        return files
 
     def _load_gitleaks_allowlist(self) -> list:
         """Load path allowlist regexes from .gitleaks.toml, if present.

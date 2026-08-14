@@ -21,7 +21,9 @@ pipeline:
       steps:
         - id: secrets
           type: script
-          run: "gitleaks detect --source . --no-git"
+          # DF-012: gitleaks alone is not trustworthy (its default rules
+          # miss sk-/ghp_ patterns) — cross-check with the built-in scanner.
+          run: "gitleaks detect --source . --no-git --no-banner && built-in cross-check"
           on_fail: continue          # continue | block | skip_remaining
 
         - id: lint
@@ -759,10 +761,18 @@ def _default_tier1_steps(workdir: str, config: dict | None = None) -> list[dict]
             "id": "secrets",
             "type": "script",
             "run": (
-                "gitleaks detect --source . --no-git --no-banner || "
+                # DF-012: gitleaks' default rules (and the generated config)
+                # miss sk-/ghp_ patterns, so "gitleaks clean" is not proof of
+                # clean. Run the built-in scanner (workdir mode — the judged
+                # changes are committed, not staged) ALWAYS, and fail the step
+                # if EITHER scanner finds anything. gitleaks absent → skip it.
+                "if command -v gitleaks >/dev/null 2>&1; then "
+                "gitleaks detect --source . --no-git --no-banner; else true; fi; g1=$?; "
                 'python3 -c "from engine.guard_manager import GuardManager; '
                 "import sys; gm = GuardManager('.'); "
-                'r = gm._check_secrets(); sys.exit(0 if r.passed else 1)"'
+                'r = gm._builtin_secrets_scan(staged_only=False); '
+                'sys.exit(1 if not r.passed else 0)"; '
+                'g2=$?; [ "$g1" -eq 0 ] && [ "$g2" -eq 0 ]'
             ),
             "on_fail": "continue",
         },

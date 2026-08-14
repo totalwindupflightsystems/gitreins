@@ -484,6 +484,40 @@ class TestLoadPipelineConfigFallback:
             "tier1 secrets step must pass --no-banner to gitleaks"
         )
 
+    def test_tier1_secrets_step_blocks_committed_secrets(self, tmp_workdir):
+        """DF-012: the default tier1 secrets step FAILS on committed
+        sk-/ghp_ secrets even when gitleaks reports clean — the built-in
+        scanner cross-check runs unconditionally (workdir mode, since the
+        judged changes are committed, not staged)."""
+        import subprocess
+
+        workdir = str(tmp_workdir)
+        subprocess.run(["git", "init", "-q"], cwd=workdir, capture_output=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"], cwd=workdir, capture_output=True
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"], cwd=workdir, capture_output=True
+        )
+        # Committed secrets — runtime-constructed, never literals in source
+        with open(os.path.join(workdir, "sk.txt"), "w") as f:
+            f.write('key = "sk-' + "A1" * 12 + '"\n')
+        with open(os.path.join(workdir, "gh.txt"), "w") as f:
+            f.write('token = "ghp_' + "aB3" * 12 + '"\n')
+        subprocess.run(["git", "add", "."], cwd=workdir, capture_output=True)
+        subprocess.run(["git", "commit", "-m", "init"], cwd=workdir, capture_output=True)
+
+        result = load_pipeline_config(workdir)
+        p = Pipeline(result, workdir)
+        # pre-commit trigger: tier1 only (tier2 ai_eval is pre-eval-only)
+        out = p.run({"id": "t1", "criteria": []}, trigger="pre-commit")
+        tier1 = out["stages"]["tier1"]
+        secrets_step = next(s for s in tier1["steps"] if s["id"] == "secrets")
+        assert secrets_step["data"]["exit_code"] != 0, (
+            "tier1 secrets step passed on committed secrets: "
+            f"{secrets_step['output'][:300]}"
+        )
+
 
 # ── GR-063c: C++ pipeline — split "c" from "cpp" ───────────────────────────
 

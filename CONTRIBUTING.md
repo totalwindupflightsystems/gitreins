@@ -73,7 +73,7 @@ assets/          — Banner images and branding
 3. Tag: `git tag -a vX.Y.Z -m "Release vX.Y.Z"`
 4. Push tag: `git push origin vX.Y.Z`
 5. Build: `python3 -m build --wheel`
-6. Publish: `twine upload dist/*.whl`
+6. Publish: tag the release (`git tag vX.Y.Z && git push --tags`); CI builds, publishes to PyPI, and creates the GitHub release automatically
 
 ## Questions?
 

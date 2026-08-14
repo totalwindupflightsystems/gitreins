@@ -29,6 +29,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - LSP integration tests in CI: pyflakes+pycodestyle added to dev deps (both Python 3.10 and 3.12 affected)
 - 80 ruff lint errors reduced to 0
 - Flaky LSP integration test: `_lsp_read_response` retry on select timeout
+- Pre-commit hook now pins the gitreins binary that ran `install` (absolute path or `python -m gitreins`) — PATH shadowing can no longer silently run a different version that skips guards (DF-011)
+- Secrets guard cross-checks gitleaks-clean results against the built-in scanner in the judge pipeline tier1 (workdir mode), and the generated `.gitleaks.toml` now includes ghp_/glpat-/AIza rules (DF-012)
 
 ## [0.10.2] — 2026-07-14
 
