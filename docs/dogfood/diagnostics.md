@@ -126,3 +126,108 @@ add a `pyproject.toml` before `gitreins init`, or make detection fall back on
 6. **AI agents:** use the MCP tools (`task_*`, `guard_run`, `judge_evaluate`,
    `commit`) — same semantics as the CLI; the `commit` tool runs guards first and
    rejects if they fail.
+
+---
+
+## Second dogfood run (2026-08-14) — the PyPI consumer path & release lag
+
+The 08-03 run tested the repo-HEAD build. This run tested what a REAL new user
+gets: `pip install gitreins` from PyPI, in a fresh venv, on a scratch repo
+(`/tmp/dogfood-gitreins2/`). Findings: DF-010..DF-014 on the board.
+
+### The release-lag problem (DF-010) — how the fix got stuck
+
+**How it's built:** releases are manual — CONTRIBUTING.md step 6 says
+`twine upload dist/*.whl`; `.github/workflows/ci.yml` has NO release/pypi job;
+there is no `release:` bump cadence tied to the board. The last release
+(v0.11.0, tag `v0.11.0`, uploaded 2026-07-23T15:54:40Z) is a snapshot of
+whatever HEAD was on 07-23.
+
+**What happened:** the DF-001 gitleaks-regex fix (`9a54e79`, 08-03) landed in
+`gitreins/cli.py` (`_glob_to_regex()` converts `*.log` → `.*\\.log` before the
+allowlist is written) but was NEVER released. `git rev-list --count v0.11.0..HEAD`
+= **201 commits**, 166 of them fix/feat. Every user who `pip install gitreins`
+today gets the exact P0 the 08-03 dogfood documented:
+
+```
+$ pip install gitreins        # 0.11.0
+$ gitreins init               # writes .gitleaks.toml with '*.log', '*.spec.md', '*.md'
+$ gitreins guard
+Tier 1 Guards: FAIL  (test mode: full)
+  ✗ secrets — ○              # gitleaks v8.30.1 panics: regexp: Compile('*.log'):
+                             # missing argument to repetition operator
+```
+
+**The right way:** release pipeline automation. At minimum a CI job that, when
+the board marks a `release:` task complete, builds (`python -m build`), checks
+the sdist/wheel actually contains the fixed `cli.py` (compare against HEAD!),
+uploads to PyPI, and tags. The "does the sdist match HEAD" check is the one that
+would have caught this 11 days ago. Also: after every dogfood run, check whether
+the FIXED version is what's on PyPI — a green repo + stale package is a
+user-facing P0 even when all board tasks are complete.
+
+### The hook PATH trap (DF-011) — same binary name, different version
+
+**How it's built:** `gitreins install` writes `.git/hooks/pre-commit` containing
+`gitreins guard`. Bare `gitreins` resolves via PATH.
+
+**What happened:** on this machine `/home/kara/.hermes/venvs/board/bin` precedes
+the repo's `.venv/bin` on PATH, and that venv has gitreins **0.8.1**. Result:
+the hook ran 0.8.1 while the user's `.venv` had 0.11.0. Two real secrets
+(`sk-...` API key, `ghp_...` GitHub PAT) committed cleanly through the 0.8.1
+hook (`git commit` exit 0, guard printed PASS). The same commit with
+`.venv/bin` first on PATH was BLOCKED: `✗ secrets — sk.txt:1: [OpenAI/OpenRouter
+API key]`.
+
+**The right way:** the hook must pin the interpreter/binary that ran
+`install`. Options: absolute path resolved at install time
+(`shutil.which('gitreins')` → `/path/to/venv/bin/gitreins`), or
+`"$REPO_ROOT/.venv/bin/gitreins"` when present, or
+`python -m gitreins` with the installing interpreter's absolute path. A hook
+that silently runs a DIFFERENT version of the harness than the user's is worse
+than no hook — it manufactures false confidence (the user watched a PASS).
+
+### The gitleaks coverage gap (DF-012) — default rules miss the flagship patterns
+
+**How it's built:** `_check_secrets()` runs gitleaks first; only on
+`FileNotFoundError` does it fall back to the built-in regex scanner. The
+generated config adds ONE custom rule (`sk-...` 20+ chars).
+
+**What happened:** direct probes — `gitleaks detect` with default rules AND with
+the generated config — reported `no leaks found` for `ghp_...` PATs and even
+`sk-...` keys (the ghp_ token committed in the DF-011 repro proves it live). The
+built-in scanner catches both. So the guard's coverage is BINARY: with gitleaks
+installed it sees less than without it. The `✗ secrets — ○` panic (DF-010) is
+the loud failure; the quiet miss is scarier.
+
+**The right way:** when gitleaks reports clean, cross-check the diff against the
+built-in scanner and union the findings (or add `ghp_`/`glpat-`/`AIza` rules to
+the generated config). Add a regression test that commits `sk-`/`ghp_` fixtures
+and asserts the guard BLOCKS — on both the gitleaks and fallback paths. The
+08-03 run proved the sk- block works when gitleaks panics (fallback path); this
+run proved gitleaks-present + clean is not trustworthy.
+
+### GR-099: a correctly-blocked task re-verified for 13 days (DF-013)
+
+Ticks 180-193 all say "GR-099 still blocked (live re-verified)". The
+blocked_reason is CORRECT — pydantic 2.13.4 (latest, pulled by `mcp>=2.0`)
+pins `pydantic-core==2.46.4` exactly; live `pip install gitreins
+pydantic-core>=2.47.0` → `ResolutionImpossible`; core 2.47.0 exists but no
+pydantic requires it. Re-verifying an immutable fact every tick is idle work
+disguised as diligence. **The right way:** parked-block semantics — record
+`verified_at` + recheck condition ("when pydantic releases a version requiring
+core >= 2.47.0") and let idle ticks skip parked tasks.
+
+### What held up (verified again on repo-HEAD 0.11.0+)
+
+- `gitreins install` / `init` — clean output, backup files, correct exit codes.
+- Task lifecycle create/start/complete; tasks persist across runs.
+- **Tier-2 agentic judge works end-to-end**: `task complete demo-task` ran
+  tier1 (secrets/lint/tests/static_analysis) + tier2 LLM loop, delivered
+  per-criterion PASS with file evidence, saved verdict `bdcb3a41`. Bounded:
+  `GITREINS_MAX_ITERATIONS=8 GITREINS_MAX_TIME=6m`.
+- **Secrets guard BLOCKS with the current source** (sk- key commit → exit 1,
+  redacted finding with file:line). The flagship promise is real — when the
+  right code is installed.
+- gitleaks-regex fix works: HEAD-generated `.gitleaks.toml` has valid
+  `.*\\.log` entries; guard PASS on the same repo where PyPI 0.11.0 failed.

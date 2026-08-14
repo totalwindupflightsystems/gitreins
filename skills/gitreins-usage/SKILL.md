@@ -104,6 +104,28 @@ The MCP `commit` tool runs guards first and rejects the commit if they fail.
    `history.storage: git`, verdicts commit to a separate branch; on `main` the
    report says "No verdict history found". Check out the branch or read the verdict
    files via `git show gitreins:.gitreins/history/...`.
+10. **PyPI is 11 days behind HEAD (2026-08-14): 0.11.0 predates the DF-001
+    gitleaks-regex fix.** `pip install gitreins` → `gitreins init` writes a
+    BROKEN `.gitleaks.toml` (bare `*.log` globs) → `gitreins guard` = `✗ secrets
+    — ○` forever. Fix: use the repo `.venv/bin/gitreins` (HEAD) for real work,
+    or fix the generated config by hand; track the release in DF-010. Always
+    verify a dogfood target by what's ON PYPI, not just repo HEAD — a green
+    repo can ship a broken package for weeks.
+11. **The pre-commit hook calls bare `gitreins` — PATH shadowing runs a
+    DIFFERENT version.** On this machine `/home/kara/.hermes/venvs/board/bin`
+    (gitreins 0.8.1) precedes `.venv/bin` (0.11.0), so the hook silently ran
+    0.8.1 and let real `sk-`/`ghp_` secrets through. Before trusting a commit
+    gate: `which gitreins` from the hook's perspective, or prepend the target
+    venv: `PATH="$HOME/gitreins-poc/.venv/bin:$HOME/go/bin:$PATH"`.
+12. **gitleaks (default rules AND the generated config) reports `no leaks
+    found` for `sk-...` and `ghp_...` patterns** — the built-in regex scanner
+    catches both, gitleaks doesn't. "gitleaks clean" is not proof of clean;
+    the guard's binary coverage (gitleaks-first vs fallback) is a known hole
+    (DF-012).
+13. **GR-099 is correctly blocked (pydantic 2.13.4 pins pydantic-core==2.46.4
+    exactly; `pip install gitreins pydantic-core>=2.47.0` → ResolutionImpossible)
+    — do NOT re-verify it every tick.** Park it with a recheck date; idle
+    audits should skip recently-verified blocked tasks (DF-013).
 
 ## Config reference (quick)
 
