@@ -128,6 +128,11 @@ def _lsp_read_response(proc: subprocess.Popen, timeout: float = 60.0) -> dict | 
     Uses os.read on the raw file descriptor to bypass Python's
     BufferedReader buffering, which interferes with select().
     Falls back to proc.stdout.read() for in-memory streams (BytesIO).
+
+    Returns None immediately when the server's stdout is exhausted
+    (EOF — the process died) instead of spinning until the deadline
+    (GR-138): a dead server must never hold the init/diagnostics
+    channel for the full timeout.
     """
     import time as _time
     import os as _os
@@ -142,14 +147,17 @@ def _lsp_read_response(proc: subprocess.Popen, timeout: float = 60.0) -> dict | 
 
     # Accumulated raw data buffer
     buffer = b""
+    eof = False
 
     def _read_more() -> int:
-        """Read more data into buffer. Returns bytes read (0 = EOF/timeout)."""
-        nonlocal buffer
+        """Read more data into buffer. Returns bytes read (0 = timeout/EOF)."""
+        nonlocal buffer, eof
         if fd is None:
             # BytesIO / mock — use normal read
             stdout = proc.stdout
             chunk = stdout.read(4096) if stdout and hasattr(stdout, "read") else b""
+            if not chunk:
+                eof = True
             buffer += chunk
             return len(chunk)
         # Real pipe — select with deadline, then os.read
@@ -164,6 +172,7 @@ def _lsp_read_response(proc: subprocess.Popen, timeout: float = 60.0) -> dict | 
         except Exception:
             return 0
         if not chunk:
+            eof = True
             return 0
         buffer += chunk
         return len(chunk)
@@ -179,6 +188,8 @@ def _lsp_read_response(proc: subprocess.Popen, timeout: float = 60.0) -> dict | 
         if _read_more() == 0:
             if _time.monotonic() >= deadline:
                 return None  # global deadline exceeded
+            if eof:
+                return None  # server closed stdout — no more messages
             continue  # select() timed out but deadline not reached — retry
 
     header_bytes = buffer[:header_end]
@@ -199,6 +210,8 @@ def _lsp_read_response(proc: subprocess.Popen, timeout: float = 60.0) -> dict | 
         if _read_more() == 0:
             if _time.monotonic() >= deadline:
                 break  # global deadline exceeded
+            if eof:
+                break  # server closed stdout mid-message
             continue  # select() timed out but deadline not reached — retry
 
     if len(buffer) < content_length:
@@ -231,6 +244,8 @@ def _collect_diagnostics(
                 break
             msg = _lsp_read_response(proc, remaining)
             if msg is None:
+                if proc.poll() is not None:
+                    break  # server exited — no more diagnostics (GR-138)
                 continue
             if msg.get("method") == "textDocument/publishDiagnostics":
                 uri = msg.get("params", {}).get("uri", "")
@@ -378,14 +393,18 @@ def _tool_supports_language(tool: str, lang: str) -> bool:
 def _tool_default_timeouts(tool: str, workdir: str) -> tuple[float, float]:
     """Return (init_timeout, per_file_timeout) tuned for the tool/project.
 
-    C++ (clangd) and Rust (rust-analyzer) LSP servers build a project-wide
-    index on first run and parse full translation units per file — 30-60s
-    caps are far too tight for real C++ repos (compile_commands.json,
-    heavy header includes). Heuristic: if the tool is clangd or the repo
-    contains C/C++ files, grant generous budgets.
+    C++ (clangd/ccls) LSP servers build a project-wide index on first
+    run and parse full translation units per file — 30-60s caps are far
+    too tight for real C++ repos (compile_commands.json, heavy header
+    includes). rust-analyzer gets the same generous per-file budget, but
+    its *init* cap stays bounded (~30s): a project rust-analyzer cannot
+    recognize (missing src/main.rs, broken toolchain shim) must fail the
+    init fast so the guard/tests skip instead of holding the init
+    channel for minutes (GR-138).
     """
-    heavy = {"clangd", "ccls", "rust-analyzer"}
-    if tool in heavy:
+    if tool == "rust-analyzer":
+        return (30.0, 120.0)
+    if tool in {"clangd", "ccls"}:
         return (300.0, 120.0)
     # Repo-level sniff: any staged or on-disk C/C++/Rust sources?
     try:

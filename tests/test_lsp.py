@@ -333,6 +333,23 @@ class TestRunLspCheck:
         assert result == []
         mock_shutdown.assert_called_once()
 
+    def test_rust_analyzer_init_failure_uses_bounded_timeout(self):
+        """rust-analyzer init failure returns fast with the 30s default cap (GR-138).
+
+        Regression: the old 300s heavy-set cap made an uninitializable
+        project hold the init channel for five minutes before the test
+        could skip. The default rust-analyzer cap must be bounded and
+        passed through to _lsp_initialize.
+        """
+        mock_proc = MagicMock()
+        with patch("engine.lsp.find_lsp_tool", return_value="/usr/bin/rust-analyzer"):
+            with patch("engine.lsp.subprocess.Popen", return_value=mock_proc):
+                with patch("engine.lsp._lsp_initialize", return_value=False) as mock_init:
+                    with patch("engine.lsp._lsp_shutdown"):
+                        result = run_lsp_check("rust-analyzer", "/tmp", files=["src/main.rs"])
+        assert result == []
+        assert mock_init.call_args.kwargs["timeout"] == 30.0
+
 
 class TestToolDefaultTimeouts:
     """Test C++-aware LSP timeout defaults (GR: C++ repo timeout fix)."""
@@ -349,7 +366,7 @@ class TestToolDefaultTimeouts:
         from engine.lsp import _tool_default_timeouts
 
         init_t, per_file_t = _tool_default_timeouts("rust-analyzer", "/tmp/empty")
-        assert init_t >= 300
+        assert init_t <= 30
         assert per_file_t >= 120
 
     def test_pylsp_gets_default_budget(self):
@@ -420,6 +437,34 @@ class TestLspHeaderParsing:
             result = _lsp_read_response(mock_proc, timeout=1.0)
         assert result is not None
         assert result["method"] == "textDocument/publishDiagnostics"
+
+    def test_read_response_returns_none_quickly_when_server_dead(self):
+        """A dead LSP server must not hold the read loop until the timeout (GR-138).
+
+        Regression: the old loop kept select()/read() cycling on the
+        closed stdout pipe of an exited server until the deadline —
+        a broken rust-analyzer shim burned the full 300s init cap.
+        EOF must return None immediately.
+        """
+        import time as _time
+
+        from engine.lsp import _lsp_read_response
+
+        proc = subprocess.Popen(
+            [sys.executable, "-c", "import sys"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        try:
+            start = _time.monotonic()
+            result = _lsp_read_response(proc, timeout=60.0)
+            elapsed = _time.monotonic() - start
+        finally:
+            proc.kill()
+            proc.wait()
+        assert result is None
+        assert elapsed < 5.0
 
 
 # ── Integration tests with real pylsp server ────────────────────
@@ -866,13 +911,14 @@ edition = "2021"
 
     def _write_file(self, workdir, name, content):
         path = os.path.join(workdir, name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             f.write(content)
         return path
 
     def test_rust_analyzer_skip_if_not_installed(self, lsp_workdir):
         """When rust-analyzer not found, skip gracefully (no crash)."""
-        path = self._write_file(lsp_workdir, "main.rs", self.CLEAN_RS_CODE)
+        path = self._write_file(lsp_workdir, "src/main.rs", self.CLEAN_RS_CODE)
         self._write_file(lsp_workdir, "Cargo.toml", self.CARGO_TOML)
         with patch("engine.lsp.find_lsp_tool", return_value=None):
             diags = run_lsp_check("rust-analyzer", lsp_workdir, files=[path])
@@ -883,7 +929,7 @@ edition = "2021"
         if shutil.which("rust-analyzer") is None:
             pytest.skip("rust-analyzer not installed")
         self._write_file(lsp_workdir, "Cargo.toml", self.CARGO_TOML)
-        path = self._write_file(lsp_workdir, "main.rs", self.BAD_RS_CODE)
+        path = self._write_file(lsp_workdir, "src/main.rs", self.BAD_RS_CODE)
         diags = run_lsp_check("rust-analyzer", lsp_workdir, files=[path], timeout_per_file=15.0)
         if not diags:
             pytest.skip("rust-analyzer failed to initialize (no project structure or timeout)")
@@ -897,7 +943,7 @@ edition = "2021"
         if shutil.which("rust-analyzer") is None:
             pytest.skip("rust-analyzer not installed")
         self._write_file(lsp_workdir, "Cargo.toml", self.CARGO_TOML)
-        path = self._write_file(lsp_workdir, "main.rs", self.CLEAN_RS_CODE)
+        path = self._write_file(lsp_workdir, "src/main.rs", self.CLEAN_RS_CODE)
         diags = run_lsp_check("rust-analyzer", lsp_workdir, files=[path], timeout_per_file=15.0)
         errors = [d for d in diags if d.get("severity") == "error"]
         assert len(errors) == 0, f"Expected no errors for clean Rust code, got: {errors}"
