@@ -50,6 +50,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 from dataclasses import dataclass, field
 
 import yaml
@@ -778,6 +779,17 @@ def _has_sig_file(workdir: str, sig_file: str) -> bool:
     return os.path.isfile(os.path.join(workdir, sig_file))
 
 
+def _engine_root() -> str:
+    """Absolute path of the directory containing the `engine` package.
+
+    Works in both source checkouts (…/gitreins/engine/pipeline.py) and
+    installed layouts (…/site-packages/engine/pipeline.py) — the parent of
+    the engine dir is the import root that must go on PYTHONPATH for the
+    default-pipeline built-in scanner subprocess.
+    """
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
 def _default_tier1_steps(workdir: str, config: dict | None = None) -> list[dict]:
     """Return language-appropriate default Tier 1 pipeline steps.
 
@@ -803,9 +815,16 @@ def _default_tier1_steps(workdir: str, config: dict | None = None) -> list[dict]
                 # clean. Run the built-in scanner (workdir mode — the judged
                 # changes are committed, not staged) ALWAYS, and fail the step
                 # if EITHER scanner finds anything. gitleaks absent → skip it.
+                #
+                # The built-in scanner runs under the interpreter that is
+                # executing gitreins (sys.executable), with PYTHONPATH pointing
+                # at the engine package root — a bare `python3` from PATH
+                # cannot import `engine`, which made this step fail with
+                # ModuleNotFoundError in any env where the package is only
+                # importable by the venv (2026-08-15 fix).
                 "if command -v gitleaks >/dev/null 2>&1; then "
                 "gitleaks detect --source . --no-git --no-banner; else true; fi; g1=$?; "
-                'python3 -c "from engine.guard_manager import GuardManager; '
+                f'PYTHONPATH="{_engine_root()}" {sys.executable} -c "from engine.guard_manager import GuardManager; '
                 "import sys; gm = GuardManager('.'); "
                 'r = gm._builtin_secrets_scan(staged_only=False); '
                 'sys.exit(1 if not r.passed else 0)"; '
