@@ -500,7 +500,8 @@ class GuardManager:
             # GitLab tokens
             (r"\bglpat-[A-Za-z0-9_\-]{20,}", "GitLab personal access token"),
             # OpenAI/OpenRouter keys (20+ chars, at least one uppercase/digit —
-            # real keys are hex/base64; quoted doc strings like 'sk-premise-verification' are all-lowercase)
+            # real keys are hex/base64; quoted doc strings that are all-lowercase
+            # (e.g. 'premise-verification') are not keys)
             (r"\bsk-(?=[A-Za-z0-9_\-]{20,})[A-Za-z0-9_\-]*[A-Z0-9][A-Za-z0-9_\-]*", "OpenAI/OpenRouter API key"),
             # AWS keys
             (r"(?i)AKIA[0-9A-Z]{16}", "AWS access key"),
@@ -646,6 +647,10 @@ class GuardManager:
             ".next",
             ".turbo",
             ".pnpm-store",
+            # Gitignored stray demo-fixture dirs (other-uid, unreadable files) —
+            # mirrors .gitignore and .gitleaks.toml allowlist
+            "demo-slugify",
+            "demo-calc",
         }
         files: list[str] = []
         for root, dirs, names in os.walk(self.workdir):

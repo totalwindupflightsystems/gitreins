@@ -30,4 +30,9 @@ paths = [
   '''.gitreins-sandbox/.*''',
   '''sandbox/.*''',
   '''\.coding-hermes/.*''',
+  # Gitignored stray demo-fixture dirs (created by a sandbox test as another
+  # uid, unreadable 0600 files) — mirrors .gitignore lines 60-61; scanning
+  # them yields permission-denied noise, never committed content
+  '''demo-slugify/.*''',
+  '''demo-calc/.*''',
 ]
