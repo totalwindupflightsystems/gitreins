@@ -20,6 +20,8 @@ Thumbs.db
 .gitreins-sandbox/
 # GitReins guard history (runtime artifacts, no versioning needed)
 .gitreins/history/
+# Judge token-usage telemetry (PR #2 — best-effort cost log, never committed)
+.gitreins/usage.jsonl
 # Runtime task data (committed separately on gitreins branch)
 .gitreins/tasks.yaml
 
