@@ -351,7 +351,7 @@ history:
 - **MCP Transport:** stdio (12 tools)
 - **Config:** YAML in `.gitreins/` directory
 - **Evaluator Default Model:** DeepSeek V4 Flash (~$0.01/eval)
-- **Test suite:** ~1286 tests across 30 test files (parallelized with pytest-xdist)
+- **Test suite:** ~1286 tests across 31 test files (parallelized with pytest-xdist)
 
 ## Architecture & Docs
 
