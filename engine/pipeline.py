@@ -50,6 +50,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 from dataclasses import dataclass, field
 
 import yaml
@@ -297,7 +298,11 @@ class Pipeline:
                 env=sanitized_env,
             )
             output = (result.stdout + result.stderr)[:2000]
-            passed = result.returncode == 0 or on_fail == "continue"
+            # A non-zero exit is a hard failure regardless of on_fail. on_fail
+            # only controls whether later steps still run; it must never turn a
+            # failed lint/test into a pass (previously `on_fail: continue` and
+            # generated `cmd || true` both zeroed the failure). 2026-08-08.
+            passed = result.returncode == 0
 
             return StepResult(
                 id=step_id,
@@ -308,11 +313,11 @@ class Pipeline:
             )
         except subprocess.TimeoutExpired:
             return StepResult(
-                id=step_id, type="script", passed=(on_fail == "continue"), error="Command timed out"
+                id=step_id, type="script", passed=False, error="Command timed out"
             )
         except Exception as e:
             return StepResult(
-                id=step_id, type="script", passed=(on_fail == "continue"), error=str(e)
+                id=step_id, type="script", passed=False, error=str(e)
             )
 
     def _run_ai_eval(self, step_def: dict, task: dict) -> StepResult:
@@ -392,13 +397,20 @@ class Pipeline:
             # Nothing set in the step — defer to .gitreins/config.yaml
             evaluator = AgenticEvaluator(self._llm, self.workdir)
 
-        # Build prompt with template substitution
+        # Build prompt with template substitution — the custom prompt_template
+        # (if any) is passed to the evaluator as its system-prompt override so
+        # it actually becomes the evaluation prompt. Previously this branch set
+        # _pipeline_context then did nothing with the template (2026-08-08).
         prompt_template = step_def.get("prompt_template", "")
         if prompt_template:
-            task["_pipeline_context"] = self._get_pipeline_context()
-            # The evaluator will use the task's criteria as its prompt
-            # We inject pipeline context into the task
-            pass
+            pipeline_context = self._get_pipeline_context()
+            import json as _json
+            ctx_str = _json.dumps(pipeline_context.get("stages", {}), default=str)[:4000]
+            rendered = prompt_template.replace(
+                "{{ pipeline_context }}", ctx_str,
+            )
+            task["_system_prompt_override"] = rendered
+            task["_pipeline_context"] = pipeline_context
 
         try:
             verdict = evaluator.evaluate(task)
@@ -408,6 +420,32 @@ class Pipeline:
                 f"  {'✓' if i.status == 'PASS' else '✗'} {i.criterion}: {i.detail}"
                 for i in verdict.items
             )
+
+            # Persist the judge's real token usage so external tools (e.g. the
+            # coding-hermes scheduler dashboard) can sum GitReins judge cost
+            # alongside foreman/worker cost. GitReins uses its own LLM client,
+            # so its usage never appears in Hermes' state.db telemetry; without
+            # this, judge cost was invisible. Append to .gitreins/usage.jsonl,
+            # timestamped, one JSON line per judge run. Best-effort — never
+            # blocks or fails the eval on a write error. (2026-08-08)
+            try:
+                import json as _uj, os as _uos, time as _time
+                _cap = getattr(evaluator, "eval_cap", None)
+                if _cap is not None:
+                    usage_line = {
+                        "ts": _time.time(),
+                        "tokens_in": getattr(_cap, "cumulative_input_tokens", 0),
+                        "tokens_out": getattr(_cap, "cumulative_output_tokens", 0),
+                        "cache_read": getattr(_cap, "cumulative_cache_read", 0),
+                        "cache_write": getattr(_cap, "cumulative_cache_write", 0),
+                        "step": step_id,
+                    }
+                    usage_path = _uos.path.join(self.workdir, ".gitreins", "usage.jsonl")
+                    _uos.makedirs(_uos.path.dirname(usage_path), exist_ok=True)
+                    with open(usage_path, "a") as _f:
+                        _f.write(_uj.dumps(usage_line) + "\n")
+            except Exception:
+                pass  # non-fatal
 
             return StepResult(
                 id=step_id,
@@ -741,6 +779,17 @@ def _has_sig_file(workdir: str, sig_file: str) -> bool:
     return os.path.isfile(os.path.join(workdir, sig_file))
 
 
+def _engine_root() -> str:
+    """Absolute path of the directory containing the `engine` package.
+
+    Works in both source checkouts (…/gitreins/engine/pipeline.py) and
+    installed layouts (…/site-packages/engine/pipeline.py) — the parent of
+    the engine dir is the import root that must go on PYTHONPATH for the
+    default-pipeline built-in scanner subprocess.
+    """
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
 def _default_tier1_steps(workdir: str, config: dict | None = None) -> list[dict]:
     """Return language-appropriate default Tier 1 pipeline steps.
 
@@ -766,9 +815,16 @@ def _default_tier1_steps(workdir: str, config: dict | None = None) -> list[dict]
                 # clean. Run the built-in scanner (workdir mode — the judged
                 # changes are committed, not staged) ALWAYS, and fail the step
                 # if EITHER scanner finds anything. gitleaks absent → skip it.
+                #
+                # The built-in scanner runs under the interpreter that is
+                # executing gitreins (sys.executable), with PYTHONPATH pointing
+                # at the engine package root — a bare `python3` from PATH
+                # cannot import `engine`, which made this step fail with
+                # ModuleNotFoundError in any env where the package is only
+                # importable by the venv (2026-08-15 fix).
                 "if command -v gitleaks >/dev/null 2>&1; then "
                 "gitleaks detect --source . --no-git --no-banner; else true; fi; g1=$?; "
-                'python3 -c "from engine.guard_manager import GuardManager; '
+                f'PYTHONPATH="{_engine_root()}" {sys.executable} -c "from engine.guard_manager import GuardManager; '
                 "import sys; gm = GuardManager('.'); "
                 'r = gm._builtin_secrets_scan(staged_only=False); '
                 'sys.exit(1 if not r.passed else 0)"; '
@@ -778,32 +834,35 @@ def _default_tier1_steps(workdir: str, config: dict | None = None) -> list[dict]
         },
     ]
 
-    # Lint + test commands per language ecosystem
+    # Lint + test commands per language ecosystem. NOTE: no `2>/dev/null ||
+    # true` suffix — appending it would zero the exit code and make a failing
+    # lint/test report as a pass (2026-08-08 fix; _run_script_step now treats
+    # non-zero exit as a hard failure regardless of on_fail).
     _LANG_COMMANDS: dict[str, tuple[str, str]] = {
         "go": ("go vet ./...", "go test ./..."),
         "rust": (
-            "cargo clippy -- -D warnings 2>/dev/null || true",
-            "cargo test --no-fail-fast 2>/dev/null || true",
+            "cargo clippy -- -D warnings",
+            "cargo test --no-fail-fast",
         ),
         "python": (
-            "ruff check . --quiet 2>/dev/null || true",
-            "pytest -x --tb=short 2>/dev/null || true",
+            "ruff check . --quiet",
+            "pytest -x --tb=short",
         ),
-        "js": ("npx eslint . 2>/dev/null || true", "npm test 2>/dev/null || true"),
-        "java": ("mvn checkstyle:check 2>/dev/null || true", "mvn test -q 2>/dev/null || true"),
-        "c": ("make lint 2>/dev/null || true", "make test 2>/dev/null || true"),
-        "cpp": ("make lint 2>/dev/null || true", "make test 2>/dev/null || true"),
-        "ruby": ("rubocop 2>/dev/null || true", "bundle exec rspec 2>/dev/null || true"),
+        "js": ("npx eslint .", "npm test"),
+        "java": ("mvn checkstyle:check", "mvn test -q"),
+        "c": ("make lint", "make test"),
+        "cpp": ("make lint", "make test"),
+        "ruby": ("rubocop", "bundle exec rspec"),
         "php": (
-            "php vendor/bin/phpcs 2>/dev/null || true",
-            "php vendor/bin/phpunit 2>/dev/null || true",
+            "php vendor/bin/phpcs",
+            "php vendor/bin/phpunit",
         ),
-        "kotlin": ("./gradlew lint 2>/dev/null || true", "./gradlew test 2>/dev/null || true"),
+        "kotlin": ("./gradlew lint", "./gradlew test"),
         "csharp": (
-            "dotnet format --verify-no-changes 2>/dev/null || true",
-            "dotnet test 2>/dev/null || true",
+            "dotnet format --verify-no-changes",
+            "dotnet test",
         ),
-        "scala": ("sbt scalafmtCheck 2>/dev/null || true", "sbt test 2>/dev/null || true"),
+        "scala": ("sbt scalafmtCheck", "sbt test"),
     }
 
     # Detection order — first match becomes the primary language

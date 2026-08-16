@@ -135,6 +135,37 @@ For each criterion:
 - **Do not re-run the same command.** Check previous results before running again.
 - **Do not search for the same pattern twice.** Use sandbox to track what you've checked.
 
+## MANDATORY TEST VERIFICATION (HARD RULE — 2026-08-08)
+
+You MUST NOT report PASS on any criterion that mentions tests, build, lint,
+type-checking, or "the code works/runs" unless you have ACTUAL command output
+proving it. Reasoning from the code alone is NOT sufficient — the suite can be
+red while the code looks fine (cached test results and pre-loaded context are
+not evidence of a passing run).
+
+**Step 1 — find the test command.** Read `.gitreins/config.yaml` for
+`guards.test_command` (e.g. `go test -count=1 ./...`, `uv run pytest`). If it
+is absent, run a sensible default for the project's language
+(`go test ./...`, `pytest`, `npm test`).
+
+**Step 2 — run it, fresh.** Execute the exact test command via `run_command`.
+Use a cache-defeating flag where the toolchain supports one (`go test
+-count=1 ./...`) so you do not receive a cached pass. Capture exit_code and the
+tail of the output.
+
+**Step 3 — record the evidence.** In every criterion's `detail`, if it
+concerns tests/build/lint, you MUST quote the actual exit_code and the
+decisive output line (e.g. `PASS`, `ok <pkg>`, `FAIL`, an error). A detail of
+just "tests pass" with no command output is a FAIL.
+
+**Exceptions:** If the project has no test suite at all (e.g. `test_command`
+is `true`, or the repo is docs-only), record that explicitly: "no test suite —
+verified <command or none>". You may then judge non-test criteria by code
+inspection.
+
+A criterion whose verification should have run tests but whose detail shows no
+command output MUST be marked FAIL, not PASS.
+
 ## VERDICT FORMAT
 
 When you've checked EVERY criterion, deliver your verdict. You MUST output EXACTLY this JSON format with NO surrounding text, NO markdown fences, NO commentary:
@@ -305,6 +336,19 @@ EVALUATOR_TOOLS = [
             "parameters": {"type": "object", "properties": {}},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "scan_security",
+            "description": "Run deterministic, syntax-aware security-pattern scanning with ast-grep against the CodeRabbit essential rules (184 rules across 14 languages: c, cpp, csharp, go, html, java, javascript, kotlin, php, python, ruby, rust, scala, swift, typescript). Catches real vulnerabilities (hardcoded secrets, insecure crypto, JWT 'none' algorithm, SQL injection, XSS, unsafe deserialization, debug-enabled, world-writable files, etc.) WITHOUT relying on the LLM to spot them. Returns findings as SARIF (file, line, message, CWE/OWASP refs). Use this before judging any security/correctness criterion — it finds bugs a code-reading model can miss. Optional 'path' arg to scan a specific file/dir; omit to scan the whole repo (may be slow on large repos).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Optional: file or directory to scan. Omit to scan the whole repo."},
+                },
+            },
+        },
+    },
 ]
 
 
@@ -369,6 +413,10 @@ class AgenticEvaluator:
         self.command_timeout = command_timeout
 
         self._sandbox: dict[str, str] = {}
+        # Custom system-prompt override from a pipeline prompt_template; set by
+        # evaluate() from the task dict. Initialize to None so _system_prompt()
+        # is always safe to call (2026-08-08).
+        self._system_prompt_override: str | None = None
         self._task_index: dict[str, dict] = {}
         self._files_read: set[str] = set()
         self._commands_run: set[str] = set()
@@ -783,6 +831,37 @@ class AgenticEvaluator:
 
         return prompt
 
+    def _system_prompt(self) -> str:
+        """Return the evaluator system prompt: the pipeline-provided
+        `prompt_template` override when set, else the built-in prompt.
+        Token/file-scope/fast-track placeholders are substituted either way.
+        (2026-08-08: prompt_template is now actually wired through.)"""
+        base = self._system_prompt_override or EVALUATOR_SYSTEM_PROMPT
+        return (
+            base.replace(
+                "{token_budget}",
+                _fmt_tokens(self.eval_cap.max_input_tokens)
+                if self.eval_cap.max_input_tokens > 0
+                else "unlimited",
+            )
+            .replace(
+                "{output_budget}",
+                _fmt_tokens(self.eval_cap.max_output_tokens)
+                if self.eval_cap.max_output_tokens > 0
+                else "unlimited",
+            )
+            .replace("{file_scope}", self._allowed_files is not None and "changed" or "full")
+            .replace("{fast_track_mode}", "ON" if self.fast_track else "OFF")
+            .replace(
+                "{fast_track_instruction}",
+                "ON — Verify ONLY changed lines and immediate callers. Skip deep call-graph analysis. "
+                "Trust the diff: if a criterion references code outside changed files, check only the "
+                "interface boundary (function signature, type) — do NOT trace into unchanged code."
+                if self.fast_track
+                else "OFF — Normal mode. Read surrounding code as needed to verify criteria.",
+            )
+        )
+
     def _compact_context(
         self,
         messages: list[dict],
@@ -813,28 +892,7 @@ class AgenticEvaluator:
         new_messages: list[dict] = [
             {
                 "role": "system",
-                "content": EVALUATOR_SYSTEM_PROMPT.replace(
-                    "{token_budget}",
-                    _fmt_tokens(self.eval_cap.max_input_tokens)
-                    if self.eval_cap.max_input_tokens > 0
-                    else "unlimited",
-                )
-                .replace(
-                    "{output_budget}",
-                    _fmt_tokens(self.eval_cap.max_output_tokens)
-                    if self.eval_cap.max_output_tokens > 0
-                    else "unlimited",
-                )
-                .replace("{file_scope}", self._allowed_files is not None and "changed" or "full")
-                .replace("{fast_track_mode}", "ON" if self.fast_track else "OFF")
-                .replace(
-                    "{fast_track_instruction}",
-                    "ON — Verify ONLY changed lines and immediate callers. Skip deep call-graph analysis. "
-                    "Trust the diff: if a criterion references code outside changed files, check only the "
-                    "interface boundary (function signature, type) — do NOT trace into unchanged code."
-                    if self.fast_track
-                    else "OFF — Normal mode. Read surrounding code as needed to verify criteria.",
-                ),
+                "content": self._system_prompt(),
             },
             {"role": "user", "content": compacted_prompt},
         ]
@@ -855,6 +913,10 @@ class AgenticEvaluator:
         self._files_read.clear()
         self._commands_run.clear()
         self._searches_done.clear()
+
+        # Custom system-prompt override from a pipeline prompt_template, if
+        # any (2026-08-08 fix — was never wired through before).
+        self._system_prompt_override = task.get("_system_prompt_override")
 
         # Build the task prompt
         criteria_list = task.get("criteria", [])
@@ -922,28 +984,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         messages: list[dict] = [
             {
                 "role": "system",
-                "content": EVALUATOR_SYSTEM_PROMPT.replace(
-                    "{token_budget}",
-                    _fmt_tokens(self.eval_cap.max_input_tokens)
-                    if self.eval_cap.max_input_tokens > 0
-                    else "unlimited",
-                )
-                .replace(
-                    "{output_budget}",
-                    _fmt_tokens(self.eval_cap.max_output_tokens)
-                    if self.eval_cap.max_output_tokens > 0
-                    else "unlimited",
-                )
-                .replace("{file_scope}", self._allowed_files is not None and "changed" or "full")
-                .replace("{fast_track_mode}", "ON" if self.fast_track else "OFF")
-                .replace(
-                    "{fast_track_instruction}",
-                    "ON — Verify ONLY changed lines and immediate callers. Skip deep call-graph analysis. "
-                    "Trust the diff: if a criterion references code outside changed files, check only the "
-                    "interface boundary (function signature, type) — do NOT trace into unchanged code."
-                    if self.fast_track
-                    else "OFF — Normal mode. Read surrounding code as needed to verify criteria.",
-                ),
+                "content": self._system_prompt(),
             },
             {"role": "user", "content": task_prompt},
         ]
@@ -1200,10 +1241,20 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 )
         if not has_any:
             return None
+        # A partial verdict must reflect whether ALL criteria passed, not just
+        # whether ANY were verified. Previously this returned COMPLETE whenever
+        # at least one criterion was checked, so a run that hit the cap after
+        # one PASS (with the rest marked FAIL — Not verified) still reported
+        # COMPLETE and the pipeline passed the task. (2026-08-08 fix)
+        complete = all(item.status == "PASS" for item in items)
         return Verdict(
-            verdict="COMPLETE",
+            verdict="COMPLETE" if complete else "INCOMPLETE",
             items=items,
-            summary="Partial verdict — evaluation hit resource cap before all criteria verified",
+            summary=(
+                "Partial verdict — evaluation hit resource cap before all criteria verified"
+                if not complete
+                else "Partial verdict — all verified criteria passed"
+            ),
         )
 
     def _execute_tool_with_dedup(self, tc: ToolCall) -> tuple[dict, bool]:
@@ -1294,6 +1345,8 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 return self._tool_detect_dead_code()
             elif tc.name == "skylos_scan":
                 return self._tool_skylos_scan()
+            elif tc.name == "scan_security":
+                return self._tool_scan_security(**tc.arguments)
             elif tc.name == "read_static_analysis":
                 return self._tool_read_static_analysis(**tc.arguments)
             elif tc.name == "read_lsp_diagnostics":
@@ -1869,5 +1922,77 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             }
         except FileNotFoundError:
             return {"error": "skylos not installed — pip install skylos"}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _tool_scan_security(self, path: str | None = None) -> dict:
+        """Run ast-grep security-pattern scan against the CodeRabbit essential
+        rules (deterministic, syntax-aware — finds real vulns without relying on
+        the LLM). Scans each rule individually (--rule) because bulk directory
+        loading aborts on any rule that uses CodeRabbit's inline-utils schema,
+        which stock ast-grep rejects. Rules that fail to parse are skipped; the
+        rest are aggregated. Returns findings as SARIF-derived entries."""
+        try:
+            import json as _json
+            import glob as _glob
+            import shutil as _shutil
+            import subprocess as _sp
+
+            ast_grep = _shutil.which("ast-grep")
+            if not ast_grep:
+                return {"error": "ast-grep not installed — cargo install ast-grep"}
+
+            rules_dir = os.path.expanduser("~/.gitreins-rules/rules")
+            if not os.path.isdir(rules_dir):
+                return {
+                    "error": "gitreins security rules not installed "
+                    "(~/.gitreins-rules/rules — clone coderabbitai/ast-grep-essentials)"
+                }
+
+            rule_files = sorted(_glob.glob(os.path.join(rules_dir, "*", "*", "*.yml")))
+            if not rule_files:
+                rule_files = sorted(_glob.glob(os.path.join(rules_dir, "*", "*.yml")))
+
+            scan_target = path if path else "."
+            all_findings = []
+            skipped = 0
+            for rf in rule_files:
+                result = _sp.run(
+                    [ast_grep, "scan", "--rule", rf, "--format", "sarif", scan_target],
+                    capture_output=True, text=True, timeout=30,
+                    cwd=self.workdir,
+                )
+                if result.returncode != 0:
+                    skipped += 1  # rule failed to parse — skip, don't abort
+                    continue
+                if not result.stdout.strip():
+                    continue
+                try:
+                    data = _json.loads(result.stdout)
+                except _json.JSONDecodeError:
+                    continue
+                for run in data.get("runs", []):
+                    for res in run.get("results", []):
+                        msg = (res.get("message", {}) or {}).get("text", "")
+                        loc = (res.get("locations") or [{}])[0].get("physicalLocation", {})
+                        art = (loc.get("artifactLocation", {}) or {}).get("uri", "")
+                        reg = loc.get("region", {}) or {}
+                        all_findings.append({
+                            "file": os.path.basename(art),
+                            "path": art,
+                            "line": reg.get("startLine"),
+                            "message": msg[:300],
+                            "rule": os.path.basename(rf),
+                        })
+
+            return {
+                "total_findings": len(all_findings),
+                "rules_loaded": len(rule_files),
+                "rules_skipped": skipped,
+                "findings": all_findings,
+                "note": "Deterministic AST security scan (CodeRabbit essentials, per-rule) — treat findings as strong FAIL evidence for security/correctness criteria.",
+            }
+        except FileNotFoundError:
+            return {"error": "ast-grep not installed — cargo install ast-grep"}
         except Exception as e:
             return {"error": str(e)}
