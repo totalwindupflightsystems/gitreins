@@ -274,7 +274,6 @@ class Pipeline:
         """Execute a shell command."""
         step_id = step_def.get("id", "unnamed")
         cmd = step_def.get("run", "")
-        on_fail = step_def.get("on_fail", "block")
 
         if not cmd:
             return StepResult(id=step_id, type="script", passed=False, error="No command specified")
@@ -429,7 +428,9 @@ class Pipeline:
             # timestamped, one JSON line per judge run. Best-effort — never
             # blocks or fails the eval on a write error. (2026-08-08)
             try:
-                import json as _uj, os as _uos, time as _time
+                import json as _uj
+                import os as _uos
+                import time as _time
                 _cap = getattr(evaluator, "eval_cap", None)
                 if _cap is not None:
                     usage_line = {
