@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **PR #2 (carterlasalle, merged 4779fd2)** — quality-gate correctness + evaluator hardening:
+  - **Four "PASS-but-failing" bugs fixed** (all reproduced live on main, fixed on branch, 8 regression tests in `tests/test_quality_gate_regressions.py`):
+    1. Pipeline exceptions returned `passed=True` even without `pass_on_error` (dead code made every pipeline crash pass)
+    2. Failing script steps with `on_fail: continue` were marked passed
+    3. Default tier-1 lint/test commands carried `2>/dev/null || true`, zeroing exit codes (all languages)
+    4. Cap-hit partial verdicts reported COMPLETE when only ANY criterion was verified
+  - Mandatory test-verification hard rule in the evaluator prompt (no PASS on test/build claims without command output)
+  - `scan_security` ast-grep tool (CodeRabbit essential rules, SARIF findings) for deterministic security scanning
+  - `prompt_template` pipeline config is now actually wired through as the evaluator system prompt (was a no-op `pass`)
+  - Judge token usage persisted to `.gitreins/usage.jsonl` (best-effort cost telemetry, now gitignored)
+  - Default-pipeline built-in secrets scanner runs under `sys.executable` + `PYTHONPATH` (fixes ModuleNotFoundError outside the venv)
+
 ## [0.12.0] — 2026-08-14
 
 ### Added
