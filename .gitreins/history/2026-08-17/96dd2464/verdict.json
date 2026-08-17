@@ -1,0 +1,77 @@
+{
+  "task_id": "GR-GAP-031",
+  "task_title": "Add docs/cli-reference.md \u2014 CLI API reference",
+  "task_criteria": [
+    "docs/cli-reference.md exists covering all 11 subcommands with options + exit codes"
+  ],
+  "passed": true,
+  "items": [],
+  "stages": {
+    "tier1": {
+      "id": "tier1",
+      "passed": true,
+      "any_failed": false,
+      "summary": "  \u2713 lint: \n  \u2713 secrets: \u001b[90m6:15AM\u001b[0m \u001b[32mINF\u001b[0m \u001b[1mscanned ~4866132 bytes (4.87 MB) in 1.19s\u001b[0m\n\u001b[90m6:15AM\u001b[0m \u001b[32m\n  \u2713 tests: ============================= test session starts ==============================\nplatform linux -- P",
+      "steps": [
+        {
+          "id": "lint",
+          "type": "script",
+          "passed": true,
+          "output": "",
+          "error": "",
+          "data": {
+            "exit_code": 0
+          }
+        },
+        {
+          "id": "secrets",
+          "type": "script",
+          "passed": true,
+          "output": "\u001b[90m6:15AM\u001b[0m \u001b[32mINF\u001b[0m \u001b[1mscanned ~4866132 bytes (4.87 MB) in 1.19s\u001b[0m\n\u001b[90m6:15AM\u001b[0m \u001b[32mINF\u001b[0m \u001b[1mno leaks found\u001b[0m\n",
+          "error": "",
+          "data": {
+            "exit_code": 0
+          }
+        },
+        {
+          "id": "tests",
+          "type": "script",
+          "passed": true,
+          "output": "============================= test session starts ==============================\nplatform linux -- Python 3.11.15, pytest-9.1.1, pluggy-1.6.0\nrootdir: /home/kara/gitreins-poc\nconfigfile: pyproject.toml\ntestpaths: tests\nplugins: xdist-3.8.0, anyio-4.14.2\ncreated: 4/4 workers\n4 workers [1288 items]\n\n........................................................................ [  5%]\n........................................................................ [ 11%]\n.........................................",
+          "error": "",
+          "data": {
+            "exit_code": 0
+          }
+        }
+      ]
+    },
+    "tier2": {
+      "id": "tier2",
+      "passed": true,
+      "any_failed": false,
+      "summary": "COMPLETE\n  \u2713 docs/cli-reference.md exists covering all 11 subcommands with options + exit codes: docs/cli-reference.md exists (9102 bytes). It documents all 11 subcommands: install (exit 0/1), init (--reset, exit 0/1), task (create/start/complete/list/delete with --depends-on, --force, --status options and exit codes), guard (--dead-code, exit 0/1), judge (--skip-tier2/--async/--status, exit 0/1/2), commit (--skip-tier2, exit 0/1), commit-audit (message arg, exit 0/1), mcp-server (env vars, exit 0/1), security-scan (-d/--output/--force-ml, exit 0/1/2), setup-tools (exit 0/1), report (-n/--interactive, exit 0). Each section lists options and exit codes.\ndocs/cli-reference.md exists and documents all 11 subcommands with their options and exit codes.",
+      "steps": [
+        {
+          "id": "tier2",
+          "type": "ai_eval",
+          "passed": true,
+          "output": "COMPLETE\n  \u2713 docs/cli-reference.md exists covering all 11 subcommands with options + exit codes: docs/cli-reference.md exists (9102 bytes). It documents all 11 subcommands: install (exit 0/1), init (--reset, exit 0/1), task (create/start/complete/list/delete with --depends-on, --force, --status options and exit codes), guard (--dead-code, exit 0/1), judge (--skip-tier2/--async/--status, exit 0/1/2), commit (--skip-tier2, exit 0/1), commit-audit (message arg, exit 0/1), mcp-server (env vars, exit",
+          "error": "",
+          "data": {
+            "verdict": "COMPLETE",
+            "items": [
+              {
+                "criterion": "docs/cli-reference.md exists covering all 11 subcommands with options + exit codes",
+                "status": "PASS",
+                "detail": "docs/cli-reference.md exists (9102 bytes). It documents all 11 subcommands: install (exit 0/1), init (--reset, exit 0/1), task (create/start/complete/list/delete with --depends-on, --force, --status options and exit codes), guard (--dead-code, exit 0/1), judge (--skip-tier2/--async/--status, exit 0/1/2), commit (--skip-tier2, exit 0/1), commit-audit (message arg, exit 0/1), mcp-server (env vars, exit 0/1), security-scan (-d/--output/--force-ml, exit 0/1/2), setup-tools (exit 0/1), report (-n/--interactive, exit 0). Each section lists options and exit codes."
+              }
+            ],
+            "summary": "docs/cli-reference.md exists and documents all 11 subcommands with their options and exit codes."
+          }
+        }
+      ]
+    }
+  },
+  "summary": "Judge Result: GR-GAP-031\n\nStage tier1: PASS\n    \u2713 lint: \n  \u2713 secrets: \u001b[90m6:15AM\u001b[0m \u001b[32mINF\u001b[0m \u001b[1mscanned ~4866132 bytes (4.87 MB) in 1.19s\u001b[0m\n\u001b[90m6:15AM\u001b[0m \u001b[32m\n  \u2713 tests: ============================= test session starts ==============================\nplatform linux -- P\n\nStage tier2: PASS\n  COMPLETE\n  \u2713 docs/cli-reference.md exists covering all 11 subcommands with options + exit codes: docs/cli-reference.md exists (9102 bytes). It documents all 11 subcommands: install (exit 0/1), init (--reset, exit 0/1), task (create/start/complete/list/delete with --depends-on, --force, --status options and exit codes), guard (--dead-code, exit 0/1), judge (--skip-tier2/--async/--status, exit 0/1/2), commit (--skip-tier2, exit 0/1), commit-audit (message arg, exit 0/1), mcp-server (env vars, exit 0/1), security-scan (-d/--output/--force-ml, exit 0/1/2), setup-tools (exit 0/1), report (-n/--interactive, exit 0). Each section lists options and exit codes.\ndocs/cli-reference.md exists and documents all 11 subcommands with their options and exit codes.\n\nOverall: PASS \u2713",
+  "evaluated_at": "2026-08-17T11:16:52.105977"
+}
