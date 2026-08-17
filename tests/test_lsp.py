@@ -494,7 +494,11 @@ class TestLspIntegration:
     to bypass git-staging logic and pass file paths directly.
     """
 
-    pytestmark = pytestmark_integration
+    # Serialize real-LSP integration tests onto one xdist worker: their
+    # servers (pylsp/rust-analyzer/gopls) are CPU-heavy and mutually
+    # starve each other under -n 4, which is a load source behind the
+    # gopls full-suite flake (GR-GAP-032).
+    pytestmark = [pytestmark_integration, pytest.mark.xdist_group("lsp-integration")]
 
     BAD_CODE_UNDEFINED = "x = undefined_variable\n"
 
@@ -894,6 +898,8 @@ class TestStagedFilesByLanguage:
 class TestRustAnalyzerIntegration:
     """Integration tests that exercise real rust-analyzer server communication."""
 
+    pytestmark = pytest.mark.xdist_group("lsp-integration")
+
     BAD_RS_CODE = """fn main() {
     let x: i32 = "hello";
 }
@@ -970,6 +976,25 @@ class TestTsLspIntegration:
 class TestGoplsIntegration:
     """Integration tests for Go LSP with gopls."""
 
+    pytestmark = pytest.mark.xdist_group("lsp-integration")
+
+    # GR-GAP-032: gopls gets an explicit, generous diagnostics budget and
+    # retries with a fresh server. Root cause of the full-suite flake:
+    # under CPU contention (xdist workers + real rust-analyzer/pylsp
+    # integration tests + fleet load) a gopls v0.22 spawn can go QUIESCENT
+    # — it never publishes diagnostics, ignores even repeated didOpen
+    # nudges, and shows zero work in a goroutine dump (no load goroutines,
+    # no `go` children, no errors). The race is binary, not slowness:
+    # non-stalled runs deliver in <1.5s even under heavy load, stalled
+    # runs never recover within ANY budget (observed 30s and 120s
+    # timeouts). The engine's interactive 30s per-file default is a
+    # guard-latency cap, too tight for a loaded box. This test asserts
+    # gopls *correctness*, not latency, so it sets its own budget and
+    # retries each stall with a fresh server. The assertion stays strict.
+    GOPLS_INIT_TIMEOUT = 120.0
+    GOPLS_PER_FILE_TIMEOUT = 60.0
+    GOPLS_MAX_ATTEMPTS = 3
+
     def test_gopls_detects_go_errors(self, lsp_workdir):
         """gopls detects type errors in Go code when installed."""
         if not shutil.which("gopls"):
@@ -983,9 +1008,43 @@ class TestGoplsIntegration:
         path = os.path.join(lsp_workdir, "test.go")
         with open(path, "w") as f:
             f.write('package main\n\nfunc main() {\n\tvar x int = "hello"\n}\n')
-        diags = run_lsp_check("gopls", lsp_workdir, files=[path])
+        # Retry empty results with a fresh server: a stalled gopls spawn
+        # never recovers, but the next spawn usually lands in a scheduled
+        # window (per-spawn stall rate ~10-25% under heavy load; 3
+        # attempts => ~0.1-1.5% residual). Each attempt spawns its own
+        # gopls via run_lsp_check.
+        diags = []
+        for attempt in range(1, self.GOPLS_MAX_ATTEMPTS + 1):
+            diags = run_lsp_check(
+                "gopls",
+                lsp_workdir,
+                files=[path],
+                init_timeout=self.GOPLS_INIT_TIMEOUT,
+                timeout_per_file=self.GOPLS_PER_FILE_TIMEOUT,
+            )
+            if diags:
+                break
         # gopls should detect at least the type mismatch
-        assert len(diags) > 0, "gopls should produce diagnostics on bad Go code"
+        assert len(diags) > 0, (
+            "gopls should produce diagnostics on bad Go code "
+            f"(empty after {self.GOPLS_MAX_ATTEMPTS} fresh-server attempts)"
+        )
+
+    def test_gopls_timeout_budget_is_explicit_and_generous(self):
+        """Regression guard for GR-GAP-032.
+
+        The gopls integration test must not silently fall back to the
+        engine's 30s interactive per-file default, and must retry with
+        fresh servers: under full-suite / fleet CPU load, a gopls spawn
+        can go quiescent and NEVER publish diagnostics (binary race —
+        observed >30s and >120s stalls that never recovered; non-stalled
+        runs deliver in <1.5s). The test asserts gopls correctness, not
+        latency, so its budget and retry count must stay explicit and
+        generous.
+        """
+        assert self.GOPLS_INIT_TIMEOUT >= 60.0
+        assert self.GOPLS_PER_FILE_TIMEOUT >= 60.0
+        assert self.GOPLS_MAX_ATTEMPTS >= 2
 
     def test_gopls_skip_gracefully_when_not_installed(self, lsp_workdir):
         """gopls not found returns empty diagnostics."""
