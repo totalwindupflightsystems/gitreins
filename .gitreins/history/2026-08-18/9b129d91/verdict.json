@@ -1,0 +1,77 @@
+{
+  "task_id": "GR-GAP-033",
+  "task_title": "README test-count claim verified against logged green full run",
+  "task_criteria": [
+    "README test-count claim matches a logged green full run (or is explicitly qualified as pending)"
+  ],
+  "passed": true,
+  "items": [],
+  "stages": {
+    "tier1": {
+      "id": "tier1",
+      "passed": true,
+      "any_failed": false,
+      "summary": "  \u2713 lint: \n  \u2713 secrets: \u001b[90m7:20PM\u001b[0m \u001b[32mINF\u001b[0m \u001b[1mscanned ~4896006 bytes (4.90 MB) in 1.23s\u001b[0m\n\u001b[90m7:20PM\u001b[0m \u001b[32m\n  \u2713 tests: ============================= test session starts ==============================\nplatform linux -- P",
+      "steps": [
+        {
+          "id": "lint",
+          "type": "script",
+          "passed": true,
+          "output": "",
+          "error": "",
+          "data": {
+            "exit_code": 0
+          }
+        },
+        {
+          "id": "secrets",
+          "type": "script",
+          "passed": true,
+          "output": "\u001b[90m7:20PM\u001b[0m \u001b[32mINF\u001b[0m \u001b[1mscanned ~4896006 bytes (4.90 MB) in 1.23s\u001b[0m\n\u001b[90m7:20PM\u001b[0m \u001b[32mINF\u001b[0m \u001b[1mno leaks found\u001b[0m\n",
+          "error": "",
+          "data": {
+            "exit_code": 0
+          }
+        },
+        {
+          "id": "tests",
+          "type": "script",
+          "passed": true,
+          "output": "============================= test session starts ==============================\nplatform linux -- Python 3.11.15, pytest-9.1.1, pluggy-1.6.0\nrootdir: /home/kara/gitreins-poc\nconfigfile: pyproject.toml\ntestpaths: tests\nplugins: xdist-3.8.0, anyio-4.14.2\ncreated: 4/4 workers\n4 workers [1289 items]\n\n........................................................................ [  5%]\n........................................................................ [ 11%]\n.........................................",
+          "error": "",
+          "data": {
+            "exit_code": 0
+          }
+        }
+      ]
+    },
+    "tier2": {
+      "id": "tier2",
+      "passed": true,
+      "any_failed": false,
+      "summary": "COMPLETE\n  \u2713 README test-count claim matches a logged green full run (or is explicitly qualified as pending): README.md:14 and :354 (at HEAD) explicitly qualify the '1289 tests pass' claim with a logged green full run: 'verified on a green full run 2026-08-17 (1282 passed, 7 skipped, 0 failed)' and 'last verified green full run 2026-08-17: 1282 passed, 7 skipped, 0 failed at 8fc7720'. The logged green run is documented in .gitreins/history/2026-08-17/a08276bd/summary.md: 'Full pytest tests/ run (commit 91c4c26): 1282 passed, 7 skipped, 2 warnings in 43.21s', exit 0, 0 failures. Numbers consistent (1282+7=1289). Commit fed598c made the qualification.\nREADME test-count claim is explicitly qualified with a logged green full run (1282 passed, 7 skipped, 0 failed on 2026-08-17), satisfying the criterion.",
+      "steps": [
+        {
+          "id": "tier2",
+          "type": "ai_eval",
+          "passed": true,
+          "output": "COMPLETE\n  \u2713 README test-count claim matches a logged green full run (or is explicitly qualified as pending): README.md:14 and :354 (at HEAD) explicitly qualify the '1289 tests pass' claim with a logged green full run: 'verified on a green full run 2026-08-17 (1282 passed, 7 skipped, 0 failed)' and 'last verified green full run 2026-08-17: 1282 passed, 7 skipped, 0 failed at 8fc7720'. The logged green run is documented in .gitreins/history/2026-08-17/a08276bd/summary.md: 'Full pytest tests/ run ",
+          "error": "",
+          "data": {
+            "verdict": "COMPLETE",
+            "items": [
+              {
+                "criterion": "README test-count claim matches a logged green full run (or is explicitly qualified as pending)",
+                "status": "PASS",
+                "detail": "README.md:14 and :354 (at HEAD) explicitly qualify the '1289 tests pass' claim with a logged green full run: 'verified on a green full run 2026-08-17 (1282 passed, 7 skipped, 0 failed)' and 'last verified green full run 2026-08-17: 1282 passed, 7 skipped, 0 failed at 8fc7720'. The logged green run is documented in .gitreins/history/2026-08-17/a08276bd/summary.md: 'Full pytest tests/ run (commit 91c4c26): 1282 passed, 7 skipped, 2 warnings in 43.21s', exit 0, 0 failures. Numbers consistent (1282+7=1289). Commit fed598c made the qualification."
+              }
+            ],
+            "summary": "README test-count claim is explicitly qualified with a logged green full run (1282 passed, 7 skipped, 0 failed on 2026-08-17), satisfying the criterion."
+          }
+        }
+      ]
+    }
+  },
+  "summary": "Judge Result: GR-GAP-033\n\nStage tier1: PASS\n    \u2713 lint: \n  \u2713 secrets: \u001b[90m7:20PM\u001b[0m \u001b[32mINF\u001b[0m \u001b[1mscanned ~4896006 bytes (4.90 MB) in 1.23s\u001b[0m\n\u001b[90m7:20PM\u001b[0m \u001b[32m\n  \u2713 tests: ============================= test session starts ==============================\nplatform linux -- P\n\nStage tier2: PASS\n  COMPLETE\n  \u2713 README test-count claim matches a logged green full run (or is explicitly qualified as pending): README.md:14 and :354 (at HEAD) explicitly qualify the '1289 tests pass' claim with a logged green full run: 'verified on a green full run 2026-08-17 (1282 passed, 7 skipped, 0 failed)' and 'last verified green full run 2026-08-17: 1282 passed, 7 skipped, 0 failed at 8fc7720'. The logged green run is documented in .gitreins/history/2026-08-17/a08276bd/summary.md: 'Full pytest tests/ run (commit 91c4c26): 1282 passed, 7 skipped, 2 warnings in 43.21s', exit 0, 0 failures. Numbers consistent (1282+7=1289). Commit fed598c made the qualification.\nREADME test-count claim is explicitly qualified with a logged green full run (1282 passed, 7 skipped, 0 failed on 2026-08-17), satisfying the criterion.\n\nOverall: PASS \u2713",
+  "evaluated_at": "2026-08-18T00:22:42.110423"
+}
