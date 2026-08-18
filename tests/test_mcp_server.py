@@ -676,7 +676,7 @@ class TestJudgeAsyncMCP:
         """Default judge.evaluate (no wait) returns job_id + running without blocking."""
         monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
         monkeypatch.setattr(mcp_server.llm, "api_key", "sk-test")
-        _stub_judge_evaluate(monkeypatch, sleep=0.5)
+        _stub_judge_evaluate(monkeypatch, sleep=5.0)
         self._create_task(mcp_server, "async-me")
 
         t0 = time.monotonic()
@@ -687,9 +687,11 @@ class TestJudgeAsyncMCP:
         assert result["status"] == "running"
         assert result["task_id"] == "async-me"
         assert result["workdir"] == mcp_server.workdir
-        # The stubbed evaluation sleeps 0.5s — a blocking call could never
-        # return this fast with status still "running".
-        assert elapsed < 0.3, f"judge.evaluate blocked for {elapsed:.2f}s — expected async return"
+        # The stubbed evaluation sleeps 5.0s — a blocking call could never
+        # return this fast with status still "running". 1.0s headroom is
+        # load-robust under xdist CPU contention while still ~4s short of
+        # what a synchronous join would take.
+        assert elapsed < 1.0, f"judge.evaluate blocked for {elapsed:.2f}s — expected async return"
 
     def test_judge_status_polls_to_complete(self, mcp_server, monkeypatch):
         """judge.status polls a background job to 'complete' with the full result."""
