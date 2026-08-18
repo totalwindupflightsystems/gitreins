@@ -33,6 +33,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
+    "pytest-timeout>=2.3",
     "twine>=5.0",
     "build>=1.0",
     "python-lsp-server>=1.10",
@@ -120,6 +121,7 @@ select = [
 dev = [
     "pycodestyle>=2.14.0",
     "pyflakes>=3.4.0",
+    "pytest-timeout>=2.3",
     "pytest-xdist>=3.8.0",
     "ruff>=0.5",
 ]
