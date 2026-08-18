@@ -24,6 +24,15 @@ gitreins install        # creates .gitreins/config.yaml + pre-commit hook
 gitreins init           # smart init — detects language, size, optimal config
 ```
 
+**Running from a source checkout** (no pip install): the `gitreins` console
+script is not on your PATH — it lives in the repo's virtualenv. Activate it
+first in each shell, then the commands above work as written:
+
+```bash
+source .venv/bin/activate        # or call .venv/bin/gitreins directly
+gitreins --help
+```
+
 New to GitReins? Read the [Onboarding Guide](docs/onboarding.md) — full
 install → init → first guard run → task workflow, plus troubleshooting for
 the most common first-run failures (gitleaks regex config, Python import

@@ -12,6 +12,17 @@ project.
 pip install gitreins
 ```
 
+**Running from a source checkout** (contributing to GitReins itself, no pip
+install): the console script is only on PATH after activating the repo's
+virtualenv — a fresh shell gets `command not found` otherwise.
+
+```bash
+cd gitreins
+python3 -m venv .venv && .venv/bin/pip install -e .
+source .venv/bin/activate        # or call .venv/bin/gitreins directly
+gitreins --help
+```
+
 Then, inside your project repo (must already be a git repository):
 
 ```bash
