@@ -48,6 +48,27 @@ def _sanitized_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
 
 
+def _is_test_file(fpath: str) -> bool:
+    """True for test/fixture files, which routinely embed deliberately
+    fake keys (benchmarks, fixtures, examples).
+
+    Mirrors the documentation-file exemption in the built-in secrets
+    scan: gitleaks still scans every file, so this only relaxes the
+    low-entropy regex cross-check for files whose secrets are by
+    construction not real.
+    """
+    base = os.path.basename(fpath)
+    if re.search(r"(^|/)test(s|data)?/", fpath):
+        return True
+    if base.endswith(("_test.go", "_test.py", "_test.rs", "_test.sh", "_test.rb")):
+        return True
+    if base.startswith("test_") and base.endswith(".py"):
+        return True
+    if re.search(r"\.(test|spec)\.(js|ts|jsx|tsx|mjs|cjs)$", base):
+        return True
+    return False
+
+
 # ── Diff-based test discovery ──────────────────────────────────
 
 # Files that, when changed, force a full test run (too broad to narrow)
@@ -585,6 +606,14 @@ class GuardManager:
                     skip in fpath
                     for skip in (".memory-bank/", "docs/", "CONTRIBUTING.md", "SECURITY.md")
                 ) or fpath.endswith(".md"):
+                    continue
+
+                # Skip test files — fixtures and benchmarks routinely
+                # embed deliberately fake keys (e.g. sk-benchmark-...).
+                # Same rationale as the documentation skip above; gitleaks
+                # still scans everything, so this only exempts the
+                # low-entropy built-in cross-check. (musterflow GAP-012)
+                if _is_test_file(fpath):
                     continue
 
                 try:

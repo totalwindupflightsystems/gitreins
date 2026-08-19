@@ -336,6 +336,49 @@ class TestBuiltinSecretsScan:
         assert "app.py:1" in result.output
         assert "tok.txt:1" in result.output
 
+    def test_builtin_scan_skips_go_test_fixture_keys(self, tmp_workdir):
+        """Test files with deliberately fake keys (benchmarks/fixtures)
+        are exempt from the built-in cross-check — same rationale as the
+        .md/docs exemption. (musterflow GAP-012: judge tier1 flagged
+        internal/auth/auth_test.go benchmark fixture sk-benchmark-...)
+        """
+        with open(os.path.join(tmp_workdir, "auth_test.go"), "w") as f:
+            f.write(
+                'cred := Credential{Type: CredentialAPIKey, '
+                'Key: "sk-benchmark-test-key-12345"}\n'
+            )
+        gm = GuardManager(tmp_workdir)
+        result = gm._builtin_secrets_scan(staged_only=False)
+        assert result.passed is True
+
+    def test_builtin_scan_still_flags_same_key_in_source(self, tmp_workdir):
+        """The test-file exemption is file-type based, not a pattern
+        relaxation: the same fake-key literal in a source file is still
+        caught."""
+        with open(os.path.join(tmp_workdir, "auth.go"), "w") as f:
+            f.write(
+                'cred := Credential{Type: CredentialAPIKey, '
+                'Key: "sk-benchmark-test-key-12345"}\n'
+            )
+        gm = GuardManager(tmp_workdir)
+        result = gm._builtin_secrets_scan(staged_only=False)
+        assert result.passed is False
+        assert "auth.go:1" in result.output
+
+    def test_is_test_file_patterns(self):
+        """_is_test_file recognizes common test-file shapes."""
+        from engine.guard_manager import _is_test_file
+
+        assert _is_test_file("internal/auth/auth_test.go")
+        assert _is_test_file("tests/test_guard_manager.py")
+        assert _is_test_file("test/conftest.py")
+        assert _is_test_file("src/foo.test.ts")
+        assert _is_test_file("src/foo.spec.js")
+        assert _is_test_file("scripts/run_test.sh")
+        assert not _is_test_file("internal/cli/root.go")
+        assert not _is_test_file("cmd/main.go")
+        assert not _is_test_file("README.md")
+
     def test_private_key_block_detected(self, tmp_workdir):
         """Private key block (BEGIN RSA PRIVATE KEY) is detected."""
         _write_staged_file(
