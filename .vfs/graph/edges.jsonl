@@ -728,3 +728,6 @@
 {"from":"gitreins/cli.py","to":"pkg:shlex","rel":"imports","provenance":"ast_exact","confidence":1.0}
 {"from":"tests/test_cli.py","to":"pkg:shlex","rel":"imports","provenance":"ast_exact","confidence":1.0}
 {"from":"tests/test_pipeline.py","to":"pkg:subprocess","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"engine/guard_manager.py","to":"pkg:shutil","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"engine/guard_manager.py","to":"pkg:sys","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_guard_manager.py","to":"pkg:sys","rel":"imports","provenance":"ast_exact","confidence":1.0}
