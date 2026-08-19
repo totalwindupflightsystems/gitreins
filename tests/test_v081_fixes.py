@@ -136,6 +136,27 @@ class TestDefaultPipelineLanguageDetection:
 
             shutil.rmtree(d, ignore_errors=True)
 
+    def test_js_project_lint_disabled_via_config(self):
+        """guards.lint: false skips the lint step in the judge tier1 pipeline.
+
+        Ring-runner RR-GAP-040: repos with guards.lint disabled and no lint
+        setup (no eslint.config) must not get an env-dependent lint FP from
+        `npx eslint .` — the pipeline honors the same flag the guard uses.
+        """
+        d = self._make_temp_workdir("package.json")
+        try:
+            cfg = {"guards": {"lint": False, "test_command": "npm test"}}
+            steps = _default_tier1_steps(d, config=cfg)
+            assert not any(s["id"] == "lint" for s in steps), (
+                "lint step must be skipped when guards.lint=false"
+            )
+            assert any(s["id"] == "tests" for s in steps), "tests step still present"
+            assert any(s["id"] == "secrets" for s in steps), "secrets step still present"
+        finally:
+            import shutil
+
+            shutil.rmtree(d, ignore_errors=True)
+
     def test_unknown_project_secrets_only(self):
         """Unknown project (no ecosystem files) gets only secrets step."""
         d = self._make_temp_workdir(None)

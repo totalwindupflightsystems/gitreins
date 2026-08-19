@@ -894,7 +894,14 @@ def _default_tier1_steps(workdir: str, config: dict | None = None) -> list[dict]
 
     if primary is not None:
         lint_cmd, test_cmd = _LANG_COMMANDS[primary]
-        steps.append({"id": "lint", "type": "script", "run": lint_cmd})
+        # Honor guards.lint: false — the guard mode already skips lint when
+        # disabled; the judge tier1 pipeline must match, otherwise repos with
+        # no lint setup (e.g. no eslint dep / no eslint.config) get an
+        # env-dependent lint FP from `npx eslint .` (npx fetches eslint from
+        # cache/registry, so PATH hygiene cannot suppress it). Ring-runner
+        # RR-GAP-040 / off-by-one answer 1286.
+        if guards_cfg.get("lint", True):
+            steps.append({"id": "lint", "type": "script", "run": lint_cmd})
         test_step: dict = {"id": "tests", "type": "script", "run": test_cmd}
         if configured_test_cmd:
             test_step["run"] = configured_test_cmd
