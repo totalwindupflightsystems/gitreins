@@ -11,7 +11,7 @@
 
 GitReins lives inside your git repository as a quality harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ✅ **v0.12.0** — LSP diagnostics (14 languages), static analysis (9 analyzers), commit audit with CVE-scored severity, optional Antares CVE-localization guard, Anthropic Messages API support, DeepSeek prompt caching telemetry, large-repo hardening (fast-track + `--skip-tier2`), MCP `propagate`, 1293 tests pass, verified on a green full run 2026-08-17 (1282 passed, 7 skipped, 0 failed).
+> ✅ **v0.12.0** — LSP diagnostics (14 languages), static analysis (9 analyzers), commit audit with CVE-scored severity, optional Antares CVE-localization guard, Anthropic Messages API support, DeepSeek prompt caching telemetry, large-repo hardening (fast-track + `--skip-tier2`), MCP `propagate`, 1303 tests pass, verified on a green full run 2026-08-17 (1282 passed, 7 skipped, 0 failed).
 
 ---
 
@@ -37,6 +37,13 @@ New to GitReins? Read the [Onboarding Guide](docs/onboarding.md) — full
 install → init → first guard run → task workflow, plus troubleshooting for
 the most common first-run failures (gitleaks regex config, Python import
 setup).
+
+> **uv is optional.** `gitreins init` prefers `uv run pytest` as the test
+> command when uv is installed, but a machine without uv still passes the
+> tests guard: when the configured `test_command` starts with a runner
+> (`uv run` / `pipenv run` / `poetry run`) whose binary is missing from
+> PATH, the guard automatically falls back to `python -m pytest ...` and
+> prints a warning line. pip-only users never see `uv: command not found`.
 
 ## How It Works
 
@@ -328,6 +335,8 @@ guards:
   lint: true
   tests: true
   test_mode: "full"          # "full" or "diff"
+  # uv/pipenv/poetry are OPTIONAL — if the runner prefix's binary is not on
+  # PATH, the guard falls back to `python -m pytest ...` with a warning.
   test_command: "uv run pytest -x --tb=short"
 
   # Go projects (auto-detected via go.mod):
@@ -360,7 +369,7 @@ history:
 - **MCP Transport:** stdio (12 tools)
 - **Config:** YAML in `.gitreins/` directory
 - **Evaluator Default Model:** DeepSeek V4 Flash (~$0.01/eval)
-- **Test suite:** ~1293 tests across 32 test files (parallelized with pytest-xdist; last verified green full run 2026-08-17: 1282 passed, 7 skipped, 0 failed at 8fc7720)
+- **Test suite:** ~1303 tests across 32 test files (parallelized with pytest-xdist; last verified green full run 2026-08-17: 1282 passed, 7 skipped, 0 failed at 8fc7720)
 
 ## Architecture & Docs
 

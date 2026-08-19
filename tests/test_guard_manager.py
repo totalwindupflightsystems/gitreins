@@ -6,6 +6,7 @@ axiom:trace work_item=GR-001 spec=specs/04-Guard-Manager.md plan=.memory-bank/wo
 import os
 import shutil
 import subprocess
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,6 +17,7 @@ from engine.guard_manager import (
     Tier1Result,
     _build_diff_test_command,
     _discover_test_targets,
+    _resolve_test_command,
 )
 
 
@@ -595,6 +597,130 @@ class TestTestsGuard:
         assert result.passed is True
         assert "clean-tree" in result.output
         assert "echo clean-tree-diff-run" in mock_subprocess.call_args.args[0]
+
+
+class TestRunnerFallback:
+    """GR-GAP-037: runtime fallback when a configured test_command's runner is missing.
+
+    A config written by `gitreins init` on a uv machine runs `uv run pytest`
+    on every machine — including pip-only ones where uv is absent. The
+    fallback rewrites pytest invocations to `{sys.executable} -m pytest`
+    with a warning instead of dying with `uv: command not found`.
+    """
+
+    def test_runner_missing_falls_back_to_python_m_pytest(self):
+        """uv absent → `uv run pytest ...` becomes `{sys.executable} -m pytest ...` + warning."""
+        with patch("shutil.which", return_value=None):
+            cmd, warning = _resolve_test_command("uv run pytest -x --tb=short")
+        assert cmd == f"{sys.executable} -m pytest -x --tb=short"
+        assert warning is not None
+        assert "'uv' not found on PATH" in warning
+        assert "falling back to" in warning
+        assert "command not found" not in cmd
+
+    def test_runner_missing_bare_pytest(self):
+        """uv absent + bare `uv run pytest` → `{sys.executable} -m pytest`."""
+        with patch("shutil.which", return_value=None):
+            cmd, warning = _resolve_test_command("uv run pytest")
+        assert cmd == f"{sys.executable} -m pytest"
+        assert warning is not None
+
+    def test_runner_missing_pipenv_and_poetry(self):
+        """pipenv/poetry prefixes fall back the same way."""
+        with patch("shutil.which", return_value=None):
+            cmd, warning = _resolve_test_command("pipenv run pytest -q")
+        assert cmd == f"{sys.executable} -m pytest -q"
+        assert warning is not None
+        with patch("shutil.which", return_value=None):
+            cmd, warning = _resolve_test_command("poetry run pytest --tb=long")
+        assert cmd == f"{sys.executable} -m pytest --tb=long"
+        assert warning is not None
+
+    def test_runner_missing_interpreter_form(self):
+        """uv absent + `uv run python -m pytest` → `{sys.executable} -m pytest`."""
+        with patch("shutil.which", return_value=None):
+            cmd, warning = _resolve_test_command("uv run python -m pytest -x")
+        assert cmd == f"{sys.executable} -m pytest -x"
+        assert warning is not None
+        with patch("shutil.which", return_value=None):
+            cmd, warning = _resolve_test_command("uv run python3 -m pytest -x")
+        assert cmd == f"{sys.executable} -m pytest -x"
+        assert warning is not None
+
+    def test_runner_present_passthrough(self):
+        """uv on PATH → command unchanged, no warning."""
+        with patch("shutil.which", return_value="/usr/local/bin/uv"):
+            cmd, warning = _resolve_test_command("uv run pytest -x --tb=short")
+        assert cmd == "uv run pytest -x --tb=short"
+        assert warning is None
+
+    def test_non_runner_command_passthrough(self):
+        """`make test` (no known runner prefix) passes through untouched."""
+        cmd, warning = _resolve_test_command("make test")
+        assert cmd == "make test"
+        assert warning is None
+
+    def test_runner_prefix_non_pytest_passthrough(self):
+        """`uv run tox` can't be rewritten to pytest — passes through unchanged."""
+        with patch("shutil.which", return_value=None):
+            cmd, warning = _resolve_test_command("uv run tox")
+        assert cmd == "uv run tox"
+        assert warning is None
+
+    def test_run_test_command_executes_rewritten_command(self, tmp_workdir):
+        """_run_test_command spawns the rewritten command and tags the warning."""
+        gm = GuardManager(
+            tmp_workdir,
+            {"guards": {"test_command": "uv run pytest -x --tb=short"}},
+        )
+        mock_run = MagicMock()
+        mock_run.returncode = 0
+        mock_run.stdout = "1 passed"
+        mock_run.stderr = ""
+        with patch("shutil.which", return_value=None):
+            with patch("subprocess.run", return_value=mock_run) as mock_subprocess:
+                result = gm._run_test_command("uv run pytest -x --tb=short", "tests (full)")
+        executed = mock_subprocess.call_args.args[0]
+        assert executed == f"{sys.executable} -m pytest -x --tb=short"
+        assert result.passed is True
+        assert result.warning and "'uv' not found on PATH" in result.warning
+        # Warning is also visible in the captured output
+        assert result.warning in result.output
+
+    def test_diff_mode_command_also_falls_back(self, tmp_workdir):
+        """Diff-mode narrowed commands go through the same fallback."""
+        gm = GuardManager(
+            tmp_workdir,
+            {"guards": {"test_command": "uv run pytest -x --tb=short"}},
+        )
+        test_file = os.path.join(tmp_workdir, "tests", "test_x.py")
+        narrowed = _build_diff_test_command(
+            "uv run pytest -x --tb=short", [test_file], tmp_workdir
+        )
+        assert narrowed == "uv run pytest -x --tb=short tests/test_x.py"
+        mock_run = MagicMock()
+        mock_run.returncode = 0
+        mock_run.stdout = "1 passed"
+        mock_run.stderr = ""
+        with patch("shutil.which", return_value=None):
+            with patch("subprocess.run", return_value=mock_run) as mock_subprocess:
+                result = gm._run_test_command(narrowed, "tests (diff: 1 files)")
+        executed = mock_subprocess.call_args.args[0]
+        assert executed == f"{sys.executable} -m pytest -x --tb=short tests/test_x.py"
+        assert result.passed is True
+        assert result.warning is not None
+
+    def test_summary_shows_fallback_warning_line(self):
+        """Tier1Result.summary surfaces the warning after the tests line."""
+        result = GuardResult(
+            name="tests",
+            passed=True,
+            output="1 passed",
+            warning="test runner 'uv' not found on PATH — falling back to 'x'",
+        )
+        summary = Tier1Result(passed=True, results=[result]).summary
+        assert "✓ tests" in summary
+        assert "⚠ test runner 'uv' not found on PATH" in summary
 
 
 class TestExtendedGuardManager:

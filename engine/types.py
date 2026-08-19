@@ -9,6 +9,9 @@ class GuardResult:
     passed: bool
     output: str = ""
     error: str = ""
+    # Non-fatal note for guard output (e.g. GR-GAP-037 runner fallback:
+    # configured test_command's runner binary missing → python -m pytest).
+    warning: str = ""
 
     def _pass_detail(self) -> str:
         """Short detail string for passing guards (e.g. 'clean', '3 files')."""
@@ -94,4 +97,6 @@ class Tier1Result:
             elif r.passed:
                 detail = r._pass_detail()
             lines.append(f"  {status} {r.name}{detail}")
+            if r.warning:
+                lines.append(f"  ⚠ {r.warning}")
         return "\n".join(lines)

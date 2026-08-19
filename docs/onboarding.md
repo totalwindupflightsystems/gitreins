@@ -12,6 +12,13 @@ project.
 pip install gitreins
 ```
 
+**uv is optional, not required.** `gitreins init` writes
+`uv run pytest` as the test command only when uv is on PATH. On a machine
+without uv (pip-only), the tests guard automatically falls back to
+`python -m pytest ...` — you get a warning line in guard output, never a
+`uv: command not found` failure. The same fallback covers `pipenv run`
+and `poetry run`.
+
 **Running from a source checkout** (contributing to GitReins itself, no pip
 install): the console script is only on PATH after activating the repo's
 virtualenv — a fresh shell gets `command not found` otherwise.

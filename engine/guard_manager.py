@@ -206,6 +206,56 @@ def _build_diff_test_command(test_command: str, test_files: list[str], workdir: 
     return cmd
 
 
+# Runner prefixes that wrap the real test binary in their own virtualenv.
+# A config written by `gitreins init` on a uv machine (or the shipped
+# uv-based default) fails on any machine without that runner: the shell
+# dies with `uv: command not found` before pytest ever starts (GR-GAP-037).
+_KNOWN_TEST_RUNNER_PREFIXES = ("uv run", "pipenv run", "poetry run")
+
+
+def _resolve_test_command(cmd: str) -> tuple[str, str | None]:
+    """GR-GAP-037: runtime fallback when a configured test_command's runner is missing.
+
+    When *cmd* starts with a known runner prefix (`uv run`, `pipenv run`,
+    `poetry run`) but that runner's binary is not on PATH, rewrite pytest
+    invocations to ``{sys.executable} -m pytest ...`` so a pip-only machine
+    (no uv/pipenv/poetry) still passes the tests stage. Returns the effective
+    command plus a warning line for guard output (None when no fallback
+    applied).
+
+    Commands without a known runner prefix (e.g. ``make test``) and
+    runner-prefixed non-pytest commands (e.g. ``uv run tox`` — semantics
+    can't be preserved) pass through unchanged.
+    """
+    import shutil
+    import sys
+
+    stripped = cmd.strip()
+    for prefix in _KNOWN_TEST_RUNNER_PREFIXES:
+        if not stripped.startswith(prefix):
+            continue
+        runner = prefix.split()[0]
+        if shutil.which(runner):
+            return cmd, None
+        rest = stripped[len(prefix):].lstrip()
+        # pytest invocation → {sys.executable} -m pytest ...
+        if rest == "pytest" or rest.startswith("pytest "):
+            new_cmd = f"{sys.executable} -m {rest}"
+        # interpreter invocation (uv run python -m pytest ...) → same interpreter
+        elif re.match(r"^python3?(\s|$)", rest):
+            new_cmd = re.sub(r"^python3?(\s|$)", f"{sys.executable}\\1", rest, count=1)
+        else:
+            # Custom runner command — cannot safely rewrite (tox != pytest).
+            return cmd, None
+        warning = (
+            f"test runner '{runner}' not found on PATH — falling back to "
+            f"'{new_cmd}' for this run. Install the runner (e.g. pip install "
+            f"{runner}) to use the configured test_command verbatim."
+        )
+        return new_cmd, warning
+    return cmd, None
+
+
 def _load_guard_config(workdir: str) -> dict:
     """Load .gitreins/config.yaml and extract the guards section.
 
@@ -783,9 +833,10 @@ class GuardManager:
 
     def _run_test_command(self, cmd: str, label: str) -> GuardResult:
         """Execute a test command and return a GuardResult."""
+        resolved_cmd, fallback_warning = _resolve_test_command(cmd)
         try:
             result = subprocess.run(
-                cmd,
+                resolved_cmd,
                 shell=True,
                 capture_output=True,
                 text=True,
@@ -794,12 +845,18 @@ class GuardManager:
                 env=_sanitized_env(),
             )
             output = result.stdout + result.stderr
+            if fallback_warning:
+                output = f"{fallback_warning}\n{output}"
             if len(output) > 2000:
                 output = output[-2000:]  # Keep last 2000 chars for failure context
             if result.returncode == 0:
-                return GuardResult(name=label, passed=True, output=output[:500])
+                return GuardResult(
+                    name=label, passed=True, output=output[:500], warning=fallback_warning or ""
+                )
             else:
-                return GuardResult(name=label, passed=False, output=output)
+                return GuardResult(
+                    name=label, passed=False, output=output, warning=fallback_warning or ""
+                )
         except subprocess.TimeoutExpired:
             return GuardResult(
                 name=label,
@@ -809,9 +866,12 @@ class GuardManager:
                     f"To raise the limit: set guards.test_timeout in "
                     f".gitreins/config.yaml (e.g. test_timeout: 300)."
                 ),
+                warning=fallback_warning or "",
             )
         except Exception as e:
-            return GuardResult(name=label, passed=False, error=str(e))
+            return GuardResult(
+                name=label, passed=False, error=str(e), warning=fallback_warning or ""
+            )
 
     def _check_dead_code(self) -> GuardResult:
         """Detect unreachable code, unused functions, and unused imports."""

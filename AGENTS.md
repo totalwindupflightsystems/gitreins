@@ -8,7 +8,9 @@ If guards fail, the commit is BLOCKED. You cannot skip this.
 ### Quick check before committing:
 
 ```bash
-PATH="$HOME/go/bin:$HOME/gitreins-poc/.venv/bin:$PATH" gitreins guard
+# Works from any checkout path — the venv path is derived from the repo root.
+# ($HOME/go/bin is the standard Go user-tools dir; adjust if gitleaks lives elsewhere.)
+PATH="$HOME/go/bin:$(git rev-parse --show-toplevel)/.venv/bin:$PATH" gitreins guard
 ```
 
 ### What's checked:
