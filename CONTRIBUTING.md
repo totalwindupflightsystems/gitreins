@@ -40,7 +40,7 @@ All tests must pass before submitting a PR. Currently 1293 tests (canonical coun
 engine/          — Core engine (evaluator, guards, pipeline, LLM client, task manager, judge, dead_code)
 gitreins/        — CLI entry point and install script
 gitreins_mcp/    — MCP stdio server (9 tools)
-tests/           — pytest test suite (322 unit + integration tests)
+tests/           — pytest test suite (1303 unit + integration tests across 32 files; canonical count in README)
 tests/reliability/ — 7 adversarial benchmark projects
 docs/            — Architecture, component map, evaluator loop, technology choices
 .memory-bank/    — Institutional memory (ADRs, findings, work-item status)
