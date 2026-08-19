@@ -32,7 +32,7 @@ pip install gitreins
 pytest tests/ -v
 ```
 
-All tests must pass before submitting a PR. Currently 322 tests, 94% engine coverage.
+All tests must pass before submitting a PR. Currently 1293 tests (canonical count: `pytest --collect-only -q`; see README for the latest verified green run).
 
 ## Project Structure
 
