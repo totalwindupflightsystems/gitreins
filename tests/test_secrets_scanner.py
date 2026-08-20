@@ -13,6 +13,8 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from engine.guard_manager import GuardManager
+
 
 def _scan_text(text: str) -> list[tuple[str, str]]:
     """Run the built-in scanner against a single string of text. Returns list of (label, match) tuples."""
@@ -250,3 +252,139 @@ class TestSlack:
         fake_token = prefix + "NOTAREAL-NOTAREAL-NOTAREALsynthetic0000000000000000"
         matches = _scan_text(f'token = "{fake_token}"')
         assert _any_match(matches, "Slack API token")
+
+
+# ══════════════════════════════════════════════════════════════════
+# GR-GAP-039: venv-like dirs pruned from the judge workdir scan
+# ══════════════════════════════════════════════════════════════════
+
+
+def _write_workdir_file(workdir: str, relpath: str, content: str) -> str:
+    """Write a file under the workdir, creating parent dirs. Returns full path."""
+    full = os.path.join(workdir, relpath)
+    os.makedirs(os.path.dirname(full), exist_ok=True)
+    with open(full, "w") as f:
+        f.write(content)
+    return full
+
+
+class TestVenvDirExclusion:
+    """The judge's whole-workdir secrets scan (staged_only=False, DF-012) must
+    not report findings from vendored venv/site-packages code.
+
+    On docs-only commit 690a389 the workdir walk entered
+    .venv312/lib/python3.12/site-packages/... and tripped danger patterns
+    in vendored third-party code (jedi RECORD lines with AKIA + sha256 hex,
+    cryptography private-key markers, pydantic/starlette/httpx example
+    password literals) — 7 false positives while gitleaks was clean.
+    Any .venv*/venv* dir must be pruned, plus site-packages/dist-packages
+    as a belt-and-braces for oddly-named venvs.
+    """
+
+    # Fixture content mimicking vendored third-party code: every line below
+    # trips a built-in danger pattern if the file is scanned.
+    VENDORED = (
+        "AKIAABCDEFGHIJKLMNOP\t"
+        "4a5b6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4\n"
+        'password = "supersecret123"\n'
+        "-----BEGIN RSA PRIVATE KEY-----\n"
+    )
+
+    def test_workdir_files_excludes_dotted_venv_dir(self, tmp_workdir):
+        """.venv312/lib/python3.12/site-packages/<pkg>/mod.py is not enumerated."""
+        _write_workdir_file(
+            tmp_workdir,
+            ".venv312/lib/python3.12/site-packages/jedi/mod.py",
+            self.VENDORED,
+        )
+        _write_workdir_file(tmp_workdir, "src/app.py", "x = 1\n")
+
+        gm = GuardManager(tmp_workdir)
+        files = gm._workdir_files()
+
+        assert not any(f.startswith(".venv312") for f in files)
+        assert "src/app.py" in files
+
+    def test_workdir_files_excludes_plain_venv_dir(self, tmp_workdir):
+        """A plain 'venv' dir (no dot prefix) is also pruned."""
+        _write_workdir_file(
+            tmp_workdir,
+            "venv/lib/python3.12/site-packages/cryptography/mod.py",
+            self.VENDORED,
+        )
+        _write_workdir_file(tmp_workdir, "main.py", "x = 1\n")
+
+        gm = GuardManager(tmp_workdir)
+        files = gm._workdir_files()
+
+        assert not any(f.startswith("venv/") for f in files)
+        assert "main.py" in files
+
+    def test_workdir_files_excludes_any_venv_prefix(self, tmp_workdir):
+        """venv311, .venvs, etc. all match the prefix filter."""
+        for venv in ("venv311", ".venvs", "venvs", ".venv312"):
+            _write_workdir_file(
+                tmp_workdir,
+                f"{venv}/lib/python3.12/site-packages/pkg/mod.py",
+                self.VENDORED,
+            )
+        _write_workdir_file(tmp_workdir, "src/app.py", "x = 1\n")
+
+        gm = GuardManager(tmp_workdir)
+        files = gm._workdir_files()
+
+        assert files == ["src/app.py"]
+
+    def test_workdir_files_excludes_site_and_dist_packages(self, tmp_workdir):
+        """Belt-and-braces: site-packages/dist-packages are pruned even under
+        an unusual venv root name."""
+        _write_workdir_file(
+            tmp_workdir,
+            "pyenv312/lib/python3.12/site-packages/httpx/mod.py",
+            self.VENDORED,
+        )
+        _write_workdir_file(
+            tmp_workdir,
+            "pyenv312/lib/python3.12/dist-packages/starlette/mod.py",
+            self.VENDORED,
+        )
+        _write_workdir_file(tmp_workdir, "src/app.py", "x = 1\n")
+
+        gm = GuardManager(tmp_workdir)
+        files = gm._workdir_files()
+
+        assert files == ["src/app.py"]
+
+    def test_workdir_scan_clean_with_vendored_venv(self, tmp_workdir):
+        """staged_only=False scan passes when findings exist only under a venv."""
+        _write_workdir_file(
+            tmp_workdir,
+            ".venv312/lib/python3.12/site-packages/jedi/mod.py",
+            self.VENDORED,
+        )
+        _write_workdir_file(tmp_workdir, "src/app.py", "x = 1\n")
+
+        gm = GuardManager(tmp_workdir)
+        result = gm._builtin_secrets_scan(staged_only=False)
+
+        assert result.passed is True
+        assert "clean" in result.output
+
+    def test_workdir_scan_still_flags_finding_outside_venv(self, tmp_workdir):
+        """Over-skip guard: a genuine finding in normal source still trips."""
+        _write_workdir_file(
+            tmp_workdir,
+            ".venv312/lib/python3.12/site-packages/jedi/mod.py",
+            self.VENDORED,
+        )
+        _write_workdir_file(
+            tmp_workdir, "src/app.py", 'aws_key = "AKIAABCDEFGHIJKLMNOP"\n'
+        )
+
+        gm = GuardManager(tmp_workdir)
+        result = gm._builtin_secrets_scan(staged_only=False)
+
+        assert result.passed is False
+        assert "AWS access key" in result.output
+        assert ".venv312" not in result.output
+

@@ -710,8 +710,6 @@ class GuardManager:
         skip_dirs = {
             ".git",
             ".gitreins",
-            ".venv",
-            "venv",
             "node_modules",
             "__pycache__",
             ".mypy_cache",
@@ -726,6 +724,10 @@ class GuardManager:
             ".next",
             ".turbo",
             ".pnpm-store",
+            # Belt-and-braces: catch venvs with unusual root names (the
+            # .venv*/venv* prefix filter below handles the normal ones).
+            "site-packages",
+            "dist-packages",
             # Gitignored stray demo-fixture dirs (other-uid, unreadable files) —
             # mirrors .gitignore and .gitleaks.toml allowlist
             "demo-slugify",
@@ -733,7 +735,18 @@ class GuardManager:
         }
         files: list[str] = []
         for root, dirs, names in os.walk(self.workdir):
-            dirs[:] = [d for d in dirs if d not in skip_dirs]
+            # Prune ANY venv-like dir, not just exact ".venv"/"venv":
+            # .venv312, venv311, venvs, etc. The judge's workdir scan
+            # (DF-012) walked .venv312/lib/python3.12/site-packages vendored
+            # code and tripped danger patterns (jedi RECORD AKIA lines,
+            # cryptography private-key markers, pydantic example passwords)
+            # on docs-only commits. (GR-GAP-039)
+            dirs[:] = [
+                d
+                for d in dirs
+                if d not in skip_dirs
+                and not (d.startswith(".venv") or d.startswith("venv"))
+            ]
             for name in names:
                 files.append(os.path.relpath(os.path.join(root, name), self.workdir))
         return files
