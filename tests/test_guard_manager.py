@@ -528,6 +528,18 @@ class TestLintGuard:
         # Falls through to built-in scanner; should return a result
         assert result is not None
 
+    def test_gitleaks_missing_warns_expected_path(self, guard_manager):
+        """GR-GAP-043: missing gitleaks emits a visible warning naming the
+        expected $HOME/go/bin/gitleaks path, and the built-in scanner still
+        runs (hint, not a failure)."""
+        expected = os.path.join(os.path.expanduser("~"), "go", "bin", "gitleaks")
+        with patch("subprocess.run", side_effect=FileNotFoundError("gitleaks")):
+            result = guard_manager._check_secrets()
+        assert result is not None
+        assert expected in result.warning
+        assert "built-in" in result.warning
+        assert result.passed is True  # fallback still runs clean on empty tree
+
 
 class TestTestsGuard:
     """Test _check_tests behavior."""

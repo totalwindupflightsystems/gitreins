@@ -1255,6 +1255,13 @@ def cmd_guard_run(args):
 
     workdir = get_workdir()
     config = load_config(workdir)
+    # GR-GAP-043: --staged-only / --full override config guards.test_mode
+    # ('diff' / 'full'). If both are passed, --staged-only wins (diff is the
+    # narrower scope); neither → config value (default: 'full').
+    if getattr(args, "staged_only", False):
+        config.setdefault("guards", {})["test_mode"] = "diff"
+    elif getattr(args, "full", False):
+        config.setdefault("guards", {})["test_mode"] = "full"
     gm = GuardManager(workdir, config=config)
     result = gm.run_all(force_dead_code=getattr(args, "dead_code", False))
 
@@ -1777,6 +1784,24 @@ def main():
         "--dead-code",
         action="store_true",
         help="Enable Python dead-code detection (overrides config)",
+    )
+    guard_p.add_argument(
+        "--staged-only",
+        dest="staged_only",
+        action="store_true",
+        help=(
+            "Run tests in diff mode — only packages with staged changes "
+            "(overrides config guards.test_mode)"
+        ),
+    )
+    guard_p.add_argument(
+        "--full",
+        dest="full",
+        action="store_true",
+        help=(
+            "Run the full test suite (overrides config guards.test_mode; "
+            "default when neither flag is given)"
+        ),
     )
 
     # judge

@@ -24,6 +24,7 @@ import os
 import re
 import subprocess
 import time
+from dataclasses import replace
 from engine.guards import (
     _coerce_timeout,
     check_go_lint,
@@ -540,7 +541,19 @@ class GuardManager:
                     name="secrets", passed=False, output=result.stdout + result.stderr
                 )
         except FileNotFoundError:
-            logger.debug("gitleaks not found — using built-in scanner")
+            # GR-GAP-043: the missing-gitleaks case must be VISIBLE, not a
+            # silent debug line — AGENTS.md hardcodes $HOME/go/bin on PATH,
+            # so a user without gitleaks there gets no hint otherwise.
+            expected = os.path.join(os.path.expanduser("~"), "go", "bin", "gitleaks")
+            result = self._builtin_secrets_scan()
+            hint = (
+                f"gitleaks not found at expected path {expected} — using the "
+                "built-in secrets scanner instead. Install gitleaks "
+                "(e.g. 'go install github.com/gitleaks/gitleaks/v8@latest') "
+                "for full secret coverage."
+            )
+            logger.debug(hint)
+            return replace(result, warning=hint)
         except Exception as e:
             logger.warning("gitleaks failed: %s — falling back to built-in scanner", e)
 

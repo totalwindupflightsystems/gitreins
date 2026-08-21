@@ -60,6 +60,13 @@ class TestHelpOutput:
         result = run_cli("unknown")
         assert "invalid choice" in result.stderr
 
+    def test_guard_help_lists_test_mode_flags(self):
+        """guard --help lists --staged-only/--full test-mode flags (GR-GAP-043)."""
+        result = run_cli("guard", "--help")
+        assert result.returncode == 0
+        assert "--staged-only" in result.stdout
+        assert "--full" in result.stdout
+
 
 class TestWorkdirDetection:
     """Test get_workdir() — step-3-1-1-2."""
@@ -213,6 +220,28 @@ class TestGuardRunCLI:
         result = run_cli("guard", cwd=tmp_workdir)
         assert result.returncode == 0
         assert "Tier 1 Guards:" in result.stdout
+
+    def test_guard_staged_only_sets_diff_test_mode(self, tmp_workdir):
+        """--staged-only forces diff test mode (GR-GAP-043)."""
+        result = run_cli("guard", "--staged-only", cwd=tmp_workdir)
+        assert result.returncode == 0
+        assert "(test mode: diff" in result.stdout
+
+    def test_guard_full_flag_sets_full_test_mode(self, tmp_workdir):
+        """--full forces full test mode (GR-GAP-043)."""
+        result = run_cli("guard", "--full", cwd=tmp_workdir)
+        assert result.returncode == 0
+        assert "(test mode: full" in result.stdout
+
+    def test_guard_staged_only_overrides_config_full(self, tmp_workdir):
+        """--staged-only overrides guards.test_mode: full in config (GR-GAP-043)."""
+        cfg_dir = os.path.join(tmp_workdir, ".gitreins")
+        os.makedirs(cfg_dir, exist_ok=True)
+        with open(os.path.join(cfg_dir, "config.yaml"), "w") as f:
+            f.write("guards:\n  test_mode: full\n")
+        result = run_cli("guard", "--staged-only", cwd=tmp_workdir)
+        assert result.returncode == 0
+        assert "(test mode: diff" in result.stdout
 
 
 class TestJudgeCLI:
