@@ -34,6 +34,11 @@ jobs:
           FILES=$(pytest --collect-only -q --override-ini=addopts= 2>/dev/null | grep -oE '^tests/[a-zA-Z0-9_./-]+\.py' | sort -u | wc -l)
           grep -q "${COUNT} tests pass" README.md || { echo "README test-count drift: README says '$(grep -oE '[0-9]+ tests pass' README.md | head -1)', pytest collects ${COUNT}"; exit 1; }
           grep -q "${FILES} test files" README.md || { echo "README test-file-count drift: README says '$(grep -oE '[0-9]+ test files' README.md | head -1)', pytest collects ${FILES} files"; exit 1; }
+          # every 'N tests across' / 'N test files' mention must match live collect (GR-GAP-041: line 372 Tech Stack count drifted for 3 days unseen)
+          BAD=$(grep -oE '[0-9]+ tests across' README.md | grep -vx "${COUNT} tests across" || true)
+          [ -z "$BAD" ] || { echo "README test-count drift: '$(echo "$BAD" | head -1)' != ${COUNT}"; exit 1; }
+          BAD=$(grep -oE '[0-9]+ test files' README.md | grep -vx "${FILES} test files" || true)
+          [ -z "$BAD" ] || { echo "README test-file-count drift: '$(echo "$BAD" | head -1)' != ${FILES}"; exit 1; }
           echo "README test counts match: ${COUNT} tests / ${FILES} files"
       - name: Run guards
         run: gitreins guard
