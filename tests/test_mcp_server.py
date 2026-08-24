@@ -955,6 +955,7 @@ class TestJudgeAsyncPersistence:
         from engine.job_store import list_jobs
 
         monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
+        monkeypatch.setattr(mcp_server.llm, "api_key", "sk-test")
         _stub_judge_evaluate(monkeypatch, sleep=5.0)
         self._create_task(mcp_server, "conc-me")
 
