@@ -11,7 +11,7 @@
 
 GitReins lives inside your git repository as a quality harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ✅ **v0.12.0** — LSP diagnostics (14 languages), opt-in static analysis (9 analyzers, default off), commit audit with CVE-scored severity, optional Antares CVE-localization guard, Anthropic Messages API support, DeepSeek prompt caching telemetry, large-repo hardening (fast-track + `--skip-tier2`), MCP `propagate`, 1314 tests pass / 32 test files, verified on a full run 2026-08-20 (1294 passed, 14 skipped, 1 known env-dependent LSP flake — tracked at `tests/test_lsp.py` PYLSP_SKIP_310).
+> ✅ **v0.12.0** — LSP diagnostics (14 languages), opt-in static analysis (9 analyzers, default off), commit audit with CVE-scored severity, optional Antares CVE-localization guard, Anthropic Messages API support, DeepSeek prompt caching telemetry, large-repo hardening (fast-track + `--skip-tier2`), MCP `propagate`, judge single-flight + resume lease, evaluator committed-diff read path, 1328 tests pass / 32 test files, verified on a full run 2026-08-24 (1313 passed, 14 skipped, 1 known env-dependent LSP flake — tracked at `tests/test_lsp.py` PYLSP_SKIP_310).
 
 ---
 
@@ -369,7 +369,7 @@ history:
 - **MCP Transport:** stdio (12 tools)
 - **Config:** YAML in `.gitreins/` directory
 - **Evaluator Default Model:** DeepSeek V4 Flash (~$0.01/eval)
-- **Test suite:** ~1314 tests across 32 test files (parallelized with pytest-xdist; last verified full run 2026-08-20: 1294 passed, 14 skipped, 1 known env-dependent LSP flake — tracked at `tests/test_lsp.py` PYLSP_SKIP_310)
+- **Test suite:** ~1328 tests across 32 test files (parallelized with pytest-xdist; last verified full run 2026-08-24: 1313 passed, 14 skipped, 1 known env-dependent LSP flake — tracked at `tests/test_lsp.py` PYLSP_SKIP_310)
 
 ## Architecture & Docs
 

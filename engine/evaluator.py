@@ -551,15 +551,30 @@ class AgenticEvaluator:
         except Exception:
             diff_text = ""
 
+        # GR-GAP-046: a judge run after a COMMITTED change has an empty
+        # `git diff HEAD` — without a fallback the evaluator would see no
+        # changed code and confabulate stale state ("config unchanged"
+        # after the fix was committed). When there is no working-tree
+        # diff at all, anchor the context on the last commit instead.
+        commit_context = ""
         if not changed_files and not diff_text:
-            return ""
+            commit_context = self._last_commit_context()
+            if not commit_context:
+                return ""
 
         lines: list[str] = []
 
-        if test_mode == "diff":
-            # Diff mode: send only the hunks
-            lines.append("## CHANGED CODE (DIFF)")
+        if commit_context:
+            lines.append(commit_context)
             lines.append("")
+
+        if test_mode == "diff":
+            # Diff mode: send only the hunks. When the tree is clean and a
+            # commit anchor exists, the diff section is omitted entirely —
+            # there is no diff, and "(no changes detected)" would lie.
+            if diff_text or not commit_context:
+                lines.append("## CHANGED CODE (DIFF)")
+                lines.append("")
             if diff_text:
                 # Truncate very large diffs
                 diff_lines = diff_text.splitlines()
@@ -569,12 +584,18 @@ class AgenticEvaluator:
                         f"... [truncated at 500 lines, {len(diff_text.splitlines())} total]"
                     )
                 lines.append("\n".join(diff_lines))
-            else:
+            elif not commit_context:
                 lines.append("(no changes detected)")
-            lines.append("")
+            if diff_text or not commit_context:
+                lines.append("")
 
         else:
             # Full mode: include complete changed files (capped)
+            if not changed_files:
+                # commit_context-only case (clean tree): nothing to show
+                # beyond the last-commit anchor already appended above.
+                return "\n".join(lines)
+
             lines.append("## CHANGED FILES (FULL)")
             lines.append("")
             max_files = 20
@@ -646,6 +667,42 @@ class AgenticEvaluator:
                 lines.append("```")
 
         return "\n".join(lines)
+
+    def _last_commit_context(self) -> str:
+        """Context block anchored on HEAD when the working tree is clean.
+
+        GR-GAP-046: after a fix is COMMITTED, ``git diff HEAD`` is empty
+        and the evaluator would otherwise see no changed code at all —
+        which makes judges confabulate stale state ('config unchanged'
+        after the fix was committed). Returns a compact commit summary
+        (hash + subject + stat) or "" when there is no commit / git
+        fails (fresh repos keep the pre-existing empty-context behavior).
+        """
+        import subprocess
+
+        try:
+            head = subprocess.run(
+                ["git", "log", "-1", "--format=%H %s"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                cwd=self.workdir,
+            )
+            if head.returncode != 0 or not head.stdout.strip():
+                return ""
+            stat = subprocess.run(
+                ["git", "show", "--stat", "--format=", "HEAD"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                cwd=self.workdir,
+            )
+            block = f"## LAST COMMIT (working tree clean)\n\ncommit {head.stdout.strip()}\n"
+            if stat.returncode == 0 and stat.stdout.strip():
+                block += f"\n```\n{stat.stdout.strip()}\n```\n"
+            return block
+        except Exception:
+            return ""
 
     def _compute_allowed_files(self) -> set[str]:
         """Compute the set of files the evaluator is allowed to touch.

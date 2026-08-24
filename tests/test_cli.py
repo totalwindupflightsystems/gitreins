@@ -781,6 +781,132 @@ class TestJudgeAsyncCLI:
         assert result.returncode == 1
         assert "Job not found" in result.stdout
 
+    def test_async_single_flight_and_pid_ordering(self, tmp_workdir, monkeypatch, capsys):
+        """GR-GAP-046: two async dispatches of the same task yield ONE running
+        job — the second dispatch reuses the existing job (no duplicate
+        evaluation) — and the persisted record always carries the child pid
+        (no pid=None window where a poll would resume a live job)."""
+        import subprocess as _subprocess
+
+        from engine.job_store import load_job
+        from gitreins import cli as cli_mod
+
+        run_cli("task", "create", "sf-cli", "SF CLI", "c1", cwd=tmp_workdir)
+        spawned: list = []
+        real_popen = _subprocess.Popen
+
+        class _FakeProc:
+            pid = 424242
+
+        def _fake_popen(cmd, *args, **kwargs):
+            # Spy ONLY the worker spawn (--run-job); let git rev-parse
+            # inside get_workdir() run for real.
+            if "--run-job" in cmd:
+                spawned.append(cmd)
+                return _FakeProc()
+            return real_popen(cmd, *args, **kwargs)
+
+        monkeypatch.setattr(_subprocess, "Popen", _fake_popen)
+        monkeypatch.chdir(tmp_workdir)
+
+        cli_mod._cmd_judge_async("sf-cli")
+        out1 = capsys.readouterr().out
+        cli_mod._cmd_judge_async("sf-cli")
+        out2 = capsys.readouterr().out
+
+        assert len(spawned) == 1, f"expected ONE worker spawn, got {len(spawned)}"
+        m1 = re.search(r"Async job dispatched: (job-[0-9a-f]+)", out1)
+        m2 = re.search(r"Async job already running: (job-[0-9a-f]+)", out2)
+        assert m1, out1
+        assert m2, out2
+        assert m1.group(1) == m2.group(1)
+
+        # The job file written by the dispatcher has the child's real pid —
+        # never None (the pid=None window is closed by Popen-first ordering).
+        job = load_job(m1.group(1))
+        assert job is not None
+        assert job["pid"] == 424242
+        assert job["status"] == "running"
+
+
+class TestJudgeSyncSingleFlight:
+    """GR-GAP-046: sync `gitreins judge` honors the single-flight key."""
+
+    def test_judge_sync_reuses_in_flight_job(self, tmp_workdir, monkeypatch, capsys):
+        """While a background job for the task is genuinely in flight (live
+        pid), the sync judge does not start a second evaluation — it points
+        at the running job (prevents CLI+MCP double evaluation)."""
+        from types import SimpleNamespace
+
+        from engine.job_store import make_job, save_job
+        from engine.judge import Judge
+        from gitreins import cli as cli_mod
+
+        run_cli("task", "create", "sync-sf", "Sync SF", "c1", cwd=tmp_workdir)
+        monkeypatch.chdir(tmp_workdir)
+        monkeypatch.setattr(cli_mod, "_check_for_updates", lambda: None)
+
+        # Genuinely in-flight job: pid = this (alive) process.
+        job = make_job("sync-sf", tmp_workdir)
+        job["pid"] = os.getpid()
+        save_job(job)
+
+        def _must_not_run(self, task):
+            pytest.fail("evaluate_task ran while a job was in flight")
+
+        monkeypatch.setattr(Judge, "evaluate_task", _must_not_run)
+
+        args = SimpleNamespace(
+            id="sync-sf",
+            status=False,
+            run_job=False,
+            async_dispatch=False,
+            skip_tier2=False,
+        )
+        cli_mod.cmd_judge(args)
+        out = capsys.readouterr().out
+        assert "already in progress" in out
+        assert job["id"] in out
+
+    def test_judge_sync_proceeds_when_running_job_is_orphaned(self, tmp_workdir, monkeypatch, capsys):
+        """A running record whose pid is DEAD is an orphan — the sync judge
+        supersedes it and evaluates (no permanent single-flight block)."""
+        from types import SimpleNamespace
+
+        from engine.job_store import make_job, save_job
+        from gitreins import cli as cli_mod
+
+        run_cli("task", "create", "sync-orphan", "Sync Orphan", "c1", cwd=tmp_workdir)
+        monkeypatch.chdir(tmp_workdir)
+        monkeypatch.setattr(cli_mod, "_check_for_updates", lambda: None)
+
+        job = make_job("sync-orphan", tmp_workdir)
+        job["pid"] = 99999999  # dead
+        save_job(job)
+
+        verdict_json = json.dumps(
+            {
+                "verdict": "COMPLETE",
+                "items": [{"criterion": "c1", "status": "PASS", "detail": "ok"}],
+                "summary": "all good",
+            }
+        )
+        monkeypatch.setenv(
+            "GITREINS_MOCK_LLM_RESPONSE", json.dumps({"content": verdict_json})
+        )
+
+        args = SimpleNamespace(
+            id="sync-orphan",
+            status=False,
+            run_job=False,
+            async_dispatch=False,
+            skip_tier2=False,
+        )
+        cli_mod.cmd_judge(args)
+        out = capsys.readouterr().out
+        assert "Judge Result" in out
+        assert "already in progress" not in out
+
 
 # ── Regression: config deletion via silent parse failure ──────────────────────
 

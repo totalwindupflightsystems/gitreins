@@ -22,11 +22,14 @@ from engine.llm import LLMClient
 from engine.guard_manager import GuardManager
 from engine.propagate import Propagator
 from engine.job_store import (
+    acquire_resume_lease,
     cap_from_dict,
     cap_to_dict,
+    find_running_job,
     load_job,
     make_job,
     pid_alive,
+    release_resume_lease,
     save_job,
 )
 
@@ -632,19 +635,41 @@ class GitReinsMCPServer:
         servers) or on the shared ``.gitreins/history`` git storage. A
         fresh ``Judge`` is built inside the job from the captured params.
 
+        Single-flight (GR-GAP-046): before dispatching, the shared disk
+        job store is checked for an existing RUNNING job for the same
+        (task_id, workdir) key — if one exists it is REUSED (its id is
+        returned, no second evaluation is dispatched), across server
+        instances and the CLI. Re-running ``task.complete`` on a failing
+        task therefore cannot multiply judges: a running job is reused, a
+        completed/error job is superseded by a fresh run. The check and
+        the create+save happen under ``_jobs_lock`` so concurrent tool
+        calls on this instance cannot both dispatch. When a job is
+        reused, its recorded eval_cap (the first dispatch's) applies.
+
         Jobs are persisted to the shared disk job store (DF-006) so they
         survive server restarts; an orphaned ``running`` job is resumed
         automatically on the next ``judge.status`` poll.
 
-        Returns the new job id; the caller returns immediately while the
+        Returns the job id; the caller returns immediately while the
         job runs. Poll ``judge.status`` with the job id for the result.
         """
-        job = make_job(task_id, wd, caps=cap_to_dict(eval_cap))
-        job["pid"] = os.getpid()
-        job_id = job["id"]
         with self._jobs_lock:
+            existing = find_running_job(task_id, wd)
+            if existing is not None:
+                job_id = existing["id"]
+                self._jobs[job_id] = existing
+                logger.info(
+                    "Reusing running job %s for task=%s workdir=%s (single-flight)",
+                    job_id,
+                    task_id,
+                    wd,
+                )
+                return job_id
+            job = make_job(task_id, wd, caps=cap_to_dict(eval_cap))
+            job["pid"] = os.getpid()
+            job_id = job["id"]
             self._jobs[job_id] = job
-        save_job(job)
+            save_job(job)
 
         self._start_job_thread(job, wd, task, eval_cap)
         return job_id
@@ -719,28 +744,54 @@ class GitReinsMCPServer:
         return job
 
     def _resume_disk_job(self, job: dict) -> dict:
-        """Re-dispatch an orphaned running job in this server instance."""
-        wd = job.get("workdir") or self.workdir
-        task = TaskManager(wd).get(job.get("task_id", ""))
-        if task is None:
-            job["status"] = "error"
-            job["error"] = (
-                f"task {job.get('task_id')} no longer exists in {wd} — job could not be resumed"
+        """Re-dispatch an orphaned running job in this server instance.
+
+        The resume is claimed under an exclusive per-job lease
+        (``fcntl.flock`` on ``<job_id>.lock``, GR-GAP-046) so two server
+        instances polling the same orphaned job cannot both re-dispatch a
+        worker. The claim re-reads the record INSIDE the lease: a loser
+        that raced the winner's pid-write sees the winner's live pid and
+        returns the record untouched instead of starting a second
+        evaluation.
+        """
+        lease = acquire_resume_lease(job["id"])
+        if lease is None:
+            # Another instance holds the resume lease right now — it is
+            # claiming this job. Never double-dispatch; return the record
+            # as-is (the winner's claim lands on disk momentarily).
+            return load_job(job["id"]) or job
+        try:
+            # Re-read under the lease: the caller's snapshot may predate
+            # another instance's claim.
+            fresh = load_job(job["id"]) or job
+            if fresh.get("status") != "running" or pid_alive(fresh.get("pid")):
+                # Already claimed (live pid) or finished — nothing to resume.
+                return fresh
+            wd = fresh.get("workdir") or self.workdir
+            task = TaskManager(wd).get(fresh.get("task_id", ""))
+            if task is None:
+                fresh["status"] = "error"
+                fresh["error"] = (
+                    f"task {fresh.get('task_id')} no longer exists in {wd} — job could not be resumed"
+                )
+                fresh["finished_at"] = time.time()
+                save_job(fresh)
+                return fresh
+            logger.info(
+                "Resuming orphaned job %s (task=%s workdir=%s)",
+                fresh["id"],
+                fresh["task_id"],
+                wd,
             )
-            job["finished_at"] = time.time()
-            save_job(job)
-            return job
-        logger.info(
-            "Resuming orphaned job %s (task=%s workdir=%s)",
-            job["id"],
-            job["task_id"],
-            wd,
-        )
-        job["pid"] = os.getpid()
-        job["resumed_at"] = time.time()
-        save_job(job)
-        self._start_job_thread(job, wd, task, eval_cap=cap_from_dict(job.get("caps")))
-        return job
+            fresh["pid"] = os.getpid()
+            fresh["resumed_at"] = time.time()
+            save_job(fresh)
+            self._start_job_thread(
+                fresh, wd, task, eval_cap=cap_from_dict(fresh.get("caps"))
+            )
+            return fresh
+        finally:
+            release_resume_lease(lease)
 
     def _judge_status(self, job_id: str) -> dict:
         """Return the status of a background evaluation job.

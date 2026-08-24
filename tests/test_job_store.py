@@ -11,6 +11,7 @@ from engine.job_store import (
     cap_from_dict,
     cap_to_dict,
     delete_job,
+    find_running_job,
     job_dir,
     list_jobs,
     load_job,
@@ -110,3 +111,62 @@ def test_pid_alive():
     assert pid_alive(os.getpid()) is True
     # 99999999 is (practically) never a live pid
     assert pid_alive(99999999) is False
+
+
+# ── GR-GAP-046: single-flight key lookup ─────────────────────────────────────
+
+
+def test_find_running_job_matches_task_and_workdir(store_dir):
+    """find_running_job returns a running job for the same (task, workdir)."""
+    job = make_job("t1", "/r")
+    job["pid"] = 4242
+    save_job(job)
+    found = find_running_job("t1", "/r")
+    assert found is not None
+    assert found["id"] == job["id"]
+
+
+def test_find_running_job_normalizes_workdir(store_dir):
+    """Workdir comparison is abspath-normalized (trailing slash, symlinks)."""
+    job = make_job("t1", "/r/sub")
+    save_job(job)
+    assert find_running_job("t1", "/r/sub/") is not None
+
+
+def test_find_running_job_ignores_completed_and_error(store_dir):
+    """A completed/error job for the same task is superseded (new run)."""
+    done = make_job("t1", "/r")
+    done["status"] = "complete"
+    done["finished_at"] = 1.0
+    save_job(done)
+    failed = make_job("t1", "/r")
+    failed["status"] = "error"
+    failed["finished_at"] = 2.0
+    save_job(failed)
+    assert find_running_job("t1", "/r") is None
+
+
+def test_find_running_job_scoped_to_task_and_workdir(store_dir):
+    """Different task id or different workdir does not collide."""
+    a = make_job("t1", "/r")
+    save_job(a)
+    b = make_job("t2", "/r")
+    save_job(b)
+    c = make_job("t1", "/other")
+    save_job(c)
+    found = find_running_job("t1", "/r")
+    assert found is not None and found["id"] == a["id"]
+    assert find_running_job("t2", "/r")["id"] == b["id"]
+    assert find_running_job("t1", "/other")["id"] == c["id"]
+
+
+def test_find_running_job_returns_newest_of_duplicates(store_dir):
+    """If multiple running records exist (legacy), the newest wins."""
+    old = make_job("t1", "/r")
+    old["started_at"] = 1.0
+    save_job(old)
+    new = make_job("t1", "/r")
+    new["started_at"] = 2.0
+    save_job(new)
+    found = find_running_job("t1", "/r")
+    assert found["id"] == new["id"]

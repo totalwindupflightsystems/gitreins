@@ -1320,6 +1320,19 @@ def cmd_judge(args):
         print(f"Task not found: {args.id}")
         sys.exit(1)
 
+    # Single-flight (GR-GAP-046): while a background evaluation for this
+    # task is genuinely in flight (live pid — e.g. an MCP-dispatched job),
+    # don't start a second evaluation inline. Point the user at the
+    # running job instead. Only a LIVE pid blocks: a running record whose
+    # owner died is an orphan and a sync run supersedes it.
+    from engine.job_store import find_running_job, pid_alive
+
+    running = find_running_job(args.id, workdir)
+    if running is not None and pid_alive(running.get("pid")):
+        print(f"Evaluation already in progress for {args.id} (job {running['id']})")
+        print(f"  poll:    gitreins judge --status {running['id']}")
+        return
+
     if getattr(args, "skip_tier2", False):
         print("Tier 2 skipped (--skip-tier2 flag)")
 
@@ -1340,10 +1353,18 @@ def _cmd_judge_async(task_id: str) -> None:
     exiting; the job record lives in the shared disk store, so it can be
     polled with ``gitreins judge --status <job_id>`` and from the MCP
     server's ``judge.status`` tool.
+
+    Single-flight (GR-GAP-046): if a job for the same (task_id, workdir)
+    key is already ``running`` in the shared disk store, it is reused —
+    no second worker is spawned, so concurrent dispatches (CLI + MCP, or
+    two CLIs) yield ONE running evaluation. The child pid is captured
+    BEFORE the job record is first persisted, so there is no window where
+    the disk record claims a dead/None pid and a poll would resume a job
+    that is about to be owned by a live child.
     """
     import subprocess
 
-    from engine.job_store import job_log_path, make_job, save_job
+    from engine.job_store import find_running_job, job_log_path, make_job, new_job_id, save_job
     from engine.task_manager import TaskManager
 
     workdir = get_workdir()
@@ -1353,19 +1374,27 @@ def _cmd_judge_async(task_id: str) -> None:
         print(f"Task not found: {task_id}")
         sys.exit(1)
 
-    job = make_job(task_id, workdir)
-    save_job(job)
+    existing = find_running_job(task_id, workdir)
+    if existing is not None:
+        print(f"Async job already running: {existing['id']}")
+        print(f"  task:    {task_id}")
+        print(f"  workdir: {workdir}")
+        print(f"  poll:    gitreins judge --status {existing['id']}")
+        return
 
-    log_path = job_log_path(job["id"])
+    log_path = job_log_path(new_job_id())
     try:
         logf = open(log_path, "ab")
     except OSError as e:
         print(f"Could not open job log {log_path}: {e}")
         sys.exit(1)
 
+    # Spawn the child FIRST: the job record is published with the child's
+    # real pid in the same save that creates it (no pid=None window).
+    job_id = new_job_id()
     try:
         proc = subprocess.Popen(
-            [sys.executable, "-m", "gitreins.cli", "judge", "--run-job", job["id"]],
+            [sys.executable, "-m", "gitreins.cli", "judge", "--run-job", job_id],
             cwd=workdir,
             start_new_session=True,
             stdout=logf,
@@ -1374,13 +1403,11 @@ def _cmd_judge_async(task_id: str) -> None:
         )
     except OSError as e:
         logf.close()
-        job["status"] = "error"
-        job["error"] = f"worker spawn failed: {e}"
-        job["finished_at"] = time.time()
-        save_job(job)
         print(f"Could not start background job: {e}")
         sys.exit(1)
 
+    job = make_job(task_id, workdir)
+    job["id"] = job_id
     job["pid"] = proc.pid
     save_job(job)
     print(f"Async job dispatched: {job['id']}")
@@ -1403,6 +1430,16 @@ def _cmd_judge_worker(job_id: str) -> None:
     from engine.judge import Judge, judge_result_to_dict
 
     job = load_job(job_id)
+    if job is None:
+        # The dispatcher publishes the record AFTER spawning this child
+        # (GR-GAP-046: the record is never visible with a dead/None pid).
+        # A fast-starting child can therefore race the parent's save —
+        # retry briefly before giving up.
+        for _ in range(50):
+            time.sleep(0.02)
+            job = load_job(job_id)
+            if job is not None:
+                break
     if job is None:
         print(f"Job not found: {job_id}")
         sys.exit(1)

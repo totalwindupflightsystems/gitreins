@@ -896,6 +896,137 @@ class TestJudgeAsyncPersistence:
         assert isinstance(status["started_at"], (int, float))
         self._poll_status(mcp_server, result["job_id"])
 
+    # ── GR-GAP-046: judge single-flight + resume lease ─────────────────────
+
+    def test_task_complete_rerun_reuses_running_job(self, mcp_server, monkeypatch):
+        """Re-running task.complete while a job is in flight reuses the running
+        job — no second evaluation is dispatched (host load stays bounded)."""
+        from engine.job_store import list_jobs
+
+        monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
+        _stub_judge_evaluate(monkeypatch, sleep=5.0)
+        self._create_task(mcp_server, "rerun-me")
+        _mcp_call(mcp_server, "task.start", {"id": "rerun-me"})
+
+        r1 = _mcp_call(mcp_server, "task.complete", {"id": "rerun-me"})
+        r2 = _mcp_call(mcp_server, "task.complete", {"id": "rerun-me"})
+        assert r1["job_id"] == r2["job_id"], f"expected reuse, got {r1} / {r2}"
+
+        jobs = [j for j in list_jobs() if j["task_id"] == "rerun-me"]
+        assert len(jobs) == 1
+        assert jobs[0]["id"] == r1["job_id"]
+        assert jobs[0]["status"] == "running"
+
+    def test_task_complete_after_error_supersedes(self, mcp_server, monkeypatch):
+        """A failed evaluation is superseded: re-running task.complete on a
+        failing task starts a FRESH job (single-flight key releases on error)."""
+        from engine.job_store import list_jobs
+
+        monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
+        calls = {"n": 0}
+
+        def _flaky(self, task):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise RuntimeError("boom")
+            return _FakeJudgeResult(passed=True)
+
+        monkeypatch.setattr(Judge, "evaluate_task", _flaky)
+        self._create_task(mcp_server, "fail-rerun")
+        _mcp_call(mcp_server, "task.start", {"id": "fail-rerun"})
+
+        r1 = _mcp_call(mcp_server, "task.complete", {"id": "fail-rerun"})
+        s1 = self._poll_status(mcp_server, r1["job_id"])
+        assert s1["status"] == "error"
+
+        r2 = _mcp_call(mcp_server, "task.complete", {"id": "fail-rerun"})
+        assert r2["job_id"] != r1["job_id"]
+        s2 = self._poll_status(mcp_server, r2["job_id"])
+        assert s2["status"] == "complete"
+
+        jobs = [j for j in list_jobs() if j["task_id"] == "fail-rerun"]
+        assert len(jobs) == 2  # one error + one complete — never two running
+
+    def test_concurrent_judge_evaluate_same_task_single_flight(self, mcp_server, monkeypatch):
+        """Two CONCURRENT judge.evaluate calls for the same task yield ONE
+        running job — both callers get the same job_id."""
+        import threading
+
+        from engine.job_store import list_jobs
+
+        monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
+        _stub_judge_evaluate(monkeypatch, sleep=5.0)
+        self._create_task(mcp_server, "conc-me")
+
+        barrier = threading.Barrier(2)
+        results: dict[str, dict] = {}
+
+        def _dispatch(name):
+            barrier.wait()
+            results[name] = _mcp_call(mcp_server, "judge.evaluate", {"id": "conc-me"})
+
+        t1 = threading.Thread(target=_dispatch, args=("a",))
+        t2 = threading.Thread(target=_dispatch, args=("b",))
+        t1.start()
+        t2.start()
+        t1.join(10)
+        t2.join(10)
+        assert not t1.is_alive() and not t2.is_alive()
+
+        assert results["a"]["status"] == "running"
+        assert results["b"]["status"] == "running"
+        assert results["a"]["job_id"] == results["b"]["job_id"]
+
+        jobs = [j for j in list_jobs() if j["task_id"] == "conc-me"]
+        assert len(jobs) == 1
+        assert jobs[0]["id"] == results["a"]["job_id"]
+
+    def test_resume_lease_only_one_winner_two_instances(self, mcp_server, monkeypatch):
+        """Two server instances polling the same orphaned running job: the
+        flock lease lets exactly ONE resume win — no duplicate evaluation."""
+        import threading
+
+        from engine.job_store import load_job, make_job, save_job
+        from gitreins_mcp.server import GitReinsMCPServer
+
+        monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
+        self._create_task(mcp_server, "lease-race")
+
+        # Orphaned running job: dead pid, task exists, no in-memory record.
+        job = make_job("lease-race", mcp_server.workdir)
+        job["pid"] = 99999999
+        save_job(job)
+        job_id = job["id"]
+
+        dispatches: list[str] = []
+        monkeypatch.setattr(
+            GitReinsMCPServer,
+            "_start_job_thread",
+            lambda self, job, wd, task, eval_cap=None: dispatches.append(job["id"]),
+        )
+        server_b = GitReinsMCPServer(mcp_server.workdir)
+
+        barrier = threading.Barrier(2)
+        results: dict[str, dict] = {}
+
+        def _poll(srv, name):
+            barrier.wait()
+            results[name] = srv._load_or_resume_disk_job(job_id)
+
+        t1 = threading.Thread(target=_poll, args=(mcp_server, "a"))
+        t2 = threading.Thread(target=_poll, args=(server_b, "b"))
+        t1.start()
+        t2.start()
+        t1.join(10)
+        t2.join(10)
+        assert not t1.is_alive() and not t2.is_alive()
+
+        assert dispatches == [job_id], f"expected exactly one resume, got {dispatches}"
+        assert results["a"]["status"] == "running"
+        assert results["b"]["status"] == "running"
+        # The winner's claim landed on disk with a live pid.
+        assert load_job(job_id)["pid"] == os.getpid()
+
 
 # ── v0.7.3: Configure MCP tool ───────────────────────────────────────────────
 

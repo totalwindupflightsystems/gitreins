@@ -124,6 +124,62 @@ def delete_job(job_id: str) -> bool:
     return False
 
 
+def find_running_job(task_id: str, workdir: str) -> dict | None:
+    """Return the newest running job record for (task_id, workdir), if any.
+
+    Single-flight key (GR-GAP-046): at most ONE in-flight evaluation per
+    (task_id, workdir) across ALL processes sharing the disk store. Any
+    record still in ``running`` state blocks a new dispatch — a completed
+    or error job for the same task is superseded (new run), a running one
+    is reused. ``pid`` is deliberately NOT consulted: a ``running`` record
+    with a dead/None pid is an orphan that the resume path re-dispatches
+    on the next poll, so dispatching a second job for the same key would
+    multiply evaluations (the exact bug this guards against).
+    """
+    wd = os.path.abspath(workdir)
+    for job in list_jobs():
+        if job.get("task_id") != task_id:
+            continue
+        if os.path.abspath(job.get("workdir", "")) != wd:
+            continue
+        if job.get("status") == "running":
+            return job
+    return None
+
+
+def acquire_resume_lease(job_id: str) -> int | None:
+    """Atomically claim the right to resume a job (cross-process).
+
+    An exclusive ``fcntl.flock`` on a per-job lock file (``<job_id>.lock``
+    next to the job record) makes the resume check-then-act atomic: the
+    claim (re-read → set pid → save) happens while holding the lease, so
+    two server instances polling the same orphaned job cannot both
+    re-dispatch a worker. Non-blocking: returns the open fd (pass to
+    ``release_resume_lease``) or None if another process/thread holds the
+    lease right now.
+    """
+    import fcntl
+
+    lock_path = os.path.join(job_dir(), f"{job_id}.lock")
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        return None
+    return fd
+
+
+def release_resume_lease(fd: int) -> None:
+    """Release a lease acquired by ``acquire_resume_lease``."""
+    import fcntl
+
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
 # ── EvalCap (de)serialization ───────────────────────────────────────────────
 
 _CAP_FIELDS = (

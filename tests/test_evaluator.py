@@ -993,6 +993,76 @@ class TestCodeContextPreloading:
         ctx = evaluator._build_code_context(config)
         assert ctx == ""
 
+    def test_committed_change_visible_when_tree_clean(self, evaluator, tmp_workdir):
+        """GR-GAP-046: a judge run after a COMMITTED change sees the commit.
+
+        ``git diff HEAD`` is empty on a clean tree, so the context falls
+        back to a last-commit anchor (hash + subject + stat) instead of
+        an empty diff that would make the judge confabulate stale state.
+        """
+        import subprocess
+
+        self._init_repo_with_commit(
+            tmp_workdir, {"main.py": "def foo():\n    return 42\n"}
+        )
+        self._write(tmp_workdir, "main.py", "def foo():\n    return 99\n")
+        subprocess.run(["git", "add", "-A"], cwd=tmp_workdir)
+        subprocess.run(
+            ["git", "commit", "-m", "fix: return 99", "--no-verify"],
+            cwd=tmp_workdir,
+            env={
+                **os.environ,
+                "GIT_AUTHOR_NAME": "Test",
+                "GIT_AUTHOR_EMAIL": "t@t.com",
+                "GIT_COMMITTER_NAME": "Test",
+                "GIT_COMMITTER_EMAIL": "t@t.com",
+            },
+        )
+        # The working tree is genuinely clean now.
+        clean = subprocess.run(
+            ["git", "status", "--porcelain"], cwd=tmp_workdir, capture_output=True, text=True
+        )
+        assert clean.stdout.strip() == ""
+
+        config = {"guards": {"test_mode": "diff"}}
+        ctx = evaluator._build_code_context(config)
+
+        assert "LAST COMMIT" in ctx
+        assert "fix: return 99" in ctx
+        assert "main.py" in ctx  # the commit's stat names the changed file
+        assert "(no changes detected)" not in ctx
+        assert "CHANGED CODE (DIFF)" not in ctx  # no fabricated diff
+
+    def test_committed_change_visible_full_mode(self, evaluator, tmp_workdir):
+        """GR-GAP-046: full mode also anchors on the last commit when the
+        working tree is clean (no empty CHANGED FILES section)."""
+        import subprocess
+
+        self._init_repo_with_commit(
+            tmp_workdir, {"main.py": "def foo():\n    return 42\n"}
+        )
+        self._write(tmp_workdir, "main.py", "def foo():\n    return 99\n")
+        subprocess.run(["git", "add", "-A"], cwd=tmp_workdir)
+        subprocess.run(
+            ["git", "commit", "-m", "fix: return 99", "--no-verify"],
+            cwd=tmp_workdir,
+            env={
+                **os.environ,
+                "GIT_AUTHOR_NAME": "Test",
+                "GIT_AUTHOR_EMAIL": "t@t.com",
+                "GIT_COMMITTER_NAME": "Test",
+                "GIT_COMMITTER_EMAIL": "t@t.com",
+            },
+        )
+
+        config = {"guards": {"test_mode": "full"}}
+        ctx = evaluator._build_code_context(config)
+
+        assert "LAST COMMIT" in ctx
+        assert "fix: return 99" in ctx
+        assert "main.py" in ctx
+        assert "CHANGED FILES (FULL)" not in ctx  # no working-tree files to show
+
     def _init_repo_with_commit(self, tmp_workdir, files: dict[str, str]):
         """Helper: git init + commit the given {path: content} files."""
         import subprocess
