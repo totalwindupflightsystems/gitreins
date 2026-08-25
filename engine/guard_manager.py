@@ -257,6 +257,35 @@ def _resolve_test_command(cmd: str) -> tuple[str, str | None]:
     return cmd, None
 
 
+# ── pytest exit-5 ("no tests collected") handling ─────────────
+# pytest exit codes: 0=all passed, 1=tests failed, 2=interrupted/
+# collection error, 3=internal error, 4=usage error, 5=no tests collected.
+# Exit 5 is benign on a fresh repo with zero test files, but the tests
+# stage treated every non-zero code as a BLOCK — so `gitreins init` +
+# first `gitreins guard` failed and a brand-new repo could not make its
+# first commit (GR-GAP-048). Exit 5 with pytest's genuine "no tests ran"
+# summary and NO collection errors is pass-with-warning; anything else
+# (including exit 5 with collection errors mixed in) still blocks.
+_PYTEST_NO_TESTS_RE = re.compile(r"\bno tests ran\b", re.IGNORECASE)
+_PYTEST_ERRORS_RE = re.compile(r"(?m)^ERROR\b|\b[1-9]\d*\s+errors?\b", re.IGNORECASE)
+_PYTEST_NO_TESTS_WARNING = (
+    "pytest collected no tests (exit 5) — not blocking. Add tests to enable real test gating."
+)
+
+
+def _pytest_no_tests_benign(output: str) -> bool:
+    """True when output is pytest's benign exit-5 "no tests collected" case.
+
+    Requires pytest's signature "no tests ran" summary line (distinguishes
+    a real pytest exit 5 from some other tool exiting 5) and REJECTS the
+    output when collection errors are mixed in ("ERROR collecting ..."
+    lines or an "N error(s)" summary count) — that case stays a failure.
+    """
+    if not _PYTEST_NO_TESTS_RE.search(output):
+        return False
+    return _PYTEST_ERRORS_RE.search(output) is None
+
+
 def _load_guard_config(workdir: str) -> dict:
     """Load .gitreins/config.yaml and extract the guards section.
 
@@ -873,12 +902,26 @@ class GuardManager:
             output = result.stdout + result.stderr
             if fallback_warning:
                 output = f"{fallback_warning}\n{output}"
+            # GR-GAP-048: classify exit 5 on the FULL output (the "no tests
+            # ran" summary is a tail line, but collection-error lines sit
+            # earlier and must survive truncation for the check below).
+            no_tests_benign = result.returncode == 5 and _pytest_no_tests_benign(output)
             if len(output) > 2000:
                 output = output[-2000:]  # Keep last 2000 chars for failure context
             if result.returncode == 0:
                 return GuardResult(
                     name=label, passed=True, output=output[:500], warning=fallback_warning or ""
                 )
+            elif no_tests_benign:
+                # pytest exit 5 with zero tests collected and no collection
+                # errors — fresh-repo case: pass with a warning instead of
+                # blocking the repo's first commit.
+                warning = (
+                    f"{fallback_warning}\n{_PYTEST_NO_TESTS_WARNING}"
+                    if fallback_warning
+                    else _PYTEST_NO_TESTS_WARNING
+                )
+                return GuardResult(name=label, passed=True, output=output[:500], warning=warning)
             else:
                 return GuardResult(
                     name=label, passed=False, output=output, warning=fallback_warning or ""

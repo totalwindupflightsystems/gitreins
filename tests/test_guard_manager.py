@@ -725,6 +725,104 @@ class TestRunnerFallback:
         assert "⚠ test runner 'uv' not found on PATH" in summary
 
 
+class TestPytestExit5NoTests:
+    """GR-GAP-048: pytest exit 5 (no tests collected) warns instead of blocking.
+
+    On a fresh repo with zero test files, `gitreins init` + first
+    `gitreins guard` must NOT fail the tests stage — pytest's exit 5 is
+    benign "no tests collected". Collection errors (exit 2, or exit 5 with
+    ERROR lines mixed in) and real failures (exit 1) still block.
+    """
+
+    EXIT5_STDOUT = (
+        "============================= test session starts ==============================\n"
+        "platform linux -- Python 3.11.15, pytest-8.3.4, pluggy-1.5.0\n"
+        "rootdir: /tmp/grgap048-repro\n"
+        "collected 0 items\n"
+        "\n"
+        "============================= no tests ran in 0.00s ==============================\n"
+    )
+
+    def _mock_proc(self, returncode, stdout, stderr=""):
+        mock_run = MagicMock()
+        mock_run.returncode = returncode
+        mock_run.stdout = stdout
+        mock_run.stderr = stderr
+        return mock_run
+
+    def test_exit5_no_tests_collected_passes_with_warning(self, tmp_workdir):
+        """pytest exit 5 + 'no tests ran' → PASS with a warning, not a block."""
+        gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x --tb=short"}})
+        with patch("subprocess.run", return_value=self._mock_proc(5, self.EXIT5_STDOUT)):
+            result = gm._run_test_command("pytest -x --tb=short", "tests (full)")
+        assert result.passed is True
+        assert result.warning and "no tests" in result.warning
+        assert "exit 5" in result.warning
+
+    def test_exit5_warning_surfaces_in_summary(self, tmp_workdir):
+        """The no-tests note is visible in the guard summary as a ⚠ line."""
+        gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x --tb=short"}})
+        with patch("subprocess.run", return_value=self._mock_proc(5, self.EXIT5_STDOUT)):
+            result = gm._run_test_command("pytest -x --tb=short", "tests (full)")
+        summary = Tier1Result(passed=True, results=[result]).summary
+        assert "✓ tests (full)" in summary
+        assert "⚠ pytest collected no tests (exit 5)" in summary
+
+    def test_exit5_via_check_tests_full_mode_allows_commit(self, guard_manager):
+        """End-to-end at the guard stage: staged file + full mode + exit 5 →
+        the tests guard result passes, so the commit is not blocked."""
+        with patch("engine.guard_manager._get_staged_files", return_value=["calc.py"]):
+            with patch("subprocess.run", return_value=self._mock_proc(5, self.EXIT5_STDOUT)):
+                result = guard_manager._check_tests()
+        assert result.name == "tests (full)"
+        assert result.passed is True
+        assert result.warning and "no tests" in result.warning
+
+    def test_exit5_with_collection_errors_still_blocks(self, tmp_workdir):
+        """Exit 5 with collection ERROR lines mixed in is NOT the benign case."""
+        gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x --tb=short"}})
+        stdout = (
+            "collected 0 items / 1 error\n"
+            "________________ ERROR collecting tests/test_broken.py ________________\n"
+            "=========== 1 error, no tests ran in 0.05s ===========\n"
+        )
+        with patch("subprocess.run", return_value=self._mock_proc(5, stdout)):
+            result = gm._run_test_command("pytest -x --tb=short", "tests (full)")
+        assert result.passed is False
+
+    def test_exit5_without_pytest_marker_still_blocks(self, tmp_workdir):
+        """A non-pytest command exiting 5 (no 'no tests ran' line) still fails —
+        exit 5 is only benign for pytest's documented no-tests-collected code."""
+        gm = GuardManager(tmp_workdir, {"guards": {"test_command": "make test"}})
+        with patch("subprocess.run", return_value=self._mock_proc(5, "make: *** [test] Error 5\n")):
+            result = gm._run_test_command("make test", "tests (full)")
+        assert result.passed is False
+
+    def test_exit2_collection_error_still_blocks(self, tmp_workdir):
+        """pytest exit 2 (collection error) remains a blocking failure."""
+        gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x --tb=short"}})
+        stdout = (
+            "collected 0 items / 1 error\n"
+            "________________ ERROR collecting tests/test_broken.py ________________\n"
+            "============================== 1 error in 0.05s ===============================\n"
+        )
+        with patch("subprocess.run", return_value=self._mock_proc(2, stdout)):
+            result = gm._run_test_command("pytest -x --tb=short", "tests (full)")
+        assert result.passed is False
+
+    def test_exit1_real_test_failure_still_blocks(self, tmp_workdir):
+        """pytest exit 1 (real test failure) remains a blocking failure."""
+        gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x --tb=short"}})
+        stdout = (
+            "FAILED tests/test_calc.py::test_add - assert 1 + 1 == 3\n"
+            "===================== 1 failed, 2 passed in 0.12s =====================\n"
+        )
+        with patch("subprocess.run", return_value=self._mock_proc(1, stdout)):
+            result = gm._run_test_command("pytest -x --tb=short", "tests (full)")
+        assert result.passed is False
+        assert "1 failed" in result.output
+
+
 class TestExtendedGuardManager:
     """Extended edge case coverage for GuardManager."""
 
