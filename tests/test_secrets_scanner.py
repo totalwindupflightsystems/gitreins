@@ -377,9 +377,7 @@ class TestVenvDirExclusion:
             ".venv312/lib/python3.12/site-packages/jedi/mod.py",
             self.VENDORED,
         )
-        _write_workdir_file(
-            tmp_workdir, "src/app.py", 'aws_key = "AKIAABCDEFGHIJKLMNOP"\n'
-        )
+        _write_workdir_file(tmp_workdir, "src/app.py", 'aws_key = "AKIAABCDEFGHIJKLMNOP"\n')
 
         gm = GuardManager(tmp_workdir)
         result = gm._builtin_secrets_scan(staged_only=False)
@@ -387,4 +385,3 @@ class TestVenvDirExclusion:
         assert result.passed is False
         assert "AWS access key" in result.output
         assert ".venv312" not in result.output
-

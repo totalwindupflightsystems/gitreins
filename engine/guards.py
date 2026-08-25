@@ -39,8 +39,7 @@ def _coerce_timeout(value, name: str, default: int) -> int:
         return default
     if isinstance(value, bool):
         raise ValueError(
-            f"guards.{name} must be a positive number of seconds "
-            f"(e.g. {name}: 300), got {value!r}"
+            f"guards.{name} must be a positive number of seconds (e.g. {name}: 300), got {value!r}"
         )
     if isinstance(value, str):
         match = re.match(r"^\s*(\d+)", value)
@@ -60,8 +59,7 @@ def _coerce_timeout(value, name: str, default: int) -> int:
             ) from None
     if value <= 0:
         raise ValueError(
-            f"guards.{name} must be a positive number of seconds "
-            f"(e.g. {name}: 300), got {value!r}"
+            f"guards.{name} must be a positive number of seconds (e.g. {name}: 300), got {value!r}"
         )
     return value
 

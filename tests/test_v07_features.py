@@ -356,7 +356,9 @@ class TestInit:
         lang = _detect_language(str(tmp_path))
         assert _detect_test_command(str(tmp_path), lang) == "python3 -m pytest -x --tb=short"
 
-    def test_python_root_package_with_pythonpath_config_uses_bare_pytest(self, monkeypatch, tmp_path):
+    def test_python_root_package_with_pythonpath_config_uses_bare_pytest(
+        self, monkeypatch, tmp_path
+    ):
         """Root-package + tests/ but pyproject configures pytest pythonpath → bare pytest."""
         import shutil
 
@@ -371,8 +373,7 @@ class TestInit:
         (tmp_path / "tests").mkdir()
         (tmp_path / "tests" / "test_todo.py").write_text("def test_add(): pass\n")
         (tmp_path / "pyproject.toml").write_text(
-            "[project]\nname='todo'\n"
-            "[tool.pytest.ini_options]\npythonpath = [\".\"]\n"
+            "[project]\nname='todo'\n[tool.pytest.ini_options]\npythonpath = [\".\"]\n"
         )
 
         lang = _detect_language(str(tmp_path))
@@ -413,12 +414,13 @@ class TestInit:
         from gitreins.cli import _has_pytest_pythonpath_config
 
         (tmp_path / "pyproject.toml").write_text(
-            "[project]\nname='todo'\n"
-            "[tool.pytest.ini_options]\npythonpath = [\".\"]\n"
+            "[project]\nname='todo'\n[tool.pytest.ini_options]\npythonpath = [\".\"]\n"
         )
         assert _has_pytest_pythonpath_config(str(tmp_path)) is True
 
-    def test_python_root_package_with_pytest_ini_pythonpath_uses_bare_pytest(self, monkeypatch, tmp_path):
+    def test_python_root_package_with_pytest_ini_pythonpath_uses_bare_pytest(
+        self, monkeypatch, tmp_path
+    ):
         """Root-package + tests/ but pytest.ini configures pythonpath → bare pytest."""
         import shutil
 

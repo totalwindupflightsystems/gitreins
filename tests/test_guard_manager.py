@@ -161,9 +161,7 @@ class TestGuardManagerInit:
 
     def test_lsp_timeout_config_parsed(self, tmp_workdir):
         """guards.lsp_timeouts.{init,per_file} are parsed into manager."""
-        gm = GuardManager(
-            tmp_workdir, {"guards": {"lsp_timeouts": {"init": 600, "per_file": 240}}}
-        )
+        gm = GuardManager(tmp_workdir, {"guards": {"lsp_timeouts": {"init": 600, "per_file": 240}}})
         assert gm._lsp_init_timeout == 600
         assert gm._lsp_per_file_timeout == 240
 
@@ -242,11 +240,7 @@ class TestTimeoutCoercion:
         with open(os.path.join(tmp_workdir, "main.go"), "w") as f:
             f.write("package main\n\nfunc main() {}\n")
         with open(os.path.join(tmp_workdir, "main_test.go"), "w") as f:
-            f.write(
-                "package main\n\n"
-                'import "testing"\n\n'
-                "func TestMainSmoke(t *testing.T) {}\n"
-            )
+            f.write('package main\n\nimport "testing"\n\nfunc TestMainSmoke(t *testing.T) {}\n')
         os.makedirs(os.path.join(tmp_workdir, ".gitreins"))
         with open(os.path.join(tmp_workdir, ".gitreins", "config.yaml"), "w") as f:
             f.write("guards:\n  test_timeout: 300s\n")
@@ -346,8 +340,7 @@ class TestBuiltinSecretsScan:
         """
         with open(os.path.join(tmp_workdir, "auth_test.go"), "w") as f:
             f.write(
-                'cred := Credential{Type: CredentialAPIKey, '
-                'Key: "sk-benchmark-test-key-12345"}\n'
+                'cred := Credential{Type: CredentialAPIKey, Key: "sk-benchmark-test-key-12345"}\n'
             )
         gm = GuardManager(tmp_workdir)
         result = gm._builtin_secrets_scan(staged_only=False)
@@ -359,8 +352,7 @@ class TestBuiltinSecretsScan:
         caught."""
         with open(os.path.join(tmp_workdir, "auth.go"), "w") as f:
             f.write(
-                'cred := Credential{Type: CredentialAPIKey, '
-                'Key: "sk-benchmark-test-key-12345"}\n'
+                'cred := Credential{Type: CredentialAPIKey, Key: "sk-benchmark-test-key-12345"}\n'
             )
         gm = GuardManager(tmp_workdir)
         result = gm._builtin_secrets_scan(staged_only=False)
@@ -706,9 +698,7 @@ class TestRunnerFallback:
             {"guards": {"test_command": "uv run pytest -x --tb=short"}},
         )
         test_file = os.path.join(tmp_workdir, "tests", "test_x.py")
-        narrowed = _build_diff_test_command(
-            "uv run pytest -x --tb=short", [test_file], tmp_workdir
-        )
+        narrowed = _build_diff_test_command("uv run pytest -x --tb=short", [test_file], tmp_workdir)
         assert narrowed == "uv run pytest -x --tb=short tests/test_x.py"
         mock_run = MagicMock()
         mock_run.returncode = 0
@@ -799,7 +789,11 @@ class TestExtendedGuardManager:
             with patch.object(
                 gm,
                 "_builtin_secrets_scan",
-                return_value=GuardResult("secrets", False, "Potential secrets found:\n.env:1: [AWS access key] AWS_ACCESS_KEY_ID=\"***\""),
+                return_value=GuardResult(
+                    "secrets",
+                    False,
+                    'Potential secrets found:\n.env:1: [AWS access key] AWS_ACCESS_KEY_ID="***"',
+                ),
             ):
                 result = gm._check_secrets()
         assert result.passed is False
@@ -1125,9 +1119,7 @@ class TestBuildDiffTestCommand:
 
         workdir = str(tmp_path)
         abs_test = os.path.join(workdir, "tests", "test_a.py")
-        cmd = _build_diff_test_command(
-            "python3 -m pytest -x --tb=short", [abs_test], workdir
-        )
+        cmd = _build_diff_test_command("python3 -m pytest -x --tb=short", [abs_test], workdir)
         assert cmd == "python3 -m pytest -x --tb=short tests/test_a.py"
         assert cmd.endswith("tests/test_a.py")
 

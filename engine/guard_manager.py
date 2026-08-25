@@ -238,7 +238,7 @@ def _resolve_test_command(cmd: str) -> tuple[str, str | None]:
         runner = prefix.split()[0]
         if shutil.which(runner):
             return cmd, None
-        rest = stripped[len(prefix):].lstrip()
+        rest = stripped[len(prefix) :].lstrip()
         # pytest invocation → {sys.executable} -m pytest ...
         if rest == "pytest" or rest.startswith("pytest "):
             new_cmd = f"{sys.executable} -m {rest}"
@@ -586,7 +586,10 @@ class GuardManager:
             # OpenAI/OpenRouter keys (20+ chars, at least one uppercase/digit —
             # real keys are hex/base64; quoted doc strings that are all-lowercase
             # (e.g. 'premise-verification') are not keys)
-            (r"\bsk-(?=[A-Za-z0-9_\-]{20,})[A-Za-z0-9_\-]*[A-Z0-9][A-Za-z0-9_\-]*", "OpenAI/OpenRouter API key"),
+            (
+                r"\bsk-(?=[A-Za-z0-9_\-]{20,})[A-Za-z0-9_\-]*[A-Z0-9][A-Za-z0-9_\-]*",
+                "OpenAI/OpenRouter API key",
+            ),
             # AWS keys
             (r"(?i)AKIA[0-9A-Z]{16}", "AWS access key"),
             (
@@ -647,9 +650,7 @@ class GuardManager:
 
             if not files:
                 scope = "staged" if staged_only else "workdir"
-                return GuardResult(
-                    name="secrets", passed=True, output=f"No {scope} files to scan"
-                )
+                return GuardResult(name="secrets", passed=True, output=f"No {scope} files to scan")
 
             for fpath in files:
                 # Respect .gitleaks.toml [allowlist] paths — same exemptions
@@ -757,8 +758,7 @@ class GuardManager:
             dirs[:] = [
                 d
                 for d in dirs
-                if d not in skip_dirs
-                and not (d.startswith(".venv") or d.startswith("venv"))
+                if d not in skip_dirs and not (d.startswith(".venv") or d.startswith("venv"))
             ]
             for name in names:
                 files.append(os.path.relpath(os.path.join(root, name), self.workdir))

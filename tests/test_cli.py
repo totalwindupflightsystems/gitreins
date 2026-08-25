@@ -868,7 +868,9 @@ class TestJudgeSyncSingleFlight:
         assert "already in progress" in out
         assert job["id"] in out
 
-    def test_judge_sync_proceeds_when_running_job_is_orphaned(self, tmp_workdir, monkeypatch, capsys):
+    def test_judge_sync_proceeds_when_running_job_is_orphaned(
+        self, tmp_workdir, monkeypatch, capsys
+    ):
         """A running record whose pid is DEAD is an orphan — the sync judge
         supersedes it and evaluates (no permanent single-flight block)."""
         from types import SimpleNamespace
@@ -891,9 +893,7 @@ class TestJudgeSyncSingleFlight:
                 "summary": "all good",
             }
         )
-        monkeypatch.setenv(
-            "GITREINS_MOCK_LLM_RESPONSE", json.dumps({"content": verdict_json})
-        )
+        monkeypatch.setenv("GITREINS_MOCK_LLM_RESPONSE", json.dumps({"content": verdict_json}))
 
         args = SimpleNamespace(
             id="sync-orphan",
@@ -1463,9 +1463,7 @@ class TestPreCommitHookPathPinning:
         subprocess.run(
             ["git", "config", "user.email", "test@test.com"], cwd=repo, capture_output=True
         )
-        subprocess.run(
-            ["git", "config", "user.name", "Test"], cwd=repo, capture_output=True
-        )
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, capture_output=True)
 
         real_script = shutil.which("gitreins")
         if real_script is None:
@@ -1507,8 +1505,7 @@ class TestPreCommitHookPathPinning:
             text=True,
         )
         assert commit.returncode != 0, (
-            "Hook did not block the secret commit: "
-            f"{commit.stdout[:300]} {commit.stderr[:300]}"
+            f"Hook did not block the secret commit: {commit.stdout[:300]} {commit.stderr[:300]}"
         )
         assert "secrets" in (commit.stdout + commit.stderr).lower()
 

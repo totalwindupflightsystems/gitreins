@@ -1002,9 +1002,7 @@ class TestCodeContextPreloading:
         """
         import subprocess
 
-        self._init_repo_with_commit(
-            tmp_workdir, {"main.py": "def foo():\n    return 42\n"}
-        )
+        self._init_repo_with_commit(tmp_workdir, {"main.py": "def foo():\n    return 42\n"})
         self._write(tmp_workdir, "main.py", "def foo():\n    return 99\n")
         subprocess.run(["git", "add", "-A"], cwd=tmp_workdir)
         subprocess.run(
@@ -1038,9 +1036,7 @@ class TestCodeContextPreloading:
         working tree is clean (no empty CHANGED FILES section)."""
         import subprocess
 
-        self._init_repo_with_commit(
-            tmp_workdir, {"main.py": "def foo():\n    return 42\n"}
-        )
+        self._init_repo_with_commit(tmp_workdir, {"main.py": "def foo():\n    return 42\n"})
         self._write(tmp_workdir, "main.py", "def foo():\n    return 99\n")
         subprocess.run(["git", "add", "-A"], cwd=tmp_workdir)
         subprocess.run(

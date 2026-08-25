@@ -311,13 +311,9 @@ class Pipeline:
                 data={"exit_code": result.returncode},
             )
         except subprocess.TimeoutExpired:
-            return StepResult(
-                id=step_id, type="script", passed=False, error="Command timed out"
-            )
+            return StepResult(id=step_id, type="script", passed=False, error="Command timed out")
         except Exception as e:
-            return StepResult(
-                id=step_id, type="script", passed=False, error=str(e)
-            )
+            return StepResult(id=step_id, type="script", passed=False, error=str(e))
 
     def _run_ai_eval(self, step_def: dict, task: dict) -> StepResult:
         """Run the AI evaluator as a pipeline step."""
@@ -404,9 +400,11 @@ class Pipeline:
         if prompt_template:
             pipeline_context = self._get_pipeline_context()
             import json as _json
+
             ctx_str = _json.dumps(pipeline_context.get("stages", {}), default=str)[:4000]
             rendered = prompt_template.replace(
-                "{{ pipeline_context }}", ctx_str,
+                "{{ pipeline_context }}",
+                ctx_str,
             )
             task["_system_prompt_override"] = rendered
             task["_pipeline_context"] = pipeline_context
@@ -431,6 +429,7 @@ class Pipeline:
                 import json as _uj
                 import os as _uos
                 import time as _time
+
                 _cap = getattr(evaluator, "eval_cap", None)
                 if _cap is not None:
                     usage_line = {
@@ -827,7 +826,7 @@ def _default_tier1_steps(workdir: str, config: dict | None = None) -> list[dict]
                 "gitleaks detect --source . --no-git --no-banner; else true; fi; g1=$?; "
                 f'PYTHONPATH="{_engine_root()}" {sys.executable} -c "from engine.guard_manager import GuardManager; '
                 "import sys; gm = GuardManager('.'); "
-                'r = gm._builtin_secrets_scan(staged_only=False); '
+                "r = gm._builtin_secrets_scan(staged_only=False); "
                 'sys.exit(1 if not r.passed else 0)"; '
                 'g2=$?; [ "$g1" -eq 0 ] && [ "$g2" -eq 0 ]'
             ),

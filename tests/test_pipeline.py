@@ -496,9 +496,7 @@ class TestLoadPipelineConfigFallback:
         subprocess.run(
             ["git", "config", "user.email", "test@test.com"], cwd=workdir, capture_output=True
         )
-        subprocess.run(
-            ["git", "config", "user.name", "Test"], cwd=workdir, capture_output=True
-        )
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=workdir, capture_output=True)
         # Committed secrets — runtime-constructed, never literals in source
         with open(os.path.join(workdir, "sk.txt"), "w") as f:
             f.write('key = "sk-' + "A1" * 12 + '"\n')
@@ -514,8 +512,7 @@ class TestLoadPipelineConfigFallback:
         tier1 = out["stages"]["tier1"]
         secrets_step = next(s for s in tier1["steps"] if s["id"] == "secrets")
         assert secrets_step["data"]["exit_code"] != 0, (
-            "tier1 secrets step passed on committed secrets: "
-            f"{secrets_step['output'][:300]}"
+            f"tier1 secrets step passed on committed secrets: {secrets_step['output'][:300]}"
         )
 
 
