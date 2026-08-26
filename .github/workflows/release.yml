@@ -12,16 +12,67 @@ jobs:
   publish:
     name: Build and publish to PyPI
     runs-on: ubuntu-latest
+    outputs:
+      already_published: ${{ steps.check.outputs.already_published }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Verify tag matches pyproject version
+        run: |
+          python3 - <<'EOF'
+          import re
+          import sys
+          from pathlib import Path
+
+          ref = "${{ github.ref_name }}"
+          tag_version = ref[1:] if ref.startswith("v") else ref
+          match = re.search(r'^version\s*=\s*"([^"]+)"', Path("pyproject.toml").read_text(), re.M)
+          if match is None:
+              print("::error::no version = \"...\" line found in pyproject.toml")
+              sys.exit(1)
+          pyproject_version = match.group(1)
+          if tag_version != pyproject_version:
+              print(f"::error::tag {ref} (version {tag_version}) does not match pyproject.toml version {pyproject_version}")
+              sys.exit(1)
+          print(f"tag {ref} matches pyproject.toml version {pyproject_version}")
+          EOF
+      - name: Check if version already published
+        id: check
+        run: |
+          python3 - <<'EOF'
+          import json
+          import os
+          import sys
+          import urllib.request
+
+          ref = "${{ github.ref_name }}"
+          tag_version = ref[1:] if ref.startswith("v") else ref
+          try:
+              with urllib.request.urlopen("https://pypi.org/pypi/gitreins/json", timeout=30) as response:
+                  data = json.load(response)
+          except Exception as exc:
+              print(f"::warning::could not query PyPI ({exc}); proceeding with publish")
+              sys.exit(0)
+          pypi_version = data.get("info", {}).get("version")
+          if pypi_version == tag_version:
+              print(f"version {tag_version} already published on PyPI; skipping publish steps")
+              with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+                  out.write("already_published=true\n")
+          else:
+              print(f"version {tag_version} not on PyPI (latest: {pypi_version}); proceeding")
+          EOF
+      - name: Export already_published job output
+        run: echo "already_published=${{ steps.check.outputs.already_published }}" >> "$GITHUB_OUTPUT"
       - name: Install build tooling
+        if: steps.check.outputs.already_published != 'true'
         run: pip install build twine
       - name: Build sdist and wheel
+        if: steps.check.outputs.already_published != 'true'
         run: python -m build
       - name: Publish to PyPI
+        if: steps.check.outputs.already_published != 'true'
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
@@ -36,6 +87,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Create release notes
+        if: needs.publish.outputs.already_published != 'true'
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
