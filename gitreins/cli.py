@@ -89,7 +89,7 @@ def _resolve_gitreins_invocation() -> str | None:
     The hook must run the SAME installation that ran `install`. A bare
     `gitreins` resolves via PATH at commit time and can silently pick a
     different version (DF-011: a stale 0.8.1 earlier on PATH let real
-    secrets through while the repo's .venv had 0.11.0). Resolution
+    secrets through while the repo's .venv had an older patch release). Resolution
     order:
 
       1. ``sys.argv[0]`` — the script that actually launched this
