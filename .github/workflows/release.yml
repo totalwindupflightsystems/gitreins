@@ -71,6 +71,67 @@ jobs:
       - name: Build sdist and wheel
         if: steps.check.outputs.already_published != 'true'
         run: python -m build
+      - name: Assert wheel reports tag version
+        if: steps.check.outputs.already_published != 'true'
+        run: |
+          python3 - <<'EOF'
+          import glob
+          import os
+          import re
+          import subprocess
+          import sys
+          import tempfile
+          import venv
+          import zipfile
+          from pathlib import Path
+
+          ref = "${{ github.ref_name }}"
+          tag_version = ref[1:] if ref.startswith("v") else ref
+
+          wheels = glob.glob("dist/*.whl")
+          if not wheels:
+              print("::error::no wheel found in dist/")
+              sys.exit(1)
+          wheel = wheels[0]
+          print(f"asserting {wheel} reports version {tag_version}")
+
+          with tempfile.TemporaryDirectory() as tmp:
+              with zipfile.ZipFile(wheel) as zf:
+                  zf.extractall(tmp)
+
+              version_py = Path(tmp) / "engine" / "version.py"
+              if not version_py.exists():
+                  print("::error::engine/version.py missing from wheel")
+                  sys.exit(1)
+              src = version_py.read_text()
+              if "importlib" not in src:
+                  print("::error::engine/version.py in wheel has no importlib metadata lookup (static version drift risk)")
+                  sys.exit(1)
+              if '"0.11.0"' in src:
+                  print('::error::engine/version.py in wheel still contains static literal "0.11.0"')
+                  sys.exit(1)
+
+              metadata_files = list(Path(tmp).glob("*.dist-info/METADATA"))
+              if not metadata_files:
+                  print("::error::METADATA not found in wheel")
+                  sys.exit(1)
+              metadata = metadata_files[0].read_text()
+              m = re.search(r"^Version:\s*(.+)$", metadata, re.M)
+              metadata_version = m.group(1).strip() if m else "(missing)"
+              if metadata_version != tag_version:
+                  print(f"::error::wheel METADATA version {metadata_version} != tag version {tag_version}")
+                  sys.exit(1)
+
+              venv_dir = os.path.join(tmp, "_venv")
+              venv.EnvBuilder(with_pip=True).create(venv_dir)
+              subprocess.run([os.path.join(venv_dir, "bin", "python"), "-m", "pip", "install", "-q", wheel], check=True)
+              proc = subprocess.run([os.path.join(venv_dir, "bin", "gitreins"), "--version"], capture_output=True, text=True)
+              expected = f"gitreins {tag_version}"
+              if proc.returncode != 0 or proc.stdout.strip() != expected:
+                  print(f"::error::wheel CLI reported {proc.stdout.strip()!r} (exit {proc.returncode}); expected {expected!r}")
+                  sys.exit(1)
+              print(f"OK: {wheel} installs clean in a fresh venv and reports {expected}")
+          EOF
       - name: Publish to PyPI
         if: steps.check.outputs.already_published != 'true'
         env:
