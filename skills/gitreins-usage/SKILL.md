@@ -127,6 +127,38 @@ The MCP `commit` tool runs guards first and rejects the commit if they fail.
     — do NOT re-verify it every tick.** Park it with a recheck date; idle
     audits should skip recently-verified blocked tasks (DF-013).
 
+## Fresh install on PyPI 0.12.0 (2026-08-27 dogfood run) — what changed
+
+Verified against the RELEASED wheel in a fresh venv, not repo HEAD:
+
+- **0.12.0 is on PyPI** (08-14) — the 11-day release lag (pitfall 10) is over.
+  BUT the wheel's `engine/version.py` statically says 0.11.0 → every command
+  prints `Update available: 0.11.0 → 0.12.0` on the already-current install
+  (DF-015). `gitreins --version` is NOT trustworthy on the 0.12.0 wheel.
+- **The pre-commit hook now pins the installing binary's absolute path**
+  (pitfall 11 fixed in the wheel) — no PATH shadowing on fresh installs. If
+  the venv moves later, the hook fails with `command not found` (confusing
+  but loud).
+- **DF-001 gitleaks-regex fix is in the wheel** — a fresh `.gitleaks.toml`
+  is valid; gitleaks runs without panicking (pitfall 1 closed for fresh
+  installs).
+- **Secrets scan reports only the FIRST finding per file** (DF-016): a file
+  with `sk-` AND `ghp_` shows one finding. Each pattern is caught in
+  isolation. Don't trust "N finding(s)" as the full count for a file.
+- **uv on PATH + root-package layout still breaks the tests guard** (DF-017):
+  init writes `uv run pytest -x --tb=short`, which cannot import root
+  packages (no `pythonpath`). If guard fails with a bare pytest summary,
+  run `uv run pytest` yourself and add
+  `[tool.pytest.ini_options] pythonpath = ["."]` to pyproject.toml.
+- **Guard failure output still won't tell you WHICH test failed** (DF-018) —
+  it shows only the last pytest summary line. Re-run pytest directly to see
+  failures; MCP `guard_run` returns the full pytest log.
+- **init claims "Static analysis: enabled (mypy, pyright)" but writes no
+  tools** (DF-019) — the guard no-ops. Don't assume mypy/pyright run.
+- Tier-2 judge on a tiny repo: ~3.5 min, evidence-cited per-criterion PASS
+  (deepseek-v4-flash). MCP `guard_run`/`judge_evaluate` accept a `workdir`
+  param for cross-repo use — verified against an external repo.
+
 ## Config reference (quick)
 
 ```yaml
@@ -146,4 +178,6 @@ gitreins report -n 3                                                    # recent
 ```
 
 More detail: `docs/dogfood/2026-08-03-integration.md` (real-use report),
+`docs/dogfood/2026-08-14-integration.md` (PyPI consumer path),
+`docs/dogfood/2026-08-27-integration.md` (fresh 0.12.0 wheel path),
 `docs/dogfood/diagnostics.md` (build/error trail).

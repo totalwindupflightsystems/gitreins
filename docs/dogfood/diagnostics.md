@@ -231,3 +231,90 @@ core >= 2.47.0") and let idle ticks skip parked tasks.
   right code is installed.
 - gitleaks-regex fix works: HEAD-generated `.gitleaks.toml` has valid
   `.*\\.log` entries; guard PASS on the same repo where PyPI 0.11.0 failed.
+
+---
+
+## Third dogfood run (2026-08-27) — PyPI 0.12.0 fresh-install consumer path
+
+This run used `pip install gitreins` (PyPI 0.12.0, released 08-14) in a fresh
+venv on a scratch repo (`/tmp/dogfood-gitreins/weather-cli`), exactly the
+08-14 path but against the CURRENT release. Findings: DF-015..DF-019 on the
+board. The release pipeline fix (GR-GAP-050, tag==version + idempotent
+release.yml) WORKED — 0.12.0 is on PyPI — but the wheel itself is stale.
+
+### Wheel version drift (DF-015) — the release check that's still missing
+
+**How it's built:** the 0.12.0 wheel's `engine/version.py` statically says
+`__version__ = "0.11.0"`. Repo HEAD's `engine/version.py` is dynamic
+(`metadata.version("gitreins")`, added after the release snapshot). The wheel
+metadata (dist-info METADATA) says 0.12.0, so pip and importlib.metadata agree
+— but the CLI reports 0.11.0.
+
+**What happened:** every command printed `Update available: 0.11.0 → 0.12.0`
+on an install that WAS 0.12.0. A user (or tooling) gating on `--version`
+concludes the DF-001/DF-011 fixes are absent and acts on stale assumptions —
+the exact DF-011 class of failure, recreated by the release process itself.
+
+**The right way:** the 08-14 "does the sdist match HEAD" check exists in
+spirit (GR-GAP-050 enforces tag==version) but doesn't check the WHEEL'S
+CONTENT. Add a release gate: build the wheel, run
+`.venv/bin/gitreins --version` against the built artifact, assert it equals
+the release tag. That single check catches both this and any future
+stale-snapshot release.
+
+### Secrets scan masks findings beyond the first per file (DF-016)
+
+**What happened:** file with `sk-...` (line 2) and `ghp_...` (line 3):
+`✗ secrets — 1 finding(s): config.example.json:2`. The ghp_ token was
+invisible. Each pattern is caught when it is the only secret in the file
+(verified separately). So the scan is not coverage-limited — it stops
+reporting after the first match per file.
+
+**The right way:** report ALL findings per file with file:line; a decoy-first
+file should not hide live keys, and "1 finding" should never be silently
+truncated to that.
+
+### DF-002 regression on the uv path (DF-017)
+
+**What happened:** fresh 0.12.0, uv on PATH → `init` wrote
+`test_command: uv run pytest -x --tb=short`. Root-package layout
+(`weather.py` at root + `tests/`, no pyproject) → `ModuleNotFoundError: No
+module named 'weather'` → guard FAIL with zero detail. The DF-002 fix (init
+writes `python3 -m pytest` for root-package layouts) only fires when uv is
+absent. User-side fix that worked: `[tool.pytest.ini_options]
+pythonpath = ["."]` in pyproject.toml.
+
+**The right way:** root-package detection must win over the uv preference
+(uv was the default BECAUSE it's installed, not because the layout supports
+it), or init should auto-write the pythonpath config, or the tests guard
+should fall back when the configured command fails to import.
+
+### Tests-guard failure output (DF-018) — DF-004's fix shows the wrong line
+
+DF-004's fix (commit b088647) makes the guard print the last output line,
+100-char cap. For pytest the last line is the summary — `1 failed, 3 passed
+in 0.03s` — which names nothing. The failing test name and traceback come
+BEFORE the summary. So the "tail" fix landed on the least informative line.
+MCP `guard_run` returns the full pytest log; the CLI should render the same
+depth (e.g. grep FAILED/ERROR lines from the captured output).
+
+### init claims static analysis that doesn't run (DF-019)
+
+`init` on a Python repo prints `Static analysis: enabled (mypy, pyright)`
+but writes `static_analysis: true` with NO `static_analysis_tools`; the guard
+then no-ops (`No static analysis tools configured for this language`).
+Neither mypy nor pyright is installed by `pip install gitreins`. A user
+reading init output believes type-checking runs on every commit.
+
+### What held up on the released wheel (good news)
+
+- DF-001 fix: fresh `.gitleaks.toml` allowlist is valid; gitleaks runs, no
+  panic.
+- DF-011 fix: pre-commit hook pins the installing binary's absolute path,
+  with a comment citing DF-011.
+- DF-014 fix: init detects plain-Python repos correctly (no more
+  "Language: unknown" with .py files present).
+- The full loop works on the released artifact: guard blocks real secrets
+  and real failing tests; Tier-2 judge delivers per-criterion evidence
+  verdicts (~3.5 min on a tiny repo, deepseek-v4-flash); MCP guard_run and
+  judge_evaluate work cross-repo via `workdir`.
