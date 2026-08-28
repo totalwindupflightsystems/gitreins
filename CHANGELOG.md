@@ -20,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Judge token usage persisted to `.gitreins/usage.jsonl` (best-effort cost telemetry, now gitignored)
   - Default-pipeline built-in secrets scanner runs under `sys.executable` + `PYTHONPATH` (fixes ModuleNotFoundError outside the venv)
 
+## [0.12.1] — 2026-08-28
+
+### Fixed
+- **Wheel version drift (DF-015)** — the 0.12.0 wheel shipped a static `engine/version.py` reporting 0.11.0 while METADATA said 0.12.0. The built wheel now reports the installed metadata version (`engine/version.py` stays importlib.metadata-dynamic, no static literal); `gitreins --version` in the 0.12.1 wheel prints `gitreins 0.12.1`.
+
 ## [0.12.0] — 2026-08-14
 
 ### Added
