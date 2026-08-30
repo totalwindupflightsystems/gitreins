@@ -758,3 +758,15 @@
 {"from":"tests/test_quality_gate_regressions.py","to":"pkg:engine.pipeline","rel":"imports","provenance":"ast_exact","confidence":1.0}
 {"from":"tests/test_quality_gate_regressions.py","to":"pkg:engine.task_manager","rel":"imports","provenance":"ast_exact","confidence":1.0}
 {"from":"tests/test_quality_gate_regressions.py","to":"pkg:engine.pipeline","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_lsp.py","to":"pkg:json","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_lsp.py","to":"pkg:os","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_lsp.py","to":"pkg:shutil","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_lsp.py","to":"pkg:subprocess","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_lsp.py","to":"pkg:sys","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_lsp.py","to":"pkg:unittest.mock","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_lsp.py","to":"pkg:pytest","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_lsp.py","to":"pkg:engine.lsp","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_lsp.py","to":"pkg:io","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_lsp.py","to":"pkg:time","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_lsp.py","to":"pkg:engine.judge","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_lsp.py","to":"pkg:engine.evaluator","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
