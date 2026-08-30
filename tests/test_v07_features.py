@@ -647,7 +647,13 @@ class TestGuardOutput:
             results=[
                 GuardResult(name="secrets", passed=True, output="clean"),
                 GuardResult(
-                    name="tests", passed=False, output="FAILED test_a\nFAILED test_b\nFAILED test_c"
+                    name="tests",
+                    passed=False,
+                    output=(
+                        "FAILED tests/test_a.py::test_a\n"
+                        "FAILED tests/test_b.py::test_b\n"
+                        "FAILED tests/test_c.py::test_c"
+                    ),
                 ),
             ],
         )

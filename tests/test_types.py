@@ -58,18 +58,84 @@ def test_tier1_summary_formats_passes_failures_and_empty_output():
 
 
 def test_tier1_summary_counts_failed_lines_and_shows_tail():
+    # Only anchored pytest "FAILED <path>::<test>" lines count: "FAIL
+    # package/two" merely contains the "FAIL" substring and must not inflate
+    # the count (DF-021 substring-overcount regression).
     result = Tier1Result(
         passed=False,
         results=[
             GuardResult(
                 "tests",
                 False,
-                "intro\nFAILED tests/test_one.py\nFAIL package/two\nignored",
+                "intro\nFAILED tests/test_one.py::test_a\nFAIL package/two\nignored",
             )
         ],
     )
 
-    assert result.summary == "  ✗ tests — 2 failure(s); ignored"
+    assert result.summary == (
+        "  ✗ tests — 1 failure(s); FAILED tests/test_one.py::test_a"
+    )
+
+
+def test_tier1_summary_banner_tail_still_shows_failed_test_id():
+    # Banner-tail regression: pytest's last output line is the
+    # "=== N failed, M passed ===" banner — the tail must prefer the last
+    # FAILED line so the failing test ID stays visible (DF-021).
+    result = Tier1Result(
+        passed=False,
+        results=[
+            GuardResult(
+                "tests",
+                False,
+                "FAILED tests/test_bad.py::test_broken - assert 0 == 1\n"
+                "=== 1 failed, 2 passed in 0.12s ===",
+            )
+        ],
+    )
+
+    assert result.summary == (
+        "  ✗ tests — 1 failure(s); FAILED tests/test_bad.py::test_broken - assert 0 == 1"
+    )
+
+
+def test_tier1_summary_substring_fail_lines_not_counted():
+    # Substring-overcount regression: lines shaped like pytest output but
+    # lacking the "FAILED <path>::<test>" anchor (no :: separator, bare FAIL)
+    # are not pytest failures and contribute zero to the count.
+    result = Tier1Result(
+        passed=False,
+        results=[
+            GuardResult(
+                "tests",
+                False,
+                "BUILD FAIL\nFAILED something went wrong\n"
+                "tests/test_x.py::test_y FAILED\n=== 1 failed, 1 passed in 0.1s ===",
+            )
+        ],
+    )
+
+    assert result.summary == "  ✗ tests — === 1 failed, 1 passed in 0.1s ==="
+
+
+def test_tier1_summary_counts_multiple_failed_lines():
+    # Multi-FAILED regression: every anchored FAILED line is counted and the
+    # tail shows the last one.
+    result = Tier1Result(
+        passed=False,
+        results=[
+            GuardResult(
+                "tests",
+                False,
+                "FAILED tests/test_a.py::test_one\n"
+                "FAILED tests/test_b.py::test_two - assert boom\n"
+                "FAILED tests/test_c.py::test_three",
+            )
+        ],
+    )
+
+    assert result.summary == (
+        "  ✗ tests — 3 failure(s); FAILED tests/test_c.py::test_three"
+    )
 
 
 def test_tier1_summary_truncates_long_tail_line():

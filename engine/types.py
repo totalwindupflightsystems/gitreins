@@ -1,6 +1,15 @@
 """Type definitions for GitReins guard results."""
 
+import re
+
 from dataclasses import dataclass, field
+
+# pytest short test summary info lines look like
+# "FAILED tests/test_x.py::test_y - AssertionError: boom". Failure counting is
+# anchored to this shape — a bare "FAIL" substring elsewhere in the output
+# (build logs, error prose) is not a pytest failure and must not inflate the
+# count (DF-021).
+_FAILED_TEST_LINE = re.compile(r"^FAILED \S+::")
 
 
 @dataclass(frozen=True)
@@ -84,14 +93,23 @@ class Tier1Result:
             detail = ""
             if not r.passed and r.output:
                 out_lines = [ln for ln in r.output.split("\n") if ln.strip()]
-                tail = _truncate_line(out_lines[-1].strip()) if out_lines else ""
+                failed_lines = [
+                    ln.strip() for ln in out_lines if _FAILED_TEST_LINE.match(ln.strip())
+                ]
+                # Prefer the last pytest FAILED line over the final output line:
+                # pytest's "=== N failed, M passed ===" banner would otherwise
+                # hide the failing test ID (DF-021).
+                tail_src = failed_lines[-1] if failed_lines else (
+                    out_lines[-1].strip() if out_lines else ""
+                )
+                tail = _truncate_line(tail_src) if tail_src else ""
                 if r.name == "secrets":
                     findings = _secrets_findings_detail(r.output)
                     if findings:
                         detail = f" — {findings}"
                 if not detail and tail:
                     detail = f" — {tail}"
-                fail_count = len([ln for ln in out_lines if "FAIL" in ln or "FAILED" in ln])
+                fail_count = len(failed_lines)
                 if fail_count:
                     detail = f" — {fail_count} failure(s); {tail}"
             elif r.passed:
