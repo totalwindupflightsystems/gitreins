@@ -616,6 +616,11 @@ class TestLspJudgeIntegration:
         from engine.lsp import run_lsp_check
         from unittest.mock import MagicMock
 
+        # Bare `python -m pytest` doesn't put .venv/bin on PATH, so
+        # shutil.which('pylsp') misses the venv's pylsp; prepend the venv
+        # bin dir (derived from sys.executable) so find_lsp_tool resolves it.
+        os.environ["PATH"] = os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", "")
+
         workdir = str(tmp_path / "repo")
         os.makedirs(workdir)
         self._init_git_repo(workdir)
@@ -963,6 +968,11 @@ class TestTsLspIntegration:
 
     def test_ts_lsp_skip_gracefully(self, lsp_workdir):
         """typescript-language-server not found returns empty diagnostics."""
+        if find_lsp_tool("ts-lsp"):
+            pytest.skip(
+                "typescript-language-server is installed; graceful-skip contract "
+                "verified when tool absent"
+            )
         path = os.path.join(lsp_workdir, "test.ts")
         with open(path, "w") as f:
             f.write("const x: number = 'hello';\n")
