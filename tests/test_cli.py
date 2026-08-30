@@ -1013,6 +1013,112 @@ class TestCmdInitConfigSafety:
         assert os.path.isfile(config_path), "Config file not created"
 
 
+# ── DF-022: static_analysis: true must never be written without tools ──────
+
+
+class TestInitStaticAnalysisTools:
+    """DF-022: init's config-update path (install-style config → init) must
+    write a non-empty static_analysis_tools.python list whenever
+    static_analysis: true is emitted, and must never overwrite user-set
+    guard keys on re-runs."""
+
+    def test_config_update_path_writes_static_analysis_tools(self, tmp_workdir):
+        """Install-style config with no static_analysis keys → init adds
+        static_analysis: true AND a non-empty static_analysis_tools.python."""
+        import yaml as _yaml
+
+        # Python repo so static_analysis gets enabled
+        with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
+            f.write("print(1)\n")
+        with open(os.path.join(tmp_workdir, "setup.py"), "w") as f:
+            f.write("from setuptools import setup\nsetup(name='df022')\n")
+
+        # Mirror the minimal config gitreins/install writes (no static_analysis)
+        config_dir = os.path.join(tmp_workdir, ".gitreins")
+        os.makedirs(config_dir, exist_ok=True)
+        config_path = os.path.join(config_dir, "config.yaml")
+        with open(config_path, "w") as f:
+            _yaml.dump(
+                {
+                    "guards": {
+                        "secrets": True,
+                        "lint": True,
+                        "tests": True,
+                        "test_command": "pytest -x --tb=short",
+                    },
+                    "evaluator": {"max_iterations": 15},
+                },
+                f,
+            )
+
+        result = run_cli("init", cwd=tmp_workdir)
+        assert result.returncode == 0, (
+            f"init failed: {result.stdout}\n{result.stderr}"
+        )
+
+        with open(config_path) as f:
+            config = _yaml.safe_load(f)
+        guards = config["guards"]
+        assert guards["static_analysis"] is True
+        python_tools = guards["static_analysis_tools"]["python"]
+        assert isinstance(python_tools, list) and python_tools, (
+            "static_analysis_tools.python must be a non-empty list, "
+            f"got: {python_tools!r}"
+        )
+
+    def test_init_preserves_existing_static_analysis_tools(self, tmp_workdir):
+        """Re-running init never overwrites pre-existing static_analysis_tools
+        or other user-set guard keys, and a second run is a no-op."""
+        import yaml as _yaml
+
+        with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
+            f.write("print(1)\n")
+        with open(os.path.join(tmp_workdir, "setup.py"), "w") as f:
+            f.write("from setuptools import setup\nsetup(name='df022')\n")
+
+        config_dir = os.path.join(tmp_workdir, ".gitreins")
+        os.makedirs(config_dir, exist_ok=True)
+        config_path = os.path.join(config_dir, "config.yaml")
+        with open(config_path, "w") as f:
+            _yaml.dump(
+                {
+                    "guards": {
+                        "secrets": True,
+                        "lint": True,
+                        "tests": True,
+                        "test_mode": "full",
+                        "test_command": "pytest -x --tb=short",
+                        "static_analysis": True,
+                        "static_analysis_tools": {"python": ["pyright"]},
+                        "custom_gate": True,
+                    },
+                    "evaluator": {"max_iterations": 15},
+                },
+                f,
+            )
+
+        result = run_cli("init", cwd=tmp_workdir)
+        assert result.returncode == 0, (
+            f"init failed: {result.stdout}\n{result.stderr}"
+        )
+
+        with open(config_path) as f:
+            config = _yaml.safe_load(f)
+        guards = config["guards"]
+        # User-set values untouched
+        assert guards["static_analysis_tools"]["python"] == ["pyright"]
+        assert guards["custom_gate"] is True
+
+        # Second init: config is up to date — no changes, keys still intact
+        result2 = run_cli("init", cwd=tmp_workdir)
+        assert result2.returncode == 0
+        assert "No changes needed" in result2.stdout
+        with open(config_path) as f:
+            config2 = _yaml.safe_load(f)
+        assert config2["guards"]["static_analysis_tools"]["python"] == ["pyright"]
+        assert config2["guards"]["custom_gate"] is True
+
+
 # ── v0.7.2: Gitleaks .toml auto-generation ────────────────────────────
 
 

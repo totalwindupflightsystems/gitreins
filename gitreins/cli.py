@@ -176,15 +176,28 @@ def _safe_overwrite(path: str, content_func) -> str | None:
 
     Returns the bak_path if a backup was created, else None.
     """
+    import io
     import shutil
+
+    # Serialize to a buffer first so the write can be skipped entirely when
+    # the content is unchanged — keeps 'gitreins init' truly idempotent
+    # (DF-022): a second run on an up-to-date repo is a no-op (no rewrite,
+    # no backup churn) and reports "No changes needed".
+    buf = io.StringIO()
+    content_func(buf)
+    new_content = buf.getvalue().encode("utf-8")
 
     bak_path = None
     if os.path.isfile(path) and os.path.getsize(path) > 0:
+        with open(path, "rb") as f:
+            old_content = f.read()
+        if old_content == new_content:
+            return None
         bak_path = path + ".bak"
         shutil.copy2(path, bak_path)
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w") as f:
-        content_func(f)
+    with open(path, "wb") as f:
+        f.write(new_content)
     return bak_path
 
 
@@ -351,7 +364,7 @@ def cmd_init(args):
     else:
         # Fill in missing guard keys
         guards = existing.setdefault("guards", {})
-        updates = _fill_missing_guards(guards, lang_info, test_cmd)
+        updates = _fill_missing_guards(guards, lang_info, test_cmd, static_tools)
         if updates:
             changed.append(f"guards (+{', '.join(updates)})")
 
@@ -790,6 +803,17 @@ def _build_guards_section(lang: dict, test_cmd: str, static_tools: list[str] | N
     if static_tools is None:
         static_tools = []
 
+    # Canonical default static-analysis tools per language (DF-022). PATH
+    # detection is preferred, but when it finds nothing installed we still
+    # write a non-empty list: static_analysis: true WITHOUT tools makes the
+    # guard silently no-op, which is worse than a noisy failure.
+    canonical_tools = {
+        "python": ["mypy", "pyright"],
+        "ruby": ["sorbet"],
+        "php": ["phpstan"],
+        "sql": ["sqlfluff"],
+    }
+
     section: dict
     if lang["is_go"]:
         return {
@@ -808,8 +832,9 @@ def _build_guards_section(lang: dict, test_cmd: str, static_tools: list[str] | N
             "test_command": test_cmd,
             "static_analysis": True,  # ON: dynamic language, no compiler
         }
-        if static_tools:
-            section["static_analysis_tools"] = {"python": static_tools}
+        section["static_analysis_tools"] = {
+            "python": static_tools or canonical_tools["python"]
+        }
         return section
     elif lang["is_ts"]:
         return {
@@ -828,6 +853,7 @@ def _build_guards_section(lang: dict, test_cmd: str, static_tools: list[str] | N
             "test_mode": "full",
             "test_command": "bundle exec rspec",
             "static_analysis": True,  # ON: dynamic language, no compiler
+            "static_analysis_tools": {"ruby": static_tools or canonical_tools["ruby"]},
         }
     elif lang["is_php"]:
         return {
@@ -837,6 +863,7 @@ def _build_guards_section(lang: dict, test_cmd: str, static_tools: list[str] | N
             "test_mode": "full",
             "test_command": "vendor/bin/phpunit",
             "static_analysis": True,  # ON: dynamic language, no compiler
+            "static_analysis_tools": {"php": static_tools or canonical_tools["php"]},
         }
     elif lang["is_rust"]:
         return {
@@ -855,6 +882,7 @@ def _build_guards_section(lang: dict, test_cmd: str, static_tools: list[str] | N
             "test_mode": "full",
             "test_command": "echo 'No SQL test runner configured'",
             "static_analysis": True,  # ON: no compiler for SQL
+            "static_analysis_tools": {"sql": static_tools or canonical_tools["sql"]},
         }
     else:
         return {
@@ -866,10 +894,12 @@ def _build_guards_section(lang: dict, test_cmd: str, static_tools: list[str] | N
         }
 
 
-def _fill_missing_guards(guards: dict, lang: dict, test_cmd: str) -> list[str]:
+def _fill_missing_guards(
+    guards: dict, lang: dict, test_cmd: str, static_tools: list[str] | None = None
+) -> list[str]:
     """Fill in missing guard keys without overwriting existing values. Returns keys added."""
     added = []
-    defaults = _build_guards_section(lang, test_cmd)
+    defaults = _build_guards_section(lang, test_cmd, static_tools)
 
     for key, val in defaults.items():
         if key not in guards:
