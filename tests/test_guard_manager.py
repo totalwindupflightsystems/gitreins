@@ -439,6 +439,135 @@ class TestBuiltinSecretsScan:
         assert "clean" in result.output
 
 
+class TestSecretsMergeOnGitleaksFailure:
+    """DF-016: a gitleaks nonzero exit must NOT short-circuit the built-in
+    cross-check — multi-secret files report a complete scan.
+
+    Regression: a file with an sk- key on line 2 and a low-entropy ghp_
+    token on line 3 reported only '1 finding(s): config.example.json:2'.
+    The ghp_ token (caught by the builtin regex, skipped by gitleaks'
+    entropy filter) was silently masked behind the decoy-first order.
+    """
+
+    @staticmethod
+    def _staged_multi_secret_file(tmp_workdir):
+        """Stage config.example.json with an sk- key on line 2 and a
+        low-entropy ghp_ token on line 3. Secrets are constructed at
+        runtime — never literal API-key-looking strings in test source.
+        """
+        sk_secret = "sk-proj-" + "aB1cD2" * 6
+        gh_token = "ghp_" + "ABCDEFGHIJKLMNOPQRSTUVWXYZ" + "abcdefghij"
+        _write_staged_file(
+            tmp_workdir,
+            "config.example.json",
+            "{\n"
+            f'  "api_key": "{sk_secret}",\n'
+            f'  "github_token": "{gh_token}",\n'
+            '  "name": "demo"\n'
+            "}\n",
+        )
+        return sk_secret, gh_token
+
+    @staticmethod
+    def _gitleaks_failure_mock(secret, file, line):
+        """Verbose gitleaks failure output: File:/Line: block for ONE
+        finding only, no human-readable description (matches real
+        gitleaks output, empirically verified)."""
+        return MagicMock(
+            returncode=1,
+            stdout=(
+                f'Finding:     "api_key": "{secret}"\n'
+                f"Secret:      {secret}\n"
+                "RuleID:      sk-api-key\n"
+                "Entropy:     5.25\n"
+                f"File:        {file}\n"
+                f"Line:        {line}\n"
+                f"Fingerprint: {file}:sk-api-key:{line}\n"
+                "\n"
+                "INF 0 commits scanned.\n"
+                "INF scanned ~148 bytes in 25.2ms\n"
+                "WRN leaks found: 1\n"
+            ),
+            stderr="",
+        )
+
+    @staticmethod
+    def _run_with_mocked_gitleaks(gm, mock_run):
+        """Run _check_secrets with gitleaks mocked to fail; git calls
+        (staged-file discovery for the builtin scan) still hit the real
+        subprocess.run."""
+        real_run = subprocess.run
+
+        def fake_run(cmd, *args, **kwargs):
+            if cmd and cmd[0] == "gitleaks":
+                return mock_run
+            return real_run(cmd, *args, **kwargs)
+
+        with patch("subprocess.run", side_effect=fake_run):
+            return gm._check_secrets()
+
+    def test_gitleaks_failure_reports_both_findings(self, tmp_workdir):
+        """A staged file with an sk- key (line 2) AND a ghp_ token (line 3)
+        reports BOTH findings when gitleaks exits nonzero — the low-entropy
+        ghp_ token is never masked behind the decoy-first sk- finding."""
+        sk_secret, _ = self._staged_multi_secret_file(tmp_workdir)
+        gm = GuardManager(tmp_workdir)
+        mock_run = self._gitleaks_failure_mock(sk_secret, "config.example.json", 2)
+        result = self._run_with_mocked_gitleaks(gm, mock_run)
+        assert result.passed is False
+        assert "OpenAI/OpenRouter API key" in result.output
+        assert "GitHub personal access token" in result.output
+
+    def test_builtin_scan_invoked_on_gitleaks_failure_path(self, tmp_workdir):
+        """gitleaks-finds-something no longer short-circuits the built-in
+        cross-check — the wraps-spy proves _builtin_secrets_scan runs even
+        when gitleaks exits nonzero."""
+        sk_secret, _ = self._staged_multi_secret_file(tmp_workdir)
+        gm = GuardManager(tmp_workdir)
+        mock_run = self._gitleaks_failure_mock(sk_secret, "config.example.json", 2)
+        real_run = subprocess.run
+
+        def fake_run(cmd, *args, **kwargs):
+            if cmd and cmd[0] == "gitleaks":
+                return mock_run
+            return real_run(cmd, *args, **kwargs)
+
+        with patch("subprocess.run", side_effect=fake_run):
+            with patch.object(gm, "_builtin_secrets_scan", wraps=gm._builtin_secrets_scan) as spy:
+                result = gm._check_secrets()
+        assert spy.called
+        assert result.passed is False
+
+    def test_merged_findings_deduped_by_path_line(self, tmp_workdir):
+        """No duplicate path:line entries when gitleaks and the builtin
+        scanner flag the same line — the summary counts each location
+        exactly once."""
+        from engine.types import _secrets_findings_detail
+
+        sk_secret, _ = self._staged_multi_secret_file(tmp_workdir)
+        gm = GuardManager(tmp_workdir)
+        mock_run = self._gitleaks_failure_mock(sk_secret, "config.example.json", 2)
+        result = self._run_with_mocked_gitleaks(gm, mock_run)
+        detail = _secrets_findings_detail(result.output)
+        assert detail.count("config.example.json:") == 2, detail
+        assert "config.example.json:2" in detail
+        assert "config.example.json:3" in detail
+
+    def test_tier1_summary_renders_merged_findings(self, tmp_workdir):
+        """Tier1Result.summary counts the gitleaks File:/Line: pair AND the
+        built-in scanner's path:line — the user sees the full finding count
+        and both locations, so 'fix one finding, the next commit still fails
+        on the next' is visible at a glance."""
+        sk_secret, _ = self._staged_multi_secret_file(tmp_workdir)
+        gm = GuardManager(tmp_workdir)
+        mock_run = self._gitleaks_failure_mock(sk_secret, "config.example.json", 2)
+        result = self._run_with_mocked_gitleaks(gm, mock_run)
+        summary = Tier1Result(passed=False, results=[result]).summary
+        assert "2 finding(s)" in summary
+        assert "config.example.json:2" in summary
+        assert "config.example.json:3" in summary
+
+
 class TestSecretsSanitization:
     """Test secret value redaction in output — step-1-3-1-4."""
 
@@ -920,8 +1049,13 @@ class TestExtendedGuardManager:
         with patch("subprocess.run", return_value=mock_run) as mock_patch:
             result = gm._check_secrets()
         # The banner-suppression flag must actually be passed to gitleaks.
-        cmd = mock_patch.call_args.args[0]
-        assert "--no-banner" in cmd
+        # (DF-016: the gitleaks-failure path now ALSO runs the built-in
+        # cross-check, so subprocess.run is called for git too — find the
+        # gitleaks invocation specifically.)
+        gitleaks_cmd = next(
+            c.args[0] for c in mock_patch.call_args_list if c.args[0] and c.args[0][0] == "gitleaks"
+        )
+        assert "--no-banner" in gitleaks_cmd
         # Finding detail still surfaces in the guard output...
         assert result.passed is False
         assert "Finding: config.py" in result.output

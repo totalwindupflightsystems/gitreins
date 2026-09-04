@@ -313,6 +313,50 @@ def _load_guard_config(workdir: str) -> dict:
         return {}
 
 
+def _merge_secret_findings(gitleaks_output: str, builtin_output: str) -> str:
+    """Merge gitleaks' verbose finding blocks with built-in scanner findings.
+
+    gitleaks' verbose output carries ``File:/Line:`` pairs that the Tier1
+    summary counts (_secrets_findings_detail), but no human-readable
+    labels; the built-in scanner emits ``path:line: [label]`` lines with
+    the labels. DF-016: when both scanners report (gitleaks nonzero exit),
+    the merged output keeps the gitleaks block verbatim and appends each
+    built-in finding — a ``File:/Line:`` block (only when that path:line is
+    NOT already in the gitleaks pairs, so the summary never double-counts
+    a location) plus the original labeled line (so every finding's label
+    stays visible).
+    """
+    gitleaks_pairs: set[tuple[str, str]] = set()
+    files: list[str] = []
+    lines: list[str] = []
+    for ln in gitleaks_output.splitlines():
+        stripped = ln.strip()
+        if stripped.startswith("File:"):
+            value = stripped.removeprefix("File:").strip()
+            if value:
+                files.append(value)
+        elif stripped.startswith("Line:"):
+            value = stripped.removeprefix("Line:").strip()
+            if value:
+                lines.append(value)
+    for path, line in zip(files, lines):
+        gitleaks_pairs.add((path, line))
+
+    merged: list[str] = [gitleaks_output]
+    seen = set(gitleaks_pairs)
+    for ln in builtin_output.splitlines():
+        m = re.match(r"^(?P<path>.*?):(?P<line>\d+): ", ln)
+        if not m:
+            continue
+        key = (m.group("path"), m.group("line"))
+        if key not in seen:
+            seen.add(key)
+            merged.append(f"File: {key[0]}")
+            merged.append(f"Line: {key[1]}")
+        merged.append(ln)
+    return "\n".join(merged)
+
+
 class GuardManager:
     """Run static checks against staged changes."""
 
@@ -566,9 +610,19 @@ class GuardManager:
                     return builtin
                 return GuardResult(name="secrets", passed=True, output="gitleaks: clean")
             else:
-                return GuardResult(
-                    name="secrets", passed=False, output=result.stdout + result.stderr
-                )
+                # gitleaks found something — do NOT short-circuit (DF-016).
+                # The built-in cross-check still runs and its findings are
+                # merged into the output: gitleaks' verbose dump carries
+                # File:/Line: pairs but no human-readable labels, so a
+                # low-entropy key it skipped (e.g. a ghp_ token behind a
+                # decoy-first sk- key) would otherwise vanish from the
+                # report. The result stays failed until BOTH scanners are
+                # clean — reporting-completeness only, no weakening.
+                builtin = self._builtin_secrets_scan()
+                output = result.stdout + result.stderr
+                if not builtin.passed:
+                    output = _merge_secret_findings(output, builtin.output)
+                return GuardResult(name="secrets", passed=False, output=output)
         except FileNotFoundError:
             # GR-GAP-043: the missing-gitleaks case must be VISIBLE, not a
             # silent debug line — AGENTS.md hardcodes $HOME/go/bin on PATH,
