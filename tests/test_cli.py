@@ -1210,6 +1210,41 @@ class TestInitRunnerGitignoreAndWarning:
         lang = _detect_language(str(tmp_path))
         assert _detect_test_command(str(tmp_path), lang) == "python3 -m pytest -x --tb=short"
 
+    def test_detect_test_command_root_module_prefers_module_pytest_over_uv(self, monkeypatch, tmp_path):
+        """Root weather.py module + tests/ + uv on PATH -> `python3 -m pytest` (DF-017)."""
+        from gitreins.cli import _detect_language, _detect_test_command
+
+        monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/uv" if name == "uv" else None)
+        (tmp_path / "weather.py").write_text("def forecast():\n    return 'sunny'\n")
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_weather.py").write_text(
+            "from weather import forecast\n\ndef test_forecast():\n    assert forecast() == 'sunny'\n"
+        )
+        lang = _detect_language(str(tmp_path))
+        assert lang["is_python"]
+        assert _detect_test_command(str(tmp_path), lang) == "python3 -m pytest -x --tb=short"
+
+    def test_fresh_init_root_module_with_uv_writes_executable_module_pytest(self, tmp_workdir):
+        """DF-017: real fresh init on weather.py + tests/ (uv discoverable) writes
+        guards.test_command = 'python3 -m pytest -x --tb=short' and that exact
+        command collects the test importing the root module."""
+        import yaml as _yaml
+
+        with open(os.path.join(tmp_workdir, "weather.py"), "w") as f:
+            f.write("def forecast():\n    return 'sunny'\n")
+        os.makedirs(os.path.join(tmp_workdir, "tests"), exist_ok=True)
+        with open(os.path.join(tmp_workdir, "tests", "test_weather.py"), "w") as f:
+            f.write("from weather import forecast\n\ndef test_forecast():\n    assert forecast() == 'sunny'\n")
+        result = run_cli("init", cwd=tmp_workdir)
+        assert result.returncode == 0, result.stdout + result.stderr
+        config_path = os.path.join(tmp_workdir, ".gitreins", "config.yaml")
+        with open(config_path) as f:
+            config = _yaml.safe_load(f)
+        cmd = config["guards"]["test_command"]
+        assert cmd == "python3 -m pytest -x --tb=short", f"expected module pytest, got {cmd!r}"
+        run = subprocess.run(shlex.split(cmd), cwd=tmp_workdir, capture_output=True, text=True, timeout=60)
+        assert run.returncode == 0, f"{cmd} failed:\n{run.stdout}\n{run.stderr}"
+
     def test_detect_test_command_pipenv_runner(self, monkeypatch, tmp_path):
         """Pipfile + pipenv on PATH → `pipenv run pytest ...`."""
         import shutil

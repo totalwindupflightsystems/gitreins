@@ -440,7 +440,7 @@ def cmd_init(args):
     print(f"  Test cmd:    {test_cmd}")
     if test_cmd == "python3 -m pytest -x --tb=short":
         print(
-            "  Note: using 'python3 -m pytest' — root-package layout without pytest pythonpath "
+            "  Note: using 'python3 -m pytest' — root module/package layout without pytest pythonpath "
             'config; add [tool.pytest.ini_options] pythonpath = ["."] to pyproject.toml '
             "to use bare pytest"
         )
@@ -481,7 +481,7 @@ def _looks_like_python(workdir: str) -> bool:
 
     True when the repo root has any top-level *.py file, or any top-level
     package dir (contains __init__.py) outside well-known non-package dirs.
-    Keeps the root-package probe in _detect_test_command reachable for
+    Keeps the root-module/package probe in _detect_test_command reachable for
     fresh repos that have no pyproject.toml/setup.py/setup.cfg/
     requirements.txt yet.
     """
@@ -532,8 +532,8 @@ def _detect_language(workdir: str) -> dict:
         or os.path.isfile(os.path.join(workdir, "setup.py"))
         or os.path.isfile(os.path.join(workdir, "setup.cfg"))
         or os.path.isfile(os.path.join(workdir, "requirements.txt"))
-        # Narrow fallback (DF-002): root-package layouts without any of the
-        # marker files above are still Python — a top-level *.py file or a
+        # Narrow fallback (DF-002): root module/package layouts without any of the
+        # marker files above are still Python — a top-level *.py module file or a
         # top-level package dir (contains __init__.py) is enough.
         or _looks_like_python(workdir)
     ):
@@ -612,24 +612,37 @@ def _detect_static_analysis_tools(workdir: str, lang: dict) -> list[str]:
     return tools
 
 
-def _detect_root_package_layout(workdir: str) -> bool:
-    """True when the repo root has one or more top-level package dirs.
+def _detect_root_import_layout(workdir: str) -> bool:
+    """True when the repo root has top-level Python packages or modules.
 
-    A top-level package dir is a directory directly under the repo root
-    that contains __init__.py, excluding well-known non-package dirs
-    (tests/, .venv, node_modules, .git, .gitreins, __pycache__).
+    A top-level Python package is a directory directly under the repo root
+    that contains __init__.py; a top-level Python module is a *.py file
+    directly under the repo root. Well-known non-package dirs (tests/,
+    .venv, node_modules, .git, .gitreins, __pycache__) are excluded.
+
+    DF-017: pytest 9 importlib mode leaves the repo root off sys.path, so
+    tests importing a root package dir OR a root module file (e.g.
+    weather.py) only work under `python3 -m pytest` (which prepends CWD);
+    uv's `uv run pytest` entry point has the same blind spot.
     """
     excluded = {"tests", ".venv", "node_modules", ".git", ".gitreins", "__pycache__"}
     try:
-        entries = os.listdir(workdir)
+        with os.scandir(workdir) as it:
+            for entry in it:
+                try:
+                    if entry.name in excluded:
+                        continue
+                    if entry.is_dir():
+                        if os.path.isfile(os.path.join(workdir, entry.name, "__init__.py")):
+                            return True
+                    elif entry.is_file() and entry.name.endswith(".py"):
+                        return True
+                except OSError:
+                    # Entry vanished or became unreadable between scandir and
+                    # the probe read -- skip it rather than failing detection.
+                    continue
     except OSError:
         return False
-    for entry in entries:
-        if entry in excluded:
-            continue
-        full = os.path.join(workdir, entry)
-        if os.path.isdir(full) and os.path.isfile(os.path.join(full, "__init__.py")):
-            return True
     return False
 
 
@@ -676,16 +689,18 @@ def _has_pytest_pythonpath_config(workdir: str) -> bool:
 
 
 def _needs_python_module_pytest(workdir: str) -> bool:
-    """True when bare `pytest` cannot import the project's root packages.
+    """True when bare `pytest` cannot import the project's root modules/packages.
 
     pytest 9 importlib mode no longer adds the repo root to sys.path, so a
-    root-package layout (top-level __init__.py dirs) with a tests/ dir only
-    works under `python3 -m pytest` — unless the user already configured
-    pytest's pythonpath (pyproject.toml / pytest.ini / setup.cfg).
+    root-module/package layout (top-level *.py module files or __init__.py
+    dirs) with a tests/ dir only works under `python3 -m pytest` — unless
+    the user already configured pytest's pythonpath (pyproject.toml /
+    pytest.ini / setup.cfg). Checked ahead of _detect_python_runner so uv
+    can never override the module-pytest decision (DF-017).
     """
     if not os.path.isdir(os.path.join(workdir, "tests")):
         return False
-    if not _detect_root_package_layout(workdir):
+    if not _detect_root_import_layout(workdir):
         return False
     if _has_pytest_pythonpath_config(workdir):
         return False
