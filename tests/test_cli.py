@@ -1245,6 +1245,23 @@ class TestInitRunnerGitignoreAndWarning:
         run = subprocess.run(shlex.split(cmd), cwd=tmp_workdir, capture_output=True, text=True, timeout=60)
         assert run.returncode == 0, f"{cmd} failed:\n{run.stdout}\n{run.stderr}"
 
+    def test_detect_test_command_src_layout_setup_py_prefers_uv_run(self, monkeypatch, tmp_path):
+        """Non-root src layout (setup.py + src/weather.py + tests/) + uv on PATH
+        prefers `uv run pytest` — setup.py is a build script, not an importable root module."""
+        from gitreins.cli import _detect_language, _detect_test_command
+
+        monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/uv" if name == "uv" else None)
+        (tmp_path / "setup.py").write_text("from setuptools import setup\nsetup()\n")
+        (tmp_path / "src").mkdir()
+        (tmp_path / "src" / "weather.py").write_text("def forecast():\n    return 'sunny'\n")
+        (tmp_path / "tests").mkdir()
+        (tmp_path / "tests" / "test_weather.py").write_text(
+            "from weather import forecast\n\ndef test_forecast():\n    assert forecast() == 'sunny'\n"
+        )
+        lang = _detect_language(str(tmp_path))
+        assert lang["is_python"]
+        assert _detect_test_command(str(tmp_path), lang) == "uv run pytest -x --tb=short"
+
     def test_detect_test_command_pipenv_runner(self, monkeypatch, tmp_path):
         """Pipfile + pipenv on PATH → `pipenv run pytest ...`."""
         import shutil

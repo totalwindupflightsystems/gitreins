@@ -618,14 +618,23 @@ def _detect_root_import_layout(workdir: str) -> bool:
     A top-level Python package is a directory directly under the repo root
     that contains __init__.py; a top-level Python module is a *.py file
     directly under the repo root. Well-known non-package dirs (tests/,
-    .venv, node_modules, .git, .gitreins, __pycache__) are excluded.
+    .venv, node_modules, .git, .gitreins, __pycache__) are excluded, as are
+    well-known non-importable top-level build/bootstrap scripts
+    (setup.py, conftest.py).
 
     DF-017: pytest 9 importlib mode leaves the repo root off sys.path, so
     tests importing a root package dir OR a root module file (e.g.
     weather.py) only work under `python3 -m pytest` (which prepends CWD);
     uv's `uv run pytest` entry point has the same blind spot.
     """
-    excluded = {"tests", ".venv", "node_modules", ".git", ".gitreins", "__pycache__"}
+    # setup.py / conftest.py are top-level *.py build/bootstrap scripts that
+    # tests never import from the repo root; a src/ (non-root) layout whose
+    # only root .py files are these must not be misclassified as a root-import
+    # layout (DF-017), otherwise uv run pytest is wrongly replaced by module pytest.
+    excluded = {
+        "tests", ".venv", "node_modules", ".git", ".gitreins", "__pycache__",
+        "setup.py", "conftest.py",
+    }
     try:
         with os.scandir(workdir) as it:
             for entry in it:
