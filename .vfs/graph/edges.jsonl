@@ -822,3 +822,7 @@
 {"from":"tests/test_persist.py","to":"pkg:subprocess","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
 {"from":"tests/test_persist.py","to":"pkg:unittest.mock","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
 {"from":"tests/test_persist.py","to":"pkg:engine.persist","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_guard_exit.py","to":"pkg:os","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_guard_exit.py","to":"pkg:subprocess","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_guard_exit.py","to":"pkg:sys","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_guard_exit.py","to":"pkg:yaml","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
