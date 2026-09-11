@@ -516,8 +516,25 @@ class TestCommitMCP:
 class TestGuardRunMCP:
     """Test guard.run — step-2-3-1-2."""
 
-    def test_guard_run_returns_passed_and_results(self, mcp_server):
-        """guard.run returns passed bool and result list with name/passed/output."""
+    @staticmethod
+    def _write_guard_config(workdir: str) -> str:
+        """Write a minimal guard config (secrets on, lint/tests off).
+
+        Guards.run refuses to run without this file (GR-GAP-054), so every
+        test asserting the configured-path contract writes one first.
+        """
+        cfg_dir = os.path.join(workdir, ".gitreins")
+        os.makedirs(cfg_dir, exist_ok=True)
+        cfg_path = os.path.join(cfg_dir, "config.yaml")
+        with open(cfg_path, "w") as f:
+            f.write("guards:\n  secrets: true\n  lint: false\n  tests: false\n")
+        return cfg_path
+
+    def test_guard_run_returns_passed_and_results(self, mcp_server, tmp_workdir):
+        """guard.run returns passed bool, workdir and result list with
+        name/passed/output for a CONFIGURED repo (GR-GAP-054 keeps this
+        contract byte-for-shape)."""
+        self._write_guard_config(tmp_workdir)
         response = mcp_server.handle_request(
             {
                 "jsonrpc": "2.0",
@@ -528,12 +545,95 @@ class TestGuardRunMCP:
         )
         text = response["result"]["content"][0]["text"]
         result = json.loads(text)
-        assert "passed" in result
+        assert result["passed"] is True
+        assert result["workdir"] == os.path.abspath(tmp_workdir)
         assert "results" in result
+        assert len(result["results"]) > 0
         for r in result["results"]:
             assert "name" in r
             assert "passed" in r
             assert "output" in r
+
+    def test_guard_run_without_config_returns_error_not_pass(
+        self, mcp_server, tmp_workdir, monkeypatch
+    ):
+        """GR-GAP-054/AC1+AC2: a repo with no .gitreins/config.yaml errors out
+        naming `gitreins init` — never a false green — and GuardManager.run_all
+        is not invoked at all."""
+        from engine import guard_manager as gm_mod
+
+        calls: list[str] = []
+
+        def _forbidden_run_all(self, *args, **kwargs):  # noqa: ANN001
+            calls.append("run_all")
+            raise AssertionError("GuardManager.run_all must not run without a config")
+
+        monkeypatch.setattr(gm_mod.GuardManager, "run_all", _forbidden_run_all)
+        assert not os.path.isfile(os.path.join(tmp_workdir, ".gitreins", "config.yaml"))
+
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "guard.run", "arguments": {}},
+            }
+        )
+        text = response["result"]["content"][0]["text"]
+        result = json.loads(text)
+        assert "error" in result, result
+        assert ".gitreins/config.yaml" in result["error"]
+        assert "gitreins init" in result["error"]
+        assert "passed" not in result
+        assert "results" not in result
+        assert calls == []
+
+    def test_guard_run_target_workdir_with_config_allows(self, mcp_server, tmp_workdir, tmp_path):
+        """AC4: the config gate inspects the TARGET workdir, not the MCP
+        server's own workdir — an unconfigured server may still guard a
+        configured repo passed via the optional workdir argument."""
+        assert not os.path.isfile(os.path.join(tmp_workdir, ".gitreins", "config.yaml"))
+        target = tmp_path / "target-repo"
+        target.mkdir()
+        subprocess.run(["git", "init"], cwd=str(target), capture_output=True)
+        self._write_guard_config(str(target))
+
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "guard.run", "arguments": {"workdir": str(target)}},
+            }
+        )
+        result = json.loads(response["result"]["content"][0]["text"])
+        assert "error" not in result, result
+        assert result["passed"] is True
+        assert result["workdir"] == os.path.abspath(str(target))
+        assert [r["name"] for r in result["results"]]
+
+    def test_guard_run_target_workdir_without_config_errors(
+        self, mcp_server, tmp_workdir, tmp_path
+    ):
+        """AC4: a CONFIGURED server workdir does not authorize an unconfigured
+        target — the gate follows the requested workdir."""
+        self._write_guard_config(tmp_workdir)
+        bare = tmp_path / "bare-repo"
+        bare.mkdir()
+
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "guard.run", "arguments": {"workdir": str(bare)}},
+            }
+        )
+        result = json.loads(response["result"]["content"][0]["text"])
+        assert "error" in result, result
+        assert "gitreins init" in result["error"]
+        assert "passed" not in result
+        assert result["workdir"] == os.path.abspath(str(bare))
 
 
 class TestJudgeEvaluateMCP:
@@ -1639,8 +1739,41 @@ class TestMCPStdioIntegration:
         assert len(result["tasks"]) == 1
         assert result["tasks"][0]["id"] == "f1"
 
-    def test_guard_run_over_stdio(self, mcp_proc):
-        """guard.run returns passed bool and results list."""
+    def test_guard_run_over_stdio(self, mcp_proc, tmp_path):
+        """guard.run returns passed bool, workdir and results list for a
+        configured repo (GR-GAP-054: the fixture server's own workdir has no
+        .gitreins/config.yaml, so the gate must follow the requested workdir —
+        AC3 + AC4 over real stdio)."""
+        target = tmp_path / "configured-repo"
+        target.mkdir()
+        subprocess.run(["git", "init"], cwd=str(target), capture_output=True)
+        cfg_dir = target / ".gitreins"
+        cfg_dir.mkdir()
+        (cfg_dir / "config.yaml").write_text(
+            "guards:\n  secrets: true\n  lint: false\n  tests: false\n"
+        )
+        resp = self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "guard.run", "arguments": {"workdir": str(target)}},
+            },
+        )
+        result = json.loads(resp["result"]["content"][0]["text"])
+        assert result["passed"] is True
+        assert result["workdir"] == os.path.abspath(str(target))
+        assert result["results"]
+        for r in result["results"]:
+            assert "name" in r
+            assert "passed" in r
+            assert "output" in r
+
+    def test_guard_run_without_config_over_stdio(self, mcp_proc):
+        """GR-GAP-054/AC1: guard.run against a repo with no
+        .gitreins/config.yaml errors over real stdio naming `gitreins init` —
+        never a passed=true result."""
         resp = self._send_recv(
             mcp_proc,
             {
@@ -1651,12 +1784,11 @@ class TestMCPStdioIntegration:
             },
         )
         result = json.loads(resp["result"]["content"][0]["text"])
-        assert "passed" in result
-        assert "results" in result
-        for r in result["results"]:
-            assert "name" in r
-            assert "passed" in r
-            assert "output" in r
+        assert "error" in result, result
+        assert ".gitreins/config.yaml" in result["error"]
+        assert "gitreins init" in result["error"]
+        assert "passed" not in result
+        assert "results" not in result
 
     def test_judge_evaluate_nonexistent_over_stdio(self, mcp_proc):
         """judge.evaluate on nonexistent task returns error."""

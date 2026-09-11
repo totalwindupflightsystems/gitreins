@@ -493,19 +493,36 @@ class GitReinsMCPServer:
 
     def _guard_run(self, workdir: str = None, dead_code: bool = False) -> dict:
         """Run Tier 1 static guards. Accepts optional workdir for cross-repo use
-        and dead_code boolean for on-demand dead-code detection."""
+        and dead_code boolean for on-demand dead-code detection.
+
+        Refuses to run when the target repo has no .gitreins/config.yaml
+        (GR-GAP-054). Every guard falls back to its built-in defaults without
+        a config, so a config-less run reported a false green — same false
+        positive the CLI already blocks via ``_require_guard_config``. This
+        gate lives HERE, not in ``GuardManager.run_all()``: library callers
+        and unit-test fixtures construct ``GuardManager`` directly with
+        ``config=None`` and must keep working.
+        """
         import yaml
 
         wd = os.path.abspath(workdir) if workdir else self.workdir
         # Load config from .gitreins/config.yaml (same pattern as CLI)
-        config: dict[str, object] = {}
         config_path = os.path.join(wd, ".gitreins", "config.yaml")
-        if os.path.isfile(config_path):
-            try:
-                with open(config_path, "r") as f:
-                    config = yaml.safe_load(f) or {}
-            except Exception:
-                pass
+        if not os.path.isfile(config_path):
+            return {
+                "error": (
+                    f"no .gitreins/config.yaml in {wd} — run `gitreins init` first. "
+                    "Refusing to run Tier 1 guards: without a config every guard "
+                    "falls back to built-in defaults and reports a false green."
+                ),
+                "workdir": wd,
+            }
+        config: dict[str, object] = {}
+        try:
+            with open(config_path, "r") as f:
+                config = yaml.safe_load(f) or {}
+        except Exception:
+            pass
         gm = GuardManager(wd, config=config)
         result = gm.run_all(force_dead_code=dead_code)
         return {

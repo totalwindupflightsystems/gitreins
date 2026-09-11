@@ -134,6 +134,31 @@ class TestMCPRealIntegration:
             proc.terminate()
             proc.wait(timeout=5)
 
+    def test_guard_run_without_config_returns_error(self, tmp_path):
+        """GR-GAP-054/AC1: a fresh git repo with no .gitreins/config.yaml gets
+        an error naming `gitreins init` over real stdio — never a false green."""
+        d = str(tmp_path / "bare-repo")
+        os.makedirs(d)
+        subprocess.run(["git", "init"], cwd=d, capture_output=True)
+        proc = _start_mcp_server(d)
+        try:
+            req = {
+                "jsonrpc": "2.0",
+                "id": 5,
+                "method": "tools/call",
+                "params": {"name": "guard.run", "arguments": {"workdir": d}},
+            }
+            resp = _send_request(proc, req)
+            result = json.loads(resp["result"]["content"][0]["text"])
+            assert "error" in result, result
+            assert ".gitreins/config.yaml" in result["error"]
+            assert "gitreins init" in result["error"]
+            assert "passed" not in result
+            assert "results" not in result
+        finally:
+            proc.terminate()
+            proc.wait(timeout=5)
+
     def test_judge_evaluate_returns_valid_dict(self, tmp_git_repo):
         """BUG 1 fix: judge.evaluate returns dict with tier1/tier2 populated."""
         # Create and start the task
