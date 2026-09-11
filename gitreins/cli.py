@@ -161,6 +161,30 @@ def load_config(workdir: str) -> dict:
         return {}
 
 
+def _require_guard_config(workdir: str) -> str:
+    """Refuse to run guards in a repo with no .gitreins/config.yaml.
+
+    GR-GAP-051: every guard falls back to built-in defaults when the
+    config file is absent, so ``gitreins guard`` printed a green
+    "Tier 1 Guards: PASS" and ``gitreins commit`` committed unguarded —
+    a false green light (see DF-GITREINS-POC-2). Fail loud instead.
+
+    Returns the config path when it exists. Prints the fix to stderr and
+    exits 1 when it does not. Deliberately NOT inside
+    ``GuardManager.run_all()`` — library/MCP callers and unit-test
+    fixtures construct ``GuardManager`` directly with ``config=None``
+    and must keep working.
+    """
+    config_path = os.path.join(workdir, ".gitreins", "config.yaml")
+    if not os.path.isfile(config_path):
+        print(
+            "no .gitreins/config.yaml — run `gitreins init` first",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    return config_path
+
+
 def _safe_overwrite(path: str, content_func) -> str | None:
     """Write content to path, backing up the original if it exists.
 
@@ -1308,6 +1332,7 @@ def cmd_guard_run(args):
     from engine.guard_manager import GuardManager
 
     workdir = get_workdir()
+    _require_guard_config(workdir)
     config = load_config(workdir)
     # GR-GAP-043: --staged-only / --full override config guards.test_mode
     # ('diff' / 'full'). If both are passed, --staged-only wins (diff is the
@@ -1591,6 +1616,8 @@ def cmd_commit(args):
     from engine.guard_manager import GuardManager
 
     workdir = get_workdir()
+    # GR-GAP-051: never commit unguarded — same refusal as `gitreins guard`.
+    _require_guard_config(workdir)
     config = load_config(workdir)
     gm = GuardManager(workdir, config=config)
     tier1 = gm.run_all()

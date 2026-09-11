@@ -68,6 +68,68 @@ def _aws_secret() -> str:
     return "".join(chr(c) for c in (65, 75, 73, 65)) + "1234567890ABCDEF"
 
 
+class TestGuardRefusesWithoutConfig:
+    """A repo with no .gitreins/config.yaml must not get a false-green PASS.
+
+    GR-GAP-051: guards silently fell back to built-in defaults, so
+    `gitreins guard` printed "Tier 1 Guards: PASS" and `gitreins commit`
+    committed unguarded. Both must refuse with an actionable message.
+    """
+
+    def test_guard_refuses_without_config(self, tmp_path):
+        d = str(tmp_path / "repo")
+        os.makedirs(d)
+        _init_repo(d)
+        _stage_file(d, "a.txt", "hello\n")
+        assert not os.path.isdir(os.path.join(d, ".gitreins"))
+
+        result = _run_cli("guard", cwd=d)
+
+        output = result.stdout + result.stderr
+        assert result.returncode != 0, (
+            f"guard must refuse without config, got {result.returncode}. output: {output[:300]}"
+        )
+        assert "no .gitreins/config.yaml" in output
+        assert "gitreins init" in output
+        assert "Tier 1 Guards:" not in result.stdout
+        assert "PASS" not in result.stdout
+
+    def test_commit_refuses_without_config(self, tmp_path):
+        d = str(tmp_path / "repo")
+        os.makedirs(d)
+        _init_repo(d)
+        _stage_file(d, "a.txt", "hello\n")
+
+        result = _run_cli("commit", "should not land", cwd=d)
+
+        output = result.stdout + result.stderr
+        assert result.returncode != 0, (
+            f"commit must refuse without config, got {result.returncode}. output: {output[:300]}"
+        )
+        assert "no .gitreins/config.yaml" in output
+        assert "gitreins init" in output
+        assert "Tier 1 PASSED" not in output
+        # No commit may have been created.
+        log = subprocess.run(["git", "rev-parse", "HEAD"], cwd=d, capture_output=True, text=True)
+        assert log.returncode != 0, "commit must not create a commit in a config-less repo"
+
+    def test_configured_repo_still_passes(self, tmp_path):
+        """A repo WITH a config keeps today's behaviour (GR-GAP-051 AC 2/4b)."""
+        d = str(tmp_path / "repo")
+        os.makedirs(d)
+        _init_repo(d)
+        _write_config(d, {"guards": {"test_command": "echo ok"}})
+        _stage_file(d, "clean.py", "x = 1\n")
+
+        result = _run_cli("guard", cwd=d)
+
+        assert result.returncode == 0, (
+            f"configured repo must still pass, got {result.returncode}. "
+            f"stdout: {result.stdout[:300]} stderr: {result.stderr[:300]}"
+        )
+        assert "Tier 1 Guards: PASS" in result.stdout
+
+
 class TestGuardExitClean:
     """gitreins guard exits 0 on a clean tree."""
 

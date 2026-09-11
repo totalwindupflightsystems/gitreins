@@ -37,6 +37,20 @@ def run_cli(*args, **kwargs):
     return subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env, **kwargs)
 
 
+def write_guard_config(workdir, extra_guards=""):
+    """Write a minimal .gitreins/config.yaml into workdir.
+
+    GR-GAP-051: `gitreins guard` / `gitreins commit` now refuse to run in a
+    repo with no config (they used to report a false-green "Tier 1 Guards:
+    PASS" and commit unguarded), so every CLI test that exercises the guard
+    path must create one. `test_command: echo ok` keeps the tests guard fast.
+    """
+    cfg_dir = os.path.join(workdir, ".gitreins")
+    os.makedirs(cfg_dir, exist_ok=True)
+    with open(os.path.join(cfg_dir, "config.yaml"), "w") as f:
+        f.write("guards:\n  test_command: echo ok\n" + extra_guards)
+
+
 # ── Phase 3-1: Command routing and argument parsing ──────────────────────────
 
 
@@ -217,21 +231,38 @@ class TestGuardRunCLI:
 
     def test_guard_run_shows_tier1_guards(self, tmp_workdir):
         """guard run prints 'Tier 1 Guards: PASS or FAIL' and per-guard summary."""
+        write_guard_config(tmp_workdir)
         result = run_cli("guard", cwd=tmp_workdir)
         assert result.returncode == 0
         assert "Tier 1 Guards:" in result.stdout
 
     def test_guard_staged_only_sets_diff_test_mode(self, tmp_workdir):
         """--staged-only forces diff test mode (GR-GAP-043)."""
+        write_guard_config(tmp_workdir)
         result = run_cli("guard", "--staged-only", cwd=tmp_workdir)
         assert result.returncode == 0
         assert "(test mode: diff" in result.stdout
 
     def test_guard_full_flag_sets_full_test_mode(self, tmp_workdir):
         """--full forces full test mode (GR-GAP-043)."""
+        write_guard_config(tmp_workdir)
         result = run_cli("guard", "--full", cwd=tmp_workdir)
         assert result.returncode == 0
         assert "(test mode: full" in result.stdout
+
+    def test_guard_refuses_without_config(self, tmp_workdir):
+        """No .gitreins/config.yaml → non-zero, actionable message, no PASS (GR-GAP-051)."""
+        gitreins_dir = os.path.join(tmp_workdir, ".gitreins")
+        assert not os.path.isfile(os.path.join(gitreins_dir, "config.yaml"))
+
+        result = run_cli("guard", cwd=tmp_workdir)
+
+        output = result.stdout + result.stderr
+        assert result.returncode != 0, f"expected refusal, got {result.returncode}: {output[:200]}"
+        assert "no .gitreins/config.yaml" in output
+        assert "gitreins init" in output
+        assert "Tier 1 Guards:" not in result.stdout
+        assert "PASS" not in result.stdout
 
     def test_guard_staged_only_overrides_config_full(self, tmp_workdir):
         """--staged-only overrides guards.test_mode: full in config (GR-GAP-043)."""
@@ -274,9 +305,20 @@ class TestCommitCLI:
 
     def test_commit_in_clean_repo(self, tmp_workdir):
         """Commit in clean repo (no staged) runs guards then attempts commit."""
+        write_guard_config(tmp_workdir)
         result = run_cli("commit", "test commit", cwd=tmp_workdir)
         output = result.stdout + result.stderr
         assert "Tier 1" in output
+
+    def test_commit_refuses_without_config(self, tmp_workdir):
+        """No config → commit refuses instead of committing unguarded (GR-GAP-051)."""
+        result = run_cli("commit", "must not land", cwd=tmp_workdir)
+
+        output = result.stdout + result.stderr
+        assert result.returncode != 0, f"expected refusal, got {result.returncode}: {output[:200]}"
+        assert "no .gitreins/config.yaml" in output
+        assert "gitreins init" in output
+        assert "Tier 1" not in output
 
 
 class TestMCPServerCLI:
@@ -359,6 +401,7 @@ class TestExtendedCLI:
 
     def test_guard_run_all_details(self, tmp_workdir):
         """guard run prints summary, PASS, per-guard results."""
+        write_guard_config(tmp_workdir)
         result = run_cli("guard", cwd=tmp_workdir)
         assert result.returncode == 0
         assert "Tier 1" in result.stdout
@@ -453,13 +496,18 @@ class TestConfigAndWorkdir:
         assert os.path.isdir(gitreins)
         assert os.path.isfile(os.path.join(gitreins, "tasks.yaml"))
 
-    def test_guard_works_without_gitreins_dir(self, tmp_workdir):
-        """Guard runs without .gitreins/ directory."""
+    def test_guard_refuses_without_gitreins_dir(self, tmp_workdir):
+        """Guard refuses to run without .gitreins/config.yaml (GR-GAP-051).
+
+        Before GR-GAP-051 this reported a false-green "Tier 1 Guards: PASS".
+        """
         gitreins = os.path.join(tmp_workdir, ".gitreins")
         assert not os.path.isdir(gitreins)
         result = run_cli("guard", cwd=tmp_workdir)
-        assert result.returncode == 0
-        assert "Tier 1 Guards:" in result.stdout
+        output = result.stdout + result.stderr
+        assert result.returncode != 0, f"expected refusal, got {result.returncode}: {output[:200]}"
+        assert "no .gitreins/config.yaml" in output
+        assert "Tier 1 Guards:" not in result.stdout
 
     def test_guard_run_ignores_leaked_git_index_file(self, tmp_path):
         """Nested guard must not read a GIT_INDEX_FILE leaked by a pre-commit hook.
@@ -472,6 +520,9 @@ class TestConfigAndWorkdir:
         (repo / "tests").mkdir(parents=True)
         (repo / "tests" / "test_x.py").write_text("def test_x(): pass\n")
         (repo / "app.py").write_text("def main(): pass\n")
+        # GR-GAP-051: guard refuses to run without a config — give the repo one.
+        (repo / ".gitreins").mkdir()
+        (repo / ".gitreins" / "config.yaml").write_text("guards:\n  test_command: echo ok\n")
         subprocess.run(["git", "init", "-q", str(repo)], check=True)
         subprocess.run(["git", "-C", str(repo), "add", "app.py", "tests/test_x.py"], check=True)
 
@@ -510,6 +561,7 @@ class TestGuardAndCommit:
     def test_guard_detects_secrets_in_staged_file(self, tmp_workdir):
         """Guard detects staged file containing a secret pattern."""
         subprocess.run(["git", "init"], cwd=tmp_workdir, capture_output=True, timeout=15)
+        write_guard_config(tmp_workdir)
         secret_file = os.path.join(tmp_workdir, "secret.py")
         with open(secret_file, "w") as f:
             f.write('api_key = "sk-1234567890123456789012345678901234567890"\n')
@@ -522,6 +574,7 @@ class TestGuardAndCommit:
     def test_guard_secrets_detected_when_fails(self, tmp_workdir):
         """Guard output contains FAIL when secrets found."""
         subprocess.run(["git", "init"], cwd=tmp_workdir, capture_output=True, timeout=15)
+        write_guard_config(tmp_workdir)
         secret_file = os.path.join(tmp_workdir, "creds.py")
         with open(secret_file, "w") as f:
             f.write('token = "ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"\n')
@@ -531,12 +584,14 @@ class TestGuardAndCommit:
 
     def test_commit_shows_guard_output(self, tmp_workdir):
         """Commit shows guard result in output."""
+        write_guard_config(tmp_workdir)
         result = run_cli("commit", "test message", cwd=tmp_workdir)
         assert "Tier 1" in result.stdout
 
     def test_commit_fails_when_guard_detects_secret(self, tmp_workdir):
         """Commit exits 1 when guards detect a secret in staged files."""
         subprocess.run(["git", "init"], cwd=tmp_workdir, capture_output=True, timeout=15)
+        write_guard_config(tmp_workdir)
         secret_file = os.path.join(tmp_workdir, "secret_key.py")
         with open(secret_file, "w") as f:
             f.write('api_key = "sk-1234567890123456789012345678901234567890"\n')
