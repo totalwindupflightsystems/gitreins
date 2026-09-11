@@ -437,3 +437,246 @@ def test_build_report_reads_verdicts_from_gitreins_branch(tmp_path):
     assert "old-task" in report
     assert "new-task" in report
     assert "Total entries: 2" in report
+
+
+# ── evaluated-payload preservation (DF-GITREINS-POC-1) ─────────
+#
+# `gitreins task complete` evaluates staged implementation/test files and
+# then persists the verdict. The old first-verdict path stashed the dirty
+# worktree, checked out an orphan branch in the caller's worktree, and ran
+# a plain `git stash pop` — the pop demoted staged files to unstaged, and
+# when it failed it was silent (returncode never checked), so the next
+# commit silently dropped the evaluated payload. These tests pin the
+# caller's index and worktree byte-for-byte across persist().
+
+_PRESERVE_ENV = _git_env()
+
+
+def _make_payload_repo(repo) -> dict:
+    """Init a main-branch repo with the documented dogfood staged-set shape.
+
+    Reproduces the real DF-GITREINS-POC-1 failure conditions: a staged
+    modification of a TRACKED file (the harness config analog) plus the two
+    newly staged implementation/test files, and an unstaged tracked change
+    on a second file so both index and worktree preservation are checked.
+
+    Returns a snapshot dict: staged file list, staged diff, unstaged diff,
+    all captured before persistence.
+    """
+    env = _PRESERVE_ENV
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True, env=env)
+
+    def git(*args):
+        subprocess.run(["git", *args], check=True, capture_output=True, cwd=str(repo), env=env)
+
+    (repo / "harness_config.txt").write_text("history:\n  enabled: true\n")
+    (repo / "notes.txt").write_text("notes v1\n")
+    git("add", "harness_config.txt", "notes.txt")
+    git("commit", "-q", "-m", "init")
+
+    # init regenerated the harness config -> STAGED tracked-file modification
+    (repo / "harness_config.txt").write_text("history:\n  enabled: true\n  storage: git\n")
+    # the evaluated payload: two NEW files staged
+    (repo / "calculator.py").write_text("def add(a, b):\n    return a + b\n")
+    (repo / "test_calculator.py").write_text(
+        "from calculator import add\n\n\ndef test_add():\n    assert add(2, 3) == 5\n"
+    )
+    # a separate unstaged tracked change (worktree preservation)
+    (repo / "notes.txt").write_text("notes v1\nlocal edit\n")
+    git("add", "harness_config.txt", "calculator.py", "test_calculator.py")
+
+    staged_names = subprocess.run(
+        ["git", "diff", "--cached", "--name-only"],
+        capture_output=True,
+        text=True,
+        cwd=str(repo),
+        env=env,
+    ).stdout
+    staged_diff = subprocess.run(
+        ["git", "diff", "--cached"],
+        capture_output=True,
+        text=True,
+        cwd=str(repo),
+        env=env,
+    ).stdout
+    unstaged_diff = subprocess.run(
+        ["git", "diff"],
+        capture_output=True,
+        text=True,
+        cwd=str(repo),
+        env=env,
+    ).stdout
+    return {
+        "staged_names": staged_names,
+        "staged_diff": staged_diff,
+        "unstaged_diff": unstaged_diff,
+        "env": env,
+    }
+
+
+def _persist_first_verdict(repo) -> str:
+    """Persist one verdict on a repo whose `gitreins` branch does not exist."""
+    p = VerdictPersister(str(repo))
+    p.config["max_verdicts"] = 0  # no pruning
+    assert p.storage_mode == "git"
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "-q", "gitreins"],
+        capture_output=True,
+        cwd=str(repo),
+    )
+    assert result.returncode != 0  # precondition: no gitreins branch yet
+    return p.persist("df-task", {"passed": True, "task_title": "DF Task"})
+
+
+def _assert_index_and_worktree_preserved(repo, before: dict) -> None:
+    env = before["env"]
+
+    def out(*args):
+        return subprocess.run(
+            ["git", *args],
+            capture_output=True,
+            text=True,
+            cwd=str(repo),
+            env=env,
+        ).stdout
+
+    assert out("diff", "--cached", "--name-only") == before["staged_names"]
+    assert out("diff", "--cached") == before["staged_diff"]
+    assert out("diff") == before["unstaged_diff"]
+    assert out("rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
+
+
+def test_first_verdict_preserves_staged_and_unstaged_state(tmp_path):
+    repo = tmp_path / "repo"
+    before = _make_payload_repo(repo)
+
+    commit_hash = _persist_first_verdict(repo)
+
+    assert commit_hash not in ("dry-run", "disabled")
+    assert len(commit_hash) == 8
+    _assert_index_and_worktree_preserved(repo, before)
+
+
+def test_first_verdict_lands_on_gitreins_branch(tmp_path):
+    repo = tmp_path / "repo"
+    before = _make_payload_repo(repo)
+
+    commit_hash = _persist_first_verdict(repo)
+
+    env = before["env"]
+    tree_paths = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", "gitreins"],
+        capture_output=True,
+        text=True,
+        cwd=str(repo),
+        env=env,
+    ).stdout.split()
+    assert len(tree_paths) == 2  # orphan branch holds only verdict entry files
+    assert all(p.endswith(("verdict.json", "summary.md")) for p in tree_paths)
+
+    verdict_path = next(p for p in tree_paths if p.endswith("verdict.json"))
+    stored = json.loads(
+        subprocess.run(
+            ["git", "show", f"gitreins:{verdict_path}"],
+            capture_output=True,
+            text=True,
+            cwd=str(repo),
+            env=env,
+        ).stdout
+    )
+    # verdict.json content round-trips through the plumbing-written tree
+    assert stored["task_id"] == "df-task"
+    assert stored["passed"] is True
+
+    # Caller remains on main with an intact index (no orphan checkout fallout)
+    _assert_index_and_worktree_preserved(repo, before)
+
+
+def test_second_verdict_appends_to_gitreins_branch(tmp_path):
+    repo = tmp_path / "repo"
+    before = _make_payload_repo(repo)
+    first = _persist_first_verdict(repo)
+    second = VerdictPersister(str(repo)).persist(
+        "df-task-2", {"passed": False, "task_title": "DF Task 2"}
+    )
+
+    assert second not in ("dry-run", "disabled")
+    assert first != second
+    env = before["env"]
+    ls = subprocess.run(
+        ["git", "rev-list", "gitreins"],
+        capture_output=True,
+        text=True,
+        cwd=str(repo),
+        env=env,
+    ).stdout.split()
+    assert len(ls) == 2  # verdict commits chain on the branch, parentless root first
+
+    _assert_index_and_worktree_preserved(repo, before)
+
+
+def test_next_commit_includes_evaluated_payload(tmp_path):
+    """The commit after persist() carries the evaluated files, staged as they were."""
+    repo = tmp_path / "repo"
+    before = _make_payload_repo(repo)
+
+    _persist_first_verdict(repo)
+
+    env = before["env"]
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "feat: calculator"],
+        check=True,
+        capture_output=True,
+        cwd=str(repo),
+        env=env,
+    )
+    names = subprocess.run(
+        ["git", "show", "--name-only", "--format=", "HEAD"],
+        capture_output=True,
+        text=True,
+        cwd=str(repo),
+        env=env,
+    ).stdout.split()
+    assert "calculator.py" in names
+    assert "test_calculator.py" in names
+    assert "harness_config.txt" in names  # staged mod rides along, not demoted
+    assert "notes.txt" not in names  # unstaged edit stays out of the commit
+
+
+def test_verdict_persistence_failure_returns_dry_run_and_preserves_payload(tmp_path, monkeypatch):
+    """If the verdict commit cannot be created, degrade honestly — never destroy state."""
+    repo = tmp_path / "repo"
+    before = _make_payload_repo(repo)
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("simulated plumbing failure")
+
+    monkeypatch.setattr(VerdictPersister, "_git", boom)
+    result = _persist_first_verdict(repo)
+
+    assert result == "dry-run"  # _git_commit catches and reports honestly
+    assert not (repo / ".git" / "refs" / "heads" / "gitreins").exists()
+    _assert_index_and_worktree_preserved(repo, before)
+
+
+def test_plumbing_commands_touch_neither_index_nor_worktree(tmp_path, monkeypatch):
+    """Defense in depth: the orphan path must not invoke worktree-mutating git verbs."""
+    repo = tmp_path / "repo"
+    _make_payload_repo(repo)
+
+    real_run = subprocess.run
+    forbidden = ("checkout", "stash", "restore", "reset", "clean", "read-tree", "sparse-checkout")
+
+    def spy_run(cmd, *args, **kwargs):
+        if isinstance(cmd, list) and cmd and cmd[0] == "git":
+            verb = next((c for c in cmd[1:] if not c.startswith("-")), None)
+            assert verb not in forbidden, f"worktree-mutating git verb invoked: {verb}"
+        return real_run(cmd, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", spy_run)
+    commit_hash = _persist_first_verdict(repo)
+    # The verdict commit must actually happen — a dry-run here means the
+    # persistence path tried a forbidden worktree-mutating verb and failed.
+    assert commit_hash not in ("dry-run", "disabled")
+    assert len(commit_hash) == 8

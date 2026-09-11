@@ -419,95 +419,114 @@ class VerdictPersister:
             return "dry-run"
 
     def _create_orphan(self, rel_path: str, task_id: str, passed: bool) -> str:
-        """Create gitreins orphan branch with initial verdict commit."""
-        # Remember current branch
+        """Create gitreins orphan branch with initial verdict commit.
+
+        Pure plumbing (hash-object → mktree → commit-tree → update-ref).
+        The previous implementation stashed the caller's dirty state,
+        checked out an orphan branch in the caller's worktree, then ran a
+        plain `git stash pop` — which demoted staged files to unstaged and
+        silently dropped the evaluated payload from the next commit when
+        the pop failed (DF-GITREINS-POC-1). Plumbing never touches the
+        caller's index, working tree, or HEAD.
+
+        Raises RuntimeError when the commit cannot be created so
+        _git_commit can degrade honestly ("dry-run") without destroying
+        the evaluated payload or leaving a half-created branch.
+        """
+        tree = self._write_tree_from_dir(rel_path)
+
+        message = f"verdict: {task_id} — {'PASS' if passed else 'FAIL'}"
+        commit = self._git(["commit-tree", tree, "-m", message])
+
+        # All-zeros <old-oid> makes update-ref refuse if the branch sprang
+        # into existence concurrently (first verdict must be the sole creator).
+        self._git(["update-ref", "refs/heads/gitreins", commit, "0" * 40])
+
+        return commit[:8]
+
+    def _write_tree_from_dir(self, rel_path: str) -> str:
+        """Write a git tree object containing exactly the files under rel_path.
+
+        Blobs are hashed straight into this repo's object database from the
+        verdict entry files, then nested trees are built bottom-up (mktree
+        takes one level per invocation). The resulting root tree holds only
+        the verdict paths, which is what makes an orphan-style root commit
+        possible without any checkout.
+        """
+        entry_base = os.path.join(self.workdir, rel_path)
+        if not os.path.isdir(entry_base):
+            raise RuntimeError(f"verdict entry dir disappeared before commit: {entry_base}")
+
+        prefix = rel_path.replace(os.sep, "/").rstrip("/") + "/"
+        entries = []  # (abs_path, path relative to the entry dir, "/"-separated)
+        for root, dirs, files in os.walk(entry_base):
+            dirs.sort()
+            for name in sorted(files):
+                full = os.path.join(root, name)
+                entry_rel = os.path.relpath(full, entry_base).replace(os.sep, "/")
+                entries.append((full, entry_rel))
+        if not entries:
+            raise RuntimeError(f"no verdict files to commit under: {entry_base}")
+
+        return self._build_tree_level(entries, prefix)
+
+    def _build_tree_level(self, entries: list, prefix: str) -> str:
+        """Build one tree level; recurse into subdirectories bottom-up."""
+        lines = []
+        by_first_component: dict[str, list] = {}
+        for full, entry_rel in entries:
+            first, _, rest = entry_rel.partition("/")
+            if rest:
+                by_first_component.setdefault(first, []).append((full, rest))
+            else:
+                oid = self._git(["hash-object", "-w", "--", full])
+                mode = "100755" if os.access(full, os.X_OK) else "100644"
+                lines.append((f"{mode} blob {oid}\t{first}", False))
+
+        for name, sub_entries in sorted(by_first_component.items()):
+            sub_oid = self._build_tree_level(sub_entries, prefix + name + "/")
+            lines.append((f"040000 tree {sub_oid}\t{name}", True))
+
+        # Canonical tree order: directories compare as name + "/"
+        lines.sort(key=lambda item: item[0].split("\t", 1)[1] + ("/" if item[1] else ""))
+        return self._git(["mktree"], input_text="".join(line + "\n" for line, _ in lines))
+
+    def _git(self, args: list[str], input_text: str | None = None) -> str:
+        """Run a git plumbing command in the repo and return stripped stdout.
+
+        Non-zero exits raise RuntimeError with git's stderr — verdict
+        persistence must fail loudly rather than report success while the
+        history was not written.
+        """
         result = subprocess.run(
-            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            ["git", *args],
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=30,
             cwd=self.workdir,
+            input=input_text,
+            env=self._git_env(),
         )
-        current_branch = result.stdout.strip()
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"git {' '.join(args)} failed (rc={result.returncode}): "
+                f"{result.stderr.strip()}"
+            )
+        return result.stdout.strip()
 
-        # Check for uncommitted changes
-        status = subprocess.run(
-            ["git", "status", "--porcelain"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-            cwd=self.workdir,
-        )
-        stashed = False
-        if status.stdout.strip():
-            subprocess.run(
-                ["git", "stash", "push", "-m", "gitreins-persist"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                cwd=self.workdir,
-            )
-            stashed = True
+    @staticmethod
+    def _git_env() -> dict:
+        """Env for plumbing git calls; identity only when the user has none.
 
-        try:
-            subprocess.run(
-                ["git", "checkout", "--orphan", "gitreins"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                cwd=self.workdir,
-            )
-            subprocess.run(
-                ["git", "rm", "-rf", "."],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                cwd=self.workdir,
-            )
-            subprocess.run(
-                ["git", "add", rel_path],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                cwd=self.workdir,
-            )
-            subprocess.run(
-                ["git", "commit", "-m", f"verdict: {task_id} — {'PASS' if passed else 'FAIL'}"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                cwd=self.workdir,
-            )
-            hash_result = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                cwd=self.workdir,
-            )
-            commit_hash = hash_result.stdout.strip()[:8]
-
-            # Return to original branch
-            restore = current_branch if current_branch not in ("HEAD", "") else "main"
-            subprocess.run(
-                ["git", "checkout", restore],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                cwd=self.workdir,
-            )
-
-            return commit_hash
-
-        finally:
-            if stashed:
-                subprocess.run(
-                    ["git", "stash", "pop"],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                    cwd=self.workdir,
-                )
+        setdefault on a private copy — an existing user/global identity is
+        never overridden, a bare container/test environment still commits.
+        """
+        env = dict(os.environ)
+        env.setdefault("GIT_AUTHOR_NAME", "GitReins")
+        env.setdefault("GIT_AUTHOR_EMAIL", "gitreins@localhost")
+        env.setdefault("GIT_COMMITTER_NAME", "GitReins")
+        env.setdefault("GIT_COMMITTER_EMAIL", "gitreins@localhost")
+        return env
 
     def _commit_to_existing(self, rel_path: str, task_id: str, passed: bool) -> str:
         """Commit to existing gitreins branch via worktree to avoid switching."""
@@ -527,20 +546,26 @@ class VerdictPersister:
             os.makedirs(os.path.dirname(dst), exist_ok=True)
             shutil.copytree(src, dst)
 
-            subprocess.run(
+            add = subprocess.run(
                 ["git", "add", rel_path],
                 capture_output=True,
                 text=True,
                 timeout=10,
                 cwd=worktree_dir,
+                env=self._git_env(),
             )
-            subprocess.run(
+            if add.returncode != 0:
+                raise RuntimeError(f"git add failed in worktree: {add.stderr.strip()}")
+            commit = subprocess.run(
                 ["git", "commit", "-m", f"verdict: {task_id} — {'PASS' if passed else 'FAIL'}"],
                 capture_output=True,
                 text=True,
                 timeout=10,
                 cwd=worktree_dir,
+                env=self._git_env(),
             )
+            if commit.returncode != 0:
+                raise RuntimeError(f"git commit failed in worktree: {commit.stderr.strip()}")
             hash_result = subprocess.run(
                 ["git", "rev-parse", "HEAD"],
                 capture_output=True,
