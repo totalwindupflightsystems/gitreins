@@ -816,3 +816,9 @@
 {"from":"tests/test_cli.py","to":"pkg:gitreins","rel":"imports","provenance":"ast_exact","confidence":1.0}
 {"from":"tests/test_cli.py","to":"pkg:logging","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
 {"from":"tests/test_cli.py","to":"pkg:yaml","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_persist.py","to":"pkg:json","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_persist.py","to":"pkg:os","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_persist.py","to":"pkg:shutil","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_persist.py","to":"pkg:subprocess","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_persist.py","to":"pkg:unittest.mock","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_persist.py","to":"pkg:engine.persist","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
