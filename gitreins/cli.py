@@ -19,6 +19,7 @@ import argparse
 import logging
 import os
 import shlex
+import subprocess
 import sys
 import time
 import yaml
@@ -1611,8 +1612,70 @@ def _cmd_judge_status(job_id: str) -> None:
     sys.exit(0)
 
 
+def _git_nul_paths(workdir: str, *args: str) -> set[bytes]:
+    """Return Git pathnames from a NUL-delimited command result.
+
+    Git's ``-z`` output is deliberately kept as bytes until display time so
+    spaces, newlines, and non-UTF-8 filenames cannot corrupt the path set.
+    """
+    result = subprocess.run(
+        ["git", *args],
+        capture_output=True,
+        cwd=workdir,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or b"").decode(errors="replace").strip()
+        raise RuntimeError(detail or f"git {' '.join(args)} failed")
+    return {path for path in result.stdout.split(b"\0") if path}
+
+
+def _snapshot_staged_paths(workdir: str) -> set[bytes]:
+    """Snapshot all staged paths, including both sides of renames."""
+    return _git_nul_paths(
+        workdir,
+        "diff",
+        "--cached",
+        "--name-only",
+        "-z",
+        "--no-renames",
+        "--diff-filter=ACDMRTUXB",
+    )
+
+
+def _git_head(workdir: str) -> bytes | None:
+    """Return HEAD's object ID, or None for a repository with no commits."""
+    result = subprocess.run(
+        ["git", "rev-parse", "--verify", "HEAD"],
+        capture_output=True,
+        cwd=workdir,
+    )
+    if result.returncode != 0:
+        return None
+    head = result.stdout.strip()
+    return head or None
+
+
+def _commit_paths(workdir: str, commit: bytes) -> set[bytes]:
+    """Return every path represented by a commit, without rename detection."""
+    return _git_nul_paths(
+        workdir,
+        "diff-tree",
+        "--root",
+        "--no-commit-id",
+        "--name-only",
+        "-z",
+        "--no-renames",
+        "-r",
+        commit.decode("ascii"),
+    )
+
+
+def _display_git_path(path: bytes) -> str:
+    """Render a pathname without allowing control characters to hide it."""
+    return repr(os.fsdecode(path))
+
+
 def cmd_commit(args):
-    import subprocess
     from engine.guard_manager import GuardManager
 
     workdir = get_workdir()
@@ -1627,6 +1690,13 @@ def cmd_commit(args):
         print(tier1.summary)
         sys.exit(1)
 
+    try:
+        staged_paths = _snapshot_staged_paths(workdir)
+        previous_head = _git_head(workdir)
+    except RuntimeError as exc:
+        print(f"COMMIT INTEGRITY CHECK FAILED — cannot snapshot Git state: {exc}", file=sys.stderr)
+        sys.exit(1)
+
     if getattr(args, "skip_tier2", False):
         print("Tier 1 PASSED — Tier 2 skipped (--skip-tier2 flag) — committing...")
     else:
@@ -1638,6 +1708,38 @@ def cmd_commit(args):
         cwd=workdir,
     )
     print(result.stdout + result.stderr)
+    if result.returncode != 0:
+        sys.exit(result.returncode)
+
+    try:
+        new_head = _git_head(workdir)
+        committed_paths = _commit_paths(workdir, new_head) if new_head else set()
+    except RuntimeError as exc:
+        print(f"COMMIT INTEGRITY CHECK FAILED — cannot verify Git state: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    if new_head is None or new_head == previous_head:
+        print(
+            "COMMIT INTEGRITY CHECK FAILED — git reported success, but HEAD did not advance.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    missing_paths = sorted(staged_paths - committed_paths)
+    if missing_paths:
+        print(
+            "COMMIT INTEGRITY CHECK FAILED — the new commit omits staged paths:",
+            file=sys.stderr,
+        )
+        for path in missing_paths:
+            print(f"  {_display_git_path(path)}", file=sys.stderr)
+        sys.exit(1)
+
+    print(
+        f"Commit completeness confirmed: {len(staged_paths)} staged path(s) represented in {new_head.decode('ascii')[:12]}."
+    )
+    for path in sorted(staged_paths):
+        print(f"  {_display_git_path(path)}")
 
 
 def cmd_commit_audit(args):

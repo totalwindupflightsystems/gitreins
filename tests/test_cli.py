@@ -51,6 +51,31 @@ def write_guard_config(workdir, extra_guards=""):
         f.write("guards:\n  test_command: echo ok\n" + extra_guards)
 
 
+def _init_real_git_repo(tmp_path):
+    """Create a real repository with an initial commit for commit CLI tests."""
+    repo = tmp_path / "real-repo"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "GitReins Tests"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "config", "user.email", "gitreins-tests@example.invalid"],
+        check=True,
+    )
+    (repo / "base.txt").write_text("base\n")
+    subprocess.run(["git", "-C", str(repo), "add", "base.txt"], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "initial"], check=True)
+    return str(repo)
+
+
+def _write_pre_commit_hook(repo, body):
+    hook_dir = os.path.join(repo, ".git", "hooks")
+    os.makedirs(hook_dir, exist_ok=True)
+    hook = os.path.join(hook_dir, "pre-commit")
+    with open(hook, "w") as f:
+        f.write("#!/bin/sh\n" + body + "\n")
+    os.chmod(hook, 0o755)
+
+
 # ── Phase 3-1: Command routing and argument parsing ──────────────────────────
 
 
@@ -319,6 +344,63 @@ class TestCommitCLI:
         assert "no .gitreins/config.yaml" in output
         assert "gitreins init" in output
         assert "Tier 1" not in output
+
+
+    def test_commit_success_confirms_complete_staged_payload(self, tmp_path):
+        """A complete commit reports every path captured after Tier 1."""
+        repo = _init_real_git_repo(tmp_path)
+        write_guard_config(repo)
+        (tmp_path / "real-repo" / "payload with space.txt").write_text("one\n")
+        (tmp_path / "real-repo" / "second.txt").write_text("two\n")
+        subprocess.run(
+            ["git", "-C", repo, "add", "payload with space.txt", "second.txt"], check=True
+        )
+
+        result = run_cli("commit", "complete payload", cwd=repo)
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        output = result.stdout + result.stderr
+        assert "Commit completeness confirmed: 2 staged path(s)" in output
+        assert "payload with space.txt" in output
+        assert "second.txt" in output
+
+    def test_commit_propagates_git_failure(self, tmp_path):
+        """A non-zero git commit result remains a non-zero CLI result."""
+        repo = _init_real_git_repo(tmp_path)
+        write_guard_config(repo)
+        (tmp_path / "real-repo" / "blocked.txt").write_text("blocked\n")
+        subprocess.run(["git", "-C", repo, "add", "blocked.txt"], check=True)
+        _write_pre_commit_hook(repo, "echo commit deliberately blocked >&2\nexit 23")
+
+        result = run_cli("commit", "blocked payload", cwd=repo)
+
+        assert result.returncode == 1
+        output = result.stdout + result.stderr
+        assert "commit deliberately blocked" in output
+
+    def test_commit_detects_path_removed_by_successful_hook(self, tmp_path):
+        """A successful commit that drops a staged path fails with its name."""
+        repo = _init_real_git_repo(tmp_path)
+        write_guard_config(repo)
+        (tmp_path / "real-repo" / "kept.txt").write_text("kept\n")
+        (tmp_path / "real-repo" / "omitted.txt").write_text("omitted\n")
+        subprocess.run(["git", "-C", repo, "add", "kept.txt", "omitted.txt"], check=True)
+        _write_pre_commit_hook(repo, "git reset --quiet -- omitted.txt")
+
+        result = run_cli("commit", "incomplete payload", cwd=repo)
+
+        assert result.returncode != 0
+        output = result.stdout + result.stderr
+        assert "COMMIT INTEGRITY CHECK FAILED" in output
+        assert "omitted.txt" in output
+        committed = subprocess.run(
+            ["git", "-C", repo, "show", "--format=", "--name-only", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert "kept.txt" in committed
+        assert "omitted.txt" not in committed
 
 
 class TestMCPServerCLI:
