@@ -115,6 +115,8 @@ select = [
 "engine/guard_manager.py" = ["E501"]
 # Judgment viewer — long lines are embedded CSS/JS inside the HTML template string
 "scripts/judgment_viewer.py" = ["E501"]
+# gitreins serve — embedded HTML/CSS/JS SPA template
+"gitreins/serve.py" = ["E501"]
 # Pipeline templates — long embedded shell command strings for YAML generation
 "engine/pipeline.py" = ["E501"]
 # CLI — long help strings and argument definitions

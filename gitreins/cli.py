@@ -1335,6 +1335,20 @@ def cmd_report(args):
     print(report)
 
 
+def cmd_serve(args):
+    """Run the local judgment-browser web server."""
+    from gitreins.serve import serve
+
+    workdir = get_workdir()
+    serve(
+        workdir,
+        host=args.host,
+        port=args.port,
+        project=args.project or "",
+        open_browser=args.open,
+    )
+
+
 def _cmd_report_tui(workdir: str, n: int = 20):
     """Interactive TUI for verdict browsing (requires textual)."""
     from engine.persist import build_report, VerdictPersister
@@ -2191,6 +2205,18 @@ def main():
     report_p.add_argument("-n", type=int, default=10, help="Number of recent verdicts to show")
     report_p.add_argument("--interactive", "-i", action="store_true", help="Interactive TUI mode")
 
+    serve_p = sub.add_parser(
+        "serve", help="Live judgment browser — local web server (Ctrl-C to stop)"
+    )
+    serve_p.add_argument("--port", type=int, default=8616, help="Port to bind (default 8616)")
+    serve_p.add_argument("--host", default="127.0.0.1", help="Bind address (default 127.0.0.1)")
+    serve_p.add_argument(
+        "--project",
+        default="",
+        help="Scheduler project name for the tick ledger (e.g. gitreins-poc)",
+    )
+    serve_p.add_argument("--open", action="store_true", help="Open the browser automatically")
+
     args = parser.parse_args()
 
     # Setup logging
@@ -2232,6 +2258,8 @@ def main():
         cmd_setup_tools(args)
     elif args.command == "report":
         cmd_report(args)
+    elif args.command == "serve":
+        cmd_serve(args)
     else:
         parser.print_help()
 
