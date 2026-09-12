@@ -40,6 +40,7 @@ dev = [
     "pyflakes>=3.0",
     "pycodestyle>=2.11",
     "mypy>=1.0",
+    "pyright>=1.1.390",
     "pytest-xdist>=3.0",
     "ruff>=0.5",
     "types-PyYAML>=6.0",
