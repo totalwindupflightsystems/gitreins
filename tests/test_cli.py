@@ -345,7 +345,6 @@ class TestCommitCLI:
         assert "gitreins init" in output
         assert "Tier 1" not in output
 
-
     def test_commit_success_confirms_complete_staged_payload(self, tmp_path):
         """A complete commit reports every path captured after Tier 1."""
         repo = _init_real_git_repo(tmp_path)
@@ -1189,9 +1188,7 @@ class TestInitStaticAnalysisTools:
             )
 
         result = run_cli("init", cwd=tmp_workdir)
-        assert result.returncode == 0, (
-            f"init failed: {result.stdout}\n{result.stderr}"
-        )
+        assert result.returncode == 0, f"init failed: {result.stdout}\n{result.stderr}"
 
         with open(config_path) as f:
             config = _yaml.safe_load(f)
@@ -1199,8 +1196,7 @@ class TestInitStaticAnalysisTools:
         assert guards["static_analysis"] is True
         python_tools = guards["static_analysis_tools"]["python"]
         assert isinstance(python_tools, list) and python_tools, (
-            "static_analysis_tools.python must be a non-empty list, "
-            f"got: {python_tools!r}"
+            f"static_analysis_tools.python must be a non-empty list, got: {python_tools!r}"
         )
 
     def test_init_preserves_existing_static_analysis_tools(self, tmp_workdir):
@@ -1235,9 +1231,7 @@ class TestInitStaticAnalysisTools:
             )
 
         result = run_cli("init", cwd=tmp_workdir)
-        assert result.returncode == 0, (
-            f"init failed: {result.stdout}\n{result.stderr}"
-        )
+        assert result.returncode == 0, f"init failed: {result.stdout}\n{result.stderr}"
 
         with open(config_path) as f:
             config = _yaml.safe_load(f)
@@ -1347,7 +1341,9 @@ class TestInitRunnerGitignoreAndWarning:
         lang = _detect_language(str(tmp_path))
         assert _detect_test_command(str(tmp_path), lang) == "python3 -m pytest -x --tb=short"
 
-    def test_detect_test_command_root_module_prefers_module_pytest_over_uv(self, monkeypatch, tmp_path):
+    def test_detect_test_command_root_module_prefers_module_pytest_over_uv(
+        self, monkeypatch, tmp_path
+    ):
         """Root weather.py module + tests/ + uv on PATH -> `python3 -m pytest` (DF-017)."""
         from gitreins.cli import _detect_language, _detect_test_command
 
@@ -1371,7 +1367,9 @@ class TestInitRunnerGitignoreAndWarning:
             f.write("def forecast():\n    return 'sunny'\n")
         os.makedirs(os.path.join(tmp_workdir, "tests"), exist_ok=True)
         with open(os.path.join(tmp_workdir, "tests", "test_weather.py"), "w") as f:
-            f.write("from weather import forecast\n\ndef test_forecast():\n    assert forecast() == 'sunny'\n")
+            f.write(
+                "from weather import forecast\n\ndef test_forecast():\n    assert forecast() == 'sunny'\n"
+            )
         result = run_cli("init", cwd=tmp_workdir)
         assert result.returncode == 0, result.stdout + result.stderr
         config_path = os.path.join(tmp_workdir, ".gitreins", "config.yaml")
@@ -1379,7 +1377,9 @@ class TestInitRunnerGitignoreAndWarning:
             config = _yaml.safe_load(f)
         cmd = config["guards"]["test_command"]
         assert cmd == "python3 -m pytest -x --tb=short", f"expected module pytest, got {cmd!r}"
-        run = subprocess.run(shlex.split(cmd), cwd=tmp_workdir, capture_output=True, text=True, timeout=60)
+        run = subprocess.run(
+            shlex.split(cmd), cwd=tmp_workdir, capture_output=True, text=True, timeout=60
+        )
         assert run.returncode == 0, f"{cmd} failed:\n{run.stdout}\n{run.stderr}"
 
     def test_detect_test_command_src_layout_setup_py_prefers_uv_run(self, monkeypatch, tmp_path):
@@ -1597,6 +1597,136 @@ class TestInitRunnerGitignoreAndWarning:
         assert scan.returncode == 0, (
             f"gitleaks scan not clean (rc={scan.returncode}):\n{scan.stderr}"
         )
+
+
+class TestInstallSmartInitConsistency:
+    """DF-GITREINS-POC-3: install and smart-init share one persisted contract."""
+
+    @staticmethod
+    def _python_repo(tmp_path):
+        repo = _init_real_git_repo(tmp_path)
+        (tmp_path / "real-repo" / "pyproject.toml").write_text("[project]\nname = 'consumer'\n")
+        (tmp_path / "real-repo" / "tests").mkdir()
+        (tmp_path / "real-repo" / "tests" / "test_smoke.py").write_text("def test_smoke(): pass\n")
+        fake_bin = tmp_path / "fake-bin"
+        fake_bin.mkdir()
+        fake_uv = fake_bin / "uv"
+        fake_uv.write_text("#!/bin/sh\nexit 0\n")
+        fake_uv.chmod(0o755)
+        env = {"PATH": str(fake_bin) + os.pathsep + os.environ["PATH"]}
+        return repo, env
+
+    def test_install_then_init_persists_announced_test_command(self, tmp_path):
+        """The command smart init announces is the command it writes."""
+        import yaml
+
+        repo, env = self._python_repo(tmp_path)
+        installed = run_cli("install", cwd=repo, extra_env=env)
+        assert installed.returncode == 0, installed.stdout + installed.stderr
+
+        initialized = run_cli("init", cwd=repo, extra_env=env)
+        assert initialized.returncode == 0, initialized.stdout + initialized.stderr
+        announced = next(
+            line.split("Test cmd:", 1)[1].strip()
+            for line in initialized.stdout.splitlines()
+            if line.startswith("  Test cmd:")
+        )
+        with open(os.path.join(repo, ".gitreins", "config.yaml")) as f:
+            persisted = yaml.safe_load(f)["guards"]["test_command"]
+        assert announced == persisted == "uv run pytest -x --tb=short"
+
+    def test_init_preserves_custom_test_command_after_install(self, tmp_path):
+        """Smart init may upgrade only the untouched install default."""
+        import yaml
+
+        repo, env = self._python_repo(tmp_path)
+        assert run_cli("install", cwd=repo, extra_env=env).returncode == 0
+        config_path = os.path.join(repo, ".gitreins", "config.yaml")
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+        config["guards"]["test_command"] = "python -m pytest -q"
+        with open(config_path, "w") as f:
+            yaml.safe_dump(config, f, sort_keys=False)
+
+        initialized = run_cli("init", cwd=repo, extra_env=env)
+        assert initialized.returncode == 0, initialized.stdout + initialized.stderr
+        with open(config_path) as f:
+            persisted = yaml.safe_load(f)
+        assert persisted["guards"]["test_command"] == "python -m pytest -q"
+        assert "Test cmd:    python -m pytest -q" in initialized.stdout
+
+    def test_init_reports_persisted_static_analysis_setting_and_tools(self, tmp_path):
+        """Messages describe the saved toggle and tool list, not fresh detection."""
+        import yaml
+
+        repo, env = self._python_repo(tmp_path)
+        assert run_cli("install", cwd=repo, extra_env=env).returncode == 0
+        config_path = os.path.join(repo, ".gitreins", "config.yaml")
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+        config["guards"]["static_analysis"] = True
+        config["guards"]["static_analysis_tools"] = {"python": ["custom-linter"]}
+        with open(config_path, "w") as f:
+            yaml.safe_dump(config, f, sort_keys=False)
+
+        enabled = run_cli("init", cwd=repo, extra_env=env)
+        assert enabled.returncode == 0, enabled.stdout + enabled.stderr
+        assert "Static analysis: enabled (custom-linter)" in enabled.stdout
+
+        config["guards"]["static_analysis"] = False
+        with open(config_path, "w") as f:
+            yaml.safe_dump(config, f, sort_keys=False)
+        disabled = run_cli("init", cwd=repo, extra_env=env)
+        assert disabled.returncode == 0, disabled.stdout + disabled.stderr
+        assert (
+            "Static analysis: disabled (explicitly off; configured tools: custom-linter)"
+            in disabled.stdout
+        )
+
+    def test_install_init_artifacts_are_ignored_and_idempotent(self, tmp_path):
+        """All generated runtime files stay untracked without duplicate rules."""
+        repo, env = self._python_repo(tmp_path)
+        assert run_cli("install", cwd=repo, extra_env=env).returncode == 0
+        first_init = run_cli("init", cwd=repo, extra_env=env)
+        assert first_init.returncode == 0, first_init.stdout + first_init.stderr
+        gitignore_path = os.path.join(repo, ".gitignore")
+        before = open(gitignore_path).read()
+        backup_path = os.path.join(repo, ".gitreins", "config.yaml.bak")
+        assert os.path.isfile(backup_path)
+        backup_before = open(backup_path, "rb").read()
+        backup_mtime_before = os.stat(backup_path).st_mtime_ns
+
+        assert run_cli("install", cwd=repo, extra_env=env).returncode == 0
+        second_init = run_cli("init", cwd=repo, extra_env=env)
+        assert second_init.returncode == 0, second_init.stdout + second_init.stderr
+        after = open(gitignore_path).read()
+        assert after == before
+        assert open(backup_path, "rb").read() == backup_before
+        assert os.stat(backup_path).st_mtime_ns == backup_mtime_before
+        for entry in (
+            ".gitreins/tasks.yaml",
+            ".gitreins/config.yaml.bak",
+            ".gitreins/usage.jsonl",
+            "__pycache__/",
+        ):
+            assert after.splitlines().count(entry) == 1, entry
+
+        (tmp_path / "real-repo" / ".gitreins" / "usage.jsonl").write_text("{}\n")
+        (tmp_path / "real-repo" / "__pycache__").mkdir()
+        (tmp_path / "real-repo" / "__pycache__" / "source.cpython-311.pyc").write_bytes(b"cache")
+        (tmp_path / "real-repo" / "source.py").write_text("value = 1\n")
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        assert "config.yaml.bak" not in status
+        assert "usage.jsonl" not in status
+        assert "__pycache__" not in status
+        assert "source.py" in status
+        assert ".gitreins/config.yaml" in status
 
 
 class TestPreCommitHookIntegration:

@@ -26,6 +26,13 @@ import yaml
 
 from engine.version import __version__
 
+INSTALL_DEFAULT_TEST_COMMAND = "pytest -x --tb=short"
+GITREINS_GITIGNORE_ENTRIES = (
+    ".gitreins/tasks.yaml",
+    ".gitreins/config.yaml.bak",
+    ".gitreins/usage.jsonl",
+)
+
 DEFAULT_GITREINS_CONFIG = """\
 # GitReins Configuration
 
@@ -258,8 +265,8 @@ def _ensure_gitignore_entry(workdir: str, entry: str) -> tuple[bool, str]:
     """Ensure `entry` is present in <workdir>/.gitignore (create if absent).
 
     Returns (changed, message). Shared by cmd_install and cmd_init so both
-    activation paths protect `.gitreins/tasks.yaml` from accidental commits
-    (GR-GAP-025).
+    activation paths protect GitReins' local runtime files from accidental
+    commits (GR-GAP-025, DF-GITREINS-POC-3).
     """
     gitignore_path = os.path.join(workdir, ".gitignore")
     existing = ""
@@ -276,13 +283,39 @@ def _ensure_gitignore_entry(workdir: str, entry: str) -> tuple[bool, str]:
     return True, f".gitignore (added {entry})"
 
 
+def _gitignore_entries_for_project(workdir: str, lang: dict | None = None) -> tuple[str, ...]:
+    """Return the GitReins-generated files to protect in this project.
+
+    The universal entries cover GitReins state and telemetry. Python projects
+    also get the standard interpreter cache exclusion; other languages should
+    not receive a language-specific rule just because ``install`` was run.
+    """
+    if lang is None:
+        lang = _detect_language(workdir)
+    entries = list(GITREINS_GITIGNORE_ENTRIES)
+    if lang.get("is_python"):
+        entries.append("__pycache__/")
+    return tuple(entries)
+
+
+def _ensure_gitignore_entries(workdir: str, entries: tuple[str, ...]) -> list[str]:
+    """Append missing entries and return messages for entries that changed it."""
+    changed = []
+    for entry in entries:
+        entry_changed, message = _ensure_gitignore_entry(workdir, entry)
+        if entry_changed:
+            changed.append(message)
+    return changed
+
+
 def cmd_install(args):
     """One-command GitReins activation for the current repo.
 
     Creates:
       - .gitreins/config.yaml   (default config if missing)
       - .git/hooks/pre-commit   (runs `gitreins guard` on staged changes)
-      - .gitignore              (adds .gitreins/tasks.yaml if not already present)
+      - .gitignore              (adds GitReins runtime entries, plus
+                                 `__pycache__/` for Python projects)
 
     For smarter auto-detection, use: gitreins init
     """
@@ -293,7 +326,6 @@ def cmd_install(args):
     gitreins_dir = os.path.join(workdir, ".gitreins")
     config_path = os.path.join(gitreins_dir, "config.yaml")
     hook_path = os.path.join(hooks_dir, "pre-commit")
-    tasks_entry = ".gitreins/tasks.yaml"
 
     if not os.path.isdir(git_dir):
         print(f"Error: {workdir} is not a git repository (no .git directory).")
@@ -320,12 +352,11 @@ def cmd_install(args):
     os.chmod(hook_path, 0o755)
     created.append(hook_path + ("" if not hook_existed else " (overwritten)"))
 
-    # 3. .gitignore — add .gitreins/tasks.yaml if not present
-    gitignore_changed, gitignore_msg = _ensure_gitignore_entry(workdir, tasks_entry)
-    if gitignore_changed:
+    # 3. .gitignore — protect GitReins state and runtime artifacts
+    for gitignore_msg in _ensure_gitignore_entries(
+        workdir, _gitignore_entries_for_project(workdir)
+    ):
         created.append(gitignore_msg)
-    else:
-        skipped.append(gitignore_msg)
 
     # 4. Success summary
     print(f"GitReins installed in {workdir}")
@@ -387,9 +418,12 @@ def cmd_init(args):
         existing["guards"] = _build_guards_section(lang_info, test_cmd, static_tools)
         changed.append("guards")
     else:
-        # Fill in missing guard keys
+        # Fill in missing guard keys, then upgrade only the exact default that
+        # `install` wrote. Any other value is user-authored and stays intact.
         guards = existing.setdefault("guards", {})
         updates = _fill_missing_guards(guards, lang_info, test_cmd, static_tools)
+        if _upgrade_install_default_test_command(guards, test_cmd):
+            updates.append("test_command")
         if updates:
             changed.append(f"guards (+{', '.join(updates)})")
 
@@ -442,11 +476,11 @@ def cmd_init(args):
         _generate_gitleaks_config(workdir, lang_info, gitleaks_path)
         changed.append(".gitleaks.toml")
 
-    # Ensure .gitignore ignores local task state (GR-GAP-025) — matches
-    # cmd_install so `init` standalone can't lead to committing tasks.yaml.
-    gi_changed, gi_msg = _ensure_gitignore_entry(workdir, ".gitreins/tasks.yaml")
-    if gi_changed:
-        changed.append(gi_msg)
+    # Ensure GitReins state and runtime artifacts stay local. This mirrors
+    # cmd_install so either activation path is safe (GR-GAP-025).
+    changed.extend(
+        _ensure_gitignore_entries(workdir, _gitignore_entries_for_project(workdir, lang_info))
+    )
 
     # Summary
     print(f"GitReins init: {workdir}")
@@ -462,8 +496,9 @@ def cmd_init(args):
             file=sys.stderr,
         )
     print(f"  Packages:    {size['packages']}")
-    print(f"  Test cmd:    {test_cmd}")
-    if test_cmd == "python3 -m pytest -x --tb=short":
+    persisted_test_cmd = existing["guards"].get("test_command", test_cmd)
+    print(f"  Test cmd:    {persisted_test_cmd}")
+    if persisted_test_cmd == "python3 -m pytest -x --tb=short":
         print(
             "  Note: using 'python3 -m pytest' — root module/package layout without pytest pythonpath "
             'config; add [tool.pytest.ini_options] pythonpath = ["."] to pyproject.toml '
@@ -474,26 +509,7 @@ def cmd_init(args):
     print(
         f"  History:     {existing.get('history', {}).get('enabled', True) and 'enabled' or 'disabled'}"
     )
-    sa_enabled = existing.get("guards", {}).get("static_analysis", False)
-    sa_status = []
-    if sa_enabled and static_tools:
-        sa_status.append(f"enabled ({', '.join(static_tools)})")
-    elif sa_enabled:
-        # Build tool-specific install instructions for the detected language
-        install_hints = []
-        if lang_info["is_python"]:
-            install_hints.append("pip install mypy")
-        elif lang_info["is_ruby"]:
-            install_hints.append("gem install sorbet && srb init")
-        elif lang_info["is_php"]:
-            install_hints.append("composer require --dev phpstan/phpstan")
-        elif lang_info["has_sql"]:
-            install_hints.append("pip install sqlfluff")
-        hint = "; ".join(install_hints) if install_hints else "see docs for install instructions"
-        sa_status.append(f"enabled (no tools detected — install: {hint})")
-    else:
-        sa_status.append("disabled (compiled language or explicitly off)")
-    print(f"  Static analysis: {' '.join(sa_status)}")
+    print(f"  Static analysis: {_static_analysis_status(existing['guards'], lang_info)}")
     print()
     if changed:
         print(f"Updated: {', '.join(changed)}")
@@ -657,8 +673,14 @@ def _detect_root_import_layout(workdir: str) -> bool:
     # only root .py files are these must not be misclassified as a root-import
     # layout (DF-017), otherwise uv run pytest is wrongly replaced by module pytest.
     excluded = {
-        "tests", ".venv", "node_modules", ".git", ".gitreins", "__pycache__",
-        "setup.py", "conftest.py",
+        "tests",
+        ".venv",
+        "node_modules",
+        ".git",
+        ".gitreins",
+        "__pycache__",
+        "setup.py",
+        "conftest.py",
     }
     try:
         with os.scandir(workdir) as it:
@@ -881,9 +903,7 @@ def _build_guards_section(lang: dict, test_cmd: str, static_tools: list[str] | N
             "test_command": test_cmd,
             "static_analysis": True,  # ON: dynamic language, no compiler
         }
-        section["static_analysis_tools"] = {
-            "python": static_tools or canonical_tools["python"]
-        }
+        section["static_analysis_tools"] = {"python": static_tools or canonical_tools["python"]}
         return section
     elif lang["is_ts"]:
         return {
@@ -941,6 +961,63 @@ def _build_guards_section(lang: dict, test_cmd: str, static_tools: list[str] | N
             "test_mode": "full",
             "test_command": test_cmd,
         }
+
+
+def _upgrade_install_default_test_command(guards: dict, detected_test_cmd: str) -> bool:
+    """Upgrade only the untouched test command created by ``install``.
+
+    ``install`` has no user input and writes ``INSTALL_DEFAULT_TEST_COMMAND``.
+    Treating that exact value as the baseline lets smart init tailor it while
+    preserving every custom command on subsequent runs.
+    """
+    if (
+        guards.get("test_command") == INSTALL_DEFAULT_TEST_COMMAND
+        and detected_test_cmd != INSTALL_DEFAULT_TEST_COMMAND
+    ):
+        guards["test_command"] = detected_test_cmd
+        return True
+    return False
+
+
+def _configured_static_analysis_tools(guards: dict) -> list[str]:
+    """Flatten configured static-analysis tools for user-facing status output."""
+    configured = guards.get("static_analysis_tools", {})
+    values = configured.values() if isinstance(configured, dict) else [configured]
+    tools = []
+    for value in values:
+        if isinstance(value, str):
+            candidates = [value]
+        elif isinstance(value, (list, tuple)):
+            candidates = value
+        else:
+            candidates = []
+        for tool in candidates:
+            if isinstance(tool, str) and tool not in tools:
+                tools.append(tool)
+    return tools
+
+
+def _static_analysis_status(guards: dict, lang: dict) -> str:
+    """Describe the persisted static-analysis toggle and configured tools."""
+    enabled = guards.get("static_analysis", False)
+    tools = _configured_static_analysis_tools(guards)
+    if enabled and tools:
+        return f"enabled ({', '.join(tools)})"
+    if enabled:
+        install_hints = []
+        if lang["is_python"]:
+            install_hints.append("pip install mypy")
+        elif lang["is_ruby"]:
+            install_hints.append("gem install sorbet && srb init")
+        elif lang["is_php"]:
+            install_hints.append("composer require --dev phpstan/phpstan")
+        elif lang["has_sql"]:
+            install_hints.append("pip install sqlfluff")
+        hint = "; ".join(install_hints) if install_hints else "see docs for install instructions"
+        return f"enabled (no tools configured — install: {hint})"
+    if tools:
+        return f"disabled (explicitly off; configured tools: {', '.join(tools)})"
+    return "disabled (compiled language or explicitly off)"
 
 
 def _fill_missing_guards(

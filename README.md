@@ -11,7 +11,7 @@
 
 GitReins lives inside your git repository as a quality harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ✅ **v0.12.0** — LSP diagnostics (14 languages), opt-in static analysis (9 analyzers, default off), commit audit with CVE-scored severity, optional Antares CVE-localization guard, Anthropic Messages API support, DeepSeek prompt caching telemetry, large-repo hardening (fast-track + `--skip-tier2`), MCP `propagate`, judge single-flight + resume lease, evaluator committed-diff read path, 1366 tests pass / 32 test files, verified on a full run 2026-09-11 (1358 passed, 8 skipped).
+> ✅ **v0.12.0** — LSP diagnostics (14 languages), opt-in static analysis (9 analyzers; baseline install default off, smart init enables it for detected dynamic-language projects), commit audit with CVE-scored severity, optional Antares CVE-localization guard, Anthropic Messages API support, DeepSeek prompt caching telemetry, large-repo hardening (fast-track + `--skip-tier2`), MCP `propagate`, judge single-flight + resume lease, evaluator committed-diff read path, 1370 tests pass / 32 test files, verified on a full run 2026-09-12 (1363 passed, 7 skipped).
 
 ---
 
@@ -20,9 +20,16 @@ GitReins lives inside your git repository as a quality harness. It provides MCP 
 ```bash
 pip install gitreins
 cd /path/to/your-project
-gitreins install        # creates .gitreins/config.yaml + pre-commit hook
+gitreins install        # baseline config + pre-commit hook
 gitreins init           # smart init — detects language, size, optimal config
 ```
+
+`install` is the conservative baseline: its config leaves static analysis off.
+`init` is the smart opt-in path and enables static analysis for detected
+projects such as Python, recording the configured analyzers in the config. An
+explicit `static_analysis` setting is preserved on reruns, as is a custom
+`guards.test_command`; only the untouched install baseline may be upgraded to
+the detected test runner.
 
 **Running from a source checkout** (no pip install): the `gitreins` console
 script is not on your PATH — it lives in the repo's virtualenv. Activate it
@@ -369,7 +376,7 @@ history:
 - **MCP Transport:** stdio (12 tools)
 - **Config:** YAML in `.gitreins/` directory
 - **Evaluator Default Model:** DeepSeek V4 Flash (~$0.01/eval)
-- **Test suite:** ~1366 tests across 32 test files (parallelized with pytest-xdist; last verified full run 2026-09-11: 1358 passed, 8 skipped)
+- **Test suite:** ~1370 tests across 32 test files (parallelized with pytest-xdist; last verified full run 2026-09-12: 1363 passed, 7 skipped)
 
 ## Architecture & Docs
 

@@ -41,8 +41,10 @@ gitreins install
 - `.gitreins/config.yaml` — default config (skipped if already present)
 - `.git/hooks/pre-commit` — runs `gitreins guard` on every commit
   (overwritten if a hook already exists)
-- `.gitignore` — appends `.gitreins/tasks.yaml` (local task state is never
-  committed; it is added to `.gitignore` automatically)
+- `.gitignore` — appends the local GitReins runtime exclusions
+  `.gitreins/tasks.yaml`, `.gitreins/config.yaml.bak`, and
+  `.gitreins/usage.jsonl`; Python projects also get `__pycache__/` (existing
+  entries are preserved and never duplicated)
 
 ## 2. Smart init
 
@@ -52,8 +54,12 @@ gitreins init
 
 `gitreins init` auto-detects the project language, size, and complexity, and
 writes an optimized `.gitreins/config.yaml` (guard set, test mode, evaluator
-budgets). Run it after `install` — `install` writes only the default config,
-`init` tailors it to your repo.
+budgets). Run it after `install` — `install` writes only the conservative
+baseline config, while `init` tailors it to the repo. For detected Python and
+other dynamic-language projects, smart init enables static analysis and records
+its configured tools. Explicit static-analysis settings and custom test
+commands are preserved on reruns; the detected test runner replaces only the
+untouched `install` default.
 
 ## 3. Gitleaks allowlist (no action needed)
 
