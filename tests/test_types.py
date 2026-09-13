@@ -72,9 +72,7 @@ def test_tier1_summary_counts_failed_lines_and_shows_tail():
         ],
     )
 
-    assert result.summary == (
-        "  ✗ tests — 1 failure(s); FAILED tests/test_one.py::test_a"
-    )
+    assert result.summary == ("  ✗ tests — 1 failure(s); FAILED tests/test_one.py::test_a")
 
 
 def test_tier1_summary_banner_tail_still_shows_failed_test_id():
@@ -133,9 +131,7 @@ def test_tier1_summary_counts_multiple_failed_lines():
         ],
     )
 
-    assert result.summary == (
-        "  ✗ tests — 3 failure(s); FAILED tests/test_c.py::test_three"
-    )
+    assert result.summary == ("  ✗ tests — 3 failure(s); FAILED tests/test_c.py::test_three")
 
 
 def test_tier1_summary_truncates_long_tail_line():

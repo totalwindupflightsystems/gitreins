@@ -99,8 +99,10 @@ class Tier1Result:
                 # Prefer the last pytest FAILED line over the final output line:
                 # pytest's "=== N failed, M passed ===" banner would otherwise
                 # hide the failing test ID (DF-021).
-                tail_src = failed_lines[-1] if failed_lines else (
-                    out_lines[-1].strip() if out_lines else ""
+                tail_src = (
+                    failed_lines[-1]
+                    if failed_lines
+                    else (out_lines[-1].strip() if out_lines else "")
                 )
                 tail = _truncate_line(tail_src) if tail_src else ""
                 if r.name == "secrets":

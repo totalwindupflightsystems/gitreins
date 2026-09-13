@@ -13,6 +13,9 @@ Usage:
     gitreins worktree doctor
     gitreins worktree list
     gitreins worktree fleet <manifest.json> [--merge]
+    gitreins worktree fresh --cmd "<command>" [--keep --timeout <seconds>]
+    gitreins worktree repro --cmd "<command>" -k <N> [--concurrency <C>]
+    gitreins worktree dogfood [--keep --skip-judge]
     gitreins worktree clean [--confirm-stale-orphan]
     gitreins worktree merge <id> [--force --actor <actor>]
     gitreins guard run
@@ -22,6 +25,7 @@ Usage:
 """
 
 import argparse
+import json
 import logging
 import os
 import shlex
@@ -61,7 +65,9 @@ defaults:
   worktree_venv_source: ".venv"            # shared source under canonical main
   worktree_venv_name: ".venv"              # destination name in each tree
 
-# ── Guards (Tier 1 static checks) ─────────────────────────────────
+# ── Disposable and fleet worktrees ───────────────────────────────
+worktree_fleet:
+  disk_ceiling_mb: 4096                   # <=0 means unlimited
 guards:
   secrets: true
   lint: true
@@ -460,6 +466,16 @@ def cmd_init(args):
         }
         changed.append("history")
 
+    # Disposable/fleet worktree policy — additive so existing settings stay intact.
+    fleet = existing.setdefault("worktree_fleet", {})
+    if not isinstance(fleet, dict):
+        fleet = {}
+        existing["worktree_fleet"] = fleet
+        changed.append("worktree_fleet")
+    if "disk_ceiling_mb" not in fleet:
+        fleet["disk_ceiling_mb"] = 4096
+        changed.append("worktree_fleet.disk_ceiling_mb")
+
     # Write config
     os.makedirs(gitreins_dir, exist_ok=True)
     bak = _safe_overwrite(
@@ -474,9 +490,19 @@ def cmd_init(args):
     if bak:
         changed.append(f"backup: {os.path.basename(bak)}")
 
-    # Ensure pre-commit hook exists
-    hook_path = os.path.join(workdir, ".git", "hooks", "pre-commit")
-    hooks_dir = os.path.dirname(hook_path)
+    # Ensure pre-commit hook exists.  ``.git`` is a file in linked and
+    # detached worktrees, so resolve Git's common hooks path instead of
+    # assuming a directory under the checkout.
+    hooks_result = subprocess.run(
+        ["git", "-C", workdir, "rev-parse", "--git-path", "hooks"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    hooks_dir = hooks_result.stdout.strip() or os.path.join(workdir, ".git", "hooks")
+    if not os.path.isabs(hooks_dir):
+        hooks_dir = os.path.join(workdir, hooks_dir)
+    hook_path = os.path.join(hooks_dir, "pre-commit")
     if not os.path.isfile(hook_path) or args.reset:
         os.makedirs(hooks_dir, exist_ok=True)
         with open(hook_path, "w") as f:
@@ -1412,14 +1438,114 @@ def cmd_worktree_fleet(args):
     print(_json.dumps(report, indent=2, sort_keys=True))
 
 
+def _write_worktree_json(path: str | None, payload: dict) -> None:
+    """Write disposable evidence as UTF-8 JSON when requested."""
+    from engine.worktree_manager import WorktreeError
+
+    if path is None:
+        return
+    try:
+        json_path = os.path.abspath(path)
+        parent = os.path.dirname(json_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(json_path, "w", encoding="utf-8") as stream:
+            json.dump(payload, stream, indent=2)
+            stream.write("\n")
+    except OSError as exc:
+        raise WorktreeError(f"could not write evidence JSON {path}: {exc}") from exc
+
+
+def cmd_worktree_fresh(args):
+    """Run one shell command in a disposable detached worktree."""
+    from engine.worktree_disposable import DisposableWorktreeManager
+    from engine.worktree_manager import WorktreeError
+
+    try:
+        verifier = DisposableWorktreeManager(get_workdir())
+        result = verifier.run(
+            args.cmd,
+            timeout=getattr(args, "timeout", None),
+            keep=bool(getattr(args, "keep", False)),
+        )
+        _write_worktree_json(getattr(args, "json_path", None), result)
+    except WorktreeError as exc:
+        print(f"worktree fresh: infrastructure failure\nError: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+
+    kept = " (kept at " + result["tree"] + ")" if result["kept"] else ""
+    print(f"fresh: exit {result['exit_code']} in {result['duration_s']:.3f}s{kept}")
+    if result["output"]:
+        print(result["output"])
+    if result["exit_code"]:
+        raise SystemExit(result["exit_code"])
+
+
+def cmd_worktree_repro(args):
+    """Run a command repeatedly in bounded disposable worktrees."""
+    from engine.worktree_disposable import DisposableWorktreeManager
+    from engine.worktree_manager import WorktreeError
+
+    try:
+        verifier = DisposableWorktreeManager(get_workdir())
+        report = verifier.repro(
+            args.cmd,
+            args.k,
+            concurrency=getattr(args, "concurrency", None),
+            timeout=getattr(args, "timeout", None),
+            keep_failures=bool(getattr(args, "keep_failures", False)),
+        )
+        _write_worktree_json(getattr(args, "json_path", None), report)
+    except WorktreeError as exc:
+        print(f"worktree repro: infrastructure failure\nError: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+
+    kept = [run["tree"] for run in report["runs"] if run["kept"]]
+    suffix = f" — {len(kept)} failure(s) kept at {', '.join(kept)}" if kept else ""
+    print(
+        f"repro: {report['passes']}/{report['k']} passed "
+        f"(pass rate {report['pass_rate']:.2f}) — {report['failures']} failure(s){suffix}"
+    )
+    if report["failures"]:
+        raise SystemExit(1)
+
+
+def cmd_worktree_dogfood(args):
+    """Exercise init, task, guard, and judge in a disposable tree."""
+    from engine.worktree_disposable import DisposableWorktreeManager
+    from engine.worktree_manager import WorktreeError
+
+    try:
+        verifier = DisposableWorktreeManager(get_workdir())
+        report = verifier.dogfood(
+            keep=bool(getattr(args, "keep", False)),
+            skip_judge=bool(getattr(args, "skip_judge", False)),
+            test_command=getattr(args, "test_command", None),
+            timeout=getattr(args, "timeout", None),
+        )
+        _write_worktree_json(getattr(args, "json_path", None), report)
+    except WorktreeError as exc:
+        print(f"worktree dogfood: infrastructure failure\nError: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+
+    print(
+        f"dogfood: {sum(step['status'] == 'passed' for step in report['steps'])}/"
+        f"{len(report['steps'])} steps passed; judge {report['judge']['status']}"
+    )
+    if report["exit_code"]:
+        raise SystemExit(report["exit_code"])
+
+
 def cmd_worktree_clean(args):
-    """Reap merged worktrees; stale/orphan only with explicit confirmation."""
+    """Reap merged task worktrees and finished disposable runs."""
+    from engine.worktree_disposable import DisposableWorktreeManager
     from engine.worktree_manager import PROTECTED_STATES, WorktreeError, WorktreeManager
 
     confirm = bool(getattr(args, "confirm_stale_orphan", False))
     try:
         manager = WorktreeManager(get_workdir())
         report = manager.clean(confirm_stale_orphan=confirm)
+        disposable_removed = DisposableWorktreeManager(manager.main_root).reap()
     except WorktreeError as exc:
         print(f"worktree clean: failed\nError: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
@@ -1429,7 +1555,11 @@ def cmd_worktree_clean(args):
         print(f"Reaped {len(removed)} worktree(s): {', '.join(removed)}")
         for branch in report["branches_deleted"]:
             print(f"  branch deleted (merged): {branch}")
-    else:
+    if disposable_removed:
+        print(
+            f"Reaped {len(disposable_removed)} disposable run(s): {', '.join(disposable_removed)}"
+        )
+    if not removed and not disposable_removed:
         print("Nothing to reap.")
 
     kept = report["kept"]
@@ -2336,6 +2466,47 @@ def main():
         "--actor", default=None, help="Identity required by --force-merge"
     )
 
+    worktree_fresh_p = worktree_sub.add_parser(
+        "fresh", help="Run one shell command in a fresh detached worktree"
+    )
+    worktree_fresh_p.add_argument("--cmd", required=True, help="Shell command executed with sh -c")
+    worktree_fresh_p.add_argument(
+        "--json", dest="json_path", help="Write evidence JSON to this path"
+    )
+    worktree_fresh_p.add_argument("--keep", action="store_true", help="Retain the disposable tree")
+    worktree_fresh_p.add_argument("--timeout", type=float, help="Command timeout in seconds")
+
+    worktree_repro_p = worktree_sub.add_parser(
+        "repro", help="Run a command repeatedly in fresh detached worktrees"
+    )
+    worktree_repro_p.add_argument("--cmd", required=True, help="Shell command executed with sh -c")
+    worktree_repro_p.add_argument("-k", type=int, required=True, help="Number of repetitions")
+    worktree_repro_p.add_argument(
+        "--concurrency", type=int, help="Maximum concurrent runs (default: configured cap)"
+    )
+    worktree_repro_p.add_argument("--timeout", type=float, help="Per-run timeout in seconds")
+    worktree_repro_p.add_argument(
+        "--keep-failures", action="store_true", help="Retain failed trees"
+    )
+    worktree_repro_p.add_argument(
+        "--json", dest="json_path", help="Write evidence JSON to this path"
+    )
+
+    worktree_dogfood_p = worktree_sub.add_parser(
+        "dogfood", help="Exercise init, task, guard, and judge in a throwaway tree"
+    )
+    worktree_dogfood_p.add_argument(
+        "--keep", action="store_true", help="Retain the disposable tree"
+    )
+    worktree_dogfood_p.add_argument(
+        "--skip-judge", action="store_true", help="Skip Tier 2 deterministically"
+    )
+    worktree_dogfood_p.add_argument("--test-command", help="Override the guard test command")
+    worktree_dogfood_p.add_argument("--timeout", type=float, help="Per-step timeout in seconds")
+    worktree_dogfood_p.add_argument(
+        "--json", dest="json_path", help="Write evidence JSON to this path"
+    )
+
     worktree_clean_p = worktree_sub.add_parser(
         "clean",
         help="Reap merged worktrees immediately; stale/orphan only with confirmation",
@@ -2544,6 +2715,12 @@ def main():
             cmd_worktree_list(args)
         elif args.subcommand == "fleet":
             cmd_worktree_fleet(args)
+        elif args.subcommand == "fresh":
+            cmd_worktree_fresh(args)
+        elif args.subcommand == "repro":
+            cmd_worktree_repro(args)
+        elif args.subcommand == "dogfood":
+            cmd_worktree_dogfood(args)
         elif args.subcommand == "clean":
             cmd_worktree_clean(args)
         elif args.subcommand == "merge":

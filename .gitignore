@@ -51,6 +51,8 @@ hivemind-audit.md
 .gitreins/.gitreins/
 .gitreins/worktrees.json
 .gitreins/worktrees.lock
+.gitreins/disposable.json
+.gitreins/disposable.lock
 .gitreins/config.yaml.bak
 
 # Hilo — local cache files (rebuildable)

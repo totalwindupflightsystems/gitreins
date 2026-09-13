@@ -619,7 +619,9 @@ class TestLspJudgeIntegration:
         # Bare `python -m pytest` doesn't put .venv/bin on PATH, so
         # shutil.which('pylsp') misses the venv's pylsp; prepend the venv
         # bin dir (derived from sys.executable) so find_lsp_tool resolves it.
-        os.environ["PATH"] = os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", "")
+        os.environ["PATH"] = (
+            os.path.dirname(sys.executable) + os.pathsep + os.environ.get("PATH", "")
+        )
 
         workdir = str(tmp_path / "repo")
         os.makedirs(workdir)

@@ -509,8 +509,7 @@ class VerdictPersister:
         )
         if result.returncode != 0:
             raise RuntimeError(
-                f"git {' '.join(args)} failed (rc={result.returncode}): "
-                f"{result.stderr.strip()}"
+                f"git {' '.join(args)} failed (rc={result.returncode}): {result.stderr.strip()}"
             )
         return result.stdout.strip()
 

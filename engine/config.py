@@ -65,6 +65,7 @@ class GitReinsDefaults:
     max_concurrent_worktrees: int = 2
     worktree_venv_source: str = ".venv"
     worktree_venv_name: str = ".venv"
+    worktree_disk_ceiling_mb: int = 4096
 
     # ── Security scan (Antares) ──
     security_scan_enabled: bool = False
@@ -154,6 +155,11 @@ class GitReinsDefaults:
             ),
             worktree_venv_name=str(
                 _worktree_fleet_value(config_dict, defaults, "venv_name", self.worktree_venv_name)
+            ),
+            worktree_disk_ceiling_mb=_coerce_disk_ceiling(
+                _worktree_fleet_value(
+                    config_dict, defaults, "disk_ceiling_mb", self.worktree_disk_ceiling_mb
+                )
             ),
             security_scan_enabled=bool(
                 defaults.get("security_scan", {}).get("enabled", self.security_scan_enabled)
@@ -289,6 +295,7 @@ class GitReinsDefaults:
             "max_concurrent_worktrees": self.max_concurrent_worktrees,
             "worktree_venv_source": self.worktree_venv_source,
             "worktree_venv_name": self.worktree_venv_name,
+            "disk_ceiling_mb": self.worktree_disk_ceiling_mb,
             "commit_audit": {
                 "enabled": self.commit_audit_enabled,
                 "mode": self.commit_audit_mode,
@@ -353,6 +360,17 @@ def _coerce_positive_int(value) -> int:
     if result < 1:
         raise ValueError(f"max_concurrent_worktrees must be greater than zero, got {result}")
     return result
+
+
+def _coerce_disk_ceiling(value) -> int:
+    """Accept zero/negative unlimited disk ceilings, rejecting booleans."""
+    if isinstance(value, bool):
+        raise ValueError("disk_ceiling_mb must be an integer, not boolean")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+        return int(value.strip())
+    raise ValueError(f"disk_ceiling_mb must be an integer, got {value!r}")
 
 
 # ── Factory ───────────────────────────────────────────────────

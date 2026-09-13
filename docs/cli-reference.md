@@ -20,7 +20,7 @@ Running `gitreins` with no command prints the top-level help and exits
 **0**. An unknown command exits **2** (argparse behavior for
 unrecognized arguments).
 
-There are **11 top-level subcommands**:
+There are **12 top-level subcommands**:
 
 | # | Command | Purpose |
 |---|---------|---------|
@@ -35,6 +35,7 @@ There are **11 top-level subcommands**:
 | 9 | `security-scan` | Run the Antares CVE localization scanner (opt-in) |
 | 10 | `setup-tools` | Show available static analysis tools and install instructions |
 | 11 | `report` | Show verdict history |
+| 12 | `worktree` | Task worktrees, disposable QA, repro, and dogfood |
 
 ## 1. `gitreins install`
 
@@ -307,6 +308,61 @@ gitreins report [-n <count>] [--interactive]
 | `-i`, `--interactive` | Interactive TUI mode (requires `textual`; falls back to text) |
 
 Exit **0** on success.
+
+## 12. `gitreins worktree`
+
+Worktree lifecycle and disposable verification commands. Task worktrees are
+branch-backed; disposable worktrees are detached and live under a separate
+`.disposable` directory.
+
+### `worktree fresh`
+
+```bash
+gitreins worktree fresh --cmd "<shell command>" [--json <path>] [--keep]
+  [--timeout <seconds>]
+```
+
+Runs the command with `sh -c` in one clean tree. Exit 0 means the command
+passed; a nonzero command exit is propagated unchanged; exit 2 means GitReins
+could not create/reap the tree or write evidence. `--keep` retains the tree
+and `--json` writes a machine-readable run record.
+
+### `worktree repro`
+
+```bash
+gitreins worktree repro --cmd "<shell command>" -k <N>
+  [--concurrency <C>] [--timeout <seconds>] [--keep-failures] [--json <path>]
+```
+
+Runs N copies from the same captured `HEAD`. Concurrency defaults to
+`worktree_fleet.max_concurrent_worktrees`. Exit 0 means all passed, exit 1
+means one or more command failures, and exit 2 means infrastructure failure.
+The JSON record has this shape:
+
+```json
+{"command":"<cmd>","k":3,"concurrency":2,"head":"<sha>",
+ "passes":3,"failures":0,"pass_rate":1.0,
+ "runs":[{"index":1,"exit_code":0,"duration_s":0.1,
+           "tree":"<path>","kept":false}],
+ "started_at":0.0,"finished_at":0.0}
+```
+
+`--keep-failures` keeps failed trees only; successful trees are always reaped.
+
+### `worktree dogfood`
+
+```bash
+gitreins worktree dogfood [--keep] [--skip-judge]
+  [--test-command "<cmd>"] [--timeout <seconds>] [--json <path>]
+```
+
+Runs `init`, task creation/start, `guard`, and the Tier 2 judge flow in a
+throwaway checkout. `--skip-judge` skips Tier 2 deterministically. If no LLM
+key is configured, the judge is recorded as skipped rather than passed.
+`--test-command` overrides only the guard test command inside the tree. Exit
+0 means executed steps passed or judge was skipped, exit 1 means a step
+failed, and exit 2 means GitReins infrastructure failed. Evidence contains
+`steps`, a `judge` object, timestamps, the tree path, and keep status.
 
 ## Hooks
 

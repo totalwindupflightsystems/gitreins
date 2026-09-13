@@ -227,12 +227,14 @@ class WorktreeManager:
         self._gitreins_dir = self.main_root / ".gitreins"
         self._registry_file = self._gitreins_dir / WORKTREES_FILE
         self._lock_state = threading.local()
-        if venv_source is None or venv_name is None:
-            from engine.config import load_defaults
+        from engine.config import load_defaults
 
-            defaults = load_defaults(str(self.main_root))
-            venv_source = defaults.worktree_venv_source if venv_source is None else venv_source
-            venv_name = defaults.worktree_venv_name if venv_name is None else venv_name
+        defaults = load_defaults(str(self.main_root))
+        if venv_source is None:
+            venv_source = defaults.worktree_venv_source
+        if venv_name is None:
+            venv_name = defaults.worktree_venv_name
+        self.worktree_disk_ceiling_mb = defaults.worktree_disk_ceiling_mb
         self.venv_source = str(venv_source)
         self.venv_name = str(venv_name)
         self._validate_venv_name()
@@ -494,6 +496,12 @@ class WorktreeManager:
                 f"{venv_destination} already exists; refusing to overwrite"
             )
 
+        # The disposable verifier owns the shared byte-counting policy.  Keep
+        # this import lazy so WorktreeManager remains usable without loading
+        # the CLI-facing disposable surface.
+        from engine.worktree_disposable import enforce_disk_ceiling
+
+        enforce_disk_ceiling(self, requested_path=tree_path)
         result = _git(
             self.main_root,
             "worktree",
