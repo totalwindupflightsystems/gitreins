@@ -23,6 +23,8 @@ import re
 import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from engine.repo_paths import board_file_path
+
 TICKS_DB = os.path.expanduser("~/.hermes/coding-hermes/scheduler.db")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _HASH_RE = re.compile(r"^[a-f0-9]{4,16}$")
@@ -83,7 +85,7 @@ def load_verdict(workdir: str, date: str, h: str) -> dict | None:
 
 
 def load_jsonl(workdir: str, name: str, limit: int = 2000) -> list:
-    path = os.path.join(workdir, ".coding-hermes", "board", name)
+    path = board_file_path(workdir, name)
     rows = []
     if os.path.isfile(path):
         with open(path) as f:

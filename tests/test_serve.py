@@ -2,6 +2,7 @@
 
 import http.client
 import json
+import subprocess
 import threading
 from pathlib import Path
 
@@ -17,6 +18,7 @@ def repo_fixture(tmp_path: Path) -> dict:
     board = tmp_path / ".coding-hermes" / "board"
     history.mkdir(parents=True)
     board.mkdir(parents=True)
+    subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True)
 
     pass_verdict = {
         "task_id": "JVIEW-PASS",

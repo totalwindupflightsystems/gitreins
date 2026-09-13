@@ -11,7 +11,7 @@
 
 GitReins lives inside your git repository as a quality harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ✅ **v0.12.0** — LSP diagnostics (14 languages), opt-in static analysis (9 analyzers; baseline install default off, smart init enables it for detected dynamic-language projects), commit audit with CVE-scored severity, optional Antares CVE-localization guard, Anthropic Messages API support, DeepSeek prompt caching telemetry, large-repo hardening (fast-track + `--skip-tier2`), MCP `propagate`, judge single-flight + resume lease, evaluator committed-diff read path, 1378 tests pass / 33 test files, verified on a full run 2026-09-12 (1370 passed, 8 skipped).
+> ✅ **v0.12.0** — LSP diagnostics (14 languages), opt-in static analysis (9 analyzers; baseline install default off, smart init enables it for detected dynamic-language projects), commit audit with CVE-scored severity, optional Antares CVE-localization guard, Anthropic Messages API support, DeepSeek prompt caching telemetry, large-repo hardening (fast-track + `--skip-tier2`), MCP `propagate`, judge single-flight + resume lease, evaluator committed-diff read path, 1386 tests pass / 34 test files, verified on a full run 2026-09-13 (1378 passed, 8 skipped).
 
 ---
 
@@ -376,7 +376,7 @@ history:
 - **MCP Transport:** stdio (12 tools)
 - **Config:** YAML in `.gitreins/` directory
 - **Evaluator Default Model:** DeepSeek V4 Flash (~$0.01/eval)
-- **Test suite:** ~1378 tests across 33 test files (parallelized with pytest-xdist; last verified full run 2026-09-12: 1370 passed, 8 skipped)
+- **Test suite:** ~1386 tests across 34 test files (parallelized with pytest-xdist; last verified full run 2026-09-13: 1378 passed, 8 skipped)
 
 ## Architecture & Docs
 

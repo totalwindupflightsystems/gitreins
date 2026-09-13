@@ -12,11 +12,19 @@ Scans a repo's judgment stores and emits ONE self-contained dark HTML page
 Usage:
   python3 judgment_viewer.py --repo /home/kara/gitreins-poc --out /home/kara/gitreins-judgments.html
 """
+
 import argparse
 import html
 import json
 import os
 import sqlite3
+import sys
+
+try:
+    from engine.repo_paths import board_file_path
+except ModuleNotFoundError:
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from engine.repo_paths import board_file_path
 
 TICKS_DB = os.path.expanduser("~/.hermes/coding-hermes/scheduler.db")
 
@@ -42,29 +50,33 @@ def load_verdicts(repo):
             t1 = stages.get("tier1") or {}
             t2 = stages.get("tier2") or {}
             items = v.get("items") or (t2.get("items") or [])
-            out.append({
-                "date": day,
-                "hash": h,
-                "task_id": v.get("task_id", "?"),
-                "title": v.get("task_title", ""),
-                "criteria": v.get("task_criteria", []),
-                "passed": bool(v.get("passed")),
-                "items": [
-                    {"criterion": i.get("criterion", "?"),
-                     "status": i.get("status", "?"),
-                     "detail": (i.get("detail") or "")[:1500]}
-                    for i in items
-                ],
-                "tier1_passed": t1.get("passed") if t1 else None,
-                "tier1_summary": (t1.get("summary") or "")[:4000],
-                "tier2_summary": (t2.get("summary") or "")[:4000],
-                "summary": (v.get("summary") or "")[:1500],
-            })
+            out.append(
+                {
+                    "date": day,
+                    "hash": h,
+                    "task_id": v.get("task_id", "?"),
+                    "title": v.get("task_title", ""),
+                    "criteria": v.get("task_criteria", []),
+                    "passed": bool(v.get("passed")),
+                    "items": [
+                        {
+                            "criterion": i.get("criterion", "?"),
+                            "status": i.get("status", "?"),
+                            "detail": (i.get("detail") or "")[:1500],
+                        }
+                        for i in items
+                    ],
+                    "tier1_passed": t1.get("passed") if t1 else None,
+                    "tier1_summary": (t1.get("summary") or "")[:4000],
+                    "tier2_summary": (t2.get("summary") or "")[:4000],
+                    "summary": (v.get("summary") or "")[:1500],
+                }
+            )
     return out
 
 
 def load_events(repo):
-    path = os.path.join(repo, ".coding-hermes", "board", "events.jsonl")
+    path = board_file_path(repo, "events.jsonl")
     evs = []
     if os.path.isfile(path):
         for line in open(path):
@@ -80,21 +92,23 @@ def load_events(repo):
                 detail = json.loads(e.get("detail") or "{}")
             except Exception:
                 pass
-            evs.append({
-                "id": e.get("id"),
-                "ts": e.get("timestamp", ""),
-                "type": e.get("event_type", "?"),
-                "task": e.get("task_id") or "",
-                "actor": e.get("actor") or "",
-                "commit": (detail.get("commit") or "")[:8],
-                "tick": detail.get("tick"),
-                "verdict": detail.get("verdict") or "",
-            })
+            evs.append(
+                {
+                    "id": e.get("id"),
+                    "ts": e.get("timestamp", ""),
+                    "type": e.get("event_type", "?"),
+                    "task": e.get("task_id") or "",
+                    "actor": e.get("actor") or "",
+                    "commit": (detail.get("commit") or "")[:8],
+                    "tick": detail.get("tick"),
+                    "verdict": detail.get("verdict") or "",
+                }
+            )
     return evs
 
 
 def load_tasks(repo):
-    path = os.path.join(repo, ".coding-hermes", "board", "tasks.jsonl")
+    path = board_file_path(repo, "tasks.jsonl")
     tasks = {}
     if os.path.isfile(path):
         for line in open(path):
@@ -248,20 +262,28 @@ def main():
     n_pass = sum(1 for v in verdicts if v["passed"])
     n_fail = len(verdicts) - n_pass
     rate = round(100 * n_pass / len(verdicts)) if verdicts else 0
-    page = (TEMPLATE
-            .replace("__SUBTITLE__", html.escape(f"{os.path.basename(args.repo)} · every LLM judgment the harness ever made, with the evidence"))
-            .replace("__N_VERDICTS__", str(len(verdicts)))
-            .replace("__N_PASS__", str(n_pass))
-            .replace("__N_FAIL__", str(n_fail))
-            .replace("__RATE__", str(rate))
-            .replace("__N_EVENTS__", str(len(events)))
-            .replace("__DATA__", json.dumps(verdicts))
-            .replace("__EVENTS__", json.dumps(events))
-            .replace("__TICKS__", json.dumps(ticks)))
+    page = (
+        TEMPLATE.replace(
+            "__SUBTITLE__",
+            html.escape(
+                f"{os.path.basename(args.repo)} · every LLM judgment the harness ever made, with the evidence"
+            ),
+        )
+        .replace("__N_VERDICTS__", str(len(verdicts)))
+        .replace("__N_PASS__", str(n_pass))
+        .replace("__N_FAIL__", str(n_fail))
+        .replace("__RATE__", str(rate))
+        .replace("__N_EVENTS__", str(len(events)))
+        .replace("__DATA__", json.dumps(verdicts))
+        .replace("__EVENTS__", json.dumps(events))
+        .replace("__TICKS__", json.dumps(ticks))
+    )
     with open(args.out, "w") as f:
         f.write(page)
-    print(f"{len(verdicts)} verdicts ({n_pass} pass / {n_fail} fail, {rate}%), "
-          f"{len(events)} events, {len(ticks)} ticks -> {args.out} ({os.path.getsize(args.out)//1024} KB)")
+    print(
+        f"{len(verdicts)} verdicts ({n_pass} pass / {n_fail} fail, {rate}%), "
+        f"{len(events)} events, {len(ticks)} ticks -> {args.out} ({os.path.getsize(args.out) // 1024} KB)"
+    )
 
 
 if __name__ == "__main__":

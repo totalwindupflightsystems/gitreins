@@ -111,12 +111,27 @@ class TestWorkdirDetection:
     """Test get_workdir() — step-3-1-1-2."""
 
     def test_get_workdir_in_git_repo(self):
-        """Inside git repo → returns repo root (git rev-parse --show-toplevel)."""
+        """Inside git repo → returns a Git-recognized checkout root."""
         from gitreins.cli import get_workdir
 
         workdir = get_workdir()
+        expected_root = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        recognized_root = subprocess.run(
+            ["git", "-C", workdir, "rev-parse", "--show-toplevel"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+
         assert os.path.isdir(workdir)
-        assert os.path.isdir(os.path.join(workdir, ".git"))
+        assert os.path.exists(os.path.join(workdir, ".git"))
+        assert os.path.samefile(workdir, expected_root)
+        assert os.path.samefile(workdir, recognized_root)
 
     def test_get_workdir_outside_git_repo(self, tmp_path):
         """Outside git repo, git rev-parse fails, returns os.getcwd()."""

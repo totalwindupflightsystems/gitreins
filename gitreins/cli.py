@@ -9,6 +9,7 @@ Usage:
     gitreins task complete <id>
     gitreins task list [--status pending|in_progress|complete]
     gitreins task delete <id>
+    gitreins worktree doctor
     gitreins guard run
     gitreins judge <id>
     gitreins commit <message>
@@ -25,6 +26,7 @@ import time
 import yaml
 
 from engine.version import __version__
+from engine.repo_paths import WorktreeResolutionError, resolve_worktree_paths
 
 INSTALL_DEFAULT_TEST_COMMAND = "pytest -x --tb=short"
 GITREINS_GITIGNORE_ENTRIES = (
@@ -1335,6 +1337,23 @@ def cmd_report(args):
     print(report)
 
 
+def cmd_worktree_doctor(args):
+    """Show and validate the shared board resolution for this checkout."""
+    try:
+        paths = resolve_worktree_paths()
+    except WorktreeResolutionError as exc:
+        print(f"worktree doctor: invalid\nError: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+
+    local_status = "present" if paths.local_board_exists else "absent"
+    print(f"Invoking worktree root: {paths.invoking_worktree_root}")
+    print(f"Git common dir: {paths.git_common_dir}")
+    print(f"Canonical main checkout/root: {paths.canonical_main_root}")
+    print(f"Canonical board path: {paths.canonical_board}")
+    print(f"Ignored local worktree board copy: {local_status} ({paths.local_board})")
+    print("Resolution: valid")
+
+
 def cmd_serve(args):
     """Run the local judgment-browser web server."""
     from gitreins.serve import serve
@@ -2089,6 +2108,11 @@ def main():
     delete_p = task_sub.add_parser("delete", help="Delete a task")
     delete_p.add_argument("id")
 
+    # worktree diagnostics
+    worktree_p = sub.add_parser("worktree", help="Git worktree diagnostics")
+    worktree_sub = worktree_p.add_subparsers(dest="subcommand")
+    worktree_sub.add_parser("doctor", help="Validate the shared canonical board resolution")
+
     # guard
     guard_p = sub.add_parser("guard", help="Run Tier 1 guards")
     guard_p.add_argument(
@@ -2240,6 +2264,11 @@ def main():
             cmd_task_list(args)
         elif args.subcommand == "delete":
             cmd_task_delete(args)
+        else:
+            parser.print_help()
+    elif args.command == "worktree":
+        if args.subcommand == "doctor":
+            cmd_worktree_doctor(args)
         else:
             parser.print_help()
     elif args.command == "guard":
