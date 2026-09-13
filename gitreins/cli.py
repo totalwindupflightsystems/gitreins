@@ -9,7 +9,10 @@ Usage:
     gitreins task complete <id>
     gitreins task list [--status pending|in_progress|complete]
     gitreins task delete <id>
+    gitreins task worktree <id> [--tick <id>]
     gitreins worktree doctor
+    gitreins worktree list
+    gitreins worktree clean [--confirm-stale-orphan]
     gitreins guard run
     gitreins judge <id>
     gitreins commit <message>
@@ -1276,6 +1279,98 @@ def cmd_task_delete(args):
     print(f"Deleted: {args.id}")
 
 
+def cmd_task_worktree(args):
+    """Create (or idempotently reuse) a task's isolated git worktree."""
+    from engine.worktree_manager import WorktreeError, WorktreeManager
+
+    try:
+        manager = WorktreeManager(get_workdir())
+        brief_path = manager.worker_brief_path(args.id)
+        record, created = manager.create(
+            args.id,
+            brief_path=str(brief_path),
+            tick=getattr(args, "tick", None),
+        )
+    except (WorktreeError, KeyError) as exc:
+        print(f"task worktree: failed\nError: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+
+    verb = "Created" if created else "Reused"
+    print(f"✓ {verb} worktree {record.path} (branch {record.branch})")
+    print("✓ task filed in registry — main checkout .gitreins/worktrees.json")
+    print("✓ board linked to main checkout — one shared truth")
+    print(f"✓ worker brief path: {record.brief_path}")
+    if record.tick:
+        print(f"✓ tick: {record.tick}")
+    print("Merge-back armed on judge PASS (worktree merge-back lands in WORKTREE-003).")
+
+
+def _format_age(seconds: float) -> str:
+    seconds = max(0, int(seconds))
+    if seconds < 60:
+        return f"{seconds}s"
+    if seconds < 3600:
+        return f"{seconds // 60}m"
+    if seconds < 86400:
+        return f"{seconds // 3600}h"
+    return f"{seconds // 86400}d"
+
+
+def cmd_worktree_list(args):
+    """List registered task worktrees with reconciled state and age."""
+    import time as _time
+
+    from engine.worktree_manager import WorktreeError, WorktreeManager
+
+    try:
+        manager = WorktreeManager(get_workdir())
+        records = manager.list_records()
+    except WorktreeError as exc:
+        print(f"worktree list: failed\nError: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+
+    if not records:
+        print("No worktrees registered.")
+        return
+
+    now = _time.time()
+    print(f"{'TASK':<24} {'STATE':<10} {'AGE':<8} BRANCH")
+    for record in records:
+        age = _format_age(now - record.created_at)
+        print(f"  {record.task_id:<22} {record.state:<10} {age:<8} {record.branch}")
+        print(f"    path: {record.path}")
+
+
+def cmd_worktree_clean(args):
+    """Reap merged worktrees; stale/orphan only with explicit confirmation."""
+    from engine.worktree_manager import PROTECTED_STATES, WorktreeError, WorktreeManager
+
+    confirm = bool(getattr(args, "confirm_stale_orphan", False))
+    try:
+        manager = WorktreeManager(get_workdir())
+        report = manager.clean(confirm_stale_orphan=confirm)
+    except WorktreeError as exc:
+        print(f"worktree clean: failed\nError: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+
+    removed = report["removed"]
+    if removed:
+        print(f"Reaped {len(removed)} worktree(s): {', '.join(removed)}")
+        for branch in report["branches_deleted"]:
+            print(f"  branch deleted (merged): {branch}")
+    else:
+        print("Nothing to reap.")
+
+    kept = report["kept"]
+    if kept:
+        print(f"Kept {len(kept)} worktree(s):")
+        for task_id, state in kept:
+            line = f"  {task_id} [{state}]"
+            if state in PROTECTED_STATES and not confirm:
+                line += " — reaping requires --confirm-stale-orphan"
+            print(line)
+
+
 def _persist_result(workdir: str, task, result) -> None:
     """Save evaluation verdict to history. Non-fatal — logs on failure."""
     try:
@@ -2108,10 +2203,40 @@ def main():
     delete_p = task_sub.add_parser("delete", help="Delete a task")
     delete_p.add_argument("id")
 
-    # worktree diagnostics
-    worktree_p = sub.add_parser("worktree", help="Git worktree diagnostics")
+    # worktree diagnostics + lifecycle
+    worktree_p = sub.add_parser("worktree", help="Git worktree diagnostics and task worktree lifecycle")
     worktree_sub = worktree_p.add_subparsers(dest="subcommand")
     worktree_sub.add_parser("doctor", help="Validate the shared canonical board resolution")
+
+    worktree_sub.add_parser(
+        "list", help="List registered task worktrees (task, branch, state, age)"
+    )
+
+    worktree_clean_p = worktree_sub.add_parser(
+        "clean",
+        help="Reap merged worktrees immediately; stale/orphan only with confirmation",
+    )
+    worktree_clean_p.add_argument(
+        "--confirm-stale-orphan",
+        dest="confirm_stale_orphan",
+        action="store_true",
+        help=(
+            "Also remove stale (>24h without heartbeat) and orphan trees. "
+            "Without this flag they are reported and kept."
+        ),
+    )
+
+    task_wt_p = task_sub.add_parser(
+        "worktree",
+        help="Create (or idempotently reuse) a task's isolated worktree",
+    )
+    task_wt_p.add_argument("id", help="Task id — also names the branch and worktree directory")
+    task_wt_p.add_argument(
+        "--tick",
+        dest="tick",
+        default=None,
+        help="Optional tick/job id to record in the registry entry",
+    )
 
     # guard
     guard_p = sub.add_parser("guard", help="Run Tier 1 guards")
@@ -2264,11 +2389,17 @@ def main():
             cmd_task_list(args)
         elif args.subcommand == "delete":
             cmd_task_delete(args)
+        elif args.subcommand == "worktree":
+            cmd_task_worktree(args)
         else:
             parser.print_help()
     elif args.command == "worktree":
         if args.subcommand == "doctor":
             cmd_worktree_doctor(args)
+        elif args.subcommand == "list":
+            cmd_worktree_list(args)
+        elif args.subcommand == "clean":
+            cmd_worktree_clean(args)
         else:
             parser.print_help()
     elif args.command == "guard":
