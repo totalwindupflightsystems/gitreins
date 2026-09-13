@@ -12,6 +12,7 @@ Usage:
     gitreins task worktree <id> [--tick <id>]
     gitreins worktree doctor
     gitreins worktree list
+    gitreins worktree fleet <manifest.json> [--merge]
     gitreins worktree clean [--confirm-stale-orphan]
     gitreins worktree merge <id> [--force --actor <actor>]
     gitreins guard run
@@ -56,6 +57,9 @@ defaults:
   tool_call_weight: 0.1                 # fraction per tool call
   check_for_updates: true               # check PyPI on each run
   update_check_ttl: "24h"               # re-check after this period
+  max_concurrent_worktrees: 2             # bounded fleet concurrency
+  worktree_venv_source: ".venv"            # shared source under canonical main
+  worktree_venv_name: ".venv"              # destination name in each tree
 
 # ── Guards (Tier 1 static checks) ─────────────────────────────────
 guards:
@@ -1349,25 +1353,63 @@ def cmd_worktree_list(args):
     """List registered task worktrees with reconciled state and age."""
     import time as _time
 
+    from engine.config import load_defaults
     from engine.worktree_manager import WorktreeError, WorktreeManager
 
     try:
         manager = WorktreeManager(get_workdir())
         records = manager.list_records()
-    except WorktreeError as exc:
+        cap = load_defaults(str(manager.main_root)).max_concurrent_worktrees
+    except (WorktreeError, ValueError) as exc:
         print(f"worktree list: failed\nError: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
 
     if not records:
         print("No worktrees registered.")
+        print(f"Fleet cap: {cap}")
         return
 
     now = _time.time()
-    print(f"{'TASK':<24} {'STATE':<10} {'AGE':<8} BRANCH")
+    print(f"Fleet cap: {cap}")
+    print(f"{'TASK':<24} {'STATE':<10} {'PHASE':<10} {'AGE':<8} BRANCH")
     for record in records:
         age = _format_age(now - record.created_at)
-        print(f"  {record.task_id:<22} {record.state:<10} {age:<8} {record.branch}")
+        phase = record.lane_phase or record.state
+        print(f"  {record.task_id:<22} {record.state:<10} {phase:<10} {age:<8} {record.branch}")
+        if record.exit_code is not None:
+            print(f"    exit: {record.exit_code}")
+        if record.error:
+            print(f"    error: {record.error}")
+        if record.output:
+            evidence = " ".join(record.output.split())
+            print(f"    evidence: {evidence[:240]}")
         print(f"    path: {record.path}")
+
+
+def cmd_worktree_fleet(args):
+    """Run an explicit bounded fleet manifest and print its tick report."""
+    import json as _json
+
+    from engine.worktree_fleet import FleetValidationError, WorktreeFleet, load_fleet_manifest
+    from engine.worktree_manager import WorktreeError
+
+    try:
+        lanes = load_fleet_manifest(args.manifest)
+        fleet = WorktreeFleet(
+            get_workdir(),
+            max_concurrent_worktrees=getattr(args, "max_concurrent_worktrees", None),
+        )
+        report = fleet.run(
+            lanes,
+            tick=getattr(args, "tick", None),
+            merge=bool(getattr(args, "merge", False)),
+            force_merge=bool(getattr(args, "force_merge", False)),
+            merge_actor=getattr(args, "actor", None),
+        )
+    except (FleetValidationError, WorktreeError, ValueError) as exc:
+        print(f"worktree fleet: failed\nError: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+    print(_json.dumps(report, indent=2, sort_keys=True))
 
 
 def cmd_worktree_clean(args):
@@ -2269,7 +2311,29 @@ def main():
     worktree_sub.add_parser("doctor", help="Validate the shared canonical board resolution")
 
     worktree_sub.add_parser(
-        "list", help="List registered task worktrees (task, branch, state, age)"
+        "list", help="List registered task worktrees (task, branch, state, phase, age, cap)"
+    )
+
+    worktree_fleet_p = worktree_sub.add_parser(
+        "fleet",
+        help="Run explicit task lanes concurrently in isolated worktrees",
+    )
+    worktree_fleet_p.add_argument("manifest", help="JSON/YAML manifest containing a lanes list")
+    worktree_fleet_p.add_argument(
+        "--max-concurrent-worktrees",
+        type=int,
+        default=None,
+        help="Override configured fleet cap for this run (positive integer)",
+    )
+    worktree_fleet_p.add_argument("--tick", default=None, help="Optional tick/job id")
+    worktree_fleet_p.add_argument(
+        "--merge", action="store_true", help="Apply successful lanes serially after execution"
+    )
+    worktree_fleet_p.add_argument(
+        "--force-merge", action="store_true", help="Bypass verdict gates when used with --merge"
+    )
+    worktree_fleet_p.add_argument(
+        "--actor", default=None, help="Identity required by --force-merge"
     )
 
     worktree_clean_p = worktree_sub.add_parser(
@@ -2478,6 +2542,8 @@ def main():
             cmd_worktree_doctor(args)
         elif args.subcommand == "list":
             cmd_worktree_list(args)
+        elif args.subcommand == "fleet":
+            cmd_worktree_fleet(args)
         elif args.subcommand == "clean":
             cmd_worktree_clean(args)
         elif args.subcommand == "merge":

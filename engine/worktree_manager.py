@@ -32,9 +32,12 @@ import json
 import os
 import re
 import subprocess
+import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
 
 # Task IDs become path components and branch names.  Keep the shape strict:
@@ -45,6 +48,7 @@ WORKTREES_FILE = "worktrees.json"
 STALE_AFTER_SECONDS = 24 * 60 * 60
 
 LIVE_STATES = ("running", "guarding", "judging")
+LANE_STATES = ("running", "guarding", "judging", "completed", "failed")
 # States whose trees may only be removed with an explicit confirmation flag.
 PROTECTED_STATES = ("stale", "orphan")
 
@@ -73,6 +77,14 @@ class WorktreeRecord:
     main_root: str | None = None
     branch_point: str | None = None
     notes: list[str] = field(default_factory=list)
+    lane_phase: str | None = None
+    lane_result: dict | None = None
+    lane_command: list[str] | None = None
+    exit_code: int | None = None
+    output: str | None = None
+    started_at: float | None = None
+    finished_at: float | None = None
+    error: str | None = None
 
     def to_dict(self) -> dict:
         data: dict = {
@@ -94,6 +106,22 @@ class WorktreeRecord:
             data["branch_point"] = self.branch_point
         if self.notes:
             data["notes"] = list(self.notes)
+        if self.lane_phase is not None:
+            data["lane_phase"] = self.lane_phase
+        if self.lane_result is not None:
+            data["lane_result"] = self.lane_result
+        if self.lane_command is not None:
+            data["lane_command"] = list(self.lane_command)
+        if self.exit_code is not None:
+            data["exit_code"] = self.exit_code
+        if self.output is not None:
+            data["output"] = self.output
+        if self.started_at is not None:
+            data["started_at"] = self.started_at
+        if self.finished_at is not None:
+            data["finished_at"] = self.finished_at
+        if self.error is not None:
+            data["error"] = self.error
         return data
 
     @classmethod
@@ -111,6 +139,16 @@ class WorktreeRecord:
             main_root=data.get("main_root"),
             branch_point=data.get("branch_point"),
             notes=list(data.get("notes", [])),
+            lane_phase=data.get("lane_phase"),
+            lane_result=data.get("lane_result"),
+            lane_command=list(data["lane_command"])
+            if data.get("lane_command") is not None
+            else None,
+            exit_code=data.get("exit_code"),
+            output=data.get("output"),
+            started_at=data.get("started_at"),
+            finished_at=data.get("finished_at"),
+            error=data.get("error"),
         )
 
 
@@ -154,6 +192,17 @@ def _default_tree_root(main_root: Path, task_id: str) -> Path:
     return main_root.parent / f"{repo_name}-wt" / task_id
 
 
+def _exclusive_operation(method):
+    """Serialize registry read-modify-write operations across processes."""
+
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self._exclusive_lock():
+            return method(self, *args, **kwargs)
+
+    return wrapped
+
+
 class WorktreeManager:
     """Create, register, reconcile, and clean task-owned worktrees.
 
@@ -162,7 +211,14 @@ class WorktreeManager:
     rewrite the file atomically (same-directory temp file + ``os.replace``).
     """
 
-    def __init__(self, workdir: str | os.PathLike[str] | None = None, clock=time.time):
+    def __init__(
+        self,
+        workdir: str | os.PathLike[str] | None = None,
+        clock=time.time,
+        *,
+        venv_source: str | os.PathLike[str] | None = None,
+        venv_name: str | None = None,
+    ):
         from engine.repo_paths import resolve_worktree_paths
 
         self._clock = clock
@@ -170,6 +226,48 @@ class WorktreeManager:
         self.main_root = paths.canonical_main_root
         self._gitreins_dir = self.main_root / ".gitreins"
         self._registry_file = self._gitreins_dir / WORKTREES_FILE
+        self._lock_state = threading.local()
+        if venv_source is None or venv_name is None:
+            from engine.config import load_defaults
+
+            defaults = load_defaults(str(self.main_root))
+            venv_source = defaults.worktree_venv_source if venv_source is None else venv_source
+            venv_name = defaults.worktree_venv_name if venv_name is None else venv_name
+        self.venv_source = str(venv_source)
+        self.venv_name = str(venv_name)
+        self._validate_venv_name()
+
+    def _validate_venv_name(self) -> None:
+        name = Path(self.venv_name)
+        if name.is_absolute() or name.name != self.venv_name or self.venv_name in {"", ".", ".."}:
+            raise WorktreeValidationError(
+                f"invalid worktree venv_name {self.venv_name!r}: must be a direct child name"
+            )
+
+    @contextmanager
+    def _exclusive_lock(self):
+        """Hold one advisory lock for nested registry and merge operations."""
+        depth = getattr(self._lock_state, "depth", 0)
+        if depth:
+            self._lock_state.depth = depth + 1
+            try:
+                yield
+            finally:
+                self._lock_state.depth = depth
+            return
+
+        import fcntl
+
+        self._gitreins_dir.mkdir(parents=True, exist_ok=True)
+        lock_path = self._gitreins_dir / "worktrees.lock"
+        with open(lock_path, "a+", encoding="utf-8") as stream:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+            self._lock_state.depth = 1
+            try:
+                yield
+            finally:
+                self._lock_state.depth = 0
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
 
     # ── registry storage ────────────────────────────────────────────
 
@@ -291,7 +389,7 @@ class WorktreeManager:
                 elif self._heartbeat_age(record, now) > STALE_AFTER_SECONDS:
                     state = "stale"
                     notes.append("no heartbeat for more than 24h")
-                elif record.state in ("guarding", "judging"):
+                elif record.state in LANE_STATES:
                     state = record.state
                 else:
                     state = "running"
@@ -306,6 +404,7 @@ class WorktreeManager:
     def save_reconciled(self, records: dict[str, WorktreeRecord]) -> None:
         self._save_registry(records)
 
+    @_exclusive_operation
     def reconcile_and_persist(self) -> dict[str, WorktreeRecord]:
         """Boot-time equivalent: reconcile, persist, return."""
         records = self.reconcile()
@@ -314,6 +413,36 @@ class WorktreeManager:
 
     # ── create ──────────────────────────────────────────────────────
 
+    def _venv_paths(self, tree_path: Path) -> tuple[Path, Path | None]:
+        source = Path(self.venv_source).expanduser()
+        if not source.is_absolute():
+            source = self.main_root / source
+        if not source.exists() and not source.is_symlink():
+            return tree_path / self.venv_name, None
+        return tree_path / self.venv_name, source
+
+    def _link_venv(self, tree_path: Path) -> None:
+        destination, source = self._venv_paths(tree_path)
+        if source is None:
+            return
+        if destination.exists() or destination.is_symlink():
+            raise WorktreeError(
+                f"worktree venv destination {destination} already exists; refusing to overwrite"
+            )
+        try:
+            os.symlink(source, destination, target_is_directory=True)
+        except OSError as exc:
+            raise WorktreeError(
+                f"could not symlink shared venv {source} to {destination}: {exc}"
+            ) from exc
+
+    def _remove_new_tree(self, tree_path: Path, branch: str) -> None:
+        """Best-effort rollback for a failed first-time create."""
+        _git(self.main_root, "worktree", "remove", "--force", str(tree_path), check=False)
+        _git(self.main_root, "worktree", "prune", check=False)
+        _git(self.main_root, "branch", "-D", branch, check=False)
+
+    @_exclusive_operation
     def create(
         self,
         task_id: str,
@@ -358,6 +487,12 @@ class WorktreeManager:
                 f"worktree path {tree_path} already exists and is not empty; "
                 "registry and git disagree about this task"
             )
+        venv_destination, venv_source = self._venv_paths(tree_path)
+        if venv_source is not None and (venv_destination.exists() or venv_destination.is_symlink()):
+            raise WorktreeError(
+                "worktree venv destination "
+                f"{venv_destination} already exists; refusing to overwrite"
+            )
 
         result = _git(
             self.main_root,
@@ -370,6 +505,11 @@ class WorktreeManager:
         if result.returncode != 0:
             detail = result.stderr.strip() or result.stdout.strip() or "no diagnostic output"
             raise WorktreeError(f"git worktree add failed for {task_id}: {detail}")
+        try:
+            self._link_venv(tree_path)
+        except WorktreeError:
+            self._remove_new_tree(tree_path, branch)
+            raise
 
         now = self._clock()
         branch_point = _git(self.main_root, "rev-parse", "HEAD").stdout.strip() or None
@@ -446,6 +586,7 @@ class WorktreeManager:
             records[record.task_id] = record
             self._save_registry(records)
 
+    @_exclusive_operation
     def heartbeat(self, task_id: str) -> WorktreeRecord:
         """Refresh the liveness heartbeat for a task's worktree entry."""
         records = self._load_registry()
@@ -455,6 +596,7 @@ class WorktreeManager:
         self._touch_heartbeat(record)
         return record
 
+    @_exclusive_operation
     def mark_phase(self, task_id: str, phase: str) -> WorktreeRecord:
         """Record a lifecycle phase (guarding/judging) and refresh the heartbeat."""
         if phase not in ("guarding", "judging"):
@@ -467,8 +609,50 @@ class WorktreeManager:
         self._touch_heartbeat(record)
         return record
 
+    @_exclusive_operation
+    def mark_lane(
+        self,
+        task_id: str,
+        phase: str,
+        *,
+        command: list[str] | None = None,
+        result: dict | None = None,
+        exit_code: int | None = None,
+        output: str | None = None,
+        error: str | None = None,
+    ) -> WorktreeRecord:
+        """Atomically record fleet phase, heartbeat, and latest lane evidence."""
+        if phase not in LANE_STATES:
+            raise ValueError(f"unknown lane phase {phase!r}: expected one of {LANE_STATES}")
+        records = self._load_registry()
+        record = records.get(task_id)
+        if record is None:
+            raise KeyError(f"no worktree registered for task: {task_id}")
+        now = self._clock()
+        record.state = phase
+        record.lane_phase = phase
+        record.updated_at = now
+        record.last_heartbeat = now
+        if command is not None:
+            record.lane_command = list(command)
+        if result is not None:
+            record.lane_result = result
+        if exit_code is not None:
+            record.exit_code = exit_code
+        if output is not None:
+            record.output = output
+        if error is not None:
+            record.error = error
+        if phase == "running" and record.started_at is None:
+            record.started_at = now
+        if phase in ("completed", "failed"):
+            record.finished_at = now
+        self._save_registry(records)
+        return record
+
     # ── listing ─────────────────────────────────────────────────────
 
+    @_exclusive_operation
     def list_records(self) -> list[WorktreeRecord]:
         """Reconciled, registry-ordered listing (truthful by construction)."""
         records = self.reconcile_and_persist()
@@ -476,6 +660,7 @@ class WorktreeManager:
 
     # ── judge-gated merge-back ──────────────────────────────────────
 
+    @_exclusive_operation
     def merge(
         self,
         task_id: str,
@@ -645,7 +830,11 @@ class WorktreeManager:
 
     def _is_clean(self, workdir: Path) -> bool:
         status = _git(workdir, "status", "--porcelain", "--untracked-files=all").stdout
-        ignored = {".gitreins/worktrees.json"}
+        ignored = {
+            ".gitreins/worktrees.json",
+            ".gitreins/worktrees.lock",
+            ".coding-hermes/board/events.jsonl",
+        }
         for line in status.splitlines():
             path = line[3:] if len(line) >= 4 else ""
             if path in ignored or path.startswith(".gitreins/history/"):
@@ -799,6 +988,7 @@ class WorktreeManager:
 
     # ── cleanup ─────────────────────────────────────────────────────
 
+    @_exclusive_operation
     def clean(
         self,
         *,

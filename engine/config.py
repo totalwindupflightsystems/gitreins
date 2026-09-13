@@ -61,6 +61,11 @@ class GitReinsDefaults:
     # ── Guard defaults ──
     hook_timeout: int = 300  # overall pre-commit hook timeout (GR-064e, raised from 120)
 
+    # ── Parallel worktree fleet ──
+    max_concurrent_worktrees: int = 2
+    worktree_venv_source: str = ".venv"
+    worktree_venv_name: str = ".venv"
+
     # ── Security scan (Antares) ──
     security_scan_enabled: bool = False
     security_scan_model: str = "antares-1b"  # "antares-1b" | "antares-350m"
@@ -137,6 +142,19 @@ class GitReinsDefaults:
             max_file_bytes=int(defaults.get("max_file_bytes", self.max_file_bytes)),
             pass_on_error=bool(defaults.get("pass_on_error", self.pass_on_error)),
             hook_timeout=int(defaults.get("hook_timeout", self.hook_timeout)),
+            max_concurrent_worktrees=_coerce_positive_int(
+                _worktree_fleet_value(
+                    config_dict, defaults, "max_concurrent_worktrees", self.max_concurrent_worktrees
+                )
+            ),
+            worktree_venv_source=str(
+                _worktree_fleet_value(
+                    config_dict, defaults, "venv_source", self.worktree_venv_source
+                )
+            ),
+            worktree_venv_name=str(
+                _worktree_fleet_value(config_dict, defaults, "venv_name", self.worktree_venv_name)
+            ),
             security_scan_enabled=bool(
                 defaults.get("security_scan", {}).get("enabled", self.security_scan_enabled)
             ),
@@ -268,6 +286,9 @@ class GitReinsDefaults:
             "max_file_bytes": self.max_file_bytes,
             "pass_on_error": self.pass_on_error,
             "hook_timeout": self.hook_timeout,
+            "max_concurrent_worktrees": self.max_concurrent_worktrees,
+            "worktree_venv_source": self.worktree_venv_source,
+            "worktree_venv_name": self.worktree_venv_name,
             "commit_audit": {
                 "enabled": self.commit_audit_enabled,
                 "mode": self.commit_audit_mode,
@@ -291,6 +312,47 @@ class GitReinsDefaults:
             "check_for_updates": self.check_for_updates,
             "update_check_ttl": f"{int(self.update_check_ttl_hours)}h",
         }
+
+
+def _worktree_fleet_value(config_dict: dict, defaults: dict, key: str, fallback):
+    """Resolve a fleet option from the documented and legacy config shapes."""
+    fleet = config_dict.get("worktree_fleet", {})
+    if not isinstance(fleet, dict):
+        fleet = {}
+    venv = fleet.get("venv", {})
+    if not isinstance(venv, dict):
+        venv = {}
+    if key in fleet:
+        return fleet[key]
+    nested_key = {"venv_source": "source", "venv_name": "name"}.get(key, key)
+    if nested_key in venv:
+        return venv[nested_key]
+    aliases = {
+        "venv_source": "worktree_venv_source",
+        "venv_name": "worktree_venv_name",
+    }
+    default_key = aliases.get(key, key)
+    if default_key in defaults:
+        return defaults[default_key]
+    default_venv = defaults.get("worktree_venv", {})
+    if isinstance(default_venv, dict) and nested_key in default_venv:
+        return default_venv[nested_key]
+    return fallback
+
+
+def _coerce_positive_int(value) -> int:
+    """Accept an integer cap, rejecting booleans, zero, and fractions."""
+    if isinstance(value, bool):
+        raise ValueError("max_concurrent_worktrees must be a positive integer, not boolean")
+    if isinstance(value, int):
+        result = value
+    elif isinstance(value, str) and value.strip().isdigit():
+        result = int(value.strip())
+    else:
+        raise ValueError(f"max_concurrent_worktrees must be a positive integer, got {value!r}")
+    if result < 1:
+        raise ValueError(f"max_concurrent_worktrees must be greater than zero, got {result}")
+    return result
 
 
 # ── Factory ───────────────────────────────────────────────────
@@ -318,6 +380,8 @@ def load_defaults(workdir: str | None = None) -> GitReinsDefaults:
             with open(config_path) as f:
                 config = yaml.safe_load(f) or {}
             return base.overlay(config)
+        except ValueError:
+            raise
         except Exception:
             logger.debug("Failed to load %s, using built-in defaults", config_path)
 

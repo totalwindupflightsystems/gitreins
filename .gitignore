@@ -49,6 +49,8 @@ hivemind-audit.md
 
 # GitReins nested runtime artifacts
 .gitreins/.gitreins/
+.gitreins/worktrees.json
+.gitreins/worktrees.lock
 .gitreins/config.yaml.bak
 
 # Hilo — local cache files (rebuildable)

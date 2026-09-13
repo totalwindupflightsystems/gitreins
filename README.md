@@ -11,7 +11,7 @@
 
 GitReins lives inside your git repository as a quality harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ✅ **v0.12.0** — LSP diagnostics (14 languages), opt-in static analysis (9 analyzers; baseline install default off, smart init enables it for detected dynamic-language projects), commit audit with CVE-scored severity, optional Antares CVE-localization guard, Anthropic Messages API support, DeepSeek prompt caching telemetry, large-repo hardening (fast-track + `--skip-tier2`), MCP `propagate`, judge single-flight + resume lease, evaluator committed-diff read path, 1427 tests pass / 34 test files, verified on a full run 2026-09-13 (1419 passed, 8 skipped).
+> ✅ **v0.12.0** — LSP diagnostics (14 languages), opt-in static analysis (9 analyzers; baseline install default off, smart init enables it for detected dynamic-language projects), commit audit with CVE-scored severity, optional Antares CVE-localization guard, Anthropic Messages API support, DeepSeek prompt caching telemetry, large-repo hardening (fast-track + `--skip-tier2`), MCP `propagate`, judge single-flight + resume lease, evaluator committed-diff read path, 1428 tests pass / 35 test files, verified on a full run (1428 passed, 8 skipped).
 
 ---
 
@@ -87,6 +87,51 @@ gitreins commit-audit [message]       # Validate commit message against staged d
 gitreins setup-tools                  # Show available static analysis tools and install instructions
 gitreins mcp-server                   # Run MCP stdio server (for AI agents)
 ```
+
+### Parallel worktree fleet
+
+A foreman or scheduler can run an explicit JSON/YAML manifest without coupling
+to a scheduler implementation. Each lane gets one `../<repo>-wt/<task-id>` tree;
+commands run with argv arrays in that tree, bounded by the configured cap.
+Optional `guard` and `judge` argv arrays record those phases in the shared
+canonical registry.
+
+```bash
+gitreins worktree fleet lanes.json
+gitreins worktree fleet lanes.json --max-concurrent-worktrees 3
+gitreins worktree fleet lanes.json --merge --force-merge --actor release-bot
+# Inspect cap, phase, exit status, and retained evidence:
+gitreins worktree list
+```
+
+Manifest example:
+
+```json
+{
+  "lanes": [
+    {"task_id": "API-1", "priority": 10, "command": ["./worker", "API-1"],
+     "guard": ["gitreins", "guard", "--full"]},
+    {"task_id": "UI-1", "priority": 20, "command": ["./worker", "UI-1"]}
+  ]
+}
+```
+
+The default cap is 2 and can be overridden in `.gitreins/config.yaml`:
+
+```yaml
+worktree_fleet:
+  max_concurrent_worktrees: 2
+  venv:
+    source: .venv
+    name: .venv
+```
+
+When the configured source exists, every new task tree symlinks it rather than
+installing dependencies. A missing source is allowed for non-Python projects;
+existing destination files are never replaced. The shared environment is
+intentionally not mutated by GitReins, and concurrent dependency installs are
+not lane-safe. Successful `--merge` lanes are applied in priority/task-id order
+under an advisory lock; normal judge verdict gates remain in force.
 
 ---
 
@@ -376,7 +421,7 @@ history:
 - **MCP Transport:** stdio (12 tools)
 - **Config:** YAML in `.gitreins/` directory
 - **Evaluator Default Model:** DeepSeek V4 Flash (~$0.01/eval)
-- **Test suite:** ~1427 tests across 34 test files (parallelized with pytest-xdist; last verified full run 2026-09-13: 1419 passed, 8 skipped)
+- **Test suite:** 1436 tests across 35 test files (parallelized with pytest-xdist; last verified full run: 1428 passed, 8 skipped)
 
 ## Architecture & Docs
 
