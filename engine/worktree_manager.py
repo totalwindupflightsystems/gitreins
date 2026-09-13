@@ -28,11 +28,13 @@ every worktree of the same repository reads and writes one truth.
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Task IDs become path components and branch names.  Keep the shape strict:
@@ -338,9 +340,7 @@ class WorktreeManager:
         # Path occupied by a different task's registration?
         for other_id, other in records.items():
             if other_id != task_id and str(Path(other.path).resolve()) == str(tree_path):
-                raise WorktreeError(
-                    f"path {tree_path} is already registered to task {other_id!r}"
-                )
+                raise WorktreeError(f"path {tree_path} is already registered to task {other_id!r}")
 
         if existing is not None:
             if not reuse:
@@ -473,6 +473,329 @@ class WorktreeManager:
         """Reconciled, registry-ordered listing (truthful by construction)."""
         records = self.reconcile_and_persist()
         return sorted(records.values(), key=lambda r: r.created_at)
+
+    # ── judge-gated merge-back ──────────────────────────────────────
+
+    def merge(
+        self,
+        task_id: str,
+        *,
+        force: bool = False,
+        actor: str | None = None,
+        reason: str = "explicit judge-gate override",
+        guard_runner=None,
+        judge_runner=None,
+    ) -> dict:
+        """Apply a task worktree to canonical main only after safety gates."""
+        task_id = validate_task_id(task_id)
+        if force and (not isinstance(actor, str) or not actor.strip()):
+            raise WorktreeError("--force requires a non-empty actor identity via --actor")
+
+        records = self.reconcile_and_persist()
+        record = records.get(task_id)
+        if record is None:
+            raise WorktreeError(f"task {task_id!r} is not registered with a worktree")
+        tree = Path(record.path).resolve()
+        if not tree.is_dir():
+            raise WorktreeError(f"task {task_id!r} worktree is unavailable: {tree}")
+        if record.main_root and Path(record.main_root).resolve() != self.main_root.resolve():
+            raise WorktreeError("worktree registry points at a different canonical main checkout")
+        expected_branch = _branch_for(task_id)
+        expected_tree = _default_tree_root(self.main_root, task_id).resolve()
+        if record.branch != expected_branch or tree != expected_tree:
+            raise WorktreeError(
+                "registered task worktree has an unsafe branch or path; refusing merge"
+            )
+
+        trees = self._git_worktrees()
+        tree_meta = trees.get(str(tree))
+        if tree_meta is None or tree_meta.get("branch") != f"refs/heads/{record.branch}":
+            raise WorktreeError("registered task worktree does not match Git branch metadata")
+        branch_result = _git(
+            self.main_root, "symbolic-ref", "--quiet", "--short", "HEAD", check=False
+        )
+        if branch_result.returncode != 0 or not branch_result.stdout.strip():
+            raise WorktreeError("canonical main is detached; refusing merge")
+        destination_branch = branch_result.stdout.strip()
+        if not self._is_clean(self.main_root):
+            raise WorktreeError("canonical main has uncommitted changes; refusing merge")
+        if not self._is_clean(tree):
+            raise WorktreeError("task worktree has uncommitted changes; refusing merge")
+
+        main_head = self._head(self.main_root)
+        source_head = self._branch_tip(record.branch)
+        if main_head is None or source_head is None:
+            raise WorktreeError("canonical main or task branch has no resolvable commit")
+        if not record.branch_point or not self._commit_exists(record.branch_point):
+            raise WorktreeError("registered worktree has no valid branch_point; refusing merge")
+        if source_head == record.branch_point:
+            raise WorktreeError("task branch has no commits beyond its registered branch point")
+
+        if not force:
+            verdict = self._find_verdict(task_id, record, source_head)
+            if verdict is None:
+                raise WorktreeError(
+                    "no PASS verdict for the exact task/worktree/branch commit; "
+                    f"inspect {self._verdict_reference(task_id, record)}"
+                )
+            if verdict.get("passed") is not True:
+                raise WorktreeError(
+                    "HOLD: the matching verdict is FAIL; worktree and branch were preserved. "
+                    f"Verdict: {self._verdict_reference(task_id, record, verdict)}"
+                )
+
+        rebased = False
+        if main_head != record.branch_point:
+            rebased = True
+            rebase = _git(tree, "rebase", destination_branch, check=False)
+            if rebase.returncode != 0:
+                _git(tree, "rebase", "--abort", check=False)
+                detail = rebase.stderr.strip() or rebase.stdout.strip() or "unknown conflict"
+                raise WorktreeError(f"rebase failed; task worktree held: {detail}")
+            source_head = self._branch_tip(record.branch)
+            if source_head is None:
+                raise WorktreeError("rebased task branch has no resolvable commit")
+            if self._head(self.main_root) != main_head:
+                raise WorktreeError("canonical main moved during rebase; task worktree held")
+
+            runner = guard_runner or self._default_guard_runner
+            try:
+                guard_result = runner(tree)
+            except Exception as exc:
+                raise WorktreeError(f"HOLD: configured guard failed after rebase: {exc}") from exc
+            if not self._runner_passed(guard_result):
+                raise WorktreeError(
+                    "HOLD: configured guard failed after rebase; task worktree preserved"
+                )
+            if not force:
+                runner = judge_runner or self._default_judge_runner
+                try:
+                    fresh = runner(tree, task_id)
+                except Exception as exc:
+                    raise WorktreeError(f"HOLD: fresh judge failed after rebase: {exc}") from exc
+                verdict = self._fresh_verdict(task_id, record, source_head, fresh)
+                if verdict is None or verdict.get("passed") is not True:
+                    raise WorktreeError(
+                        "HOLD: no fresh PASS verdict for the rebased commit; "
+                        f"inspect {self._verdict_reference(task_id, record, verdict)}"
+                    )
+
+        # Recheck all safety facts immediately before changing canonical main.
+        if self._head(self.main_root) != main_head:
+            raise WorktreeError("canonical main moved before merge; task worktree held")
+        if not self._is_clean(self.main_root) or not self._is_clean(tree):
+            raise WorktreeError("Git safety precondition changed before merge; task worktree held")
+        if not self._is_ancestor(destination_branch, record.branch):
+            raise WorktreeError("task branch is not fast-forwardable onto canonical main")
+        source_head = self._branch_tip(record.branch)
+        if source_head is None:
+            raise WorktreeError("task branch disappeared before merge")
+
+        if force:
+            self._append_board_event(
+                {
+                    "event_type": "worktree_merge_override",
+                    "task_id": task_id,
+                    "actor": actor,
+                    "source_branch": record.branch,
+                    "source_commit": source_head,
+                    "destination_commit": source_head,
+                    "reason": reason,
+                    "policy_state": "verdict_gate_bypassed",
+                }
+            )
+
+        applied = _git(
+            self.main_root, "merge", "--ff-only", "--no-edit", record.branch, check=False
+        )
+        if applied.returncode != 0 or self._head(self.main_root) != source_head:
+            detail = (
+                applied.stderr.strip() or applied.stdout.strip() or "fast-forward was not applied"
+            )
+            raise WorktreeError(f"merge was not applied; task worktree held: {detail}")
+
+        self._append_board_event(
+            {
+                "event_type": "worktree_merged",
+                "task_id": task_id,
+                "actor": actor or "gitreins-worktree-merge",
+                "source_branch": record.branch,
+                "source_commit": source_head,
+                "destination_branch": destination_branch,
+                "destination_commit": source_head,
+                "policy_state": "force" if force else ("rebased_pass" if rebased else "pass"),
+            }
+        )
+        branches_deleted: list[str] = []
+        self._remove_tree(record, branches_deleted)
+        if tree.exists() or self._branch_tip(record.branch) is not None:
+            raise WorktreeError(
+                "merge applied but reaping was incomplete; task worktree was not forgotten"
+            )
+        del records[task_id]
+        self._save_registry(records)
+        return {
+            "task_id": task_id,
+            "mode": "rebased-fast-forward" if rebased else "fast-forward",
+            "source_commit": source_head,
+            "destination_commit": source_head,
+            "branch": record.branch,
+            "worktree": str(tree),
+        }
+
+    def _is_clean(self, workdir: Path) -> bool:
+        status = _git(workdir, "status", "--porcelain", "--untracked-files=all").stdout
+        ignored = {".gitreins/worktrees.json"}
+        for line in status.splitlines():
+            path = line[3:] if len(line) >= 4 else ""
+            if path in ignored or path.startswith(".gitreins/history/"):
+                continue
+            return False
+        return True
+
+    def _head(self, workdir: Path) -> str | None:
+        result = _git(workdir, "rev-parse", "--verify", "HEAD", check=False)
+        return result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
+
+    def _commit_exists(self, commit: str) -> bool:
+        result = _git(self.main_root, "cat-file", "-e", f"{commit}^{{commit}}", check=False)
+        return result.returncode == 0
+
+    def _is_ancestor(self, ancestor: str, descendant: str) -> bool:
+        result = _git(
+            self.main_root,
+            "merge-base",
+            "--is-ancestor",
+            ancestor,
+            descendant,
+            check=False,
+        )
+        return result.returncode == 0
+
+    def _verdict_reference(
+        self, task_id: str, record: WorktreeRecord, verdict: dict | None = None
+    ) -> str:
+        from engine.persist import VerdictPersister
+
+        # Verdicts are produced in the task checkout, not canonical main.  A
+        # branch-backed verdict may no longer have a local copy, so identify
+        # that source explicitly instead of pointing at an unrelated main
+        # checkout history directory.
+        task_tree = Path(record.path).resolve()
+        persister = VerdictPersister(str(task_tree))
+        if verdict and verdict.get("_date") and verdict.get("_hash"):
+            local_path = (
+                Path(persister.history_dir)
+                / str(verdict["_date"])
+                / str(verdict["_hash"])
+                / "verdict.json"
+            )
+            if local_path.is_file():
+                return str(local_path)
+            branch_path = (
+                f"{persister._branch_history_prefix().rstrip('/')}/"
+                f"{verdict['_date']}/{verdict['_hash']}/verdict.json"
+            )
+            return f"gitreins:{branch_path} (from {task_tree})"
+        return f"{persister.history_dir} (task {task_id})"
+
+    def _matching_verdicts(self, task_id: str, record: WorktreeRecord) -> list[dict]:
+        from engine.persist import VerdictPersister
+
+        # _persist_result(str(tree), ...) stamps and writes the verdict in the
+        # producing task worktree.  Reading canonical main would let unrelated
+        # local history suppress the gitreins-branch fallback in
+        # VerdictPersister.list_verdicts().
+        task_tree = Path(record.path).resolve()
+        persister = VerdictPersister(str(task_tree))
+        try:
+            entries = persister.list_verdicts(n=10000, task_id=task_id)
+        except Exception as exc:
+            raise WorktreeError(f"could not read verdict history: {exc}") from exc
+        worktree = str(task_tree)
+        return [
+            entry
+            for entry in entries
+            if str(entry.get("worktree", "")) == worktree and entry.get("branch") == record.branch
+        ]
+
+    def _find_verdict(self, task_id: str, record: WorktreeRecord, source_head: str) -> dict | None:
+        for entry in self._matching_verdicts(task_id, record):
+            if entry.get("commit") == source_head or entry.get("source_commit") == source_head:
+                return entry
+        return None
+
+    def _fresh_verdict(
+        self, task_id: str, record: WorktreeRecord, source_head: str, fresh
+    ) -> dict | None:
+        if isinstance(fresh, dict) and fresh.get("passed") is True:
+            if fresh.get("commit", fresh.get("source_commit")) == source_head:
+                return fresh
+        return self._find_verdict(task_id, record, source_head)
+
+    @staticmethod
+    def _runner_passed(result) -> bool:
+        if isinstance(result, bool):
+            return result
+        return bool(getattr(result, "passed", False))
+
+    def _default_guard_runner(self, tree: Path) -> bool:
+        from engine.guard_manager import GuardManager
+        from gitreins.cli import load_config
+
+        result = GuardManager(str(tree), config=load_config(str(tree))).run_all()
+        return result.passed
+
+    def _default_judge_runner(self, tree: Path, task_id: str) -> dict:
+        from engine.judge import Judge
+        from engine.llm import LLMClient
+        from engine.task_manager import TaskManager
+        from gitreins.cli import _persist_result, load_config
+
+        task = TaskManager(str(self.main_root)).get(task_id)
+        if task is None:
+            raise WorktreeError(f"task {task_id!r} is missing from the task store")
+        result = Judge(LLMClient(), str(tree), guard_config=load_config(str(tree))).evaluate_task(
+            task
+        )
+        _persist_result(str(tree), task, result)
+        return {
+            "passed": result.passed,
+            "commit": self._head(tree),
+            "worktree": str(tree.resolve()),
+            "branch": _git(tree, "symbolic-ref", "--quiet", "--short", "HEAD").stdout.strip(),
+        }
+
+    def _append_board_event(self, event: dict) -> dict:
+        """Append one valid event while allocating an id under an advisory lock."""
+        import fcntl
+
+        from engine.repo_paths import board_file_path
+
+        path = board_file_path(self.main_root, "events.jsonl")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a+", encoding="utf-8") as stream:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+            stream.seek(0)
+            next_id = 1
+            for line in stream:
+                try:
+                    existing = json.loads(line)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                if isinstance(existing, dict) and isinstance(existing.get("id"), int):
+                    next_id = max(next_id, existing["id"] + 1)
+            entry = {
+                "id": next_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                **event,
+            }
+            stream.seek(0, os.SEEK_END)
+            stream.write(json.dumps(entry, ensure_ascii=False, separators=(",", ":")) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+            fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+        return entry
 
     # ── cleanup ─────────────────────────────────────────────────────
 

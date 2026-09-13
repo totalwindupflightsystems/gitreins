@@ -596,5 +596,289 @@ def test_cli_worktree_clean_requires_confirmation_then_reaps(wt_repo):
 def test_cli_worktree_help_lists_new_subcommands():
     result = _run_cli("worktree", "--help", cwd=Path.cwd())
     assert result.returncode == 0, result.stderr
-    for token in ("doctor", "list", "clean"):
+    for token in ("doctor", "list", "clean", "merge"):
         assert token in result.stdout
+
+
+# ── WORKTREE-004 — judge-gated merge-back ────────────────────────────────
+
+
+def _write_merge_config(repo: Path) -> None:
+    config = repo / ".gitreins" / "config.yaml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text("history:\n  storage: filesystem\n", encoding="utf-8")
+    _git(repo, "add", ".gitreins/config.yaml")
+    _git(repo, "commit", "-qm", "test merge config")
+
+
+def _write_merge_verdict(repo: Path, task_id: str, record, passed: bool, commit: str) -> Path:
+    # Judge persistence is rooted at the producing task checkout.  Keep the
+    # repo argument for callers that also use it to prepare config, but never
+    # use canonical main as the verdict artifact location.
+    entry = (
+        Path(record.path) / ".gitreins" / "history" / "2026-01-01" / ("pass" if passed else "fail")
+    )
+    entry.mkdir(parents=True, exist_ok=True)
+    verdict = {
+        "task_id": task_id,
+        "passed": passed,
+        "worktree": str(Path(record.path).resolve()),
+        "branch": record.branch,
+        "commit": commit,
+    }
+    path = entry / "verdict.json"
+    path.write_text(json.dumps(verdict), encoding="utf-8")
+    return path
+
+
+def _make_task_commit(manager: WorktreeManager, task_id: str, filename: str = "task.txt"):
+    record, _ = manager.create(task_id)
+    tree = Path(record.path)
+    _commit_in(tree, filename, f"{task_id} work")
+    return record, tree
+
+
+def test_merge_refuses_without_exact_pass_verdict_and_keeps_worktree(wt_repo):
+    manager = WorktreeManager(wt_repo)
+    record, tree = _make_task_commit(manager, "MERGE-NO-VERDICT")
+    before = _git(wt_repo, "rev-parse", "HEAD").stdout.strip()
+
+    with pytest.raises(WorktreeError, match="verdict"):
+        manager.merge(record.task_id)
+
+    assert _git(wt_repo, "rev-parse", "HEAD").stdout.strip() == before
+    assert tree.exists() and _branch_exists(wt_repo, record.branch)
+
+
+def test_merge_fail_verdict_is_hold(wt_repo):
+    _write_merge_config(wt_repo)
+    manager = WorktreeManager(wt_repo)
+    record, tree = _make_task_commit(manager, "MERGE-FAIL")
+    source = _git(tree, "rev-parse", "HEAD").stdout.strip()
+    _write_merge_verdict(wt_repo, record.task_id, record, False, source)
+    before = _git(wt_repo, "rev-parse", "HEAD").stdout.strip()
+
+    with pytest.raises(WorktreeError, match="HOLD"):
+        manager.merge(record.task_id)
+
+    assert _git(wt_repo, "rev-parse", "HEAD").stdout.strip() == before
+    assert tree.exists() and _branch_exists(wt_repo, record.branch)
+
+
+def test_merge_pass_fast_forwards_logs_event_and_reaps(wt_repo):
+    _write_merge_config(wt_repo)
+    manager = WorktreeManager(wt_repo)
+    record, tree = _make_task_commit(manager, "MERGE-FAST")
+    source = _git(tree, "rev-parse", "HEAD").stdout.strip()
+
+    # Production judge persistence runs in the task checkout.  Keep unrelated
+    # local history in canonical main to prove it cannot shadow the task
+    # verdict, then persist the matching PASS under the registered tree.
+    from engine.persist import VerdictPersister
+
+    main_persister = VerdictPersister(str(wt_repo))
+    main_persister.persist(
+        "UNRELATED-MAIN",
+        {"passed": True, "worktree": str(wt_repo.resolve()), "branch": "main", "commit": source},
+    )
+    task_persister = VerdictPersister(str(tree))
+    task_persister.persist(
+        record.task_id,
+        {
+            "passed": True,
+            "worktree": str(tree.resolve()),
+            "branch": record.branch,
+            "commit": source,
+        },
+    )
+    local_entries = task_persister.list_verdicts(task_id=record.task_id)
+    assert len(local_entries) == 1
+    local_artifact = (
+        Path(task_persister.history_dir)
+        / local_entries[0]["_date"]
+        / local_entries[0]["_hash"]
+        / "verdict.json"
+    )
+    assert local_artifact.is_file()
+
+    result = manager.merge(record.task_id)
+
+    assert result["mode"] == "fast-forward"
+    assert _git(wt_repo, "rev-parse", "HEAD").stdout.strip() == source
+    assert not tree.exists()
+    assert not _branch_exists(wt_repo, record.branch)
+    assert manager._load_registry() == {}
+    events = [
+        json.loads(line)
+        for line in (wt_repo / ".coding-hermes" / "board" / "events.jsonl").read_text().splitlines()
+    ]
+    event = events[-1]
+    assert event["event_type"] == "worktree_merged"
+    assert event["task_id"] == record.task_id
+    assert event["source_commit"] == source
+    assert event["destination_commit"] == source
+
+
+def test_merge_main_moved_rebases_reruns_guard_and_requires_fresh_judge(wt_repo):
+    _write_merge_config(wt_repo)
+    manager = WorktreeManager(wt_repo)
+    record, tree = _make_task_commit(manager, "MERGE-REBASE")
+    old_source = _git(tree, "rev-parse", "HEAD").stdout.strip()
+    _write_merge_verdict(wt_repo, record.task_id, record, True, old_source)
+    _commit_in(wt_repo, "main.txt", "main moved")
+    main_before = _git(wt_repo, "rev-parse", "HEAD").stdout.strip()
+    calls = []
+
+    def guard(path):
+        calls.append(("guard", _git(path, "rev-parse", "HEAD").stdout.strip()))
+        return True
+
+    def judge(path, task_id):
+        calls.append(("judge", _git(path, "rev-parse", "HEAD").stdout.strip()))
+        rebased = _git(path, "rev-parse", "HEAD").stdout.strip()
+        _write_merge_verdict(wt_repo, task_id, record, True, rebased)
+
+    result = manager.merge(record.task_id, guard_runner=guard, judge_runner=judge)
+
+    rebased = calls[0][1]
+    assert result["mode"] == "rebased-fast-forward"
+    assert rebased != old_source
+    assert calls[0][0] == "guard" and calls[1][0] == "judge"
+    assert _git(wt_repo, "rev-parse", "HEAD").stdout.strip() == rebased
+    assert main_before != rebased
+    assert not tree.exists() and manager._load_registry() == {}
+
+
+def test_merge_rebase_red_guard_holds_rebased_worktree(wt_repo):
+    _write_merge_config(wt_repo)
+    manager = WorktreeManager(wt_repo)
+    record, tree = _make_task_commit(manager, "MERGE-GUARD-RED")
+    old_source = _git(tree, "rev-parse", "HEAD").stdout.strip()
+    _write_merge_verdict(wt_repo, record.task_id, record, True, old_source)
+    _commit_in(wt_repo, "main.txt", "main moved")
+    main_before = _git(wt_repo, "rev-parse", "HEAD").stdout.strip()
+
+    with pytest.raises(WorktreeError, match="guard"):
+        manager.merge(record.task_id, guard_runner=lambda _path: False)
+
+    assert _git(wt_repo, "rev-parse", "HEAD").stdout.strip() == main_before
+    assert tree.exists() and _branch_exists(wt_repo, record.branch)
+    assert _git(tree, "rev-parse", "HEAD").stdout.strip() != old_source
+
+
+def test_merge_rebase_without_fresh_pass_holds_rebased_worktree(wt_repo):
+    _write_merge_config(wt_repo)
+    manager = WorktreeManager(wt_repo)
+    record, tree = _make_task_commit(manager, "MERGE-FRESH-FAIL")
+    old_source = _git(tree, "rev-parse", "HEAD").stdout.strip()
+    _write_merge_verdict(wt_repo, record.task_id, record, True, old_source)
+    _commit_in(wt_repo, "main.txt", "main moved")
+    main_before = _git(wt_repo, "rev-parse", "HEAD").stdout.strip()
+
+    with pytest.raises(WorktreeError, match="fresh PASS"):
+        manager.merge(
+            record.task_id,
+            guard_runner=lambda _path: True,
+            judge_runner=lambda _path, _task_id: {"passed": False},
+        )
+
+    assert _git(wt_repo, "rev-parse", "HEAD").stdout.strip() == main_before
+    assert tree.exists() and _branch_exists(wt_repo, record.branch)
+
+
+def test_merge_rebase_conflict_holds_main_and_worktree(wt_repo):
+    _write_merge_config(wt_repo)
+    manager = WorktreeManager(wt_repo)
+    record, tree = _make_task_commit(manager, "MERGE-CONFLICT", "same.txt")
+    (tree / "same.txt").write_text("task\n", encoding="utf-8")
+    _git(tree, "add", "same.txt")
+    _git(tree, "commit", "-qm", "task conflict")
+    (wt_repo / "same.txt").write_text("main\n", encoding="utf-8")
+    _git(wt_repo, "add", "same.txt")
+    _git(wt_repo, "commit", "-qm", "main conflict")
+    source_before = _git(tree, "rev-parse", "HEAD").stdout.strip()
+    main_before = _git(wt_repo, "rev-parse", "HEAD").stdout.strip()
+    _write_merge_verdict(wt_repo, record.task_id, record, True, source_before)
+
+    with pytest.raises(WorktreeError, match="rebase"):
+        manager.merge(record.task_id)
+
+    assert _git(wt_repo, "rev-parse", "HEAD").stdout.strip() == main_before
+    assert _git(tree, "rev-parse", "HEAD").stdout.strip() == source_before
+    assert tree.exists() and _branch_exists(wt_repo, record.branch)
+
+
+def test_merge_force_requires_actor_and_logs_override(wt_repo):
+    manager = WorktreeManager(wt_repo)
+    record, tree = _make_task_commit(manager, "MERGE-FORCE")
+    source = _git(tree, "rev-parse", "HEAD").stdout.strip()
+
+    with pytest.raises(WorktreeError, match="actor"):
+        manager.merge(record.task_id, force=True)
+    assert tree.exists()
+
+    result = manager.merge(record.task_id, force=True, actor="test-actor", reason="emergency")
+    assert result["mode"] == "fast-forward"
+    events = [
+        json.loads(line)
+        for line in (wt_repo / ".coding-hermes" / "board" / "events.jsonl").read_text().splitlines()
+    ]
+    override = next(event for event in events if event["event_type"] == "worktree_merge_override")
+    assert override["actor"] == "test-actor"
+    assert override["source_branch"] == record.branch
+    assert override["source_commit"] == source
+    assert override["destination_commit"] == source
+    assert override["reason"] == "emergency"
+
+
+def test_merge_rejects_unknown_and_unsafe_task_ids(wt_repo):
+    manager = WorktreeManager(wt_repo)
+    with pytest.raises(WorktreeError, match="not registered"):
+        manager.merge("UNKNOWN")
+    with pytest.raises(WorktreeValidationError):
+        manager.merge("../unsafe")
+
+    record, _tree = _make_task_commit(manager, "MERGE-REGISTRY-SAFE")
+    records = manager._load_registry()
+    records[record.task_id].branch = "refs/heads/attacker"
+    manager._save_registry(records)
+    with pytest.raises(WorktreeError, match="unsafe"):
+        manager.merge(record.task_id, force=True, actor="test-actor")
+
+
+def test_cli_worktree_merge_force_is_wired_and_requires_actor(wt_repo):
+    created = _run_cli("task", "worktree", "CLI-MERGE", cwd=wt_repo)
+    assert created.returncode == 0, created.stderr
+    tree = wt_repo.parent / "main-wt" / "CLI-MERGE"
+    _commit_in(tree, "cli.txt", "cli merge work")
+
+    refused = _run_cli("worktree", "merge", "CLI-MERGE", "--force", cwd=wt_repo)
+    assert refused.returncode != 0
+    assert "actor" in (refused.stdout + refused.stderr)
+    assert tree.exists()
+
+    merged = _run_cli(
+        "worktree",
+        "merge",
+        "CLI-MERGE",
+        "--force",
+        "--actor",
+        "cli-test",
+        cwd=wt_repo,
+    )
+    assert merged.returncode == 0, merged.stdout + merged.stderr
+    assert "Merged CLI-MERGE" in merged.stdout
+    assert not tree.exists()
+
+
+def test_cli_worktree_merge_without_verdict_prints_reference(wt_repo):
+    created = _run_cli("task", "worktree", "CLI-NO-VERDICT", cwd=wt_repo)
+    assert created.returncode == 0, created.stderr
+    tree = wt_repo.parent / "main-wt" / "CLI-NO-VERDICT"
+    _commit_in(tree, "cli.txt", "cli merge work")
+
+    refused = _run_cli("worktree", "merge", "CLI-NO-VERDICT", cwd=wt_repo)
+
+    assert refused.returncode != 0
+    assert ".gitreins/history" in refused.stderr
+    assert tree.exists()

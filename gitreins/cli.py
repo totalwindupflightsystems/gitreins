@@ -13,6 +13,7 @@ Usage:
     gitreins worktree doctor
     gitreins worktree list
     gitreins worktree clean [--confirm-stale-orphan]
+    gitreins worktree merge <id> [--force --actor <actor>]
     gitreins guard run
     gitreins judge <id>
     gitreins commit <message>
@@ -1309,6 +1310,30 @@ def cmd_task_worktree(args):
     print("Merge-back armed on judge PASS (worktree merge-back lands in WORKTREE-003).")
 
 
+def cmd_worktree_merge(args):
+    """Judge-gated fast-forward merge of a task worktree into canonical main."""
+    from engine.repo_paths import WorktreeResolutionError
+    from engine.worktree_manager import WorktreeError, WorktreeManager
+
+    try:
+        result = WorktreeManager(get_workdir()).merge(
+            args.id,
+            force=bool(getattr(args, "force", False)),
+            actor=getattr(args, "actor", None),
+            reason=getattr(args, "reason", "explicit judge-gate override"),
+        )
+    except (WorktreeError, WorktreeResolutionError) as exc:
+        print(f"worktree merge: refused\nError: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+
+    print(
+        f"Merged {result['task_id']} ({result['mode']}) into canonical main "
+        f"at {result['destination_commit'][:12]}"
+    )
+    print(f"  branch: {result['branch']}")
+    print(f"  worktree reaped: {result['worktree']}")
+
+
 def _format_age(seconds: float) -> str:
     seconds = max(0, int(seconds))
     if seconds < 60:
@@ -1395,7 +1420,22 @@ def _persist_result(workdir: str, task, result) -> None:
             producing_worktree = os.path.abspath(workdir)
             producing_branch = ""
 
-        # Build verdict data from result
+        # Build verdict data from result. The commit stamp is mandatory for
+        # merge-back to distinguish a verdict for an older branch tip.
+        source_commit = ""
+        try:
+            commit_result = subprocess.run(
+                ["git", "rev-parse", "--verify", "HEAD"],
+                capture_output=True,
+                text=True,
+                cwd=workdir,
+                timeout=5,
+                check=False,
+            )
+            if commit_result.returncode == 0:
+                source_commit = commit_result.stdout.strip()
+        except (OSError, subprocess.TimeoutExpired):
+            pass
         verdict_data = {
             "task_id": task.id,
             "task_title": task.title,
@@ -1403,6 +1443,7 @@ def _persist_result(workdir: str, task, result) -> None:
             "passed": result.passed,
             "worktree": producing_worktree,
             "branch": producing_branch,
+            "commit": source_commit,
         }
 
         # Extract items from verdict or pipeline result
@@ -2245,6 +2286,26 @@ def main():
         ),
     )
 
+    worktree_merge_p = worktree_sub.add_parser(
+        "merge",
+        help="Judge-gated fast-forward merge of a task worktree into canonical main",
+    )
+    worktree_merge_p.add_argument("id", help="Task id whose registered worktree should be merged")
+    worktree_merge_p.add_argument(
+        "--force",
+        action="store_true",
+        help="Bypass only the verdict gate; all Git safety checks still apply",
+    )
+    worktree_merge_p.add_argument(
+        "--actor",
+        help="Required identity recorded when --force bypasses the verdict gate",
+    )
+    worktree_merge_p.add_argument(
+        "--reason",
+        default="explicit judge-gate override",
+        help="Reason recorded for a --force override",
+    )
+
     task_wt_p = task_sub.add_parser(
         "worktree",
         help="Create (or idempotently reuse) a task's isolated worktree",
@@ -2419,6 +2480,8 @@ def main():
             cmd_worktree_list(args)
         elif args.subcommand == "clean":
             cmd_worktree_clean(args)
+        elif args.subcommand == "merge":
+            cmd_worktree_merge(args)
         else:
             parser.print_help()
     elif args.command == "guard":
