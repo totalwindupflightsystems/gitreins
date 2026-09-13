@@ -41,6 +41,8 @@ def repo_fixture(tmp_path: Path) -> dict:
             },
         },
         "evaluated_at": "2026-09-01T12:00:00Z",
+        "worktree": "/tmp/task-worktree",
+        "branch": "gitreins/task/JVIEW-PASS",
     }
     fail_verdict = {
         "task_id": "JVIEW-FAIL",
@@ -170,6 +172,8 @@ def test_verdicts_lists_fixture_metadata(live_server, repo_fixture):
             "passed": True,
             "n_criteria": 1,
             "tier1_passed": True,
+            "worktree": "/tmp/task-worktree",
+            "branch": "gitreins/task/JVIEW-PASS",
         },
         "e5f6a7b8": {
             "date": "2026-09-02",
@@ -193,6 +197,34 @@ def test_verdict_detail_returns_full_record(live_server, repo_fixture):
     assert json_body(body) == expected
     assert json_body(body)["stages"]["tier1"]["passed"] is True
     assert json_body(body)["stages"]["tier2"]["items"][0]["status"] == "PASS"
+
+
+def test_verdict_detail_returns_worktree_metadata_and_viewer_renders_it(live_server, repo_fixture):
+    """The detail API preserves origin metadata and the SPA displays it."""
+    date, verdict_hash, _expected = repo_fixture["verdicts"][0]
+    status, body = get(live_server, f"/api/verdicts/{date}/{verdict_hash}")
+    assert status == 200
+    payload = json_body(body)
+    assert payload["worktree"] == "/tmp/task-worktree"
+    assert payload["branch"] == "gitreins/task/JVIEW-PASS"
+
+    html_status, html_body = get(live_server, "/")
+    html = html_body.decode("utf-8")
+    assert html_status == 200
+    assert "v.worktree" in html
+    assert "v.branch" in html
+    assert "worktree: " in html
+    assert "branch: " in html
+
+
+def test_legacy_verdict_detail_without_metadata_still_renders(live_server, repo_fixture):
+    """Old verdict JSON without origin fields remains a valid detail record."""
+    date, verdict_hash, expected = repo_fixture["verdicts"][1]
+    status, body = get(live_server, f"/api/verdicts/{date}/{verdict_hash}")
+    assert status == 200
+    assert json_body(body) == expected
+    assert "worktree" not in json_body(body)
+    assert "branch" not in json_body(body)
 
 
 def test_verdict_detail_rejects_unknown_hash_and_malformed_date(live_server):

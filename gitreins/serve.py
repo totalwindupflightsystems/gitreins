@@ -58,17 +58,22 @@ def list_verdicts(workdir: str) -> list[dict]:
             t1 = stages.get("tier1") or {}
             t2 = stages.get("tier2") or {}
             items = v.get("items") or t2.get("items") or []
-            out.append(
-                {
-                    "date": day,
-                    "hash": h,
-                    "task_id": v.get("task_id", "?"),
-                    "title": v.get("task_title", ""),
-                    "passed": bool(v.get("passed")),
-                    "n_criteria": len(items),
-                    "tier1_passed": t1.get("passed") if t1 else None,
-                }
-            )
+            row = {
+                "date": day,
+                "hash": h,
+                "task_id": v.get("task_id", "?"),
+                "title": v.get("task_title", ""),
+                "passed": bool(v.get("passed")),
+                "n_criteria": len(items),
+                "tier1_passed": t1.get("passed") if t1 else None,
+            }
+            # Metadata was added after the first verdict schema; omit it from
+            # legacy list rows rather than manufacturing values for old data.
+            if "worktree" in v:
+                row["worktree"] = v["worktree"]
+            if "branch" in v:
+                row["branch"] = v["branch"]
+            out.append(row)
     return out
 
 
@@ -221,9 +226,13 @@ async function boot(){
 }
 function render(){
   const rows=V.filter(v=>(filter==='all'||(filter==='pass')===v.passed)&&(!q||(v.task_id+' '+v.title).toLowerCase().includes(q)));
-  document.getElementById('list').innerHTML=rows.map(v=>'<div class="row" onclick="show(\\''+v.date+'\\',\\''+v.hash+'\\')">'+
+  document.getElementById('list').innerHTML=rows.map(v=>{
+    const origin=[v.worktree?'worktree: '+v.worktree:'',v.branch?'branch: '+v.branch:''].filter(Boolean).join(' · ');
+    return '<div class="row" onclick="show(\\''+v.date+'\\',\\''+v.hash+'\\')">'+
     '<div class="top"><span class="task">'+esc(v.task_id)+'</span><span class="title">'+esc(v.title)+'</span>'+badge(v.passed)+'</div>'+
-    '<div class="meta">'+v.date+' · '+v.hash+' · '+v.n_criteria+' criteria · tier1: '+(v.tier1_passed==null?'—':(v.tier1_passed?'PASS':'FAIL'))+'</div></div>').join('')
+    '<div class="meta">'+v.date+' · '+v.hash+' · '+v.n_criteria+' criteria · tier1: '+(v.tier1_passed==null?'—':(v.tier1_passed?'PASS':'FAIL'))+'</div>'+
+    (origin?'<div class="meta">'+esc(origin)+'</div>':'')+'</div>';
+  }).join('')
     ||'<p style="color:#5a5a75;font-size:13px">no judgments match</p>';
 }
 async function show(date,hash){
@@ -231,10 +240,12 @@ async function show(date,hash){
   const v=await r.json();
   const stages=v.stages||{};const t1=stages.tier1||{};const t2=stages.tier2||{};
   const items=v.items||(t2.items||[]);
+  const origin=[v.worktree?'worktree: '+v.worktree:'',v.branch?'branch: '+v.branch:''].filter(Boolean).join(' · ');
   const d=document.getElementById('detail');
   d.innerHTML='<button class="close" onclick="document.getElementById(\\'detail\\').style.display=\\'none\\'">✕ close</button>'+
    '<h3>'+esc(v.task_id||'?')+' — '+esc(v.task_title||'')+'</h3>'+
    '<div style="color:#8a8aa3;font-size:11px">'+date+' · '+hash+' · overall '+(v.passed?'PASS':'FAIL')+'</div>'+
+   (origin?'<div class="meta">'+esc(origin)+'</div>':'')+
    '<div class="sec">Criteria ('+items.length+')</div>'+
    items.map(it=>'<div class="crit '+(it.status=='PASS'?'p':'f')+'"><div class="c">'+(it.status=='PASS'?'✅':'❌')+' '+esc(it.criterion)+'</div><div class="d">'+esc(it.detail)+'</div></div>').join('')
    ||'<p style="color:#5a5a75;font-size:12px">no per-criterion items recorded</p>'+

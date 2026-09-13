@@ -32,6 +32,7 @@ from engine.guards import (
     check_go_build,
 )
 from engine.lsp import run_lsp_check
+from engine.repo_paths import WorktreeResolutionError, resolve_worktree_identity
 from engine.types import GuardResult, Tier1Result
 
 logger = logging.getLogger("gitreins.guard")
@@ -88,31 +89,32 @@ def _discover_test_targets(workdir: str) -> list[str] | None:
     """Return a list of test file paths to run, or None for full suite.
 
     None means "full suite" — returned when:
-    - No staged changes
+    - No staged or registered linked-worktree changes
     - A force-full file was changed
     - No test files map to the changed sources (safety fallback)
 
     Returns absolute paths to test files.
     """
-    # Get staged files
-    staged = _get_staged_files(workdir)
-    if not staged:
+    # In a registered linked worktree this includes committed task-branch
+    # changes, while ordinary repositories remain staged-only.
+    changed_files = _get_worktree_changed_files(workdir)
+    if not changed_files:
         return None
 
     # Check force-full triggers
-    for staged_file in staged:
+    for changed_file in changed_files:
         for glob in _FORCE_FULL_TEST_GLOBS:
-            if fnmatch.fnmatch(staged_file, glob):
-                logger.debug("Force-full trigger: %s matches %s", staged_file, glob)
+            if fnmatch.fnmatch(changed_file, glob):
+                logger.debug("Force-full trigger: %s matches %s", changed_file, glob)
                 return None
 
-    # Map staged source files to test files using basename matching
+    # Map changed source files to test files using basename matching
     test_files: set[str] = set()
-    for staged_file in staged:
+    for changed_file in changed_files:
         # If a test file itself changed, always include it
-        basename = os.path.basename(staged_file)
+        basename = os.path.basename(changed_file)
         if basename.startswith("test_") and basename.endswith(".py"):
-            test_files.add(os.path.join(workdir, staged_file))
+            test_files.add(os.path.join(workdir, changed_file))
             continue
 
         # Derive test file from source basename:
@@ -124,16 +126,16 @@ def _discover_test_targets(workdir: str) -> list[str] | None:
             os.path.join(workdir, "tests", f"test_{module}.py"),
         ]
         # Special case: gitreins_mcp/server.py → tests/test_mcp_server.py
-        if os.path.dirname(staged_file).startswith("gitreins_mcp"):
+        if os.path.dirname(changed_file).startswith("gitreins_mcp"):
             candidates.append(os.path.join(workdir, "tests", f"test_mcp_{module}.py"))
 
         for candidate in candidates:
             if os.path.isfile(candidate):
                 test_files.add(candidate)
-                logger.debug("Mapped %s → %s", staged_file, os.path.relpath(candidate, workdir))
+                logger.debug("Mapped %s → %s", changed_file, os.path.relpath(candidate, workdir))
                 break
         else:
-            logger.debug("No test file found for %s (tried: %s)", staged_file, candidates)
+            logger.debug("No test file found for %s (tried: %s)", changed_file, candidates)
 
     if not test_files:
         # Changed files don't map to any known tests — skip in diff mode
@@ -183,6 +185,41 @@ def _get_staged_files(workdir: str) -> list[str]:
         return [f.strip() for f in result.stdout.split("\n") if f.strip()]
     except Exception:
         return []
+
+
+def _get_worktree_changed_files(workdir: str) -> list[str]:
+    """Return staged files plus linked-task changes since the recorded base."""
+    changed = set(_get_staged_files(workdir))
+    try:
+        identity = resolve_worktree_identity(workdir)
+    except WorktreeResolutionError:
+        return sorted(changed)
+
+    if not identity.is_linked_worktree or not identity.branch_point:
+        return sorted(changed)
+
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "diff",
+                "--name-only",
+                "--diff-filter=ACM",
+                "--end-of-options",
+                f"{identity.branch_point}...HEAD",
+                "--",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=workdir,
+            env=_sanitized_env(),
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return sorted(changed)
+    if result.returncode == 0:
+        changed.update(f.strip() for f in result.stdout.splitlines() if f.strip())
+    return sorted(changed)
 
 
 def _build_diff_test_command(test_command: str, test_files: list[str], workdir: str) -> str:
@@ -743,8 +780,6 @@ class GuardManager:
                 full = os.path.join(self.workdir, fpath)
                 if not os.path.isfile(full):
                     continue
-                if os.path.getsize(full) > 1_000_000:
-                    continue  # Skip very large files
 
                 # Skip documentation files — they routinely contain
                 # example API keys, placeholder tokens, and credential
@@ -764,12 +799,30 @@ class GuardManager:
                     continue
 
                 try:
-                    with open(full, "r", errors="replace") as f:
-                        lines = f.readlines()
+                    if staged_only:
+                        staged_result = subprocess.run(
+                            ["git", "show", f":{fpath}"],
+                            capture_output=True,
+                            text=True,
+                            timeout=10,
+                            cwd=self.workdir,
+                            errors="replace",
+                            env=_sanitized_env(),
+                        )
+                        if staged_result.returncode != 0:
+                            continue
+                        text = staged_result.stdout
+                    else:
+                        if os.path.getsize(full) > 1_000_000:
+                            continue  # Skip very large files
+                        with open(full, "r", errors="replace") as f:
+                            text = f.read()
                 except Exception:
                     continue
+                if len(text.encode("utf-8", errors="replace")) > 1_000_000:
+                    continue
 
-                for i, line in enumerate(lines, 1):
+                for i, line in enumerate(text.splitlines(), 1):
                     # Skip whitelisted lines
                     if any(re.search(wp, line) for wp in whitelist_patterns):
                         continue
@@ -914,14 +967,23 @@ class GuardManager:
         """
         test_command = self.config.get("guards", {}).get("test_command", "pytest -x --tb=short")
 
-        # Skip if nothing is staged — nothing to test
+        # A linked task may have committed branch changes with an empty index.
+        # Keep ordinary clean-tree behavior unchanged while allowing those
+        # committed changes to participate in diff-mode discovery.
         staged = _get_staged_files(self.workdir)
-        if not staged:
+        changed = (
+            _get_worktree_changed_files(self.workdir)
+            if self._test_mode == "diff" and not staged
+            else []
+        )
+        if not staged and not changed:
             if not self._test_on_clean:
                 return GuardResult(name="tests", passed=True, output="No files staged — skipped")
             logger.info("test_on_clean: no files staged — running full test_command")
 
         if self._test_mode == "diff":
+            if not changed and self._test_on_clean:
+                return self._run_test_command(test_command, "tests (full)")
             test_files = _discover_test_targets(self.workdir)
             if test_files is not None:
                 if not test_files:

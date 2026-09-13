@@ -29,7 +29,11 @@ import time
 import yaml
 
 from engine.version import __version__
-from engine.repo_paths import WorktreeResolutionError, resolve_worktree_paths
+from engine.repo_paths import (
+    WorktreeResolutionError,
+    resolve_worktree_identity,
+    resolve_worktree_paths,
+)
 
 INSTALL_DEFAULT_TEST_COMMAND = "pytest -x --tb=short"
 GITREINS_GITIGNORE_ENTRIES = (
@@ -1380,12 +1384,25 @@ def _persist_result(workdir: str, task, result) -> None:
         if not persister.enabled:
             return
 
+        # Stamp the checkout that produced the verdict.  Keep explicit empty
+        # branch metadata for detached/non-Git-compatible invocations so the
+        # persisted schema remains stable while old verdicts stay readable.
+        try:
+            identity = resolve_worktree_identity(workdir)
+            producing_worktree = str(identity.worktree_root)
+            producing_branch = identity.branch or ""
+        except WorktreeResolutionError:
+            producing_worktree = os.path.abspath(workdir)
+            producing_branch = ""
+
         # Build verdict data from result
         verdict_data = {
             "task_id": task.id,
             "task_title": task.title,
             "task_criteria": task.criteria,
             "passed": result.passed,
+            "worktree": producing_worktree,
+            "branch": producing_branch,
         }
 
         # Extract items from verdict or pipeline result
@@ -2204,7 +2221,9 @@ def main():
     delete_p.add_argument("id")
 
     # worktree diagnostics + lifecycle
-    worktree_p = sub.add_parser("worktree", help="Git worktree diagnostics and task worktree lifecycle")
+    worktree_p = sub.add_parser(
+        "worktree", help="Git worktree diagnostics and task worktree lifecycle"
+    )
     worktree_sub = worktree_p.add_subparsers(dest="subcommand")
     worktree_sub.add_parser("doctor", help="Validate the shared canonical board resolution")
 

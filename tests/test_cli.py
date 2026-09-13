@@ -11,6 +11,7 @@ import shutil
 import sys
 import subprocess
 import time
+from pathlib import Path
 import pytest
 
 
@@ -76,7 +77,37 @@ def _write_pre_commit_hook(repo, body):
     os.chmod(hook, 0o755)
 
 
-# ── Phase 3-1: Command routing and argument parsing ──────────────────────────
+def test_persist_result_stamps_producing_worktree_and_branch(tmp_path):
+    """Persisted verdicts identify the linked checkout that produced them."""
+    from types import SimpleNamespace
+
+    from gitreins.cli import _persist_result
+
+    main = Path(_init_real_git_repo(tmp_path))
+    linked = tmp_path / "task-worktree"
+    subprocess.run(
+        ["git", "-C", str(main), "worktree", "add", "-q", "-b", "gitreins/task/META", str(linked)],
+        check=True,
+    )
+    (linked / ".gitreins").mkdir()
+    (linked / ".gitreins" / "config.yaml").write_text(
+        "history:\n  storage: filesystem\n  max_verdicts: 0\n", encoding="utf-8"
+    )
+
+    task = SimpleNamespace(id="META", title="metadata", criteria=["record origin"])
+    result = SimpleNamespace(
+        passed=True,
+        verdict=None,
+        pipeline_result={},
+        summary="ok",
+    )
+    _persist_result(str(linked), task, result)
+
+    verdict_files = list((linked / ".gitreins" / "history").glob("*/*/verdict.json"))
+    assert len(verdict_files) == 1
+    verdict = json.loads(verdict_files[0].read_text(encoding="utf-8"))
+    assert verdict["worktree"] == str(linked.resolve())
+    assert verdict["branch"] == "gitreins/task/META"
 
 
 class TestHelpOutput:

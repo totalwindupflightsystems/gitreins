@@ -3,10 +3,12 @@ Unit tests for engine/guard_manager.py — pre-commit static checks.
 axiom:trace work_item=GR-001 spec=specs/04-Guard-Manager.md plan=.memory-bank/work-items/GR-001/plan.yaml
 """
 
+import json
 import os
 import shutil
 import subprocess
 import sys
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -1462,3 +1464,120 @@ def _write_staged_file(workdir, filename, content):
         f.write(content)
     # Stage the file
     subprocess.run(["git", "add", filepath], cwd=workdir, capture_output=True)
+
+
+def _run_git(workdir: Path, *args: str) -> str:
+    """Run a Git command in a fixture checkout and return stdout."""
+    result = subprocess.run(
+        ["git", "-C", str(workdir), *args],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def _make_linked_guard_fixture(tmp_path: Path) -> tuple[Path, Path, str]:
+    """Create main/task checkouts with a recorded task branch point."""
+    main = tmp_path / "main"
+    linked = tmp_path / "linked"
+    main.mkdir()
+    _run_git(main, "init", "-q")
+    _run_git(main, "config", "user.name", "GitReins Tests")
+    _run_git(main, "config", "user.email", "gitreins-tests@example.invalid")
+    (main / "feature.py").write_text("VALUE = 'base'\n", encoding="utf-8")
+    (main / "unrelated.py").write_text("VALUE = 'base'\n", encoding="utf-8")
+    (main / "tests").mkdir()
+    (main / "tests" / "test_feature.py").write_text(
+        "def test_feature():\n    assert True\n", encoding="utf-8"
+    )
+    (main / "tests" / "test_unrelated.py").write_text(
+        "def test_unrelated():\n    assert True\n", encoding="utf-8"
+    )
+    _run_git(
+        main,
+        "add",
+        "feature.py",
+        "unrelated.py",
+        "tests/test_feature.py",
+        "tests/test_unrelated.py",
+    )
+    _run_git(main, "commit", "-qm", "initial")
+    branch_point = _run_git(main, "rev-parse", "HEAD")
+    _run_git(main, "worktree", "add", "-q", "-b", "gitreins/task/WORKTREE-003", str(linked))
+
+    (linked / "feature.py").write_text("VALUE = 'task branch'\n", encoding="utf-8")
+    _run_git(linked, "add", "feature.py")
+    _run_git(linked, "commit", "-qm", "committed task change")
+    _write_staged_file(str(linked), "staged_only.py", "VALUE = 1\n")
+    (main / ".gitreins").mkdir()
+    (main / ".gitreins" / "worktrees.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "worktrees": [
+                    {
+                        "task_id": "WORKTREE-003",
+                        "path": str(linked),
+                        "branch": "gitreins/task/WORKTREE-003",
+                        "branch_point": branch_point,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    return main, linked, branch_point
+
+
+class TestLinkedWorktreeGuardSemantics:
+    """Real linked-worktree coverage for WORKTREE-003 guard scope."""
+
+    def test_diff_targets_include_committed_branch_and_staged_changes(self, tmp_path):
+        """Diff mode uses the task branch point, not only the linked index."""
+        from engine.guard_manager import GuardManager, _discover_test_targets
+
+        _main, linked, _branch_point = _make_linked_guard_fixture(tmp_path)
+        targets = _discover_test_targets(str(linked))
+        assert targets == [str(linked / "tests" / "test_feature.py")]
+
+        manager = GuardManager(
+            str(linked),
+            {"guards": {"test_mode": "diff", "test_command": f"{sys.executable} -m pytest -q"}},
+        )
+        result = manager._check_tests()
+        assert result.passed is True, result.output
+        assert "diff: 1 files" in result.name
+
+    def test_diff_targets_ignore_unstaged_changes(self, tmp_path):
+        """Diff mode compares committed task changes plus staged files only."""
+        _main, linked, _branch_point = _make_linked_guard_fixture(tmp_path)
+        (linked / "unrelated.py").write_text("VALUE = 'unstaged task edit'\n", encoding="utf-8")
+
+        assert _discover_test_targets(str(linked)) == [str(linked / "tests" / "test_feature.py")]
+
+    def test_gitleaks_and_builtin_scan_only_linked_index(self, tmp_path, monkeypatch):
+        """A relative foreign GIT_INDEX_FILE cannot poison either scanner."""
+        from engine.guard_manager import GuardManager
+
+        main, linked, _branch_point = _make_linked_guard_fixture(tmp_path)
+        main_secret = "ghp_" + "M" * 40
+        task_secret = "ghp_" + "T" * 40
+        _write_staged_file(str(main), "main-secret.py", f'TOKEN = "{main_secret}"\n')
+        _write_staged_file(str(linked), "task-secret.py", f'TOKEN = "{task_secret}"\n')
+        (linked / "task-secret.py").write_text('TOKEN = "safe after staging"\n', encoding="utf-8")
+        monkeypatch.setenv("GIT_INDEX_FILE", "../main/.git/index")
+
+        manager = GuardManager(
+            str(linked),
+            {"guards": {"secrets": True, "lint": False, "tests": False}},
+        )
+        builtin = manager._builtin_secrets_scan()
+        assert builtin.passed is False, builtin.output
+        assert "task-secret.py" in builtin.output
+        assert "main-secret.py" not in builtin.output
+
+        checked = manager._check_secrets()
+        assert checked.passed is False, checked.output
+        assert "task-secret.py" in checked.output
+        assert "main-secret.py" not in checked.output
