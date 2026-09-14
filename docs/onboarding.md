@@ -99,7 +99,14 @@ gitreins task create fix-auth "Fix authentication" \
 gitreins task start fix-auth
 
 # 3. Do the work, then complete — this triggers the LLM judge
+# Tier 2 requires credentials before this command changes task state.
+export GITREINS_LLM_API_KEY="your-provider-key"
+# Optional: export GITREINS_LLM_BASE_URL="https://api.openai.com/v1"
+# Optional: export GITREINS_LLM_MODEL="your-model"
 gitreins task complete fix-auth
+
+# Or explicitly run and persist Tier 1 only, without an LLM key:
+gitreins task complete --skip-tier2 fix-auth
 ```
 
 `task complete` runs Tier 1 guards, then the Tier 2 agentic evaluator, which

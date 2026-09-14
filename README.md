@@ -11,7 +11,7 @@
 
 GitReins lives inside your git repository as a quality harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ✅ **v0.12.0** — LSP diagnostics (14 languages), opt-in static analysis (9 analyzers; baseline install default off, smart init enables it for detected dynamic-language projects), commit audit with CVE-scored severity, optional Antares CVE-localization guard, Anthropic Messages API support, DeepSeek prompt caching telemetry, large-repo hardening (fast-track + `--skip-tier2`), MCP `propagate`, judge single-flight + resume lease, evaluator committed-diff read path, 1449 tests pass / 36 test files, verified by collection (optional-tool skips vary).
+> ✅ **v0.12.0** — LSP diagnostics (14 languages), opt-in static analysis (9 analyzers; baseline install default off, smart init enables it for detected dynamic-language projects), commit audit with CVE-scored severity, optional Antares CVE-localization guard, Anthropic Messages API support, DeepSeek prompt caching telemetry, large-repo hardening (fast-track + `--skip-tier2`), MCP `propagate`, judge single-flight + resume lease, evaluator committed-diff read path, 1453 tests pass / 36 test files, verified by collection (optional-tool skips vary).
 
 ---
 
@@ -56,7 +56,7 @@ setup).
 
 1. **Create tasks** — Define criteria via CLI or MCP tools
 2. **Work with your AI agent** — Claude, Hermes, Codex, or Pi does code generation
-3. **Complete tasks** — `gitreins task complete <id>` triggers automatic evaluation
+3. **Complete tasks** — `gitreins task complete <id>` triggers automatic evaluation. Tier 2 needs an LLM credential; configure `GITREINS_LLM_API_KEY` (plus optional `GITREINS_LLM_BASE_URL` and `GITREINS_LLM_MODEL`) first. For an explicit Tier-1-only run, use `gitreins task complete --skip-tier2 <id>`.
 4. **Tier 1: Static guards** — secrets, build, lint, tests (configurable)
 5. **Tier 2: Agentic evaluator** — LLM loop reads files, runs tests, delivers per-criterion PASS/FAIL
 6. **Verdicts persisted** — stored in `.gitreins/history/`, browsable via `gitreins report`
@@ -78,7 +78,9 @@ gitreins security-scan [-d DIR] [--output text|json] [--force-ml]
 gitreins report [-n N] [--interactive]  # Browse verdict history
 gitreins task create <id> <title> [criteria...] [--depends-on ...]
 gitreins task start <id>
-gitreins task complete <id> [--force]
+gitreins task complete <id> [--force] [--skip-tier2]
+# Tier 2 requires GITREINS_LLM_API_KEY; optionally set GITREINS_LLM_BASE_URL and GITREINS_LLM_MODEL.
+# Use --skip-tier2 for an explicit Tier 1-only evaluation without an LLM key.
 gitreins task list [--status pending|in_progress|complete]
 gitreins task delete <id>
 gitreins judge <id>                   # Evaluate a task
@@ -421,7 +423,7 @@ history:
 - **MCP Transport:** stdio (12 tools)
 - **Config:** YAML in `.gitreins/` directory
 - **Evaluator Default Model:** DeepSeek V4 Flash (~$0.01/eval)
-- **Test suite:** 1449 tests across 36 test files (collection total; optional-tool skips vary)
+- **Test suite:** 1453 tests across 36 test files (collection total; optional-tool skips vary)
 
 ## Architecture & Docs
 

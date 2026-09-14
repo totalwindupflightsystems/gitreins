@@ -31,10 +31,20 @@ correctly skips lint and test checks for non-Python changes.
 
 ### LLM evaluator won't run
 
-Set the `GITREINS_LLM_API_KEY` environment variable:
+`gitreins task complete <id>` runs the Tier 2 evaluator and requires a
+credential before it changes an in-progress task to complete. Set the primary
+credential (or one of the supported provider-key fallbacks):
 
 ```bash
-export GITREINS_LLM_API_KEY="sk-your-key"
+export GITREINS_LLM_API_KEY="your-provider-key"
+export GITREINS_LLM_BASE_URL="https://api.openai.com/v1"  # optional
+export GITREINS_LLM_MODEL="your-model"                   # optional
+```
+
+For an explicit Tier 1-only evaluation that does not require an LLM key, run:
+
+```bash
+gitreins task complete --skip-tier2 <id>
 ```
 
 ### Hanging pre-commit hooks

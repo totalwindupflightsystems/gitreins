@@ -1269,6 +1269,7 @@ def cmd_task_complete(args):
     tm = TaskManager(workdir)
 
     force = getattr(args, "force", False)
+    skip_tier2 = getattr(args, "skip_tier2", False)
 
     # Check dependencies (unless forced)
     if not force:
@@ -1280,17 +1281,39 @@ def cmd_task_complete(args):
             print("Complete those tasks first, or use --force to skip dependency checks.")
             sys.exit(1)
 
+    # Resolve credentials before changing the task state.  The evaluator's
+    # fallback chain is owned by LLMClient, so inspect its resolved key rather
+    # than duplicating provider selection in the CLI.
+    llm = None
+    if not skip_tier2:
+        llm = LLMClient()
+        if not llm.api_key:
+            print(
+                "Cannot complete task: Tier 2 evaluation requires an LLM credential.",
+                file=sys.stderr,
+            )
+            print(
+                "Configure GITREINS_LLM_API_KEY (or a supported provider API key).", file=sys.stderr
+            )
+            print("You may also set GITREINS_LLM_BASE_URL and GITREINS_LLM_MODEL.", file=sys.stderr)
+            print(
+                "For Tier 1-only evaluation, run: gitreins task complete --skip-tier2 <id>",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
     task = tm.complete(args.id, force=force)
     print(f"Completed: {task.id} → {task.status}")
 
     print("\nEvaluating...")
-    llm = LLMClient()
     judge = Judge(llm, workdir)
-    result = judge.evaluate_task(task)
+    result = judge.evaluate_task(task, skip_tier2=skip_tier2)
     print(result.summary)
 
     # Persist verdict
     _persist_result(workdir, task, result)
+    if not result.passed:
+        sys.exit(1)
 
 
 def cmd_task_list(args):
@@ -2423,9 +2446,21 @@ def main():
     start_p = task_sub.add_parser("start", help="Start a task")
     start_p.add_argument("id")
 
-    complete_p = task_sub.add_parser("complete", help="Complete and evaluate a task")
+    complete_p = task_sub.add_parser(
+        "complete",
+        help="Complete and evaluate a task",
+        description="Complete a task and run Tier 1 plus the Tier 2 LLM evaluator.",
+        epilog=(
+            "Tier 2 requires GITREINS_LLM_API_KEY (or a supported provider key); "
+            "configure GITREINS_LLM_BASE_URL and GITREINS_LLM_MODEL as needed. "
+            "Use --skip-tier2 for an explicit Tier 1-only evaluation."
+        ),
+    )
     complete_p.add_argument("id")
     complete_p.add_argument("--force", "-f", action="store_true", help="Skip dependency checks")
+    complete_p.add_argument(
+        "--skip-tier2", action="store_true", help="Skip Tier 2 LLM evaluation; Tier 1 guards only"
+    )
 
     list_p = task_sub.add_parser("list", help="List tasks")
     list_p.add_argument("--status", choices=["pending", "in_progress", "complete"])

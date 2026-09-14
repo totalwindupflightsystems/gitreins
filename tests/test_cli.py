@@ -28,10 +28,18 @@ def run_cli(*args, **kwargs):
         All other kwargs passed through to subprocess.run.
     """
     extra_env = kwargs.pop("extra_env", {})
+    unset_env = kwargs.pop("unset_env", ())
     cmd = [sys.executable, CLI_SCRIPT] + list(args)
     env = os.environ.copy()
     env.setdefault("PYTHONPATH", "")
     env.update(extra_env)
+    # Mock responses still exercise the Tier 2 CLI path.  Give those existing
+    # hermetic tests a non-secret placeholder credential unless they explicitly
+    # remove it through unset_env.
+    if "GITREINS_MOCK_LLM_RESPONSE" in extra_env:
+        env.setdefault("GITREINS_LLM_API_KEY", "test-key")
+    for key in unset_env:
+        env.pop(key, None)
     PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     if PROJECT_ROOT not in env["PYTHONPATH"]:
         env["PYTHONPATH"] = PROJECT_ROOT + (":" + env["PYTHONPATH"] if env["PYTHONPATH"] else "")
@@ -517,6 +525,105 @@ class TestExtendedCLI:
         assert result.returncode == 0
         assert "Complete" in result.stdout or "complete" in result.stdout
 
+
+class TestTaskCompleteCredentialFlow:
+    """Credential ordering, Tier 1 opt-out, and evaluator exit status."""
+
+    _LLM_ENV_KEYS = (
+        "GITREINS_LLM_API_KEY",
+        "NEURALWATT_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "KIMI_API_KEY",
+        "GROQ_API_KEY",
+        "OPENROUTER_API_KEY",
+    )
+
+    def test_missing_key_refuses_before_completing_task(self, tmp_workdir):
+        """Missing credentials leave an in-progress task untouched."""
+        run_cli("task", "create", "needs-key", "Needs key", "c1", cwd=tmp_workdir)
+        run_cli("task", "start", "needs-key", cwd=tmp_workdir)
+        result = run_cli(
+            "task",
+            "complete",
+            "needs-key",
+            cwd=tmp_workdir,
+            unset_env=(*self._LLM_ENV_KEYS, "GITREINS_MOCK_LLM_RESPONSE"),
+        )
+
+        assert result.returncode != 0
+        output = result.stdout + result.stderr
+        assert "GITREINS_LLM_API_KEY" in output
+        assert "GITREINS_LLM_BASE_URL" in output
+        assert "GITREINS_LLM_MODEL" in output
+        assert "gitreins task complete --skip-tier2 <id>" in output
+        assert "sk-" not in output
+        from engine.task_manager import TaskManager
+
+        assert TaskManager(tmp_workdir).get("needs-key").status == "in_progress"
+
+    def test_skip_tier2_completes_and_persists_tier1_verdict_without_key(self, tmp_workdir):
+        """The explicit opt-out runs Tier 1 and saves a passing verdict."""
+        write_guard_config(tmp_workdir)
+        run_cli("task", "create", "tier1-only", "Tier 1 only", "c1", cwd=tmp_workdir)
+        run_cli("task", "start", "tier1-only", cwd=tmp_workdir)
+        result = run_cli(
+            "task",
+            "complete",
+            "--skip-tier2",
+            "tier1-only",
+            cwd=tmp_workdir,
+            unset_env=(*self._LLM_ENV_KEYS, "GITREINS_MOCK_LLM_RESPONSE"),
+        )
+
+        assert result.returncode == 0
+        assert "Overall: PASS" in result.stdout
+        from engine.task_manager import TaskManager
+
+        assert TaskManager(tmp_workdir).get("tier1-only").status == "complete"
+        verdicts = list((Path(tmp_workdir) / ".gitreins" / "history").rglob("verdict.json"))
+        assert verdicts
+        assert json.loads(verdicts[-1].read_text())["passed"] is True
+
+    def test_tier2_failure_returns_nonzero_after_persisting_verdict(self, tmp_workdir):
+        """A failed evaluator verdict is persisted and reaches the CLI exit code."""
+        verdict_json = json.dumps(
+            {
+                "verdict": "INCOMPLETE",
+                "items": [{"criterion": "c1", "status": "FAIL", "detail": "not done"}],
+                "summary": "not complete",
+            }
+        )
+        run_cli("task", "create", "tier2-fail", "Tier 2 fail", "c1", cwd=tmp_workdir)
+        run_cli("task", "start", "tier2-fail", cwd=tmp_workdir)
+        result = run_cli(
+            "task",
+            "complete",
+            "tier2-fail",
+            cwd=tmp_workdir,
+            extra_env={
+                "GITREINS_LLM_API_KEY": "test-credential",
+                "GITREINS_MOCK_LLM_RESPONSE": json.dumps({"content": verdict_json}),
+            },
+        )
+
+        assert result.returncode != 0
+        assert "Overall: FAIL" in result.stdout
+        verdicts = list((Path(tmp_workdir) / ".gitreins" / "history").rglob("verdict.json"))
+        assert verdicts
+        assert json.loads(verdicts[-1].read_text())["passed"] is False
+
+    def test_task_complete_help_documents_credentials_and_opt_out(self):
+        """Task completion help names configuration and the Tier 1-only path."""
+        result = run_cli("task", "complete", "--help")
+        output = result.stdout + result.stderr
+        assert result.returncode == 0
+        for variable in ("GITREINS_LLM_API_KEY", "GITREINS_LLM_BASE_URL", "GITREINS_LLM_MODEL"):
+            assert variable in output
+        assert "--skip-tier2" in output
+        assert "Tier 1-only" in output
+
     def test_list_with_status_multiple_filters(self, tmp_workdir):
         """List with --status in_progress shows only in_progress tasks."""
         run_cli("task", "create", "t1", "T1", cwd=tmp_workdir)
@@ -749,7 +856,7 @@ class TestTaskLifecycleExtended:
         result = run_cli("task", "list", cwd=tmp_workdir)
         assert "◐" in result.stdout
 
-        run_cli("task", "complete", "life1", cwd=tmp_workdir)
+        run_cli("task", "complete", "--skip-tier2", "life1", cwd=tmp_workdir)
 
         result = run_cli("task", "list", cwd=tmp_workdir)
         assert "●" in result.stdout
@@ -759,7 +866,7 @@ class TestTaskLifecycleExtended:
         run_cli("task", "create", "todo1", "Todo", "c1", cwd=tmp_workdir)
         run_cli("task", "create", "done1", "Done", "c1", cwd=tmp_workdir)
         run_cli("task", "start", "done1", cwd=tmp_workdir)
-        run_cli("task", "complete", "done1", cwd=tmp_workdir)
+        run_cli("task", "complete", "--skip-tier2", "done1", cwd=tmp_workdir)
         result = run_cli("task", "list", "--status", "complete", cwd=tmp_workdir)
         assert result.returncode == 0
         assert "done1" in result.stdout
