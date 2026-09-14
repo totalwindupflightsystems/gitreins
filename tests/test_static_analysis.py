@@ -282,31 +282,57 @@ class TestStaticDiag:
 
 
 class TestFindTool:
-    """Test tool discovery via find_tool()."""
+    """Test tool discovery via find_tool().
 
-    def test_find_tool_mypy_installed(self):
-        path = find_tool("mypy")
-        assert path is not None
-        assert "mypy" in path
+    Every test drives the REAL find_tool through its actual dependency,
+    ``engine.static_analysis.shutil.which``, which is patched per test.
+    No test consults the host PATH, so the class is hermetic on hosts
+    without mypy/pyright/cppcheck/staticcheck (bunker CI included).
+    """
+
+    def test_find_tool_registered_simple_command(self):
+        """Registered simple command: which() hit → absolute path returned."""
+        with patch(
+            "engine.static_analysis.shutil.which",
+            side_effect=lambda cmd: f"/opt/tools/bin/{cmd}" if cmd == "mypy" else None,
+        ) as mock_which:
+            path = find_tool("mypy")
+        assert path == "/opt/tools/bin/mypy"
         assert os.path.isabs(path)
+        assert "mypy" in path
+        mock_which.assert_called_once_with("mypy")
 
-    def test_find_tool_pyright_installed(self):
-        path = find_tool("pyright")
-        assert path is not None
+    def test_find_tool_compound_candidate(self):
+        """Compound candidate: bare binary absent, npx present → the full
+        'npx pyright' command string is returned, in candidate order."""
+        with patch(
+            "engine.static_analysis.shutil.which",
+            side_effect=lambda cmd: "/usr/bin/npx" if cmd == "npx" else None,
+        ) as mock_which:
+            path = find_tool("pyright")
+        assert path == "npx pyright"
         assert "pyright" in path
-        # pyright may be found as 'npx pyright' (compound command) or
-        # an absolute path — both are valid returns from find_tool.
+        # Lookup order: bare "pyright" first, then the compound head "npx".
+        assert [c.args[0] for c in mock_which.call_args_list] == ["pyright", "npx"]
+
+    def test_find_tool_unknown_tool_falls_back_to_name(self):
+        """Unknown tool: candidates default to [name] — the name itself is
+        looked up and its resolved path returned."""
+        with patch(
+            "engine.static_analysis.shutil.which",
+            side_effect=lambda cmd: f"/usr/bin/{cmd}" if cmd == "python3" else None,
+        ) as mock_which:
+            result = find_tool("python3")
+        assert result == "/usr/bin/python3"
+        assert "python3" in result
+        mock_which.assert_called_once_with("python3")
 
     def test_find_tool_missing(self):
-        result = find_tool("nonexistent-tool-xyz")
+        """Controlled missing case: which() finds nothing → None."""
+        with patch("engine.static_analysis.shutil.which", return_value=None) as mock_which:
+            result = find_tool("nonexistent-tool-xyz")
         assert result is None
-
-    def test_find_tool_not_registered(self):
-        """Unknown tool name falls through to using the name itself as
-        the single candidate."""
-        result = find_tool("python3")
-        assert result is not None
-        assert "python3" in result
+        mock_which.assert_called_once_with("nonexistent-tool-xyz")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -315,12 +341,69 @@ class TestFindTool:
 
 
 class TestListAvailableTools:
-    """Test list_available_tools returns correct tool lists."""
+    """Test list_available_tools returns correct tool lists.
+
+    Positive-path tests mock the ``engine.static_analysis.find_tool``
+    seam so discovery is controlled explicitly and never depends on
+    tools installed on the host PATH (bunker CI has no cppcheck,
+    staticcheck, mypy, or pyright). Unavailable-tool exclusion is
+    asserted through the same seam, preserving the find-only-installed
+    contract instead of testing a hardcoded mapping.
+    """
+
+    @staticmethod
+    def _finder(found: dict[str, str]):
+        """Return a find_tool stand-in: paths for listed tools, None otherwise."""
+        return lambda tool: found.get(tool)
 
     def test_list_python_tools(self):
-        tools = list_available_tools("python")
-        assert "mypy" in tools
-        assert "pyright" in tools
+        """Python maps to [mypy, pyright]; both discovered → both returned."""
+        with patch(
+            "engine.static_analysis.find_tool",
+            side_effect=self._finder(
+                {"mypy": "/usr/bin/mypy", "pyright": "/usr/local/bin/pyright"}
+            ),
+        ) as mock_find:
+            tools = list_available_tools("python")
+        assert tools == ["mypy", "pyright"]
+        assert [c.args[0] for c in mock_find.call_args_list] == ["mypy", "pyright"]
+
+    def test_list_cpp_tools(self):
+        """C++ maps to cppcheck; discovered → returned."""
+        with patch(
+            "engine.static_analysis.find_tool",
+            side_effect=self._finder({"cppcheck": "/usr/bin/cppcheck"}),
+        ) as mock_find:
+            tools = list_available_tools("cpp")
+        assert tools == ["cppcheck"]
+        assert [c.args[0] for c in mock_find.call_args_list] == ["cppcheck"]
+
+    def test_list_go_tools(self):
+        """Go maps to staticcheck; discovered → returned."""
+        with patch(
+            "engine.static_analysis.find_tool",
+            side_effect=self._finder({"staticcheck": "/usr/bin/staticcheck"}),
+        ) as mock_find:
+            tools = list_available_tools("go")
+        assert tools == ["staticcheck"]
+        assert [c.args[0] for c in mock_find.call_args_list] == ["staticcheck"]
+
+    def test_list_partial_availability_omits_missing(self):
+        """A tool find_tool cannot find is omitted; found tools stay."""
+        with patch(
+            "engine.static_analysis.find_tool",
+            side_effect=self._finder({"mypy": "/usr/bin/mypy"}),
+        ):
+            assert list_available_tools("python") == ["mypy"]
+            assert list_available_tools("cpp") == []
+            assert list_available_tools("go") == []
+
+    def test_list_no_tools_found_returns_empty(self):
+        """find_tool returning None for every tool yields an empty list."""
+        with patch("engine.static_analysis.find_tool", return_value=None):
+            assert list_available_tools("python") == []
+            assert list_available_tools("cpp") == []
+            assert list_available_tools("go") == []
 
     def test_list_nonexistent_language(self):
         tools = list_available_tools("nonexistent")
@@ -329,14 +412,6 @@ class TestListAvailableTools:
     def test_list_empty_language(self):
         tools = list_available_tools("")
         assert tools == []
-
-    def test_list_cpp_tools(self):
-        tools = list_available_tools("cpp")
-        assert "cppcheck" in tools
-
-    def test_list_go_tools(self):
-        tools = list_available_tools("go")
-        assert "staticcheck" in tools
 
     def test_list_rust_tools(self):
         """Rust maps to clippy — verify mapping exists (mock PATH)."""
