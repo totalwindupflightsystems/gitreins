@@ -1019,28 +1019,66 @@ class TestJudgeAsyncPersistence:
 
     def test_task_complete_after_error_supersedes(self, mcp_server, monkeypatch):
         """A failed evaluation is superseded: re-running task.complete on a
-        failing task starts a FRESH job (single-flight key releases on error)."""
-        from engine.job_store import list_jobs
+        failing task starts a FRESH job (single-flight key releases on error).
+
+        The controlled thread start models a following test replacing the
+        class-level method before the daemon gets scheduled. The evaluator
+        selected at dispatch must still own the first job.
+        """
+        import threading
+
+        from engine.job_store import list_jobs, load_job
+        import gitreins_mcp.server as server_module
 
         monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
-        calls = {"n": 0}
+        original_job_dir = os.environ["GITREINS_JOB_DIR"]
+        pending_targets = []
+        thread_started = threading.Event()
+        real_thread = threading.Thread
 
-        def _flaky(self, task):
-            calls["n"] += 1
-            if calls["n"] == 1:
-                raise RuntimeError("boom")
+        class _ControlledThread:
+            def __init__(self, *args, target=None, **kwargs):
+                self.target = target
+
+            def start(self):
+                pending_targets.append(self.target)
+                thread_started.set()
+
+        def _run_next_job():
+            target = pending_targets.pop(0)
+            worker = real_thread(target=target)
+            worker.start()
+            worker.join(5)
+            assert not worker.is_alive()
+
+        monkeypatch.setattr(server_module.threading, "Thread", _ControlledThread)
+
+        def _first_evaluator(self, task):
+            raise RuntimeError("boom")
+
+        def _later_evaluator(self, task):
             return _FakeJudgeResult(passed=True)
 
-        monkeypatch.setattr(Judge, "evaluate_task", _flaky)
+        monkeypatch.setattr(Judge, "evaluate_task", _first_evaluator)
         self._create_task(mcp_server, "fail-rerun")
         _mcp_call(mcp_server, "task.start", {"id": "fail-rerun"})
 
         r1 = _mcp_call(mcp_server, "task.complete", {"id": "fail-rerun"})
+        assert thread_started.wait(1)
+
+        # A later test-like class monkeypatch lands before the daemon runs.
+        monkeypatch.setattr(Judge, "evaluate_task", _later_evaluator)
+        later_job_dir = os.path.join(os.path.dirname(original_job_dir), "later-jobs")
+        monkeypatch.setenv("GITREINS_JOB_DIR", later_job_dir)
+        _run_next_job()
+        monkeypatch.setenv("GITREINS_JOB_DIR", original_job_dir)
+        assert load_job(r1["job_id"])["status"] == "error"
         s1 = self._poll_status(mcp_server, r1["job_id"])
         assert s1["status"] == "error"
 
         r2 = _mcp_call(mcp_server, "task.complete", {"id": "fail-rerun"})
         assert r2["job_id"] != r1["job_id"]
+        _run_next_job()
         s2 = self._poll_status(mcp_server, r2["job_id"])
         assert s2["status"] == "complete"
 
@@ -1103,7 +1141,7 @@ class TestJudgeAsyncPersistence:
         monkeypatch.setattr(
             GitReinsMCPServer,
             "_start_job_thread",
-            lambda self, job, wd, task, eval_cap=None: dispatches.append(job["id"]),
+            lambda self, job, wd, task, eval_cap=None, store_dir=None: dispatches.append(job["id"]),
         )
         server_b = GitReinsMCPServer(mcp_server.workdir)
 

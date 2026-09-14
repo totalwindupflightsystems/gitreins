@@ -38,20 +38,25 @@ logger = logging.getLogger("gitreins.job_store")
 DEFAULT_JOB_DIR = os.path.expanduser("~/.local/share/gitreins/jobs")
 
 
-def job_dir() -> str:
-    """Return the shared jobs directory, creating it if needed."""
-    d = os.environ.get("GITREINS_JOB_DIR", DEFAULT_JOB_DIR)
+def job_dir(directory: str | None = None) -> str:
+    """Return the shared jobs directory, creating it if needed.
+
+    Callers that dispatch work asynchronously may pass the directory captured
+    at dispatch time so a later process-global environment change cannot move
+    terminal writes to another store.
+    """
+    d = directory if directory is not None else os.environ.get("GITREINS_JOB_DIR", DEFAULT_JOB_DIR)
     os.makedirs(d, exist_ok=True)
     return d
 
 
-def job_path(job_id: str) -> str:
-    return os.path.join(job_dir(), f"{job_id}.json")
+def job_path(job_id: str, directory: str | None = None) -> str:
+    return os.path.join(job_dir(directory), f"{job_id}.json")
 
 
-def job_log_path(job_id: str) -> str:
+def job_log_path(job_id: str, directory: str | None = None) -> str:
     """Path to the worker process log for a job (stdout/stderr of the run)."""
-    return os.path.join(job_dir(), f"{job_id}.log")
+    return os.path.join(job_dir(directory), f"{job_id}.log")
 
 
 def new_job_id() -> str:
@@ -74,9 +79,9 @@ def make_job(task_id: str, workdir: str, caps: dict | None = None) -> dict:
     }
 
 
-def save_job(job: dict) -> None:
+def save_job(job: dict, directory: str | None = None) -> None:
     """Persist a job record atomically (tmp file + os.replace)."""
-    path = job_path(job["id"])
+    path = job_path(job["id"], directory)
     tmp = f"{path}.tmp-{os.getpid()}"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(job, f, indent=2)
@@ -85,9 +90,9 @@ def save_job(job: dict) -> None:
     os.replace(tmp, path)
 
 
-def load_job(job_id: str) -> dict | None:
+def load_job(job_id: str, directory: str | None = None) -> dict | None:
     """Load a job record from disk, or None if it doesn't exist."""
-    path = job_path(job_id)
+    path = job_path(job_id, directory)
     if not os.path.exists(path):
         return None
     try:
@@ -100,31 +105,32 @@ def load_job(job_id: str) -> dict | None:
         return None
 
 
-def list_jobs() -> list[dict]:
+def list_jobs(directory: str | None = None) -> list[dict]:
     """Return all job records on disk (newest first)."""
     jobs = []
-    if not os.path.isdir(job_dir()):
+    d = job_dir(directory)
+    if not os.path.isdir(d):
         return jobs
-    for name in os.listdir(job_dir()):
+    for name in os.listdir(d):
         if not name.endswith(".json"):
             continue
-        job = load_job(name[:-5])
+        job = load_job(name[:-5], directory)
         if job:
             jobs.append(job)
     jobs.sort(key=lambda j: j.get("started_at", 0.0), reverse=True)
     return jobs
 
 
-def delete_job(job_id: str) -> bool:
+def delete_job(job_id: str, directory: str | None = None) -> bool:
     """Delete a job record; returns True if it existed."""
-    path = job_path(job_id)
+    path = job_path(job_id, directory)
     if os.path.exists(path):
         os.remove(path)
         return True
     return False
 
 
-def find_running_job(task_id: str, workdir: str) -> dict | None:
+def find_running_job(task_id: str, workdir: str, directory: str | None = None) -> dict | None:
     """Return the newest running job record for (task_id, workdir), if any.
 
     Single-flight key (GR-GAP-046): at most ONE in-flight evaluation per
@@ -137,7 +143,7 @@ def find_running_job(task_id: str, workdir: str) -> dict | None:
     multiply evaluations (the exact bug this guards against).
     """
     wd = os.path.abspath(workdir)
-    for job in list_jobs():
+    for job in list_jobs(directory):
         if job.get("task_id") != task_id:
             continue
         if os.path.abspath(job.get("workdir", "")) != wd:
@@ -147,7 +153,7 @@ def find_running_job(task_id: str, workdir: str) -> dict | None:
     return None
 
 
-def acquire_resume_lease(job_id: str) -> int | None:
+def acquire_resume_lease(job_id: str, directory: str | None = None) -> int | None:
     """Atomically claim the right to resume a job (cross-process).
 
     An exclusive ``fcntl.flock`` on a per-job lock file (``<job_id>.lock``
@@ -160,7 +166,7 @@ def acquire_resume_lease(job_id: str) -> int | None:
     """
     import fcntl
 
-    lock_path = os.path.join(job_dir(), f"{job_id}.lock")
+    lock_path = os.path.join(job_dir(directory), f"{job_id}.lock")
     fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)

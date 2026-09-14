@@ -26,6 +26,7 @@ from engine.job_store import (
     cap_from_dict,
     cap_to_dict,
     find_running_job,
+    job_dir,
     load_job,
     make_job,
     pid_alive,
@@ -650,7 +651,9 @@ class GitReinsMCPServer:
         serializes the actual ``evaluate_task`` call so concurrent judges
         can't contend on ports/tmp (LSP integration tests run real
         servers) or on the shared ``.gitreins/history`` git storage. A
-        fresh ``Judge`` is built inside the job from the captured params.
+        fresh Judge instances are built in the worker from captured params,
+        while the evaluator implementation and job-store directory are
+        captured before the worker starts.
 
         Single-flight (GR-GAP-046): before dispatching, the shared disk
         job store is checked for an existing RUNNING job for the same
@@ -670,8 +673,9 @@ class GitReinsMCPServer:
         Returns the job id; the caller returns immediately while the
         job runs. Poll ``judge.status`` with the job id for the result.
         """
+        store_dir = job_dir()
         with self._jobs_lock:
-            existing = find_running_job(task_id, wd)
+            existing = find_running_job(task_id, wd, directory=store_dir)
             if existing is not None:
                 job_id = existing["id"]
                 self._jobs[job_id] = existing
@@ -686,13 +690,20 @@ class GitReinsMCPServer:
             job["pid"] = os.getpid()
             job_id = job["id"]
             self._jobs[job_id] = job
-            save_job(job)
+            save_job(job, directory=store_dir)
 
-        self._start_job_thread(job, wd, task, eval_cap)
+        self._start_job_thread(job, wd, task, eval_cap, store_dir=store_dir)
         return job_id
 
-    def _start_job_thread(self, job: dict, wd: str, task, eval_cap=None) -> None:
+    def _start_job_thread(
+        self, job: dict, wd: str, task, eval_cap=None, store_dir: str | None = None
+    ) -> None:
         """Spawn the worker thread for a job record (fresh or resumed)."""
+        if store_dir is None:
+            store_dir = job_dir()
+        # Resolve the method before start(): class-level patches can change
+        # Judge.evaluate_task while a daemon thread is waiting to run.
+        evaluate_task = Judge.evaluate_task
 
         def _finish(update: dict) -> None:
             # Disk-before-memory ordering: persist the terminal state FIRST so
@@ -705,7 +716,7 @@ class GitReinsMCPServer:
             done = dict(job)
             done.update(update)
             try:
-                save_job(done)
+                save_job(done, directory=store_dir)
             except OSError as e:
                 logger.error("Failed to persist job %s terminal state: %s", job["id"], e)
             with self._jobs_lock:
@@ -715,7 +726,7 @@ class GitReinsMCPServer:
             try:
                 j = Judge(self.llm, wd, eval_cap=eval_cap)
                 with self._eval_lock:
-                    result = j.evaluate_task(task)
+                    result = evaluate_task(j, task)
                 d = self._judge_result_dict(job["task_id"], wd, result)
                 _finish(
                     {
@@ -771,16 +782,17 @@ class GitReinsMCPServer:
         returns the record untouched instead of starting a second
         evaluation.
         """
-        lease = acquire_resume_lease(job["id"])
+        store_dir = job_dir()
+        lease = acquire_resume_lease(job["id"], directory=store_dir)
         if lease is None:
             # Another instance holds the resume lease right now — it is
             # claiming this job. Never double-dispatch; return the record
             # as-is (the winner's claim lands on disk momentarily).
-            return load_job(job["id"]) or job
+            return load_job(job["id"], directory=store_dir) or job
         try:
             # Re-read under the lease: the caller's snapshot may predate
             # another instance's claim.
-            fresh = load_job(job["id"]) or job
+            fresh = load_job(job["id"], directory=store_dir) or job
             if fresh.get("status") != "running" or pid_alive(fresh.get("pid")):
                 # Already claimed (live pid) or finished — nothing to resume.
                 return fresh
@@ -792,7 +804,7 @@ class GitReinsMCPServer:
                     f"task {fresh.get('task_id')} no longer exists in {wd} — job could not be resumed"
                 )
                 fresh["finished_at"] = time.time()
-                save_job(fresh)
+                save_job(fresh, directory=store_dir)
                 return fresh
             logger.info(
                 "Resuming orphaned job %s (task=%s workdir=%s)",
@@ -802,9 +814,13 @@ class GitReinsMCPServer:
             )
             fresh["pid"] = os.getpid()
             fresh["resumed_at"] = time.time()
-            save_job(fresh)
+            save_job(fresh, directory=store_dir)
             self._start_job_thread(
-                fresh, wd, task, eval_cap=cap_from_dict(fresh.get("caps"))
+                fresh,
+                wd,
+                task,
+                eval_cap=cap_from_dict(fresh.get("caps")),
+                store_dir=store_dir,
             )
             return fresh
         finally:
