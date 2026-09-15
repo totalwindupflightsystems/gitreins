@@ -474,6 +474,20 @@ pytestmark_integration = pytest.mark.skipif(
     reason="pylsp not installed — integration test skipped",
 )
 
+# DF-GITREINS-POC-6: real-server tests that assert non-empty diagnostics must
+# skip (not fail) when pylsp is absent. The second condition mirrors the
+# venv-bin escape hatch used by test_lsp_roundtrip_format_parse, which
+# prepends dirname(sys.executable) to PATH before resolving the tool —
+# without it this marker over-skips in a repo venv that has pylsp and
+# under-skips in a bare consumer venv. Apply per-test ONLY: the hermetic
+# judge/evaluator tests in TestLspJudgeIntegration must keep running
+# everywhere, so a class-level marker would silently delete coverage.
+PYLSP_MISSING = pytest.mark.skipif(
+    shutil.which("pylsp") is None
+    and not os.path.exists(os.path.join(os.path.dirname(sys.executable), "pylsp")),
+    reason="pylsp not installed — real-server integration test skipped",
+)
+
 
 @pytest.fixture
 def lsp_workdir(tmp_path):
@@ -603,6 +617,7 @@ class TestLspJudgeIntegration:
         )
         subprocess.run(["git", "config", "user.name", "Test"], cwd=workdir, capture_output=True)
 
+    @PYLSP_MISSING
     @PYLSP_SKIP_310
     def test_lsp_roundtrip_format_parse(self, tmp_path):
         """Real pylsp output → formatted like GuardManager → parsed back by Judge.
@@ -1273,3 +1288,97 @@ class TestRubyLspIntegration:
                 result = _staged_files_by_language(lsp_workdir)
         assert "ruby" in result
         assert any("main.rb" in f for f in result["ruby"])
+
+
+class TestPylspSkipContract:
+    """DF-GITREINS-POC-6: pylsp absent ⇒ the real-pylsp node SKIPS, never FAILS.
+
+    Proves the skip contract hermetically on ANY machine — including ones
+    where pylsp IS installed — by running the exact node id in a subprocess
+    pytest with a plugin that hides pylsp from ``shutil.which`` before the
+    test module is imported (the skipif marker is evaluated at import time).
+    """
+
+    NODE_ID = "tests/test_lsp.py::TestLspJudgeIntegration::test_lsp_roundtrip_format_parse"
+
+    PYLSP_HIDER_PLUGIN = '''\
+"""Test plugin: hide pylsp AND force >=3.11 (DF-GITREINS-POC-6)."""
+import os
+import shutil
+import sys
+
+_original_which = shutil.which
+_original_exists = os.path.exists
+
+# On a real <3.11 interpreter, pre-seed tomllib from tomli BEFORE the fake
+# version lands, so engine/version.py's version-gated `import tomllib`
+# keeps working inside the subprocess (tomllib is stdlib-only 3.11+).
+if sys.version_info < (3, 11):
+    try:
+        import tomli as _tomli
+
+        sys.modules["tomllib"] = _tomli
+    except ImportError:  # pragma: no cover - only on tomli-less 3.10
+        pass
+
+
+def _which_without_pylsp(cmd, *args, **kwargs):
+    if cmd == "pylsp":
+        return None
+    return _original_which(cmd, *args, **kwargs)
+
+
+def _exists_without_pylsp(path, *args, **kwargs):
+    # The PYLSP_MISSING skipif carries an os.path.exists(venv-bin/pylsp)
+    # escape hatch mirroring the test's PATH-prepend; it must see the tool
+    # as absent too, or a pylsp-having machine would run (and fail) the node.
+    if os.path.basename(str(path)) == "pylsp":
+        return False
+    return _original_exists(path, *args, **kwargs)
+
+
+def pytest_configure(config):
+    # Applied at configure time so import-time skipif markers see it.
+    # sys.version_info is faked to >=3.11 so the CI-only PYLSP_SKIP_310
+    # marker can never mask the missing-tool contract on any interpreter.
+    sys.version_info = (3, 11, 0, "final", 0)
+    shutil.which = _which_without_pylsp
+    os.path.exists = _exists_without_pylsp
+'''
+
+    def test_roundtrip_node_skips_when_pylsp_hidden(self, tmp_path):
+        """Subprocess run with pylsp hidden exits 0 and reports the node skipped."""
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        plugin_dir = tmp_path / "skip_plugin"
+        plugin_dir.mkdir()
+        (plugin_dir / "zz_pylsp_hider.py").write_text(self.PYLSP_HIDER_PLUGIN, encoding="utf-8")
+
+        env = dict(os.environ)
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = str(plugin_dir) + (os.pathsep + existing if existing else "")
+
+        # Single node id, no xdist: cannot recurse into a full-suite spawn.
+        proc = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pytest",
+                self.NODE_ID,
+                "--override-ini=addopts=",
+                "-p",
+                "no:cacheprovider",
+                "-p",
+                "zz_pylsp_hider",
+                "-q",
+            ],
+            cwd=repo_root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=90,
+        )
+        combined = (proc.stdout or "") + "\n" + (proc.stderr or "")
+        if proc.returncode != 0 or "1 skipped" not in combined:
+            pytest.fail(
+                f"pylsp-less run must SKIP (exit 0), got rc={proc.returncode}:\n{combined[-4000:]}"
+            )
