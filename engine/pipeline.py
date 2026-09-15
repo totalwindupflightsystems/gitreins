@@ -49,13 +49,64 @@ import glob
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
 
 import yaml
 
+from engine.types import _FAILED_TEST_LINE
+
 logger = logging.getLogger("gitreins.pipeline")
+
+# DF-GITREINS-POC-8: step evidence budget. Matches MAX_EVIDENCE_CHARS (4000)
+# in engine/worktree_fleet.py and engine/worktree_disposable.py so every
+# surface that persists command output uses the same bound. The old behavior
+# (output[:500] in StepResult.to_dict) kept only the pytest banner and threw
+# away the short test summary at the END of the output — the part that names
+# the failing test.
+MAX_STEP_EVIDENCE_CHARS = 4000
+
+# pytest short-summary ERROR lines ("ERROR tests/test_x.py::test_setup - ...")
+# mirror engine.types._FAILED_TEST_LINE for collection/setup errors.
+_ERROR_TEST_LINE = re.compile(r"^ERROR \S+::")
+
+
+def _bound_step_evidence(output: str, cap: int = MAX_STEP_EVIDENCE_CHARS) -> str:
+    """Bound step evidence to *cap* chars, keeping BOTH ends of the output.
+
+    Output at or under the cap is returned byte-identical. Longer output is
+    kept as head (~60% of the budget) + an omission marker + tail (~40%) —
+    the tail carries pytest's short test summary, so it is never dropped.
+    Any FAILED/ERROR short-summary line inside the omitted middle is hoisted
+    into the marker region (deduped, order preserved, max 20 lines) so a
+    failing test id survives even when the suite was interrupted mid-run and
+    the tail holds no summary.
+    """
+    if len(output) <= cap:
+        return output
+    head_len = (cap * 6) // 10
+    tail_len = cap - head_len
+    head = output[:head_len]
+    tail = output[-tail_len:]
+    omitted_len = len(output) - head_len - tail_len
+    hoisted: list[str] = []
+    seen: set[str] = set()
+    for line in output[head_len : len(output) - tail_len].split("\n"):
+        stripped = line.strip()
+        if not (_FAILED_TEST_LINE.match(stripped) or _ERROR_TEST_LINE.match(stripped)):
+            continue
+        if stripped in seen:
+            continue
+        seen.add(stripped)
+        hoisted.append(stripped)
+        if len(hoisted) >= 20:
+            break
+    marker = f"\n… [{omitted_len} chars omitted] …\n"
+    if hoisted:
+        marker += "\n".join(hoisted) + "\n…\n"
+    return head + marker + tail
 
 
 @dataclass
@@ -72,7 +123,9 @@ class StepResult:
             "id": self.id,
             "type": self.type,
             "passed": self.passed,
-            "output": self.output[:500],
+            # DF-GITREINS-POC-8: head+tail bounding instead of a head-only
+            # [:500] slice that discarded pytest's short test summary.
+            "output": _bound_step_evidence(self.output),
             "error": self.error,
             "data": self.data,
         }
@@ -710,9 +763,19 @@ class Pipeline:
         lines = []
         for step in stage.steps:
             status = "✓" if step.passed else "✗"
-            lines.append(
-                f"  {status} {step.id}: {step.output[:100] if step.output else step.error[:100]}"
-            )
+            detail = step.output[:100] if step.output else step.error[:100]
+            if not step.passed and step.output:
+                # A failing step's first 100 chars are the pytest banner;
+                # surface the first FAILED/ERROR short-summary line instead
+                # so the failing test id is visible (DF-021 kin /
+                # DF-GITREINS-POC-8). Fall back to the [:100] head when the
+                # output carries no such line.
+                for line in step.output.split("\n"):
+                    stripped = line.strip()
+                    if _FAILED_TEST_LINE.match(stripped) or _ERROR_TEST_LINE.match(stripped):
+                        detail = stripped[:100]
+                        break
+            lines.append(f"  {status} {step.id}: {detail}")
         return "\n".join(lines)
 
     def _compile_results(self) -> dict:

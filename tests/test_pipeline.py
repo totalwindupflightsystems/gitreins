@@ -9,6 +9,7 @@ from unittest.mock import MagicMock, patch
 import yaml
 
 from engine.pipeline import (
+    MAX_STEP_EVIDENCE_CHARS,
     Pipeline,
     StageResult,
     StepResult,
@@ -40,11 +41,145 @@ class TestStepResult:
         assert d["error"] == "E501"
 
     def test_step_result_output_truncated(self):
-        """to_dict truncates output to 500 chars."""
+        """1000 chars is under the 4000 budget — stored byte-identical (DF-GITREINS-POC-8)."""
         long_output = "x" * 1000
         sr = StepResult(id="tests", type="script", passed=True, output=long_output)
         d = sr.to_dict()
-        assert len(d["output"]) == 500
+        # Contract changed (DF-GITREINS-POC-8): under-budget output is kept
+        # whole; the old head-only [:500] slice is gone.
+        assert d["output"] == long_output
+        assert "chars omitted" not in d["output"]
+
+
+def _make_pytest_output(total_chars: int = 20000) -> tuple[str, str, str]:
+    """Build a pytest-shaped payload of ~*total_chars* chars.
+
+    Returns (payload, first_line, last_line). The last line is the summary
+    banner that carries the failing-test counts — exactly what the old
+    head-only [:500] slice threw away.
+    """
+    first = "============================= test session starts ============================="
+    last = "========================= 2 failed, 5 passed in 1.23s ========================="
+    lines = [first]
+    size = len(first) + len(last) + 2
+    i = 0
+    while size < total_chars:
+        line = f"tests/test_mod.py::test_case_{i} PASSED [ {i % 100}%]"
+        lines.append(line)
+        size += len(line) + 1
+        i += 1
+    lines.append(last)
+    return "\n".join(lines), first, last
+
+
+class TestStepEvidenceBound:
+    """DF-GITREINS-POC-8: _bound_step_evidence head+tail + FAILED-line hoisting."""
+
+    def test_oversized_output_bounded_with_head_tail_and_marker(self):
+        """~20KB pytest payload: bounded, keeps first AND last line, has marker."""
+        from engine.pipeline import _bound_step_evidence
+
+        payload, first, last = _make_pytest_output(20000)
+        assert len(payload) > MAX_STEP_EVIDENCE_CHARS
+        bounded = _bound_step_evidence(payload)
+        # Concrete bound: head (60%) + tail (40%) + small marker allowance.
+        assert len(bounded) <= MAX_STEP_EVIDENCE_CHARS + 100
+        # BOTH ends survive — old [:500] kept only 500 chars.
+        assert len(bounded) >= MAX_STEP_EVIDENCE_CHARS
+        assert bounded.startswith(first)
+        assert bounded.endswith(last)
+        assert "chars omitted" in bounded
+
+    def test_failed_line_in_omitted_middle_is_hoisted(self):
+        """A FAILED line beyond the head window survives truncation."""
+        from engine.pipeline import _bound_step_evidence
+
+        payload, first, last = _make_pytest_output(20000)
+        failed_line = "FAILED tests/test_mid.py::TestBoom::test_boom - AssertionError: boom"
+        # Inject the FAILED line well past the head window (~60% of budget).
+        # Newlines on both sides so it stays a standalone line (the cut can
+        # land mid-line).
+        inject_at = 10000
+        assert inject_at > int(MAX_STEP_EVIDENCE_CHARS * 0.6)
+        payload = payload[:inject_at] + "\n" + failed_line + "\n" + payload[inject_at:]
+        bounded = _bound_step_evidence(payload)
+        assert bounded.startswith(first)
+        assert bounded.endswith(last)
+        # The failing test id survives in the serialized evidence.
+        assert failed_line in bounded
+
+    def test_error_line_in_omitted_middle_is_hoisted(self):
+        """pytest ERROR short-summary lines (collection/setup errors) hoist too."""
+        from engine.pipeline import _bound_step_evidence
+
+        payload, _, _ = _make_pytest_output(20000)
+        error_line = "ERROR tests/test_broken.py::TestSetup::test_setup - ImportError: nope"
+        inject_at = 12000
+        payload = payload[:inject_at] + "\n" + error_line + "\n" + payload[inject_at:]
+        bounded = _bound_step_evidence(payload)
+        assert error_line in bounded
+
+    def test_short_output_byte_identical_no_marker(self):
+        """Output at/below budget passes through unchanged."""
+        from engine.pipeline import _bound_step_evidence
+
+        for size in (0, 1, 1000, MAX_STEP_EVIDENCE_CHARS):
+            out = "x" * size
+            assert _bound_step_evidence(out) == out
+
+    def test_to_dict_20kb_payload_keeps_head_tail_and_marker(self):
+        """to_dict (not just the helper) keeps both ends of a 20KB payload.
+
+        This is the AC1 test: against the old code (output[:500]) the
+        serialized output is a 500-char head-only slice — it cannot end with
+        the summary banner, cannot contain the marker, and is far under the
+        budget. Every assertion here fails against the old code.
+        """
+        payload, first, last = _make_pytest_output(20000)
+        sr = StepResult(id="tests", type="script", passed=False, output=payload)
+        d = sr.to_dict()
+        assert len(d["output"]) <= MAX_STEP_EVIDENCE_CHARS + 100
+        assert d["output"].startswith(first)
+        assert d["output"].endswith(last)  # fails under [:500] (head-only)
+        assert "chars omitted" in d["output"]  # fails under [:500]
+        assert len(d["output"]) > 500  # old code stored exactly 500
+
+    def test_summarize_stage_failed_step_shows_pytest_failed_line(self, tmp_workdir):
+        """_summarize_stage surfaces the FAILED line, not the pytest banner."""
+        step_output = (
+            "============================= test session starts =============================\n"
+            "collecting ... collected 7 items\n"
+            "tests/test_x.py .....F.\n"
+            "================================== FAILURES ===================================\n"
+            "________________________________ TestY.test_z _________________________________\n"
+            "E       assert 1 == 2\n"
+            "========================= short test summary info =========================\n"
+            "FAILED tests/test_x.py::TestY::test_z - AssertionError\n"
+        )
+        stage = StageResult(
+            id="tier1",
+            passed=False,
+            any_failed=True,
+            steps=[StepResult(id="tests", type="script", passed=False, output=step_output)],
+        )
+        p = Pipeline({"pipeline": {"stages": []}}, tmp_workdir)
+        summary = p._summarize_stage(stage)
+        line = "  ✗ tests: FAILED tests/test_x.py::TestY::test_z - AssertionError"
+        assert line in summary
+        assert "test session starts" not in summary
+
+    def test_summarize_stage_falls_back_to_head_without_failed_line(self, tmp_workdir):
+        """No FAILED/ERROR line in a failing step's output → previous [:100] head."""
+        step_output = "grep: pattern not found in any file" + " detail" * 20
+        stage = StageResult(
+            id="tier1",
+            passed=False,
+            any_failed=True,
+            steps=[StepResult(id="grep", type="script", passed=False, output=step_output)],
+        )
+        p = Pipeline({"pipeline": {"stages": []}}, tmp_workdir)
+        summary = p._summarize_stage(stage)
+        assert f"  ✗ grep: {step_output[:100]}" in summary
 
 
 class TestStageResult:
