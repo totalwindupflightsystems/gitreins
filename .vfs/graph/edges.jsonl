@@ -826,3 +826,10 @@
 {"from":"tests/test_guard_exit.py","to":"pkg:subprocess","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
 {"from":"tests/test_guard_exit.py","to":"pkg:sys","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
 {"from":"tests/test_guard_exit.py","to":"pkg:yaml","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"engine/pipeline.py","to":"pkg:re","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"engine/pipeline.py","to":"pkg:engine.types","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_pipeline.py","to":"pkg:os","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_pipeline.py","to":"pkg:unittest.mock","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_pipeline.py","to":"pkg:yaml","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_pipeline.py","to":"pkg:engine.pipeline","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_pipeline.py","to":"pkg:subprocess","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
