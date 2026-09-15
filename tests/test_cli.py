@@ -1530,10 +1530,44 @@ class TestInitRunnerGitignoreAndWarning:
             config = _yaml.safe_load(f)
         cmd = config["guards"]["test_command"]
         assert cmd == "python3 -m pytest -x --tb=short", f"expected module pytest, got {cmd!r}"
-        run = subprocess.run(
-            shlex.split(cmd), cwd=tmp_workdir, capture_output=True, text=True, timeout=60
-        )
+        # QA-GITREINS-POC-002: the persisted config string must stay
+        # `python3 -m pytest ...` (asserted above, DF-017 behavior), but when
+        # verifying that the command actually collects the tests we pin the
+        # interpreter to sys.executable: the ambient `python3` resolved from
+        # PATH may be ANY interpreter, including one without pytest installed,
+        # which would make this test fail through no fault of the product code.
+        argv = [sys.executable, "-m", "pytest", "-x", "--tb=short"]
+        run = subprocess.run(argv, cwd=tmp_workdir, capture_output=True, text=True, timeout=60)
         assert run.returncode == 0, f"{cmd} failed:\n{run.stdout}\n{run.stderr}"
+
+    def test_fresh_init_verification_pins_interpreter_not_ambient_path(
+        self, tmp_workdir, monkeypatch
+    ):
+        """QA-GITREINS-POC-002 regression: the fresh-init verification must not
+        depend on the ambient PATH-resolved `python3`.
+
+        Installs an executable `python3` stub on PATH that emulates an
+        interpreter without pytest (exit 1, 'No module named pytest'), then runs
+        the canonical fresh-init verification (the DF-017 test above) against
+        that poisoned environment. Pre-fix, that verification shellled out to
+        `python3` resolved from PATH and failed; post-fix it pins
+        sys.executable and succeeds. Hermetic: the stub guarantees a broken
+        ambient `python3` regardless of host PATH contents.
+        """
+        stub_dir = os.path.join(tmp_workdir, "path-stub")
+        os.makedirs(stub_dir, exist_ok=True)
+        stub = os.path.join(stub_dir, "python3")
+        with open(stub, "w") as f:
+            f.write("#!/bin/sh\necho 'No module named pytest' >&2\nexit 1\n")
+        os.chmod(stub, 0o755)
+        # Prepend (never replace) so init's own `git` calls still resolve; the
+        # stub shadows any ambient `python3` on the inherited PATH.
+        monkeypatch.setenv("PATH", stub_dir + os.pathsep + os.environ.get("PATH", ""))
+
+        # Run the canonical verification (the original test method) under the
+        # poisoned PATH: its execution step must pin sys.executable, so the
+        # stub never runs and the whole flow succeeds.
+        self.test_fresh_init_root_module_with_uv_writes_executable_module_pytest(tmp_workdir)
 
     def test_detect_test_command_src_layout_setup_py_prefers_uv_run(self, monkeypatch, tmp_path):
         """Non-root src layout (setup.py + src/weather.py + tests/) + uv on PATH
