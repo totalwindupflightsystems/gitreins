@@ -40,5 +40,7 @@ jobs:
           BAD=$(grep -oE '[0-9]+ test files' README.md | grep -vx "${FILES} test files" || true)
           [ -z "$BAD" ] || { echo "README test-file-count drift: '$(echo "$BAD" | head -1)' != ${FILES}"; exit 1; }
           echo "README test counts match: ${COUNT} tests / ${FILES} files"
+      - name: Verify README version drift
+        run: python scripts/check_docs_drift.py
       - name: Run guards
         run: gitreins guard
