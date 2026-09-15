@@ -11,3 +11,12 @@ Details: `docs/dogfood/2026-08-03-integration.md` (real-use report), `docs/dogfo
 
 Details: `docs/dogfood/2026-08-27-integration.md` (real-use report), `docs/dogfood/diagnostics.md` (08-27 section). Board tasks: DF-015..DF-019.
 2026-09-07 | PROMISING-BUT-ROUGH | 15s t2fs | friction 8 | 5 findings\n
+| 2026-09-15 | 🟡 PROMISING-BUT-ROUGH | "pip install gitreins, install/init in any repo, criteria tasks, per-criterion agentic judge, guards that block secrets on commit" | (1) P1 task complete FAILS in fresh consumer envs — init dirties config.yaml → full-suite safety trigger → tests/test_lsp.py FAILS (not skips) without pylsp → Overall FAIL although criteria + judge PASS (DF-GITREINS-POC-6; repro 1 failed/824 passed, verdict evidence docs/dogfood/evidence/); (2) P1 PyPI 0.12.1 (08-28) is ~70 commits behind HEAD — wheel still ships the POC-3 init mismatch and has NO worktree command; release pipeline (DF-010) still missing (DF-GITREINS-POC-7); (3) P2 tier1 failure evidence in task complete is 500 head-chars of pytest banner — failing test name never shown (DF-GITREINS-POC-8) | Leg A fresh machine (las-bunker-04 agent): ~5 min via uv (README pip path impossible: no pip/venv/sudo); Leg B HEAD consumer: ~10 min to green guard, full judged loop 32s judge / 35min with POC-6 diagnosis; regression checks: DF-011/DF-015/DF-016 fixes verified on wheel, POC-1/2/3 at HEAD, POC-3+worktree missing from wheel
+
+Details: `docs/dogfood/2026-09-15-integration.md` (two-leg real-use report),
+`docs/dogfood/diagnostics.md` (09-15 section: pylsp trap diagnosis, evidence truncation,
+wheel-vs-HEAD proof), `docs/dogfood/evidence/` (verdict.json + fullsuite log),
+`skills/gitreins-usage/SKILL.md` v1.1.0 (worktree section, pitfalls 14–17).
+Board tasks: DF-GITREINS-POC-6, -7, -8 (pending).
+Install leg: SKIPPED-install-bunker on las-bunker-03 (host down, ssh timeout) —
+RUN on las-bunker-04 instead (bunker agent 08e03826, spawned+destroyed cleanly).

@@ -1,0 +1,41 @@
+        bad_diags = [d for d in diags if "bad_code.py" in d.get("file", "")]
+>       assert len(bad_diags) > 0, f"Expected LSP diagnostics for bad code, got {diags}"
+E       AssertionError: Expected LSP diagnostics for bad code, got []
+E       assert 0 > 0
+E        +  where 0 = len([])
+
+/tmp/dogfood-gitreins-scratch/tests/test_lsp.py:645: AssertionError
+----------------------------- Captured stderr call -----------------------------
+WARNING:gitreins.lsp:LSP tool 'pylsp' not found on PATH — skipping
+------------------------------ Captured log call -------------------------------
+WARNING  gitreins.lsp:lsp.py:437 LSP tool 'pylsp' not found on PATH — skipping
+=============================== warnings summary ===============================
+tests/reliability/dead-tests/test_arithmetic.py::test_subtract_no_assertion
+  /tmp/dogfood-gitreins-scratch/.venv/lib/python3.14/site-packages/_pytest/python.py:171: PytestReturnNotNoneWarning: Test functions should return None, but tests/reliability/dead-tests/test_arithmetic.py::test_subtract_no_assertion returned <class 'int'>.
+  Did you mean to use `assert` instead of `return`?
+  See https://docs.pytest.org/en/stable/how-to/assert.html#return-not-none for more information.
+    warnings.warn(
+
+tests/reliability/dead-tests/test_strings.py::test_reverse_against_wrong_value
+  /tmp/dogfood-gitreins-scratch/.venv/lib/python3.14/site-packages/_pytest/python.py:171: PytestReturnNotNoneWarning: Test functions should return None, but tests/reliability/dead-tests/test_strings.py::test_reverse_against_wrong_value returned <class 'bool'>.
+  Did you mean to use `assert` instead of `return`?
+  See https://docs.pytest.org/en/stable/how-to/assert.html#return-not-none for more information.
+    warnings.warn(
+
+tests/test_cli.py::test_persist_result_stamps_producing_worktree_and_branch
+tests/test_cli.py::TestJudgeSyncSingleFlight::test_judge_sync_proceeds_when_running_job_is_orphaned
+  /tmp/dogfood-gitreins-scratch/engine/persist.py:103: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    verdict_data["evaluated_at"] = datetime.utcnow().isoformat()
+
+tests/test_cli.py::test_persist_result_stamps_producing_worktree_and_branch
+tests/test_cli.py::TestJudgeSyncSingleFlight::test_judge_sync_proceeds_when_running_job_is_orphaned
+  /tmp/dogfood-gitreins-scratch/engine/persist.py:109: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    date_str = datetime.utcnow().strftime("%Y-%m-%d")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_lsp.py::TestLspJudgeIntegration::test_lsp_roundtrip_format_parse
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!! xdist.dsession.Interrupted: stopping after 1 failures !!!!!!!!!!!!!
+1 failed, 824 passed, 12 skipped, 6 warnings in 16.52s
+PYTEST_EXIT=2

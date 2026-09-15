@@ -4,7 +4,7 @@ description: >-
   How to use the GitReins quality harness in this repo (and any repo it's
   installed in): task lifecycle, guards, LLM judge, MCP tools, and the known
   pitfalls that will bite you. Load this before committing or creating tasks.
-version: 1.0.0
+version: 1.1.0
 category: software-development
 ---
 
@@ -180,4 +180,45 @@ gitreins report -n 3                                                    # recent
 More detail: `docs/dogfood/2026-08-03-integration.md` (real-use report),
 `docs/dogfood/2026-08-14-integration.md` (PyPI consumer path),
 `docs/dogfood/2026-08-27-integration.md` (fresh 0.12.0 wheel path),
+`docs/dogfood/2026-09-15-integration.md` (fresh-machine bunker leg + HEAD consumer leg),
 `docs/dogfood/diagnostics.md` (build/error trail).
+
+## Disposable verification — worktree (2026-09-15: verify claims in clean trees)
+
+Throwaway checkouts under `.disposable/`, from HEAD (WORKTREE-006; NOT on the
+PyPI wheel — see pitfall 14):
+
+```bash
+gitreins worktree fresh --cmd ".venv/bin/python -m pytest tests/test_version.py -q" --json /tmp/wf.json
+gitreins worktree repro  --cmd ".venv/bin/python -m pytest tests/test_config.py -q" -k 3 --concurrency 2 --json /tmp/wr.json
+gitreins worktree dogfood --skip-judge --json /tmp/wd.json   # init+task+guard+judge flow in a throwaway tree
+```
+
+- `fresh` = one clean tree; `repro -k N` = N copies (catches flaky/order-dependent
+  tests); `dogfood` = the harness's own self-test. Exit 0 pass, 1 command failure,
+  2 infrastructure. JSON records match `docs/cli-reference.md` shapes.
+- `worktree dogfood --skip-judge` passes even on pylsp-less machines (clean config
+  → diff mode) — use it as the quick sanity check that dodges pitfall 15.
+
+## Pitfalls 14–17 (2026-09-15 dogfood run)
+
+14. **PyPI wheel is a generation behind HEAD (POC-7).** 0.12.1 (08-28) predates
+    ~70 commits: wheel `init` still has the announce-vs-persist mismatch (POC-3)
+    and there is NO `worktree` subcommand on the wheel. Trust behavior of HEAD,
+    not of the wheel; DF-010 (release pipeline) is the fix to watch.
+15. **`task complete` fails in fresh consumer envs: the pylsp test trap (POC-6).**
+    If `.gitreins/config.yaml` is dirty (init just edited it), the tier1 tests step
+    runs the FULL suite; `tests/test_lsp.py` FAILS (not skips) where pylsp is not
+    installed, so the whole task FAILS although criteria and judge PASS.
+    Workarounds: `uv pip install python-lsp-server` in the env that runs
+    `task complete`, commit/revert the config before completing, use a clean
+    checkout (diff mode), or `--skip-tier2` when Tier 1-only is intended.
+16. **Tier1 failure evidence in `task complete` is 500 head-chars (POC-8)** —
+    pytest prints failing test names at the END, so the stored output never names
+    the failure. Re-run the suite yourself (`pytest -n 4 --maxfail=1 -q`) or call
+    MCP `guard_run` (full logs) to see what actually failed.
+17. **Fresh minimal machines can't follow the README quickstart.** No pip/pipx/
+    sudo and `python3 -m venv` broken (no ensurepip) on bare Debian 13. Working
+    no-root path: `curl -LsSf https://astral.sh/uv/install.sh | sh && uv tool
+    install gitreins` (5 s; hook pin + secrets multi-finding fixes verified on
+    that wheel).

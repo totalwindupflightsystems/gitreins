@@ -318,3 +318,84 @@ reading init output believes type-checking runs on every commit.
   and real failing tests; Tier-2 judge delivers per-criterion evidence
   verdicts (~3.5 min on a tiny repo, deepseek-v4-flash); MCP guard_run and
   judge_evaluate work cross-repo via `workdir`.
+
+---
+
+## 2026-09-15 run — fresh-machine leg (bunker) + HEAD consumer leg
+
+### Why this run happened
+
+Four prior dogfood runs (08-03, 08-14, 08-27, 09-07) each left findings; the foreman
+landed fixes for the whole 09-07 wave (DF-GITREINS-POC-1..4 closed, commits 3d3e968,
+662a31c, 449282e, 8810e5f) plus a new disposable-verification feature (WORKTREE-006,
+ca32bff). This run regression-checked those fixes and took the two legs previous
+runs had not combined: a virgin-machine install (ephemeral bunker agent) and a
+full consumer workflow at HEAD.
+
+### How the fresh-install leg was built (the right way)
+
+las-bunker-03 was unreachable (ssh timeout), so the agent ran on las-bunker-04
+(`bunker spawn --server bunker-las-04 --ttl 2h` → agent 08e03826, destroyed after).
+The point of the leg is that the agent is a bare Debian 13 user: python3.13 present,
+**no pip, no pipx, no uv, no sudo, `python3 -m venv` broken (no ensurepip)**. Any
+install doc that assumes one of those is broken by construction on such a machine.
+
+Lesson recorded for the README (POC-7/docs follow-up): the honest quickstart for a
+no-root box is `curl -LsSf https://astral.sh/uv/install.sh | sh && uv tool install
+gitreins` — 5 s to a working 0.12.1 CLI. The `pip install gitreins` path silently
+assumes a Python env that minimal containers don't have.
+
+### The pylsp trap — how the tier1 failure was diagnosed
+
+The failure arrived as a contradiction: `task complete dogfood-0915` printed
+tier1 FAIL + tier2 PASS + Overall FAIL, while the same criteria passed manually and
+the judge's own verification commands passed. Diagnostic chain:
+
+1. `verdict.json` (`.gitreins/history/2026-09-15/c5f0c739/verdict.json`) — tier1
+   tests step `exit_code: 2`, output exactly 500 chars ending mid-pytest-banner,
+   and the platform line said **Python 3.14.5** (system) not the repo's 3.11 —
+   proof the step ran in the consumer venv, not the dev environment.
+2. Why full suite? `git status` showed `.gitreins/config.yaml` modified — `init`
+   had edited it, and the guard's safety rule escalates dirty-config runs to
+   full-suite mode. (The worktree dogfood path never trips this because its
+   throwaway tree starts clean — that's why `worktree dogfood --skip-judge`
+   passed 3/4 while `task complete` failed.)
+3. Why did the full suite fail? `pytest -n 4 --maxfail=1` → 1 failed / 824 passed /
+   12 skipped, sole failure `tests/test_lsp.py:645`
+   (`test_lsp_roundtrip_format_parse`: "Expected LSP diagnostics for bad code,
+   got []"). The runtime skips gracefully when pylsp is missing; the test asserts
+   instead of skipping. CI never installs-less-than-dev, so the trap is invisible
+   there. Fix belongs to the foreman: skipif-guard the LSP integration tests on
+   pylsp presence (mirror the runtime), and/or ship pylsp in an extras group the
+   docs name. Board row: DF-GITREINS-POC-6.
+
+### Evidence truncation (POC-8) — measured, not assumed
+
+The verdict.json tests step output is exactly 500 characters of head content. Pytest
+puts failing test names and tracebacks at the END of its output, so the stored
+evidence structurally cannot name the failure. Same lesson as DF-018 (08-27: "the
+tail fix landed on the least informative line"), one code path over: this is the
+`task complete` tier1 step, not the guard CLI. MCP `guard_run` already returns full
+logs — the CLI/verdict path should match (head+tail, or pytest summary extraction).
+
+### Wheel-vs-HEAD drift (POC-7) — how it was proven
+
+Same scratch repo recipe run twice: once with the PyPI wheel (bunker agent, uv tool
+install), once at HEAD (local clone). The wheel's init announced `uv run pytest…`
+but wrote `pytest -x --tb=short`; HEAD's init wrote what it announced. The wheel's
+`--help` has no `worktree`; HEAD does. That's the whole story of the release gap:
+the fixes exist, they just aren't shipped — DF-010 (release pipeline) has been open
+since 08-14 and is the single highest-leverage process fix left.
+
+### What held up (worth trusting)
+
+- Secrets blocking on the wheel: sk-+ghp_ in one file → hook rejected the commit,
+  both findings reported with file:line. DF-011 pin and DF-016 multi-finding fixes
+  are real on the released artifact.
+- Tier 2 judge at HEAD: criterion-level evidence quotes actual command output from
+  its own re-runs; 32 s on a tiny task via deepseek-v4-flash.
+- MCP surface: 12 tools, schema-doc aligned (one param-naming lesson: `id`, not
+  `task_id`), structured guard results, full task lifecycle verified by a real
+  line-delimited JSON-RPC client.
+- worktree fleet: `fresh` (clean tree, JSON record), `repro -k 3` (3/3, documented
+  JSON shape field-for-field), `dogfood --skip-judge` (3/4 steps + clean skip).
