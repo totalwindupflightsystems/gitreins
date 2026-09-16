@@ -134,10 +134,16 @@ class TestSkippedStepReasons:
         assert result.skipped_steps == []
         assert result.degraded is False
 
-    def test_absent_lsp_server_is_a_skip_not_a_clean_pass(self, tmp_path):
-        """`run_lsp_check` returns [] for a missing server — that is not "clean"."""
+    def test_absent_lsp_server_is_a_skip_not_a_clean_pass(self, tmp_path, monkeypatch):
+        """`run_lsp_check` returns [] for a missing server — that is not "clean".
+
+        Pinned with a patched tool lookup: CI installs python-lsp-server (a dev
+        extra), so "pylsp is missing" is a property of the environment this test
+        must not depend on.
+        """
         repo = _repo(tmp_path)
         _stage(repo, "clean.py", "x = 1\n")
+        monkeypatch.setattr("engine.guard_manager.find_lsp_tool", lambda tool: None)
         result = _manager(repo, lsp=True, lsp_tools=["pylsp"]).run_all()
 
         assert result.passed is True
