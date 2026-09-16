@@ -447,12 +447,26 @@ A static variant for publishing history without a server is
 
 ## Hooks
 
-- **pre-commit**: runs `gitreins guard` on staged changes. A guard
-  failure blocks the commit (exit 1); a DEGRADED pass (exit 2) also blocks
-  unless `guards.allow_skips: true` — stage a gradable file or accept skips
-  in config.
-- **commit-msg**: runs `gitreins commit-audit`; a rejected message
-  blocks the commit.
+- **pre-commit**: installed by `gitreins install`; runs `gitreins guard` on
+  staged changes. A guard failure blocks the commit (exit 1); a DEGRADED pass
+  (exit 2) also blocks unless `guards.allow_skips: true` — stage a gradable file
+  or accept skips in config.
+- **commit-msg**: **not installed by `gitreins install`.** The CLI ships
+  `gitreins commit-audit` for that slot (no argument needed — it reads
+  `.git/COMMIT_EDITMSG`), but you must create the hook yourself:
+
+  ```bash
+  cat > .git/hooks/commit-msg <<'HOOK'
+  #!/usr/bin/env bash
+  exec gitreins commit-audit
+  HOOK
+  chmod +x .git/hooks/commit-msg
+  ```
+
+  It needs an LLM credential, skips on a `gitreins.skip-tier2` trailer, and
+  blocks the commit only when the config's pipeline includes a `commit_audit`
+  stage with `commit_audit.mode: block` (`warn` is the default) — the command
+  exits 0 with "No commit message to audit." when there is nothing to read.
 
 ## Configuration
 

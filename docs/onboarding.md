@@ -46,11 +46,28 @@ gitreins install
 - `.gitreins/config.yaml` — default config (skipped if already present)
 - `.git/hooks/pre-commit` — runs `gitreins guard` on every commit
   (overwritten if a hook already exists)
-- `.git/hooks/commit-msg` — runs `gitreins commit-audit` on the commit message
 - `.gitignore` — appends the local GitReins runtime exclusions
   `.gitreins/tasks.yaml`, `.gitreins/config.yaml.bak`, and
   `.gitreins/usage.jsonl`; Python projects also get `__pycache__/` (existing
   entries are preserved and never duplicated)
+
+`install` writes the **pre-commit hook only**. The commit-message auditor
+(`gitreins commit-audit`, which reads `.git/COMMIT_EDITMSG` when given no
+argument) is shipped for the `commit-msg` slot but is not installed for you —
+create the hook yourself if you want messages audited:
+
+```bash
+cat > .git/hooks/commit-msg <<'HOOK'
+#!/usr/bin/env bash
+exec gitreins commit-audit
+HOOK
+chmod +x .git/hooks/commit-msg
+```
+
+It needs an LLM credential, honours a `gitreins.skip-tier2` trailer in the
+message, and blocks only when your config's pipeline includes a `commit_audit`
+stage with `commit_audit.mode: block` — the default mode is `warn`, which
+reports without blocking.
 
 ## 2. Smart init
 
