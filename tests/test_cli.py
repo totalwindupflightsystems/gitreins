@@ -2181,6 +2181,66 @@ class TestPreCommitHookPathPinning:
         )
         assert "gitreins" in result.stdout
 
+    def test_generated_python_m_hook_runs_end_to_end(self, tmp_workdir, monkeypatch):
+        """DF-024: the hook GENERATED for a non-console-script install must execute.
+
+        `test_hook_pins_python_m_when_no_console_script` only string-matches the
+        rendered hook; this one installs that exact rendered text as a repo's
+        pre-commit hook and commits through it, so the pinned
+        `<interpreter> -m gitreins guard` line is proven to run (it used to abort
+        the commit with "No module named gitreins.__main__").
+        """
+        import yaml as _yaml
+
+        from gitreins.cli import _render_pre_commit_hook
+
+        monkeypatch.setattr(sys, "argv", ["/usr/bin/pytest"])  # no console-script argv0
+        hook_text = _render_pre_commit_hook()
+        assert f"{shlex.quote(sys.executable)} -m gitreins guard" in hook_text
+
+        repo = os.path.join(tmp_workdir, "repo")
+        os.makedirs(repo)
+        subprocess.run(["git", "init", "-q"], cwd=repo, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=repo, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=repo, capture_output=True)
+
+        config_dir = os.path.join(repo, ".gitreins")
+        os.makedirs(config_dir, exist_ok=True)
+        with open(os.path.join(config_dir, "config.yaml"), "w") as f:
+            _yaml.dump(
+                {"guards": {"test_mode": "diff", "test_command": "echo ok", "allow_skips": True}},
+                f,
+            )
+
+        hooks_dir = os.path.join(repo, ".git", "hooks")
+        os.makedirs(hooks_dir, exist_ok=True)
+        hook_path = os.path.join(hooks_dir, "pre-commit")
+        with open(hook_path, "w") as f:
+            f.write(hook_text)
+        os.chmod(hook_path, 0o755)
+
+        with open(os.path.join(repo, "clean.py"), "w") as f:
+            f.write("# clean\n")
+        subprocess.run(["git", "add", "clean.py"], cwd=repo, capture_output=True)
+
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        env = dict(os.environ)
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = project_root + (os.pathsep + existing if existing else "")
+
+        commit = subprocess.run(
+            ["git", "commit", "-m", "probe"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=180,
+        )
+        output = commit.stdout + commit.stderr
+        assert "No module named gitreins" not in output, output
+        assert commit.returncode == 0, output
+        assert "Tier 1" in output, f"the pinned hook did not run the guard: {output}"
+
     def test_generated_hook_runs_pinned_binary_and_blocks_secret(self, tmp_workdir):
         """End-to-end: `install` with a PATH impostor → the generated hook
         still runs the real gitreins and blocks a commit containing a
