@@ -169,6 +169,19 @@ class TestFullTreeLintLane:
         assert result.passed is False
         assert "F401" in result.output
 
+    def test_full_tree_clean_lint_output_names_scope_in_full_output(self, tmp_path, ruff_on_path):
+        """The scope line survives into the run log's full output: raw ruff
+        stdout is EMPTY on a clean tree, so without the prefix the log's
+        evidence lookup would render an empty lint body and a post-mortem
+        could not tell what was graded."""
+        workdir = _scratch_repo(tmp_path, {"a.py": "x = 1\n", "b.py": "y = 2\n"})
+        gm = GuardManager(workdir, config={"guards": {"secrets": False}}, grade_full_tree=True)
+
+        gm._check_lint()
+
+        full_output = gm._full_outputs.get("lint", "")
+        assert full_output.startswith("ruff: clean (2 tracked files)")
+
     def test_full_tree_lint_fails_on_real_ruff_finding(self, tmp_path, ruff_on_path):
         """AC 5: the forced lane GRADES — a genuine ruff finding (F401,
         unused import) in a tracked file fails the lane. passed is False,

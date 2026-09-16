@@ -1408,6 +1408,13 @@ class GuardManager:
                 output = lint_result.stdout + lint_result.stderr
                 # DF-018: untruncated lint output for the run log (the
                 # GuardResult below keeps the capped head the summary reads).
+                if lint_result.returncode == 0 and self._grade_full_tree:
+                    # The raw ruff stdout for a clean tree is EMPTY, and the
+                    # log's evidence lookup falls back to it — an empty body
+                    # would shadow the graded scope ("ruff: clean (N tracked
+                    # files)") in the persisted run log. Prefix the summary
+                    # line so a post-mortem sees what was graded.
+                    output = f"ruff: clean ({len(py_files)} tracked files)\n{output}"
                 self._remember_full_output("lint", output)
                 if len(output) > 2000:
                     output = output[:2000] + "\n... [truncated]"
