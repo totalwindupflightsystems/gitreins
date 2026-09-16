@@ -6,11 +6,14 @@ axiom:trace work_item=GR-003 spec=specs/09-CLI.md plan=.memory-bank/work-items/G
 import json
 import os
 import re
+import select
 import shlex
 import shutil
+import socket
 import sys
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import pytest
 
@@ -18,6 +21,86 @@ import pytest
 # Get the path to the cli module
 CLI_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "gitreins")
 CLI_SCRIPT = os.path.join(CLI_DIR, "cli.py")
+
+# Ambient LLM credentials ``engine/llm.py`` falls back to when
+# GITREINS_LLM_API_KEY is unset.  A CLI child spawned by a test inherits
+# whatever the caller's shell exports, so a test can silently acquire a live
+# provider call: INT-FLAKE-1 — `test_full_task_lifecycle_subprocess` ran
+# `task complete <id>` with no `--skip-tier2`, and inside a foreman session
+# (which exports GITREINS_LLM_API_KEY + GITREINS_LLM_BASE_URL) the child
+# performed a real Tier 2 evaluation inside `run_cli`'s 30 s subprocess
+# timeout.  It flaked under the parallel guard and passed on an immediate
+# rerun.
+LLM_CREDENTIAL_ENV_KEYS = (
+    "GITREINS_LLM_API_KEY",
+    "NEURALWATT_API_KEY",
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "KIMI_API_KEY",
+    "GROQ_API_KEY",
+    "OPENROUTER_API_KEY",
+)
+
+# Loopback dead port (nothing listens on 9).  A child that tries to reach an
+# LLM without a test-supplied base URL now fails immediately instead of
+# hanging on a live provider, so a regression is loud and fast rather than a
+# load-dependent flake.
+HERMETIC_LLM_BASE_URL = "http://127.0.0.1:9/v1"
+
+
+def _hermetic_env() -> dict:
+    """The child environment every CLI test starts from.
+
+    INT-FLAKE-1: no ambient provider credential, and no routable LLM endpoint.
+    A test that wants either must supply it explicitly through ``extra_env``,
+    which is what makes the dependency visible in the test source.
+    """
+    env = os.environ.copy()
+    for key in LLM_CREDENTIAL_ENV_KEYS:
+        env.pop(key, None)
+    env["GITREINS_LLM_BASE_URL"] = HERMETIC_LLM_BASE_URL
+    env.setdefault("PYTHONPATH", "")
+    return env
+
+
+def _cli_failure(result) -> str:
+    """Assertion message for a failed CLI step: exit status plus both streams.
+
+    The INT-FLAKE-1 report was an opaque ``assert '○' in ''``; a flake has to
+    name its own cause or the next reader re-triages it from scratch.
+    """
+    return (
+        f"CLI exited with {result.returncode}\n"
+        f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
+    )
+
+
+def _llm_sentinel_socket():
+    """A loopback listener that reveals whether a child dialled the endpoint.
+
+    Nothing calls ``accept``, so a ``connect`` from a child stays queued in the
+    backlog and ``select`` reports the socket readable — a connection attempt
+    is visible without a responder, which keeps the probe token-free.
+    """
+    sock = socket.socket()
+    sock.bind(("127.0.0.1", 0))
+    sock.listen(8)
+    return sock
+
+
+def _sentinel_base_url(sock) -> str:
+    return f"http://127.0.0.1:{sock.getsockname()[1]}/v1"
+
+
+def _has_pending_connection(sock) -> bool:
+    readable, _, _ = select.select([sock], [], [], 0)
+    return bool(readable)
+
+
+def _drain_pending(sock) -> None:
+    while _has_pending_connection(sock):
+        sock.accept()[0].close()
 
 
 def run_cli(*args, **kwargs):
@@ -30,8 +113,7 @@ def run_cli(*args, **kwargs):
     extra_env = kwargs.pop("extra_env", {})
     unset_env = kwargs.pop("unset_env", ())
     cmd = [sys.executable, CLI_SCRIPT] + list(args)
-    env = os.environ.copy()
-    env.setdefault("PYTHONPATH", "")
+    env = _hermetic_env()
     env.update(extra_env)
     # Mock responses still exercise the Tier 2 CLI path.  Give those existing
     # hermetic tests a non-secret placeholder credential unless they explicitly
@@ -858,21 +940,34 @@ class TestTaskLifecycleExtended:
     """Extended task lifecycle tests."""
 
     def test_full_task_lifecycle_subprocess(self, tmp_workdir):
-        """Full lifecycle: create → start → list → complete → list."""
-        run_cli("task", "create", "life1", "Lifecycle", "c1", cwd=tmp_workdir)
+        """Full lifecycle: create → start → list → complete → list.
+
+        Tier 1 only (``--skip-tier2``) on purpose: a Tier 2 completion is a
+        live provider round trip, so without the flag this test's runtime
+        depended on whether the caller's shell exported a credential
+        (INT-FLAKE-1).  Every step is asserted on its exit status as well as
+        its output, so a future flake names its own cause.
+        """
+        created = run_cli("task", "create", "life1", "Lifecycle", "c1", cwd=tmp_workdir)
+        assert created.returncode == 0, _cli_failure(created)
 
         result = run_cli("task", "list", cwd=tmp_workdir)
-        assert "○" in result.stdout
+        assert result.returncode == 0, _cli_failure(result)
+        assert "○" in result.stdout, _cli_failure(result)
 
-        run_cli("task", "start", "life1", cwd=tmp_workdir)
-
-        result = run_cli("task", "list", cwd=tmp_workdir)
-        assert "◐" in result.stdout
-
-        run_cli("task", "complete", "--skip-tier2", "life1", cwd=tmp_workdir)
+        started = run_cli("task", "start", "life1", cwd=tmp_workdir)
+        assert started.returncode == 0, _cli_failure(started)
 
         result = run_cli("task", "list", cwd=tmp_workdir)
-        assert "●" in result.stdout
+        assert result.returncode == 0, _cli_failure(result)
+        assert "◐" in result.stdout, _cli_failure(result)
+
+        completed = run_cli("task", "complete", "--skip-tier2", "life1", cwd=tmp_workdir)
+        assert completed.returncode == 0, _cli_failure(completed)
+
+        result = run_cli("task", "list", cwd=tmp_workdir)
+        assert result.returncode == 0, _cli_failure(result)
+        assert "●" in result.stdout, _cli_failure(result)
 
     def test_list_filter_complete_status(self, tmp_workdir):
         """List --status complete shows only completed tasks."""
@@ -900,6 +995,100 @@ class TestTaskLifecycleExtended:
         result = run_cli("task", "list", cwd=tmp_workdir)
         assert "keep1" in result.stdout
         assert "gone1" not in result.stdout
+
+
+class TestTaskLifecycleHermeticity:
+    """INT-FLAKE-1 regression coverage for the lifecycle's failure mode.
+
+    The flake was environmental, not a bug in the lifecycle: with a provider
+    credential exported the CLI child ran a LIVE Tier 2 evaluation, so the
+    test's duration depended on a provider round trip inside a 30 s
+    subprocess timeout (slow under the parallel guard, fast on an immediate
+    rerun).  These tests pin both halves of the fix — the Tier 1-only
+    lifecycle must never dial the configured endpoint, and repeated parallel
+    lifecycles must not share a task store.
+    """
+
+    _CANARY_ENV = {
+        "GITREINS_LLM_API_KEY": "sk-hermetic-canary",
+        "GITREINS_LLM_MODEL": "hermetic-canary-model",
+    }
+
+    def test_tier1_lifecycle_never_dials_the_llm_endpoint(self, tmp_workdir):
+        """A credential plus a listening endpoint in the child stay unused."""
+        sentinel = _llm_sentinel_socket()
+        try:
+            env = dict(self._CANARY_ENV, GITREINS_LLM_BASE_URL=_sentinel_base_url(sentinel))
+
+            # Prove the probe is not vacuous: it sees a connection when one is
+            # made, so an empty check below means "the CLI never dialled".
+            probe = socket.create_connection(sentinel.getsockname(), timeout=5)
+            probe.close()
+            assert _has_pending_connection(sentinel), "sentinel cannot see connections at all"
+            _drain_pending(sentinel)
+
+            for round_no in range(3):
+                task_id = f"hermetic{round_no}"
+                created = run_cli(
+                    "task", "create", task_id, "Hermetic", "c1", cwd=tmp_workdir, extra_env=env
+                )
+                assert created.returncode == 0, _cli_failure(created)
+
+                started = run_cli("task", "start", task_id, cwd=tmp_workdir, extra_env=env)
+                assert started.returncode == 0, _cli_failure(started)
+
+                completed = run_cli(
+                    "task", "complete", "--skip-tier2", task_id, cwd=tmp_workdir, extra_env=env
+                )
+                assert completed.returncode == 0, _cli_failure(completed)
+                assert "Overall: PASS" in completed.stdout, _cli_failure(completed)
+
+                listed = run_cli("task", "list", cwd=tmp_workdir, extra_env=env)
+                assert listed.returncode == 0, _cli_failure(listed)
+                assert "●" in listed.stdout, _cli_failure(listed)
+
+                assert not _has_pending_connection(sentinel), (
+                    "the CLI dialled the configured LLM endpoint during a Tier 1-only "
+                    "lifecycle — that is the INT-FLAKE-1 flake (a live provider call "
+                    "inside the subprocess timeout)"
+                )
+        finally:
+            sentinel.close()
+
+    def test_parallel_lifecycles_share_no_state(self, workdir_factory):
+        """Four concurrent lifecycles, four workspaces: all green, no cross-talk.
+
+        Covers the shared-state half of INT-FLAKE-1's hypothesis list: a
+        parallel guard run must not let one sequence's task store or exit
+        status leak into another's.
+        """
+        pairs = [(workdir_factory(), f"par{i}") for i in range(4)]
+
+        def _sequence(pair):
+            workdir, task_id = pair
+            results = [
+                run_cli("task", "create", task_id, "Parallel", "c1", cwd=workdir),
+                run_cli("task", "start", task_id, cwd=workdir),
+                run_cli("task", "complete", "--skip-tier2", task_id, cwd=workdir),
+                run_cli("task", "list", cwd=workdir),
+            ]
+            return workdir, task_id, results
+
+        with ThreadPoolExecutor(max_workers=len(pairs)) as pool:
+            outcomes = list(pool.map(_sequence, pairs))
+
+        for workdir, task_id, results in outcomes:
+            for result in results:
+                assert result.returncode == 0, _cli_failure(result)
+            assert "●" in results[-1].stdout, _cli_failure(results[-1])
+            stored = (Path(workdir) / ".gitreins" / "tasks.yaml").read_text()
+            assert task_id in stored
+            for _, other_id, _ in outcomes:
+                if other_id != task_id:
+                    assert other_id not in stored, (
+                        f"{other_id} leaked into {workdir}/.gitreins/tasks.yaml — "
+                        "concurrent lifecycles must not share a task store"
+                    )
 
 
 class TestEdgeCases:

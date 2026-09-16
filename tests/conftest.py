@@ -6,14 +6,13 @@ axiom:trace work_item=GR-001 spec=specs/05-Task-Manager.md plan=.memory-bank/wor
 import pytest
 
 
-@pytest.fixture
-def tmp_workdir(tmp_path):
-    """Create a temporary git repository with .gitreins/ directory.
+def init_fake_git_workdir(workdir) -> None:
+    """Give *workdir* the minimal ``.git`` a GitReins workspace fixture needs.
 
-    Returns a clean workdir path that acts as a realistic GitReins workspace.
+    Not a usable repository — just enough for ``git rev-parse --show-toplevel``
+    to resolve the workdir itself, which is how the CLI locates the
+    ``.gitreins/`` store it reads and writes.
     """
-    workdir = tmp_path / "repo"
-    workdir.mkdir()
     git_dir = workdir / ".git"
     git_dir.mkdir()
     # Create minimal git config so git commands work
@@ -22,7 +21,44 @@ def tmp_workdir(tmp_path):
     (git_dir / "objects").mkdir()
     (git_dir / "refs").mkdir()
     (git_dir / "refs" / "heads").mkdir()
+
+
+@pytest.fixture
+def tmp_workdir(tmp_path):
+    """Create a temporary git repository with .gitreins/ directory.
+
+    Returns a clean workdir path that acts as a realistic GitReins workspace.
+    """
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    init_fake_git_workdir(workdir)
     return str(workdir)
+
+
+@pytest.fixture
+def workdir_factory(tmp_path):
+    """Build several isolated fake git workdirs inside one test.
+
+    ``tmp_workdir`` is function-scoped, so a test that drives concurrent CLI
+    sequences needs its own factory to give each sequence a workspace of its
+    own — otherwise the sequences would share one task store and the test
+    could not tell isolation from luck.
+
+    Usage::
+
+        def test_x(workdir_factory):
+            first, second = workdir_factory(), workdir_factory()
+    """
+    made: list[str] = []
+
+    def _make() -> str:
+        workdir = tmp_path / f"repo-{len(made) + 1}"
+        workdir.mkdir()
+        init_fake_git_workdir(workdir)
+        made.append(str(workdir))
+        return str(workdir)
+
+    return _make
 
 
 @pytest.fixture(autouse=True)

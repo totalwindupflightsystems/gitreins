@@ -22,6 +22,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   head+tail evidence bound had no tail to preserve and the failing test id
   never reached `verdict.json`. The whole output is now kept and bounded once,
   at serialization.
+- **A CLI test could silently acquire a live provider call (INT-FLAKE-1)** —
+  `test_full_task_lifecycle_subprocess` completed a task without
+  `--skip-tier2`, so whenever the caller's shell exported one of the
+  credentials `engine/llm.py` falls back to (a foreman session does) the
+  child ran a real Tier 2 evaluation inside the test's 30 s subprocess
+  timeout: green in CI, intermittently red under the parallel guard. Every
+  CLI subprocess test now starts from a hermetic environment (ambient
+  provider credentials stripped, LLM endpoint pinned to a loopback dead
+  port), each lifecycle step asserts its exit status and reports both
+  streams on failure, and two regression tests pin the failure mode — a
+  sentinel socket proving a Tier 1-only lifecycle never dials the endpoint,
+  and four concurrent lifecycles proving no shared task store.
 
 ## [0.13.0] — 2026-09-16
 
