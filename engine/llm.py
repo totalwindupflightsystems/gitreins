@@ -71,6 +71,17 @@ def _is_anthropic(url: str) -> bool:
     return "anthropic.com" in url_lower or "claude" in url_lower
 
 
+class LLMResponseError(RuntimeError):
+    """Provider returned a response we cannot use (missing/empty choices).
+
+    Carries the provider's own payload so the real cause (auth, quota,
+    content filter, reasoning-token starvation) is visible to callers
+    instead of a bare KeyError('choices'). (GAP-074)
+    """
+
+    pass
+
+
 class LLMClient:
     """Multi-provider chat completions client with retry logic."""
 
@@ -272,8 +283,22 @@ class LLMClient:
         resp.raise_for_status()
         data = resp.json()
 
-        choice = data["choices"][0]
-        message = choice["message"]
+        choices = data.get("choices")
+        if not choices:
+            # GAP-074: a 200 without choices (error envelope, empty choices,
+            # or a reasoning model whose visible content was empty) must not
+            # surface as a bare KeyError('choices') — that discards the
+            # provider's own error text and makes every cause look identical.
+            provider_err = data.get("error") or data.get("message")
+            finish = ""
+            if choices == [] and data.get("usage"):
+                finish = " (empty choices; usage=%s)" % data["usage"]
+            raise LLMResponseError(
+                "provider returned no choices: %s%s"
+                % (provider_err or data, finish)
+            )
+        choice = choices[0]
+        message = choice.get("message") or {}
 
         tool_calls = []
         if message.get("tool_calls"):
