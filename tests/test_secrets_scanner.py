@@ -6,9 +6,12 @@ Stripe, Azure, Slack tokens.
 """
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
+
+import pytest
 
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -385,3 +388,196 @@ class TestVenvDirExclusion:
         assert result.passed is False
         assert "AWS access key" in result.output
         assert ".venv312" not in result.output
+
+
+# ══════════════════════════════════════════════════════════════════
+# POC-17 / TRUST-002: the harness's own state dir is never graded
+# ══════════════════════════════════════════════════════════════════
+#
+# `.gitreins/` holds the harness's config, verdict history, guard run logs
+# and disposable-worktree bookkeeping. Guard logs persist raw scanner output
+# (DF-018) and history artifacts embed prior evidence, so a scan of that
+# directory fails on canary/fixture tokens that are NOT in the repo's code
+# and cannot be removed from a failing tree. Tick 285 lost a diagnosis cycle
+# to exactly that (tier1 `secrets` FAIL while every source file was clean).
+
+# Built this way so the literal token never sits in the repo's own source
+# (GitHub push protection / the scanner's own fixtures).
+HARNESS_CANARY = "ghp_" + "a1B2c3D4e5F6g7H8i9J0k1L2m3N4o5P6q7R8"
+
+
+def _git_repo(root: str) -> str:
+    """Turn *root* into a real git repo (staged-file scans need an index)."""
+    os.makedirs(root, exist_ok=True)
+    subprocess.run(["git", "init", "-q"], cwd=root, check=True, capture_output=True)
+    for key, val in (("user.email", "test@test.com"), ("user.name", "test")):
+        subprocess.run(["git", "config", key, val], cwd=root, capture_output=True)
+    return root
+
+
+def _tier1_secrets_command(workdir: str) -> str:
+    """The exact shell the judge's Tier 1 secrets step runs."""
+    from engine.pipeline import tier1_plan
+
+    steps, _marker = tier1_plan(workdir, {})
+    return next(s["run"] for s in steps if s["id"] == "secrets")
+
+
+class TestHarnessStateExcludedFromBuiltinScan:
+    """Criterion 1: the builtin workdir scan skips `.gitreins/**`."""
+
+    def test_workdir_files_prunes_all_harness_state(self, tmp_workdir):
+        """Config, logs and history are all pruned from the enumeration."""
+        _write_workdir_file(tmp_workdir, ".gitreins/config.yaml", "guards:\n  secrets: true\n")
+        _write_workdir_file(tmp_workdir, ".gitreins/logs/guard-1.log", HARNESS_CANARY)
+        _write_workdir_file(
+            tmp_workdir, ".gitreins/history/2026-09-16/abcd/verdict.json", HARNESS_CANARY
+        )
+        _write_workdir_file(tmp_workdir, ".gitreins/disposable.json", '{"id": "x"}\n')
+        _write_workdir_file(tmp_workdir, "src/app.py", "x = 1\n")
+
+        gm = GuardManager(tmp_workdir)
+        files = gm._workdir_files()
+
+        assert not any(f.startswith(".gitreins/") for f in files)
+        assert files == ["src/app.py"]
+
+    def test_workdir_scan_ignores_canary_in_harness_state(self, tmp_workdir):
+        """Canary in `.gitreins/logs/x.log` does NOT fail the scan, and the
+        evidence names the exclusion (criterion 3)."""
+        _write_workdir_file(
+            tmp_workdir, ".gitreins/logs/guard-1.log", f"fixture = {HARNESS_CANARY}\n"
+        )
+        _write_workdir_file(tmp_workdir, "src/app.py", "x = 1\n")
+
+        gm = GuardManager(tmp_workdir)
+        result = gm._builtin_secrets_scan(staged_only=False)
+
+        assert result.passed is True
+        assert ".gitreins/**" in result.output
+        assert "excluded harness state" in result.output
+
+    def test_workdir_scan_still_flags_same_canary_in_source(self, tmp_workdir):
+        """Criterion 2 (MUST half): the identical canary in a source file
+        still fails — the exclusion is scoped, not a blanket relaxation."""
+        _write_workdir_file(
+            tmp_workdir, ".gitreins/logs/guard-1.log", f"fixture = {HARNESS_CANARY}\n"
+        )
+        _write_workdir_file(tmp_workdir, "src/app.py", f"token = {HARNESS_CANARY}\n")
+
+        gm = GuardManager(tmp_workdir)
+        result = gm._builtin_secrets_scan(staged_only=False)
+
+        assert result.passed is False
+        assert "src/app.py" in result.output
+        assert ".gitreins" not in result.output
+
+    def test_staged_scan_ignores_tracked_gitreins_state(self, tmp_path):
+        """`.gitreins/config.yaml` and `history/` are TRACKED in a real repo,
+        so the staged path needs the same exclusion."""
+        repo = _git_repo(str(tmp_path / "repo"))
+        os.makedirs(os.path.join(repo, ".gitreins", "history"))
+        _write_workdir_file(repo, ".gitreins/config.yaml", f"note: {HARNESS_CANARY}\n")
+        _write_workdir_file(repo, "src/app.py", "x = 1\n")
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+
+        gm = GuardManager(repo)
+        assert gm._builtin_secrets_scan().passed is True
+
+        _write_workdir_file(repo, "src/app.py", f"token = {HARNESS_CANARY}\n")
+        subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+        staged = GuardManager(repo)._builtin_secrets_scan()
+        assert staged.passed is False
+        assert "src/app.py" in staged.output
+
+
+class TestTier1SecretsStepHarnessScope:
+    """Criterion 2 end-to-end: the JUDGE's secrets step, both scanners."""
+
+    def _make_repo(self, root: str) -> str:
+        repo = _git_repo(root)
+        _write_workdir_file(repo, ".gitreins/logs/guard-1.log", f"fixture = {HARNESS_CANARY}\n")
+        _write_workdir_file(repo, "src/app.py", "def add(a, b):\n    return a + b\n")
+        return repo
+
+    def test_step_passes_with_canary_only_in_harness_state(self, tmp_path):
+        repo = self._make_repo(str(tmp_path / "repo"))
+
+        proc = subprocess.run(
+            _tier1_secrets_command(repo), shell=True, cwd=repo, capture_output=True, text=True
+        )
+
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        # Criterion 3: the exclusion is part of the step's evidence.
+        assert ".gitreins/**" in proc.stdout
+
+    def test_step_fails_when_same_canary_reaches_a_source_file(self, tmp_path):
+        repo = self._make_repo(str(tmp_path / "repo"))
+        _write_workdir_file(repo, "src/app.py", f"token = {HARNESS_CANARY}\n")
+
+        proc = subprocess.run(
+            _tier1_secrets_command(repo), shell=True, cwd=repo, capture_output=True, text=True
+        )
+
+        assert proc.returncode != 0
+        assert "src/app.py" in proc.stdout
+
+
+class TestGitleaksHarnessExclusionConfig:
+    """The generated gitleaks config is what keeps `--no-git` off harness
+    state; gitleaks version present → also prove it live."""
+
+    def test_config_extends_repo_config_when_present(self, tmp_path):
+        from engine.pipeline import harness_scan_gitleaks_config
+
+        repo = str(tmp_path / "repo")
+        os.makedirs(repo)
+        _write_workdir_file(repo, ".gitleaks.toml", "[extend]\nuseDefault = true\n")
+
+        cfg = harness_scan_gitleaks_config(repo)
+
+        assert f"path = '{os.path.join(repo, '.gitleaks.toml')}'" in cfg
+        assert "useDefault" not in cfg
+        assert r"(^|/)\.gitreins/.*" in cfg
+
+    def test_config_falls_back_to_default_ruleset(self, tmp_path):
+        from engine.pipeline import harness_scan_gitleaks_config
+
+        repo = str(tmp_path / "repo")
+        os.makedirs(repo)
+
+        cfg = harness_scan_gitleaks_config(repo)
+
+        assert "path = " not in cfg
+        assert "useDefault = true" in cfg
+        assert r"(^|/)\.gitreins/.*" in cfg
+
+    @pytest.mark.skipif(
+        shutil.which("gitleaks") is None, reason="gitleaks not installed on this host"
+    )
+    def test_gitleaks_scan_scope_excludes_harness_state(self, tmp_path):
+        """Bare `--no-git` flags the harness canary; the generated config
+        does not — and still flags the same canary in a source file."""
+        from engine.pipeline import harness_scan_gitleaks_config
+
+        repo = _git_repo(str(tmp_path / "repo"))
+        _write_workdir_file(repo, ".gitreins/logs/guard-1.log", f"fixture = {HARNESS_CANARY}\n")
+        _write_workdir_file(repo, "src/app.py", "x = 1\n")
+
+        def gl(cfg_path: str | None) -> int:
+            cmd = ["gitleaks", "detect", "--source", ".", "--no-git", "--no-banner"]
+            if cfg_path:
+                cmd += ["--config", cfg_path]
+            return subprocess.run(cmd, cwd=repo, capture_output=True, text=True).returncode
+
+        cfg_path = os.path.join(str(tmp_path), "harness-scan.toml")
+        with open(cfg_path, "w") as f:
+            f.write(harness_scan_gitleaks_config(repo))
+
+        # Pre-fix behaviour: the harness's own log alone fails the scan.
+        assert gl(None) != 0
+        # Scoped: clean on the same tree.
+        assert gl(cfg_path) == 0
+        # Still real: the same canary in source code fails.
+        _write_workdir_file(repo, "src/app.py", f"token = {HARNESS_CANARY}\n")
+        assert gl(cfg_path) != 0

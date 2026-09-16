@@ -40,6 +40,41 @@ from engine.types import GuardResult, Tier1Result
 logger = logging.getLogger("gitreins.guard")
 
 
+# ── Harness state (POC-17 / TRUST-002) ──────────────────────────────────────
+# `.gitreins/` is the HARNESS's own state directory: config, verdict history,
+# guard run logs, usage telemetry and disposable-worktree bookkeeping. It is
+# never the repo's code, and neither scanner may grade it:
+#   * guard run logs persist raw scanner output plus QA anti-tamper fixtures,
+#   * `.gitreins/history/**` verdict artifacts embed the evidence of earlier
+#     judgements (which can itself quote a fixture token),
+# so a scan of that directory fails on tokens the tree's author cannot fix
+# from a failing tree. Tick 285 burned a diagnosis cycle on exactly this:
+# tier1 `secrets` failed while the code was clean.
+HARNESS_STATE_DIRS: tuple[str, ...] = (".gitreins",)
+
+
+def harness_state_allowlist_paths() -> list[str]:
+    """gitleaks ``[allowlist].paths`` regexes for :data:`HARNESS_STATE_DIRS`.
+
+    gitleaks' ``detect --no-git`` mode walks the working tree and does NOT
+    honour ``.gitignore``, so a gitignored guard log under
+    ``.gitreins/logs/`` is scanned unless the config allowlists it.
+    """
+    return [rf"(^|/){re.escape(d)}/.*" for d in HARNESS_STATE_DIRS]
+
+
+def _is_harness_state_path(fpath: str) -> bool:
+    """True when the workdir-relative *fpath* lives inside harness state.
+
+    Callers pass repo-relative paths (``_workdir_files`` /
+    ``_get_staged_files``), so a directory component match is enough.
+    """
+    if not fpath:
+        return False
+    parts = fpath.replace(os.sep, "/").split("/")
+    return any(d in parts[:-1] for d in HARNESS_STATE_DIRS)
+
+
 def _sanitized_env() -> dict[str, str]:
     """Return the current environment with every GIT_* variable removed.
 
@@ -1027,6 +1062,14 @@ class GuardManager:
                 return GuardResult(name="secrets", passed=True, output=f"No {scope} files to scan")
 
             for fpath in files:
+                # POC-17 / TRUST-002: the harness's own state directory is
+                # never graded — neither scanner may fail a judgement on
+                # GitReins' config, logs, verdict history or disposable
+                # bookkeeping. Checked here as well as in _workdir_files so a
+                # STAGED `.gitreins/**` path (config.yaml and history/ are
+                # tracked) is skipped too.
+                if _is_harness_state_path(fpath):
+                    continue
                 # Respect .gitleaks.toml [allowlist] paths — same exemptions
                 # gitleaks applies (test fixtures with deliberate fake keys).
                 if any(rx.search(fpath) for rx in allowlist):
@@ -1097,7 +1140,12 @@ class GuardManager:
                     output="Potential secrets found:\n" + "\n".join(findings[:20]),
                 )
             return GuardResult(
-                name="secrets", passed=True, output=f"Scanned {len(files)} files — clean"
+                name="secrets",
+                passed=True,
+                output=(
+                    f"Scanned {len(files)} files — clean "
+                    f"(excluded harness state: {', '.join(d + '/**' for d in HARNESS_STATE_DIRS)})"
+                ),
             )
 
         except Exception as e:
@@ -1113,7 +1161,7 @@ class GuardManager:
         """
         skip_dirs = {
             ".git",
-            ".gitreins",
+            *HARNESS_STATE_DIRS,
             "node_modules",
             "__pycache__",
             ".mypy_cache",

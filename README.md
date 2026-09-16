@@ -11,7 +11,7 @@
 
 GitReins lives inside your git repository as a quality harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ✅ **v0.13.0** — LSP diagnostics (14 languages), opt-in static analysis (9 analyzers; baseline install default off, smart init enables it for detected dynamic-language projects), commit audit with CVE-scored severity, optional Antares CVE-localization guard, Anthropic Messages API support, DeepSeek prompt caching telemetry, large-repo hardening (fast-track + `--skip-tier2`), MCP `propagate`, judge single-flight + resume lease, evaluator committed-diff read path, guard run logs (full, untruncated output persisted per run), judge Tier 1 / guard parity (one language-detection source of truth + loud degradation marker), guard trust: zero-work skips are a DEGRADED PASS with named skip reasons, `guards.allow_skips`, exit 2 unless accepted, and a merge-back that refuses verdicts carrying skips, 1547 tests pass / 41 test files, verified by collection (optional-tool skips vary).
+> ✅ **v0.13.0** — LSP diagnostics (14 languages), opt-in static analysis (9 analyzers; baseline install default off, smart init enables it for detected dynamic-language projects), commit audit with CVE-scored severity, optional Antares CVE-localization guard, Anthropic Messages API support, DeepSeek prompt caching telemetry, large-repo hardening (fast-track + `--skip-tier2`), MCP `propagate`, judge single-flight + resume lease, evaluator committed-diff read path, guard run logs (full, untruncated output persisted per run), judge Tier 1 / guard parity (one language-detection source of truth + loud degradation marker), guard trust: zero-work skips are a DEGRADED PASS with named skip reasons, `guards.allow_skips`, exit 2 unless accepted, a merge-back that refuses verdicts carrying skips, and a Tier 1 secrets scope that excludes GitReins' own `.gitreins/**` state, 1556 tests pass / 41 test files, verified by collection (optional-tool skips vary).
 
 ---
 
@@ -442,7 +442,7 @@ history:
 - **MCP Transport:** stdio (12 tools)
 - **Config:** YAML in `.gitreins/` directory
 - **Evaluator Default Model:** DeepSeek V4 Flash (~$0.01/eval)
-- **Test suite:** 1547 tests across 41 test files (collection total; optional-tool skips vary)
+- **Test suite:** 1556 tests across 41 test files (collection total; optional-tool skips vary)
 
 ## Architecture & Docs
 

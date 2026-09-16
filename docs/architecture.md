@@ -57,7 +57,7 @@ An LLM-powered agentic loop with 7 tools (`engine/evaluator.py`):
 Iterates until it has enough evidence to deliver a verdict.
 
 ### 5. Guard Manager
-Static checks (`engine/guard_manager.py`): secrets (gitleaks or built-in pattern scanner), lint (ruff/flake8), staged tests (pytest). Runs Tier 1 — no LLM dependency. All checks are optional and configurable via `.gitreins/config.yaml`.
+Static checks (`engine/guard_manager.py`): secrets (gitleaks or built-in pattern scanner), lint (ruff/flake8), staged tests (pytest). Runs Tier 1 — no LLM dependency. All checks are optional and configurable via `.gitreins/config.yaml`. Both scanners skip GitReins' own `.gitreins/**` state (config, guard run logs, verdict history, disposable bookkeeping): the judge never grades the harness itself, and the exclusion is named in the Tier 1 secrets step output.
 
 ### 6. Judge Orchestrator
 Runs the full pipeline: Tier 1 (static guards) → Tier 2 (agentic evaluator). Compiles verdict from all tiers (`engine/judge.py`).
