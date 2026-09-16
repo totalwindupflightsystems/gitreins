@@ -1706,7 +1706,9 @@ class GuardManager:
         """Run configured static analysis tools against the project.
 
         Respects static_analysis_tools config key. Only runs tools that
-        exist on PATH. Returns FAIL if any tool finds errors.
+        exist on PATH; a configured tool that is absent is reported as
+        not-installed and (when none ran) makes the whole step a skip —
+        never a "clean" pass. Returns FAIL if any tool finds errors.
         """
         if self._is_go:
             return GuardResult(
@@ -1737,13 +1739,22 @@ class GuardManager:
                 output="No static analysis tools configured for this language",
             )
 
+        # DF-019: `run_static_check` returns [] when the binary is absent, and
+        # that empty list used to be reported as "<tool> — clean" — a vacuous
+        # green on a gate that never ran, while `init` announced the tool as
+        # enabled. Check the binary first (same rule the LSP gate learned in
+        # TRUST-001) and name the gap instead of grading nothing as clean.
+        from engine.static_analysis import find_tool, run_static_check
+
         all_diagnostics: list[str] = []
         had_errors = False
+        missing: list[str] = []
 
         for tool in lang_tools:
+            if not find_tool(tool):
+                missing.append(tool)
+                continue
             try:
-                from engine.static_analysis import run_static_check
-
                 # cppcheck on a real C++ repo can exceed the default 120s —
                 # grant C++/Rust tools the same generous budget as clangd.
                 tool_timeout = 300.0 if (self._is_cpp or self._is_rust) else 120.0
@@ -1765,8 +1776,21 @@ class GuardManager:
                 if severity == "error":
                     had_errors = True
 
+        if not all_diagnostics and missing:
+            # Every configured tool is absent: nothing was graded. DF-019 —
+            # this reports as a skip with the tools named, never as "clean".
+            return GuardResult(
+                name="static_analysis",
+                passed=True,
+                output="No static analysis tools ran — check static_analysis_tools config",
+                skipped=True,
+                skip_reason=(
+                    f"no static analysis tool on PATH ({', '.join(missing)} not installed)"
+                ),
+            )
+
         if not all_diagnostics:
-            # Every configured tool failed to run (missing binary, crash) —
+            # Every configured tool failed to run (crash, timeout) —
             # TRUST-001: nothing was graded, so this is a skip.
             return GuardResult(
                 name="static_analysis",
@@ -1775,6 +1799,11 @@ class GuardManager:
                 skipped=True,
                 skip_reason="no configured static-analysis tool ran",
             )
+
+        if missing:
+            # Some tools ran, some are absent — keep the graded result and name
+            # the gap in the output so "clean" is never read as full coverage.
+            all_diagnostics.extend(f"  {tool} — not installed (skipped)" for tool in missing)
 
         output = "\n".join(all_diagnostics)
         if len(output) > 2000:

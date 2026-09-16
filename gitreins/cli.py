@@ -563,6 +563,19 @@ def cmd_init(args):
         f"  History:     {existing.get('history', {}).get('enabled', True) and 'enabled' or 'disabled'}"
     )
     print(f"  Static analysis: {_static_analysis_status(existing['guards'], lang_info)}")
+    if existing["guards"].get("static_analysis", False):
+        # DF-019: warn loudly instead of letting "enabled (…)" imply the tools
+        # run. Static analysers are an opt-in install; `pip install gitreins`
+        # does not bring them.
+        absent_static = _missing_static_analysis_tools(existing["guards"])
+        if absent_static:
+            print(
+                "  Warning: static analysis is enabled, but these configured tools are not\n"
+                "  installed — the guard reports the step as skipped and grades nothing until\n"
+                "  they are:\n" + "\n".join(_static_analysis_install_lines(absent_static)) + "\n"
+                "  (run 'gitreins setup-tools' to re-check availability)",
+                file=sys.stderr,
+            )
     print()
     if changed:
         print(f"Updated: {', '.join(changed)}")
@@ -1008,12 +1021,40 @@ def _configured_static_analysis_tools(guards: dict) -> list[str]:
     return tools
 
 
+def _missing_static_analysis_tools(guards: dict) -> list[str]:
+    """Configured static-analysis tools that are NOT installed on this machine.
+
+    DF-019: `init` announced "Static analysis: enabled (mypy, pyright)" for
+    tools that were absent, so a fresh user believed mypy ran while the guard
+    skipped the step. Anything the status line claims must be resolvable by the
+    same lookup the guard uses.
+    """
+    from engine.static_analysis import find_tool
+
+    return [tool for tool in _configured_static_analysis_tools(guards) if not find_tool(tool)]
+
+
+def _static_analysis_install_lines(missing: list[str]) -> list[str]:
+    """Human-readable install instructions for absent static-analysis tools."""
+    from engine.static_analysis import _install_help
+
+    return [f"    {tool} — install: {_install_help(tool)}" for tool in missing]
+
+
 def _static_analysis_status(guards: dict, lang: dict) -> str:
     """Describe the persisted static-analysis toggle and configured tools."""
     enabled = guards.get("static_analysis", False)
     tools = _configured_static_analysis_tools(guards)
     if enabled and tools:
-        return f"enabled ({', '.join(tools)})"
+        # DF-019: name only what can actually run. Announcing a configured but
+        # absent tool as enabled is the lie this row was filed about.
+        missing = set(_missing_static_analysis_tools(guards))
+        if not missing:
+            return f"enabled ({', '.join(tools)})"
+        if len(missing) == len(tools):
+            return f"enabled ({', '.join(tools)}; none installed — nothing will run)"
+        absent = [tool for tool in tools if tool in missing]
+        return f"enabled ({', '.join(tools)}; not installed: {', '.join(absent)})"
     if enabled:
         install_hints = []
         if lang["is_python"]:
@@ -1025,7 +1066,7 @@ def _static_analysis_status(guards: dict, lang: dict) -> str:
         elif lang["has_sql"]:
             install_hints.append("pip install sqlfluff")
         hint = "; ".join(install_hints) if install_hints else "see docs for install instructions"
-        return f"enabled (no tools configured — install: {hint})"
+        return f"enabled (no tools configured — nothing will run; install: {hint})"
     if tools:
         return f"disabled (explicitly off; configured tools: {', '.join(tools)})"
     return "disabled (compiled language or explicitly off)"

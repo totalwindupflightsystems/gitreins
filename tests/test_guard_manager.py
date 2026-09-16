@@ -1680,3 +1680,88 @@ class TestLinkedWorktreeGuardSemantics:
         assert checked.passed is False, checked.output
         assert "task-secret.py" in checked.output
         assert "main-secret.py" not in checked.output
+
+
+# ── DF-019: the static-analysis gate must never report "clean" for a tool that did not run ──
+
+
+class TestStaticAnalysisGuardHonesty:
+    """DF-019: `init` enables static analysis; a tool that is not installed is a skip."""
+
+    @staticmethod
+    def _manager(tmp_path, tools):
+        (tmp_path / "main.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'consumer'\n", encoding="utf-8")
+        return GuardManager(
+            str(tmp_path),
+            {
+                "guards": {
+                    "secrets": False,
+                    "lint": False,
+                    "tests": False,
+                    "static_analysis": True,
+                    "static_analysis_tools": {"python": list(tools)},
+                }
+            },
+        )
+
+    def test_absent_tool_is_a_skip_not_a_clean_pass(self, tmp_path):
+        """No configured analyser installed → skipped, tools named, never "clean"."""
+        manager = self._manager(tmp_path, ["mypy", "pyright"])
+
+        with patch("engine.static_analysis.find_tool", return_value=None):
+            result = manager._check_static_analysis()
+
+        assert result.passed is True
+        assert result.skipped is True
+        assert "mypy" in result.skip_reason
+        assert "pyright" in result.skip_reason
+        assert "not installed" in result.skip_reason
+        assert "clean" not in result.output
+        assert "No static analysis tools ran" in result.output
+
+    def test_partial_availability_names_the_absent_tool(self, tmp_path):
+        """A tool that ran clean is graded; the absent one is named, not implied."""
+        manager = self._manager(tmp_path, ["mypy", "pyright"])
+
+        def fake_find(tool):
+            return f"/fake/bin/{tool}" if tool == "mypy" else None
+
+        with (
+            patch("engine.static_analysis.find_tool", side_effect=fake_find),
+            patch("engine.static_analysis.run_static_check", return_value=[]),
+        ):
+            result = manager._check_static_analysis()
+
+        assert result.passed is True
+        assert result.skipped is False
+        assert "mypy — clean" in result.output
+        assert "pyright — not installed (skipped)" in result.output
+
+    def test_installed_tools_clean_result_is_unchanged(self, tmp_path):
+        """Both tools present and clean → an ordinary pass with no skip noise."""
+        manager = self._manager(tmp_path, ["mypy", "pyright"])
+
+        with (
+            patch("engine.static_analysis.find_tool", side_effect=lambda tool: f"/fake/{tool}"),
+            patch("engine.static_analysis.run_static_check", return_value=[]),
+        ):
+            result = manager._check_static_analysis()
+
+        assert result.passed is True
+        assert result.skipped is False
+        assert result.output.strip() == "mypy — clean\n  pyright — clean"
+
+    def test_findings_from_an_installed_tool_still_fail(self, tmp_path):
+        """The honesty check must not swallow a real diagnostic."""
+        manager = self._manager(tmp_path, ["mypy"])
+        diag = [{"file": "main.py", "line": 2, "severity": "error", "message": "boom"}]
+
+        with (
+            patch("engine.static_analysis.find_tool", return_value="/fake/mypy"),
+            patch("engine.static_analysis.run_static_check", return_value=diag),
+        ):
+            result = manager._check_static_analysis()
+
+        assert result.passed is False
+        assert "main.py:2 [mypy] boom" in result.output

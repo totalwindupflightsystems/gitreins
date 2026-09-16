@@ -1871,7 +1871,12 @@ class TestInstallSmartInitConsistency:
 
         enabled = run_cli("init", cwd=repo, extra_env=env)
         assert enabled.returncode == 0, enabled.stdout + enabled.stderr
-        assert "Static analysis: enabled (custom-linter)" in enabled.stdout
+        # DF-019: the saved list is still named, and an unresolvable tool is
+        # disclosed instead of being announced as if it ran.
+        assert (
+            "Static analysis: enabled (custom-linter; none installed — nothing will run)"
+            in enabled.stdout
+        )
 
         config["guards"]["static_analysis"] = False
         with open(config_path, "w") as f:
@@ -1882,6 +1887,71 @@ class TestInstallSmartInitConsistency:
             "Static analysis: disabled (explicitly off; configured tools: custom-linter)"
             in disabled.stdout
         )
+
+    @staticmethod
+    def _tool_path(tmp_path, name, *tools):
+        """PATH containing only git plus the named fake tools.
+
+        DF-019 probes need a PATH where a static-analysis tool is provably
+        absent — the host PATH resolves mypy (and pyright via npx), so it
+        cannot be used to model a fresh consumer.
+        """
+        bin_dir = tmp_path / name
+        bin_dir.mkdir()
+        git = shutil.which("git")
+        if git:
+            os.symlink(git, bin_dir / "git")
+        for tool in tools:
+            fake = bin_dir / tool
+            fake.write_text("#!/bin/sh\nexit 0\n")
+            fake.chmod(0o755)
+        return {"PATH": str(bin_dir)}
+
+    def test_init_names_absent_static_analysis_tools_and_warns(self, tmp_path):
+        """DF-019: `init` must not claim a type checker runs when none is installed.
+
+        A fresh consumer with no static-analysis tool on PATH gets the truth in
+        the status line plus an install hint on stderr — not "enabled (mypy,
+        pyright)" for two binaries that do not exist.
+        """
+        import yaml
+
+        repo, env = self._python_repo(tmp_path)
+        assert run_cli("install", cwd=repo, extra_env=env).returncode == 0
+        config_path = os.path.join(repo, ".gitreins", "config.yaml")
+        with open(config_path) as f:
+            config = yaml.safe_load(f)
+        config["guards"]["static_analysis"] = True
+        config["guards"]["static_analysis_tools"] = {"python": ["mypy", "pyright"]}
+        with open(config_path, "w") as f:
+            yaml.safe_dump(config, f, sort_keys=False)
+
+        # Nothing resolvable: neither tool is installed on this PATH.
+        bare = run_cli("init", cwd=repo, extra_env=self._tool_path(tmp_path, "bare-bin"))
+        assert bare.returncode == 0, bare.stdout + bare.stderr
+        assert (
+            "Static analysis: enabled (mypy, pyright; none installed — nothing will run)"
+            in bare.stdout
+        )
+        assert "static analysis is enabled" in bare.stderr
+        assert "mypy — install: pip install mypy" in bare.stderr
+        assert "pyright" in bare.stderr
+        assert "gitreins setup-tools" in bare.stderr
+
+        # One of them resolvable: only the absent tool is flagged.
+        partial = run_cli("init", cwd=repo, extra_env=self._tool_path(tmp_path, "mypy-bin", "mypy"))
+        assert partial.returncode == 0, partial.stdout + partial.stderr
+        assert "Static analysis: enabled (mypy, pyright; not installed: pyright)" in partial.stdout
+        assert "mypy — install" not in partial.stderr
+        assert "pyright — install:" in partial.stderr
+
+        # Both resolvable: the plain announcement is unchanged (no warning).
+        healthy = run_cli(
+            "init", cwd=repo, extra_env=self._tool_path(tmp_path, "both-bin", "mypy", "pyright")
+        )
+        assert healthy.returncode == 0, healthy.stdout + healthy.stderr
+        assert "Static analysis: enabled (mypy, pyright)" in healthy.stdout
+        assert "static analysis is enabled" not in healthy.stderr
 
     def test_install_init_artifacts_are_ignored_and_idempotent(self, tmp_path):
         """All generated runtime files stay untracked without duplicate rules."""
