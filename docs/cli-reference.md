@@ -429,21 +429,25 @@ failed, and exit 2 means GitReins infrastructure failed. Evidence contains
 
 Live judgment browser — a local web server that renders the verdict history
 (the same `.gitreins/history/<date>/<hash>/verdict.json` directories and the
-`gitreins` branch fallback that `report` reads). Ctrl-C stops it.
+`gitreins` branch fallback that `report` reads). Ctrl-C stops it. Design
+review, API contract, data sources and the security decision live in
+[judgment-viewer.md](judgment-viewer.md).
 
 ```
-gitreins serve [--port <port>] [--host <host>] [--project <name>] [--open]
+gitreins serve [--repo <path>] [--port <port>] [--host <host>] [--project <name>] [--open]
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--port` | Port to bind (default `8616`) |
-| `--host` | Bind address (default `127.0.0.1` — local-only unless you change it) |
+| `--repo` | Browse another checkout's judgment history by path (default: the repository you run from). A path inside a checkout resolves to that work tree's root; a path that is not a directory exits 2 |
+| `--port` | Port to bind (default `8616`; `0` binds an ephemeral port and prints it) |
+| `--host` | Bind address (default `127.0.0.1` — local-only unless you change it; a non-loopback host warns that the data is served without authentication) |
 | `--project` | Scheduler project name for the tick ledger (e.g. `gitreins-poc`) |
 | `--open` | Open the browser automatically |
 
-A static variant for publishing history without a server is
-`scripts/judgment_viewer.py`.
+The server is read-only and re-reads the repository on every request, so a
+refresh shows new judgments. A static variant for publishing history without a
+server is `scripts/judgment_viewer.py`.
 
 ## Hooks
 

@@ -1,0 +1,161 @@
+# Judgment Viewer (`gitreins serve`)
+
+`gitreins serve` starts a read-only local web server that renders the judgment
+history of a checkout: every verdict in `.gitreins/history/`, the criteria and
+Tier 1/Tier 2 evidence inside each verdict, the board event timeline, and (when
+asked for) the scheduler tick ledger for a project.
+
+It exists because `.gitreins/history/<date>/<hash>/verdict.json` is a durable
+audit record that nobody wants to read as JSON. The browser answers the three
+questions a review actually asks — what was judged, what did the gates say, and
+what did the judge say — without leaving the terminal far behind.
+
+```
+gitreins serve
+```
+
+Then open <http://127.0.0.1:8616/>. Ctrl-C stops it. Nothing is written: the
+server never mutates the repository it browses.
+
+## Usage
+
+```
+gitreins serve [--repo <path>] [--port <port>] [--host <host>] [--project <name>] [--open]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--repo` | the repository you run from | Browse another checkout's judgment history by path — no `cd` needed |
+| `--port` | `8616` | Port to bind; `0` binds an ephemeral port and the banner prints the real one |
+| `--host` | `127.0.0.1` | Bind address. Anything other than loopback serves judgment data over the network — see [Security model](#security-model) |
+| `--project` | none | Scheduler project name whose tick ledger is shown (e.g. `gitreins-poc`) |
+| `--open` | off | Open the browser automatically after binding |
+
+### Browsing another project
+
+One install can review every project on the machine:
+
+```
+gitreins serve --repo ~/other-project --port 8660
+gitreins serve --repo /srv/work/checkout --project my-project
+```
+
+`--repo` accepts:
+
+- the root of any GitReins checkout (the checkout containing `.gitreins/`);
+- **any path inside it** — the path is normalized to that Git work tree's root,
+  because `.gitreins/history/` and `.coding-hermes/board/` live there;
+- a plain directory that is not a Git repository at all, as long as it holds
+  `.gitreins/history/` — useful for archived or copied history.
+
+A path that does not exist, or that is a file rather than a directory, is
+refused before the server binds: `error: --repo is not a directory: <path>`
+with exit code `2`.
+
+A browsed checkout that has judgments but no `.coding-hermes/board/` is fully
+browsable: `/api/tasks` and `/api/events` answer with empty lists instead of an
+error.
+
+## API contract
+
+Every response is JSON except `/`, which is the HTML viewer. The API is
+**unversioned but stable**: changes are additive, existing fields keep their
+meaning, and a breaking change will arrive as a new endpoint rather than a
+changed one. Data is re-read from disk on every request, so the contract is
+"current state of the checkout", never a snapshot taken at startup.
+
+| Method | Path | Success | Payload | Errors |
+|--------|------|---------|---------|--------|
+| GET | `/` | 200 HTML | the single-page viewer (no server-side data; it fetches `/api/*`) | — |
+| GET | `/api/stats` | 200 | `total`, `passed`, `failed`, `pass_rate`, `repo`, `path`, `generated` | — |
+| GET | `/api/verdicts` | 200 | `{"verdicts": [row, …]}` — metadata only, newest last | — |
+| GET | `/api/verdicts/<date>/<hash>` | 200 | the full `verdict.json` (criteria, `stages.tier1`, `stages.tier2`) | `400` malformed path (not `<date>/<hash>`), `404` unknown date/hash |
+| GET | `/api/tasks` | 200 | `{"tasks": [row, …]}` from the board's `tasks.jsonl` | `200 []` when the board is absent |
+| GET | `/api/events` | 200 | `{"events": [row, …]}` from the board's `events.jsonl` | `200 []` when the board is absent |
+| GET | `/api/ticks` | 200 | `{"project": <name or null>, "ticks": [row, …]}` | `200 []` when `--project` is unset or the ledger is unavailable |
+| any | other path | — | `{"error": "not found"}` | `404` |
+
+Verdict list rows carry `date`, `hash`, `task_id`, `title`, `passed`,
+`n_criteria`, `tier1_passed`, plus `worktree`/`branch` when the verdict recorded
+them. Rows are omitted from the list (not zero-filled) when a field predates the
+schema — the viewer never invents values for legacy records.
+
+The SPA is a hash-free, single-page app: it loads `/api/stats`, `/api/verdicts`,
+`/api/events` and `/api/ticks` once, then opens a verdict via
+`/api/verdicts/<date>/<hash>` when a row is clicked. Refresh for new judgments;
+there is no push channel.
+
+## Data sources
+
+| Surface | Source | Absent source | Notes |
+|---------|--------|---------------|-------|
+| Verdict list + detail | `<checkout>/.gitreins/history/<YYYY-MM-DD>/<hash>/verdict.json` | `total: 0`, empty list | Filesystem only. Unparseable or non-matching entries are skipped, never guessed |
+| Board timeline | `<canonical>/.coding-hermes/board/events.jsonl` | `[]` | Resolved through Git's common dir, so a linked worktree shows the shared board |
+| Board tasks | `<canonical>/.coding-hermes/board/tasks.jsonl` | `[]` | Last 2000 lines are read |
+| Ticks | `~/.hermes/coding-hermes/scheduler.db`, table `ticks`, filtered by `project_name` | `[]` | Host-coupled, read-only SQLite, opt-in per `--project`; if the DB is missing the panel says so |
+
+`gitreins serve` reads the filesystem; it does **not** fall back to the
+`refs/heads/gitreins` verdict branch the way `gitreins report` does. On a fresh
+clone with no local history the viewer is legitimately empty — run `gitreins
+report` for the branch fallback, or fetch the branch into `.gitreins/`.
+
+## Security model
+
+- **Read-only.** No endpoint writes to the browsed checkout, and the server
+  holds no credentials. `--repo` grants nothing beyond what the process could
+  already read.
+- **Loopback by default.** The bind address is `127.0.0.1`, so the viewer is
+  reachable only from the machine it runs on.
+- **Strict path validation.** Date and hash path segments must match
+  `^\d{4}-\d{2}-\d{2}$` and `^[a-f0-9]{4,16}$` before any file is opened, so
+  `..`, absolute paths and encoded traversal (`%2e%2e`) can never escape the
+  history directory. This is enforced by construction: the segments are
+  validated first, then joined.
+- **Board access is name-bound.** Board files are resolved through
+  `board_file_path`, which accepts only a direct child filename of the canonical
+  board directory.
+- **No auth.** There is no token, no cookie, no CORS relaxation.
+
+### Decision: loopback-only is retained; no token auth (2026-09-16)
+
+**Decision.** The default bind address stays `127.0.0.1` and the viewer ships
+without authentication. `--host` remains an escape hatch for a trusted network,
+and it now warns on stderr that the data leaves the loopback interface with no
+authentication.
+
+**Why.** The payload is local quality evidence: verdicts, criteria and gate
+output for one checkout. A token without TLS is a false sense of safety
+(credentials and content travel in cleartext, and a browser would hold the token
+in a URL or localStorage), while TLS for a local tool needs certificate
+management that the tool does not have. Loopback-only with an explicit, warned
+opt-out is the honest trade: the safe path is the default path.
+
+**Revisit when.** (a) the viewer gains a write action, (b) it must be reachable
+from another machine as a supported workflow rather than an experiment, or (c)
+verdicts start carrying data that is sensitive beyond the checkout. Any of those
+turns "add token auth" into its own board row rather than a flag on this one.
+
+### Decision: the API stays unversioned (2026-09-16)
+
+**Decision.** No `/v1` prefix. The contract is documented here, changes are
+additive, and breaking changes get a new endpoint.
+
+**Why.** The only consumers are this SPA and local scripts; the versioned
+alternative (dual-serving `/api` and `/api/v1`) buys nothing today and costs
+permanent duplication. The doc table above is the contract of record — if that
+stops being true, if the API grows external consumers, versioning becomes a
+row of its own.
+
+## Static variant
+
+`scripts/judgment_viewer.py` renders the same history to a standalone HTML file
+for publishing without a server. Serve is for a live, always-current view;
+the static script is for attaching evidence to something.
+
+## See also
+
+- `gitreins report` — the terminal view of the same verdict history, including
+  the `refs/heads/gitreins` branch fallback.
+- [CLI reference](cli-reference.md) — the full command surface.
+- [Disposable verification](disposable-verification.md) — where most verdicts
+  under a scratch clone come from.

@@ -22,6 +22,7 @@ Usage:
     gitreins judge <id>
     gitreins commit <message>
     gitreins mcp-server
+    gitreins serve [--repo <path>] [--port <port>] [--project <name>]
 """
 
 import argparse
@@ -1719,9 +1720,13 @@ def cmd_worktree_doctor(args):
 
 def cmd_serve(args):
     """Run the local judgment-browser web server."""
-    from gitreins.serve import serve
+    from gitreins.serve import ServeArgumentError, resolve_workdir, serve
 
-    workdir = get_workdir()
+    try:
+        workdir = resolve_workdir(getattr(args, "repo", None), get_workdir())
+    except ServeArgumentError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        sys.exit(2)
     serve(
         workdir,
         host=args.host,
@@ -2772,6 +2777,11 @@ def main():
     )
     serve_p.add_argument("--port", type=int, default=8616, help="Port to bind (default 8616)")
     serve_p.add_argument("--host", default="127.0.0.1", help="Bind address (default 127.0.0.1)")
+    serve_p.add_argument(
+        "--repo",
+        default=None,
+        help="Browse another checkout's judgments by path (default: the repository you run from)",
+    )
     serve_p.add_argument(
         "--project",
         default="",

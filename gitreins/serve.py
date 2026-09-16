@@ -11,8 +11,15 @@ that reads the repo's judgment stores on EVERY request (live, not a snapshot):
   GET /api/events                -> board events.jsonl
   GET /api/ticks                 -> scheduler tick ledger (optional, host DB)
 
+The browsed checkout defaults to the repository containing the working
+directory; ``--repo <path>`` (see :func:`resolve_workdir`) points the same
+server at any other GitReins checkout, so one install can review every
+project's judgment history without ``cd``.
+
 Security: binds 127.0.0.1 by default; path params are strictly validated;
-read-only — the server never writes to the repo.
+read-only — the server never writes to the repo.  The API is an unversioned
+but stable contract (additive changes only); docs/judgment-viewer.md records
+the contract table, the data sources and the exposure decision.
 """
 
 from __future__ import annotations
@@ -23,11 +30,43 @@ import re
 import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from engine.repo_paths import board_file_path
+from engine.repo_paths import (
+    WorktreeResolutionError,
+    board_file_path,
+    resolve_worktree_identity,
+)
 
 TICKS_DB = os.path.expanduser("~/.hermes/coding-hermes/scheduler.db")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _HASH_RE = re.compile(r"^[a-f0-9]{4,16}$")
+
+
+class ServeArgumentError(ValueError):
+    """Raised when ``--repo`` names a path that cannot be browsed."""
+
+
+def resolve_workdir(repo: str | None = None, fallback: str | None = None) -> str:
+    """Resolve which checkout the viewer browses.
+
+    Without ``--repo`` the viewer keeps its original behaviour: the checkout
+    containing the working directory (``fallback``, normally the caller's
+    ``get_workdir()``).  With ``--repo <path>`` the path is expanded and must
+    be an existing directory; when it sits inside a Git work tree it is
+    normalized to that work tree's root, because ``.gitreins/`` and
+    ``.coding-hermes/board/`` live there.  A directory that is not inside a
+    Git repository is used as given, so a checkout holding only judgment
+    history stays browsable.
+    """
+    if not repo:
+        return fallback or os.getcwd()
+    path = os.path.abspath(os.path.expanduser(repo))
+    if not os.path.isdir(path):
+        raise ServeArgumentError(f"--repo is not a directory: {path}")
+    try:
+        identity = resolve_worktree_identity(path)
+    except WorktreeResolutionError:
+        return path
+    return str(identity.worktree_root)
 
 
 # ── loaders (read from disk on every request => live) ────────────────────────
@@ -90,7 +129,12 @@ def load_verdict(workdir: str, date: str, h: str) -> dict | None:
 
 
 def load_jsonl(workdir: str, name: str, limit: int = 2000) -> list:
-    path = board_file_path(workdir, name)
+    try:
+        path = board_file_path(workdir, name)
+    except (WorktreeResolutionError, OSError, ValueError):
+        # A browsed checkout (--repo) may hold judgments but no coding-hermes
+        # board: an absent board is an empty list, never a 500.
+        return []
     rows = []
     if os.path.isfile(path):
         with open(path) as f:
@@ -204,6 +248,7 @@ async function boot(){
   const [st,vs,ev,tk]=await Promise.all([j('/api/stats'),j('/api/verdicts'),j('/api/events'),j('/api/ticks')]);
   V=vs.verdicts;
   document.getElementById('sub').textContent=st.repo+' · live view · '+st.generated;
+  document.getElementById('sub').title=st.path||'';
   document.getElementById('stats').innerHTML=
     '<div class="stat"><span class="n">'+st.total+'</span><span class="l">Judgments</span></div>'+
     '<div class="stat"><span class="n">'+st.passed+'</span><span class="l">Passed</span></div>'+
@@ -222,7 +267,7 @@ async function boot(){
     return '<div class="ev"><span class="ts">'+esc((t.spawned_at||'').slice(0,16))+'</span><span class="t">'+dot+
     '</span><span class="v">'+(t.commits||0)+' commits · '+(t.files||0)+' files · $'+esc(t.cost==null?'0':t.cost)+
     (t.error?' · '+esc(t.error):'')+'</span></div>';
-  }).join('')||'<p style="color:#5a5a75;font-size:12px">no scheduler ledger on this host</p>';
+  }).join('')||'<p style="color:#5a5a75;font-size:12px">'+(tk.project?'no scheduler ticks recorded for '+esc(tk.project):'no scheduler project selected (start with --project <name>)')+'</p>';
 }
 function render(){
   const rows=V.filter(v=>(filter==='all'||(filter==='pass')===v.passed)&&(!q||(v.task_id+' '+v.title).toLowerCase().includes(q)));
@@ -291,6 +336,7 @@ class Handler(BaseHTTPRequestHandler):
                     {
                         **stats(vs),
                         "repo": os.path.basename(os.path.abspath(self.workdir)),
+                        "path": os.path.abspath(self.workdir),
                         "generated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
                     }
                 )
@@ -309,7 +355,14 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/events":
                 self._json({"events": load_jsonl(self.workdir, "events.jsonl")})
             elif path == "/api/ticks":
-                self._json({"ticks": load_ticks(self.project) if self.project else []})
+                # Host-coupled and opt-in: one scheduler DB per machine, and
+                # only the project named by --project has ticks to show.
+                self._json(
+                    {
+                        "project": self.project or None,
+                        "ticks": load_ticks(self.project) if self.project else [],
+                    }
+                )
             else:
                 self._json({"error": "not found"}, 404)
         except BrokenPipeError:
@@ -332,12 +385,26 @@ def serve(
     project: str = "",
     open_browser: bool = False,
 ) -> None:
+    """Serve the judgment browser for ``workdir`` until interrupted.
+
+    ``workdir`` must already be resolved (see :func:`resolve_workdir`);
+    ``project`` is the optional scheduler project whose tick ledger is shown.
+    """
     Handler.workdir = workdir
     Handler.project = project
     httpd = ThreadingHTTPServer((host, port), Handler)
-    url = f"http://{host}:{port}/"
+    # Report the port actually bound (pass --port 0 to let the OS choose one).
+    url = f"http://{host}:{httpd.server_address[1]}/"
     print(f"GitReins judgment browser: {url}")
     print(f"repo: {os.path.abspath(workdir)}  (Ctrl-C to stop)")
+    print(
+        f"scheduler project: {project if project else '(none - pass --project <name> to show ticks)'}"
+    )
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        print(
+            f"warning: --host {host} serves judgment data over the network with NO "
+            "authentication; keep 127.0.0.1 unless the network is trusted"
+        )
     if open_browser:
         import webbrowser
 
