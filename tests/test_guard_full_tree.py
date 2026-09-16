@@ -240,6 +240,122 @@ class TestFullTreeLintLane:
         assert sorted(files) == ["a.py", "b.py"]
 
 
+# ── DF-GITREINS-POC-18: the repo's own ruff config governs the scope ──
+
+
+EXCLUDE_PYPROJECT = """\
+[tool.ruff]
+extend-exclude = [
+    "sandbox/",
+]
+"""
+
+
+class TestLintRespectsRepoRuffConfig:
+    """``ruff check sandbox/x.py`` lints an excluded file because exclude
+    patterns only apply while ruff recurses into directories — the guard built
+    an explicit file list, so the whole-tree lint graded the repo's own
+    deliberately-excluded scratch tree and could never go green."""
+
+    def test_full_tree_lint_does_not_grade_config_excluded_file(self, tmp_path, ruff_on_path):
+        """The tracked, config-excluded file carries a genuine F401; the lane
+        must still be clean and must say the file was excluded, not graded."""
+        workdir = _scratch_repo(
+            tmp_path,
+            {
+                "pyproject.toml": EXCLUDE_PYPROJECT,
+                "sandbox/scratch.py": "import os\n",
+                "clean.py": "x = 1\n",
+            },
+        )
+        gm = GuardManager(workdir, config={"guards": {"secrets": False}}, grade_full_tree=True)
+
+        result = gm._check_lint()
+
+        assert result.skipped is False
+        assert result.passed is True
+        assert "F401" not in result.output
+        assert result.output == "ruff: clean (1 tracked files, 1 excluded by config)"
+        assert "1 excluded by config" in gm._full_outputs["lint"]
+
+    def test_full_tree_lint_still_grades_a_file_no_config_excludes(self, tmp_path, ruff_on_path):
+        """Control: an explicitly passed file the config does NOT exclude is
+        still graded, so the fix cannot be 'nothing is ever linted'."""
+        workdir = _scratch_repo(
+            tmp_path,
+            {
+                "pyproject.toml": EXCLUDE_PYPROJECT,
+                "sandbox/scratch.py": "import os\n",
+                "dirty.py": "import sys\n",
+            },
+        )
+        gm = GuardManager(workdir, config={"guards": {"secrets": False}}, grade_full_tree=True)
+
+        result = gm._check_lint()
+
+        assert result.passed is False
+        assert "F401" in result.output
+        assert "dirty.py" in result.output
+        assert "sandbox/scratch.py" not in result.output
+
+    def test_full_tree_lint_honest_skip_when_config_excludes_every_file(
+        self, tmp_path, ruff_on_path
+    ):
+        """Every submitted file excluded → zero files graded. That is the
+        TRUST-001 honest skip, never a clean lint pass."""
+        workdir = _scratch_repo(
+            tmp_path,
+            {
+                "pyproject.toml": EXCLUDE_PYPROJECT,
+                "sandbox/scratch.py": "import os\n",
+            },
+        )
+        gm = GuardManager(workdir, config={"guards": {"secrets": False}}, grade_full_tree=True)
+
+        result = gm._check_lint()
+
+        assert result.skipped is True
+        assert result.passed is True
+        assert "0 of 1 file(s) in scope" in result.output
+        assert result.skip_reason == "all 1 file(s) excluded by ruff config"
+
+    def test_staged_lint_respects_config_excludes_too(self, tmp_path, ruff_on_path):
+        """Staged mode goes through the same file list — a staged excluded
+        file is not graded either, matching a developer's local ruff."""
+        workdir = _scratch_repo(
+            tmp_path,
+            {
+                "pyproject.toml": EXCLUDE_PYPROJECT,
+                "sandbox/scratch.py": "x = 1\n",
+                "staged_clean.py": "y = 2\n",
+            },
+        )
+        with open(os.path.join(workdir, "sandbox", "scratch.py"), "w") as f:
+            f.write("import os\n")  # genuine F401 in a config-excluded path
+        with open(os.path.join(workdir, "staged_clean.py"), "w") as f:
+            f.write("import sys\n")  # genuine F401 in a graded path
+        _git(workdir, "add", "sandbox/scratch.py", "staged_clean.py")
+
+        gm = GuardManager(workdir, config={"guards": {"secrets": False}})
+        result = gm._check_lint()
+
+        assert result.passed is False
+        assert "F401" in result.output
+        assert "staged_clean.py" in result.output
+        assert "sandbox/scratch.py" not in result.output
+
+    def test_ruff_scope_helper_reports_none_when_ruff_is_absent(self, tmp_path, monkeypatch):
+        """An unresolvable scope must not be invented: with the binary off
+        PATH the helper returns None and the caller falls back to the
+        submitted list (the pre-existing missing-linter skip still applies)."""
+        from engine.guard_manager import _ruff_scoped_files
+
+        workdir = _scratch_repo(tmp_path, {"a.py": "x = 1\n"})
+        monkeypatch.setenv("PATH", str(tmp_path / "empty-bin"))
+
+        assert _ruff_scoped_files(workdir, ["a.py"]) is None
+
+
 # ── AC 4: default construction keeps today's skip semantics ───────
 
 

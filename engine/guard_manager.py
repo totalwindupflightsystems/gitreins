@@ -299,6 +299,48 @@ def _tree_python_files(workdir: str) -> list[str]:
     return files
 
 
+def _ruff_scoped_files(workdir: str, py_files: list[str]) -> list[str] | None:
+    """Which of *py_files* ruff actually grades once the repo's config applies.
+
+    DF-GITREINS-POC-18: ruff honours ``exclude``/``extend-exclude`` only while
+    it recurses into directories — a file named explicitly on the command line
+    is linted even when the repo deliberately excludes it (scratch trees such
+    as ``sandbox/``, stale ``build/`` copies, secret fixtures). ``--force-exclude``
+    restores the configuration's authority over explicit paths; ``--show-files``
+    with the same flags reports the resulting scope, so the lint lane can name
+    how many files were graded and can never claim a clean pass when the config
+    excluded every submitted file.
+
+    Returns repo-relative paths in ruff's order, or ``None`` when ruff cannot
+    answer (binary absent, flag unsupported, unexpected exit code) — callers
+    then keep the submitted list instead of inventing a scope.
+    """
+    try:
+        proc = subprocess.run(
+            ["ruff", "check", "--force-exclude", "--show-files", *py_files],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            cwd=workdir,
+            env=_sanitized_env(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    scoped: list[str] = []
+    for line in proc.stdout.splitlines():
+        path = line.strip()
+        if not path.endswith((".py", ".pyi")):
+            continue
+        try:
+            path = os.path.relpath(path, workdir) if os.path.isabs(path) else path
+        except ValueError:  # pragma: no cover - different drive (Windows)
+            pass
+        scoped.append(path)
+    return scoped
+
+
 def _build_diff_test_command(test_command: str, test_files: list[str], workdir: str) -> str:
     """Build a test command targeting specific test files.
 
@@ -1374,6 +1416,11 @@ class GuardManager:
         DF-GITREINS-POC-11: under grade_full_tree (CLI --full), an empty
         index no longer vacates the lane — the whole tree (tracked +
         untracked-but-not-ignored .py files) is graded instead.
+
+        DF-GITREINS-POC-18: the graded scope is whatever the repo's own ruff
+        configuration allows — a config-excluded path stays excluded even when
+        it is named explicitly (``ruff check --force-exclude``), and a file
+        list the config excludes ENTIRELY is an honest SKIP, never a clean pass.
         """
         linters = ["ruff", "flake8"]
         # Get staged Python files
@@ -1397,8 +1444,33 @@ class GuardManager:
 
         for linter in linters:
             try:
+                if linter == "ruff":
+                    # DF-GITREINS-POC-18: the repo's own ruff configuration
+                    # governs an explicit file list too. Resolve the real
+                    # scope first (see _ruff_scoped_files) so the lane can
+                    # name how many files it graded and never report a clean
+                    # lint over a list the config excluded entirely.
+                    scoped = _ruff_scoped_files(self.workdir, py_files)
+                    graded = len(scoped) if scoped is not None else len(py_files)
+                    excluded = len(py_files) - graded
+                    if graded == 0:
+                        return GuardResult(
+                            name="lint",
+                            passed=True,
+                            output=(
+                                f"ruff: 0 of {len(py_files)} file(s) in scope — all excluded "
+                                "by the repo's ruff configuration"
+                            ),
+                            skipped=True,
+                            skip_reason=f"all {len(py_files)} file(s) excluded by ruff config",
+                        )
+                    lint_cmd = ["ruff", "check", "--force-exclude", *py_files]
+                else:
+                    graded = len(py_files)
+                    excluded = 0
+                    lint_cmd = [linter, *py_files]
                 lint_result = subprocess.run(
-                    [linter, "check", *py_files] if linter == "ruff" else [linter, *py_files],
+                    lint_cmd,
                     capture_output=True,
                     text=True,
                     timeout=120,
@@ -1406,6 +1478,12 @@ class GuardManager:
                     env=_sanitized_env(),
                 )
                 output = lint_result.stdout + lint_result.stderr
+                scope_note = f"{graded} tracked files"
+                if excluded:
+                    # The config dropped files from the submitted list — say
+                    # so, or a reader cannot tell a smaller scope from a
+                    # smaller tree.
+                    scope_note += f", {excluded} excluded by config"
                 # DF-018: untruncated lint output for the run log (the
                 # GuardResult below keeps the capped head the summary reads).
                 if lint_result.returncode == 0 and self._grade_full_tree:
@@ -1414,7 +1492,7 @@ class GuardManager:
                     # would shadow the graded scope ("ruff: clean (N tracked
                     # files)") in the persisted run log. Prefix the summary
                     # line so a post-mortem sees what was graded.
-                    output = f"ruff: clean ({len(py_files)} tracked files)\n{output}"
+                    output = f"{linter}: clean ({scope_note})\n{output}"
                 self._remember_full_output("lint", output)
                 if len(output) > 2000:
                     output = output[:2000] + "\n... [truncated]"
@@ -1424,7 +1502,7 @@ class GuardManager:
                     if self._grade_full_tree:
                         # Name the scope so a whole-tree run is
                         # distinguishable from a staged run in the console.
-                        clean += f" ({len(py_files)} tracked files)"
+                        clean += f" ({scope_note})"
                     return GuardResult(
                         name="lint",
                         passed=True,

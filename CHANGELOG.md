@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **A whole-tree lint graded files the repo's own ruff config excludes
+  (DF-GITREINS-POC-18)** — `exclude`/`extend-exclude` apply only while ruff
+  recurses into directories, so passing an explicit file list (what `gitreins
+  guard` does) linted a tracked scratch tree the repo deliberately excludes:
+  `guard --full` reported F401/E402 in `sandbox/` on every run and could never
+  go green, which trains readers to ignore the strongest gate. The lint lane
+  now lints with `ruff check --force-exclude` and resolves the real scope with
+  `--show-files`, reporting it (`ruff: clean (96 tracked files, 19 excluded by
+  config)`); a list the config excludes ENTIRELY is a named skip, not a clean
+  pass. Diff/staged mode follows the same rule.
 - **`-x` + xdist made a real test failure exit 2, and the judge read it as an
   interruption (INT-FLAKE-2)** — xdist's `DSession` raises
   `Interrupted(KeyboardInterrupt)` when maxfail trips, which pytest maps onto
