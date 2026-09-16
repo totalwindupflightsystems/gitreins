@@ -561,38 +561,38 @@ def cmd_init(args):
         print("No changes needed — config is up to date.")
 
 
-def _looks_like_python(workdir: str) -> bool:
-    """Narrow Python fallback for marker-less repos (DF-002).
-
-    True when the repo root has any top-level *.py file, or any top-level
-    package dir (contains __init__.py) outside well-known non-package dirs.
-    Keeps the root-module/package probe in _detect_test_command reachable for
-    fresh repos that have no pyproject.toml/setup.py/setup.cfg/
-    requirements.txt yet.
-    """
-    excluded = {"tests", ".venv", "node_modules", ".git", ".gitreins", "__pycache__"}
-    try:
-        entries = os.listdir(workdir)
-    except OSError:
-        return False
-    for entry in entries:
-        full = os.path.join(workdir, entry)
-        if os.path.isfile(full) and entry.endswith(".py"):
-            return True
-        if entry in excluded:
-            continue
-        if os.path.isdir(full) and os.path.isfile(os.path.join(full, "__init__.py")):
-            return True
-    return False
+# Canonical language token (engine.lang_detect) -> (cli flag, display name,
+# legacy `type` token). The tokens are produced by engine.lang_detect, the
+# single source of truth for language detection (DF-GITREINS-POC-16); this
+# table only translates them into the dict shape `init`/`install` consume.
+_LANG_INFO: dict[str, tuple[str, str, str]] = {
+    "go": ("is_go", "Go", "go"),
+    "python": ("is_python", "Python", "python"),
+    "js": ("is_ts", "TypeScript", "typescript"),
+    "ruby": ("is_ruby", "Ruby", "ruby"),
+    "php": ("is_php", "PHP", "php"),
+    "rust": ("is_rust", "Rust", "rust"),
+    "java": ("", "Java", "java"),
+    "kotlin": ("", "Kotlin", "kotlin"),
+    "csharp": ("", "C#", "csharp"),
+    "scala": ("", "Scala", "scala"),
+    "c": ("", "C", "c"),
+    "cpp": ("", "C++", "cpp"),
+}
 
 
 def _detect_language(workdir: str) -> dict:
     """Detect project language(s). Returns {name, type, is_go, is_python, is_ts, ...}.
 
-    Uses independent if-blocks (not elif) so multi-language projects are detected
-    correctly — a repo with both pyproject.toml and package.json is Python AND TypeScript.
-    'type' is the primary language (first detected), 'name' aggregates all found.
+    Delegates entirely to engine.lang_detect — the signature-file table, the
+    source-extension fallback and the per-language command map live there and
+    are shared with the judge's Tier 1 pipeline and the guard, so `init`,
+    `guard` and `judge` can no longer disagree about what this repo is
+    (DF-GITREINS-POC-16). Multi-language repos report every detected language:
+    'type' is the primary (first) one, 'name' aggregates all found.
     """
+    from engine import lang_detect
+
     info = {
         "name": "unknown",
         "type": "unknown",
@@ -606,71 +606,20 @@ def _detect_language(workdir: str) -> dict:
     }
     langs_found: list[str] = []
 
-    if os.path.isfile(os.path.join(workdir, "go.mod")):
-        info["is_go"] = True
-        langs_found.append("Go")
+    for token in lang_detect.detect_languages(workdir):
+        flag, display, type_token = _LANG_INFO.get(token, ("", token.title(), token))
+        if flag:
+            info[flag] = True
+        if display not in langs_found:
+            langs_found.append(display)
         if info["type"] == "unknown":
-            info["type"] = "go"
+            info["type"] = type_token
 
-    if (
-        os.path.isfile(os.path.join(workdir, "pyproject.toml"))
-        or os.path.isfile(os.path.join(workdir, "setup.py"))
-        or os.path.isfile(os.path.join(workdir, "setup.cfg"))
-        or os.path.isfile(os.path.join(workdir, "requirements.txt"))
-        # Narrow fallback (DF-002): root module/package layouts without any of the
-        # marker files above are still Python — a top-level *.py module file or a
-        # top-level package dir (contains __init__.py) is enough.
-        or _looks_like_python(workdir)
-    ):
-        info["is_python"] = True
-        langs_found.append("Python")
-        if info["type"] == "unknown":
-            info["type"] = "python"
-
-    if os.path.isfile(os.path.join(workdir, "package.json")) or os.path.isfile(
-        os.path.join(workdir, "tsconfig.json")
-    ):
-        info["is_ts"] = True
-        langs_found.append("TypeScript")
-        if info["type"] == "unknown":
-            info["type"] = "typescript"
-
-    if os.path.isfile(os.path.join(workdir, "Gemfile")) or any(
-        f.endswith(".gemspec")
-        for f in os.listdir(workdir)
-        if os.path.isfile(os.path.join(workdir, f))
-    ):
-        info["is_ruby"] = True
-        langs_found.append("Ruby")
-        if info["type"] == "unknown":
-            info["type"] = "ruby"
-
-    if os.path.isfile(os.path.join(workdir, "composer.json")):
-        info["is_php"] = True
-        langs_found.append("PHP")
-        if info["type"] == "unknown":
-            info["type"] = "php"
-
-    if os.path.isfile(os.path.join(workdir, "Cargo.toml")):
-        info["is_rust"] = True
-        langs_found.append("Rust")
-        if info["type"] == "unknown":
-            info["type"] = "rust"
-
-    # SQL detection: check for .sql files or migrations dir
-    try:
-        for _root, dirs, files in os.walk(workdir):
-            dirs[:] = [d for d in dirs if d not in (".git", ".venv", "node_modules", ".gitreins")]
-            if any(f.endswith(".sql") for f in files):
-                info["has_sql"] = True
-                langs_found.append("SQL")
-                break
-            if "migrations" in dirs:
-                info["has_sql"] = True
-                langs_found.append("SQL")
-                break
-    except PermissionError:
-        pass
+    # SQL detection runs regardless of other languages; it selects static
+    # analysis tooling only (no lint/test command pair exists for SQL).
+    if lang_detect.has_sql_sources(workdir):
+        info["has_sql"] = True
+        langs_found.append("SQL")
 
     if langs_found:
         info["name"] = " + ".join(langs_found)
@@ -842,6 +791,15 @@ def _detect_test_command(workdir: str, lang: dict) -> str:
             except Exception:
                 pass
         return "npx vitest run"
+    # Languages `init` has no runner heuristics for (rust/java/c/cpp/ruby/php/
+    # kotlin/csharp/scala) use the shared language default, so the config init
+    # writes is the same command the judge's Tier 1 runs for that language
+    # (DF-GITREINS-POC-16). 'unknown' keeps the documented pytest default.
+    from engine import lang_detect
+
+    shared = lang_detect.lint_test_commands(lang.get("type"))
+    if shared:
+        return shared[1]
     return "pytest -x --tb=short"
 
 
@@ -1895,6 +1853,13 @@ def cmd_judge(args):
 
     # Persist verdict
     _persist_result(workdir, task, result)
+
+    # DF-GITREINS-POC-16: a FAIL verdict must reach the shell. Printing
+    # "Overall: FAIL" while exiting 0 lets a caller (script, CI step, agent)
+    # treat a red gate as success — the same silent-pass class this task is
+    # about. `gitreins guard` already exits 1 on the same tree.
+    if not result.passed:
+        sys.exit(1)
 
 
 def _cmd_judge_async(task_id: str) -> None:

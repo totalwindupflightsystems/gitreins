@@ -101,14 +101,44 @@ class TestDefaultTier1CommandsPreserveExitCodes:
     """Default lint/test commands must not zero their exit codes."""
 
     def test_no_exit_zeroing_suffixes(self):
-        import engine.pipeline as pipeline_mod
+        """DF-GITREINS-POC-16: the tables live in engine.lang_detect — assert
+        on the real table values (no suffix may swallow a failure)."""
+        from engine.lang_detect import LANG_COMMANDS
 
-        src_path = os.path.join(os.path.dirname(pipeline_mod.__file__), "pipeline.py")
-        with open(src_path) as f:
-            src = f.read()
-        block = src.split("_LANG_COMMANDS")[1].split("Detection order")[0]
-        assert "|| true" not in block
-        assert "2>/dev/null" not in block
+        assert LANG_COMMANDS, "language command table must not be empty"
+        for language, (lint_cmd, test_cmd) in LANG_COMMANDS.items():
+            for cmd in (lint_cmd, test_cmd):
+                assert "|| true" not in cmd, f"{language} zeroes its exit code: {cmd}"
+                assert "2>/dev/null" not in cmd, f"{language} swallows its output: {cmd}"
+
+    def test_detection_tables_defined_once(self):
+        """One language-detection source of truth (DF-GITREINS-POC-16).
+
+        The signature-file table and the language->command map must be DEFINED
+        only in engine/lang_detect.py; every other module imports them.
+        """
+        import re
+
+        import engine.lang_detect as lang_detect_mod
+
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(lang_detect_mod.__file__)))
+        pattern = re.compile(r"^(LANG_COMMANDS|SIGNATURE_FILES)\s*[:=]", re.MULTILINE)
+        offenders: list[str] = []
+        for base in ("engine", "gitreins"):
+            for root, dirs, files in os.walk(os.path.join(repo_root, base)):
+                dirs[:] = [d for d in dirs if d != "__pycache__"]
+                for name in files:
+                    if not name.endswith(".py"):
+                        continue
+                    path = os.path.join(root, name)
+                    if os.path.abspath(path) == os.path.abspath(lang_detect_mod.__file__):
+                        continue
+                    with open(path, encoding="utf-8", errors="replace") as f:
+                        if pattern.search(f.read()):
+                            offenders.append(os.path.relpath(path, repo_root))
+        assert offenders == [], (
+            f"language tables re-defined outside engine/lang_detect.py: {offenders}"
+        )
 
 
 class TestPartialVerdictRequiresAllPass:

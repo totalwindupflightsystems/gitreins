@@ -187,8 +187,15 @@ gitreins judge <id> [--skip-tier2] [--async] [--status <job_id>]
 
 | Code | Meaning |
 |------|---------|
-| 0 | Evaluation complete (verdict persisted) |
-| 1 | Task not found |
+| 0 | Evaluation complete and the verdict PASSED (persisted) |
+| 1 | Task not found, or the evaluation verdict FAILED |
+
+Sync `judge` propagates the verdict to the shell (DF-GITREINS-POC-16): a FAIL
+verdict exits 1, matching `gitreins guard` on the same tree, so a red gate can
+never be read as success by a script. Tier 1 grades the same check set the
+guard grades — see [the Tier 1 / guard parity contract](evaluator-loop.md#tier-1--guard-parity-contract-df-gitreins-poc-16)
+— and a tier1 narrower than the guard gate (nothing detectable) is marked
+degraded in `verdict.json` and warned about on the CLI.
 
 **Exit codes (`--status` mode)**
 

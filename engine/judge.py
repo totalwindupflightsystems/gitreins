@@ -11,7 +11,7 @@ from engine.evaluator import AgenticEvaluator
 from engine.guard_manager import GuardManager, Tier1Result
 from engine.llm import LLMClient
 from engine.eval_cap import EvalCap
-from engine.pipeline import Pipeline, load_pipeline_config
+from engine.pipeline import Pipeline, degradation_warning, load_pipeline_config
 from engine.task_manager import Task
 
 logger = logging.getLogger("gitreins.judge")
@@ -282,6 +282,12 @@ class JudgeResult:
             for stage_id, stage in stages.items():
                 status = "PASS" if stage.get("passed") else "FAIL"
                 lines.append(f"\nStage {stage_id}: {status}")
+                # DF-GITREINS-POC-16: a stage that graded LESS than the guard
+                # gate must say so out loud — a green verdict on a
+                # secrets-only tier1 is not evidence the tree passes.
+                warning = degradation_warning(stage)
+                if warning:
+                    lines.append(f"  {warning}")
                 summary = stage.get("summary", "")
                 if summary:
                     lines.append(f"  {summary}")

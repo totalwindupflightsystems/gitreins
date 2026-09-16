@@ -26,6 +26,7 @@ import subprocess
 import time
 from dataclasses import replace
 from datetime import datetime, timezone
+from engine import lang_detect
 from engine.guards import (
     _coerce_timeout,
     check_go_lint,
@@ -624,21 +625,26 @@ class GuardManager:
             guards_cfg.get("hook_timeout", 300), "hook_timeout", 300
         )
 
-        # Project type detection
-        self._is_go = os.path.isfile(os.path.join(self.workdir, "go.mod"))
+        # Project type detection — every marker query comes from
+        # engine.lang_detect, the single source of truth shared with the
+        # judge's Tier 1 pipeline and `gitreins init`, so the gate and the
+        # verdict can never disagree about what language this repo is
+        # (DF-GITREINS-POC-16). Signatures only (no extension fallback): the
+        # Go/Rust guards need a real ecosystem marker, not an inferred one.
+        signatures = lang_detect.signature_languages(self.workdir)
+        self._is_go = "go" in signatures
         self._go_guards = guards_cfg.get("go", {})
-        self._is_ruby = os.path.isfile(os.path.join(self.workdir, "Gemfile"))
-        self._is_php = os.path.isfile(os.path.join(self.workdir, "composer.json"))
+        self._is_ruby = "ruby" in signatures
+        self._is_php = "php" in signatures
         self._is_cpp = (
-            os.path.isfile(os.path.join(self.workdir, "CMakeLists.txt"))
-            or os.path.isfile(os.path.join(self.workdir, "Makefile"))
+            "cpp" in signatures
+            or "c" in signatures
             or os.path.isfile(os.path.join(self.workdir, "compile_commands.json"))
             or any(
-                f.endswith((".cpp", ".cc", ".cxx", ".hpp", ".h", ".c"))
-                for f in _get_staged_files(self.workdir)
+                f.endswith(lang_detect.CPP_SOURCE_SUFFIXES) for f in _get_staged_files(self.workdir)
             )
         )
-        self._is_rust = os.path.isfile(os.path.join(self.workdir, "Cargo.toml"))
+        self._is_rust = "rust" in signatures
         self._has_sql = any(
             f.endswith(".sql") for f in _get_staged_files(self.workdir)
         ) or os.path.isdir(os.path.join(self.workdir, "migrations"))
@@ -1428,13 +1434,10 @@ class GuardManager:
                 passed=True,
                 output="Go compiler covers static analysis — skipped",
             )
-        # Check for Python, Ruby, PHP, SQL, C/C++, Rust, Go
+        # Check for Python, Ruby, PHP, SQL, C/C++, Rust, Go. Marker queries
+        # come from engine.lang_detect (single source of truth).
         lang_tools: list[str] = []
-        if (
-            os.path.isfile(os.path.join(self.workdir, "pyproject.toml"))
-            or os.path.isfile(os.path.join(self.workdir, "setup.py"))
-            or os.path.isfile(os.path.join(self.workdir, "setup.cfg"))
-        ):
+        if lang_detect.python_packaging_present(self.workdir):
             lang_tools = self._static_tools.get("python", [])
         elif self._is_ruby:
             lang_tools = self._static_tools.get("ruby", [])

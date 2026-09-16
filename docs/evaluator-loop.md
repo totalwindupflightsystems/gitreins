@@ -245,3 +245,71 @@ git commit ✓
 ```
 
 Tier 1 runs first because it's fast and free. Tier 2 only fires if Tier 1 passes.
+
+## Tier 1 / Guard Parity Contract (DF-GITREINS-POC-16)
+
+A green Tier 1 must mean the same thing the repo's own gate means:
+
+> **`gitreins judge` Tier 1 grades the same check set, with the same commands,
+> that `gitreins guard` grades on the identical tree.** If the guard would run
+> lint and tests for this repo, Tier 1 runs lint and tests.
+
+How it is enforced:
+
+1. **One language-detection source of truth — `engine/lang_detect.py`.** The
+   signature-file table, the source-extension fallback and the
+   `language -> (lint_command, test_command)` map live there and nowhere else.
+   Consumers: the judge's `tier1_plan` (`engine/pipeline.py`), the guard
+   (`engine/guard_manager.py`) and `gitreins init`/`install`
+   (`gitreins/cli.py`). Three independent detectors used to disagree — a plain
+   `.py` repo was Python to `init` and language-less (secrets-only) to the judge.
+2. **Detection order:** signature file → source-extension fallback (tracked +
+   untracked-not-ignored files via `git ls-files`, else a bounded `os.walk`) →
+   nothing. Test directories never satisfy the fallback (a tree whose only
+   sources are tests has no product code to grade); tool/build dirs and
+   dot-directories are pruned.
+3. **Commands:** the tests step runs `guards.test_command` when configured,
+   otherwise the detected language's default, resolved through the guard's own
+   `_resolve_test_command` (so a configured `uv run pytest` on a machine
+   without `uv` degrades to `python -m pytest` in both engines). `guards.lint:
+   false` and `guards.test_timeout` are honoured exactly as before.
+4. **Verdict semantics match the guard:** a missing linter binary is a SKIP
+   (guard: "No linter found — skipped"), not a failure; a missing test runner is
+   a FAILURE (non-zero exit).
+
+### Loud degradation
+
+When Tier 1 ends up *narrower* than the guard gate — genuinely nothing
+detectable — the run is marked degraded instead of passing silently:
+
+* the CLI prints a warning naming the skipped checks and the reason:
+
+```
+WARNING: coverage is secrets-only — lint, tests did not run (no language
+detected in <workdir>); run `gitreins guard` for the full gate
+```
+
+* `verdict.json` carries the machine-readable marker on the tier1 stage:
+
+```json
+"tier1": {
+  "passed": true,
+  "coverage": "secrets-only",
+  "degraded": true,
+  "skipped_steps": ["lint", "tests"],
+  "degradation_reason": "no language detected in /path/to/repo"
+}
+```
+
+A non-degraded stage carries `"coverage": "secrets+lint+tests"` (or
+`"secrets+tests"` when `guards.lint: false`) and no `degraded` key. The marker is
+**additive**: a degraded stage may still be `passed: true` — that combination is
+exactly what the marker is for.
+
+### Known residual divergence
+
+`pytest` exit 5 ("no tests collected") is a pass-with-warning in the guard
+(`_pytest_no_tests_benign`) but a failure in the judge's tests step, which
+grades the raw exit code. Tier 1 is therefore *stricter* than the guard on a
+test-less Python repo — never more permissive, which is the direction that
+matters for a green verdict.

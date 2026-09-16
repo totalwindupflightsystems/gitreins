@@ -45,7 +45,6 @@ pipeline:
 """
 
 import concurrent.futures
-import glob
 import json
 import logging
 import os
@@ -56,6 +55,8 @@ from dataclasses import dataclass, field
 
 import yaml
 
+from engine import lang_detect
+from engine.guard_manager import _resolve_test_command
 from engine.types import _FAILED_TEST_LINE
 
 logger = logging.getLogger("gitreins.pipeline")
@@ -138,15 +139,47 @@ class StageResult:
     steps: list[StepResult] = field(default_factory=list)
     any_failed: bool = False
     summary: str = ""
+    # DF-GITREINS-POC-16: coverage marker. `coverage` names the checks this
+    # stage actually graded; `degraded` is True when the stage ran a SUBSET of
+    # the gate for the detected language (e.g. secrets-only because nothing
+    # was detectable). A degraded stage may still be `passed` — the marker
+    # exists so a narrow pass cannot be mistaken for a full one.
+    coverage: str = ""
+    degraded: bool = False
+    skipped_steps: list[str] = field(default_factory=list)
+    degradation_reason: str = ""
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "id": self.id,
             "passed": self.passed,
             "any_failed": self.any_failed,
             "summary": self.summary,
             "steps": [s.to_dict() for s in self.steps],
         }
+        if self.coverage:
+            d["coverage"] = self.coverage
+        if self.degraded:
+            d["degraded"] = True
+            d["skipped_steps"] = list(self.skipped_steps)
+            d["degradation_reason"] = self.degradation_reason
+        return d
+
+
+def degradation_warning(stage: dict) -> str | None:
+    """One-line CLI warning for a stage narrower than the guard gate.
+
+    Returns None for a stage with no degradation marker, so callers can call
+    this unconditionally while printing a stage summary.
+    """
+    if not stage.get("degraded"):
+        return None
+    skipped = ", ".join(stage.get("skipped_steps") or []) or "unknown checks"
+    reason = stage.get("degradation_reason") or "unknown reason"
+    return (
+        f"WARNING: coverage is {stage.get('coverage') or 'unknown'} — {skipped} did not run "
+        f"({reason}); run `gitreins guard` for the full gate"
+    )
 
 
 class Pipeline:
@@ -192,6 +225,14 @@ class Pipeline:
                 result = self._run_parallel_stage(stage_id, stage_def, task)
             else:
                 result = self._run_sequential_stage(stage_id, stage_def, task)
+
+            # DF-GITREINS-POC-16: carry the stage's coverage marker into the
+            # verdict (see StageResult). Declared by the stage definition, so
+            # a custom pipeline simply has none.
+            result.coverage = stage_def.get("coverage", "")
+            result.degraded = bool(stage_def.get("degraded", False))
+            result.skipped_steps = list(stage_def.get("skipped_steps") or [])
+            result.degradation_reason = stage_def.get("degradation_reason", "")
 
             self._stage_results[stage_id] = result
 
@@ -863,36 +904,40 @@ def _fix_on_key(obj):
     return obj
 
 
-def _has_sig_file(workdir: str, sig_file: str) -> bool:
-    """Check if a signature file exists, supporting wildcard patterns."""
-    if any(c in sig_file for c in "*?["):
-        matches = glob.glob(os.path.join(workdir, sig_file))
-        return len(matches) > 0
-    return os.path.isfile(os.path.join(workdir, sig_file))
+def _lint_step_run(lint_cmd: str) -> str:
+    """Wrap *lint_cmd* with the guard's missing-linter semantics.
 
-
-def _engine_root() -> str:
-    """Absolute path of the directory containing the `engine` package.
-
-    Works in both source checkouts (…/gitreins/engine/pipeline.py) and
-    installed layouts (…/site-packages/engine/pipeline.py) — the parent of
-    the engine dir is the import root that must go on PYTHONPATH for the
-    default-pipeline built-in scanner subprocess.
+    ``GuardManager._check_lint`` returns PASS ("No linter found — skipped")
+    when the linter binary is absent. The judge's lint step must behave the
+    same way, or Tier 1 would FAIL on a machine that merely lacks ruff while
+    ``gitreins guard`` passes on the identical tree (DF-GITREINS-POC-16).
+    The binary is only checked for EXISTENCE; a lint finding still fails.
     """
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    binary = lint_cmd.split()[0]
+    return (
+        f"if command -v {binary} >/dev/null 2>&1; then {lint_cmd}; "
+        f'else echo "{binary} not found — lint skipped (guard parity)"; exit 0; fi'
+    )
 
 
-def _default_tier1_steps(workdir: str, config: dict | None = None) -> list[dict]:
-    """Return language-appropriate default Tier 1 pipeline steps.
+def tier1_plan(workdir: str, config: dict | None = None) -> tuple[list[dict], dict]:
+    """Build the default Tier 1 steps plus their coverage marker.
 
-    Detects the project language(s) by checking for ecosystem files
-    (go.mod, pyproject.toml, Cargo.toml, package.json, etc.) and
-    returns lint + test commands for the primary language found.
-    Falls back to a secrets-only step when no language is detected.
+    DF-GITREINS-POC-16: Tier 1 must grade the SAME set the guard would grade
+    on this tree — secrets, lint (unless ``guards.lint: false``), tests — with
+    the test command coming from ``guards.test_command`` (or the detected
+    language's default) resolved through the guard's own
+    ``_resolve_test_command``. Language detection is delegated to
+    ``engine.lang_detect``, the single source of truth shared with the guard
+    and ``init``; the signature-file table alone used to leave marker-less
+    repos (plain ``.py`` trees) with a secrets-only Tier 1 that a green judge
+    verdict then misreported as a full pass.
 
-    Honors .gitreins/config.yaml overrides: ``guards.test_command`` and
-    ``guards.test_timeout`` replace the language-default test command and
-    the 120s script timeout (large Go suites exceed 120s).
+    Returns ``(steps, marker)`` where *marker* is always a dict:
+    ``coverage`` (which checks ran, ``+``-joined step ids, or
+    ``"secrets-only"``), ``degraded`` (bool), ``skipped_steps`` (list) and
+    ``reason``. A degraded marker never flips the stage's verdict — it makes
+    a narrower run honest.
     """
     guards_cfg = (config or {}).get("guards", {})
     configured_test_cmd = guards_cfg.get("test_command")
@@ -926,88 +971,80 @@ def _default_tier1_steps(workdir: str, config: dict | None = None) -> list[dict]
         },
     ]
 
-    # Lint + test commands per language ecosystem. NOTE: no `2>/dev/null ||
-    # true` suffix — appending it would zero the exit code and make a failing
-    # lint/test report as a pass (2026-08-08 fix; _run_script_step now treats
-    # non-zero exit as a hard failure regardless of on_fail).
-    _LANG_COMMANDS: dict[str, tuple[str, str]] = {
-        "go": ("go vet ./...", "go test ./..."),
-        "rust": (
-            "cargo clippy -- -D warnings",
-            "cargo test --no-fail-fast",
-        ),
-        "python": (
-            "ruff check . --quiet",
-            "pytest -x --tb=short",
-        ),
-        "js": ("npx eslint .", "npm test"),
-        "java": ("mvn checkstyle:check", "mvn test -q"),
-        "c": ("make lint", "make test"),
-        "cpp": ("make lint", "make test"),
-        "ruby": ("rubocop", "bundle exec rspec"),
-        "php": (
-            "php vendor/bin/phpcs",
-            "php vendor/bin/phpunit",
-        ),
-        "kotlin": ("./gradlew lint", "./gradlew test"),
-        "csharp": (
-            "dotnet format --verify-no-changes",
-            "dotnet test",
-        ),
-        "scala": ("sbt scalafmtCheck", "sbt test"),
+    language = lang_detect.detect_language(workdir)
+    commands = lang_detect.lint_test_commands(language)
+    if commands is None:
+        # LOUD degradation (workstream c): say exactly what did not run and
+        # why. Callers surface this in the CLI and in verdict.json.
+        reason = (
+            f"no language detected in {workdir}"
+            if language is None
+            else f"no lint/test commands declared for language '{language}'"
+        )
+        return steps, {
+            "coverage": "secrets-only",
+            "degraded": True,
+            "skipped_steps": ["lint", "tests"],
+            "reason": reason,
+        }
+
+    lint_cmd, test_cmd = commands
+    # Honor guards.lint: false — the guard mode already skips lint when
+    # disabled; the judge tier1 pipeline must match, otherwise repos with
+    # no lint setup (e.g. no eslint dep / no eslint.config) get an
+    # env-dependent lint FP from `npx eslint .` (npx fetches eslint from
+    # cache/registry, so PATH hygiene cannot suppress it). Ring-runner
+    # RR-GAP-040 / off-by-one answer 1286.
+    if guards_cfg.get("lint", True):
+        steps.append({"id": "lint", "type": "script", "run": _lint_step_run(lint_cmd)})
+
+    # Same command the guard would run, resolved by the guard's own helper so
+    # a missing runner prefix (`uv run` on a pip-only machine) degrades the
+    # same way in both engines.
+    resolved_test_cmd, resolution_warning = _resolve_test_command(configured_test_cmd or test_cmd)
+    test_step: dict = {"id": "tests", "type": "script", "run": resolved_test_cmd}
+    if resolution_warning:
+        test_step["resolution_warning"] = resolution_warning
+    if test_timeout > 0:
+        test_step["timeout"] = test_timeout
+    steps.append(test_step)
+
+    return steps, {
+        "coverage": "+".join(s["id"] for s in steps),
+        "degraded": False,
+        "skipped_steps": [],
+        "reason": "",
     }
 
-    # Detection order — first match becomes the primary language
-    _SIGNATURE_FILES: list[tuple[str, str]] = [
-        ("go.mod", "go"),
-        ("Cargo.toml", "rust"),
-        ("pyproject.toml", "python"),
-        ("setup.py", "python"),
-        ("requirements.txt", "python"),
-        ("package.json", "js"),
-        ("pom.xml", "java"),
-        ("settings.gradle.kts", "kotlin"),
-        ("build.gradle", "java"),
-        ("CMakeLists.txt", "cpp"),
-        ("Makefile", "c"),
-        ("Gemfile", "ruby"),
-        ("composer.json", "php"),
-        ("*.csproj", "csharp"),
-        ("*.sln", "csharp"),
-        ("build.sbt", "scala"),
-    ]
 
-    primary = None
-    for sig_file, lang in _SIGNATURE_FILES:
-        if _has_sig_file(workdir, sig_file):
-            primary = lang
-            break
+def _default_tier1_steps(workdir: str, config: dict | None = None) -> list[dict]:
+    """Return language-appropriate default Tier 1 pipeline steps.
 
-    if primary is not None:
-        lint_cmd, test_cmd = _LANG_COMMANDS[primary]
-        # Honor guards.lint: false — the guard mode already skips lint when
-        # disabled; the judge tier1 pipeline must match, otherwise repos with
-        # no lint setup (e.g. no eslint dep / no eslint.config) get an
-        # env-dependent lint FP from `npx eslint .` (npx fetches eslint from
-        # cache/registry, so PATH hygiene cannot suppress it). Ring-runner
-        # RR-GAP-040 / off-by-one answer 1286.
-        if guards_cfg.get("lint", True):
-            steps.append({"id": "lint", "type": "script", "run": lint_cmd})
-        test_step: dict = {"id": "tests", "type": "script", "run": test_cmd}
-        if configured_test_cmd:
-            test_step["run"] = configured_test_cmd
-        if test_timeout > 0:
-            test_step["timeout"] = test_timeout
-        steps.append(test_step)
-
+    Thin wrapper over :func:`tier1_plan` (kept for the existing callers and
+    tests); see that function for the parity contract.
+    """
+    steps, _marker = tier1_plan(workdir, config)
     return steps
+
+
+def _engine_root() -> str:
+    """Absolute path of the directory containing the `engine` package.
+
+    Works in both source checkouts (…/gitreins/engine/pipeline.py) and
+    installed layouts (…/site-packages/engine/pipeline.py) — the parent of
+    the engine dir is the import root that must go on PYTHONPATH for the
+    default-pipeline built-in scanner subprocess.
+    """
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def load_pipeline_config(workdir: str = ".") -> dict:
     """Load pipeline configuration from .gitreins/config.yaml."""
     config_path = os.path.join(workdir, ".gitreins", "config.yaml")
     if not os.path.exists(config_path):
-        # Return default pipeline
+        # No config file at all — the default pipeline (marker included, so a
+        # degraded tier1 stays honest on a repo that was never `init`-ed).
+        _missing_cfg_steps, missing_cfg_marker = tier1_plan(workdir, None)
         return {
             "pipeline": {
                 "stages": [
@@ -1015,7 +1052,11 @@ def load_pipeline_config(workdir: str = ".") -> dict:
                         "id": "tier1",
                         "parallel": True,
                         "on": ["pre-commit", "pre-eval"],
-                        "steps": _default_tier1_steps(workdir),
+                        "steps": _missing_cfg_steps,
+                        "coverage": missing_cfg_marker["coverage"],
+                        "degraded": missing_cfg_marker["degraded"],
+                        "skipped_steps": missing_cfg_marker["skipped_steps"],
+                        "degradation_reason": missing_cfg_marker["reason"],
                     },
                     {
                         "id": "tier2",
@@ -1042,13 +1083,21 @@ def load_pipeline_config(workdir: str = ".") -> dict:
         # are parsed as ``True:`` / ``False:`` and break key lookups.
         config = _fix_on_key(config)
         if "pipeline" not in config:
+            tier1_steps, tier1_marker = tier1_plan(workdir, config)
             config["pipeline"] = {
                 "stages": [
                     {
                         "id": "tier1",
                         "parallel": True,
                         "on": ["pre-commit", "pre-eval"],
-                        "steps": _default_tier1_steps(workdir, config),
+                        "steps": tier1_steps,
+                        # DF-GITREINS-POC-16: what this tier1 actually graded
+                        # ("secrets+lint+tests", "secrets-only", …) so a run
+                        # narrower than the guard gate is machine-readable.
+                        "coverage": tier1_marker["coverage"],
+                        "degraded": tier1_marker["degraded"],
+                        "skipped_steps": tier1_marker["skipped_steps"],
+                        "degradation_reason": tier1_marker["reason"],
                     },
                     {
                         "id": "tier2",
