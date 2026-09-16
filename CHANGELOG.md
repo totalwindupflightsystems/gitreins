@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] — 2026-09-16
+
+### Added
+- **Worktree fleet** — per-task worktrees (`gitreins task worktree <id>`, registry,
+  list/clean), canonical shared board across trees, worktree-correct guard/judge semantics
+  (merge-base diff, staged-scoped secrets, verdict tree stamps), judge-gated merge-back
+  (AUTO/REBASE/HOLD/MANUAL), and a bounded parallel worker fleet
+- **`gitreins serve`** — live judgment browser: local web server + JSON API over
+  `.gitreins/history`, board events, and the scheduler tick ledger
+- **Judge verdict evidence bounding** — step evidence capped/split (head+tail) with
+  FAILED/ERROR lines hoisted; guard failures name the failing test
+- **Docs-drift CI guard** — README banner version vs pyproject + count claims enforced
+  (`scripts/check_docs_drift.py`)
+
+### Fixed
+- config-less `guard`/`commit` false-green (refuse without config; MCP `guard.run` too)
+- single-flight judge race across instances; orphaned async-job resume leases
+- deepseek max_output_tokens clamp; pytest exit-5 treated as pass-with-warning
+- hermetic static-tool discovery (cppcheck PATH independence); test interpreter pinning
+
+
 ### Added
 - **PR #2 (carterlasalle, merged 4779fd2)** — quality-gate correctness + evaluator hardening:
   - **Four "PASS-but-failing" bugs fixed** (all reproduced live on main, fixed on branch, 8 regression tests in `tests/test_quality_gate_regressions.py`):
