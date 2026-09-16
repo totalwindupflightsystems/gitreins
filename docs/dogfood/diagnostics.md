@@ -399,3 +399,52 @@ since 08-14 and is the single highest-leverage process fix left.
   line-delimited JSON-RPC client.
 - worktree fleet: `fresh` (clean tree, JSON record), `repro -k 3` (3/3, documented
   JSON shape field-for-field), `dogfood --skip-judge` (3/4 steps + clean skip).
+
+## 2026-09-16b (qa lane) — wheel-verification + the canary that taught two lessons
+
+**Trigger:** 0.13.0 hit PyPI at 05:41Z (wheel release verified, DF-GITREINS-POC-7
+deliverable shipped). The morning run had SKIPPED-install-bunker (las-bunker-03 down);
+this tick re-ran the install leg on the same host (up again) and re-tested every past
+P0/P1 against the shipped artifact, plus anti-tamper canaries through the control hook.
+
+**How the P0-that-wasn't was found and killed.** First anti-tamper canary: a hand-typed
+`ghp_` token (33 chars) appended to engine/llm.py, staged, committed through the real
+pre-commit hook → `✓ secrets — clean`, exit 0. Looked like a P0 regression of DF-012.
+Before writing a single task: direct gitleaks A/B (repo config vs default) caught 1 leak
+(repo config, the custom sk- rule) on a fixture with a malformed ghp_ — proving the binary
+and config were fine and the fixture was bad. gitleaks' official github-pat rule requires
+the 36-char suffix; my token had 29. Re-ran with a programmatically generated exact-shape
+token (40 chars): **hook BLOCKED it, exit 1**. Lesson recorded: fake secrets in tests must
+be exact-shape, and a "P0 regression" claim must survive a direct-tool A/B before it goes
+on the board. Residue discipline: the canary was committed (hook passed), so the
+un-commit was `git reset --mixed HEAD~1` + `git checkout -- <file>` (plain checkout alone
+leaves the staged change in the index); verified HEAD restored and `grep -c CANARY` = 0.
+
+**Why POC-12 looked fixed on 09-15 and wasn't.** The judge's tier1 is
+secrets-only by design (`stages.tier1.steps == ['secrets']` in verdict.json — checked on
+a HEAD scratch repo and on the wheel). On 09-15 the scratch repo happened to contain
+untracked secrets; the judge — unlike guard — scans the whole worktree, so its secrets
+step FAILed (correctly) and the PASS overall flipped to FAIL. That accident masked the
+real gap: judge ignores tests/lint. This run's discriminator: staged failing test, no
+secrets anywhere → judge PASS exit 0 on the same tree where guard FAILs exit 1. Two
+independent runs (yesterday's and the wheel leg earlier today) hit the same confound —
+evidence: this run reproduced the FAIL by planting `leaky3.py` untracked, then watched
+judge flip to PASS after `rm leaky3.py` with the failing test still staged.
+
+**Scanner-divergence (P3, POC-15).** On the shape-strict ghp_ token: guard with gitleaks
+on PATH → FAIL (github-pat rule); guard without gitleaks → PASS (built-in regex is
+looser). The guard output does not name which scanner ran (only the fallback warning
+when gitleaks is missing), so a green badge means different things on different machines.
+Repro: /tmp fixture, `gitleaks detect --no-git` with `-c .gitleaks.toml` (3 leaks: the
+custom sk- rule double-counted on purpose-shaped strings) vs default (1 leak).
+
+**Wheel regression matrix (0.13.0, bunker agent):** POC-16 multi-finding secrets FIXED,
+DF-011 hook pin FIXED, POC-13 README example parses, POC-3/D init persist FIXED, POC-10
+exit codes FIXED (guard FAIL→1, task complete FAIL→1/PASS→0), DF-015 version correct,
+worktree ships. Still open on the wheel: POC-11 vacuous-green clean-tree guard (skips
+shown as ✓ with exit 0), POC-6-class full-suite-trigger risk, judge/guard tier1
+divergence (POC-12), and the fresh-env bare-`pytest`-not-found failure mode.
+
+**Time-to-first-success:** 13 s to working CLI on the bunker agent (venv path); full
+battery ≈35 min. Friction count 8. Install leg: RUN (previous note in this log was the
+morning run's SKIPPED — superseded by this one).

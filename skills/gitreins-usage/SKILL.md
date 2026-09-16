@@ -4,7 +4,7 @@ description: >-
   How to use the GitReins quality harness in this repo (and any repo it's
   installed in): task lifecycle, guards, LLM judge, MCP tools, and the known
   pitfalls that will bite you. Load this before committing or creating tasks.
-version: 1.1.0
+version: 1.2.0
 category: software-development
 ---
 
@@ -181,12 +181,13 @@ More detail: `docs/dogfood/2026-08-03-integration.md` (real-use report),
 `docs/dogfood/2026-08-14-integration.md` (PyPI consumer path),
 `docs/dogfood/2026-08-27-integration.md` (fresh 0.12.0 wheel path),
 `docs/dogfood/2026-09-15-integration.md` (fresh-machine bunker leg + HEAD consumer leg),
+`docs/dogfood/2026-09-16b-integration.md` (0.13.0 wheel-verification run),
 `docs/dogfood/diagnostics.md` (build/error trail).
 
 ## Disposable verification — worktree (2026-09-15: verify claims in clean trees)
 
-Throwaway checkouts under `.disposable/`, from HEAD (WORKTREE-006; NOT on the
-PyPI wheel — see pitfall 14):
+Throwaway checkouts under `.disposable/`, from HEAD (WORKTREE-006; on the PyPI
+wheel since 0.13.0 — see pitfall 14):
 
 ```bash
 gitreins worktree fresh --cmd ".venv/bin/python -m pytest tests/test_version.py -q" --json /tmp/wf.json
@@ -202,10 +203,11 @@ gitreins worktree dogfood --skip-judge --json /tmp/wd.json   # init+task+guard+j
 
 ## Pitfalls 14–17 (2026-09-15 dogfood run)
 
-14. **PyPI wheel is a generation behind HEAD (POC-7).** 0.12.1 (08-28) predates
-    ~70 commits: wheel `init` still has the announce-vs-persist mismatch (POC-3)
-    and there is NO `worktree` subcommand on the wheel. Trust behavior of HEAD,
-    not of the wheel; DF-010 (release pipeline) is the fix to watch.
+14. **(Updated 2026-09-16) PyPI wheel vs HEAD — 0.13.0 IS the wheel to trust now.**
+    0.13.0 (2026-09-16) ships: worktree subcommand, POC-3/D init persistence, POC-16
+    multi-finding secrets, DF-011 hook pin, POC-10 exit codes, correct --version.
+    Older 0.12.x wheels lack all of these (POC-7). Still missing from ANY wheel AND
+    HEAD: the judge tier1 tests/lint gap (pitfall 20).
 15. **`task complete` fails in fresh consumer envs: the pylsp test trap (POC-6).**
     If `.gitreins/config.yaml` is dirty (init just edited it), the tier1 tests step
     runs the FULL suite; `tests/test_lsp.py` FAILS (not skips) where pylsp is not
@@ -218,7 +220,31 @@ gitreins worktree dogfood --skip-judge --json /tmp/wd.json   # init+task+guard+j
     the failure. Re-run the suite yourself (`pytest -n 4 --maxfail=1 -q`) or call
     MCP `guard_run` (full logs) to see what actually failed.
 17. **Fresh minimal machines can't follow the README quickstart.** No pip/pipx/
-    sudo and `python3 -m venv` broken (no ensurepip) on bare Debian 13. Working
-    no-root path: `curl -LsSf https://astral.sh/uv/install.sh | sh && uv tool
+    sudo and `python3 -m venv` broken (no ensurepip) on bare Debian 13.
+    Working no-root path: `curl -LsSf https://astral.sh/uv/install.sh | sh && uv tool
     install gitreins` (5 s; hook pin + secrets multi-finding fixes verified on
     that wheel).
+
+## Pitfalls 18–20 (2026-09-16b qa-lane run — verified on the 0.13.0 wheel + HEAD)
+
+18. **Fresh Debian 13 machines: the README's literal `pip install gitreins` hits the
+    PEP-668 wall** (externally-managed environment; pip 25+). Working quickstart:
+    `python3 -m venv ~/.venvs/gr && ~/.venvs/gr/bin/pip install gitreins` → working
+    CLI in ~13 s. Also budget for `pip install pytest` in that same venv — the tests
+    guard shells out to `pytest` and fresh venvs don't have it (`✗ tests — pytest:
+    not found`). The wheel is py3-none-any; version self-report is correct on 0.13.0.
+19. **A green `✓ secrets` badge does not name its scanner — coverage differs by
+    machine (POC-15).** gitleaks' official github-pat rule requires the exact 40-char
+    token shape (36-char suffix); the built-in regex fallback is looser in some spots
+    and stricter in others. A shape-strict `ghp_` token FAILs guard only where
+    gitleaks is installed/on PATH. When auditing, check which scanner actually ran
+    (the fallback warning prints only when gitleaks is MISSING). And when building
+    canary fixtures: generate exact-shape tokens programmatically — a hand-typed
+    33-char `ghp_...` correctly passes both scanners and will fabricate a P0.
+20. **Judge tier1 is secrets-only — it does not run tests or lint (POC-12, still
+    open).** `task complete` / `gitreins judge` PASS a tree with staged failing tests
+    (verdict.json `stages.tier1.steps == ['secrets']`). The 09-15 "fixed at HEAD"
+    note was wrong — the scratch repo had untracked secrets, and the judge scans the
+    whole worktree (guard scans staged scope), so the secrets step failed and masked
+    the gap. Rule: judge = criteria + secrets; gate merges on guard (hook/CI), never
+    on judge exit code alone.
