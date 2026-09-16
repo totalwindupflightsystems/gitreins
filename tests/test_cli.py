@@ -2154,6 +2154,33 @@ class TestPreCommitHookPathPinning:
         assert "gitreins guard" not in stripped_lines
         assert "__GITREINS_CMD__" not in hook
 
+    def test_pinned_python_m_invocation_is_actually_runnable(self, tmp_workdir):
+        """DF-024: the `python -m gitreins` form the hook pins must execute.
+
+        The hook runs from the CONSUMER repo's root, so the pinned
+        interpreter has to import the installation without relying on the
+        current directory — hence PYTHONPATH here, mirroring an installed
+        (non-editable) consumer environment.
+        """
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        env = dict(os.environ)
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = project_root + (os.pathsep + existing if existing else "")
+
+        result = subprocess.run(
+            [sys.executable, "-m", "gitreins", "--version"],
+            cwd=tmp_workdir,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=60,
+        )
+        assert result.returncode == 0, (
+            "`python -m gitreins` (the invocation installed hooks pin) must run: "
+            f"rc={result.returncode} stdout={result.stdout!r} stderr={result.stderr!r}"
+        )
+        assert "gitreins" in result.stdout
+
     def test_generated_hook_runs_pinned_binary_and_blocks_secret(self, tmp_workdir):
         """End-to-end: `install` with a PATH impostor → the generated hook
         still runs the real gitreins and blocks a commit containing a
