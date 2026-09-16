@@ -20,3 +20,5 @@ wheel-vs-HEAD proof), `docs/dogfood/evidence/` (verdict.json + fullsuite log),
 Board tasks: DF-GITREINS-POC-6, -7, -8 (pending).
 Install leg: SKIPPED-install-bunker on las-bunker-03 (host down, ssh timeout) —
 RUN on las-bunker-04 instead (bunker agent 08e03826, spawned+destroyed cleanly).
+2026-09-16 | PROMISING-BUT-ROUGH | 82s t2fs | friction 14 | 5 findings
+
