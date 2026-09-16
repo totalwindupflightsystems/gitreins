@@ -350,7 +350,9 @@ class TestJudgeGuardParity:
         if not shutil.which("git"):
             pytest.skip("git not available")
         _git_init(tmp_path)
-        (tmp_path / "test_ok.py").write_text("def test_ok():\n    assert 1 == 1\n")
+        (tmp_path / "test_ok.py").write_text(
+            "def add(a, b):\n    return a + b\n\n\ndef test_add():\n    assert add(1, 2) == 3\n"
+        )
         command = f"{sys.executable} -m pytest -x --tb=short -p no:cacheprovider"
         _write_config(tmp_path, test_command=command)
 
@@ -400,7 +402,10 @@ class TestJudgeCliExitCode:
         assert "Stage tier1: FAIL" in result.stdout
 
     def test_passing_tree_exits_zero(self, tmp_path):
-        self._prepare(tmp_path, "def test_ok():\n    assert 1 == 1\n")
+        self._prepare(
+            tmp_path,
+            "def add(a, b):\n    return a + b\n\n\ndef test_add():\n    assert add(1, 2) == 3\n",
+        )
         result = self._cli(["judge", "--skip-tier2", "t1"], tmp_path)
         assert result.returncode == 0, result.stdout + result.stderr
         assert "Stage tier1: PASS" in result.stdout
