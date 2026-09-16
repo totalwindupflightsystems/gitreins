@@ -448,3 +448,23 @@ divergence (POC-12), and the fresh-env bare-`pytest`-not-found failure mode.
 **Time-to-first-success:** 13 s to working CLI on the bunker agent (venv path); full
 battery ≈35 min. Friction count 8. Install leg: RUN (previous note in this log was the
 morning run's SKIPPED — superseded by this one).
+
+**Exit 2 is not an interruption (INT-FLAKE-2, 2026-09-16).** Verdict 47f9d514 (GR-GAP-051)
+recorded `tests: exit_code=2` with the output ending mid-dot-line and no pytest summary, so the
+row was filed as "the tier1 tests step intermittently dies mid-suite" — an environment problem.
+Six earlier verdicts (GR-104 ×2, GR-GAP-010, GR-138, INT-CI-2, GR-GAP-051) carry the same
+signature. The live reproduction says otherwise, and it is deterministic, not intermittent:
+with `-x` (maxfail) **and** xdist, the run that fails one test exits **2**.
+`pytest -x --tb=short -n 2` over a 3-test suite with one bad assertion → exit 2, output ending
+`!!!! xdist.dsession.Interrupted: stopping after 1 failures !!!!` — xdist's `DSession` raises
+`Interrupted(KeyboardInterrupt)` when maxfail trips (`xdist/dsession.py`), and pytest maps
+`KeyboardInterrupt` to `ExitCode.INTERRUPTED`. The same failure without xdist exits 1 (verified),
+and with no `-x` it exits 1 too. INT-CI-2's captured head even shows the `F` that triggered it.
+Two GitReins defects made that unreadable: the step's head-only `[:2000]` capture slice landed
+exactly where pytest's short summary starts, so `_bound_step_evidence` had no tail left to keep
+and the FAILED line vanished (mutation check: restoring the slice makes the new step test report
+`interrupted-unclassified` again), and nothing recorded *why* pytest exited 2.
+Fix: `engine.types.pytest_outcome` classifies from the captured output (`maxfail` vs
+`interrupted` vs `interrupted-unclassified`, plus exit 1/3/4/5 and signal kills), the tests step
+records it as `data.pytest_outcome`, and the capture keeps the whole output. Regression tests
+re-run the live `-x -n 2` reproduction and pin `returncode == 2`.

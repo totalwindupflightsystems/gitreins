@@ -480,6 +480,47 @@ A non-degraded stage carries `"coverage": "secrets+lint+tests"` (or
 **additive**: a degraded stage may still be `passed: true` — that combination is
 exactly what the marker is for.
 
+### Reading a failing Tier 1 tests step (INT-FLAKE-2)
+
+`exit_code` alone does not say **why** pytest ended, and the missing half is
+the dangerous half. With `-x` (maxfail) **and** pytest-xdist, the master
+raises xdist's own `Interrupted(KeyboardInterrupt)` as soon as maxfail is
+reached, and pytest maps `KeyboardInterrupt` onto `ExitCode.INTERRUPTED` — so
+a suite with a real failing test exits **2**, the same code an externally
+signalled run exits (without xdist the same failure exits 1). Reading that `2`
+as "the harness interrupted the run" cost a filed flake row and six verdicts
+of wrong triage.
+
+The tests step therefore records a classification next to the exit code:
+
+```json
+"steps": [
+  {"id": "tests", "type": "script", "passed": false,
+   "data": {"exit_code": 2,
+            "pytest_outcome": {
+              "kind": "maxfail",
+              "detail": "real test failure(s): maxfail stopped the run after 1 failure(s) — pytest exit 2 here is xdist's Interrupted, not an interruption of the run; first: tests/test_x.py::test_broken",
+              "first_failing_test": "tests/test_x.py::test_broken",
+              "failures": 1,
+              "interrupted": false}}}
+```
+
+`kind` is one of `passed`, `failed`, `maxfail`, `interrupted`,
+`interrupted-unclassified`, `internal-error`, `usage-error`,
+`no-tests-collected`, `unknown` (enumerated as
+`engine.types.PYTEST_OUTCOME_KINDS`). Two rules of thumb:
+
+* `maxfail` means **tests failed** — triage the failing test, do not re-run
+  the judge looking for an environment problem. `interrupted` (a
+  `KeyboardInterrupt` banner with no failing test) is the only kind that means
+  the run was cut short from outside; `interrupted-unclassified` means the
+  captured output is too short to say — capture more before concluding
+  anything.
+* The step keeps the **whole** captured output; bounding happens once at
+  serialization (`MAX_STEP_EVIDENCE_CHARS`, head+tail, FAILED/ERROR lines
+  hoisted). A head-only capture slice is what made the pre-fix record unable
+  to name its own cause.
+
 ### Known residual divergence
 
 `pytest` exit 5 ("no tests collected") is a pass-with-warning in the guard

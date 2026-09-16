@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`-x` + xdist made a real test failure exit 2, and the judge read it as an
+  interruption (INT-FLAKE-2)** — xdist's `DSession` raises
+  `Interrupted(KeyboardInterrupt)` when maxfail trips, which pytest maps onto
+  `ExitCode.INTERRUPTED`, so a failing suite reported the same code as a
+  signalled run. The tier1 tests step now records `data.pytest_outcome`
+  (`kind`/`detail`/`first_failing_test`/`failures`/`interrupted`, via
+  `engine.types.pytest_outcome`) instead of leaving a bare exit code, and says
+  `maxfail` (real failure) vs `interrupted` (signalled) vs
+  `interrupted-unclassified` (evidence too short) explicitly.
+- **Step capture kept only the first 2000 chars** — the head-only slice landed
+  where pytest's short test summary begins, so the DF-GITREINS-POC-8
+  head+tail evidence bound had no tail to preserve and the failing test id
+  never reached `verdict.json`. The whole output is now kept and bounded once,
+  at serialization.
+
 ## [0.13.0] — 2026-09-16
 
 ### Added

@@ -61,7 +61,7 @@ from engine.guard_manager import (
     _resolve_test_command,
     harness_state_allowlist_paths,
 )
-from engine.types import _FAILED_TEST_LINE, parse_first_failing_test
+from engine.types import _FAILED_TEST_LINE, parse_first_failing_test, pytest_outcome
 
 logger = logging.getLogger("gitreins.pipeline")
 
@@ -76,6 +76,12 @@ MAX_STEP_EVIDENCE_CHARS = 4000
 # pytest short-summary ERROR lines ("ERROR tests/test_x.py::test_setup - ...")
 # mirror engine.types._FAILED_TEST_LINE for collection/setup errors.
 _ERROR_TEST_LINE = re.compile(r"^ERROR \S+::")
+
+# INT-FLAKE-2: script steps whose command is a pytest invocation get their
+# outcome classified (engine.types.pytest_outcome) instead of leaving a bare
+# exit code in the verdict. Matches `pytest`, `python -m pytest`, `uv run
+# pytest`, and a venv console script — the whole `\bpytest\b` word.
+_PYTEST_INVOCATION = re.compile(r"\bpytest\b")
 
 # TRUST-001: a step that SKIPS (e.g. the linter is not on PATH) prints this
 # marker and exits 0, so the stage can record the gate it never graded instead
@@ -473,7 +479,14 @@ class Pipeline:
                 cwd=self.workdir,
                 env=sanitized_env,
             )
-            output = (result.stdout + result.stderr)[:2000]
+            # INT-FLAKE-2: keep the WHOLE captured output. The previous
+            # head-only [:2000] slice landed exactly where pytest's short test
+            # summary begins on a long run, so the verdict evidence had no tail
+            # for _bound_step_evidence to preserve (DF-GITREINS-POC-8's
+            # head+tail bound cannot recover what was already discarded) and
+            # the failing test id vanished from the record. Bounding now
+            # happens once, at serialization (StepResult.to_dict).
+            output = result.stdout + result.stderr
             # A non-zero exit is a hard failure regardless of on_fail. on_fail
             # only controls whether later steps still run; it must never turn a
             # failed lint/test into a pass (previously `on_fail: continue` and
@@ -481,6 +494,12 @@ class Pipeline:
             passed = result.returncode == 0
 
             data: dict = {"exit_code": result.returncode}
+            # INT-FLAKE-2: an exit code cannot say WHY pytest ended — under
+            # `-x` + xdist a REAL failing test exits 2 (INTERRUPTED), exactly
+            # like a signalled run. Classify from the output so the verdict
+            # names the cause instead of the reader's guess.
+            if _PYTEST_INVOCATION.search(cmd):
+                data["pytest_outcome"] = pytest_outcome(result.returncode, output)
             # DF-018: the tier-1 stage points the written verdict at the raw
             # guard evidence (complete, untruncated run log) when one exists.
             guard_log = self._guard_log_ref(stage_id)

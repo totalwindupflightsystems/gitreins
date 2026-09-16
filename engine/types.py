@@ -154,6 +154,159 @@ def first_failing_test_detail(output: str, fail_count: int = 0) -> str:
     return "FAIL (" + "; ".join(clauses) + ")"
 
 
+# ── pytest outcome classification (INT-FLAKE-2) ──────────────────
+# A pytest exit code does not say WHY a run ended, and the missing half is the
+# dangerous half: `-x` (maxfail) combined with pytest-xdist makes the master
+# raise xdist's own ``Interrupted(KeyboardInterrupt)`` as soon as maxfail is
+# reached, and pytest maps KeyboardInterrupt onto ``ExitCode.INTERRUPTED`` (2).
+# A suite with a REAL failing test therefore exits 2 — the same code an
+# externally interrupted run exits — while a failure with maxfail reached but
+# no xdist exits 1. Every reader that trusted the number filed the failure as a
+# harness flake: the tier1 tests step recorded ``exit_code: 2`` and the
+# maxfail/FAILED evidence sat past the head-only capture slice, so INT-FLAKE-2
+# was filed as an "environment interruption" for six verdicts before the
+# mapping was reproduced live (2026-09-16: ``pytest -x --tb=short -n 2`` over a
+# 3-test suite with one bad assertion → exit 2, output ending in
+# ``xdist.dsession.Interrupted: stopping after 1 failures``).
+#
+# These markers are what tells the two apart from captured output.
+_MAXFAIL_MARKER = re.compile(r"xdist\.dsession\.Interrupted:\s*stopping after (\d+) failure")
+# `-x` without xdist prints the same banner (and exits 1). Anchored per line —
+# the banner is one line in the middle of the captured output.
+_MAXFAIL_BANNER = re.compile(r"^!+\s*stopping after (\d+) failures?\s*!+$", re.MULTILINE)
+_KEYBOARD_INTERRUPT_MARKER = re.compile(r"^!*\s*KeyboardInterrupt\s*!*$", re.MULTILINE)
+# pytest's terminal summary: "===== 1 failed, 2 passed in 1.17s =====".
+_PYTEST_FAILED_COUNT = re.compile(r"(\d+) failed")
+_PYTEST_NO_TESTS = re.compile(r"no tests ran", re.IGNORECASE)
+_PYTEST_USAGE_ERROR = re.compile(r"^ERROR: ", re.MULTILINE)
+
+# ``kind`` values returned by pytest_outcome(). Kept as a tuple so tests and
+# downstream readers can enumerate them instead of hardcoding strings.
+PYTEST_OUTCOME_KINDS = (
+    "passed",
+    "failed",
+    "maxfail",
+    "interrupted",
+    "interrupted-unclassified",
+    "internal-error",
+    "usage-error",
+    "no-tests-collected",
+    "unknown",
+)
+
+
+def _pytest_reported_failures(output: str) -> int | None:
+    """N from pytest's terminal ``N failed`` clause, or None when absent.
+
+    Scanned from the END because the terminal summary is the last thing pytest
+    prints; a test that merely echoes "3 failed" earlier in the log must not
+    win over the real summary line.
+    """
+    for line in reversed(output.split("\n")):
+        match = _PYTEST_FAILED_COUNT.search(line)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def pytest_outcome(exit_code: int | None, output: str) -> dict:
+    """Classify why a pytest run ended, for a verdict record.
+
+    INT-FLAKE-2: ``StepResult.data['exit_code']`` alone made a real failing
+    suite indistinguishable from a harness interruption, because ``-x`` plus
+    xdist exits 2 on the first failure. This is the honest mapping, derived
+    from the captured output rather than from the number:
+
+    * ``passed`` — exit 0.
+    * ``failed`` — exit 1: tests failed (no maxfail reach).
+    * ``maxfail`` — exit 2 whose output carries the xdist maxfail marker, the
+      non-xdist maxfail banner, or the FAILED/ERROR id that triggered it: a
+      REAL failure, not an interruption.
+    * ``interrupted`` — exit 2 with a KeyboardInterrupt banner and no failing
+      test: the run was signalled from outside.
+    * ``interrupted-unclassified`` — exit 2 with neither piece of evidence
+      (typically a truncated capture): reported as unknown, never as a code
+      defect.
+    * ``internal-error`` / ``usage-error`` / ``no-tests-collected`` — pytest
+      exit 3 / 4 / 5.
+
+    Returns a JSON-safe dict with ``kind``, ``detail`` (one human line),
+    ``first_failing_test``, ``failures`` and ``interrupted``. ``failures`` is
+    pytest's own reported count when the terminal summary is present, else the
+    number of FAILED lines seen (a lower bound on truncated output).
+    """
+    first = parse_first_failing_test(output)
+    failed_lines = sum(1 for line in output.split("\n") if _FAILED_TEST_ID.match(line.strip()))
+    reported = _pytest_reported_failures(output)
+    failures = reported if reported is not None else failed_lines
+
+    kind = "unknown"
+    detail = ""
+    interrupted = False
+
+    if exit_code == 0:
+        kind = "passed"
+        detail = "pytest passed"
+    elif exit_code == 1:
+        kind = "failed"
+        detail = f"{failures} failure(s)" if failures else "pytest reported failures"
+        if first:
+            detail += f"; first: {first}"
+    elif exit_code == 2:
+        marker = _MAXFAIL_MARKER.search(output)
+        banner = _MAXFAIL_BANNER.search(output.strip())
+        if marker or banner or first:
+            kind = "maxfail"
+            stop_at = int(marker.group(1)) if marker else None
+            if stop_at is None:
+                stop_at = int(banner.group(1)) if banner else (failures or 1)
+            detail = (
+                f"real test failure(s): maxfail stopped the run after {stop_at} "
+                "failure(s) — pytest exit 2 here is xdist's Interrupted, not an "
+                "interruption of the run"
+            )
+            if first:
+                detail += f"; first: {first}"
+        elif _KEYBOARD_INTERRUPT_MARKER.search(output):
+            kind = "interrupted"
+            interrupted = True
+            detail = (
+                "run interrupted by a signal (KeyboardInterrupt) — no failing "
+                "test in the captured output"
+            )
+        else:
+            kind = "interrupted-unclassified"
+            interrupted = True
+            detail = (
+                "pytest exited 2 (INTERRUPTED) with neither a FAILED line nor a "
+                "KeyboardInterrupt banner in the captured output — cause not "
+                "determinable from this evidence"
+            )
+    elif exit_code == 3 and "INTERNALERROR" in output.upper():
+        kind = "internal-error"
+        detail = "pytest crashed with an internal error"
+    elif exit_code == 4 or (exit_code is not None and _PYTEST_USAGE_ERROR.search(output)):
+        kind = "usage-error"
+        detail = "pytest rejected the invocation (usage error)"
+    elif exit_code == 5 or _PYTEST_NO_TESTS.search(output):
+        kind = "no-tests-collected"
+        detail = "pytest collected no tests"
+    elif exit_code is not None and exit_code < 0:
+        kind = "unknown"
+        detail = f"pytest was killed by signal {-exit_code} before it could summarise"
+    else:
+        kind = "unknown"
+        detail = f"pytest exited with unexpected code {exit_code}"
+
+    return {
+        "kind": kind,
+        "detail": detail,
+        "first_failing_test": first,
+        "failures": failures,
+        "interrupted": interrupted,
+    }
+
+
 # ── Secrets scanner attribution (TRUST-003 / dogfood POC-15) ──────
 # The secrets guard runs TWO scanners — gitleaks (when installed) and the
 # built-in regex cross-check — and fails when EITHER finds something, but the
