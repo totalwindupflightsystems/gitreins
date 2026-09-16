@@ -46,6 +46,10 @@ GITREINS_GITIGNORE_ENTRIES = (
     ".gitreins/tasks.yaml",
     ".gitreins/config.yaml.bak",
     ".gitreins/usage.jsonl",
+    # DF-018: guard run logs (one full log per guard run). Without this
+    # entry every consumer repo that runs the guard would show an untracked
+    # .gitreins/logs/ in `git status`.
+    ".gitreins/logs/",
 )
 
 DEFAULT_GITREINS_CONFIG = """\
@@ -1815,6 +1819,15 @@ def cmd_guard_run(args):
 
     print(f"Tier 1 Guards: {'PASS' if result.passed else 'FAIL'}{mode_note}")
     print(result.summary)
+
+    # DF-018: name the persisted run log (the complete, untruncated output)
+    # on BOTH pass and fail — the bounded summary above is not enough to
+    # diagnose a failure after the fact. When persistence failed, print the
+    # reason instead of a path.
+    if extra.get("guard_log"):
+        print(f"  guard log: {extra['guard_log']}")
+    else:
+        print(f"  guard log: not written — {extra.get('guard_log_error') or 'unknown reason'}")
 
     if result.warnings:
         print()

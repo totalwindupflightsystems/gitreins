@@ -21,6 +21,12 @@ class GuardResult:
     # Non-fatal note for guard output (e.g. GR-GAP-037 runner fallback:
     # configured test_command's runner binary missing → python -m pytest).
     warning: str = ""
+    # Exit code of the underlying tool, when the guard ran one (lint, tests,
+    # gitleaks). None for guards that are not a single subprocess (LSP,
+    # static analysis, skylos) — the persisted run log records "n/a" for
+    # those. Recorded per guard so a post-mortem can tell a test failure
+    # from a runner error (DF-018).
+    exit_code: int | None = None
 
     def _pass_detail(self) -> str:
         """Short detail string for passing guards (e.g. 'clean', '3 files')."""

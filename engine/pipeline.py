@@ -260,7 +260,9 @@ class Pipeline:
         result = StageResult(id=stage_id)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(steps)) as executor:
-            futures = {executor.submit(self._run_step, step, task): step for step in steps}
+            futures = {
+                executor.submit(self._run_step, step, task, stage_id): step for step in steps
+            }
             for future in concurrent.futures.as_completed(futures):
                 step_result = future.result()
                 result.steps.append(step_result)
@@ -279,7 +281,7 @@ class Pipeline:
         if steps:
             # Multi-step sequential stage (e.g. tier1 with secrets→lint→tests)
             for step_def in steps:
-                step_result = self._run_step(step_def, task)
+                step_result = self._run_step(step_def, task, stage_id)
                 result.steps.append(step_result)
                 if not step_result.passed and step_def.get("on_fail") != "continue":
                     # Stop at first hard failure — later steps won't change the verdict
@@ -297,7 +299,7 @@ class Pipeline:
             step_result = self._run_output(stage_def, task)
         else:
             # Treat as a single script step
-            step_result = self._run_script_step(stage_def, task)
+            step_result = self._run_script_step(stage_def, task, stage_id)
 
         result.steps.append(step_result)
         result.passed = step_result.passed
@@ -305,13 +307,13 @@ class Pipeline:
         result.summary = step_result.output or step_result.error
         return result
 
-    def _run_step(self, step_def: dict, task: dict) -> StepResult:
+    def _run_step(self, step_def: dict, task: dict, stage_id: str | None = None) -> StepResult:
         """Run a single step (used by parallel stages)."""
         step_type = step_def.get("type", "script")
         step_id = step_def.get("id", "unnamed")
 
         if step_type == "script":
-            return self._run_script_step(step_def, task)
+            return self._run_script_step(step_def, task, stage_id)
         elif step_type == "ai_eval":
             return self._run_ai_eval(step_def, task)
         elif step_type == "commit_audit":
@@ -323,7 +325,27 @@ class Pipeline:
                 id=step_id, type=step_type, passed=False, error=f"Unknown step type: {step_type}"
             )
 
-    def _run_script_step(self, step_def: dict, task: dict) -> StepResult:
+    def _guard_log_ref(self, stage_id: str | None) -> str | None:
+        """Newest persisted guard-run log, for tier-1 step evidence (DF-018).
+
+        The path derivation lives in ONE place (engine.guard_manager's
+        accessor) — the tier-1 stage points a written verdict at the raw,
+        untruncated guard output instead of duplicating the path logic.
+        Returns None when the stage is not tier1, or when no guard run has
+        persisted a log for this workdir yet.
+        """
+        if stage_id != "tier1":
+            return None
+        try:
+            from engine.guard_manager import newest_guard_log
+
+            return newest_guard_log(self.workdir)
+        except Exception:  # evidence plumbing must never fail a pipeline
+            return None
+
+    def _run_script_step(
+        self, step_def: dict, task: dict, stage_id: str | None = None
+    ) -> StepResult:
         """Execute a shell command."""
         step_id = step_def.get("id", "unnamed")
         cmd = step_def.get("run", "")
@@ -356,12 +378,19 @@ class Pipeline:
             # generated `cmd || true` both zeroed the failure). 2026-08-08.
             passed = result.returncode == 0
 
+            data: dict = {"exit_code": result.returncode}
+            # DF-018: the tier-1 stage points the written verdict at the raw
+            # guard evidence (complete, untruncated run log) when one exists.
+            guard_log = self._guard_log_ref(stage_id)
+            if guard_log:
+                data["guard_log"] = guard_log
+
             return StepResult(
                 id=step_id,
                 type="script",
                 passed=passed,
                 output=output,
-                data={"exit_code": result.returncode},
+                data=data,
             )
         except subprocess.TimeoutExpired:
             return StepResult(id=step_id, type="script", passed=False, error="Command timed out")

@@ -529,6 +529,9 @@ class GitReinsMCPServer:
         return {
             "passed": result.passed,
             "workdir": wd,
+            # DF-018: point MCP callers at the complete, untruncated guard
+            # run log. None when persistence was refused by the filesystem.
+            "guard_log": result.extra.get("guard_log"),
             "results": [
                 {"name": r.name, "passed": r.passed, "output": r.output[:500]}
                 for r in result.results

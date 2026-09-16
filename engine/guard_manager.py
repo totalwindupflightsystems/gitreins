@@ -25,6 +25,7 @@ import re
 import subprocess
 import time
 from dataclasses import replace
+from datetime import datetime, timezone
 from engine.guards import (
     _coerce_timeout,
     check_go_lint,
@@ -394,6 +395,180 @@ def _merge_secret_findings(gitleaks_output: str, builtin_output: str) -> str:
     return "\n".join(merged)
 
 
+# ── Guard run log persistence (DF-018) ─────────────────────────
+# The guard console summary is deliberately BOUNDED (head+tail bounding in
+# engine/types.py + the tail-only slice in _run_test_command), so after a
+# failed run the full pytest traceback was unrecoverable: the only way to
+# learn what actually broke was to re-run pytest by hand.
+#
+# Every guard run now persists its COMPLETE, untruncated output to
+# ``<workdir>/.gitreins/logs/guard-<UTC-stamp>.log`` — one file per run —
+# and the newest path is exposed to callers (CLI, judge pipeline) through
+# ``newest_guard_log()``. Same contract as the judge usage telemetry in
+# engine/pipeline.py: BEST-EFFORT and NON-FATAL. Never raises, never
+# changes the guard verdict, never blocks a commit.
+GUARD_LOG_SUBDIR = os.path.join(".gitreins", "logs")
+GUARD_LOG_PREFIX = "guard-"
+GUARD_LOG_SUFFIX = ".log"
+# Newest N runs are retained; older files are pruned so the directory
+# cannot grow without bound.
+GUARD_LOG_KEEP = 20
+# Single-log cap. Pathological output (a runaway suite) is cut with an
+# explicit marker rather than filling the disk.
+GUARD_LOG_MAX_BYTES = 2 * 1024 * 1024
+
+
+def guard_log_dir(workdir: str) -> str:
+    """Absolute path of the directory holding persisted guard run logs."""
+    return os.path.join(os.path.abspath(workdir), GUARD_LOG_SUBDIR)
+
+
+def _guard_log_name() -> str:
+    """Log file name for one run.
+
+    Fixed-width UTC stamp (microseconds) so lexical order == chronological
+    order, which makes "newest" and "prune the oldest" both one sort.
+    """
+    return (
+        f"{GUARD_LOG_PREFIX}{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')}"
+        f"{GUARD_LOG_SUFFIX}"
+    )
+
+
+def _guard_log_files(workdir: str) -> list[str]:
+    """Absolute paths of every persisted guard log, oldest first."""
+    directory = guard_log_dir(workdir)
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return []
+    return sorted(
+        os.path.join(directory, name)
+        for name in names
+        if name.startswith(GUARD_LOG_PREFIX) and name.endswith(GUARD_LOG_SUFFIX)
+    )
+
+
+def newest_guard_log(workdir: str) -> str | None:
+    """Path of the newest persisted guard run log, or None when there is none.
+
+    The single accessor for callers that cite the raw evidence — neither the
+    CLI nor the judge pipeline guesses the timestamp embedded in the name.
+    """
+    files = _guard_log_files(workdir)
+    return files[-1] if files else None
+
+
+def _bound_guard_log(content: str, max_bytes: int | None = None) -> str:
+    """Cap a log body at *max_bytes*, ending with an explicit marker."""
+    limit = GUARD_LOG_MAX_BYTES if max_bytes is None else max_bytes
+    raw = content.encode("utf-8", errors="replace")
+    if len(raw) <= limit:
+        return content
+    marker = f"\n... [log truncated at {limit} bytes]\n"
+    keep = max(0, limit - len(marker.encode("utf-8")))
+    return raw[:keep].decode("utf-8", errors="ignore") + marker
+
+
+def _log_test_scope(extra: dict) -> str:
+    """Human-readable test scope for the log header."""
+    mode = extra.get("test_mode", "unknown")
+    if "test_targets" not in extra:
+        return "all (full mode)" if mode == "full" else "unknown"
+    targets = extra["test_targets"]
+    if targets is None:
+        return "full suite (safety trigger)"
+    return f"{targets} file(s)"
+
+
+def _guard_log_content(
+    workdir: str, result: Tier1Result, full_outputs: dict[str, str] | None = None
+) -> str:
+    """Render the full run log: header, then every guard's complete output.
+
+    Failures are listed before passes — a post-mortem reads the top of the
+    file. ``full_outputs`` carries the untruncated output captured before a
+    guard applied its own 2000-char cap (DF-018); guards that bounded
+    internally fall back to ``GuardResult.output``.
+    """
+    extra = result.extra or {}
+    evidence = full_outputs or {}
+    failed = [r for r in result.results if not r.passed]
+    lines = [
+        "GitReins guard run log — full output (the console summary is bounded)",
+        f"run_utc: {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}",
+        f"workdir: {os.path.abspath(workdir)}",
+        f"test_mode: {extra.get('test_mode', 'unknown')}",
+        f"test_targets: {_log_test_scope(extra)}",
+        f"overall: {'PASS' if result.passed else 'FAIL'}",
+        f"guards: {len(result.results)} ({len(failed)} failed)",
+    ]
+    if result.warnings:
+        lines.append("warnings:")
+        lines.extend(f"  - {warning}" for warning in result.warnings)
+
+    for r in sorted(result.results, key=lambda guard: guard.passed):
+        exit_code = "n/a" if r.exit_code is None else str(r.exit_code)
+        lines += [
+            "",
+            "=" * 78,
+            f"[{'PASS' if r.passed else 'FAIL'}] {r.name}"
+            f"  passed={str(r.passed).lower()}  exit_code={exit_code}",
+            "=" * 78,
+        ]
+        if r.warning:
+            lines.append(f"warning: {r.warning}")
+        if r.error:
+            lines.append(f"error: {r.error}")
+        body = evidence.get(r.name, r.output)
+        if body:
+            lines.append("--- output (untruncated) ---")
+            lines.append(body.rstrip("\n"))
+
+    return "\n".join(lines) + "\n"
+
+
+def _prune_guard_logs(directory: str, keep: int | None = None) -> None:
+    """Delete all but the newest *keep* guard logs. Never raises."""
+    limit = GUARD_LOG_KEEP if keep is None else keep
+    if limit <= 0:
+        return
+    try:
+        names = sorted(
+            name
+            for name in os.listdir(directory)
+            if name.startswith(GUARD_LOG_PREFIX) and name.endswith(GUARD_LOG_SUFFIX)
+        )
+    except OSError:
+        return
+    for name in names[:-limit]:
+        try:
+            os.remove(os.path.join(directory, name))
+        except OSError:
+            logger.debug("could not prune guard log %s", name)
+
+
+def write_guard_log(
+    workdir: str, result: Tier1Result, full_outputs: dict[str, str] | None = None
+) -> str:
+    """Persist the complete run log for *result*; return the log file path.
+
+    One timestamped file per run plus retention pruning. *full_outputs*
+    supplies untruncated output per guard name (see GuardManager). Raises on
+    a write failure (uncreatable directory, permission/disk errors) — the
+    caller ``GuardManager._persist_run_log`` is what makes the whole thing
+    best-effort and non-fatal.
+    """
+    directory = guard_log_dir(workdir)
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, _guard_log_name())
+    content = _bound_guard_log(_guard_log_content(workdir, result, full_outputs))
+    with open(path, "w", encoding="utf-8", errors="replace") as f:
+        f.write(content)
+    _prune_guard_logs(directory)
+    return path
+
+
 class GuardManager:
     """Run static checks against staged changes."""
 
@@ -422,6 +597,13 @@ class GuardManager:
         lsp_cfg = guards_cfg.get("lsp_timeouts", {})
         self._lsp_init_timeout: float | None = lsp_cfg.get("init")
         self._lsp_per_file_timeout: float | None = lsp_cfg.get("per_file")
+
+        # DF-018: untruncated guard outputs for the persisted run log. The
+        # guard results keep their own bounded output (what the console
+        # summary and the pipeline's step-evidence bounding consume); this
+        # map is only read by write_guard_log, so the raw evidence — the
+        # full pytest traceback — survives the run.
+        self._full_outputs: dict[str, str] = {}
 
         # Test mode: "full" (default) or "diff"
         self._test_mode = guards_cfg.get("test_mode", "full")
@@ -479,9 +661,23 @@ class GuardManager:
         start = time.monotonic()
         results: list[GuardResult] = []
         warnings: list[str] = []
+        # Fresh evidence map per run — write_guard_log reads it (DF-018).
+        self._full_outputs = {}
 
         def _timed_out() -> bool:
             return (time.monotonic() - start) >= self._hook_timeout
+
+        def _finalize(result: Tier1Result) -> Tier1Result:
+            """Persist the full run log (best-effort) on EVERY exit path.
+
+            DF-018: the console summary is deliberately bounded, so the raw
+            evidence has to outlive the run. Persistence never changes the
+            verdict — a write failure is recorded in ``extra`` (the CLI
+            prints the reason instead of a path) and the result is returned
+            untouched.
+            """
+            self._persist_run_log(result)
+            return result
 
         if self._enabled["secrets"]:
             results.append(self._check_secrets())
@@ -491,7 +687,7 @@ class GuardManager:
                     f"(hook_timeout). Remaining checks skipped — "
                     f"commit allowed to proceed (fail-open)."
                 )
-                return Tier1Result(passed=True, results=results, warnings=warnings)
+                return _finalize(Tier1Result(passed=True, results=results, warnings=warnings))
 
         if self._enabled["lint"] and not self._is_go:
             results.append(self._check_lint())
@@ -501,7 +697,7 @@ class GuardManager:
                     f"(hook_timeout). Remaining checks skipped — "
                     f"commit allowed to proceed (fail-open)."
                 )
-                return Tier1Result(passed=True, results=results, warnings=warnings)
+                return _finalize(Tier1Result(passed=True, results=results, warnings=warnings))
 
         if self._enabled["tests"] and not self._is_go:
             results.append(self._check_tests())
@@ -511,7 +707,7 @@ class GuardManager:
                     f"(hook_timeout). Remaining checks skipped — "
                     f"commit allowed to proceed (fail-open)."
                 )
-                return Tier1Result(passed=True, results=results, warnings=warnings)
+                return _finalize(Tier1Result(passed=True, results=results, warnings=warnings))
 
         dead_code_enabled = self._enabled["dead_code"] or force_dead_code
         if dead_code_enabled and not self._is_go:
@@ -522,7 +718,7 @@ class GuardManager:
                     f"(hook_timeout). Remaining checks skipped — "
                     f"commit allowed to proceed (fail-open)."
                 )
-                return Tier1Result(passed=True, results=results, warnings=warnings)
+                return _finalize(Tier1Result(passed=True, results=results, warnings=warnings))
 
         if self._enabled["skylos"]:
             results.append(self._check_skylos())
@@ -532,7 +728,7 @@ class GuardManager:
                     f"(hook_timeout). Remaining checks skipped — "
                     f"commit allowed to proceed (fail-open)."
                 )
-                return Tier1Result(passed=True, results=results, warnings=warnings)
+                return _finalize(Tier1Result(passed=True, results=results, warnings=warnings))
 
         if self._enabled["static_analysis"]:
             results.append(self._check_static_analysis())
@@ -542,7 +738,7 @@ class GuardManager:
                     f"(hook_timeout). Remaining checks skipped — "
                     f"commit allowed to proceed (fail-open)."
                 )
-                return Tier1Result(passed=True, results=results, warnings=warnings)
+                return _finalize(Tier1Result(passed=True, results=results, warnings=warnings))
 
         if self._enabled["lsp"] and not self._is_go:
             results.append(self._check_lsp())
@@ -552,7 +748,7 @@ class GuardManager:
                     f"(hook_timeout). Remaining checks skipped — "
                     f"commit allowed to proceed (fail-open)."
                 )
-                return Tier1Result(passed=True, results=results, warnings=warnings)
+                return _finalize(Tier1Result(passed=True, results=results, warnings=warnings))
 
         if self._enabled.get("security_scan", False):
             results.append(self._check_security_scan())
@@ -562,7 +758,7 @@ class GuardManager:
                     f"(hook_timeout). Remaining checks skipped — "
                     f"commit allowed to proceed (fail-open)."
                 )
-                return Tier1Result(passed=True, results=results, warnings=warnings)
+                return _finalize(Tier1Result(passed=True, results=results, warnings=warnings))
 
         if self._is_go:
             if self._go_guards.get("build", True):
@@ -573,7 +769,7 @@ class GuardManager:
                         f"(hook_timeout). Remaining checks skipped — "
                         f"commit allowed to proceed (fail-open)."
                     )
-                    return Tier1Result(passed=True, results=results, warnings=warnings)
+                    return _finalize(Tier1Result(passed=True, results=results, warnings=warnings))
             if self._go_guards.get("lint", True):
                 results.append(self._check_go_lint())
                 if _timed_out():
@@ -582,7 +778,7 @@ class GuardManager:
                         f"(hook_timeout). Remaining checks skipped — "
                         f"commit allowed to proceed (fail-open)."
                     )
-                    return Tier1Result(passed=True, results=results, warnings=warnings)
+                    return _finalize(Tier1Result(passed=True, results=results, warnings=warnings))
             if self._go_guards.get("tests", True):
                 results.append(self._check_go_tests())
                 if _timed_out():
@@ -591,7 +787,7 @@ class GuardManager:
                         f"(hook_timeout). Remaining checks skipped — "
                         f"commit allowed to proceed (fail-open)."
                     )
-                    return Tier1Result(passed=True, results=results, warnings=warnings)
+                    return _finalize(Tier1Result(passed=True, results=results, warnings=warnings))
 
         passed = all(r.passed for r in results)
         extra = {
@@ -605,7 +801,35 @@ class GuardManager:
                 extra["staged_count"] = len(staged)
             else:
                 extra["test_targets"] = None  # full suite triggered
-        return Tier1Result(passed=passed, results=results, extra=extra, warnings=warnings)
+        return _finalize(
+            Tier1Result(passed=passed, results=results, extra=extra, warnings=warnings)
+        )
+
+    def _remember_full_output(self, name: str, output: str) -> None:
+        """Keep an untruncated guard output for the persisted run log (DF-018).
+
+        Called BEFORE the guard's own 2000-char cap, so the log carries the
+        complete traceback while the guard result stays bounded for the
+        console.
+        """
+        self._full_outputs[name] = output
+
+    def _persist_run_log(self, result: Tier1Result) -> None:
+        """Write the full run log and record its path (or the failure) in extra.
+
+        BEST-EFFORT and NON-FATAL (DF-018): a missing/unwritable
+        ``.gitreins/``, a permission error or a full disk must never raise
+        out of a guard run, and must never alter the verdict. The reason is
+        surfaced through ``extra['guard_log_error']`` instead, which the CLI
+        prints in place of a path.
+        """
+        try:
+            path = write_guard_log(self.workdir, result, self._full_outputs)
+        except Exception as exc:  # noqa: BLE001 — best-effort by contract
+            logger.warning("guard run log not written: %s", exc)
+            result.extra["guard_log_error"] = str(exc)
+            return
+        result.extra["guard_log"] = path
 
     @property
     def test_mode(self) -> str:
@@ -659,7 +883,9 @@ class GuardManager:
                 output = result.stdout + result.stderr
                 if not builtin.passed:
                     output = _merge_secret_findings(output, builtin.output)
-                return GuardResult(name="secrets", passed=False, output=output)
+                return GuardResult(
+                    name="secrets", passed=False, output=output, exit_code=result.returncode
+                )
         except FileNotFoundError:
             # GR-GAP-043: the missing-gitleaks case must be VISIBLE, not a
             # silent debug line — AGENTS.md hardcodes $HOME/go/bin on PATH,
@@ -944,13 +1170,26 @@ class GuardManager:
                     env=_sanitized_env(),
                 )
                 output = lint_result.stdout + lint_result.stderr
+                # DF-018: untruncated lint output for the run log (the
+                # GuardResult below keeps the capped head the summary reads).
+                self._remember_full_output("lint", output)
                 if len(output) > 2000:
                     output = output[:2000] + "\n... [truncated]"
 
                 if lint_result.returncode == 0:
-                    return GuardResult(name="lint", passed=True, output=f"{linter}: clean")
+                    return GuardResult(
+                        name="lint",
+                        passed=True,
+                        output=f"{linter}: clean",
+                        exit_code=lint_result.returncode,
+                    )
                 else:
-                    return GuardResult(name="lint", passed=False, output=output)
+                    return GuardResult(
+                        name="lint",
+                        passed=False,
+                        output=output,
+                        exit_code=lint_result.returncode,
+                    )
             except FileNotFoundError:
                 continue
 
@@ -1018,6 +1257,10 @@ class GuardManager:
             output = result.stdout + result.stderr
             if fallback_warning:
                 output = f"{fallback_warning}\n{output}"
+            # DF-018: keep the untruncated output for the run log BEFORE the
+            # tail cap below. The GuardResult keeps the bounded tail the
+            # console summary consumes; the log gets the whole traceback.
+            self._remember_full_output(label, output)
             # GR-GAP-048: classify exit 5 on the FULL output (the "no tests
             # ran" summary is a tail line, but collection-error lines sit
             # earlier and must survive truncation for the check below).
@@ -1026,7 +1269,11 @@ class GuardManager:
                 output = output[-2000:]  # Keep last 2000 chars for failure context
             if result.returncode == 0:
                 return GuardResult(
-                    name=label, passed=True, output=output[:500], warning=fallback_warning or ""
+                    name=label,
+                    passed=True,
+                    output=output[:500],
+                    warning=fallback_warning or "",
+                    exit_code=result.returncode,
                 )
             elif no_tests_benign:
                 # pytest exit 5 with zero tests collected and no collection
@@ -1037,10 +1284,20 @@ class GuardManager:
                     if fallback_warning
                     else _PYTEST_NO_TESTS_WARNING
                 )
-                return GuardResult(name=label, passed=True, output=output[:500], warning=warning)
+                return GuardResult(
+                    name=label,
+                    passed=True,
+                    output=output[:500],
+                    warning=warning,
+                    exit_code=result.returncode,
+                )
             else:
                 return GuardResult(
-                    name=label, passed=False, output=output, warning=fallback_warning or ""
+                    name=label,
+                    passed=False,
+                    output=output,
+                    warning=fallback_warning or "",
+                    exit_code=result.returncode,
                 )
         except subprocess.TimeoutExpired:
             return GuardResult(

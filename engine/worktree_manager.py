@@ -843,9 +843,15 @@ class WorktreeManager:
             ".gitreins/worktrees.lock",
             ".coding-hermes/board/events.jsonl",
         }
+        # Runtime artifact DIRECTORIES written by GitReins itself. They are
+        # never uncommitted work: a guard run inside a task worktree writes
+        # its run log (DF-018) into .gitreins/logs/, and counting that as
+        # dirt held every fleet merge with "Git safety precondition changed
+        # before merge".
+        ignored_prefixes = (".gitreins/history/", ".gitreins/logs/")
         for line in status.splitlines():
             path = line[3:] if len(line) >= 4 else ""
-            if path in ignored or path.startswith(".gitreins/history/"):
+            if path in ignored or path.startswith(ignored_prefixes):
                 continue
             return False
         return True
