@@ -94,24 +94,46 @@ class LLMClient:
         max_retries: int = 3,
         llm_reasoning: str | None = None,
     ):
-        base_url = (
-            base_url or os.getenv("GITREINS_LLM_BASE_URL") or "https://api.openai.com/v1"
-        ).rstrip("/")
-        self.api_key = api_key or os.getenv("GITREINS_LLM_API_KEY", "")
-        if not self.api_key:
-            # Fallback: try common provider keys
-            for env_key in (
-                "NEURALWATT_API_KEY",
-                "OPENAI_API_KEY",
-                "ANTHROPIC_API_KEY",
-                "DEEPSEEK_API_KEY",
-                "KIMI_API_KEY",
-                "GROQ_API_KEY",
-                "OPENROUTER_API_KEY",
-            ):
-                self.api_key = os.getenv(env_key, "")
-                if self.api_key:
-                    break
+        env_base_url = os.getenv("GITREINS_LLM_BASE_URL")
+        if base_url:
+            resolved_base_url, self.base_url_source = base_url, "explicit argument"
+        elif env_base_url:
+            resolved_base_url, self.base_url_source = env_base_url, "GITREINS_LLM_BASE_URL"
+        else:
+            resolved_base_url, self.base_url_source = "https://api.openai.com/v1", "default"
+        # Rebind the local name: provider detection and endpoint building below
+        # read ``base_url``, and it must be the RESOLVED value — a None here
+        # made ``_is_anthropic(None)`` raise AttributeError on any client built
+        # from env/default config.
+        base_url = resolved_base_url.rstrip("/")
+        self.base_url = base_url
+
+        # DF-GITREINS-POC-14: record WHERE the key came from, never the key.
+        # The eight-key fallback chain below means "a credential is present"
+        # says nothing about which provider it belongs to; a failed call used
+        # to report only "LLM request failed after 3 attempts", so the reader
+        # could not tell which env var supplied the rejected key.
+        if api_key:
+            self.api_key = api_key
+            self.api_key_source = "explicit argument"
+        else:
+            self.api_key = os.getenv("GITREINS_LLM_API_KEY", "")
+            self.api_key_source = "GITREINS_LLM_API_KEY" if self.api_key else "none"
+            if not self.api_key:
+                # Fallback: try common provider keys
+                for env_key in (
+                    "NEURALWATT_API_KEY",
+                    "OPENAI_API_KEY",
+                    "ANTHROPIC_API_KEY",
+                    "DEEPSEEK_API_KEY",
+                    "KIMI_API_KEY",
+                    "GROQ_API_KEY",
+                    "OPENROUTER_API_KEY",
+                ):
+                    self.api_key = os.getenv(env_key, "")
+                    if self.api_key:
+                        self.api_key_source = f"{env_key} (fallback)"
+                        break
         self.model = model or os.getenv("GITREINS_LLM_MODEL") or _default_model()
         self.max_retries = max_retries
 
@@ -183,10 +205,25 @@ class LLMClient:
             try:
                 return self._chat_attempt(messages, tools, temperature, max_tokens)
             except requests.HTTPError as e:
-                status = e.response.status_code if hasattr(e, "response") and e.response else None
+                # `is not None`, never truthiness: requests.Response defines
+                # __bool__ as `self.ok`, so a REAL 4xx/5xx response is falsy.
+                # The old truthiness test left `status` None for every genuine
+                # client error, so a permanent 401/403/404/422 was retried
+                # three times with backoff while the suite's MagicMock
+                # responses (always truthy) kept the intended "don't retry 4xx"
+                # behavior — DF-GITREINS-POC-14, live: a 401 against a local
+                # server logged "HTTP error (attempt 1/3)…(3/3)".
+                status = (
+                    e.response.status_code
+                    if hasattr(e, "response") and e.response is not None
+                    else None
+                )
                 # Don't retry on 4xx (except 429 rate limit)
                 if status and status != 429 and 400 <= status < 500:
-                    raise
+                    # Permanent failure: fail fast, and name the config it used
+                    # (provider/model/endpoint/key source) like the
+                    # retry-exhausted path does.
+                    raise requests.HTTPError(f"{e} ({self.describe()})", response=e.response) from e
                 last_error = e
                 logger.warning("HTTP error (attempt %d/%d): %s", attempt + 1, self.max_retries, e)
             except requests.RequestException as e:
@@ -200,7 +237,23 @@ class LLMClient:
                 logger.debug("Retrying in %ds...", wait)
                 time.sleep(wait)
 
-        raise RuntimeError(f"LLM request failed after {self.max_retries} attempts") from last_error
+        raise RuntimeError(
+            f"LLM request failed after {self.max_retries} attempts"
+            f" ({self.describe()}) — last error: {last_error}"
+        ) from last_error
+
+    def describe(self) -> str:
+        """One-line, credential-free description of the resolved config.
+
+        DF-GITREINS-POC-14: every failure surface (the raised error, the CLI
+        recovery block) names provider, model, endpoint and WHICH env var
+        supplied the key — never the key itself. The eight-key fallback chain
+        makes "a credential is present" meaningless on its own.
+        """
+        return (
+            f"provider={self.provider} model={self.model} url={self._chat_url} "
+            f"key=<{self.api_key_source}>"
+        )
 
     def _chat_attempt(
         self,

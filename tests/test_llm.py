@@ -670,3 +670,144 @@ class TestGR068ThinkingMode:
         assert result.usage.cache_write_tokens == 200
         # Regular input = total - cache
         assert result.usage.prompt_tokens == 800  # 6000 - 5000 - 200
+
+
+# ── DF-GITREINS-POC-14: a failed call names the config it used ───────────────
+
+
+class TestFailureDiagnostics:
+    """The failure surfaces must name provider/model/endpoint/key SOURCE.
+
+    POC-14: `task complete` printed "Evaluator error: LLM call failed: LLM
+    request failed after 3 attempts" — with no provider, endpoint, model or
+    which env var supplied the rejected key, the reader could not act on it.
+    """
+
+    CREDENTIAL_KEYS = (
+        "GITREINS_LLM_API_KEY",
+        "NEURALWATT_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "KIMI_API_KEY",
+        "GROQ_API_KEY",
+        "OPENROUTER_API_KEY",
+    )
+
+    @staticmethod
+    def _clear_credentials(monkeypatch):
+        for key in TestFailureDiagnostics.CREDENTIAL_KEYS:
+            monkeypatch.delenv(key, raising=False)
+
+    def test_exhausted_retries_name_the_resolved_config(self, llm_client):
+        """RuntimeError carries provider, model, endpoint, key source, cause."""
+        with patch.object(
+            llm_client, "_chat_attempt", side_effect=requests.RequestException("connection refused")
+        ):
+            with patch("time.sleep", return_value=None):
+                with pytest.raises(RuntimeError) as exc:
+                    llm_client.chat([{"role": "user", "content": "hi"}])
+
+        message = str(exc.value)
+        assert "LLM request failed after 3 attempts" in message
+        assert f"provider={llm_client.provider}" in message
+        assert f"model={llm_client.model}" in message
+        assert "https://test.local/v1/chat/completions" in message
+        assert "key=<explicit argument>" in message
+        # The underlying cause, not just the retry count.
+        assert "connection refused" in message
+        # ...and never the credential itself.
+        assert "test-key-12345" not in message
+
+    def test_describe_names_the_primary_env_var(self, monkeypatch):
+        """GITREINS_LLM_API_KEY is named when it is the source."""
+        self._clear_credentials(monkeypatch)
+        monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-primary-secret")
+        client = LLMClient(base_url="https://test.local/v1")
+        assert "key=<GITREINS_LLM_API_KEY>" in client.describe()
+        assert "sk-primary-secret" not in client.describe()
+
+    def test_describe_names_the_fallback_env_var(self, monkeypatch):
+        """A key taken from the fallback chain says WHICH var it came from."""
+        self._clear_credentials(monkeypatch)
+        monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-secret")
+        client = LLMClient(base_url="https://openrouter.ai/api/v1")
+        assert "key=<OPENROUTER_API_KEY (fallback)>" in client.describe()
+        assert "sk-or-secret" not in client.describe()
+
+    def test_describe_reports_no_credential(self, monkeypatch):
+        """No key anywhere → the source is named 'none', not an empty string."""
+        self._clear_credentials(monkeypatch)
+        client = LLMClient(base_url="https://test.local/v1")
+        assert client.api_key == ""
+        assert client.describe().endswith("key=<none>")
+
+    def test_base_url_source_is_recorded(self, monkeypatch):
+        """Endpoint provenance: explicit argument vs env vs default."""
+        self._clear_credentials(monkeypatch)
+        explicit = LLMClient(base_url="https://explicit.local/v1", api_key="k")
+        assert explicit.base_url_source == "explicit argument"
+
+        monkeypatch.setenv("GITREINS_LLM_BASE_URL", "https://env.local/v1/")
+        from_env = LLMClient(api_key="k")
+        assert from_env.base_url_source == "GITREINS_LLM_BASE_URL"
+        assert from_env.base_url == "https://env.local/v1"
+        assert from_env.describe().startswith("provider=openai")
+        assert "url=https://env.local/v1/chat/completions" in from_env.describe()
+
+        monkeypatch.delenv("GITREINS_LLM_BASE_URL", raising=False)
+        defaulted = LLMClient(api_key="k")
+        assert defaulted.base_url_source == "default"
+        assert defaulted.base_url == "https://api.openai.com/v1"
+
+
+class TestPermanentClientErrorFailsFast:
+    """A REAL 4xx response must not be retried (DF-GITREINS-POC-14).
+
+    ``requests.Response.__bool__`` is ``self.ok``, so a truthiness test on the
+    response object is False for every 4xx/5xx. The old check therefore left
+    ``status`` None for real responses and retried permanent client errors
+    three times with backoff — while the MagicMock fixtures used by the
+    existing 4xx test (always truthy) passed. These tests use real Response
+    objects so the fixture-truthiness gap cannot recur.
+    """
+
+    @staticmethod
+    def _real_response(status_code: int, body: bytes = b'{"error":{"message":"bad key"}}'):
+        import requests
+
+        resp = requests.Response()
+        resp.status_code = status_code
+        resp.url = "https://test.local/v1/chat/completions"
+        resp._content = body
+        resp.request = requests.Request("POST", resp.url).prepare()
+        return resp
+
+    def test_401_fails_on_the_first_attempt(self, llm_client):
+        """A rejected credential is permanent: one call, not three."""
+        with patch("requests.post", return_value=self._real_response(401)) as post:
+            with patch("time.sleep", return_value=None) as sleep:
+                with pytest.raises(requests.HTTPError) as exc:
+                    llm_client.chat([{"role": "user", "content": "hi"}])
+
+        assert post.call_count == 1, "a 401 must not be retried"
+        assert sleep.call_count == 0
+        # Fail-fast path names the resolved config, like the retry path does.
+        assert "401" in str(exc.value)
+        assert f"provider={llm_client.provider}" in str(exc.value)
+        assert "key=<explicit argument>" in str(exc.value)
+        assert "test-key-12345" not in str(exc.value)
+
+    def test_429_is_still_retried_with_a_real_response(self, llm_client):
+        """Rate limiting IS transient: a real 429 keeps the retry budget."""
+        responses = [self._real_response(429), self._real_response(200, b'{"choices":[]}')]
+        with patch("requests.post", side_effect=responses) as post:
+            with patch("time.sleep", return_value=None):
+                with pytest.raises(Exception):
+                    llm_client.chat([{"role": "user", "content": "hi"}])
+        assert post.call_count == 2, "a 429 must be retried"
+
+    def test_response_truthiness_is_the_trap(self):
+        """Pin the underlying fact: real 4xx responses are falsy."""
+        assert bool(self._real_response(401)) is False
+        assert bool(self._real_response(200, b"{}")) is True

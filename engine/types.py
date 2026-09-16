@@ -94,6 +94,42 @@ class GuardResult:
         return ""
 
 
+def strip_ansi(text: str) -> str:
+    """Remove terminal escape sequences from captured tool output.
+
+    DF-GITREINS-POC-14: the tier-1 secrets step captures gitleaks' logrus
+    output, which colourises the ``6:51PM INF scanned ~5 MB`` lines. Those
+    escapes were recorded verbatim into ``verdict.json`` and, when a step's
+    first output line happened to be one, printed raw on the console. Strip
+    them at the presentation/record boundary — the text is unchanged, only
+    the colour codes go.
+
+    Handles CSI sequences (``\\x1b[32m``) and OSC sequences
+    (``\\x1b]8;;url\\x07``), the two families terminal tooling actually emits.
+    """
+    return _ANSI_CSI.sub("", _ANSI_OSC.sub("", text or ""))
+
+
+_ANSI_CSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]")
+_ANSI_OSC = re.compile(r"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
+
+
+def _first_nonblank_line(text: str, limit: int = 100) -> str:
+    """ANSI-stripped first non-blank line of *text*, truncated to *limit*.
+
+    DF-GITREINS-POC-14: a stage summary is ONE line per step, but it was
+    rendered from ``output[:100]`` — a raw slice that carried embedded
+    newlines (so one step printed as several lines) and terminal escapes.
+    Returns "" when the text has no non-blank line, letting the caller name
+    that case instead of printing a dangling ``✓ lint: ``.
+    """
+    for line in strip_ansi(text).split("\n"):
+        line = line.strip()
+        if line:
+            return line[:limit]
+    return ""
+
+
 def _truncate_line(line: str, limit: int = 100) -> str:
     """Truncate a single-line detail to *limit* chars with a trailing ellipsis."""
     if len(line) > limit:

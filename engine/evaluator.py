@@ -370,6 +370,40 @@ class Verdict:
     summary: str = ""
 
 
+# DF-GITREINS-POC-14: the summary prefix the evaluator writes when it cannot
+# reach the provider at all. A verdict carrying it judged NOTHING — the work
+# was never read — so `task complete` matches this marker to print the
+# recovery path instead of leaving a bare FAIL behind.
+LLM_FAILURE_SUMMARY_PREFIX = "Evaluator error: LLM call failed:"
+
+
+def _is_transport_failure(exc: BaseException) -> bool:
+    """True when *exc* (or its cause chain) never reached the provider.
+
+    A connection/timeout failure is not a context-window problem, but the
+    keyword sniffer below reads the WHOLE error message — and ``requests``'
+    own wording for an unreachable provider is "Max retries exceeded with
+    url: …", which matches the "exceeded" keyword. Result: a provider outage
+    burned every compaction round (3 × fresh conversation + a re-call) before
+    the verdict was finally written as INCOMPLETE.
+
+    An ``HTTPError`` is deliberately NOT a transport failure: the provider
+    answered, and a 4xx body is exactly where context-length errors live.
+    """
+    import requests
+
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, requests.exceptions.RequestException) and not isinstance(
+            current, requests.exceptions.HTTPError
+        ):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
 class AgenticEvaluator:
     """The evaluator loop: LLM iterates with tools until it delivers a verdict.
 
@@ -1128,8 +1162,13 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                     pass
 
                 # Also check error message for common context-window keywords
+                # — but ONLY for errors that actually reached the provider.
+                # DF-GITREINS-POC-14: the named-failure message now embeds the
+                # underlying cause, and requests' "Max retries exceeded with
+                # url: …" matched the "exceeded" keyword, so a refused socket
+                # was retried through every compaction round.
                 err_msg = str(e).lower()
-                if not is_context_error:
+                if not is_context_error and not _is_transport_failure(e):
                     is_context_error = any(
                         kw in err_msg
                         for kw in (
@@ -1165,7 +1204,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 logger.error("LLM call failed on iteration %d: %s", iteration, e)
                 return Verdict(
                     verdict="INCOMPLETE",
-                    summary=f"Evaluator error: LLM call failed: {e}",
+                    summary=f"{LLM_FAILURE_SUMMARY_PREFIX} {e}",
                 )
 
             # Track LLM call (costs 1.0 iterations + token usage)

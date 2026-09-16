@@ -12,6 +12,7 @@ from engine.evaluator import (
     AgenticEvaluator,
     Verdict,
     VerdictItem,
+    _is_transport_failure,
 )
 from engine.llm import LLMResponse, ToolCall
 
@@ -699,6 +700,84 @@ class TestCompaction:
             verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
         assert verdict.verdict == "INCOMPLETE"
         assert "other error" in verdict.summary.lower()
+
+    def test_transport_failure_does_not_trigger_compaction(self, evaluator, llm_client):
+        """A refused socket is not a context-window error (DF-GITREINS-POC-14).
+
+        LLMClient now embeds the underlying cause in its message, and requests'
+        wording for an unreachable provider is "Max retries exceeded with url:
+        …" — which matched the "exceeded" keyword, so a provider outage ran
+        every compaction round before writing the INCOMPLETE verdict.
+        """
+        import requests
+
+        transport = RuntimeError(
+            "LLM request failed after 3 attempts (provider=openai model=m "
+            "url=http://127.0.0.1:9/v1/chat/completions key=<GITREINS_LLM_API_KEY>) "
+            "— last error: Max retries exceeded with url: /v1/chat/completions"
+        )
+        transport.__cause__ = requests.ConnectionError("Connection refused")
+
+        with patch.object(llm_client, "chat", side_effect=transport):
+            with patch.object(evaluator, "_compact_context") as compact:
+                verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
+
+        assert compact.call_count == 0, "a transport failure must not compact context"
+        assert verdict.verdict == "INCOMPLETE"
+        assert "Max retries exceeded" in verdict.summary  # the real cause survives
+
+    def test_context_keyword_still_compacts_without_a_transport_cause(self, evaluator, llm_client):
+        """The keyword path is preserved for errors that reached the provider."""
+        err = RuntimeError("provider returned no choices: maximum context length exceeded")
+        evaluator._sandbox["verified_0"] = "PASS"
+        with patch.object(
+            llm_client,
+            "chat",
+            side_effect=[
+                err,
+                LLMResponse(
+                    content='{"verdict":"COMPLETE","items":[{"criterion":"c0","status":"PASS","detail":"x"}],"summary":"ok"}'
+                ),
+            ],
+        ):
+            verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
+        assert verdict.verdict == "COMPLETE"
+
+
+class TestTransportFailureClassification:
+    """_is_transport_failure distinguishes "never reached the provider" (POC-14)."""
+
+    def test_connection_error_is_transport(self):
+        import requests
+
+        assert _is_transport_failure(requests.ConnectionError("refused")) is True
+
+    def test_timeout_is_transport(self):
+        import requests
+
+        assert _is_transport_failure(requests.Timeout("timed out")) is True
+
+    def test_http_error_is_not_transport(self):
+        """The provider answered — a 4xx body is where context errors live."""
+        import requests
+
+        assert _is_transport_failure(requests.HTTPError("400 context length exceeded")) is False
+
+    def test_wrapped_cause_is_walked(self):
+        import requests
+
+        wrapper = RuntimeError("LLM request failed after 3 attempts")
+        wrapper.__cause__ = requests.ConnectionError("refused")
+        assert _is_transport_failure(wrapper) is True
+
+    def test_plain_error_is_not_transport(self):
+        assert _is_transport_failure(ValueError("some other error")) is False
+
+    def test_self_referential_chain_terminates(self):
+        """A cycle in __context__ must not hang the classifier."""
+        err = RuntimeError("loop")
+        err.__context__ = err
+        assert _is_transport_failure(err) is False
 
     def test_proactive_compaction_at_90pct_threshold(self, evaluator, llm_client):
         """When cumulative prompt tokens exceed 90% of limit, compaction triggers by default."""

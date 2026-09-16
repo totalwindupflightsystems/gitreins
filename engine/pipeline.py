@@ -61,7 +61,13 @@ from engine.guard_manager import (
     _resolve_test_command,
     harness_state_allowlist_paths,
 )
-from engine.types import _FAILED_TEST_LINE, parse_first_failing_test, pytest_outcome
+from engine.types import (
+    _FAILED_TEST_LINE,
+    _first_nonblank_line,
+    parse_first_failing_test,
+    pytest_outcome,
+    strip_ansi,
+)
 
 logger = logging.getLogger("gitreins.pipeline")
 
@@ -108,6 +114,37 @@ def parse_skip_sentinels(output: str) -> list[tuple[str, str]]:
             continue
         found.append((step, reason.strip() if sep else "reason not recorded"))
     return found
+
+
+_SECRETS_SCANNERS_LINE = re.compile(r"^secrets:\s*scanners=(?P<ids>[^\n]+)$", re.M)
+
+
+def parse_secrets_scanners(output: str) -> list[str]:
+    """Scanner ids the Tier 1 ``secrets`` step reported running.
+
+    DF-GITREINS-POC-15: the step echoes ``secrets: scanners=...`` (TRUST-003)
+    so the console and the run log name the active scanner, but the verdict's
+    step ``data`` carried no machine-readable scanner id — a consumer had to
+    parse prose to learn whether gitleaks or only the built-in cross-check
+    graded the tree. Returns ``["gitleaks", "builtin"]`` in the order the step
+    named them, ``[]`` when the line is absent or unparseable (never a guess:
+    the fallback is "no attribution recorded", not a default scanner).
+    """
+    match = _SECRETS_SCANNERS_LINE.search(output or "")
+    if not match:
+        return []
+    raw = match.group("ids").strip()
+    # "gitleaks+builtin cross-check" | "builtin cross-check only (gitleaks not on PATH)"
+    raw = raw.split(" only")[0]
+    ids: list[str] = []
+    for token in raw.split("+"):
+        token = token.strip()
+        if not token:
+            continue
+        scanner = "gitleaks" if token.startswith("gitleaks") else "builtin"
+        if scanner not in ids:
+            ids.append(scanner)
+    return ids
 
 
 def _bound_step_evidence(output: str, cap: int = MAX_STEP_EVIDENCE_CHARS) -> str:
@@ -162,7 +199,7 @@ class StepResult:
             "passed": self.passed,
             # DF-GITREINS-POC-8: head+tail bounding instead of a head-only
             # [:500] slice that discarded pytest's short test summary.
-            "output": _bound_step_evidence(self.output),
+            "output": _bound_step_evidence(strip_ansi(self.output)),
             "error": self.error,
             "data": self.data,
         }
@@ -505,6 +542,13 @@ class Pipeline:
             guard_log = self._guard_log_ref(stage_id)
             if guard_log:
                 data["guard_log"] = guard_log
+            # DF-GITREINS-POC-15: stamp the secrets scanners this run actually
+            # used, so a consumer reads the attribution instead of parsing the
+            # step output's prose. Absent when the step reported none.
+            if step_id == "secrets":
+                scanners = parse_secrets_scanners(output)
+                if scanners:
+                    data["secrets_scanners"] = scanners
 
             return StepResult(
                 id=step_id,
@@ -909,28 +953,41 @@ class Pipeline:
         }
 
     def _summarize_stage(self, stage: StageResult) -> str:
-        """Create a summary string for a stage."""
+        """Create a summary string for a stage — ONE line per step.
+
+        DF-GITREINS-POC-14: this used to render ``output[:100]`` verbatim, so
+        a step whose capture carried a newline printed as several lines and a
+        step with raw escape codes (gitleaks' ``\\x1b[32mINF`` log lines)
+        printed them; a step that produced NO output printed a dangling
+        ``✓ lint: ``. Now every detail is ANSI-stripped, single-line, and
+        named when empty.
+        """
         lines = []
         for step in stage.steps:
             status = "✓" if step.passed else "✗"
-            detail = step.output[:100] if step.output else step.error[:100]
+            source = step.output or step.error
+            detail = _first_nonblank_line(source)
             if not step.passed and step.output:
                 # A failing step's first 100 chars are the pytest banner;
                 # surface the first FAILED/ERROR short-summary line instead
                 # so the failing test id is visible (DF-021 kin /
                 # DF-GITREINS-POC-8). TRUST-003 (AC1): the parsed id is named
                 # with the same '[first failing id]' marker the guard console
-                # uses. Fall back to the [:100] head when the output carries
-                # no recognizable failure line.
-                first_id = parse_first_failing_test(step.output)
+                # uses. Fall back to the sanitized head when the output
+                # carries no recognizable failure line.
+                clean = strip_ansi(step.output)
+                first_id = parse_first_failing_test(clean)
                 if first_id:
                     detail = f"FAIL ({first_id} [first failing id])"[:100]
                 else:
-                    for line in step.output.split("\n"):
+                    for line in clean.split("\n"):
                         stripped = line.strip()
                         if _FAILED_TEST_LINE.match(stripped) or _ERROR_TEST_LINE.match(stripped):
                             detail = stripped[:100]
                             break
+            if not detail:
+                # Never print a dangling colon: name the empty case instead.
+                detail = "ok (no output)" if step.passed else "no output"
             lines.append(f"  {status} {step.id}: {detail}")
         return "\n".join(lines)
 
@@ -1081,7 +1138,12 @@ def _secrets_step_run(workdir: str) -> str:
         # evidence, so a judge FAIL says WHICH scanner raised it instead of
         # leaving "secrets" ambiguous (the ambiguity that cost POC-15 a cycle).
         'echo "secrets: scanners=gitleaks+builtin cross-check"; '
-        'gitleaks detect --source . --no-git --no-banner --config "$_glcfg"; '
+        # DF-GITREINS-POC-14: --no-color keeps gitleaks' logrus colour codes
+        # out of the captured evidence — verdict.json recorded raw
+        # `\x1b[32mINF\x1b[0m scanned ~5 MB` lines and the console summary
+        # printed them when one landed first. The INFO lines themselves stay:
+        # they are the scope evidence ("scanned ~5 MB") a post-mortem reads.
+        'gitleaks detect --source . --no-git --no-banner --no-color --config "$_glcfg"; '
         '_glrc=$?; rm -f "$_glcfg"; '
         'if [ "$_glrc" -eq 0 ]; then echo "secrets: gitleaks: clean"; '
         'else echo "secrets: gitleaks: findings found (exit $_glrc)"; fi; '

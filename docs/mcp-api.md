@@ -82,7 +82,10 @@ each config snapshot is `{model, provider, api_key_configured, api_key_prefix, b
 | `id` | string | yes | Task ID |
 | `workdir` | string | no | Repo containing the task |
 
-**Returns:** the task dict, or `{"error": "Task not found: <id>"}`.
+**Returns:** the MCP result envelope — `{"content": [{"type": "text", "text": "<json>"}]}` — whose
+`text` is the task dict serialized as a JSON string (indent 2). Clients must parse `text`; the
+envelope is the wire shape for **every** tool, not just this one. Task not found → the same
+envelope with `{"error": "Task not found: <id>"}` as the payload.
 
 ### 7. `task.delete` — delete a task
 

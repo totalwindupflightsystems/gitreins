@@ -13,7 +13,9 @@ from engine.pipeline import (
     Pipeline,
     StageResult,
     StepResult,
+    _secrets_step_run,
     load_pipeline_config,
+    parse_secrets_scanners,
 )
 
 
@@ -965,3 +967,117 @@ class TestAiEvalCapForwarding:
         assert cap.max_output_tokens == 1_000_000
         assert cap.max_seconds == 1800.0
         assert not cap.is_unlimited
+
+
+# ── DF-GITREINS-POC-14 / -15: the verdict surface names its own state ────────
+
+
+class TestStageSummaryDiagnostics:
+    """Per-step verdict lines: one line, ANSI-free, never a dangling colon.
+
+    POC-14 reported '✓ lint: ' (empty) next to raw gitleaks INFO carrying
+    terminal escapes, because the summary rendered ``output[:100]`` verbatim —
+    a raw slice that keeps embedded newlines and escape codes.
+    """
+
+    @staticmethod
+    def _summary(steps, workdir):
+        stage = StageResult(id="tier1", passed=all(s.passed for s in steps), steps=steps)
+        return Pipeline({"pipeline": {"stages": []}}, workdir)._summarize_stage(stage)
+
+    def test_summary_is_single_line_and_ansi_free(self, tmp_workdir):
+        """A capture that opens with escaped gitleaks INFO renders as one line."""
+        output = (
+            "\x1b[90m6:51PM\x1b[0m \x1b[32mINF\x1b[0m no leaks found\nsecrets: gitleaks: clean\n"
+        )
+        summary = self._summary(
+            [StepResult(id="secrets", type="script", passed=True, output=output)], tmp_workdir
+        )
+        assert summary == "  ✓ secrets: 6:51PM INF no leaks found"
+        assert "\x1b[" not in summary
+        assert len(summary.split("\n")) == 1
+
+    def test_summary_names_an_empty_passing_capture(self, tmp_workdir):
+        """No output at all → named, not a dangling '✓ lint: ' (the POC-14 line)."""
+        summary = self._summary(
+            [StepResult(id="lint", type="script", passed=True, output="")], tmp_workdir
+        )
+        assert summary == "  ✓ lint: ok (no output)"
+        assert not summary.rstrip().endswith(":")
+
+    def test_summary_names_an_empty_failing_capture(self, tmp_workdir):
+        """A failing step with no output and no error is still named."""
+        summary = self._summary(
+            [StepResult(id="tests", type="script", passed=False, output="", error="")], tmp_workdir
+        )
+        assert summary == "  ✗ tests: no output"
+
+    def test_summary_falls_back_to_the_error_text(self, tmp_workdir):
+        """No output but an error → the error names the step."""
+        summary = self._summary(
+            [
+                StepResult(
+                    id="tests", type="script", passed=False, output="", error="Command timed out"
+                )
+            ],
+            tmp_workdir,
+        )
+        assert summary == "  ✗ tests: Command timed out"
+
+
+class TestSecretsScannerAttribution:
+    """DF-GITREINS-POC-15: the scanner that ran is machine-readable."""
+
+    def test_secrets_step_disables_gitleaks_color(self, tmp_workdir):
+        """The capture cannot carry escapes: gitleaks runs with --no-color."""
+        cmd = _secrets_step_run(tmp_workdir)
+        assert "gitleaks detect --source . --no-git --no-banner --no-color" in cmd
+
+    def test_parse_secrets_scanners_both(self):
+        """Both scanners named → both ids, in the step's order."""
+        assert parse_secrets_scanners("secrets: scanners=gitleaks+builtin cross-check") == [
+            "gitleaks",
+            "builtin",
+        ]
+
+    def test_parse_secrets_scanners_fallback_only(self):
+        """The fallback echo names gitleaks' absence — the id list stays honest."""
+        line = "secrets: scanners=builtin cross-check only (gitleaks not on PATH)"
+        assert parse_secrets_scanners(line) == ["builtin"]
+
+    def test_parse_secrets_scanners_absent_is_empty(self):
+        """No attribution line → no ids (never a defaulted scanner)."""
+        assert parse_secrets_scanners("no attribution here") == []
+        assert parse_secrets_scanners("") == []
+
+    def test_recorded_evidence_is_ansi_free(self):
+        """verdict.json's step output no longer stores escape codes."""
+        sr = StepResult(
+            id="secrets", type="script", passed=True, output="\x1b[32mINF\x1b[0m scanned ~5 MB"
+        )
+        assert sr.to_dict()["output"] == "INF scanned ~5 MB"
+
+    def test_script_step_stamps_the_active_scanners(self, tmp_workdir):
+        """A real secrets step records its scanner ids in the step data."""
+        pipeline = Pipeline({"pipeline": {"stages": []}}, tmp_workdir)
+        step = {
+            "id": "secrets",
+            "type": "script",
+            "run": "echo 'secrets: scanners=gitleaks+builtin cross-check'",
+        }
+        result = pipeline._run_script_step(step, {})
+        assert result.passed is True
+        assert result.data["secrets_scanners"] == ["gitleaks", "builtin"]
+
+    def test_script_step_omits_scanners_when_unreported(self, tmp_workdir):
+        """A step that reported no attribution gets no key (not an empty list)."""
+        pipeline = Pipeline({"pipeline": {"stages": []}}, tmp_workdir)
+        result = pipeline._run_script_step({"id": "secrets", "run": "echo nothing"}, {})
+        assert "secrets_scanners" not in result.data
+
+    def test_non_secrets_step_is_not_stamped(self, tmp_workdir):
+        """The stamp is the secrets lane's, not every step's."""
+        pipeline = Pipeline({"pipeline": {"stages": []}}, tmp_workdir)
+        step = {"id": "lint", "run": "echo 'secrets: scanners=gitleaks'"}
+        result = pipeline._run_script_step(step, {})
+        assert "secrets_scanners" not in result.data

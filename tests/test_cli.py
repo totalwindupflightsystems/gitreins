@@ -2538,3 +2538,63 @@ class TestCLIExitCodes:
         assert result.returncode != 0, (
             f"judge must exit non-zero on missing task, got {result.returncode}"
         )
+
+
+# ── DF-GITREINS-POC-14: an unknown task id names itself ─────────────────────
+
+
+class TestUnknownTaskIdSurface:
+    """`task <verb> <unknown-id>` prints one clean line, never a traceback.
+
+    POC-14: `task complete` / `task delete` let TaskManager's KeyError escape
+    (raw Python traceback, rc 1) while `judge` printed 'Task not found: <id>'.
+    Same id, same repo, two different failure surfaces.
+    """
+
+    def test_start_unknown_id_prints_one_line(self, tmp_workdir):
+        result = run_cli("task", "start", "no-such-task", cwd=tmp_workdir)
+        assert result.returncode == 1, _cli_failure(result)
+        assert result.stdout.strip() == "Task not found: no-such-task"
+        assert "Traceback" not in result.stderr
+        assert "KeyError" not in result.stderr
+        assert "task list" in result.stderr
+
+    def test_delete_unknown_id_prints_one_line(self, tmp_workdir):
+        result = run_cli("task", "delete", "no-such-task", cwd=tmp_workdir)
+        assert result.returncode == 1, _cli_failure(result)
+        assert result.stdout.strip() == "Task not found: no-such-task"
+        assert "Traceback" not in result.stderr
+        assert "KeyError" not in result.stderr
+
+    def test_complete_unknown_id_wins_over_the_credential_check(self, tmp_workdir):
+        """The id is resolved FIRST: no credential complaint for a missing task.
+
+        The hermetic env supplies no credential, so the old order reported
+        "Tier 2 evaluation requires an LLM credential" for a task that does
+        not exist.
+        """
+        result = run_cli("task", "complete", "no-such-task", cwd=tmp_workdir)
+        assert result.returncode == 1, _cli_failure(result)
+        assert result.stdout.strip() == "Task not found: no-such-task"
+        assert "credential" not in (result.stdout + result.stderr).lower()
+        assert "Traceback" not in result.stderr
+
+    def test_complete_unknown_id_with_a_credential_still_names_the_id(self, tmp_workdir):
+        """A configured credential does not turn the missing id into a judge run."""
+        result = run_cli(
+            "task",
+            "complete",
+            "no-such-task",
+            cwd=tmp_workdir,
+            extra_env={"GITREINS_LLM_API_KEY": "test-key"},
+        )
+        assert result.returncode == 1, _cli_failure(result)
+        assert result.stdout.strip() == "Task not found: no-such-task"
+        assert "Evaluating" not in result.stdout
+
+    def test_known_id_still_completes(self, tmp_workdir):
+        """The guard rail does not reject a real task id (regression guard)."""
+        run_cli("task", "create", "real-task", "Real", "c1", cwd=tmp_workdir)
+        result = run_cli("task", "complete", "real-task", "--skip-tier2", cwd=tmp_workdir)
+        assert "Task not found" not in result.stdout
+        assert "real-task" in (result.stdout + result.stderr)

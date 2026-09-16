@@ -1272,11 +1272,60 @@ def cmd_task_start(args):
     from engine.task_manager import TaskManager
 
     tm = TaskManager(get_workdir())
+    _require_task(tm, args.id)
     task = tm.start(args.id)
     print(f"Started: {task.id} → {task.status}")
 
 
+def _require_task(tm, task_id: str):
+    """Return the task, or exit 1 with the clean message ``judge`` prints.
+
+    DF-GITREINS-POC-14: ``task start`` / ``task complete`` / ``task delete``
+    let TaskManager's ``KeyError("Task not found: <id>")`` escape, so an
+    unknown id dumped a Python traceback (rc 1) while ``judge`` printed a
+    single line and exited. Same id, same repo, two different failure
+    surfaces. The hint goes to stderr so a scripted stdout read stays
+    greppable.
+    """
+    task = tm.get(task_id)
+    if task is None:
+        print(f"Task not found: {task_id}")
+        print("Run `gitreins task list` to see known task ids.", file=sys.stderr)
+        raise SystemExit(1)
+    return task
+
+
+def _print_tier2_recovery(llm, task_id: str) -> None:
+    """Name the resolved LLM config and the way forward after a Tier 2 that
+    judged nothing (DF-GITREINS-POC-14).
+
+    The evaluator returns INCOMPLETE + an error summary when it cannot reach
+    the provider; the CLI used to exit 1 on that without saying which
+    credential/endpoint was tried or how to retry.
+    """
+    print("", file=sys.stderr)
+    print(
+        "Tier 2 judged nothing — the FAIL above is an infrastructure error, "
+        "not a verdict on the work.",
+        file=sys.stderr,
+    )
+    if llm is not None:
+        print(f"  resolved: {llm.describe()}", file=sys.stderr)
+    print(
+        "  fix the credential/endpoint (GITREINS_LLM_API_KEY, "
+        "GITREINS_LLM_BASE_URL, GITREINS_LLM_MODEL), then re-run:",
+        file=sys.stderr,
+    )
+    print(f"    gitreins task complete {task_id} --force", file=sys.stderr)
+    print(
+        f"  or grade Tier 1 alone:  gitreins task complete {task_id} --skip-tier2",
+        file=sys.stderr,
+    )
+    print("  see docs/onboarding.md (T5)", file=sys.stderr)
+
+
 def cmd_task_complete(args):
+    from engine.evaluator import LLM_FAILURE_SUMMARY_PREFIX
     from engine.task_manager import TaskManager
     from engine.llm import LLMClient
     from engine.judge import Judge
@@ -1286,6 +1335,10 @@ def cmd_task_complete(args):
 
     force = getattr(args, "force", False)
     skip_tier2 = getattr(args, "skip_tier2", False)
+
+    # DF-GITREINS-POC-14: resolve the id BEFORE the credential check, so an
+    # unknown id reports "Task not found" instead of a credential complaint.
+    _require_task(tm, args.id)
 
     # Check dependencies (unless forced)
     if not force:
@@ -1329,6 +1382,11 @@ def cmd_task_complete(args):
     # Persist verdict
     _persist_result(workdir, task, result)
     if not result.passed:
+        # DF-GITREINS-POC-14: an INCOMPLETE verdict that never reached the
+        # provider judged nothing — print the resolved config and the way
+        # forward instead of exiting on a bare FAIL.
+        if LLM_FAILURE_SUMMARY_PREFIX in (result.summary or ""):
+            _print_tier2_recovery(llm, task.id)
         sys.exit(1)
 
 
@@ -1349,6 +1407,7 @@ def cmd_task_delete(args):
     from engine.task_manager import TaskManager
 
     tm = TaskManager(get_workdir())
+    _require_task(tm, args.id)
     tm.delete(args.id)
     print(f"Deleted: {args.id}")
 

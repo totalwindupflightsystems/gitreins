@@ -125,13 +125,20 @@ the verdict.
 |----------|-------------|
 | `id` | Task ID (required, positional) |
 | `-f`, `--force` | Skip dependency checks |
+| `--skip-tier2` | Grade Tier 1 only — no LLM call |
 
 **Exit codes**
 
 | Code | Meaning |
 |------|---------|
 | 0 | Task completed and judged |
-| 1 | Blocked by incomplete dependencies (unless `--force`) |
+| 1 | Unknown task id (`Task not found: <id>`), blocked by incomplete dependencies (unless `--force`), no LLM credential, or a failed verdict |
+
+An unknown id is resolved **before** the credential check, so it reports
+`Task not found: <id>` even on a machine with no provider key configured.
+When Tier 2 cannot reach the provider, the verdict says so and the CLI names
+the resolved `provider=… model=… url=… key=<source env var>` plus the retry
+commands; see `docs/onboarding.md` section T5 for the full recovery path.
 
 ### `task list`
 
@@ -147,7 +154,8 @@ Exit **0** (prints "No tasks found." when the list is empty).
 |----------|-------------|
 | `id` | Task ID (required, positional) |
 
-Exit **0** on success.
+Exit **0** on success; exit **1** with `Task not found: <id>` for an
+unknown id.
 
 ## 4. `gitreins guard`
 

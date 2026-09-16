@@ -324,6 +324,36 @@ on clean-tree runs, or accept degraded runs for this repo with
 `guards.allow_skips: true` — which is what `gitreins init` writes for new repos.
 Never silence it globally in CI: exit 2 is the signal that a gate never ran.
 
+### T5. `task complete` ends with a FAIL and the evaluator says the LLM call failed
+
+**Symptom:** `gitreins task complete <id>` prints `Completed: <id> → complete`,
+then a verdict whose Tier 2 line reads
+
+```
+Evaluator error: LLM call failed: LLM request failed after 3 attempts
+(provider=openai model=... url=https://.../chat/completions key=<OPENAI_API_KEY (fallback)>)
+```
+
+**Cause:** Tier 2 could not reach the provider at all, so **nothing was
+judged** — the FAIL is an infrastructure error, not a verdict on the work. The
+resolved config is printed because the credential chain falls back through
+`GITREINS_LLM_API_KEY` → `NEURALWATT_API_KEY` → `OPENAI_API_KEY` → … → `OPENROUTER_API_KEY`,
+so "a key is set" says nothing about which provider it belongs to (the key
+itself is never printed — only the env var that supplied it).
+
+**Fix:** correct the credential or endpoint named in the line
+(`GITREINS_LLM_API_KEY`, `GITREINS_LLM_BASE_URL`, `GITREINS_LLM_MODEL`), then
+re-run the evaluation on the already-complete task:
+
+```bash
+gitreins task complete <id> --force      # re-judges; the task stays 'complete'
+gitreins task complete <id> --skip-tier2 # Tier 1 only, no LLM needed
+```
+
+An unknown task id needs no credential: `task start` / `task complete` /
+`task delete` print `Task not found: <id>` and exit 1, exactly like
+`gitreins judge`.
+
 ## Checklist: done when
 
 - [ ] `gitreins guard` passes (default guard set: secrets, lint, tests, and
