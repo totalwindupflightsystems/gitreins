@@ -6,6 +6,7 @@ Stripe, Azure, Slack tokens.
 """
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -521,6 +522,45 @@ class TestTier1SecretsStepHarnessScope:
 
         assert proc.returncode != 0
         assert "src/app.py" in proc.stdout
+
+
+class TestTier1SecretsStepNamesScanners:
+    """TRUST-003: the JUDGE's secrets step says which scanners it used.
+
+    The step is a shell script, so the attribution is echoed into the step
+    output that reaches tier1 evidence and verdict.json — a judge FAIL on
+    `secrets` no longer leaves "secrets" ambiguous.
+    """
+
+    def test_step_output_names_the_scanner_set(self, tmp_path):
+        repo = _git_repo(str(tmp_path / "repo"))
+        _write_workdir_file(repo, "src/app.py", "def add(a, b):\n    return a + b\n")
+
+        proc = subprocess.run(
+            _tier1_secrets_command(repo), shell=True, cwd=repo, capture_output=True, text=True
+        )
+
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        # The built-in cross-check always runs, so its line is always present...
+        assert "secrets: builtin cross-check status: clean" in proc.stdout
+        # ...and the scanner set is named, with or without gitleaks installed.
+        assert "secrets: scanners=" in proc.stdout
+        assert re.search(
+            r"secrets: scanners=(gitleaks\+builtin cross-check|builtin cross-check only)",
+            proc.stdout,
+        ), proc.stdout
+        assert re.search(r"secrets: gitleaks: (clean|not on PATH)", proc.stdout), proc.stdout
+
+    def test_step_output_names_the_offending_scanner_on_failure(self, tmp_path):
+        repo = _git_repo(str(tmp_path / "repo"))
+        _write_workdir_file(repo, "src/app.py", f"token = {HARNESS_CANARY}\n")
+
+        proc = subprocess.run(
+            _tier1_secrets_command(repo), shell=True, cwd=repo, capture_output=True, text=True
+        )
+
+        assert proc.returncode != 0
+        assert "secrets: builtin cross-check status: 1 finding" in proc.stdout
 
 
 class TestGitleaksHarnessExclusionConfig:

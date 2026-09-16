@@ -59,6 +59,8 @@ Iterates until it has enough evidence to deliver a verdict.
 ### 5. Guard Manager
 Static checks (`engine/guard_manager.py`): secrets (gitleaks or built-in pattern scanner), lint (ruff/flake8), staged tests (pytest). Runs Tier 1 — no LLM dependency. All checks are optional and configurable via `.gitreins/config.yaml`. Both scanners skip GitReins' own `.gitreins/**` state (config, guard run logs, verdict history, disposable bookkeeping): the judge never grades the harness itself, and the exclusion is named in the Tier 1 secrets step output.
 
+Failure evidence is named rather than counted: the console tests line prints the **first failing test id** parsed from the pytest output (`FAIL (<id> [first failing id]; N failure(s))`, `engine/types.py:parse_first_failing_test`), and the secrets line prints every scanner that ran with its own outcome (`clean (gitleaks + builtin cross-check)` / `FAIL (builtin cross-check: 2 findings; gitleaks: clean)`), because a finding raised only by the low-entropy built-in cross-check is not the same problem as one gitleaks reported. Both facts are also written to the run log's `diagnostics:` block, and the judge's Tier 1 secrets step echoes the same scanner attribution into its step output.
+
 ### 6. Judge Orchestrator
 Runs the full pipeline: Tier 1 (static guards) → Tier 2 (agentic evaluator). Compiles verdict from all tiers (`engine/judge.py`).
 

@@ -145,7 +145,11 @@ class TestStepEvidenceBound:
         assert len(d["output"]) > 500  # old code stored exactly 500
 
     def test_summarize_stage_failed_step_shows_pytest_failed_line(self, tmp_workdir):
-        """_summarize_stage surfaces the FAILED line, not the pytest banner."""
+        """_summarize_stage surfaces the parsed failing test id, not the banner.
+
+        TRUST-003: the stage summary names the FIRST failing test with the same
+        '[first failing id]' marker the guard console uses.
+        """
         step_output = (
             "============================= test session starts =============================\n"
             "collecting ... collected 7 items\n"
@@ -164,7 +168,7 @@ class TestStepEvidenceBound:
         )
         p = Pipeline({"pipeline": {"stages": []}}, tmp_workdir)
         summary = p._summarize_stage(stage)
-        line = "  ✗ tests: FAILED tests/test_x.py::TestY::test_z - AssertionError"
+        line = "  ✗ tests: FAIL (tests/test_x.py::TestY::test_z [first failing id])"
         assert line in summary
         assert "test session starts" not in summary
 

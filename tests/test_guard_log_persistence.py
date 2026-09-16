@@ -259,6 +259,66 @@ class TestLogPersistence:
 
         assert newest_guard_log(workdir) == result.extra["guard_log"]
 
+    def test_diagnostics_block_names_the_failing_test_and_the_scanners(self, tmp_path, monkeypatch):
+        """TRUST-003 (AC3): both console facts are persisted in the run log.
+
+        The console line is bounded; the log is the post-mortem artifact, so
+        the first failing test id and the secrets scanner attribution must be
+        readable there without re-parsing the untruncated bodies below.
+        """
+        workdir = _probe_workdir(tmp_path, _failing_script())
+        gm = _manager(workdir, secrets=True)
+        monkeypatch.setattr(
+            gm,
+            "_check_secrets",
+            lambda: GuardResult(
+                "secrets",
+                True,
+                "gitleaks: clean",
+                scanners=(("gitleaks", "clean"), ("builtin", "clean")),
+            ),
+        )
+
+        result = gm.run_all()
+
+        content = _read(result.extra["guard_log"])
+        assert "diagnostics:" in content
+        assert (
+            "  first_failing_test: tests/test_probe.py::test_boom  (from tests (full))" in content
+        )
+        assert "  secrets_scanners: clean (gitleaks + builtin cross-check)" in content
+
+    def test_diagnostics_log_a_finding_scanner_with_its_count(self, tmp_path, monkeypatch):
+        """A secrets FAIL logs WHICH scanner found what — the POC-15 ambiguity."""
+        workdir = _probe_workdir(tmp_path, _passing_script())
+        gm = _manager(workdir, secrets=True)
+        monkeypatch.setattr(
+            gm,
+            "_check_secrets",
+            lambda: GuardResult(
+                "secrets",
+                False,
+                'Potential secrets found:\n.env:1: [AWS access key] AWS_ACCESS_KEY_ID="***"',
+                scanners=(("gitleaks", "clean"), ("builtin", "2 findings")),
+            ),
+        )
+
+        result = gm.run_all()
+
+        content = _read(result.extra["guard_log"])
+        assert (
+            "  secrets_scanners: FAIL (builtin cross-check: 2 findings; gitleaks: clean)" in content
+        )
+
+    def test_diagnostics_say_none_detected_when_there_is_nothing_to_name(self, tmp_path):
+        """A clean run is explicit, never a silently missing diagnostic."""
+        workdir = _probe_workdir(tmp_path, _passing_script())
+        result = _manager(workdir).run_all()
+
+        content = _read(result.extra["guard_log"])
+        assert "  first_failing_test: none detected" in content
+        assert "  secrets_scanners: none ran" in content
+
 
 # ── Retention and size cap ───────────────────────────────────────
 
@@ -449,6 +509,31 @@ class TestCallersCiteTheLog:
         assert match, f"no guard log line in output:\n{out.stdout}"
         assert os.path.isfile(match.group(1))
         assert "overall: PASS" in _read(match.group(1))
+
+    def test_cli_console_names_the_failing_test_and_the_scanners(self, tmp_path):
+        """TRUST-003 end-to-end: the bounded console output the user reads.
+
+        Both facts must reach the CLI's own summary — naming them only in the
+        log would leave the dogfood friction (re-run the tools by hand) intact.
+        """
+        workdir = str(tmp_path / "repo")
+        os.makedirs(workdir)
+        command = f"{shlex.quote(sys.executable)} {SCRIPT_NAME}"
+        config = _guard_config(command, secrets=True)
+        config["defaults"] = {"check_for_updates": False}
+        _init_repo(workdir, config)
+        with open(os.path.join(workdir, SCRIPT_NAME), "w") as f:
+            f.write(_failing_script())
+
+        out = _run_guard_cli(workdir)
+
+        assert out.returncode == 1, out.stdout + out.stderr
+        assert (
+            "FAIL (tests/test_probe.py::test_boom [first failing id]; 1 failure(s))" in out.stdout
+        )
+        # The scanner name is environment-independent: gitleaks when installed,
+        # otherwise the built-in cross-check is named as the one that ran.
+        assert re.search(r"secrets — clean \([^)]*cross-check", out.stdout), out.stdout
 
 
 # ── Runtime artifacts stay out of git ────────────────────────────

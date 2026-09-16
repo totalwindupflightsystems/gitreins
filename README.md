@@ -11,7 +11,7 @@
 
 GitReins lives inside your git repository as a quality harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ✅ **v0.13.0** — LSP diagnostics (14 languages), opt-in static analysis (9 analyzers; baseline install default off, smart init enables it for detected dynamic-language projects), commit audit with CVE-scored severity, optional Antares CVE-localization guard, Anthropic Messages API support, DeepSeek prompt caching telemetry, large-repo hardening (fast-track + `--skip-tier2`), MCP `propagate`, judge single-flight + resume lease, evaluator committed-diff read path, guard run logs (full, untruncated output persisted per run), judge Tier 1 / guard parity (one language-detection source of truth + loud degradation marker), guard trust: zero-work skips are a DEGRADED PASS with named skip reasons, `guards.allow_skips`, exit 2 unless accepted, a merge-back that refuses verdicts carrying skips, and a Tier 1 secrets scope that excludes GitReins' own `.gitreins/**` state, 1556 tests pass / 41 test files, verified by collection (optional-tool skips vary).
+> ✅ **v0.13.0** — LSP diagnostics (14 languages), opt-in static analysis (9 analyzers; baseline install default off, smart init enables it for detected dynamic-language projects), commit audit with CVE-scored severity, optional Antares CVE-localization guard, Anthropic Messages API support, DeepSeek prompt caching telemetry, large-repo hardening (fast-track + `--skip-tier2`), MCP `propagate`, judge single-flight + resume lease, evaluator committed-diff read path, guard run logs (full, untruncated output persisted per run), judge Tier 1 / guard parity (one language-detection source of truth + loud degradation marker), guard trust: zero-work skips are a DEGRADED PASS with named skip reasons, `guards.allow_skips`, exit 2 unless accepted, a merge-back that refuses verdicts carrying skips, and a Tier 1 secrets scope that excludes GitReins' own `.gitreins/**` state, failure lines that name the first failing test id and every secrets scanner that ran (both persisted to the guard run log), 1587 tests pass / 41 test files, verified by collection (optional-tool skips vary).
 
 ---
 
@@ -279,7 +279,7 @@ guards:
 **Full mode:**
 ```
 Tier 1 Guards: PASS  (test mode: full)
-  ✓ secrets — clean
+  ✓ secrets — clean (gitleaks + builtin cross-check)
   ✓ lint — ok
   ✓ tests — passed
 ```
@@ -287,29 +287,47 @@ Tier 1 Guards: PASS  (test mode: full)
 **Diff mode (targeted):**
 ```
 Tier 1 Guards: PASS  (test mode: diff, 3 test file(s))
-  ✓ secrets — clean
+  ✓ secrets — clean (gitleaks + builtin cross-check)
   ✓ tests — passed
 ```
 
 **Diff mode (safety trigger — full suite):**
 ```
 Tier 1 Guards: PASS  (test mode: diff, full suite — safety trigger)
-  ✓ secrets — clean
+  ✓ secrets — clean (gitleaks + builtin cross-check)
   ✓ tests — passed
 ```
 
 **Degraded pass (a gate did no work — `guards.allow_skips` decides the exit code):**
 ```
 Tier 1: DEGRADED PASS (skips: lint=no staged files, tests=no staged files)  (test mode: diff)
-  ✓ secrets — clean
+  ✓ secrets — clean (gitleaks + builtin cross-check)
   ~ lint — skipped (no staged files)
   ~ tests — skipped (no staged files)
+```
+
+**Failure diagnostics (named, not just counted):**
+```
+Tier 1 Guards: FAIL  (test mode: full)
+  ✗ secrets — FAIL (builtin cross-check: 2 findings; gitleaks: clean)
+      findings: 2 finding(s): .env:1, src/db.py:7
+  ✗ tests (full) — FAIL (tests/test_probe.py::test_boom [first failing id]; 3 failure(s))
+  guard log: .gitreins/logs/guard-20260916T200106.123456Z.log
 ```
 
 `~` marks a step that was skipped, and a degraded run never prints the green
 `Tier 1 Guards: PASS` header — so grepping that string is proof the gates
 actually ran. With `guards.allow_skips: false` (code default) it exits **2**;
 `gitreins init` writes `allow_skips: true` for ergonomic first commits.
+
+A failure line names what broke instead of only counting it: the tests line
+carries the **first failing test id** parsed from the pytest output (with the
+failure count), and the secrets line names **every scanner that ran** plus each
+one's outcome — `gitleaks`, the built-in low-entropy cross-check, or both —
+because a finding raised only by the cross-check is a different problem from one
+gitleaks reported. Both facts are also recorded in the persisted run log
+(`.gitreins/logs/guard-*.log`) under `diagnostics:`, so a post-mortem does not
+need to re-run pytest or the scanners.
 
 ---
 
@@ -442,7 +460,7 @@ history:
 - **MCP Transport:** stdio (12 tools)
 - **Config:** YAML in `.gitreins/` directory
 - **Evaluator Default Model:** DeepSeek V4 Flash (~$0.01/eval)
-- **Test suite:** 1556 tests across 41 test files (collection total; optional-tool skips vary)
+- **Test suite:** 1587 tests across 41 test files (collection total; optional-tool skips vary)
 
 ## Architecture & Docs
 

@@ -570,6 +570,100 @@ class TestSecretsMergeOnGitleaksFailure:
         assert "config.example.json:3" in summary
 
 
+class TestSecretsScannerAttribution:
+    """TRUST-003: `_check_secrets` records WHICH scanner ran and what each saw.
+
+    The console line and the run log render ``GuardResult.scanners``, so the
+    attribution has to be populated on every branch: both clean, builtin-only
+    finding, gitleaks-only finding, and gitleaks absent.
+    """
+
+    def test_both_scanners_clean_records_both(self, tmp_workdir):
+        gm = GuardManager(tmp_workdir)
+        mock_run = MagicMock(returncode=0, stdout="", stderr="")
+        with patch("subprocess.run", return_value=mock_run):
+            with patch.object(
+                gm,
+                "_builtin_secrets_scan",
+                return_value=GuardResult(
+                    "secrets", True, "Scanned 1 files — clean", scanners=(("builtin", "clean"),)
+                ),
+            ):
+                result = gm._check_secrets()
+
+        assert result.passed is True
+        assert result.scanners == (("gitleaks", "clean"), ("builtin", "clean"))
+        assert Tier1Result(passed=True, results=[result]).summary == (
+            "  ✓ secrets — clean (gitleaks + builtin cross-check)"
+        )
+
+    def test_builtin_only_finding_names_the_builtin_scanner(self, tmp_workdir):
+        """The gitleaks-clean / builtin-findings case (GR-GAP-005) is the one
+        POC-15 could not attribute from the console."""
+        gm = GuardManager(tmp_workdir)
+        mock_run = MagicMock(returncode=0, stdout="", stderr="")
+        with patch("subprocess.run", return_value=mock_run):
+            with patch.object(
+                gm,
+                "_builtin_secrets_scan",
+                return_value=GuardResult(
+                    "secrets",
+                    False,
+                    'Potential secrets found:\n.env:1: [AWS access key] AWS_ACCESS_KEY_ID="***"',
+                    scanners=(("builtin", "2 findings"),),
+                ),
+            ):
+                result = gm._check_secrets()
+
+        assert result.passed is False
+        assert result.scanners == (("gitleaks", "clean"), ("builtin", "2 findings"))
+        assert Tier1Result(passed=False, results=[result]).summary.startswith(
+            "  ✗ secrets — FAIL (builtin cross-check: 2 findings; gitleaks: clean)"
+        )
+
+    def test_gitleaks_finding_count_comes_from_its_own_report(self, tmp_workdir):
+        """gitleaks' `leaks found: N` trailer sets the per-scanner count."""
+        sk_secret, _ = TestSecretsMergeOnGitleaksFailure._staged_multi_secret_file(tmp_workdir)
+        gm = GuardManager(tmp_workdir)
+        mock_run = TestSecretsMergeOnGitleaksFailure._gitleaks_failure_mock(
+            sk_secret, "config.example.json", 2
+        )
+
+        result = TestSecretsMergeOnGitleaksFailure._run_with_mocked_gitleaks(gm, mock_run)
+
+        assert result.passed is False
+        assert ("gitleaks", "1 finding") in result.scanners
+        assert any(sid == "builtin" and status != "clean" for sid, status in result.scanners)
+        summary = Tier1Result(passed=False, results=[result]).summary
+        assert "FAIL (gitleaks: 1 finding;" in summary
+
+    def test_gitleaks_absent_is_named(self, tmp_workdir):
+        gm = GuardManager(tmp_workdir)
+        with patch("subprocess.run", side_effect=FileNotFoundError):
+            result = gm._check_secrets()
+
+        assert ("gitleaks", "not on PATH") in result.scanners
+        assert "not on PATH" in Tier1Result(passed=True, results=[result]).summary
+
+    def test_unparseable_gitleaks_failure_is_not_reported_as_clean(self, tmp_workdir):
+        """A non-zero exit whose output carries no tally must not read as zero."""
+        gm = GuardManager(tmp_workdir)
+        mock_run = MagicMock(returncode=1, stdout="leak detected in config.py", stderr="")
+        real_run = subprocess.run
+
+        def fake_run(cmd, *args, **kwargs):
+            if cmd and cmd[0] == "gitleaks":
+                return mock_run
+            return real_run(cmd, *args, **kwargs)
+
+        with patch.object(gm, "_builtin_secrets_scan", return_value=GuardResult("secrets", True)):
+            with patch("subprocess.run", side_effect=fake_run):
+                result = gm._check_secrets()
+
+        assert result.passed is False
+        assert result.scanners == (("gitleaks", "reported findings (count unavailable)"),)
+
+
 class TestSecretsSanitization:
     """Test secret value redaction in output — step-1-3-1-4."""
 

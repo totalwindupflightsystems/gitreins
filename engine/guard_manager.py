@@ -35,7 +35,16 @@ from engine.guards import (
 )
 from engine.lsp import find_lsp_tool, run_lsp_check
 from engine.repo_paths import WorktreeResolutionError, resolve_worktree_identity
-from engine.types import GuardResult, Tier1Result
+from engine.types import (
+    SCANNER_CLEAN,
+    SCANNER_NOT_RUN,
+    GuardResult,
+    Tier1Result,
+    parse_first_failing_test,
+    parse_gitleaks_finding_count,
+    render_secrets_scanners,
+    scanner_finding_status,
+)
 
 logger = logging.getLogger("gitreins.guard")
 
@@ -259,6 +268,37 @@ def _get_worktree_changed_files(workdir: str) -> list[str]:
     return sorted(changed)
 
 
+def _tree_python_files(workdir: str) -> list[str]:
+    """Tracked + untracked-but-not-ignored Python files, repo-relative (deduped).
+
+    Same git invocation ``engine.lang_detect`` uses for its source-file
+    listing, so whole-tree grading and language detection can never disagree
+    about what the tree contains. Empty index is the normal case here — this
+    is the whole-tree listing, not a staged-files listing.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            cwd=workdir,
+            capture_output=True,
+            timeout=15,
+            env=_sanitized_env(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if proc.returncode != 0:
+        return []
+    out = proc.stdout.decode("utf-8", "replace")
+    seen: set[str] = set()
+    files: list[str] = []
+    for path in out.split("\0"):
+        # --cached + --others can list the same path twice (index + worktree).
+        if path.endswith(".py") and path not in seen:
+            seen.add(path)
+            files.append(path)
+    return files
+
+
 def _build_diff_test_command(test_command: str, test_files: list[str], workdir: str) -> str:
     """Build a test command targeting specific test files.
 
@@ -443,6 +483,11 @@ def _merge_secret_findings(gitleaks_output: str, builtin_output: str) -> str:
 # ``newest_guard_log()``. Same contract as the judge usage telemetry in
 # engine/pipeline.py: BEST-EFFORT and NON-FATAL. Never raises, never
 # changes the guard verdict, never blocks a commit.
+# TRUST-003: scanner ids for the secrets guard's attribution pairs, rendered
+# through engine.types.scanner_label() ("builtin" → "builtin cross-check").
+GITLEAKS_SCANNER = "gitleaks"
+BUILTIN_SCANNER = "builtin"
+
 GUARD_LOG_SUBDIR = os.path.join(".gitreins", "logs")
 GUARD_LOG_PREFIX = "guard-"
 GUARD_LOG_SUFFIX = ".log"
@@ -517,6 +562,39 @@ def _log_test_scope(extra: dict) -> str:
     return f"{targets} file(s)"
 
 
+def _diagnostics_lines(result: Tier1Result) -> list[str]:
+    """TRUST-003: record the two console facts in the run log as well.
+
+    The log is the post-mortem artifact (DF-018), so the first failing test id
+    and the secrets scanner attribution must be readable there without
+    re-parsing the untruncated bodies below.
+    """
+    first_id = ""
+    source = ""
+    for guard in result.results:
+        if guard.passed or not guard.output:
+            continue
+        test_id = parse_first_failing_test(guard.output)
+        if test_id:
+            first_id, source = test_id, guard.name
+            break
+    scanners = next(
+        (
+            guard.scanners
+            for guard in result.results
+            if guard.name.startswith("secrets") and guard.scanners
+        ),
+        (),
+    )
+    lines = [
+        "diagnostics:",
+        f"  first_failing_test: {first_id or 'none detected'}"
+        + (f"  (from {source})" if source else ""),
+        f"  secrets_scanners: {render_secrets_scanners(scanners) if scanners else 'none ran'}",
+    ]
+    return lines
+
+
 def _guard_log_content(
     workdir: str, result: Tier1Result, full_outputs: dict[str, str] | None = None
 ) -> str:
@@ -541,6 +619,7 @@ def _guard_log_content(
         + (" (DEGRADED — skipped checks)" if result.degraded else ""),
         f"guards: {len(result.results)} ({len(failed)} failed, {len(skipped)} skipped)",
     ]
+    lines += _diagnostics_lines(result)
     if skipped:
         # TRUST-001: the log keeps the machine-readable skip list for
         # post-mortems, matching the console's DEGRADED PASS line.
@@ -617,7 +696,13 @@ def write_guard_log(
 class GuardManager:
     """Run static checks against staged changes."""
 
-    def __init__(self, workdir: str = ".", config: dict | None = None):
+    def __init__(
+        self,
+        workdir: str = ".",
+        config: dict | None = None,
+        *,
+        grade_full_tree: bool = False,
+    ):
         self.workdir = os.path.abspath(workdir)
         if config is None:
             config = _load_guard_config(self.workdir)
@@ -652,6 +737,15 @@ class GuardManager:
 
         # Test mode: "full" (default) or "diff"
         self._test_mode = guards_cfg.get("test_mode", "full")
+
+        # Whole-tree grading opt-in (DF-GITREINS-POC-11). Keyword-only in
+        # __init__, default False so every existing caller — judge, worktree
+        # manager, MCP server, pipeline subprocess — keeps today's behavior
+        # byte for byte. When True, a clean tree no longer vacates the tests
+        # and lint lanes: the full test_command runs and the linter grades
+        # the whole tree instead of returning the TRUST-001 skips. The CLI
+        # sets it from `gitreins guard --full`.
+        self._grade_full_tree = bool(grade_full_tree)
 
         # Run the full test_command even when nothing is staged (AUDIT-GAP-002 /
         # GR-GAP-009): chained suites (e.g. totalstack ACM parity) otherwise
@@ -930,9 +1024,12 @@ class GuardManager:
                 # built-in scanner catches provider patterns without that
                 # filter (GR-GAP-005). gitleaks OR builtin must both be clean.
                 builtin = self._builtin_secrets_scan()
+                scanners = ((GITLEAKS_SCANNER, SCANNER_CLEAN), *builtin.scanners)
                 if not builtin.passed:
-                    return builtin
-                return GuardResult(name="secrets", passed=True, output="gitleaks: clean")
+                    return replace(builtin, scanners=scanners)
+                return GuardResult(
+                    name="secrets", passed=True, output="gitleaks: clean", scanners=scanners
+                )
             else:
                 # gitleaks found something — do NOT short-circuit (DF-016).
                 # The built-in cross-check still runs and its findings are
@@ -946,8 +1043,15 @@ class GuardManager:
                 output = result.stdout + result.stderr
                 if not builtin.passed:
                     output = _merge_secret_findings(output, builtin.output)
+                # TRUST-003 (AC2): name which scanner raised the finding and
+                # what the other one saw — 'fail' alone was ambiguous.
+                gitleaks_status = self._gitleaks_failure_status(output)
                 return GuardResult(
-                    name="secrets", passed=False, output=output, exit_code=result.returncode
+                    name="secrets",
+                    passed=False,
+                    output=output,
+                    exit_code=result.returncode,
+                    scanners=((GITLEAKS_SCANNER, gitleaks_status), *builtin.scanners),
                 )
         except FileNotFoundError:
             # GR-GAP-043: the missing-gitleaks case must be VISIBLE, not a
@@ -962,11 +1066,31 @@ class GuardManager:
                 "for full secret coverage."
             )
             logger.debug(hint)
-            return replace(result, warning=hint)
+            # TRUST-003: an absent scanner is NAMED, not silently implied —
+            # the console line then reads "clean (builtin cross-check;
+            # gitleaks not on PATH)".
+            return replace(
+                result,
+                warning=hint,
+                scanners=((GITLEAKS_SCANNER, SCANNER_NOT_RUN), *result.scanners),
+            )
         except Exception as e:
             logger.warning("gitleaks failed: %s — falling back to built-in scanner", e)
 
         return self._builtin_secrets_scan()
+
+    @staticmethod
+    def _gitleaks_failure_status(output: str) -> str:
+        """Per-scanner status for a non-zero gitleaks exit (TRUST-003).
+
+        The count comes from gitleaks' own report when it is parseable; a
+        non-zero exit whose output carries no recognizable tally is reported
+        as findings-found-without-a-count rather than misreported as zero.
+        """
+        count = parse_gitleaks_finding_count(output)
+        if count is None:
+            return "reported findings (count unavailable)"
+        return scanner_finding_status(count)
 
     def _builtin_secrets_scan(self, staged_only: bool = True) -> GuardResult:
         """
@@ -1059,7 +1183,12 @@ class GuardManager:
 
             if not files:
                 scope = "staged" if staged_only else "workdir"
-                return GuardResult(name="secrets", passed=True, output=f"No {scope} files to scan")
+                return GuardResult(
+                    name="secrets",
+                    passed=True,
+                    output=f"No {scope} files to scan",
+                    scanners=((BUILTIN_SCANNER, SCANNER_CLEAN),),
+                )
 
             for fpath in files:
                 # POC-17 / TRUST-002: the harness's own state directory is
@@ -1138,6 +1267,7 @@ class GuardManager:
                     name="secrets",
                     passed=False,
                     output="Potential secrets found:\n" + "\n".join(findings[:20]),
+                    scanners=((BUILTIN_SCANNER, scanner_finding_status(len(findings))),),
                 )
             return GuardResult(
                 name="secrets",
@@ -1146,11 +1276,17 @@ class GuardManager:
                     f"Scanned {len(files)} files — clean "
                     f"(excluded harness state: {', '.join(d + '/**' for d in HARNESS_STATE_DIRS)})"
                 ),
+                scanners=((BUILTIN_SCANNER, SCANNER_CLEAN),),
             )
 
         except Exception as e:
             logger.exception("Secrets scan failed")
-            return GuardResult(name="secrets", passed=False, error=str(e))
+            return GuardResult(
+                name="secrets",
+                passed=False,
+                error=str(e),
+                scanners=((BUILTIN_SCANNER, "scan error"),),
+            )
 
     def _workdir_files(self) -> list[str]:
         """Relative paths of all non-ignored files in the workdir.
@@ -1227,23 +1363,34 @@ class GuardManager:
         return allowed
 
     def _check_lint(self) -> GuardResult:
-        """Run linter on staged Python files."""
+        """Run linter on staged Python files.
+
+        DF-GITREINS-POC-11: under grade_full_tree (CLI --full), an empty
+        index no longer vacates the lane — the whole tree (tracked +
+        untracked-but-not-ignored .py files) is graded instead.
+        """
         linters = ["ruff", "flake8"]
+        # Get staged Python files
+        staged_files = _get_staged_files(self.workdir)
+        py_files = [f for f in staged_files if f.endswith(".py")]
+        if not py_files and self._grade_full_tree:
+            # Nothing staged but whole-tree grading is on: lint the tree
+            # (tracked + untracked-but-not-ignored). Never invoke the
+            # linter with an empty file list — the honest skip below stays
+            # for a tree with no Python files at all.
+            py_files = _tree_python_files(self.workdir)
+        if not py_files:
+            # TRUST-001: nothing staged is not a graded lint pass.
+            return GuardResult(
+                name="lint",
+                passed=True,
+                output="No Python files staged",
+                skipped=True,
+                skip_reason="no staged files",
+            )
+
         for linter in linters:
             try:
-                # Get staged Python files
-                staged_files = _get_staged_files(self.workdir)
-                py_files = [f for f in staged_files if f.endswith(".py")]
-                if not py_files:
-                    # TRUST-001: nothing staged is not a graded lint pass.
-                    return GuardResult(
-                        name="lint",
-                        passed=True,
-                        output="No Python files staged",
-                        skipped=True,
-                        skip_reason="no staged files",
-                    )
-
                 lint_result = subprocess.run(
                     [linter, "check", *py_files] if linter == "ruff" else [linter, *py_files],
                     capture_output=True,
@@ -1260,10 +1407,15 @@ class GuardManager:
                     output = output[:2000] + "\n... [truncated]"
 
                 if lint_result.returncode == 0:
+                    clean = f"{linter}: clean"
+                    if self._grade_full_tree:
+                        # Name the scope so a whole-tree run is
+                        # distinguishable from a staged run in the console.
+                        clean += f" ({len(py_files)} tracked files)"
                     return GuardResult(
                         name="lint",
                         passed=True,
-                        output=f"{linter}: clean",
+                        output=clean,
                         exit_code=lint_result.returncode,
                     )
                 else:

@@ -61,7 +61,7 @@ from engine.guard_manager import (
     _resolve_test_command,
     harness_state_allowlist_paths,
 )
-from engine.types import _FAILED_TEST_LINE
+from engine.types import _FAILED_TEST_LINE, parse_first_failing_test
 
 logger = logging.getLogger("gitreins.pipeline")
 
@@ -899,13 +899,19 @@ class Pipeline:
                 # A failing step's first 100 chars are the pytest banner;
                 # surface the first FAILED/ERROR short-summary line instead
                 # so the failing test id is visible (DF-021 kin /
-                # DF-GITREINS-POC-8). Fall back to the [:100] head when the
-                # output carries no such line.
-                for line in step.output.split("\n"):
-                    stripped = line.strip()
-                    if _FAILED_TEST_LINE.match(stripped) or _ERROR_TEST_LINE.match(stripped):
-                        detail = stripped[:100]
-                        break
+                # DF-GITREINS-POC-8). TRUST-003 (AC1): the parsed id is named
+                # with the same '[first failing id]' marker the guard console
+                # uses. Fall back to the [:100] head when the output carries
+                # no recognizable failure line.
+                first_id = parse_first_failing_test(step.output)
+                if first_id:
+                    detail = f"FAIL ({first_id} [first failing id])"[:100]
+                else:
+                    for line in step.output.split("\n"):
+                        stripped = line.strip()
+                        if _FAILED_TEST_LINE.match(stripped) or _ERROR_TEST_LINE.match(stripped):
+                            detail = stripped[:100]
+                            break
             lines.append(f"  {status} {step.id}: {detail}")
         return "\n".join(lines)
 
@@ -1052,13 +1058,23 @@ def _secrets_step_run(workdir: str) -> str:
         f"{harness_scan_gitleaks_config(workdir)}\n"
         "GITREINS_GITLEAKS_CFG\n"
         f'echo "secrets: harness state excluded from gitleaks scope ({exclusions})"; '
+        # TRUST-003: name the scanners and each one's outcome in the step
+        # evidence, so a judge FAIL says WHICH scanner raised it instead of
+        # leaving "secrets" ambiguous (the ambiguity that cost POC-15 a cycle).
+        'echo "secrets: scanners=gitleaks+builtin cross-check"; '
         'gitleaks detect --source . --no-git --no-banner --config "$_glcfg"; '
         '_glrc=$?; rm -f "$_glcfg"; '
-        "else _glrc=0; fi; g1=$_glrc; "
+        'if [ "$_glrc" -eq 0 ]; then echo "secrets: gitleaks: clean"; '
+        'else echo "secrets: gitleaks: findings found (exit $_glrc)"; fi; '
+        "else _glrc=0; "
+        'echo "secrets: scanners=builtin cross-check only (gitleaks not on PATH)"; '
+        'echo "secrets: gitleaks: not on PATH"; fi; g1=$_glrc; '
         f'PYTHONPATH="{_engine_root()}" {sys.executable} -c "from engine.guard_manager import GuardManager; '
         "import sys; gm = GuardManager('.'); "
         "r = gm._builtin_secrets_scan(staged_only=False); "
         "print('secrets: builtin cross-check: ' + r.output); "
+        "print('secrets: builtin cross-check status: ' "
+        "+ (r.scanners[0][1] if r.scanners else 'clean')); "
         'sys.exit(1 if not r.passed else 0)"; '
         'g2=$?; [ "$g1" -eq 0 ] && [ "$g2" -eq 0 ]'
     )
