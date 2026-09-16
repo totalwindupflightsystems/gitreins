@@ -160,12 +160,33 @@ gitreins guard [--dead-code]
 
 | Code | Meaning |
 |------|---------|
-| 0 | All guards PASS |
+| 0 | All guards PASS (or a DEGRADED pass with `guards.allow_skips: true`) |
 | 1 | One or more guards FAIL (fix issues and re-run) |
+| 2 | DEGRADED PASS — a substantive gate (lint/tests/lsp) did no work and `guards.allow_skips` is false |
 
 Warnings are printed to stderr and do not affect the exit code. The
 output includes the active test mode (`diff` or `full`) and the tested
 targets.
+
+**Degraded pass (`guards.allow_skips`, TRUST-001)**
+
+A guard that does no work — nothing staged, no linter on PATH, zero tests
+collected — is not a gate that passed. Those runs print
+`Tier 1: DEGRADED PASS (skips: lint=no staged files, tests=no staged files)`,
+mark the skipped steps with `~`, and exit **2** unless the repo sets
+`guards.allow_skips: true`:
+
+```yaml
+guards:
+  allow_skips: true   # accept zero-work skips (gitreins init writes this)
+```
+
+A degraded run never prints `Tier 1 Guards: PASS`, so CI and merge-back —
+which both consume the exit code as truth — can tell a gate that never ran
+from one that passed. The skipped steps are also persisted in the guard run
+log (`.gitreins/logs/`), in the judge's Tier 1 stage, and in
+`verdict.json` (`stages.tier1.skipped_steps`); `gitreins worktree merge`
+refuses a verdict whose Tier 1 carries skips.
 
 ## 5. `gitreins judge`
 
@@ -374,7 +395,9 @@ failed, and exit 2 means GitReins infrastructure failed. Evidence contains
 ## Hooks
 
 - **pre-commit**: runs `gitreins guard` on staged changes. A guard
-  failure blocks the commit (exit 1).
+  failure blocks the commit (exit 1); a DEGRADED pass (exit 2) also blocks
+  unless `guards.allow_skips: true` — stage a gradable file or accept skips
+  in config.
 - **commit-msg**: runs `gitreins commit-audit`; a rejected message
   blocks the commit.
 
@@ -382,5 +405,6 @@ failed, and exit 2 means GitReins infrastructure failed. Evidence contains
 
 Runtime behavior is controlled by `.gitreins/config.yaml` in the repo
 root (created by `gitreins install` / `gitreins init`). Key settings:
-`test_command`, `max_input_tokens`, guard enable/disable toggles, and
+`test_command`, `test_mode`, `test_on_clean`, `allow_skips`,
+`max_input_tokens`, guard enable/disable toggles, and
 history persistence. See `docs/architecture.md` for the config schema.

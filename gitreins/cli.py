@@ -440,6 +440,11 @@ def cmd_init(args):
     # Guards section
     if "guards" not in existing or args.reset:
         existing["guards"] = _build_guards_section(lang_info, test_cmd, static_tools)
+        # TRUST-001: fresh repos get allow_skips: true — the first `gitreins
+        # guard` on a clean tree is a DEGRADED pass, and a brand-new repo has
+        # nothing to stage yet. The code-level default stays False (fail loud)
+        # for configs that predate this key.
+        existing["guards"].setdefault("allow_skips", True)
         changed.append("guards")
     else:
         # Fill in missing guard keys, then upgrade only the exact default that
@@ -1028,6 +1033,9 @@ def _fill_missing_guards(
     """Fill in missing guard keys without overwriting existing values. Returns keys added."""
     added = []
     defaults = _build_guards_section(lang, test_cmd, static_tools)
+    # TRUST-001: the generated default config accepts zero-work skips; a repo
+    # that wants DEGRADED runs to exit 2 removes the key or sets it false.
+    defaults.setdefault("allow_skips", True)
 
     for key, val in defaults.items():
         if key not in guards:
@@ -1775,7 +1783,16 @@ def cmd_guard_run(args):
         mode_note += ", full suite — safety trigger"
     mode_note += ")"
 
-    print(f"Tier 1 Guards: {'PASS' if result.passed else 'FAIL'}{mode_note}")
+    # TRUST-001: a run where a substantive gate (lint/tests/lsp) did no work is
+    # a DEGRADED PASS, and it never prints the green "Tier 1 Guards: PASS"
+    # header — grepping that string is now proof the gates actually ran. The
+    # exit code is 0 only when the repo opted in via guards.allow_skips.
+    if not result.passed:
+        print(f"Tier 1 Guards: FAIL{mode_note}")
+    elif result.degraded:
+        print(f"Tier 1: DEGRADED PASS (skips: {result.skip_summary}){mode_note}")
+    else:
+        print(f"Tier 1 Guards: PASS{mode_note}")
     print(result.summary)
 
     # DF-018: name the persisted run log (the complete, untruncated output)
@@ -1796,6 +1813,20 @@ def cmd_guard_run(args):
         print()
         print("Fix the issues above and re-run: gitreins guard")
         sys.exit(1)
+
+    # TRUST-001: a degraded pass exits 0 ONLY with guards.allow_skips: true.
+    # Exit 2 (not 1) keeps "a gate failed" distinct from "a gate never ran".
+    if result.degraded and not result.extra.get("allow_skips", False):
+        print()
+        print(
+            "\033[33m⚠ DEGRADED PASS: "
+            f"{result.skip_summary} — these gates did not run, so this run is not \n"
+            "  evidence the tree passes. Stage the files you want graded (git add), or \n"
+            "  set guards.allow_skips: true in .gitreins/config.yaml to accept skips \n"
+            "  on zero-work runs (gitreins init writes it for fresh repos).\033[0m",
+            file=sys.stderr,
+        )
+        sys.exit(2)
 
 
 def cmd_judge(args):

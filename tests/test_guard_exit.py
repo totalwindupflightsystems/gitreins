@@ -131,10 +131,33 @@ class TestGuardRefusesWithoutConfig:
 
 
 class TestGuardExitClean:
-    """gitreins guard exits 0 on a clean tree."""
+    """gitreins guard exit codes on a tree with nothing to grade.
 
-    def test_guard_exit_0_on_clean_tree(self, tmp_path):
-        """Empty repo with no staged files -> exit 0."""
+    TRUST-001: the guard no longer reports a vacuous green here — a clean tree
+    is a DEGRADED pass. It exits 0 only when the repo accepts skips
+    (`guards.allow_skips: true`, what `gitreins init` writes); otherwise 2.
+    """
+
+    def test_guard_exit_0_on_clean_tree_with_allow_skips(self, tmp_path):
+        """Empty repo, no staged files, allow_skips: true -> DEGRADED, exit 0."""
+        d = str(tmp_path / "repo")
+        os.makedirs(d)
+        _init_repo(d)
+        _write_config(d, {"guards": {"test_command": "echo ok", "allow_skips": True}})
+
+        result = _run_cli("guard", cwd=d)
+
+        assert result.returncode == 0, (
+            f"guard must exit 0 on clean tree with allow_skips, got {result.returncode}. "
+            f"stdout: {result.stdout[:200]} stderr: {result.stderr[:200]}"
+        )
+        assert "Tier 1: DEGRADED PASS (skips: lint=no staged files, tests=no staged files)" in (
+            result.stdout
+        )
+        assert "Tier 1 Guards: PASS" not in result.stdout
+
+    def test_guard_exit_2_on_clean_tree_without_allow_skips(self, tmp_path):
+        """Same tree, no allow_skips -> exit 2 (a skip is not a pass)."""
         d = str(tmp_path / "repo")
         os.makedirs(d)
         _init_repo(d)
@@ -142,12 +165,11 @@ class TestGuardExitClean:
 
         result = _run_cli("guard", cwd=d)
 
-        assert result.returncode == 0, (
-            f"guard must exit 0 on clean tree, got {result.returncode}. "
-            f"stdout: {result.stdout[:200]}"
+        assert result.returncode == 2, (
+            f"guard must exit 2 on a degraded clean tree, got {result.returncode}. "
+            f"stdout: {result.stdout[:200]} stderr: {result.stderr[:200]}"
         )
-        assert "Tier 1 Guards:" in result.stdout
-        assert "PASS" in result.stdout
+        assert "DEGRADED PASS" in result.stdout
 
     def test_guard_exit_0_with_clean_file(self, tmp_path):
         """Staging a clean file with no issues -> exit 0."""

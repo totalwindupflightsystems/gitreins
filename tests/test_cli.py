@@ -53,11 +53,14 @@ def write_guard_config(workdir, extra_guards=""):
     repo with no config (they used to report a false-green "Tier 1 Guards:
     PASS" and commit unguarded), so every CLI test that exercises the guard
     path must create one. `test_command: echo ok` keeps the tests guard fast.
+    TRUST-001: `allow_skips: true` keeps a clean-tree (nothing staged) run at
+    exit 0 — the run still prints "Tier 1: DEGRADED PASS (skips: ...)", which
+    is what makes the skip visible instead of vacuous.
     """
     cfg_dir = os.path.join(workdir, ".gitreins")
     os.makedirs(cfg_dir, exist_ok=True)
     with open(os.path.join(cfg_dir, "config.yaml"), "w") as f:
-        f.write("guards:\n  test_command: echo ok\n" + extra_guards)
+        f.write("guards:\n  test_command: echo ok\n  allow_skips: true\n" + extra_guards)
 
 
 def _init_real_git_repo(tmp_path):
@@ -309,11 +312,19 @@ class TestGuardRunCLI:
     """Test guard run CLI — step-3-3-1-1."""
 
     def test_guard_run_shows_tier1_guards(self, tmp_workdir):
-        """guard run prints 'Tier 1 Guards: PASS or FAIL' and per-guard summary."""
+        """guard run prints a Tier 1 header and the per-guard summary.
+
+        TRUST-001: this workdir has nothing staged, so the run is honest about
+        it — "Tier 1: DEGRADED PASS (skips: ...)" with `~` skip markers rather
+        than the green "Tier 1 Guards: PASS".
+        """
         write_guard_config(tmp_workdir)
         result = run_cli("guard", cwd=tmp_workdir)
         assert result.returncode == 0
-        assert "Tier 1 Guards:" in result.stdout
+        assert "Tier 1" in result.stdout
+        assert "DEGRADED PASS (skips:" in result.stdout
+        assert "~ lint — skipped (no staged files)" in result.stdout
+        assert "Tier 1 Guards: PASS" not in result.stdout
 
     def test_guard_staged_only_sets_diff_test_mode(self, tmp_workdir):
         """--staged-only forces diff test mode (GR-GAP-043)."""
@@ -348,7 +359,9 @@ class TestGuardRunCLI:
         cfg_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(cfg_dir, exist_ok=True)
         with open(os.path.join(cfg_dir, "config.yaml"), "w") as f:
-            f.write("guards:\n  test_mode: full\n")
+            # allow_skips keeps this clean-tree run at exit 0 (TRUST-001);
+            # the assertion below is about the test mode, not about skips.
+            f.write("guards:\n  test_mode: full\n  allow_skips: true\n")
         result = run_cli("guard", "--staged-only", cwd=tmp_workdir)
         assert result.returncode == 0
         assert "(test mode: diff" in result.stdout
@@ -1985,7 +1998,13 @@ exit $?
         import yaml as _yaml
 
         with open(os.path.join(config_dir, "config.yaml"), "w") as f:
-            _yaml.dump({"guards": {"test_mode": "diff", "test_command": "echo ok"}}, f)
+            # TRUST-001: a diff-mode run whose changed file maps to no test file
+            # is a DEGRADED pass (the tests gate graded nothing), so a clean
+            # commit through the hook needs allow_skips — the same key
+            # `gitreins init` writes for fresh repos.
+            _yaml.dump(
+                {"guards": {"test_mode": "diff", "test_command": "echo ok", "allow_skips": True}}, f
+            )
 
         hooks_dir = os.path.join(tmp_workdir, ".git", "hooks")
         os.makedirs(hooks_dir, exist_ok=True)

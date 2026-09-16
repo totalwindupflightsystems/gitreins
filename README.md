@@ -11,7 +11,7 @@
 
 GitReins lives inside your git repository as a quality harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ✅ **v0.13.0** — LSP diagnostics (14 languages), opt-in static analysis (9 analyzers; baseline install default off, smart init enables it for detected dynamic-language projects), commit audit with CVE-scored severity, optional Antares CVE-localization guard, Anthropic Messages API support, DeepSeek prompt caching telemetry, large-repo hardening (fast-track + `--skip-tier2`), MCP `propagate`, judge single-flight + resume lease, evaluator committed-diff read path, guard run logs (full, untruncated output persisted per run), judge Tier 1 / guard parity (one language-detection source of truth + loud degradation marker), 1529 tests pass / 40 test files, verified by collection (optional-tool skips vary).
+> ✅ **v0.13.0** — LSP diagnostics (14 languages), opt-in static analysis (9 analyzers; baseline install default off, smart init enables it for detected dynamic-language projects), commit audit with CVE-scored severity, optional Antares CVE-localization guard, Anthropic Messages API support, DeepSeek prompt caching telemetry, large-repo hardening (fast-track + `--skip-tier2`), MCP `propagate`, judge single-flight + resume lease, evaluator committed-diff read path, guard run logs (full, untruncated output persisted per run), judge Tier 1 / guard parity (one language-detection source of truth + loud degradation marker), guard trust: zero-work skips are a DEGRADED PASS with named skip reasons, `guards.allow_skips`, exit 2 unless accepted, and a merge-back that refuses verdicts carrying skips, 1547 tests pass / 41 test files, verified by collection (optional-tool skips vary).
 
 ---
 
@@ -298,6 +298,19 @@ Tier 1 Guards: PASS  (test mode: diff, full suite — safety trigger)
   ✓ tests — passed
 ```
 
+**Degraded pass (a gate did no work — `guards.allow_skips` decides the exit code):**
+```
+Tier 1: DEGRADED PASS (skips: lint=no staged files, tests=no staged files)  (test mode: diff)
+  ✓ secrets — clean
+  ~ lint — skipped (no staged files)
+  ~ tests — skipped (no staged files)
+```
+
+`~` marks a step that was skipped, and a degraded run never prints the green
+`Tier 1 Guards: PASS` header — so grepping that string is proof the gates
+actually ran. With `guards.allow_skips: false` (code default) it exits **2**;
+`gitreins init` writes `allow_skips: true` for ergonomic first commits.
+
 ---
 
 ## Verdict History
@@ -392,6 +405,12 @@ guards:
   # uv/pipenv/poetry are OPTIONAL — if the runner prefix's binary is not on
   # PATH, the guard falls back to `python -m pytest ...` with a warning.
   test_command: "uv run pytest -x --tb=short"
+  # A run where a substantive gate (lint/tests/lsp) did NO work — nothing
+  # staged, no linter on PATH, zero tests collected — is a DEGRADED PASS.
+  # true  = degraded runs still exit 0 (gitreins init writes this default)
+  # false = degraded runs exit 2, so CI can never read a gate that never ran
+  #         as a gate that passed
+  allow_skips: true
 
   # Go projects (auto-detected via go.mod):
   go:
@@ -423,7 +442,7 @@ history:
 - **MCP Transport:** stdio (12 tools)
 - **Config:** YAML in `.gitreins/` directory
 - **Evaluator Default Model:** DeepSeek V4 Flash (~$0.01/eval)
-- **Test suite:** 1529 tests across 40 test files (collection total; optional-tool skips vary)
+- **Test suite:** 1547 tests across 41 test files (collection total; optional-tool skips vary)
 
 ## Architecture & Docs
 

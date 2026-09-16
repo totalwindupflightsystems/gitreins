@@ -5,6 +5,12 @@ guards:
   test_mode: diff
   test_command: uv run pytest -x --tb=short
   test_timeout: 900
+  # TRUST-001: this repo's own gate is graded by `pytest tests/ -v` in CI, and
+  # `gitreins guard` here runs on a clean checkout (nothing staged → lint/tests
+  # skip, so the run is a DEGRADED pass). Accept that explicitly instead of
+  # exiting 2 on every CI run. The DEGRADED line is still printed, so a skip
+  # can never read as a graded pass.
+  allow_skips: true
   dead_code: false
   skylos: false
   static_analysis: false

@@ -207,7 +207,7 @@ class TestLogPersistence:
         assert "test_mode: full" in content
         assert "test_targets: all (full mode)" in content
         assert "overall: FAIL" in content
-        assert "guards: 1 (1 failed)" in content
+        assert "guards: 1 (1 failed, 0 skipped)" in content
         # Per-guard: name, passed, exit_code.
         assert "[FAIL] tests (full)  passed=false  exit_code=1" in content
 
@@ -218,7 +218,7 @@ class TestLogPersistence:
         assert result.passed is True
         content = _read(result.extra["guard_log"])
         assert "overall: PASS" in content
-        assert "guards: 1 (0 failed)" in content
+        assert "guards: 1 (0 failed, 0 skipped)" in content
         assert "[PASS] tests (full)  passed=true  exit_code=0" in content
         assert PASS_MARKER in content
 
@@ -234,8 +234,24 @@ class TestLogPersistence:
 
         assert result.passed is False
         content = _read(result.extra["guard_log"])
-        assert "guards: 2 (1 failed)" in content
+        assert "guards: 2 (1 failed, 0 skipped)" in content
         assert content.index("[FAIL] tests (full)") < content.index("[PASS] secrets")
+
+    def test_skipped_steps_are_named_in_the_log(self, tmp_path):
+        """TRUST-001: the log keeps the skip list and a DEGRADED overall line."""
+        workdir = _probe_workdir(tmp_path, _passing_script())
+        gm = _manager(workdir, secrets=True)
+        gm._check_tests = lambda: GuardResult(  # type: ignore[method-assign]
+            "tests", True, "No files staged — skipped", skipped=True, skip_reason="no staged files"
+        )
+        result = gm.run_all()
+
+        content = _read(result.extra["guard_log"])
+        assert "overall: PASS (DEGRADED — skipped checks)" in content
+        assert "guards: 2 (0 failed, 1 skipped)" in content
+        assert "skipped_steps:" in content
+        assert "  - tests: no staged files" in content
+        assert "[SKIP] tests" in content and "skip_reason=no staged files" in content
 
     def test_newest_log_path_comes_from_the_accessor(self, tmp_path):
         workdir = _probe_workdir(tmp_path, _passing_script())

@@ -11,6 +11,20 @@ from dataclasses import dataclass, field
 # count (DF-021).
 _FAILED_TEST_LINE = re.compile(r"^FAILED \S+::")
 
+# TRUST-001: which guards are SUBSTANTIVE gates. A run where one of these did
+# no work (nothing staged, no linter on PATH, no tests collected) is a
+# DEGRADED pass, not a pass — CI and merge-back both consume an exit code as
+# truth, so a gate that never ran must not be indistinguishable from one that
+# passed. Config-disabled guards are NOT degradations (they never run at all),
+# and a language-appropriate replacement (Go's vet/test/build for a Go repo)
+# is not one either.
+_SUBSTANTIVE_STEPS = frozenset({"lint", "tests", "lsp"})
+
+
+def _step_id(name: str) -> str:
+    """Base guard id for a result name ('tests (diff: 3 files)' → 'tests')."""
+    return name.split(" ", 1)[0].strip()
+
 
 @dataclass(frozen=True)
 class GuardResult:
@@ -27,6 +41,12 @@ class GuardResult:
     # those. Recorded per guard so a post-mortem can tell a test failure
     # from a runner error (DF-018).
     exit_code: int | None = None
+    # TRUST-001: this guard did no work. `skipped` keeps the result passing
+    # (the tool is not at fault) while making the zero-work run visible:
+    # `skip_reason` is the short user-facing reason ("no staged files") the
+    # summary and the DEGRADED PASS line print.
+    skipped: bool = False
+    skip_reason: str = ""
 
     def _pass_detail(self) -> str:
         """Short detail string for passing guards (e.g. 'clean', '3 files')."""
@@ -92,9 +112,46 @@ class Tier1Result:
     warnings: list[str] = field(default_factory=list)
 
     @property
+    def skipped_steps(self) -> list[dict[str, str]]:
+        """Every step that did no work, as ``{"step": id, "reason": reason}``.
+
+        TRUST-001: the machine-readable half of the degradation marker. The
+        CLI raises it to a DEGRADED PASS line and a non-zero exit code (unless
+        ``guards.allow_skips`` is true); the judge persists it in
+        ``verdict.json`` so a merge-back can refuse a pass whose gates never
+        ran.
+        """
+        return [
+            {"step": _step_id(r.name), "reason": r.skip_reason or "reason not recorded"}
+            for r in self.results
+            if r.skipped
+        ]
+
+    @property
+    def degraded_steps(self) -> list[dict[str, str]]:
+        """Skipped steps among the SUBSTANTIVE gates (lint/tests/lsp)."""
+        return [s for s in self.skipped_steps if s["step"] in _SUBSTANTIVE_STEPS]
+
+    @property
+    def degraded(self) -> bool:
+        """True when a substantive gate did no work this run."""
+        return bool(self.degraded_steps)
+
+    @property
+    def skip_summary(self) -> str:
+        """'lint=no staged files, tests=no staged files' for the console line."""
+        return ", ".join(f"{s['step']}={s['reason']}" for s in self.degraded_steps)
+
+    @property
     def summary(self) -> str:
         lines = []
         for r in self.results:
+            if r.skipped:
+                # ~ marks a step that did no work — never a ✓.
+                lines.append(f"  ~ {r.name} — skipped ({r.skip_reason or 'unknown reason'})")
+                if r.warning:
+                    lines.append(f"  ⚠ {r.warning}")
+                continue
             status = "✓" if r.passed else "✗"
             detail = ""
             if not r.passed and r.output:

@@ -187,6 +187,26 @@ def _branch_for(task_id: str) -> str:
     return BRANCH_PREFIX + task_id
 
 
+def _tier1_skipped_steps(verdict: dict) -> list[str]:
+    """Skipped Tier 1 step ids recorded in a persisted verdict (TRUST-001).
+
+    ``verdict.json`` carries ``stages.tier1.{degraded,skipped_steps}``: either
+    declared by the stage plan (an undetectable tree) or picked up at runtime
+    from a step's ``GITREINS_SKIP:`` marker (linter absent on this machine).
+    A judge-gated merge refuses any PASS whose record carries skips — the gate
+    that would have caught a defect never ran.
+    """
+    if not isinstance(verdict, dict):
+        return []
+    tier1 = (verdict.get("stages") or {}).get("tier1") or {}
+    if not isinstance(tier1, dict):
+        return []
+    skipped = tier1.get("skipped_steps")
+    if isinstance(skipped, (list, tuple)):
+        return [str(step) for step in skipped if str(step).strip()]
+    return ["unknown"] if tier1.get("degraded") else []
+
+
 def _default_tree_root(main_root: Path, task_id: str) -> Path:
     repo_name = main_root.name or "repo"
     return main_root.parent / f"{repo_name}-wt" / task_id
@@ -736,6 +756,15 @@ class WorktreeManager:
                     "HOLD: the matching verdict is FAIL; worktree and branch were preserved. "
                     f"Verdict: {self._verdict_reference(task_id, record, verdict)}"
                 )
+            skipped = _tier1_skipped_steps(verdict)
+            if skipped:
+                raise WorktreeError(
+                    "HOLD: the matching verdict's Tier 1 carries skipped checks "
+                    f"({', '.join(skipped)}) — a PASS whose gates never ran cannot merge. "
+                    "Re-run the judge with those gates available (or pass --force with "
+                    "--actor to override). Verdict: "
+                    f"{self._verdict_reference(task_id, record, verdict)}"
+                )
 
         rebased = False
         if main_head != record.branch_point:
@@ -771,6 +800,13 @@ class WorktreeManager:
                     raise WorktreeError(
                         "HOLD: no fresh PASS verdict for the rebased commit; "
                         f"inspect {self._verdict_reference(task_id, record, verdict)}"
+                    )
+                skipped = _tier1_skipped_steps(verdict)
+                if skipped:
+                    raise WorktreeError(
+                        "HOLD: the fresh verdict's Tier 1 carries skipped checks "
+                        f"({', '.join(skipped)}) — a PASS whose gates never ran cannot "
+                        "merge; task worktree preserved."
                     )
 
         # Recheck all safety facts immediately before changing canonical main.

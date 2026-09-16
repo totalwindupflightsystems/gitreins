@@ -73,6 +73,32 @@ MAX_STEP_EVIDENCE_CHARS = 4000
 # mirror engine.types._FAILED_TEST_LINE for collection/setup errors.
 _ERROR_TEST_LINE = re.compile(r"^ERROR \S+::")
 
+# TRUST-001: a step that SKIPS (e.g. the linter is not on PATH) prints this
+# marker and exits 0, so the stage can record the gate it never graded instead
+# of reading as a graded pass. Format on the line:
+#   <marker> <step-id>=<short reason>
+SKIP_SENTINEL = "GITREINS_SKIP:"
+
+
+def parse_skip_sentinels(output: str) -> list[tuple[str, str]]:
+    """Extract ``(step_id, reason)`` pairs from a step's output.
+
+    Only lines carrying :data:`SKIP_SENTINEL` are read, so an ordinary lint or
+    test output can never be mistaken for a skip.
+    """
+    found: list[tuple[str, str]] = []
+    for line in (output or "").split("\n"):
+        idx = line.find(SKIP_SENTINEL)
+        if idx == -1:
+            continue
+        payload = line[idx + len(SKIP_SENTINEL) :].strip()
+        step, sep, reason = payload.partition("=")
+        step = step.strip()
+        if not step:
+            continue
+        found.append((step, reason.strip() if sep else "reason not recorded"))
+    return found
+
 
 def _bound_step_evidence(output: str, cap: int = MAX_STEP_EVIDENCE_CHARS) -> str:
     """Bound step evidence to *cap* chars, keeping BOTH ends of the output.
@@ -182,6 +208,32 @@ def degradation_warning(stage: dict) -> str | None:
     )
 
 
+def _record_runtime_skips(stage: StageResult) -> None:
+    """Fold runtime skip sentinels into *stage*'s degradation marker.
+
+    TRUST-001: :func:`tier1_plan` declares the skips it knows statically (an
+    undetectable tree). A step can also skip on the machine it actually runs
+    on — ``_lint_step_run`` echoes :data:`SKIP_SENTINEL` and exits 0 when the
+    linter is not on PATH. Without this pass, that run reads as a graded lint
+    and the verdict carries no ``skipped_steps`` for a merge-back to refuse.
+    Idempotent: ids are deduplicated and an existing reason is preserved.
+    """
+    found: list[tuple[str, str]] = []
+    for step in stage.steps:
+        for step_id, reason in parse_skip_sentinels(f"{step.output}\n{step.error}"):
+            if step_id in stage.skipped_steps or step_id in [sid for sid, _ in found]:
+                continue
+            found.append((step_id, reason))
+    if not found:
+        return
+    stage.degraded = True
+    stage.skipped_steps.extend(step_id for step_id, _ in found)
+    detail = "skipped at runtime — " + ", ".join(f"{sid}: {reason}" for sid, reason in found)
+    stage.degradation_reason = (
+        f"{stage.degradation_reason}; {detail}" if stage.degradation_reason else detail
+    )
+
+
 class Pipeline:
     """Execute a pipeline of stages against a task."""
 
@@ -233,6 +285,11 @@ class Pipeline:
             result.degraded = bool(stage_def.get("degraded", False))
             result.skipped_steps = list(stage_def.get("skipped_steps") or [])
             result.degradation_reason = stage_def.get("degradation_reason", "")
+            # TRUST-001: a step that skipped AT RUNTIME (linter missing on this
+            # machine) is a degradation the stage definition cannot declare in
+            # advance. Fold it in so verdict.json carries skipped_steps and a
+            # judge-gated merge-back can refuse a pass whose gates never ran.
+            _record_runtime_skips(result)
 
             self._stage_results[stage_id] = result
 
@@ -916,7 +973,8 @@ def _lint_step_run(lint_cmd: str) -> str:
     binary = lint_cmd.split()[0]
     return (
         f"if command -v {binary} >/dev/null 2>&1; then {lint_cmd}; "
-        f'else echo "{binary} not found — lint skipped (guard parity)"; exit 0; fi'
+        f'else echo "{SKIP_SENTINEL} lint=no linter on PATH ({binary} not found)"; '
+        f"exit 0; fi"
     )
 
 

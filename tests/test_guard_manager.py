@@ -891,12 +891,17 @@ class TestPytestExit5NoTests:
         assert "exit 5" in result.warning
 
     def test_exit5_warning_surfaces_in_summary(self, tmp_workdir):
-        """The no-tests note is visible in the guard summary as a ⚠ line."""
+        """The no-tests note is visible in the guard summary as a ⚠ line.
+
+        TRUST-001: pytest collecting zero tests means the gate graded nothing,
+        so the summary marks it as a skip (with its reason) instead of a ✓.
+        """
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x --tb=short"}})
         with patch("subprocess.run", return_value=self._mock_proc(5, self.EXIT5_STDOUT)):
             result = gm._run_test_command("pytest -x --tb=short", "tests (full)")
         summary = Tier1Result(passed=True, results=[result]).summary
-        assert "✓ tests (full)" in summary
+        assert "~ tests (full) — skipped (no tests collected)" in summary
+        assert "✓ tests (full)" not in summary
         assert "⚠ pytest collected no tests (exit 5)" in summary
 
     def test_exit5_via_check_tests_full_mode_allows_commit(self, guard_manager):

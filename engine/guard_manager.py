@@ -33,7 +33,7 @@ from engine.guards import (
     check_go_tests,
     check_go_build,
 )
-from engine.lsp import run_lsp_check
+from engine.lsp import find_lsp_tool, run_lsp_check
 from engine.repo_paths import WorktreeResolutionError, resolve_worktree_identity
 from engine.types import GuardResult, Tier1Result
 
@@ -495,26 +495,35 @@ def _guard_log_content(
     extra = result.extra or {}
     evidence = full_outputs or {}
     failed = [r for r in result.results if not r.passed]
+    skipped = result.skipped_steps
     lines = [
         "GitReins guard run log — full output (the console summary is bounded)",
         f"run_utc: {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}",
         f"workdir: {os.path.abspath(workdir)}",
         f"test_mode: {extra.get('test_mode', 'unknown')}",
         f"test_targets: {_log_test_scope(extra)}",
-        f"overall: {'PASS' if result.passed else 'FAIL'}",
-        f"guards: {len(result.results)} ({len(failed)} failed)",
+        f"overall: {'PASS' if result.passed else 'FAIL'}"
+        + (" (DEGRADED — skipped checks)" if result.degraded else ""),
+        f"guards: {len(result.results)} ({len(failed)} failed, {len(skipped)} skipped)",
     ]
+    if skipped:
+        # TRUST-001: the log keeps the machine-readable skip list for
+        # post-mortems, matching the console's DEGRADED PASS line.
+        lines.append("skipped_steps:")
+        lines.extend(f"  - {step['step']}: {step['reason']}" for step in skipped)
     if result.warnings:
         lines.append("warnings:")
         lines.extend(f"  - {warning}" for warning in result.warnings)
 
-    for r in sorted(result.results, key=lambda guard: guard.passed):
+    for r in sorted(result.results, key=lambda guard: (guard.skipped, guard.passed)):
         exit_code = "n/a" if r.exit_code is None else str(r.exit_code)
+        status = "SKIP" if r.skipped else ("PASS" if r.passed else "FAIL")
         lines += [
             "",
             "=" * 78,
-            f"[{'PASS' if r.passed else 'FAIL'}] {r.name}"
-            f"  passed={str(r.passed).lower()}  exit_code={exit_code}",
+            f"[{status}] {r.name}"
+            f"  passed={str(r.passed).lower()}  exit_code={exit_code}"
+            + (f"  skip_reason={r.skip_reason}" if r.skipped else ""),
             "=" * 78,
         ]
         if r.warning:
@@ -608,10 +617,16 @@ class GuardManager:
 
         # Test mode: "full" (default) or "diff"
         self._test_mode = guards_cfg.get("test_mode", "full")
+
         # Run the full test_command even when nothing is staged (AUDIT-GAP-002 /
         # GR-GAP-009): chained suites (e.g. totalstack ACM parity) otherwise
         # never execute on clean-tree guard runs → vacuous green audits.
         self._test_on_clean = guards_cfg.get("test_on_clean", False)
+        # TRUST-001: when a substantive gate (lint/tests/lsp) does no work, the
+        # run is a DEGRADED pass. Exit 0 is kept ONLY when this flag is true;
+        # the code-level default is False (fail loud) while `gitreins init`
+        # writes allow_skips: true for ergonomic first commits on a fresh repo.
+        self._allow_skips = bool(guards_cfg.get("allow_skips", False))
         # Test timeout in seconds (default: 180s). Coerced to int — string
         # config values like '300s' crash subprocess.run(timeout=...) with a
         # TypeError (GR-GAP-028, Kobayashi-Maru ticks 240-242).
@@ -798,6 +813,10 @@ class GuardManager:
         passed = all(r.passed for r in results)
         extra = {
             "test_mode": self._test_mode,
+            # TRUST-001: the CLI turns these into the DEGRADED PASS line and
+            # the exit-code policy; library/MCP callers read them without
+            # having to re-derive skips from the per-guard results.
+            "allow_skips": self._allow_skips,
         }
         if self._test_mode == "diff" and self._enabled.get("tests"):
             staged = _get_staged_files(self.workdir)
@@ -807,9 +826,12 @@ class GuardManager:
                 extra["staged_count"] = len(staged)
             else:
                 extra["test_targets"] = None  # full suite triggered
-        return _finalize(
+        result = _finalize(
             Tier1Result(passed=passed, results=results, extra=extra, warnings=warnings)
         )
+        result.extra["degraded"] = result.degraded
+        result.extra["skipped_steps"] = result.skipped_steps
+        return result
 
     def _remember_full_output(self, name: str, output: str) -> None:
         """Keep an untruncated guard output for the persisted run log (DF-018).
@@ -1165,7 +1187,14 @@ class GuardManager:
                 staged_files = _get_staged_files(self.workdir)
                 py_files = [f for f in staged_files if f.endswith(".py")]
                 if not py_files:
-                    return GuardResult(name="lint", passed=True, output="No Python files staged")
+                    # TRUST-001: nothing staged is not a graded lint pass.
+                    return GuardResult(
+                        name="lint",
+                        passed=True,
+                        output="No Python files staged",
+                        skipped=True,
+                        skip_reason="no staged files",
+                    )
 
                 lint_result = subprocess.run(
                     [linter, "check", *py_files] if linter == "ruff" else [linter, *py_files],
@@ -1199,7 +1228,15 @@ class GuardManager:
             except FileNotFoundError:
                 continue
 
-        return GuardResult(name="lint", passed=True, output="No linter found — skipped")
+        # No linter binary ran (none of the candidates exist on PATH) —
+        # TRUST-001: a skipped gate, not a clean one.
+        return GuardResult(
+            name="lint",
+            passed=True,
+            output="No linter found — skipped",
+            skipped=True,
+            skip_reason="no linter on PATH",
+        )
 
     def _check_tests(self) -> GuardResult:
         """Run the configured test command.
@@ -1223,7 +1260,16 @@ class GuardManager:
         )
         if not staged and not changed:
             if not self._test_on_clean:
-                return GuardResult(name="tests", passed=True, output="No files staged — skipped")
+                # TRUST-001: the vacuous-green case from the dogfood verdict —
+                # no tests ran, so this is a skip with a named reason, never a
+                # silent pass.
+                return GuardResult(
+                    name="tests",
+                    passed=True,
+                    output="No files staged — skipped",
+                    skipped=True,
+                    skip_reason="no staged files",
+                )
             logger.info("test_on_clean: no files staged — running full test_command")
 
         if self._test_mode == "diff":
@@ -1237,6 +1283,8 @@ class GuardManager:
                         name="tests",
                         passed=True,
                         output="No matching test files — skipped (diff mode)",
+                        skipped=True,
+                        skip_reason="no test files match the changed sources (diff mode)",
                     )
                 # Narrowed — only run relevant tests
                 cmd = _build_diff_test_command(test_command, test_files, self.workdir)
@@ -1296,6 +1344,10 @@ class GuardManager:
                     output=output[:500],
                     warning=warning,
                     exit_code=result.returncode,
+                    # TRUST-001: pytest collected zero tests — the gate graded
+                    # nothing, so say so instead of reporting a green step.
+                    skipped=True,
+                    skip_reason="no tests collected",
                 )
             else:
                 return GuardResult(
@@ -1344,7 +1396,11 @@ class GuardManager:
             return GuardResult(name="dead_code", passed=False, output=output)
         except ImportError:
             return GuardResult(
-                name="dead_code", passed=True, output="Dead code detector unavailable — skipped"
+                name="dead_code",
+                passed=True,
+                output="Dead code detector unavailable — skipped",
+                skipped=True,
+                skip_reason="dead-code detector unavailable",
             )
         except Exception as e:
             return GuardResult(name="dead_code", passed=False, error=str(e))
@@ -1486,10 +1542,14 @@ class GuardManager:
                     had_errors = True
 
         if not all_diagnostics:
+            # Every configured tool failed to run (missing binary, crash) —
+            # TRUST-001: nothing was graded, so this is a skip.
             return GuardResult(
                 name="static_analysis",
                 passed=True,
                 output="No tools ran — check static_analysis_tools config",
+                skipped=True,
+                skip_reason="no configured static-analysis tool ran",
             )
 
         output = "\n".join(all_diagnostics)
@@ -1518,8 +1578,16 @@ class GuardManager:
 
         all_diagnostics: list[str] = []
         had_errors = False
+        missing: list[str] = []
 
         for tool in self._lsp_tools:
+            # TRUST-001: `run_lsp_check` returns [] for a server that is not
+            # installed, and an empty list used to read as "clean" — a vacuous
+            # pass on the gate the dogfood verdict called out. Check the binary
+            # first and record the tool as not-installed instead.
+            if not find_lsp_tool(tool):
+                missing.append(tool)
+                continue
             try:
                 diags = run_lsp_check(
                     tool,
@@ -1544,10 +1612,32 @@ class GuardManager:
                 if severity == "error":
                     had_errors = True
 
-        if not all_diagnostics:
+        if not all_diagnostics and missing:
+            # Nothing was graded: every configured server is absent.
             return GuardResult(
-                name="lsp", passed=True, output="No LSP tools ran — check lsp_tools config"
+                name="lsp",
+                passed=True,
+                output="No LSP tools ran — check lsp_tools config",
+                skipped=True,
+                skip_reason=f"no LSP tool on PATH ({', '.join(missing)} not installed)",
             )
+
+        if not all_diagnostics:
+            # pylsp (or another configured server) never produced diagnostics:
+            # it is missing on PATH or crashed on init. TRUST-001: the LSP gate
+            # did no work — a skip, named for the tool the user can install.
+            return GuardResult(
+                name="lsp",
+                passed=True,
+                output="No LSP tools ran — check lsp_tools config",
+                skipped=True,
+                skip_reason="no LSP tool ran (install pylsp?)",
+            )
+
+        if missing:
+            # Some servers ran, some are absent — keep the graded result but
+            # name the gap in the output (TRUST-001).
+            all_diagnostics.extend(f"  {tool} — not installed (skipped)" for tool in missing)
 
         output = "\n".join(all_diagnostics)
         if len(output) > 2000:

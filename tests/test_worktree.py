@@ -611,7 +611,9 @@ def _write_merge_config(repo: Path) -> None:
     _git(repo, "commit", "-qm", "test merge config")
 
 
-def _write_merge_verdict(repo: Path, task_id: str, record, passed: bool, commit: str) -> Path:
+def _write_merge_verdict(
+    repo: Path, task_id: str, record, passed: bool, commit: str, stages: dict | None = None
+) -> Path:
     # Judge persistence is rooted at the producing task checkout.  Keep the
     # repo argument for callers that also use it to prepare config, but never
     # use canonical main as the verdict artifact location.
@@ -626,6 +628,8 @@ def _write_merge_verdict(repo: Path, task_id: str, record, passed: bool, commit:
         "branch": record.branch,
         "commit": commit,
     }
+    if stages is not None:
+        verdict["stages"] = stages
     path = entry / "verdict.json"
     path.write_text(json.dumps(verdict), encoding="utf-8")
     return path
@@ -659,6 +663,44 @@ def test_merge_fail_verdict_is_hold(wt_repo):
     before = _git(wt_repo, "rev-parse", "HEAD").stdout.strip()
 
     with pytest.raises(WorktreeError, match="HOLD"):
+        manager.merge(record.task_id)
+
+    assert _git(wt_repo, "rev-parse", "HEAD").stdout.strip() == before
+    assert tree.exists() and _branch_exists(wt_repo, record.branch)
+
+
+def test_merge_pass_verdict_with_tier1_skips_is_hold(wt_repo):
+    """TRUST-001: a PASS whose Tier 1 carries skips cannot merge back.
+
+    verdict.json records ``stages.tier1.skipped_steps`` when a substantive gate
+    did no work (nothing staged, linter absent). The merge-back is the last
+    consumer of that verdict, so it must refuse — the gate that would have
+    caught a defect never ran.
+    """
+    _write_merge_config(wt_repo)
+    manager = WorktreeManager(wt_repo)
+    record, tree = _make_task_commit(manager, "MERGE-SKIP")
+    source = _git(tree, "rev-parse", "HEAD").stdout.strip()
+    _write_merge_verdict(
+        wt_repo,
+        record.task_id,
+        record,
+        True,
+        source,
+        stages={
+            "tier1": {
+                "id": "tier1",
+                "passed": True,
+                "coverage": "secrets",
+                "degraded": True,
+                "skipped_steps": ["lint"],
+                "degradation_reason": "skipped at runtime — lint: no linter on PATH",
+            }
+        },
+    )
+    before = _git(wt_repo, "rev-parse", "HEAD").stdout.strip()
+
+    with pytest.raises(WorktreeError, match="HOLD.*skipped"):
         manager.merge(record.task_id)
 
     assert _git(wt_repo, "rev-parse", "HEAD").stdout.strip() == before
