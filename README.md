@@ -381,6 +381,44 @@ git show gitreins:.gitreins/history/<date>/<hash>/verdict.json        # one verd
 With `storage: "filesystem"`, verdicts are written locally only — no branch
 is created and the fallback is skipped.
 
+### Judge token usage (`.gitreins/usage.jsonl`)
+
+Every Tier 2 evaluation appends one telemetry line to
+`<workdir>/.gitreins/usage.jsonl` as its evidence step completes, so judge
+token spend can be summed by external tooling (fleet dashboards, cost
+reports). GitReins uses its own LLM client, so this usage never appears in the
+telemetry of the agent that invoked it — this file is the only record.
+
+```json
+{"ts": 1757973600.42, "tokens_in": 41250, "tokens_out": 1863, "cache_read": 0, "cache_write": 0, "step": "ai_eval"}
+```
+
+| Field | Meaning |
+|---|---|
+| `ts` | Unix epoch seconds of the write |
+| `tokens_in` | Cumulative input tokens for the evaluation so far (cache reads included) |
+| `tokens_out` | Cumulative output tokens for the evaluation so far |
+| `cache_read` / `cache_write` | Cumulative cached-prompt tokens (0 for providers without prompt caching) |
+| `step` | Pipeline step id that wrote the line (`ai_eval` for the judge step) |
+
+Three details matter when you consume it:
+
+- **Cumulative, not per-call.** Each line reports the evaluation's running
+  totals. Sum line-to-line deltas; the final line alone is the run total only
+  when nothing reset the window.
+- **Counters reset on compaction.** When the evaluator compacts its context,
+  the token counters restart, so a later line can be numerically smaller than
+  an earlier one. A consumer that assumes monotonic growth undercounts.
+- **Best-effort, never fatal.** A write failure (permissions, full disk) is
+  swallowed and the evaluation continues; absence of a line is not evidence
+  that the judge did not run — read the verdict for that.
+
+The file is runtime state: `gitreins install` / `gitreins init` add
+`.gitreins/usage.jsonl` to `.gitignore`, and it is never auto-committed. It
+carries no task id, model name, or credentials — correlate it with
+`.gitreins/history/<date>/<hash>/verdict.json` by timestamp when you need
+per-task attribution.
+
 ## Task Dependencies
 
 Tasks can depend on other tasks. Evaluation is blocked until dependencies pass:
@@ -389,12 +427,13 @@ Tasks can depend on other tasks. Evaluation is blocked until dependencies pass:
 gitreins task create build "Project builds" \
   "CGO_ENABLED=0 go build ./cmd/server exits 0"
 
-gitreins task create api-crud "CRUD endpoints" --depends-on build \
+gitreins task create api-crud "CRUD endpoints" \
   "POST /api/users creates a user" \
-  "GET /api/users lists users"
+  "GET /api/users lists users" \
+  --depends-on build
 
 gitreins task complete api-crud
-# → "Cannot complete 'api-crud' — depends on: build"
+# → "Cannot complete 'api-crud' — depends on incomplete tasks: build"
 
 gitreins task complete build      # complete the dependency first
 gitreins task complete api-crud   # now this works
@@ -402,6 +441,21 @@ gitreins task complete api-crud   # now this works
 # Or force-skip dependency checks:
 gitreins task complete api-crud --force
 ```
+
+**Flag placement matters.** A task's criteria are one repeated positional
+argument, so argparse cannot interleave them with an option: put
+`--depends-on` (or `--depends-on <id>` repeated) *after* the criteria. Writing
+criteria after the flag fails with `unrecognized arguments`:
+
+```bash
+# REJECTED — the criteria after the option are not parsed as criteria:
+#   gitreins task create api-crud "CRUD endpoints" --depends-on build \
+#     "POST /api/users creates a user"
+#   gitreins: error: unrecognized arguments: POST /api/users creates a user
+```
+
+`scripts/check_cli_examples.py` replays every documented example through the
+real CLI parser in CI, so this class of broken example cannot ship again.
 
 ## Configuration
 
@@ -423,6 +477,12 @@ guards:
   # uv/pipenv/poetry are OPTIONAL — if the runner prefix's binary is not on
   # PATH, the guard falls back to `python -m pytest ...` with a warning.
   test_command: "uv run pytest -x --tb=short"
+  # Run test_command even with an empty index (nothing staged). Default false
+  # means the tests lane is a SKIP with a named reason ("no staged files") —
+  # under allow_skips:false that makes the whole run a DEGRADED pass (exit 2).
+  # Set true when the suite must run on clean-tree guard runs too (chained
+  # suites, audits, or commits that land through another tool).
+  test_on_clean: false
   # A run where a substantive gate (lint/tests/lsp) did NO work — nothing
   # staged, no linter on PATH, zero tests collected — is a DEGRADED PASS.
   # true  = degraded runs still exit 0 (gitreins init writes this default)

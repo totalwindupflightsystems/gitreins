@@ -32,14 +32,41 @@ pip install gitreins
 pytest tests/ -v
 ```
 
-All tests must pass before submitting a PR. Currently 1293 tests (canonical count: `pytest --collect-only -q`; see README for the latest verified green run).
+All tests must pass before submitting a PR. Currently **1587 tests across 41
+test files** (canonical count: `pytest --collect-only -q`, which is exactly what
+CI recomputes).
+
+**Count claims are gated.** CI's `Verify README test-count drift` step collects
+the suite and fails the build when any `N tests pass`, `N tests across`, or
+`N test files` claim in README.md disagrees with the live collection — so a
+commit that adds, removes, or renames tests MUST update README's counts in the
+same commit. The numbers in this file are not machine-checked; keep them equal
+to README's.
+
+## Documentation Checks
+
+Run these before a docs change (the first two also run in CI):
+
+```bash
+python scripts/check_docs_drift.py      # README version == pyproject version; README count claims agree
+python scripts/check_cli_examples.py    # every documented `gitreins ...` example parses with the real argparse
+```
+
+The suite's own count gate (`Verify README test-count drift`) is the third:
+README's `N tests pass` / `N tests across` / `N test files` claims must equal the
+live pytest collection.
+
+`check_cli_examples.py` replays each documented example through the CLI's own
+parser (handlers stubbed, so nothing executes) — a README example that cannot
+parse is a broken promise, and the checker is what keeps the README's
+`--depends-on` example honest.
 
 ## Project Structure
 
 ```
 engine/          — Core engine (evaluator, guards, pipeline, LLM client, task manager, judge, dead_code)
 gitreins/        — CLI entry point and install script
-gitreins_mcp/    — MCP stdio server (9 tools)
+gitreins_mcp/    — MCP stdio server (12 tools)
 tests/           — pytest test suite (1587 tests across 41 files; canonical count in README)
 tests/reliability/ — 7 adversarial benchmark projects
 docs/            — Architecture, component map, evaluator loop, technology choices

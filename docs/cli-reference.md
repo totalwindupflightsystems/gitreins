@@ -20,22 +20,23 @@ Running `gitreins` with no command prints the top-level help and exits
 **0**. An unknown command exits **2** (argparse behavior for
 unrecognized arguments).
 
-There are **12 top-level subcommands**:
+There are **13 top-level subcommands**:
 
 | # | Command | Purpose |
 |---|---------|---------|
 | 1 | `install` | Install hooks and config in the current repo |
 | 2 | `init` | Smart init — detect language, size, optimal config |
-| 3 | `task` | Task management (create / start / complete / list / delete) |
-| 4 | `guard` | Run Tier 1 guards (secrets, lint, tests, static analysis) |
-| 5 | `judge` | Evaluate a task (Tier 1 + Tier 2 LLM judge) |
-| 6 | `commit` | Commit with guard checks |
-| 7 | `commit-audit` | Validate commit message against staged diff (commit-msg hook) |
-| 8 | `mcp-server` | Run the MCP stdio server |
-| 9 | `security-scan` | Run the Antares CVE localization scanner (opt-in) |
-| 10 | `setup-tools` | Show available static analysis tools and install instructions |
-| 11 | `report` | Show verdict history |
-| 12 | `worktree` | Task worktrees, disposable QA, repro, and dogfood |
+| 3 | `task` | Task management (create / start / complete / list / delete / worktree) |
+| 4 | `worktree` | Task worktrees, disposal, repro, dogfood, fleet, merge |
+| 5 | `guard` | Run Tier 1 guards (secrets, lint, tests, static analysis) |
+| 6 | `judge` | Evaluate a task (Tier 1 + Tier 2 LLM judge) |
+| 7 | `commit` | Commit with guard checks |
+| 8 | `commit-audit` | Validate commit message against staged diff (commit-msg hook) |
+| 9 | `mcp-server` | Run the MCP stdio server |
+| 10 | `security-scan` | Run the Antares CVE localization scanner (opt-in) |
+| 11 | `setup-tools` | Show available static analysis tools and install instructions |
+| 12 | `report` | Show verdict history |
+| 13 | `serve` | Live judgment browser (local web server) |
 
 ## 1. `gitreins install`
 
@@ -101,6 +102,12 @@ gitreins task delete <id>
 
 Exit **0** on success.
 
+Put `--depends-on` **after** the criteria: `criteria` is a variadic positional
+argument, so argparse rejects criteria written after an option (the error is
+`unrecognized arguments: <criterion text>`). The flag is repeatable —
+`--depends-on build --depends-on lint` — and dependency checks are enforced at
+`task complete` (bypass with `--force`).
+
 ### `task start`
 
 | Argument | Description |
@@ -149,12 +156,14 @@ the quality gate enforced by the pre-commit hook; it can also be run
 manually at any time.
 
 ```
-gitreins guard [--dead-code]
+gitreins guard [--dead-code] [--staged-only] [--full]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--dead-code` | Enable Python dead-code detection (overrides config) |
+| `--staged-only` | Run tests in diff mode — only packages with staged changes (overrides `guards.test_mode`) |
+| `--full` | Grade the whole tree even with an empty index: the tests lane runs and lint covers tracked+untracked Python files instead of skipping |
 
 **Exit codes**
 
@@ -343,6 +352,20 @@ Worktree lifecycle and disposable verification commands. Task worktrees are
 branch-backed; disposable worktrees are detached and live under a separate
 `.disposable` directory.
 
+| Subcommand | Purpose |
+|---|---|
+| `doctor` | Validate the shared canonical registry resolution before trusting it |
+| `list` | List registered task worktrees (task, branch, state, phase, age, cap) |
+| `fleet <manifest>` | Run explicit task lanes concurrently in isolated worktrees (JSON/YAML manifest; `--merge` applies successful lanes) |
+| `fresh` | Run one command in a fresh detached worktree |
+| `repro` | Run a command repeatedly in fresh detached worktrees (flakiness measurement) |
+| `dogfood` | Exercise `init`, task, `guard`, and `judge` in a throwaway tree |
+| `clean` | Reap merged worktrees immediately; stale/orphan only with confirmation |
+| `merge <id>` | Judge-gated fast-forward merge of a task worktree into canonical main |
+
+Task worktrees themselves are created with `gitreins task worktree <id>`
+(idempotent: an existing tree for the task is reused).
+
 ### `worktree fresh`
 
 ```bash
@@ -392,6 +415,26 @@ key is configured, the judge is recorded as skipped rather than passed.
 failed, and exit 2 means GitReins infrastructure failed. Evidence contains
 `steps`, a `judge` object, timestamps, the tree path, and keep status.
 
+## 13. `gitreins serve`
+
+Live judgment browser — a local web server that renders the verdict history
+(the same `.gitreins/history/<date>/<hash>/verdict.json` directories and the
+`gitreins` branch fallback that `report` reads). Ctrl-C stops it.
+
+```
+gitreins serve [--port <port>] [--host <host>] [--project <name>] [--open]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--port` | Port to bind (default `8616`) |
+| `--host` | Bind address (default `127.0.0.1` — local-only unless you change it) |
+| `--project` | Scheduler project name for the tick ledger (e.g. `gitreins-poc`) |
+| `--open` | Open the browser automatically |
+
+A static variant for publishing history without a server is
+`scripts/judgment_viewer.py`.
+
 ## Hooks
 
 - **pre-commit**: runs `gitreins guard` on staged changes. A guard
@@ -408,3 +451,40 @@ root (created by `gitreins install` / `gitreins init`). Key settings:
 `test_command`, `test_mode`, `test_on_clean`, `allow_skips`,
 `max_input_tokens`, guard enable/disable toggles, and
 history persistence. See `docs/architecture.md` for the config schema.
+
+### `guards.test_on_clean`
+
+```yaml
+guards:
+  test_on_clean: false   # default
+```
+
+Runs the configured `test_command` even when the index is empty (nothing
+staged). The default `false` means the tests lane is a SKIP with the named
+reason `no staged files` — under `guards.allow_skips: false` the whole run is
+then a DEGRADED pass (exit 2). Set it to `true` when the suite must run on
+clean-tree guard runs too: chained suites where a clean tree still needs
+executing, post-hoc audits, or repos whose commits land through another tool.
+`gitreins guard --full` is the per-run override and additionally lints
+tracked+untracked Python files.
+
+### `guards.allow_skips`
+
+Accepts a DEGRADED run as exit 0 (see the guard exit-code table). `gitreins init`
+writes `true` for new repos; CI should normally keep `false` so a gate that did
+no work can never read as a gate that passed.
+
+### `evaluator.static_analysis_diagnostics`
+
+Advertises `read_static_analysis` to the Tier 2 judge and lets it return the
+configured analyzers' diagnostics. Off by default; `gitreins init` enables it
+for detected dynamic-language projects.
+
+### Judge token telemetry
+
+`.gitreins/usage.jsonl` — one JSON line per evaluation step (`ts`, `tokens_in`,
+`tokens_out`, `cache_read`, `cache_write`, `step`), appended best-effort and
+gitignored by `install`/`init`. Counters are cumulative per context window and
+reset on compaction, so sum deltas rather than reading the last line. See
+README ("Judge token usage") and `docs/evaluator-loop.md` for consumers.
+

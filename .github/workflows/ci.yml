@@ -42,5 +42,7 @@ jobs:
           echo "README test counts match: ${COUNT} tests / ${FILES} files"
       - name: Verify README version drift
         run: python scripts/check_docs_drift.py
+      - name: Verify documented CLI examples parse
+        run: python scripts/check_cli_examples.py
       - name: Run guards
         run: gitreins guard

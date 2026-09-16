@@ -11,40 +11,122 @@ LOAD CONTEXT → LLM CALL → TOOL CALL? → (yes) Execute → Back to LLM
 
 The loop terminates when the LLM issues no tool calls — it has decided it has sufficient evidence.
 
-## Max Iterations
+## Caps: iterations, time, tokens
 
-Default: **15** (configurable via `config.yaml` → `evaluator.max_iterations`, max 20).
+Caps come from `engine/config.py` (`GitReinsDefaults`) and are overridable per
+repo in `.gitreins/config.yaml` under `evaluator:` — or per call for MCP
+`judge.evaluate`. They are checked **before** each call, so a run can end
+slightly above its cap (the final call is allowed through).
 
-When the LLM exhausts all iterations without delivering a verdict, the evaluator appends a final forced prompt:
+| Cap | Default | Meaning |
+|---|---|---|
+| `max_iterations` | `100` | LLM reasoning turns; every tool call additionally costs `tool_call_weight` |
+| `max_input_tokens` | `10_000_000` (10M) | prompt budget per context window; `"200k"` / `"1.5M"` forms accepted |
+| `max_output_tokens` | `131_072` (128K) | output-token budget |
+| `max_time` | unset | wall-clock cap (`30s`, `5m`, `2h`); unset = unlimited |
+| `max_tokens_per_call` | `16384` | per-request output cap (separate from the session budget) |
+| `tool_call_weight` | `0.1` | iterations charged per tool call |
+| `compaction_threshold` | `0.90` | compact the conversation once 90% of the prompt budget is used |
 
-```
-"You've reached the maximum number of tool calls. Deliver your final verdict NOW."
-```
+### When a cap is hit
 
-If the final call also fails, a default `INCOMPLETE` verdict is returned.
+There is no forced "deliver your verdict now" prompt. On cap exhaustion the
+evaluator makes a best-effort recovery instead:
 
-## Evaluation Tools (7)
+1. **Partial verdict from the sandbox.** If the LLM recorded criterion
+   evidence under the scratch keys `verified_<index>`, that evidence is turned
+   into a verdict: `PASS…` evidence → PASS, anything else → FAIL, and criteria
+   with no `verified_<index>` key become FAIL with *"Not verified — evaluation
+   terminated before this criterion was checked"*. The run is COMPLETE only if
+   **every** criterion came back PASS — one PASS plus a FAIL is INCOMPLETE, so
+   a capped run can never pass a task it did not finish verifying.
+2. **Otherwise INCOMPLETE** with `summary` = `Cap exceeded: <reason>`, which
+   names the cap and how much was used.
 
-All 7 tools are defined in `engine/evaluator.py` as OpenAI function-calling definitions. Each tool call returns a JSON dict.
+### Context compaction
+
+Compaction is proactive: when the prompt reaches `compaction_threshold` of
+`max_input_tokens`, the conversation is rebuilt (at most `MAX_COMPACTIONS = 3`
+per evaluation — the same ceiling covers provider context-length errors). A
+compaction resets the per-turn loop counter and the token counters
+(`reset_context_tracking`), but **not** the iteration/time caps: those span the
+whole evaluation, so a compacted run can issue more LLM calls than
+`max_iterations` while still being capped overall. Judge token telemetry
+(.gitreins/usage.jsonl, below) shows the reset as a counter that drops.
+
+## Mandatory test verification (hard rule)
+
+The judge is not allowed to PASS a criterion on code reading alone. For any
+criterion that mentions tests, build, lint, type-checking, or "the code
+works/runs", the prompt requires actual command output:
+
+> You MUST NOT report PASS on any criterion that mentions tests, build, lint,
+> type-checking, or "the code works/runs" unless you have ACTUAL command output
+> proving it. Reasoning from the code alone is NOT sufficient — the suite can be
+> red while the code looks fine (cached test results and pre-loaded context are
+> not evidence of a passing run).
+
+The prescribed sequence is: read `guards.test_command` from
+`.gitreins/config.yaml` (falling back to a language default), run that command
+**fresh** (cache-defeating flags such as `go test -count=1 ./...` where the
+toolchain has one), then quote the `exit_code` and the decisive output line in
+the criterion's `detail`. A detail of just "tests pass" with no command output
+is a FAIL, and the rule is explicit that a criterion whose verification should
+have run tests but whose detail shows no output **must be marked FAIL, not
+PASS**. The only exception is a project with no test suite at all (docs-only
+repo, `test_command: true`), which must be recorded as
+*"no test suite — verified <command or none>"*.
+
+
+## Evaluation Tools (12)
+
+All 12 tools are defined in `engine/evaluator.py` (`EVALUATOR_TOOLS`) as OpenAI
+function-calling definitions. Each tool call returns a JSON dict. The judge
+advertises **11** of them by default: `read_static_analysis` is dropped from the
+schema unless `evaluator.static_analysis_diagnostics: true` is set.
 
 ### Repo Inspection (5 tools)
 
 | Tool | Signature | Description |
 |---|---|---|
-| `read_file` | `(path: str, offset?: int, limit?: int) → dict` | Read any file in the working tree with optional line-range support |
-| `run_command` | `(cmd: str) → dict` | Run a shell command (tests, lint, build) with 30s timeout |
+| `read_file` | `(path: str, offset?: int, limit?: int, byte_offset?: int, byte_limit?: int, mode?: str) → dict` | Read any file in the working tree; line-based ranges by default, byte-level access with `mode="bytes"` |
+| `run_command` | `(cmd: str) → dict` | Run a shell command (tests, lint, build) with a 30s timeout |
 | `search_pattern` | `(regex: str, file_glob?: str) → dict` | Search the codebase for a Python regex pattern |
 | `read_diff` | `() → dict` | Show staged and unstaged git diff summaries |
 | `get_task_item` | `(id: str) → dict` | Fetch a task's full definition and criteria |
 
-### Scratch / Sandbox (2 tools)
+### Diagnostics (4 tools)
 
 | Tool | Signature | Description |
 |---|---|---|
+| `read_static_analysis` | `(path?: str) → dict` | Type errors and warnings from the configured analyzers (mypy and friends) |
+| `read_lsp_diagnostics` | `() → dict` | LSP findings collected during the Tier 1 guard run — file, line, severity, message (undefined names, syntax errors, type mismatches, import errors) |
+| `detect_dead_code` | `() → dict` | AST-based Python dead code: unreachable code, unused functions/imports, empty functions |
+| `skylos_scan` | `() → dict` | Multi-language dead code / AI-mistake scan via the `skylos` binary (unused symbols, unreachable code), returned with a letter grade |
+
+### Security / Sandbox (3 tools)
+
+| Tool | Signature | Description |
+|---|---|---|
+| `scan_security` | `(path?: str) → dict` | Deterministic, syntax-aware ast-grep scan against the bundled CodeRabbit essential rules — hardcoded secrets, weak crypto, SQL injection, XSS, unsafe deserialization, and similar, without relying on the LLM |
 | `sandbox_write` | `(key: str, content: str) → dict` | Write to an in-memory scratch dict |
 | `sandbox_read` | `(key: str) → dict` | Read from an in-memory scratch dict |
 
-**`mcp_call` is NOT implemented.** The MCP allowlist exists in config but the evaluator does not expose an MCP bridge tool. Only these 7 tools are available.
+**`mcp_call` is NOT implemented.** The MCP allowlist exists in config but the
+evaluator does not expose an MCP bridge tool. Only these 12 tools (11 with
+static analysis off) are available.
+
+Tools backed by an external binary degrade with an `error` field rather than
+skipping silently: `skylos_scan` returns `{"error": "skylos not installed — pip
+install skylos"}`, and `scan_security` names either `ast-grep` or the missing
+rule set (`~/.gitreins-rules/rules`, cloned from `coderabbitai/ast-grep-essentials`).
+An error result is evidence the check did not run — never treat it as a clean
+scan.
+
+The scratch dict is also how a capped run recovers: an LLM that stores
+`verified_<index>` entries there before the cap is hit gets a partial verdict
+(see *When a cap is hit* above).
+
 
 ---
 
@@ -127,6 +209,68 @@ Returns the full task dict from the in-memory task index. Tasks are registered a
               "Password stored as bcrypt hash"]}
 ```
 
+#### `read_static_analysis(path?)`
+
+Runs the analyzers configured under `guards.static_analysis_tools` against a
+directory (the given path's parent, or the repo root) and returns their
+diagnostics.
+
+```json
+{"diagnostics": [{"tool": "mypy", "file": "src/x.py", "line": 12, "severity": "error",
+                  "message": "Incompatible types", "code": ""}],
+ "count": 1, "tools_used": ["mypy"]}
+```
+
+Two guards on this tool: it returns
+`{"error": "static_analysis_diagnostics is not enabled in .gitreins/config.yaml"}`
+when the evaluator toggle is off, and
+`{"diagnostics": [], "note": "No static analysis tools configured"}` when no
+tool is configured. A tool that crashes contributes a diagnostic with
+`severity: "error"` rather than aborting the call.
+
+#### `read_lsp_diagnostics()`
+
+Returns the diagnostics LSP tools (`pylsp` and friends) produced during the
+Tier 1 guard run — no new LSP check is triggered, this is the cached Tier 1
+result.
+
+```json
+{"diagnostics": [{"file": "engine/x.py", "line": 9, "severity": "error",
+                  "message": "Undefined name 'foo'"}], "count": 1}
+```
+
+An empty list means LSP did not run for this evaluation (no server on PATH, or
+the lane was skipped) — absence of diagnostics is not evidence of clean code.
+
+#### `detect_dead_code()`
+
+AST-based Python dead-code scan (reuses `engine.dead_code.DeadCodeDetector`),
+grouped by category with at most 20 findings per category:
+
+```json
+{"total_findings": 3, "passed": false,
+ "by_category": {"unused_function": {"count": 2, "items": [...]}}}
+```
+
+#### `skylos_scan()`
+
+Shells out to the `skylos` binary (120s timeout, `--no-grep-verify`) for a
+multi-language dead-code / AI-mistake scan, returning a letter grade plus
+unused functions, unused imports and dead symbols. Missing binary →
+`{"error": "skylos not installed — pip install skylos"}`; a nonzero exit →
+`{"error": "skylos exited <code>", "stderr": "..."}`.
+
+#### `scan_security(path?)`
+
+Deterministic ast-grep scan against the CodeRabbit essential rule set — one
+ast-grep invocation per rule file, because bulk loading aborts on rules stock
+ast-grep cannot parse (those are skipped; the rest are aggregated). Findings
+are SARIF-derived (`file`, `path`, `line`, `message`, `rule`). Two
+infrastructure errors are reported instead of an empty result:
+`{"error": "ast-grep not installed — cargo install ast-grep"}` and
+`{"error": "gitreins security rules not installed (~/.gitreins-rules/rules —
+clone coderabbitai/ast-grep-essentials)"}`.
+
 #### `sandbox_write(key, content)`
 
 Writes to `self._sandbox: dict[str, str]` — a plain in-memory dict. Cleared at the start of every `evaluate()` call.
@@ -166,7 +310,36 @@ The system prompt also reinforces this:
 
 > Do not re-read the same file twice. Do not re-run the same command. Do not search for the same pattern twice.
 
-`read_diff`, `get_task_item`, and sandbox tools are **not** dedup-tracked (they are idempotent or cheap).
+`read_diff`, `get_task_item`, and sandbox tools are **not** dedup-tracked (they are idempotent or cheap). The diagnostics and security tools
+(`read_static_analysis`, `read_lsp_diagnostics`, `detect_dead_code`,
+`skylos_scan`, `scan_security`) are not dedup-tracked either — they re-run on
+every call, and `skylos_scan` / `scan_security` shell out, so a repeat costs
+real time. Only the three tracked tools inject a `_dedup_warning`.
+
+## Judge token telemetry (`.gitreins/usage.jsonl`)
+
+The pipeline appends one JSON line per evaluation step to
+`<workdir>/.gitreins/usage.jsonl` (best-effort — a write error is swallowed and
+never fails the evaluation):
+
+```json
+{"ts": 1757973600.42, "tokens_in": 41250, "tokens_out": 1863, "cache_read": 0, "cache_write": 0, "step": "ai_eval"}
+```
+
+The counters come from the evaluation's `EvalCap` and are cumulative for the
+current context window, so:
+
+- sum line-to-line **deltas** to get spend — the last line is a run total only
+  when no compaction reset the window;
+- **counters reset on compaction** (`reset_context_tracking`), so a later line
+  can be smaller than an earlier one;
+- the file carries no task id, model, or credentials — join it with
+  `.gitreins/history/<date>/<hash>/verdict.json` by timestamp when you need
+  per-task attribution.
+
+The file is runtime state (gitignored by `install`/`init`), and it exists
+because GitReins calls its own LLM client: judge spend never appears in the
+telemetry of the agent that invoked the judge.
 
 ## Verdict Parsing
 
@@ -223,18 +396,19 @@ The fallback logs a warning and includes the raw text in the summary.
 
 1. **`evaluate()` called** — `_sandbox`, `_files_read`, `_commands_run`, `_searches_done` are cleared.
 2. **Task prompt built** — criteria are injected as numbered items. LLM is told to call `get_task_item()` first.
-3. **Loop runs** — `self.max_iterations` turns. Each turn: LLM call → tool execution → append results.
-4. **Verdict or exhaustion** — LLM stops tool calling → verdict parsed. Or max iterations hit → forced final prompt.
+3. **Loop runs** — one LLM call per turn, each turn appending tool results; iterations and tool calls are charged against `EvalCap` (see *Caps* above).
+4. **Verdict or exhaustion** — the LLM stops calling tools → verdict parsed. Or a cap is hit → partial verdict from the sandbox if any criterion was recorded, otherwise INCOMPLETE with `Cap exceeded:`.
 5. **Return** — `Verdict` dataclass with `verdict`, `items[]`, `summary`.
 
 ## Tier System
 
 ```
 Tier 1: Static Guards (no LLM)
-  ├── gitleaks (secrets)
+  ├── secrets (gitleaks and/or the built-in scanner)
   ├── lint
-  └── staged tests
-      ↓ PASS
+  ├── tests (full or diff mode)
+  └── static analysis / LSP (only when configured and the tool is on PATH)
+      ↓ PASS (DEGRADED skips are named; they block unless guards.allow_skips)
 Tier 2: Agentic Evaluator (LLM)
   ├── reads code
   ├── runs tests
