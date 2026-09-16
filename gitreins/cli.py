@@ -78,6 +78,10 @@ guards:
   tests: true
   test_mode: "full"                      # "full" or "diff" (smart)
   test_command: "pytest -x --tb=short"
+  # TRUST-001: a run where a substantive gate (lint/tests/lsp) did no work is a
+  # DEGRADED pass and exits 2 unless this is true. `init` writes true so the
+  # first commit on a fresh repo is not blocked; set false to fail loud.
+  allow_skips: true
   # dead_code: true    # opt-in: Python dead-code detection (AST-based)
   # skylos: true       # opt-in: multi-language dead code + AI mistake detection
 
