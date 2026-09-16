@@ -555,6 +555,8 @@ def _log_test_scope(extra: dict) -> str:
     """Human-readable test scope for the log header."""
     mode = extra.get("test_mode", "unknown")
     if "test_targets" not in extra:
+        if extra.get("grade_full_tree"):
+            return "all (whole tree)"
         return "all (full mode)" if mode == "full" else "unknown"
     targets = extra["test_targets"]
     if targets is None:
@@ -942,6 +944,10 @@ class GuardManager:
         passed = all(r.passed for r in results)
         extra = {
             "test_mode": self._test_mode,
+            # DF-GITREINS-POC-11: the CLI reads this for the whole-tree mode
+            # note ("test mode: full, whole tree"); library callers can use
+            # it to distinguish a whole-tree run from a staged run.
+            "grade_full_tree": self._grade_full_tree,
             # TRUST-001: the CLI turns these into the DEGRADED PASS line and
             # the exit-code policy; library/MCP callers read them without
             # having to re-derive skips from the per-guard results.
@@ -1445,7 +1451,10 @@ class GuardManager:
         In 'full' mode (default), runs the entire test suite.
         When no files are staged, tests are skipped unless guards.test_on_clean
         is true (then the full test_command runs — chained suites execute on
-        clean-tree guard runs instead of silently passing).
+        clean-tree guard runs instead of silently passing). Under
+        grade_full_tree (CLI --full) the full test_command runs even with an
+        empty index — a --full run is expected to produce test evidence, not
+        a skip.
         """
         test_command = self.config.get("guards", {}).get("test_command", "pytest -x --tb=short")
 
@@ -1459,7 +1468,14 @@ class GuardManager:
             else []
         )
         if not staged and not changed:
-            if not self._test_on_clean:
+            if self._grade_full_tree:
+                # DF-GITREINS-POC-11: --full grades the whole tree even with
+                # an empty index — fall through to the full test_command
+                # instead of returning the TRUST-001 skip. (Only
+                # test_on_clean's logger line is bypassed here; ordinary
+                # construction keeps it.)
+                pass
+            elif not self._test_on_clean:
                 # TRUST-001: the vacuous-green case from the dogfood verdict —
                 # no tests ran, so this is a skip with a named reason, never a
                 # silent pass.
@@ -1470,7 +1486,8 @@ class GuardManager:
                     skipped=True,
                     skip_reason="no staged files",
                 )
-            logger.info("test_on_clean: no files staged — running full test_command")
+            else:
+                logger.info("test_on_clean: no files staged — running full test_command")
 
         if self._test_mode == "diff":
             if not changed and self._test_on_clean:

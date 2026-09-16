@@ -1770,17 +1770,24 @@ def cmd_guard_run(args):
     # GR-GAP-043: --staged-only / --full override config guards.test_mode
     # ('diff' / 'full'). If both are passed, --staged-only wins (diff is the
     # narrower scope); neither → config value (default: 'full').
+    # DF-GITREINS-POC-11: --full additionally grades the whole tree when the
+    # index is empty (tests run, lint grades tracked+untracked files) —
+    # --staged-only must not.
+    grade_full_tree = False
     if getattr(args, "staged_only", False):
         config.setdefault("guards", {})["test_mode"] = "diff"
     elif getattr(args, "full", False):
         config.setdefault("guards", {})["test_mode"] = "full"
-    gm = GuardManager(workdir, config=config)
+        grade_full_tree = True
+    gm = GuardManager(workdir, config=config, grade_full_tree=grade_full_tree)
     result = gm.run_all(force_dead_code=getattr(args, "dead_code", False))
 
     # Build mode note
     mode = gm.test_mode
     extra = result.extra
     mode_note = f"  (test mode: {mode}"
+    if extra.get("grade_full_tree"):
+        mode_note += ", whole tree"
     if extra.get("test_targets"):
         mode_note += f", {extra['test_targets']} test file(s)"
     elif extra.get("test_targets") is None and mode == "diff":
@@ -2623,7 +2630,9 @@ def main():
         action="store_true",
         help=(
             "Run the full test suite (overrides config guards.test_mode; "
-            "default when neither flag is given)"
+            "default when neither flag is given). Grades the whole tree "
+            "even with an empty index: the tests lane runs and lint covers "
+            "tracked+untracked Python files instead of skipping."
         ),
     )
 
