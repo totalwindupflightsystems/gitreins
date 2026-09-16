@@ -197,6 +197,16 @@ log (`.gitreins/logs/`), in the judge's Tier 1 stage, and in
 `verdict.json` (`stages.tier1.skipped_steps`); `gitreins worktree merge`
 refuses a verdict whose Tier 1 carries skips.
 
+**`--full` grades the whole tree (empty index included).** A `--full` run
+does not produce skips on a clean tree: the tests lane runs the configured
+`guards.test_command`, and lint covers tracked + untracked-but-not-ignored
+Python files (the lint line names the scope, `ruff: clean (N tracked
+files)`). The mode note reads `(test mode: full, whole tree)` so a
+whole-tree run is distinguishable from a staged run, and the plain PASS
+header is only printed when the gates actually ran. `--staged-only` and a
+bare `gitreins guard` keep the degraded-pass semantics above; when the
+index is non-empty, staged files are graded rather than the whole tree.
+
 ## 5. `gitreins judge`
 
 Evaluate a task: runs Tier 1 guards, then the Tier 2 LLM judge
