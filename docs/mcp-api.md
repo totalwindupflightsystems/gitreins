@@ -12,10 +12,78 @@ For the full wire-protocol specification (transport framing, lifecycle, security
 - **Protocol:** JSON-RPC 2.0, line-delimited JSON over stdin/stdout (`Content-Type`-free,
   one response per line). Multi-line JSON requests are buffered with a brace-count parser.
 - **Handshake:** `initialize` → `notifications/initialized` → `tools/list` → `tools/call`.
-- **Server info:** `{"name": "gitreins", "version": "0.1.0"}` (the MCP `initialize` version
-  string is a display constant; the real installed version is `gitreins --version`).
+- **Server info:** `{"name": "gitreins", "version": "<installed version>"}` — the
+  `initialize` result reports the **installed release** (`engine.version`, the same
+  source `gitreins --version` reads), so a client can trust `serverInfo.version` when
+  reasoning about the tool surface. It is not a frozen constant; on a source checkout
+  with no installed metadata it falls back to the version declared in `pyproject.toml`.
+- **Startup acknowledgement (stderr):** the server writes exactly one line when it
+  starts and one when it stops, to **stderr** — stdout stays protocol-pure, because an
+  unsolicited line there would corrupt the JSON-RPC stream. Shown indented (raw output,
+  not an invocation):
+
+      gitreins MCP server <version> — stdio, protocol 2024-11-05, 12 tools, workdir=/path/to/repo
+      gitreins MCP server <version> — stdin closed (EOF), exiting 0
+
+  `<version>` is the installed release, so a client log is self-identifying without
+  the doc pinning a number that goes stale. A client that sends a request and reads
+  nothing back can tell "still starting" from "died before reading stdin" by reading
+  its server log. Ask the version without opening the transport with
+  `python -m gitreins_mcp.server --version`.
 - **Capability discovery:** `tools/list` returns the 12 schemas below. Tool names use
   dotted notation (`task.create`, `guard.run`, `judge.evaluate`).
+
+## Client Quick Start (raw JSON-RPC, no MCP SDK)
+
+The transport is plain line-delimited JSON, so any shell or script can drive it. Three
+requests in sequence, one process, with the server's stderr kept visible:
+
+```bash
+$ cd /path/to/repo
+$ { echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"demo","version":"1.0"}}}';
+    echo '{"jsonrpc":"2.0","method":"notifications/initialized"}';
+    echo '{"jsonrpc":"2.0","id":2,"method":"tools/list"}';
+    echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"task.list","arguments":{"status":"pending"}}}';
+  } | python -m gitreins_mcp.server
+```
+
+A minimal client in Python (same three calls, plus the -32601 check):
+
+```python
+import json, subprocess
+
+proc = subprocess.Popen(
+    ["python", "-m", "gitreins_mcp.server"],
+    stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True,
+)
+
+def call(method, **params):
+    req = {"jsonrpc": "2.0", "id": next(counter), "method": method}
+    if params:
+        req["params"] = params
+    proc.stdin.write(json.dumps(req) + "\n")
+    proc.stdin.flush()
+    return json.loads(proc.stdout.readline())   # one response per line
+
+counter = iter(range(1, 100))
+call("initialize", protocolVersion="2024-11-05", capabilities={})
+call("notifications/initialized")
+print(call("tools/list")["result"]["tools"][0]["name"])
+print(call("tools/call", name="task.list", arguments={})["result"]["content"][0]["text"])
+
+proc.stdin.close()          # EOF → the server logs its exit line and exits 0
+print(proc.stderr.read())   # startup + exit acknowledgement lines
+```
+
+Notes that save a debugging session:
+
+- **One response per line, in order.** Do not read more than one line per request.
+- **`notifications/*` never answers.** `notifications/initialized` returns no response
+  (`None` internally), so a client that waits for it hangs.
+- **Unknown method or tool → `-32601`**, as a JSON-RPC error object (not a tool result);
+  see the error taxonomy below.
+- **stdout is protocol-only.** Logs, warnings and the startup acknowledgement go to
+  stderr; a client that merges the two streams will try to parse prose as JSON.
 
 ## Tool Catalog
 

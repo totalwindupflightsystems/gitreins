@@ -16,6 +16,7 @@ import sys
 import threading
 import time
 
+from engine.version import __version__
 from engine.task_manager import TaskManager
 from engine.judge import Judge, judge_result_to_dict
 from engine.llm import LLMClient
@@ -38,6 +39,13 @@ from engine.job_store import (
 logging.basicConfig(level=logging.WARNING, stream=sys.stderr, force=True)
 
 logger = logging.getLogger("gitreins.mcp")
+
+# DF-GITREINS-POC-5: one source of truth for the identity a connecting client
+# sees. `initialize` used to answer with a hardcoded "0.1.0" that disagreed
+# with the installed release (CLI/README 0.13.0), so a client reasoning about
+# the tool surface from serverInfo.version reasoned about the PoC.
+SERVER_NAME = "gitreins"
+PROTOCOL_VERSION = "2024-11-05"
 
 
 class GitReinsMCPServer:
@@ -896,9 +904,9 @@ class GitReinsMCPServer:
                     "jsonrpc": "2.0",
                     "id": req_id,
                     "result": {
-                        "protocolVersion": "2024-11-05",
+                        "protocolVersion": PROTOCOL_VERSION,
                         "capabilities": {"tools": {}},
-                        "serverInfo": {"name": "gitreins", "version": "0.1.0"},
+                        "serverInfo": {"name": SERVER_NAME, "version": __version__},
                     },
                 }
             elif method == "tools/list":
@@ -939,6 +947,27 @@ class GitReinsMCPServer:
                 "error": {"code": -32000, "message": str(e)},
             }
 
+    def startup_line(self) -> str:
+        """One-line startup acknowledgement for the connected client's log.
+
+        DF-GITREINS-POC-5: a stdio client that pipes a request in and gets no
+        answer cannot tell "still starting" from "died before reading stdin".
+        stdout is protocol-pure (one JSON-RPC message per line — an unsolicited
+        line there would corrupt the stream), so the acknowledgement goes to
+        stderr, where it is visible in the client's server log and in a CI job
+        transcript without ever being parsed as a response. Name, version,
+        protocol, tool count and workdir in one line.
+        """
+        return (
+            f"{SERVER_NAME} MCP server {__version__} — stdio, protocol "
+            f"{PROTOCOL_VERSION}, {len(self._tools)} tools, workdir={self.workdir}"
+        )
+
+    def _stderr_line(self, text: str) -> None:
+        """Write one acknowledged line to stderr, flushed (never stdout)."""
+        sys.stderr.write(text + "\n")
+        sys.stderr.flush()
+
     def run_stdio(self) -> None:
         """Run the MCP server over line-delimited JSON stdio.
 
@@ -946,6 +975,7 @@ class GitReinsMCPServer:
         Multi-line JSON is handled by buffering until a complete JSON
         object can be parsed (balanced braces).
         """
+        self._stderr_line(self.startup_line())
         buffer = ""
         for line in sys.stdin:
             buffer += line
@@ -1006,6 +1036,11 @@ class GitReinsMCPServer:
                         # Need more data
                         break
 
+        # DF-GITREINS-POC-5: name the reason the process is about to exit.
+        # "No response" and "server gone" look identical from the client side;
+        # a client whose stdin closed (or whose parent died) reads this line.
+        self._stderr_line(f"{SERVER_NAME} MCP server {__version__} — stdin closed (EOF), exiting 0")
+
     def _write_response(self, response: dict) -> None:
         """Write a JSON-RPC response to stdout."""
         sys.stdout.write(json.dumps(response) + "\n")
@@ -1023,6 +1058,12 @@ if __name__ == "__main__":
     workdir = sys.argv[1] if len(sys.argv) > 1 else "."
     if workdir == "stdio":
         workdir = "."  # Hermes MCP passes "stdio" — ignore it
+    if workdir in ("--version", "-V"):
+        # Ask the server its version without opening the stdio transport.
+        print(f"{SERVER_NAME} MCP server {__version__}")
+        raise SystemExit(0)
     server = GitReinsMCPServer(workdir)
-    logger.info("GitReins MCP server starting — workdir=%s", server.workdir)
+    # The startup acknowledgement (name/version/protocol/tool count/workdir) is
+    # emitted once by run_stdio() so BOTH entry points — `gitreins mcp-server`
+    # and `python -m gitreins_mcp.server` — report the same identity line.
     server.run_stdio()

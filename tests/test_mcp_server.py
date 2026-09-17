@@ -13,7 +13,8 @@ import time
 import pytest
 
 from engine.judge import Judge
-from gitreins_mcp.server import GitReinsMCPServer
+from engine.version import __version__
+from gitreins_mcp.server import PROTOCOL_VERSION, SERVER_NAME, GitReinsMCPServer
 
 
 @pytest.fixture
@@ -49,7 +50,9 @@ class TestInitializeHandshake:
         assert "capabilities" in response["result"]
         assert "tools" in response["result"]["capabilities"]
         assert response["result"]["serverInfo"]["name"] == "gitreins"
-        assert response["result"]["serverInfo"]["version"] == "0.1.0"
+        # DF-GITREINS-POC-5: the identity a client sees is the installed
+        # release, not a hardcoded "0.1.0" that disagreed with CLI/README.
+        assert response["result"]["serverInfo"]["version"] == __version__
 
     def test_initialized_notification_returns_none(self, mcp_server):
         """Notifications/initialized returns None (no response)."""
@@ -1305,6 +1308,81 @@ class TestStdioBuffering:
         assert depth > 0  # Unbalanced — need more data
 
 
+# ── DF-GITREINS-POC-5: server identity + startup acknowledgement ───────────
+
+
+class TestMCPStartupAcknowledgement:
+    """The stdio server names its identity, its start and its exit — on stderr.
+
+    DF-GITREINS-POC-5: a client that pipes a request in and reads nothing back
+    could not tell "still starting" from "died before reading stdin", and the
+    only version it could read (`serverInfo`) was a frozen "0.1.0".
+    """
+
+    def test_initialize_reports_installed_version(self, mcp_server):
+        """serverInfo is the installed release, not a frozen literal."""
+        resp = mcp_server.handle_request({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+        assert resp["result"]["serverInfo"]["name"] == SERVER_NAME
+        assert resp["result"]["serverInfo"]["version"] == __version__
+        assert resp["result"]["protocolVersion"] == PROTOCOL_VERSION
+
+    def test_startup_line_names_identity_protocol_and_tool_count(self, mcp_server):
+        """One line carries name, version, protocol, tool count and workdir."""
+        line = mcp_server.startup_line()
+        assert line.startswith(f"{SERVER_NAME} MCP server {__version__}")
+        assert f"protocol {PROTOCOL_VERSION}" in line
+        assert f"{len(mcp_server._tools)} tools" in line
+        assert mcp_server.workdir in line
+        assert "\n" not in line
+
+    def test_startup_and_eof_lines_are_stderr_only(self, tmp_path):
+        """stdout stays protocol-pure; the acknowledgement lands on stderr."""
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        server_path = os.path.join(project_root, "gitreins_mcp", "server.py")
+        env = os.environ.copy()
+        env["PYTHONPATH"] = project_root
+        proc = subprocess.Popen(
+            [sys.executable, server_path, str(workdir)],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            cwd=str(workdir),
+            env=env,
+            text=True,
+        )
+        out, err = proc.communicate(
+            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize"}) + "\n",
+            timeout=60,
+        )
+        assert proc.returncode == 0, err
+        # stdout: exactly the one JSON-RPC response, nothing else.
+        lines = [line for line in out.split("\n") if line.strip()]
+        assert len(lines) == 1, out
+        assert json.loads(lines[0])["result"]["serverInfo"]["version"] == __version__
+        # stderr: the startup acknowledgement and the named EOF exit.
+        assert f"{SERVER_NAME} MCP server {__version__}" in err
+        assert f"protocol {PROTOCOL_VERSION}" in err
+        assert "stdin closed (EOF)" in err
+
+    def test_version_flag_answers_without_opening_the_transport(self, tmp_path):
+        """`server.py --version` is answerable by a client/cron pre-flight."""
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        env = os.environ.copy()
+        env["PYTHONPATH"] = project_root
+        result = subprocess.run(
+            [sys.executable, os.path.join(project_root, "gitreins_mcp", "server.py"), "--version"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            cwd=str(tmp_path),
+            env=env,
+        )
+        assert result.returncode == 0
+        assert result.stdout.strip() == f"{SERVER_NAME} MCP server {__version__}"
+
+
 # ── Integration tests: MCP server started as subprocess over stdio ─────────
 
 
@@ -1400,7 +1478,7 @@ class TestMCPStdioIntegration:
         assert resp["result"]["protocolVersion"] == "2024-11-05"
         assert resp["result"]["capabilities"]["tools"] == {}
         assert resp["result"]["serverInfo"]["name"] == "gitreins"
-        assert resp["result"]["serverInfo"]["version"] == "0.1.0"
+        assert resp["result"]["serverInfo"]["version"] == __version__
 
     def test_initialized_notification_over_stdio(self, mcp_proc):
         """Send notifications/initialized → no response; next request works."""

@@ -1018,6 +1018,12 @@ These are **not** JSON-RPC errors. They are returned as successful JSON-RPC resp
 
 ## 16. Example Outputs
 
+> **Identity note (DF-GITREINS-POC-5):** the transcripts below were captured from the
+> v0.1.0 PoC drive, so their `serverInfo.version` reads `"0.1.0"`. The live server
+> reports the **installed** release in `serverInfo.version` (the same source
+> `gitreins --version` reads) and logs a startup acknowledgement on stderr; read the
+> field from the handshake rather than from these samples.
+
 ### 16.1 Happy Path — Create, Start, Complete, Commit
 
 ```

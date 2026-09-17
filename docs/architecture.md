@@ -1,6 +1,9 @@
 # GitReins Architecture
 
-**IMPLEMENTED (v0.1.0)**
+**IMPLEMENTED** — this document describes the architecture as built. For the exact
+release you are running see `gitreins --version` (the MCP handshake's
+`serverInfo.version` reports the same value; DF-GITREINS-POC-5 replaced a frozen
+"v0.1.0" banner that disagreed with the shipped release).
 
 ## System Overview
 

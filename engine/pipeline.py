@@ -147,39 +147,173 @@ def parse_secrets_scanners(output: str) -> list[str]:
     return ids
 
 
-def _bound_step_evidence(output: str, cap: int = MAX_STEP_EVIDENCE_CHARS) -> str:
-    """Bound step evidence to *cap* chars, keeping BOTH ends of the output.
+_MAX_HOISTED_LINES = 20
+# Every hoisted FAILED/ERROR line is itself bounded: the marker reports on a
+# budget of *cap* chars and must not spend the budget it is describing.
+_MAX_HOISTED_CHARS = 1000
 
-    Output at or under the cap is returned byte-identical. Longer output is
-    kept as head (~60% of the budget) + an omission marker + tail (~40%) —
-    the tail carries pytest's short test summary, so it is never dropped.
-    Any FAILED/ERROR short-summary line inside the omitted middle is hoisted
-    into the marker region (deduped, order preserved, max 20 lines) so a
-    failing test id survives even when the suite was interrupted mid-run and
-    the tail holds no summary.
+
+def _head_end_for_budget(output: str, budget: int) -> int:
+    """Index of the largest prefix of COMPLETE lines that fits in *budget*.
+
+    ``0`` means no complete line fits (a single line longer than the budget).
     """
-    if len(output) <= cap:
-        return output
-    head_len = (cap * 6) // 10
-    tail_len = cap - head_len
-    head = output[:head_len]
-    tail = output[-tail_len:]
-    omitted_len = len(output) - head_len - tail_len
+    end = 0
+    for line in output.splitlines(keepends=True):
+        if end + len(line) > budget:
+            break
+        end += len(line)
+    return end
+
+
+def _tail_start_for_budget(output: str, budget: int) -> int:
+    """Index of the largest suffix of COMPLETE lines that fits in *budget*.
+
+    ``len(output)`` means no complete line fits.
+    """
+    start = len(output)
+    used = 0
+    for line in reversed(output.splitlines(keepends=True)):
+        if used + len(line) > budget:
+            break
+        used += len(line)
+        start -= len(line)
+    return start
+
+
+def _hoist_summary_lines(omitted: str) -> tuple[list[str], int]:
+    """FAILED/ERROR short-summary lines from *omitted*, deduped, order kept.
+
+    Returns ``(lines, dropped)`` where *dropped* counts the matching lines the
+    count/char budget could not carry (reported in the marker, never silently
+    swallowed).
+    """
     hoisted: list[str] = []
     seen: set[str] = set()
-    for line in output[head_len : len(output) - tail_len].split("\n"):
+    used = 0
+    dropped = 0
+    for line in omitted.split("\n"):
         stripped = line.strip()
         if not (_FAILED_TEST_LINE.match(stripped) or _ERROR_TEST_LINE.match(stripped)):
             continue
         if stripped in seen:
             continue
         seen.add(stripped)
+        if len(hoisted) >= _MAX_HOISTED_LINES or used + len(stripped) > _MAX_HOISTED_CHARS:
+            dropped += 1
+            continue
         hoisted.append(stripped)
-        if len(hoisted) >= 20:
-            break
-    marker = f"\n… [{omitted_len} chars omitted] …\n"
+        used += len(stripped)
+    return hoisted, dropped
+
+
+def _omission_marker(
+    omitted: str,
+    *,
+    partial_line_cut: bool,
+    hoisted: list[str],
+    dropped_hoisted: int = 0,
+) -> str:
+    """The omission marker: how much went, on which lines, plus hoisted ids."""
+    detail = f"{len(omitted)} chars omitted — {len(omitted.splitlines())} line(s)"
+    if partial_line_cut:
+        detail += "; one over-budget line was cut mid-line"
+    text = f"\n… [{detail}] …\n"
     if hoisted:
-        marker += "\n".join(hoisted) + "\n…\n"
+        text += "\n".join(hoisted) + "\n…\n"
+    if dropped_hoisted:
+        text += f"… [{dropped_hoisted} further FAILED/ERROR line(s) not hoisted] …\n"
+    return text
+
+
+def _bound_step_evidence(output: str, cap: int = MAX_STEP_EVIDENCE_CHARS) -> str:
+    """Bound step evidence to *cap* chars on LINE boundaries, keeping BOTH ends.
+
+    Output at or under the cap is returned byte-identical. Longer output is
+    kept as head (~60% of the budget) + an omission marker + tail (~40%) —
+    the tail carries pytest's short test summary, so it is never dropped.
+
+    DF-GITREINS-POC-5: the head and tail are filled with COMPLETE lines, so a
+    reader never meets a half-written line (`tests/test_mod.py::test_case_50
+    PASSED [` and a fragment of its percentage) at either cut, and the marker
+    names how many chars and lines went plus how many FAILED/ERROR short-
+    summary lines were hoisted out of the middle. The one exception is a
+    single line longer than its side's budget (a minified JSON blob, one
+    enormous traceback line): that line IS cut mid-line and the marker says
+    so. The cap is a real bound — the marker is charged against it, not added
+    on top. Any FAILED/ERROR short-summary line inside the omitted middle is
+    hoisted into the marker region (deduped, order preserved) so a failing
+    test id survives even when the suite was interrupted mid-run and the tail
+    holds no summary.
+    """
+    if len(output) <= cap:
+        return output
+
+    head_budget = (cap * 6) // 10
+    tail_budget = cap - head_budget
+
+    head_end = _head_end_for_budget(output, head_budget)
+    partial_line_cut = head_end == 0
+    if partial_line_cut:
+        head_end = head_budget
+
+    tail_start = _tail_start_for_budget(output, tail_budget)
+    if tail_start >= len(output):
+        # No complete line fits in the tail budget either (the payload's last
+        # line alone is longer than 40% of the cap) — cut mid-line and flag
+        # it; a suffix is kept, so the summary line still survives.
+        partial_line_cut = True
+        tail_start = len(output) - tail_budget
+    tail_start = max(tail_start, head_end)
+
+    head = output[:head_end]
+    tail = output[tail_start:]
+    marker = ""
+    # The marker is charged against the cap, so shrink the evidence until
+    # head + marker + tail fits. Whole lines go first; a side that is one long
+    # line is char-cut (still a prefix/suffix) and the marker says so.
+    for _ in range(12):
+        omitted = output[len(head) : len(output) - len(tail)]
+        hoisted, dropped = _hoist_summary_lines(omitted)
+        marker = _omission_marker(
+            omitted,
+            partial_line_cut=partial_line_cut,
+            hoisted=hoisted,
+            dropped_hoisted=dropped,
+        )
+        over = len(head) + len(marker) + len(tail) - cap
+        if over <= 0:
+            break
+        # Drop whole lines from the tail's head until at least *over* chars are
+        # gone (a side that is one long line is char-cut instead — still a
+        # suffix/prefix — and the marker is told).
+        if tail:
+            drop_len = 0
+            while drop_len < over:
+                newline = tail.find("\n")
+                if newline == -1:
+                    cut = min(over - drop_len, len(tail))
+                    tail = tail[cut:]
+                    drop_len += cut
+                    partial_line_cut = True
+                    break
+                tail = tail[newline + 1 :]
+                drop_len += newline + 1
+            continue
+        if head:
+            drop_len = 0
+            while drop_len < over and head:
+                newline = head.rfind("\n")
+                if newline <= 0:
+                    cut = min(over - drop_len, len(head))
+                    head = head[: len(head) - cut]
+                    drop_len += cut
+                    partial_line_cut = True
+                    break
+                drop_len += len(head) - newline
+                head = head[:newline]
+            continue
+        break
     return head + marker + tail
 
 

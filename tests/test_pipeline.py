@@ -84,10 +84,13 @@ class TestStepEvidenceBound:
         payload, first, last = _make_pytest_output(20000)
         assert len(payload) > MAX_STEP_EVIDENCE_CHARS
         bounded = _bound_step_evidence(payload)
-        # Concrete bound: head (60%) + tail (40%) + small marker allowance.
-        assert len(bounded) <= MAX_STEP_EVIDENCE_CHARS + 100
-        # BOTH ends survive — old [:500] kept only 500 chars.
-        assert len(bounded) >= MAX_STEP_EVIDENCE_CHARS
+        # Concrete bound: head (60%) + tail (40%) + the marker, ALL inside the
+        # cap (DF-GITREINS-POC-5 — the marker used to be added on top of it:
+        # 4027 chars for a 4000 cap).
+        assert len(bounded) <= MAX_STEP_EVIDENCE_CHARS
+        # BOTH ends survive — old [:500] kept only 500 chars — and the budget
+        # is used, not wasted (line-aligned filling leaves < 1 line spare).
+        assert len(bounded) >= MAX_STEP_EVIDENCE_CHARS - 200
         assert bounded.startswith(first)
         assert bounded.endswith(last)
         assert "chars omitted" in bounded
@@ -140,7 +143,7 @@ class TestStepEvidenceBound:
         payload, first, last = _make_pytest_output(20000)
         sr = StepResult(id="tests", type="script", passed=False, output=payload)
         d = sr.to_dict()
-        assert len(d["output"]) <= MAX_STEP_EVIDENCE_CHARS + 100
+        assert len(d["output"]) <= MAX_STEP_EVIDENCE_CHARS
         assert d["output"].startswith(first)
         assert d["output"].endswith(last)  # fails under [:500] (head-only)
         assert "chars omitted" in d["output"]  # fails under [:500]
@@ -186,6 +189,104 @@ class TestStepEvidenceBound:
         p = Pipeline({"pipeline": {"stages": []}}, tmp_workdir)
         summary = p._summarize_stage(stage)
         assert f"  ✗ grep: {step_output[:100]}" in summary
+
+
+class TestStepEvidenceLineBoundary:
+    """DF-GITREINS-POC-5: cuts land on line boundaries, the marker reports
+    what went, and the cap is a real bound (marker charged against it)."""
+
+    @staticmethod
+    def _split(bounded: str) -> tuple[str, str, str]:
+        """(head, marker, tail) split on the marker's own delimiters."""
+        start = bounded.find("\n… [")
+        end = bounded.find("] …\n", start)
+        return bounded[:start], bounded[start : end + len("] …\n")], bounded[end + len("] …\n") :]
+
+    def test_head_and_tail_are_whole_lines(self):
+        """Neither cut leaves a half-written line (the dogfood fragment case)."""
+        from engine.pipeline import _bound_step_evidence
+
+        payload, _, _ = _make_pytest_output(20000)
+        bounded = _bound_step_evidence(payload)
+        head, marker, tail = self._split(bounded)
+        assert head.endswith("\n")
+        assert tail.startswith("tests/test_mod.py::test_case_")
+        # The old char-offset cut produced "…test_case_50 PASSED [" in the head
+        # and "7 PASSED [ 68%]" at the tail — both halves of a broken line.
+        assert not head.rstrip("\n").endswith("PASSED [")
+        assert "chars omitted" in marker
+        assert "line(s)" in marker
+
+    def test_marker_names_omitted_lines_and_chars(self):
+        """The marker is quantitative, not a bare ellipsis."""
+        from engine.pipeline import _bound_step_evidence
+
+        payload, _, _ = _make_pytest_output(20000)
+        marker = self._split(_bound_step_evidence(payload))[1]
+        assert "chars omitted" in marker and "line(s)" in marker
+        omitted = int(marker.split("[")[1].split(" chars omitted")[0])
+        assert omitted > 0
+        assert omitted <= len(payload)
+
+    def test_cap_is_a_real_bound_including_the_marker(self):
+        """len(result) <= cap for every shape, small caps included."""
+        from engine.pipeline import _bound_step_evidence
+
+        payload, _, _ = _make_pytest_output(20000)
+        cases = {
+            "pytest-shaped": payload,
+            "single-giant-line": "X" * 50000,
+            "traceback-lines": "\n".join(f"  File 'x.py', line {i}" for i in range(4000)),
+            "many-failures": payload[:5000]
+            + "\n"
+            + "\n".join(f"FAILED tests/t.py::test_{i} - AssertionError: nope" for i in range(200))
+            + "\n"
+            + payload[5000:],
+        }
+        for label, text in cases.items():
+            bounded = _bound_step_evidence(text)
+            assert len(bounded) <= MAX_STEP_EVIDENCE_CHARS, f"{label}: {len(bounded)}"
+
+    def test_over_budget_single_line_is_cut_and_says_so(self):
+        """A line longer than its side's budget is the one documented mid-line cut."""
+        from engine.pipeline import _bound_step_evidence
+
+        bounded = _bound_step_evidence("X" * 50000)
+        assert len(bounded) <= MAX_STEP_EVIDENCE_CHARS
+        assert "mid-line" in bounded
+
+    def test_trailing_summary_survives_a_giant_leading_line(self):
+        """The tail keeps the LAST line even when the head is one huge line."""
+        from engine.pipeline import _bound_step_evidence
+
+        payload = "Y" * 30000 + "\nFAILED tests/test_x.py::test_y - boom"
+        bounded = _bound_step_evidence(payload)
+        assert bounded.endswith("boom")
+        assert len(bounded) <= MAX_STEP_EVIDENCE_CHARS
+
+    def test_hoist_budget_reports_lines_it_could_not_carry(self):
+        """More FAILED lines than the hoist budget → the dropped count is named."""
+        from engine.pipeline import _bound_step_evidence
+
+        payload, _, _ = _make_pytest_output(20000)
+        many = "\n".join(
+            f"FAILED tests/test_m.py::test_{i} - AssertionError: nope" for i in range(200)
+        )
+        bounded = _bound_step_evidence(payload[:5000] + "\n" + many + "\n" + payload[5000:])
+        assert "not hoisted" in bounded
+        assert len(bounded) <= MAX_STEP_EVIDENCE_CHARS
+
+    def test_small_caps_stay_readable_and_bounded(self):
+        """A small cap still yields whole lines where a line fits."""
+        from engine.pipeline import _bound_step_evidence
+
+        payload = "\n".join(f"line {i} of a long output" for i in range(200))
+        for cap in (200, 500, 1000):
+            bounded = _bound_step_evidence(payload, cap=cap)
+            assert len(bounded) <= cap
+            head = self._split(bounded)[0]
+            if head:
+                assert head.endswith("\n")
 
 
 class TestStageResult:

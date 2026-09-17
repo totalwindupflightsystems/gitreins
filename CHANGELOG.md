@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **MCP onboarding: the server names itself, and a client can be written from
+  the docs (DF-GITREINS-POC-5)** — the stdio server used to start silently: a
+  client that piped a request in and read nothing back could not tell "still
+  starting" from "died before reading stdin", and `docs/mcp-api.md` had no
+  usable client example. `run_stdio()` now writes exactly one acknowledgement
+  line to **stderr** (name, version, protocol, tool count, resolved workdir)
+  and one named exit line on stdin EOF — stderr because stdout is
+  protocol-pure and an unsolicited line there would corrupt the stream — and
+  `python -m gitreins_mcp.server --version` answers the version without
+  opening a transport. `docs/mcp-api.md` gained a copy-pasteable raw JSON-RPC
+  quick start (shell one-liner + a 20-line Python client) naming the three
+  traps that cost a debugging session: one response per line,
+  `notifications/*` never answers, and unknown method/tool is `-32601`.
+  `docs/cli-reference.md` documents the acknowledgement and exit line.
 - **QA run ledger (QA-GITREINS-POC-7)** — QA verdicts were recorded nowhere
   durable: `worktree fresh|repro|dogfood` outcomes lived in stdout and in the
   gitignored, ceiling-pruned disposable registry, so the harness record covered
@@ -24,6 +38,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reported on stderr and the run's exit code is unchanged.
 
 ### Fixed
+- **The MCP handshake reported a version that disagreed with the CLI and
+  README (DF-GITREINS-POC-5)** — `initialize` answered with a hardcoded
+  `"version": "0.1.0"` while the shipped release was 0.13.0, so a client
+  reasoning about the tool surface from `serverInfo.version` reasoned about
+  the PoC (12 tools shipped since; `docs/mcp-api.md` even called the field "a
+  display constant"). `serverInfo.version` now reports `engine.version` — the
+  same source `gitreins --version` reads, falling back to `pyproject.toml` on
+  a bare checkout — and `PROTOCOL_VERSION`/`SERVER_NAME` are single constants.
+  A regression test pins CLI == package == handshake and fails if a doc pins a
+  stale server version literal; `docs/architecture.md` no longer opens with a
+  frozen "IMPLEMENTED (v0.1.0)" banner, and the PoC-era transcripts in
+  `specs/02-MCP-Protocol.md` carry a note saying where the live value comes
+  from.
+- **Tier 1 evidence was cut mid-line and the 4 KB cap was not a cap
+  (DF-GITREINS-POC-5)** — the head+tail bound sliced at raw character offsets,
+  so a verdict's `output` ended in a broken fragment
+  (`…tests/test_case_50 PASSED [`) and resumed with the other half of that same
+  line, and the omission marker was added on top of the budget (4027 chars for
+  a 4000 cap). Both cuts now land on line boundaries and the marker is charged
+  against the cap, naming how many chars and lines went and flagging the one
+  documented exception (a single line longer than its side's budget — minified
+  JSON, one huge traceback line — is cut mid-line and says so). Hoisted
+  FAILED/ERROR ids are themselves budgeted, with the count the budget could
+  not carry reported instead of silently dropped. Live: a 28 KB pytest payload
+  serializes to 3984 chars, head ending at a newline, tail starting at a test
+  line.
 - **A whole-tree lint graded files the repo's own ruff config excludes
   (DF-GITREINS-POC-18)** — `exclude`/`extend-exclude` apply only while ruff
   recurses into directories, so passing an explicit file list (what `gitreins

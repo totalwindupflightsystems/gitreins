@@ -311,7 +311,21 @@ environment variables:
 | `GITREINS_LLM_REASONING` | Reasoning mode: `enabled` or `disabled` (default `disabled`) |
 
 The MCP tool `mcp_gitreins_configure` can hot-reload the LLM config at
-runtime. Exits **0** on clean shutdown; **1** on fatal errors.
+runtime. Exits **0** on clean shutdown (stdin EOF); **1** on fatal errors.
+
+On startup the server writes one acknowledgement line to **stderr** (stdout is
+protocol-pure), naming its identity and the workdir it resolved — raw output,
+not an invocation:
+
+    gitreins MCP server <version> — stdio, protocol 2024-11-05, 12 tools, workdir=/path/to/repo
+
+`<version>` is the installed release — the same value `gitreins --version`
+prints and the same value the `initialize` result reports in
+`serverInfo.version`. A named exit line follows on stdin EOF
+(`gitreins MCP server <version> — stdin closed (EOF), exiting 0`). The module
+form answers the version without opening the transport:
+`python -m gitreins_mcp.server --version`. See `docs/mcp-api.md` for a
+copy-pasteable raw JSON-RPC client.
 
 ## 9. `gitreins security-scan`
 
