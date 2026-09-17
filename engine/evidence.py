@@ -13,8 +13,10 @@ evidence — every failure is swallowed and reported as a missing item):
          dispatched for the task, else ``<workdir>/.gitreins/worker-brief.md``
   log    ``GITREINS_DRIVER_LOG`` — path to the worker/driver log; only the tail
          is kept, because the interesting part of a driver log is its end
-  patch  the diff the judge actually graded: ``git diff HEAD`` when the working
-         tree is dirty, else the patch of the stamped commit (``git show``)
+  patch  the patch of the commit the verdict stamped — the fix as landed
+  worktree  ``git diff HEAD`` — whatever was uncommitted, i.e. what the judge
+         read when it graded; recorded separately so a permanently dirty tree
+         (generated files, graph caches) cannot pass itself off as the fix
 
 Everything is bounded: a brief keeps its head, a log keeps its tail, and the
 patch is capped — each artifact records ``bytes``/``truncated`` so a reader can
@@ -34,20 +36,23 @@ LOG_ENV = "GITREINS_DRIVER_LOG"
 BRIEF_NAME = "brief"
 LOG_NAME = "log"
 PATCH_NAME = "patch"
+WORKTREE_NAME = "worktree"
 
 BRIEF_FILENAME = "worker-brief.md"
 LOG_FILENAME = "driver-log.tail.txt"
 PATCH_FILENAME = "commit.patch"
+WORKTREE_FILENAME = "worktree.patch"
 
 #: Character labels used by the viewer and the docs.
 ITEM_LABELS = {
     BRIEF_NAME: "Worker brief",
     LOG_NAME: "Driver log (tail)",
-    PATCH_NAME: "Graded patch",
+    PATCH_NAME: "Landed commit patch",
+    WORKTREE_NAME: "Working-tree diff (graded)",
 }
 
-#: Bounds. The patch is the largest artifact on purpose: a verdict for a
-#: multi-file change is unreadable without it, and 256 KiB is still far below
+#: Bounds. The patches are the largest artifacts on purpose: a verdict for a
+#: multi-file change is unreadable without them, and 256 KiB is still far below
 #: what a single HTTP response can carry comfortably.
 MAX_BRIEF_BYTES = 32 * 1024
 MAX_LOG_BYTES = 16 * 1024
@@ -123,47 +128,36 @@ def _run_git(workdir: str, args: list[str], cap: int) -> str:
     return _decode(result.stdout.encode("utf-8", errors="replace")[: cap + 1])
 
 
-def _tree_is_dirty(workdir: str) -> bool:
-    try:
-        result = subprocess.run(
-            ["git", "status", "--porcelain"],
-            cwd=workdir,
-            capture_output=True,
-            text=True,
-            timeout=20,
-            check=False,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return False
-    return result.returncode == 0 and bool(result.stdout.strip())
+def commit_patch(workdir: str, commit: str = "") -> tuple[str, str]:
+    """The landed commit's own patch, as ``(text, source)``.
 
-
-def graded_patch(workdir: str, commit: str = "") -> tuple[str, str]:
-    """The diff the judge graded, as ``(text, source)`` — empty when git has none.
-
-    A judge reads the working-tree diff first and falls back to the last commit
-    when the tree is clean (``engine.evaluator``), so the evidence mirrors that
-    order instead of always reporting the committed patch: a worker that lands
-    its fix in the working tree is the normal case in this fleet.
+    ``commit`` is the SHA the verdict stamped (HEAD at judge time); ``HEAD`` is
+    the fallback for callers that collected evidence without one.
     """
-    if _tree_is_dirty(workdir):
-        text = _run_git(workdir, ["diff", "HEAD", "--no-color"], MAX_PATCH_BYTES)
-        if text:
-            return text, "git diff HEAD (working tree)"
-    if commit:
-        text = _run_git(
-            workdir,
-            ["show", "--no-color", "--stat", "--patch", "--format=fuller", commit],
-            MAX_PATCH_BYTES,
-        )
-        if text:
-            return text, f"git show {commit[:12]}"
+    target = commit or "HEAD"
     text = _run_git(
         workdir,
-        ["show", "--no-color", "--stat", "--patch", "--format=fuller", "HEAD"],
+        ["show", "--no-color", "--stat", "--patch", "--format=fuller", target],
         MAX_PATCH_BYTES,
     )
-    return text, "git show HEAD"
+    if not text:
+        return "", ""
+    source = f"git show {target[:12]}" if commit else "git show HEAD"
+    return text, source
+
+
+def worktree_patch(workdir: str) -> tuple[str, str]:
+    """The uncommitted diff the judge graded, as ``(text, source)``.
+
+    Kept separate from the commit patch on purpose: a checkout whose tree is
+    permanently dirty (generated files, graph caches) would otherwise store that
+    noise under the name "the fix". Both artifacts are recorded, so a reader can
+    tell the landed patch from whatever else was in the working tree.
+    """
+    text = _run_git(workdir, ["diff", "HEAD", "--no-color"], MAX_PATCH_BYTES)
+    if not text.strip():
+        return "", ""
+    return text, "git diff HEAD (working tree)"
 
 
 def _write_artifact(entry_dir: str, filename: str, text: str) -> int:
@@ -218,11 +212,19 @@ def _collect_log(env: dict[str, str]) -> tuple[dict[str, Any], str] | None:
 
 
 def _collect_patch(workdir: str, commit: str) -> tuple[dict[str, Any], str] | None:
-    text, source = graded_patch(workdir, commit)
+    text, source = commit_patch(workdir, commit)
     if not text.strip():
         return None
     text, truncated = _bounded_head(text.encode("utf-8"), MAX_PATCH_BYTES)
     return _item(PATCH_NAME, PATCH_FILENAME, text, truncated, source)
+
+
+def _collect_worktree(workdir: str) -> tuple[dict[str, Any], str] | None:
+    text, source = worktree_patch(workdir)
+    if not text.strip():
+        return None
+    text, truncated = _bounded_head(text.encode("utf-8"), MAX_PATCH_BYTES)
+    return _item(WORKTREE_NAME, WORKTREE_FILENAME, text, truncated, source)
 
 
 def collect_evidence(
@@ -251,6 +253,7 @@ def collect_evidence(
         lambda: _collect_brief(workdir, environ),
         lambda: _collect_log(environ),
         lambda: _collect_patch(workdir, commit),
+        lambda: _collect_worktree(workdir),
     ):
         try:
             collected = collector()

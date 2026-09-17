@@ -12,17 +12,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recorded *what* was decided but not the run that produced it: the worker brief
   and driver log usually live in `/tmp` and die with the tick, and the record
   named a commit without the patch the judge actually graded. `task complete`
-  now copies three artifacts next to `verdict.json` — `worker-brief.md`
+  now copies the run's artifacts next to `verdict.json` — `worker-brief.md`
   (`GITREINS_WORKER_BRIEF`, else `<checkout>/.gitreins/worker-brief.md`, first
-  32 KiB), `driver-log.tail.txt` (`GITREINS_DRIVER_LOG`, last 16 KiB) and
-  `commit.patch` (the graded diff: `git diff HEAD` for a dirty tree, else
-  `git show <stamped commit>`, first 256 KiB) — lists them in
-  `verdict.json → evidence.items` with `bytes`/`truncated`/`source`, and
-  `gitreins serve` renders them as an **Evidence** section in the detail pane
-  behind an additive, manifest-bound route
-  (`/api/verdicts/<date>/<hash>/evidence/<name>`). Collection is best-effort:
-  an absent or unreadable source is omitted (never faked as an empty file) and
-  can never fail a verdict; a clipped artifact names the bytes it dropped.
+  32 KiB), `driver-log.tail.txt` (`GITREINS_DRIVER_LOG`, last 16 KiB),
+  `commit.patch` (the patch of the stamped commit — the fix as landed) and
+  `worktree.patch` (`git diff HEAD`, the uncommitted diff the judge read, kept
+  separate so a permanently dirty checkout cannot pass its noise off as the fix;
+  patches bounded at 256 KiB) — lists them in `verdict.json → evidence.items`
+  with `bytes`/`truncated`/`source`, and `gitreins serve` renders them as an
+  **Evidence** section in the detail pane behind an additive, manifest-bound
+  route (`/api/verdicts/<date>/<hash>/evidence/<name>`). Collection is
+  best-effort: an absent or unreadable source is omitted (never faked as an
+  empty file) and can never fail a verdict; a clipped artifact names the bytes
+  it dropped.
 - **MCP onboarding: the server names itself, and a client can be written from
   the docs (DF-GITREINS-POC-5)** — the stdio server used to start silently: a
   client that piped a request in and read nothing back could not tell "still

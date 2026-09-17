@@ -128,7 +128,8 @@ sources exist (best-effort — evidence never fails a verdict):
 |----------|--------|-------|
 | `worker-brief.md` | `GITREINS_WORKER_BRIEF` (path), else `<checkout>/.gitreins/worker-brief.md` | first 32 KiB |
 | `driver-log.tail.txt` | `GITREINS_DRIVER_LOG` (path) | last 16 KiB |
-| `commit.patch` | the diff the judge graded (`git diff HEAD`, else `git show <stamped commit>`) | first 256 KiB |
+| `commit.patch` | the patch of the commit the verdict stamped — the fix as landed (`git show <stamped commit>`, else `git show HEAD`) | first 256 KiB |
+| `worktree.patch` | `git diff HEAD` — what was uncommitted when the verdict was written, i.e. what the judge read | first 256 KiB |
 
 The artifacts are listed in `verdict.json → evidence.items` and rendered by
 `gitreins serve` (see [Judgment Viewer](judgment-viewer.md#worker-evidence-in-a-verdict-directory)).

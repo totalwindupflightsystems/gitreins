@@ -114,23 +114,29 @@ def test_driver_log_keeps_the_tail_and_records_truncation(tmp_path, monkeypatch)
     assert item["bytes"] == len(text.encode())
 
 
-def test_patch_is_the_graded_working_tree_diff_when_the_tree_is_dirty(tmp_path):
+def test_dirty_tree_records_the_landed_patch_and_the_graded_working_tree_diff(tmp_path):
+    """Both artifacts, distinguishable: the fix as committed, and what was uncommitted."""
     repo = _repo(tmp_path)
     (repo / "mod.py").write_text("value = 1\n", encoding="utf-8")
     _git(repo, "add", "mod.py")
     _git(repo, "commit", "-q", "-m", "base")
+    commit = _git(repo, "rev-parse", "HEAD").strip()
     (repo / "mod.py").write_text("value = 2\n", encoding="utf-8")
     entry = tmp_path / "entry"
 
-    manifest = evidence.collect_evidence(str(repo), str(entry), env={})
+    manifest = evidence.collect_evidence(str(repo), str(entry), commit=commit, env={})
 
-    item = _items(manifest)[evidence.PATCH_NAME]
-    patch = (entry / evidence.PATCH_FILENAME).read_text(encoding="utf-8")
-    assert "+value = 2" in patch
-    assert item["source"].startswith("git diff HEAD")
+    items = _items(manifest)
+    assert set(items) == {evidence.PATCH_NAME, evidence.WORKTREE_NAME}
+    landed = (entry / evidence.PATCH_FILENAME).read_text(encoding="utf-8")
+    graded = (entry / evidence.WORKTREE_FILENAME).read_text(encoding="utf-8")
+    assert "+value = 1" in landed and "+value = 2" not in landed
+    assert "+value = 2" in graded
+    assert items[evidence.PATCH_NAME]["source"] == f"git show {commit[:12]}"
+    assert items[evidence.WORKTREE_NAME]["source"] == "git diff HEAD (working tree)"
 
 
-def test_patch_falls_back_to_the_stamped_commit_when_the_tree_is_clean(tmp_path):
+def test_clean_tree_records_only_the_landed_patch(tmp_path):
     repo = _repo(tmp_path)
     (repo / "mod.py").write_text("value = 1\n", encoding="utf-8")
     _git(repo, "add", "mod.py")
@@ -140,9 +146,18 @@ def test_patch_falls_back_to_the_stamped_commit_when_the_tree_is_clean(tmp_path)
 
     manifest = evidence.collect_evidence(str(repo), str(entry), commit=commit, env={})
 
-    item = _items(manifest)[evidence.PATCH_NAME]
-    assert f"git show {commit[:12]}" == item["source"]
+    assert set(_items(manifest)) == {evidence.PATCH_NAME}
     assert "landed fix" in (entry / evidence.PATCH_FILENAME).read_text(encoding="utf-8")
+
+
+def test_repository_without_a_commit_records_no_patch_at_all(tmp_path):
+    repo = _repo(tmp_path)
+    (repo / "mod.py").write_text("value = 1\n", encoding="utf-8")
+    entry = tmp_path / "entry"
+
+    manifest = evidence.collect_evidence(str(repo), str(entry), env={})
+
+    assert _items(manifest) == {}
 
 
 def test_collector_is_best_effort_when_entry_dir_cannot_be_created(tmp_path):
@@ -265,16 +280,27 @@ def test_task_complete_writes_brief_log_and_patch_next_to_verdict_json(
 
     verdict = json.loads((entry / "verdict.json").read_text(encoding="utf-8"))
     manifest = {item["name"]: item for item in verdict["evidence"]["items"]}
-    assert set(manifest) == {evidence.BRIEF_NAME, evidence.LOG_NAME, evidence.PATCH_NAME}
+    assert set(manifest) == {
+        evidence.BRIEF_NAME,
+        evidence.LOG_NAME,
+        evidence.PATCH_NAME,
+        evidence.WORKTREE_NAME,
+    }
     assert verdict["commit"], "the verdict still stamps the commit it graded"
 
     assert (entry / evidence.BRIEF_FILENAME).read_text(encoding="utf-8") == (
         "# Worker brief\nEmbed the evidence.\n"
     )
     assert (entry / evidence.LOG_FILENAME).read_text(encoding="utf-8").endswith("finished\n")
-    patch = (entry / evidence.PATCH_FILENAME).read_text(encoding="utf-8")
-    assert "+value = 2" in patch
-    assert manifest[evidence.PATCH_NAME]["source"].startswith("git diff HEAD")
+    # The landed fix (the commit) and the graded working tree are separate
+    # artifacts: in a checkout that is never clean, the second must not be able
+    # to masquerade as the first.
+    landed = (entry / evidence.PATCH_FILENAME).read_text(encoding="utf-8")
+    graded = (entry / evidence.WORKTREE_FILENAME).read_text(encoding="utf-8")
+    assert "+value = 1" in landed and "+value = 2" not in landed
+    assert "+value = 2" in graded
+    assert manifest[evidence.PATCH_NAME]["source"].startswith("git show ")
+    assert manifest[evidence.WORKTREE_NAME]["source"].startswith("git diff HEAD")
 
     # And the same artifacts are reachable through the module the viewer uses.
-    assert evidence.read_evidence(str(entry), verdict, evidence.PATCH_NAME)[1] == patch
+    assert evidence.read_evidence(str(entry), verdict, evidence.WORKTREE_NAME)[1] == graded

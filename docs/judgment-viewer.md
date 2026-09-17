@@ -99,7 +99,8 @@ and die with the tick.
 |----------|--------|-------|
 | `worker-brief.md` | `GITREINS_WORKER_BRIEF` (path), else `<checkout>/.gitreins/worker-brief.md` | first 32 KiB, head kept |
 | `driver-log.tail.txt` | `GITREINS_DRIVER_LOG` (path) | last 16 KiB, tail kept |
-| `commit.patch` | the diff the judge graded: `git diff HEAD` for a dirty tree, else `git show <stamped commit>` | first 256 KiB, head kept |
+| `commit.patch` | the patch of the commit the verdict stamped — the fix as landed (`git show <stamped commit>`, else `git show HEAD`) | first 256 KiB, head kept |
+| `worktree.patch` | `git diff HEAD` — whatever was uncommitted when the verdict was written, i.e. what the judge read | first 256 KiB, head kept |
 
 Each artifact is listed in `verdict.json → evidence.items` with its `name`,
 `label`, `file`, `bytes`, `truncated` flag and the `source` it was copied from,
@@ -108,8 +109,13 @@ and the viewer's detail pane renders that list as the **Evidence** section
 artifact says so: `truncated: true` and a `<N> of <M> bytes dropped` line at the
 clip point, naming the arithmetic instead of silently losing text.
 
-Two rules make the section trustworthy:
+Three rules make the section trustworthy:
 
+- **The landed fix and the graded tree are separate artifacts.** `commit.patch`
+  is the patch of the commit the verdict stamped; `worktree.patch` is the
+  uncommitted diff (`git diff HEAD`), recorded only when there is one. A
+  checkout that is never clean — generated files, graph caches — would otherwise
+  store that noise under the name "the fix".
 - **Absent means absent.** A source that is missing, unreadable or empty is left
   out of the manifest entirely — the pane says the artifact was not recorded
   rather than showing an empty file that reads as "the worker wrote nothing".
