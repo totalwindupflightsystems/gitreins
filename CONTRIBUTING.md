@@ -32,7 +32,7 @@ pip install gitreins
 pytest tests/ -v
 ```
 
-All tests must pass before submitting a PR. Currently **1774 tests across 48
+All tests must pass before submitting a PR. Currently **1779 tests across 48
 test files** (canonical count: `pytest --collect-only -q`, which is exactly what
 CI recomputes).
 
@@ -42,6 +42,20 @@ the suite and fails the build when any `N tests pass`, `N tests across`, or
 commit that adds, removes, or renames tests MUST update README's counts in the
 same commit. The numbers in this file are not machine-checked; keep them equal
 to README's.
+
+## Load reproduction
+
+Some failures only appear under load. Reproduce them without leaving load behind:
+
+- **Never spawn detached CPU loops** (`setsid sh -c 'while :; do :; done' &`) —
+  they are session leaders, so a killed runner leaves them spinning on the host
+  that also runs the gateway, the scheduler and DuckBrain (INT-FLAKE-5: 24+
+  orphaned burners, load average 33.8).
+- **Use `scripts/loadgen.py`** — daemonic children plus `PR_SET_PDEATHSIG`, so the
+  kernel kills them when the runner dies even on SIGKILL; capped workers,
+  duration and CPU set; it verifies its own cleanup and exits non-zero on a
+  survivor, and refuses to start on a host running the shared services unless
+  explicitly allowed. Full rule and rationale: `docs/load-reproduction.md`.
 
 ## Documentation Checks
 
@@ -67,7 +81,7 @@ parse is a broken promise, and the checker is what keeps the README's
 engine/          — Core engine (evaluator, guards, pipeline, LLM client, task manager, judge, dead_code)
 gitreins/        — CLI entry point and install script
 gitreins_mcp/    — MCP stdio server (12 tools)
-tests/           — pytest test suite (1774 tests across 48 files; canonical count in README)
+tests/           — pytest test suite (1779 tests across 49 files; canonical count in README)
 tests/reliability/ — 7 adversarial benchmark projects
 docs/            — Architecture, component map, evaluator loop, technology choices
 .memory-bank/    — Institutional memory (ADRs, findings, work-item status)
