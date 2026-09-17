@@ -60,10 +60,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against the cap, naming how many chars and lines went and flagging the one
   documented exception (a single line longer than its side's budget — minified
   JSON, one huge traceback line — is cut mid-line and says so). Hoisted
-  FAILED/ERROR ids are themselves budgeted, with the count the budget could
-  not carry reported instead of silently dropped. Live: a 28 KB pytest payload
-  serializes to 3984 chars, head ending at a newline, tail starting at a test
-  line.
+  FAILED/ERROR ids are themselves budgeted, and the marker spends only the room
+  the cap actually leaves: a 200-char budget on a 200-failure payload reports
+  how many ids it could not carry instead of returning 1123 chars for it (the
+  Tier-2 judge caught that on the first submission of this row). Live: a 28 KB
+  pytest payload serializes to 3891 chars, head ending at a newline, tail
+  starting at a test line.
 - **A whole-tree lint graded files the repo's own ruff config excludes
   (DF-GITREINS-POC-18)** — `exclude`/`extend-exclude` apply only while ruff
   recurses into directories, so passing an explicit file list (what `gitreins

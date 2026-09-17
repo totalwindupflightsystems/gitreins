@@ -181,12 +181,13 @@ def _tail_start_for_budget(output: str, budget: int) -> int:
     return start
 
 
-def _hoist_summary_lines(omitted: str) -> tuple[list[str], int]:
+def _hoist_summary_lines(omitted: str, budget: int = _MAX_HOISTED_CHARS) -> tuple[list[str], int]:
     """FAILED/ERROR short-summary lines from *omitted*, deduped, order kept.
 
     Returns ``(lines, dropped)`` where *dropped* counts the matching lines the
     count/char budget could not carry (reported in the marker, never silently
-    swallowed).
+    swallowed). *budget* is the room the marker has left for id lines — a small
+    cap carries no ids but still counts them.
     """
     hoisted: list[str] = []
     seen: set[str] = set()
@@ -199,7 +200,7 @@ def _hoist_summary_lines(omitted: str) -> tuple[list[str], int]:
         if stripped in seen:
             continue
         seen.add(stripped)
-        if len(hoisted) >= _MAX_HOISTED_LINES or used + len(stripped) > _MAX_HOISTED_CHARS:
+        if len(hoisted) >= _MAX_HOISTED_LINES or used + len(stripped) > budget:
             dropped += 1
             continue
         hoisted.append(stripped)
@@ -226,6 +227,31 @@ def _omission_marker(
     return text
 
 
+def _marker_for(omitted: str, *, partial_line_cut: bool, budget: int) -> str:
+    """The marker for *omitted*, fitted into *budget* chars.
+
+    The base line (char/line counts) is always reported; the hoisted FAILED/
+    ERROR ids and their drop count only spend what is left of *budget* after
+    it, so a small cap reports the tally and the number of ids it could not
+    carry instead of overshooting the cap it is describing.
+    """
+    base = _omission_marker(
+        omitted, partial_line_cut=partial_line_cut, hoisted=[], dropped_hoisted=0
+    )
+    hoist_budget = min(_MAX_HOISTED_CHARS, max(0, budget - len(base) - 40))
+    hoisted, dropped = _hoist_summary_lines(omitted, hoist_budget)
+    marker = _omission_marker(
+        omitted,
+        partial_line_cut=partial_line_cut,
+        hoisted=hoisted,
+        dropped_hoisted=dropped,
+    )
+    if len(marker) <= budget:
+        return marker
+    # Not even the tally plus the drop note fits: report the tally alone.
+    return base
+
+
 def _bound_step_evidence(output: str, cap: int = MAX_STEP_EVIDENCE_CHARS) -> str:
     """Bound step evidence to *cap* chars on LINE boundaries, keeping BOTH ends.
 
@@ -249,8 +275,12 @@ def _bound_step_evidence(output: str, cap: int = MAX_STEP_EVIDENCE_CHARS) -> str
     if len(output) <= cap:
         return output
 
-    head_budget = (cap * 6) // 10
-    tail_budget = cap - head_budget
+    # The marker is part of the budget, not an addition to it: keep room for it
+    # and split the rest 60/40 between the head and the tail.
+    marker_reserve = min(120, cap // 4)
+    usable = max(0, cap - marker_reserve)
+    head_budget = (usable * 6) // 10
+    tail_budget = usable - head_budget
 
     head_end = _head_end_for_budget(output, head_budget)
     partial_line_cut = head_end == 0
@@ -274,12 +304,10 @@ def _bound_step_evidence(output: str, cap: int = MAX_STEP_EVIDENCE_CHARS) -> str
     # line is char-cut (still a prefix/suffix) and the marker says so.
     for _ in range(12):
         omitted = output[len(head) : len(output) - len(tail)]
-        hoisted, dropped = _hoist_summary_lines(omitted)
-        marker = _omission_marker(
+        marker = _marker_for(
             omitted,
             partial_line_cut=partial_line_cut,
-            hoisted=hoisted,
-            dropped_hoisted=dropped,
+            budget=max(0, cap - len(head) - len(tail)),
         )
         over = len(head) + len(marker) + len(tail) - cap
         if over <= 0:
@@ -314,7 +342,13 @@ def _bound_step_evidence(output: str, cap: int = MAX_STEP_EVIDENCE_CHARS) -> str
                 head = head[:newline]
             continue
         break
-    return head + marker + tail
+    result = head + marker + tail
+    if len(result) > cap:
+        # Degenerate cap: even with both sides emptied the marker (or a single
+        # unshrinkable line) is larger than the cap. The bound wins over the
+        # report here, and it is the only path that can cut the marker itself.
+        result = result[:cap]
+    return result
 
 
 @dataclass
