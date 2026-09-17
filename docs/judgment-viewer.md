@@ -2,8 +2,9 @@
 
 `gitreins serve` starts a read-only local web server that renders the judgment
 history of a checkout: every verdict in `.gitreins/history/`, the criteria and
-Tier 1/Tier 2 evidence inside each verdict, the board event timeline, the QA run
-ledger, and (when asked for) the scheduler tick ledger for a project.
+Tier 1/Tier 2 evidence inside each verdict, the worker evidence embedded next to
+the verdict (brief, driver-log tail, graded patch), the board event timeline, the
+QA run ledger, and (when asked for) the scheduler tick ledger for a project.
 
 It exists because `.gitreins/history/<date>/<hash>/verdict.json` is a durable
 audit record that nobody wants to read as JSON. The browser answers the three
@@ -69,7 +70,8 @@ changed one. Data is re-read from disk on every request, so the contract is
 | GET | `/` | 200 HTML | the single-page viewer (no server-side data; it fetches `/api/*`) | — |
 | GET | `/api/stats` | 200 | `total`, `passed`, `failed`, `pass_rate`, `repo`, `path`, `generated` | — |
 | GET | `/api/verdicts` | 200 | `{"verdicts": [row, …]}` — metadata only, newest last | — |
-| GET | `/api/verdicts/<date>/<hash>` | 200 | the full `verdict.json` (criteria, `stages.tier1`, `stages.tier2`) | `400` malformed path (not `<date>/<hash>`), `404` unknown date/hash |
+| GET | `/api/verdicts/<date>/<hash>` | 200 | the full `verdict.json` (criteria, `stages.tier1`, `stages.tier2`, `evidence` manifest when one was collected) | `400` malformed path (not `<date>/<hash>`), `404` unknown date/hash |
+| GET | `/api/verdicts/<date>/<hash>/evidence/<name>` | 200 `text/plain` | one worker-evidence artifact declared by that verdict's `evidence` manifest (`brief`, `log`, `patch`) | `400` missing `<name>`, `404` unknown verdict or a name the manifest does not declare (including an artifact deleted since) |
 | GET | `/api/tasks` | 200 | `{"tasks": [row, …]}` from the board's `tasks.jsonl` | `200 []` when the board is absent |
 | GET | `/api/events` | 200 | `{"events": [row, …]}` from the board's `events.jsonl` | `200 []` when the board is absent |
 | GET | `/api/ticks` | 200 | `{"project": <name or null>, "ticks": [row, …]}` | `200 []` when `--project` is unset or the ledger is unavailable |
@@ -86,11 +88,46 @@ The SPA is a hash-free, single-page app: it loads `/api/stats`, `/api/verdicts`,
 `/api/verdicts/<date>/<hash>` when a row is clicked. Refresh for new judgments;
 there is no push channel.
 
+## Worker evidence in a verdict directory
+
+`task complete` copies the run's own artifacts next to `verdict.json`, because a
+verdict that names a commit but not the brief, the driver log and the patch it
+graded is only half an audit record — and those sources usually live in `/tmp`
+and die with the tick.
+
+| Artifact | Source | Bound |
+|----------|--------|-------|
+| `worker-brief.md` | `GITREINS_WORKER_BRIEF` (path), else `<checkout>/.gitreins/worker-brief.md` | first 32 KiB, head kept |
+| `driver-log.tail.txt` | `GITREINS_DRIVER_LOG` (path) | last 16 KiB, tail kept |
+| `commit.patch` | the diff the judge graded: `git diff HEAD` for a dirty tree, else `git show <stamped commit>` | first 256 KiB, head kept |
+
+Each artifact is listed in `verdict.json → evidence.items` with its `name`,
+`label`, `file`, `bytes`, `truncated` flag and the `source` it was copied from,
+and the viewer's detail pane renders that list as the **Evidence** section
+(load-on-click, so a large patch is fetched only when asked for). A clipped
+artifact says so: `truncated: true` and a `<N> of <M> bytes dropped` line at the
+clip point, naming the arithmetic instead of silently losing text.
+
+Two rules make the section trustworthy:
+
+- **Absent means absent.** A source that is missing, unreadable or empty is left
+  out of the manifest entirely — the pane says the artifact was not recorded
+  rather than showing an empty file that reads as "the worker wrote nothing".
+- **Evidence never fails a verdict.** Collection is best-effort: a collector
+  error, an unwritable history directory or an unreadable source leaves the
+  verdict untouched. A verdict recorded before this feature exists simply has no
+  `evidence` block.
+
+Only names declared in the verdict's own manifest are servable, and a declared
+name must be a plain file name (no separators), so the artifact route cannot be
+used to read anything outside the verdict directory.
+
 ## Data sources
 
 | Surface | Source | Absent source | Notes |
 |---------|--------|---------------|-------|
 | Verdict list + detail | `<checkout>/.gitreins/history/<YYYY-MM-DD>/<hash>/verdict.json` | `total: 0`, empty list | Filesystem only. Unparseable or non-matching entries are skipped, never guessed |
+| Worker evidence | the same verdict directory: `worker-brief.md`, `driver-log.tail.txt`, `commit.patch` | the pane says the artifact was not recorded | Written by `task complete` (see [Worker evidence](#worker-evidence-in-a-verdict-directory)); served only for names the verdict's own `evidence` manifest declares |
 | Board timeline | `<canonical>/.coding-hermes/board/events.jsonl` | `[]` | Resolved through Git's common dir, so a linked worktree shows the shared board |
 | Board tasks | `<canonical>/.coding-hermes/board/tasks.jsonl` | `[]` | Last 2000 lines are read |
 | Ticks | `~/.hermes/coding-hermes/scheduler.db`, table `ticks`, filtered by `project_name` | `[]` | Host-coupled, read-only SQLite, opt-in per `--project`; without `--project` the panel reads `no scheduler project selected (start with --project <name>)`, and a selected project with no ledger rows reads `no scheduler ticks recorded for <project>` |
@@ -113,6 +150,10 @@ report` for the branch fallback, or fetch the branch into `.gitreins/`.
   `..`, absolute paths and encoded traversal (`%2e%2e`) can never escape the
   history directory. This is enforced by construction: the segments are
   validated first, then joined.
+- **Evidence artifacts are manifest-bound.** The evidence route serves only a
+  name the verdict's own `evidence` block declares, and a declared file name must
+  be a plain name — a crafted `<name>` (or a hand-edited manifest trying to name
+  `../something`) is a `404`/`None`, never an open of an unlisted path.
 - **Board access is name-bound.** Board files are resolved through
   `board_file_path`, which accepts only a direct child filename of the canonical
   board directory.

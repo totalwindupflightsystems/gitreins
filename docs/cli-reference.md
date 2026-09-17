@@ -121,6 +121,18 @@ Exit **0** on success.
 Marks the task complete and runs the Tier 2 LLM judge, then persists
 the verdict.
 
+Persisting also embeds **worker evidence** next to `verdict.json` when the
+sources exist (best-effort — evidence never fails a verdict):
+
+| Artifact | Source | Bound |
+|----------|--------|-------|
+| `worker-brief.md` | `GITREINS_WORKER_BRIEF` (path), else `<checkout>/.gitreins/worker-brief.md` | first 32 KiB |
+| `driver-log.tail.txt` | `GITREINS_DRIVER_LOG` (path) | last 16 KiB |
+| `commit.patch` | the diff the judge graded (`git diff HEAD`, else `git show <stamped commit>`) | first 256 KiB |
+
+The artifacts are listed in `verdict.json → evidence.items` and rendered by
+`gitreins serve` (see [Judgment Viewer](judgment-viewer.md#worker-evidence-in-a-verdict-directory)).
+
 | Argument | Description |
 |----------|-------------|
 | `id` | Task ID (required, positional) |

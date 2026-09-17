@@ -11,6 +11,9 @@ that reads the repo's judgment stores on EVERY request (live, not a snapshot):
   GET /api/events                -> board events.jsonl
   GET /api/ticks                 -> scheduler tick ledger (optional, host DB)
   GET /api/qa                    -> QA run ledger (worktree fresh|repro|dogfood rows)
+  GET /api/verdicts/<d>/<hash>/evidence/<name>
+                                 -> worker evidence artifact: brief, driver-log
+                                    tail or graded patch (text/plain)
 
 The browsed checkout defaults to the repository containing the working
 directory; ``--repo <path>`` (see :func:`resolve_workdir`) points the same
@@ -32,7 +35,7 @@ import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, TypedDict
 
-from engine import qa_ledger
+from engine import evidence, qa_ledger
 from engine.repo_paths import (
     WorktreeResolutionError,
     board_file_path,
@@ -174,8 +177,22 @@ def load_verdict(workdir: str, date: str, h: str) -> dict[str, Any] | None:
         return None
 
 
+def load_verdict_evidence(workdir: str, date: str, h: str, name: str) -> tuple[str, str] | None:
+    """``(filename, text)`` for one evidence artifact of a verdict, else ``None``.
+
+    The artifact must be declared by the verdict's own manifest (see
+    :mod:`engine.evidence`), so an unknown ``name`` is a 404 and the served path
+    can never leave the verdict directory.
+    """
+    verdict = load_verdict(workdir, date, h)
+    if verdict is None:
+        return None
+    return evidence.read_evidence(os.path.join(_verdict_dir(workdir), date, h), verdict, name)
+
+
 def load_jsonl(workdir: str, name: str, limit: int = 2000) -> list[Any]:
     """Last ``limit`` parses of board file ``name`` (rows are any JSON value)."""
+
     try:
         path = board_file_path(workdir, name)
     except (WorktreeResolutionError, OSError, ValueError):
@@ -306,7 +323,7 @@ a{color:#60a5fa}
 <script>
 const esc=s=>{const d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML};
 const badge=v=>v?'<span class="badge pass">PASS</span>':'<span class="badge fail">FAIL</span>';
-let V=[],filter='all',q='';
+let V=[],filter='all',q='',CUR=null;
 async function j(url){const r=await fetch(url);if(!r.ok)throw new Error(url);return r.json()}
 async function boot(){
   const [st,vs,ev,tk,qa]=await Promise.all([j('/api/stats'),j('/api/verdicts'),j('/api/events'),j('/api/ticks'),j('/api/qa')]);
@@ -377,8 +394,26 @@ async function show(date,hash){
    ||'<p style="color:#5a5a75;font-size:12px">no per-criterion items recorded</p>'+
    ((t1.summary)?'<div class="sec">Tier 1 — static gates</div><pre>'+esc(t1.summary)+'</pre>':'')+
    ((t2.summary)?'<div class="sec">Tier 2 — judge summary</div><pre>'+esc(t2.summary)+'</pre>':'')+
-   (v.summary?'<div class="sec">Verdict summary</div><pre>'+esc(v.summary)+'</pre>':'');
+   (v.summary?'<div class="sec">Verdict summary</div><pre>'+esc(v.summary)+'</pre>':'')+
+   evidenceSection(v);
+  CUR={date:date,hash:hash,items:(v.evidence&&v.evidence.items)||[]};
   d.style.display='block';d.scrollIntoView({behavior:'smooth',block:'start'});
+}
+function evidenceSection(v){
+  const ev=(v.evidence&&v.evidence.items)||[];
+  if(!ev.length)return '<div class="sec">Evidence</div><p style="color:#5a5a75;font-size:12px">no worker evidence recorded for this verdict (the brief, driver-log tail and graded patch are collected at task complete)</p>';
+  return '<div class="sec">Evidence ('+ev.length+')</div>'+ev.map((it,i)=>
+    '<div class="ev"><span class="t">'+esc(it.label||it.name)+'</span><span class="v">'+(it.bytes||0)+' B'+
+    (it.truncated?' \u00b7 truncated':'')+(it.source?' \u00b7 '+esc(it.source):'')+
+    '</span><button class="close" style="float:none" onclick="evload('+i+')">load</button>'+
+    '<pre id="ev'+i+'" style="display:none"></pre></div>').join('');
+}
+async function evload(i){
+  const it=CUR&&CUR.items?CUR.items[i]:null;if(!it)return;
+  const pre=document.getElementById('ev'+i);if(!pre)return;
+  if(pre.style.display==='block'){pre.style.display='none';return;}
+  const r=await fetch('/api/verdicts/'+CUR.date+'/'+CUR.hash+'/evidence/'+encodeURIComponent(it.name));
+  pre.textContent=r.ok?await r.text():'unavailable';pre.style.display='block';
 }
 document.querySelectorAll('.tab[data-f]').forEach(t=>t.onclick=()=>{document.querySelectorAll('.tab[data-f]').forEach(x=>x.classList.remove('active'));t.classList.add('active');filter=t.dataset.f;render()});
 document.getElementById('q').oninput=e=>{q=e.target.value.toLowerCase();render()};
@@ -394,11 +429,15 @@ class Handler(BaseHTTPRequestHandler):
     workdir: str = "."
     project: str = ""
 
-    def _send(self, code: int, body: bytes, ctype: str) -> None:
+    def _send(
+        self, code: int, body: bytes, ctype: str, extra_headers: dict[str, str] | None = None
+    ) -> None:
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        for name, value in (extra_headers or {}).items():
+            self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
 
@@ -426,6 +465,22 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"verdicts": list_verdicts(self.workdir)})
             elif path.startswith("/api/verdicts/"):
                 parts = [p for p in path.split("/") if p]
+                if len(parts) == 6 and parts[4] == "evidence":
+                    # Worker evidence artifact (JVIEW-005). The manifest decides
+                    # what exists, so a name the verdict does not declare is a
+                    # 404 and no unlisted file is ever served.
+                    artifact = load_verdict_evidence(self.workdir, parts[2], parts[3], parts[5])
+                    if artifact is None:
+                        self._json({"error": "not found"}, 404)
+                        return
+                    filename, text = artifact
+                    self._send(
+                        200,
+                        text.encode(),
+                        "text/plain; charset=utf-8",
+                        extra_headers={"X-Gitreins-Evidence": filename},
+                    )
+                    return
                 if len(parts) != 4:
                     self._json({"error": "use /api/verdicts/<date>/<hash>"}, 400)
                     return

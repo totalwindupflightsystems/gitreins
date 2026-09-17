@@ -1754,7 +1754,17 @@ def _persist_result(workdir: str, task, result) -> None:
         # Summary text
         verdict_data["summary"] = result.summary
 
-        commit_hash = persister.persist(task.id, verdict_data)
+        # Worker execution evidence (JVIEW-005): the worker brief, the driver
+        # log tail and the graded patch are copied into the verdict directory,
+        # so a verdict stays readable after /tmp is cleaned. Best-effort — the
+        # collector swallows its own failures and the persister ignores a hook
+        # that raises, because evidence must never fail a verdict.
+        def _collect_evidence(entry_dir: str) -> dict:
+            from engine.evidence import collect_evidence
+
+            return collect_evidence(workdir, entry_dir, commit=source_commit, task_id=task.id)
+
+        commit_hash = persister.persist(task.id, verdict_data, collect_evidence=_collect_evidence)
         if commit_hash == "disabled":
             pass  # user opted out
         elif commit_hash == "dry-run":

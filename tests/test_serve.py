@@ -19,6 +19,10 @@ from gitreins import serve
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
+EVIDENCE_BRIEF_TEXT = "Deliver the viewer evidence section.\nSecond line of the brief.\n"
+EVIDENCE_PATCH_TEXT = "diff --git a/gitreins/serve.py b/gitreins/serve.py\n+evidence\n"
+
+
 @pytest.fixture()
 def repo_fixture(tmp_path: Path) -> dict:
     """Create the smallest repository-shaped judgment viewer fixture."""
@@ -51,6 +55,28 @@ def repo_fixture(tmp_path: Path) -> dict:
         "evaluated_at": "2026-09-01T12:00:00Z",
         "worktree": "/tmp/task-worktree",
         "branch": "gitreins/task/JVIEW-PASS",
+        "evidence": {
+            "collected_at": "2026-09-01T12:00:01Z",
+            "task_id": "JVIEW-PASS",
+            "items": [
+                {
+                    "name": "brief",
+                    "label": "Worker brief",
+                    "file": "worker-brief.md",
+                    "bytes": len(EVIDENCE_BRIEF_TEXT.encode("utf-8")),
+                    "truncated": False,
+                    "source": "GITREINS_WORKER_BRIEF: /tmp/brief.md",
+                },
+                {
+                    "name": "patch",
+                    "label": "Graded patch",
+                    "file": "commit.patch",
+                    "bytes": len(EVIDENCE_PATCH_TEXT.encode("utf-8")),
+                    "truncated": False,
+                    "source": "git diff HEAD (working tree)",
+                },
+            ],
+        },
     }
     fail_verdict = {
         "task_id": "JVIEW-FAIL",
@@ -82,6 +108,11 @@ def repo_fixture(tmp_path: Path) -> dict:
         verdict_dir = history / date / verdict_hash
         verdict_dir.mkdir(parents=True)
         (verdict_dir / "verdict.json").write_text(json.dumps(verdict), encoding="utf-8")
+
+    # Worker evidence artifacts, as `task complete` writes them (JVIEW-005).
+    pass_dir = history / "2026-09-01" / "a1b2c3d4"
+    (pass_dir / "worker-brief.md").write_text(EVIDENCE_BRIEF_TEXT, encoding="utf-8")
+    (pass_dir / "commit.patch").write_text(EVIDENCE_PATCH_TEXT, encoding="utf-8")
 
     events = [
         {"timestamp": "2026-09-02T12:01:00Z", "event_type": "verdict", "task_id": "JVIEW-FAIL"},
@@ -471,6 +502,99 @@ def test_viewer_page_advertises_the_qa_panel(repo_fixture, tmp_path, monkeypatch
     html = body.decode("utf-8")
     assert "qalist" in html
     assert "/api/qa" in html
+
+
+# ── worker evidence: brief + driver log + graded patch (JVIEW-005) ───────────
+
+
+def test_evidence_route_serves_a_manifest_declared_artifact(live_server, repo_fixture):
+    """The brief the fixture's manifest declares round-trips as text/plain."""
+    date, verdict_hash, _ = repo_fixture["verdicts"][0]
+
+    status, body = get(live_server, f"/api/verdicts/{date}/{verdict_hash}/evidence/brief")
+
+    assert status == 200
+    assert body.decode("utf-8") == EVIDENCE_BRIEF_TEXT
+
+
+def test_evidence_route_serves_the_graded_patch(live_server, repo_fixture):
+    date, verdict_hash, _ = repo_fixture["verdicts"][0]
+
+    status, body = get(live_server, f"/api/verdicts/{date}/{verdict_hash}/evidence/patch")
+
+    assert status == 200
+    assert body.decode("utf-8") == EVIDENCE_PATCH_TEXT
+
+
+def test_evidence_route_404s_for_undeclared_and_traversing_names(live_server, repo_fixture):
+    """Only artifacts the verdict's own manifest declares are reachable."""
+    date, verdict_hash, _ = repo_fixture["verdicts"][0]
+
+    undeclared_status, undeclared_body = get(
+        live_server, f"/api/verdicts/{date}/{verdict_hash}/evidence/log"
+    )
+    traversal_status, traversal_body = get(
+        live_server, f"/api/verdicts/{date}/{verdict_hash}/evidence/..%2f..%2fetc%2fpasswd"
+    )
+    bare_status, bare_body = get(live_server, f"/api/verdicts/{date}/{verdict_hash}/evidence")
+
+    assert undeclared_status == 404
+    assert json_body(undeclared_body) == {"error": "not found"}
+    assert traversal_status == 404
+    assert "sentinel" not in traversal_body.decode("utf-8", errors="replace")
+    assert bare_status == 400
+    assert json_body(bare_body)["error"]
+
+
+def test_evidence_route_404s_when_the_artifact_file_is_gone(live_server, repo_fixture):
+    """A deleted artifact is a 404, never a 500."""
+    date, verdict_hash, _ = repo_fixture["verdicts"][0]
+    patch = repo_fixture["root"] / ".gitreins" / "history" / date / verdict_hash / "commit.patch"
+    stored = patch.read_text(encoding="utf-8")
+    patch.unlink()
+    try:
+        status, body = get(live_server, f"/api/verdicts/{date}/{verdict_hash}/evidence/patch")
+    finally:
+        patch.write_text(stored, encoding="utf-8")
+
+    assert status == 404
+    assert json_body(body) == {"error": "not found"}
+
+
+def test_legacy_verdict_without_evidence_has_no_items_and_no_artifacts(live_server, repo_fixture):
+    """A verdict recorded before evidence embedding stays readable and 404s."""
+    date, verdict_hash, _ = repo_fixture["verdicts"][1]
+
+    detail_status, detail_body = get(live_server, f"/api/verdicts/{date}/{verdict_hash}")
+    artifact_status, _artifact_body = get(
+        live_server, f"/api/verdicts/{date}/{verdict_hash}/evidence/brief"
+    )
+
+    assert detail_status == 200
+    assert "evidence" not in json_body(detail_body)
+    assert artifact_status == 404
+
+
+def test_verdict_detail_exposes_the_evidence_manifest(live_server, repo_fixture):
+    date, verdict_hash, _ = repo_fixture["verdicts"][0]
+
+    status, body = get(live_server, f"/api/verdicts/{date}/{verdict_hash}")
+
+    assert status == 200
+    items = json_body(body)["evidence"]["items"]
+    assert [item["name"] for item in items] == ["brief", "patch"]
+    assert items[0]["source"].startswith("GITREINS_WORKER_BRIEF")
+
+
+def test_viewer_page_renders_the_evidence_section(live_server):
+    """The SPA carries the Evidence section and fetches the artifact route."""
+    status, body = get(live_server, "/")
+
+    assert status == 200
+    html = body.decode("utf-8")
+    assert "evidenceSection" in html
+    assert "no worker evidence recorded for this verdict" in html
+    assert "/evidence/" in html
 
 
 def _cli_env() -> dict:

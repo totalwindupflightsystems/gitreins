@@ -30,6 +30,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Callable
 from datetime import datetime
 
 logger = logging.getLogger("gitreins.persist")
@@ -94,8 +95,20 @@ class VerdictPersister:
 
     # ── Save ────────────────────────────────────────────────
 
-    def persist(self, task_id: str, verdict_data: dict) -> str:
-        """Save verdict to history. Returns commit hash or "dry-run" or "disabled"."""
+    def persist(
+        self,
+        task_id: str,
+        verdict_data: dict,
+        collect_evidence: Callable[[str], dict] | None = None,
+    ) -> str:
+        """Save verdict to history. Returns commit hash or "dry-run" or "disabled".
+
+        ``collect_evidence`` is an optional ``f(entry_dir) -> manifest`` hook run
+        after the verdict directory exists and before it is committed, so the
+        worker-brief/driver-log/patch artifacts land in the SAME history commit
+        as the verdict they belong to. A hook that raises is ignored: evidence
+        is never allowed to fail a verdict.
+        """
         if not self.enabled:
             return "disabled"
 
@@ -109,6 +122,17 @@ class VerdictPersister:
         date_str = datetime.utcnow().strftime("%Y-%m-%d")
         entry_dir = os.path.join(self.history_dir, date_str, short_hash)
         os.makedirs(entry_dir, exist_ok=True)
+
+        # Worker execution evidence (JVIEW-005): the brief, the driver-log tail
+        # and the graded patch, written next to verdict.json so the verdict
+        # directory is a self-contained audit unit.
+        if collect_evidence is not None:
+            try:
+                manifest = collect_evidence(entry_dir)
+            except Exception:
+                manifest = None
+            if manifest:
+                verdict_data["evidence"] = manifest
 
         # Write verdict.json
         verdict_path = os.path.join(entry_dir, "verdict.json")
