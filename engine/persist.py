@@ -202,7 +202,11 @@ class VerdictPersister:
                     entries.append(data)
                     if len(entries) >= n:
                         return entries
-                except (json.JSONDecodeError, OSError):
+                except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+                    # QA-GITREINS-POC-6: an undecodable verdict.json is skipped
+                    # exactly like a malformed one — the sibling branch reader
+                    # (``_list_branch_verdicts``) already tolerated this; the
+                    # local reader used to abort the whole listing on it.
                     continue
 
         return entries

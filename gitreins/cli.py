@@ -3018,20 +3018,29 @@ def main():
     elif args.command == "init":
         cmd_init(args)
     elif args.command == "task":
-        if args.subcommand == "create":
-            cmd_task_create(args)
-        elif args.subcommand == "start":
-            cmd_task_start(args)
-        elif args.subcommand == "complete":
-            cmd_task_complete(args)
-        elif args.subcommand == "list":
-            cmd_task_list(args)
-        elif args.subcommand == "delete":
-            cmd_task_delete(args)
-        elif args.subcommand == "worktree":
-            cmd_task_worktree(args)
-        else:
-            parser.print_help()
+        # QA-GITREINS-POC-6: a task write can refuse to clobber state that could
+        # not be read (and could not be preserved). Surface that as one clean
+        # line + exit 1 instead of a traceback, like the other task paths do.
+        from engine.task_manager import TaskStateCorruptError
+
+        try:
+            if args.subcommand == "create":
+                cmd_task_create(args)
+            elif args.subcommand == "start":
+                cmd_task_start(args)
+            elif args.subcommand == "complete":
+                cmd_task_complete(args)
+            elif args.subcommand == "list":
+                cmd_task_list(args)
+            elif args.subcommand == "delete":
+                cmd_task_delete(args)
+            elif args.subcommand == "worktree":
+                cmd_task_worktree(args)
+            else:
+                parser.print_help()
+        except TaskStateCorruptError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
     elif args.command == "worktree":
         if args.subcommand == "doctor":
             cmd_worktree_doctor(args)

@@ -430,7 +430,12 @@ def list_rows(
     ledger = path or qa_ledger_path(workdir)
     rows: list[dict[str, Any]] = []
     try:
-        with open(ledger, encoding="utf-8") as stream:
+        # QA-GITREINS-POC-6: decode with errors="replace" so an undecodable byte
+        # in ONE line costs that line only. A strict decode raised
+        # UnicodeDecodeError out of the loop body and threw away every row the
+        # reader had already salvaged (``gitreins qa list`` / ``report`` died
+        # with a traceback on a binary-corrupted ledger).
+        with open(ledger, encoding="utf-8", errors="replace") as stream:
             for line in stream:
                 line = line.strip()
                 if not line:

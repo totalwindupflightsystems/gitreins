@@ -395,13 +395,24 @@ def load_defaults(workdir: str | None = None) -> GitReinsDefaults:
     config_path = os.path.join(workdir, ".gitreins", "config.yaml")
     if os.path.isfile(config_path):
         try:
-            with open(config_path) as f:
+            with open(config_path, encoding="utf-8") as f:
                 config = yaml.safe_load(f) or {}
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+            # QA-GITREINS-POC-6: an unreadable config must degrade to the
+            # built-in defaults with a NAMED diagnostic. It used to escape:
+            # UnicodeDecodeError is a ValueError subclass, so `except ValueError:
+            # raise` below re-raised it and a binary-corrupted config.yaml made
+            # `load_defaults()` raise instead of falling back.
+            logger.warning("Unreadable %s — using built-in defaults: %s", config_path, exc)
+            return base
+        try:
+            # Values still validate loudly: an out-of-range setting is a config
+            # mistake to fix, not corruption to paper over.
             return base.overlay(config)
         except ValueError:
             raise
-        except Exception:
-            logger.debug("Failed to load %s, using built-in defaults", config_path)
+        except Exception as exc:
+            logger.warning("Failed to load %s, using built-in defaults: %s", config_path, exc)
 
     return base
 

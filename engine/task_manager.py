@@ -15,6 +15,7 @@ tasks:
     status: pending  # pending | in_progress | complete
 """
 
+import hashlib
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -27,6 +28,23 @@ class DependencyError(Exception):
     """Raised when a task cannot complete because its dependencies are not met."""
 
     pass
+
+
+class TaskStateCorruptError(RuntimeError):
+    """Raised instead of overwriting a task-state file that could not be read.
+
+    QA-GITREINS-POC-6: a truncated/unparseable ``.gitreins/tasks.yaml`` used to
+    print ``Warning: failed to load tasks: ...`` and then let the next write
+    replace the file with an empty-but-valid one — the corrupted bytes (which
+    are often a partially recoverable audit trail) were destroyed with no copy
+    anywhere. The manager now copies the unreadable file aside on load and
+    refuses to write when even that copy could not be made.
+    """
+
+    pass
+
+
+CORRUPT_STATE_SUFFIX = ".corrupt-"
 
 
 @dataclass
@@ -48,6 +66,8 @@ class TaskManager:
         self._config_dir = os.path.join(self.workdir, ".gitreins")
         self._tasks_file = os.path.join(self._config_dir, "tasks.yaml")
         self._tasks: dict[str, Task] = {}
+        self._load_error: str | None = None
+        self._preserved_state: str | None = None
         self._load()
 
     def _load(self) -> None:
@@ -69,11 +89,56 @@ class TaskManager:
                 )
                 self._tasks[task.id] = task
         except Exception as e:
+            # QA-GITREINS-POC-6: the file is unreadable, so the loaded task set is
+            # incomplete by definition. Preserve the raw bytes NOW — the next write
+            # must not be able to destroy them — and say so loudly.
+            self._load_error = str(e)
             print(f"Warning: failed to load tasks: {e}")
+            self._preserve_unreadable_state()
+
+    def _preserve_unreadable_state(self) -> str | None:
+        """Copy the unreadable task state aside; return the sidecar path (None on failure).
+
+        The sidecar name carries the content hash, so repeated loads of the same
+        broken file are idempotent (no sidecar churn) while a second distinct
+        corruption gets its own preserved copy.
+        """
+        if self._preserved_state and os.path.exists(self._preserved_state):
+            return self._preserved_state
+        try:
+            with open(self._tasks_file, "rb") as f:
+                raw = f.read()
+        except OSError as exc:
+            print(f"Warning: cannot read {self._tasks_file} to preserve it: {exc}")
+            return None
+        dest = self._tasks_file + CORRUPT_STATE_SUFFIX + hashlib.sha256(raw).hexdigest()[:12]
+        if os.path.exists(dest):
+            self._preserved_state = dest
+            return dest
+        try:
+            with open(dest, "wb") as f:
+                f.write(raw)
+        except OSError as exc:
+            print(f"Warning: cannot preserve the unreadable task state as {dest}: {exc}")
+            return None
+        self._preserved_state = dest
+        print(
+            f"Warning: preserved the unreadable task state as {dest} "
+            "— copy it back to recover the tasks it still holds"
+        )
+        return dest
 
     def _save(self) -> None:
         """Save tasks to YAML file."""
         os.makedirs(self._config_dir, exist_ok=True)
+        if self._load_error is not None and os.path.exists(self._tasks_file):
+            # Never replace state we could not read without a preserved copy.
+            if self._preserve_unreadable_state() is None:
+                raise TaskStateCorruptError(
+                    f"{self._tasks_file} could not be read ({self._load_error}) and a copy "
+                    "could not be preserved — refusing to overwrite it"
+                )
+            self._load_error = None
         tasks_list = []
         for task in self._tasks.values():
             entry: dict[str, Any] = {
