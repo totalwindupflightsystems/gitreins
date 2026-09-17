@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Per-judgment tokens and cost in the judgment viewer (JVIEW-006)** — the
+  judge's token spend lives in `.gitreins/usage.jsonl` and carries no task id, so
+  the economics of quality were invisible next to the verdicts that produced it.
+  `engine/usage.py` attributes each usage line to the verdict whose
+  `evaluated_at` is the earliest one at or after the line's `ts` (1:1, so a line
+  is never double-counted; a line that precedes no verdict stays unattributed),
+  and `gitreins serve` now exposes the join: `GET /api/verdicts/<d>/<h>` carries
+  a `usage` block (`tokens_in/out`, `cache_read/write`, `rows`, `steps`,
+  `cost_usd`, `priced`, `model`) when telemetry is traceable, `GET /api/stats` an
+  aggregate `usage` summary (`judgements`, `verdicts`, `unattributed`, tokens,
+  `cost_usd`, `priced`/`unpriced`, `prices_configured`). Costs come from the
+  checkout's own rates (`usage.price_per_1m_input/_output`, model defaulting to
+  `defaults.model`) — with none configured the reader reports tokens with
+  `priced: false` and `cost_usd: null` instead of inventing a rate. The SPA shows
+  a cost badge in the detail pane and an aggregate Judge spend card in the stats
+  header (`unpriced` + the reason when rates are missing).
 - **Worker evidence embedded in the verdict directory (JVIEW-005)** — a verdict
   recorded *what* was decided but not the run that produced it: the worker brief
   and driver log usually live in `/tmp` and die with the tick, and the record

@@ -15,6 +15,12 @@ that reads the repo's judgment stores on EVERY request (live, not a snapshot):
                                  -> worker evidence artifact: brief, driver-log
                                     tail or graded patch (text/plain)
 
+Per-judgment telemetry (JVIEW-006): ``/api/verdicts/<date>/<hash>`` carries a
+``usage`` block when ``.gitreins/usage.jsonl`` has rows traceable to that verdict
+and ``/api/stats`` an aggregate ``usage`` summary; costs are reported only when
+the checkout configures rates (``usage.price_per_1m_input/_output``), never
+invented.
+
 The browsed checkout defaults to the repository containing the working
 directory; ``--repo <path>`` (see :func:`resolve_workdir`) points the same
 server at any other GitReins checkout, so one install can review every
@@ -32,10 +38,11 @@ import json
 import os
 import re
 import sqlite3
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, TypedDict
 
-from engine import evidence, qa_ledger
+from engine import evidence, qa_ledger, usage
 from engine.repo_paths import (
     WorktreeResolutionError,
     board_file_path,
@@ -84,6 +91,42 @@ class QaPayload(TypedDict):
 
     ledger: str
     runs: list[dict[str, Any]]
+
+
+class UsageEntry(TypedDict):
+    """Per-judgment telemetry block of ``GET /api/verdicts/<date>/<hash>``."""
+
+    date: str
+    hash: str
+    evaluated_at: float
+    rows: int
+    steps: list[str]
+    tokens_in: int
+    tokens_out: int
+    cache_read: int
+    cache_write: int
+    first_ts: float
+    last_ts: float
+    model: str
+    cost_usd: float | None
+    priced: bool
+
+
+class UsageSummary(TypedDict):
+    """Aggregate telemetry block of ``GET /api/stats``."""
+
+    judgements: int
+    verdicts: int
+    unattributed: int
+    tokens_in: int
+    tokens_out: int
+    cache_read: int
+    cache_write: int
+    cost_usd: float
+    priced: int
+    unpriced: int
+    model: str
+    prices_configured: bool
 
 
 class ServeArgumentError(ValueError):
@@ -258,6 +301,60 @@ def stats(verdicts: list[VerdictRow]) -> Stats:
     }
 
 
+# ── per-judgment telemetry (JVIEW-006) ───────────────────────────────────────
+
+
+def verdict_stamps(workdir: str) -> list[tuple[str, str, float]]:
+    """``(date, hash, evaluated_at_epoch)`` for every verdict that records one."""
+    hist = _verdict_dir(workdir)
+    stamps: list[tuple[str, str, float]] = []
+    if not os.path.isdir(hist):
+        return stamps
+    for day in sorted(os.listdir(hist)):
+        ddir = os.path.join(hist, day)
+        if not _DATE_RE.match(day) or not os.path.isdir(ddir):
+            continue
+        for h in sorted(os.listdir(ddir)):
+            vpath = os.path.join(ddir, h, "verdict.json")
+            if not _HASH_RE.match(h) or not os.path.isfile(vpath):
+                continue
+            try:
+                with open(vpath) as fh:
+                    evaluated_at = json.load(fh).get("evaluated_at")
+            except Exception:
+                continue
+            epoch = _epoch(evaluated_at)
+            if epoch is not None:
+                stamps.append((day, h, epoch))
+    return stamps
+
+
+def _epoch(value: Any) -> float | None:
+    """Epoch seconds for an ISO-8601 stamp; naive stamps are read as UTC."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.timestamp()
+
+
+def load_usage(workdir: str) -> tuple[dict[str, UsageEntry], UsageSummary]:
+    """Attributed usage per verdict plus the aggregate the stats header shows.
+
+    Attribution is by time (the telemetry carries no task id) and each line is
+    charged to at most one verdict — see :mod:`engine.usage`.
+    """
+    prices = usage.load_price_config(workdir)
+    rows = usage.load_usage_rows(workdir)
+    index = usage.attribute_rows(verdict_stamps(workdir), rows, prices)
+    total = len(list_verdicts(workdir))
+    return index, usage.summarize(index, prices, total_verdicts=total)
+
+
 # ── HTML viewer (hash-route SPA; fetches /api/* live) ───────────────────────
 
 _PAGE = """<!DOCTYPE html>
@@ -271,10 +368,11 @@ body{background:#0f0f1a;color:#e0e0e0;font-family:-apple-system,BlinkMacSystemFo
 h1{font-size:clamp(22px,6vw,36px);background:linear-gradient(135deg,#f7971e,#ffd200);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .sub{color:#8a8aa3;font-size:13px;margin:2px 0 14px}
 .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:14px}
-@media(min-width:600px){.grid{grid-template-columns:repeat(4,1fr)}body{padding:20px}}
+@media(min-width:600px){.grid{grid-template-columns:repeat(5,1fr)}body{padding:20px}}
 .stat{background:#1a1a2e;border:1px solid #2a2a3e;border-radius:10px;padding:10px;text-align:center}
 .stat .n{font-size:clamp(19px,5vw,26px);font-weight:800;color:#4ade80;display:block}
 .stat .l{font-size:10px;color:#8a8aa3;text-transform:uppercase;letter-spacing:.5px}
+.stat .u{font-size:10px;color:#5a5a75;display:block;margin-top:2px}
 .tabs{display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center}
 .tab{background:#12121f;border:1px solid #2a2a3e;border-radius:20px;padding:5px 14px;font-size:12px;cursor:pointer;color:#8a8aa3}
 .tab.active{background:#166534;color:#4ade80;border-color:#166534}
@@ -287,6 +385,7 @@ h1{font-size:clamp(22px,6vw,36px);background:linear-gradient(135deg,#f7971e,#ffd
 .badge{padding:2px 9px;border-radius:20px;font-size:10px;font-weight:800;white-space:nowrap}
 .pass{background:#166534;color:#4ade80}.fail{background:#3b0820;color:#f472b6}
 .mute{background:#12121f;color:#8a8aa3}
+.warn{background:#3b1e08;color:#f59e0b}
 .meta{color:#5a5a75;font-size:10.5px;margin-top:3px;font-family:ui-monospace,Menlo,monospace}
 h2{font-size:16px;color:#ffd200;margin:18px 0 8px}
 .panel{background:#1a1a2e;border:1px solid #2a2a3e;border-radius:12px;padding:10px 12px;max-height:420px;overflow-y:auto}
@@ -334,7 +433,8 @@ async function boot(){
     '<div class="stat"><span class="n">'+st.total+'</span><span class="l">Judgments</span></div>'+
     '<div class="stat"><span class="n">'+st.passed+'</span><span class="l">Passed</span></div>'+
     '<div class="stat"><span class="n">'+st.failed+'</span><span class="l">Failed (gates held)</span></div>'+
-    '<div class="stat"><span class="n">'+st.pass_rate+'%</span><span class="l">Pass rate</span></div>';
+    '<div class="stat"><span class="n">'+st.pass_rate+'%</span><span class="l">Pass rate</span></div>'+
+    spendCard(st.usage);
   render();
   document.getElementById('evlist').innerHTML=(ev.events||[]).slice().reverse().map(e=>{
     let d={};try{d=JSON.parse(e.detail||'{}')}catch(_){}
@@ -367,6 +467,33 @@ async function boot(){
   }).join('')||'<p style="color:#5a5a75;font-size:12px">no QA runs recorded (ledger: '+esc(qa.ledger||'')+')</p>';
   if((qa.runs||[]).length)document.getElementById('qalist').innerHTML+='<p style="color:#5a5a75;font-size:12px">ledger: '+esc(qa.ledger||'')+'</p>';
 }
+function money(usd){return '$'+(Number(usd)||0).toFixed(2)}
+function costBadge(v){
+  const u=v.usage;if(!u)return '';
+  if(u.priced)return ' <span class="badge mute" title="judge cost from usage.jsonl at the rates configured in .gitreins/config.yaml">$'+Number(u.cost_usd).toFixed(4)+'</span>';
+  return ' <span class="badge warn" title="usage.jsonl rows are traceable, but no price is configured">cost unpriced</span>';
+}
+function spendCard(u){
+  if(!u)return '<div class="stat"><span class="n">—</span><span class="l">Judge spend</span></div>';
+  const priced=u.prices_configured&&u.priced>0;
+  const head=priced?money(u.cost_usd):'unpriced';
+  const sub=priced
+    ? (u.priced+' priced · '+u.unpriced+' unpriced')
+    : 'tokens only · set usage.price_per_1m_input/_output';
+  return '<div class="stat" title="'+esc(sub)+'"><span class="n">'+head+'</span><span class="l">Judge spend</span>'+
+    '<span class="u">'+u.judgements+'/'+u.verdicts+' judgments · '+
+    Math.round((u.tokens_in||0)/1000)+'k in / '+Math.round((u.tokens_out||0)/1000)+'k out'+
+    (u.unattributed?' · '+u.unattributed+' no telemetry':'')+'</span></div>';
+}
+function telemetry(v){
+  const u=v.usage;if(!u)return '';
+  const cost=u.priced?('$'+Number(u.cost_usd).toFixed(4)+' · '+esc(u.model||'configured rates')):'unpriced (cost needs usage.price_per_1m_input/_output)';
+  return '<div class="sec">Judge telemetry</div><div class="meta">'+u.rows+' line(s) from usage.jsonl · '+
+    (u.tokens_in||0)+' tokens in / '+(u.tokens_out||0)+' out'+
+    ((u.cache_read||0)?' · '+u.cache_read+' cache read':'')+
+    (u.steps&&u.steps.length?' · steps: '+esc(u.steps.join(', ')):'')+'</div>'+
+    '<div class="meta">cost: '+cost+'</div>';
+}
 function render(){
   const rows=V.filter(v=>(filter==='all'||(filter==='pass')===v.passed)&&(!q||(v.task_id+' '+v.title).toLowerCase().includes(q)));
   document.getElementById('list').innerHTML=rows.map(v=>{
@@ -387,7 +514,8 @@ async function show(date,hash){
   const d=document.getElementById('detail');
   d.innerHTML='<button class="close" onclick="document.getElementById(\\'detail\\').style.display=\\'none\\'">✕ close</button>'+
    '<h3>'+esc(v.task_id||'?')+' — '+esc(v.task_title||'')+'</h3>'+
-   '<div style="color:#8a8aa3;font-size:11px">'+date+' · '+hash+' · overall '+(v.passed?'PASS':'FAIL')+'</div>'+
+   '<div style="color:#8a8aa3;font-size:11px">'+date+' · '+hash+' · overall '+(v.passed?'PASS':'FAIL')+
+   costBadge(v)+'</div>'+
    (origin?'<div class="meta">'+esc(origin)+'</div>':'')+
    '<div class="sec">Criteria ('+items.length+')</div>'+
    items.map(it=>'<div class="crit '+(it.status=='PASS'?'p':'f')+'"><div class="c">'+(it.status=='PASS'?'✅':'❌')+' '+esc(it.criterion)+'</div><div class="d">'+esc(it.detail)+'</div></div>').join('')
@@ -395,6 +523,7 @@ async function show(date,hash){
    ((t1.summary)?'<div class="sec">Tier 1 — static gates</div><pre>'+esc(t1.summary)+'</pre>':'')+
    ((t2.summary)?'<div class="sec">Tier 2 — judge summary</div><pre>'+esc(t2.summary)+'</pre>':'')+
    (v.summary?'<div class="sec">Verdict summary</div><pre>'+esc(v.summary)+'</pre>':'')+
+   telemetry(v)+
    evidenceSection(v);
   CUR={date:date,hash:hash,items:(v.evidence&&v.evidence.items)||[]};
   d.style.display='block';d.scrollIntoView({behavior:'smooth',block:'start'});
@@ -451,11 +580,12 @@ class Handler(BaseHTTPRequestHandler):
                 self._send(200, _PAGE.encode(), "text/html; charset=utf-8")
             elif path == "/api/stats":
                 vs = list_verdicts(self.workdir)
-                from datetime import datetime, timezone
+                _index, usage_summary = load_usage(self.workdir)
 
                 self._json(
                     {
                         **stats(vs),
+                        "usage": usage_summary,
                         "repo": os.path.basename(os.path.abspath(self.workdir)),
                         "path": os.path.abspath(self.workdir),
                         "generated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
@@ -488,6 +618,13 @@ class Handler(BaseHTTPRequestHandler):
                 if v is None:
                     self._json({"error": "not found"}, 404)
                     return
+                # Per-judgment telemetry is joined on the way out (JVIEW-006):
+                # the stored verdict.json is served verbatim otherwise, and a
+                # verdict with no traceable usage rows simply has no block.
+                index, _summary = load_usage(self.workdir)
+                entry = index.get(f"{parts[2]}/{parts[3]}")
+                if entry:
+                    v = {**v, "usage": entry}
                 self._json(v)
             elif path == "/api/tasks":
                 self._json({"tasks": load_jsonl(self.workdir, "tasks.jsonl")})

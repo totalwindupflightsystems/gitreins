@@ -3,8 +3,9 @@
 `gitreins serve` starts a read-only local web server that renders the judgment
 history of a checkout: every verdict in `.gitreins/history/`, the criteria and
 Tier 1/Tier 2 evidence inside each verdict, the worker evidence embedded next to
-the verdict (brief, driver-log tail, graded patch), the board event timeline, the
-QA run ledger, and (when asked for) the scheduler tick ledger for a project.
+the verdict (brief, driver-log tail, graded patch), what each judgment cost in
+tokens (`usage.jsonl`), the board event timeline, the QA run ledger, and (when
+asked for) the scheduler tick ledger for a project.
 
 It exists because `.gitreins/history/<date>/<hash>/verdict.json` is a durable
 audit record that nobody wants to read as JSON. The browser answers the three
@@ -68,9 +69,9 @@ changed one. Data is re-read from disk on every request, so the contract is
 | Method | Path | Success | Payload | Errors |
 |--------|------|---------|---------|--------|
 | GET | `/` | 200 HTML | the single-page viewer (no server-side data; it fetches `/api/*`) | — |
-| GET | `/api/stats` | 200 | `total`, `passed`, `failed`, `pass_rate`, `repo`, `path`, `generated` | — |
+| GET | `/api/stats` | 200 | `total`, `passed`, `failed`, `pass_rate`, `usage` (aggregate judge tokens/cost), `repo`, `path`, `generated` | — |
 | GET | `/api/verdicts` | 200 | `{"verdicts": [row, …]}` — metadata only, newest last | — |
-| GET | `/api/verdicts/<date>/<hash>` | 200 | the full `verdict.json` (criteria, `stages.tier1`, `stages.tier2`, `evidence` manifest when one was collected) | `400` malformed path (not `<date>/<hash>`), `404` unknown date/hash |
+| GET | `/api/verdicts/<date>/<hash>` | 200 | the full `verdict.json` (criteria, `stages.tier1`, `stages.tier2`, `evidence` manifest when one was collected) plus a joined `usage` block when judge telemetry is traceable to it | `400` malformed path (not `<date>/<hash>`), `404` unknown date/hash |
 | GET | `/api/verdicts/<date>/<hash>/evidence/<name>` | 200 `text/plain` | one worker-evidence artifact declared by that verdict's `evidence` manifest (`brief`, `log`, `patch`) | `400` missing `<name>`, `404` unknown verdict or a name the manifest does not declare (including an artifact deleted since) |
 | GET | `/api/tasks` | 200 | `{"tasks": [row, …]}` from the board's `tasks.jsonl` | `200 []` when the board is absent |
 | GET | `/api/events` | 200 | `{"events": [row, …]}` from the board's `events.jsonl` | `200 []` when the board is absent |
@@ -86,7 +87,9 @@ schema — the viewer never invents values for legacy records.
 The SPA is a hash-free, single-page app: it loads `/api/stats`, `/api/verdicts`,
 `/api/events`, `/api/ticks` and `/api/qa` once, then opens a verdict via
 `/api/verdicts/<date>/<hash>` when a row is clicked. Refresh for new judgments;
-there is no push channel.
+there is no push channel. The stats header carries a fifth card with the
+aggregate judge spend (or `unpriced`, with the reason), and the detail pane shows
+the per-judgment cost badge and the token line for the verdict being read.
 
 ## Worker evidence in a verdict directory
 
@@ -128,12 +131,47 @@ Only names declared in the verdict's own manifest are servable, and a declared
 name must be a plain file name (no separators), so the artifact route cannot be
 used to read anything outside the verdict directory.
 
+## Judge telemetry: tokens and cost per judgment
+
+`.gitreins/usage.jsonl` is the only record of what the judge spent (GitReins uses
+its own LLM client), and it carries no task id — the viewer joins it to verdicts
+by time, so the economics of quality are visible next to each verdict instead of
+in a separate file.
+
+- **Attribution is 1:1 by timestamp.** A usage line belongs to the verdict whose
+  `evaluated_at` is the earliest one at or after the line's `ts`. A line is
+  therefore charged to at most one verdict (no double counting across two rows),
+  and a line that precedes no verdict — a pre-commit pass, an evaluation whose
+  verdict was never persisted — stays unattributed rather than being blamed on an
+  unrelated judgment. The stats header reports those as `unattributed`.
+- **Absent means absent.** A verdict with no traceable lines has no `usage` block
+  in the detail payload; the aggregate counts it in `unattributed`. Neither is
+  zero-filled.
+- **Costs come from the checkout's own rates**, never from a table baked into the
+  tool — a token count is a measurement, a price is a setting:
+
+```
+usage:
+  model: deepseek-v4-flash        # optional; defaults to defaults.model
+  price_per_1m_input: 0.28        # USD per 1M input tokens
+  price_per_1m_output: 0.42       # USD per 1M output tokens
+```
+
+With no rates configured, the API still reports `tokens_in`/`tokens_out` (and
+`cache_read`/`cache_write` alongside) with `priced: false` and `cost_usd: null`,
+the detail pane shows a `cost unpriced` badge, and the stats header says so —
+a fabricated rate would be worse than a visible gap. `tokens_in` already
+includes cache reads, so a cost is charged on input + output only. The rates
+belong to the model named by `usage.model` (else `defaults.model`), and usage
+lines do not carry a model of their own.
+
 ## Data sources
 
 | Surface | Source | Absent source | Notes |
 |---------|--------|---------------|-------|
 | Verdict list + detail | `<checkout>/.gitreins/history/<YYYY-MM-DD>/<hash>/verdict.json` | `total: 0`, empty list | Filesystem only. Unparseable or non-matching entries are skipped, never guessed |
 | Worker evidence | the same verdict directory: `worker-brief.md`, `driver-log.tail.txt`, `commit.patch` | the pane says the artifact was not recorded | Written by `task complete` (see [Worker evidence](#worker-evidence-in-a-verdict-directory)); served only for names the verdict's own `evidence` manifest declares |
+| Judge telemetry | `<repo>/.gitreins/usage.jsonl` (written by every Tier 2 evaluation) | no `usage` block, counted as `unattributed` | Joined to verdicts by timestamp, 1:1; costs need `usage.price_per_1m_input/_output` in `.gitreins/config.yaml` (see [Judge telemetry](#judge-telemetry-tokens-and-cost-per-judgment)) |
 | Board timeline | `<canonical>/.coding-hermes/board/events.jsonl` | `[]` | Resolved through Git's common dir, so a linked worktree shows the shared board |
 | Board tasks | `<canonical>/.coding-hermes/board/tasks.jsonl` | `[]` | Last 2000 lines are read |
 | Ticks | `~/.hermes/coding-hermes/scheduler.db`, table `ticks`, filtered by `project_name` | `[]` | Host-coupled, read-only SQLite, opt-in per `--project`; without `--project` the panel reads `no scheduler project selected (start with --project <name>)`, and a selected project with no ledger rows reads `no scheduler ticks recorded for <project>` |

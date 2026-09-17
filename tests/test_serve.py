@@ -22,6 +22,36 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 EVIDENCE_BRIEF_TEXT = "Deliver the viewer evidence section.\nSecond line of the brief.\n"
 EVIDENCE_PATCH_TEXT = "diff --git a/gitreins/serve.py b/gitreins/serve.py\n+evidence\n"
 
+# Judge telemetry fixture: two usage lines before the first verdict and one
+# before the second, all inside the window each verdict owns (JVIEW-006).
+USAGE_ROWS = [
+    {
+        "ts": 1788263940.0,
+        "tokens_in": 41250,
+        "tokens_out": 1863,
+        "cache_read": 0,
+        "cache_write": 0,
+        "step": "ai_eval",
+    },
+    {
+        "ts": 1788263945.0,
+        "tokens_in": 50000,
+        "tokens_out": 2000,
+        "cache_read": 128,
+        "cache_write": 0,
+        "step": "tier1",
+    },
+    {
+        "ts": 1788350340.0,
+        "tokens_in": 9542,
+        "tokens_out": 794,
+        "cache_read": 0,
+        "cache_write": 0,
+        "step": "ai_eval",
+    },
+]
+PRICE_CONFIG = "defaults:\n  model: deepseek-v4-flash\nusage:\n  price_per_1m_input: 0.28\n  price_per_1m_output: 0.42\n"
+
 
 @pytest.fixture()
 def repo_fixture(tmp_path: Path) -> dict:
@@ -113,6 +143,13 @@ def repo_fixture(tmp_path: Path) -> dict:
     pass_dir = history / "2026-09-01" / "a1b2c3d4"
     (pass_dir / "worker-brief.md").write_text(EVIDENCE_BRIEF_TEXT, encoding="utf-8")
     (pass_dir / "commit.patch").write_text(EVIDENCE_PATCH_TEXT, encoding="utf-8")
+
+    # Judge telemetry, as the evaluator writes it (JVIEW-006). No config.yaml
+    # here on purpose: the default state of a checkout is UNPRICED, and the
+    # tests that want a costed verdict write the usage block themselves.
+    (tmp_path / ".gitreins" / "usage.jsonl").write_text(
+        "".join(json.dumps(row) + "\n" for row in USAGE_ROWS), encoding="utf-8"
+    )
 
     events = [
         {"timestamp": "2026-09-02T12:01:00Z", "event_type": "verdict", "task_id": "JVIEW-FAIL"},
@@ -240,9 +277,12 @@ def test_verdict_detail_returns_full_record(live_server, repo_fixture):
     status, body = get(live_server, f"/api/verdicts/{date}/{verdict_hash}")
 
     assert status == 200
-    assert json_body(body) == expected
-    assert json_body(body)["stages"]["tier1"]["passed"] is True
-    assert json_body(body)["stages"]["tier2"]["items"][0]["status"] == "PASS"
+    # The stored record is served verbatim; the only added block is the
+    # joined judge telemetry (asserted on its own below).
+    served = json_body(body)
+    assert {key: value for key, value in served.items() if key != "usage"} == expected
+    assert served["stages"]["tier1"]["passed"] is True
+    assert served["stages"]["tier2"]["items"][0]["status"] == "PASS"
 
 
 def test_verdict_detail_returns_worktree_metadata_and_viewer_renders_it(live_server, repo_fixture):
@@ -268,9 +308,10 @@ def test_legacy_verdict_detail_without_metadata_still_renders(live_server, repo_
     date, verdict_hash, expected = repo_fixture["verdicts"][1]
     status, body = get(live_server, f"/api/verdicts/{date}/{verdict_hash}")
     assert status == 200
-    assert json_body(body) == expected
-    assert "worktree" not in json_body(body)
-    assert "branch" not in json_body(body)
+    served = json_body(body)
+    assert {key: value for key, value in served.items() if key != "usage"} == expected
+    assert "worktree" not in served
+    assert "branch" not in served
 
 
 def test_verdict_detail_rejects_unknown_hash_and_malformed_date(live_server):
@@ -595,6 +636,109 @@ def test_viewer_page_renders_the_evidence_section(live_server):
     assert "evidenceSection" in html
     assert "no worker evidence recorded for this verdict" in html
     assert "/evidence/" in html
+
+
+# ── judge telemetry: tokens/cost per judgment (JVIEW-006) ────────────────────
+
+
+def test_verdict_detail_includes_judge_telemetry_when_traceable(live_server, repo_fixture):
+    """Usage lines before a verdict's evaluated_at are charged to that verdict."""
+    date, verdict_hash, _ = repo_fixture["verdicts"][0]
+
+    status, body = get(live_server, f"/api/verdicts/{date}/{verdict_hash}")
+
+    assert status == 200
+    usage = json_body(body)["usage"]
+    assert usage["tokens_in"] == 41250 + 50000
+    assert usage["tokens_out"] == 1863 + 2000
+    assert usage["cache_read"] == 128
+    assert usage["rows"] == 2
+    assert usage["steps"] == ["ai_eval", "tier1"]
+    # No rates configured in this fixture => tokens are reported, cost is not.
+    assert usage["priced"] is False
+    assert usage["cost_usd"] is None
+
+
+def test_verdict_detail_prices_the_judgment_when_rates_are_configured(live_server, repo_fixture):
+    date, verdict_hash, _ = repo_fixture["verdicts"][0]
+    (repo_fixture["root"] / ".gitreins" / "config.yaml").write_text(PRICE_CONFIG, encoding="utf-8")
+
+    status, body = get(live_server, f"/api/verdicts/{date}/{verdict_hash}")
+
+    assert status == 200
+    usage = json_body(body)["usage"]
+    expected = round(((41250 + 50000) * 0.28 + (1863 + 2000) * 0.42) / 1_000_000, 6)
+    assert usage["priced"] is True
+    assert usage["cost_usd"] == expected
+    assert usage["model"] == "deepseek-v4-flash"
+
+
+def test_verdict_without_traceable_rows_has_no_usage_block(live_server, repo_fixture):
+    """A verdict that predates every usage line reports no telemetry, not zeroes."""
+    late = repo_fixture["root"] / ".gitreins" / "history" / "2026-09-03" / "ffff0000"
+    late.mkdir(parents=True)
+    (late / "verdict.json").write_text(
+        json.dumps(
+            {
+                "task_id": "JVIEW-LATE",
+                "task_title": "late",
+                "passed": True,
+                "evaluated_at": "2026-09-04T12:00:00Z",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    status, body = get(live_server, "/api/verdicts/2026-09-03/ffff0000")
+
+    assert status == 200
+    assert "usage" not in json_body(body)
+
+
+def test_stats_include_the_aggregate_judge_spend(live_server, repo_fixture):
+    status, body = get(live_server, "/api/stats")
+
+    assert status == 200
+    usage = json_body(body)["usage"]
+    assert usage["judgements"] == 2
+    assert usage["verdicts"] == 2
+    assert usage["unattributed"] == 0
+    assert usage["tokens_in"] == 41250 + 50000 + 9542
+    assert usage["tokens_out"] == 1863 + 2000 + 794
+    assert usage["unpriced"] == 2
+    assert usage["priced"] == 0
+    assert usage["cost_usd"] == 0.0
+    assert usage["prices_configured"] is False
+    assert usage["model"] == ""
+
+
+def test_stats_report_a_priced_subtotal_next_to_the_unpriced_count(live_server, repo_fixture):
+    (repo_fixture["root"] / ".gitreins" / "config.yaml").write_text(PRICE_CONFIG, encoding="utf-8")
+
+    status, body = get(live_server, "/api/stats")
+
+    assert status == 200
+    usage = json_body(body)["usage"]
+    expected = round(
+        ((41250 + 50000) * 0.28 + (1863 + 2000) * 0.42) / 1_000_000,
+        6,
+    ) + round((9542 * 0.28 + 794 * 0.42) / 1_000_000, 6)
+    assert usage["priced"] == 2
+    assert usage["unpriced"] == 0
+    assert usage["cost_usd"] == round(expected, 6)
+    assert usage["prices_configured"] is True
+
+
+def test_viewer_page_renders_the_cost_badge_and_the_spend_card(live_server):
+    """The SPA carries the detail cost badge and the aggregate spend card."""
+    status, body = get(live_server, "/")
+
+    assert status == 200
+    html = body.decode("utf-8")
+    assert "costBadge" in html
+    assert "spendCard" in html
+    assert "Judge spend" in html
+    assert "Judge telemetry" in html
 
 
 def _cli_env() -> dict:
