@@ -546,6 +546,24 @@ class TestRuntimeArtifactsAreIgnored:
 
         assert ".gitreins/logs/" in entries
 
+    def test_graph_cache_strays_are_gitignored(self):
+        """QA-GITREINS-POC-9: the code-graph writer re-creates these every run.
+
+        ``.vfs/graph/.last_reconcile`` and ``.parse_cache.json`` are rewritten
+        by the graph reconcile, so without a .gitignore entry a clean tree is
+        re-dirtied by two untracked files on every pass (the class the QA
+        battery kept re-filing). ``edges.jsonl`` stays tracked on purpose —
+        its refresh is a separate chore commit.
+        """
+        with open(os.path.join(PROJECT_ROOT, ".gitignore"), "r") as f:
+            entries = [line.strip() for line in f.read().splitlines()]
+
+        assert ".vfs/graph/.last_reconcile" in entries
+        assert ".vfs/graph/.parse_cache.json" in entries
+        # The tracked edge store must NOT be ignored: git would then keep
+        # reporting the refresh as uncommitted work with no way to land it.
+        assert ".vfs/graph/edges.jsonl" not in entries
+
     def test_guard_logs_do_not_block_the_worktree_merge_gate(self, tmp_path, monkeypatch):
         """A run log is GitReins' own runtime artifact, never uncommitted work.
 

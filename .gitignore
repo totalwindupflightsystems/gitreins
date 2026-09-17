@@ -66,6 +66,12 @@ hivemind-audit.md
 .vfs/graph/graph.db
 .vfs/graph/graph.db.wal
 .vfs/graph/.last_warm
+# Graph-cache bookkeeping strays (QA-GITREINS-POC-9): the code-graph writer
+# recreates these on every reconcile, so without an entry here every run
+# re-dirties a clean tree with two untracked files. (.vfs/graph/edges.jsonl
+# stays TRACKED on purpose — its refresh is a separate chore commit.)
+.vfs/graph/.last_reconcile
+.vfs/graph/.parse_cache.json
 
 # Demo projects (own git repos, not part of GitReins source)
 demo-calc/
