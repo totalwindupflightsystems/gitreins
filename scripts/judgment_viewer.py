@@ -8,6 +8,7 @@ Scans a repo's judgment stores and emits ONE self-contained dark HTML page
   <repo>/.coding-hermes/board/events.jsonl              -> fleet event timeline
   <repo>/.coding-hermes/board/tasks.jsonl               -> task titles/status
   ~/.hermes/coding-hermes/scheduler.db                  -> tick outcomes/cost
+  <repo>/.gitreins/qa-ledger.jsonl (or $GITREINS_QA_LEDGER) -> QA runs
 
 Usage:
   python3 judgment_viewer.py --repo /home/kara/gitreins-poc --out /home/kara/gitreins-judgments.html
@@ -73,6 +74,31 @@ def load_verdicts(repo):
                 }
             )
     return out
+
+
+def load_qa(repo, n=50):
+    """QA run ledger rows (JVIEW-007) plus the path they came from.
+
+    The same source `gitreins serve` reads: `engine.qa_ledger.list_rows`. A
+    missing, unreadable or half-garbage ledger yields no runs — never a crash,
+    because a static page that dies on a dirty ledger is worse than one that
+    says the ledger was empty.
+    """
+    try:
+        from engine.qa_ledger import list_rows, qa_ledger_path
+    except ModuleNotFoundError:
+        sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        from engine.qa_ledger import list_rows, qa_ledger_path
+
+    try:
+        ledger = qa_ledger_path(repo)
+    except Exception:
+        ledger = ""
+    try:
+        rows = list_rows(repo, path=ledger)[-n:] if ledger else []
+    except Exception:
+        rows = []
+    return ledger, rows
 
 
 def load_events(repo):
@@ -210,11 +236,15 @@ h2{font-size:16px;color:#ffd200;margin:18px 0 8px}
 <div style="background:#1a1a2e;border:1px solid #2a2a3e;border-radius:12px;padding:10px 12px;max-height:420px;overflow-y:auto" id="evlist"></div>
 <h2>🖥️ Scheduler Ticks <span style="font-size:11px;color:#5a5a75">(latest 500)</span></h2>
 <div style="background:#1a1a2e;border:1px solid #2a2a3e;border-radius:12px;padding:10px 12px;max-height:340px;overflow-y:auto" id="ticklist"></div>
-<div class="footer">Generated from .gitreins/history + board + scheduler ledger · static page, no server needed</div>
+<h2>🧪 QA Runs <span style="font-size:11px;color:#5a5a75">(__N_QA__)</span></h2>
+<div style="background:#1a1a2e;border:1px solid #2a2a3e;border-radius:12px;padding:10px 12px;max-height:340px;overflow-y:auto" id="qalist"></div>
+<div class="footer">Generated from .gitreins/history + board + scheduler ledger + QA ledger · static page, no server needed</div>
 <script>
 const D = __DATA__;
 const EV = __EVENTS__;
 const TK = __TICKS__;
+const QA = __QA__;
+const QALEDGER = __QA_LEDGER__;
 let filter='all', q='';
 function esc(s){const d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML}
 function badge(v){return v?'<span class="badge pass">PASS</span>':'<span class="badge fail">FAIL</span>'}
@@ -227,6 +257,13 @@ function render(){
   </div>`).join('')||'<p style="color:#5a5a75;font-size:13px">no judgments match</p>';
   document.getElementById('evlist').innerHTML=EV.slice().reverse().map(e=>`<div class="ev"><span class="ts">${esc((e.ts||'').slice(0,16))}</span><span class="t">${esc(e.type)}</span><span class="k">${esc(e.task)}</span><span class="v">${e.commit?'<span class="mono">'+esc(e.commit)+'</span> ':''}${esc(e.verdict)}${e.tick?' · tick '+esc(e.tick):''}</span></div>`).join('');
   document.getElementById('ticklist').innerHTML=TK.map(t=>`<div class="ev"><span class="ts">${esc((t.spawned_at||'').slice(0,16))}</span><span class="t">${t.status=='completed'&&t.outcome=='committed'?'🟢 committed':(t.status=='completed'?'🟡 '+esc(t.outcome||t.status):'🔴 '+esc(t.status))}</span><span class="v">${t.commits||0} commits · ${t.files||0} files · $${esc(t.cost==null?'0':t.cost)}${t.error?' · '+esc(t.error):''}</span></div>`).join('');
+  const qaBadge=v=>{v=String(v||'').toUpperCase();return v==='PASS'?'<span class="badge pass">✅ PASS</span>':(v==='FAIL'?'<span class="badge fail">❌ FAIL</span>':'<span class="badge mute">'+esc(v||'?')+'</span>')};
+  const qaCells=c=>{if(!c||typeof c!=='object')return 'no graded cells';const v=Object.values(c).map(x=>String(x).toLowerCase());const np=v.filter(x=>['pass','passed','ok'].includes(x)).length;const nf=v.filter(x=>['fail','failed','error'].includes(x)).length;return (np+nf)?('cells '+np+'/'+(np+nf)+' passed'):'no graded cells'};
+  const qaBits=r=>{const b=[];if(typeof r.exit_code==='number')b.push('exit '+r.exit_code);if(r.commit)b.push('commit '+esc(String(r.commit).slice(0,7)));if(r.project)b.push(esc(r.project));return b.join(' · ')};
+  document.getElementById('qalist').innerHTML=QA.length
+    ? QA.map(r=>`<div class="ev"><span class="ts">${esc((r.ts||'').slice(0,16))}</span>${qaBadge(r.verdict)}<span class="t">${esc(r.kind||'?')}</span><span class="v">${esc(qaCells(r.cells))}${qaBits(r)?' · '+qaBits(r):''}</span></div>`).join('')+
+      `<p style="color:#5a5a75;font-size:10.5px;margin-top:6px">ledger: ${esc(QALEDGER||'(none)')}</p>`
+    : `<p style="color:#5a5a75;font-size:12px">no QA runs recorded (ledger: ${esc(QALEDGER||'(none)')})</p>`;
 }
 function show(date,hash){
   const v=D.find(x=>x.date===date&&x.hash===hash);if(!v)return;
@@ -259,6 +296,7 @@ def main():
     verdicts = load_verdicts(args.repo)
     events = load_events(args.repo)
     ticks = load_ticks(args.project)
+    ledger, qa_runs = load_qa(args.repo)
     n_pass = sum(1 for v in verdicts if v["passed"])
     n_fail = len(verdicts) - n_pass
     rate = round(100 * n_pass / len(verdicts)) if verdicts else 0
@@ -277,12 +315,16 @@ def main():
         .replace("__DATA__", json.dumps(verdicts))
         .replace("__EVENTS__", json.dumps(events))
         .replace("__TICKS__", json.dumps(ticks))
+        .replace("__N_QA__", str(len(qa_runs)))
+        .replace("__QA_LEDGER__", json.dumps(ledger))
+        .replace("__QA__", json.dumps(qa_runs))
     )
     with open(args.out, "w") as f:
         f.write(page)
     print(
         f"{len(verdicts)} verdicts ({n_pass} pass / {n_fail} fail, {rate}%), "
-        f"{len(events)} events, {len(ticks)} ticks -> {args.out} ({os.path.getsize(args.out) // 1024} KB)"
+        f"{len(events)} events, {len(ticks)} ticks, {len(qa_runs)} QA runs -> {args.out} "
+        f"({os.path.getsize(args.out) // 1024} KB)"
     )
 
 

@@ -175,7 +175,7 @@ lines do not carry a model of their own.
 | Board timeline | `<canonical>/.coding-hermes/board/events.jsonl` | `[]` | Resolved through Git's common dir, so a linked worktree shows the shared board |
 | Board tasks | `<canonical>/.coding-hermes/board/tasks.jsonl` | `[]` | Last 2000 lines are read |
 | Ticks | `~/.hermes/coding-hermes/scheduler.db`, table `ticks`, filtered by `project_name` | `[]` | Host-coupled, read-only SQLite, opt-in per `--project`; without `--project` the panel reads `no scheduler project selected (start with --project <name>)`, and a selected project with no ledger rows reads `no scheduler ticks recorded for <project>` |
-| QA runs | `<repo>/.gitreins/qa-ledger.jsonl`, overridable by `GITREINS_QA_LEDGER` or the `qa_ledger.path` config key | `[]` | Written by `worktree fresh\|repro\|dogfood` and `gitreins qa record`; rows are oldest-first and malformed lines are skipped, never guessed; the panel names the ledger path and shows verdict, cells summary, exit code and commit per run |
+| QA runs | `<repo>/.gitreins/qa-ledger.jsonl`, overridable by `GITREINS_QA_LEDGER` or the `qa_ledger.path` config key | `[]` | Written by `worktree fresh\|repro\|dogfood` and `gitreins qa record`; rows are oldest-first and malformed lines are skipped, never guessed; the panel names the ledger path and shows verdict, cells summary, exit code and commit per run. The static variant (`scripts/judgment_viewer.py`) renders the same rows in its QA Runs panel (JVIEW-007) |
 
 `gitreins serve` reads the filesystem; it does **not** fall back to the
 `refs/heads/gitreins` verdict branch the way `gitreins report` does. On a fresh
@@ -236,8 +236,10 @@ row of its own.
 ## Static variant
 
 `scripts/judgment_viewer.py` renders the same history to a standalone HTML file
-for publishing without a server. Serve is for a live, always-current view;
-the static script is for attaching evidence to something.
+for publishing without a server: verdicts, the board event timeline, the
+scheduler ticks and the QA run ledger (its own panel, with the ledger path named
+under the list). Serve is for a live, always-current view; the static script is
+for attaching evidence to something.
 
 ## See also
 

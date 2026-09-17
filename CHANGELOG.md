@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **QA runs in the static judgment page too (JVIEW-007)** — the QA run ledger
+  became a first-class data source, `gitreins serve` exposes it at `GET /api/qa`
+  and renders it, but `scripts/judgment_viewer.py` (the standalone page published
+  without a server) still showed task verdicts only, so the harness' own QA
+  history stayed invisible exactly where the record is browsed off-line. The
+  generator now reads the same `engine.qa_ledger` rows and renders a **QA Runs**
+  panel with a PASS/FAIL badge, kind, cells summary, exit code, commit and the
+  ledger path under the list — and degrades to "no QA runs recorded (ledger: …)"
+  on an absent, unreadable or half-garbage ledger instead of dying. Tests:
+  `tests/test_judgment_viewer_script.py` (4 — absent ledger, rows present,
+  unreadable ledger, and a generated page carrying the section).
 - **Per-judgment tokens and cost in the judgment viewer (JVIEW-006)** — the
   judge's token spend lives in `.gitreins/usage.jsonl` and carries no task id, so
   the economics of quality were invisible next to the verdicts that produced it.
