@@ -9,7 +9,9 @@ locked because a repro farm may create and reap several trees concurrently.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -28,6 +30,8 @@ from engine.worktree_manager import WorktreeError, WorktreeManager, _git
 DISPOSABLE_FILE = "disposable.json"
 DISPOSABLE_LOCK = "disposable.lock"
 MAX_EVIDENCE_CHARS = 4000
+
+logger = logging.getLogger("gitreins.worktree_disposable")
 
 
 @dataclass
@@ -228,16 +232,88 @@ def _save_disposable_file(path: Path, records: list[DisposableRecord]) -> None:
     os.replace(tmp, path)
 
 
+def _worktree_listing(main_root: Path) -> set[str] | None:
+    """Return the paths git currently tracks as worktrees (None = unreadable)."""
+    result = _git(main_root, "worktree", "list", "--porcelain", check=False)
+    if result.returncode != 0:
+        return None
+    paths: set[str] = set()
+    for line in result.stdout.splitlines():
+        if not line.startswith("worktree "):
+            continue
+        raw = line[len("worktree ") :].strip()
+        if raw:
+            paths.add(_resolved(raw))
+    return paths
+
+
+def _resolved(path: str | os.PathLike[str]) -> str:
+    """Normalize a path for comparison without requiring it to exist."""
+    try:
+        return str(Path(path).resolve())
+    except OSError:  # pragma: no cover - resolve() is non-strict
+        return str(path)
+
+
+def _discard_leftover_directory(path: Path) -> bool:
+    """Delete a tree directory git no longer tracks; True when it is gone."""
+    if not path.exists():
+        return True
+    try:
+        shutil.rmtree(path)
+    except OSError:
+        return not path.exists()
+    return not path.exists()
+
+
 def _remove_disposable_tree(main_root: Path, path: Path) -> None:
-    """Reap a disposable tree and prune Git metadata, failing on Git errors."""
+    """Idempotently reap a disposable tree and prune Git metadata.
+
+    The caller MUST hold the disposable registry lock
+    (:meth:`DisposableWorktreeManager._exclusive_lock`) so that the git
+    metadata mutations below cannot interleave with another reap in the same
+    checkout.
+
+    INT-CI-11: `git worktree remove` exits non-zero for *benign stale* states
+    that a parallel repro farm creates by design.  Each of the ``k`` runs
+    reaps its own tree and then runs a repo-wide ``git worktree prune``; a
+    concurrent reap can delete another run's admin metadata
+    (``<git-common-dir>/worktrees/<run-id>``, including
+    ``delete_worktrees_dir_if_empty`` removing ``worktrees/`` itself) between
+    a command's worktree-list snapshot and its own path resolution, and git
+    then aborts with a message naming an admin path that no longer exists
+    (``fatal: Invalid path '<common>/worktrees/<run-id>': No such file or
+    directory`` — ``strbuf_realpath`` with ``REALPATH_DIE_ON_ERROR``,
+    ``abspath.c``).  Reading *git's exit code* as "the reap failed" turned
+    that into an infrastructure failure and failed the repro run, so the
+    decision is now made from the registry state: a tree git no longer tracks
+    is already reaped — remove any directory left behind and continue — and
+    only a tree that is still registered (or a directory that cannot be
+    deleted) is a real failure.
+    """
     result = _git(main_root, "worktree", "remove", "--force", str(path), check=False)
-    if result.returncode != 0 and path.exists():
+    if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip() or "no diagnostic output"
-        raise WorktreeError(f"could not reap disposable worktree {path}: {detail}")
+        registered = _worktree_listing(main_root)
+        if registered is None or _resolved(path) in registered:
+            raise WorktreeError(f"could not reap disposable worktree {path}: {detail}")
+        if not _discard_leftover_directory(path):
+            raise WorktreeError(
+                f"could not reap disposable worktree {path}: git reported {detail!r} "
+                "and the leftover directory could not be deleted"
+            )
     prune = _git(main_root, "worktree", "prune", check=False)
     if prune.returncode != 0:
         detail = prune.stderr.strip() or prune.stdout.strip() or "no diagnostic output"
-        raise WorktreeError(f"could not prune disposable worktree metadata: {detail}")
+        registered = _worktree_listing(main_root)
+        if registered is None or _resolved(path) in registered:
+            raise WorktreeError(f"could not prune disposable worktree metadata: {detail}")
+        logger.warning(
+            "disposable worktree prune reported %r for an already-reaped tree %s — "
+            "treating as metadata noise from a concurrent reap",
+            detail,
+            path,
+        )
 
 
 class DisposableWorktreeManager:
@@ -330,6 +406,20 @@ class DisposableWorktreeManager:
                     break
             self._save(records)
 
+    def _reap_and_forget(self, record: DisposableRecord) -> None:
+        """Reap one run's tree and drop it from the registry under one lock.
+
+        Holding the registry lock across the git metadata mutations
+        serializes removes and prunes inside one checkout — the source of the
+        INT-CI-11 reap failure (a parallel repro farm reaping ``k`` trees at
+        once).  ``_exclusive_lock`` is re-entrant per thread, so callers that
+        already hold it (``reap``, ``create``, ``enforce_disk_ceiling``) can
+        call this safely.
+        """
+        with self._exclusive_lock():
+            _remove_disposable_tree(self.main_root, Path(record.path))
+            self._save([item for item in self._load() if item.run_id != record.run_id])
+
     def reap(self, *, run_id: str | None = None) -> list[str]:
         """Reap disposable records, optionally selecting one run id."""
         with self._exclusive_lock():
@@ -410,9 +500,7 @@ class DisposableWorktreeManager:
         finally:
             record.pid = None
             if not keep:
-                _remove_disposable_tree(self.main_root, Path(record.path))
-                with self._exclusive_lock():
-                    self._save([item for item in self._load() if item.run_id != record.run_id])
+                self._reap_and_forget(record)
             else:
                 self._update(record)
         finished_at = time.time()
@@ -574,9 +662,7 @@ class DisposableWorktreeManager:
         finally:
             record.pid = None
             if not keep:
-                _remove_disposable_tree(self.main_root, Path(record.path))
-                with self._exclusive_lock():
-                    self._save([item for item in self._load() if item.run_id != record.run_id])
+                self._reap_and_forget(record)
             else:
                 self._update(record)
 

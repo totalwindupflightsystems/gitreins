@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -216,3 +217,89 @@ def test_dogfood_keep_retains_tree(disposable_repo):
     assert verifier._load()
     verifier.reap()
     assert verifier._load() == []
+
+
+# ── INT-CI-11: the reap is idempotent and serialized ─────────────────────────
+#
+# CI-only failure on a board-only commit: `worktree repro -k 3` exited 2 with
+# `could not reap disposable worktree .../.disposable/run-6ef7c5c0...: fatal:
+# Invalid path '<repo>/.git/worktrees/run-c05c99c2...': No such file or
+# directory` (the manager reported an infrastructure failure, assert 2 == 0)
+# and then passed on a rerun.  A parallel repro farm reaps `k` trees at once,
+# so one run's `git worktree prune` can delete another run's admin metadata
+# (<git-common-dir>/worktrees/<run-id>, or even the whole worktrees/ dir via
+# delete_worktrees_dir_if_empty) while that run is resolving its own admin
+# path — git then aborts even though the tree is already gone.
+
+
+def test_reap_tolerates_admin_metadata_dropped_by_a_concurrent_reap(disposable_repo):
+    """A tree git no longer tracks is already reaped — reap it, do not raise."""
+    verifier = DisposableWorktreeManager(disposable_repo)
+    record = verifier.create("race", run_id="run-c05c99c2a1b2")
+    tree = Path(record.path)
+    admin = disposable_repo / ".git" / "worktrees" / record.run_id
+    assert admin.is_dir()
+
+    # What the concurrent reap does: the admin metadata disappears while the
+    # worktree directory is still on disk.
+    shutil.rmtree(admin)
+    assert tree.is_dir()
+    assert record.run_id not in _git(disposable_repo, "worktree", "list").stdout
+
+    assert verifier.reap() == [record.run_id]
+    assert not tree.exists()
+    assert verifier._load() == []
+    assert not (_disposable_dir(disposable_repo) / record.run_id).exists()
+
+
+def test_reap_still_fails_loudly_while_git_tracks_the_tree(disposable_repo, monkeypatch):
+    """The tolerance is not a blanket ignore: a registered tree that cannot be
+    reaped still raises, and nothing is silently forgotten."""
+    import engine.worktree_disposable as disposable_mod
+
+    verifier = DisposableWorktreeManager(disposable_repo)
+    record = verifier.create("stuck", run_id="run-stillregistered")
+    tree = Path(record.path)
+
+    real_git = disposable_mod._git
+
+    def failing_git(workdir, *args, check=True):
+        if args[:2] == ("worktree", "remove"):
+            return subprocess.CompletedProcess(
+                list(args),
+                1,
+                "",
+                "fatal: Invalid path "
+                f"'{disposable_repo}/.git/worktrees/{record.run_id}': "
+                "No such file or directory",
+            )
+        return real_git(workdir, *args, check=check)
+
+    monkeypatch.setattr(disposable_mod, "_git", failing_git)
+    with pytest.raises(WorktreeError, match="could not reap disposable worktree"):
+        verifier.reap()
+    assert tree.is_dir()
+    assert [item.run_id for item in verifier._load()] == [record.run_id]
+
+
+def test_parallel_repro_reaps_are_serialized(disposable_repo, monkeypatch):
+    """k concurrent reaps never run git metadata mutations at the same time."""
+    import engine.worktree_disposable as disposable_mod
+
+    real_remove = disposable_mod._remove_disposable_tree
+    live = {"now": 0, "max": 0}
+
+    def spy(main_root, path):
+        live["now"] += 1
+        live["max"] = max(live["max"], live["now"])
+        try:
+            return real_remove(main_root, path)
+        finally:
+            live["now"] -= 1
+
+    monkeypatch.setattr(disposable_mod, "_remove_disposable_tree", spy)
+    report = DisposableWorktreeManager(disposable_repo).repro("test -f base.txt", 4, concurrency=4)
+    assert report["passes"] == 4
+    assert report["failures"] == 0
+    assert live["max"] == 1, f"reaps were not serialized: {live}"
+    assert not any(_disposable_dir(disposable_repo).iterdir())

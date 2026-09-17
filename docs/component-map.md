@@ -9,6 +9,8 @@
 | LLM Interface | `engine/llm.py` | 298 | Implemented ✅ | Multi-provider chat completions (OpenAI, Anthropic) |
 | Pipeline Engine | `engine/pipeline.py` | 428 | Implemented ✅ | Configurable multi-stage evaluation pipelines |
 | QA Run Ledger | `engine/qa_ledger.py` | 518 | Implemented ✅ | Durable QA verdicts: one row per `worktree fresh/repro/dogfood` run plus `gitreins qa record` for external lanes |
+| LSP Runner | `engine/lsp.py` | 782 | Implemented ✅ | Spawns LSP servers, collects normalized diagnostics; every file is opened once and re-requested as a change when a spawn never reports on it, with an optional readiness probe (`run_lsp_check_status`) that says whether a server checked the file at all |
+| Disposable Worktrees | `engine/worktree_disposable.py` | 770 | Implemented ✅ | Throwaway verification trees (`fresh`/`repro`/`dogfood`) with a locked, idempotent reap — a tree git no longer tracks is already reaped, never an infrastructure failure |
 | MCP Server | `gitreins_mcp/server.py` | 406 | Implemented ✅ | MCP stdio transport, tool registration, primary agent interface |
 | CLI | `gitreins/cli.py` | 218 | Implemented ✅ | CLI entry point for gitreins commands |
 | Installer | `gitreins/install` | 76 | Implemented ✅ | Symlinks hooks into .git/hooks/ — one command activation |

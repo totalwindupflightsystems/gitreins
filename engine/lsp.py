@@ -93,6 +93,50 @@ class LspDiag:
         return asdict(self)
 
 
+# ── Readiness probe (INT-FLAKE-4) ───────────────────────────────────────────
+#
+# ``run_lsp_check`` answers ``[]`` both for "the server is healthy and found
+# nothing" and for "the spawn went quiescent and never published anything", so
+# a caller cannot tell a clean tree from a stalled server.  A real
+# request/response round trip is the discriminator: every LSP server in
+# ``_TOOL_BINARIES`` implements ``workspace/symbol``, and any answer (a result
+# *or* an error response) proves the server is consuming input and servicing
+# requests.  A quiescent gopls under load answers nothing.
+READY_PROBE_METHOD = "workspace/symbol"
+READY_PROBE_ID = 9001
+PROBE_PARAMS: dict = {"query": ""}
+READY_PROBE_TIMEOUT_S = 15.0
+
+# How long to wait for the server's first `publishDiagnostics` for a file
+# before re-sending the same content as a change.  A healthy server publishes
+# in ~0.06-1.5 s even under load, so this window is far above the observed
+# latency, while a spawn whose didOpen landed too early never publishes at all.
+RECHECK_AFTER_S = 5.0
+
+
+@dataclass
+class LspCheckStatus:
+    """Outcome of one LSP check, including whether the server was responsive."""
+
+    tool: str
+    diagnostics: list[dict]
+    files: list[str]
+    server_ready: bool | None = None  # None = not probed
+    ready_seconds: float | None = None
+    stalled: bool = False
+    stall_reason: str | None = None
+    probe_method: str | None = None
+    # True only when the server sent a `publishDiagnostics` notification for
+    # every requested file (an empty list counts: that is a real "found
+    # nothing").  False means it never reported on the file at all.
+    published: bool = True
+    rechecks: int = 0
+    duration_s: float = 0.0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
 _SEVERITY_MAP = {
     1: "error",
     2: "warning",
@@ -120,6 +164,26 @@ def _lsp_encode_message(msg: dict) -> bytes:
     body = payload.encode("utf-8")
     header = f"Content-Length: {len(body)}\r\n\r\n"
     return header.encode("utf-8") + body
+
+
+def _lsp_send_request(
+    proc: subprocess.Popen, request_id: int, method: str, params: dict | None = None
+) -> bool:
+    """Send a JSON-RPC request; False when the server's stdin is gone."""
+    message = {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": method,
+        "params": params or {},
+    }
+    try:
+        if proc.stdin is None:
+            return False
+        proc.stdin.write(_lsp_encode_message(message))
+        proc.stdin.flush()
+        return True
+    except Exception:
+        return False
 
 
 def _lsp_read_response(proc: subprocess.Popen, timeout: float = 60.0) -> dict | None:
@@ -231,15 +295,34 @@ def _collect_diagnostics(
     filepath: str,
     timeout: float,
     tool: str,
-) -> list[dict]:
+    probe_method: str | None = None,
+    ready_timeout: float = READY_PROBE_TIMEOUT_S,
+) -> tuple[list[dict], float | None, bool]:
+    """Collect diagnostics for ``filepath``; optionally probe server liveness.
+
+    Returns ``(diagnostics, probe_seconds, published)``.  ``published`` says
+    whether the server ever sent a ``publishDiagnostics`` notification for this
+    file — an empty list is a *published* "found nothing", which is different
+    from the server never reporting on the file at all (INT-FLAKE-4's stall).
+    When ``probe_method`` is set a real request is sent as the wait starts:
+    ``probe_seconds`` is the latency of its response, or ``None`` when the
+    server never answered it.
+    """
     import time as _time
 
     diags: list[dict] = []
-    deadline = _time.monotonic() + timeout
+    published = False
+    started = _time.monotonic()
+    deadline = started + timeout
+    probe_seconds: float | None = None
+    effective_deadline = deadline
+    if probe_method:
+        _lsp_send_request(proc, READY_PROBE_ID, probe_method, PROBE_PARAMS)
+        effective_deadline = min(deadline, started + ready_timeout)
 
     try:
         while True:
-            remaining = deadline - _time.monotonic()
+            remaining = effective_deadline - _time.monotonic()
             if remaining <= 0:
                 break
             msg = _lsp_read_response(proc, remaining)
@@ -247,12 +330,20 @@ def _collect_diagnostics(
                 if proc.poll() is not None:
                     break  # server exited — no more diagnostics (GR-138)
                 continue
+            if msg.get("id") == READY_PROBE_ID:
+                # The server answered a real request: it is responsive, so a
+                # missing diagnostics notification is a real "found nothing"
+                # rather than a stall.  Keep waiting for the diagnostics.
+                probe_seconds = round(_time.monotonic() - started, 6)
+                effective_deadline = deadline
+                continue
             if msg.get("method") == "textDocument/publishDiagnostics":
                 uri = msg.get("params", {}).get("uri", "")
                 file_uri = urllib.parse.urlparse(uri).path if uri else filepath
                 # Only collect diagnostics for the requested file
                 if file_uri != filepath:
                     continue
+                published = True
                 for d in msg.get("params", {}).get("diagnostics", []):
                     range_start = d.get("range", {}).get("start", {})
                     line_0based = range_start.get("line", 0)
@@ -266,11 +357,11 @@ def _collect_diagnostics(
                             "tool": tool,
                         }
                     )
-                break  # got diagnostics for this file — done
+                break  # got the file's diagnostics — done
     except Exception:
         pass
 
-    return diags
+    return diags, probe_seconds, published
 
 
 def _lsp_initialize(proc: subprocess.Popen, workdir: str, timeout: float = 60.0) -> bool:
@@ -329,7 +420,41 @@ def _lsp_did_open(proc: subprocess.Popen[bytes], filepath: str, language_id: str
     proc.stdin.flush()
 
 
-def _lsp_shutdown(proc: subprocess.Popen[bytes]) -> None:
+def _lsp_did_change(proc: subprocess.Popen[bytes], filepath: str, version: int = 2) -> bool:
+    """Re-send the file's current content, as a real change, to force a check.
+
+    INT-FLAKE-4: when a ``didOpen`` lands before gopls has a snapshot for the
+    file, gopls loads it (symbols and definitions resolve) but never publishes
+    diagnostics for that open — a real client's next edit re-triggers the
+    check.  Sending the same text with a bumped version is that edit: measured
+    at 0.01 s to publish under load, where waiting produced nothing for 42 s.
+    """
+    file_uri = Path(filepath).as_uri()
+    try:
+        with open(filepath, "r", errors="replace") as f:
+            text = f.read()
+    except Exception:
+        text = ""
+
+    message = {
+        "jsonrpc": "2.0",
+        "method": "textDocument/didChange",
+        "params": {
+            "textDocument": {"uri": file_uri, "version": version},
+            "contentChanges": [{"text": text}],
+        },
+    }
+    try:
+        if proc.stdin is None:
+            return False
+        proc.stdin.write(_lsp_encode_message(message))
+        proc.stdin.flush()
+        return True
+    except Exception:
+        return False
+
+
+def _lsp_shutdown(proc: subprocess.Popen[bytes], timeout: float = 30.0) -> None:
     shutdown_msg = {
         "jsonrpc": "2.0",
         "id": 1,
@@ -340,7 +465,7 @@ def _lsp_shutdown(proc: subprocess.Popen[bytes]) -> None:
         assert proc.stdin is not None
         proc.stdin.write(_lsp_encode_message(shutdown_msg))
         proc.stdin.flush()
-        _lsp_read_response(proc, timeout=30.0)
+        _lsp_read_response(proc, timeout=timeout)
     except Exception:
         pass
 
@@ -420,13 +545,49 @@ def _tool_default_timeouts(tool: str, workdir: str) -> tuple[float, float]:
     return (60.0, 30.0)
 
 
-def run_lsp_check(
+def run_lsp_check_status(
     tool: str,
     workdir: str,
     files: list[str] | None = None,
     timeout_per_file: float | None = None,
     init_timeout: float | None = None,
-) -> list[dict]:
+    probe: bool = False,
+    ready_timeout: float = READY_PROBE_TIMEOUT_S,
+    recheck_after: float = RECHECK_AFTER_S,
+) -> LspCheckStatus:
+    """Run one LSP check and report *why* it produced no diagnostics.
+
+    Every file is opened once; if the server publishes nothing for it within
+    ``recheck_after``, the same content is re-sent as a ``didChange`` — the
+    INT-FLAKE-4 root cause is a ``didOpen`` that lands before gopls has a
+    snapshot for the file, after which the check simply never runs even though
+    the file resolves for symbols and definitions.  ``status.published``
+    reports whether the server ever reported on every file, so a caller can
+    tell a real "found nothing" from a spawn that never checked anything.
+
+    With ``probe=True`` the server must additionally answer a real request
+    (``workspace/symbol``) within ``ready_timeout``; ``stalled`` marks a spawn
+    that never reported on the file at all (or never answered), which is a
+    load/environment signal, not a verdict.
+
+    ``run_lsp_check`` keeps the historical contract (diagnostics only);
+    this entry point is for callers that must discriminate.
+    """
+    import time as _time
+
+    started = _time.monotonic()
+    status = LspCheckStatus(
+        tool=tool,
+        diagnostics=[],
+        files=list(files or []),
+        probe_method=READY_PROBE_METHOD if probe else None,
+    )
+
+    def finish(diagnostics: list[dict]) -> LspCheckStatus:
+        status.diagnostics = diagnostics
+        status.duration_s = round(_time.monotonic() - started, 6)
+        return status
+
     init_t, per_file_t = _tool_default_timeouts(tool, workdir)
     if init_timeout is None:
         init_timeout = init_t
@@ -435,7 +596,7 @@ def run_lsp_check(
     tool_path = find_lsp_tool(tool)
     if not tool_path:
         logger.warning("LSP tool '%s' not found on PATH — skipping", tool)
-        return []
+        return finish([])
 
     if files is not None:
         staged_files = files
@@ -446,16 +607,15 @@ def run_lsp_check(
             if _tool_supports_language(tool, lang):
                 staged_files.extend(lang_files)
 
+    status.files = list(staged_files)
     if not staged_files:
         logger.debug("No staged files for LSP tool '%s'", tool)
-        return []
+        return finish([])
 
     all_diagnostics: list[dict] = []
     proc = None
 
     try:
-        import signal as _signal
-
         proc = subprocess.Popen(
             [tool_path],
             stdin=subprocess.PIPE,
@@ -466,12 +626,18 @@ def run_lsp_check(
         )
     except Exception as exc:
         logger.warning("Failed to start LSP tool '%s': %s", tool, exc)
-        return []
+        return finish([])
 
     try:
         if not _lsp_initialize(proc, workdir, timeout=init_timeout):
             logger.warning("LSP tool '%s' failed to initialize", tool)
-            return []
+            if probe:
+                status.server_ready = False
+                status.stalled = True
+                status.stall_reason = (
+                    f"the server did not answer `initialize` within {init_timeout:.0f}s"
+                )
+            return finish([])
 
         for filepath in staged_files:
             ext = os.path.splitext(filepath)[1].lower()
@@ -479,17 +645,85 @@ def run_lsp_check(
 
             _lsp_did_open(proc, filepath, language_id)
 
-            diags = _collect_diagnostics(proc, filepath, timeout_per_file, tool)
+            first_phase = min(timeout_per_file, recheck_after)
+            diags, probe_seconds, published = _collect_diagnostics(
+                proc,
+                filepath,
+                first_phase,
+                tool,
+                status.probe_method,
+                ready_timeout,
+            )
+            if not published and recheck_after < timeout_per_file:
+                # The server never reported on this file.  Re-send the same
+                # content as a change to force the check (INT-FLAKE-4: a
+                # didOpen that landed before the snapshot existed otherwise
+                # never produces diagnostics, while the same content as a
+                # didChange publishes in ~0.01 s).
+                if _lsp_did_change(proc, filepath):
+                    status.rechecks += 1
+                    more, probe_seconds_2, published_2 = _collect_diagnostics(
+                        proc,
+                        filepath,
+                        max(1.0, timeout_per_file - first_phase),
+                        tool,
+                        None,  # the readiness probe was already sent for this file
+                        ready_timeout,
+                    )
+                    diags.extend(more)
+                    published = published or published_2
+                    if probe_seconds is None:
+                        probe_seconds = probe_seconds_2
             all_diagnostics.extend(diags)
+            status.published = status.published and published
+            if not published:
+                # The server gave us nothing to judge this file with: neither a
+                # diagnostics notification (an empty list counts as a verdict)
+                # nor, when probed, an answer to a real request.
+                status.stalled = True
+                if not probe:
+                    status.stall_reason = (
+                        f"the server never published diagnostics for {filepath} "
+                        f"(re-requested the file as a change to force the check)"
+                    )
+                elif probe_seconds is not None:
+                    status.stall_reason = (
+                        f"the server answered `{status.probe_method}` in {probe_seconds}s but "
+                        f"never published diagnostics for {filepath}"
+                    )
+                elif proc.poll() is not None:
+                    status.stall_reason = (
+                        f"the server exited before answering `{status.probe_method}` or "
+                        f"publishing diagnostics for {filepath}"
+                    )
+                else:
+                    status.stall_reason = (
+                        f"the server never answered `{status.probe_method}` and never published "
+                        f"diagnostics for {filepath} within {ready_timeout:.0f}s"
+                    )
+                logger.warning("LSP tool '%s' reported nothing for %s", tool, filepath)
+            if not probe:
+                continue
+            if probe_seconds is None:
+                # Unanswered probe — a liveness fact about the spawn, not a
+                # verdict gate (a server can publish without answering it).
+                status.server_ready = False
+                continue
+            status.server_ready = True
+            if status.ready_seconds is None or probe_seconds < status.ready_seconds:
+                status.ready_seconds = probe_seconds
 
     except subprocess.TimeoutExpired:
         logger.warning("LSP tool '%s' timed out", tool)
     except Exception as exc:
         logger.warning("LSP tool '%s' error: %s", tool, exc)
     finally:
-        # Always attempt graceful shutdown first, then force-kill the process group
+        # Always attempt graceful shutdown first, then force-kill the process group.
+        # A stalled server never answers `shutdown`, so do not wait the full
+        # grace period for one (INT-FLAKE-4: an attempt must stay cheap so the
+        # caller can afford to retry a stalled spawn).
         if proc is not None:
-            _lsp_shutdown(proc)
+            _lsp_shutdown(proc, timeout=1.0 if status.stalled else 30.0)
             try:
                 proc.wait(timeout=3)
             except subprocess.TimeoutExpired:
@@ -526,4 +760,27 @@ def run_lsp_check(
                     except Exception:
                         pass
 
-    return all_diagnostics
+    return finish(all_diagnostics)
+
+
+def run_lsp_check(
+    tool: str,
+    workdir: str,
+    files: list[str] | None = None,
+    timeout_per_file: float | None = None,
+    init_timeout: float | None = None,
+) -> list[dict]:
+    """Return the diagnostics for ``files`` (no readiness probe).
+
+    Behaviour is unchanged from before INT-FLAKE-4: the guard and every
+    existing caller keep the diagnostics-only contract, and callers that need
+    to tell a stalled spawn from a clean tree use ``run_lsp_check_status``.
+    """
+    return run_lsp_check_status(
+        tool,
+        workdir,
+        files=files,
+        timeout_per_file=timeout_per_file,
+        init_timeout=init_timeout,
+        probe=False,
+    ).diagnostics

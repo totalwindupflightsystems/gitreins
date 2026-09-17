@@ -82,6 +82,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reported on stderr and the run's exit code is unchanged.
 
 ### Fixed
+- **A quiescent LSP spawn read as a clean tree, and the gopls integration test
+  failed on it (INT-FLAKE-4)** — `run_lsp_check` returns `[]` both for "the
+  server is healthy and found nothing" and for "the server never checked the
+  file", so a load-dependent stall was indistinguishable from a clean tree (and
+  the guard's LSP lane reported one as the other). Reproduced under CPU load:
+  a gopls v0.22 spawn answers `workspace/symbol` and resolves definitions and
+  document symbols while publishing no `publishDiagnostics` for 42 s — and
+  re-sending the same content as a `textDocument/didChange` publishes the check
+  in **0.01 s**. Root cause: the `didOpen` lands before gopls holds a snapshot
+  for the file, after which the check simply never runs. `engine/lsp.py` now
+  opens each file once and, when the server has not published for it within
+  `recheck_after` (default 5 s — a healthy server publishes in 0.06-1.5 s even
+  under load), re-sends the same content as a change to force the check;
+  `run_lsp_check_status` reports `published` (did the server report on every
+  file — an empty list counts), `rechecks`, `server_ready` (a real
+  `workspace/symbol` round trip, opt-in via `probe=True`) and `stalled` with a
+  named reason. `run_lsp_check` keeps its diagnostics-only contract for the
+  guard. The gopls integration test now retries fresh servers on the readiness
+  signal inside a wall-clock stall budget (the attempt count is only a ceiling),
+  asserts strictly when the server *did* report, and reports a never-reported
+  spawn as a distinct non-failing diagnostic.
+- **A detached judge job was polled under a fixed 30 s deadline
+  (INT-FLAKE-3)** — the async-dispatch test polls `judge --status` for a
+  *detached worker process*, so its runtime scales with machine load while the
+  deadline was a constant: one of the Tier-2 judge's twelve parallel full-suite
+  runs went red with `subprocess.TimeoutExpired` although the job was healthy
+  (11/12 and 8/8 local runs green). The budget is now derived from the measured
+  workload — the 1-minute load average per CPU, refined with the wall time of
+  the first `judge --status` child actually observed — clamped to 30-240 s, and
+  exhausting it is only a failure for a job that is genuinely stuck: a worker
+  pid that is gone (or an errored job) still fails, while a worker that is
+  still running is reported as a distinct, non-failing slow-run diagnostic.
+  Tests cover the budget derivation (idle/loaded/slow-child/capped/non-POSIX),
+  the stuck-job failure path and the live-worker diagnostic.
+- **The disposable reap treated a benign race as an infrastructure failure
+  (INT-CI-11)** — a CI-only red on a board-only commit:
+  `could not reap disposable worktree .../.disposable/run-…: fatal: Invalid
+  path '<repo>/.git/worktrees/run-…': No such file or directory`, which turned
+  `worktree repro -k 3` into a failure (`assert 2 == 0`) and went green on a
+  rerun. A parallel repro farm reaps its `k` trees at once, so one run's
+  repo-wide `git worktree prune` can delete another run's admin metadata
+  (`<git-common-dir>/worktrees/<run-id>`, or the whole `worktrees/` directory
+  via `delete_worktrees_dir_if_empty`) between that command's worktree-list
+  snapshot and its own path resolution — git then exits non-zero even though the
+  tree is already gone. The reap is now **idempotent**: on a non-zero `git
+  worktree remove` the decision is made from the registry state, not the exit
+  code — a tree git no longer tracks is already reaped (any leftover directory
+  is deleted, metadata pruned) and only a tree that is still registered, or a
+  directory that cannot be deleted, still raises. All git metadata mutations are
+  serialized under the manager's cross-process registry lock, so the farm's own
+  reaps can no longer race each other. Before/after proof in the tick record:
+  the same stale state raised `WorktreeError` and left the tree on disk before
+  the fix, and is reaped cleanly after it.
 - **The MCP handshake reported a version that disagreed with the CLI and
   README (DF-GITREINS-POC-5)** — `initialize` answered with a hardcoded
   `"version": "0.1.0"` while the shipped release was 0.13.0, so a client
