@@ -29,6 +29,7 @@ import os
 import re
 import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any, TypedDict
 
 from engine.repo_paths import (
     WorktreeResolutionError,
@@ -39,6 +40,38 @@ from engine.repo_paths import (
 TICKS_DB = os.path.expanduser("~/.hermes/coding-hermes/scheduler.db")
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _HASH_RE = re.compile(r"^[a-f0-9]{4,16}$")
+
+
+# ── typed API shapes (TypedDict = plain dict at runtime, so behaviour is ─────
+# ── identical to the untyped loaders; the types only describe the payloads) ──
+
+
+class _VerdictProvenance(TypedDict, total=False):
+    """Optional metadata stamped only on verdicts recorded after the first schema."""
+
+    worktree: str
+    branch: str
+
+
+class VerdictRow(_VerdictProvenance):
+    """One metadata-only row of ``GET /api/verdicts`` (no criteria/evidence)."""
+
+    date: str
+    hash: str
+    task_id: str
+    title: str
+    passed: bool
+    n_criteria: int
+    tier1_passed: bool | None
+
+
+class Stats(TypedDict):
+    """Counts block of ``GET /api/stats`` (before the repo/provenance fields)."""
+
+    total: int
+    passed: int
+    failed: int
+    pass_rate: int
 
 
 class ServeArgumentError(ValueError):
@@ -76,9 +109,10 @@ def _verdict_dir(workdir: str) -> str:
     return os.path.join(workdir, ".gitreins", "history")
 
 
-def list_verdicts(workdir: str) -> list[dict]:
+def list_verdicts(workdir: str) -> list[VerdictRow]:
+    """Every verdict under ``workdir`` as a metadata-only row (oldest day first)."""
     hist = _verdict_dir(workdir)
-    out = []
+    out: list[VerdictRow] = []
     if not os.path.isdir(hist):
         return out
     for day in sorted(os.listdir(hist)):
@@ -90,14 +124,15 @@ def list_verdicts(workdir: str) -> list[dict]:
             if not _HASH_RE.match(h) or not os.path.isfile(vpath):
                 continue
             try:
-                v = json.load(open(vpath))
+                with open(vpath) as fh:
+                    v = json.load(fh)
             except Exception:
                 continue
             stages = v.get("stages") or {}
             t1 = stages.get("tier1") or {}
             t2 = stages.get("tier2") or {}
             items = v.get("items") or t2.get("items") or []
-            row = {
+            row: VerdictRow = {
                 "date": day,
                 "hash": h,
                 "task_id": v.get("task_id", "?"),
@@ -116,26 +151,29 @@ def list_verdicts(workdir: str) -> list[dict]:
     return out
 
 
-def load_verdict(workdir: str, date: str, h: str) -> dict | None:
+def load_verdict(workdir: str, date: str, h: str) -> dict[str, Any] | None:
+    """Full verdict record for a date/hash pair, or ``None`` when it is unknown."""
     if not _DATE_RE.match(date) or not _HASH_RE.match(h):
         return None
     vpath = os.path.join(_verdict_dir(workdir), date, h, "verdict.json")
     if not os.path.isfile(vpath):
         return None
     try:
-        return json.load(open(vpath))
+        with open(vpath) as fh:
+            return json.load(fh)
     except Exception:
         return None
 
 
-def load_jsonl(workdir: str, name: str, limit: int = 2000) -> list:
+def load_jsonl(workdir: str, name: str, limit: int = 2000) -> list[Any]:
+    """Last ``limit`` parses of board file ``name`` (rows are any JSON value)."""
     try:
         path = board_file_path(workdir, name)
     except (WorktreeResolutionError, OSError, ValueError):
         # A browsed checkout (--repo) may hold judgments but no coding-hermes
         # board: an absent board is an empty list, never a 500.
         return []
-    rows = []
+    rows: list[Any] = []
     if os.path.isfile(path):
         with open(path) as f:
             lines = f.readlines()[-limit:]
@@ -150,7 +188,8 @@ def load_jsonl(workdir: str, name: str, limit: int = 2000) -> list:
     return rows
 
 
-def load_ticks(project: str, limit: int = 500) -> list[dict]:
+def load_ticks(project: str, limit: int = 500) -> list[dict[str, Any]]:
+    """Tick rows for ``project`` from the host scheduler ledger (read-only)."""
     if not os.path.exists(TICKS_DB):
         return []
     try:
@@ -168,7 +207,8 @@ def load_ticks(project: str, limit: int = 500) -> list[dict]:
     return [dict(zip(keys, r)) for r in rows]
 
 
-def stats(verdicts: list[dict]) -> dict:
+def stats(verdicts: list[VerdictRow]) -> Stats:
+    """Counts block for ``GET /api/stats`` (``pass_rate`` is an integer percent)."""
     n_pass = sum(1 for v in verdicts if v["passed"])
     return {
         "total": len(verdicts),
@@ -309,8 +349,9 @@ boot();
 
 
 class Handler(BaseHTTPRequestHandler):
-    workdir = "."
-    project = ""
+    # Class-level config: ``serve()`` sets both before the socket is bound.
+    workdir: str = "."
+    project: str = ""
 
     def _send(self, code: int, body: bytes, ctype: str) -> None:
         self.send_response(code)
@@ -320,10 +361,10 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _json(self, payload, code: int = 200) -> None:
+    def _json(self, payload: object, code: int = 200) -> None:
         self._send(code, json.dumps(payload).encode(), "application/json")
 
-    def do_GET(self):  # noqa: N802 (http.server API)
+    def do_GET(self) -> None:  # noqa: N802 (http.server API)
         path = self.path.split("?")[0].rstrip("/") or "/"
         try:
             if path == "/":
@@ -345,10 +386,12 @@ class Handler(BaseHTTPRequestHandler):
             elif path.startswith("/api/verdicts/"):
                 parts = [p for p in path.split("/") if p]
                 if len(parts) != 4:
-                    return self._json({"error": "use /api/verdicts/<date>/<hash>"}, 400)
+                    self._json({"error": "use /api/verdicts/<date>/<hash>"}, 400)
+                    return
                 v = load_verdict(self.workdir, parts[2], parts[3])
                 if v is None:
-                    return self._json({"error": "not found"}, 404)
+                    self._json({"error": "not found"}, 404)
+                    return
                 self._json(v)
             elif path == "/api/tasks":
                 self._json({"tasks": load_jsonl(self.workdir, "tasks.jsonl")})
@@ -373,9 +416,10 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-    def log_message(self, fmt, *args):  # quiet by default
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+        # Quiet by default; the name ``format`` matches http.server's own API.
         if os.environ.get("GITREINS_SERVE_VERBOSE"):
-            super().log_message(fmt, *args)
+            super().log_message(format, *args)
 
 
 def serve(
