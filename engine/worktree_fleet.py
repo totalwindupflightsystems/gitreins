@@ -17,9 +17,8 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 from engine.config import load_defaults
+from engine.evidence_bounds import MAX_EVIDENCE_CHARS, bound_evidence
 from engine.worktree_manager import WorktreeError, WorktreeManager, validate_task_id
-
-MAX_EVIDENCE_CHARS = 4000
 
 
 class FleetValidationError(WorktreeError):
@@ -112,10 +111,17 @@ def _validate_cap(cap) -> int:
 
 
 def _evidence(output: str) -> str:
-    output = output.strip()
-    if len(output) <= MAX_EVIDENCE_CHARS:
-        return output
-    return output[: MAX_EVIDENCE_CHARS - 40] + "\n… [output truncated]"
+    """Bound command evidence on LINE boundaries, keeping BOTH ends.
+
+    DF-GITREINS-POC-19: this used to be a head-only slice at a raw character
+    offset (``output[:MAX_EVIDENCE_CHARS - 40]``), so the evidence a
+    ``worktree fresh`` lane records — and the QA ledger row built from it —
+    ended in a half-written line and threw away the tail, which is where
+    pytest's short test summary names the failing test. It now delegates to
+    the one bounder every other evidence surface uses
+    (``engine.evidence_bounds``), so the rules cannot drift again.
+    """
+    return bound_evidence(output.strip(), cap=MAX_EVIDENCE_CHARS)
 
 
 class WorktreeFleet:

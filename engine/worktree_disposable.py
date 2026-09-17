@@ -25,11 +25,11 @@ from pathlib import Path
 from typing import Any
 
 from engine.config import load_defaults
+from engine.evidence_bounds import MAX_EVIDENCE_CHARS, bound_evidence
 from engine.worktree_manager import WorktreeError, WorktreeManager, _git
 
 DISPOSABLE_FILE = "disposable.json"
 DISPOSABLE_LOCK = "disposable.lock"
-MAX_EVIDENCE_CHARS = 4000
 
 logger = logging.getLogger("gitreins.worktree_disposable")
 
@@ -68,11 +68,16 @@ class DisposableRecord:
 
 
 def _evidence(output: str) -> str:
-    """Bound command evidence to the same limit used by the worktree fleet."""
-    output = output.strip()
-    if len(output) <= MAX_EVIDENCE_CHARS:
-        return output
-    return output[: MAX_EVIDENCE_CHARS - 40] + "\n… [output truncated]"
+    """Bound command evidence on LINE boundaries, keeping BOTH ends.
+
+    DF-GITREINS-POC-19: the same defect DF-GITREINS-POC-5 fixed for pipeline
+    steps was live here — a head-only slice at a raw character offset
+    (``output[:MAX_EVIDENCE_CHARS - 40]``), so a repro/dogfood run's recorded
+    evidence ended in a half-written line and dropped the tail where pytest's
+    short test summary lives. It now delegates to the shared bounder
+    (``engine.evidence_bounds``) used by every other evidence surface.
+    """
+    return bound_evidence(output.strip(), cap=MAX_EVIDENCE_CHARS)
 
 
 def _tree_size(path: Path) -> int:
@@ -393,6 +398,15 @@ class DisposableWorktreeManager:
                 command=command,
                 keep=keep,
             )
+            # WORKTREE-007: `enforce_disk_ceiling` above REWRITES the registry
+            # when it reaps an older run to make room, so the list read at the
+            # top of this method is stale by the time this run registers.
+            # Appending to it would resurrect the reaped run as a ghost entry —
+            # a registered path that no longer exists, counted by accounting and
+            # `--keep` reporting and only cleared by `worktree clean`. Re-read
+            # the registry under the same lock (held for the whole create) and
+            # register against what is actually on disk.
+            records = self._load()
             records.append(record)
             self._save(records)
             return record

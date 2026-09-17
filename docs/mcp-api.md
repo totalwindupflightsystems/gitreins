@@ -12,6 +12,26 @@ For the full wire-protocol specification (transport framing, lifecycle, security
 - **Protocol:** JSON-RPC 2.0, line-delimited JSON over stdin/stdout (`Content-Type`-free,
   one response per line). Multi-line JSON requests are buffered with a brace-count parser.
 - **Handshake:** `initialize` → `notifications/initialized` → `tools/list` → `tools/call`.
+- **Protocol version (negotiated):** `initialize` answers with the client's requested
+  revision when this server implements it, and otherwise with the newest revision it
+  does implement — `2025-11-25` — plus one explanatory line on stderr (stdout stays
+  protocol-pure). The supported set, newest first, is `2025-11-25`, `2025-06-18`,
+  `2025-03-26`, `2024-11-05`: all four share the session handshake and the tools-only
+  capability surface this server offers (`initialize` result carries
+  `capabilities: {"tools": {}}`), while the additions each revision brought are
+  optional for a tools-only server. The current spec revision, **`2026-07-28`, is
+  deliberately not advertised**: it removed the `initialize` handshake, made MCP
+  stateless, moved the version into each request's `_meta`, and made `server/discover`
+  mandatory. A `2026-07-28` client probes with `server/discover` (answered `-32601`
+  here, as any unknown method is) and should then fall back to `initialize` with a
+  revision from the list above. Invalid or absent `protocolVersion` values never fail
+  the handshake — they get the newest implemented revision and a stderr note naming
+  what was requested.
+- **Notifications are never answered:** a JSON-RPC message without an `id` gets no
+  response, including revision-specific notifications this server does not implement
+  (`notifications/cancelled`, `notifications/progress`,
+  `notifications/roots/list_changed`). An unknown *method* with an `id` is still a
+  `-32601` error.
 - **Server info:** `{"name": "gitreins", "version": "<installed version>"}` — the
   `initialize` result reports the **installed release** (`engine.version`, the same
   source `gitreins --version` reads), so a client can trust `serverInfo.version` when
@@ -19,10 +39,11 @@ For the full wire-protocol specification (transport framing, lifecycle, security
   with no installed metadata it falls back to the version declared in `pyproject.toml`.
 - **Startup acknowledgement (stderr):** the server writes exactly one line when it
   starts and one when it stops, to **stderr** — stdout stays protocol-pure, because an
-  unsolicited line there would corrupt the JSON-RPC stream. Shown indented (raw output,
-  not an invocation):
+  unsolicited line there would corrupt the JSON-RPC stream. The protocol it names is
+  the newest revision it implements, not the one a given client negotiated. Shown
+  indented (raw output, not an invocation):
 
-      gitreins MCP server <version> — stdio, protocol 2024-11-05, 12 tools, workdir=/path/to/repo
+      gitreins MCP server <version> — stdio, protocol 2025-11-25 (negotiated per client request), 12 tools, workdir=/path/to/repo
       gitreins MCP server <version> — stdin closed (EOF), exiting 0
 
   `<version>` is the installed release, so a client log is self-identifying without
@@ -40,7 +61,7 @@ requests in sequence, one process, with the server's stderr kept visible:
 
 ```bash
 $ cd /path/to/repo
-$ { echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"demo","version":"1.0"}}}';
+$ { echo '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"demo","version":"1.0"}}}';
     echo '{"jsonrpc":"2.0","method":"notifications/initialized"}';
     echo '{"jsonrpc":"2.0","id":2,"method":"tools/list"}';
     echo '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"task.list","arguments":{"status":"pending"}}}';
@@ -66,7 +87,7 @@ def call(method, **params):
     return json.loads(proc.stdout.readline())   # one response per line
 
 counter = iter(range(1, 100))
-call("initialize", protocolVersion="2024-11-05", capabilities={})
+call("initialize", protocolVersion="2025-11-25", capabilities={})
 call("notifications/initialized")
 print(call("tools/list")["result"]["tools"][0]["name"])
 print(call("tools/call", name="task.list", arguments={})["result"]["content"][0]["text"])
@@ -84,6 +105,12 @@ Notes that save a debugging session:
   see the error taxonomy below.
 - **stdout is protocol-only.** Logs, warnings and the startup acknowledgement go to
   stderr; a client that merges the two streams will try to parse prose as JSON.
+- **Read `result.protocolVersion` from `initialize`, don't assume it.** A request this
+  server does not implement (for example `2026-07-28`) is answered with `2025-11-25`
+  and the mismatch is logged on stderr, so a client that hardcodes a revision it asked
+  for will disagree with the wire. Send `notifications/initialized` only after reading
+  the answer, and treat a notification as fire-and-forget: nothing comes back, by
+  design.
 
 ## Tool Catalog
 
@@ -264,7 +291,7 @@ judge.status(job_id=…)  ──▶  {"status": "running"}  (poll until complete
 | Code | Name | Condition | Example |
 |------|------|-----------|---------|
 | `-32600` | Invalid Request | `jsonrpc` field missing or not `"2.0"` | `"Invalid Request: jsonrpc field must be '2.0'"` |
-| `-32601` | Method Not Found | Unknown `method` or unknown `tool` name | `"Unknown method: foo"` / `"Unknown tool: foo"` |
+| `-32601` | Method Not Found | Unknown `method` **with an `id`**, or unknown `tool` name | `"Unknown method: foo"` / `"Unknown tool: foo"` |
 | `-32000` | Server Error | Unhandled exception in handler | sanitized `<exception message>` |
 
 ### Domain errors (in tool result text, NOT JSON-RPC errors)

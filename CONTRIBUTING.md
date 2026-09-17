@@ -32,7 +32,7 @@ pip install gitreins
 pytest tests/ -v
 ```
 
-All tests must pass before submitting a PR. Currently **1811 tests across 51
+All tests must pass before submitting a PR. Currently **1834 tests across 52
 test files** (canonical count: `pytest --collect-only -q`, which is exactly what
 CI recomputes).
 
@@ -78,15 +78,49 @@ parse is a broken promise, and the checker is what keeps the README's
 ## Project Structure
 
 ```
-engine/          — Core engine (evaluator, guards, pipeline, LLM client, task manager, judge, dead_code)
-gitreins/        — CLI entry point and install script
-gitreins_mcp/    — MCP stdio server (12 tools)
-tests/           — pytest test suite (1811 tests across 51 files; canonical count in README)
+engine/            — Core engine (evaluator, guards, pipeline, LSP, LLM client, task manager, judge, dead_code)
+gitreins/          — CLI entry point and install script
+gitreins_mcp/      — MCP stdio server (12 tools)
+tests/             — pytest test suite (1834 tests across 52 files; canonical count in README)
 tests/reliability/ — 7 adversarial benchmark projects
-docs/            — Architecture, component map, evaluator loop, technology choices
-.memory-bank/    — Institutional memory (ADRs, findings, work-item status)
-assets/          — Banner images and branding
+scripts/           — Repo-level checkers run by CI (docs drift, CLI examples, board ids) + the judgment viewer
+docs/              — Architecture, component map, evaluator loop, MCP API, CLI reference, dogfood reports
+specs/             — Design specs (PRD → architecture → per-subsystem design)
+.memory-bank/      — Institutional memory (ADRs, findings, work-item status)
+.coding-hermes/    — Foreman board (JSONL canonical store: board/events/tasks/fixtures + schema)
+.gitreins/         — GitReins runtime config; `history/` holds committed sample verdicts
+assets/            — Banner images and branding
+sandbox/           — Evaluation scratch space (excluded from ruff; see docs/sandbox.md)
+bin/               — Machine-specific MCP launcher for a developer checkout (not part of the package)
+skills/            — Agent-facing usage skill for this repo
+website/           — Static landing page
+.vfs/              — Hilo code-graph cache; `.vfs/graph/edges.jsonl` is tracked on purpose
 ```
+
+### Intentional exceptions (CLN-1)
+
+A folder-hygiene pass (CLN-1, 2026-09-17) inventoried every tracked top-level
+entry against the list above: no tracked file was a stray, so nothing was
+deleted, and these items that *look* like artifacts are deliberately kept —
+
+- `.coding-hermes/board/tasks.jsonl.bak-20260904`, `.coding-hermes/tasks.md.bak`
+  — dated snapshots from the DuckDB board migration; `tasks.md.bak` is the store
+  66 parser-dropped tasks were backfilled from. Snapshots, not strays.
+- `.gitreins/history/**/verdict.json` + `summary.md` — committed sample verdicts
+  so `scripts/judgment_viewer.py` renders on a fresh clone. New verdicts are
+  written unversioned (`.gitignore`) and committed to the `gitreins` branch.
+- `.vfs/graph/edges.jsonl` — the code graph ships so Hilo queries work cold; its
+  siblings (`graph.db`, `.last_reconcile`, `.parse_cache.json`) stay ignored.
+- `bin/hermes-mcp-wrapper.sh` — a launcher pinned to one developer checkout
+  (absolute paths, `~/.hermes/.env`); kept because that developer's MCP client
+  invokes it by path. The package does not install it.
+- `sandbox/*.py` — scratch scripts, excluded from ruff and never collected by
+  pytest; they stay out of the suite on purpose.
+
+Removal rule for future cleanups: grep `tests/`, `.github/workflows/` and the
+docs for a reference before deleting anything, and check whether the content is
+reproducible from something still tracked. Untracked strays (build output,
+`*.bak.<epoch>`, cache files) belong in `.gitignore` instead.
 
 ## Development Workflow
 

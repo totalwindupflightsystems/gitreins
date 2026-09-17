@@ -330,7 +330,15 @@ On startup the server writes one acknowledgement line to **stderr** (stdout is
 protocol-pure), naming its identity and the workdir it resolved — raw output,
 not an invocation:
 
-    gitreins MCP server <version> — stdio, protocol 2024-11-05, 12 tools, workdir=/path/to/repo
+    gitreins MCP server <version> — stdio, protocol 2025-11-25 (negotiated per client request), 12 tools, workdir=/path/to/repo
+
+The protocol named there is the newest revision the server implements — the same
+one it answers with when a client asks for a revision it does not implement.
+`initialize` echoes a supported request (`2025-11-25`, `2025-06-18`, `2025-03-26`,
+`2024-11-05`) and logs the mismatch on stderr otherwise; the current spec revision
+(`2026-07-28`) removed the `initialize` handshake this server speaks, so it is not
+advertised. See `docs/mcp-api.md` for the negotiation rules and a copy-pasteable
+raw JSON-RPC client.
 
 `<version>` is the installed release — the same value `gitreins --version`
 prints and the same value the `initialize` result reports in

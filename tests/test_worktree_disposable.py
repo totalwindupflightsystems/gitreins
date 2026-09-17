@@ -162,6 +162,36 @@ def test_disk_ceiling_reaps_oldest_disposable_first(disposable_repo):
     assert verifier._load() == []
 
 
+def test_ceiling_reap_during_create_leaves_no_ghost_registry_entry(disposable_repo):
+    """WORKTREE-007: after a ceiling-driven reap the registry lists live trees only.
+
+    `create` used to capture the registry BEFORE `enforce_disk_ceiling` ran, so
+    when the ceiling reaped run-first to make room, the new record was appended
+    to the stale list and the reaped run came back as a ghost entry: registered,
+    counted by accounting / `--keep` reporting, but not on disk.
+    """
+    verifier = DisposableWorktreeManager(disposable_repo)
+    first = verifier.create("first", run_id="run-first", keep=True)
+    (Path(first.path) / "payload.bin").write_bytes(b"a" * 600_000)
+    second = verifier.create("second", run_id="run-second", keep=True)
+    (Path(second.path) / "payload.bin").write_bytes(b"b" * 600_000)
+
+    verifier.manager.worktree_disk_ceiling_mb = 1
+    third = verifier.create("third", run_id="run-third", keep=True)
+
+    assert not Path(first.path).exists()
+    assert Path(second.path).exists() and Path(third.path).exists()
+
+    records = verifier._load()
+    registered = sorted(record.run_id for record in records)
+    on_disk = sorted(
+        entry.name for entry in _disposable_dir(disposable_repo).iterdir() if entry.is_dir()
+    )
+    # The registry is the truth about what exists: no ghost, nothing missing.
+    assert registered == on_disk == ["run-second", "run-third"]
+    assert all(Path(record.path).exists() for record in records)
+
+
 def test_disk_ceiling_failure_has_no_new_tree(disposable_repo):
     verifier = DisposableWorktreeManager(disposable_repo)
     verifier.manager.worktree_disk_ceiling_mb = 1

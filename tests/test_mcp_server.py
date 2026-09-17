@@ -14,7 +14,13 @@ import pytest
 
 from engine.judge import Judge
 from engine.version import __version__
-from gitreins_mcp.server import PROTOCOL_VERSION, SERVER_NAME, GitReinsMCPServer
+from gitreins_mcp.server import (
+    PROTOCOL_VERSION,
+    SERVER_NAME,
+    SUPPORTED_PROTOCOL_VERSIONS,
+    GitReinsMCPServer,
+    negotiate_protocol_version,
+)
 
 
 @pytest.fixture
@@ -1383,6 +1389,118 @@ class TestMCPStartupAcknowledgement:
         assert result.stdout.strip() == f"{SERVER_NAME} MCP server {__version__}"
 
 
+# ── DF-GITREINS-POC-20: protocol version negotiation ──────────────────────
+
+
+class TestProtocolVersionNegotiation:
+    """`initialize` NEGOTIATES the revision instead of pinning one constant.
+
+    DF-GITREINS-POC-20: every client used to be answered with a hardcoded
+    "2024-11-05" — several spec revisions stale, and ignoring what the client
+    asked for. The server now advertises the newest revision it actually
+    implements, echoes any supported request, and records a mismatch (with the
+    revisions a client may retry with) on stderr.
+    """
+
+    def test_advertised_set_is_newest_first_and_excludes_2026_07_28(self):
+        assert SUPPORTED_PROTOCOL_VERSIONS[0] == PROTOCOL_VERSION == "2025-11-25"
+        assert list(SUPPORTED_PROTOCOL_VERSIONS) == sorted(
+            SUPPORTED_PROTOCOL_VERSIONS, reverse=True
+        )
+        # 2026-07-28 removed the initialize handshake, moved negotiation into
+        # each request's _meta and made `server/discover` mandatory — this
+        # session-oriented stdio server implements none of that, so it must
+        # not claim the revision.
+        assert "2026-07-28" not in SUPPORTED_PROTOCOL_VERSIONS
+
+    @pytest.mark.parametrize("requested", SUPPORTED_PROTOCOL_VERSIONS)
+    def test_supported_request_is_echoed(self, mcp_server, requested, capsys):
+        resp = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {"protocolVersion": requested, "capabilities": {}},
+            }
+        )
+        assert resp["result"]["protocolVersion"] == requested
+        assert capsys.readouterr().err == ""  # an echo is never a mismatch
+
+    def test_unrecognized_request_answers_newest_and_notes_the_mismatch(
+        self, mcp_server, capsys
+    ):
+        resp = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 2,
+                "method": "initialize",
+                "params": {"protocolVersion": "2026-07-28", "capabilities": {}},
+            }
+        )
+        assert resp["result"]["protocolVersion"] == PROTOCOL_VERSION
+        err = capsys.readouterr().err
+        assert "2026-07-28" in err
+        assert f"answering with {PROTOCOL_VERSION}" in err
+        # The note tells the client how the newest revision probes a server.
+        assert "server/discover" in err
+        # ...and every revision it may retry with.
+        for revision in SUPPORTED_PROTOCOL_VERSIONS:
+            assert revision in err
+
+    def test_absent_protocol_version_answers_newest_and_notes_it(self, mcp_server, capsys):
+        resp = mcp_server.handle_request(
+            {"jsonrpc": "2.0", "id": 3, "method": "initialize", "params": {}}
+        )
+        assert resp["result"]["protocolVersion"] == PROTOCOL_VERSION
+        assert "no protocolVersion" in capsys.readouterr().err
+
+    def test_initialize_without_params_still_answers(self, mcp_server, capsys):
+        resp = mcp_server.handle_request({"jsonrpc": "2.0", "id": 4, "method": "initialize"})
+        assert resp["result"]["protocolVersion"] == PROTOCOL_VERSION
+        assert "no protocolVersion" in capsys.readouterr().err
+
+    def test_non_string_protocol_version_never_crashes(self, mcp_server, capsys):
+        resp = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 5,
+                "method": "initialize",
+                "params": {"protocolVersion": 20260728},
+            }
+        )
+        assert resp["result"]["protocolVersion"] == PROTOCOL_VERSION
+        assert "no protocolVersion" in capsys.readouterr().err
+
+    def test_negotiation_helper_is_total(self):
+        for requested in SUPPORTED_PROTOCOL_VERSIONS:
+            assert negotiate_protocol_version(requested) == (requested, None)
+        assert negotiate_protocol_version("2026-07-28")[0] == PROTOCOL_VERSION
+        assert negotiate_protocol_version("")[1].startswith("protocol negotiation")
+        assert negotiate_protocol_version(None)[1].startswith("protocol negotiation")
+        assert negotiate_protocol_version("2026-07-28")[1] is not None
+
+    def test_unknown_notification_is_never_answered(self, mcp_server):
+        """A notification (no id) gets no response; an unknown request still does."""
+        for method in (
+            "notifications/cancelled",
+            "notifications/progress",
+            "notifications/roots/list_changed",
+        ):
+            assert (
+                mcp_server.handle_request(
+                    {"jsonrpc": "2.0", "method": method, "params": {}}
+                )
+                is None
+            )
+        resp = mcp_server.handle_request({"jsonrpc": "2.0", "id": 9, "method": "bogus/method"})
+        assert resp["error"]["code"] == -32601
+
+    def test_startup_line_names_the_negotiated_protocol(self, mcp_server):
+        line = mcp_server.startup_line()
+        assert f"protocol {PROTOCOL_VERSION} (negotiated per client request)" in line
+        assert f"{len(mcp_server._tools)} tools" in line
+
+
 # ── Integration tests: MCP server started as subprocess over stdio ─────────
 
 
@@ -1479,6 +1597,31 @@ class TestMCPStdioIntegration:
         assert resp["result"]["capabilities"]["tools"] == {}
         assert resp["result"]["serverInfo"]["name"] == "gitreins"
         assert resp["result"]["serverInfo"]["version"] == __version__
+
+    def test_unsupported_protocol_version_negotiates_down_over_stdio(self, mcp_proc):
+        """DF-GITREINS-POC-20: a newer request is answered with ours + a note.
+
+        The revision the client asked for is not advertised, so the server
+        answers with the newest one it implements and writes the mismatch to
+        stderr — never into the stdout JSON-RPC stream.
+        """
+        resp = self._send_recv(
+            mcp_proc,
+            {
+                "jsonrpc": "2.0",
+                "id": 11,
+                "method": "initialize",
+                "params": {"protocolVersion": "2026-07-28", "capabilities": {}},
+            },
+        )
+        assert resp["id"] == 11
+        assert resp["result"]["protocolVersion"] == PROTOCOL_VERSION
+        fd = mcp_proc.stderr.fileno()
+        ready, _, _ = select.select([fd], [], [], 10)
+        assert ready, "no negotiation note on stderr"
+        err = os.read(fd, 65536).decode()
+        assert "2026-07-28" in err
+        assert f"answering with {PROTOCOL_VERSION}" in err
 
     def test_initialized_notification_over_stdio(self, mcp_proc):
         """Send notifications/initialized → no response; next request works."""

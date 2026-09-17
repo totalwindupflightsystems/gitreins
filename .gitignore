@@ -31,6 +31,10 @@ Thumbs.db
 .gitreins/qa-ledger.jsonl
 # Runtime task data (committed separately on gitreins branch)
 .gitreins/tasks.yaml
+# Dated backup strays a writer leaves beside a GitReins store (QA-GITREINS-POC-1
+# residual: `.gitignore` covered the store but not `<store>.bak.<epoch>`).
+.gitreins/tasks.yaml.bak.*
+.gitreins/*.bak.*
 
 # Secrets
 .env

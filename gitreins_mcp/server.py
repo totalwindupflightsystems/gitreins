@@ -45,7 +45,60 @@ logger = logging.getLogger("gitreins.mcp")
 # with the installed release (CLI/README 0.13.0), so a client reasoning about
 # the tool surface from serverInfo.version reasoned about the PoC.
 SERVER_NAME = "gitreins"
-PROTOCOL_VERSION = "2024-11-05"
+
+# DF-GITREINS-POC-20: the protocol revisions this server actually implements,
+# NEWEST FIRST. All four share the session `initialize` handshake and the
+# tools-only capability surface this stdio server offers (`initialize` →
+# `notifications/initialized` → `tools/list` → `tools/call`), which is why
+# they can be advertised together; the additions each revision brought
+# (streamable HTTP and auth in 2025-03-26, elicitation and structured tool
+# output in 2025-06-18, icons/tasks/URL-mode elicitation in 2025-11-25) are
+# optional for a tools-only server.
+#
+# 2026-07-28 is deliberately NOT advertised: that revision removed the
+# initialize handshake altogether, made MCP stateless, moved version
+# negotiation into each request's `_meta`, and made `server/discover`
+# mandatory — none of which this session-oriented stdio server implements.
+# A 2026-07-28 client probes with `server/discover`, gets -32601 here, and
+# per that revision's backward-compatibility guidance should fall back to
+# `initialize`; the negotiation note on stderr says so.
+SUPPORTED_PROTOCOL_VERSIONS = (
+    "2025-11-25",
+    "2025-06-18",
+    "2025-03-26",
+    "2024-11-05",
+)
+# The newest revision this server implements — the value it answers with when
+# it cannot echo the client's request. Never a claim of "latest published".
+PROTOCOL_VERSION = SUPPORTED_PROTOCOL_VERSIONS[0]
+
+
+def negotiate_protocol_version(requested: object) -> tuple[str, str | None]:
+    """Return ``(revision_to_answer_with, mismatch_note)``.
+
+    MCP version negotiation: a server that supports the client's requested
+    revision MUST answer with that same revision; otherwise it answers with a
+    revision it does support, and the client decides whether to proceed.
+
+    *mismatch_note* is ``None`` when the request is echoed, else one line
+    naming what the client asked for, what it got, and what else is on offer —
+    the caller writes it to stderr (stdout is protocol-pure).
+    """
+    if isinstance(requested, str) and requested in SUPPORTED_PROTOCOL_VERSIONS:
+        return requested, None
+    if not isinstance(requested, str) or not requested.strip():
+        return PROTOCOL_VERSION, (
+            f"protocol negotiation: client sent no protocolVersion; "
+            f"answering with {PROTOCOL_VERSION} "
+            f"(supported: {', '.join(SUPPORTED_PROTOCOL_VERSIONS)})"
+        )
+    return PROTOCOL_VERSION, (
+        f"protocol negotiation: client requested {requested!r}, which this server "
+        f"does not implement; answering with {PROTOCOL_VERSION} "
+        f"(supported: {', '.join(SUPPORTED_PROTOCOL_VERSIONS)}). A 2026-07-28 "
+        f"client probes with `server/discover` (-32601 here) and should then "
+        f"fall back to `initialize`."
+    )
 
 
 class GitReinsMCPServer:
@@ -900,11 +953,22 @@ class GitReinsMCPServer:
         try:
             if method == "initialize":
                 self._initialized = True
+                # DF-GITREINS-POC-20: negotiate instead of pinning. A revision
+                # this server implements is echoed back; anything else (a
+                # newer spec revision, a typo, no value at all) gets this
+                # server's newest implemented revision plus one stderr line
+                # naming the mismatch, so a client log explains the downgrade
+                # instead of leaving it to guess.
+                negotiated, mismatch_note = negotiate_protocol_version(
+                    params.get("protocolVersion") if isinstance(params, dict) else None
+                )
+                if mismatch_note:
+                    self._stderr_line(mismatch_note)
                 return {
                     "jsonrpc": "2.0",
                     "id": req_id,
                     "result": {
-                        "protocolVersion": PROTOCOL_VERSION,
+                        "protocolVersion": negotiated,
                         "capabilities": {"tools": {}},
                         "serverInfo": {"name": SERVER_NAME, "version": __version__},
                     },
@@ -934,6 +998,15 @@ class GitReinsMCPServer:
             elif method == "notifications/initialized":
                 return None  # No response for notifications
             else:
+                # JSON-RPC 2.0: a notification (no `id`) MUST NOT be answered.
+                # MCP clients send revision-specific notifications this server
+                # does not implement — `notifications/cancelled`,
+                # `notifications/progress`, `notifications/roots/list_changed`.
+                # Answering -32601 to a notification puts a response on the
+                # wire for a request the client is not waiting on, which
+                # desynchronizes a line-delimited client's read loop.
+                if "id" not in request:
+                    return None
                 return {
                     "jsonrpc": "2.0",
                     "id": req_id,
@@ -960,7 +1033,8 @@ class GitReinsMCPServer:
         """
         return (
             f"{SERVER_NAME} MCP server {__version__} — stdio, protocol "
-            f"{PROTOCOL_VERSION}, {len(self._tools)} tools, workdir={self.workdir}"
+            f"{PROTOCOL_VERSION} (negotiated per client request), "
+            f"{len(self._tools)} tools, workdir={self.workdir}"
         )
 
     def _stderr_line(self, text: str) -> None:

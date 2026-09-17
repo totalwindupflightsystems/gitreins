@@ -92,7 +92,7 @@ python -m gitreins_mcp.server [workdir]
 ## 5. Assumptions
 
 - The client and server run on the same host. stdio is the only transport.
-- The client speaks proper JSON-RPC 2.0 and MCP protocol version `2024-11-05`.
+- The client speaks proper JSON-RPC 2.0 and MCP `initialize`-handshake revisions — the server implements `2025-11-25`, `2025-06-18`, `2025-03-26` and `2024-11-05`, echoes a supported request and answers with its newest one otherwise.
 - The server workdir contains a valid git repository with `.gitreins/config.yaml` (optional but recommended).
 - Task IDs are unique within a single repository's task store. Cross-repo collisions are allowed.
 - The LLM client (`GITREINS_LLM_API_KEY`) is optional. Evaluation features degrade gracefully when absent.
@@ -175,7 +175,7 @@ Client                          Server
   │   method:initialize}         │
   │                               │
   │◄─────────────── {result:     │
-  │                   protocolVersion: "2024-11-05",
+  │                   protocolVersion: "2025-11-25",  (negotiated)
   │                   capabilities: {tools:{}},
   │                   serverInfo: {name:"gitreins",version:"0.1.0"}}
   │                               │
@@ -976,7 +976,7 @@ These are **not** JSON-RPC errors. They are returned as successful JSON-RPC resp
 | JSON-RPC 2.0 dispatcher | ✅ Implemented | `handle_request()` method |
 | stdio transport loop | ✅ Implemented | `run_stdio()` with brace counting |
 | Multi-line JSON buffer | ✅ Implemented | Brace-depth parser with string/escape handling |
-| Initialize handshake | ✅ Implemented | Returns protocolVersion `2024-11-05` |
+| Initialize handshake | ✅ Implemented | Negotiates: echoes a supported revision (`2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05`), else answers with `2025-11-25` and logs the mismatch on stderr |
 | Tools/list endpoint | ✅ Implemented | Returns all 9 tool schemas |
 | task.create | ✅ Implemented | With cross-repo workdir |
 | task.start | ✅ Implemented | With cross-repo workdir |
@@ -1028,7 +1028,7 @@ These are **not** JSON-RPC errors. They are returned as successful JSON-RPC resp
 
 ```
 $ echo '{"jsonrpc":"2.0","id":1,"method":"initialize"}' | python -m gitreins_mcp.server
-{"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "gitreins", "version": "0.1.0"}}}
+{"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2025-11-25", "capabilities": {"tools": {}}, "serverInfo": {"name": "gitreins", "version": "0.1.0"}}}
 
 $ echo '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"task.create","arguments":{"id":"login","title":"Login endpoint","criteria":["POST /login 200","Hash password"]}}' | python -m gitreins_mcp.server
 {"jsonrpc": "2.0", "id": 2, "result": {"content": [{"type": "text", "text": "{\"id\": \"login\", \"title\": \"Login endpoint\", \"criteria\": [\"POST /login 200\", \"Hash password\"], \"status\": \"pending\", \"created_at\": \"2026-06-20T14:32:00Z\"}"}]}}

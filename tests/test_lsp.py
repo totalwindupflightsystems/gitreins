@@ -597,6 +597,71 @@ def lsp_workdir(tmp_path):
     return str(tmp_path)
 
 
+def require_gopls_module_context(workdir):
+    """Establish gopls' module context or SKIP with the missing piece NAMED.
+
+    DF-GITREINS-POC-21: the gopls integration tests used to skip only on a
+    missing gopls and then set up module context with `go mod init` whose
+    failure was silently ignored (``capture_output``, no ``check``). Measured
+    against the engine's own API on one machine, same bad Go file:
+
+      * WITH a ``go.mod``:     ``published=True``, **2 diagnostics**
+        ("declared and not used: x") — the verdict the test asserts;
+      * WITHOUT one:           ``published=True``, **0 diagnostics** — which is
+        exactly the test's ``defect`` branch, so an environment gap was read as
+        a gopls correctness defect ("gopls REPORTED on the file but produced no
+        diagnostics for blatantly bad Go code").
+
+    A fresh system with gopls on PATH but no usable Go toolchain therefore
+    fails this test through no fault of the code under test. This makes the
+    dependency explicit and skips with the reason named (the arc's convention
+    for an absent tool: a named skip, never a fake pass), while a real
+    unreadable-module case still lands in the defect branch.
+    """
+    if not shutil.which("gopls"):
+        pytest.skip("gopls not installed")
+    if not shutil.which("go"):
+        pytest.skip(
+            "go toolchain not installed — gopls has no module context without it, "
+            "and would publish an EMPTY diagnostic list for bad Go (the DF-GITREINS-POC-21 "
+            "environment signature, not a type-checking verdict)"
+        )
+    proc = subprocess.run(
+        ["go", "mod", "init", "example.com/test"],
+        cwd=workdir,
+        capture_output=True,
+        text=True,
+    )
+    output = (proc.stderr or "") + (proc.stdout or "")
+    if proc.returncode != 0 and "go.mod already exists" not in output:
+        pytest.skip(
+            f"`go mod init` failed in {workdir} (rc={proc.returncode}): {output.strip()[:200]}"
+        )
+
+
+def gopls_environment_note(workdir):
+    """One-line environment fingerprint for a gopls verdict (DF-GITREINS-POC-21).
+
+    The fresh-system failure was filed with no way to tell an environment gap
+    from a verdict, so every gopls failure now records which tools were found,
+    their versions, and whether a module context was established.
+    """
+    def first_line(cmd):
+        try:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.SubprocessError) as exc:
+            return f"{cmd[0]}: {exc}"
+        return (proc.stdout or proc.stderr or "").strip().splitlines()[0] if (
+            proc.stdout or proc.stderr
+        ) else f"{cmd[0]}: no output"
+
+    return (
+        f"gopls={shutil.which('gopls')} ({first_line(['gopls', 'version'])}); "
+        f"go={shutil.which('go')} ({first_line(['go', 'version'])}); "
+        f"go.mod present: {os.path.exists(os.path.join(workdir, 'go.mod'))}"
+    )
+
+
 PYLSP_SKIP_310 = pytest.mark.skipif(
     sys.version_info < (3, 11),
     reason="pylsp pyflakes/pycodestyle plugins may not activate on Python 3.10 — CI-only skip",
@@ -1179,14 +1244,13 @@ class TestGoplsIntegration:
 
     def test_gopls_detects_go_errors(self, lsp_workdir):
         """gopls detects type errors in Go code when installed."""
-        if not shutil.which("gopls"):
-            pytest.skip("gopls not installed")
-        # gopls needs a go.mod for module context
-        import subprocess
-
-        subprocess.run(
-            ["go", "mod", "init", "example.com/test"], cwd=lsp_workdir, capture_output=True
-        )
+        # DF-GITREINS-POC-21: this test drives REAL gopls, which type-checks
+        # nothing without a module context. Measured on one machine with the
+        # same bad Go file: with a go.mod -> 2 diagnostics ("declared and not
+        # used: x"); without one -> `published=True` and ZERO diagnostics, the
+        # test's own defect branch. So an absent Go toolchain is an environment
+        # gap, and it is now a NAMED skip instead of a fake defect.
+        require_gopls_module_context(lsp_workdir)
         path = os.path.join(lsp_workdir, "test.go")
         with open(path, "w") as f:
             f.write('package main\n\nfunc main() {\n\tvar x int = "hello"\n}\n')
@@ -1320,11 +1384,11 @@ class TestGoplsIntegration:
         fake.chmod(0o755)
         monkeypatch.setenv("PATH", f"{quiet_bin}{os.pathsep}{os.environ['PATH']}")
 
-        import subprocess
-
-        subprocess.run(
-            ["go", "mod", "init", "example.com/stall"], cwd=lsp_workdir, capture_output=True
-        )
+        # DF-GITREINS-POC-21: the stand-in does not read go.mod (it answers
+        # `initialize` and publishes one canned diagnostic on `didChange`), so
+        # this test must not depend on a Go toolchain: the old `go mod init`
+        # here was dead setup that turned a fresh box with no `go` binary into
+        # a FileNotFoundError inside a hermetic test.
         path = os.path.join(lsp_workdir, "stall.go")
         with open(path, "w") as f:
             f.write('package main\n\nfunc main() {\n\tvar x int = "hello"\n}\n')
@@ -1337,10 +1401,21 @@ class TestGoplsIntegration:
             timeout_per_file=30.0,
             recheck_after=1.0,
         )
-        assert status.rechecks == 1, status
-        assert status.published is True, status
-        assert not status.stalled, status
-        assert len(status.diagnostics) == 1, status
+        # DF-GITREINS-POC-21: a fresh-system failure of this test was filed with
+        # no way to tell an environment gap from a recovery-path defect, so the
+        # failure context now carries the environment fingerprint and the FULL
+        # status record (rechecks/published/stalled/stall_reason).
+        context = {
+            "status": status.to_dict(),
+            "environment": gopls_environment_note(lsp_workdir),
+            "stand_in": os.fspath(fake),
+            "stand_in_executable": os.access(fake, os.X_OK),
+            "interpreter": sys.executable,
+        }
+        assert status.rechecks == 1, context
+        assert status.published is True, context
+        assert not status.stalled, context
+        assert len(status.diagnostics) == 1, context
         assert status.diagnostics[0]["tool"] == "gopls"
 
     def test_gopls_probe_reports_a_quiescent_spawn_as_stalled(
@@ -1390,6 +1465,43 @@ class TestGoplsIntegration:
         with patch("shutil.which", return_value=None):
             diags = run_lsp_check("gopls", lsp_workdir, files=[])
         assert diags == [], "gopls should return empty diagnostics when not installed"
+
+    def test_gopls_module_context_escape_is_named(self, lsp_workdir, monkeypatch):
+        """DF-GITREINS-POC-21: every environment gap is a NAMED skip, not a defect.
+
+        Measured failure mode: with no module context gopls publishes an EMPTY
+        diagnostic list for bad Go, which the integration test reads as a
+        correctness defect. Each missing piece must therefore be named.
+        """
+        monkeypatch.setattr(shutil, "which", lambda name: None)
+        with pytest.raises(pytest.skip.Exception, match="gopls not installed"):
+            require_gopls_module_context(lsp_workdir)
+
+        monkeypatch.setattr(
+            shutil, "which", lambda name: "/usr/bin/gopls" if name == "gopls" else None
+        )
+        with pytest.raises(pytest.skip.Exception, match="go toolchain not installed"):
+            require_gopls_module_context(lsp_workdir)
+
+        class _FailedInit:
+            returncode = 1
+            stdout = ""
+            stderr = "go: cannot find main module"
+
+        monkeypatch.setattr(shutil, "which", lambda name: f"/usr/bin/{name}")
+        monkeypatch.setattr(subprocess, "run", lambda *a, **k: _FailedInit())
+        with pytest.raises(pytest.skip.Exception, match="go mod init"):
+            require_gopls_module_context(lsp_workdir)
+
+    def test_gopls_environment_note_names_tools_and_module_context(self, lsp_workdir):
+        """The failure fingerprint the fresh-system row asked for is real."""
+        note = gopls_environment_note(lsp_workdir)
+        assert "gopls=" in note
+        assert "go=" in note
+        assert "go.mod present: False" in note
+        with open(os.path.join(lsp_workdir, "go.mod"), "w") as handle:
+            handle.write("module example.com/x\n")
+        assert "go.mod present: True" in gopls_environment_note(lsp_workdir)
 
 
 # ── Integration tests: jdtls ──────────────────────────────────────────
