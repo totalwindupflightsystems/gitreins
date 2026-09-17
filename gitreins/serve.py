@@ -10,6 +10,7 @@ that reads the repo's judgment stores on EVERY request (live, not a snapshot):
   GET /api/tasks                 -> board tasks.jsonl
   GET /api/events                -> board events.jsonl
   GET /api/ticks                 -> scheduler tick ledger (optional, host DB)
+  GET /api/qa                    -> QA run ledger (worktree fresh|repro|dogfood rows)
 
 The browsed checkout defaults to the repository containing the working
 directory; ``--repo <path>`` (see :func:`resolve_workdir`) points the same
@@ -31,6 +32,7 @@ import sqlite3
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, TypedDict
 
+from engine import qa_ledger
 from engine.repo_paths import (
     WorktreeResolutionError,
     board_file_path,
@@ -72,6 +74,13 @@ class Stats(TypedDict):
     passed: int
     failed: int
     pass_rate: int
+
+
+class QaPayload(TypedDict):
+    """Payload of ``GET /api/qa``: the ledger path plus its run rows."""
+
+    ledger: str
+    runs: list[dict[str, Any]]
 
 
 class ServeArgumentError(ValueError):
@@ -207,6 +216,20 @@ def load_ticks(project: str, limit: int = 500) -> list[dict[str, Any]]:
     return [dict(zip(keys, r)) for r in rows]
 
 
+def load_qa(workdir: str, limit: int = 200) -> QaPayload:
+    """QA run ledger rows (oldest-first, newest ``limit`` kept) plus its path.
+
+    A missing, unreadable or half-garbage ledger is an empty run list, never a
+    500 — the same contract as :func:`load_ticks`.
+    """
+    ledger = qa_ledger.qa_ledger_path(workdir)
+    try:
+        rows = qa_ledger.list_rows(workdir, path=ledger)[-limit:]
+    except Exception:
+        return {"ledger": ledger, "runs": []}
+    return {"ledger": ledger, "runs": rows}
+
+
 def stats(verdicts: list[VerdictRow]) -> Stats:
     """Counts block for ``GET /api/stats`` (``pass_rate`` is an integer percent)."""
     n_pass = sum(1 for v in verdicts if v["passed"])
@@ -278,14 +301,15 @@ a{color:#60a5fa}
 <div id="detail"></div>
 <h2>🕰️ Board Event Timeline</h2><div class="panel" id="evlist"></div>
 <h2>🖥️ Scheduler Ticks</h2><div class="panel" id="ticklist"></div>
-<footer>gitreins serve · live reads from .gitreins/history + board + scheduler ledger</footer>
+<h2>🧪 QA Runs</h2><div class="panel" id="qalist"></div>
+<footer>gitreins serve · live reads from .gitreins/history + board + scheduler ledger + QA ledger</footer>
 <script>
 const esc=s=>{const d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML};
 const badge=v=>v?'<span class="badge pass">PASS</span>':'<span class="badge fail">FAIL</span>';
 let V=[],filter='all',q='';
 async function j(url){const r=await fetch(url);if(!r.ok)throw new Error(url);return r.json()}
 async function boot(){
-  const [st,vs,ev,tk]=await Promise.all([j('/api/stats'),j('/api/verdicts'),j('/api/events'),j('/api/ticks')]);
+  const [st,vs,ev,tk,qa]=await Promise.all([j('/api/stats'),j('/api/verdicts'),j('/api/events'),j('/api/ticks'),j('/api/qa')]);
   V=vs.verdicts;
   document.getElementById('sub').textContent=st.repo+' · live view · '+st.generated;
   document.getElementById('sub').title=st.path||'';
@@ -308,6 +332,23 @@ async function boot(){
     '</span><span class="v">'+(t.commits||0)+' commits · '+(t.files||0)+' files · $'+esc(t.cost==null?'0':t.cost)+
     (t.error?' · '+esc(t.error):'')+'</span></div>';
   }).join('')||'<p style="color:#5a5a75;font-size:12px">'+(tk.project?'no scheduler ticks recorded for '+esc(tk.project):'no scheduler project selected (start with --project <name>)')+'</p>';
+  document.getElementById('qalist').innerHTML=(qa.runs||[]).map(r=>{
+    const v=String(r.verdict||'').toUpperCase();
+    const cls=v==='PASS'?'pass':(v==='FAIL'?'fail':'mute');
+    const icon=v==='PASS'?'\u2705':(v==='FAIL'?'\u274c':'\u00b7');
+    const cells=r.cells&&typeof r.cells==='object'?Object.values(r.cells):[];
+    const np=cells.filter(c=>['pass','passed','ok'].includes(String(c).toLowerCase())).length;
+    const nf=cells.filter(c=>['fail','failed','error'].includes(String(c).toLowerCase())).length;
+    const graded=np+nf;
+    const cellsTxt=graded?('cells '+np+'/'+graded+' passed'):'no graded cells';
+    const bits=[];
+    if(typeof r.exit_code==='number')bits.push('exit '+r.exit_code);
+    if(r.commit)bits.push('commit '+esc(String(r.commit).slice(0,7)));
+    return '<div class="ev"><span class="ts">'+esc((r.ts||'').slice(0,16))+'</span>'+
+    '<span class="badge '+cls+'">'+icon+' '+esc(v||'?')+'</span><span class="t">'+esc(r.kind||'?')+
+    '</span><span class="v">'+esc(cellsTxt)+(bits.length?' \u00b7 '+bits.join(' \u00b7 '):'')+'</span></div>';
+  }).join('')||'<p style="color:#5a5a75;font-size:12px">no QA runs recorded (ledger: '+esc(qa.ledger||'')+')</p>';
+  if((qa.runs||[]).length)document.getElementById('qalist').innerHTML+='<p style="color:#5a5a75;font-size:12px">ledger: '+esc(qa.ledger||'')+'</p>';
 }
 function render(){
   const rows=V.filter(v=>(filter==='all'||(filter==='pass')===v.passed)&&(!q||(v.task_id+' '+v.title).toLowerCase().includes(q)));
@@ -406,6 +447,8 @@ class Handler(BaseHTTPRequestHandler):
                         "ticks": load_ticks(self.project) if self.project else [],
                     }
                 )
+            elif path == "/api/qa":
+                self._json(load_qa(self.workdir))
             else:
                 self._json({"error": "not found"}, 404)
         except BrokenPipeError:

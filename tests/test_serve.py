@@ -377,6 +377,102 @@ def test_ticks_route_reads_the_selected_project_ledger(repo_fixture, tmp_path, m
     assert [row["id"] for row in payload["ticks"]] == [1]
 
 
+# ── /api/qa: the QA run ledger in the viewer (JVIEW-007) ─────────────────────
+
+
+def _pin_qa_ledger(monkeypatch, path) -> None:
+    """Hermetic ledger location: clear any host value, then pin the fixture's."""
+    monkeypatch.delenv("GITREINS_QA_LEDGER", raising=False)
+    monkeypatch.setenv("GITREINS_QA_LEDGER", str(path))
+
+
+def test_qa_route_is_empty_when_the_ledger_is_absent(repo_fixture, tmp_path, monkeypatch):
+    """A missing ledger answers 200 with an empty run list, never a 500."""
+    ledger = tmp_path / "absent-qa-ledger.jsonl"
+    _pin_qa_ledger(monkeypatch, ledger)
+
+    with running_server(str(repo_fixture["root"])) as address:
+        status, body = get(address, "/api/qa")
+
+    assert status == 200
+    payload = json_body(body)
+    assert payload["runs"] == []
+    assert payload["ledger"] == str(ledger)
+
+
+def test_qa_route_serves_ledger_rows_in_file_order(repo_fixture, tmp_path, monkeypatch):
+    """Ledger rows round-trip verbatim, oldest first, with the resolved path."""
+    ledger = tmp_path / "qa-ledger.jsonl"
+    rows = [
+        {
+            "ts": "2026-09-16T10:00:00+00:00",
+            "project": "gitreins-poc",
+            "kind": "fresh",
+            "verdict": "PASS",
+            "status": "ok",
+            "cells": {"tier1": "passed", "tests": "passed", "lint": "passed"},
+            "exit_code": 0,
+            "commit": "abc1234def5678",
+            "run_id": "qa-fresh-001",
+        },
+        {
+            "ts": "2026-09-16T11:00:00+00:00",
+            "project": "gitreins-poc",
+            "kind": "repro",
+            "verdict": "FAIL",
+            "status": "failed",
+            "cells": {"run-1": "failed", "run-2": "passed"},
+            "exit_code": 1,
+            "run_id": "qa-repro-002",
+        },
+    ]
+    ledger.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    _pin_qa_ledger(monkeypatch, ledger)
+
+    with running_server(str(repo_fixture["root"])) as address:
+        status, body = get(address, "/api/qa")
+
+    assert status == 200
+    payload = json_body(body)
+    assert payload["ledger"] == str(ledger)
+    assert payload["runs"] == rows
+    assert payload["runs"][0]["verdict"] == "PASS"
+    assert payload["runs"][0]["commit"] == "abc1234def5678"
+    assert payload["runs"][0]["exit_code"] == 0
+    assert payload["runs"][1]["verdict"] == "FAIL"
+
+
+def test_qa_route_survives_an_unreadable_ledger(repo_fixture, tmp_path, monkeypatch):
+    """A directory where the ledger file should be is an empty run list, still 200."""
+    ledger_dir = tmp_path / "qa-ledger-dir"
+    ledger_dir.mkdir()
+    # qa_ledger_path resolves a directory override to <dir>/qa-ledger.jsonl;
+    # making THAT a directory is what makes open() raise IsADirectoryError.
+    (ledger_dir / "qa-ledger.jsonl").mkdir()
+    _pin_qa_ledger(monkeypatch, ledger_dir)
+
+    with running_server(str(repo_fixture["root"])) as address:
+        status, body = get(address, "/api/qa")
+
+    assert status == 200
+    payload = json_body(body)
+    assert payload["runs"] == []
+    assert payload["ledger"] == str(ledger_dir / "qa-ledger.jsonl")
+
+
+def test_viewer_page_advertises_the_qa_panel(repo_fixture, tmp_path, monkeypatch):
+    """The SPA carries the QA Runs panel shell and fetches the ledger route."""
+    _pin_qa_ledger(monkeypatch, tmp_path / "unused-qa-ledger.jsonl")
+
+    with running_server(str(repo_fixture["root"])) as address:
+        status, body = get(address, "/")
+
+    assert status == 200
+    html = body.decode("utf-8")
+    assert "qalist" in html
+    assert "/api/qa" in html
+
+
 def _cli_env() -> dict:
     """Child environment that imports the working tree (as CI does)."""
     env = dict(os.environ)

@@ -2,8 +2,8 @@
 
 `gitreins serve` starts a read-only local web server that renders the judgment
 history of a checkout: every verdict in `.gitreins/history/`, the criteria and
-Tier 1/Tier 2 evidence inside each verdict, the board event timeline, and (when
-asked for) the scheduler tick ledger for a project.
+Tier 1/Tier 2 evidence inside each verdict, the board event timeline, the QA run
+ledger, and (when asked for) the scheduler tick ledger for a project.
 
 It exists because `.gitreins/history/<date>/<hash>/verdict.json` is a durable
 audit record that nobody wants to read as JSON. The browser answers the three
@@ -73,6 +73,7 @@ changed one. Data is re-read from disk on every request, so the contract is
 | GET | `/api/tasks` | 200 | `{"tasks": [row, …]}` from the board's `tasks.jsonl` | `200 []` when the board is absent |
 | GET | `/api/events` | 200 | `{"events": [row, …]}` from the board's `events.jsonl` | `200 []` when the board is absent |
 | GET | `/api/ticks` | 200 | `{"project": <name or null>, "ticks": [row, …]}` | `200 []` when `--project` is unset or the ledger is unavailable |
+| GET | `/api/qa` | 200 | `{"ledger": <path>, "runs": [row, …]}` from the QA run ledger, oldest first | `200 []` when the ledger is absent or unreadable |
 | any | other path | — | `{"error": "not found"}` | `404` |
 
 Verdict list rows carry `date`, `hash`, `task_id`, `title`, `passed`,
@@ -81,7 +82,7 @@ them. Rows are omitted from the list (not zero-filled) when a field predates the
 schema — the viewer never invents values for legacy records.
 
 The SPA is a hash-free, single-page app: it loads `/api/stats`, `/api/verdicts`,
-`/api/events` and `/api/ticks` once, then opens a verdict via
+`/api/events`, `/api/ticks` and `/api/qa` once, then opens a verdict via
 `/api/verdicts/<date>/<hash>` when a row is clicked. Refresh for new judgments;
 there is no push channel.
 
@@ -93,6 +94,7 @@ there is no push channel.
 | Board timeline | `<canonical>/.coding-hermes/board/events.jsonl` | `[]` | Resolved through Git's common dir, so a linked worktree shows the shared board |
 | Board tasks | `<canonical>/.coding-hermes/board/tasks.jsonl` | `[]` | Last 2000 lines are read |
 | Ticks | `~/.hermes/coding-hermes/scheduler.db`, table `ticks`, filtered by `project_name` | `[]` | Host-coupled, read-only SQLite, opt-in per `--project`; without `--project` the panel reads `no scheduler project selected (start with --project <name>)`, and a selected project with no ledger rows reads `no scheduler ticks recorded for <project>` |
+| QA runs | `<repo>/.gitreins/qa-ledger.jsonl`, overridable by `GITREINS_QA_LEDGER` or the `qa_ledger.path` config key | `[]` | Written by `worktree fresh\|repro\|dogfood` and `gitreins qa record`; rows are oldest-first and malformed lines are skipped, never guessed; the panel names the ledger path and shows verdict, cells summary, exit code and commit per run |
 
 `gitreins serve` reads the filesystem; it does **not** fall back to the
 `refs/heads/gitreins` verdict branch the way `gitreins report` does. On a fresh
