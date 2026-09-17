@@ -1117,15 +1117,23 @@ class TestGoplsIntegration:
     # budget (observed 30s and 120s timeouts).
     #
     # INT-FLAKE-4 changed the retry from "3 attempts, then fail" to a
-    # readiness-driven budget: every attempt must answer a real request
-    # (`workspace/symbol`) within GOPLS_READY_TIMEOUT, and a spawn that answers
-    # nothing is killed immediately and classified as STALLED instead of being
-    # waited out. A stalled spawn therefore costs ~READY_TIMEOUT instead of
-    # ~180s, so the loop can afford many fresh servers under a wall-clock
-    # stall budget (the attempt count is only a ceiling, not the budget). The
-    # assertion stays strict for a *responsive* server: if gopls answers the
-    # probe and still reports nothing on blatant bad Go code, that is a real
-    # defect and the test fails.
+    # readiness-driven budget. The signal is `published` — did the server send a
+    # `publishDiagnostics` notification for the file at all (an empty list is a
+    # real "found nothing")? A spawn that never reported on the file is killed
+    # early and retried, so a stalled attempt costs ~READY_TIMEOUT instead of
+    # ~180s and the loop can afford many fresh servers inside a wall-clock stall
+    # budget (the attempt count is only a ceiling, not the budget).
+    #
+    # ⚠️ Deliberately NOT the failure signal: `server_ready`. Measured under CPU
+    # load (see the tick-302 record), a quiescent gopls ANSWERS requests —
+    # `workspace/symbol` in 7.7e-05 s, document symbols and definitions resolve
+    # — while never publishing diagnostics for the opened file (42 s of
+    # silence), so request-responsiveness is exactly what a stalled spawn still
+    # has. Failing the test on `server_ready and not published` would re-create
+    # the flake the row is about. The failure gate is therefore "the server
+    # reported on the file (published) and reported nothing on blatantly bad Go
+    # code", which is a real defect; a never-reporting spawn is a distinct,
+    # non-failing diagnostic that names both flags so the record stays honest.
     GOPLS_INIT_TIMEOUT = 120.0
     GOPLS_PER_FILE_TIMEOUT = 60.0
     GOPLS_READY_TIMEOUT = 12.0
@@ -1144,6 +1152,31 @@ class TestGoplsIntegration:
             ready_timeout=self.GOPLS_READY_TIMEOUT,
         )
 
+    @staticmethod
+    def _classify_gopls_outcome(never_reported: list, reported_empty: list) -> str:
+        """Classify a finished batch of gopls attempts.
+
+        * ``"verdict"`` — no batch to judge (an attempt produced diagnostics).
+        * ``"defect"`` — the server REPORTED on the file (``published``, possibly
+          an empty list) and still found nothing on blatantly bad Go code. A
+          server that published a verdict of "clean" is a real defect.
+        * ``"stall"`` — no spawn ever reported on the file: the load-dependent
+          quiescent shape, reported as a distinct non-failing diagnostic.
+
+        ``server_ready`` is deliberately NOT part of this decision: measured
+        under CPU load a quiescent gopls still answers ``workspace/symbol``
+        (7.7e-05 s) and resolves symbols/definitions while never publishing
+        diagnostics for the opened file, so treating "responsive but silent" as
+        a defect would re-create exactly the flake this row is about. A stall
+        batch that answered the probe is still a stall, and the skip message
+        names how many did.
+        """
+        if reported_empty:
+            return "defect"
+        if never_reported:
+            return "stall"
+        return "verdict"
+
     def test_gopls_detects_go_errors(self, lsp_workdir):
         """gopls detects type errors in Go code when installed."""
         if not shutil.which("gopls"):
@@ -1161,6 +1194,9 @@ class TestGoplsIntegration:
         # the file at all (that is the environment signal — a diagnosed
         # quiescent spawn, not a verdict), inside a wall-clock budget. The
         # attempt count is a ceiling; the budget follows the signal.
+        # `published` is the gate, never `server_ready`: the measured stall shape
+        # answers requests, so only "did the server report on the file" separates
+        # a verdict from an environment stall.
         started = time.monotonic()
         never_reported: list[dict] = []
         reported_empty: list[dict] = []
@@ -1171,11 +1207,13 @@ class TestGoplsIntegration:
                 break
             over_budget = time.monotonic() - started >= self.GOPLS_STALL_BUDGET_S
             if not status.published:
+                # Includes server_ready=True: the quiescent spawn answers
+                # requests yet never reports on the file.
                 never_reported.append(status.to_dict())
                 if over_budget or len(never_reported) >= self.GOPLS_MAX_ATTEMPTS:
                     break
                 continue
-            # The server reported on the file (published, possibly empty) but
+            # The server REPORTED on the file (published, possibly empty) but
             # found nothing on blatantly bad Go code. That is a real
             # correctness signal; confirm with one more fresh server first.
             reported_empty.append(status.to_dict())
@@ -1189,16 +1227,21 @@ class TestGoplsIntegration:
         if status is not None and status.diagnostics:
             assert len(status.diagnostics) > 0
             return
-        if never_reported and not reported_empty:
+        outcome = self._classify_gopls_outcome(never_reported, reported_empty)
+        if outcome == "stall":
             # Every spawn stayed silent about the file, even after the engine
             # re-requested it as a change: a load-dependent quiescent spawn,
-            # not a gopls verdict. Report a distinct, non-failing diagnostic.
+            # not a gopls verdict. Report a distinct, non-failing diagnostic
+            # that names both signals.
+            answered = sum(1 for item in never_reported if item.get("server_ready"))
             pytest.skip(
                 f"gopls produced no verdict: {len(never_reported)} fresh spawn(s) in "
-                f"{time.monotonic() - started:.0f}s never published diagnostics for the "
-                f"file (load-dependent quiescent spawn, not a type-checking failure): "
-                f"{never_reported[-1]['stall_reason']}"
+                f"{time.monotonic() - started:.0f}s never published diagnostics for the file "
+                f"({answered} of them still answered the `{never_reported[-1]['probe_method']}` "
+                f"readiness probe — the measured load-dependent quiescent shape, not a "
+                f"type-checking failure): {never_reported[-1]['stall_reason']}"
             )
+        assert outcome == "defect", (outcome, never_reported, reported_empty)
         pytest.fail(
             "gopls REPORTED on the file but produced no diagnostics for blatantly bad "
             f"Go code: {len(reported_empty)} reported-empty attempt(s), "
@@ -1233,6 +1276,34 @@ class TestGoplsIntegration:
         assert callable(run_lsp_check_status)
         for field in ("published", "stalled", "server_ready", "rechecks"):
             assert field in LspCheckStatus.__dataclass_fields__, field
+
+    def test_gopls_failure_gate_is_published_not_probe_responsiveness(self):
+        """INT-FLAKE-4: what fails the test, and what is a non-failing diagnostic.
+
+        Measured under CPU load, a quiescent gopls answers `workspace/symbol` in
+        7.7e-05 s and resolves symbols while never publishing diagnostics for the
+        opened file — so "responsive" must not be the failure gate.
+        """
+        cls = type(self)
+        answered_but_silent = [
+            {
+                "server_ready": True,
+                "published": False,
+                "stalled": True,
+                "stall_reason": "answered but never published",
+            }
+        ]
+        never_answered = [{"server_ready": False, "published": False, "stalled": True}]
+        reported_empty = [{"server_ready": True, "published": True, "stalled": False}]
+
+        # A stall that still answered the probe is a stall, not a defect.
+        assert cls._classify_gopls_outcome(answered_but_silent, []) == "stall"
+        assert cls._classify_gopls_outcome(never_answered, []) == "stall"
+        # A server that reported on the file and found nothing IS a defect.
+        assert cls._classify_gopls_outcome([], reported_empty) == "defect"
+        assert cls._classify_gopls_outcome(never_answered, reported_empty) == "defect"
+        # Nothing to judge means diagnostics were found (the success path).
+        assert cls._classify_gopls_outcome([], []) == "verdict"
 
     def test_gopls_recovers_a_didopen_that_never_checked_the_file(
         self, lsp_workdir, tmp_path, monkeypatch
