@@ -73,5 +73,7 @@ jobs:
         run: python scripts/check_docs_drift.py
       - name: Verify documented CLI examples parse
         run: python scripts/check_cli_examples.py
+      - name: Verify board id hygiene
+        run: python scripts/check_board_ids.py .coding-hermes/board
       - name: Run guards
         run: gitreins guard

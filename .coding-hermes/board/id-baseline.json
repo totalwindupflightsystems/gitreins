@@ -1,0 +1,8 @@
+{
+  "comment": "Legacy duplicate ids grandfathered by the board id gate (QA-GITREINS-POC-8). These rows predate the producer-side fix in hermes-dagger examples/coding-hermes/qa.ts (ids continue after the highest suffix in use) and are append-only history: they are never renumbered. Counts are asserted by scripts/check_board_ids.py, so the baseline can only shrink deliberately, in the same commit as the board change that makes an entry stale.",
+  "duplicate_ids": {
+    "QA-GITREINS-POC-1": 8,
+    "QA-GITREINS-POC-2": 2,
+    "QA-GITREINS-POC-3": 2
+  }
+}
