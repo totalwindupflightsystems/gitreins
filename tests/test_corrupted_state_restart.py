@@ -135,9 +135,11 @@ class TestTaskStateRestart:
 
         tm = TaskManager(tmp_workdir)
 
-        out = capsys.readouterr().out
-        assert "Warning: failed to load tasks:" in out
-        assert "tasks.yaml" in out
+        # Warnings go to stderr (protocol purity: MCP stdio stdout stays JSON-RPC-clean).
+        captured = capsys.readouterr()
+        combined = captured.out + captured.err
+        assert "Warning: failed to load tasks:" in combined
+        assert "tasks.yaml" in combined
         assert tm.list_tasks() == []
         assert _read_bytes(path) == GARBAGE, "a read must not mutate the corrupt store"
 
@@ -221,7 +223,9 @@ class TestTaskStateRestart:
 
         _assert_no_traceback(result)
         assert result.returncode == 0, result.stdout + result.stderr
-        assert "failed to load tasks" in result.stdout
+        assert (
+            "failed to load tasks" in result.stderr
+        )  # warnings go to stderr (MCP stdio protocol purity)
         assert len(_sidecars(path)) == 1
         reloaded = TaskManager(tmp_workdir)
         assert [task.id for task in reloaded.list_tasks()] == ["cli-after-corrupt"]
@@ -235,7 +239,9 @@ class TestTaskStateRestart:
 
         _assert_no_traceback(result)
         assert result.returncode == 1
-        assert result.stderr.startswith("error: "), result.stderr
+        # Warnings precede the final error line on stderr (stderr is the
+        # diagnostic stream; stdout stays protocol-pure for MCP stdio).
+        assert result.stderr.rstrip().endswith("refusing to overwrite it")
         assert "refusing to overwrite" in result.stderr
         os.chmod(path, 0o600)
         assert _read_bytes(path) == GARBAGE

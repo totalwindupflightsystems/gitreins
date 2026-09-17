@@ -342,3 +342,36 @@ class TestTaskManagerExtendedEdgeCases:
         lst2 = task_manager.all_tasks()
         assert lst1 is not lst2  # different list objects
         assert len(lst1) == len(lst2) == 1
+
+
+class TestTruncatedStoreDetection:
+    """DF-GITREINS-POC-22: a truncated store must not load as a silent PARTIAL list."""
+
+    def test_truncated_store_warns_and_preserves(self, tmp_path, capsys):
+        import os
+
+        from engine.task_manager import TaskManager
+
+        cfg = tmp_path / ".gitreins"
+        cfg.mkdir()
+        # A store cut off mid-write: parses as a tiny valid doc, but lacks the
+        # document-terminating newline yaml.dump always writes.
+        (cfg / "tasks.yaml").write_bytes(b"tasks:\n- id: v0.4.1-model-fix\n  title: V")
+        tm = TaskManager(workdir=str(tmp_path))
+        captured = capsys.readouterr()
+        assert "truncated" in captured.err
+        # The parsed fragment is still served...
+        assert "v0.4.1-model-fix" in tm._tasks
+        # ...and the raw bytes were preserved aside (POC-6 mechanism).
+        sidecars = [n for n in os.listdir(cfg) if n.startswith("tasks.yaml.corrupt-")]
+        assert sidecars, "expected a preserved corrupt-state sidecar"
+
+    def test_intact_store_no_truncation_warning(self, tmp_path, capsys):
+        from engine.task_manager import TaskManager
+
+        tm = TaskManager(workdir=str(tmp_path))
+        tm.create("t1", "Task one", "criterion")
+        capsys.readouterr()
+        # Reload from the intact store: no warning.
+        TaskManager(workdir=str(tmp_path))
+        assert "truncated" not in capsys.readouterr().out

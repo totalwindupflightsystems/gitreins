@@ -17,6 +17,7 @@ tasks:
 
 import hashlib
 import os
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -74,6 +75,28 @@ class TaskManager:
         """Load tasks from YAML file."""
         if not os.path.exists(self._tasks_file):
             return
+        # DF-GITREINS-POC-22: a structurally truncated store (crash mid-write,
+        # full disk, kill -9 during _save) can still parse as a *smaller but
+        # valid* YAML doc — silently serving a fraction of the task list with
+        # rc=0. yaml.dump always terminates the document with a newline, so a
+        # store that does NOT end in one was cut short: say so loudly and
+        # preserve the raw bytes (same mechanism as POC-6) while still serving
+        # whatever parsed, rather than pretending the list is whole.
+        try:
+            with open(self._tasks_file, "rb") as f:
+                f.seek(-1, os.SEEK_END)
+                if f.read(1) != b"\n":
+                    self._load_error = "file appears truncated (no document-terminating newline)"
+                    print(
+                        f"Warning: {self._tasks_file} looks truncated — the task list "
+                        "below may be PARTIAL; a preserved copy is being made",
+                        file=sys.stderr,
+                    )
+                    self._preserve_unreadable_state()
+        except OSError:
+            # Unreadable at all: the parse below will report the real failure;
+            # stay silent here so one broken file produces one clean line.
+            pass
         try:
             with open(self._tasks_file, "r") as f:
                 data = yaml.safe_load(f) or {}
@@ -93,7 +116,7 @@ class TaskManager:
             # incomplete by definition. Preserve the raw bytes NOW — the next write
             # must not be able to destroy them — and say so loudly.
             self._load_error = str(e)
-            print(f"Warning: failed to load tasks: {e}")
+            print(f"Warning: failed to load tasks: {e}", file=sys.stderr)
             self._preserve_unreadable_state()
 
     def _preserve_unreadable_state(self) -> str | None:
@@ -109,7 +132,7 @@ class TaskManager:
             with open(self._tasks_file, "rb") as f:
                 raw = f.read()
         except OSError as exc:
-            print(f"Warning: cannot read {self._tasks_file} to preserve it: {exc}")
+            print(f"Warning: cannot read {self._tasks_file} to preserve it: {exc}", file=sys.stderr)
             return None
         dest = self._tasks_file + CORRUPT_STATE_SUFFIX + hashlib.sha256(raw).hexdigest()[:12]
         if os.path.exists(dest):
@@ -119,12 +142,16 @@ class TaskManager:
             with open(dest, "wb") as f:
                 f.write(raw)
         except OSError as exc:
-            print(f"Warning: cannot preserve the unreadable task state as {dest}: {exc}")
+            print(
+                f"Warning: cannot preserve the unreadable task state as {dest}: {exc}",
+                file=sys.stderr,
+            )
             return None
         self._preserved_state = dest
         print(
             f"Warning: preserved the unreadable task state as {dest} "
-            "— copy it back to recover the tasks it still holds"
+            "— copy it back to recover the tasks it still holds",
+            file=sys.stderr,
         )
         return dest
 

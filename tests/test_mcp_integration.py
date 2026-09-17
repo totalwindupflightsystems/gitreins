@@ -82,6 +82,10 @@ def tmp_git_repo():
             )
         tasks_yaml = os.path.join(d, ".gitreins", "tasks.yaml")
         with open(tasks_yaml, "w") as f:
+            # End with a newline: yaml.dump (the writer TaskManager._save uses)
+            # always terminates the document with one, and the DF-GITREINS-POC-22
+            # truncation heuristic treats a missing final newline as a cut-short
+            # store. Seed the fixture in canonical form.
             json.dump(
                 {
                     "tasks": [
@@ -97,6 +101,7 @@ def tmp_git_repo():
                 },
                 f,
             )
+            f.write("\n")  # canonical terminator: yaml.dump always ends with one
 
         # Create hello.txt so the criterion passes
         with open(os.path.join(d, "hello.txt"), "w") as f:
