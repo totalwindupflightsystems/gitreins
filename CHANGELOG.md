@@ -102,6 +102,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   streams on failure, and two regression tests pin the failure mode — a
   sentinel socket proving a Tier 1-only lifecycle never dials the endpoint,
   and four concurrent lifecycles proving no shared task store.
+- **CI installed its analyzer from a floating `@latest` (INT-CI-8)** — the
+  workflow's `go install honnef.co/go/tools/cmd/staticcheck@latest` resolved on
+  the runner, so run 34628610209 failed test (3.12) after v0.8.1 pulled a newer
+  Go toolchain and `proxy.golang.org` answered `stream error: stream ID 37;
+  INTERNAL_ERROR` for the `golang.org/x/tools` zip — while the identical commit
+  passed the next run, i.e. a transient network failure arriving as a code
+  failure. The step now pins the version in `STATICCHECK_VERSION`, retries the
+  install three times with growing backoff, falls back to `GOPROXY=direct` on
+  the last attempt, verifies the installed binary, and fails the job loudly
+  when every attempt failed (a bare `for` loop ends on its last `sleep`, so the
+  status is checked explicitly instead of read off the loop).
+  `tests/test_ci_workflow_pins.py` guards the pin, the retry and the loud
+  failure so neither can fall out again.
 
 ## [0.13.0] — 2026-09-16
 

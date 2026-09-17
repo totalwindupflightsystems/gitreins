@@ -21,11 +21,40 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
       - name: Install system tools for LSP/static analysis
+        env:
+          # INT-CI-8 — pin the analyzer. `@latest` is resolved on the runner at
+          # run time: staticcheck v0.8.1 requires go >= 1.26.0, so each job
+          # auto-downloads a Go toolchain before it can build anything (the
+          # runner's own Go is older), and a new upstream release can silently
+          # change the job. An explicit version keeps that requirement auditable.
+          STATICCHECK_VERSION: v0.8.1
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq cppcheck
-          go install honnef.co/go/tools/cmd/staticcheck@latest
-          echo "$HOME/go/bin" >> $GITHUB_PATH
+          # INT-CI-8 — the module fetch is network-sensitive: run 34628610209
+          # failed test (3.12) with `proxy.golang.org ... stream error: stream
+          # ID 37; INTERNAL_ERROR` while reading the golang.org/x/tools zip,
+          # while the identical commit passed the next run. Retry with a
+          # growing backoff, and fall back to GOPROXY=direct on the last
+          # attempt so one broken proxy path is not fatal.
+          installed=0
+          for attempt in 1 2 3; do
+            if [ "$attempt" -lt 3 ]; then goproxy="$(go env GOPROXY)"; else goproxy="direct"; fi
+            if GOPROXY="$goproxy" go install "honnef.co/go/tools/cmd/staticcheck@${STATICCHECK_VERSION}"; then
+              installed=1
+              break
+            fi
+            echo "::warning::staticcheck ${STATICCHECK_VERSION} install attempt ${attempt} failed (GOPROXY=${goproxy}); retrying"
+            sleep $((attempt * 15))
+          done
+          # The loop ends with a successful `sleep`, so the status is checked
+          # explicitly: a failed install must fail the job, never pass silently.
+          if [ "$installed" -ne 1 ]; then
+            echo "::error::staticcheck ${STATICCHECK_VERSION} could not be installed in 3 attempts"
+            exit 1
+          fi
+          "$HOME/go/bin/staticcheck" -version
+          echo "$HOME/go/bin" >> "$GITHUB_PATH"
       - name: Run tests
         run: pytest tests/ -v --tb=short
       - name: Verify README test-count drift
