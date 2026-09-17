@@ -90,6 +90,39 @@ of 1 report `repro: 9/10 passed (pass rate 0.90)`. With `--keep-failures`,
 the failed tree remains available for reproducing the failing state; the nine
 successful trees are removed before the command returns.
 
+## QA run ledger
+
+Every QA surface records its outcome. `worktree fresh`, `worktree repro`, and
+`worktree dogfood` append one row to the QA ledger, so a verdict survives the
+reaped tree, the ceiling reaper, and the gitignored registry:
+
+```bash
+gitreins qa list                 # newest runs: verdict, cells, exit code, commit
+gitreins qa list --json          # the rows themselves
+```
+
+A run produced outside the harness — a fleet QA lane, a bunker battery, a
+manual audit — is recorded with `gitreins qa record`:
+
+```bash
+gitreins qa record --project my-repo --kind bunker --exit-code 0 \
+  --cell launch=OK --cell collect=OK --evidence /tmp/evidence.jsonl \
+  --note "fresh-system battery"
+```
+
+Rows carry the fleet QA-ledger keys (`ts`, `project`, `status`, `cells`,
+`findings`, `evidence`, `note`) plus harness extras (`kind`, `verdict`,
+`run_id`, `exit_code`, `commit`, `harness_version`, `detail`), so a consumer
+that already reads the fleet schema can read a harness-written ledger.
+
+`GITREINS_QA_LEDGER` overrides the ledger location (a file, or a directory that
+receives `qa-ledger.jsonl`); otherwise `qa_ledger.path` in
+`.gitreins/config.yaml` applies, defaulting to
+`<repo>/.gitreins/qa-ledger.jsonl`. `qa_ledger.enabled: false` stops recording
+and `qa_ledger.max_entries` (default 1000) keeps the newest rows. Recording
+never fails a QA run: a write failure is reported on stderr and the run's own
+exit code is unchanged.
+
 ## Disk ceiling
 
 Set the cap in `.gitreins/config.yaml`:

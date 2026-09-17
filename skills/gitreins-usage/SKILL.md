@@ -201,6 +201,29 @@ gitreins worktree dogfood --skip-judge --json /tmp/wd.json   # init+task+guard+j
 - `worktree dogfood --skip-judge` passes even on pylsp-less machines (clean config
   → diff mode) — use it as the quick sanity check that dodges pitfall 15.
 
+## QA run ledger — where QA verdicts land (0.13.0+)
+
+Every QA run records its own outcome, so the verdict outlives the reaped tree
+and the gitignored registry:
+
+```bash
+gitreins qa list --json          # newest runs: verdict, cells, exit code, commit
+gitreins qa record --project <repo> --kind bunker --exit-code 0 \
+  --cell launch=OK --evidence /tmp/evidence.jsonl --note "fresh-system battery"
+```
+
+- `worktree fresh|repro|dogfood` append their own row (`kind` = fresh/repro/dogfood);
+  `qa record` is for a run produced outside the harness — a fleet QA lane, a
+  bunker battery, a manual audit.
+- Rows carry the fleet QA-ledger keys (`ts`, `project`, `status`, `cells`,
+  `findings`, `evidence`, `note`) plus harness extras (`kind`, `verdict`,
+  `run_id`, `exit_code`, `commit`, `harness_version`, `detail`).
+- Location: `GITREINS_QA_LEDGER` (a file, or a directory) > `qa_ledger.path` in
+  `.gitreins/config.yaml` > `<repo>/.gitreins/qa-ledger.jsonl`.
+  `qa_ledger.enabled: false` stops recording — announced on stderr, never a
+  failure of the run it records.
+- `gitreins report` prints a QA block after the task verdict history.
+
 ## Pitfalls 14–17 (2026-09-15 dogfood run)
 
 14. **(Updated 2026-09-16) PyPI wheel vs HEAD — 0.13.0 IS the wheel to trust now.**

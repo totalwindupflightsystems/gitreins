@@ -18,6 +18,8 @@ Usage:
     gitreins worktree dogfood [--keep --skip-judge]
     gitreins worktree clean [--confirm-stale-orphan]
     gitreins worktree merge <id> [--force --actor <actor>]
+    gitreins qa list [--json]
+    gitreins qa record --project <name> [--verdict PASS|FAIL --cell <name>=<status> ...]
     gitreins guard run
     gitreins judge <id>
     gitreins commit <message>
@@ -1554,6 +1556,23 @@ def _write_worktree_json(path: str | None, payload: dict) -> None:
         raise WorktreeError(f"could not write evidence JSON {path}: {exc}") from exc
 
 
+def _record_qa_run(kind: str, report: dict, *, command: str | None = None) -> None:
+    """Record a QA-run outcome in the ledger; never fail the run it records.
+
+    ``None`` return from the ledger means recording is switched off
+    (``qa_ledger.enabled: false``), which is stated rather than silent.
+    """
+    from engine.qa_ledger import record_run
+
+    try:
+        stored = record_run(get_workdir(), kind, report, command=command)
+    except (OSError, TypeError, ValueError) as exc:
+        print(f"qa ledger: {kind} run not recorded ({exc})", file=sys.stderr)
+        return
+    if stored is None:
+        print(f"qa ledger: {kind} run not recorded (qa_ledger.enabled is false)", file=sys.stderr)
+
+
 def cmd_worktree_fresh(args):
     """Run one shell command in a disposable detached worktree."""
     from engine.worktree_disposable import DisposableWorktreeManager
@@ -1571,6 +1590,7 @@ def cmd_worktree_fresh(args):
         print(f"worktree fresh: infrastructure failure\nError: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
 
+    _record_qa_run("fresh", result, command=args.cmd)
     kept = " (kept at " + result["tree"] + ")" if result["kept"] else ""
     print(f"fresh: exit {result['exit_code']} in {result['duration_s']:.3f}s{kept}")
     if result["output"]:
@@ -1598,6 +1618,7 @@ def cmd_worktree_repro(args):
         print(f"worktree repro: infrastructure failure\nError: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
 
+    _record_qa_run("repro", report, command=args.cmd)
     kept = [run["tree"] for run in report["runs"] if run["kept"]]
     suffix = f" — {len(kept)} failure(s) kept at {', '.join(kept)}" if kept else ""
     print(
@@ -1626,6 +1647,7 @@ def cmd_worktree_dogfood(args):
         print(f"worktree dogfood: infrastructure failure\nError: {exc}", file=sys.stderr)
         raise SystemExit(2) from exc
 
+    _record_qa_run("dogfood", report)
     print(
         f"dogfood: {sum(step['status'] == 'passed' for step in report['steps'])}/"
         f"{len(report['steps'])} steps passed; judge {report['judge']['status']}"
@@ -1744,9 +1766,73 @@ def _persist_result(workdir: str, task, result) -> None:
         print("  ⚠ Failed to persist verdict (non-fatal)", file=sys.stderr)
 
 
+def cmd_qa_list(args):
+    """Show recorded QA run outcomes from the QA ledger."""
+    from engine.qa_ledger import format_rows, list_rows
+
+    workdir = get_workdir()
+    n = args.n if hasattr(args, "n") else 20
+    if getattr(args, "as_json", False):
+        print(json.dumps(list_rows(workdir, n), indent=2))
+        return
+    print(format_rows(workdir, n=n))
+
+
+def cmd_qa_record(args):
+    """Record a QA run outcome produced outside the harness.
+
+    Rows carry the fleet QA-ledger keys, so pointing ``GITREINS_QA_LEDGER`` at a
+    fleet ledger appends a row that a fleet discovery can read.
+    """
+    from engine.qa_ledger import qa_ledger_path, record_external
+
+    workdir = get_workdir()
+    cells: dict[str, str] = {}
+    for entry in getattr(args, "cell", None) or []:
+        name, separator, value = entry.partition("=")
+        if not separator or not name.strip() or not value.strip():
+            print(f"qa record: --cell expects NAME=STATUS (got {entry!r})", file=sys.stderr)
+            raise SystemExit(2)
+        cells[name.strip()] = value.strip()
+
+    findings = []
+    for entry in getattr(args, "finding", None) or []:
+        finding_id, _separator, title = entry.partition(":")
+        findings.append({"id": finding_id.strip(), "title": title.strip()})
+
+    try:
+        row = record_external(
+            workdir,
+            project=getattr(args, "project", None) or None,
+            status=getattr(args, "status", None) or None,
+            kind=getattr(args, "kind", None) or "lane",
+            cells=cells,
+            findings=findings,
+            evidence=getattr(args, "evidence", None) or "",
+            note=getattr(args, "note", None) or "",
+            agent=getattr(args, "agent", None) or "",
+            server=getattr(args, "server", None) or "",
+            commit=getattr(args, "commit", None),
+            verdict=getattr(args, "verdict", None),
+            exit_code=getattr(args, "exit_code", None),
+            ts=getattr(args, "ts", None) or None,
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        print(f"qa record: not recorded ({exc})", file=sys.stderr)
+        raise SystemExit(1) from exc
+    if row is None:
+        print("qa record: not recorded (qa_ledger.enabled is false)", file=sys.stderr)
+        raise SystemExit(1)
+    print(
+        f"qa ledger: recorded {row['kind']} {row['project']} {row['verdict']} "
+        f"in {qa_ledger_path(workdir)}"
+    )
+
+
 def cmd_report(args):
     """Show recent verdict history."""
     from engine.persist import build_report
+    from engine.qa_ledger import format_report_section
 
     workdir = get_workdir()
     n = args.n if hasattr(args, "n") else 10
@@ -1758,6 +1844,13 @@ def cmd_report(args):
 
     report = build_report(workdir, n=n)
     print(report)
+
+    # QA verdicts are not task verdicts, so they are reported alongside the
+    # task history rather than mixed into it.
+    qa_section = format_report_section(workdir, n=min(max(n, 1), 10))
+    if qa_section:
+        print()
+        print(qa_section)
 
 
 def cmd_worktree_doctor(args):
@@ -2826,6 +2919,60 @@ def main():
         "setup-tools", help="Show available static analysis tools and install instructions"
     )
 
+    # qa — QA run ledger
+    qa_p = sub.add_parser(
+        "qa",
+        help="QA run ledger — record and read QA run outcomes",
+        description=(
+            "QA verdicts are recorded in a QA ledger so the harness record covers QA\n"
+            "runs, not only foreman/dev task verdicts:\n"
+            "  * `gitreins worktree fresh|repro|dogfood` records its own outcome;\n"
+            "  * `gitreins qa record` accepts an outcome produced outside the harness.\n"
+            "Rows carry the fleet QA-ledger keys (ts, project, status, cells, findings,\n"
+            "evidence, note) plus harness extras (kind, verdict, run_id, exit_code,\n"
+            "commit, harness_version, detail)."
+        ),
+        epilog=(
+            "Ledger path: GITREINS_QA_LEDGER (file or directory) > qa_ledger.path in\n"
+            ".gitreins/config.yaml > <repo>/.gitreins/qa-ledger.jsonl. Recording is off\n"
+            "when qa_ledger.enabled is false; qa_ledger.max_entries keeps the newest N.\n"
+        ),
+    )
+    qa_sub = qa_p.add_subparsers(dest="qa_command")
+    qa_list_p = qa_sub.add_parser("list", help="Show recorded QA run outcomes")
+    qa_list_p.add_argument("-n", type=int, default=20, help="Number of recent runs to show")
+    qa_list_p.add_argument(
+        "--json", dest="as_json", action="store_true", help="Emit ledger rows as JSON"
+    )
+    qa_record_p = qa_sub.add_parser(
+        "record", help="Record a QA run outcome produced outside the harness"
+    )
+    qa_record_p.add_argument(
+        "--project", help="Project id (default: this repository's directory name)"
+    )
+    qa_record_p.add_argument(
+        "--kind", default="lane", help="Run kind, e.g. lane, bunker, dogfood (default: lane)"
+    )
+    qa_record_p.add_argument(
+        "--status", help="Fleet-ledger status word (default: pass/fail from the verdict)"
+    )
+    qa_record_p.add_argument("--verdict", choices=["PASS", "FAIL"], help="Explicit verdict")
+    qa_record_p.add_argument(
+        "--exit-code", dest="exit_code", type=int, help="Exit code of the audited run"
+    )
+    qa_record_p.add_argument(
+        "--cell", action="append", metavar="NAME=STATUS", help="Cell outcome (repeatable)"
+    )
+    qa_record_p.add_argument(
+        "--finding", action="append", metavar="ID:TITLE", help="Finding id and title (repeatable)"
+    )
+    qa_record_p.add_argument("--evidence", help="Path to the run's evidence file")
+    qa_record_p.add_argument("--note", help="Free-form note stored with the row")
+    qa_record_p.add_argument("--agent", help="Agent id that ran the audit")
+    qa_record_p.add_argument("--server", help="Host or bunker the audit ran on")
+    qa_record_p.add_argument("--commit", help="Commit audited (default: this repository's HEAD)")
+    qa_record_p.add_argument("--ts", help="ISO timestamp of the run (default: now, UTC)")
+
     # report
     report_p = sub.add_parser("report", help="Show verdict history")
     report_p.add_argument("-n", type=int, default=10, help="Number of recent verdicts to show")
@@ -2908,6 +3055,13 @@ def main():
         cmd_security_scan(args)
     elif args.command == "setup-tools":
         cmd_setup_tools(args)
+    elif args.command == "qa":
+        if args.qa_command == "list":
+            cmd_qa_list(args)
+        elif args.qa_command == "record":
+            cmd_qa_record(args)
+        else:
+            parser.print_help()
     elif args.command == "report":
         cmd_report(args)
     elif args.command == "serve":

@@ -362,6 +362,9 @@ gitreins report [-n <count>] [--interactive]
 | `-n <count>` | Number of recent verdicts to show (default 10) |
 | `-i`, `--interactive` | Interactive TUI mode (requires `textual`; falls back to text) |
 
+A short QA-run block is printed after the verdict history when the QA ledger
+has rows (see section 13); with no recorded QA runs the output is unchanged.
+
 Exit **0** on success.
 
 ## 12. `gitreins worktree`
@@ -394,7 +397,9 @@ gitreins worktree fresh --cmd "<shell command>" [--json <path>] [--keep]
 Runs the command with `sh -c` in one clean tree. Exit 0 means the command
 passed; a nonzero command exit is propagated unchanged; exit 2 means GitReins
 could not create/reap the tree or write evidence. `--keep` retains the tree
-and `--json` writes a machine-readable run record.
+and `--json` writes a machine-readable run record. The outcome is also appended
+to the QA ledger (`gitreins qa list`), so a QA verdict outlives the reaped
+tree.
 
 ### `worktree repro`
 
@@ -433,7 +438,68 @@ key is configured, the judge is recorded as skipped rather than passed.
 failed, and exit 2 means GitReins infrastructure failed. Evidence contains
 `steps`, a `judge` object, timestamps, the tree path, and keep status.
 
-## 13. `gitreins serve`
+## 13. `gitreins qa`
+
+QA run ledger — the record of what QA runs actually did. `worktree fresh`,
+`worktree repro`, and `worktree dogfood` append their own outcome, and
+`gitreins qa record` accepts a run produced outside the harness (a fleet QA
+lane, a bunker battery), so QA verdicts land in the harness record instead of
+only in stdout and the gitignored disposable registry.
+
+```
+gitreins qa list [-n <count>] [--json]
+gitreins qa record [--project <name>] [--kind <kind>] [--verdict PASS|FAIL]
+  [--exit-code <code>] [--cell <name>=<status> ...] [--finding <id>:<title> ...]
+  [--evidence <path>] [--note <text>] [--agent <id>] [--server <name>]
+  [--commit <sha>] [--ts <iso>] [--status <word>]
+```
+
+### `qa list`
+
+| Option | Description |
+|--------|-------------|
+| `-n <count>` | Number of recent runs to show (default 20) |
+| `--json` | Emit the ledger rows as JSON |
+
+Exit **0** on success, **2** when `--cell` is not `NAME=STATUS`.
+
+### `qa record`
+
+Records one row. `--project` defaults to the repository directory name,
+`--kind` to `lane`, `--verdict`/`--exit-code` to a passing verdict when
+neither is given, and `--commit` to the repository's `HEAD`. `--cell` and
+`--finding` are repeatable. Status defaults to `pass`/`fail` derived from the
+verdict.
+
+A row carries the fleet QA-ledger keys — `ts`, `project`, `status`, `cells`,
+`findings`, `evidence`, `note` — plus harness extras: `kind`, `verdict`,
+`run_id`, `exit_code`, `commit`, `harness_version`, `detail`. A process that
+already reads the fleet schema can therefore read a harness-written ledger.
+
+Ledger location, first match wins:
+
+1. `GITREINS_QA_LEDGER` — a file path, or a directory (existing, or ending with
+   a separator) that receives `qa-ledger.jsonl`. Point it at a fleet ledger to
+   append there.
+2. `qa_ledger.path` in `.gitreins/config.yaml` (relative paths resolve against
+   the repo root).
+3. `<repo>/.gitreins/qa-ledger.jsonl`.
+
+```yaml
+qa_ledger:
+  enabled: true
+  path: ".gitreins/qa-ledger.jsonl"
+  max_entries: 1000
+```
+
+`qa_ledger.enabled: false` stops recording — the QA run still succeeds and
+prints `qa ledger: <kind> run not recorded (qa_ledger.enabled is false)` on
+stderr. `qa_ledger.max_entries` (default 1000) keeps the newest rows. A ledger
+write failure never fails the QA run it records; it is reported on stderr
+instead. `gitreins report` prints a short QA block after the task verdict
+history.
+
+## 14. `gitreins serve`
 
 Live judgment browser — a local web server that renders the verdict history
 (the same `.gitreins/history/<date>/<hash>/verdict.json` directories and the

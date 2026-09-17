@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **QA run ledger (QA-GITREINS-POC-7)** — QA verdicts were recorded nowhere
+  durable: `worktree fresh|repro|dogfood` outcomes lived in stdout and in the
+  gitignored, ceiling-pruned disposable registry, so the harness record covered
+  `task complete` verdicts (dev / foreman work) and no QA verdicts at all.
+  Every QA run now appends one row to a QA ledger, and `gitreins qa record`
+  accepts a run produced outside the harness (a fleet QA lane, a bunker
+  battery). `gitreins qa list` reads it back and `gitreins report` prints a QA
+  block. Rows carry the fleet QA-ledger keys (`ts`, `project`, `status`,
+  `cells`, `findings`, `evidence`, `note`) plus harness extras (`kind`,
+  `verdict`, `run_id`, `exit_code`, `commit`, `harness_version`, `detail`), so
+  a consumer that already reads that schema can read a harness-written ledger;
+  `GITREINS_QA_LEDGER` points the ledger at a fleet file. Recording never fails
+  the run it records — a write failure or `qa_ledger.enabled: false` is
+  reported on stderr and the run's exit code is unchanged.
+
 ### Fixed
 - **A whole-tree lint graded files the repo's own ruff config excludes
   (DF-GITREINS-POC-18)** — `exclude`/`extend-exclude` apply only while ruff

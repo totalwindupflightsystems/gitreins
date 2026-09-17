@@ -26,6 +26,9 @@ Thumbs.db
 # Guard run logs (DF-018 — one full, untruncated log per guard run; runtime
 # artifacts, pruned to the newest GUARD_LOG_KEEP runs)
 .gitreins/logs/
+# QA run ledger (gitreins qa — one row per QA run; runtime artifact. Point
+# GITREINS_QA_LEDGER at a tracked path to version it.)
+.gitreins/qa-ledger.jsonl
 # Runtime task data (committed separately on gitreins branch)
 .gitreins/tasks.yaml
 

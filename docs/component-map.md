@@ -8,6 +8,7 @@
 | Judge Orchestrator | `engine/judge.py` | 134 | Implemented ✅ | Tier 1 → Tier 2 pipeline, verdict compilation |
 | LLM Interface | `engine/llm.py` | 298 | Implemented ✅ | Multi-provider chat completions (OpenAI, Anthropic) |
 | Pipeline Engine | `engine/pipeline.py` | 428 | Implemented ✅ | Configurable multi-stage evaluation pipelines |
+| QA Run Ledger | `engine/qa_ledger.py` | 518 | Implemented ✅ | Durable QA verdicts: one row per `worktree fresh/repro/dogfood` run plus `gitreins qa record` for external lanes |
 | MCP Server | `gitreins_mcp/server.py` | 406 | Implemented ✅ | MCP stdio transport, tool registration, primary agent interface |
 | CLI | `gitreins/cli.py` | 218 | Implemented ✅ | CLI entry point for gitreins commands |
 | Installer | `gitreins/install` | 76 | Implemented ✅ | Symlinks hooks into .git/hooks/ — one command activation |

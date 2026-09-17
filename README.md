@@ -11,7 +11,7 @@
 
 GitReins lives inside your git repository as a quality harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ✅ **v0.13.0** — LSP diagnostics (14 languages), opt-in static analysis (9 analyzers; baseline install default off, smart init enables it for detected dynamic-language projects), commit audit with CVE-scored severity, optional Antares CVE-localization guard, Anthropic Messages API support, DeepSeek prompt caching telemetry, large-repo hardening (fast-track + `--skip-tier2`), MCP `propagate`, judge single-flight + resume lease, evaluator committed-diff read path, guard run logs (full, untruncated output persisted per run), judge Tier 1 / guard parity (one language-detection source of truth + loud degradation marker), guard trust: zero-work skips are a DEGRADED PASS with named skip reasons, `guards.allow_skips`, exit 2 unless accepted, a merge-back that refuses verdicts carrying skips, and a Tier 1 secrets scope that excludes GitReins' own `.gitreins/**` state, failure lines that name the first failing test id and every secrets scanner that ran (both persisted to the guard run log), a static-analysis gate that reports an absent analyser as a named skip instead of a "clean" pass (and an `init` status that names it too), an executable `python -m gitreins` module entry point for the interpreter form that installed hooks pin (that form used to die with "No module named gitreins.__main__" and block every commit instead of running the guard), a Tier 1 tests step that says why pytest ended instead of leaving a bare exit code (with `-x` + xdist a real failing test exits 2 — `data.pytest_outcome` names `maxfail` vs a signalled interruption, and the step keeps the whole captured output so pytest's short test summary survives the evidence bound), and a whole-tree lint scope that obeys the repo's own ruff configuration (a config-excluded file is never graded even when passed explicitly; an all-excluded file list is a named skip, never a clean pass), failure surfaces that name their own state (a Tier 2 that never reached the provider reports its provider/model/endpoint/key-source plus the retry commands instead of a bare FAIL, `task start|complete|delete` print `Task not found: <id>` instead of a KeyError traceback, verdict lines are single-line and ANSI-free, and the Tier 1 secrets step stamps the scanners that actually ran into the verdict data), 1679 tests pass / 43 test files, verified by collection (optional-tool skips vary).
+> ✅ **v0.13.0** — LSP diagnostics (14 languages), opt-in static analysis (9 analyzers; baseline install default off, smart init enables it for detected dynamic-language projects), commit audit with CVE-scored severity, optional Antares CVE-localization guard, Anthropic Messages API support, DeepSeek prompt caching telemetry, large-repo hardening (fast-track + `--skip-tier2`), MCP `propagate`, judge single-flight + resume lease, evaluator committed-diff read path, guard run logs (full, untruncated output persisted per run), judge Tier 1 / guard parity (one language-detection source of truth + loud degradation marker), guard trust: zero-work skips are a DEGRADED PASS with named skip reasons, `guards.allow_skips`, exit 2 unless accepted, a merge-back that refuses verdicts carrying skips, and a Tier 1 secrets scope that excludes GitReins' own `.gitreins/**` state, failure lines that name the first failing test id and every secrets scanner that ran (both persisted to the guard run log), a static-analysis gate that reports an absent analyser as a named skip instead of a "clean" pass (and an `init` status that names it too), an executable `python -m gitreins` module entry point for the interpreter form that installed hooks pin (that form used to die with "No module named gitreins.__main__" and block every commit instead of running the guard), a Tier 1 tests step that says why pytest ended instead of leaving a bare exit code (with `-x` + xdist a real failing test exits 2 — `data.pytest_outcome` names `maxfail` vs a signalled interruption, and the step keeps the whole captured output so pytest's short test summary survives the evidence bound), and a whole-tree lint scope that obeys the repo's own ruff configuration (a config-excluded file is never graded even when passed explicitly; an all-excluded file list is a named skip, never a clean pass), failure surfaces that name their own state (a Tier 2 that never reached the provider reports its provider/model/endpoint/key-source plus the retry commands instead of a bare FAIL, `task start|complete|delete` print `Task not found: <id>` instead of a KeyError traceback, verdict lines are single-line and ANSI-free, and the Tier 1 secrets step stamps the scanners that actually ran into the verdict data), a QA run ledger so QA verdicts land in the harness record (`worktree fresh|repro|dogfood` record their own outcome, `gitreins qa record` accepts a run produced elsewhere, `gitreins qa list` and `gitreins report` read it back), 1702 tests pass / 44 test files, verified by collection (optional-tool skips vary).
 
 ---
 
@@ -59,7 +59,7 @@ setup).
 3. **Complete tasks** — `gitreins task complete <id>` triggers automatic evaluation. Tier 2 needs an LLM credential; configure `GITREINS_LLM_API_KEY` (plus optional `GITREINS_LLM_BASE_URL` and `GITREINS_LLM_MODEL`) first. For an explicit Tier-1-only run, use `gitreins task complete --skip-tier2 <id>`.
 4. **Tier 1: Static guards** — secrets, build, lint, tests (configurable)
 5. **Tier 2: Agentic evaluator** — LLM loop reads files, runs tests, delivers per-criterion PASS/FAIL
-6. **Verdicts persisted** — stored in `.gitreins/history/`, browsable via `gitreins report` or the live judgment browser `gitreins serve`
+6. **Verdicts persisted** — stored in `.gitreins/history/`, browsable via `gitreins report` or the live judgment browser `gitreins serve`. QA runs (`worktree fresh|repro|dogfood`) record their own verdict in the QA ledger — `gitreins qa list`, and `gitreins qa record` for a run produced outside the harness (a fleet lane, a bunker battery)
 7. **Commit through harness** — pre-commit hook runs guards, blocks if checks fail
 
 > **MCP commit rule:** the MCP `commit` tool refuses while any task is
@@ -90,6 +90,9 @@ gitreins setup-tools                  # Show available static analysis tools and
 gitreins mcp-server                   # Run MCP stdio server (for AI agents)
 gitreins serve [--repo <path>] [--port <port>] [--project <name>]
                                       # Live judgment browser (local web server)
+gitreins qa list [--json]             # QA run ledger (fresh/repro/dogfood verdicts)
+gitreins qa record --project <name> [--verdict PASS|FAIL --cell <name>=<status>]
+                                      # Record a QA run produced outside the harness
 ```
 
 ### Parallel worktree fleet
@@ -539,11 +542,11 @@ history:
 - **MCP Transport:** stdio (12 tools)
 - **Config:** YAML in `.gitreins/` directory
 - **Evaluator Default Model:** DeepSeek V4 Flash (~$0.01/eval)
-- **Test suite:** 1679 tests across 43 test files (collection total; optional-tool skips vary)
+- **Test suite:** 1702 tests across 44 test files (collection total; optional-tool skips vary)
 
 ## Architecture & Docs
 
-- [Disposable verification](docs/disposable-verification.md) — run QA batteries, dogfood, and repro farms in throwaway worktrees without a bunker.
+- [Disposable verification](docs/disposable-verification.md) — run QA batteries, dogfood, and repro farms in throwaway worktrees without a bunker. Every QA run records its outcome in the QA ledger (`gitreins qa list`), including runs produced outside the harness (`gitreins qa record`).
 
 | Document | What it covers |
 |---|---|
