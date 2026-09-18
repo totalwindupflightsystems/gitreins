@@ -1893,41 +1893,56 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             # Remove closing fence
             cleaned = re.sub(r"\n?```\s*$", "", cleaned)
 
-        # Strategy 2: Find JSON object boundaries
+        # Strategy 2: Take the FIRST complete JSON object in the text (GR-GAP-059).
+        #
+        # This used to slice greedily from the first "{" to the LAST "}"
+        # (`cleaned.rfind("}")`). Any "}" appearing AFTER the first complete
+        # object — a duplicated verdict object, a trailing note, an echoed
+        # example — made that slice over-long and json.loads raised
+        # "Extra data", so the parse silently degraded to the keyword fallback
+        # with an EMPTY item list: the artifact could no longer name which
+        # criterion failed (tick 306, verdict 91176df2).
+        #
+        # raw_decode() consumes exactly ONE JSON value and reports where it
+        # stopped, so trailing data is ignored instead of poisoning the parse.
+        parse_reason: str | None = None
         start = cleaned.find("{")
-        end = cleaned.rfind("}")
-        if start >= 0 and end > start:
-            json_str = cleaned[start : end + 1]
+        if start < 0:
+            parse_reason = "no JSON object found"
+        else:
             try:
-                data = json.loads(json_str)
-
-                # Validate required fields
-                if "verdict" not in data or "items" not in data:
-                    raise ValueError("Missing required fields 'verdict' or 'items'")
-
-                verdict_val = str(data["verdict"]).upper()
-                if verdict_val not in ("COMPLETE", "INCOMPLETE"):
-                    verdict_val = "INCOMPLETE"
-
-                items = []
-                for item in data.get("items", []):
-                    status = str(item.get("status", "FAIL")).upper()
-                    if status not in ("PASS", "FAIL"):
-                        status = "FAIL"
-                    items.append(
-                        VerdictItem(
-                            criterion=item.get("criterion", "unknown"),
-                            status=status,
-                            detail=item.get("detail", ""),
-                        )
-                    )
-                return Verdict(
-                    verdict=verdict_val,
-                    items=items,
-                    summary=data.get("summary", ""),
-                )
+                data, _end = json.JSONDecoder().raw_decode(cleaned, start)
             except (json.JSONDecodeError, ValueError) as e:
-                logger.warning("JSON parse failed: %s", e)
+                parse_reason = f"JSON parse failed: {e}"
+            else:
+                try:
+                    # Validate required fields
+                    if "verdict" not in data or "items" not in data:
+                        raise ValueError("Missing required fields 'verdict' or 'items'")
+
+                    verdict_val = str(data["verdict"]).upper()
+                    if verdict_val not in ("COMPLETE", "INCOMPLETE"):
+                        verdict_val = "INCOMPLETE"
+
+                    items = []
+                    for item in data.get("items", []):
+                        status = str(item.get("status", "FAIL")).upper()
+                        if status not in ("PASS", "FAIL"):
+                            status = "FAIL"
+                        items.append(
+                            VerdictItem(
+                                criterion=item.get("criterion", "unknown"),
+                                status=status,
+                                detail=item.get("detail", ""),
+                            )
+                        )
+                    return Verdict(
+                        verdict=verdict_val,
+                        items=items,
+                        summary=data.get("summary", ""),
+                    )
+                except (json.JSONDecodeError, ValueError) as e:
+                    parse_reason = f"JSON parse failed: {e}"
 
         # Strategy 3: Keyword-based fallback
         content_lower = content.lower()
@@ -1938,10 +1953,14 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         else:
             verdict = "INCOMPLETE"
 
-        logger.warning("Falling back to keyword parse: verdict=%s", verdict)
+        # The fallback must not masquerade as a criterion failure: keep the
+        # content preview AND name the parse reason so the persisted verdict
+        # artifact says why the item list is empty (GR-GAP-059).
+        parse_reason = parse_reason or "unparseable response"
+        logger.warning("Falling back to keyword parse: verdict=%s (reason: %s)", verdict, parse_reason)
         return Verdict(
             verdict=verdict,
-            summary=f"(auto-parsed from non-JSON response) {content[:300]}",
+            summary=f"(auto-parsed from non-JSON response — {parse_reason}) {content[:300]}",
         )
 
     def _tool_detect_dead_code(self) -> dict:

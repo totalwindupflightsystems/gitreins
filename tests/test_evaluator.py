@@ -3,6 +3,7 @@ Unit tests for engine/evaluator.py — agentic LLM loop with tools and dedup.
 axiom:trace work_item=GR-001 spec=specs/03-Agentic-Evaluator.md plan=.memory-bank/work-items/GR-001/plan.yaml
 """
 
+import json
 import os
 from unittest.mock import MagicMock, patch
 
@@ -353,6 +354,80 @@ class TestVerdictParsing:
         verdict = evaluator._parse_verdict("")
         assert verdict.verdict == "INCOMPLETE"
         assert "auto-parsed" in verdict.summary
+
+    # ── GR-GAP-059: trailing data after the verdict object ──────────────
+    # Regression cover for the greedy find("{")..rfind("}") slice, which
+    # turned any "}" after the first complete object into a json.loads
+    # "Extra data" error and degraded the verdict to INCOMPLETE with an
+    # EMPTY item list (tick 306, verdict 91176df2).
+
+    @staticmethod
+    def _verdict_json(verdict: str = "COMPLETE") -> str:
+        """A valid verdict object with three items."""
+        return json.dumps(
+            {
+                "verdict": verdict,
+                "items": [
+                    {"criterion": "c1", "status": "PASS", "detail": "d1"},
+                    {"criterion": "c2", "status": "PASS", "detail": "d2"},
+                    {"criterion": "c3", "status": "PASS", "detail": "d3"},
+                ],
+                "summary": "all three pass",
+            }
+        )
+
+    def test_trailing_junk_with_brace_keeps_verdict_and_items(self, evaluator):
+        """AC1: trailing junk containing '}' no longer poisons the parse."""
+        content = self._verdict_json("COMPLETE") + "\nNote: the } above closes the object.\n"
+        verdict = evaluator._parse_verdict(content)
+        assert verdict.verdict == "COMPLETE"
+        assert len(verdict.items) == 3
+        assert [i.criterion for i in verdict.items] == ["c1", "c2", "c3"]
+        assert all(i.status == "PASS" for i in verdict.items)
+        assert verdict.summary == "all three pass"
+
+    def test_two_concatenated_verdict_objects_takes_first(self, evaluator):
+        """AC2: two concatenated objects → the FIRST object's verdict and items."""
+        first = self._verdict_json("COMPLETE")
+        second = json.dumps(
+            {
+                "verdict": "INCOMPLETE",
+                "items": [{"criterion": "other", "status": "FAIL", "detail": "second object"}],
+                "summary": "second",
+            }
+        )
+        verdict = evaluator._parse_verdict(f"{first}\n{second}")
+        assert verdict.verdict == "COMPLETE"
+        assert len(verdict.items) == 3
+        assert [i.criterion for i in verdict.items] == ["c1", "c2", "c3"]
+        assert verdict.summary == "all three pass"
+
+    def test_trailing_prose_only_after_json(self, evaluator):
+        """Trailing prose with no brace at all still parses the object."""
+        content = self._verdict_json("INCOMPLETE") + "\nLet me know if that helps!"
+        verdict = evaluator._parse_verdict(content)
+        assert verdict.verdict == "INCOMPLETE"
+        assert len(verdict.items) == 3
+
+    def test_no_json_object_records_parse_reason(self, evaluator):
+        """AC3: no JSON object at all → keyword verdict + parse reason in summary."""
+        verdict = evaluator._parse_verdict("After reviewing, all criteria pass.")
+        assert verdict.verdict == "COMPLETE"  # existing keyword behavior
+        assert "auto-parsed" in verdict.summary
+        assert "no JSON object found" in verdict.summary
+
+    def test_malformed_json_records_parse_error(self, evaluator):
+        """A malformed object → keyword verdict + the JSON error in summary."""
+        verdict = evaluator._parse_verdict('{"verdict": "COMPLETE", "items": [}')
+        assert verdict.verdict == "COMPLETE"  # existing keyword behavior
+        assert "auto-parsed" in verdict.summary
+        assert "JSON parse failed" in verdict.summary
+
+    def test_missing_items_records_parse_reason(self, evaluator):
+        """A valid object missing 'items' → keyword fallback names the reason."""
+        verdict = evaluator._parse_verdict('{"verdict":"COMPLETE","summary":"all criteria pass"}')
+        assert verdict.verdict == "COMPLETE"
+        assert "Missing required fields" in verdict.summary
 
 
 class TestMaxIterationsAndErrors:
