@@ -13,7 +13,7 @@ back:
     {"ts": "...", "project": "repo-name", "status": "pass", "verdict": "PASS",
      "kind": "dogfood", "run_id": "...", "exit_code": 0, "commit": "<sha>",
      "cells": {"init": "passed", ...}, "findings": [], "evidence": "",
-     "harness_version": "0.13.0", "note": "", "detail": {...}}
+     "harness_version": "0.14.0", "note": "", "detail": {...}}
 
 A row is a **superset** of the fleet QA-ledger vocabulary (``ts``,
 ``project``, ``status``, ``cells``, ``findings``, ``evidence``, ``note``): a

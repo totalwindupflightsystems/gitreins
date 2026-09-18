@@ -7,7 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] — 2026-09-18
+
 ### Added
+- **An executable `python -m gitreins` — the interpreter form installed
+  pre-commit hooks pin (DF-024, 509acff)** — the generated hook pins the
+  gitreins that ran `install` (the absolute console-script path when one
+  launched the command, otherwise `<sys.executable> -m gitreins`), and the
+  package had no `__main__.py`, so that second form could never run:
+  `/.../python: No module named gitreins.__main__; 'gitreins' is a package and
+  cannot be directly executed` (exit 1). Because the hook ends with `exit $?`,
+  every repo whose hook carried the pinned interpreter form had a pre-commit
+  gate that BLOCKED all commits with an opaque Python message instead of
+  running secrets/lint/tests — while the CHANGELOG, the hook template's own
+  comment and `docs/dogfood/diagnostics.md` all advertise that form.
+  `gitreins/__main__.py` delegates to `cli.main` (`sys.exit(main())`) with no
+  other side effects, so `python -m gitreins <command>` behaves exactly like
+  the console script — including the exit code, which is what the hook depends
+  on. `tests/test_cli.py::TestPreCommitHookPathPinning::test_pinned_python_m_invocation_is_actually_runnable`
+  runs the pinned form from a foreign cwd (the consumer-install shape) and
+  asserts exit 0 plus a version banner.
+- **A board id gate so one id means one finding (QA-GITREINS-POC-8, 4495a60)** —
+  the QA filing path numbered its per-cycle findings from 1, so each cycle
+  re-used `QA-GITREINS-POC-1` (later -2, -3) for a different finding: 12 rows
+  ended up sharing 3 ids, title/id dedupe could never match, and the board
+  reported the duplicates as pre-existing errors on every run.
+  `scripts/check_board_ids.py` fails on a NEW duplicate id, a row missing
+  id/title/status, and a baseline entry whose count no longer matches the board
+  (the baseline may only shrink); `.coding-hermes/board/id-baseline.json`
+  grandfathers the 12 legacy rows by count, `.coding-hermes/board/README.md`
+  writes the rule down, and CI runs the gate as **"Verify board id hygiene"**.
 - **QA runs in the static judgment page too (JVIEW-007)** — the QA run ledger
   became a first-class data source, `gitreins serve` exposes it at `GET /api/qa`
   and renders it, but `scripts/judgment_viewer.py` (the standalone page published
@@ -82,6 +111,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reported on stderr and the run's exit code is unchanged.
 
 ### Fixed
+- **A truncated task store loaded as a silent partial list (DF-GITREINS-POC-22)** —
+  `yaml.dump` always terminates the store with a newline, so a store whose final
+  byte is not one was cut short mid-write; the loader accepted whatever parsed,
+  returned rc 0, printed no warning and left no `.corrupt-<hash>` sidecar — so
+  the next write destroyed the dropped tasks. The loader now reports the
+  truncation loudly on **stderr** (stdout stays JSON-RPC-pure for the MCP stdio
+  server, POC-5 law), preserves the raw bytes aside through the same
+  content-addressed mechanism as an unreadable store, and still serves what
+  parsed; the MCP fixture seeds `tasks.yaml` in canonical form.
+- **A zero-work `gitreins guard` printed a clean PASS (TRUST-001)** — on a clean
+  tree the guard printed "Tier 1 Guards: PASS" with exit 0 while its own
+  persisted log said `lint="No Python files staged"` and
+  `tests="No files staged — skipped"`, and the LSP gate reported "clean"
+  whenever its server was not installed: a gate that never ran was
+  indistinguishable from one that passed, which CI and merge-back both consume
+  as truth. Skips are now labelled (`~` plus the reason instead of a checkmark,
+  zero-work skips in lint/tests/lsp/static-analysis), `cmd_guard_run` prints
+  `Tier 1: DEGRADED PASS (skips: ...)` and exits **2** unless
+  `guards.allow_skips` is true (`init` writes `allow_skips: true` for fresh
+  repos), `verdict.json` carries
+  `stages.tier1.{degraded,skipped_steps,degradation_reason}`,
+  `gitreins worktree merge` refuses a PASS whose Tier 1 record carries skips,
+  and the guard run log records a DEGRADED overall line plus `[SKIP]` entries
+  with the reason. A guard disabled by config, or replaced by the language's own
+  gate (Go vet/test/build), is not a degradation.
+- **Corrupted state was destroyed instead of preserved (QA-GITREINS-POC-6)** — an
+  unreadable `.gitreins/tasks.yaml` was warned about and then REPLACED
+  (200-byte payload → 145-byte fresh file, no copy anywhere, exit 0); a
+  binary-corrupted QA ledger and `verdict.json` killed `qa list`/`report` with
+  `UnicodeDecodeError` tracebacks and lost the rows already salvaged; an
+  undecodable `.gitreins/config.yaml` raised out of `load_defaults()` instead of
+  falling back. The task store is now preserved as
+  `<tasks.yaml>.corrupt-<sha256[:12]>` before any write (content-addressed, so
+  repeated loads do not churn sidecars) and the write is REFUSED when even that
+  copy cannot be made (`TaskStateCorruptError` → one `error:` line + exit 1), the
+  ledger decodes with `errors="replace"` so a garbage line costs that line only,
+  an undecodable verdict is skipped like a malformed one, and an unreadable
+  config degrades to the built-in defaults with a named warning while a wrong
+  VALUE still raises. 20 tests in `tests/test_corrupted_state_restart.py`,
+  observed through the real CLI boundary.
+- **MCP `protocolVersion` was pinned to one revision (DF-GITREINS-POC-20)** —
+  `initialize` answered the hardcoded `2024-11-05` for every client.
+  `SUPPORTED_PROTOCOL_VERSIONS` now advertises the four revisions that share the
+  session `initialize` handshake and the tools-only capability surface this
+  stdio server implements (2025-11-25 / 2025-06-18 / 2025-03-26 / 2024-11-05):
+  `initialize` echoes a supported request, otherwise answers `2025-11-25` plus
+  one stderr line naming the mismatch and the revisions a client may retry
+  with, and an unknown **notification** (no id) is no longer answered with
+  `-32601` — a JSON-RPC notification must not get a response. 2026-07-28 is
+  deliberately NOT advertised (it removed the initialize handshake).
 - **A quiescent LSP spawn read as a clean tree, and the gopls integration test
   failed on it (INT-FLAKE-4)** — `run_lsp_check` returns `[]` both for "the
   server is healthy and found nothing" and for "the server never checked the

@@ -1,6 +1,6 @@
 # GitReins Onboarding Guide
 
-**Version-stamped: verified against `gitreins 0.13.0` (2026-09-16).** The guide
+**Version-stamped: verified against `gitreins 0.14.0` (2026-09-18).** The guide
 started as the 2026-08-03 dogfood report (`docs/dogfood/2026-08-03-integration.md`)
 and has been refreshed so every command matches the current CLI: `init`, `task`,
 `guard`, `judge`, `serve` and `worktree` are all exercised as written.

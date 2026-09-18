@@ -42,7 +42,7 @@ logger = logging.getLogger("gitreins.mcp")
 
 # DF-GITREINS-POC-5: one source of truth for the identity a connecting client
 # sees. `initialize` used to answer with a hardcoded "0.1.0" that disagreed
-# with the installed release (CLI/README 0.13.0), so a client reasoning about
+# with the installed release (CLI/README 0.14.0), so a client reasoning about
 # the tool surface from serverInfo.version reasoned about the PoC.
 SERVER_NAME = "gitreins"
 

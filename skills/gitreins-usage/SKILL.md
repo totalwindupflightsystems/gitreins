@@ -226,9 +226,16 @@ gitreins qa record --project <repo> --kind bunker --exit-code 0 \
 
 ## Pitfalls 14–17 (2026-09-15 dogfood run)
 
-14. **(Updated 2026-09-16) PyPI wheel vs HEAD — 0.13.0 IS the wheel to trust now.**
-    0.13.0 (2026-09-16) ships: worktree subcommand, POC-3/D init persistence, POC-16
-    multi-finding secrets, DF-011 hook pin, POC-10 exit codes, correct --version.
+14. **(Updated 2026-09-18) PyPI wheel vs HEAD — 0.14.0 IS the wheel to trust now.**
+    0.14.0 (2026-09-18) carries everything 0.13.0 shipped (worktree subcommand,
+    POC-3/D init persistence, POC-16 multi-finding secrets, DF-011 hook pin, POC-10
+    exit codes, correct --version) plus the fixes the 0.13.0 wheel still lacked: the
+    runnable `python -m gitreins` form the installed hook pins (a 0.13.0 wheel dies
+    with `No module named gitreins.__main__` and blocks every commit), a truncated
+    `.gitreins/tasks.yaml` reported and preserved instead of loading as a silent
+    partial list, zero-work guard skips reported as a DEGRADED PASS instead of a
+    vacuous green, and an MCP `initialize` that reports the installed release and
+    negotiates a protocol revision.
     Older 0.12.x wheels lack all of these (POC-7). Still missing from ANY wheel AND
     HEAD: the judge tier1 tests/lint gap (pitfall 20).
 15. **`task complete` fails in fresh consumer envs: the pylsp test trap (POC-6).**

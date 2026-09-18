@@ -143,12 +143,42 @@ reproducible from something still tracked. Untracked strays (build output,
 
 ## Release Process
 
-1. Bump version in `engine/version.py` and `pyproject.toml`
-2. Update CHANGELOG (if exists)
-3. Tag: `git tag -a vX.Y.Z -m "Release vX.Y.Z"`
-4. Push tag: `git push origin vX.Y.Z`
-5. Build: `python3 -m build --wheel`
-6. Publish: tag the release (`git tag vX.Y.Z && git push --tags`); CI builds, publishes to PyPI, and creates the GitHub release automatically
+One serialized cut, in order. Only the last step publishes — never build/publish from a
+second place, and never tag a tree whose version, lock, changelog and docs disagree.
+
+1. **Bump the version in `pyproject.toml`** — `[project].version` is the single source of
+   truth. `engine/version.py` resolves it at runtime (installed package metadata via
+   `importlib.metadata`, falling back to `pyproject.toml` on a bare checkout), so there
+   is no version literal to edit there.
+2. **Refresh the lock and the installed metadata** — `uv lock` makes the `gitreins` entry
+   in `uv.lock` follow `pyproject.toml`; then `uv pip install -e . --no-deps` so
+   `importlib.metadata` reports the new version to `gitreins --version`, the MCP
+   handshake and `tests/test_version.py`. Confirm with `uv lock --check`.
+3. **Cut the CHANGELOG** — move the `## [Unreleased]` entries under a new
+   `## [X.Y.Z] — YYYY-MM-DD` heading and leave a fresh, empty `## [Unreleased]` header at
+   the top for the next cycle.
+4. **Sync every current-release stamp** — the README release banner (version plus the
+   `N tests pass` / `M test files` counts, both read from a live collection:
+   `python -m pytest --collect-only -q --override-ini=addopts=`), the
+   `docs/onboarding.md` version stamp, and any docstring, comment or skill file that
+   asserts the current release. Historical citations ("since vX.Y.Z", a dated dogfood
+   record) stay as they are.
+5. **Run the gates** — `python scripts/check_docs_drift.py`,
+   `python scripts/check_cli_examples.py`, `python scripts/check_board_ids.py
+   .coding-hermes/board`, the full suite (`python -m pytest -x --tb=short`),
+   `ruff check` and `ruff format --check` on the files you touched, and `gitreins guard`.
+   The guard runs the full suite in this mode, because `pyproject.toml` is one of its
+   safety-trigger config files.
+6. **Commit the cut on `main` and push it** — version, lock, changelog and docs land in
+   ONE commit, so no checkout can observe a half-cut release.
+7. **Tag and push the tag** —
+   `git tag -a vX.Y.Z -m "Release vX.Y.Z" && git push <remote> vX.Y.Z`.
+   That is the only publish step: CI's release workflow reads the tag, verifies it
+   matches `pyproject.toml`, builds the wheel and sdist, uploads them to PyPI and creates
+   the GitHub release automatically. There is no local `python -m build` or `twine` step.
+
+`<remote>` is your push remote for the public repository (`github` in this checkout;
+`origin` where the repo is the only remote).
 
 ## Questions?
 
