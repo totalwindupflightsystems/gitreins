@@ -27,6 +27,7 @@ from dataclasses import dataclass, field
 
 from engine.llm import LLMClient, ToolCall
 from engine.eval_cap import EvalCap, parse_eval_cap, eval_cap_from_config, _fmt_tokens
+from engine import command_hygiene
 
 logger = logging.getLogger("gitreins.evaluator")
 
@@ -1589,31 +1590,36 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             return {"error": str(e)}
 
     def _tool_run_command(self, cmd: str = None, command: str = None) -> dict:
-        """Run a shell command."""
+        """Run a shell command — bounded, group-clean, busy-wait-refusing.
+
+        The judge is an LLM, so whatever it runs is untrusted shell. Two
+        properties are load-bearing (fix for the 2026-09-18 host incident):
+
+        * a busy-wait / unbounded CPU-burn / fork-bomb command is REFUSED with a
+          message naming the correct primitive (``sleep`` for waiting,
+          ``scripts/loadgen.py`` for bounded load);
+        * the command runs in its own session and the whole process group is
+          reaped when it returns or times out, so backgrounded children
+          (``... &``) cannot escape as orphans reparented to ``systemd --user``.
+
+        Delegating to ``engine.command_hygiene.run_bounded`` keeps one
+        implementation of that discipline (see module docstring for the
+        measurements).
+        """
         cmd = cmd or command
         if not cmd:
             return {"error": "No command provided"}
-        try:
-            result = subprocess.run(
-                cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=self.command_timeout,
-                cwd=self.workdir,
-            )
-            output = result.stdout + result.stderr
-            if len(output) > 4000:
-                output = output[:4000] + f"\n... [truncated, exit_code={result.returncode}]"
-            return {
-                "cmd": cmd,
-                "exit_code": result.returncode,
-                "output": output,
-            }
-        except subprocess.TimeoutExpired:
-            return {"cmd": cmd, "error": f"Command timed out after {self.command_timeout}s"}
-        except Exception as e:
-            return {"cmd": cmd, "error": str(e)}
+
+        result = command_hygiene.run_bounded(
+            cmd,
+            cwd=self.workdir,
+            timeout=self.command_timeout,
+        )
+        if result.get("refused"):
+            return {"cmd": cmd, "error": result["reason"], "refused": True}
+        if "error" in result and "exit_code" not in result:
+            return {"cmd": cmd, "error": result["error"]}
+        return result
 
     def _tool_search_pattern(self, regex: str, file_glob: str = "*") -> dict:
         """Search the codebase for a regex pattern using ripgrep (rg) with fallback."""

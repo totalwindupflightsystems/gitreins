@@ -56,6 +56,7 @@ from dataclasses import dataclass, field
 import yaml
 
 from engine import lang_detect
+from engine import command_hygiene
 from engine.evidence_bounds import (
     MAX_STEP_EVIDENCE_CHARS,  # noqa: F401 — re-exported for this module's callers/tests
     _ERROR_TEST_LINE,
@@ -471,36 +472,37 @@ class Pipeline:
             # pre-commit hook — they poison nested git commands in tests
             # (same class as DF-008; guards.py got this in 3cad082).
             sanitized_env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-            result = subprocess.run(
+            # 2026-09-18: run through command_hygiene so a step that backgrounds work
+            # cannot leak orphans (the tier-2 run_command path caused 278 survivors
+            # reparented to systemd --user) and a busy-wait step is refused with a
+            # pointer at the bounded alternative. Same output/exit-code contract.
+            out = command_hygiene.run_bounded(
                 cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=step_def.get("timeout", 120),
                 cwd=self.workdir,
+                timeout=step_def.get("timeout", 120),
                 env=sanitized_env,
             )
-            # INT-FLAKE-2: keep the WHOLE captured output. The previous
-            # head-only [:2000] slice landed exactly where pytest's short test
-            # summary begins on a long run, so the verdict evidence had no tail
-            # for _bound_step_evidence to preserve (DF-GITREINS-POC-8's
-            # head+tail bound cannot recover what was already discarded) and
-            # the failing test id vanished from the record. Bounding now
-            # happens once, at serialization (StepResult.to_dict).
-            output = result.stdout + result.stderr
+            if out.get("refused"):
+                return StepResult(id=step_id, type="script", passed=False, error=out["reason"])
+            if out.get("timed_out"):
+                return StepResult(id=step_id, type="script", passed=False, error="Command timed out")
+            output = out["output"]
             # A non-zero exit is a hard failure regardless of on_fail. on_fail
             # only controls whether later steps still run; it must never turn a
             # failed lint/test into a pass (previously `on_fail: continue` and
             # generated `cmd || true` both zeroed the failure). 2026-08-08.
-            passed = result.returncode == 0
+            passed = out["exit_code"] == 0
 
-            data: dict = {"exit_code": result.returncode}
+            data: dict = {"exit_code": out["exit_code"]}
+            if out.get("leftover_pids"):
+                # Never hide a reap failure: the verdict carries the evidence.
+                data["leftover_pids"] = out["leftover_pids"]
             # INT-FLAKE-2: an exit code cannot say WHY pytest ended — under
             # `-x` + xdist a REAL failing test exits 2 (INTERRUPTED), exactly
             # like a signalled run. Classify from the output so the verdict
             # names the cause instead of the reader's guess.
             if _PYTEST_INVOCATION.search(cmd):
-                data["pytest_outcome"] = pytest_outcome(result.returncode, output)
+                data["pytest_outcome"] = pytest_outcome(out["exit_code"], output)
             # DF-018: the tier-1 stage points the written verdict at the raw
             # guard evidence (complete, untruncated run log) when one exists.
             guard_log = self._guard_log_ref(stage_id)

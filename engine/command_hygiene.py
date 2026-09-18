@@ -1,0 +1,201 @@
+"""command_hygiene — run judge commands bounded, and refuse CPU busy-waits.
+
+Why this module exists (2026-09-18 host incident, measured live):
+
+    The tier-2 evaluator's ``run_command`` tool executed the judge's shell with
+    ``subprocess.run(cmd, shell=True, timeout=...)``. That is unsafe in the
+    specific way that produced 278 orphaned CPU burners on the fleet host:
+
+    * ``timeout=`` kills only the DIRECT child. A command that backgrounds
+      work — e.g. the load-repro idiom agents invent
+      ``for i in $(seq 1 64); do timeout 300 nice -n 0 sh -c 'while :; do :; done' & done``
+      — leaves those children running; they are reparented to ``systemd --user``
+      and outlive the evaluator entirely (measured: loadavg 220-346, ~2000 procs
+      on the box that also serves the gateway, scheduler and DuckBrain).
+    * Nothing stopped the judge from *manufacturing* load in the first place.
+
+Two guarantees fix both:
+
+1. ``run_bounded`` spawns the command in its OWN session
+   (``start_new_session=True``) and kills the whole PROCESS GROUP when the call
+   returns or times out, so backgrounded children cannot escape. Kill signals are
+   validated (never PID 1, group must still exist in ``/proc``) — the repo's own
+   rule after the ``os.killpg`` incident.
+2. ``busy_wait_reason`` refuses busy-wait / unbounded CPU-burn / fork-bomb
+   commands outright, pointing at the bounded alternative
+   (``scripts/loadgen.py``) or ``sleep`` for waiting.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import signal
+import subprocess
+import time
+from pathlib import Path
+
+# ── refusal policy ────────────────────────────────────────────────────────────
+
+_SPIN_LOOP = re.compile(r"while\s+(?::|true)\s*;\s*do\s+(?:(?::|true|continue)\s*;?\s*)+done")
+_FORK_BOMB = re.compile(r":\s*\(\s*\)\s*\{[^}]*:\s*\|\s*:[^}]*\}")
+_YES_PIPED = re.compile(r"(?:^|[;&|]\s*)yes\s*\|")
+_BOUNDING_CONSUMER = re.compile(
+    r"\|\s*(?:head|tail|grep\s+-m|sed\s+-n|timeout\s+\d+|awk[^|]*(?:exit|NR))"
+)
+_YES_BARE = re.compile(r"(?:^|[;&|]\s*)yes\s*(?:>\s*/dev/null|>>\s*/dev/null|$|[;&])")
+_CAT_ZERO_REDIRECT = re.compile(r"cat\s+/dev/zero\s*(?:>|>>)")
+_DD_UNBOUNDED = re.compile(r"dd\s+[^;&|]*if=/dev/zero[^;&|]*of=/dev/null")
+
+
+def busy_wait_reason(cmd: str) -> str | None:
+    """Return a human reason when ``cmd`` is a CPU busy-wait/burn, else None.
+
+    Only UNBOUNDED forms are refused: ``yes | head -100`` and
+    ``dd ... count=10`` terminate on their own and stay allowed.
+    """
+    if not cmd:
+        return None
+    normalised = re.sub(r"\s+", " ", cmd)
+    if _SPIN_LOOP.search(normalised):
+        return "a CPU busy-wait loop (`while :; do :; done`-class)"
+    if _FORK_BOMB.search(normalised):
+        return "a shell fork bomb"
+    if _YES_PIPED.search(normalised) and not _BOUNDING_CONSUMER.search(normalised):
+        return "an unbounded `yes` burn"
+    if _YES_BARE.search(normalised):
+        return "an unbounded `yes` burn"
+    if _CAT_ZERO_REDIRECT.search(normalised):
+        return "an unbounded `cat /dev/zero` burn"
+    if _DD_UNBOUNDED.search(normalised) and "count=" not in normalised:
+        return "an unbounded `dd if=/dev/zero of=/dev/null` burn"
+    return None
+
+
+BUSY_WAIT_MESSAGE = (
+    "refused: {reason}.\n"
+    "These loops burn a core for nothing and — when backgrounded — OUTLIVE the evaluator "
+    "(reparented to systemd --user). On 2026-09-18 this left 278 orphaned burners, loadavg "
+    "220-346, on the host that also serves the gateway, scheduler and DuckBrain.\n"
+    "Use instead:\n"
+    "  * to WAIT → `sleep <seconds>`;\n"
+    "  * for bounded load in a flake repro → `python3 scripts/loadgen.py --workers 4 --seconds 60` "
+    "(caps workers at 8, caps duration, arms PR_SET_PDEATHSIG, refuses shared hosts, fails if any "
+    "child survives);\n"
+    "  * a bounded burn → `timeout <s> stress-ng --cpu 2 --timeout <s>` when "
+    "stress-ng is installed."
+)
+
+# ── process-group hygiene ─────────────────────────────────────────────────────
+
+
+def pids_in_group(pgid: int) -> list[int]:
+    """PIDs whose process group is ``pgid`` (validated; scans /proc)."""
+    if not isinstance(pgid, int) or isinstance(pgid, bool) or pgid <= 1:
+        return []
+    found: list[int] = []
+    proc = Path("/proc")
+    if not proc.is_dir():
+        return found
+    for entry in os.listdir(proc):
+        if not entry.isdigit():
+            continue
+        try:
+            stat = (proc / entry / "stat").read_text()
+            # field 5 = pgrp (index 2 after the comm field, which may contain spaces)
+            fields = stat[stat.rindex(")") + 2:].split()
+            pgrp = int(fields[2])
+        except (OSError, ValueError, IndexError):
+            continue
+        if pgrp == pgid:
+            found.append(int(entry))
+    return found
+
+
+def kill_group(pgid: int, grace: float = 3.0) -> list[int]:
+    """SIGTERM then SIGKILL every process in ``pgid``'s group; return survivors.
+
+    Refuses PID 1 and any group that no longer exists (never signal a reused
+    PID): the group is re-checked in /proc between signals.
+    """
+    if not isinstance(pgid, int) or isinstance(pgid, bool) or pgid <= 1:
+        return []
+    if not pids_in_group(pgid):
+        return []
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(pgid, sig)
+        except (ProcessLookupError, PermissionError):
+            return pids_in_group(pgid)
+        time.sleep(grace)
+        if not pids_in_group(pgid):
+            return []
+    return pids_in_group(pgid)
+
+
+def run_bounded(
+    cmd: str,
+    *,
+    cwd: str | None = None,
+    timeout: float = 30.0,
+    max_output: int = 4000,
+    env: dict | None = None,
+) -> dict:
+    """Run ``cmd`` in its own session; always reap leftover group members.
+
+    Returns ``{"cmd", "exit_code", "output", "timed_out", "leftover_pids"}`` or
+    ``{"cmd", "refused", "reason"}`` for a refused busy-wait.
+    """
+    reason = busy_wait_reason(cmd)
+    if reason:
+        return {"cmd": cmd, "refused": True, "reason": BUSY_WAIT_MESSAGE.format(reason=reason)}
+
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            cwd=cwd,
+            env=env,
+            start_new_session=True,  # own process group → backgrounded children cannot escape
+        )
+    except OSError as exc:
+        return {"cmd": cmd, "error": str(exc)}
+
+    timed_out = False
+    output = ""
+    try:
+        output, _ = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        kill_group(proc.pid)
+        try:
+            output, _ = proc.communicate(timeout=5)
+        except (subprocess.TimeoutExpired, ValueError, OSError):
+            output = ""
+    finally:
+        # Even on clean exit the group may hold backgrounded children (`... &`):
+        # this is the leak that produced the orphan fleet.
+        leftovers = kill_group(proc.pid)
+
+    output = output or ""
+    if len(output) > max_output:
+        output = output[:max_output] + f"\n... [truncated, exit_code={proc.returncode}]"
+
+    result = {
+        "cmd": cmd,
+        "exit_code": proc.returncode,
+        "output": output,
+        "timed_out": timed_out,
+    }
+    if timed_out:
+        result["error"] = f"Command timed out after {timeout}s"
+    if leftovers:
+        result["leftover_pids"] = leftovers
+        result["warning"] = (
+            "process-group reap left survivors (reported, never hidden): "
+            f"{leftovers}"
+        )
+    return result
