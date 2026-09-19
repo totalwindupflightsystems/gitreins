@@ -63,3 +63,13 @@ gitreins judge fix-auth
   This bug took down Kara's entire session every 2-5 minutes for 30+ hours. The fix is
   ALREADY applied in `engine/lsp.py:482-502` (validation at :486, `os.killpg` guarded at :491,
   `proc.kill()` fallback at :495) — do not regress it.
+- **Spawn detached CPU burn loops** (`setsid sh -c 'while :; do :; done' &`, backgrounded
+  `timeout N nice ...` burner loops, unbounded `yes`/`cat /dev/zero`/`dd`) — when the caller
+  exits they are orphaned to `systemd --user` and keep running: this host hit loadavg 220+
+  with 278 survivors on 2026-09-18. The tier-2 evaluator now REFUSES them (see
+  `engine/command_hygiene.py` — it names the correct primitive in the refusal) and the
+  terminal tool vetoes them at the boundary. To WAIT use `sleep <seconds>`. To generate
+  BOUNDED load for a flake/load repro use the documented path: **`docs/load-reproduction.md`**
+  (`python3 scripts/loadgen.py --workers N --seconds S` — capped workers, capped duration,
+  PDEATHSIG teardown so children die with the runner, refuses to run on a shared host, and
+  fails the run if any child survives).
