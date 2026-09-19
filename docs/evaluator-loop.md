@@ -26,7 +26,7 @@ slightly above its cap (the final call is allowed through).
 | `max_time` | unset | wall-clock cap (`30s`, `5m`, `2h`); unset = unlimited |
 | `max_tokens_per_call` | `16384` | per-request output cap (separate from the session budget) |
 | `tool_call_weight` | `0.1` | iterations charged per tool call |
-| `compaction_threshold` | `0.90` | compact the conversation once 90% of the prompt budget is used |
+| `compaction_threshold` | `0.90` | compact once the **cumulative** input tokens consumed since the last compaction exceed this share of `max_input_tokens` — the same quantity the cap meters |
 
 ### When a cap is hit
 
@@ -45,8 +45,11 @@ evaluator makes a best-effort recovery instead:
 
 ### Context compaction
 
-Compaction is proactive: when the prompt reaches `compaction_threshold` of
-`max_input_tokens`, the conversation is rebuilt (at most `MAX_COMPACTIONS = 3`
+Compaction is proactive: when the **cumulative input tokens consumed since the
+last compaction** exceed `compaction_threshold` of `max_input_tokens` — the
+same quantity the hard input cap enforces (`EvalCap.cumulative_input_tokens`),
+not the size of any single prompt — the conversation is rebuilt (at most
+`MAX_COMPACTIONS = 3`
 per evaluation — the same ceiling covers provider context-length errors). A
 compaction resets the per-turn loop counter and the token counters
 (`reset_context_tracking`), but **not** the iteration/time caps: those span the

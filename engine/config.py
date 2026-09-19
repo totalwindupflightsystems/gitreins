@@ -49,7 +49,9 @@ class GitReinsDefaults:
     max_output_tokens: int = 131_072  # 128K — safe floor below most provider caps
     max_tokens_per_call: int = 16384  # Per-LLM-call cap (session budget is separate)
     tool_call_weight: float = 0.1
-    compaction_threshold: float = 0.90  # compact when 90% of input budget used (10% remaining)
+    # Compact once cumulative input tokens consumed since the last compaction
+    # exceed this share of max_input_tokens — the same quantity the cap meters.
+    compaction_threshold: float = 0.90
     code_context_budget: float = 0.70  # cap pre-loaded code context to 70% of input budget
     file_scope: str = "changed"  # "changed" = only changed files + tests, "full" = entire codebase
     fast_track: str = "auto"  # skip full call-graph on large repos (GR-064a)

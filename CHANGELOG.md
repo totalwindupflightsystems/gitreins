@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The tier-2 compaction valve meters the cumulative budget it protects
+  (GR-GAP-062)** — the proactive compaction check compared
+  `cumulative_prompt_tok`, which the loop maintains as the LARGEST SINGLE
+  CALL's prompt size (`engine/evaluator.py:1218`, `max(...)`), against
+  `compaction_threshold × max_input_tokens`, a share of the CUMULATIVE input
+  budget that `EvalCap` enforces (`engine/eval_cap.py:122,177`). On any rung
+  where the budget dwarfs a single prompt (the fleet runs 2M–24M against
+  ~50k prompts) the threshold was unreachable: compaction never fired,
+  `reset_context_tracking()` never ran, and the counter walked into the hard
+  cap, which returns INCOMPLETE and loses the verdict mid-write. The valve now
+  reads `self.eval_cap.cumulative_input_tokens` — the same quantity the cap
+  meters — and the warning line shows both figures so operators can tell them
+  apart. Regression:
+  `tests/test_evaluator.py::TestTransportFailureClassification::test_compaction_fires_on_cumulative_consumption_not_prompt_size`
+  (RED under the old comparison: 1000-token prompts against a 5%×100k
+  threshold never fired; GREEN: fires once cumulative consumption crosses
+  5000).
+
 ## [0.14.0] — 2026-09-18
 
 ### Added

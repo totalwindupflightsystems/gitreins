@@ -1118,16 +1118,22 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                     summary=f"Cap exceeded: {cap_error}",
                 )
 
-            # Proactive compaction: compact when context exceeds configured threshold
-            # (default 90% of input budget — 10% remaining)
-            if cumulative_prompt_tok > 0 and compaction_count < MAX_COMPACTIONS:
+            # Proactive compaction: compact when cumulative input consumption
+            # exceeds the configured threshold (default 90% of the input
+            # budget). The meter is the same quantity the hard cap enforces
+            # (EvalCap.cumulative_input_tokens) — a per-call prompt size can
+            # never reach a share of a cumulative budget on large rungs.
+            budget_used = self.eval_cap.cumulative_input_tokens
+            if budget_used > 0 and compaction_count < MAX_COMPACTIONS:
                 threshold_ratio = evaluator_cfg.get("compaction_threshold", 0.90)
                 threshold = int(self.eval_cap.max_input_tokens * threshold_ratio)
-                if cumulative_prompt_tok > threshold:
+                if budget_used > threshold:
                     logger.warning(
-                        "Context near limit (%d/%d tokens) — compacting (compaction #%d)",
-                        cumulative_prompt_tok,
+                        "Context budget %d/%d input tokens (largest single prompt %d) "
+                        "— compacting (compaction #%d)",
+                        budget_used,
                         self.eval_cap.max_input_tokens,
+                        cumulative_prompt_tok,
                         compaction_count + 1,
                     )
                     messages, compaction_count = self._compact_context(

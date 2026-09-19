@@ -1010,6 +1010,78 @@ class TestTransportFailureClassification:
         # Should have completed without compaction — all 3 calls direct
         assert call_count[0] == 3
 
+    def test_compaction_fires_on_cumulative_consumption_not_prompt_size(
+        self, evaluator, llm_client, tmp_workdir
+    ):
+        """GR-GAP-062: the proactive valve must meter the same quantity the hard
+        cap enforces — cumulative input tokens consumed since the last
+        compaction — NOT the largest single prompt. With a 100k budget, a 5%
+        threshold (5000) and 1000-token prompts, the old per-call comparison
+        could never fire; cumulative consumption crosses 5000 on the 6th call.
+        """
+        import yaml
+
+        cdir = os.path.join(tmp_workdir, ".gitreins")
+        os.makedirs(cdir, exist_ok=True)
+        with open(os.path.join(cdir, "config.yaml"), "w") as f:
+            yaml.dump({"evaluator": {"compaction_threshold": 0.05}}, f)
+
+        evaluator.eval_cap.max_input_tokens = 100_000
+        evaluator.eval_cap.max_iterations = -1  # long call sequence; iterations unbounded
+        threshold = int(100_000 * 0.05)
+
+        call_count = [0]
+        max_single_prompt = [0]
+        first_firing = {}  # cumulative_input_tokens observed at the first compaction
+
+        def fake_chat(messages, tools=None, max_tokens=None):
+            call_count[0] += 1
+            if call_count[0] <= 20:
+                tc = ToolCall(
+                    id=f"tc{call_count[0]}",
+                    name="read_file",
+                    arguments={"path": f"f{call_count[0]}.py"},
+                )
+                max_single_prompt[0] = max(max_single_prompt[0], 1000)
+                return LLMResponse(
+                    content="checking",
+                    tool_calls=[tc],
+                    usage=MagicMock(
+                        prompt_tokens=1000,
+                        completion_tokens=10,
+                        cache_read_tokens=0,
+                        cache_write_tokens=0,
+                        total_tokens=1010,
+                    ),
+                )
+            return LLMResponse(
+                content='{"verdict":"COMPLETE","items":[{"criterion":"c0","status":"PASS","detail":"ok"}],"summary":"done"}',
+            )
+
+        real_compact = evaluator._compact_context
+
+        def spy_compact(*args, **kwargs):
+            if not first_firing:
+                first_firing["budget_used"] = evaluator.eval_cap.cumulative_input_tokens
+            return real_compact(*args, **kwargs)
+
+        with patch.object(llm_client, "chat", side_effect=fake_chat):
+            with patch.object(
+                evaluator, "_tool_read_file", return_value={"content": "test", "total_lines": 1}
+            ):
+                with patch.object(evaluator, "_compact_context", side_effect=spy_compact) as spy:
+                    verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
+
+        assert spy.call_count >= 1
+        # The decisive asymmetry the old code cannot satisfy: at the first
+        # firing the LARGEST SINGLE PROMPT (1000) was far below the threshold
+        # while CUMULATIVE consumption had crossed it.
+        assert max_single_prompt[0] < threshold
+        assert first_firing["budget_used"] > threshold
+        # The run must not die on the hard cap.
+        assert verdict.verdict == "COMPLETE"
+        assert "Cap exceeded" not in verdict.summary
+
     def test_code_context_budget_config_override(self, evaluator, llm_client, tmp_workdir):
         """When config sets code_context_budget to 0.20, code context is capped at 20%."""
         import yaml
