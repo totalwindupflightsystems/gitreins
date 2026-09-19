@@ -20,7 +20,7 @@ Running `gitreins` with no command prints the top-level help and exits
 **0**. An unknown command exits **2** (argparse behavior for
 unrecognized arguments).
 
-There are **13 top-level subcommands**:
+There are **14 top-level subcommands**:
 
 | # | Command | Purpose |
 |---|---------|---------|
@@ -36,7 +36,8 @@ There are **13 top-level subcommands**:
 | 10 | `security-scan` | Run the Antares CVE localization scanner (opt-in) |
 | 11 | `setup-tools` | Show available static analysis tools and install instructions |
 | 12 | `report` | Show verdict history |
-| 13 | `serve` | Live judgment browser (local web server) |
+| 13 | `qa` | QA run ledger — record and read QA run outcomes |
+| 14 | `serve` | Live judgment browser (local web server) |
 
 ## 1. `gitreins install`
 
@@ -422,6 +423,49 @@ branch-backed; disposable worktrees are detached and live under a separate
 Task worktrees themselves are created with `gitreins task worktree <id>`
 (idempotent: an existing tree for the task is reused).
 
+### `worktree doctor`
+
+```bash
+gitreins worktree doctor
+```
+
+Prints and validates the shared canonical board resolution for the checkout
+you invoked it from: the worktree root, the git common dir, the canonical main
+checkout, the canonical board path, and whether the ignored local worktree
+board copy is present. Exit **0** means the resolution is valid; exit **1**
+means it is not (`worktree doctor: invalid` with the reason on stderr).
+
+### `worktree list`
+
+```bash
+gitreins worktree list
+```
+
+Lists every registered task worktree (task id, branch, state, phase, age, cap)
+and prints the configured fleet cap. Read-only, no options; exit **0** even
+when nothing is registered (`No worktrees registered.`).
+
+### `worktree fleet`
+
+```bash
+gitreins worktree fleet <manifest> [--max-concurrent-worktrees <n>] [--tick <id>]
+  [--merge] [--force-merge --actor <identity>]
+```
+
+Runs the explicit lanes in a JSON/YAML manifest (a `lanes` list) concurrently
+in isolated worktrees and prints the tick report as JSON.
+
+| Option | Description |
+|--------|-------------|
+| `--max-concurrent-worktrees <n>` | Override the configured fleet cap for this run (positive integer) |
+| `--tick <id>` | Optional tick/job id recorded with the run |
+| `--merge` | Apply successful lanes serially after execution |
+| `--force-merge` | Bypass verdict gates when used with `--merge` |
+| `--actor <identity>` | Identity required by `--force-merge` |
+
+Exit **0** prints the report; exit **1** means the manifest or a lane failed
+validation (`worktree fleet: failed` with the error on stderr).
+
 ### `worktree fresh`
 
 ```bash
@@ -473,6 +517,37 @@ key is configured, the judge is recorded as skipped rather than passed.
 failed, and exit 2 means GitReins infrastructure failed. Evidence contains
 `steps`, a `judge` object, timestamps, the tree path, and keep status.
 
+### `worktree clean`
+
+```bash
+gitreins worktree clean [--confirm-stale-orphan]
+```
+
+Reaps merged task worktrees immediately and finished disposable runs, then
+reports what it kept. Stale (>24h without a heartbeat) and orphan trees are
+**reported and kept** unless you pass `--confirm-stale-orphan`, which also
+removes them. Exit **0** whether or not anything was reaped (it prints
+`Nothing to reap.`); exit **1** means the reap itself failed
+(`worktree clean: failed`).
+
+### `worktree merge`
+
+```bash
+gitreins worktree merge <id> [--force --actor <identity>] [--reason <text>]
+```
+
+Judge-gated fast-forward merge of a task worktree into canonical main, then
+reaps the tree.
+
+| Option | Description |
+|--------|-------------|
+| `--force` | Bypass only the verdict gate; all Git safety checks still apply |
+| `--actor <identity>` | Required identity recorded when `--force` bypasses the verdict gate |
+| `--reason <text>` | Reason recorded for a `--force` override |
+
+Exit **0** merges and prints the destination commit; exit **1** means the merge
+was refused (`worktree merge: refused` with the reason on stderr).
+
 ## 13. `gitreins qa`
 
 QA run ledger — the record of what QA runs actually did. `worktree fresh`,
@@ -496,15 +571,29 @@ gitreins qa record [--project <name>] [--kind <kind>] [--verdict PASS|FAIL]
 | `-n <count>` | Number of recent runs to show (default 20) |
 | `--json` | Emit the ledger rows as JSON |
 
-Exit **0** on success, **2** when `--cell` is not `NAME=STATUS`.
+Read-only. Exit **0** on success; an unknown option is an argparse usage error
+and exits **2**.
 
 ### `qa record`
+
+```bash
+gitreins qa record [--project <name>] [--kind <kind>] [--verdict PASS|FAIL]
+  [--exit-code <code>] [--cell <name>=<status> ...] [--finding <id>:<title> ...]
+  [--evidence <path>] [--note <text>] [--agent <id>] [--server <name>]
+  [--commit <sha>] [--ts <iso>] [--status <word>]
+```
 
 Records one row. `--project` defaults to the repository directory name,
 `--kind` to `lane`, `--verdict`/`--exit-code` to a passing verdict when
 neither is given, and `--commit` to the repository's `HEAD`. `--cell` and
 `--finding` are repeatable. Status defaults to `pass`/`fail` derived from the
 verdict.
+
+Exit **0** on success, **2** when `--cell` is not `NAME=STATUS`
+(`qa record: --cell expects NAME=STATUS (got '<value>')` on stderr), and
+**1** when the row could not be recorded (an unreadable or unwritable ledger,
+or `qa_ledger.enabled: false`). Cell validation belongs to `record`: `list`
+takes no cell flag.
 
 A row carries the fleet QA-ledger keys — `ts`, `project`, `status`, `cells`,
 `findings`, `evidence`, `note` — plus harness extras: `kind`, `verdict`,

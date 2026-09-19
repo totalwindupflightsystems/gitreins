@@ -66,6 +66,11 @@ jobs:
         run: python scripts/check_docs_drift.py
       - name: Verify documented CLI examples parse
         run: python scripts/check_cli_examples.py
+      # GR-GAP-056: examples that parse can still sit in a table that is wrong
+      # (the reference claimed 13 subcommands while the CLI had 14). This step
+      # compares the doc's claims against the live parser.
+      - name: Verify CLI reference matches the live CLI
+        run: python scripts/check_cli_doc_sync.py
       - name: Verify board id hygiene
         run: python scripts/check_board_ids.py .coding-hermes/board
       - name: Run guards
