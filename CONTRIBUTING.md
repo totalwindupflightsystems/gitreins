@@ -32,16 +32,19 @@ pip install gitreins
 pytest tests/ -v
 ```
 
-All tests must pass before submitting a PR. Currently **1864 tests across 53
+All tests must pass before submitting a PR. Currently **1872 tests across 53
 test files** (canonical count: `pytest --collect-only -q`, which is exactly what
 CI recomputes).
 
-**Count claims are gated.** CI's `Verify README test-count drift` step collects
-the suite and fails the build when any `N tests pass`, `N tests across`, or
-`N test files` claim in README.md disagrees with the live collection — so a
-commit that adds, removes, or renames tests MUST update README's counts in the
-same commit. The numbers in this file are not machine-checked; keep them equal
-to README's.
+**Count claims are gated.** `scripts/check_docs_drift.py` runs the live
+collection (`pytest --collect-only -q --override-ini=addopts=`, exactly the
+CI command) and fails when any `N tests pass`, `N tests across`, or
+`N test files` claim in README.md **or this file** disagrees with it — so a
+commit that adds, removes, or renames tests MUST update the counts in the same
+commit. CI's `Verify README test-count drift` step runs that script (it is the
+single implementation; the numbers in this file are machine-checked too). Pass
+`--static` to skip the live comparison — the message then says so and certifies
+only that the documented claims agree with each other.
 
 ## Load reproduction
 
@@ -59,16 +62,19 @@ Some failures only appear under load. Reproduce them without leaving load behind
 
 ## Documentation Checks
 
-Run these before a docs change (the first two also run in CI):
+Run these before a docs change (both also run in CI):
 
 ```bash
-python scripts/check_docs_drift.py      # README version == pyproject version; README count claims agree
+python scripts/check_docs_drift.py      # README version == pyproject version, AND every README/CONTRIBUTING test-count claim == the live pytest collection
 python scripts/check_cli_examples.py    # every documented `gitreins ...` example parses with the real argparse
 ```
 
-The suite's own count gate (`Verify README test-count drift`) is the third:
-README's `N tests pass` / `N tests across` / `N test files` claims must equal the
-live pytest collection.
+`check_docs_drift.py` is the single implementation behind CI's
+`Verify README test-count drift` and `Verify README version drift` steps — the
+live collection (`N tests pass` / `N tests across` / `N test files` claims in
+README.md and CONTRIBUTING.md must equal it) happens inside the script, not in
+a duplicated bash block, and an unmeasurable collection is a FAIL, never a
+green. `--static` skips the live comparison (the message says so).
 
 `check_cli_examples.py` replays each documented example through the CLI's own
 parser (handlers stubbed, so nothing executes) — a README example that cannot
@@ -81,7 +87,7 @@ parse is a broken promise, and the checker is what keeps the README's
 engine/            — Core engine (evaluator, guards, pipeline, LSP, LLM client, task manager, judge, dead_code)
 gitreins/          — CLI entry point and install script
 gitreins_mcp/      — MCP stdio server (12 tools)
-tests/             — pytest test suite (1864 tests across 53 files; canonical count in README)
+tests/             — pytest test suite (1872 tests across 53 files; canonical count in README)
 tests/reliability/ — 7 adversarial benchmark projects
 scripts/           — Repo-level checkers run by CI (docs drift, CLI examples, board ids) + the judgment viewer
 docs/              — Architecture, component map, evaluator loop, MCP API, CLI reference, dogfood reports
