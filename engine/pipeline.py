@@ -146,8 +146,6 @@ def parse_secrets_scanners(output: str) -> list[str]:
     return ids
 
 
-
-
 @dataclass
 class StepResult:
     id: str
@@ -485,7 +483,9 @@ class Pipeline:
             if out.get("refused"):
                 return StepResult(id=step_id, type="script", passed=False, error=out["reason"])
             if out.get("timed_out"):
-                return StepResult(id=step_id, type="script", passed=False, error="Command timed out")
+                return StepResult(
+                    id=step_id, type="script", passed=False, error="Command timed out"
+                )
             output = out["output"]
             # A non-zero exit is a hard failure regardless of on_fail. on_fail
             # only controls whether later steps still run; it must never turn a

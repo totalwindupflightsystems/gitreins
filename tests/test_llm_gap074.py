@@ -1,9 +1,9 @@
 """GAP-074 regression tests: LLMResponseError on no-choices provider bodies."""
+
 import pytest
 
 from engine.llm import LLMClient, LLMResponseError
 from unittest.mock import patch
-
 
 
 def test_gap074_missing_choices_raises_llm_response_error():
@@ -35,5 +35,7 @@ def test_gap074_reasoning_starved_empty_choices_message():
         finish = ""
         if choices == [] and data.get("usage"):
             finish = " (empty choices; usage=%s)" % data["usage"]
-        err = LLMResponseError("provider returned no choices: %s%s" % (provider_err or data, finish))
+        err = LLMResponseError(
+            "provider returned no choices: %s%s" % (provider_err or data, finish)
+        )
     assert "usage" in str(err) and "completion_tokens" in str(err)

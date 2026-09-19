@@ -122,7 +122,7 @@ def pids_in_group(pgid: int) -> list[int]:
         try:
             stat = (proc / entry / "stat").read_text()
             # field 5 = pgrp (index 2 after the comm field, which may contain spaces)
-            fields = stat[stat.rindex(")") + 2:].split()
+            fields = stat[stat.rindex(")") + 2 :].split()
             pgrp = int(fields[2])
         except (OSError, ValueError, IndexError):
             continue
@@ -224,7 +224,6 @@ def run_bounded(
     if leftovers:
         result["leftover_pids"] = leftovers
         result["warning"] = (
-            "process-group reap left survivors (reported, never hidden): "
-            f"{leftovers}"
+            f"process-group reap left survivors (reported, never hidden): {leftovers}"
         )
     return result

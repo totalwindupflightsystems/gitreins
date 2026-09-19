@@ -1426,9 +1426,7 @@ class TestProtocolVersionNegotiation:
         assert resp["result"]["protocolVersion"] == requested
         assert capsys.readouterr().err == ""  # an echo is never a mismatch
 
-    def test_unrecognized_request_answers_newest_and_notes_the_mismatch(
-        self, mcp_server, capsys
-    ):
+    def test_unrecognized_request_answers_newest_and_notes_the_mismatch(self, mcp_server, capsys):
         resp = mcp_server.handle_request(
             {
                 "jsonrpc": "2.0",
@@ -1487,9 +1485,7 @@ class TestProtocolVersionNegotiation:
             "notifications/roots/list_changed",
         ):
             assert (
-                mcp_server.handle_request(
-                    {"jsonrpc": "2.0", "method": method, "params": {}}
-                )
+                mcp_server.handle_request({"jsonrpc": "2.0", "method": method, "params": {}})
                 is None
             )
         resp = mcp_server.handle_request({"jsonrpc": "2.0", "id": 9, "method": "bogus/method"})

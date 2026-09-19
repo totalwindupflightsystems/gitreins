@@ -1969,7 +1969,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         # content preview AND name the parse reason so the persisted verdict
         # artifact says why the item list is empty (GR-GAP-059).
         parse_reason = parse_reason or "unparseable response"
-        logger.warning("Falling back to keyword parse: verdict=%s (reason: %s)", verdict, parse_reason)
+        logger.warning(
+            "Falling back to keyword parse: verdict=%s (reason: %s)", verdict, parse_reason
+        )
         return Verdict(
             verdict=verdict,
             summary=f"(auto-parsed from non-JSON response — {parse_reason}) {content[:300]}",

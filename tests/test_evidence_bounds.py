@@ -66,7 +66,9 @@ def _pytest_shaped_run() -> str:
     lines = ["============================= test session starts ============================="]
     lines.append("platform linux -- Python 3.11.15, pytest-9.1.1, pluggy-1.6.0")
     for index in range(400):
-        lines.append(f"tests/test_deep_module.py::test_case_{index:03d} PASSED [ {index % 100:3d}%]")
+        lines.append(
+            f"tests/test_deep_module.py::test_case_{index:03d} PASSED [ {index % 100:3d}%]"
+        )
     lines.append("tests/test_deep_module.py::test_breaks_in_the_middle FAILED [ 71%]")
     for index in range(40):
         lines.append(f"tests/test_deep_module.py::test_tail_{index:03d} PASSED [ 91%]")
@@ -76,7 +78,9 @@ def _pytest_shaped_run() -> str:
     lines.append("E   assert 1 == 2")
     lines.append("=========================== short test summary info ============================")
     lines.append("FAILED tests/test_deep_module.py::test_breaks_in_the_middle - assert 1 == 2")
-    lines.append("========================= 1 failed, 439 passed in 12.34s =========================")
+    lines.append(
+        "========================= 1 failed, 439 passed in 12.34s ========================="
+    )
     return "\n".join(lines)
 
 

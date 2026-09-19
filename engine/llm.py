@@ -347,8 +347,7 @@ class LLMClient:
             if choices == [] and data.get("usage"):
                 finish = " (empty choices; usage=%s)" % data["usage"]
             raise LLMResponseError(
-                "provider returned no choices: %s%s"
-                % (provider_err or data, finish)
+                "provider returned no choices: %s%s" % (provider_err or data, finish)
             )
         choice = choices[0]
         message = choice.get("message") or {}

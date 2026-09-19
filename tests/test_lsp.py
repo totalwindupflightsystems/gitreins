@@ -646,14 +646,17 @@ def gopls_environment_note(workdir):
     from a verdict, so every gopls failure now records which tools were found,
     their versions, and whether a module context was established.
     """
+
     def first_line(cmd):
         try:
             proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         except (OSError, subprocess.SubprocessError) as exc:
             return f"{cmd[0]}: {exc}"
-        return (proc.stdout or proc.stderr or "").strip().splitlines()[0] if (
-            proc.stdout or proc.stderr
-        ) else f"{cmd[0]}: no output"
+        return (
+            (proc.stdout or proc.stderr or "").strip().splitlines()[0]
+            if (proc.stdout or proc.stderr)
+            else f"{cmd[0]}: no output"
+        )
 
     return (
         f"gopls={shutil.which('gopls')} ({first_line(['gopls', 'version'])}); "

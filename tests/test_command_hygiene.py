@@ -6,6 +6,7 @@ assert by scanning cmdlines for a needle that could appear in the test runner's
 own argv — capture the child's real PID via a file and check /proc/<pid>, or
 assert on a side effect (a file that must NOT exist).
 """
+
 from __future__ import annotations
 
 import os
@@ -43,27 +44,34 @@ def pidfile(tmp_path):
 
 # ── refusal policy ────────────────────────────────────────────────────────────
 
-@pytest.mark.parametrize("cmd", [
-    "timeout 300 nice -n 0 sh -c while :; do :; done",
-    "cd /home/kara/crier && for i in $(seq 1 64); do timeout 300 nice -n 0 sh -c 'while :; do :; done' & done",
-    "bash -c 'while true; do :; done'",
-    "yes > /dev/null",
-    "cat /dev/zero > /dev/null",
-    "dd if=/dev/zero of=/dev/null bs=1M",
-    ":(){ :|:& };:",
-])
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "timeout 300 nice -n 0 sh -c while :; do :; done",
+        "cd /home/kara/crier && for i in $(seq 1 64); do timeout 300 nice -n 0 sh -c 'while :; do :; done' & done",
+        "bash -c 'while true; do :; done'",
+        "yes > /dev/null",
+        "cat /dev/zero > /dev/null",
+        "dd if=/dev/zero of=/dev/null bs=1M",
+        ":(){ :|:& };:",
+    ],
+)
 def test_busy_wait_commands_are_refused(cmd):
     assert ch.busy_wait_reason(cmd), f"must be refused: {cmd}"
 
 
-@pytest.mark.parametrize("cmd", [
-    "sleep 0.1",
-    "go test ./... -count=1",
-    "yes | head -100",
-    "dd if=/dev/urandom of=/dev/null bs=64k count=8",
-    "for i in $(seq 1 3); do echo $i; sleep 0.05; done",
-    "python3 scripts/loadgen.py --workers 4 --seconds 5",
-])
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "sleep 0.1",
+        "go test ./... -count=1",
+        "yes | head -100",
+        "dd if=/dev/urandom of=/dev/null bs=64k count=8",
+        "for i in $(seq 1 3); do echo $i; sleep 0.05; done",
+        "python3 scripts/loadgen.py --workers 4 --seconds 5",
+    ],
+)
 def test_legitimate_commands_still_run(cmd):
     assert ch.busy_wait_reason(cmd) is None, f"must NOT be refused: {cmd}"
 
@@ -85,6 +93,7 @@ def test_refused_command_never_executes(tmp_path):
 
 
 # ── the leak fix: backgrounded children cannot escape ────────────────────────
+
 
 def test_backgrounded_child_is_reaped_on_normal_exit(pidfile):
     """The exact incident shape: the call RETURNS while a `&` child is alive.
@@ -115,7 +124,7 @@ def test_group_helpers_validate_inputs():
     assert ch.kill_group(1) == []
     assert ch.pids_in_group(0) == []
     assert ch.kill_group("not-an-int") == []  # type: ignore[arg-type]
-    assert ch.kill_group(999_999_999) == []   # nonexistent group
+    assert ch.kill_group(999_999_999) == []  # nonexistent group
 
 
 def test_pids_in_group_finds_a_child_group():
@@ -137,6 +146,7 @@ def test_happy_path_reports_exit_code_and_output():
 
 
 # ── output bounding: the TAIL is where a run's summary lives ─────────────────
+
 
 def test_output_bound_keeps_the_tail_and_reports_the_omission():
     """QA-GITREINS-POC-11: the bound is head + TAIL on line boundaries.
