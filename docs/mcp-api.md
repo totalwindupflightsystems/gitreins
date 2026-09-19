@@ -302,7 +302,7 @@ Returned as successful JSON-RPC responses with `{"error": "..."}` in the result 
 |-----------|---------|--------------|
 | Task not found | task.start, task.complete, task.get, task.delete, judge.evaluate | `{"error": "Task not found: <id>"}` |
 | Task not found (cross-repo) | judge.evaluate | `{"error": "Task not found: <id> in <workdir>"}` |
-| In-progress tasks blocking commit | commit | `{"error": "Tasks still in progress — complete or delete them first", "tasks": [...]}` |
+| In-progress tasks blocking commit | commit | `{"error": "Tasks still in progress: <ids> — commits are blocked while a task is in_progress because task.complete runs the quality judge against the committed state. Complete them via task.complete, or delete them via task.delete, then retry commit.", "tasks": [...]}` |
 | Tier 1 guards failed | commit | `{"error": "Tier 1 guards failed — commit blocked", "details": "..."}` |
 | Evaluation failure | task.complete | `{"task": {...}, "verdict": {"error": "..."}}` |
 | LLM not configured | task.complete | `{"task": {...}, "note": "LLM not configured — skipping evaluation"}` |
