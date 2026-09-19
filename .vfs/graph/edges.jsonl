@@ -1405,3 +1405,16 @@
 {"from":"tests/test_mcp_integration.py","to":"pkg:shutil","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
 {"from":"demo-slugify/slugify.py","to":"pkg:re","rel":"imports","provenance":"ast_exact","confidence":1.0}
 {"from":"demo-slugify/slugify.py","to":"pkg:unicodedata","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"scripts/check_docs_drift.py","to":"pkg:argparse","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"scripts/check_docs_drift.py","to":"pkg:re","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"scripts/check_docs_drift.py","to":"pkg:subprocess","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"scripts/check_docs_drift.py","to":"pkg:sys","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"scripts/check_docs_drift.py","to":"pkg:pathlib","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_docs_drift.py","to":"pkg:importlib.util","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_docs_drift.py","to":"pkg:importlib.util","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_docs_drift.py","to":"pkg:subprocess","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_docs_drift.py","to":"pkg:subprocess","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_docs_drift.py","to":"pkg:sys","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_docs_drift.py","to":"pkg:sys","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_docs_drift.py","to":"pkg:pathlib","rel":"imports","provenance":"ast_exact","confidence":1.0}
+{"from":"tests/test_docs_drift.py","to":"pkg:pathlib","rel":"tested_by","provenance":"ast_exact","confidence":1.0}
