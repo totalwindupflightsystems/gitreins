@@ -24,6 +24,20 @@ Two guarantees fix both:
 2. ``busy_wait_reason`` refuses busy-wait / unbounded CPU-burn / fork-bomb
    commands outright, pointing at the bounded alternative
    (``scripts/loadgen.py``) or ``sleep`` for waiting.
+
+Output bounding (QA-GITREINS-POC-11, 2026-09-19): the captured output is bounded
+by the SHARED line-bounded implementation in ``engine.evidence_bounds`` —
+head + omission marker + TAIL — exactly like every other surface that persists
+command output (``engine.pipeline``, ``engine.worktree_fleet``,
+``engine.worktree_disposable``). The first cut of this module bounded the
+output HEAD-ONLY (``output[:max_output]``), which threw away everything past
+the cap: for a pipeline step whose pytest output sits after 4000+ chars of
+earlier output, pytest's short test summary ("FAILED tests/...::test_x"), the
+maxfail banner and xdist's ``Interrupted`` marker were all discarded, so
+``engine.types.pytest_outcome`` honestly reported ``interrupted-unclassified``
+for a run that had really failed a test. That is the defect class
+DF-GITREINS-POC-8 / DF-GITREINS-POC-19 already fixed for the other evidence
+surfaces; this module now uses the same bounder so it cannot drift again.
 """
 
 from __future__ import annotations
@@ -34,6 +48,11 @@ import signal
 import subprocess
 import time
 from pathlib import Path
+
+# The shared head+tail, line-bounded evidence bounder. Importing it here is
+# safe — engine.evidence_bounds imports only engine.types (no cycle back into
+# engine.command_hygiene).
+from engine.evidence_bounds import MAX_EVIDENCE_CHARS, _bound_step_evidence
 
 # ── refusal policy ────────────────────────────────────────────────────────────
 
@@ -138,13 +157,19 @@ def run_bounded(
     *,
     cwd: str | None = None,
     timeout: float = 30.0,
-    max_output: int = 4000,
+    max_output: int = MAX_EVIDENCE_CHARS,
     env: dict | None = None,
 ) -> dict:
     """Run ``cmd`` in its own session; always reap leftover group members.
 
     Returns ``{"cmd", "exit_code", "output", "timed_out", "leftover_pids"}`` or
     ``{"cmd", "refused", "reason"}`` for a refused busy-wait.
+
+    ``output`` is bounded to ``max_output`` chars by the shared line-bounded
+    head+TAIL bounder (``engine.evidence_bounds``) — never a head-only slice, so
+    a summary written at the END of a run (pytest's short test summary, a
+    trailing error banner) survives the bound, and the omission marker reports
+    how many chars/lines went.
     """
     reason = busy_wait_reason(cmd)
     if reason:
@@ -181,8 +206,12 @@ def run_bounded(
         leftovers = kill_group(proc.pid)
 
     output = output or ""
-    if len(output) > max_output:
-        output = output[:max_output] + f"\n... [truncated, exit_code={proc.returncode}]"
+    # QA-GITREINS-POC-11: head+TAIL, line-bounded — the previously head-only
+    # `output[:max_output]` slice threw away pytest's short test summary (and
+    # the maxfail/xdist markers that live there), which made an honest failed
+    # run read as `interrupted-unclassified`. Same shared bounder as every
+    # other evidence surface, so this cannot drift again.
+    output = _bound_step_evidence(output, max_output)
 
     result = {
         "cmd": cmd,

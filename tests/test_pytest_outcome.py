@@ -18,13 +18,14 @@ retention (``_run_script_step`` keeps the whole output so
 """
 
 import os
+import re
 import shlex
 import subprocess
 import sys
 
 import pytest
 
-from engine.pipeline import Pipeline
+from engine.pipeline import MAX_STEP_EVIDENCE_CHARS, Pipeline
 from engine.types import PYTEST_OUTCOME_KINDS, pytest_outcome
 
 # ── Captured evidence (verbatim, from the live reproductions) ────────────────
@@ -295,9 +296,22 @@ class TestTier1TestsStepEvidence:
         assert outcome["interrupted"] is False
         assert outcome["first_failing_test"].endswith("test_broken.py::test_broken")
 
-        # The serialized (bounded) evidence must still carry the summary tail.
+        # The (bounded) evidence must still carry the summary tail.
+        #
+        # QA-GITREINS-POC-11: the bound now applies INSIDE
+        # engine.command_hygiene.run_bounded (shared head+tail bounder), so
+        # `step.output` is already bounded and step.to_dict() re-bounding it is
+        # idempotent — the old `len(retained) < len(step.output)` length-delta
+        # proxy is unsatisfiable by construction (measured after the fix: both
+        # 3398 chars). Pin the properties it was proxying for instead: the bound
+        # held on the step's own evidence, the truncation was REPORTED, and
+        # serialization lost nothing further.
         retained = step.to_dict()["output"]
-        assert len(retained) < len(step.output), "expected the 4000-char evidence bound to apply"
+        assert len(step.output) <= MAX_STEP_EVIDENCE_CHARS, len(step.output)
+        omitted = re.search(r"\[(\d+) chars omitted — ", step.output)
+        assert omitted, step.output[:200]
+        assert int(omitted.group(1)) > 0, "expected truncation to be reported"
+        assert retained == step.output, "serialization must not drop further evidence"
         assert "FAILED test_broken.py::test_broken" in retained
         assert "xdist.dsession.Interrupted" in retained
 

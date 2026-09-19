@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import pathlib
+import re
 import subprocess
 import sys
 import time
@@ -133,3 +134,68 @@ def test_happy_path_reports_exit_code_and_output():
     assert "hello" in out["output"]
     assert out["timed_out"] is False
     assert "leftover_pids" not in out
+
+
+# ── output bounding: the TAIL is where a run's summary lives ─────────────────
+
+def test_output_bound_keeps_the_tail_and_reports_the_omission():
+    """QA-GITREINS-POC-11: the bound is head + TAIL on line boundaries.
+
+    The defect pinned here: ``run_bounded`` bounded its captured output
+    HEAD-ONLY (``output[:max_output]``), so for a command whose meaningful
+    summary is written LAST — pytest's short test summary ("FAILED
+    tests/…::test_x"), the maxfail banner, xdist's ``Interrupted`` marker —
+    every piece of that evidence was thrown away. The pipeline step's
+    ``pytest_outcome`` then honestly reported ``interrupted-unclassified`` for
+    a run that had really failed a test (the DF-GITREINS-POC-8 / -19 class,
+    which the other evidence surfaces already bound head+tail).
+    """
+    from engine.evidence_bounds import MAX_EVIDENCE_CHARS
+
+    marker = "TAIL-MARKER-QA-GITREINS-POC-11"
+    # 200 short lines (~8 KB of output) and the marker as the LAST line: the
+    # tail is the only place the marker can be found.
+    cmd = (
+        'for i in $(seq 1 200); do echo "filler line $i padding padding padding"; done; '
+        f"echo {marker}"
+    )
+
+    # Premise, measured rather than assumed: the raw output really does exceed
+    # the cap (otherwise the assertions below are vacuous).
+    raw = ch.run_bounded(cmd, timeout=60, max_output=10**7)
+    assert raw["exit_code"] == 0
+    assert len(raw["output"]) > MAX_EVIDENCE_CHARS, len(raw["output"])
+    assert marker in raw["output"]
+
+    out = ch.run_bounded(cmd, timeout=60)
+    assert out["exit_code"] == 0
+    bounded = out["output"]
+
+    # The cap is a real bound...
+    assert len(bounded) <= MAX_EVIDENCE_CHARS, len(bounded)
+    assert len(bounded) < len(raw["output"])
+    # ...the head is kept...
+    assert bounded.startswith("filler line 1 padding")
+    # ...the TAIL survived, and it is the true end of the output...
+    assert marker in bounded
+    assert bounded.rstrip("\n").endswith(marker), bounded[-200:]
+    # ...both cuts are on LINE boundaries (no half-written line)...
+    for line in bounded.splitlines():
+        assert (
+            line == ""
+            or line.startswith("filler line ")
+            or line == marker
+            or line.strip().startswith("…")
+        ), f"half-written line in bounded output: {line!r}"
+    # ...and the truncation is REPORTED, with how much went.
+    omitted = re.search(r"\[(\d+) chars omitted — (\d+) line\(s\)\]", bounded)
+    assert omitted, bounded
+    gone = int(omitted.group(1))
+    assert 0 < gone < len(raw["output"]), (gone, len(raw["output"]))
+
+
+def test_output_under_the_cap_is_returned_verbatim():
+    """The bound must not touch output that fits — no marker, no reflow."""
+    out = ch.run_bounded("printf 'a\\nb\\nc\\n'", timeout=10)
+    assert out["output"] == "a\nb\nc\n"
+    assert "omitted" not in out["output"]

@@ -157,12 +157,23 @@ class TestRunCommand:
         assert "timed out" in result["error"]
 
     def test_output_truncated_at_4000(self, evaluator):
-        """Output is truncated at 4000 characters."""
-        # Generate > 4000 chars of output
-        result = evaluator._tool_run_command("python3 -c 'print(\"x\" * 5000)'")
-        output_len = len(result["output"])
-        assert output_len <= 4100  # Allow some margin for truncation message
-        assert "truncated" in result["output"]
+        """Output is bounded at 4000 chars and the truncation is REPORTED.
+
+        QA-GITREINS-POC-11: the marker moved from the old head-only suffix
+        (``"... [truncated, exit_code=N]"``) to the shared head+tail bounder's
+        ``… [N chars omitted — M line(s)] …`` (``engine.evidence_bounds``), the
+        same bound every other evidence surface applies. The two properties the
+        old assertions pinned are kept — the cap holds AND the bound announces
+        itself — and the tail, which the head-only slice dropped, is now pinned
+        too (the judge reads this output, so a summary written last must
+        survive).
+        """
+        # > 4000 chars of output, with a marker as the LAST line.
+        result = evaluator._tool_run_command("python3 -c 'print(\"x\" * 5000)' ; echo TAIL-KEEPME")
+        output = result["output"]
+        assert len(output) <= 4100  # the 4000-char cap + its omission marker
+        assert "chars omitted" in output, output[:200]
+        assert "TAIL-KEEPME" in output, "the tail of the output must survive the bound"
 
 
 class TestSearchPattern:

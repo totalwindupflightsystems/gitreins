@@ -1430,11 +1430,16 @@ class TestGoplsIntegration:
         fake.chmod(0o755)
         monkeypatch.setenv("PATH", f"{quiet_bin}{os.pathsep}{os.environ['PATH']}")
 
-        import subprocess
-
-        subprocess.run(
-            ["go", "mod", "init", "example.com/quiet"], cwd=lsp_workdir, capture_output=True
-        )
+        # QA-GITREINS-POC-11: NO `go mod init` here. The stand-in answers
+        # `initialize` and then goes silent — it never type-checks anything, so
+        # it needs no module context. That call was DEAD SETUP that only turned
+        # a box without a `go` binary into a FileNotFoundError inside this
+        # hermetic test (measured: PATH pointing at an empty dir →
+        # `FileNotFoundError: [Errno 2] No such file or directory: 'go'` from
+        # this unguarded subprocess.run). The sibling stand-in test above
+        # (recheck_after / DF-GITREINS-POC-21) already dropped it; this one had
+        # not. Real-toolchain setups keep using require_gopls_module_context,
+        # which SKIPS with the missing piece named instead of raising.
         path = os.path.join(lsp_workdir, "quiet.go")
         with open(path, "w") as f:
             f.write('package main\n\nfunc main() {\n\tvar x int = "hello"\n}\n')
