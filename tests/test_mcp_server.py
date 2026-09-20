@@ -984,6 +984,7 @@ class TestJudgeAsyncPersistence:
 
         status = _mcp_call(mcp_server, "judge.status", {"job_id": job["id"]})
         assert status["status"] == "error"
+        assert status["running"] is False
         assert "no longer exists" in status["error"]
 
     def test_unknown_job_still_errors_from_disk(self, mcp_server):
@@ -1004,6 +1005,108 @@ class TestJudgeAsyncPersistence:
         assert status["pid"] == os.getpid()
         assert isinstance(status["started_at"], (int, float))
         self._poll_status(mcp_server, result["job_id"])
+
+    # ── DF-GITREINS-POC-24: additive `running` boolean ──────────────────────
+
+    def test_judge_status_running_boolean_fresh_and_terminal(self, mcp_server, monkeypatch):
+        """judge.status carries `running`: true while evaluating, false once
+        terminal — every existing field and status string unchanged."""
+        monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
+        monkeypatch.setattr(mcp_server.llm, "api_key", "sk-test")
+        _stub_judge_evaluate(monkeypatch, sleep=0.3)
+        self._create_task(mcp_server, "bool-me")
+
+        fresh = _mcp_call(mcp_server, "judge.evaluate", {"id": "bool-me"})
+        assert set(fresh.keys()) == {"job_id", "status", "task_id", "workdir"}
+        assert fresh["status"] == "running"
+
+        status = _mcp_call(mcp_server, "judge.status", {"job_id": fresh["job_id"]})
+        # Exact key set: the payload is today's shape + exactly one field.
+        assert set(status.keys()) == {
+            "job_id",
+            "status",
+            "running",
+            "task_id",
+            "workdir",
+            "result",
+            "error",
+            "pid",
+            "started_at",
+        }
+        assert status["status"] == "running"
+        assert status["running"] is True
+
+        terminal = self._poll_status(mcp_server, fresh["job_id"])
+        assert set(terminal.keys()) == {
+            "job_id",
+            "status",
+            "running",
+            "task_id",
+            "workdir",
+            "result",
+            "error",
+        }
+        assert terminal["status"] == "complete"
+        assert terminal["running"] is False
+
+    def test_old_build_record_without_running_key_reports_not_running(self, mcp_server):
+        """A disk record written by an OLD build (no `running` key) reports
+        `running: false` instead of crashing or inventing a value."""
+        from engine.job_store import new_job_id, save_job
+
+        # Hand-built old-build record: no `running` key anywhere, live pid
+        # (this process) so the resume path leaves it untouched.
+        job = {
+            "id": new_job_id(),
+            "status": "complete",
+            "task_id": "legacy-me",
+            "workdir": mcp_server.workdir,
+            "result": {"passed": True},
+            "error": None,
+            "started_at": 1.0,
+            "finished_at": 2.0,
+            "pid": os.getpid(),
+            "caps": None,
+        }
+        save_job(job)
+
+        status = _mcp_call(mcp_server, "judge.status", {"job_id": job["id"]})
+        assert status["status"] == "complete"
+        assert status["running"] is False
+
+    def test_old_build_record_resumes_and_reports_running(self, mcp_server, monkeypatch):
+        """An old-build RUNNING record (no `running` key, dead pid) resumes
+        and reports `running: true` — the resume claim write is a
+        current-build write, so it stamps the field."""
+        monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
+        monkeypatch.setattr(mcp_server.llm, "api_key", "sk-test")
+        _stub_judge_evaluate(monkeypatch, sleep=0.05)
+        self._create_task(mcp_server, "legacy-orphan")
+
+        from engine.job_store import new_job_id, save_job
+
+        job = {
+            "id": new_job_id(),
+            "status": "running",
+            "task_id": "legacy-orphan",
+            "workdir": mcp_server.workdir,
+            "result": None,
+            "error": None,
+            "started_at": 1.0,
+            "finished_at": None,
+            "pid": 99999999,
+            "caps": None,
+        }
+        assert "running" not in job
+        save_job(job)
+
+        status = _mcp_call(mcp_server, "judge.status", {"job_id": job["id"]})
+        assert status["status"] == "running", f"expected resume, got: {status}"
+        assert status["running"] is True
+
+        terminal = self._poll_status(mcp_server, job["id"])
+        assert terminal["status"] == "complete"
+        assert terminal["running"] is False
 
     # ── GR-GAP-046: judge single-flight + resume lease ─────────────────────
 

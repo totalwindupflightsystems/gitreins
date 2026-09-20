@@ -818,6 +818,7 @@ class GitReinsMCPServer:
                     {
                         "result": d,
                         "status": "complete",
+                        "running": False,
                         "finished_at": time.time(),
                     }
                 )
@@ -826,6 +827,7 @@ class GitReinsMCPServer:
                 _finish(
                     {
                         "status": "error",
+                        "running": False,
                         "error": str(e),
                         "finished_at": time.time(),
                     }
@@ -886,6 +888,7 @@ class GitReinsMCPServer:
             task = TaskManager(wd).get(fresh.get("task_id", ""))
             if task is None:
                 fresh["status"] = "error"
+                fresh["running"] = False
                 fresh["error"] = (
                     f"task {fresh.get('task_id')} no longer exists in {wd} — job could not be resumed"
                 )
@@ -900,6 +903,10 @@ class GitReinsMCPServer:
             )
             fresh["pid"] = os.getpid()
             fresh["resumed_at"] = time.time()
+            # Additive (DF-GITREINS-POC-24): the claim write is a current-
+            # build write, so stamp the field — an old-build record without
+            # the key resumes and reports running=True like any fresh job.
+            fresh["running"] = True
             save_job(fresh, directory=store_dir)
             self._start_job_thread(
                 fresh,
@@ -929,6 +936,10 @@ class GitReinsMCPServer:
         d = {
             "job_id": job["id"],
             "status": job["status"],
+            # Additive (DF-GITREINS-POC-24): True while the job is
+            # dispatched/running, False once terminal. Records from older
+            # builds lack the key — treated as NOT running.
+            "running": bool(job.get("running", False)),
             "task_id": job["task_id"],
             "workdir": job["workdir"],
             "result": job.get("result"),
