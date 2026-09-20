@@ -113,8 +113,22 @@ class TestRuffFormatGate:
         it would pass forever and hide exactly the drift it is meant to catch."""
         assert re.search(r"ruff format\s+\.\s*$", _text(), re.MULTILINE) is None
 
-    def test_step_covers_the_whole_tree(self):
-        assert self._format_step()["run"].strip().endswith(".")
+    def test_step_covers_the_tracked_python_sources(self):
+        """The step must grade the tracked `.py`/`.pyi` sources the guard
+        grades — not a bare `.`.
+
+        `.` was the original scope and it failed on a clean tree: ruff >= 0.16
+        also formats python code blocks inside `.md`, so ``specs/*.md`` and
+        ``docs/*.md`` tripped the step (7 files, 2026-09-20) while the same
+        tree was clean under 0.15.22. The scope is now the tracked python file
+        list, which is what the guard's lint lane already uses.
+        """
+        run = self._format_step()["run"]
+        assert "git ls-files" in run
+        assert "'*.py'" in run and "'*.pyi'" in run
+        assert "--force-exclude" in run
+        # `--check` must still be present so the exit code carries the verdict.
+        assert "--check" in run
 
     def test_step_runs_before_the_guards(self):
         """Formatting drift reads as a clear, named failure in the workflow

@@ -66,8 +66,15 @@ jobs:
       # `ruff` arrives with the dev extra installed by "Install dependencies"
       # above (`pip install -e ".[dev]"` pins ruff>=0.5), so no extra install
       # step is needed to keep this and the guard's `ruff check` on one ruff.
+      # Scope: the guard's lint lane grades `.py`/`.pyi` sources, and it
+      # EXCLUDES what the repo's own `exclude`/`extend-exclude` names. `.` was
+      # wrong twice over: ruff >= 0.16 also formats python code blocks inside
+      # `.md` (7 spec docs — `specs/*.md`, `docs/*.md` — tripped the step on
+      # 2026-09-20 while the same tree was clean under 0.15.22), and a bare `.`
+      # ignores the intent of grading the shipped source. Pass the same shape
+      # `git ls-files` gives the guard.
       - name: Verify formatting with ruff format --check
-        run: ruff format --check .
+        run: git ls-files -z '*.py' '*.pyi' | xargs -0 ruff format --check --force-exclude
       # GR-GAP-061: both drift steps below delegate to the single
       # implementation in scripts/check_docs_drift.py (the live pytest
       # collection happens inside the script — no duplicated bash here).
