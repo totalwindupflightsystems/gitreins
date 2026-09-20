@@ -71,11 +71,11 @@ question ──► TRACE (hilo)  ──► ASSEMBLE (hilo) ──► BUDGET (mea
 
 - `--budget` **does not** guarantee the ceiling; the wrapper **measures** the assembled text and
   enforces `MAX_BUNDLE_TOKENS = 28_000` (2k margin under the measured ~30k wall).
-- Token estimate must be **conservative or real**. The same filler family measured **1.98 chars/token
-  when repetitive and 3.5 when not** — so `chars // 3.5` can undercount by ~75% and blow the ceiling.
-  Use a real tokenizer when one is available; otherwise the conservative floor `chars // 2`. Recompute
-  after every bundle, and keep the measurement in the verdict so a low score can be told apart from a
-  clipped bundle.
+- Token estimate must be **conservative or real**: this filler family measured **1.98** chars/token
+  when repetitive and **3.5** when varied, so `chars // 3.5` can undercount by ~75% and blow the ceiling.
+  Use a real tokenizer when one is available; otherwise the conservative floor `chars // 2`.
+  Recompute after every bundle, and keep the measurement in the verdict so a low score can be told apart
+  from a clipped bundle.
 - Truncation is **line-aligned** and **disclosed** (how many bytes/lines were dropped, from where).
   **Reuse `engine/evidence_bounds.py`** — it already implements head/tail budgets with an omission
   marker and hoisted summary lines. Do not write a second truncator.
