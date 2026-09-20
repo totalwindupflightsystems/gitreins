@@ -28,6 +28,20 @@ through the shared :func:`persist_evaluation` helper below, so the verdict
 record on disk is identical no matter which surface ran the evaluation.
 Console printing deliberately does NOT live here — the MCP server's stdout is
 its JSON-RPC channel and a stray write corrupts the protocol.
+
+One LIVE record per job: the entry directory is keyed on timestamp + task id,
+so a job that is re-dispatched under the SAME id — the resume path re-runs an
+orphaned ``running`` job whose owner died after it had already persisted —
+would otherwise append a second verdict for one logical run, leaving a consumer
+that joins history to the job store unable to tell which record is graded.
+:meth:`VerdictPersister.persist` therefore supersedes the previous live entry
+for a job id instead of leaving both looking current: the older record gets
+``superseded_by`` (the path of the record that replaced it) and
+``superseded_at``; the newer one carries ``supersedes`` (the path it replaced,
+``null`` for a first attempt). Superseding is a LABEL, never a delete — the
+abandoned attempt keeps its own verdict, summary and evidence for the audit
+trail. Records without a ``job_id`` (the sync surfaces) have no stable run
+identity to key on, so they are never superseded.
 """
 
 import hashlib
@@ -117,6 +131,12 @@ class VerdictPersister:
         worker-brief/driver-log/patch artifacts land in the SAME history commit
         as the verdict they belong to. A hook that raises is ignored: evidence
         is never allowed to fail a verdict.
+
+        A record carrying a ``job_id`` supersedes the previous LIVE entry for
+        that same job id (DF-GITREINS-POC-26): the predecessor is located before
+        the new entry is written and marked once it has landed, so after a
+        resumed job exactly ONE record per job id is live and the abandoned
+        attempt names the record that replaced it.
         """
         if not self.enabled:
             return "disabled"
@@ -131,6 +151,18 @@ class VerdictPersister:
         date_str = datetime.utcnow().strftime("%Y-%m-%d")
         entry_dir = os.path.join(self.history_dir, date_str, short_hash)
         os.makedirs(entry_dir, exist_ok=True)
+
+        # Supersede contract: locate the record this one replaces BEFORE writing,
+        # then label it AFTER the new record is on disk. Write-first ordering is
+        # deliberate — a crash in between leaves the previous attempt live rather
+        # than leaving a job id with no live record at all.
+        job_id = verdict_data.get("job_id")
+        prior_entry_rel = self._find_live_entry_for_job(job_id) if job_id else None
+        new_entry_path = self._entry_record_path(f"{date_str}/{short_hash}")
+        verdict_data["supersedes"] = (
+            self._entry_record_path(prior_entry_rel) if prior_entry_rel else None
+        )
+        verdict_data["superseded_by"] = None
 
         # Worker execution evidence (JVIEW-005): the brief, the driver-log tail
         # and the graded patch, written next to verdict.json so the verdict
@@ -147,6 +179,11 @@ class VerdictPersister:
         verdict_path = os.path.join(entry_dir, "verdict.json")
         with open(verdict_path, "w") as f:
             json.dump(verdict_data, f, indent=2, default=str)
+
+        # Label the attempt this one replaced (never delete it — the audit trail
+        # of the interrupted run survives).
+        if prior_entry_rel is not None:
+            self._mark_superseded(prior_entry_rel, new_entry_path, verdict_data["evaluated_at"])
 
         # Write summary.md
         summary_path = os.path.join(entry_dir, "summary.md")
@@ -422,6 +459,75 @@ class VerdictPersister:
             lines.append("")
 
         return "\n".join(lines)
+
+    # ── Supersede bookkeeping (DF-GITREINS-POC-26) ───────────
+
+    def _entry_record_path(self, entry_rel: str) -> str:
+        """Workdir-relative, "/"-joined path for a history-relative entry path.
+
+        This is the shape stored in ``supersedes``/``superseded_by``: the path a
+        verdict entry has on the ``gitreins`` branch, which is also how a record
+        is named on disk. An entry that cannot be expressed relative to the
+        workdir (history configured outside it) is recorded by absolute path
+        instead — still an unambiguous pointer for a consumer.
+        """
+        abs_entry = os.path.join(self.history_dir, *entry_rel.split("/"))
+        rel_to_wd = os.path.relpath(abs_entry, self.workdir)
+        if rel_to_wd.startswith(".."):
+            return abs_entry.replace(os.sep, "/")
+        return rel_to_wd.replace(os.sep, "/")
+
+    def _find_live_entry_for_job(self, job_id: str) -> str | None:
+        """History-relative path of the newest LIVE entry carrying *job_id*.
+
+        "Live" means the record is not marked ``superseded_by``. The scan runs
+        newest first (date desc, hash desc — the reader's ordering), so a chain
+        of resumes always supersedes the record that is currently live. Records
+        that are malformed or undecodable are skipped exactly as the history
+        reader skips them, and a record written by another surface for the same
+        job id is found the same way (the store is shared).
+        """
+        if not os.path.isdir(self.history_dir):
+            return None
+        for date_dir in sorted(os.listdir(self.history_dir), reverse=True):
+            date_path = os.path.join(self.history_dir, date_dir)
+            if not os.path.isdir(date_path):
+                continue
+            for hash_dir in sorted(os.listdir(date_path), reverse=True):
+                verdict_path = os.path.join(date_path, hash_dir, "verdict.json")
+                if not os.path.isfile(verdict_path):
+                    continue
+                try:
+                    with open(verdict_path) as f:
+                        data = json.load(f)
+                except (json.JSONDecodeError, OSError, UnicodeDecodeError):
+                    continue
+                if data.get("job_id") == job_id and not data.get("superseded_by"):
+                    return f"{date_dir}/{hash_dir}"
+        return None
+
+    def _mark_superseded(self, entry_rel: str, superseded_by: str, when: str) -> None:
+        """Label the entry at *entry_rel* as superseded by *superseded_by*.
+
+        Written atomically (tmp file + ``os.replace``) so a concurrent reader
+        never sees a half-rewritten verdict. Never raises: this is bookkeeping
+        on top of a verdict that is already written, so a failure must not turn
+        a successful persist into an error.
+        """
+        try:
+            verdict_path = os.path.join(self.history_dir, *entry_rel.split("/"), "verdict.json")
+            with open(verdict_path) as f:
+                data = json.load(f)
+            data["superseded_by"] = superseded_by
+            data["superseded_at"] = when
+            tmp = f"{verdict_path}.tmp-{os.getpid()}"
+            with open(tmp, "w") as f:
+                json.dump(data, f, indent=2, default=str)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, verdict_path)
+        except Exception as exc:
+            logger.warning("Failed to mark %s superseded (non-fatal): %s", entry_rel, exc)
 
     def _git_commit(self, entry_dir: str, task_id: str, passed: bool) -> str:
         """Commit verdict entry to gitreins orphan branch. Returns short hash or 'dry-run'."""
