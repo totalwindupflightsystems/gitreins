@@ -30,8 +30,8 @@ All numbers below were measured on this host on 2026-09-20; commands are reprodu
 | Answer shape | `answers.<q>.noul` (0–1) / `.choice` (label + probs) / `.score` (0..N + legend) | Three primitives: probability, classification, rubric position. |
 | Cost, measured | 315 in-tokens → `$0.0000132`; 30,008 in-tokens → `$0.001260336` | **$0.042/M input, $0 output.** The 28k-token bundle below costs ≈ $0.0012. |
 | Batch property | several questions answered in **one** request, one flat cost | Ask resolution + missing-kind + evidence-quality together; pay once. |
-| **Input ceiling** | **30,008 in-tokens accepted; ~30.2k+ rejected** `HTTP 400 max_tokens_exceeded` | This is the "32k context" in practice. **Usable budget ≈ 30k; spec caps at 28k.** |
-| Chars per token | ≈ 3.5 (105,160 chars → 30,008 tokens) | Budget arithmetic the wrapper uses. |
+| **Input ceiling** | **32,778 in-tokens accepted** (65,000 chars); 30,008 accepted (105,160 chars); rejected above ≈33k | This is the "32k context" in practice. **Usable budget ≈ 30k; spec caps the bundle at 28k.** |
+| Chars per token | **content-dependent: measured 1.98 and 3.5 on the same filler family** | A fixed divisor is unsafe — see the budget law in §3.3. |
 | Discriminating power | real snippet ("does this handle negatives") → `noul 0.87`; 30k tokens of filler → `0.09` | It scores **resolution**, not bulk. More code is not more answer. |
 | Key availability | `GITREINS_OPENROUTER_KEY` **live**; `OPENROUTER_API_KEY` **401 expired** | Failover across all `sk-or-v1-*` candidates is mandatory, not defensive polish. |
 | Hilo bundle | `hilo graph understand "<task>" --budget N` → `## MAP` / `## SIGNATURES` / `## DETAIL` with *whitespace-minified real source* + per-file `provenance` + `score` | This is the assembly primitive. |
@@ -71,7 +71,11 @@ question ──► TRACE (hilo)  ──► ASSEMBLE (hilo) ──► BUDGET (mea
 
 - `--budget` **does not** guarantee the ceiling; the wrapper **measures** the assembled text and
   enforces `MAX_BUNDLE_TOKENS = 28_000` (2k margin under the measured ~30k wall).
-- Token estimate = `chars // 3.5` (measured ratio), recomputed after each bundle.
+- Token estimate must be **conservative or real**. The same filler family measured **1.98 chars/token
+  when repetitive and 3.5 when not** — so `chars // 3.5` can undercount by ~75% and blow the ceiling.
+  Use a real tokenizer when one is available; otherwise the conservative floor `chars // 2`. Recompute
+  after every bundle, and keep the measurement in the verdict so a low score can be told apart from a
+  clipped bundle.
 - Truncation is **line-aligned** and **disclosed** (how many bytes/lines were dropped, from where).
   **Reuse `engine/evidence_bounds.py`** — it already implements head/tail budgets with an omission
   marker and hoisted summary lines. Do not write a second truncator.
