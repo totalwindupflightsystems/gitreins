@@ -4,7 +4,7 @@ description: >-
   How to use the GitReins quality harness in this repo (and any repo it's
   installed in): task lifecycle, guards, LLM judge, MCP tools, and the known
   pitfalls that will bite you. Load this before committing or creating tasks.
-version: 1.3.0
+version: 1.4.0
 category: software-development
 ---
 
@@ -208,7 +208,7 @@ and the gitignored registry:
 
 ```bash
 gitreins qa list --json          # newest runs: verdict, cells, exit code, commit
-gitreins qa record --project <repo> --kind bunker --exit-code 0 \
+gitreins qa record --project <repo> --kind bunker --verdict PASS --exit-code 0 \
   --cell launch=OK --evidence /tmp/evidence.jsonl --note "fresh-system battery"
 ```
 
@@ -217,12 +217,28 @@ gitreins qa record --project <repo> --kind bunker --exit-code 0 \
   bunker battery, a manual audit.
 - Rows carry the fleet QA-ledger keys (`ts`, `project`, `status`, `cells`,
   `findings`, `evidence`, `note`) plus harness extras (`kind`, `verdict`,
-  `run_id`, `exit_code`, `commit`, `harness_version`, `detail`).
+  `run_id`, `exit_code`, `commit`, `harness_version`, `detail`). The two schemas
+  are merged on purpose: a consumer that already parses fleet QA ledgers reads a
+  harness-written one with no translation layer.
 - Location: `GITREINS_QA_LEDGER` (a file, or a directory) > `qa_ledger.path` in
   `.gitreins/config.yaml` > `<repo>/.gitreins/qa-ledger.jsonl`.
-  `qa_ledger.enabled: false` stops recording — announced on stderr, never a
-  failure of the run it records.
+  `qa_ledger.enabled: false` stops recording — announced on stderr, exit 1, never
+  a failure of the run it records.
 - `gitreins report` prints a QA block after the task verdict history.
+- **ALWAYS pass `--verdict` (and `--exit-code`).** Omitting both writes
+  `"status":"unknown","verdict":"UNKNOWN"` with exit 0 (measured 2026-09-20b on
+  HEAD and on the 0.14.0 wheel), although `docs/cli-reference.md` says they
+  default to "a passing verdict". An UNKNOWN row renders with neither a tick nor
+  a cross, so it is indistinguishable from an undecided run — POC-29.
+- `--evidence <path>` is stored verbatim **without checking the path exists**
+  (exit 0, dangling pointer). Verify the path yourself before recording — POC-29.
+- `max_entries` (default 1000) keeps the newest rows, and the eviction is silent:
+  at a full ledger, the next `qa record` still prints "recorded" and exits 0 while
+  the count stays put — POC-32. Raise the cap before a long battery.
+- `gitreins install` does **not** add `.gitreins/qa-ledger.jsonl` to the consumer's
+  `.gitignore` (only this repo's own .gitignore has it), so a `git add -A` commit
+  will sweep fleet QA rows — agent ids, server names, evidence paths — into user
+  history. Add the ignore yourself — POC-31.
 
 ## Driving the MCP server as a real client (2026-09-20 dogfood run — verified at HEAD 0.14.0)
 
@@ -313,3 +329,87 @@ Client-side rules the hard way:
     whole worktree (guard scans staged scope), so the secrets step failed and masked
     the gap. Rule: judge = criteria + secrets; gate merges on guard (hook/CI), never
     on judge exit code alone.
+
+## commit-msg audit — OFF until you declare a stage (2026-09-20b dogfood run)
+
+`gitreins install` does **not** install a commit-msg hook (docs/cli-reference.md says
+so; verified on a fresh box — only `pre-commit` exists). You create it:
+
+```bash
+cat > .git/hooks/commit-msg <<'HOOK'
+#!/usr/bin/env bash
+exec gitreins commit-audit
+HOOK
+chmod +x .git/hooks/commit-msg
+```
+
+**That hook does nothing on its own.** `commit-audit "any message"` on a fresh
+`install`+`init` repo exits 0 with stdout AND stderr completely empty — no audit, no
+skip line — because the audit stage list comes from `config["pipeline"]["stages"]`
+(`engine/pipeline.py:253`), which no installer path ever writes. Declare the stage:
+
+```yaml
+pipeline:
+  stages:
+    - {id: commit_audit, type: commit_audit, on: [commit-msg]}
+
+commit_audit:            # ← TOP LEVEL. The only placement the engine reads.
+  mode: block            # warn (default) | block | suggest
+```
+
+- `mode` is read by `_load_commit_audit_config` → `cfg.get("commit_audit", {})` —
+  **top level only**. A stage-level `mode: block` and `defaults.commit_audit.mode:
+  block` are BOTH dead config: measured, the audit still printed "(Warning only —
+  commit will proceed)" and exited 0. Only top-level `block` exits 1
+  ("(Commit BLOCKED — fix message or set commit_audit.mode=warn)") — POC-30.
+- Once reachable the audit is genuinely good: it cited the staged diff by name
+  ("the diff adds a new file f.md … the message does not mention adding
+  documentation") rather than emitting generic style advice.
+- It needs an LLM credential and skips on a `gitreins.skip-tier2` trailer.
+
+## Disposable batteries need `.coding-hermes/board/` (2026-09-20b)
+
+`worktree fresh|repro|dogfood` raise
+
+```
+WorktreeResolutionError: canonical board directory does not exist:
+  <repo>/.coding-hermes/board; create .coding-hermes/board in the main checkout
+```
+
+with a raw traceback and exit **1** (the doc page reserves exit 2 for infrastructure
+failures) unless that directory exists — it is the Hermes fleet scheduler's board
+layout, not anything `gitreins install` creates, and no user-facing doc lists it as
+a prerequisite. `mkdir -p .coding-hermes/board` and the same command passes
+(`fresh: exit 0 in 0.191s`) and self-records in the QA ledger — POC-27.
+
+## Pitfalls 21–25 (2026-09-20b run — QA ledger / commit audit / fresh machine)
+
+21. **The documented `qa record` default is not what runs (POC-29).** Neither
+    `--verdict` nor `--exit-code` → `status: unknown`, `verdict: UNKNOWN`, exit 0.
+    Always pass both. `--evidence` is also accepted for a path that does not exist,
+    so the audit trail can point nowhere; validate it yourself.
+22. **Ledger rotation is silent (POC-32).** At `max_entries` the next record exits 0
+    and the oldest row is dropped with no message. With the default 1000 that is
+    minor; for a shared fleet ledger (`GITREINS_QA_LEDGER` → one path, many
+    projects — the configuration the docs recommend) it means anyone's next write
+    can truncate history invisibly.
+23. **The QA ledger is not gitignored in consumer repos (POC-31).** `install` covers
+    `tasks.yaml`, `config.yaml.bak`, `usage.jsonl`, `logs/` — not
+    `qa-ledger.jsonl`. A `git add -A` commit lands the rows (agent, server,
+    findings, evidence paths) in user history. Add `.gitreins/qa-ledger.jsonl` to
+    `.gitignore` in every repo that records QA.
+24. **A fresh-machine venv must be ACTIVATED before guard/commit (POC-28).** On bare
+    Debian: PEP-668 blocks the README's `pip install`; the venv path works (32 s);
+    but `gitreins guard` from the unactivated venv — even with pytest installed
+    *into that venv* — fails `✗ tests (full) — /bin/sh: 1: pytest: not found`
+    (the guard shells out via `sh -c` with the ambient PATH), and the README's
+    documented first commit is **blocked**. `source .venv/bin/activate` first, then
+    `Tier 1: DEGRADED PASS`, `✓ tests`, exit 0, commit lands. Same class as the
+    uv-runner fallback the 0.14.0 notes fixed — it just does not cover the
+    interpreter that launched gitreins.
+25. **Before filing "command X is broken", check whether it needs a declared stage
+    or config placement.** Three of this run's four surfaces were *inert*, not
+    broken, and the difference is one YAML block. Read
+    `engine/pipeline.py:253` (stages) and `_load_commit_audit_config` (top-level
+    `commit_audit`) before concluding a capability is missing — and prefer
+    `gitreins <cmd> --help` plus a controlled re-run over a confident bug report.

@@ -31,3 +31,15 @@ Details: `docs/dogfood/2026-09-20-integration.md` (real-use report), `docs/dogfo
 `skills/gitreins-usage/SKILL.md` v1.3.0 (MCP client section). Board rows: DF-GITREINS-POC-23, -24, -25.
 Install leg: RUN by hand on las-bunker-02 agent 70bc1d49 (spawned+destroyed cleanly) after three
 bunker-qa.sh launch failures — 16s PyPI install, smoke clean except known fresh-venv pytest gap.
+
+| 2026-09-20b | 🟡 PROMISING-BUT-ROUGH | "A team or agent fleet can record what its QA runs actually did — harness-run or outside the harness — into one browsable ledger, gate commits on a message audit, and self-verify in disposable worktrees without a bunker" — surfaces NEVER touched by runs 1-6 (QA ledger, commit-msg audit, disposable batteries in a NON-fleet repo) | (1) P1 `worktree fresh|repro|dogfood` refuse to run in any repo lacking `.coding-hermes/board/` — the fleet scheduler's layout, undocumented as a prerequisite; `mkdir -p` makes the identical command pass in 0.19s, and the infra failure is reported as exit 1 instead of the documented 2, as a raw traceback (DF-GITREINS-POC-27); (2) P1 fresh-venv install: `gitreins guard` from an UNACTIVATED venv fails `tests (full) — /bin/sh: 1: pytest: not found` even with pytest installed INTO that venv, and the README's own "Try the hook" first commit is BLOCKED (exit 1); `source .venv/bin/activate` fixes it (POC-28); (3) P1 `qa record` with neither --verdict nor --exit-code writes `verdict: UNKNOWN` exit 0 although docs promise a passing verdict, and `--evidence` accepts a nonexistent path (POC-29). Plus P1 POC-30 (`commit-audit` is a silent no-op with stdout AND stderr empty unless a pipeline stage is hand-written, and only a TOP-LEVEL `commit_audit.mode: block` actually blocks — stage-level `mode: block` is dead config), P2 POC-31 (`install` omits `.gitreins/qa-ledger.jsonl` from the consumer `.gitignore`, so the next `git add -A` commits fleet QA rows), P2 POC-32 (rotation at `max_entries` is silent: record exits 0, count unchanged). Regression sweeps GREEN: PyPI wheel == HEAD 0.14.0, DF-011 hook path pinning, QA-ledger fleet-schema interop, no commit-msg hook installed by install/init (matches docs) | ~3 min to a working QA ledger; ~20 min to a working message audit; friction count 9 (7 inside the documented flow) |
+
+Details: `docs/dogfood/2026-09-20b-integration.md` (real-use report: working flow, the 9-item
+error table, the fresh-machine leg), `docs/dogfood/diagnostics.md` (09-20b section: why each
+silent no-op happens — `engine/pipeline.py:253` empty stage list, `_load_commit_audit_config`
+top-level-only `mode`, `engine/repo_paths.py:264-269` board gate), `skills/gitreins-usage/SKILL.md`
+v1.4.0 (commit-msg audit section, board prerequisite, pitfalls 21-25). Board rows:
+DF-GITREINS-POC-27..-32 (6 rows: 4xP1, 2xP2).
+Install leg: RUN on las-bunker-03 (host UP this time; agent 3f4f7cdc spawned, used, destroyed and
+verified gone) — 32s venv install of the 0.14.0 wheel; all three P1s reproduce on the wheel.
+Foreman not woken, cooldowns untouched per the 2026-09-09 fleet law. No code changed.

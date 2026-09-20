@@ -540,3 +540,173 @@ walking away** — the same class as "filed:N is not proof," one layer up the st
 included); friction 6 → findings POC-23 (P1), POC-24 (P2), POC-25 (P2, harness); regression
 sweeps all green (POC-20 negotiation, 12-tool surface vs docs, commit-block on in_progress,
 all-files-land-in-commit vs the 09-07 P0, PyPI wheel == HEAD at 0.14.0).
+
+## 2026-09-20b run — the QA ledger, the commit-msg audit, and the surfaces that are OFF until you switch them on
+
+**Angle:** runs 1–6 covered the CLI, install/init, guard, judge, the wheel and (this morning)
+MCP + `serve`. This run covered what grep showed had never been exercised: `gitreins qa
+record|list`, `gitreins commit-audit` behind a real commit-msg hook, and the disposable
+battery (`worktree fresh|dogfood`) run against a **plain** consumer repo instead of a fleet
+checkout. HEAD `0031492`, wheel 0.14.0 (PyPI == HEAD), fresh-machine leg on `bunker-las-03`
+agent `3f4f7cdc` (spawned, used, destroyed).
+
+### The shape of this run's findings: everything works, nothing is reachable
+
+Four surfaces, three of which are **inert in the configuration the docs describe**. That is a
+different failure class from the earlier runs' (broken guards, stale wheels). It is worth
+naming precisely, because it is the class that survives tests: a feature whose unit tests
+drive it through its internal API can be 100% green while the command the user is told to run
+does nothing at all, with exit 0 and no output.
+
+### 1. The QA ledger — the one surface that works on first try
+
+`gitreins qa record` writes a JSONL row to `.gitreins/qa-ledger.jsonl` (resolved as
+`GITREINS_QA_LEDGER` > `qa_ledger.path` > repo default) and `qa list` / `report` read it back.
+The row merges two schemas on purpose: the fleet QA keys (`ts project status cells findings
+evidence note`) and harness extras (`kind verdict run_id exit_code commit harness_version
+detail`). That merge is the feature's real value — a fleet that already parses QA ledgers can
+read a harness-written one without a translation layer. Verified by writing a bunker-battery
+row the way this fleet does and reading it back through both `qa list` and `report`.
+
+Three ways the row can lie, all measured:
+
+- **No verdict/exit-code → `UNKNOWN`.** `docs/cli-reference.md` says both flags default to
+  "a passing verdict when neither is given". Measured, in a controlled run with the config
+  confirmed sound: `status: unknown`, `verdict: UNKNOWN`, exit 0. A QA row that is neither a
+  pass nor a fail is worse than one that fails — `qa list` prints it with no tick and no
+  cross, so a green battery and an undecided one look the same in the ledger the browser reads.
+- **`--evidence <nonexistent>` is accepted silently.** Exit 0, path stored verbatim. The
+  audit pointer is broken at the exact moment the record asserts there is evidence.
+- **Rotation is announced nowhere.** With `max_entries: 3` full, the next record exits 0
+  ("recorded"), the row count stays 3, and the oldest row is gone. Default is 1000 so this is
+  a P2 — until you follow the doc's own advice to point several projects at one fleet ledger.
+
+The module is `engine/qa_ledger.py` (523 lines) with `tests/test_qa_ledger.py`; the retention
+behaviour is implemented and tested, the *reporting* of it is what is missing. Same shape as
+the guard's DEGRADED-pass naming convention (0.14.0) — the convention exists in this codebase,
+it just was not applied here.
+
+### 2. `commit-audit` — a pipeline stage that no installer writes, and a `mode` nobody reads
+
+The command exists, is listed in `--help` and the README's standing surface, and
+`docs/cli-reference.md` has a Hooks section that tells you to create the hook yourself — with
+a body of `exec gitreins commit-audit`, correctly (gitreins does **not** install a commit-msg
+hook; verified on the fresh box: only `pre-commit` exists).
+
+Measured, four placements:
+
+| Config | `commit-audit "wip"` | Where it is read |
+|---|---|---|
+| nothing (fresh `install`+`init`) | exit 0, **stdout AND stderr empty** | `engine/pipeline.py:253` builds stages from `config['pipeline']['stages']` — empty list |
+| `pipeline.stages[] = {type: commit_audit, mode: warn}` | audit runs, rejects "wip" with reasons + a suggested message | ✓ works |
+| …plus stage-level `mode: block` | **still** "(Warning only — commit will proceed)", exit 0 | stage key never consulted |
+| top-level `commit_audit: {mode: block}` | exit 1, "(Commit BLOCKED …)" | `_load_commit_audit_config` → `cfg.get("commit_audit", {})` — **top level only** |
+
+So two documented-sounding placements are dead config (`pipeline.stages[].mode` and
+`defaults.commit_audit.mode` — the latter is the natural place, since every other setting lives
+under `defaults:`), and the only one that blocks is documented nowhere. A user who does exactly
+what the docs say installs a hook that prints nothing and blocks nothing, twice over.
+
+The audit itself, once reachable, is good — it cited the actual diff (`the diff adds a new file
+f.md … the message does not mention adding documentation`) instead of generic style advice.
+That is why the finding is about activation, not quality.
+
+### 3. The disposable battery — gated on the fleet scheduler's board layout
+
+```
+$ gitreins worktree fresh --cmd "echo hello"
+engine.repo_paths.WorktreeResolutionError: canonical board directory does not exist:
+  <repo>/.coding-hermes/board; create .coding-hermes/board in the main checkout
+```
+
+`mkdir -p .coding-hermes/board` and the *same* command passes (`fresh: exit 0 in 0.191s`) and
+self-records as `fresh PASS {'fresh': 'passed'}` in the QA ledger. The gate is
+`engine/repo_paths.py:264-269`. `.coding-hermes/board/` is **this fleet's scheduler layout**
+(`board/tasks.jsonl`, `events.jsonl`) — nothing `gitreins install` creates, and nothing the
+user-facing docs mention as a prerequisite (`docs/judgment-viewer.md` mentions the board only
+as a `serve` data source; `docs/disposable-verification.md` — the page that documents these
+exact commands — never mentions it).
+
+Two consequences worth separating: (a) the documented batteries are unreachable for a plain
+repo, which is the README's audience; (b) an infrastructure failure is reported as exit **1**,
+while the same doc page specifies "2 = GitReins infrastructure failures", so the fleet's own
+QA harness (which branches on those codes) misclassifies it. It also surfaces as a raw
+Python traceback rather than the one-line actionable sentence the function already composes.
+
+### 4. The fresh machine, seen again — and the first documented commit is blocked
+
+`bunker-las-03` was up this run (it was down for the 09-15 leg and unusable for this morning's),
+so the install leg ran properly on bare Debian 13, py3.13.5, no toolchains, no `uv`.
+
+PEP-668 blocks the README's literal `pip install gitreins` (known, documented as skill pitfall
+18). The venv path works: `python3 -m venv .venv && .venv/bin/pip install gitreins` → 32 s,
+`gitreins 0.14.0`. `install`+`init` work, and the pre-commit hook is pinned to the **absolute
+venv path** ([DF-011]'s shadowing fix, still holding).
+
+Then the quickstart's last documented step — *"Try the hook: make a change, git add ., git
+commit -m 'test'"* — **exits 1**:
+
+```
+✗ tests (full) — /bin/sh: 1: pytest: not found
+```
+
+The venv we invoked gitreins from owns pytest; the guard shells out via `sh -c` with the
+ambient PATH, so it cannot see it. Installing pytest into that venv changes nothing. The one
+thing that makes it work is `source .venv/bin/activate` — after which the same commands give
+`Tier 1: DEGRADED PASS`, `✓ tests (full)`, exit 0, and the commit lands. Nothing in the docs
+or the error says that. This is the same *class* as the runner-fallback the 0.14.0 notes
+celebrate (`uv run pytest` rewritten to `python -m pytest` when the runner is missing) — the
+fallback just does not extend to the interpreter that launched gitreins.
+
+### 5. The ledger's gitignore entry never reaches the consumer
+
+`gitreins install` writes `.gitignore` entries for `tasks.yaml`, `config.yaml.bak`,
+`usage.jsonl`, `logs/` — not `qa-ledger.jsonl`. On the fresh box, `git check-ignore` says
+"not ignored", and the very next `git add -A && git commit` landed
+`create mode 100644 .gitreins/qa-ledger.jsonl` in the history, rows and all (agent id, server,
+findings, evidence paths). The ledger line *does* exist in gitreins' own `.gitignore` (line 31)
+and was added by `67eca8f` — **the same commit that introduced the feature**. The ignore was
+applied to the vendor checkout, which is the one place it is not needed, and not to the
+installer's template. The documented intent is the opposite ("runtime artifact. Point
+GITREINS_QA_LEDGER at a tracked path to version it" — opt IN, not opt out).
+
+### The right way (condensed, from this run)
+
+```bash
+# fresh machine, no root:
+python3 -m venv .venv && .venv/bin/pip install gitreins pytest
+source .venv/bin/activate            # ← REQUIRED before guard/commit, not optional
+
+gitreins install && gitreins init
+mkdir -p .coding-hermes/board        # ← REQUIRED for worktree fresh|repro|dogfood
+echo '.gitreins/qa-ledger.jsonl' >> .gitignore   # install won't do it for you
+
+# QA ledger: ALWAYS pass a verdict explicitly — the documented default writes UNKNOWN
+gitreins qa record --kind lane --verdict PASS --cell smoke=passed \
+  --evidence /absolute/path/that/exists.json
+
+# commit-msg gate: needs BOTH a stage and a TOP-LEVEL mode
+cat > .git/hooks/commit-msg <<'HOOK'
+#!/usr/bin/env bash
+exec gitreins commit-audit
+HOOK
+chmod +x .git/hooks/commit-msg
+cat >> .gitreins/config.yaml <<'YAML'
+pipeline:
+  stages:
+    - {id: commit_audit, type: commit_audit, on: [commit-msg]}
+commit_audit:
+  mode: block
+YAML
+```
+
+### Run stats
+
+Time-to-first-success: QA ledger ~3 min; disposable battery 12 min (gated on discovering the
+board dir); working message audit ~20 min (including reading `engine/pipeline.py` to find which
+`mode` is live). Friction: **9**, seven inside the documented flow. Fresh-machine leg: RUN
+(`bunker-las-03` agent `3f4f7cdc`, destroyed and verified gone). Findings: POC-27 (P1),
+-28 (P1), -29 (P1), -30 (P1), -31 (P2), -32 (P2). All three P1s reproduce on the released
+0.14.0 wheel as well as HEAD. Regressions checked and still green: PyPI == HEAD (0.14.0),
+DF-011 hook pinning, `install`+`init` idempotence, QA-ledger fleet-schema interop, and the
+absence of a commit-msg hook (matching the docs).

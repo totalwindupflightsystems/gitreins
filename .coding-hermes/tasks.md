@@ -53,3 +53,21 @@ Full rows on the board (.coding-hermes/board/tasks.jsonl): DF-GITREINS-POC-23 (P
 Bunker install leg: RUN (by hand, las-bunker-02 agent 70bc1d49, 16s PyPI to 0.14.0;
 smoke clean except known fresh-venv pytest gap; agent destroyed). bunker-qa.sh launch
 failures filed as -25 with evidence.
+
+## Dogfood Findings (2026-09-20b)
+Verdict: PROMISING-BUT-ROUGH
+Angle: the QA-ledger / commit-msg-audit / disposable-battery surfaces and a fresh-machine
+install leg on a NON-fleet consumer repo — grep of docs/dogfood/ shows runs 1-6 never touched
+any of them (last run, this morning, took MCP + serve).
+Promise: "A team (or an agent fleet) can record what its QA runs actually did — harness-run or
+outside the harness — into one browsable ledger, gate commits on a message audit, and self-verify
+the whole thing in disposable worktrees without a bunker."
+Full rows on the real board (.coding-hermes/board/tasks.jsonl):
+- [P1] DF-GITREINS-POC-27 worktree fresh|repro|dogfood refuse to run in any repo lacking `.coding-hermes/board/` (the fleet scheduler's layout, undocumented): WorktreeResolutionError, raw traceback, exit 1 rather than the documented infra code 2. `mkdir -p` and the identical command passes in 0.19s and self-records in the QA ledger.
+- [P1] DF-GITREINS-POC-28 fresh venv install: `gitreins guard` from an UNACTIVATED venv fails `tests (full) — /bin/sh: 1: pytest: not found` even with pytest installed into that venv; the README's documented "Try the hook" first commit is BLOCKED (exit 1). `source .venv/bin/activate` -> DEGRADED PASS, tests pass, commit lands.
+- [P1] DF-GITREINS-POC-29 `qa record` with neither --verdict nor --exit-code writes `verdict: UNKNOWN / status: unknown`, exit 0, contradicting docs ("a passing verdict when neither is given"); `--evidence <nonexistent>` is also accepted silently (dangling audit pointer).
+- [P1] DF-GITREINS-POC-30 `commit-audit` is a silent no-op on a fresh install (empty stdout AND stderr, exit 0) unless the user hand-writes a `pipeline.stages[]` entry; and only a TOP-LEVEL `commit_audit.mode: block` actually blocks — stage-level `mode: block` (the documented placement) and `defaults.commit_audit.mode` are both dead config.
+- [P2] DF-GITREINS-POC-31 `gitreins install` omits `.gitreins/qa-ledger.jsonl` from the consumer `.gitignore` (only the vendor repo's own file has it, added by the same commit as the feature), so the next `git add -A` commits fleet QA rows — agent ids, server names, evidence paths.
+- [P2] DF-GITREINS-POC-32 rotation at `max_entries` is silent: with the ledger full, `qa record` exits 0 ("recorded") and the row count is unchanged — oldest row evicted without a word.
+Details: docs/dogfood/2026-09-20b-integration.md + diagnostics.md 09-20b section; skills/gitreins-usage/SKILL.md v1.4.0 (pitfalls 21-25).
+Install leg: RUN on las-bunker-03 (host UP; agent 3f4f7cdc spawned, used, destroyed and verified gone); all three P1s reproduce on the shipped 0.14.0 wheel. Foreman not woken; cooldowns untouched (2026-09-09 fleet law).
