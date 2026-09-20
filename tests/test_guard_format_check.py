@@ -207,6 +207,48 @@ class TestFormatCommandShape:
     def test_parse_ignores_a_count_only_report(self):
         assert _parse_unformatted_files("1 file would be reformatted\n") == []
 
+    def test_parse_reads_the_modern_ruff_locator(self):
+        """ruff >= 0.16 dropped ``Would reformat:`` for a diff-hunk shape.
+
+        Captured verbatim from `ruff 0.16.8 format --check drifted.py` on
+        2026-09-20 — the shape CI produced while the local venv (0.15.22) still
+        emitted the legacy line. Parsing only the legacy prefix made the gate
+        report ``ruff format <paths>`` with no files named in CI.
+        """
+        raw = (
+            "unformatted: File would be reformatted\n"
+            " --> drifted.py:2:7\n"
+            "  |\n"
+            "1 | values = [\n"
+            "  -     1, 2, 3,\n"
+            "2 +     1,\n"
+            "3 +     2,\n"
+            "4 +     3,\n"
+            "5 | ]\n"
+            "  |\n"
+            "\n"
+            "1 file would be reformatted\n"
+        )
+        assert _parse_unformatted_files(raw) == ["drifted.py"]
+
+    def test_parse_reads_several_modern_locators(self):
+        raw = (
+            "unformatted: File would be reformatted\n --> pkg/a.py:2:7\n  |\n"
+            "unformatted: File would be reformatted\n --> b.py:1:5\n  |\n"
+            "\n2 files would be reformatted\n"
+        )
+        assert _parse_unformatted_files(raw) == ["pkg/a.py", "b.py"]
+
+    def test_parse_keeps_a_path_containing_a_colon(self):
+        assert _parse_unformatted_files(" --> odd:name.py:3:1\n") == ["odd:name.py"]
+
+    def test_failure_message_names_files_from_the_modern_shape(self):
+        msg = _format_failure_message(
+            "unformatted: File would be reformatted\n --> drifted.py:2:7\n"
+        )
+        assert "ruff format drifted.py" in msg
+        assert "<paths>" not in msg
+
     def test_failure_message_names_the_files_and_the_fix(self):
         msg = _format_failure_message("Would reformat: pkg/a.py\nWould reformat: b.py\n")
         assert "pkg/a.py" in msg and "b.py" in msg

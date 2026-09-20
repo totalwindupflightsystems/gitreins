@@ -357,21 +357,41 @@ def _ruff_format_command(py_files: list[str]) -> list[str]:
     return ["ruff", "format", "--check", "--force-exclude", *py_files]
 
 
+_UNFORMATTED_LEGACY_PREFIX = "Would reformat:"
+
+
 def _parse_unformatted_files(raw: str) -> list[str]:
     """Paths ruff's formatter reported as needing a reformat.
 
-    ``ruff format --check`` names each offender on its own ``Would reformat:
-    <path>`` line; that line is the only place the files are named (the
-    trailing count line is a number, not a file list).
+    Two output shapes exist in the wild and BOTH must parse, because CI
+    installs ruff at its latest release while a developer's venv can hold an
+    older one (measured 2026-09-20: ruff 0.16.8 in CI vs 0.15.22 locally, and
+    the accompanying test only exercised the local shape — the gate's own
+    parser failed in CI with ``2 failed`` on an otherwise green suite):
+
+    * 0.15.x and earlier: ``Would reformat: <path>``, one line per offender.
+    * 0.16.x and later:   ``unformatted: File would be reformatted`` followed by
+      a diff hunk whose locator line is `` --> <path>:<line>:<col>``.
+
+    Either shape names each offender exactly once, so the union of the two
+    patterns is the file list; a line matching neither (the trailing count, the
+    unified-diff body) is ignored.
     """
-    prefix = "Would reformat:"
     files: list[str] = []
     for line in raw.splitlines():
-        line = line.strip()
-        if line.startswith(prefix):
-            path = line[len(prefix) :].strip()
-            if path and path not in files:
-                files.append(path)
+        stripped = line.strip()
+        if stripped.startswith(_UNFORMATTED_LEGACY_PREFIX):
+            path = stripped[len(_UNFORMATTED_LEGACY_PREFIX) :].strip()
+        elif stripped.startswith("-->"):
+            # ``--> path:line:col`` (ruff >= 0.16). Split from the RIGHT so a
+            # path containing a colon (Windows drive, POSIX name) survives.
+            locator = stripped[3:].strip()
+            parts = locator.rsplit(":", 2)
+            path = parts[0].strip() if len(parts) == 3 else locator
+        else:
+            continue
+        if path and path not in files:
+            files.append(path)
     return files
 
 
