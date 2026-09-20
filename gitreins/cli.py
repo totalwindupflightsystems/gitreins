@@ -40,7 +40,6 @@ import yaml
 from engine.version import __version__
 from engine.repo_paths import (
     WorktreeResolutionError,
-    resolve_worktree_identity,
     resolve_worktree_paths,
 )
 
@@ -1693,66 +1692,19 @@ def cmd_worktree_clean(args):
 
 
 def _persist_result(workdir: str, task, result) -> None:
-    """Save evaluation verdict to history. Non-fatal — logs on failure."""
+    """Save evaluation verdict to history. Non-fatal — logs on failure.
+
+    Thin wrapper over ``engine.persist.persist_evaluation`` (the single shared
+    implementation the MCP server also calls) that keeps the CLI's console
+    behaviour: the saved-verdict line, the dry-run warning and the non-fatal
+    warning all stay here, never in the shared helper.
+    """
     try:
-        from engine.persist import VerdictPersister
+        from engine.persist import VerdictPersister, persist_evaluation
 
         persister = VerdictPersister(workdir)
         if not persister.enabled:
             return
-
-        # Stamp the checkout that produced the verdict.  Keep explicit empty
-        # branch metadata for detached/non-Git-compatible invocations so the
-        # persisted schema remains stable while old verdicts stay readable.
-        try:
-            identity = resolve_worktree_identity(workdir)
-            producing_worktree = str(identity.worktree_root)
-            producing_branch = identity.branch or ""
-        except WorktreeResolutionError:
-            producing_worktree = os.path.abspath(workdir)
-            producing_branch = ""
-
-        # Build verdict data from result. The commit stamp is mandatory for
-        # merge-back to distinguish a verdict for an older branch tip.
-        source_commit = ""
-        try:
-            commit_result = subprocess.run(
-                ["git", "rev-parse", "--verify", "HEAD"],
-                capture_output=True,
-                text=True,
-                cwd=workdir,
-                timeout=5,
-                check=False,
-            )
-            if commit_result.returncode == 0:
-                source_commit = commit_result.stdout.strip()
-        except (OSError, subprocess.TimeoutExpired):
-            pass
-        verdict_data = {
-            "task_id": task.id,
-            "task_title": task.title,
-            "task_criteria": task.criteria,
-            "passed": result.passed,
-            "worktree": producing_worktree,
-            "branch": producing_branch,
-            "commit": source_commit,
-        }
-
-        # Extract items from verdict or pipeline result
-        if result.verdict and hasattr(result.verdict, "items"):
-            verdict_data["items"] = [
-                {"criterion": item.criterion, "status": item.status, "detail": item.detail}
-                for item in result.verdict.items
-            ]
-        else:
-            verdict_data["items"] = []
-
-        # Pipeline stages
-        if result.pipeline_result:
-            verdict_data["stages"] = result.pipeline_result.get("stages", {})
-
-        # Summary text
-        verdict_data["summary"] = result.summary
 
         # Worker execution evidence (JVIEW-005): the worker brief, the driver
         # log tail and the graded patch are copied into the verdict directory,
@@ -1762,13 +1714,29 @@ def _persist_result(workdir: str, task, result) -> None:
         def _collect_evidence(entry_dir: str) -> dict:
             from engine.evidence import collect_evidence
 
+            source_commit = ""
+            try:
+                commit_result = subprocess.run(
+                    ["git", "rev-parse", "--verify", "HEAD"],
+                    capture_output=True,
+                    text=True,
+                    cwd=workdir,
+                    timeout=5,
+                    check=False,
+                )
+                if commit_result.returncode == 0:
+                    source_commit = commit_result.stdout.strip()
+            except (OSError, subprocess.TimeoutExpired):
+                pass
             return collect_evidence(workdir, entry_dir, commit=source_commit, task_id=task.id)
 
-        commit_hash = persister.persist(task.id, verdict_data, collect_evidence=_collect_evidence)
+        commit_hash = persist_evaluation(workdir, task, result, collect_evidence=_collect_evidence)
         if commit_hash == "disabled":
             pass  # user opted out
         elif commit_hash == "dry-run":
             print("  ⚠ Verdict saved to disk but not committed (git unavailable)", file=sys.stderr)
+        elif commit_hash == "error":
+            print("  ⚠ Failed to persist verdict (non-fatal)", file=sys.stderr)
         else:
             print(f"  📋 Verdict saved: {commit_hash}")
 

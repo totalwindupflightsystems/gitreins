@@ -25,6 +25,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (RED under the old comparison: 1000-token prompts against a 5%×100k
   threshold never fired; GREEN: fires once cumulative consumption crosses
   5000).
+- **An MCP-dispatched evaluation now persists its verdict into
+  `.gitreins/history` (DF-GITREINS-POC-23)** — the MCP paths wrote only the
+  job record, so `gitreins serve` / `gitreins report` / the static judgment
+  page never showed an MCP-driven run (live: a completed
+  `~/.local/share/gitreins/jobs/job-326f9cbf….json` beside a workdir with
+  history enabled whose `.gitreins/history` did not exist). The verdict
+  construction and the persister call moved out of the CLI into the shared
+  `engine.persist.build_verdict_data` / `persist_evaluation`, which the CLI,
+  the MCP async job and the MCP `wait=true` sync path all call; the record
+  carries `job_id` and a `source` marker (`mcp` / `mcp-sync`). Persistence is
+  non-fatal and silent on stdout (the MCP channel is JSON-RPC), and the async
+  job persists BEFORE it lands its terminal state, so a job that reads
+  `complete` always has its verdict on disk.
 
 ## [0.14.0] — 2026-09-18
 

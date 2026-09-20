@@ -21,6 +21,13 @@ Config (.gitreins/config.yaml):
 Usage:
     persister = VerdictPersister(workdir="/path/to/repo")
     commit_hash = persister.persist(task_id, verdict_data)
+
+Every entry point that produces a verdict (CLI sync ``judge``, CLI async
+``judge --async``, MCP ``judge.evaluate``, MCP ``task.complete``) persists it
+through the shared :func:`persist_evaluation` helper below, so the verdict
+record on disk is identical no matter which surface ran the evaluation.
+Console printing deliberately does NOT live here — the MCP server's stdout is
+its JSON-RPC channel and a stray write corrupts the protocol.
 """
 
 import hashlib
@@ -32,6 +39,8 @@ import subprocess
 import tempfile
 from collections.abc import Callable
 from datetime import datetime
+
+from engine.repo_paths import WorktreeResolutionError, resolve_worktree_identity
 
 logger = logging.getLogger("gitreins.persist")
 
@@ -649,6 +658,108 @@ class VerdictPersister:
                     removed += 1
                 except OSError:
                     pass
+
+
+# ── Shared verdict persistence (CLI + MCP) ─────────────────────
+
+
+def build_verdict_data(workdir: str, task, result) -> dict:
+    """Build the verdict payload persisted for an evaluation.
+
+    Behaviour moved verbatim from the CLI's historical ``_persist_result``:
+    same keys, same values, and the same explicit empty-branch metadata for
+    detached / non-Git-compatible invocations so the persisted schema stays
+    stable while old verdicts stay readable.
+    """
+    # Stamp the checkout that produced the verdict.  Keep explicit empty
+    # branch metadata for detached/non-Git-compatible invocations so the
+    # persisted schema remains stable while old verdicts stay readable.
+    try:
+        identity = resolve_worktree_identity(workdir)
+        producing_worktree = str(identity.worktree_root)
+        producing_branch = identity.branch or ""
+    except WorktreeResolutionError:
+        producing_worktree = os.path.abspath(workdir)
+        producing_branch = ""
+
+    # The commit stamp is mandatory for merge-back to distinguish a verdict
+    # for an older branch tip.
+    source_commit = ""
+    try:
+        commit_result = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD"],
+            capture_output=True,
+            text=True,
+            cwd=workdir,
+            timeout=5,
+            check=False,
+        )
+        if commit_result.returncode == 0:
+            source_commit = commit_result.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+    verdict_data = {
+        "task_id": task.id,
+        "task_title": task.title,
+        "task_criteria": task.criteria,
+        "passed": result.passed,
+        "worktree": producing_worktree,
+        "branch": producing_branch,
+        "commit": source_commit,
+    }
+
+    # Extract items from verdict or pipeline result
+    if result.verdict and hasattr(result.verdict, "items"):
+        verdict_data["items"] = [
+            {"criterion": item.criterion, "status": item.status, "detail": item.detail}
+            for item in result.verdict.items
+        ]
+    else:
+        verdict_data["items"] = []
+
+    # Pipeline stages
+    if result.pipeline_result:
+        verdict_data["stages"] = result.pipeline_result.get("stages", {})
+
+    # Summary text
+    verdict_data["summary"] = result.summary
+
+    return verdict_data
+
+
+def persist_evaluation(
+    workdir: str,
+    task,
+    result,
+    *,
+    extra: dict | None = None,
+    collect_evidence: Callable[[str], dict] | None = None,
+) -> str:
+    """Persist one evaluation verdict through the shared persistence path.
+
+    Returns the verdict commit hash, ``"dry-run"`` (files written, git
+    unavailable) or ``"disabled"`` (history switched off). ``extra`` is a
+    plain dict stamped into the verdict record — the MCP callers use it to
+    record the job id and the surface that produced the verdict.
+
+    Non-fatal by contract: a persistence failure is logged and reported as
+    ``"error"``, never raised into the run that produced the verdict. This
+    writer never prints: the MCP server's stdout carries JSON-RPC, so console
+    output belongs to the CLI wrapper only.
+    """
+    try:
+        persister = VerdictPersister(workdir)
+        if not persister.enabled:
+            return "disabled"
+
+        verdict_data = build_verdict_data(workdir, task, result)
+        if extra:
+            verdict_data.update(extra)
+        return persister.persist(task.id, verdict_data, collect_evidence=collect_evidence)
+    except Exception as exc:  # persistence must never fail the verdict
+        logger.warning("Failed to persist verdict for %s (non-fatal): %s", workdir, exc)
+        return "error"
 
 
 # ── Report builder (shared between CLI and TUI) ────────────────

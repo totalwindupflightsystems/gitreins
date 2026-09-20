@@ -693,6 +693,12 @@ class GitReinsMCPServer:
                 else self.judge
             )
             result = j.evaluate_task(task)
+            # DF-GITREINS-POC-23: the sync path persists through the same
+            # shared helper as the async job and the CLI, so a `wait=true`
+            # evaluation is visible in <workdir>/.gitreins/history too.
+            from engine.persist import persist_evaluation
+
+            persist_evaluation(wd, task, result, extra={"job_id": None, "source": "mcp-sync"})
             return self._judge_result_dict(id, wd, result)
 
         # Async path: dispatch a background job and return immediately.
@@ -792,6 +798,22 @@ class GitReinsMCPServer:
                 with self._eval_lock:
                     result = evaluate_task(j, task)
                 d = self._judge_result_dict(job["task_id"], wd, result)
+                # DF-GITREINS-POC-23: an MCP-driven evaluation used to write
+                # only the job record, so `gitreins serve`/`report` (which read
+                # <workdir>/.gitreins/history) never showed it. Persist through
+                # the SAME shared helper the CLI uses, BEFORE the terminal
+                # state lands, so a job that reads `complete` always has its
+                # verdict on disk. persist_evaluation never raises and never
+                # prints — a persistence failure cannot change the terminal
+                # state and cannot corrupt the JSON-RPC stdout channel.
+                from engine.persist import persist_evaluation
+
+                persist_evaluation(
+                    wd,
+                    task,
+                    result,
+                    extra={"job_id": job["id"], "source": "mcp"},
+                )
                 _finish(
                     {
                         "result": d,

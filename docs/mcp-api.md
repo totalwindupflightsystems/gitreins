@@ -237,6 +237,15 @@ tool-call timeouts on slow suites).
 **Errors:** `{"error": "LLM not configured — set GITREINS_LLM_API_KEY"}`, or
 `{"error": "Task not found: <id>"}` / `{"error": "Task not found: <id> in <workdir>"}`.
 
+**Verdict persistence.** An MCP-dispatched evaluation persists its verdict into the workdir's
+`.gitreins/history` exactly like a CLI run — the async job (and `task.complete`, which dispatches
+one) and the `wait=true` sync call both write the browsable record, so `gitreins serve`,
+`gitreins report` and the static judgment page show MCP-driven runs. The record carries the
+producing `job_id` (`null` for the sync path) and a `source` marker (`"mcp"` for the async job,
+`"mcp-sync"` for `wait=true`) alongside the task id, graded items and summary. Persistence
+respects `history.enabled` (nothing is written when history is switched off) and is non-fatal: a
+persistence failure is logged, never raised, and never changes the job's terminal state.
+
 ### 11. `judge.status` — poll a background evaluation job
 
 | Param | Type | Required | Description |
