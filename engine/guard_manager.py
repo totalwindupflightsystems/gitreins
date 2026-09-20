@@ -341,6 +341,60 @@ def _ruff_scoped_files(workdir: str, py_files: list[str]) -> list[str] | None:
     return scoped
 
 
+def _ruff_format_command(py_files: list[str]) -> list[str]:
+    """The ruff FORMATTER's exit-code-bearing check over *py_files* (GR-GAP-063).
+
+    ``--check`` is the flag that sets the exit code (1 when a file would be
+    reformatted); ``--diff`` prints the diff and exits 0, which is the exact
+    false-green shape GR-GAP-061 hit in CI — a step that always passes. Never
+    swap one for the other here.
+
+    ``--force-exclude`` keeps the repo's own ``exclude`` / ``extend-exclude``
+    authority over an explicitly named file list, exactly as the check command
+    does (DF-GITREINS-POC-18), so the format sub-check grades the same scope
+    the check lane graded.
+    """
+    return ["ruff", "format", "--check", "--force-exclude", *py_files]
+
+
+def _parse_unformatted_files(raw: str) -> list[str]:
+    """Paths ruff's formatter reported as needing a reformat.
+
+    ``ruff format --check`` names each offender on its own ``Would reformat:
+    <path>`` line; that line is the only place the files are named (the
+    trailing count line is a number, not a file list).
+    """
+    prefix = "Would reformat:"
+    files: list[str] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if line.startswith(prefix):
+            path = line[len(prefix) :].strip()
+            if path and path not in files:
+                files.append(path)
+    return files
+
+
+def _format_failure_message(raw: str) -> str:
+    """Name the offending files, then the command that fixes them (GR-GAP-063).
+
+    The lane's failure must be actionable on its own: a reader sees which
+    files drifted and the exact command to repair them, without consulting a
+    brief. The raw ruff output is appended so a non-drift failure (a parse
+    error, an excluded-everything list) still reads as itself instead of being
+    flattened into "N files would be reformatted".
+    """
+    files = _parse_unformatted_files(raw)
+    if files:
+        head = (
+            f"ruff format --check: {len(files)} file(s) would be reformatted — "
+            f"run `ruff format {' '.join(files)}`"
+        )
+    else:
+        head = "ruff format --check: failed — run `ruff format <paths>` (see output below)"
+    return f"{head}\n{raw}"
+
+
 def _build_diff_test_command(test_command: str, test_files: list[str], workdir: str) -> str:
     """Build a test command targeting specific test files.
 
@@ -1421,6 +1475,15 @@ class GuardManager:
         configuration allows — a config-excluded path stays excluded even when
         it is named explicitly (``ruff check --force-exclude``), and a file
         list the config excludes ENTIRELY is an honest SKIP, never a clean pass.
+
+        GR-GAP-063: the lane ALSO grades formatting (``ruff format --check``)
+        over that same scope, because the two are one verdict — code the
+        checker accepts can still have drifted from the repo's formatter, and
+        nothing gated that before. ``--check`` rather than ``--diff``:
+        ``--diff`` exits 0 on differences and would be a permanent green.
+        Formatting failures keep the ``lint`` lane's name and fail the lane;
+        the output names the offending files and the ``ruff format <files>``
+        command that fixes them.
         """
         linters = ["ruff", "flake8"]
         # Get staged Python files
@@ -1498,15 +1561,60 @@ class GuardManager:
                     output = output[:2000] + "\n... [truncated]"
 
                 if lint_result.returncode == 0:
-                    clean = f"{linter}: clean"
+                    # GR-GAP-063: formatting is part of the lint verdict, not a
+                    # lane of its own. `ruff check` grades correctness and is
+                    # blind to formatting — the tree drifted from
+                    # `ruff format` repeatedly with every gate green, so the
+                    # same graded scope now runs `ruff format --check` too.
+                    # --force-exclude keeps the scope identical to the check
+                    # command's (a config-excluded file is never graded here
+                    # either). A missing formatter is not a failure of a lint
+                    # lane that just ran ruff successfully: it is reported in
+                    # the clean line instead of inventing a red.
+                    format_note = ""
+                    format_failure: GuardResult | None = None
+                    if linter == "ruff":
+                        try:
+                            fmt_result = subprocess.run(
+                                _ruff_format_command(py_files),
+                                capture_output=True,
+                                text=True,
+                                timeout=120,
+                                cwd=self.workdir,
+                                env=_sanitized_env(),
+                            )
+                        except (OSError, subprocess.SubprocessError):
+                            format_note = "format: not run (formatter unavailable)"
+                        else:
+                            fmt_raw = fmt_result.stdout + fmt_result.stderr
+                            if fmt_result.returncode != 0:
+                                format_failure = GuardResult(
+                                    name="lint",
+                                    passed=False,
+                                    output=_format_failure_message(fmt_raw),
+                                    exit_code=fmt_result.returncode,
+                                )
+                            else:
+                                format_note = f"format: clean ({graded} files)"
+                    if format_failure is not None:
+                        # Persist the un-truncated formatter output for the run
+                        # log, exactly as the check sub-step does.
+                        self._remember_full_output("lint", format_failure.output)
+                        return format_failure
+                    # GR-GAP-063: the clean line names the formatter sub-check
+                    # too — a reader (and the run log) can then tell a lane that
+                    # graded formatting from one that never ran it.
+                    clean_parts = [f"{linter}: clean"]
                     if self._grade_full_tree:
                         # Name the scope so a whole-tree run is
                         # distinguishable from a staged run in the console.
-                        clean += f" ({scope_note})"
+                        clean_parts[0] += f" ({scope_note})"
+                    if format_note:
+                        clean_parts.append(format_note)
                     return GuardResult(
                         name="lint",
                         passed=True,
-                        output=clean,
+                        output=", ".join(clean_parts),
                         exit_code=lint_result.returncode,
                     )
                 else:

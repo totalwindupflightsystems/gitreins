@@ -847,8 +847,13 @@ class TestConfigAndWorkdir:
         """
         repo = tmp_path / "repo"
         (repo / "tests").mkdir(parents=True)
-        (repo / "tests" / "test_x.py").write_text("def test_x(): pass\n")
-        (repo / "app.py").write_text("def main(): pass\n")
+        # GR-GAP-063: the fixtures are formatted, because the guard's lint lane
+        # now grades `ruff format --check` too — a one-line `def f(): pass`
+        # would fail the gate for a formatting reason unrelated to this test,
+        # and the PASS assertion below would then say nothing about the leaked
+        # index. (Two-line defs are what `ruff format` produces.)
+        (repo / "tests" / "test_x.py").write_text("def test_x():\n    pass\n")
+        (repo / "app.py").write_text("def main():\n    pass\n")
         # GR-GAP-051: guard refuses to run without a config — give the repo one.
         (repo / ".gitreins").mkdir()
         (repo / ".gitreins" / "config.yaml").write_text("guards:\n  test_command: echo ok\n")
@@ -870,6 +875,9 @@ class TestConfigAndWorkdir:
         )
         assert result.returncode == 0, result.stdout + result.stderr
         assert "Tier 1 Guards: PASS" in result.stdout
+        # DF-008, restated positively: the leaked index's file must not be
+        # graded anywhere in the output (lint or otherwise).
+        assert "phantom.py" not in result.stdout
 
     def test_start_task_uses_existing_gitreins_dir(self, tmp_workdir):
         """Starting a task uses existing .gitreins/ directory."""

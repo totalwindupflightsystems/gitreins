@@ -152,7 +152,7 @@ class TestFullTreeLintLane:
 
         assert result.skipped is False
         assert result.passed is True
-        assert result.output == "ruff: clean (2 tracked files)"
+        assert result.output == "ruff: clean (2 tracked files), format: clean (2 files)"
 
     def test_full_tree_lints_untracked_non_ignored_files_too(self, tmp_path, ruff_on_path):
         """--others --exclude-standard semantics: an untracked, non-ignored
@@ -220,7 +220,7 @@ class TestFullTreeLintLane:
 
         assert result.skipped is False
         assert result.passed is True
-        assert result.output == "ruff: clean (1 tracked files)"
+        assert result.output == "ruff: clean (1 tracked files), format: clean (1 files)"
 
     def test_tree_python_files_helper_lists_tracked_plus_untracked(self, tmp_path):
         """_tree_python_files mirrors lang_detect's listing: tracked +
@@ -275,7 +275,9 @@ class TestLintRespectsRepoRuffConfig:
         assert result.skipped is False
         assert result.passed is True
         assert "F401" not in result.output
-        assert result.output == "ruff: clean (1 tracked files, 1 excluded by config)"
+        assert result.output == (
+            "ruff: clean (1 tracked files, 1 excluded by config), format: clean (1 files)"
+        )
         assert "1 excluded by config" in gm._full_outputs["lint"]
 
     def test_full_tree_lint_still_grades_a_file_no_config_excludes(self, tmp_path, ruff_on_path):

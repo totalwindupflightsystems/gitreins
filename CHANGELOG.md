@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`ruff format` is gated in CI and in the guard's lint lane (GR-GAP-063)**
+  — formatting cleanliness lived only as prose in task briefs: the CI workflow
+  grepped zero hits for `ruff` (it ran no ruff at all), and
+  `.gitreins/config.yaml`'s lint lane graded `ruff check` alone, which accepts
+  a file the formatter would rewrite. Nine tracked files had drifted from
+  `ruff format` and no gate could see it until an idle sweep paid it down
+  (repaired in `4a55784`) — and the tree drifted again after that. Both halves
+  now run `ruff format --check`: a `Verify formatting with ruff format --check`
+  step in `.github/workflows/ci.yml` (before `Run guards`, using the ruff the
+  existing `pip install -e ".[dev]"` step already installs) and a format
+  sub-check inside `GuardManager._check_lint` over the SAME graded scope the
+  check step used (`--force-exclude`, so a config-excluded file is not graded
+  merely because it was named; an all-excluded list stays the named skip it
+  was). The lane's verdict shape is unchanged — one `lint` `GuardResult`,
+  formatting failures failing it — and the failure output names every drifted
+  file plus the `ruff format <files>` command that fixes them. `--check` and
+  not `--diff`/bare `ruff format`: those exit 0 on differences (and the bare
+  form silently rewrites the tree), the false-green shape GR-GAP-061 hit.
+  Regression: `tests/test_guard_format_check.py` (RED with the sub-check
+  disabled — 7 failures) alongside `tests/test_ci_workflow_pins.py`'s
+  `TestRuffFormatGate`.
+
 ### Fixed
 - **`judge.status` payloads carry an additive `running` boolean and the docs
   ship a poll loop keyed on the terminal status set (DF-GITREINS-POC-24)** —
