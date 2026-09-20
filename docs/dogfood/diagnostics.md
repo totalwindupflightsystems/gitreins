@@ -468,3 +468,75 @@ Fix: `engine.types.pytest_outcome` classifies from the captured output (`maxfail
 `interrupted` vs `interrupted-unclassified`, plus exit 1/3/4/5 and signal kills), the tests step
 records it as `data.pytest_outcome`, and the capture keeps the whole output. Regression tests
 re-run the live `-x -n 2` reproduction and pin `returncode == 2`.
+
+## 2026-09-20 run — the MCP server driven by a raw client, and `serve` over HTTP
+
+**Why this run is different:** six earlier runs all touched CLI/guard/judge/PyPI. The two
+surfaces no run had driven — the MCP stdio server as a real agent would, and the `gitreins
+serve` HTTP API — were the target. The MCP surface is where the P1 was hiding.
+
+**How the MCP server is wired (the 60-second tour).** `gitreins_mcp/server.py` is a
+single-file JSON-RPC 2.0 server, line-delimited over stdin/stdout, no SDK required on the
+client side. `handle_request` dispatches: `initialize` (negotiates protocol via
+`negotiate_protocol_version`, reports the installed version — the POC-20 fix), `tools/list`
+(12 schemas built inline in `_tool_schemas`), `tools/call` (looks up `self._tools`,
+wraps the return in `content[0].text` as JSON), and deliberately answers NOTHING to
+notifications (a response to a notification desynchronizes a line-delimited client — that
+comment at server.py:1004 is load-bearing; preserve it). Tool results are plain dicts; errors
+come back as `{"error": ...}` results, NOT JSON-RPC errors, except unknown tools (-32601) and
+handler exceptions (-32000). A client must check for the `error` key inside the result text.
+
+**The async judge across process death (the genuinely good part).** `task.complete` with an
+LLM configured writes a job record to `~/.local/share/gitreins/jobs/` (engine/job_store.py,
+atomic tmp+replace) and returns immediately. The job carries its own `workdir` and `pid`. If
+the dispatcher process dies mid-eval, the NEXT server's `judge.status` finds the record on
+disk, sees `pid` is not alive, and re-dispatches (`_load_or_resume_disk_job`) — the
+evaluation is resumed by whatever process polls next. This run proved it: the client's
+per-call server pattern (new server per tool call, so the run survived the client exiting)
+produced an orphaned job that a later instance resumed and completed with full evidence.
+`EvalCap` caps are captured at dispatch and ride in the job record, so a resume can't escape
+its budget.
+
+**POC-23 anatomy (why MCP verdicts never reach the browser).** `VerdictPersister` writes
+`.gitreins/history/<date>/<hash>/verdict.json` — that directory is the ONLY thing
+`gitreins serve`/`gitreins report` read (`gitreins/serve.py:_verdict_dir`). The async job
+path (`gitreins_mcp/server.py:_submit_eval_job` → job store) never instantiates a persister;
+grep for `VerdictPersister` hits only `gitreins/cli.py` and `engine/worktree_manager.py`.
+So CLI `task complete` produces browsable verdicts and MCP `task.complete` does not. The job
+record already has everything needed (workdir + result), so the fix is small — persist on
+terminal state, ideally stamped with the job_id for cross-reference.
+
+**POC-24 anatomy (the poll trap).** The job record shape (job_store.py docstring) is
+`{id, status, task_id, workdir, result, error, started_at, finished_at, pid, caps}` — there
+is no `running` boolean. `judge.status` echoes `status` ∈ {running, complete, error}. A
+client that polls "until running == false" (the natural async-API reflex, and what most MCP
+judge examples in the wild do) never terminates: `running` is never present, so the
+condition is never true. This cost the dogfood run two tool-timeouts before the predicate
+was caught. The docs describe the strings correctly but never show the loop.
+
+**serve's safety model (why the traversal probes 404).** Date/hash path components are
+regex-gated (`_DATE_RE`, `_HASH_RE`) before they ever touch the filesystem, and evidence
+files must be declared in the verdict's own manifest (engine/evidence.py), so an unknown
+name can't smuggle a path. Loaders read from disk on every request — the browser is live,
+no cache to invalidate. `--host` override prints an explicit no-auth warning.
+
+**The fresh-venv guard gap, seen again on the wheel.** `pip install gitreins` in a bare venv
+→ `gitreins guard` FAILs `✗ tests — pytest: not found` because the tests guard shells out to
+bare `pytest`, which the venv doesn't have. Known (skill pitfall 18), still true on 0.14.0,
+still a first-5-minutes trip hazard for the README quickstart path.
+
+**The install leg that wasn't (harness, not gitreins).** `bunker-qa.sh launch` failed three
+ways in a row and reported success each time: (1) tool-cap kill mid-sync (513 MB tree) left
+a partial tree and no qa-run.sh; (2) with CAP_KB unset, `set -u` killed the generator
+mid-heredoc and shipped a 0-byte qa-run.sh — while printing "QA launch complete"; (3) even
+exporting CAP_KB didn't beat the tool cap. The leg was completed by hand over direct ssh on
+the already-synced agent (16 s PyPI install, clean smoke except the pytest-not-found above).
+Full mechanism on board row DF-GITREINS-POC-25 — filed on this board because bunker-qa.sh is
+shared fleet harness with no other bug tracker. The lesson generalizes: **"launch complete"
+from a driver is not liveness; probe the target (script shipped? process running?) before
+walking away** — the same class as "filed:N is not proof," one layer up the stack.
+
+**Run stats:** time-to-first-success ~20 min (raw client from scratch, schema reading
+included); friction 6 → findings POC-23 (P1), POC-24 (P2), POC-25 (P2, harness); regression
+sweeps all green (POC-20 negotiation, 12-tool surface vs docs, commit-block on in_progress,
+all-files-land-in-commit vs the 09-07 P0, PyPI wheel == HEAD at 0.14.0).

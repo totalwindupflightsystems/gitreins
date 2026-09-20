@@ -43,3 +43,13 @@ Promise: pip install gitreins (0.13.0 shipped 05:41Z today), install/init in any
 - Regression matrix on the 0.13.0 wheel (fresh bunker install, las-bunker-03 agent 696a61d3, 13s to CLI): POC-16 multi-finding secrets FIXED, DF-011 hook pin FIXED, POC-13 README example parses, POC-3/D init persist FIXED, POC-10 exit codes FIXED, DF-015 version correct, worktree ships. Anti-tamper canary (exact-shape ghp_, 40 chars) BLOCKED by the control hook. Still open on wheel: POC-11 vacuous-green clean-tree guard; README quickstart hits PEP-668 on fresh Debian (venv path works); fresh venvs need pytest installed for the tests guard.
 - Self-finding recorded: first canary used a malformed 33-char ghp_ token, sailed through both scanners, briefly looked like a P0 DF-012 regression — killed by direct gitleaks A/B before filing. Exact-shape fixtures or no P0. Trail: docs/dogfood/diagnostics.md 09-16b section.
 Details: docs/dogfood/2026-09-16b-integration.md, docs/dogfood/diagnostics.md (09-16b), skills/gitreins-usage/SKILL.md v1.2.0 (pitfalls 18–20). Board rows: DF-GITREINS-POC-15, -16 (pending). Install leg: RUN (supersedes morning SKIPPED — host was down then, up now). Foreman not woken, cooldowns untouched per 2026-09-09 fleet law.
+
+## Dogfood Findings (2026-09-20)
+Verdict: PROMISING-BUT-ROUGH
+Angle: MCP stdio server driven by a raw JSON-RPC client (12-tool surface, async judge,
+disk resume) + gitreins serve over HTTP — the two surfaces runs 1-6 never touched.
+Full rows on the board (.coding-hermes/board/tasks.jsonl): DF-GITREINS-POC-23 (P1),
+-24 (P2), -25 (P2, harness). Report: docs/dogfood/2026-09-20-integration.md.
+Bunker install leg: RUN (by hand, las-bunker-02 agent 70bc1d49, 16s PyPI to 0.14.0;
+smoke clean except known fresh-venv pytest gap; agent destroyed). bunker-qa.sh launch
+failures filed as -25 with evidence.

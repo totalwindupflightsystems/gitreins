@@ -4,7 +4,7 @@ description: >-
   How to use the GitReins quality harness in this repo (and any repo it's
   installed in): task lifecycle, guards, LLM judge, MCP tools, and the known
   pitfalls that will bite you. Load this before committing or creating tasks.
-version: 1.2.0
+version: 1.3.0
 category: software-development
 ---
 
@@ -223,6 +223,41 @@ gitreins qa record --project <repo> --kind bunker --exit-code 0 \
   `qa_ledger.enabled: false` stops recording — announced on stderr, never a
   failure of the run it records.
 - `gitreins report` prints a QA block after the task verdict history.
+
+## Driving the MCP server as a real client (2026-09-20 dogfood run — verified at HEAD 0.14.0)
+
+No SDK needed. `gitreins mcp-server` speaks line-delimited JSON-RPC 2.0 on stdio:
+
+```python
+p = subprocess.Popen(["gitreins", "mcp-server"], cwd=repo,
+                     stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                     stderr=subprocess.PIPE, text=True, bufsize=1)
+# handshake: initialize -> notifications/initialized -> tools/list
+# tool call: {"jsonrpc":"2.0","id":N,"method":"tools/call",
+#             "params":{"name":"task.create","arguments":{...}}}
+# result payload = json.loads(resp["result"]["content"][0]["text"])
+```
+
+Client-side rules the hard way:
+
+- **Tool errors live INSIDE the result text** as `{"error": "..."}` — only unknown tools
+  (-32601) and handler crashes (-32000) are JSON-RPC errors. Always check the parsed payload
+  for an `error` key.
+- **Poll `judge.status` until `status` is `"complete"` or `"error"`** — there is no
+  `running` boolean anywhere in the payload (POC-24). "Poll until running == false" loops
+  forever. The background judge takes minutes (deepseek-v4-flash: ~7 min for a 6-test task).
+- **The background judge survives your process.** Jobs persist to
+  `~/.local/share/gitreins/jobs/` with their own workdir+pid; the next `judge.status` from
+  any server instance resumes an orphaned job. A per-tool-call server pattern works.
+- **MCP-judged verdicts are NOT browsable** (POC-23, open at 0.14.0): the async path never
+  writes `.gitreins/history/`, so `gitreins serve`/`report` show nothing for MCP-driven
+  runs. The full verdict lives in `~/.local/share/gitreins/jobs/job-<id>.json`. Read it
+  from there until POC-23 lands.
+- The 12 tool names/schemas in `docs/mcp-api.md` match the wire exactly (verified
+  tool-by-tool). That doc is the contract; trust it over any summary.
+- The `commit` tool runs Tier 1 in-process and returns the guard output inside the tool
+  result — and it refuses while any task is in_progress. Land work: complete/delete tasks
+  first, then commit.
 
 ## Pitfalls 14–17 (2026-09-15 dogfood run)
 
