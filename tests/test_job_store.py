@@ -39,6 +39,7 @@ def test_save_load_roundtrip(store_dir):
     assert loaded["task_id"] == "task-1"
     assert loaded["workdir"] == "/tmp/some/repo"
     assert loaded["status"] == "running"
+    assert loaded["running"] is True
     assert loaded["pid"] == 1234
     assert loaded["result"] is None
     assert loaded["caps"] is None

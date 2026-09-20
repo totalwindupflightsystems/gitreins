@@ -2189,6 +2189,7 @@ def _cmd_judge_worker(job_id: str) -> None:
     task = tm.get(job["task_id"])
     if not task:
         job["status"] = "error"
+        job["running"] = False
         job["error"] = f"task {job['task_id']} not found in {wd}"
         job["finished_at"] = time.time()
         save_job(job)
@@ -2202,6 +2203,7 @@ def _cmd_judge_worker(job_id: str) -> None:
         result = judge.evaluate_task(task)
         job["result"] = judge_result_to_dict(job["task_id"], wd, result)
         job["status"] = "complete"
+        job["running"] = False
         job["finished_at"] = time.time()
         save_job(job)
         # Same verdict persistence as a synchronous run
@@ -2209,6 +2211,7 @@ def _cmd_judge_worker(job_id: str) -> None:
         print(result.summary)
     except Exception as e:
         job["status"] = "error"
+        job["running"] = False
         job["error"] = str(e)
         job["finished_at"] = time.time()
         save_job(job)

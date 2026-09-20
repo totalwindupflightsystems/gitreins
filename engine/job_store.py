@@ -16,6 +16,10 @@ Record shape::
     {
         "id": "job-<hex>",
         "status": "running" | "complete" | "error",
+        "running": bool,          # additive: True while dispatched/running,
+                                  # False once terminal (complete | error);
+                                  # records from older builds lack the key
+                                  # and are treated as NOT running
         "task_id": str,
         "workdir": str,
         "result": dict | None,    # judge result dict (see engine.judge.judge_result_to_dict)
@@ -68,6 +72,7 @@ def make_job(task_id: str, workdir: str, caps: dict | None = None) -> dict:
     return {
         "id": new_job_id(),
         "status": "running",
+        "running": True,
         "task_id": task_id,
         "workdir": os.path.abspath(workdir),
         "result": None,

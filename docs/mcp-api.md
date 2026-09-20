@@ -253,9 +253,40 @@ persistence failure is logged, never raised, and never changes the job's termina
 | `job_id` | string | yes | Job ID from `judge.evaluate` or `task.complete` |
 
 **Returns:**
-- `{"job_id": ..., "status": "running"}` — still evaluating
-- `{"job_id": ..., "status": "complete", "result": {"task_id", "passed", "workdir", "tier1_passed", "verdict", "items", "summary"}}`
-- `{"job_id": ..., "status": "error", "error": "..."}`
+- `{"job_id": ..., "status": "running", "running": true}` — still evaluating
+- `{"job_id": ..., "status": "complete", "running": false, "result": {"task_id", "passed", "workdir", "tier1_passed", "verdict", "items", "summary"}}`
+- `{"job_id": ..., "status": "error", "running": false, "error": "..."}`
+
+**The `running` field:** every payload also carries a boolean `"running"` — `true` while
+the job is dispatched/running, `false` once terminal. The field is additive: the three
+`status` strings above are unchanged, and a job record written by an older build (no
+`running` key on disk) is reported as `"running": false`.
+
+**Worked poll loop** — key the loop on the TERMINAL SET of `status` strings, not on a
+bare `running` field:
+
+```python
+import time
+
+def poll_until_terminal(status_fn, job_id, timeout_s=1800):
+    """status_fn(job_id) -> one judge.status payload dict."""
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        payload = status_fn(job_id)
+        status = payload.get("status")
+        running = payload.get("running", False)  # absent on old builds -> not running
+        if not running and status in {"complete", "error"}:
+            return payload  # terminal: `complete` carries `result`, `error` carries `error`
+        time.sleep(5)
+    raise TimeoutError(f"job {job_id} did not finish within {timeout_s}s")
+```
+
+**Warning:** do NOT poll a bare `running` field (`while payload["running"]: ...`) —
+builds older than the `running` field never send it, so that loop either raises
+KeyError or never terminates. `status in {"complete", "error"}` is the only
+termination signal guaranteed on every build. Terminal means `running == false` AND
+`status` in `{"complete", "error"}`; `"running": true` is informational (a fresh
+payload also carries `pid` and `started_at`).
 
 **Durability:** jobs are disk-backed (`~/.local/share/gitreins/jobs/`, override
 `GITREINS_JOB_DIR`). They survive MCP server restarts; a `running` job whose process died is
@@ -279,10 +310,10 @@ judge.evaluate(id=..., wait=false)
 {"job_id": "J-…", "status": "running", "task_id": …, "workdir": …}
         │
         ▼  (background: Tier 1 re-run + Tier 2 LLM evaluation; ~14 min on large suites)
-judge.status(job_id=…)  ──▶  {"status": "running"}  (poll until complete/error)
+judge.status(job_id=…)  ──▶  {"status": "running", "running": true}  (poll until complete/error)
         │
         ▼
-{"status": "complete", "result": {task_id, passed, workdir,
+{"status": "complete", "running": false, "result": {task_id, passed, workdir,
   tier1_passed, verdict, items, summary}}
 ```
 

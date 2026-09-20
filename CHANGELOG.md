@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **`judge.status` payloads carry an additive `running` boolean and the docs
+  ship a poll loop keyed on the terminal status set (DF-GITREINS-POC-24)** —
+  the payload's `{"status": "running"}` is a poll-phase value; the terminal
+  value is `{"status": "complete" | "error"}`, and a client following the
+  natural "poll until running == false" pattern had no field to poll and
+  looped forever. Every `judge.status` payload (and every disk job record,
+  MCP and CLI alike) now also carries `"running": true` while the job is
+  dispatched/running and `"running": false` once terminal; the three `status`
+  strings and every existing field are unchanged, and a record written by an
+  older build (no `running` key) is reported as `running: false`. An
+  old-build record that gets auto-resumed reports `running: true` again (the
+  resume claim write is a current-build write). docs/mcp-api.md §11 gained a
+  worked poll loop keyed on `status in {"complete", "error"}` with an
+  explicit warning against polling a bare `running` field on older builds.
+  Regression: `tests/test_mcp_server.py::TestJudgeAsyncPersistence` —
+  `test_judge_status_running_boolean_fresh_and_terminal` (exact key-set pins
+  for the fresh/running and terminal payloads), `test_old_build_record_
+  without_running_key_reports_not_running`, `test_old_build_record_resumes_
+  and_reports_running` (all three RED on the pre-fix code: `KeyError:
+  'running'`), plus a record-shape assertion in `tests/test_job_store.py`.
 - **The tier-2 compaction valve meters the cumulative budget it protects
   (GR-GAP-062)** — the proactive compaction check compared
   `cumulative_prompt_tok`, which the loop maintains as the LARGEST SINGLE
