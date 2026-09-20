@@ -100,7 +100,9 @@ gitreins guard
 ```
 
 This runs Tier 1 static guards: secrets (gitleaks or built-in scanner), lint
-(ruff), tests (pytest), static analysis (mypy and friends, if configured), and
+(ruff — checker plus `ruff format --check` over the same scope; a formatting
+failure fails the lint lane and names the files to reformat), tests (pytest),
+static analysis (mypy and friends, if configured), and
 LSP diagnostics (if configured and the server is on PATH). Each guard reports
 PASS/FAIL. The secrets guard BLOCKS on failure — no exceptions.
 

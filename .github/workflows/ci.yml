@@ -57,6 +57,17 @@ jobs:
           echo "$HOME/go/bin" >> "$GITHUB_PATH"
       - name: Run tests
         run: pytest tests/ -v --tb=short
+      # GR-GAP-063: `ruff format` was not gated anywhere — this workflow ran no
+      # ruff at all, so the tree drifted from the formatter (9 files as of
+      # 2026-09-19) with every gate green. `--check` is the whole point: it
+      # exits 1 on drift. `--diff` and a bare `ruff format` both exit 0 (and
+      # the bare form silently rewrites the runner's checkout), which is the
+      # false-green shape GR-GAP-061 hit — never substitute either here.
+      # `ruff` arrives with the dev extra installed by "Install dependencies"
+      # above (`pip install -e ".[dev]"` pins ruff>=0.5), so no extra install
+      # step is needed to keep this and the guard's `ruff check` on one ruff.
+      - name: Verify formatting with ruff format --check
+        run: ruff format --check .
       # GR-GAP-061: both drift steps below delegate to the single
       # implementation in scripts/check_docs_drift.py (the live pytest
       # collection happens inside the script — no duplicated bash here).

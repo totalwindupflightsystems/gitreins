@@ -32,7 +32,7 @@ pip install gitreins
 pytest tests/ -v
 ```
 
-All tests must pass before submitting a PR. Currently **1897 tests across 55
+All tests must pass before submitting a PR. Currently **1927 tests across 56
 test files** (canonical count: `pytest --collect-only -q`, which is exactly what
 CI recomputes).
 
@@ -87,7 +87,7 @@ parse is a broken promise, and the checker is what keeps the README's
 engine/            — Core engine (evaluator, guards, pipeline, LSP, LLM client, task manager, judge, dead_code)
 gitreins/          — CLI entry point and install script
 gitreins_mcp/      — MCP stdio server (12 tools)
-tests/             — pytest test suite (1897 tests across 55 files; canonical count in README)
+tests/             — pytest test suite (1927 tests across 56 files; canonical count in README)
 tests/reliability/ — 7 adversarial benchmark projects
 scripts/           — Repo-level checkers run by CI (docs drift, CLI examples, CLI-reference sync, board ids) + the judgment viewer
 docs/              — Architecture, component map, evaluator loop, MCP API, CLI reference, dogfood reports
@@ -172,7 +172,8 @@ second place, and never tag a tree whose version, lock, changelog and docs disag
 5. **Run the gates** — `python scripts/check_docs_drift.py`,
    `python scripts/check_cli_examples.py`, `python scripts/check_board_ids.py
    .coding-hermes/board`, the full suite (`python -m pytest -x --tb=short`),
-   `ruff check` and `ruff format --check` on the files you touched, and `gitreins guard`.
+   `ruff check` and `ruff format --check` on the files you touched, and `gitreins guard`
+   (whose lint lane now runs both over the graded scope).
    The guard runs the full suite in this mode, because `pyproject.toml` is one of its
    safety-trigger config files.
 6. **Commit the cut on `main` and push it** — version, lock, changelog and docs land in
