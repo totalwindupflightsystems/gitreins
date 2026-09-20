@@ -862,6 +862,12 @@ class GitReinsMCPServer:
     def _resume_disk_job(self, job: dict) -> dict:
         """Re-dispatch an orphaned running job in this server instance.
 
+        The job keeps its id: the resume is the SAME logical run continuing, so
+        the record identity, the lease and the caller's poll handle all stay
+        valid. A resumed run therefore persists its verdict under the same job
+        id as the interrupted attempt, and the persister supersedes that earlier
+        record (DF-GITREINS-POC-26) so exactly one record per job id is live.
+
         The resume is claimed under an exclusive per-job lease
         (``fcntl.flock`` on ``<job_id>.lock``, GR-GAP-046) so two server
         instances polling the same orphaned job cannot both re-dispatch a

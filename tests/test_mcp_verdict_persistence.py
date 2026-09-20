@@ -144,6 +144,30 @@ def _history_root(workdir):
     return Path(workdir, ".gitreins", "history")
 
 
+def _verdict_records(workdir):
+    """Every verdict entry as ``(path, parsed verdict.json)``."""
+    return [(p, json.loads(p.read_text())) for p in _verdict_files(workdir)]
+
+
+def _record_path(workdir, entry_path):
+    """The workdir-relative, "/"-joined path a verdict record points at.
+
+    ``supersedes``/``superseded_by`` name the sibling record's ENTRY DIRECTORY
+    (``.../history/<date>/<hash>``) in the same shape it has on the ``gitreins``
+    branch; *entry_path* is the verdict.json path inside it.
+    """
+    return Path(entry_path).parent.relative_to(workdir).as_posix()
+
+
+def _live_records(workdir, job_id):
+    """Records for *job_id* that no later attempt has superseded."""
+    return [
+        (p, d)
+        for p, d in _verdict_records(workdir)
+        if d.get("job_id") == job_id and not d.get("superseded_by")
+    ]
+
+
 def _mcp_call(server, name, arguments):
     response = server.handle_request(
         {
@@ -527,3 +551,134 @@ class TestVerdictDataBuilder:
         assert captured["job_id"] == "job-1"
         assert captured["source"] == "mcp"
         assert captured["task_id"] == "stamped"
+
+
+# ── Resume supersedes the interrupted attempt (DF-GITREINS-POC-26) ───────────
+
+
+class TestResumeSupersedesInterruptedVerdict:
+    """A resumed job re-dispatches under the SAME job id.
+
+    The history entry is keyed on timestamp + task id, so the resume used to
+    append a SECOND verdict for one logical run: two records carrying the same
+    job_id, neither labelled, and a consumer joining history to the job store
+    could not tell which record was graded. The persister now supersedes the
+    earlier attempt for that job id instead of leaving both looking live.
+    """
+
+    def test_resume_leaves_exactly_one_live_record_per_job_id(self, mcp_server, monkeypatch):
+        from engine.job_store import make_job, save_job
+
+        _stub_judge_evaluate(monkeypatch)
+        _create_task(mcp_server, "mcp-resume")
+        task = mcp_server.tasks.get("mcp-resume")
+
+        # The interrupted attempt, fabricated exactly as a crashed server leaves
+        # it: the verdict already persisted, the job record still `running` with
+        # a dead owner — the state the next `judge.status` poll resumes.
+        job = make_job("mcp-resume", mcp_server.workdir)
+        job["pid"] = 99999999  # dead pid
+        save_job(job)
+        job_id = job["id"]
+        assert engine.persist.persist_evaluation(
+            mcp_server.workdir,
+            task,
+            _FakeJudgeResult(),
+            extra={"job_id": job_id, "source": "mcp"},
+        ) not in ("error", "disabled")
+
+        interrupted_path, interrupted = _verdict_records(mcp_server.workdir)[0]
+        assert interrupted["job_id"] == job_id
+        assert interrupted.get("superseded_by") is None
+
+        # The orphaned job is resumed in this server instance and persists its
+        # own verdict under the SAME job id.
+        assert _mcp_call(mcp_server, "judge.status", {"job_id": job_id})["status"] == "running"
+        assert _poll_status(mcp_server, job_id)["status"] == "complete"
+
+        records = _verdict_records(mcp_server.workdir)
+        assert len(records) == 2, [str(p) for p, _ in records]
+        live = _live_records(mcp_server.workdir, job_id)
+        assert len(live) == 1, f"expected one live record for {job_id}, got {live}"
+        resumed_path, resumed = live[0]
+        assert resumed_path != interrupted_path
+
+        # The superseded attempt is identifiable in BOTH directions...
+        assert resumed["supersedes"] == _record_path(mcp_server.workdir, interrupted_path)
+        reread = json.loads(interrupted_path.read_text())
+        assert reread["superseded_by"] == _record_path(mcp_server.workdir, resumed_path)
+        assert isinstance(reread["superseded_at"], str) and reread["superseded_at"]
+        # ...and it is labelled, not deleted: its own evidence survives.
+        assert interrupted_path.is_file()
+        assert reread["job_id"] == job_id
+        assert reread["source"] == "mcp"
+        assert reread["items"] == [{"criterion": "c1", "status": "PASS", "detail": "ok"}]
+        # The live record is the resumed run's: same provenance, no marker.
+        assert resumed["job_id"] == job_id
+        assert resumed["source"] == "mcp"
+        assert resumed.get("superseded_by") is None
+
+    def test_supersede_is_keyed_on_job_id(self, tmp_workdir):
+        """Only the SAME job id supersedes — the scan is not a blanket rewrite.
+
+        A second job (and a sync record with no job id at all) must stay live,
+        otherwise the marker would erase unrelated runs from every consumer's
+        view of history.
+        """
+        persister = engine.persist.VerdictPersister(tmp_workdir)
+        persister.config["storage"] = "filesystem"
+        persister.config["max_verdicts"] = 0
+
+        for job_id, passed in (("job-a", True), ("job-b", True), (None, True), ("job-a", False)):
+            persister.persist(
+                "resume-keyed",
+                {
+                    "passed": passed,
+                    "job_id": job_id,
+                    "source": "mcp" if job_id else "mcp-sync",
+                },
+            )
+
+        records = _verdict_records(tmp_workdir)
+        assert len(records) == 4
+
+        def _live(job_id):
+            return [
+                (p, d)
+                for p, d in records
+                if d.get("job_id") == job_id and not d.get("superseded_by")
+            ]
+
+        live_a = _live("job-a")
+        assert len(live_a) == 1, live_a
+        assert live_a[0][1]["passed"] is False  # the newest attempt for job-a
+        assert len(_live("job-b")) == 1
+        assert len(_live(None)) == 1
+        assert len([p for p, d in records if not d.get("superseded_by")]) == 3
+
+        superseded = [(p, d) for p, d in records if d.get("superseded_by")]
+        assert len(superseded) == 1, superseded
+        assert superseded[0][1]["passed"] is True  # job-a's first attempt
+        assert superseded[0][1]["superseded_by"] == _record_path(tmp_workdir, live_a[0][0])
+
+    def test_chain_of_resumes_leaves_one_live_record(self, tmp_workdir):
+        """Three attempts at one job id: one live record, each older one chained
+        to the attempt that replaced it."""
+        persister = engine.persist.VerdictPersister(tmp_workdir)
+        persister.config["storage"] = "filesystem"
+        persister.config["max_verdicts"] = 0
+
+        for passed in (True, False, True):
+            persister.persist(
+                "resume-chain", {"passed": passed, "job_id": "job-x", "source": "mcp"}
+            )
+
+        records = _verdict_records(tmp_workdir)
+        assert len(records) == 3
+        live = [p for p, d in records if not d.get("superseded_by")]
+        assert len(live) == 1
+        # Both older records name their successor, and the two successors name
+        # their predecessor — the chain is walkable in either direction.
+        assert len({d["superseded_by"] for _p, d in records if d.get("superseded_by")}) == 2
+        assert len([1 for _p, d in records if d.get("supersedes")]) == 2
+        assert _live_records(tmp_workdir, "job-x")[0][0] == live[0]
