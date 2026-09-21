@@ -20,7 +20,7 @@ Running `gitreins` with no command prints the top-level help and exits
 **0**. An unknown command exits **2** (argparse behavior for
 unrecognized arguments).
 
-There are **15 top-level subcommands**:
+There are **16 top-level subcommands**:
 
 | # | Command | Purpose |
 |---|---------|---------|
@@ -33,12 +33,13 @@ There are **15 top-level subcommands**:
 | 7 | `commit` | Commit with guard checks |
 | 8 | `commit-audit` | Validate commit message against staged diff (commit-msg hook) |
 | 9 | `resolve` | Resolve a question against the repo's code (Jev resolution gate) |
-| 10 | `mcp-server` | Run the MCP stdio server |
-| 11 | `security-scan` | Run the Antares CVE localization scanner (opt-in) |
-| 12 | `setup-tools` | Show available static analysis tools and install instructions |
-| 13 | `report` | Show verdict history |
-| 14 | `qa` | QA run ledger — record and read QA run outcomes |
-| 15 | `serve` | Live judgment browser (local web server) |
+| 10 | `preflight` | Pre-dispatch premise check — resolve a row, get a dispatch decision (Jev resolution gate) |
+| 11 | `mcp-server` | Run the MCP stdio server |
+| 12 | `security-scan` | Run the Antares CVE localization scanner (opt-in) |
+| 13 | `setup-tools` | Show available static analysis tools and install instructions |
+| 14 | `report` | Show verdict history |
+| 15 | `qa` | QA run ledger — record and read QA run outcomes |
+| 16 | `serve` | Live judgment browser (local web server) |
 
 ## 1. `gitreins install`
 
@@ -750,6 +751,54 @@ carries a real `probability` with `abstain_reason: null`, while an ABSTAIN carri
 
 ```
 gitreins resolve "Does engine/evidence_bounds.py truncate text?" --json
+```
+
+## 16. `gitreins preflight`
+
+The pre-dispatch premise check (JEVRES-003; spec `docs/jev-resolution-gate.md`
+§4 row 1). Resolves a board row's premise against the repository's code with
+the Jev resolution gate (JEVRES-001, `engine/resolution.py`) and maps the
+verdict onto a DISPATCH DECISION with `engine/preflight.py` — so a foreman can
+annotate work that is already done instead of spawning a worker for it.
+
+```
+gitreins preflight "<question>" [--json]
+```
+
+| Option | Description |
+|--------|-------------|
+| `<question>` | The row's premise to resolve, quoted (e.g. "Is JEVRES-003 already implemented?") |
+| `--json` | Emit the full machine record as JSON (foremen consume this) |
+
+| Verdict band | Decision | Meaning |
+|--------------|----------|---------|
+| `RESOLVED` (probability ≥ 0.85) | `skip-dispatch` | the evidence already resolves the row — annotate it, do NOT spawn a worker |
+| `REVIEW` (0.50–0.85) | `dispatch-with-note` | dispatch, carrying `missing_kind` + probability into the worker brief |
+| `UNRESOLVED` (probability < 0.50) | `dispatch` | nothing changes — `missing_kind` names what to build |
+| `ABSTAIN` (any failure) | `dispatch` | **fail open, by design**: the reason is recorded, work proceeds |
+
+The asymmetry with `gitreins resolve` is deliberate doctrine: the gate itself
+fails CLOSED (an ABSTAIN is never read as a pass) because it guards a merge
+decision; this policy consumes the same verdict as a DISPATCH signal, where
+the dangerous failure is the opposite one — a dead key or a transport blip
+must never be the reason work silently stops. Only a real RESOLVED probability
+is ever allowed to skip a dispatch, and every record — including the skip —
+carries the probability, `missing_kind` and the full verdict JSON
+(`verdict_json`): no skip is blind, and every row can be annotated with what
+the gate saw.
+
+This is a signal, not a gate: a skip annotates a row, it is never the sole
+authority for a merge or a commit (spec §6.5).
+
+**Exit codes**
+
+| Code | Meaning |
+|------|---------|
+| 0 | every verdict, INCLUDING an ABSTAIN (a valid dispatch outcome — read the record) |
+| 2 | hard usage error (unknown flag, missing question — argparse) |
+
+```
+gitreins preflight "Is JEVRES-003 already implemented?" --json
 ```
 
 ## Hooks

@@ -2562,6 +2562,52 @@ def _print_resolve_verdict(verdict) -> None:
             )
 
 
+def cmd_preflight(args):
+    """Pre-dispatch premise check (JEVRES-003): resolve, then decide dispatch.
+
+    Spec ``docs/jev-resolution-gate.md`` §4 row 1. Runs the JEVRES-001 gate
+    (``engine/resolution.resolve``) and maps the verdict with
+    ``engine/preflight.decide`` — never rebuilt here:
+
+        RESOLVED   (>=.85)  ->  skip-dispatch       annotate the row, NO worker
+        REVIEW     (>=.50)  ->  dispatch-with-note  carry missing_kind + probability
+        UNRESOLVED (<.50)   ->  dispatch
+        ABSTAIN    (any)    ->  dispatch            fail OPEN, reason recorded
+
+    Human output names the decision, the band, the probability and
+    ``missing_kind``; ``--json`` prints the full machine record (foremen
+    consume this one). An ABSTAIN is a VALID dispatch outcome here — the
+    opposite doctrine from ``resolve``, which exits non-zero for it — so
+    this command exits 0 for every verdict and non-zero only on hard
+    usage errors.
+    """
+    from engine.preflight import preflight
+
+    workdir = get_workdir()
+    record = preflight(args.question, workdir=workdir)
+
+    if args.json:
+        print(json.dumps(record, indent=2))
+    else:
+        _print_preflight_record(record)
+
+    sys.exit(0)
+
+
+def _print_preflight_record(record) -> None:
+    """Human-readable rendering of a preflight dispatch record."""
+    print(f"Question: {record['question']}")
+    print(f"Decision: {record['decision']}")
+    probability = f"{record['probability']:.2f}" if record["probability"] is not None else "n/a"
+    print(f"Band:     {record['band']}  (probability {probability})")
+    missing = record["missing_kind"] or "none"
+    print(f"Missing:  {missing}")
+    if record["abstain_reason"]:
+        print(f"Abstain:  {record['abstain_reason']}")
+    print(f"Reason:   {record['reason']}")
+    print("Note:     gate signal only — a skip annotates the row, it is never a merge authority")
+
+
 def cmd_security_scan(args):
     """Run the Antares CVE localization scanner (GR-117f).
 
@@ -2990,6 +3036,39 @@ def main():
         help="Emit the full verdict object as JSON for scripting",
     )
 
+    # preflight (JEVRES-003) — the pre-dispatch premise check's CLI surface
+    preflight_p = sub.add_parser(
+        "preflight",
+        help="Pre-dispatch premise check: resolve a row, get a dispatch decision",
+        description=(
+            "Resolve the row's premise against the repo's code (the Jev"
+            " resolution gate) and map the verdict onto a dispatch decision:"
+            " RESOLVED (>=.85) -> skip-dispatch (annotate the row, no worker),"
+            " REVIEW (>=.50) -> dispatch-with-note (carry missing_kind +"
+            " probability into the brief), UNRESOLVED (<.50) -> dispatch."
+            " Any failure is an ABSTAIN and FAILS OPEN — it dispatches with the"
+            " abstain_reason recorded, because this signal may skip a dispatch"
+            " and must never be the reason work silently stops."
+        ),
+        epilog=(
+            "Exit codes: 0 for every verdict including an ABSTAIN (a valid"
+            " dispatch outcome — read the record); non-zero only for hard"
+            " usage errors. With --json the full machine record is printed"
+            " (band, probability, missing_kind, decision, reason,"
+            " abstain_reason, verdict_json) for a foreman to consume."
+        ),
+    )
+    preflight_p.add_argument(
+        "question",
+        help="The row's premise to resolve against the repo (quoted)",
+    )
+    preflight_p.add_argument(
+        "--json",
+        dest="json",
+        action="store_true",
+        help="Emit the full machine record as JSON (foremen consume this)",
+    )
+
     # mcp-server
     sub.add_parser(
         "mcp-server",
@@ -3182,6 +3261,8 @@ def main():
         cmd_commit_audit(args)
     elif args.command == "resolve":
         cmd_resolve(args)
+    elif args.command == "preflight":
+        cmd_preflight(args)
     elif args.command == "mcp-server":
         cmd_mcp_server(args)
     elif args.command == "security-scan":
