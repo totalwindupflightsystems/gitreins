@@ -359,6 +359,41 @@ def test_config_path_and_max_entries_keep_the_newest_rows(qa_repo):
     assert [row["detail"]["output"] for row in rows] == ["run-1", "run-2"]
 
 
+# ── Rotation announces eviction ────────────────────────────────
+
+
+def test_rotation_past_max_entries_announces_the_eviction_on_stderr(qa_repo, capsys):
+    # An append-only audit trail must never shrink silently: recording past
+    # max_entries evicts the oldest rows, and that eviction is said on stderr
+    # while stdout (which consumers parse) stays untouched.
+    (qa_repo / ".gitreins" / "config.yaml").write_text(
+        "qa_ledger:\n  max_entries: 3\n", encoding="utf-8"
+    )
+    for index in range(4):
+        stored = record_external(str(qa_repo), project=f"p-{index}", status="pass", kind="lane")
+        assert stored is not None
+
+    rows = _ledger_rows(qa_repo)
+    assert len(rows) == 3
+    # Rotation kept the NEWEST rows, not an arbitrary window.
+    assert [row["project"] for row in rows] == ["p-1", "p-2", "p-3"]
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "qa ledger: rotation evicted 1 row(s) (max_entries=3)" in captured.err
+
+
+def test_recording_under_the_cap_prints_no_eviction_line(qa_repo, capsys):
+    for index in range(3):
+        stored = record_external(str(qa_repo), project=f"p-{index}", status="pass", kind="lane")
+        assert stored is not None
+
+    assert len(_ledger_rows(qa_repo)) == 3
+    captured = capsys.readouterr()
+    assert "evicted" not in captured.err
+    assert "qa ledger" not in captured.err
+
+
 def test_a_ledger_write_failure_does_not_fail_the_run(qa_repo):
     # A regular file where the ledger's parent directory should be makes the
     # append raise OSError; the QA run must still succeed and say so.
