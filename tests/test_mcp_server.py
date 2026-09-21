@@ -22,6 +22,16 @@ from gitreins_mcp.server import (
     negotiate_protocol_version,
 )
 
+# Wall-clock ceiling for asserting that async judge dispatch returns without
+# blocking. Measured busy-host distribution: mean ~1.3s under saturation
+# (xdist CPU contention) vs 0.46-0.76s isolated/CI — the old 1.0s/0.5s
+# ceilings flaked on loaded hosts while the SAME commit stayed green on CI
+# and in isolation (off-by-one class 1405 pattern: one file-owned,
+# CI-generous constant instead of per-test magic numbers). 3.0s still sits
+# well short of the 5.0s stub sleep a synchronous join would block on, so
+# the async-vs-blocking distinction keeps its teeth.
+CI_GENEROUS_ASYNC_SECONDS = 3.0
+
 
 @pytest.fixture
 def mcp_server(tmp_workdir):
@@ -797,10 +807,12 @@ class TestJudgeAsyncMCP:
         assert result["task_id"] == "async-me"
         assert result["workdir"] == mcp_server.workdir
         # The stubbed evaluation sleeps 5.0s — a blocking call could never
-        # return this fast with status still "running". 1.0s headroom is
-        # load-robust under xdist CPU contention while still ~4s short of
-        # what a synchronous join would take.
-        assert elapsed < 1.0, f"judge.evaluate blocked for {elapsed:.2f}s — expected async return"
+        # return this fast with status still "running". The CI-generous
+        # module constant absorbs host-load spikes (measured ~1.3s under
+        # saturation) while staying ~2s short of a synchronous join.
+        assert elapsed < CI_GENEROUS_ASYNC_SECONDS, (
+            f"judge.evaluate blocked for {elapsed:.2f}s — expected async return"
+        )
 
     def test_judge_status_polls_to_complete(self, mcp_server, monkeypatch):
         """judge.status polls a background job to 'complete' with the full result."""
@@ -849,7 +861,9 @@ class TestJudgeAsyncMCP:
     def test_task_complete_dispatches_async_job_when_llm_configured(self, mcp_server, monkeypatch):
         """task.complete with LLM key flips the task, then dispatches a background job."""
         monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
-        _stub_judge_evaluate(monkeypatch, sleep=0.1)
+        # 5.0s stub (same as the judge.evaluate async test) so a synchronous
+        # join here would block well past the CI-generous dispatch ceiling.
+        _stub_judge_evaluate(monkeypatch, sleep=5.0)
         self._create_task(mcp_server, "tc-job")
         self._call(mcp_server, "task.start", {"id": "tc-job"})
 
@@ -861,9 +875,13 @@ class TestJudgeAsyncMCP:
         assert "job_id" in result
         assert result["status"] == "running"
         assert "poll judge.status" in result["note"]
-        assert elapsed < 0.5, f"task.complete blocked for {elapsed:.2f}s — expected async return"
+        assert elapsed < CI_GENEROUS_ASYNC_SECONDS, (
+            f"task.complete blocked for {elapsed:.2f}s — expected async return"
+        )
 
-        status = self._poll_status(mcp_server, result["job_id"])
+        # Stub sleeps 5.0s; 15s deadline leaves slack for thread-start delay
+        # under xdist contention while still failing if the job never runs.
+        status = self._poll_status(mcp_server, result["job_id"], deadline=15.0)
         assert status["status"] == "complete"
         assert status["result"]["passed"] is True
         assert status["task_id"] == "tc-job"
