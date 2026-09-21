@@ -209,3 +209,52 @@ def test_output_under_the_cap_is_returned_verbatim():
     out = ch.run_bounded("printf 'a\\nb\\nc\\n'", timeout=10)
     assert out["output"] == "a\nb\nc\n"
     assert "omitted" not in out["output"]
+
+
+# ── DF-CRIER-258: the argv-LIST form (shell=False) ───────────────────────────
+
+
+def test_argv_list_happy_path_reports_exit_code_output_and_pgid():
+    """The list form runs without a shell and reports the same result shape."""
+    out = ch.run_bounded(["bash", "-c", "echo hello; exit 3"], timeout=10)
+    assert out["exit_code"] == 3
+    assert "hello" in out["output"]
+    assert out["timed_out"] is False
+    assert "leftover_pids" not in out
+    # DF-CRIER-258: the group leader's pid rides along for later reaping.
+    assert isinstance(out["pgid"], int)
+    assert not isinstance(out["pgid"], bool)
+    assert out["pgid"] > 1
+
+
+def test_argv_list_timeout_kills_backgrounded_grandchild(pidfile):
+    """The DF-CRIER-258 leak shape, list form: a command that backgrounds a
+    sleep must leave NOTHING alive after the timeout kill."""
+    cmd = ["bash", "-c", f"echo $$ > {pidfile}; sleep 60 & echo bg; wait"]
+    out = ch.run_bounded(cmd, timeout=1)
+    assert out.get("timed_out") is True
+    assert "bg" in out.get("output", "")
+    child = int(pidfile.read_text().strip())
+    assert _wait_gone(child), f"timed-out list-form grandchild {child} escaped the group kill"
+
+
+def test_argv_list_refusal_fires_and_never_executes(tmp_path):
+    """A list-form spin loop is refused (scan runs on shlex.join) and the
+    command never executes."""
+    canary = tmp_path / "executed.canary"
+    out = ch.run_bounded(["bash", "-c", "while :; do :; done; touch CANARY-UNEXPANDED"])
+    assert out.get("refused") is True
+    assert "loadgen.py" in out["reason"] and "sleep" in out["reason"]
+    assert "pgid" not in out
+    # Proof by side effect — the same discipline as the string-form test: if
+    # the refusal failed to stop execution, the canary file would exist.
+    out2 = ch.run_bounded(["bash", "-c", f"while :; do :; done; touch {canary}"])
+    assert out2.get("refused") is True
+    assert not canary.exists(), "refused list-form command executed its side effect"
+
+
+def test_string_form_result_now_carries_pgid_too():
+    """The pre-existing string form gains the same pgid field (no shape break)."""
+    out = ch.run_bounded("echo hello", timeout=10)
+    assert out["exit_code"] == 0
+    assert isinstance(out["pgid"], int) and out["pgid"] > 1

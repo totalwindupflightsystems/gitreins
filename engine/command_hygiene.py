@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import signal
 import subprocess
 import time
@@ -153,7 +154,7 @@ def kill_group(pgid: int, grace: float = 3.0) -> list[int]:
 
 
 def run_bounded(
-    cmd: str,
+    cmd: str | list[str],
     *,
     cwd: str | None = None,
     timeout: float = 30.0,
@@ -162,8 +163,17 @@ def run_bounded(
 ) -> dict:
     """Run ``cmd`` in its own session; always reap leftover group members.
 
-    Returns ``{"cmd", "exit_code", "output", "timed_out", "leftover_pids"}`` or
-    ``{"cmd", "refused", "reason"}`` for a refused busy-wait.
+    ``cmd`` is a shell string (``shell=True``) or an argv LIST (``shell=False``,
+    no intermediate shell — DF-CRIER-258). Both forms get the identical
+    discipline: own session, whole-group reap on return/timeout, busy-wait
+    refusal scan (a list is scanned via ``shlex.join(cmd)``).
+
+    Returns ``{"cmd", "exit_code", "output", "timed_out", "pgid", ...}`` or
+    ``{"cmd", "refused", "reason"}`` for a refused busy-wait. ``pgid`` is the
+    spawned process's PID (== its process-group leader under
+    ``start_new_session``); it lets a caller reap the group later
+    (``engine.evaluator`` keeps it as a belt-and-braces reap target). Absent
+    when the command was refused or spawn failed.
 
     ``output`` is bounded to ``max_output`` chars by the shared line-bounded
     head+TAIL bounder (``engine.evidence_bounds``) — never a head-only slice, so
@@ -171,14 +181,19 @@ def run_bounded(
     trailing error banner) survives the bound, and the omission marker reports
     how many chars/lines went.
     """
-    reason = busy_wait_reason(cmd)
+    scan_target = shlex.join(cmd) if isinstance(cmd, list) else cmd
+    reason = busy_wait_reason(scan_target)
     if reason:
-        return {"cmd": cmd, "refused": True, "reason": BUSY_WAIT_MESSAGE.format(reason=reason)}
+        return {
+            "cmd": cmd,
+            "refused": True,
+            "reason": BUSY_WAIT_MESSAGE.format(reason=reason),
+        }
 
     try:
         proc = subprocess.Popen(
             cmd,
-            shell=True,
+            shell=not isinstance(cmd, list),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -218,6 +233,10 @@ def run_bounded(
         "exit_code": proc.returncode,
         "output": output,
         "timed_out": timed_out,
+        # DF-CRIER-258: the group leader's pid. Under start_new_session the
+        # child is its own group leader, so callers can reap the group later
+        # (kill_group is a validated no-op once the group is gone).
+        "pgid": proc.pid,
     }
     if timed_out:
         result["error"] = f"Command timed out after {timeout}s"
