@@ -333,3 +333,82 @@ def test_parallel_repro_reaps_are_serialized(disposable_repo, monkeypatch):
     assert report["failures"] == 0
     assert live["max"] == 1, f"reaps were not serialized: {live}"
     assert not any(_disposable_dir(disposable_repo).iterdir())
+
+
+# ── DF-GITREINS-POC-27: a plain checkout has no fleet board ──────────────────
+#
+# `.coding-hermes/board/` is a Hermes fleet scheduler artifact: `gitreins
+# install`/`init` never create it, and the disposable batteries never read it.
+# Every test below runs in a repo with no `.coding-hermes/` anywhere — they all
+# used to die in WorktreeResolutionError before the board became optional.
+
+
+@pytest.fixture
+def plain_repo(tmp_path: Path) -> Path:
+    """A git repo with `install` + `init` applied and no `.coding-hermes/`."""
+    repo = tmp_path / "plain"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.name", "GitReins Disposable Tests")
+    _git(repo, "config", "user.email", "gitreins-disposable@example.invalid")
+    (repo / "base.txt").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", "base.txt")
+    _git(repo, "commit", "-qm", "initial")
+
+    for command in ("install", "init"):
+        applied = _run_cli(repo, command)
+        assert applied.returncode == 0, applied.stderr
+    assert not (repo / ".coding-hermes").exists()
+    return repo
+
+
+def _qa_rows(repo: Path) -> list[dict]:
+    ledger = repo / ".gitreins" / "qa-ledger.jsonl"
+    return [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines() if line]
+
+
+def test_fresh_runs_in_a_plain_repo_without_a_board(plain_repo: Path):
+    """`worktree fresh` exits 0 and records QA with no board to resolve."""
+    result = _run_cli(plain_repo, "worktree", "fresh", "--cmd", "echo hello")
+
+    assert result.returncode == 0, result.stderr
+    assert "hello" in result.stdout
+    rows = _qa_rows(plain_repo)
+    assert [row["kind"] for row in rows] == ["fresh"]
+    assert rows[0]["verdict"] == "PASS"
+    assert not (plain_repo / ".coding-hermes").exists()
+
+
+def test_repro_runs_in_a_plain_repo_without_a_board(plain_repo: Path):
+    result = _run_cli(plain_repo, "worktree", "repro", "--cmd", "true", "-k", "2")
+
+    assert result.returncode == 0, result.stderr
+    assert "repro: 2/2 passed" in result.stdout
+    assert [row["kind"] for row in _qa_rows(plain_repo)] == ["repro"]
+    assert not (plain_repo / ".coding-hermes").exists()
+
+
+def test_dogfood_runs_in_a_plain_repo_without_a_board(plain_repo: Path):
+    result = _run_cli(plain_repo, "worktree", "dogfood", "--skip-judge", "--test-command", "true")
+
+    assert result.returncode == 0, result.stderr
+    assert "judge skipped" in result.stdout
+    assert [row["kind"] for row in _qa_rows(plain_repo)] == ["dogfood"]
+    assert not (plain_repo / ".coding-hermes").exists()
+
+
+def test_disposable_manager_api_works_without_a_board(plain_repo: Path):
+    """The manager API itself (not just the CLI) runs with no board."""
+    verifier = DisposableWorktreeManager(plain_repo)
+
+    run = verifier.run("echo hello")
+    assert run["exit_code"] == 0
+    assert "hello" in run["output"]
+
+    report = verifier.dogfood(skip_judge=True, test_command="true")
+    assert report["exit_code"] == 0
+    assert [step["name"] for step in report["steps"]] == ["init", "task", "guard", "judge"]
+
+    verifier.reap()
+    assert verifier._load() == []
+    assert not (plain_repo / ".coding-hermes").exists()

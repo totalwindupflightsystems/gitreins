@@ -40,6 +40,18 @@ class WorktreePaths:
     local_board: Path
 
     @property
+    def board_exists(self) -> bool:
+        """Whether the canonical fleet board directory is present on disk.
+
+        ``.coding-hermes/board/`` is a Hermes fleet scheduler artifact: plain
+        ``pip install gitreins`` + ``install``/``init`` never create it, and the
+        disposable verification batteries (``worktree fresh|repro|dogfood``)
+        never read it.  The resolved path stays valid either way, so consumers
+        must gate on this property instead of assuming the directory exists.
+        """
+        return self.canonical_board.is_dir()
+
+    @property
     def local_board_exists(self) -> bool:
         """Whether a separate in-tree board directory exists in this worktree."""
         return self.invoking_worktree_root != self.canonical_main_root and self.local_board.is_dir()
@@ -208,9 +220,14 @@ def resolve_worktree_paths(workdir: str | os.PathLike[str] | None = None) -> Wor
 
     Git's ``--git-common-dir`` is the source of truth for the shared Git
     directory.  Relative output is interpreted relative to the directory
-    passed to ``git -C``.  A non-standard Git layout, bare repository, or
-    missing board is rejected instead of falling back to a local worktree
-    copy.
+    passed to ``git -C``.  A non-standard Git layout or bare repository is
+    rejected instead of falling back to a local worktree copy.
+
+    The board is optional.  ``.coding-hermes/board/`` is created by the Hermes
+    fleet scheduler, not by ``gitreins install``/``init``, so a plain checkout
+    resolves to the expected (not necessarily existing) path and
+    :attr:`WorktreePaths.board_exists` reports the truth; consumers that
+    actually use the board check it before reading or writing.
     """
     raw_workdir = Path.cwd() if workdir is None else Path(workdir).expanduser()
     invoking_dir = raw_workdir.resolve(strict=False)
@@ -263,12 +280,13 @@ def resolve_worktree_paths(workdir: str | os.PathLike[str] | None = None) -> Wor
         )
 
     board_candidate = canonical_root / ".coding-hermes" / "board"
-    if not board_candidate.is_dir():
-        raise WorktreeResolutionError(
-            f"canonical board directory does not exist: {board_candidate}; "
-            "create .coding-hermes/board in the main checkout"
-        )
-    canonical_board = board_candidate.resolve(strict=True)
+    # The board is optional: it is a Hermes fleet artifact that
+    # `gitreins install`/`init` never create and the disposable verification
+    # batteries never read.  Resolve the expected path (never strict) and let
+    # consumers gate on `board_exists` rather than failing the whole
+    # invocation — a plain `pip install gitreins` checkout must still be able
+    # to run `worktree fresh|repro|dogfood`.
+    canonical_board = board_candidate.resolve(strict=False)
     local_board = (invoking_root / ".coding-hermes" / "board").resolve(strict=False)
 
     return WorktreePaths(
@@ -281,7 +299,12 @@ def resolve_worktree_paths(workdir: str | os.PathLike[str] | None = None) -> Wor
 
 
 def canonical_board_dir(workdir: str | os.PathLike[str] | None = None) -> Path:
-    """Return the validated shared board directory for ``workdir``."""
+    """Return the shared board directory path for ``workdir``.
+
+    The directory is returned whether or not it exists; callers that use the
+    board check ``resolve_worktree_paths(workdir).board_exists`` first (an
+    absent board is not a resolution error).
+    """
     return resolve_worktree_paths(workdir).canonical_board
 
 
@@ -292,7 +315,10 @@ def board_file_path(
     """Return a validated file path inside the canonical board directory.
 
     This helper is shared by board readers and writers.  Only a direct child
-    filename is accepted so a caller cannot escape the canonical store.
+    filename is accepted so a caller cannot escape the canonical store.  The
+    returned path may not exist (no fleet board in this checkout); a writer
+    must check ``resolve_worktree_paths(workdir).board_exists`` before
+    creating or appending to it.
     """
     if not name or Path(name).name != name or name in {".", ".."}:
         raise ValueError(f"board filename must be a direct child name: {name!r}")

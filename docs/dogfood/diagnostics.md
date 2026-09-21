@@ -613,6 +613,12 @@ That is why the finding is about activation, not quality.
 
 ### 3. The disposable battery — gated on the fleet scheduler's board layout
 
+> **Fixed (DF-GITREINS-POC-27).** The board is now optional:
+> `resolve_worktree_paths` returns the expected path with `board_exists` False
+> instead of raising, `_append_board_event` skips silently, and the whole
+> battery runs in a plain `install`/`init` checkout. The analysis below is the
+> 2026-09-20 observation this finding was filed from.
+
 ```
 $ gitreins worktree fresh --cmd "echo hello"
 engine.repo_paths.WorktreeResolutionError: canonical board directory does not exist:
@@ -678,7 +684,8 @@ python3 -m venv .venv && .venv/bin/pip install gitreins pytest
 source .venv/bin/activate            # ← REQUIRED before guard/commit, not optional
 
 gitreins install && gitreins init
-mkdir -p .coding-hermes/board        # ← REQUIRED for worktree fresh|repro|dogfood
+# no `mkdir .coding-hermes/board` needed since DF-GITREINS-POC-27: the fleet
+# board is optional and worktree fresh|repro|dogfood run without it.
 echo '.gitreins/qa-ledger.jsonl' >> .gitignore   # install won't do it for you
 
 # QA ledger: ALWAYS pass a verdict explicitly — the documented default writes UNKNOWN

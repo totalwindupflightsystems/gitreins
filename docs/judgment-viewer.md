@@ -56,7 +56,13 @@ with exit code `2`.
 
 A browsed checkout that has judgments but no `.coding-hermes/board/` is fully
 browsable: `/api/tasks` and `/api/events` answer with empty lists instead of an
-error.
+error, and `/api/stats` carries a `board` block (`configured: false` plus the
+path and a one-line message) so a client can tell "no board in this checkout"
+from "the board is empty". The board is a Hermes fleet scheduler artifact —
+plain `pip install gitreins` + `install`/`init` never create one, and
+`worktree fresh|repro|dogfood` run without it (DF-GITREINS-POC-27). The routes
+deliberately stay `200`: the viewer fetches every `/api/*` route in one
+`Promise.all`, so a `404` here would blank the whole page.
 
 ## API contract
 
@@ -69,7 +75,7 @@ changed one. Data is re-read from disk on every request, so the contract is
 | Method | Path | Success | Payload | Errors |
 |--------|------|---------|---------|--------|
 | GET | `/` | 200 HTML | the single-page viewer (no server-side data; it fetches `/api/*`) | — |
-| GET | `/api/stats` | 200 | `total`, `passed`, `failed`, `pass_rate`, `usage` (aggregate judge tokens/cost), `repo`, `path`, `generated` | — |
+| GET | `/api/stats` | 200 | `total`, `passed`, `failed`, `pass_rate`, `usage` (aggregate judge tokens/cost), `board` (`configured`/`path`/`message` for the fleet board), `repo`, `path`, `generated` | — |
 | GET | `/api/verdicts` | 200 | `{"verdicts": [row, …]}` — metadata only, newest last | — |
 | GET | `/api/verdicts/<date>/<hash>` | 200 | the full `verdict.json` (criteria, `stages.tier1`, `stages.tier2`, `evidence` manifest when one was collected) plus a joined `usage` block when judge telemetry is traceable to it | `400` malformed path (not `<date>/<hash>`), `404` unknown date/hash |
 | GET | `/api/verdicts/<date>/<hash>/evidence/<name>` | 200 `text/plain` | one worker-evidence artifact declared by that verdict's `evidence` manifest (`brief`, `log`, `patch`) | `400` missing `<name>`, `404` unknown verdict or a name the manifest does not declare (including an artifact deleted since) |

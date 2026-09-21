@@ -431,9 +431,12 @@ gitreins worktree doctor
 
 Prints and validates the shared canonical board resolution for the checkout
 you invoked it from: the worktree root, the git common dir, the canonical main
-checkout, the canonical board path, and whether the ignored local worktree
-board copy is present. Exit **0** means the resolution is valid; exit **1**
-means it is not (`worktree doctor: invalid` with the reason on stderr).
+checkout, the canonical board path (with whether the board actually exists),
+and whether the ignored local worktree board copy is present. Exit **0** means
+the resolution is valid; exit **1** means it is not (`worktree doctor: invalid`
+with the reason on stderr). An absent `.coding-hermes/board/` is not an error —
+it is a Hermes fleet artifact that `install`/`init` never create, so `doctor`
+reports `board absent` and says so explicitly.
 
 ### `worktree list`
 

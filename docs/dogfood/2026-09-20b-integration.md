@@ -100,7 +100,7 @@ harness-written ledger. The advertised interop held up on inspection.
 
 | # | What I did | What happened | Fix / workaround |
 |---|---|---|---|
-| 1 | `worktree fresh --cmd "echo hello"` in a plain repo | `WorktreeResolutionError: canonical board directory does not exist: .coding-hermes/board` — traceback, exit 1 | `mkdir -p .coding-hermes/board`; it then passes in 0.19 s (**POC-27**) |
+| 1 | `worktree fresh --cmd "echo hello"` in a plain repo | `WorktreeResolutionError: canonical board directory does not exist: .coding-hermes/board` — traceback, exit 1 | `mkdir -p .coding-hermes/board`; it then passes in 0.19 s (**POC-27** — fixed: the board is optional as of DF-GITREINS-POC-27, no workaround needed) |
 | 2 | `qa record --kind lane --note X` (no verdict/exit-code) | `recorded … UNKNOWN`, `"status":"unknown","verdict":"UNKNOWN"`, exit 0 — docs say the default is a *passing* verdict (**POC-29**) | pass `--verdict` explicitly |
 | 3 | `qa record --evidence /tmp/does-not-exist.json` | accepted, exit 0, path stored verbatim — dangling audit pointer (**POC-29**) | — (validate or flag) |
 | 4 | `qa record` with `qa_ledger.max_entries: 3` already full | 4th record exits 0 "recorded", row count stays 3 — eviction is silent (**POC-32**) | raise the cap |

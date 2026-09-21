@@ -1005,11 +1005,24 @@ class WorktreeManager:
             "branch": _git(tree, "symbolic-ref", "--quiet", "--short", "HEAD").stdout.strip(),
         }
 
-    def _append_board_event(self, event: dict) -> dict:
-        """Append one valid event while allocating an id under an advisory lock."""
+    def _append_board_event(self, event: dict) -> dict | None:
+        """Append one valid event while allocating an id under an advisory lock.
+
+        Returns the written entry, or ``None`` when this checkout has no fleet
+        board.  ``.coding-hermes/board/`` is a Hermes scheduler artifact that
+        ``gitreins install``/``init`` never create, so the board event is
+        skipped silently rather than failing (and rather than creating a board
+        directory nobody asked for): the merge or lane phase it describes did
+        happen, and fleet bookkeeping must not be a precondition for it.
+        """
         import fcntl
 
         from engine.repo_paths import board_file_path
+
+        # Board events are the only board consumer in this manager; there is
+        # nothing to record to when the board is not configured.
+        if not (self.main_root / ".coding-hermes" / "board").is_dir():
+            return None
 
         path = board_file_path(self.main_root, "events.jsonl")
         path.parent.mkdir(parents=True, exist_ok=True)

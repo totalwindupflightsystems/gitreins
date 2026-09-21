@@ -50,6 +50,9 @@ from engine.repo_paths import (
 )
 
 TICKS_DB = os.path.expanduser("~/.hermes/coding-hermes/scheduler.db")
+BOARD_NOT_CONFIGURED = (
+    "fleet board not configured; run in a fleet-managed checkout or create .coding-hermes/board/"
+)
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _HASH_RE = re.compile(r"^[a-f0-9]{4,16}$")
 
@@ -233,6 +236,26 @@ def load_verdict_evidence(workdir: str, date: str, h: str, name: str) -> tuple[s
     return evidence.read_evidence(os.path.join(_verdict_dir(workdir), date, h), verdict, name)
 
 
+def board_status(workdir: str) -> dict[str, Any]:
+    """Whether the browsed checkout carries a coding-hermes fleet board.
+
+    ``.coding-hermes/board/`` is a Hermes scheduler artifact: a plain
+    ``pip install gitreins`` + ``install``/``init`` checkout has none, and
+    most of gitreins works without one.  The board routes keep their
+    documented contract in that case (``200`` with an empty list — never a
+    ``500``, and never a ``404`` that would blank the viewer, whose boot
+    fetches every ``/api/*`` route in one ``Promise.all``).  This block is how
+    a client tells "no board here" from "board is empty".
+    """
+    path = os.path.join(os.path.abspath(workdir), ".coding-hermes", "board")
+    configured = os.path.isdir(path)
+    return {
+        "configured": configured,
+        "path": path,
+        "message": "" if configured else BOARD_NOT_CONFIGURED,
+    }
+
+
 def load_jsonl(workdir: str, name: str, limit: int = 2000) -> list[Any]:
     """Last ``limit`` parses of board file ``name`` (rows are any JSON value)."""
 
@@ -240,7 +263,11 @@ def load_jsonl(workdir: str, name: str, limit: int = 2000) -> list[Any]:
         path = board_file_path(workdir, name)
     except (WorktreeResolutionError, OSError, ValueError):
         # A browsed checkout (--repo) may hold judgments but no coding-hermes
-        # board: an absent board is an empty list, never a 500.
+        # board: an absent board is an empty list, never a 500.  The same
+        # holds for a checkout that has no board directory at all (a plain
+        # `pip install gitreins` repo) — see board_status() for how a client
+        # tells "no board here" from "board is empty"; the routes stay 200 so
+        # the viewer's parallel fetch cannot blank the page.
         return []
     rows: list[Any] = []
     if os.path.isfile(path):
@@ -586,6 +613,7 @@ class Handler(BaseHTTPRequestHandler):
                     {
                         **stats(vs),
                         "usage": usage_summary,
+                        "board": board_status(self.workdir),
                         "repo": os.path.basename(os.path.abspath(self.workdir)),
                         "path": os.path.abspath(self.workdir),
                         "generated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
@@ -679,6 +707,11 @@ def serve(
     print(
         f"scheduler project: {project if project else '(none - pass --project <name> to show ticks)'}"
     )
+    board = board_status(workdir)
+    if board["configured"]:
+        print(f"board: {board['path']}")
+    else:
+        print(f"board: {BOARD_NOT_CONFIGURED} ({board['path']})")
     if host not in ("127.0.0.1", "localhost", "::1"):
         print(
             f"warning: --host {host} serves judgment data over the network with NO "

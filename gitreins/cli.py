@@ -1451,7 +1451,12 @@ def cmd_worktree_merge(args):
             actor=getattr(args, "actor", None),
             reason=getattr(args, "reason", "explicit judge-gate override"),
         )
-    except (WorktreeError, WorktreeResolutionError) as exc:
+    except WorktreeResolutionError as exc:
+        # Unresolvable checkout (not a Git repository, bare repo, malformed
+        # layout) is infrastructure, not a policy refusal: one line, exit 2.
+        print(f"worktree merge: infrastructure failure — {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+    except WorktreeError as exc:
         print(f"worktree merge: refused\nError: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
 
@@ -1845,12 +1850,23 @@ def cmd_worktree_doctor(args):
         raise SystemExit(1) from exc
 
     local_status = "present" if paths.local_board_exists else "absent"
+    board_status = "present" if paths.board_exists else "absent"
     print(f"Invoking worktree root: {paths.invoking_worktree_root}")
     print(f"Git common dir: {paths.git_common_dir}")
     print(f"Canonical main checkout/root: {paths.canonical_main_root}")
-    print(f"Canonical board path: {paths.canonical_board}")
+    print(f"Canonical board path: {paths.canonical_board} (board {board_status})")
     print(f"Ignored local worktree board copy: {local_status} ({paths.local_board})")
     print("Resolution: valid")
+    if not paths.board_exists:
+        # The board is a Hermes fleet artifact, not something install/init
+        # creates: name it instead of implying something is broken.
+        print(
+            "Fleet board: not configured — no .coding-hermes/board in the "
+            "canonical checkout. worktree fresh|repro|dogfood run without it; "
+            "merge and lane activity is simply not recorded to a board. "
+            "Create .coding-hermes/board (or run from a fleet-managed "
+            "checkout) to record board events."
+        )
 
 
 def cmd_serve(args):

@@ -56,6 +56,19 @@ def _make_repo(tmp_path: Path) -> tuple[Path, Path]:
     return main, linked
 
 
+def _plain_repo(tmp_path: Path) -> Path:
+    """A committed repo with no ``.coding-hermes/`` anywhere (DF-GITREINS-POC-27)."""
+    repo = tmp_path / "plain"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.name", "GitReins Tests")
+    _git(repo, "config", "user.email", "gitreins-tests@example.invalid")
+    (repo / "base.txt").write_text("base\n", encoding="utf-8")
+    _git(repo, "add", "base.txt")
+    _git(repo, "commit", "-qm", "initial")
+    return repo
+
+
 def test_linked_worktree_resolves_main_board_and_board_writes(tmp_path: Path):
     main, linked = _make_repo(tmp_path)
     main_board = main / ".coding-hermes" / "board"
@@ -111,11 +124,49 @@ def test_resolution_fails_outside_git(tmp_path: Path):
         resolve_worktree_paths(tmp_path)
 
 
-def test_resolution_fails_when_canonical_board_is_missing(tmp_path: Path):
-    main, _ = _make_repo(tmp_path)
+def test_resolution_without_a_canonical_board_is_not_an_error(tmp_path: Path):
+    """DF-GITREINS-POC-27: an absent fleet board resolves; it is not an error.
 
-    with pytest.raises(WorktreeResolutionError, match="canonical board directory does not exist"):
-        resolve_worktree_paths(main)
+    ``.coding-hermes/board/`` is created by the Hermes fleet scheduler, not by
+    ``gitreins install``/``init``, so a plain checkout must still resolve — with
+    ``board_exists`` False so the consumers that use the board skip it instead
+    of the whole invocation failing.
+    """
+    main = _plain_repo(tmp_path)
+
+    paths = resolve_worktree_paths(main)
+
+    assert paths.invoking_worktree_root == main.resolve()
+    assert paths.canonical_main_root == main.resolve()
+    assert paths.canonical_board == (main / ".coding-hermes" / "board").resolve()
+    assert paths.board_exists is False
+    assert not (main / ".coding-hermes").exists()
+
+
+def test_append_board_event_skips_silently_without_a_board_and_creates_nothing(tmp_path: Path):
+    """A merge/lane event with no fleet board is skipped, never a mkdir."""
+    repo = _plain_repo(tmp_path)
+    manager = WorktreeManager(repo)
+
+    event = manager._append_board_event({"event_type": "worktree_merged", "task_id": "NB-1"})
+
+    assert event is None
+    assert not (repo / ".coding-hermes").exists()
+
+
+def test_merge_without_a_board_still_fast_forwards(tmp_path: Path):
+    """The merge itself is not gated on fleet bookkeeping existing."""
+    repo = _plain_repo(tmp_path)
+    manager = WorktreeManager(repo)
+    record, tree = _make_task_commit(manager, "MERGE-NOBOARD")
+
+    result = manager.merge(record.task_id, force=True, actor="no-board-actor")
+
+    assert result["mode"] == "fast-forward"
+    assert _git(repo, "rev-parse", "HEAD").stdout.strip() == result["destination_commit"]
+    assert not tree.exists()
+    assert manager._load_registry() == {}
+    assert not (repo / ".coding-hermes").exists()
 
 
 def test_resolution_rejects_bare_repository(tmp_path: Path):
