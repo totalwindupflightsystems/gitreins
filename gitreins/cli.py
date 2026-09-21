@@ -2436,7 +2436,7 @@ def cmd_commit_audit(args):
     exits non-zero if configured to block on bad messages.
     """
     import os
-    from engine.pipeline import Pipeline, load_pipeline_config
+    from engine.pipeline import Pipeline, commit_audit_skip_message, load_pipeline_config
     from engine.llm import LLMClient
 
     workdir = get_workdir()
@@ -2467,6 +2467,10 @@ def cmd_commit_audit(args):
     config = load_pipeline_config(workdir)
     llm = LLMClient()
     pipeline = Pipeline(config, workdir, llm=llm)
+    # DF-GITREINS-POC-30: name the trigger so the no-matching-stage case below
+    # can report it. A stage-less run used to print NOTHING at all (exit 0,
+    # stdout and stderr both empty) — the hook looked like a working gate.
+    trigger = "commit-msg"
 
     task = {
         "id": "_commit_msg",
@@ -2475,7 +2479,7 @@ def cmd_commit_audit(args):
         "commit_message": message,
     }
 
-    result = pipeline.run(task, trigger="commit-msg")
+    result = pipeline.run(task, trigger=trigger)
 
     # Check if audit stage blocked
     audit_stage = result.get("stages", {}).get("commit_audit", {})
@@ -2485,6 +2489,13 @@ def cmd_commit_audit(args):
 
     if audit_stage:
         print(audit_stage.get("summary", "✓ Commit message OK."))
+        sys.exit(0)
+
+    # No stage matched this trigger: the audit did NOT run. Say so by name and
+    # exit 0 — a skip, not a failure. Silence here is what made a hook that
+    # audits nothing indistinguishable from a hook that passed: on a fresh
+    # `install` + `init` repo this command printed NOTHING at all.
+    print(commit_audit_skip_message(config, trigger))
     sys.exit(0)
 
 

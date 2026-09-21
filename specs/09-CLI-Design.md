@@ -292,6 +292,10 @@ Secrets: FAIL — found potential secret in config.py:42
 
 Runs the configured `commit_audit` pipeline stage against the staged diff. With no `message`, it reads `.git/COMMIT_EDITMSG`; a `gitreins.skip-tier2` trailer skips the audit.
 
+The stage must exist AND be armed for the `commit-msg` trigger; neither `install` nor `init` writes one. When no armed stage matches, the command prints a named skip line (`commit audit: no pipeline stage with type commit_audit for trigger commit-msg — audit NOT run`) and exits 0 — DF-GITREINS-POC-30.
+
+`mode` resolves with an explicit precedence: the stage's own `mode`, then `defaults.commit_audit.mode`, then a top-level `commit_audit.mode` (legacy, still honored), then `warn`. Only `block` exits 1.
+
 **Review modes** (configured under `commit_audit.review_mode`):
 - `message` — validate the commit message against the diff.
 - `review` — one-pass CodeRabbit-style LLM review.

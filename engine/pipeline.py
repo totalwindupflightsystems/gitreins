@@ -244,6 +244,95 @@ def _record_runtime_skips(stage: StageResult) -> None:
     )
 
 
+# The commit-audit ``mode`` values the auditor and the CLI wording support.
+_COMMIT_AUDIT_MODES = ("warn", "block", "suggest")
+
+
+def resolve_commit_audit_mode(
+    pipeline_config: dict, audit_config: dict, step_def: dict | None = None
+) -> str:
+    """Resolve the commit-audit ``mode`` with an EXPLICIT precedence.
+
+    DF-GITREINS-POC-30: ``_load_commit_audit_config`` used to return the
+    top-level section only, so a ``mode`` written on the pipeline STAGE (the
+    placement ``docs/cli-reference.md`` describes) or under
+    ``defaults.commit_audit`` was dead config — the audit ran, printed
+    "(Warning only — commit will proceed)" and exited 0 while the user believed
+    their commits were gated. All three placements are live now, and this
+    function is the single place that decides which one wins, so the rule is
+    testable without an LLM:
+
+        1. the stage's own ``mode``            (most specific)
+        2. ``defaults.commit_audit.mode``
+        3. top-level ``commit_audit.mode``     (legacy placement — still blocks)
+        4. ``"warn"``                          (default)
+
+    A value outside the supported set falls through to the next source rather
+    than being passed to the auditor as-is: the mode is a security-relevant
+    choice, so an unrecognised value must not be able to read as "whatever the
+    next rule would have said".
+    """
+    defaults_cfg = pipeline_config.get("defaults", {}).get("commit_audit", {}) or {}
+    sources = (
+        (step_def or {}).get("mode"),
+        defaults_cfg.get("mode") if isinstance(defaults_cfg, dict) else None,
+        audit_config.get("mode"),
+    )
+    for value in sources:
+        if isinstance(value, str) and value.strip().lower() in _COMMIT_AUDIT_MODES:
+            return value.strip().lower()
+    return "warn"
+
+
+def _is_commit_audit_stage(stage_def: dict) -> bool:
+    """True for a stage that declares the commit-audit step type.
+
+    The step type is ``type:``; the id is conventionally ``commit_audit`` and
+    is accepted as well, so an id-only stage (the shape the docs and the
+    onboarding snippet use) is recognised and reported instead of being
+    mistaken for "you declared nothing".
+    """
+    if not isinstance(stage_def, dict):
+        return False
+    return stage_def.get("type") == "commit_audit" or stage_def.get("id") == "commit_audit"
+
+
+def commit_audit_skip_message(config: dict, trigger: str) -> str:
+    """The named skip line for a run where the commit audit did NOT happen.
+
+    DF-GITREINS-POC-30: the command used to print NOTHING (exit 0, stdout and
+    stderr both empty) when no commit_audit stage was armed — the hook was
+    indistinguishable from a passing audit. This names which of the three
+    states the repo is in, reading only the config the run used, so the message
+    cannot disagree with what actually ran:
+
+      * no stage of that type at all — the fresh ``install`` + ``init`` state;
+      * a stage exists but does not list this trigger in ``on:``;
+      * a stage is armed for this trigger yet produced no result (its
+        ``condition`` excluded it).
+
+    Exit codes stay 0: a skip is not a failure.
+    """
+    stages = config.get("pipeline", {}).get("stages", []) or []
+    audit_stages = [s for s in stages if _is_commit_audit_stage(s)]
+    if not audit_stages:
+        return (
+            f"commit audit: no pipeline stage with type commit_audit for trigger {trigger} "
+            "— audit NOT run"
+        )
+    armed = [s for s in audit_stages if trigger in (s.get("on") or [])]
+    if not armed:
+        ids = ", ".join(str(s.get("id")) for s in audit_stages)
+        return (
+            f"commit audit: pipeline stage {ids} is not armed for trigger {trigger} "
+            "(add `on: [commit-msg]`) — audit NOT run"
+        )
+    return (
+        f"commit audit: pipeline stage armed for trigger {trigger} was skipped "
+        "(condition not met) — audit NOT run"
+    )
+
+
 class Pipeline:
     """Execute a pipeline of stages against a task."""
 
@@ -686,8 +775,14 @@ class Pipeline:
         message against the diff, with optional LLM exploration
         (configured via ``max_iterations`` in the step or config).
 
-        Config keys (from .gitreins/config.yaml):
-          ``commit_audit.mode`` — "warn" (default) | "block" | "suggest"
+        ``mode`` is resolved with an EXPLICIT precedence (DF-GITREINS-POC-30):
+        the stage's own ``mode`` wins, then ``defaults.commit_audit.mode``, then
+        top-level ``commit_audit.mode`` (the legacy placement), then ``"warn"``.
+        Before this, only the top-level key was read, so the stage-scoped and
+        ``defaults`` placements documented in ``docs/cli-reference.md`` were
+        dead config — a ``mode: block`` there stayed a warning with exit 0.
+
+        Other config keys (from .gitreins/config.yaml):
           ``commit_audit.strictness`` — "lenient" | "standard" (default) | "strict"
           ``commit_audit.max_iterations`` — int, default 3
           ``commit_audit.suggest_message`` — bool, default True
@@ -758,7 +853,7 @@ class Pipeline:
                 output=f"Audit error (passing): {e}",
             )
 
-        mode = config.get("mode", "warn")
+        mode = resolve_commit_audit_mode(self.config, config, step_def)
         passed = result.valid or mode != "block"
 
         output_lines: list[str] = []
@@ -860,7 +955,17 @@ class Pipeline:
         )
 
     def _load_commit_audit_config(self) -> dict:
-        """Read commit_audit section from .gitreins/config.yaml."""
+        """Read the commit_audit section from .gitreins/config.yaml.
+
+        The section is the MERGE of top-level ``commit_audit`` (legacy, where
+        ``mode`` used to be read from) and ``defaults.commit_audit`` — the
+        natural place, since every other setting lives under ``defaults:``.
+        Neither is a superset of the other: ``defaults`` carries everything the
+        installer writes, the top-level block is what users of the older docs
+        already have. Top-level keys win on conflict, so a repo that set both
+        keeps its recorded behavior. ``mode`` itself is resolved separately by
+        :func:`resolve_commit_audit_mode`, which also consults the stage def.
+        """
         import yaml
 
         config_path = os.path.join(self.workdir, ".gitreins", "config.yaml")
@@ -868,7 +973,14 @@ class Pipeline:
             try:
                 with open(config_path, "r") as f:
                     cfg = yaml.safe_load(f) or {}
-                return cfg.get("commit_audit", {})
+                merged: dict = {}
+                defaults_cfg = cfg.get("defaults", {}).get("commit_audit", {}) or {}
+                if isinstance(defaults_cfg, dict):
+                    merged.update(defaults_cfg)
+                top_cfg = cfg.get("commit_audit", {}) or {}
+                if isinstance(top_cfg, dict):
+                    merged.update(top_cfg)
+                return merged
             except Exception:
                 pass
         return {}

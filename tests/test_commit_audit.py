@@ -9,6 +9,7 @@ operations for diff capture and message reading.
 import json
 from unittest.mock import patch
 
+import pytest
 
 from engine.commit_audit import (
     CommitAuditor,
@@ -1299,3 +1300,241 @@ class TestPipelineScoreOutput:
         # Verify it wouldn't be WARN or BLOCK
         assert not (effective >= score_threshold)
         assert not (effective >= score_threshold * 0.75)
+
+
+# ═══════════════════════════════════════════════════════════════
+# mode placement and the named skip (DF-GITREINS-POC-30)
+# ═══════════════════════════════════════════════════════════════
+
+
+def _write_config(workdir, text: str) -> None:
+    """Write .gitreins/config.yaml into an already-initialised workdir."""
+    import os
+
+    os.makedirs(os.path.join(workdir, ".gitreins"), exist_ok=True)
+    with open(os.path.join(workdir, ".gitreins", "config.yaml"), "w") as f:
+        f.write(text)
+
+
+def _config_for(stage_lines: str = "", **top) -> str:
+    """A config whose pipeline holds exactly the given stage lines."""
+    parts = []
+    if top.get("defaults_mode"):
+        parts.append(f"defaults:\n  commit_audit:\n    mode: {top['defaults_mode']}\n")
+    if top.get("top_mode"):
+        parts.append(f"commit_audit:\n  mode: {top['top_mode']}\n")
+    parts.append("pipeline:\n  stages:\n" + (stage_lines or "    []\n"))
+    return "".join(parts)
+
+
+STAGE_ON_MSG = "    - id: commit_audit\n      type: commit_audit\n      on: [commit-msg]\n"
+
+
+def _run_audit(workdir, trigger: str = "commit-msg"):
+    """Run the pipeline against a REJECTED message, with the LLM stubbed.
+
+    The auditor itself is mocked at ``CommitAuditor.audit`` so no credential,
+    endpoint, or network is involved — what is under test is which ``mode``
+    the pipeline resolves and whether it turns that into a block.
+    """
+    from engine.commit_audit import CommitAuditResult, CommitAuditor
+    from engine.pipeline import Pipeline, load_pipeline_config
+
+    llm = LLMClient(api_key="sk-test", model="test/model", base_url="http://127.0.0.1:9/v1")
+    pipeline = Pipeline(load_pipeline_config(workdir), workdir, llm=llm)
+    task = {"id": "_commit_msg", "title": "t", "criteria": [], "commit_message": "wip"}
+    with patch.object(
+        CommitAuditor,
+        "audit",
+        return_value=CommitAuditResult(valid=False, issues=["Message 'wip' is a placeholder."]),
+    ):
+        return pipeline.run(task, trigger=trigger)
+
+
+def _mode_of(result) -> str:
+    stage = result["stages"]["commit_audit"]
+    return stage["steps"][0]["data"]["mode"]
+
+
+def _passed(result) -> bool:
+    return result["stages"]["commit_audit"]["passed"]
+
+
+class TestResolveCommitAuditMode:
+    """The precedence rule itself, free of config files and LLMs."""
+
+    def test_stage_mode_wins_over_defaults_and_top_level(self):
+        from engine.pipeline import resolve_commit_audit_mode
+
+        got = resolve_commit_audit_mode(
+            {"defaults": {"commit_audit": {"mode": "warn"}}},
+            {"mode": "warn"},
+            {"mode": "block"},
+        )
+        assert got == "block"
+
+    def test_defaults_wins_over_top_level(self):
+        from engine.pipeline import resolve_commit_audit_mode
+
+        got = resolve_commit_audit_mode(
+            {"defaults": {"commit_audit": {"mode": "block"}}}, {"mode": "warn"}, {}
+        )
+        assert got == "block"
+
+    def test_top_level_is_the_legacy_fallback(self):
+        from engine.pipeline import resolve_commit_audit_mode
+
+        assert resolve_commit_audit_mode({}, {"mode": "block"}, {}) == "block"
+
+    def test_default_is_warn(self):
+        from engine.pipeline import resolve_commit_audit_mode
+
+        assert resolve_commit_audit_mode({}, {}, {}) == "warn"
+
+    def test_unrecognised_values_fall_through(self):
+        """A typo on the stage must not mask a real `block` below it."""
+        from engine.pipeline import resolve_commit_audit_mode
+
+        got = resolve_commit_audit_mode(
+            {"defaults": {"commit_audit": {"mode": "block"}}}, {"mode": "warn"}, {"mode": "blok"}
+        )
+        assert got == "block"
+
+    def test_case_and_whitespace_tolerated(self):
+        from engine.pipeline import resolve_commit_audit_mode
+
+        assert resolve_commit_audit_mode({}, {}, {"mode": "  BLOCK "}) == "block"
+
+    def test_none_step_def_is_allowed(self):
+        from engine.pipeline import resolve_commit_audit_mode
+
+        assert resolve_commit_audit_mode({}, {"mode": "block"}, None) == "block"
+
+
+class TestCommitAuditModePrecedence:
+    """End-to-end through Pipeline.run — the four measured placements."""
+
+    def test_stage_level_block_blocks(self, tmp_workdir):
+        """The placement docs describe: a stage-level `mode: block` → exit 1.
+
+        Before DF-GITREINS-POC-30 this stayed "(Warning only — commit will
+        proceed)" with passed=True, because only the top-level key was read.
+        """
+        _write_config(tmp_workdir, _config_for(STAGE_ON_MSG + "      mode: block\n"))
+        result = _run_audit(tmp_workdir)
+        assert _mode_of(result) == "block"
+        assert _passed(result) is False
+        assert "Commit BLOCKED" in result["stages"]["commit_audit"]["summary"]
+
+    def test_stage_block_overrides_top_level_warn_and_defaults(self, tmp_workdir):
+        _write_config(
+            tmp_workdir,
+            _config_for(
+                STAGE_ON_MSG + "      mode: block\n", defaults_mode="warn", top_mode="warn"
+            ),
+        )
+        result = _run_audit(tmp_workdir)
+        assert _mode_of(result) == "block"
+        assert _passed(result) is False
+
+    def test_stage_warn_beats_top_level_block(self, tmp_workdir):
+        """The stage is the most specific scope, so a stage `warn` wins."""
+        _write_config(
+            tmp_workdir,
+            _config_for(STAGE_ON_MSG + "      mode: warn\n", top_mode="block"),
+        )
+        result = _run_audit(tmp_workdir)
+        assert _mode_of(result) == "warn"
+        assert _passed(result) is True
+        assert "Warning only" in result["stages"]["commit_audit"]["summary"]
+
+    def test_top_level_block_still_blocks_when_stage_is_silent(self, tmp_workdir):
+        """Backward compatibility: the legacy placement keeps working."""
+        _write_config(tmp_workdir, _config_for(STAGE_ON_MSG, top_mode="block"))
+        result = _run_audit(tmp_workdir)
+        assert _mode_of(result) == "block"
+        assert _passed(result) is False
+
+    def test_defaults_block_blocks(self, tmp_workdir):
+        """`defaults.commit_audit.mode` was dead config before this fix."""
+        _write_config(tmp_workdir, _config_for(STAGE_ON_MSG, defaults_mode="block"))
+        result = _run_audit(tmp_workdir)
+        assert _mode_of(result) == "block"
+        assert _passed(result) is False
+
+    def test_no_mode_anywhere_is_warn(self, tmp_workdir):
+        _write_config(tmp_workdir, _config_for(STAGE_ON_MSG))
+        result = _run_audit(tmp_workdir)
+        assert _mode_of(result) == "warn"
+        assert _passed(result) is True
+
+
+class TestCommitAuditSkipLine:
+    """A run where the audit did NOT happen must say so by name."""
+
+    def test_no_stage_prints_named_skip(self, tmp_workdir):
+        """The fresh `install` + `init` state — previously printed NOTHING."""
+        from engine.pipeline import commit_audit_skip_message, load_pipeline_config
+
+        _write_config(tmp_workdir, _config_for())
+        msg = commit_audit_skip_message(load_pipeline_config(tmp_workdir), "commit-msg")
+        assert "commit audit:" in msg
+        assert "type commit_audit" in msg
+        assert "trigger commit-msg" in msg
+        assert "audit NOT run" in msg
+
+    def test_stage_not_armed_names_the_trigger_fix(self, tmp_workdir):
+        from engine.pipeline import commit_audit_skip_message, load_pipeline_config
+
+        stage = "    - id: commit_audit\n      type: commit_audit\n      on: [pre-eval]\n"
+        _write_config(tmp_workdir, _config_for(stage))
+        msg = commit_audit_skip_message(load_pipeline_config(tmp_workdir), "commit-msg")
+        assert "not armed for trigger commit-msg" in msg
+        assert "on: [commit-msg]" in msg
+        assert "audit NOT run" in msg
+
+    def test_id_only_stage_counts_as_declared(self, tmp_workdir):
+        """`id: commit_audit` with no explicit `type:` is the docs' shape."""
+        from engine.pipeline import commit_audit_skip_message, load_pipeline_config
+
+        stage = "    - id: commit_audit\n      on: [pre-eval]\n"
+        _write_config(tmp_workdir, _config_for(stage))
+        msg = commit_audit_skip_message(load_pipeline_config(tmp_workdir), "commit-msg")
+        assert "not armed for trigger" in msg
+        assert "audit NOT run" in msg
+
+    def test_skip_line_is_not_a_block(self, tmp_workdir):
+        """A skip must stay exit 0 — the three wordings all say NOT run."""
+        from engine.pipeline import commit_audit_skip_message, load_pipeline_config
+
+        for stage in ("", STAGE_ON_MSG.replace("commit-msg", "pre-eval")):
+            _write_config(tmp_workdir, _config_for(stage))
+            msg = commit_audit_skip_message(load_pipeline_config(tmp_workdir), "commit-msg")
+            assert "audit NOT run" in msg
+            assert "BLOCKED" not in msg
+
+    def test_cli_prints_the_skip_line_and_exits_zero(self, tmp_workdir, monkeypatch, capsys):
+        """The command itself: no stage → the named line, exit 0.
+
+        Drives `cmd_commit_audit` in-process (the CLI's real code path). The
+        LLM client is stubbed so the test is hermetic AND so a regression that
+        reaches the audit fails loudly instead of dialling a provider.
+        """
+        from types import SimpleNamespace
+
+        from gitreins import cli as cli_mod
+
+        _write_config(tmp_workdir, _config_for())
+        monkeypatch.chdir(tmp_workdir)
+        monkeypatch.setattr(cli_mod, "get_workdir", lambda: tmp_workdir)
+        # `cmd_commit_audit` does `from engine.llm import LLMClient` at call
+        # time, so patching the class on its own module is what reaches it.
+        monkeypatch.setattr("engine.llm.LLMClient", lambda *a, **k: SimpleNamespace())
+
+        with pytest.raises(SystemExit) as exc:
+            cli_mod.cmd_commit_audit(SimpleNamespace(message="wip"))
+
+        assert exc.value.code == 0
+        out = capsys.readouterr().out
+        assert "audit NOT run" in out
+        assert "commit-msg" in out

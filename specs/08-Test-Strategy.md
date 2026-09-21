@@ -21,8 +21,8 @@ GitReins maintains a comprehensive test suite that validates every layer of the 
 | Unit tests (engine) | ~350 | 8 files |
 | LSP tests (unit + integration) | 42 | `tests/test_lsp.py` |
 | Static analysis tests | 72 | `tests/test_static_analysis.py` |
-| Commit audit tests | 81 | `tests/test_commit_audit.py` |
-| Integration tests (CLI) | 53 | `tests/test_cli.py` |
+| Commit audit tests | 99 | `tests/test_commit_audit.py` |
+| Integration tests (CLI) | 137 | `tests/test_cli.py` |
 | Integration tests (MCP) | 5 | `tests/test_mcp_integration.py` |
 | MCP server tests | ~50 | `tests/test_mcp_server.py` |
 | v0.7/v0.8 feature tests | ~18 | `tests/test_v07_features.py`, `tests/test_v081_fixes.py` |
@@ -143,7 +143,7 @@ Tests the MCP stdio server with real JSON-RPC 2.0 communication:
 
 These tests spawn the MCP server as a subprocess and communicate over stdin/stdout, validating the full stdio transport layer.
 
-#### CLI Integration Tests (`tests/test_cli.py`, 53 tests)
+#### CLI Integration Tests (`tests/test_cli.py`, 137 tests)
 
 Tests CLI commands via subprocess invocation:
 - `install` command creates config, hook, and gitignore entry
@@ -388,7 +388,7 @@ Python: pylint, mypy, ruff. JavaScript/TypeScript: eslint. Go: staticcheck. Rust
 | 1 | Fast suite passes | `pytest -m "not llm"` → all green |
 | 2 | Core engine coverage >85% | `pytest --cov=engine` → evaluator 85%, judge 95%, llm 91%, task_manager 93% |
 | 3 | LLM cap tests validate real stopping | `pytest tests/test_eval_cap.py::TestEvalCapRealEvaluator` → 4/4 pass |
-| 4 | CLI integration tests pass | `pytest tests/test_cli.py` → 53/53 pass |
+| 4 | CLI integration tests pass | `pytest tests/test_cli.py` → 137/137 pass |
 | 5 | MCP integration tests pass | `pytest tests/test_mcp_integration.py` → 5/5 pass |
 | 6 | Diff-mode test mapping correct | `pytest tests/test_guard_manager.py -k diff` → pass |
 | 7 | Pipeline cap regression tests pass | `pytest tests/test_eval_cap.py::TestPipelineCapRegression` → 4/4 pass |

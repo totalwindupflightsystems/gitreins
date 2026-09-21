@@ -70,7 +70,7 @@ pipeline:
     - id: commit_audit
       type: commit_audit
       on: [commit-msg]
-commit_audit:            # ← TOP LEVEL. This is the only placement that blocks.
+commit_audit:            # ← TOP LEVEL. At the time of this run, the only placement that blocked.
   mode: block
 YAML
 $GR commit-audit "wip"
