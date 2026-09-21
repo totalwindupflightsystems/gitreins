@@ -1,0 +1,9 @@
+{
+  "tick_id": "gitreins-poc-2026-09-21-02-15-55",
+  "project": "gitreins-poc",
+  "composed": false,
+  "reason": "serial fallback: POC-29 and POC-32 share engine/qa_ledger.py (same band, middle-out rule); fewer than 2 mutually independent wave-eligible rows after dependency check",
+  "wave_budget": 6,
+  "workers_dispatched": [],
+  "serial_dispatch": {"task_id": "DF-GITREINS-POC-29", "worktree": null, "shared_tree": true}
+}
