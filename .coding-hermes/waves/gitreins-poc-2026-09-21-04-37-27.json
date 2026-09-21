@@ -1,0 +1,73 @@
+{
+  "tick_id": "gitreins-poc-2026-09-21-04-37-27",
+  "project": "gitreins-poc",
+  "composed": true,
+  "created_at": "2026-09-21T04:52:43Z",
+  "recovery": {
+    "recovered_wave": "gitreins-poc-2026-09-21-02-15-55",
+    "outcome": "0 workers had been dispatched (serial fallback manifest); DF-GITREINS-POC-29 already closed in main 084a612 and pushed; no leftover branches/worktrees; manifest finished_at set"
+  },
+  "base_ref": "github/main",
+  "base_sha": "afe6467",
+  "worktree_root": "/home/kara/worktrees",
+  "wave_budget": 8,
+  "workers": [
+    {
+      "task_id": "DF-GITREINS-POC-30",
+      "worktree": "/home/kara/worktrees/gitreins-poc-DF-GITREINS-POC-30",
+      "branch": "wt/DF-GITREINS-POC-30",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "brief": "/tmp/gp-wave-brief-DF-GITREINS-POC-30.md",
+      "depends_on": [],
+      "status": "dispatching"
+    },
+    {
+      "task_id": "DF-GITREINS-POC-31",
+      "worktree": "/home/kara/worktrees/gitreins-poc-DF-GITREINS-POC-31",
+      "branch": "wt/DF-GITREINS-POC-31",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "brief": "/tmp/gp-wave-brief-DF-GITREINS-POC-31.md",
+      "depends_on": [],
+      "status": "dispatching"
+    },
+    {
+      "task_id": "DF-GITREINS-POC-32",
+      "worktree": "/home/kara/worktrees/gitreins-poc-DF-GITREINS-POC-32",
+      "branch": "wt/DF-GITREINS-POC-32",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "brief": "/tmp/gp-wave-brief-DF-GITREINS-POC-32.md",
+      "depends_on": [],
+      "status": "dispatching"
+    }
+  ],
+  "excluded": [
+    {
+      "task_id": "JEVRES-002..006",
+      "reason": "depends_on JEVRES-001 (landed 7e4966f) chain \u2014 not mutually independent"
+    },
+    {
+      "task_id": "GR-139",
+      "reason": "whole-suite load measurement perturbs parallel workers; serial candidate (21-14-07 precedent)"
+    },
+    {
+      "task_id": "DF-GITREINS-POC-25",
+      "reason": "owner workdir is ~/.hermes/scripts, not this repo"
+    },
+    {
+      "task_id": "INT-CI-13",
+      "reason": "process law, not code \u2014 folded as an AC into all three briefs (test-count sync)"
+    },
+    {
+      "task_id": "SCHED-GAP-* / RELEASE-* / SEC-002 / CLN-1",
+      "reason": "scheduler-project + cross-project rows, not gitreins-poc code surface"
+    }
+  ],
+  "merge_order": [
+    "DF-GITREINS-POC-30",
+    "DF-GITREINS-POC-31",
+    "DF-GITREINS-POC-32"
+  ]
+}

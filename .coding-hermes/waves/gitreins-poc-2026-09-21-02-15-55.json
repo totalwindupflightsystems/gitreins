@@ -6,4 +6,6 @@
   "wave_budget": 6,
   "workers_dispatched": [],
   "serial_dispatch": {"task_id": "DF-GITREINS-POC-29", "worktree": null, "shared_tree": true}
+  , "finished_at": "2026-09-21T04:45:00Z", "recovered_by": "gitreins-poc-2026-09-21-04-37-27",
+  "recovery_note": "0 workers were ever dispatched (serial fallback); task DF-GITREINS-POC-29 closed in main 084a612 and pushed; no leftover branches/worktrees"
 }
