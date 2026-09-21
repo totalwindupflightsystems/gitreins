@@ -15,6 +15,7 @@ tasks:
     status: pending  # pending | in_progress | complete
 """
 
+import fcntl
 import hashlib
 import os
 import sys
@@ -47,6 +48,8 @@ class TaskStateCorruptError(RuntimeError):
 
 CORRUPT_STATE_SUFFIX = ".corrupt-"
 
+TASKS_LOCK_SUFFIX = ".lock"
+
 
 @dataclass
 class Task:
@@ -70,6 +73,43 @@ class TaskManager:
         self._load_error: str | None = None
         self._preserved_state: str | None = None
         self._load()
+
+    @property
+    def _tasks_lock_file(self) -> str:
+        return self._tasks_file + TASKS_LOCK_SUFFIX
+
+    def _locked_load_save(self, mutate) -> None:
+        """Run a load-modify-save cycle against tasks.yaml under an exclusive flock.
+
+        Concurrent judges (wave closure) each run `gitreins task complete` in their
+        own process; without serialization their read-modify-write cycles race and
+        the last writer clobbers the first's task, or interleaved partial writes
+        corrupt the YAML entirely. The lock is an OS-level flock on a sidecar
+        ``tasks.yaml.lock`` file:
+
+        - serializes across PROCESSES (flock is kernel state, not process memory),
+        - is released automatically if the holder crashes or is killed,
+        - is re-entrant at the acquisition-point level (every writer funnels
+          through this single method, so no nested acquisition exists).
+
+        The reload inside the lock means each writer's mutation is applied to the
+        on-disk state as of lock acquisition, so concurrent completions of
+        *different* tasks both land in the file.
+        """
+        if not os.path.isdir(self._config_dir):
+            # Store dir does not exist yet — no other process can be writing
+            # this store, so the lock is a no-op (and _save creates the dir).
+            mutate()
+            self._save()
+            return
+        lock_fd = os.open(self._tasks_lock_file, os.O_RDWR | os.O_CREAT, 0o644)
+        try:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            self._load()
+            mutate()
+            self._save()
+        finally:
+            os.close(lock_fd)  # releases the flock
 
     def _load(self) -> None:
         """Load tasks from YAML file."""
@@ -180,8 +220,13 @@ class TaskManager:
             if task.depends_on:
                 entry["depends_on"] = task.depends_on
             tasks_list.append(entry)
-        with open(self._tasks_file, "w") as f:
+        # DF: write via temp file + os.replace so a crash mid-write cannot leave
+        # a truncated/partial YAML (the observed corruption mode). os.replace is
+        # atomic on POSIX; readers either see the old or the new full document.
+        tmp_path = self._tasks_file + ".tmp"
+        with open(tmp_path, "w") as f:
             yaml.dump({"tasks": tasks_list}, f, default_flow_style=False, sort_keys=False)
+        os.replace(tmp_path, self._tasks_file)
 
     def create(
         self, id: str, title: str, criteria: list[str], depends_on: list[str] | None = None
@@ -197,20 +242,28 @@ class TaskManager:
             depends_on=depends_on or [],
         )
         self._tasks[id] = task
-        self._save()
+        self._locked_load_save(lambda: self._tasks.__setitem__(id, task))
         return task
 
     def start(self, id: str) -> Task:
         """Mark a task as in progress."""
+        # Reload-on-first-mutation inside the lock (see _locked_load_save): if a
+        # concurrent writer added this task after our constructor ran, the locked
+        # reload makes it visible; if it genuinely doesn't exist anywhere, raise
+        # with the original key.
+        if id not in self._tasks:
+            self._locked_load_save(lambda: None)
         task = self._tasks.get(id)
         if not task:
             raise KeyError(f"Task not found: {id}")
         task.status = "in_progress"
-        self._save()
+        self._locked_load_save(self._apply_status(id, "in_progress"))
         return task
 
     def complete(self, id: str, force: bool = False) -> Task:
         """Mark a task as complete."""
+        if id not in self._tasks:
+            self._locked_load_save(lambda: None)
         task = self._tasks.get(id)
         if not task:
             raise KeyError(f"Task not found: {id}")
@@ -226,8 +279,36 @@ class TaskManager:
 
         task.status = "complete"
         task.completed_at = datetime.now(timezone.utc).isoformat()
-        self._save()
+        self._locked_load_save(self._apply_complete(id))
         return task
+
+    def _apply_status(self, id: str, status: str):
+        """Return a zero-arg mutate() that re-resolves `id` post-reload and sets status.
+
+        The lock's reload replaces Task objects, so the closure must not close
+        over a stale instance — it re-fetches from self._tasks and raises KeyError
+        if the task vanished between the pre-check and lock acquisition.
+        """
+
+        def mutate():
+            task = self._tasks.get(id)
+            if not task:
+                raise KeyError(f"Task not found: {id}")
+            task.status = status
+
+        return mutate
+
+    def _apply_complete(self, id: str):
+        """Same contract as _apply_status, plus the completed_at stamp."""
+
+        def mutate():
+            task = self._tasks.get(id)
+            if not task:
+                raise KeyError(f"Task not found: {id}")
+            task.status = "complete"
+            task.completed_at = datetime.now(timezone.utc).isoformat()
+
+        return mutate
 
     def check_dependencies(self, id: str) -> list[str]:
         """Return list of dependency task IDs that are not yet complete."""
@@ -259,9 +340,14 @@ class TaskManager:
     def delete(self, id: str) -> None:
         """Delete a task by ID."""
         if id not in self._tasks:
+            self._locked_load_save(lambda: None)
+        if id not in self._tasks:
             raise KeyError(f"Task not found: {id}")
-        del self._tasks[id]
-        self._save()
+
+        def mutate():
+            self._tasks.pop(id, None)
+
+        self._locked_load_save(mutate)
 
     def to_dict(self, task: Task) -> dict:
         """Convert a Task to a plain dict (for MCP/serialization)."""
