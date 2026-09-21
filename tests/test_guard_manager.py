@@ -23,6 +23,82 @@ from engine.guard_manager import (
 )
 
 
+def _stub_lane_result(returncode=0, stdout="", stderr="", timed_out=False):
+    """A command_hygiene.run_bounded result for tests-lane stubs (DF-CRIER-258).
+
+    _run_test_command executes the test command through run_bounded — its
+    stdout/stderr arrive merged in ``output`` — so tests that drive the lane
+    stub ``engine.command_hygiene.run_bounded`` instead of ``subprocess.run``.
+    Shape mirrors run_bounded's documented contract.
+    """
+    return {
+        "cmd": "stubbed",
+        "exit_code": returncode,
+        "output": stdout + stderr,
+        "timed_out": timed_out,
+        "pgid": 424242,
+    }
+
+
+def _wait_gone(pid: int, timeout: float = 5.0) -> bool:
+    """True once /proc/<pid> disappears (within timeout)."""
+    import time as _time
+
+    deadline = _time.monotonic() + timeout
+    while _time.monotonic() < deadline:
+        if not os.path.isdir(f"/proc/{pid}"):
+            return True
+        _time.sleep(0.05)
+    return not os.path.isdir(f"/proc/{pid}")
+
+
+class TestTimeoutReapsBackgroundedChildren:
+    """DF-CRIER-258 acceptance arm: "the engine terminates the command on
+    timeout" — nothing the test command backgrounded survives the lane.
+
+    The OLD implementation ran ``subprocess.run(shell=True, timeout=...)``,
+    whose timeout kill reaches only the direct child: a command like
+    ``make load-repro`` that spawns backgrounded work left those processes
+    reparented to systemd --user (measured 2026-09-18 / DF-CRIER-254: a
+    tier-2 judge's evidence command ran on for 33+ minutes after the judge
+    had written its verdict and exited). RED-PROOF for this exact shape was
+    captured before the change: a guard-style command under
+    ``subprocess.run(timeout=1)`` left its ``sleep 300`` grandchild
+    (pid 1076482) alive 2 seconds past the TimeoutExpired.
+    """
+
+    def test_timeout_leaves_no_sleep_descendant_alive(self, tmp_workdir):
+        """A guard test command that backgrounds `sleep 300` times out (tiny
+        test_timeout) and the sleep is GONE when the guard call returns."""
+        pidfile = os.path.join(tmp_workdir, "bg-sleep.pid")
+        gm = GuardManager(
+            tmp_workdir,
+            {
+                "guards": {
+                    # The sleep is the stand-in for the leaked `make
+                    # load-repro-selftest` from DF-CRIER-254: backgrounded,
+                    # long-lived, and it would outlive the caller under the
+                    # old kill-only-the-direct-child behavior.
+                    "test_command": f"bash -c 'echo $$ > {pidfile}; exec sleep 300' & "
+                    "echo started; wait",
+                    "test_timeout": 1,
+                }
+            },
+        )
+        with patch("engine.guard_manager._get_staged_files", return_value=["dummy.py"]):
+            result = gm._check_tests()
+
+        assert result.passed is False
+        assert "timed out" in result.output
+        assert os.path.isfile(pidfile), "command never recorded the sleep pid (harness problem)"
+        with open(pidfile) as fh:
+            sleep_pid = int(fh.read().strip())
+        assert _wait_gone(sleep_pid), (
+            f"backgrounded sleep {sleep_pid} survived the tests lane timeout — "
+            "the DF-CRIER-258 leak is back"
+        )
+
+
 # ── Phase 1-3-1: GuardResult/Tier1Result dataclasses — step-1-3-1-1 ─────────
 
 
@@ -762,11 +838,16 @@ class TestTestsGuard:
     """Test _check_tests behavior."""
 
     def test_pytest_not_found_skips(self, guard_manager):
-        """Tests guard returns failure when test command can't run."""
-        # Since v0.1.2, _check_tests runs test_command directly (no pytest gate).
-        # If the command can't be found, subprocess.run raises an exception.
+        """Tests guard returns failure when test command can't run.
+
+        DF-CRIER-258 seam: the lane executes through command_hygiene.run_bounded,
+        which converts a spawn failure (OSError from Popen) into a result with
+        an ``error`` key; _run_test_command surfaces it in GuardResult.error."""
         with patch("engine.guard_manager._get_staged_files", return_value=["dummy.py"]):
-            with patch("subprocess.run", side_effect=FileNotFoundError("go")):
+            with patch(
+                "engine.command_hygiene.run_bounded",
+                return_value={"cmd": "pytest -x --tb=short", "error": "go"},
+            ):
                 result = guard_manager._check_tests()
         assert result.passed is False
         assert "go" in str(result.error) or "FileNotFound" in str(result.error)
@@ -788,17 +869,16 @@ class TestTestsGuard:
             tmp_workdir,
             {"guards": {"test_command": "echo clean-tree-run", "test_on_clean": True}},
         )
-        mock_run = MagicMock()
-        mock_run.returncode = 0
-        mock_run.stdout = "clean-tree output"
-        mock_run.stderr = ""
         with patch("engine.guard_manager._get_staged_files", return_value=[]):
-            with patch("subprocess.run", return_value=mock_run) as mock_subprocess:
+            with patch(
+                "engine.command_hygiene.run_bounded",
+                return_value=_stub_lane_result(0, "clean-tree output"),
+            ) as mock_subprocess:
                 result = gm._check_tests()
         assert result.passed is True
         assert "clean-tree" in result.output
         # The configured test command must actually have been executed
-        assert "echo clean-tree-run" in mock_subprocess.call_args.args[0]
+        assert mock_subprocess.call_args.args[0] == "echo clean-tree-run"
 
     def test_clean_tree_diff_mode_runs_command_with_flag(self, tmp_workdir):
         """test_on_clean: true + test_mode: diff → full command runs on clean tree.
@@ -816,16 +896,15 @@ class TestTestsGuard:
                 }
             },
         )
-        mock_run = MagicMock()
-        mock_run.returncode = 0
-        mock_run.stdout = "diff clean-tree output"
-        mock_run.stderr = ""
         with patch("engine.guard_manager._get_staged_files", return_value=[]):
-            with patch("subprocess.run", return_value=mock_run) as mock_subprocess:
+            with patch(
+                "engine.command_hygiene.run_bounded",
+                return_value=_stub_lane_result(0, "diff clean-tree output"),
+            ) as mock_subprocess:
                 result = gm._check_tests()
         assert result.passed is True
         assert "clean-tree" in result.output
-        assert "echo clean-tree-diff-run" in mock_subprocess.call_args.args[0]
+        assert mock_subprocess.call_args.args[0] == "echo clean-tree-diff-run"
 
 
 class TestRunnerFallback:
@@ -907,7 +986,10 @@ class TestRunnerFallback:
         mock_run.stdout = "1 passed"
         mock_run.stderr = ""
         with patch("shutil.which", return_value=None):
-            with patch("subprocess.run", return_value=mock_run) as mock_subprocess:
+            with patch(
+                "engine.command_hygiene.run_bounded",
+                return_value=_stub_lane_result(0, "1 passed"),
+            ) as mock_subprocess:
                 result = gm._run_test_command("uv run pytest -x --tb=short", "tests (full)")
         executed = mock_subprocess.call_args.args[0]
         assert executed == f"{sys.executable} -m pytest -x --tb=short"
@@ -930,7 +1012,10 @@ class TestRunnerFallback:
         mock_run.stdout = "1 passed"
         mock_run.stderr = ""
         with patch("shutil.which", return_value=None):
-            with patch("subprocess.run", return_value=mock_run) as mock_subprocess:
+            with patch(
+                "engine.command_hygiene.run_bounded",
+                return_value=_stub_lane_result(0, "1 passed"),
+            ) as mock_subprocess:
                 result = gm._run_test_command(narrowed, "tests (diff: 1 files)")
         executed = mock_subprocess.call_args.args[0]
         assert executed == f"{sys.executable} -m pytest -x --tb=short tests/test_x.py"
@@ -1045,7 +1130,10 @@ class TestBarePytestFallback:
         with (
             patch("shutil.which", return_value=None),
             patch("importlib.util.find_spec", return_value=object()),
-            patch("subprocess.run", return_value=mock_run) as mock_subprocess,
+            patch(
+                "engine.command_hygiene.run_bounded",
+                return_value=_stub_lane_result(0, "1 passed"),
+            ) as mock_subprocess,
         ):
             result = gm._run_test_command("pytest -x --tb=short", "tests (full)")
         executed = mock_subprocess.call_args.args[0]
@@ -1057,14 +1145,13 @@ class TestBarePytestFallback:
     def test_exit127_pytest_failure_gets_actionable_hint(self, tmp_workdir):
         """Exit 127 + sh not-found on a pytest command → hint prepended, still FAIL."""
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x --tb=short"}})
-        not_found = MagicMock()
-        not_found.returncode = 127
-        not_found.stdout = ""
-        not_found.stderr = "/bin/sh: 1: pytest: not found\n"
         with (
             patch("shutil.which", return_value=None),
             patch("importlib.util.find_spec", return_value=None),
-            patch("subprocess.run", return_value=not_found),
+            patch(
+                "engine.command_hygiene.run_bounded",
+                return_value=_stub_lane_result(127, "", "/bin/sh: 1: pytest: not found\n"),
+            ),
         ):
             result = gm._run_test_command("pytest -x --tb=short", "tests (full)")
         assert result.passed is False
@@ -1078,11 +1165,10 @@ class TestBarePytestFallback:
     def test_exit127_non_pytest_command_gets_no_hint(self, tmp_workdir):
         """Exit 127 on a non-pytest command keeps its raw output only."""
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": "make test"}})
-        not_found = MagicMock()
-        not_found.returncode = 127
-        not_found.stdout = ""
-        not_found.stderr = "/bin/sh: 1: make: not found\n"
-        with patch("subprocess.run", return_value=not_found):
+        with patch(
+            "engine.command_hygiene.run_bounded",
+            return_value=_stub_lane_result(127, "", "/bin/sh: 1: make: not found\n"),
+        ):
             result = gm._run_test_command("make test", "tests (full)")
         assert result.passed is False
         assert result.exit_code == 127
@@ -1107,17 +1193,17 @@ class TestPytestExit5NoTests:
         "============================= no tests ran in 0.00s ==============================\n"
     )
 
-    def _mock_proc(self, returncode, stdout, stderr=""):
-        mock_run = MagicMock()
-        mock_run.returncode = returncode
-        mock_run.stdout = stdout
-        mock_run.stderr = stderr
-        return mock_run
+    def _stub_lane(self, returncode, stdout, stderr=""):
+        """run_bounded-shaped stub result for the lane (DF-CRIER-258 seam)."""
+        return _stub_lane_result(returncode, stdout, stderr)
 
     def test_exit5_no_tests_collected_passes_with_warning(self, tmp_workdir):
         """pytest exit 5 + 'no tests ran' → PASS with a warning, not a block."""
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x --tb=short"}})
-        with patch("subprocess.run", return_value=self._mock_proc(5, self.EXIT5_STDOUT)):
+        with patch(
+            "engine.command_hygiene.run_bounded",
+            return_value=self._stub_lane(5, self.EXIT5_STDOUT),
+        ):
             result = gm._run_test_command("pytest -x --tb=short", "tests (full)")
         assert result.passed is True
         assert result.warning and "no tests" in result.warning
@@ -1130,7 +1216,10 @@ class TestPytestExit5NoTests:
         so the summary marks it as a skip (with its reason) instead of a ✓.
         """
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x --tb=short"}})
-        with patch("subprocess.run", return_value=self._mock_proc(5, self.EXIT5_STDOUT)):
+        with patch(
+            "engine.command_hygiene.run_bounded",
+            return_value=self._stub_lane(5, self.EXIT5_STDOUT),
+        ):
             result = gm._run_test_command("pytest -x --tb=short", "tests (full)")
         summary = Tier1Result(passed=True, results=[result]).summary
         assert "~ tests (full) — skipped (no tests collected)" in summary
@@ -1141,7 +1230,10 @@ class TestPytestExit5NoTests:
         """End-to-end at the guard stage: staged file + full mode + exit 5 →
         the tests guard result passes, so the commit is not blocked."""
         with patch("engine.guard_manager._get_staged_files", return_value=["calc.py"]):
-            with patch("subprocess.run", return_value=self._mock_proc(5, self.EXIT5_STDOUT)):
+            with patch(
+                "engine.command_hygiene.run_bounded",
+                return_value=self._stub_lane(5, self.EXIT5_STDOUT),
+            ):
                 result = guard_manager._check_tests()
         assert result.name == "tests (full)"
         assert result.passed is True
@@ -1155,7 +1247,10 @@ class TestPytestExit5NoTests:
             "________________ ERROR collecting tests/test_broken.py ________________\n"
             "=========== 1 error, no tests ran in 0.05s ===========\n"
         )
-        with patch("subprocess.run", return_value=self._mock_proc(5, stdout)):
+        with patch(
+            "engine.command_hygiene.run_bounded",
+            return_value=self._stub_lane(5, stdout),
+        ):
             result = gm._run_test_command("pytest -x --tb=short", "tests (full)")
         assert result.passed is False
 
@@ -1163,7 +1258,10 @@ class TestPytestExit5NoTests:
         """A non-pytest command exiting 5 (no 'no tests ran' line) still fails —
         exit 5 is only benign for pytest's documented no-tests-collected code."""
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": "make test"}})
-        with patch("subprocess.run", return_value=self._mock_proc(5, "make: *** [test] Error 5\n")):
+        with patch(
+            "engine.command_hygiene.run_bounded",
+            return_value=self._stub_lane(5, "make: *** [test] Error 5\n"),
+        ):
             result = gm._run_test_command("make test", "tests (full)")
         assert result.passed is False
 
@@ -1175,7 +1273,10 @@ class TestPytestExit5NoTests:
             "________________ ERROR collecting tests/test_broken.py ________________\n"
             "============================== 1 error in 0.05s ===============================\n"
         )
-        with patch("subprocess.run", return_value=self._mock_proc(2, stdout)):
+        with patch(
+            "engine.command_hygiene.run_bounded",
+            return_value=self._stub_lane(2, stdout),
+        ):
             result = gm._run_test_command("pytest -x --tb=short", "tests (full)")
         assert result.passed is False
 
@@ -1186,7 +1287,10 @@ class TestPytestExit5NoTests:
             "FAILED tests/test_calc.py::test_add - assert 1 + 1 == 3\n"
             "===================== 1 failed, 2 passed in 0.12s =====================\n"
         )
-        with patch("subprocess.run", return_value=self._mock_proc(1, stdout)):
+        with patch(
+            "engine.command_hygiene.run_bounded",
+            return_value=self._stub_lane(1, stdout),
+        ):
             result = gm._run_test_command("pytest -x --tb=short", "tests (full)")
         assert result.passed is False
         assert "1 failed" in result.output
@@ -1218,10 +1322,13 @@ class TestExtendedGuardManager:
         assert result.passed is True
 
     def test_check_tests_timeout_returns_failure(self, guard_manager):
-        """_check_tests handles subprocess timeout."""
+        """_check_tests handles the test-command timeout (DF-CRIER-258 seam:
+        the lane runs through command_hygiene.run_bounded, whose timed_out
+        flag maps to the same "Tests timed out after Ns" failure)."""
         with patch("engine.guard_manager._get_staged_files", return_value=["dummy.py"]):
             with patch(
-                "subprocess.run", side_effect=subprocess.TimeoutExpired(cmd="go test", timeout=120)
+                "engine.command_hygiene.run_bounded",
+                return_value=_stub_lane_result(timed_out=True),
             ):
                 result = guard_manager._check_tests()
         assert result.passed is False

@@ -28,6 +28,7 @@ import time
 from dataclasses import replace
 from datetime import datetime, timezone
 from engine import lang_detect
+from engine import command_hygiene
 from engine.guards import (
     _coerce_timeout,
     check_go_lint,
@@ -1776,85 +1777,64 @@ class GuardManager:
         return self._run_test_command(test_command, label)
 
     def _run_test_command(self, cmd: str, label: str) -> GuardResult:
-        """Execute a test command and return a GuardResult."""
+        """Execute a test command and return a GuardResult.
+
+        DF-CRIER-258: the command runs through
+        ``engine.command_hygiene.run_bounded`` — own session, whole-group
+        reap on return/timeout — instead of bare ``subprocess.run``, whose
+        ``timeout=`` kills only the DIRECT child and leaves backgrounded
+        grandchildren reparented to ``systemd --user`` (the 2026-09-18
+        orphan fleet; DF-CRIER-254 measured a leaked ``make load-repro``
+        running 33+ minutes after its judge had exited). The GuardResult
+        semantics below are unchanged: same timeout message, same DF-018
+        full-output capture (``max_output=10_000_000`` keeps the run-log
+        capture untruncated in practice — a single guard output larger than
+        10 MB would be head+tail bounded, which the 2000-char display cap
+        makes unobservable), same GR-GAP-048 exit-5 benign classification
+        on the full output, same GR-GAP-064 exit-127 hint shaping.
+        """
         resolved_cmd, fallback_warning = _resolve_test_command(cmd)
-        try:
-            result = subprocess.run(
-                resolved_cmd,
-                shell=True,
-                capture_output=True,
-                text=True,
-                timeout=self._test_timeout,
-                cwd=self.workdir,
-                env=_sanitized_env(),
+        result = command_hygiene.run_bounded(
+            resolved_cmd,
+            cwd=self.workdir,
+            timeout=self._test_timeout,
+            env=_sanitized_env(),
+            max_output=10_000_000,
+        )
+        if result.get("refused"):
+            # The busy-wait refusal is a misconfigured command, not a test
+            # failure — the reason text already names the correct primitive.
+            return GuardResult(
+                name=label,
+                passed=False,
+                error=result["reason"],
+                warning=fallback_warning or "",
             )
-            output = result.stdout + result.stderr
-            if fallback_warning:
-                output = f"{fallback_warning}\n{output}"
-            # DF-018: keep the untruncated output for the run log BEFORE the
-            # tail cap below. The GuardResult keeps the bounded tail the
-            # console summary consumes; the log gets the whole traceback.
-            self._remember_full_output(label, output)
-            # GR-GAP-048: classify exit 5 on the FULL output (the "no tests
-            # ran" summary is a tail line, but collection-error lines sit
-            # earlier and must survive truncation for the check below).
-            no_tests_benign = result.returncode == 5 and _pytest_no_tests_benign(output)
-            if len(output) > 2000:
-                output = output[-2000:]  # Keep last 2000 chars for failure context
-            if result.returncode == 0:
-                return GuardResult(
-                    name=label,
-                    passed=True,
-                    output=output[:500],
-                    warning=fallback_warning or "",
-                    exit_code=result.returncode,
-                )
-            elif no_tests_benign:
-                # pytest exit 5 with zero tests collected and no collection
-                # errors — fresh-repo case: pass with a warning instead of
-                # blocking the repo's first commit.
-                warning = (
-                    f"{fallback_warning}\n{_PYTEST_NO_TESTS_WARNING}"
-                    if fallback_warning
-                    else _PYTEST_NO_TESTS_WARNING
-                )
-                return GuardResult(
-                    name=label,
-                    passed=True,
-                    output=output[:500],
-                    warning=warning,
-                    exit_code=result.returncode,
-                    # TRUST-001: pytest collected zero tests — the gate graded
-                    # nothing, so say so instead of reporting a green step.
-                    skipped=True,
-                    skip_reason="no tests collected",
-                )
-            else:
-                # GR-GAP-064: make a genuine not-found (127) actionable —
-                # the hint line is prepended to the displayed output for a
-                # FAILED pytest lane; the value of exit_code decides
-                # pass/fail and is never reclassified or swallowed.
-                not_found_hint = _pytest_not_found_hint(result.returncode, cmd)
-                if not_found_hint:
-                    # DF-018 contract: the run log keeps the untruncated
-                    # output (already captured above); the GuardResult stays
-                    # inside the 2000-char display cap with the hint leading
-                    # and the tail shortened to make room — do NOT recompute
-                    # the untruncated output here.
-                    tail_budget = max(0, 2000 - len(not_found_hint) - 1)
-                    output = (
-                        f"{not_found_hint}\n{output[-tail_budget:]}"
-                        if tail_budget
-                        else not_found_hint[:2000]
-                    )
-                return GuardResult(
-                    name=label,
-                    passed=False,
-                    output=output,
-                    warning=fallback_warning or "",
-                    exit_code=result.returncode,
-                )
-        except subprocess.TimeoutExpired:
+        if "error" in result and "exit_code" not in result:
+            # Spawn failure (OSError from Popen) — the old except-Exception
+            # path surfaced the message in GuardResult.error; keep that.
+            return GuardResult(
+                name=label,
+                passed=False,
+                error=result["error"],
+                warning=fallback_warning or "",
+            )
+        output = result.get("output") or ""
+        if fallback_warning:
+            output = f"{fallback_warning}\n{output}"
+        # DF-018: keep the untruncated output for the run log BEFORE the
+        # tail cap below. The GuardResult keeps the bounded tail the
+        # console summary consumes; the log gets the whole traceback.
+        # (run_bounded bounds at max_output=10MB — untruncated in practice.)
+        self._remember_full_output(label, output)
+        # GR-GAP-048: classify exit 5 on the FULL output (the "no tests
+        # ran" summary is a tail line, but collection-error lines sit
+        # earlier and must survive truncation for the check below).
+        return_code = result.get("exit_code")
+        no_tests_benign = return_code == 5 and _pytest_no_tests_benign(output)
+        if len(output) > 2000:
+            output = output[-2000:]  # Keep last 2000 chars for failure context
+        if result.get("timed_out"):
             return GuardResult(
                 name=label,
                 passed=False,
@@ -1865,9 +1845,58 @@ class GuardManager:
                 ),
                 warning=fallback_warning or "",
             )
-        except Exception as e:
+        if return_code == 0:
             return GuardResult(
-                name=label, passed=False, error=str(e), warning=fallback_warning or ""
+                name=label,
+                passed=True,
+                output=output[:500],
+                warning=fallback_warning or "",
+                exit_code=return_code,
+            )
+        elif no_tests_benign:
+            # pytest exit 5 with zero tests collected and no collection
+            # errors — fresh-repo case: pass with a warning instead of
+            # blocking the repo's first commit.
+            warning = (
+                f"{fallback_warning}\n{_PYTEST_NO_TESTS_WARNING}"
+                if fallback_warning
+                else _PYTEST_NO_TESTS_WARNING
+            )
+            return GuardResult(
+                name=label,
+                passed=True,
+                output=output[:500],
+                warning=warning,
+                exit_code=return_code,
+                # TRUST-001: pytest collected zero tests — the gate graded
+                # nothing, so say so instead of reporting a green step.
+                skipped=True,
+                skip_reason="no tests collected",
+            )
+        else:
+            # GR-GAP-064: make a genuine not-found (127) actionable —
+            # the hint line is prepended to the displayed output for a
+            # FAILED pytest lane; the value of exit_code decides
+            # pass/fail and is never reclassified or swallowed.
+            not_found_hint = _pytest_not_found_hint(return_code, cmd)
+            if not_found_hint:
+                # DF-018 contract: the run log keeps the untruncated
+                # output (already captured above); the GuardResult stays
+                # inside the 2000-char display cap with the hint leading
+                # and the tail shortened to make room — do NOT recompute
+                # the untruncated output here.
+                tail_budget = max(0, 2000 - len(not_found_hint) - 1)
+                output = (
+                    f"{not_found_hint}\n{output[-tail_budget:]}"
+                    if tail_budget
+                    else not_found_hint[:2000]
+                )
+            return GuardResult(
+                name=label,
+                passed=False,
+                output=output,
+                warning=fallback_warning or "",
+                exit_code=return_code,
             )
 
     def _check_dead_code(self) -> GuardResult:
