@@ -1834,10 +1834,19 @@ class GuardManager:
                 # the hint line is prepended to the displayed output for a
                 # FAILED pytest lane; the value of exit_code decides
                 # pass/fail and is never reclassified or swallowed.
-                output = result.stdout + result.stderr
                 not_found_hint = _pytest_not_found_hint(result.returncode, cmd)
                 if not_found_hint:
-                    output = f"{not_found_hint}\n{output}"
+                    # DF-018 contract: the run log keeps the untruncated
+                    # output (already captured above); the GuardResult stays
+                    # inside the 2000-char display cap with the hint leading
+                    # and the tail shortened to make room — do NOT recompute
+                    # the untruncated output here.
+                    tail_budget = max(0, 2000 - len(not_found_hint) - 1)
+                    output = (
+                        f"{not_found_hint}\n{output[-tail_budget:]}"
+                        if tail_budget
+                        else not_found_hint[:2000]
+                    )
                 return GuardResult(
                     name=label,
                     passed=False,
