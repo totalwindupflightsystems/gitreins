@@ -1,0 +1,10 @@
+{
+  "tick_id": "gitreins-poc-2026-09-21-03-33-32",
+  "project": "gitreins-poc",
+  "composed": false,
+  "reason": "serial fallback: WAVE_RECOVERY tick (0 workers to recover); then serial dispatch of DF-GITREINS-POC-27 (P1) — only 1 P1 with no deps, rest are P2/P3 with JEVRES-001 deps",
+  "wave_budget": 7,
+  "workers_dispatched": [],
+  "serial_dispatch": {"task_id": "DF-GITREINS-POC-27", "worktree": null, "shared_tree": true, "commit": "51775ce"},
+  "finished_at": "2026-09-21T04:15:00Z"
+}
