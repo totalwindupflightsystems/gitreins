@@ -15,7 +15,8 @@
       "model": "glm-5.3-flash",
       "provider": "zai-glm-default",
       "depends_on": [],
-      "status": "dispatching"
+      "status": "reverted_to_pending",
+      "reason": "worker never committed \u2014 no code changes in worktree"
     },
     {
       "task_id": "GR-141",
@@ -25,7 +26,10 @@
       "model": "glm-5.3-flash",
       "provider": "zai-glm-default",
       "depends_on": [],
-      "status": "dispatching"
+      "status": "merged",
+      "commit": "1816fad",
+      "merge_commit": "f4b334d",
+      "judge": "PASS fc15a159"
     },
     {
       "task_id": "JEVRES-003",
@@ -35,7 +39,8 @@
       "model": "glm-5.3-flash",
       "provider": "zai-glm-default",
       "depends_on": [],
-      "status": "dispatching"
+      "status": "reverted_to_pending",
+      "reason": "worker never committed \u2014 no code changes in worktree"
     },
     {
       "task_id": "JEVRES-004",
@@ -45,11 +50,21 @@
       "model": "glm-5.3-flash",
       "provider": "zai-glm-default",
       "depends_on": [],
-      "status": "dispatching"
+      "status": "reverted_to_pending",
+      "reason": "worker never committed \u2014 no code changes in worktree"
     }
   ],
   "deferred": [
-    {"task_id": "JEVRES-006", "reason": "config knob surface (engine/config.py + gitreins/cli.py) overlaps the JEVRES-003/004 wiring band — same-band collision per middle-out rule; next tick"},
-    {"task_id": "DF-GITREINS-POC-25", "reason": "externally-owned: fix lives in ~/.hermes/scripts/bunker-qa.sh (fleet harness), not this repo — tick-297 doctrine"}
-  ]
+    {
+      "task_id": "JEVRES-006",
+      "reason": "config knob surface (engine/config.py + gitreins/cli.py) overlaps the JEVRES-003/004 wiring band \u2014 same-band collision per middle-out rule; next tick"
+    },
+    {
+      "task_id": "DF-GITREINS-POC-25",
+      "reason": "externally-owned: fix lives in ~/.hermes/scripts/bunker-qa.sh (fleet harness), not this repo \u2014 tick-297 doctrine"
+    }
+  ],
+  "finished_at": "2026-09-21T23:25:00Z",
+  "recovery_tick": "gitreins-poc-2026-09-21-23-15-02",
+  "recovery_summary": "GR-140/JEVRES-003/JEVRES-004: no commits (workers never produced work), reverted to pending. GR-141: fixup worker completed, merged f4b334d, judge PASS."
 }
