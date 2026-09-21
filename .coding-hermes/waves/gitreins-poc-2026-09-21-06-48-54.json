@@ -13,7 +13,8 @@
       "branch": "wt/DF-GITREINS-POC-33",
       "brief": "/tmp/gp-wave-brief-DF-GITREINS-POC-33.md",
       "depends_on": [],
-      "status": "merged"
+      "status": "merged",
+      "merge_note": "recovered by steward tick gitreins-poc-2026-09-21-10-42-55; merges 13ae59f/ca56ec9/39dfcdb, board close 33614c4"
     },
     {
       "task_id": "INT-CI-14",
@@ -21,7 +22,8 @@
       "branch": "wt/INT-CI-14",
       "brief": "/tmp/gp-wave-brief-INT-CI-14.md",
       "depends_on": [],
-      "status": "merged"
+      "status": "merged",
+      "merge_note": "recovered by steward tick gitreins-poc-2026-09-21-10-42-55; merges 13ae59f/ca56ec9/39dfcdb, board close 33614c4"
     },
     {
       "task_id": "INT-CI-15",
@@ -29,7 +31,8 @@
       "branch": "wt/INT-CI-15",
       "brief": "/tmp/gp-wave-brief-INT-CI-15.md",
       "depends_on": [],
-      "status": "merged"
+      "status": "merged",
+      "merge_note": "recovered by steward tick gitreins-poc-2026-09-21-10-42-55; merges 13ae59f/ca56ec9/39dfcdb, board close 33614c4"
     }
   ],
   "merged_at": "2026-09-21T08:05:00Z",
@@ -42,5 +45,6 @@
     "DF-GITREINS-POC-33": "PASS faf17d52",
     "INT-CI-14": "PASS 229889ca",
     "INT-CI-15": "PASS 185243a7"
-  }
+  },
+  "finished_at": "2026-09-21T12:55:00Z"
 }
