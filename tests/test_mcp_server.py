@@ -96,8 +96,8 @@ class TestInitializeHandshake:
 class TestToolsList:
     """Test tools/list — step-2-1-1-2."""
 
-    def test_tools_list_returns_twelve_tools(self, mcp_server):
-        """tools/list returns exactly 12 tool schemas."""
+    def test_tools_list_returns_thirteen_tools(self, mcp_server):
+        """tools/list returns exactly 13 tool schemas (12 + context.resolve)."""
         response = mcp_server.handle_request(
             {
                 "jsonrpc": "2.0",
@@ -107,7 +107,7 @@ class TestToolsList:
         )
         assert response is not None
         tools = response["result"]["tools"]
-        assert len(tools) == 12
+        assert len(tools) == 13
 
     def test_all_expected_tool_names_present(self, mcp_server):
         """All expected tool names: task.create, task.start, task.complete,
@@ -134,6 +134,7 @@ class TestToolsList:
             "judge.evaluate",
             "judge.status",
             "propagate",
+            "context.resolve",
         ]
         for name in expected:
             assert name in names, f"Missing tool: {name}"
@@ -1783,7 +1784,7 @@ class TestMCPStdioIntegration:
             },
         )
         tools = resp["result"]["tools"]
-        assert len(tools) == 12
+        assert len(tools) == 13
         names = [t["name"] for t in tools]
         expected = [
             "configure",
@@ -1798,6 +1799,7 @@ class TestMCPStdioIntegration:
             "judge.evaluate",
             "judge.status",
             "propagate",
+            "context.resolve",
         ]
         for name in expected:
             assert name in names, f"Missing tool: {name}"
@@ -1927,7 +1929,7 @@ class TestMCPStdioIntegration:
         mcp_proc.stdin.flush()
         resp = self._read_response(mcp_proc)
         assert resp["id"] == 1
-        assert len(resp["result"]["tools"]) == 12
+        assert len(resp["result"]["tools"]) == 13
 
     def test_missing_jsonrpc_field(self, mcp_proc):
         """Missing jsonrpc field → invalid request error (-32600)."""
@@ -2400,3 +2402,276 @@ def _temp_target(base: str, name: str) -> str:
 
     target = os.path.join(tempfile.mkdtemp(dir=os.path.dirname(base)), name)
     return target
+
+
+# ── JEVRES-002: context.resolve ──────────────────────────────────────────────
+
+
+def _jev_payload(noul: float = 0.87) -> dict:
+    """The live decisions-endpoint answer shape, exactly as measured."""
+    return {
+        "model": "typesafe/jev-1.13-20260917",
+        "answers": {
+            "resolves": {"type": "noul", "noul": noul},
+            "missing_kind": {
+                "type": "choice",
+                "choice": "none",
+                "probabilities": {"none": 0.93, "implementation": 0.05, "test": 0.02},
+                "confidence": 0.9,
+            },
+            "evidence_quality": {
+                "type": "score",
+                "score": 2.6,
+                "legend": {
+                    "0": "mentions only",
+                    "1": "adjacent code",
+                    "2": "the exact code path",
+                    "3": "path plus its test",
+                },
+                "probabilities": {"0": 0.01, "1": 0.05, "2": 0.84, "3": 0.10},
+                "confidence": 0.77,
+            },
+        },
+        "usage": {"input_tokens": 520, "output_tokens": 96, "cost": 2.184e-05},
+        "id": "gen-dec-test-mcp-0001",
+        "provider": "TypeSafe",
+    }
+
+
+class _StubResponse:
+    """A minimal requests-shaped 200 response returning the scripted payload."""
+
+    status_code = 200
+
+    def __init__(self, noul: float):
+        self._noul = noul
+
+    def json(self):
+        return _jev_payload(self._noul)
+
+
+class _ScriptedEndpoint:
+    """Stands in for the engine module's ``requests`` binding.
+
+    The engine's default poster calls ``requests.post(endpoint, ...)`` — so
+    the stand-in must expose ``post`` (the same shape as test_resolution.py's
+    ``_BlockedRequests``), not be a bare function.
+    """
+
+    def __init__(self, calls: list, noul: float):
+        self._calls = calls
+        self._noul = noul
+
+    def post(self, url, **kwargs):
+        self._calls.append({"url": url, "json": kwargs.get("json")})
+        return _StubResponse(self._noul)
+
+
+class TestContextResolve:
+    """The context.resolve tool — JEVRES-002's MCP surface, hermetic."""
+
+    @pytest.fixture(autouse=True)
+    def _hermetic(self, monkeypatch, tmp_path):
+        """No ambient credentials, no real HOME, no real egress.
+
+        Mirrors tests/test_resolution.py's autouse fixtures: key discovery is
+        deterministic and a test that forgets to inject its own endpoint stub
+        fails loudly instead of quietly calling OpenRouter.
+        """
+        from engine import resolution
+
+        for var in resolution.CREDENTIAL_ENV_VARS:
+            monkeypatch.delenv(var, raising=False)
+        monkeypatch.setenv("HOME", str(tmp_path))
+        self._resolution = resolution
+
+    def _server_with_scripted_endpoint(self, workdir, monkeypatch, *, noul=0.87, with_key=True):
+        """An MCP server whose Jev endpoint and hilo assembler are both stubbed.
+
+        The stubs are the engine's own seams (the module ``requests`` binding
+        for the decisions POST; ``engine.resolution.assemble_bundle`` for hilo),
+        so the verdict object that reaches the tool caller is real engine
+        output — only the network and the assembler are fake.
+        """
+        from engine.resolution import ManifestEntry, TraceSeed
+
+        calls = []
+
+        monkeypatch.setattr(
+            self._resolution,
+            "requests",
+            _ScriptedEndpoint(calls, noul),
+        )
+
+        def fake_assemble_bundle(question, **kwargs):
+            return self._resolution.AssembledBundle(
+                text="## MAP\nengine/evidence_bounds.py →\n  - bound_evidence\n",
+                manifest=[
+                    ManifestEntry(
+                        file="engine/evidence_bounds.py",
+                        provenance="ast_exact",
+                        score=1.0,
+                        bytes=1024,
+                        truncated=False,
+                        source="understand",
+                        lines=24,
+                    )
+                ],
+                seeds=[TraceSeed(file="engine/evidence_bounds.py", score=0.9)],
+                tokens_estimated=300,
+            )
+
+        monkeypatch.setattr(self._resolution, "assemble_bundle", fake_assemble_bundle)
+        if with_key:
+            # Assembled at runtime so no 20+-character sk- literal exists in
+            # this file (the secrets guard's match) — same trick as
+            # tests/test_resolution.py.
+            monkeypatch.setenv("GITREINS_OPENROUTER_KEY", "sk-or-" + "v1-mcp-" + "0" * 16)
+        from gitreins_mcp.server import GitReinsMCPServer
+
+        return GitReinsMCPServer(workdir), calls
+
+    def test_context_resolve_registered_and_listed(self, tmp_workdir):
+        """context.resolve is registered and advertised in tools/list."""
+        from gitreins_mcp.server import GitReinsMCPServer
+
+        mcp = GitReinsMCPServer(tmp_workdir)
+        assert callable(mcp._tools["context.resolve"])
+        response = mcp.handle_request({"jsonrpc": "2.0", "id": 7, "method": "tools/list"})
+        tools = {t["name"]: t for t in response["result"]["tools"]}
+        assert "context.resolve" in tools
+        schema = tools["context.resolve"]["inputSchema"]
+        assert schema["required"] == ["question"]
+        assert schema["properties"]["question"]["type"] == "string"
+        assert schema["properties"]["budget"]["type"] == "integer"
+
+    def test_context_resolve_returns_banded_verdict(self, tmp_workdir, monkeypatch):
+        """A scripted RESOLVED answer comes back as the full verdict object."""
+        mcp, calls = self._server_with_scripted_endpoint(tmp_workdir, monkeypatch)
+        verdict = mcp._context_resolve("Does engine/evidence_bounds.py truncate text?")
+        assert verdict["verdict"] == "RESOLVED"
+        assert verdict["probability"] == pytest.approx(0.87)
+        assert verdict["missing_kind"] == "none"
+        assert verdict["model"] == "typesafe/jev-1.13-20260917"
+        assert verdict["exit_code"] == 0
+        # The bundle manifest ships with the verdict — no traceable bundle,
+        # no verdict (spec §3.2's provenance law).
+        assert verdict["manifest"], "manifest must be non-empty"
+        assert all("file" in entry and "provenance" in entry for entry in verdict["manifest"])
+        # Exactly one Jev call, to the pinned decisions endpoint, with the
+        # question opening the state payload.
+        assert len(calls) == 1
+        assert calls[0]["url"] == self._resolution.JEV_ENDPOINT
+        assert calls[0]["json"]["state"].startswith("Does engine/evidence_bounds.py truncate text?")
+
+    def test_context_resolve_unresolved_vs_abstain_distinguishable(self, tmp_workdir, monkeypatch):
+        """A low score is not a dead key: the two failures stay distinct."""
+        mcp, _ = self._server_with_scripted_endpoint(tmp_workdir, monkeypatch, noul=0.09)
+        # 0.09 is the spec's filler measurement — a real UNRESOLVED decision.
+        unresolved = mcp._context_resolve("does the repo handle negatives?")
+        assert unresolved["verdict"] == "UNRESOLVED"
+        assert unresolved["abstain_reason"] is None
+        assert unresolved["exit_code"] == 1
+
+        # No credentials at all: an ABSTAIN with a named reason, also exit 1.
+        # The key env var is removed for THIS call (monkeypatch scopes it to
+        # the test, so the helper's key must be explicitly withdrawn) and
+        # HOME points at the empty tmp dir, so no .env fallback is reachable.
+        monkeypatch.delenv("GITREINS_OPENROUTER_KEY", raising=False)
+        bare = GitReinsMCPServer(tmp_workdir)
+        abstain = bare._context_resolve("anything?")
+        assert abstain["verdict"] == "ABSTAIN"
+        assert abstain["abstain_reason"] == "no-credentials"
+        assert abstain["abstain_action"]
+        assert abstain["exit_code"] == 1
+
+    def test_context_resolve_budget_reaches_engine(self, tmp_workdir, monkeypatch):
+        """budget is forwarded to the engine; None means the engine ceiling."""
+        seen = {}
+
+        def fake_resolve(question, *, workdir, max_tokens):
+            seen["max_tokens"] = max_tokens
+            verdict = self._resolution.ResolutionVerdict(question=question, verdict="REVIEW")
+            verdict.probability = 0.6
+            return verdict
+
+        monkeypatch.setattr("gitreins_mcp.server.resolve_question", fake_resolve)
+        from gitreins_mcp.server import GitReinsMCPServer
+
+        mcp = GitReinsMCPServer(tmp_workdir)
+        mcp._context_resolve("q?", budget=1234)
+        assert seen["max_tokens"] == 1234
+        mcp._context_resolve("q?")
+        assert seen["max_tokens"] == self._resolution.MAX_BUNDLE_TOKENS
+
+    def test_context_resolve_over_jsonrpc(self, tmp_path):
+        """The tool answers over the real stdio JSON-RPC transport.
+
+        Starts its own server subprocess (the class-level ``mcp_proc``
+        fixture lives on TestMCPStdioIntegration). The child cannot inherit
+        monkeypatched seams, so the assertion is surface-level: the
+        registered tool answers tools/call with a verdict object. The child
+        sees no OpenRouter credential, so the answer is the fail-closed
+        ABSTAIN — which is exactly the shape being asserted.
+        """
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        (workdir / ".git").mkdir()
+        (workdir / ".git" / "HEAD").write_text("ref: refs/heads/main\n")
+        (workdir / ".git" / "config").write_text(
+            "[core]\n\trepositoryformatversion = 0\n\tbare = false\n"
+        )
+
+        test_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(test_dir)
+        server_path = os.path.join(project_root, "gitreins_mcp", "server.py")
+        env = os.environ.copy()
+        env["PYTHONPATH"] = project_root
+        env["PYTHONUNBUFFERED"] = "1"
+        for var in self._resolution.CREDENTIAL_ENV_VARS:
+            env.pop(var, None)
+        # Known .env files must be out of reach for a deterministic ABSTAIN:
+        # HOME moves to the tmp workdir's parent so ~/.hermes/.env (live on
+        # this host) is never read by the child.
+        env["HOME"] = str(tmp_path)
+
+        import subprocess as sp
+        import sys as _sys
+
+        proc = sp.Popen(
+            [_sys.executable, server_path],
+            stdin=sp.PIPE,
+            stdout=sp.PIPE,
+            stderr=sp.PIPE,
+            cwd=str(workdir),
+            env=env,
+        )
+        try:
+            request = {
+                "jsonrpc": "2.0",
+                "id": 9,
+                "method": "tools/call",
+                "params": {
+                    "name": "context.resolve",
+                    "arguments": {"question": "does evidence_bounds truncate?"},
+                },
+            }
+            proc.stdin.write((json.dumps(request) + "\n").encode())
+            proc.stdin.flush()
+            line = proc.stdout.readline()
+            assert line, "no response from server"
+            resp = json.loads(line.decode())
+        finally:
+            proc.kill()
+            proc.wait(timeout=5)
+
+        assert "error" not in resp, resp
+        result = json.loads(resp["result"]["content"][0]["text"])
+        assert result["question"] == "does evidence_bounds truncate?"
+        # Fail-closed: the child sees no credential and an empty repo assembles
+        # no bundle, so the gate refuses with a named ABSTAIN rather than a
+        # guess. Either cause is a valid refusal; both carry exit_code 1.
+        assert result["verdict"] == "ABSTAIN"
+        assert result["abstain_reason"] in {"no-credentials", "empty-bundle"}
+        assert result["exit_code"] == 1
+        assert "manifest" in result

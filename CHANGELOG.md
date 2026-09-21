@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **The Jev resolution gate is reachable from both surfaces (JEVRES-002)** —
+  JEVRES-001 built the pipeline (`engine/resolution.py`) but left it with no
+  caller. `gitreins resolve "<question>" [--budget N] [--json]` runs it from a
+  shell: human output names the verdict band, the probability, `missing_kind`
+  and the bundle manifest (file → provenance, score, bytes); `--json` emits
+  the full verdict object for scripting. The MCP server registers
+  `context.resolve` (question + optional budget) returning the same verdict
+  object, so an agent can ask the repo instead of reading it. Both surfaces
+  borrow the engine's exit discipline unchanged — RESOLVED/REVIEW exit 0,
+  UNRESOLVED and ABSTAIN exit 1, an ABSTAIN carrying a named
+  `abstain_reason` (a low score, a dead key and an exhausted budget are
+  different failures with different fixes). No second resolver: both surfaces
+  call `engine.resolution.resolve()`. Docs: `docs/cli-reference.md` §15,
+  `docs/mcp-api.md` (tool 13 of the now 13-tool surface), and the tool-count
+  claims across `docs/architecture.md`, `docs/onboarding.md`, README and
+  CONTRIBUTING. Regression: `tests/test_cli_resolve.py` (5 tests) and
+  `tests/test_mcp_server.py::TestContextResolve` (5 tests), hermetic through
+  the engine's endpoint/assembler seams.
 - **`ruff format` is gated in CI and in the guard's lint lane (GR-GAP-063)**
   — formatting cleanliness lived only as prose in task briefs: the CI workflow
   grepped zero hits for `ruff` (it ran no ruff at all), and

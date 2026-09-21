@@ -1,7 +1,7 @@
 # GitReins MCP API Reference
 
 The GitReins MCP server (`gitreins mcp-server`, source `gitreins_mcp/server.py`) exposes a
-**12-tool** surface over JSON-RPC 2.0 on stdio. This reference documents every tool with its
+**13-tool** surface over JSON-RPC 2.0 on stdio. This reference documents every tool with its
 input schema, return shapes, the async judge-job lifecycle, and the error taxonomy.
 
 For the full wire-protocol specification (transport framing, lifecycle, security model) see
@@ -43,7 +43,7 @@ For the full wire-protocol specification (transport framing, lifecycle, security
   the newest revision it implements, not the one a given client negotiated. Shown
   indented (raw output, not an invocation):
 
-      gitreins MCP server <version> — stdio, protocol 2025-11-25 (negotiated per client request), 12 tools, workdir=/path/to/repo
+      gitreins MCP server <version> — stdio, protocol 2025-11-25 (negotiated per client request), 13 tools, workdir=/path/to/repo
       gitreins MCP server <version> — stdin closed (EOF), exiting 0
 
   `<version>` is the installed release, so a client log is self-identifying without
@@ -51,7 +51,7 @@ For the full wire-protocol specification (transport framing, lifecycle, security
   nothing back can tell "still starting" from "died before reading stdin" by reading
   its server log. Ask the version without opening the transport with
   `python -m gitreins_mcp.server --version`.
-- **Capability discovery:** `tools/list` returns the 12 schemas below. Tool names use
+- **Capability discovery:** `tools/list` returns the 13 schemas below. Tool names use
   dotted notation (`task.create`, `guard.run`, `judge.evaluate`).
 
 ## Client Quick Start (raw JSON-RPC, no MCP SDK)
@@ -300,6 +300,37 @@ auto-resumed on the next poll. CLI `gitreins judge <id> --async` dispatches are 
 | `targets` | array<string> | yes | Target repo paths to propagate config to |
 
 **Returns:** `{"source": "...", "results": [...]}`.
+
+### 13. `context.resolve` — resolve a question against the repo's code (Jev resolution gate)
+
+Asks the Jev resolution gate (JEVRES-001, `engine/resolution.py`) whether the code
+already answers a question. The gate traces the question to seed files with Hilo,
+assembles a bundle inside a measured token budget, asks the Jev decisions model for a
+calibrated probability that the evidence resolves the question, and bands the answer in
+code — the probability, the bundle manifest and both token counts are part of the
+verdict, so an answer with no traceable evidence is never returned. This is the
+context-saving primitive: an agent asks the repo instead of reading it (spec:
+`docs/jev-resolution-gate.md`).
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `question` | string | yes | The question to resolve, e.g. `"Does engine/evidence_bounds.py truncate text?"` |
+| `budget` | integer | no | Max bundle tokens (defaults to the engine's measured 28,000-token ceiling) |
+
+**Returns:** the full verdict object — `{"question", "verdict", "probability",
+"missing_kind", "evidence_quality", "manifest": [{file, provenance, score, bytes,
+truncated, source, lines}], "model", "input_tokens", "tokens_estimated",
+"cost_usd", "abstain_reason", "exit_code", ...}`.
+
+`verdict` bands in code (thresholds are engine config, not the model): **RESOLVED**
+(≥ 0.85 — the evidence is sufficient), **REVIEW** (0.50–0.85 — a human or the full
+judge looks), **UNRESOLVED** (< 0.50 — `missing_kind` names what is absent), and
+**ABSTAIN** for any failure. An ABSTAIN is fail-closed, never "looks fine": it carries
+a named `abstain_reason` (`no-credentials`, `all-credentials-rejected`,
+`transport-error`, `http-error`, `malformed-response`, `bundle-over-server-ceiling`,
+`budget-exhausted`, `empty-bundle`, `empty-question`) and an `abstain_action`
+suggesting the fix. The same object is what `gitreins resolve --json` prints; the
+CLI's non-zero exit on UNRESOLVED/ABSTAIN corresponds to `exit_code: 1` here.
 
 ## Async Judge-Job Lifecycle
 

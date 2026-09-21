@@ -104,8 +104,9 @@ def test_live_surface_pins_the_current_cli():
     """The truth the doc is compared against — pinned so a silent parser
     change shows up here rather than as a mysterious doc failure."""
     top_level, worktree_options, qa_options = _load_module().live_surface(REPO_ROOT)
-    assert len(top_level) == 14
+    assert len(top_level) == 15
     assert "qa" in top_level
+    assert "resolve" in top_level
     assert sorted(worktree_options) == [
         "clean",
         "doctor",
@@ -133,7 +134,7 @@ def test_synced_fixture_doc_passes(tmp_path):
 
     proc = _run_script(doc)
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "14 subcommands" in proc.stdout
+    assert "15 subcommands" in proc.stdout
 
     code, message = _load_module().check_cli_doc_sync(REPO_ROOT, doc_path=doc)
     assert code == 0, message
@@ -148,7 +149,7 @@ def test_repository_doc_is_in_sync():
         cwd=str(REPO_ROOT),
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "14 subcommands" in proc.stdout
+    assert "15 subcommands" in proc.stdout
 
 
 def test_dropped_subcommand_row_fails_naming_it(tmp_path):
@@ -160,19 +161,19 @@ def test_dropped_subcommand_row_fails_naming_it(tmp_path):
     proc = _run_script(doc)
     assert proc.returncode == 1, proc.stdout
     assert "`qa` has no row" in proc.stdout
-    assert "numbering is not 1..13" in proc.stdout
+    assert "numbering is not 1..14" in proc.stdout
 
 
 def test_stated_count_mismatch_fails(tmp_path):
     doc = _write_synced_doc(tmp_path, _load_module())
     text = doc.read_text(encoding="utf-8").replace(
-        "There are **14 top-level subcommands**", "There are **13 top-level subcommands**"
+        "There are **15 top-level subcommands**", "There are **14 top-level subcommands**"
     )
     doc.write_text(text, encoding="utf-8")
 
     code, message = _load_module().check_cli_doc_sync(REPO_ROOT, doc_path=doc)
     assert code == 1
-    assert "stated count 13 != live count 14" in message
+    assert "stated count 14 != live count 15" in message
 
 
 def test_missing_worktree_option_fails_naming_it(tmp_path):
