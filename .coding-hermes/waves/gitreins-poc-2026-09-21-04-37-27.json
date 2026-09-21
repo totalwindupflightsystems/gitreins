@@ -20,7 +20,10 @@
       "provider": "zai-glm-default",
       "brief": "/tmp/gp-wave-brief-DF-GITREINS-POC-30.md",
       "depends_on": [],
-      "status": "dispatching"
+      "status": "merged",
+      "branch_commit": "18e9e3a",
+      "merge_commit": "dcbbbc0",
+      "judge": "PASS 215c0b4a"
     },
     {
       "task_id": "DF-GITREINS-POC-31",
@@ -30,7 +33,10 @@
       "provider": "zai-glm-default",
       "brief": "/tmp/gp-wave-brief-DF-GITREINS-POC-31.md",
       "depends_on": [],
-      "status": "dispatching"
+      "status": "merged",
+      "branch_commit": "b744fdd",
+      "merge_commit": "d9c2d10",
+      "judge": "PASS 0781135a"
     },
     {
       "task_id": "DF-GITREINS-POC-32",
@@ -40,7 +46,10 @@
       "provider": "zai-glm-default",
       "brief": "/tmp/gp-wave-brief-DF-GITREINS-POC-32.md",
       "depends_on": [],
-      "status": "dispatching"
+      "status": "merged",
+      "branch_commit": "ff770be",
+      "merge_commit": "228008b",
+      "judge": "PASS f5283122"
     }
   ],
   "excluded": [
@@ -69,5 +78,7 @@
     "DF-GITREINS-POC-30",
     "DF-GITREINS-POC-31",
     "DF-GITREINS-POC-32"
-  ]
+  ],
+  "finished_at": "2026-09-21T06:10:00Z",
+  "outcome": "3/3 merged serially with gates on the merged tree; full suite 2100 passed / 16 skipped; docs test counts re-synced to 2116/57; CI run 35564727432 green py3.10/3.11/3.12; worktrees removed, branches deleted, pushed github/main afe6467..a696837"
 }
