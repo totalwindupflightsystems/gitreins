@@ -46,6 +46,17 @@ single implementation; the numbers in this file are machine-checked too). Pass
 `--static` to skip the live comparison — the message then says so and certifies
 only that the documented claims agree with each other.
 
+**Worker briefs (INT-CI-13).** A worker brief whose diff adds or removes test
+files MUST carry this acceptance criterion verbatim:
+
+> update test-count sites (README.md x2, CONTRIBUTING.md x2) to the new
+> collection total
+
+Run `python3 scripts/check_docs_drift.py` before pushing test-touching work.
+It now runs as part of the LOCAL guard too (chained onto `guards.test_command`
+in `.gitreins/config.yaml`), so a drifted claim fails the commit itself — the
+drift class used to be invisible until CI (3 CI reds before INT-CI-13).
+
 ## Load reproduction
 
 Some failures only appear under load. Reproduce them without leaving load behind:

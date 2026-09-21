@@ -3,7 +3,16 @@ guards:
   lint: true
   tests: true
   test_mode: diff
-  test_command: uv run pytest -x --tb=short
+  # INT-CI-13: the docs-drift gate is chained onto the test command so the
+  # LOCAL guard (and the pre-commit hook, which just runs `gitreins guard` in
+  # the repo root) runs scripts/check_docs_drift.py — the live pytest
+  # collection happens inside the script, so the pytest call below is the
+  # collection step it consumes. Without the chain, test-count drift only
+  # surfaces in CI (the guard cannot see this class; 3 CI reds: GR-GAP-019
+  # era, INT-CI-12, tick 319). A drifted claim FAILS the commit before push.
+  test_command: >-
+    python3 scripts/check_docs_drift.py &&
+    uv run pytest -x --tb=short
   test_timeout: 900
   # TRUST-001: this repo's own gate is graded by `pytest tests/ -v` in CI, and
   # `gitreins guard` here runs on a clean checkout (nothing staged → lint/tests
