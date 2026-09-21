@@ -950,6 +950,145 @@ class TestRunnerFallback:
         assert "⚠ test runner 'uv' not found on PATH" in summary
 
 
+class TestBarePytestFallback:
+    """GR-GAP-064 / DF-GITREINS-POC-28: bare `pytest ...` on a machine whose
+    only pytest is a venv-local console script.
+
+    A fresh `gitreins install` venv installs pytest venv-local and gitreins
+    itself runs INSIDE that venv, but the guard subprocess cannot see the
+    venv-local binary on PATH — so the shipped default
+    `pytest -x --tb=short` died with `/bin/sh: 1: pytest: not found`
+    (exit 127) and blocked the README's own first commit. When the running
+    interpreter can import pytest, the resolver rewrites to
+    `{sys.executable} -m pytest ...` (GR-GAP-037 shape); when it cannot,
+    the command passes through and the lane fails with its natural exit 127
+    — made actionable at the call site, never silently skipped.
+    """
+
+    def test_bare_pytest_on_path_passthrough(self):
+        """pytest binary on PATH → command unchanged, no warning (fast path)."""
+        with patch("shutil.which", return_value="/usr/local/bin/pytest"):
+            cmd, warning = _resolve_test_command("pytest -x --tb=short")
+        assert cmd == "pytest -x --tb=short"
+        assert warning is None
+
+    def test_bare_pytest_missing_on_path_but_importable_rewrites(self):
+        """No PATH pytest + importable → `{sys.executable} -m pytest` + warning."""
+        with (
+            patch("shutil.which", return_value=None),
+            patch("importlib.util.find_spec", return_value=MagicMock()),
+        ):
+            cmd, warning = _resolve_test_command("pytest -x --tb=short")
+        assert cmd == f"{sys.executable} -m pytest -x --tb=short"
+        assert warning is not None
+        assert "pytest not found on PATH" in warning
+        assert "falling back to" in warning
+        assert "venv that has it" in warning
+
+    def test_bare_pytest_exactly_no_args_rewrites(self):
+        """A config of exactly `pytest` rewrites to `-m pytest` with no tail."""
+        with (
+            patch("shutil.which", return_value=None),
+            patch("importlib.util.find_spec", return_value=object()),
+        ):
+            cmd, warning = _resolve_test_command("pytest")
+        assert cmd == f"{sys.executable} -m pytest"
+        assert warning is not None
+
+    def test_bare_pytest_missing_and_not_importable_passthrough(self):
+        """Not on PATH AND not importable → unchanged; the lane fails naturally."""
+        with (
+            patch("shutil.which", return_value=None),
+            patch("importlib.util.find_spec", return_value=None),
+        ):
+            cmd, warning = _resolve_test_command("pytest -x --tb=short")
+        assert cmd == "pytest -x --tb=short"
+        assert warning is None
+
+    def test_interpreter_form_never_takes_bare_branch(self):
+        """`python -m pytest` already names its interpreter — even with no PATH pytest."""
+        for command in ("python -m pytest -x", "python3 -m pytest -x"):
+            with patch("shutil.which", return_value=None):
+                cmd, warning = _resolve_test_command(command)
+            assert cmd == command
+            assert warning is None
+
+    def test_make_test_never_takes_bare_branch(self):
+        """`make test` is not a pytest command — untouched even with no PATH pytest."""
+        with patch("shutil.which", return_value=None):
+            cmd, warning = _resolve_test_command("make test")
+        assert cmd == "make test"
+        assert warning is None
+
+    def test_runner_prefix_still_takes_gap037_path_first(self):
+        """Runner prefixes resolve through GR-GAP-037 before the bare branch runs.
+
+        find_spec must never even be consulted for a runner-prefixed command.
+        """
+        with (
+            patch("shutil.which", return_value=None),
+            patch("importlib.util.find_spec", return_value=None) as mock_spec,
+        ):
+            cmd, warning = _resolve_test_command("uv run pytest -x")
+        assert cmd == f"{sys.executable} -m pytest -x"
+        assert warning is not None
+        assert "'uv' not found on PATH" in warning
+        mock_spec.assert_not_called()
+
+    def test_bare_pytest_executes_rewritten_command(self, tmp_workdir):
+        """The fresh-venv case end-to-end: bare default runs as -m pytest."""
+        gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x --tb=short"}})
+        mock_run = MagicMock()
+        mock_run.returncode = 0
+        mock_run.stdout = "1 passed"
+        mock_run.stderr = ""
+        with (
+            patch("shutil.which", return_value=None),
+            patch("importlib.util.find_spec", return_value=object()),
+            patch("subprocess.run", return_value=mock_run) as mock_subprocess,
+        ):
+            result = gm._run_test_command("pytest -x --tb=short", "tests (full)")
+        executed = mock_subprocess.call_args.args[0]
+        assert executed == f"{sys.executable} -m pytest -x --tb=short"
+        assert result.passed is True
+        assert result.warning and "pytest not found on PATH" in result.warning
+        assert result.warning in result.output
+
+    def test_exit127_pytest_failure_gets_actionable_hint(self, tmp_workdir):
+        """Exit 127 + sh not-found on a pytest command → hint prepended, still FAIL."""
+        gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x --tb=short"}})
+        not_found = MagicMock()
+        not_found.returncode = 127
+        not_found.stdout = ""
+        not_found.stderr = "/bin/sh: 1: pytest: not found\n"
+        with (
+            patch("shutil.which", return_value=None),
+            patch("importlib.util.find_spec", return_value=None),
+            patch("subprocess.run", return_value=not_found),
+        ):
+            result = gm._run_test_command("pytest -x --tb=short", "tests (full)")
+        assert result.passed is False
+        assert result.exit_code == 127
+        assert result.output.startswith(
+            f"test runner 'pytest' not found on PATH and not importable by {sys.executable}"
+        )
+        # The raw shell failure stays visible below the hint line
+        assert "/bin/sh: 1: pytest: not found" in result.output
+
+    def test_exit127_non_pytest_command_gets_no_hint(self, tmp_workdir):
+        """Exit 127 on a non-pytest command keeps its raw output only."""
+        gm = GuardManager(tmp_workdir, {"guards": {"test_command": "make test"}})
+        not_found = MagicMock()
+        not_found.returncode = 127
+        not_found.stdout = ""
+        not_found.stderr = "/bin/sh: 1: make: not found\n"
+        with patch("subprocess.run", return_value=not_found):
+            result = gm._run_test_command("make test", "tests (full)")
+        assert result.passed is False
+        assert result.exit_code == 127
+        assert result.output == "/bin/sh: 1: make: not found\n"
+
+
 class TestPytestExit5NoTests:
     """GR-GAP-048: pytest exit 5 (no tests collected) warns instead of blocking.
 

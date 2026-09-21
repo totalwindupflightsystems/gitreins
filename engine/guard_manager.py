@@ -18,6 +18,7 @@ Config:
 """
 
 import fnmatch
+import importlib.util
 import json
 import logging
 import os
@@ -443,6 +444,11 @@ def _build_diff_test_command(test_command: str, test_files: list[str], workdir: 
 # dies with `uv: command not found` before pytest ever starts (GR-GAP-037).
 _KNOWN_TEST_RUNNER_PREFIXES = ("uv run", "pipenv run", "poetry run")
 
+# GR-GAP-064: a BARE pytest invocation (no runner prefix, no interpreter).
+# `python -m pytest` already names its interpreter (needs no help), and
+# runner-prefixed commands resolve through the GR-GAP-037 loop above.
+_BARE_PYTEST_RE = re.compile(r"^pytest(\s|$)")
+
 
 def _resolve_test_command(cmd: str) -> tuple[str, str | None]:
     """GR-GAP-037: runtime fallback when a configured test_command's runner is missing.
@@ -484,7 +490,51 @@ def _resolve_test_command(cmd: str) -> tuple[str, str | None]:
             f"{runner}) to use the configured test_command verbatim."
         )
         return new_cmd, warning
+
+    # GR-GAP-064: a bare pytest invocation (the shipped default
+    # `pytest -x --tb=short`, and the form `gitreins init` writes) fails on a
+    # fresh `gitreins install` venv: pytest is installed venv-local, gitreins
+    # itself runs INSIDE that venv, but the guard subprocess cannot see the
+    # venv-local console script on PATH — the lane dies with
+    # `/bin/sh: 1: pytest: not found` before pytest ever starts. When the
+    # running interpreter can import pytest, use it (same rewrite shape as
+    # GR-GAP-037); when it cannot, pass through unchanged so the lane fails
+    # with its natural exit 127 — a missing pytest is a real setup error and
+    # the call site makes that failure actionable instead of swallowing it.
+    if _BARE_PYTEST_RE.match(stripped):
+        if shutil.which("pytest"):
+            return cmd, None
+        if importlib.util.find_spec("pytest") is not None:
+            rest = stripped[len("pytest") :].lstrip()
+            new_cmd = f"{sys.executable} -m pytest{(' ' + rest) if rest else ''}"
+            warning = (
+                "pytest not found on PATH — falling back to "
+                f"'{new_cmd}' for this run (gitreins is running inside the "
+                "venv that has it). Install pytest on PATH (e.g. pip install "
+                "pytest) or set guards.test_command to use the venv interpreter."
+            )
+            return new_cmd, warning
     return cmd, None
+
+
+def _pytest_not_found_hint(exit_code: int, cmd: str) -> str | None:
+    """GR-GAP-064: actionable line for a shell exit 127 on a bare pytest command.
+
+    When the bare-pytest passthrough above lets the lane run and it dies with
+    `/bin/sh: 1: pytest: not found` (127), the raw output alone does not say
+    how to fix the machine. Returns the fix line (naming the running
+    interpreter) for a 127 exit on a pytest invocation, else None. The exit
+    code and FAIL verdict are never touched by this — it is output text only.
+    """
+    import sys
+
+    if exit_code != 127 or not _BARE_PYTEST_RE.match(cmd.strip()):
+        return None
+    return (
+        "test runner 'pytest' not found on PATH and not importable by "
+        f"{sys.executable} — install it with {sys.executable} -m pip install "
+        "pytest (or set guards.test_command)"
+    )
 
 
 # ── pytest exit-5 ("no tests collected") handling ─────────────
@@ -1780,6 +1830,14 @@ class GuardManager:
                     skip_reason="no tests collected",
                 )
             else:
+                # GR-GAP-064: make a genuine not-found (127) actionable —
+                # the hint line is prepended to the displayed output for a
+                # FAILED pytest lane; the value of exit_code decides
+                # pass/fail and is never reclassified or swallowed.
+                output = result.stdout + result.stderr
+                not_found_hint = _pytest_not_found_hint(result.returncode, cmd)
+                if not_found_hint:
+                    output = f"{not_found_hint}\n{output}"
                 return GuardResult(
                     name=label,
                     passed=False,
