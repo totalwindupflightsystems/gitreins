@@ -1801,6 +1801,11 @@ def cmd_qa_record(args):
     if row is None:
         print("qa record: not recorded (qa_ledger.enabled is false)", file=sys.stderr)
         raise SystemExit(1)
+    if row.get("evidence_missing"):
+        print(
+            f"qa record: evidence path not found: {row['evidence']}",
+            file=sys.stderr,
+        )
     print(
         f"qa ledger: recorded {row['kind']} {row['project']} {row['verdict']} "
         f"in {qa_ledger_path(workdir)}"
@@ -2937,7 +2942,12 @@ def main():
     qa_record_p.add_argument(
         "--status", help="Fleet-ledger status word (default: pass/fail from the verdict)"
     )
-    qa_record_p.add_argument("--verdict", choices=["PASS", "FAIL"], help="Explicit verdict")
+    qa_record_p.add_argument(
+        "--verdict",
+        choices=["PASS", "FAIL", "UNKNOWN"],
+        help="Explicit verdict (default: PASS when neither --verdict, --exit-code"
+        " nor --status is given)",
+    )
     qa_record_p.add_argument(
         "--exit-code", dest="exit_code", type=int, help="Exit code of the audited run"
     )

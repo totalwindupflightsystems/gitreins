@@ -206,6 +206,45 @@ def test_qa_record_derives_status_from_an_explicit_fail_verdict(qa_repo):
     assert (row["verdict"], row["status"]) == ("FAIL", "fail")
 
 
+def test_qa_record_defaults_to_pass_when_no_verdict_or_exit_code_is_given(qa_repo):
+    # The documented default (docs/cli-reference.md): with neither --verdict,
+    # --exit-code nor --status, the row records a passing verdict — a green
+    # battery and an undecided one must not be indistinguishable.
+    result = _run_cli(qa_repo, "qa", "record", "--project", "x", "--note", "no flags")
+    assert result.returncode == 0, result.stderr
+    row = _ledger_rows(qa_repo)[0]
+    assert (row["verdict"], row["status"]) == ("PASS", "pass")
+    assert "recorded lane x PASS" in result.stdout
+
+
+def test_qa_record_preserves_an_explicit_unknown_verdict(qa_repo):
+    result = _run_cli(qa_repo, "qa", "record", "--project", "x", "--verdict", "UNKNOWN")
+    assert result.returncode == 0, result.stderr
+    row = _ledger_rows(qa_repo)[0]
+    assert (row["verdict"], row["status"]) == ("UNKNOWN", "unknown")
+
+
+def test_qa_record_stamps_evidence_missing_when_the_evidence_path_is_absent(qa_repo, tmp_path):
+    missing = tmp_path / "definitely-missing.json"
+    result = _run_cli(qa_repo, "qa", "record", "--project", "x", "--evidence", str(missing))
+    assert result.returncode == 0, result.stderr
+    row = _ledger_rows(qa_repo)[0]
+    assert row["evidence"] == str(missing)
+    assert row["evidence_missing"] is True
+    assert f"qa record: evidence path not found: {missing}" in result.stderr
+
+
+def test_qa_record_with_an_existing_evidence_file_carries_no_marker(qa_repo, tmp_path):
+    evidence = tmp_path / "battery.jsonl"
+    evidence.write_text('{"ok": true}\n', encoding="utf-8")
+    result = _run_cli(qa_repo, "qa", "record", "--project", "x", "--evidence", str(evidence))
+    assert result.returncode == 0, result.stderr
+    row = _ledger_rows(qa_repo)[0]
+    assert row["evidence"] == str(evidence)
+    assert "evidence_missing" not in row
+    assert result.stderr == ""
+
+
 def test_qa_record_rejects_a_malformed_cell(qa_repo):
     result = _run_cli(qa_repo, "qa", "record", "--project", "x", "--cell", "launch")
     assert result.returncode == 2

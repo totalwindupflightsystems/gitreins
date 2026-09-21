@@ -340,14 +340,27 @@ def record_external(
     ts: str | None = None,
     detail: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
-    """Record a QA run produced outside the harness (a fleet lane, a bunker battery)."""
+    """Record a QA run produced outside the harness (a fleet lane, a bunker battery).
+
+    With neither ``verdict``, ``exit_code`` nor ``status``, the verdict defaults
+    to PASS — the documented ``qa record`` default (docs/cli-reference.md) — so
+    a green battery is never recorded as an undecided UNKNOWN row. An explicit
+    ``verdict`` (including ``UNKNOWN``) is always honoured as given.
+
+    A non-empty ``evidence`` value that does not point at an existing,
+    readable file keeps the row but stamps ``evidence_missing: True`` on it,
+    so an audit ledger never silently points at nothing and a run is never
+    lost to a mistyped path.
+    """
     if not verdict:
         if isinstance(exit_code, int) and not isinstance(exit_code, bool):
             verdict = "PASS" if exit_code == 0 else "FAIL"
         elif status:
             verdict = str(status).upper()
         else:
-            verdict = "UNKNOWN"
+            verdict = "PASS"
+    evidence = str(evidence or "")
+    evidence_missing = bool(evidence) and not os.path.isfile(evidence)
     cells = {str(k): str(v) for k, v in (cells or {}).items()}
     row = build_row(
         workdir,
@@ -356,7 +369,7 @@ def record_external(
         verdict=verdict,
         exit_code=exit_code,
         findings=findings,
-        evidence=str(evidence or ""),
+        evidence=evidence,
         note=note,
         detail=detail,
         project=project,
@@ -366,6 +379,8 @@ def record_external(
         server=server,
         commit=commit,
     )
+    if evidence_missing:
+        row["evidence_missing"] = True
     return row if append_row(workdir, row) else None
 
 

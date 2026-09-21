@@ -558,7 +558,7 @@ only in stdout and the gitignored disposable registry.
 
 ```
 gitreins qa list [-n <count>] [--json]
-gitreins qa record [--project <name>] [--kind <kind>] [--verdict PASS|FAIL]
+gitreins qa record [--project <name>] [--kind <kind>] [--verdict PASS|FAIL|UNKNOWN]
   [--exit-code <code>] [--cell <name>=<status> ...] [--finding <id>:<title> ...]
   [--evidence <path>] [--note <text>] [--agent <id>] [--server <name>]
   [--commit <sha>] [--ts <iso>] [--status <word>]
@@ -585,9 +585,16 @@ gitreins qa record [--project <name>] [--kind <kind>] [--verdict PASS|FAIL]
 
 Records one row. `--project` defaults to the repository directory name,
 `--kind` to `lane`, `--verdict`/`--exit-code` to a passing verdict when
-neither is given, and `--commit` to the repository's `HEAD`. `--cell` and
-`--finding` are repeatable. Status defaults to `pass`/`fail` derived from the
-verdict.
+neither is given (with no `--verdict`, `--exit-code` or `--status` at all, the
+row records verdict `PASS` / status `pass` — an explicit `--verdict UNKNOWN`
+marks a genuinely undecided run), and `--commit` to the repository's `HEAD`.
+`--cell` and `--finding` are repeatable. Status defaults to `pass`/`fail`
+derived from the verdict.
+
+A non-empty `--evidence` path that does not exist on disk is accepted but
+stamped on the row as `evidence_missing: true`, with a
+`qa record: evidence path not found: <path>` warning on stderr — the run is
+kept, but the ledger never silently points at nothing.
 
 Exit **0** on success, **2** when `--cell` is not `NAME=STATUS`
 (`qa record: --cell expects NAME=STATUS (got '<value>')` on stderr), and
@@ -597,8 +604,10 @@ takes no cell flag.
 
 A row carries the fleet QA-ledger keys — `ts`, `project`, `status`, `cells`,
 `findings`, `evidence`, `note` — plus harness extras: `kind`, `verdict`,
-`run_id`, `exit_code`, `commit`, `harness_version`, `detail`. A process that
-already reads the fleet schema can therefore read a harness-written ledger.
+`run_id`, `exit_code`, `commit`, `harness_version`, `detail` (and
+`evidence_missing: true` when the `--evidence` path was missing). A process
+that already reads the fleet schema can therefore read a harness-written
+ledger.
 
 Ledger location, first match wins:
 
