@@ -17,10 +17,17 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import pytest
 
+# DF-GITREINS-POC-31: the installer's own ignore template, imported at
+# collection time so the parametrized tests below re-derive from it instead of
+# restating the list — the restated copy is exactly what drifted from the
+# vendor .gitignore.
+from gitreins.cli import GITREINS_GITIGNORE_ENTRIES
+
 
 # Get the path to the cli module
 CLI_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "gitreins")
 CLI_SCRIPT = os.path.join(CLI_DIR, "cli.py")
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Ambient LLM credentials ``engine/llm.py`` falls back to when
 # GITREINS_LLM_API_KEY is unset.  A CLI child spawned by a test inherits
@@ -2166,6 +2173,139 @@ class TestInitRunnerGitignoreAndWarning:
         )
 
 
+def _materialize_ignored_artifact(repo, entry: str) -> str:
+    """Put the artifact a template *entry* describes on disk; return its path.
+
+    A directory entry gets a file inside it (git lists untracked files, never
+    empty dirs, so an empty directory would make a status assertion vacuous).
+    Materializing matters for the positive direction too: the defect was about a
+    file that really exists after a QA run, not a hypothetical path.
+    """
+    relative = entry + "run-artifact.log" if entry.endswith("/") else entry
+    absolute = os.path.join(repo, relative)
+    os.makedirs(os.path.dirname(absolute), exist_ok=True)
+    with open(absolute, "w") as f:
+        f.write("")
+    return relative
+
+
+@pytest.fixture(scope="module")
+def installed_ignore_repo(tmp_path_factory):
+    """A real checkout after `gitreins install`, holding every template artifact."""
+    repo = _init_real_git_repo(tmp_path_factory.mktemp("gitignore-template"))
+    result = run_cli("install", cwd=repo)
+    assert result.returncode == 0, _cli_failure(result)
+    for entry in GITREINS_GITIGNORE_ENTRIES:
+        _materialize_ignored_artifact(repo, entry)
+    # A ledger row in the shape the defect leaked: agent + server + findings.
+    with open(os.path.join(repo, ".gitreins", "qa-ledger.jsonl"), "w") as f:
+        f.write(
+            json.dumps(
+                {
+                    "ts": "2026-09-20T00:00:00Z",
+                    "project": "consumer",
+                    "status": "PASS",
+                    "cells": ["fresh=PASS"],
+                    "findings": ["DF-X-1: example"],
+                    "evidence": "/home/agent/worktrees/x",
+                    "agent": "bunker-las-02",
+                    "server": "bunker-mvp",
+                    "commit": "0" * 40,
+                }
+            )
+            + "\n"
+        )
+    return repo
+
+
+def _untracked_status(repo) -> str:
+    return subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
+def _check_ignore_exit(repo, path: str) -> int:
+    return subprocess.run(
+        ["git", "check-ignore", "-q", path],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    ).returncode
+
+
+class TestInstallGitignoreTemplate:
+    """DF-GITREINS-POC-31 — what `install` promises to ignore, it must ignore.
+
+    The QA ledger (``gitreins qa record``, and every ``worktree fresh|repro|
+    dogfood`` run) writes rows carrying ``agent``, ``server``, ``evidence``
+    (bunker/agent paths), ``findings`` and ``commit``. ``install`` shipped the
+    template without a ``.gitreins/qa-ledger.jsonl`` entry, so a routine
+    ``git add -A`` committed fleet infrastructure into the consumer's history
+    (measured on a fresh agent, wheel 0.14.0: ``git check-ignore`` exited 1 and
+    the commit listed ``create mode 100644 .gitreins/qa-ledger.jsonl``).
+
+    These tests are the template's own contract: parametrized over
+    ``GITREINS_GITIGNORE_ENTRIES`` so the NEXT runtime artifact added to the
+    tuple cannot be forgotten. ``GITREINS_GITIGNORE_ENTRIES`` is the single
+    programmatic source; ``_gitignore_entries_for_project`` — shared by
+    ``install`` and ``init`` — is its only consumer. The live behaviour is
+    re-derived at call time (no restated copy of the list inside `install`),
+    which is what the vendor/installer split let drift in the first place.
+    """
+
+    def test_qa_ledger_is_ignored_after_install(self, installed_ignore_repo):
+        """The leaked file: ignored by check-ignore, and absent from git status."""
+        ledger = ".gitreins/qa-ledger.jsonl"
+        gitignore = open(os.path.join(installed_ignore_repo, ".gitignore")).read()
+        assert _check_ignore_exit(installed_ignore_repo, ledger) == 0, (
+            f"`git check-ignore {ledger}` exited non-zero — the ledger is an untracked "
+            f"artifact a plain `git add -A` would commit.\n--- .gitignore ---\n{gitignore}"
+        )
+        status = _untracked_status(installed_ignore_repo)
+        assert "qa-ledger.jsonl" not in status, status
+
+    @pytest.mark.parametrize("entry", GITREINS_GITIGNORE_ENTRIES)
+    def test_every_template_entry_is_ignored_after_install(self, installed_ignore_repo, entry):
+        """Every entry the installer writes must ignore its artifact — and no dirt.
+
+        Catches the next runtime artifact added to the tuple but written into a
+        hand-maintained copy of the list elsewhere (or a malformed pattern git
+        cannot match): the artifact would land in `git status` as untracked.
+        """
+        relative = _materialize_ignored_artifact(installed_ignore_repo, entry)
+        gitignore = open(os.path.join(installed_ignore_repo, ".gitignore")).read()
+        assert _check_ignore_exit(installed_ignore_repo, relative) == 0, (
+            f"template entry {entry!r} is written to .gitignore but git still does not "
+            f"ignore {relative!r}.\n--- .gitignore ---\n{gitignore}"
+        )
+        status = _untracked_status(installed_ignore_repo)
+        assert relative not in status, (
+            f"{relative!r} (from template entry {entry!r}) is untracked dirt after "
+            f"install:\n{status}"
+        )
+
+    @pytest.mark.parametrize("entry", GITREINS_GITIGNORE_ENTRIES)
+    def test_vendor_gitignore_covers_every_template_entry(self, entry):
+        """Single source: the vendor checkout ignores what the installer ignores.
+
+        The template's entries were mirrored by hand into the repo's own
+        ``.gitignore``; the QA ledger entry was added to that file alone
+        (``67eca8f``, the commit that introduced the feature) and never to the
+        installer, which is how the leak reached consumers. This pins the two
+        lists together in one place.
+        """
+        with open(os.path.join(REPO_ROOT, ".gitignore")) as f:
+            vendor_entries = [line.strip() for line in f.read().splitlines()]
+        assert entry in vendor_entries, (
+            f"{entry!r} is in GITREINS_GITIGNORE_ENTRIES but not in the repo's own "
+            f".gitignore — keep the installer template and the vendor checkout in sync."
+        )
+
+
 class TestInstallSmartInitConsistency:
     """DF-GITREINS-POC-3: install and smart-init share one persisted contract."""
 
@@ -2340,12 +2480,7 @@ class TestInstallSmartInitConsistency:
         assert after == before
         assert open(backup_path, "rb").read() == backup_before
         assert os.stat(backup_path).st_mtime_ns == backup_mtime_before
-        for entry in (
-            ".gitreins/tasks.yaml",
-            ".gitreins/config.yaml.bak",
-            ".gitreins/usage.jsonl",
-            "__pycache__/",
-        ):
+        for entry in (*GITREINS_GITIGNORE_ENTRIES, "__pycache__/"):
             assert after.splitlines().count(entry) == 1, entry
 
         (tmp_path / "real-repo" / ".gitreins" / "usage.jsonl").write_text("{}\n")

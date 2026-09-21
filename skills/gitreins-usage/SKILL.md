@@ -236,9 +236,11 @@ gitreins qa record --project <repo> --kind bunker --verdict PASS --exit-code 0 \
   at a full ledger, the next `qa record` still prints "recorded" and exits 0 while
   the count stays put — POC-32. Raise the cap before a long battery.
 - `gitreins install` does **not** add `.gitreins/qa-ledger.jsonl` to the consumer's
-  `.gitignore` (only this repo's own .gitignore has it), so a `git add -A` commit
-  will sweep fleet QA rows — agent ids, server names, evidence paths — into user
-  history. Add the ignore yourself — POC-31.
+  `.gitignore` on the **0.14.0 wheel** (only this repo's own .gitignore has it), so a
+  `git add -A` commit will sweep fleet QA rows — agent ids, server names, evidence
+  paths — into user history. Add the ignore yourself — POC-31. Fixed at HEAD
+  (2026-09-21): the installer's `GITREINS_GITIGNORE_ENTRIES` template carries the
+  entry, so a wheel built from HEAD needs no manual line.
 
 ## Driving the MCP server as a real client (2026-09-20 dogfood run — verified at HEAD 0.14.0)
 
@@ -397,7 +399,8 @@ a prerequisite. `mkdir -p .coding-hermes/board` and the same command passes
     `tasks.yaml`, `config.yaml.bak`, `usage.jsonl`, `logs/` — not
     `qa-ledger.jsonl`. A `git add -A` commit lands the rows (agent, server,
     findings, evidence paths) in user history. Add `.gitreins/qa-ledger.jsonl` to
-    `.gitignore` in every repo that records QA.
+    `.gitignore` in every repo that records QA. Fixed at HEAD (2026-09-21): the
+    installer's template now carries the entry.
 24. **A fresh-machine venv must be ACTIVATED before guard/commit (POC-28).** On bare
     Debian: PEP-668 blocks the README's `pip install`; the venv path works (32 s);
     but `gitreins guard` from the unactivated venv — even with pytest installed

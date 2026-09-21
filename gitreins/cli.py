@@ -52,6 +52,14 @@ GITREINS_GITIGNORE_ENTRIES = (
     # entry every consumer repo that runs the guard would show an untracked
     # .gitreins/logs/ in `git status`.
     ".gitreins/logs/",
+    # DF-GITREINS-POC-31: the QA run ledger (`gitreins qa record`, and every
+    # `worktree fresh|repro|dogfood` run) is a runtime artifact, not user
+    # history — a row carries the agent id, the server, evidence paths under
+    # a fleet host, findings and the landed commit. Without this entry a
+    # routine `git add -A` commits fleet infrastructure into the consumer's
+    # repo. Versioning the ledger is an opt-IN: point GITREINS_QA_LEDGER at a
+    # tracked path.
+    ".gitreins/qa-ledger.jsonl",
 )
 
 DEFAULT_GITREINS_CONFIG = """\
