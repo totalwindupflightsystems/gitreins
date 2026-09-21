@@ -110,7 +110,14 @@ BUSY_WAIT_MESSAGE = (
 
 
 def pids_in_group(pgid: int) -> list[int]:
-    """PIDs whose process group is ``pgid`` (validated; scans /proc)."""
+    """PIDs whose process group is ``pgid`` (validated; scans /proc).
+
+    Zombies are NOT reported: a zombie is already dead (it only waits for
+    its parent to reap it), it cannot be signaled, and counting it made
+    ``kill_group`` burn both grace sleeps and then report survivors that
+    were corpses (DF-CRIER-258 follow-up, hit by the evaluator's exit reap
+    when the test/parent process was the one that had to do the reaping).
+    """
     if not isinstance(pgid, int) or isinstance(pgid, bool) or pgid <= 1:
         return []
     found: list[int] = []
@@ -122,8 +129,11 @@ def pids_in_group(pgid: int) -> list[int]:
             continue
         try:
             stat = (proc / entry / "stat").read_text()
-            # field 5 = pgrp (index 2 after the comm field, which may contain spaces)
+            # field 3 = state, field 5 = pgrp (index after the comm field,
+            # which may contain spaces — cut at the closing paren)
             fields = stat[stat.rindex(")") + 2 :].split()
+            if fields[0] == "Z":
+                continue
             pgrp = int(fields[2])
         except (OSError, ValueError, IndexError):
             continue

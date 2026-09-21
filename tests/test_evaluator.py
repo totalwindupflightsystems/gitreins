@@ -5,10 +5,13 @@ axiom:trace work_item=GR-001 spec=specs/03-Agentic-Evaluator.md plan=.memory-ban
 
 import json
 import os
+import subprocess
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from engine import command_hygiene
 from engine.evaluator import (
     AgenticEvaluator,
     Verdict,
@@ -174,6 +177,65 @@ class TestRunCommand:
         assert len(output) <= 4100  # the 4000-char cap + its omission marker
         assert "chars omitted" in output, output[:200]
         assert "TAIL-KEEPME" in output, "the tail of the output must survive the bound"
+
+
+class TestLastCommandPgidReap:
+    """DF-CRIER-258: the evaluator remembers the last run_command's process
+    group and evaluate() reaps it on the way out — belt-and-braces for the
+    DF-CRIER-254 shape, where a judge hit its time cap while its spawned
+    evidence command kept running for 33+ minutes.
+
+    run_bounded already reaps the group on every return; the finally in
+    evaluate() exists for terminations that land between or after tool
+    calls. kill_group is a validated no-op on a dead group, so on the
+    happy path the reap costs one /proc scan.
+    """
+
+    def test_run_command_records_pgid(self, evaluator):
+        """A successful run_command stores the group leader's pid."""
+        result = evaluator._tool_run_command("echo hello")
+        assert result["exit_code"] == 0
+        assert isinstance(evaluator._last_command_pgid, int)
+        assert not isinstance(evaluator._last_command_pgid, bool)
+        assert evaluator._last_command_pgid > 1
+
+    def test_refused_command_records_no_pgid(self, evaluator):
+        """A refused busy-wait never ran — no pgid is recorded."""
+        result = evaluator._tool_run_command("while :; do :; done")
+        assert result.get("refused") is True
+        assert evaluator._last_command_pgid is None
+
+    def test_evaluate_finally_kills_a_live_group(self, evaluator, llm_client):
+        """The hook, exercised through evaluate()'s real finally: a live
+        process group recorded before the LLM 'call' is gone after
+        evaluate() returns (here via an LLM exception — the cap-exceeded
+        and normal paths traverse the same finally)."""
+        proc = subprocess.Popen(["sleep", "30"], start_new_session=True)
+        evaluator._last_command_pgid = os.getpgid(proc.pid)
+        try:
+            with patch.object(llm_client, "chat", side_effect=RuntimeError("LLM crashed")):
+                verdict = evaluator.evaluate({"id": "err", "title": "x", "criteria": []})
+            assert verdict.verdict == "INCOMPLETE"
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and command_hygiene.pids_in_group(proc.pid):
+                time.sleep(0.05)
+            assert command_hygiene.pids_in_group(proc.pid) == [], (
+                f"process group {proc.pid} survived evaluate()'s exit reap"
+            )
+        finally:
+            # If the hook under test failed, do not leak the sleep.
+            command_hygiene.kill_group(os.getpgid(proc.pid))
+        # The finally clears the recorded pgid either way.
+        assert evaluator._last_command_pgid is None
+
+    def test_evaluate_finally_is_noop_without_a_recorded_group(self, evaluator, llm_client):
+        """No run_command this eval → the finally kills nothing and clears
+        nothing (no recorded pgid)."""
+        verdict_json = '{"verdict":"COMPLETE","items":[],"summary":"done"}'
+        with patch.object(llm_client, "chat", return_value=LLMResponse(content=verdict_json)):
+            verdict = evaluator.evaluate({"id": "t1", "title": "x", "criteria": []})
+        assert verdict.verdict == "COMPLETE"
+        assert evaluator._last_command_pgid is None
 
 
 class TestSearchPattern:

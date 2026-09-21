@@ -462,6 +462,9 @@ class AgenticEvaluator:
         self._searches_done: set[str] = set()
         self._tier1_diagnostics: list[dict] = []
         self._allowed_files: set[str] | None = None  # None = full scope, set = restricted
+        # DF-CRIER-258: pgid of the last run_command's process group, for the
+        # belt-and-braces reap in evaluate()'s finally (see there).
+        self._last_command_pgid: int | None = None
 
         # ── Fast-track mode (GR-064a) ──
         # Resolve fast_track from config. "auto" = detect based on package count.
@@ -1004,6 +1007,29 @@ class AgenticEvaluator:
         Returns:
             Verdict with pass/fail for each criterion.
         """
+        # Belt-and-braces reap (DF-CRIER-258): whatever exit this evaluation
+        # takes — a verdict, a cap (time/token/iteration), or an exception —
+        # kill the process group of the last run_command. run_bounded already
+        # reaps its group on every return, so on the happy path this is a
+        # validated no-op (kill_group re-checks /proc and refuses dead
+        # groups); it exists for the DF-CRIER-254 shape, where a judge died
+        # on a cap while its evidence command was still running.
+        try:
+            return self._evaluate_loop(task)
+        finally:
+            pgid, self._last_command_pgid = self._last_command_pgid, None
+            if pgid:
+                leftovers = command_hygiene.kill_group(pgid)
+                if leftovers:
+                    # Never hide a reap failure (mirrors run_bounded).
+                    logger.warning(
+                        "evaluator exit left process-group survivors %s (pgid %s)",
+                        leftovers,
+                        pgid,
+                    )
+
+    def _evaluate_loop(self, task: dict) -> Verdict:
+        """The agentic loop proper — evaluate() wraps this with the reap."""
         # Reset state
         self._sandbox.clear()
         self._files_read.clear()
@@ -1625,6 +1651,10 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             return {"cmd": cmd, "error": result["reason"], "refused": True}
         if "error" in result and "exit_code" not in result:
             return {"cmd": cmd, "error": result["error"]}
+        # DF-CRIER-258: remember the group so evaluate()'s finally can reap it
+        # even if this eval terminates on a cap or exception right after.
+        if result.get("pgid"):
+            self._last_command_pgid = result["pgid"]
         return result
 
     def _tool_search_pattern(self, regex: str, file_glob: str = "*") -> dict:
