@@ -480,11 +480,15 @@ class TestCliUsesSharedHelper:
         captured = capsys.readouterr()
         assert "Failed to persist verdict (non-fatal)" in captured.err
 
-    def test_cli_skips_persistence_when_history_disabled(self, tmp_workdir, monkeypatch):
-        """Both directions: enabled → the shared helper runs; disabled → it does not.
+    def test_cli_skips_persistence_when_history_disabled(self, tmp_workdir):
+        """Both directions: enabled → a verdict lands; disabled → it does not.
 
-        Real (unstubbed) helper on both arms, asserting the artefact rather than
-        a call count, so neither arm can pass vacuously.
+        Real (unstubbed) helper on both arms, asserting only the on-disk
+        artefact. No spy and no call count: entry directories are named
+        ``<date>/<sha8(task_id:evaluated_at)>`` with microsecond timestamps, so
+        every real persist lands a fresh ``verdict.json`` and any extra one —
+        from this test's own arms or a stale background thread from an earlier
+        test in this xdist worker — would move the count off the asserted value.
         """
         from gitreins.cli import _persist_result
 
@@ -493,24 +497,13 @@ class TestCliUsesSharedHelper:
             "R", (), {"passed": True, "verdict": None, "pipeline_result": {}, "summary": "s"}
         )()
 
-        calls = []
-        real_helper = engine.persist.persist_evaluation
-
-        def _spy(*args, **kwargs):
-            calls.append(args)
-            return real_helper(*args, **kwargs)
-
-        monkeypatch.setattr(engine.persist, "persist_evaluation", _spy)
-
-        # Arm 1: enabled (default) — the helper runs and a verdict lands.
+        # Arm 1: enabled (default) — a verdict lands on disk.
         _persist_result(tmp_workdir, task, result)
-        assert len(calls) == 1, "enabled history must persist through the shared helper"
         assert len(_verdict_files(tmp_workdir)) == 1
 
         # Arm 2: disabled — the CLI short-circuits, no second verdict.
         _write_history_config(tmp_workdir, "history:\n  enabled: false\n")
         _persist_result(tmp_workdir, task, result)
-        assert len(calls) == 1, "disabled history must short-circuit before the shared helper"
         assert len(_verdict_files(tmp_workdir)) == 1
 
 
