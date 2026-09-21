@@ -31,6 +31,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TestRuffFormatGate`.
 
 ### Fixed
+- **`gitreins install` ignores the QA run ledger in consumer repos
+  (DF-GITREINS-POC-31)** — the installer's `.gitignore` template
+  (`GITREINS_GITIGNORE_ENTRIES`) listed `tasks.yaml`, `config.yaml.bak`,
+  `usage.jsonl` and `logs/`, but not `qa-ledger.jsonl`. The ignore for the
+  ledger existed only in GitReins' own checkout — added by `67eca8f`, the same
+  commit that introduced the ledger — so the one place it was NOT needed was
+  the only place it was applied. On a fresh agent (wheel 0.14.0)
+  `git check-ignore .gitreins/qa-ledger.jsonl` exited 1 and the next
+  `git add -A && git commit` landed `create mode 100644
+  .gitreins/qa-ledger.jsonl` in the consumer's history, rows carrying the agent
+  id, the server, evidence paths under a fleet host, findings and the landed
+  commit. The tuple now carries the entry, so both `install` and `init` (which
+  share `_gitignore_entries_for_project`) protect it. The vendor `.gitignore`
+  comment is unchanged — it already states the intent ("runtime artifact. Point
+  GITREINS_QA_LEDGER at a tracked path to version it": opting IN to versioning
+  is the documented path, not the default). Regression:
+  `tests/test_cli.py::TestInstallGitignoreTemplate` — `git check-ignore` exit 0
+  for the ledger plus a parametrized sweep over `GITREINS_GITIGNORE_ENTRIES`
+  (each entry's artifact is ignored AND absent from `git status`), so the next
+  runtime artifact added to the tuple cannot be forgotten.
 - **`judge.status` payloads carry an additive `running` boolean and the docs
   ship a poll loop keyed on the terminal status set (DF-GITREINS-POC-24)** —
   the payload's `{"status": "running"}` is a poll-phase value; the terminal
