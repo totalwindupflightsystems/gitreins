@@ -114,7 +114,7 @@ silent PASS here would let unresolved work through the cheapest gate in the syst
 
 | # | Integration | What changes | Value |
 |---|---|---|---|
-| 1 | **Pre-dispatch premise check** | before a worker is dispatched for a board row, resolve the row's criteria; `RESOLVED` ⇒ do not dispatch, annotate the row with the bundle + probability | kills the duplicate/wasted-worker class directly |
+| 1 | **Pre-dispatch premise check** | before a worker is dispatched for a board row, resolve the row's criteria; `RESOLVED` ⇒ do not dispatch, annotate the row with the bundle + probability — **shipped in this repo as `gitreins preflight` (JEVRES-003, `engine/preflight.py`); the foreman-side wiring is external** | kills the duplicate/wasted-worker class directly |
 | 2 | **Judge pre-screen (tier 1.5)** | run resolve over `diff + criteria`; feed `missing_kind` and per-criterion probabilities to the judge | cheap triage; the judge stops re-deriving what is absent |
 | 3 | **MCP tool + CLI** | `gitreins resolve "<question>"` and MCP `context.resolve` | agents ask the repo instead of reading it — the context-saving primitive |
 | 4 | **Per-criterion attribution** | resolution probability per acceptance criterion in the verdict artifact | turns "3/3 criteria PASS" into "3/3 PASS, 0.91/0.88/0.93" with the code path cited |
