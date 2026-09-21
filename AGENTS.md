@@ -46,6 +46,27 @@ gitreins judge fix-auth
 `in_progress` — complete tasks (`task.complete`) or delete them
 (`task.delete`) first, then retry the commit.
 
+### Worker briefs and test-count sync
+
+Any worker brief whose diff adds, removes, or renames test files MUST carry this
+explicit acceptance criterion:
+
+> update test-count sites (README.md x2, CONTRIBUTING.md x2) to the new collection total
+
+`scripts/check_docs_drift.py` is the single implementation: it runs the live
+collection (`pytest --collect-only -q --override-ini=addopts=`) and fails when any
+`N tests pass` / `N tests across` / `N test files` claim in README.md **or**
+CONTRIBUTING.md disagrees with it. It is chained into the local guard's
+`test_command` (`.gitreins/config.yaml`), so a drifted claim FAILS the commit
+before push — run it directly before pushing test-touching work:
+
+```bash
+python scripts/check_docs_drift.py
+```
+
+Three CI reds (GR-GAP-019 era, INT-CI-12, tick 319) came from briefs that added
+tests without this criterion.
+
 ### If guards fail:
 1. READ the output — the guard tells you exactly what failed and where
 2. Fix the issues. Do NOT commit with `--no-verify` unless it's a docs-only
