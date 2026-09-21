@@ -3,6 +3,8 @@ Integration tests for gitreins/cli.py — command line interface.
 axiom:trace work_item=GR-003 spec=specs/09-CLI.md plan=.memory-bank/work-items/GR-003/plan.yaml
 """
 
+import contextlib
+import io
 import json
 import os
 import re
@@ -13,6 +15,7 @@ import socket
 import sys
 import subprocess
 import time
+from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import pytest
@@ -110,17 +113,14 @@ def _drain_pending(sock) -> None:
         sock.accept()[0].close()
 
 
-def run_cli(*args, **kwargs):
-    """Run the CLI as a subprocess and return CompletedProcess.
+def _apply_cli_env(env: dict, extra_env: dict, unset_env) -> dict:
+    """Apply run_cli's env contract to *env* (hermetic base + extra/unset).
 
-    Keyword Args:
-        extra_env: Dict of extra environment variables to set (merged with current env).
-        All other kwargs passed through to subprocess.run.
+    Shared by the in-process and real-exec runners so both halves of the
+    GR-139 split exercise the same credential/mock rules: mock-response tests
+    get a placeholder credential unless they remove it via unset_env, and
+    unset_env keys are dropped last (unset wins over extra).
     """
-    extra_env = kwargs.pop("extra_env", {})
-    unset_env = kwargs.pop("unset_env", ())
-    cmd = [sys.executable, CLI_SCRIPT] + list(args)
-    env = _hermetic_env()
     env.update(extra_env)
     # Mock responses still exercise the Tier 2 CLI path.  Give those existing
     # hermetic tests a non-secret placeholder credential unless they explicitly
@@ -129,10 +129,189 @@ def run_cli(*args, **kwargs):
         env.setdefault("GITREINS_LLM_API_KEY", "test-key")
     for key in unset_env:
         env.pop(key, None)
-    PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    if PROJECT_ROOT not in env["PYTHONPATH"]:
-        env["PYTHONPATH"] = PROJECT_ROOT + (":" + env["PYTHONPATH"] if env["PYTHONPATH"] else "")
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env, **kwargs)
+    return env
+
+
+class _InProcessResult:
+    """subprocess.CompletedProcess stand-in for in-process CLI invocations.
+
+    Same public surface the run_cli assertions use (returncode/stdout/stderr),
+    plus a ``real_exec`` marker so a reader can tell which runner produced a
+    result object in a given test.
+    """
+
+    def __init__(self, returncode: int, stdout: str, stderr: str):
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+        self.real_exec = False
+
+
+def _get_workdir_override(workdir: str):
+    """Return a get_workdir() stand-in pinned to *workdir*.
+
+    The real function shells out to `git rev-parse --show-toplevel`; an
+    in-process invocation cannot change its parent's cwd to select a repo, so
+    the override reproduces its contract instead: the repo root that owns
+    *workdir* (samefile as `git rev-parse` would resolve), or workdir itself
+    when it is not inside a git repo (the function's documented fallback).
+    """
+
+    def _override() -> str:
+        probe = os.path.join(workdir, ".git")
+        if os.path.exists(probe):
+            return workdir
+        return os.getcwd()
+
+    return _override
+
+
+@contextmanager
+def _in_process_workdir(workdir: str):
+    """Run an in-process CLI call with the cwd/workdir state a child would have.
+
+    Mirrors what `subprocess.run(..., cwd=workdir)` provides: os.chdir(workdir)
+    for cwd-sensitive code, and get_workdir() resolved against workdir. A
+    GITREINS_JOB_DIR is defaulted to workdir so a stray async dispatch inside
+    an in-process call cannot write into an unrelated store (a child would
+    inherit the autouse ``isolated_job_store`` value through the environment;
+    setdefault keeps that existing value authoritative). The caller restores
+    os.environ wholesale; here only cwd and the get_workdir patch are undone.
+    """
+    from gitreins import cli as cli_mod
+
+    prev_cwd = os.getcwd()
+    prev_get_workdir = cli_mod.get_workdir
+    try:
+        os.chdir(workdir)
+        cli_mod.get_workdir = _get_workdir_override(workdir)
+        os.environ.setdefault("GITREINS_JOB_DIR", os.path.join(workdir, ".gitreins-jobs"))
+        yield
+    finally:
+        cli_mod.get_workdir = prev_get_workdir
+        os.chdir(prev_cwd)
+
+
+def _run_cli_in_process(args: list, env: dict, workdir: str, unset_env=()) -> _InProcessResult:
+    """Invoke gitreins.cli.main() in this interpreter and capture its streams.
+
+    Eliminates the per-assertion interpreter spawn (GR-139 pattern 2: ~550
+    python starts per suite run just in this file). Exit codes translate
+    SystemExit(0/1/2) — argparse help/version paths exit 0, refusals exit 1/2
+    — into returncode exactly as the child's interpreter exit would.
+
+    os.environ is swapped to the hermetic child view for the duration (a
+    fresh interpreter would start with ONLY that view — the pytest process's
+    ambient secrets, e.g. a foreman session's GITREINS_LLM_API_KEY from
+    INT-FLAKE-1, must stay invisible to CLI code) and restored in finally.
+    """
+    from gitreins import cli as cli_mod
+
+    runner_env = os.environ.copy()
+    runner_env.update(env)
+    # Unset-wins hermeticity: drop ambient credential keys the child env
+    # would not have had, then pin the dead-endpoint base URL.
+    for key in LLM_CREDENTIAL_ENV_KEYS:
+        if key not in env:
+            runner_env.pop(key, None)
+    if env.get("GITREINS_LLM_BASE_URL") == HERMETIC_LLM_BASE_URL:
+        runner_env["GITREINS_LLM_BASE_URL"] = HERMETIC_LLM_BASE_URL
+    # unset_env keys must stay absent: the runner's os.environ copy still
+    # holds the pytest process's ambient value (a child simply never inherits
+    # it), so re-drop them on the runner's view of the world.
+    for key in unset_env:
+        runner_env.pop(key, None)
+
+    stdout_buf, stderr_buf = io.StringIO(), io.StringIO()
+    argv_backup = sys.argv
+    sys.argv = [CLI_SCRIPT] + list(args)
+    env_backup = dict(os.environ)
+    try:
+        os.environ.clear()
+        os.environ.update(runner_env)
+        with contextlib.redirect_stdout(stdout_buf), contextlib.redirect_stderr(stderr_buf):
+            try:
+                with _in_process_workdir(workdir):
+                    cli_mod.main()
+                returncode = 0
+            except SystemExit as exc:
+                code = exc.code
+                if code is None:
+                    returncode = 0
+                elif isinstance(code, str):
+                    # `sys.exit("message")`: the interpreter prints the string
+                    # to stderr and exits 1 — reproduce both halves.
+                    if code and not code.endswith("\n"):
+                        code += "\n"
+                    stderr_buf.write(code)
+                    returncode = 1
+                else:
+                    returncode = int(code)
+            except (KeyboardInterrupt, GeneratorExit):
+                returncode = 130
+            # Any other exception propagates: a CLI test must see a CLI
+            # refusal (SystemExit), not this runner swallowing a traceback
+            # into a synthetic returncode — same loudness as the child, whose
+            # interpreter would have died with rc 1 and a traceback on stderr.
+    finally:
+        sys.argv = argv_backup
+        os.environ.clear()
+        os.environ.update(env_backup)
+    result = _InProcessResult(returncode, stdout_buf.getvalue(), stderr_buf.getvalue())
+    return result
+
+
+def _run_cli_real_exec(
+    args: list, env: dict, workdir: str, **kwargs
+) -> subprocess.CompletedProcess:
+    """The historical runner: a fresh `python gitreins/cli.py` child process.
+
+    GR-139: retained ONLY where the process boundary itself is the subject —
+    env/cwd inheritance into a child (async detached workers), interpreter
+    pinning, and one parity smoke proving the in-process runner behaves like
+    this one. Every other CLI test uses _run_cli_in_process (pattern 2 fix).
+    """
+    cmd = [sys.executable, CLI_SCRIPT] + list(args)
+    result = subprocess.run(
+        cmd, capture_output=True, text=True, timeout=30, env=env, cwd=workdir, **kwargs
+    )
+    # Result marker: lets a test (and a reader) tell which runner produced a
+    # given result object — the in-process runner sets the same attribute False.
+    result.real_exec = True
+    return result
+
+
+def run_cli(*args, **kwargs):
+    """Run the gitreins CLI and return a CompletedProcess-like result.
+
+    Default runner is IN-PROCESS (gitreins.cli.main() in this interpreter with
+    per-call env/cwd scoping) — GR-139 pattern-2 fix: ~550 one-assertion
+    interpreter spawns per suite run in this file became zero, with one
+    real-exec parity smoke (TestRunCliParity) proving the two runners agree.
+
+    ``real_exec=True`` opts a call back into the historical child process for
+    the tests whose SUBJECT is the process boundary (async worker dispatch:
+    env/cwd inheritance into a detached child).
+
+    Keyword Args:
+        extra_env: Dict of extra environment variables to set (merged with current env).
+        unset_env: Iterable of env var names to remove after extra_env is applied.
+        real_exec: Force the subprocess runner (default False).
+        All other kwargs passed through to subprocess.run.
+    """
+    real_exec = kwargs.pop("real_exec", False)
+    extra_env = kwargs.pop("extra_env", {})
+    unset_env = kwargs.pop("unset_env", ())
+    cwd = kwargs.pop("cwd", None)
+    if kwargs:
+        raise TypeError(f"run_cli() got unexpected kwargs: {sorted(kwargs)}")
+    env = _hermetic_env()
+    _apply_cli_env(env, extra_env, unset_env)
+    if cwd is None:
+        cwd = os.getcwd()
+    if real_exec:
+        return _run_cli_real_exec(args, env, cwd)
+    return _run_cli_in_process(args, env, cwd, unset_env=unset_env)
 
 
 def write_guard_config(workdir, extra_guards=""):
@@ -1076,16 +1255,29 @@ class TestTaskLifecycleHermeticity:
         Covers the shared-state half of INT-FLAKE-1's hypothesis list: a
         parallel guard run must not let one sequence's task store or exit
         status leak into another's.
+
+        GR-139: these lifecycles run REAL children via ``real_exec=True``.
+        The in-process runner mutates process-global state (os.chdir,
+        cli.get_workdir) around each call, which is not thread-safe, and the
+        test's subject is cross-process concurrency — bounded at 4 children,
+        under the >8-concurrent pattern-1 threshold.
         """
         pairs = [(workdir_factory(), f"par{i}") for i in range(4)]
 
         def _sequence(pair):
             workdir, task_id = pair
             results = [
-                run_cli("task", "create", task_id, "Parallel", "c1", cwd=workdir),
-                run_cli("task", "start", task_id, cwd=workdir),
-                run_cli("task", "complete", "--skip-tier2", task_id, cwd=workdir),
-                run_cli("task", "list", cwd=workdir),
+                run_cli("task", "create", task_id, "Parallel", "c1", cwd=workdir, real_exec=True),
+                run_cli("task", "start", task_id, cwd=workdir, real_exec=True),
+                run_cli(
+                    "task",
+                    "complete",
+                    "--skip-tier2",
+                    task_id,
+                    cwd=workdir,
+                    real_exec=True,
+                ),
+                run_cli("task", "list", cwd=workdir, real_exec=True),
             ]
             return workdir, task_id, results
 
@@ -1211,10 +1403,17 @@ class TestJudgeExtended:
 class TestJudgeAsyncCLI:
     """CLI background jobs (DF-006): dispatch, poll, survive the parent exiting.
 
+    GR-139 runner split: the DISPATCH is a real child process
+    (``real_exec=True``) because env/cwd inheritance into that detached worker
+    IS the subject — an in-process dispatch would pass the pytest process's
+    environment and never prove the child can run the job at all. The polling
+    ``judge --status`` steps and the refusal paths stay in-process (no spawn
+    happens: unknown-task refuses before any worker is created).
+
     The detached worker inherits GITREINS_MOCK_LLM_RESPONSE (set via
-    extra_env), so the whole roundtrip runs hermetically as real
-    subprocesses. The job store is isolated by the autouse
-    ``isolated_job_store`` conftest fixture.
+    extra_env), so the roundtrip runs hermetically as a real subprocess. The
+    job store is isolated by the autouse ``isolated_job_store`` conftest
+    fixture.
     """
 
     _MOCK = {
@@ -1363,6 +1562,7 @@ class TestJudgeAsyncCLI:
             "--async",
             cwd=tmp_workdir,
             extra_env=self._MOCK,
+            real_exec=True,
         )
         assert dispatched.returncode == 0, dispatched.stdout + dispatched.stderr
         m = re.search(r"Async job dispatched: (job-[0-9a-f]+)", dispatched.stdout)
@@ -1503,6 +1703,59 @@ class TestJudgeAsyncCLI:
         assert job is not None
         assert job["pid"] == 424242
         assert job["status"] == "running"
+
+
+class TestRunCliParity:
+    """GR-139: the in-process runner must behave like the real-exec runner.
+
+    run_cli defaults to invoking gitreins.cli.main() inside the pytest
+    interpreter (pattern-2 fix: hundreds of one-assertion interpreter spawns
+    per suite run). That substitution is only sound if a reader can trust it
+    covers the same CLI behaviour — these smokes run the SAME commands through
+    BOTH runners in the SAME fixture workdir and require agreement on exit
+    code and stdout.
+    """
+
+    def test_task_lifecycle_agrees_between_runners(self, workdir_factory):
+        """create/start/complete/list: same exit codes and same stdout lines."""
+        for runner in ("in-process", "real-exec"):
+            workdir = workdir_factory()
+            if runner == "in-process":
+                create = run_cli("task", "create", "parity1", "Parity", "c1", cwd=workdir)
+                start = run_cli("task", "start", "parity1", cwd=workdir)
+                complete = run_cli("task", "complete", "--skip-tier2", "parity1", cwd=workdir)
+                listing = run_cli("task", "list", cwd=workdir)
+            else:
+                create = run_cli(
+                    "task", "create", "parity1", "Parity", "c1", cwd=workdir, real_exec=True
+                )
+                start = run_cli("task", "start", "parity1", cwd=workdir, real_exec=True)
+                complete = run_cli(
+                    "task", "complete", "--skip-tier2", "parity1", cwd=workdir, real_exec=True
+                )
+                listing = run_cli("task", "list", cwd=workdir, real_exec=True)
+
+            assert create.returncode == 0, _cli_failure(create)
+            assert create.stdout.startswith("Created task: parity1")
+            assert start.returncode == 0, _cli_failure(start)
+            assert complete.returncode == 0, _cli_failure(complete)
+            assert "Overall: PASS" in complete.stdout, _cli_failure(complete)
+            assert listing.returncode == 0, _cli_failure(listing)
+            assert "●" in listing.stdout, _cli_failure(listing)
+
+    def test_unknown_task_refusal_agrees_between_runners(self, tmp_workdir):
+        """A refusal path (task start <unknown-id>) agrees on code and text."""
+        inproc = run_cli("task", "start", "no-such-task", cwd=tmp_workdir)
+        child = run_cli("task", "start", "no-such-task", cwd=tmp_workdir, real_exec=True)
+        assert inproc.returncode == child.returncode == 1
+        assert inproc.stdout.strip() == child.stdout.strip() == "Task not found: no-such-task"
+
+    def test_result_objects_declare_which_runner_produced_them(self, tmp_workdir):
+        """The result marker (real_exec) matches the runner that was used."""
+        inproc = run_cli("task", "list", cwd=tmp_workdir)
+        assert inproc.real_exec is False
+        child = run_cli("task", "list", cwd=tmp_workdir, real_exec=True)
+        assert child.real_exec is True
 
 
 class TestJudgeSyncSingleFlight:

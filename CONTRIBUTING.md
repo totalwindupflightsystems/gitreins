@@ -32,7 +32,7 @@ pip install gitreins
 pytest tests/ -v
 ```
 
-All tests must pass before submitting a PR. Currently **2159 tests across 60
+All tests must pass before submitting a PR. Currently **2162 tests across 60
 test files** (canonical count: `pytest --collect-only -q`, which is exactly what
 CI recomputes).
 
@@ -87,7 +87,7 @@ parse is a broken promise, and the checker is what keeps the README's
 engine/            — Core engine (evaluator, guards, pipeline, LSP, LLM client, task manager, judge, dead_code)
 gitreins/          — CLI entry point and install script
 gitreins_mcp/      — MCP stdio server (13 tools)
-tests/             — pytest test suite (2159 tests across 60 files; canonical count in README)
+tests/             — pytest test suite (2162 tests across 60 files; canonical count in README)
 tests/reliability/ — 7 adversarial benchmark projects
 scripts/           — Repo-level checkers run by CI (docs drift, CLI examples, CLI-reference sync, board ids) + the judgment viewer
 docs/              — Architecture, component map, evaluator loop, MCP API, CLI reference, dogfood reports
