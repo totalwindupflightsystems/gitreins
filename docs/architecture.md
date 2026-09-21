@@ -49,14 +49,19 @@ stdio transport (`gitreins_mcp/server.py`) exposing 13 tools:
 Manages TODO items as structured tasks with nesting and dependencies (`engine/task_manager.py`). Tasks stored in `.gitreins/tasks.yaml`. Tracks state, progress, and completion criteria. The TODO items ARE the guardrails.
 
 ### 4. Agentic Evaluator
-An LLM-powered agentic loop with 7 tools (`engine/evaluator.py`):
+An LLM-powered agentic loop with 12 tools (`engine/evaluator.py`, `EVALUATOR_TOOLS`):
 1. `read_file(path, offset?, limit?)` — Read any file in the working tree
-2. `run_command(cmd)` — Run a shell command (tests, lint, build)
-3. `search_pattern(regex, file_glob?)` — Grep the codebase for a pattern
-4. `read_diff()` — Show staged and unstaged changes
-5. `get_task_item(id)` — Read a task's full definition and criteria
-6. `sandbox_write(key, content)` — Write to evaluator scratch space
-7. `sandbox_read(key)` — Read from evaluator scratch space
+2. `run_command(cmd)` — Run a shell command (tests, lint, build) with a 30s timeout
+3. `search_pattern(regex, file_glob?)` — Search the codebase for a Python regex pattern
+4. `read_static_analysis(path?)` — Type errors and warnings from the configured analyzers (dropped from the advertised schema unless `evaluator.static_analysis_diagnostics: true` is set)
+5. `read_lsp_diagnostics()` — LSP findings collected during the Tier 1 guard run
+6. `read_diff()` — Show staged and unstaged git diff summaries
+7. `get_task_item(id)` — Fetch a task's full definition and criteria
+8. `sandbox_write(key, content)` — Write to an in-memory scratch dict
+9. `sandbox_read(key)` — Read from an in-memory scratch dict
+10. `detect_dead_code()` — AST-based Python dead code: unreachable code, unused functions/imports, empty functions
+11. `skylos_scan()` — Multi-language dead code / AI-mistake scan via the `skylos` binary
+12. `scan_security(path?)` — Deterministic, syntax-aware ast-grep scan against the bundled CodeRabbit essential rules
 
 Iterates until it has enough evidence to deliver a verdict.
 

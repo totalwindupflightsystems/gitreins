@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check README.md/CONTRIBUTING.md drift against their authorities (GR-GAP-052, GR-GAP-061).
 
-Two checks, both fail-closed:
+Three checks, all fail-closed:
 
 Check A (version): the README release banner version must equal the version
 declared in pyproject.toml ([project] table).
@@ -15,6 +15,23 @@ or with a sibling claim in the same document, fails with FILE:LINE and both
 numbers. Unmeasurable collection is a FAIL, never a green: a gate must never
 certify a metric it did not measure. ``--static`` skips the live comparison and
 says so in its message (it then only checks internal claim agreement).
+
+Check C (evaluator tool counts, GR-141): every ``N tool(s)`` claim about the
+EVALUATOR in docs/architecture.md AND docs/evaluator-loop.md must equal the
+number of tools defined by ``EVALUATOR_TOOLS`` in engine/evaluator.py. The
+count is obtained by ast-parsing the evaluator source (walking to the
+``EVALUATOR_TOOLS = [...]`` assignment and counting the dict literals that
+carry a "function" key) — the package is never imported and pytest is never
+spawned for this check. Scoping: only the evaluator's surface size is
+claimed, so the check matches three shapes — "with/loop with N tools",
+"evaluation tools (N)" headings, and "All N tools" sentences — and ignores
+the MCP server's "exposing N tools", the evaluator-loop subsection
+partition tallies ("### Repo Inspection (N tools)"), and the "advertises
+N of them" default-schema note (that number is intentionally 11 ≠ 12).
+Missing claims pass (nothing asserted, nothing to check); a missing or
+unparseable evaluator source FAILS when claims exist, and an empty
+EVALUATOR_TOOLS list is always a FAIL (never green on doubt). Check C is
+static by nature and runs in both modes.
 
 GR-GAP-061: the live comparison used to live ONLY in a bash block in
 .github/workflows/ci.yml, so this script printed "counts consistent" without
@@ -31,6 +48,7 @@ collection (specific, actionable message naming both values).
 """
 
 import argparse
+import ast
 import re
 import subprocess
 import sys
@@ -55,6 +73,21 @@ _TEST_PATH_RE = re.compile(r"^tests/[a-zA-Z0-9_./-]+\.py")
 # The collected-total footer pytest prints on the last stdout line:
 # "<N> tests collected in 0.47s" / "<N> tests collected" / "1 error".
 _COLLECTED_RE = re.compile(r"^(\d+)\s+(?:tests?|test)\s+collected\b")
+
+# Check C (GR-141): every "N tool(s)" claim about the EVALUATOR surface in
+# docs/architecture.md or docs/evaluator-loop.md. Only the evaluator's surface
+# size is machine-checked — the MCP server's "exposing N tools" is a different
+# surface, "### Repo Inspection (N tools)" is a partition of the evaluator
+# surface (the sub-headings never sum to a checked claim), and "advertises
+# N of them" states the DEFAULT-ADVERTISED count (11, read_static_analysis
+# gated), not the defined surface (12). The three shapes below deliberately
+# cover the sentences a reader relies on for "how many tools does the
+# evaluator have" while excluding those three families. \s+ throughout: the
+# claims are plain text today, but a wrapped line must not silently slip past.
+_CLAIM_PROSE_RE = re.compile(r"\bwith\s+(\d+)\s+tools?\b(?!.*(?:exposing|advertise|dropped))")
+_CLAIM_HEADING_RE = re.compile(r"^#{1,6}\s*evaluation\s+tools\s*\((\d+)(?:\s*tools?)?\)", re.I)
+_CLAIM_ALL_RE = re.compile(r"\ball\s+(\d+)\s+tools?\b", re.I)
+_EVAL_DOCS = ("docs/architecture.md", "docs/evaluator-loop.md")
 
 
 def resolve_repo_root(argv=None):
@@ -172,6 +205,135 @@ def _output_tail(proc, limit=300):
     return tail[-limit:]
 
 
+# ---------------------------------------------------------------------------
+# Check C (GR-141): evaluator tool-count drift between the docs and
+# engine/evaluator.py's EVALUATOR_TOOLS.
+# ---------------------------------------------------------------------------
+
+
+def count_evaluator_tools(repo_root):
+    """Count the tools defined by EVALUATOR_TOOLS in engine/evaluator.py.
+
+    Returns (count, None) on success or (None, reason) when the source cannot
+    be trusted: missing file, unparseable Python, assignment absent, or the
+    parsed value not being a list of tool definitions. The source is
+    ast-parsed — the package is never imported, pytest is never spawned — and
+    the count is the number of dict literals in the assignment that carry a
+    "function" key (each OpenAI-style tool definition has one).
+    """
+    evaluator_path = repo_root / "engine" / "evaluator.py"
+    try:
+        source = evaluator_path.read_text(encoding="utf-8")
+    except OSError:
+        return None, f"{evaluator_path} is missing"
+
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        return None, f"could not parse {evaluator_path} as Python: {exc}"
+
+    assignment = None
+    for node in ast.walk(tree):
+        targets = getattr(node, "targets", [])
+        if any(
+            isinstance(target, ast.Name) and target.id == "EVALUATOR_TOOLS" for target in targets
+        ):
+            assignment = node
+            break
+    if assignment is None:
+        return None, f"no EVALUATOR_TOOLS assignment found in {evaluator_path}"
+
+    try:
+        tools = ast.literal_eval(assignment.value)
+    except (ValueError, SyntaxError, TypeError, MemoryError):
+        # Dynamic construction (comprehension, concatenation, ...) is a real
+        # shape the parser cannot count statically — report it, never guess.
+        return None, (
+            f"EVALUATOR_TOOLS in {evaluator_path} is not a static list literal; "
+            "its length cannot be counted without importing the package"
+        )
+    if not isinstance(tools, list):
+        return None, f"EVALUATOR_TOOLS in {evaluator_path} is not a list"
+
+    count = sum(
+        1 for tool in tools if isinstance(tool, dict) and isinstance(tool.get("function"), dict)
+    )
+    if count == 0:
+        return None, (
+            f"EVALUATOR_TOOLS in {evaluator_path} parsed to 0 tools — the "
+            "assignment is empty or its entries do not carry a 'function' key"
+        )
+    return count, None
+
+
+def _collect_tool_claims(doc_path):
+    """Every evaluator tool-count claim in doc_path: (value, line, snippet)."""
+    try:
+        text = doc_path.read_text(encoding="utf-8")
+    except OSError:
+        return []
+    claims = []
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        stripped = line.strip()
+        for pattern in (_CLAIM_PROSE_RE, _CLAIM_HEADING_RE, _CLAIM_ALL_RE):
+            match = pattern.search(stripped)
+            if match is not None:
+                snippet = " ".join(line.split())
+                claims.append((int(match.group(1)), line_no, snippet))
+                break
+    return claims
+
+
+def check_evaluator_tool_claims(repo_root):
+    """Check C: documented evaluator tool counts vs the live EVALUATOR_TOOLS.
+
+    Every "N tool(s)" claim about the evaluator in docs/architecture.md and
+    docs/evaluator-loop.md must equal len(EVALUATOR_TOOLS). Returns
+    (exit_code, message). Missing claims pass — nothing asserted, nothing to
+    check. A missing or unparseable evaluator source FAILS when any claim
+    exists (the docs would be asserting an unverifiable number); an empty
+    EVALUATOR_TOOLS always FAILS. Static by nature: runs in both modes.
+    """
+    claims_by_doc = []
+    for rel in _EVAL_DOCS:
+        claims = _collect_tool_claims(repo_root / rel)
+        if claims:
+            claims_by_doc.append((rel, claims))
+
+    if not claims_by_doc:
+        return (
+            0,
+            "evaluator tool-count check skipped: no tool-count claims found in the docs",
+        )
+
+    count, reason = count_evaluator_tools(repo_root)
+    if count is None:
+        doc_names = " + ".join(rel for rel, _ in claims_by_doc)
+        return (
+            1,
+            f"FAIL: evaluator tool-count drift cannot be verified — {doc_names} claim(s) "
+            f"a tool count but {reason}",
+        )
+
+    for rel, claims in claims_by_doc:
+        for claimed, line, snippet in claims:
+            if claimed != count:
+                return (
+                    1,
+                    f"FAIL: {rel}:{line} evaluator tool-count drift — documents "
+                    f"'{snippet}' but engine/evaluator.py defines {count} "
+                    f"EVALUATOR_TOOLS. Update {rel}:{line} to {count}.",
+                )
+
+    total = sum(len(claims) for _, claims in claims_by_doc)
+    docs = " + ".join(rel for rel, _ in claims_by_doc)
+    return (
+        0,
+        f"evaluator tool-count check OK: {total} evaluator tool claims match the "
+        f"{count} defined EVALUATOR_TOOLS ({docs})",
+    )
+
+
 def collect_doc_claims(doc_path):
     """Every count claim in doc_path: list of (phrase, value, line, snippet).
 
@@ -269,12 +431,14 @@ def _cross_doc_conflict(docs):
 
 
 def check_docs_drift(repo_root, static_only=False):
-    """Run both drift checks. Return (exit_code, message).
+    """Run all three drift checks. Return (exit_code, message).
 
-    static_only=True skips the live pytest collection and only checks internal
-    agreement of the documented claims; the success message then says the live
-    collection was NOT compared. Default: live comparison (the gate's whole
-    point — it never certifies a number it did not measure).
+    Check A (version), Check C (evaluator tool counts — static by nature, so it
+    runs in BOTH modes), then Check B (test counts). static_only=True skips the
+    live pytest collection and only checks internal agreement of the documented
+    claims; the success message then says the live collection was NOT compared.
+    Default: live comparison (the gate's whole point — it never certifies a
+    number it did not measure).
     """
     pyproject_path = repo_root / "pyproject.toml"
     readme_path = repo_root / "README.md"
@@ -304,6 +468,13 @@ def check_docs_drift(repo_root, static_only=False):
             f"but pyproject.toml says {pyproject_version}. "
             f"Update the README.md release banner to v{pyproject_version}.",
         )
+
+    # Check C (GR-141): static by nature — ast-parses the evaluator source, no
+    # pytest needed — so it runs in BOTH modes, exactly like the version check
+    # above. First failure wins: its specific message is the one reported.
+    c_code, c_message = check_evaluator_tool_claims(repo_root)
+    if c_code != 0:
+        return c_code, c_message
 
     # Gather claims from every machine-checked doc. A missing CONTRIBUTING.md
     # (e.g. a throwaway fixture tree) is tolerated; README.md is not.
@@ -343,7 +514,7 @@ def check_docs_drift(repo_root, static_only=False):
             0,
             f"docs drift check (static only): version {pyproject_version} matches README "
             f"banner; {doc_names} claims agree with each other — the live pytest "
-            f"collection was NOT compared, so the numbers are unverified.",
+            f"collection was NOT compared, so the numbers are unverified. {c_message}",
         )
 
     # Live path: the collection is the authority and it is checked FIRST, so a
@@ -381,7 +552,7 @@ def check_docs_drift(repo_root, static_only=False):
         0,
         f"docs drift check OK: version {pyproject_version} matches README banner; "
         f"{doc_names} test counts match the live collection "
-        f"({live_count} tests / {live_files} test files)",
+        f"({live_count} tests / {live_files} test files). {c_message}",
     )
 
 
@@ -400,7 +571,9 @@ def main(argv=None):
         "--static",
         action="store_true",
         help="Skip the live pytest collection; check only that documented claims agree "
-        "with each other (the success message says the live collection was not compared).",
+        "with each other (the success message says the live collection was not "
+        "compared). The evaluator tool-count check still runs — it is static by "
+        "nature.",
     )
     args = parser.parse_args(argv)
     repo_root = args.repo_root if args.repo_root is not None else resolve_repo_root()
