@@ -1,0 +1,46 @@
+{
+  "tick_id": "gitreins-poc-2026-09-21-06-48-54",
+  "project": "gitreins-poc",
+  "composed": true,
+  "created_at": "2026-09-21T07:00:00Z",
+  "base_ref": "github/main",
+  "base_sha": "88d9988",
+  "wave_budget": 9,
+  "workers": [
+    {
+      "task_id": "DF-GITREINS-POC-33",
+      "worktree": "/home/kara/worktrees/gitreins-poc-DF-GITREINS-POC-33",
+      "branch": "wt/DF-GITREINS-POC-33",
+      "brief": "/tmp/gp-wave-brief-DF-GITREINS-POC-33.md",
+      "depends_on": [],
+      "status": "merged"
+    },
+    {
+      "task_id": "INT-CI-14",
+      "worktree": "/home/kara/worktrees/gitreins-poc-INT-CI-14",
+      "branch": "wt/INT-CI-14",
+      "brief": "/tmp/gp-wave-brief-INT-CI-14.md",
+      "depends_on": [],
+      "status": "merged"
+    },
+    {
+      "task_id": "INT-CI-15",
+      "worktree": "/home/kara/worktrees/gitreins-poc-INT-CI-15",
+      "branch": "wt/INT-CI-15",
+      "brief": "/tmp/gp-wave-brief-INT-CI-15.md",
+      "depends_on": [],
+      "status": "merged"
+    }
+  ],
+  "merged_at": "2026-09-21T08:05:00Z",
+  "merges": {
+    "DF-GITREINS-POC-33": "13ae59f",
+    "INT-CI-14": "ca56ec9",
+    "INT-CI-15": "39dfcdb"
+  },
+  "judges": {
+    "DF-GITREINS-POC-33": "PASS faf17d52",
+    "INT-CI-14": "PASS 229889ca",
+    "INT-CI-15": "PASS 185243a7"
+  }
+}
