@@ -32,7 +32,8 @@ Path resolution (first match wins):
 3. ``<repo>/.gitreins/qa-ledger.jsonl``.
 
 Recording is skipped when ``qa_ledger.enabled`` is false, and the newest
-``qa_ledger.max_entries`` rows are kept (default 1000).
+``qa_ledger.max_entries`` rows are kept (default 1000) — an append that
+evicts older rows says so on stderr, so rotation is never silent.
 
 A ledger failure must never fail the run it records: callers treat
 ``OSError`` / ``ValueError`` as "not recorded" and say so on stderr instead of
@@ -44,6 +45,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Any, Iterator
@@ -404,17 +406,23 @@ def _ledger_lock(path: str) -> Iterator[None]:
             handle.close()
 
 
-def _prune(path: str, max_entries: int) -> None:
-    """Keep the newest ``max_entries`` lines; rewrite atomically."""
+def _prune(path: str, max_entries: int) -> int:
+    """Keep the newest ``max_entries`` lines; rewrite atomically.
+
+    Returns the number of oldest rows dropped, so the record path can say so:
+    an append-only audit trail silently losing rows is exactly the DEGRADED
+    shape — the write reported success while the store shrank behind it.
+    """
     with open(path, encoding="utf-8") as stream:
         lines = [line for line in stream.read().splitlines() if line.strip()]
     if len(lines) <= max_entries:
-        return
+        return 0
     kept = lines[-max_entries:]
     tmp = f"{path}.tmp{os.getpid()}"
     with open(tmp, "w", encoding="utf-8") as stream:
         stream.write("".join(f"{line}\n" for line in kept))
     os.replace(tmp, path)
+    return len(lines) - max_entries
 
 
 def append_row(workdir: str, row: dict[str, Any]) -> str | None:
@@ -422,6 +430,12 @@ def append_row(workdir: str, row: dict[str, Any]) -> str | None:
 
     Raises ``OSError`` / ``TypeError`` when the row cannot be stored — callers
     surface that as "not recorded" rather than swallowing it.
+
+    When the append pushes the ledger past ``qa_ledger.max_entries``, rotation
+    evicts the oldest rows; the eviction is announced on stderr (stdout stays
+    untouched — consumers parse it).  The fleet points ``GITREINS_QA_LEDGER``
+    at one shared ledger, so without this a writer would silently truncate the
+    fleet's QA history and no consumer could tell rows were lost.
     """
     settings = qa_ledger_settings(workdir)
     if not settings["enabled"]:
@@ -434,7 +448,12 @@ def append_row(workdir: str, row: dict[str, Any]) -> str | None:
     with _ledger_lock(path):
         with open(path, "a", encoding="utf-8") as stream:
             stream.write(f"{line}\n")
-        _prune(path, settings["max_entries"])
+        evicted = _prune(path, settings["max_entries"])
+    if evicted:
+        print(
+            f"qa ledger: rotation evicted {evicted} row(s) (max_entries={settings['max_entries']})",
+            file=sys.stderr,
+        )
     return path
 
 

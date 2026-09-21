@@ -630,7 +630,10 @@ qa_ledger:
 
 `qa_ledger.enabled: false` stops recording — the QA run still succeeds and
 prints `qa ledger: <kind> run not recorded (qa_ledger.enabled is false)` on
-stderr. `qa_ledger.max_entries` (default 1000) keeps the newest rows. A ledger
+stderr. `qa_ledger.max_entries` (default 1000) keeps the newest rows; when a
+record evicts older rows it announces
+`qa ledger: rotation evicted N row(s) (max_entries=...)` on stderr, so an
+append-only ledger never shrinks silently (stdout is unchanged). A ledger
 write failure never fails the QA run it records; it is reported on stderr
 instead. `gitreins report` prints a short QA block after the task verdict
 history.
