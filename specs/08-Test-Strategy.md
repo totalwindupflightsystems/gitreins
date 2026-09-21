@@ -21,7 +21,7 @@ GitReins maintains a comprehensive test suite that validates every layer of the 
 | Unit tests (engine) | ~350 | 8 files |
 | LSP tests (unit + integration) | 42 | `tests/test_lsp.py` |
 | Static analysis tests | 72 | `tests/test_static_analysis.py` |
-| Commit audit tests | 81 | `tests/test_commit_audit.py` |
+| Commit audit tests | 99 | `tests/test_commit_audit.py` |
 | Integration tests (CLI) | 53 | `tests/test_cli.py` |
 | Integration tests (MCP) | 5 | `tests/test_mcp_integration.py` |
 | MCP server tests | ~50 | `tests/test_mcp_server.py` |

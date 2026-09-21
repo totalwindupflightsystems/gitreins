@@ -302,15 +302,50 @@ gitreins commit-audit [message]
 |----------|-------------|
 | `message` | Commit message; omitted → read from `COMMIT_EDITMSG` |
 
-The audit is skipped (exit 0) when a `gitreins.skip-tier2` trailer is
+**The audit only runs for a pipeline stage of type `commit_audit` that is
+armed for the `commit-msg` trigger.** `gitreins install` and `gitreins init`
+write no such stage, so on a fresh repo the command prints a named skip and
+exits 0:
+
+```
+commit audit: no pipeline stage with type commit_audit for trigger commit-msg — audit NOT run
+```
+
+To audit, declare the stage:
+
+```yaml
+pipeline:
+  stages:
+    - id: commit_audit
+      type: commit_audit
+      on: [commit-msg]
+      mode: block          # warn (default) | block | suggest
+```
+
+**`mode` precedence** (highest first) — the stage's own `mode`, then
+`defaults.commit_audit.mode`, then a top-level `commit_audit.mode` (the legacy
+placement, still honored), then `warn`:
+
+| Placement | Effective when |
+|-----------|----------------|
+| `pipeline.stages[].mode` | the stage is the one running — most specific, wins over everything |
+| `defaults.commit_audit.mode` | no stage-level `mode` |
+| `commit_audit.mode` (top level) | neither of the above is set (legacy, kept for compatibility) |
+| unset | `warn` |
+
+Only `block` makes the command exit 1; `warn` and `suggest` report and exit 0.
+A value outside `warn`/`block`/`suggest` is ignored at that level and
+resolution continues to the next one.
+
+The audit is also skipped (exit 0) when a `gitreins.skip-tier2` trailer is
 present in the message.
 
 **Exit codes**
 
 | Code | Meaning |
 |------|---------|
-| 0 | Message OK, audit skipped, or no message to audit |
-| 1 | Commit message rejected by the audit stage |
+| 0 | Message OK, audit skipped (including "no armed stage"), or no message to audit |
+| 1 | Commit message rejected by the audit stage (`mode: block` only) |
 
 ## 8. `gitreins mcp-server`
 
@@ -677,10 +712,20 @@ server is `scripts/judgment_viewer.py`.
   chmod +x .git/hooks/commit-msg
   ```
 
-  It needs an LLM credential, skips on a `gitreins.skip-tier2` trailer, and
-  blocks the commit only when the config's pipeline includes a `commit_audit`
-  stage with `commit_audit.mode: block` (`warn` is the default) — the command
-  exits 0 with "No commit message to audit." when there is nothing to read.
+  It needs an LLM credential and skips on a `gitreins.skip-tier2` trailer. It
+  **only runs the audit when your config's pipeline declares a stage of type
+  `commit_audit` armed for the `commit-msg` trigger** — `install`/`init` write
+  no such stage, so add one (see §7 above for the full config and the `mode`
+  precedence: stage level → `defaults.commit_audit` → top-level
+  `commit_audit` → `warn`). With no armed stage the command says so instead of
+  passing quietly:
+
+  ```
+  commit audit: no pipeline stage with type commit_audit for trigger commit-msg — audit NOT run
+  ```
+
+  A skip still exits 0; only `mode: block` exits 1. The command also exits 0
+  with "No commit message to audit." when there is nothing to read.
 
 ## Configuration
 

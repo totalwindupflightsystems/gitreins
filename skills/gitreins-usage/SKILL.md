@@ -343,26 +343,42 @@ HOOK
 chmod +x .git/hooks/commit-msg
 ```
 
-**That hook does nothing on its own.** `commit-audit "any message"` on a fresh
-`install`+`init` repo exits 0 with stdout AND stderr completely empty — no audit, no
-skip line — because the audit stage list comes from `config["pipeline"]["stages"]`
-(`engine/pipeline.py:253`), which no installer path ever writes. Declare the stage:
+**That hook only runs the audit when a stage is declared and armed for
+`commit-msg`.** `gitreins install` + `init` write no such stage, so
+`commit-audit "any message"` prints the named skip line and exits 0 — no audit:
+
+```
+commit audit: no pipeline stage with type commit_audit for trigger commit-msg — audit NOT run
+```
+
+Declare the stage, and put `mode` where you mean it:
 
 ```yaml
 pipeline:
   stages:
-    - {id: commit_audit, type: commit_audit, on: [commit-msg]}
+    - id: commit_audit
+      type: commit_audit
+      on: [commit-msg]
+      mode: block            # stage level — most specific, wins over everything
 
-commit_audit:            # ← TOP LEVEL. The only placement the engine reads.
-  mode: block            # warn (default) | block | suggest
+defaults:                    # wins only when the stage sets no `mode`
+  commit_audit:
+    mode: warn
+
+commit_audit:                # legacy placement — still honored, lowest precedence
+  mode: block
 ```
 
-- `mode` is read by `_load_commit_audit_config` → `cfg.get("commit_audit", {})` —
-  **top level only**. A stage-level `mode: block` and `defaults.commit_audit.mode:
-  block` are BOTH dead config: measured, the audit still printed "(Warning only —
-  commit will proceed)" and exited 0. Only top-level `block` exits 1
-  ("(Commit BLOCKED — fix message or set commit_audit.mode=warn)") — POC-30.
-- Once reachable the audit is genuinely good: it cited the staged diff by name
+- `mode` precedence (highest first): `pipeline.stages[].mode` →
+  `defaults.commit_audit.mode` → top-level `commit_audit.mode` → `warn`.
+  All three placements are live; before DF-GITREINS-POC-30 only the top-level
+  key was read (`_load_commit_audit_config` returned `cfg.get("commit_audit", {})`),
+  so a stage-level `mode: block` stayed "(Warning only — commit will proceed)"
+  with exit 0 and `defaults.commit_audit.mode` was dead config entirely.
+- Only `block` exits 1 ("(Commit BLOCKED — fix message or set
+  commit_audit.mode=warn)"); `warn`/`suggest` report and exit 0. A value outside
+  `warn`/`block`/`suggest` is ignored at that level and resolution continues.
+- Once reachable the audit is genuinely good: it cites the staged diff by name
   ("the diff adds a new file f.md … the message does not mention adding
   documentation") rather than emitting generic style advice.
 - It needs an LLM credential and skips on a `gitreins.skip-tier2` trailer.

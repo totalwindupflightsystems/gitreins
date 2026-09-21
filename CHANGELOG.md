@@ -31,6 +31,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TestRuffFormatGate`.
 
 ### Fixed
+- **`gitreins commit-audit` names its skip and honors the documented `mode`
+  placement (DF-GITREINS-POC-30)** — the command promised "Validate a commit
+  message against staged diff" and, on the state `gitreins install` + `init`
+  leave behind (no `commit_audit` stage in `pipeline.stages[]`), exited 0 with
+  stdout AND stderr empty: it audited nothing and said nothing, so a
+  commit-msg hook was indistinguishable from a passing audit. It now prints a
+  named skip line and still exits 0:
+  `commit audit: no pipeline stage with type commit_audit for trigger commit-msg — audit NOT run`
+  (the wording distinguishes the three states — no stage, stage not armed for
+  this trigger, stage armed but its `condition` excluded it — and the
+  not-armed case names the `on: [commit-msg]` fix). `mode` also resolves with
+  an EXPLICIT precedence now: the pipeline stage's own `mode` >
+  `defaults.commit_audit.mode` > top-level `commit_audit.mode` > `warn`.
+  `_load_commit_audit_config` returned `cfg.get("commit_audit", {})` — top
+  level only — so the stage-scoped placement the CLI reference described was
+  dead config (a stage-level `mode: block` stayed "(Warning only — commit will
+  proceed)" with exit 0) and `defaults.commit_audit.mode` was dead entirely;
+  only the undocumented top-level placement blocked. The top-level key is
+  still honored, so nothing that worked before changed behavior — verified
+  against all four measured placements plus the CLI as a subprocess in a
+  scratch repo. Regression: `tests/test_commit_audit.py`
+  (`TestResolveCommitAuditMode`, `TestCommitAuditModePrecedence`,
+  `TestCommitAuditSkipLine` — 16 of 18 RED against the unfixed engine, the two
+  that stay green being the backward-compat guards).
 - **`judge.status` payloads carry an additive `running` boolean and the docs
   ship a poll loop keyed on the terminal status set (DF-GITREINS-POC-24)** —
   the payload's `{"status": "running"}` is a poll-phase value; the terminal

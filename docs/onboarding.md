@@ -64,10 +64,24 @@ HOOK
 chmod +x .git/hooks/commit-msg
 ```
 
-It needs an LLM credential, honours a `gitreins.skip-tier2` trailer in the
-message, and blocks only when your config's pipeline includes a `commit_audit`
-stage with `commit_audit.mode: block` — the default mode is `warn`, which
-reports without blocking.
+It needs an LLM credential and honours a `gitreins.skip-tier2` trailer in the
+message. `install`/`init` declare no `commit_audit` stage, so the hook does
+nothing until you add one:
+
+```yaml
+pipeline:
+  stages:
+    - id: commit_audit
+      type: commit_audit
+      on: [commit-msg]
+      mode: block        # warn (default) | block | suggest
+```
+
+Without that stage the command prints
+`commit audit: no pipeline stage with type commit_audit for trigger commit-msg — audit NOT run`
+and exits 0. `mode` resolves stage level → `defaults.commit_audit` → top-level
+`commit_audit` → `warn`; only `block` makes the hook fail the commit. See
+`docs/cli-reference.md` §7 for the full table.
 
 ## 2. Smart init
 

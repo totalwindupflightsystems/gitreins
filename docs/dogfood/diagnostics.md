@@ -593,7 +593,9 @@ The command exists, is listed in `--help` and the README's standing surface, and
 a body of `exec gitreins commit-audit`, correctly (gitreins does **not** install a commit-msg
 hook; verified on the fresh box: only `pre-commit` exists).
 
-Measured, four placements:
+Motto of this section: a hook that audits nothing must not look like a hook that passed.
+
+Measured before the fix, four placements:
 
 | Config | `commit-audit "wip"` | Where it is read |
 |---|---|---|
@@ -602,14 +604,27 @@ Measured, four placements:
 | …plus stage-level `mode: block` | **still** "(Warning only — commit will proceed)", exit 0 | stage key never consulted |
 | top-level `commit_audit: {mode: block}` | exit 1, "(Commit BLOCKED …)" | `_load_commit_audit_config` → `cfg.get("commit_audit", {})` — **top level only** |
 
-So two documented-sounding placements are dead config (`pipeline.stages[].mode` and
-`defaults.commit_audit.mode` — the latter is the natural place, since every other setting lives
-under `defaults:`), and the only one that blocks is documented nowhere. A user who does exactly
-what the docs say installs a hook that prints nothing and blocks nothing, twice over.
+So two documented-sounding placements were dead config (`pipeline.stages[].mode`
+and `defaults.commit_audit.mode` — the latter the natural place, since every other
+setting lives under `defaults:`), and the only one that blocked was documented
+nowhere. A user who did exactly what the docs said installed a hook that printed
+nothing and blocked nothing, twice over.
+
+**Fixed in DF-GITREINS-POC-30.** `mode` now resolves with an explicit precedence
+(`pipeline.stages[].mode` → `defaults.commit_audit.mode` → top-level
+`commit_audit.mode` → `warn`), and a stage-less run prints a named skip line
+instead of nothing:
+
+```
+commit audit: no pipeline stage with type commit_audit for trigger commit-msg — audit NOT run
+```
+
+Verified against the four placements above (the first now names its skip, the
+third now exits 1) and against the CLI as a subprocess in a scratch repo.
 
 The audit itself, once reachable, is good — it cited the actual diff (`the diff adds a new file
 f.md … the message does not mention adding documentation`) instead of generic style advice.
-That is why the finding is about activation, not quality.
+That is why the finding was about activation, not quality.
 
 ### 3. The disposable battery — gated on the fleet scheduler's board layout
 
