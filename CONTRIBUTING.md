@@ -32,7 +32,7 @@ pip install gitreins
 pytest tests/ -v
 ```
 
-All tests must pass before submitting a PR. Currently **2130 tests across 58
+All tests must pass before submitting a PR. Currently **2140 tests across 59
 test files** (canonical count: `pytest --collect-only -q`, which is exactly what
 CI recomputes).
 
@@ -45,17 +45,6 @@ commit. CI's `Verify README test-count drift` step runs that script (it is the
 single implementation; the numbers in this file are machine-checked too). Pass
 `--static` to skip the live comparison — the message then says so and certifies
 only that the documented claims agree with each other.
-
-**Worker briefs (INT-CI-13).** A worker brief whose diff adds or removes test
-files MUST carry this acceptance criterion verbatim:
-
-> update test-count sites (README.md x2, CONTRIBUTING.md x2) to the new
-> collection total
-
-Run `python3 scripts/check_docs_drift.py` before pushing test-touching work.
-It now runs as part of the LOCAL guard too (chained onto `guards.test_command`
-in `.gitreins/config.yaml`), so a drifted claim fails the commit itself — the
-drift class used to be invisible until CI (3 CI reds before INT-CI-13).
 
 ## Load reproduction
 
@@ -97,8 +86,8 @@ parse is a broken promise, and the checker is what keeps the README's
 ```
 engine/            — Core engine (evaluator, guards, pipeline, LSP, LLM client, task manager, judge, dead_code)
 gitreins/          — CLI entry point and install script
-gitreins_mcp/      — MCP stdio server (12 tools)
-tests/             — pytest test suite (2130 tests across 58 files; canonical count in README)
+gitreins_mcp/      — MCP stdio server (13 tools)
+tests/             — pytest test suite (2140 tests across 59 files; canonical count in README)
 tests/reliability/ — 7 adversarial benchmark projects
 scripts/           — Repo-level checkers run by CI (docs drift, CLI examples, CLI-reference sync, board ids) + the judgment viewer
 docs/              — Architecture, component map, evaluator loop, MCP API, CLI reference, dogfood reports

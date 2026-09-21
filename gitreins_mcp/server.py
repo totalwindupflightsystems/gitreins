@@ -22,6 +22,7 @@ from engine.judge import Judge, judge_result_to_dict
 from engine.llm import LLMClient
 from engine.guard_manager import GuardManager
 from engine.propagate import Propagator
+from engine.resolution import MAX_BUNDLE_TOKENS, resolve as resolve_question
 from engine.job_store import (
     acquire_resume_lease,
     cap_from_dict,
@@ -139,6 +140,7 @@ class GitReinsMCPServer:
             "judge.evaluate": self._judge_evaluate,
             "judge.status": self._judge_status,
             "propagate": self._propagate,
+            "context.resolve": self._context_resolve,
         }
 
     def _tool_schemas(self) -> list[dict]:
@@ -376,6 +378,24 @@ class GitReinsMCPServer:
                         },
                     },
                     "required": ["targets"],
+                },
+            },
+            {
+                "name": "context.resolve",
+                "description": "Resolve a question against the repo's code with the Jev resolution gate. Traces the question to seed files with Hilo, assembles a bundle inside a measured token budget, and returns a calibrated probability that the evidence resolves the question, banded in code: RESOLVED (>=0.85), REVIEW (>=0.50), UNRESOLVED (<0.50), or ABSTAIN (any failure — fail closed, with a named abstain_reason). The verdict carries the bundle manifest (file, provenance, score, bytes) so every answer is traceable.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "question": {
+                            "type": "string",
+                            "description": "The question to resolve against the repo, e.g. 'Does engine/evidence_bounds.py truncate text?'",
+                        },
+                        "budget": {
+                            "type": "integer",
+                            "description": "Max bundle tokens. Defaults to the engine's measured 28,000-token ceiling.",
+                        },
+                    },
+                    "required": ["question"],
                 },
             },
         ]
@@ -971,6 +991,23 @@ class GitReinsMCPServer:
         src = os.path.abspath(source) if source else self.workdir
         propagator = Propagator(src)
         return propagator.propagate(targets)
+
+    def _context_resolve(self, question: str, budget: int | None = None) -> dict:
+        """Resolve *question* against the repo's code (JEVRES-002).
+
+        The MCP surface of the Jev resolution gate (``engine/resolution.py`` —
+        JEVRES-001's pipeline, never rebuilt here). Same verdict object the
+        ``gitreins resolve`` CLI prints, serialized for a tool caller: banded
+        probability plus the bundle manifest that produced it. An ABSTAIN is a
+        named failure (``abstain_reason``), never a silent pass — fail closed,
+        matching the CLI's non-zero exit.
+        """
+        verdict = resolve_question(
+            question,
+            workdir=self.workdir,
+            max_tokens=budget if budget is not None else MAX_BUNDLE_TOKENS,
+        )
+        return verdict.to_dict()
 
     def handle_request(self, request: dict) -> dict | None:
         """Handle a single MCP JSON-RPC request."""

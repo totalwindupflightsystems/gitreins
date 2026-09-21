@@ -268,7 +268,7 @@ worktree fleet".
 
 - `gitreins commit <message>` / `gitreins commit-audit` — commit through the
   harness, and validate a commit message against the staged diff.
-- `gitreins mcp-server` — the MCP stdio server (12 tools) for AI agents, with
+- `gitreins mcp-server` — the MCP stdio server (13 tools) for AI agents, with
   `configure` for runtime LLM hot-reload and `propagate` to fan guard config out
   to sibling repos.
 - `gitreins security-scan` — the opt-in Antares CVE-localization scanner.

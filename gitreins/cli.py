@@ -2499,6 +2499,69 @@ def cmd_commit_audit(args):
     sys.exit(0)
 
 
+def cmd_resolve(args):
+    """Resolve a question against the repo's code (JEVRES-002).
+
+    Runs the Jev resolution gate (``engine/resolution.py`` — the pipeline is
+    JEVRES-001's, never rebuilt here): trace the question to seed files with
+    Hilo, assemble a bundle inside the measured token budget, ask Jev for a
+    calibrated probability that the evidence resolves the question, and band
+    the answer in code (>=.85 RESOLVED, >=.50 REVIEW, <.50 UNRESOLVED, any
+    failure ABSTAIN).
+
+    Human output names the verdict, the probability, what is missing and the
+    bundle manifest (file -> provenance, score, bytes); ``--json`` emits the
+    full verdict object for scripting. Exit codes come from the verdict
+    itself (:attr:`ResolutionVerdict.exit_code`): 0 for RESOLVED/REVIEW, 1
+    for UNRESOLVED and for ABSTAIN — a low score and a dead key are both
+    non-zero and distinguishable in the JSON (``abstain_reason`` names the
+    ABSTAIN cause, e.g. ``no-credentials`` vs ``budget-exhausted``).
+    """
+    from engine.resolution import MAX_BUNDLE_TOKENS, resolve, verdict_json
+
+    workdir = get_workdir()
+    budget = args.budget if args.budget is not None else MAX_BUNDLE_TOKENS
+    verdict = resolve(args.question, workdir=workdir, max_tokens=budget)
+
+    if args.json:
+        print(verdict_json(verdict))
+    else:
+        _print_resolve_verdict(verdict)
+
+    sys.exit(verdict.exit_code)
+
+
+def _print_resolve_verdict(verdict) -> None:
+    """Human-readable rendering of a resolution verdict."""
+    print(f"Question: {verdict.question}")
+    if verdict.verdict == "ABSTAIN":
+        print("Verdict:  ABSTAIN")
+        reason = (
+            f"{verdict.abstain_reason} — {verdict.abstain_detail}"
+            if verdict.abstain_detail
+            else (verdict.abstain_reason or "unknown")
+        )
+        print(f"Reason:   {reason}")
+        if verdict.abstain_action:
+            print(f"Fix:      {verdict.abstain_action}")
+    else:
+        probability = f"{verdict.probability:.2f}" if verdict.probability is not None else "n/a"
+        print(f"Verdict:  {verdict.verdict}  (probability {probability})")
+        missing = verdict.missing_kind or "none"
+        print(f"Missing:  {missing}")
+    if verdict.model:
+        print(f"Model:    {verdict.model}")
+    if verdict.manifest:
+        print("Bundle:")
+        for entry in verdict.manifest:
+            score = f"{entry.score:.2f}" if entry.score is not None else "n/a"
+            truncated = " truncated" if entry.truncated else ""
+            print(
+                f"  {entry.file}  [provenance={entry.provenance}, score={score},"
+                f" {entry.bytes}B{truncated}]"
+            )
+
+
 def cmd_security_scan(args):
     """Run the Antares CVE localization scanner (GR-117f).
 
@@ -2894,6 +2957,39 @@ def main():
         "message", nargs="?", help="Commit message (reads from COMMIT_EDITMSG if omitted)"
     )
 
+    # resolve (JEVRES-002) — the Jev resolution gate's CLI surface
+    resolve_p = sub.add_parser(
+        "resolve",
+        help="Resolve a question against the repo's code (Jev resolution gate)",
+        description=(
+            "Trace the question to seed files with Hilo, assemble a bundle inside a"
+            " measured token budget, and ask Jev for a calibrated probability that"
+            " the evidence resolves the question. Bands in code: RESOLVED (>=.85),"
+            " REVIEW (>=.50), UNRESOLVED (<.50); any failure (no key, transport,"
+            " exhausted budget) is an ABSTAIN — fail closed."
+        ),
+        epilog=(
+            "Exit codes: 0 for RESOLVED/REVIEW, 1 for UNRESOLVED and for ABSTAIN."
+            " With --json the verdict object distinguishes an UNRESOLVED (low"
+            " score) from an ABSTAIN (named abstain_reason: no-credentials,"
+            " all-credentials-rejected, transport-error, budget-exhausted, ...)."
+            " Requires an OpenRouter key (GITREINS_OPENROUTER_KEY) for the Jev call."
+        ),
+    )
+    resolve_p.add_argument("question", help="The question to resolve against the repo")
+    resolve_p.add_argument(
+        "--budget",
+        type=int,
+        default=None,
+        help="Max bundle tokens (default: the engine's measured 28,000-token ceiling)",
+    )
+    resolve_p.add_argument(
+        "--json",
+        dest="json",
+        action="store_true",
+        help="Emit the full verdict object as JSON for scripting",
+    )
+
     # mcp-server
     sub.add_parser(
         "mcp-server",
@@ -3084,6 +3180,8 @@ def main():
         cmd_commit(args)
     elif args.command == "commit-audit":
         cmd_commit_audit(args)
+    elif args.command == "resolve":
+        cmd_resolve(args)
     elif args.command == "mcp-server":
         cmd_mcp_server(args)
     elif args.command == "security-scan":

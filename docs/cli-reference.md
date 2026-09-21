@@ -20,7 +20,7 @@ Running `gitreins` with no command prints the top-level help and exits
 **0**. An unknown command exits **2** (argparse behavior for
 unrecognized arguments).
 
-There are **14 top-level subcommands**:
+There are **15 top-level subcommands**:
 
 | # | Command | Purpose |
 |---|---------|---------|
@@ -32,12 +32,13 @@ There are **14 top-level subcommands**:
 | 6 | `judge` | Evaluate a task (Tier 1 + Tier 2 LLM judge) |
 | 7 | `commit` | Commit with guard checks |
 | 8 | `commit-audit` | Validate commit message against staged diff (commit-msg hook) |
-| 9 | `mcp-server` | Run the MCP stdio server |
-| 10 | `security-scan` | Run the Antares CVE localization scanner (opt-in) |
-| 11 | `setup-tools` | Show available static analysis tools and install instructions |
-| 12 | `report` | Show verdict history |
-| 13 | `qa` | QA run ledger — record and read QA run outcomes |
-| 14 | `serve` | Live judgment browser (local web server) |
+| 9 | `resolve` | Resolve a question against the repo's code (Jev resolution gate) |
+| 10 | `mcp-server` | Run the MCP stdio server |
+| 11 | `security-scan` | Run the Antares CVE localization scanner (opt-in) |
+| 12 | `setup-tools` | Show available static analysis tools and install instructions |
+| 13 | `report` | Show verdict history |
+| 14 | `qa` | QA run ledger — record and read QA run outcomes |
+| 15 | `serve` | Live judgment browser (local web server) |
 
 ## 1. `gitreins install`
 
@@ -369,7 +370,7 @@ On startup the server writes one acknowledgement line to **stderr** (stdout is
 protocol-pure), naming its identity and the workdir it resolved — raw output,
 not an invocation:
 
-    gitreins MCP server <version> — stdio, protocol 2025-11-25 (negotiated per client request), 12 tools, workdir=/path/to/repo
+    gitreins MCP server <version> — stdio, protocol 2025-11-25 (negotiated per client request), 13 tools, workdir=/path/to/repo
 
 The protocol named there is the newest revision the server implements — the same
 one it answers with when a client asks for a revision it does not implement.
@@ -699,6 +700,57 @@ gitreins serve [--repo <path>] [--port <port>] [--host <host>] [--project <name>
 The server is read-only and re-reads the repository on every request, so a
 refresh shows new judgments. A static variant for publishing history without a
 server is `scripts/judgment_viewer.py`.
+
+## 15. `gitreins resolve`
+
+Resolve a question against the repository's code using the Jev resolution gate
+(JEVRES-001, `engine/resolution.py`; spec `docs/jev-resolution-gate.md`). The gate
+traces the question to seed files with Hilo, assembles a bundle inside a measured
+token budget, asks the Jev decisions model once for a calibrated probability that the
+evidence resolves the question, and bands the answer in code.
+
+```
+gitreins resolve "<question>" [--budget N] [--json]
+```
+
+| Option | Description |
+|--------|-------------|
+| `<question>` | The question to resolve, quoted (e.g. "Does engine/evidence_bounds.py truncate text?") |
+| `--budget N` | Max bundle tokens (default: the engine's measured 28,000-token ceiling) |
+| `--json` | Emit the full verdict object as JSON for scripting |
+
+Human output names the verdict band, the probability, `missing_kind` (what is absent
+when the answer is UNRESOLVED) and the bundle manifest — every file that was sent as
+evidence, with its provenance, score and size. `--json` emits the same verdict object
+the MCP `context.resolve` tool returns (see `docs/mcp-api.md`).
+
+| Verdict | Meaning |
+|---------|---------|
+| `RESOLVED` | probability ≥ 0.85 — the evidence is sufficient |
+| `REVIEW` | 0.50–0.85 — a human or the full judge looks |
+| `UNRESOLVED` | probability < 0.50 — `missing_kind` names what to build |
+| `ABSTAIN` | any failure: no key, dead key, transport, exhausted budget, empty bundle — fail closed, with a named reason and a suggested fix |
+
+The Jev call requires an OpenRouter key: `GITREINS_OPENROUTER_KEY` in the
+environment or in a known `.env` file (`~/.hermes/.env`, `./.env`,
+`~/.hermes/env-file`). Hilo must be installed for the bundle assembly.
+
+**Exit codes**
+
+| Code | Meaning |
+|------|---------|
+| 0 | RESOLVED or REVIEW |
+| 1 | UNRESOLVED (low score) or ABSTAIN (named failure) |
+
+UNRESOLVED and ABSTAIN are both exit 1 by design — a gate that failed must not read
+as a gate that passed — and are distinguishable in `--json`: an UNRESOLVED verdict
+carries a real `probability` with `abstain_reason: null`, while an ABSTAIN carries
+`verdict: "ABSTAIN"`, a named `abstain_reason` (e.g. `no-credentials` vs
+`budget-exhausted` vs a dead key) and an `abstain_action` suggesting the fix.
+
+```
+gitreins resolve "Does engine/evidence_bounds.py truncate text?" --json
+```
 
 ## Hooks
 

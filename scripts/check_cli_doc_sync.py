@@ -272,6 +272,10 @@ def check_cli_doc_sync(repo_root, doc_path=None):
         )
 
     # 3 + 4 + 5 — section 12 (`worktree`) and section 13 (`qa`) subsections.
+    # The section numbers are pinned to the shipped doc's layout, NOT to the
+    # table numbering under `## Global` (the table groups commands logically:
+    # worktree is row 4, qa row 14, while their sections sit at 12 and 13).
+    # A new subcommand appended to the table does not renumber them.
     sections_l2 = _sections(text, 2)
     for section_prefix, options_by_sub in (("12.", worktree_options), ("13.", qa_options)):
         heading = next((h for h in sections_l2 if h.startswith(section_prefix)), None)

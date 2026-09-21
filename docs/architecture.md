@@ -34,7 +34,7 @@ Git Repository (main + .gitreins/ directory)
 Any MCP-compatible coding agent (Pi, Claude Code, Hermes, Codex CLI). Interacts with GitReins MCP tools. Has no direct git access — commit must go through the harness.
 
 ### 2. MCP Server
-stdio transport (`gitreins_mcp/server.py`) exposing 12 tools:
+stdio transport (`gitreins_mcp/server.py`) exposing 13 tools:
 - `configure` — hot-reload LLM config at runtime
 - `task.create`, `task.start`, `task.complete` — task lifecycle
 - `task.list`, `task.get`, `task.delete` — task queries
@@ -42,6 +42,7 @@ stdio transport (`gitreins_mcp/server.py`) exposing 12 tools:
 - `guard.run` — run Tier 1 static guards
 - `judge.evaluate` — run full evaluation pipeline on a task (async job by default)
 - `judge.status` — poll a background evaluation job
+- `context.resolve` — resolve a question against the repo's code (Jev resolution gate)
 - `propagate` — propagate guard config to sibling repos
 
 ### 3. Task Manager
