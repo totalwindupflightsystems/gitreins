@@ -1,15 +1,22 @@
 # GitReins evidence contract v1
 
-GitReins 0.11.0 exposes a stable automation surface for `guard`, `judge`, and `report`:
+**Status (2026-09-22):** the v1 JSON Schema is published at
+[`schemas/evidence-v1.schema.json`](../schemas/evidence-v1.schema.json). The CLI
+emitters are adopted incrementally: `guard`/`judge`/`report` JSON output and the
+`--scope` flag land with EVID-002, `judge --ephemeral` with EVID-003. The
+invocations below are the contract that work implements — they are not yet
+runnable commands on the current CLI (`scripts/check_cli_examples.py` grades
+only examples that must parse today).
 
-```bash
-gitreins guard --scope working-tree --json
-gitreins judge rorca-run-42-US-001 --ephemeral --title "Story gate" \
-  --criterion "Acceptance criteria are satisfied" --scope working-tree --json
-gitreins report -n 20 --json
-```
+## The v1 automation surface
 
-Each command writes exactly one UTF-8 JSON document to stdout. The normative JSON Schema is [`schemas/evidence-v1.schema.json`](../schemas/evidence-v1.schema.json), identified by `https://gitreins.dev/schemas/evidence/v1.json` and `schemaVersion: "1.0"`.
+The contract specifies a stable automation surface for `guard`, `judge`, and `report`:
+
+- `gitreins guard --scope working-tree --json`
+- `gitreins judge rorca-run-42-US-001 --ephemeral --title "Story gate" --criterion "Acceptance criteria are satisfied" --scope working-tree --json`
+- `gitreins report -n 20 --json`
+
+Each command in the surface writes exactly one UTF-8 JSON document to stdout. The normative JSON Schema is [`schemas/evidence-v1.schema.json`](../schemas/evidence-v1.schema.json), identified by `https://gitreins.dev/schemas/evidence/v1.json` and `schemaVersion: "1.0"`.
 
 ## Compatibility
 
