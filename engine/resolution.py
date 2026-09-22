@@ -44,6 +44,7 @@ API echoed, because a verdict without a traceable bundle is not a verdict.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import logging
 import math
@@ -72,6 +73,7 @@ __all__ = [
     "DEFAULT_CHARS_PER_TOKEN",
     "JevCallResult",
     "ManifestEntry",
+    "RESOLUTION_SURFACES",
     "ResolutionVerdict",
     "TraceSeed",
     "assemble_bundle",
@@ -79,13 +81,16 @@ __all__ = [
     "estimate_tokens",
     "discover_keys",
     "is_excluded_path",
+    "is_excluded_path_for_surface",
     "order_blocks",
     "pack_blocks",
     "parse_answers",
     "parse_understand",
     "reconcile_manifest",
+    "resolution_config",
     "resolve",
     "rubric_position",
+    "surface_enabled",
     "trace_question",
     "verdict_json",
 ]
@@ -182,10 +187,17 @@ ABSTAIN_REASONS = {
     "budget-exhausted": "the assembled bundle did not fit MAX_BUNDLE_TOKENS",
     "empty-bundle": "no code could be assembled for the question",
     "empty-question": "the question was empty",
+    "surface-disabled": (
+        "this surface is disabled by config (resolution.enabled.<surface> in .gitreins/config.yaml)"
+    ),
 }
 
 #: Fixes to suggest per ABSTAIN reason (printed with the verdict).
 _REASON_ACTIONS = {
+    "surface-disabled": (
+        "set resolution.enabled.<surface>: true in .gitreins/config.yaml to"
+        " enable it (see docs/jev-resolution-gate.md §9)"
+    ),
     "no-credentials": "export GITREINS_OPENROUTER_KEY (or add it to ~/.hermes/.env)",
     "all-credentials-rejected": "replace or top up the OpenRouter key(s)",
     "transport-error": "check network/proxy connectivity to openrouter.ai",
@@ -196,6 +208,56 @@ _REASON_ACTIONS = {
     "empty-bundle": "check that hilo is installed and the question names real code",
     "empty-question": "pass a question for the repo to resolve",
 }
+
+# ── Config: the per-surface enable knobs (JEVRES-006) ────────────────────────
+
+#: Every surface the `resolution.enabled` map can switch. The judge-adjacent
+#: surfaces (predispatch, judge_prescreen) default to false even when the block
+#: exists — JEVRES-005 has to produce their calibration numbers first.
+RESOLUTION_SURFACES = ("cli", "mcp", "predispatch", "judge_prescreen")
+
+
+def resolution_config(workdir: str = ".") -> Any:
+    """The effective resolution defaults for *workdir* (built-ins + config.yaml).
+
+    Import is lazy and failure-tolerant on purpose: ``engine.config`` reads
+    constants from this module at import time, so a module-level import would
+    be a cycle, and a workdir without a usable config must degrade to the
+    built-in defaults — the same posture :mod:`engine.config` already has for
+    unreadable YAML (QA-GITREINS-POC-6).
+    """
+    try:
+        from engine.config import load_defaults
+
+        return load_defaults(workdir)
+    except Exception as exc:  # noqa: BLE001 - a broken config path is a default, not a crash
+        logger.warning("resolution config unavailable (%s); using built-in defaults", exc)
+        return None
+
+
+def surface_enabled(
+    surface: str, *, workdir: str = ".", defaults: Any = None
+) -> tuple[bool, str | None]:
+    """Is *surface* enabled by config, and why not when it is not?
+
+    Every surface ships DISABLED: the gate makes a real third-party egress and
+    the judge-adjacent surfaces have no calibration numbers yet (JEVRES-005),
+    so absent config, an absent `resolution:` block and a wrong-typed block all
+    mean off. Only an explicit ``enabled.<surface>: true`` turns a surface on.
+
+    Returns ``(enabled, abstain_reason)`` — the reason is ``"surface-disabled"``
+    when off so callers fail closed with a named, fixable cause instead of a
+    silent fall-through.
+    """
+    if surface not in RESOLUTION_SURFACES:
+        raise ValueError(
+            f"unknown resolution surface {surface!r} (known: {', '.join(RESOLUTION_SURFACES)})"
+        )
+    cfg = defaults if defaults is not None else resolution_config(workdir)
+    if cfg is None:
+        return False, "surface-disabled"
+    enabled = bool(getattr(cfg, f"resolution_enabled_{surface}", False))
+    return (True, None) if enabled else (False, "surface-disabled")
 
 
 # ── Token measurement ────────────────────────────────────────────────────────
@@ -378,6 +440,50 @@ def is_excluded_path(path: str) -> bool:
     return lowered.endswith(_EXCLUDED_SUFFIXES)
 
 
+def is_excluded_path_for_surface(
+    path: str,
+    *,
+    egress_exclude: tuple[str, ...] = (),
+    workdir: str = ".",
+    defaults: Any = None,
+) -> bool:
+    """:func:`is_excluded_path` PLUS the config's egress exclusion patterns.
+
+    The built-in filter above is the floor and is never weakened; this adds the
+    operator's ``resolution.egress_exclude`` patterns on top (JEVRES-006): a
+    pattern matches when the path itself or any ``/``-separated part of it
+    matches (``fnmatch`` semantics, case-insensitive), so ``internal`` blocks
+    ``internal/keys.py`` and ``vendor/*`` blocks everything under ``vendor/``.
+    A wrong-typed or empty pattern list is ignored — the floor always holds.
+    """
+    if is_excluded_path(path):
+        return True
+    patterns = (
+        tuple(egress_exclude)
+        if egress_exclude
+        else _configured_egress_exclude(workdir=workdir, defaults=defaults)
+    )
+    if not patterns:
+        return False
+    cleaned = path.strip().strip("'\"").lower()
+    parts = [part for part in re.split(r"[/\\]", cleaned) if part]
+    candidates = parts + [cleaned]
+    return any(
+        fnmatch.fnmatch(candidate, pattern.lower())
+        for pattern in patterns
+        for candidate in candidates
+    )
+
+
+def _configured_egress_exclude(*, workdir: str = ".", defaults: Any = None) -> tuple[str, ...]:
+    """Read ``resolution.egress_exclude`` from config; empty tuple when absent."""
+    cfg = defaults if defaults is not None else resolution_config(workdir)
+    if cfg is None:
+        return ()
+    patterns = getattr(cfg, "resolution_egress_exclude", ())
+    return tuple(str(p) for p in patterns) if patterns else ()
+
+
 def _default_hilo_runner(args: list[str], workdir: str) -> tuple[int, str, str]:
     """Run ``hilo <args>`` in *workdir*; returns (exit_code, stdout, stderr).
 
@@ -407,11 +513,14 @@ def trace_question(
     workdir: str = ".",
     limit: int = SEED_LIMIT,
     runner: Callable[[list[str], str], tuple[int, str, str]] | None = None,
+    egress_exclude: tuple[str, ...] | None = None,
 ) -> list[TraceSeed]:
     """Rank candidate files for *question* with ``hilo graph search``.
 
     Deterministic TF-IDF+BM25 — no embeddings, no API. Excluded paths (secrets,
-    keys, caches) are dropped here so they are never candidates downstream.
+    keys, caches, plus the config's ``resolution.egress_exclude`` patterns when
+    *egress_exclude* is None) are dropped here so they are never candidates
+    downstream.
     """
     run = runner or _default_hilo_runner
     code, out, _err = run(["graph", "search", question, "--limit", str(limit)], workdir)
@@ -423,7 +532,9 @@ def trace_question(
         match = _SEARCH_LINE_RE.match(line)
         if match:
             name = match.group("file")
-            if name.startswith("pkg:") or is_excluded_path(name):
+            if name.startswith("pkg:") or is_excluded_path_for_surface(
+                name, egress_exclude=egress_exclude, workdir=workdir
+            ):
                 pending = None
                 continue
             pending = TraceSeed(file=name, score=float(match.group("score")))
@@ -443,6 +554,7 @@ def related_files(
     workdir: str = ".",
     limit: int = RELATED_LIMIT,
     runner: Callable[[list[str], str], tuple[int, str, str]] | None = None,
+    egress_exclude: tuple[str, ...] | None = None,
 ) -> list[str]:
     """Reverse edges of *seed* — who imports/depends on it (`hilo graph related`).
 
@@ -459,7 +571,7 @@ def related_files(
         if not stripped or stripped.lower().startswith("no "):
             continue
         candidate = stripped.split()[0].strip("'\"")
-        if is_excluded_path(candidate):
+        if is_excluded_path_for_surface(candidate, egress_exclude=egress_exclude, workdir=workdir):
             continue
         if candidate and candidate not in files and len(files) < limit:
             files.append(candidate)
@@ -480,7 +592,14 @@ def _split_file_spec(spec: str) -> tuple[str, int | None, int | None]:
     return path, start, end
 
 
-def parse_understand(output: str, *, bundle_rank: int, source: str = "understand") -> list[Block]:
+def parse_understand(
+    output: str,
+    *,
+    bundle_rank: int,
+    source: str = "understand",
+    egress_exclude: tuple[str, ...] | None = None,
+    workdir: str = ".",
+) -> list[Block]:
     """Split a ``hilo graph understand`` bundle into per-file :class:`Block` items.
 
     The bundle's own sections (``## MAP`` / ``## SIGNATURES``) and its
@@ -488,7 +607,8 @@ def parse_understand(output: str, *, bundle_rank: int, source: str = "understand
     makes the bundle traceable. A header whose line carries trailing text (a
     line range, an omission note) is a FILE-level header and is recorded but not
     treated as source; a bare header opens a source block. An exclusion filter
-    runs here too — a bundle that ranked a ``.env`` never becomes payload.
+    runs here too — a bundle that ranked a ``.env`` (or a path matching the
+    config's ``resolution.egress_exclude`` patterns) never becomes payload.
     """
     blocks: list[Block] = []
     current: Block | None = None
@@ -516,7 +636,7 @@ def parse_understand(output: str, *, bundle_rank: int, source: str = "understand
             flush()
             spec = match.group("file")
             path, start, end = _split_file_spec(spec)
-            if is_excluded_path(path):
+            if is_excluded_path_for_surface(path, egress_exclude=egress_exclude, workdir=workdir):
                 continue
             truncated = "omitted" in match.group("rest")
             current = Block(
@@ -537,9 +657,15 @@ def parse_understand(output: str, *, bundle_rank: int, source: str = "understand
     return blocks
 
 
-def _read_block(path: str, workdir: str, *, bundle_rank: int) -> Block | None:
+def _read_block(
+    path: str,
+    workdir: str,
+    *,
+    bundle_rank: int,
+    egress_exclude: tuple[str, ...] | None = None,
+) -> Block | None:
     """Last-resort bounded, line-aligned read of *path* (never an excluded file)."""
-    if is_excluded_path(path):
+    if is_excluded_path_for_surface(path, egress_exclude=egress_exclude, workdir=workdir):
         return None
     full = Path(workdir) / path
     try:
@@ -785,6 +911,7 @@ def assemble_bundle(
     traced: bool = True,
     read_files: bool = True,
     max_tokens: int = MAX_BUNDLE_TOKENS,
+    egress_exclude: tuple[str, ...] | None = None,
 ) -> AssembledBundle:
     """Trace, assemble and bound the evidence for *question*.
 
@@ -795,13 +922,23 @@ def assemble_bundle(
     bundle caps at ~41k chars (~11.8k tokens), so a broad question genuinely
     needs several rounds or it must admit the shortfall — which it does, via
     :attr:`budget_exhausted` and the disclosure rather than by padding.
+
+    *egress_exclude* is the config's exclusion patterns (JEVRES-006): ``None``
+    loads them from the workdir's config; an explicit tuple replaces them. The
+    built-in secret/key filter always applies on top either way.
     """
     run = runner or _default_hilo_runner
     notes: list[str] = []
+    if egress_exclude is None:
+        egress_exclude = _configured_egress_exclude(workdir=workdir)
     trace_seeds = (
         list(seeds)
         if seeds is not None
-        else (trace_question(question, workdir=workdir, runner=run) if traced else [])
+        else (
+            trace_question(question, workdir=workdir, runner=run, egress_exclude=egress_exclude)
+            if traced
+            else []
+        )
     )
     trace_seeds = [seed for seed in trace_seeds if not is_excluded_path(seed.file)]
     if traced and not trace_seeds:
@@ -809,7 +946,9 @@ def assemble_bundle(
 
     dependency_paths: dict[str, list[str]] = {}
     for seed in trace_seeds[:MAX_SEED_BUNDLES]:
-        related = related_files(seed.file, workdir=workdir, runner=run)
+        related = related_files(
+            seed.file, workdir=workdir, runner=run, egress_exclude=egress_exclude
+        )
         if related:
             dependency_paths[seed.file] = related
 
@@ -821,7 +960,9 @@ def assemble_bundle(
     if code != 0:
         notes.append(f"primary understand bundle failed (exit {code}): {err.strip()[:200]}")
     else:
-        blocks.extend(parse_understand(out, bundle_rank=rank))
+        blocks.extend(
+            parse_understand(out, bundle_rank=rank, egress_exclude=egress_exclude, workdir=workdir)
+        )
     rank += 1
 
     while (
@@ -834,7 +975,13 @@ def assemble_bundle(
             ["graph", "understand", seed.file, "--budget", str(PRIMARY_BUNDLE_BUDGET)], workdir
         )
         if code == 0 and out.strip():
-            fresh = [block for block in parse_understand(out, bundle_rank=rank) if block.text]
+            fresh = [
+                block
+                for block in parse_understand(
+                    out, bundle_rank=rank, egress_exclude=egress_exclude, workdir=workdir
+                )
+                if block.text
+            ]
             if fresh:
                 blocks.extend(fresh)
         rank += 1
@@ -847,7 +994,7 @@ def assemble_bundle(
             path = seed.file.split(":")[0]
             if path in seen:
                 continue
-            block = _read_block(path, workdir, bundle_rank=rank)
+            block = _read_block(path, workdir, bundle_rank=rank, egress_exclude=egress_exclude)
             if block is not None:
                 blocks.append(block)
                 seen.add(path)
@@ -1528,6 +1675,7 @@ def resolve(
     endpoint: str = JEV_ENDPOINT,
     resolved_at: float = RESOLVED_AT,
     review_at: float = REVIEW_AT,
+    egress_exclude: tuple[str, ...] | None = None,
 ) -> ResolutionVerdict:
     """Resolve *question* against the repo at *workdir* and return a typed verdict.
 
@@ -1535,6 +1683,12 @@ def resolve(
     the way — no credentials, every key refused, transport, malformed answer, an
     empty bundle or an exhausted budget — returns an ABSTAIN verdict with
     :attr:`ResolutionVerdict.abstain_reason` set and a non-zero exit code.
+
+    The config knobs (model, token ceiling, band thresholds, egress exclusions)
+    are plain keyword arguments whose defaults are the module's measured
+    constants; the surfaces (CLI/MCP/preflight — JEVRES-006) read
+    ``resolution:`` from config and pass them in. ``egress_exclude=None`` loads
+    the config's patterns inside the assembler; an explicit tuple overrides.
 
     ``runner`` and ``poster`` are the two seams that make this testable without
     a network or a hilo install; both default to the real implementations.
@@ -1550,6 +1704,7 @@ def resolve(
         traced=traced,
         read_files=read_files,
         max_tokens=max_tokens,
+        egress_exclude=egress_exclude,
     )
     if not bundle.text.strip():
         return _abstain(

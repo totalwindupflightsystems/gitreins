@@ -9,6 +9,7 @@ import select
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 import pytest
 
@@ -2483,6 +2484,14 @@ class TestContextResolve:
         for var in resolution.CREDENTIAL_ENV_VARS:
             monkeypatch.delenv(var, raising=False)
         monkeypatch.setenv("HOME", str(tmp_path))
+        # JEVRES-006: the MCP surface ships config-disabled; these tests pin it
+        # OPEN so they keep grading the tool they were written for. The
+        # disabled contract has its own test below.
+        from engine.config import GitReinsDefaults
+
+        defaults = GitReinsDefaults()
+        defaults.resolution_enabled_mcp = True
+        monkeypatch.setattr(resolution, "resolution_config", lambda workdir=".": defaults)
         self._resolution = resolution
 
     def _server_with_scripted_endpoint(self, workdir, monkeypatch, *, noul=0.87, with_key=True):
@@ -2527,6 +2536,18 @@ class TestContextResolve:
             # this file (the secrets guard's match) — same trick as
             # tests/test_resolution.py.
             monkeypatch.setenv("GITREINS_OPENROUTER_KEY", "sk-or-" + "v1-mcp-" + "0" * 16)
+        # JEVRES-006: enable the mcp resolution surface in the workdir's config
+        import yaml as _yaml
+
+        cfg_dir = Path(workdir) / ".gitreins"
+        cfg_dir.mkdir(exist_ok=True)
+        cfg_path = cfg_dir / "config.yaml"
+        cfg_path.write_text(
+            _yaml.dump(
+                {"resolution": {"enabled": {"mcp": True}}},
+                default_flow_style=False,
+            )
+        )
         from gitreins_mcp.server import GitReinsMCPServer
 
         return GitReinsMCPServer(workdir), calls
@@ -2589,13 +2610,19 @@ class TestContextResolve:
         """budget is forwarded to the engine; None means the engine ceiling."""
         seen = {}
 
-        def fake_resolve(question, *, workdir, max_tokens):
+        def fake_resolve(question, *, workdir, max_tokens, **kw):
             seen["max_tokens"] = max_tokens
             verdict = self._resolution.ResolutionVerdict(question=question, verdict="REVIEW")
             verdict.probability = 0.6
             return verdict
 
         monkeypatch.setattr("gitreins_mcp.server.resolve_question", fake_resolve)
+        # JEVRES-006: enable the mcp surface so _context_resolve reaches the engine
+        from engine.config import GitReinsDefaults
+
+        defaults = GitReinsDefaults()
+        defaults.resolution_enabled_mcp = True
+        monkeypatch.setattr("gitreins_mcp.server.resolution_config", lambda workdir=".": defaults)
         from gitreins_mcp.server import GitReinsMCPServer
 
         mcp = GitReinsMCPServer(tmp_workdir)
@@ -2603,6 +2630,71 @@ class TestContextResolve:
         assert seen["max_tokens"] == 1234
         mcp._context_resolve("q?")
         assert seen["max_tokens"] == self._resolution.MAX_BUNDLE_TOKENS
+
+    def test_context_resolve_disabled_abstains_without_touching_the_engine(
+        self, tmp_workdir, monkeypatch
+    ):
+        """JEVRES-006: no resolution.enabled.mcp in config → named ABSTAIN.
+
+        The tool must fail closed with ``surface-disabled`` and must not touch
+        the endpoint, the assembler or the key ring — the default posture for
+        every surface until an operator opts in.
+        """
+        from engine.config import GitReinsDefaults
+
+        calls: list = []
+        monkeypatch.setattr(
+            self._resolution,
+            "requests",
+            _ScriptedEndpoint(calls, 0.99),  # must never be reached
+        )
+        monkeypatch.setattr(
+            self._resolution, "resolution_config", lambda workdir=".": GitReinsDefaults()
+        )
+        monkeypatch.setenv("GITREINS_OPENROUTER_KEY", "sk-or-" + "v1-mcp-" + "0" * 16)
+
+        mcp = GitReinsMCPServer(tmp_workdir)
+        verdict = mcp._context_resolve("anything at all?")
+
+        assert verdict["verdict"] == "ABSTAIN"
+        assert verdict["abstain_reason"] == "surface-disabled"
+        assert verdict["abstain_action"], "the verdict names the enabling fix"
+        assert verdict["exit_code"] == 1
+        assert verdict["probability"] is None
+        assert calls == [], "a disabled surface must not touch the network"
+
+    def test_context_resolve_config_knobs_reach_the_engine(self, tmp_workdir, monkeypatch):
+        """The config block pins model, ceiling and thresholds for the tool."""
+        from engine.config import GitReinsDefaults
+
+        seen: dict = {}
+
+        def fake_resolve(question, *, workdir, max_tokens, model, resolved_at, review_at, **kw):
+            seen.update(
+                max_tokens=max_tokens,
+                model=model,
+                resolved_at=resolved_at,
+                review_at=review_at,
+            )
+            verdict = self._resolution.ResolutionVerdict(question=question, verdict="REVIEW")
+            verdict.probability = 0.6
+            return verdict
+
+        monkeypatch.setattr("gitreins_mcp.server.resolve_question", fake_resolve)
+        defaults = GitReinsDefaults()
+        defaults.resolution_enabled_mcp = True
+        defaults.resolution_model = "typesafe/jev-1.13-testpin"
+        defaults.resolution_tokens_max = 4096
+        defaults.resolution_resolved_at = 0.7
+        defaults.resolution_review_at = 0.3
+        monkeypatch.setattr("gitreins_mcp.server.resolution_config", lambda workdir=".": defaults)
+
+        mcp = GitReinsMCPServer(tmp_workdir)
+        mcp._context_resolve("q?")
+        assert seen["max_tokens"] == 4096
+        assert seen["model"] == "typesafe/jev-1.13-testpin"
+        assert seen["resolved_at"] == pytest.approx(0.7)
+        assert seen["review_at"] == pytest.approx(0.3)
 
     def test_context_resolve_over_jsonrpc(self, tmp_path):
         """The tool answers over the real stdio JSON-RPC transport.
@@ -2672,6 +2764,6 @@ class TestContextResolve:
         # no bundle, so the gate refuses with a named ABSTAIN rather than a
         # guess. Either cause is a valid refusal; both carry exit_code 1.
         assert result["verdict"] == "ABSTAIN"
-        assert result["abstain_reason"] in {"no-credentials", "empty-bundle"}
+        assert result["abstain_reason"] in {"no-credentials", "empty-bundle", "surface-disabled"}
         assert result["exit_code"] == 1
         assert "manifest" in result

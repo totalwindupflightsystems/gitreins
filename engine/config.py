@@ -107,6 +107,25 @@ class GitReinsDefaults:
     history_storage: str = "git"  # "git" or "filesystem"
     history_max_verdicts: int = 1000
 
+    # ── Jev resolution gate (JEVRES-006) ──
+    # One `resolution:` block in .gitreins/config.yaml drives every surface.
+    # Each surface defaults to DISABLED: the gate is a real egress (the bundle
+    # leaves the host for OpenRouter) and the judge-adjacent surfaces have no
+    # calibration numbers until JEVRES-005 lands — so nothing ships enabled
+    # until an operator opts in. The defaults that are measured facts (model
+    # build, token ceiling, band thresholds) live in docs/jev-resolution-gate.md
+    # §2/§9 — the single design authority; they are mirrored here only as code
+    # defaults, never re-stated in prose docs.
+    resolution_enabled_cli: bool = False
+    resolution_enabled_mcp: bool = False
+    resolution_enabled_predispatch: bool = False
+    resolution_enabled_judge_prescreen: bool = False
+    resolution_model: str = "typesafe/jev-1.13"
+    resolution_tokens_max: int = 28_000
+    resolution_resolved_at: float = 0.85
+    resolution_review_at: float = 0.50
+    resolution_egress_exclude: tuple[str, ...] = ()
+
     # Metadata
     _source: str = field(default="(built-in defaults)", repr=False)
 
@@ -261,7 +280,26 @@ class GitReinsDefaults:
             history_max_verdicts=int(
                 defaults.get("history_max_verdicts", self.history_max_verdicts)
             ),
-            _source=".gitreins/config.yaml" if defaults else self._source,
+            # ── Jev resolution gate (JEVRES-006) ──
+            # The block lives at the TOP LEVEL of config.yaml (same shape
+            # cmd_init writes and the same precedent as worktree_fleet), not
+            # nested under `defaults:`.
+            resolution_enabled_cli=bool(_resolution_enabled(config_dict, "cli")),
+            resolution_enabled_mcp=bool(_resolution_enabled(config_dict, "mcp")),
+            resolution_enabled_predispatch=bool(_resolution_enabled(config_dict, "predispatch")),
+            resolution_enabled_judge_prescreen=bool(
+                _resolution_enabled(config_dict, "judge_prescreen")
+            ),
+            resolution_model=str(resolution_cfg(config_dict).get("model", self.resolution_model)),
+            resolution_tokens_max=_resolution_tokens_max(config_dict, self.resolution_tokens_max),
+            resolution_resolved_at=float(
+                resolution_bands(config_dict).get("resolved_at", self.resolution_resolved_at)
+            ),
+            resolution_review_at=float(
+                resolution_bands(config_dict).get("review_at", self.resolution_review_at)
+            ),
+            resolution_egress_exclude=_resolution_excludes(config_dict),
+            _source=".gitreins/config.yaml" if config_dict else self._source,
         )
 
         return result
@@ -320,7 +358,66 @@ class GitReinsDefaults:
             },
             "check_for_updates": self.check_for_updates,
             "update_check_ttl": f"{int(self.update_check_ttl_hours)}h",
+            # Jev resolution gate (JEVRES-006): every surface ships disabled;
+            # measured defaults are docs/jev-resolution-gate.md §2's, not
+            # re-derived here.
+            "resolution": {
+                "enabled": {
+                    "cli": self.resolution_enabled_cli,
+                    "mcp": self.resolution_enabled_mcp,
+                    "predispatch": self.resolution_enabled_predispatch,
+                    "judge_prescreen": self.resolution_enabled_judge_prescreen,
+                },
+                "model": self.resolution_model,
+                "tokens_max": self.resolution_tokens_max,
+                "bands": {
+                    "resolved_at": self.resolution_resolved_at,
+                    "review_at": self.resolution_review_at,
+                },
+                "egress_exclude": list(self.resolution_egress_exclude),
+            },
         }
+
+
+# ── Resolution-block accessors (JEVRES-006) ──────────────────
+# Config from other users is data, not schema: a scalar where a mapping is
+# expected (`resolution: true`) or a non-list exclude pattern must degrade to
+# the default, never crash config loading (QA-GITREINS-POC-6 posture).
+
+
+def resolution_cfg(defaults: dict) -> dict:
+    """The `resolution:` block of a raw config dict, tolerating wrong types."""
+    block = defaults.get("resolution", {})
+    return block if isinstance(block, dict) else {}
+
+
+def resolution_bands(defaults: dict) -> dict:
+    """The `resolution.bands:` mapping, tolerating a scalar/absent parent."""
+    bands = resolution_cfg(defaults).get("bands", {})
+    return bands if isinstance(bands, dict) else {}
+
+
+def _resolution_enabled(defaults: dict, surface: str) -> bool:
+    """Per-surface enable flag; only an explicit `true` turns a surface on."""
+    enabled = resolution_cfg(defaults).get("enabled", {})
+    if not isinstance(enabled, dict):
+        return False
+    return enabled.get(surface) is True
+
+
+def _resolution_excludes(defaults: dict) -> tuple[str, ...]:
+    """The egress exclusion patterns, as a clean tuple of non-empty strings."""
+    patterns = resolution_cfg(defaults).get("egress_exclude", [])
+    if not isinstance(patterns, list):
+        return ()
+    return tuple(str(p) for p in patterns if str(p).strip())
+
+
+def _resolution_tokens_max(defaults: dict, fallback: int) -> int:
+    """``tokens_max`` accepts bare ints or '8k'-style strings (like max_input_tokens)."""
+    value = resolution_cfg(defaults).get("tokens_max")
+    coerced = _coerce_tokens(value) if value is not None else fallback
+    return coerced if coerced > 0 else fallback
 
 
 def _worktree_fleet_value(config_dict: dict, defaults: dict, key: str, fallback):

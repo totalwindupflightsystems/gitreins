@@ -22,7 +22,7 @@ from engine.judge import Judge, judge_result_to_dict
 from engine.llm import LLMClient
 from engine.guard_manager import GuardManager
 from engine.propagate import Propagator
-from engine.resolution import MAX_BUNDLE_TOKENS, resolve as resolve_question
+from engine.resolution import resolution_config, resolve as resolve_question
 from engine.job_store import (
     acquire_resume_lease,
     cap_from_dict,
@@ -1001,11 +1001,35 @@ class GitReinsMCPServer:
         probability plus the bundle manifest that produced it. An ABSTAIN is a
         named failure (``abstain_reason``), never a silent pass — fail closed,
         matching the CLI's non-zero exit.
+
+        Config gate (JEVRES-006): the tool answers only when
+        ``resolution.enabled.mcp: true`` in the server workdir's config;
+        disabled (the default), it abstains with ``surface-disabled`` and never
+        touches Hilo, the key ring or the network. The same config block pins
+        the model, the token ceiling and the band thresholds — an explicit
+        *budget* still overrides the ceiling for one call.
         """
+        from engine.resolution import ResolutionVerdict, VERDICT_ABSTAIN, surface_enabled
+
+        cfg = resolution_config(self.workdir)
+        enabled, reason = surface_enabled("mcp", workdir=self.workdir, defaults=cfg)
+        if not enabled:
+            return ResolutionVerdict(
+                question=question,
+                verdict=VERDICT_ABSTAIN,
+                abstain_reason=reason,
+                abstain_detail=(
+                    "resolution.enabled.mcp is false (or absent) in"
+                    f" {self.workdir}/.gitreins/config.yaml"
+                ),
+            ).to_dict()
         verdict = resolve_question(
             question,
             workdir=self.workdir,
-            max_tokens=budget if budget is not None else MAX_BUNDLE_TOKENS,
+            max_tokens=budget if budget is not None else cfg.resolution_tokens_max,
+            model=cfg.resolution_model,
+            resolved_at=cfg.resolution_resolved_at,
+            review_at=cfg.resolution_review_at,
         )
         return verdict.to_dict()
 

@@ -104,6 +104,8 @@ def preflight(
     *,
     workdir: str = ".",
     dispatch: Callable[[], None] | None = None,
+    surface: str = "predispatch",
+    defaults: Any = None,
     **resolve_kwargs: Any,
 ) -> dict[str, Any]:
     """Resolve *question* and return the dispatch record for it (spec §4 row 1).
@@ -117,9 +119,38 @@ def preflight(
     too: this signal may skip a dispatch, it must never be the reason work
     silently stops.
 
+    Config gate (JEVRES-006): the gate runs only when
+    ``resolution.enabled.<surface>`` is true in config — *surface* defaults to
+    ``"predispatch"`` here, the judge pre-screen passes its own. Disabled, no
+    resolution runs at all and the record carries an ABSTAIN verdict with the
+    named ``surface-disabled`` reason, which — like every ABSTAIN on this
+    surface — maps to plain ``dispatch`` (fail open) with the reason recorded.
+
     All other keyword arguments (``keys``, ``poster``, ``runner``, ... — the
     test seams included) are forwarded to :func:`resolve` untouched.
     """
+    from engine.resolution import (
+        ResolutionVerdict,
+        VERDICT_ABSTAIN,
+        surface_enabled,
+    )
+
+    enabled, reason = surface_enabled(surface, workdir=workdir, defaults=defaults)
+    if not enabled:
+        verdict = ResolutionVerdict(
+            question=question,
+            verdict=VERDICT_ABSTAIN,
+            abstain_reason=reason,
+            abstain_detail=(
+                f"resolution.enabled.{surface} is false (or absent) in"
+                f" {workdir}/.gitreins/config.yaml"
+            ),
+        )
+        record = decide(verdict)
+        if dispatch is not None:
+            dispatch()
+        return record
+
     verdict = resolve(question, workdir=workdir, **resolve_kwargs)
     record = decide(verdict)
     if dispatch is not None and record["decision"] != DECISION_SKIP:
