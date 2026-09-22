@@ -63,7 +63,10 @@ Issues = "https://github.com/totalwindupflightsystems/gitreins/issues"
 include = ["engine*", "gitreins*", "gitreins_mcp*"]
 
 [tool.pytest.ini_options]
-addopts = "-n 4"
+# REVIEW-004: bound EVERY test. The suite used to hang indefinitely when an LSP
+# test spawned a tool that never answers (a missing/stand-in gopls), which a foreman
+# tick or CI would sit on instead of failing. pytest-timeout is a dev dependency.
+addopts = "-n 4 --timeout=120 --timeout-method=thread"
 testpaths = ["tests"]
 pythonpath = ["."]
 

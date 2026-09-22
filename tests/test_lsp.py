@@ -48,8 +48,7 @@ def read_message():
 while True:
     message = read_message()
     if message is None:
-        time.sleep(60)
-        continue
+        sys.exit(0)
     if message.get("method") == "initialize":
         reply = {"jsonrpc": "2.0", "id": message["id"], "result": {"capabilities": {}}}
         body = json.dumps(reply).encode()
@@ -91,8 +90,7 @@ def read_message():
 while True:
     message = read_message()
     if message is None:
-        time.sleep(60)
-        continue
+        sys.exit(0)
     method = message.get("method")
     if method == "initialize":
         send({"jsonrpc": "2.0", "id": message["id"], "result": {"capabilities": {}}})
@@ -648,8 +646,14 @@ def gopls_environment_note(workdir):
     """
 
     def first_line(cmd):
+        # Diagnostic only: it must never be able to hang a test. A stand-in tool that reads
+        # stdin (the gopls stand-ins in this file do) blocks forever when it inherits the test
+        # runner's stdin, and each probe used to cost the full 30s timeout twice per gopls
+        # test. DEVNULL gives it an immediate EOF, 5s bounds the answer (REVIEW-004).
         try:
-            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=5, stdin=subprocess.DEVNULL
+            )
         except (OSError, subprocess.SubprocessError) as exc:
             return f"{cmd[0]}: {exc}"
         return (
