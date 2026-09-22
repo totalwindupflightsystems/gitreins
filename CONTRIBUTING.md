@@ -12,6 +12,12 @@ python3 scripts/check_deployed_surface.py   # exits 1 on drift, prints what is m
 The probe compares the repo's subcommand list and version against the deployed binary and names any subcommand that exists only in the repo. Treat a non-zero exit as a failed deploy, not a warning. Release cuts run it as a checklist gate.
 
 
+### Remotes: both stay in sync
+
+This repo has two remotes and pushes to both: `github` (github.com/totalwindupflightsystems/gitreins, the live one, where CI and releases run) and the GitLab mirror `origin` (gitlab.readydedis.com/totalwindup/gitreins-poc). The `github` remote carries a second push URL, so a single `git push github main` fans out to both — never push to only one of them, or the mirror silently rots (it sat three months behind after the June 2026 line). The pre-sync GitLab line is preserved on that remote as `archive/pre-gitreins-sync-2026-06`.
+
+Open question recorded for the owner: whether this project should move under the `coding-hermes` org/group instead of `totalwindupflightsystems` / `totalwindup`; until that is decided the rule is simply that both remotes stay at the same commit.
+
 ## Setup
 
 **Preferred: uv (fast, deterministic)**
