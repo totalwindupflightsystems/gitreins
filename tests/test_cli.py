@@ -634,6 +634,51 @@ class TestGuardRunCLI:
         assert result.returncode == 0
         assert "(test mode: diff" in result.stdout
 
+    def test_guard_timeout_allow_skips_exits_zero(self, tmp_workdir):
+        """GR-140: a timeout run with allow_skips: true commits (exit 0), not 2.
+
+        Clean tree with test_on_clean: lint is an honest skip (degraded) and
+        the tests lane stalls past hook_timeout, so cmd_guard_run takes a
+        timeout early-return. The extra map used to be empty there,
+        allow_skips read as False, and the CLI blocked the commit its own
+        warning said was allowed — this test pins the exit code to the
+        warning's promise.
+        """
+        write_guard_config(
+            tmp_workdir,
+            extra_guards="  hook_timeout: 1\n"
+            "  test_on_clean: true\n"
+            '  test_command: python -c "import time; time.sleep(4)"\n',
+        )
+        result = run_cli("guard", cwd=tmp_workdir)
+        output = result.stdout + result.stderr
+        assert result.returncode == 0, _cli_failure(result)
+        assert "timed out after 1s" in output
+        assert "DEGRADED PASS (skips:" in result.stdout
+
+    def test_guard_timeout_without_allow_skips_exits_two(self, tmp_workdir):
+        """GR-140: allow_skips absent + timeout → the blocking exit 2 stays.
+
+        Same shape as the exit-0 test but without the allow_skips opt-in:
+        TRUST-001 keeps a degraded pass non-zero (exit 2, 'a gate never ran'
+        distinct from 'a gate failed'). The GR-140 fix must carry the extra
+        map faithfully, not widen this into exit 0.
+        """
+        cfg_dir = os.path.join(tmp_workdir, ".gitreins")
+        os.makedirs(cfg_dir, exist_ok=True)
+        with open(os.path.join(cfg_dir, "config.yaml"), "w") as f:
+            f.write(
+                "guards:\n"
+                "  hook_timeout: 1\n"
+                "  test_on_clean: true\n"
+                '  test_command: python -c "import time; time.sleep(4)"\n'
+            )
+        result = run_cli("guard", cwd=tmp_workdir)
+        output = result.stdout + result.stderr
+        assert result.returncode == 2, _cli_failure(result)
+        assert "timed out after 1s" in output
+        assert "DEGRADED PASS" in output
+
 
 class TestJudgeCLI:
     """Test judge CLI — step-3-3-1-2."""
