@@ -189,8 +189,9 @@ def main() -> int:
     if p.returncode == 0:
         ahead = git("rev-list", "--count", f"main..{REMOTE}/main")
         print(
-            f"GITLAB MIRROR CONTENT IN SYNC ({ahead} extra mirror commit(s); "
-            f"set the project's merge_method to 'ff' for identical SHAs)"
+            f"GITLAB MIRROR CONTENT IN SYNC ({ahead} mirror-side merge commit(s) - "
+            "the expected shape with merge_method=merge; do NOT switch the project to "
+            "ff-only, the merge request then fails with need_rebase)"
         )
         return 0
     print("GITLAB MIRROR STILL BEHIND (check the MR state)")
