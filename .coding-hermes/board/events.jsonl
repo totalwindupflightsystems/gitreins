@@ -481,3 +481,5 @@
 {"id": 480, "ts": null, "type": null, "tick": null, "task_id": "EVID-003", "detail": "{\"id\":\"EVID-003\",\"status\":\"pending\"}", "timestamp": "2026-09-22T18:44:49.428156+00:00", "event_type": "task_created", "actor": "foreman"}
 {"id": 481, "ts": null, "type": null, "tick": null, "task_id": "TYPE-001", "detail": "{\"id\":\"TYPE-001\",\"status\":\"pending\"}", "timestamp": "2026-09-22T18:44:59.691041+00:00", "event_type": "task_created", "actor": "foreman"}
 {"id": 482, "ts": null, "type": null, "tick": null, "task_id": "REVIEW-008", "detail": "{\"id\":\"REVIEW-008\",\"status\":\"pending\"}", "timestamp": "2026-09-22T18:48:55.042236+00:00", "event_type": "task_created", "actor": "foreman"}
+{"id": 483, "ts": null, "type": null, "tick": null, "task_id": "RELEASE-001", "detail": "{\"status\":\"complete\"}", "timestamp": "2026-09-22T18:58:55.261338+00:00", "event_type": "task_completed", "actor": "foreman"}
+{"id": 484, "ts": null, "type": null, "tick": null, "task_id": "RELEASE-002", "detail": "{\"status\":\"complete\"}", "timestamp": "2026-09-22T18:58:55.340673+00:00", "event_type": "task_completed", "actor": "foreman"}
