@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gitreins.dev/schemas/evidence/v1.json",
+  "title": "GitReins Evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["$schema", "schemaVersion", "producer", "command", "generatedAt", "scope", "outcome", "passed", "summary", "checks", "metadata"],
+  "properties": {
+    "$schema": { "const": "https://gitreins.dev/schemas/evidence/v1.json" },
+    "schemaVersion": { "const": "1.0" },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "gitreins" },
+        "version": { "type": "string", "maxLength": 64 }
+      }
+    },
+    "command": { "enum": ["guard", "judge", "report"] },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "scope": { "enum": ["staged", "working-tree", "history"] },
+    "outcome": { "enum": ["pass", "fail", "error", "unknown"] },
+    "passed": { "type": ["boolean", "null"] },
+    "summary": { "type": "string", "maxLength": 2048 },
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["taskId", "title", "ephemeral"],
+      "properties": {
+        "taskId": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 512 },
+        "ephemeral": { "type": "boolean" }
+      }
+    },
+    "checks": {
+      "type": "array",
+      "maxItems": 32,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "outcome", "passed", "summary"],
+        "properties": {
+          "id": { "type": "string", "maxLength": 128 },
+          "outcome": { "enum": ["pass", "fail", "error", "unknown"] },
+          "passed": { "type": ["boolean", "null"] },
+          "summary": { "type": "string", "maxLength": 2048 }
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["redacted", "redactionsApplied", "truncated"],
+      "properties": {
+        "redacted": { "const": true },
+        "redactionsApplied": { "type": "boolean" },
+        "truncated": { "type": "boolean" },
+        "checkCount": { "type": "integer", "minimum": 0 },
+        "changedFileCount": { "type": "integer", "minimum": 0 },
+        "historyPersisted": { "type": "boolean" },
+        "storage": { "type": "string", "maxLength": 32 }
+      }
+    }
+  }
+}
