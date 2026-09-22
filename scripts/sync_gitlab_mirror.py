@@ -171,6 +171,9 @@ def main() -> int:
         print("   could not merge automatically - inspect the MR by hand")
 
     print("4. verify ...")
+    # Re-fetch: the merge just moved the mirror's main, and a stale origin/main would report
+    # "still behind" for a sync that actually landed.
+    git("fetch", "-q", REMOTE, "main")
     remote_main = git("rev-parse", f"{REMOTE}/main")
     print(f"   gitlab main = {remote_main[:8]}  local = {local[:8]}")
     if remote_main == local:
