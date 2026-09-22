@@ -757,6 +757,147 @@ class TestSecretsSanitization:
         assert '"***"' in result.output or "sk-" in result.output
 
 
+class TestTimeoutEarlyReturnCarriesAllowSkips:
+    """GR-140: every run_all() timeout early-return carries the TRUST-001 extra map.
+
+    The normal exit path builds extra with allow_skips/test_mode/grade_full_tree,
+    but the ~10 timeout early-returns after each _timed_out() check used to pass
+    no extra at all. cmd_guard_run then read allow_skips from the empty default
+    dict, saw False, and exited 2 — blocking the commit a warning had just said
+    was "allowed to proceed (fail-open)".
+    """
+
+    def _manager(self, tmp_workdir, guards=None):
+        return GuardManager(tmp_workdir, {"guards": guards or {}})
+
+    def _fake_clock(self, elapsed_at_call):
+        """Deterministic engine.guard_manager.time replacement: per-call readings.
+
+        run_all resolves the bare global ``time.monotonic`` from
+        engine.guard_manager's MODULE namespace — an instance attribute named
+        ``time`` is invisible to it — so ``patch("engine.guard_manager.time",
+        clock)`` is the seam. With the check methods stubbed, the only
+        consumers inside the patched window are run_all's ``start`` and the
+        ``_timed_out()`` checks, so a fixed per-call sequence drives the exact
+        code path without sleeping and without touching any other module's
+        clock.
+        """
+
+        class _Clock:
+            def __init__(self, readings):
+                self._readings = iter(readings)
+
+            def monotonic(self):
+                return next(self._readings)
+
+        return _Clock(elapsed_at_call)
+
+    def test_timeout_after_tests_check_carries_allow_skips(self, tmp_workdir):
+        """Timeout early-return: extra['allow_skips'] matches the config value."""
+        gm = self._manager(tmp_workdir, {"allow_skips": True})
+        with (
+            patch.object(gm, "_check_secrets", return_value=GuardResult("secrets", True, "ok")),
+            patch.object(gm, "_check_lint", return_value=GuardResult("lint", True, "ok")),
+            patch.object(gm, "_check_tests", return_value=GuardResult("tests", True, "ok")),
+            patch("engine.guard_manager.time", self._fake_clock([0.0, 1.0, 2.0, 301.0])),
+        ):
+            result = gm.run_all()
+        assert len(result.results) == 3
+        assert result.passed is True
+        assert any("timed out" in w for w in result.warnings)
+        assert result.extra.get("allow_skips") is True
+
+    def test_timeout_extra_matches_normal_exit_extra_keys(self, tmp_workdir):
+        """The timeout extra map carries the same keys the normal exit builds."""
+        gm = self._manager(tmp_workdir, {"allow_skips": True, "test_mode": "diff"})
+        with (
+            patch.object(gm, "_check_secrets", return_value=GuardResult("secrets", True, "ok")),
+            patch.object(gm, "_check_lint", return_value=GuardResult("lint", True, "ok")),
+            patch.object(gm, "_check_tests", return_value=GuardResult("tests", True, "ok")),
+            patch("engine.guard_manager.time", self._fake_clock([0.0, 1.0, 2.0, 301.0])),
+        ):
+            timed_out = gm.run_all()
+        assert any("timed out" in w for w in timed_out.warnings)
+        assert timed_out.extra.get("allow_skips") is True
+        assert timed_out.extra.get("test_mode") == "diff"
+        assert timed_out.extra.get("grade_full_tree") is False
+
+    def test_timeout_extra_false_when_allow_skips_absent(self, tmp_workdir):
+        """No allow_skips config → the timeout extra carries False, not absence."""
+        gm = self._manager(tmp_workdir)
+        with (
+            patch.object(gm, "_check_secrets", return_value=GuardResult("secrets", True, "ok")),
+            patch.object(gm, "_check_lint", return_value=GuardResult("lint", True, "ok")),
+            patch.object(gm, "_check_tests", return_value=GuardResult("tests", True, "ok")),
+            patch("engine.guard_manager.time", self._fake_clock([0.0, 1.0, 2.0, 301.0])),
+        ):
+            result = gm.run_all()
+        assert any("timed out" in w for w in result.warnings)
+        assert result.extra.get("allow_skips") is False
+
+    def test_timeout_after_first_check_also_carries_extra(self, tmp_workdir):
+        """The earliest early-return (right after secrets) carries extra too."""
+        gm = self._manager(tmp_workdir, {"allow_skips": True})
+        with (
+            patch.object(gm, "_check_secrets", return_value=GuardResult("secrets", True, "ok")),
+            patch("engine.guard_manager.time", self._fake_clock([0.0, 301.0])),
+        ):
+            result = gm.run_all()
+        assert len(result.results) == 1
+        assert any("timed out" in w for w in result.warnings)
+        assert result.extra.get("allow_skips") is True
+
+    def test_every_timeout_exit_path_carries_allow_skips(self, tmp_workdir):
+        """Parametrized over all arms: whichever _timed_out fires, extra rides along."""
+        gm = self._manager(tmp_workdir, {"allow_skips": True})
+        arms = ["secrets", "lint", "tests"]
+        for fired_after in range(1, len(arms) + 1):
+            # Readings: start=0, checks 1..fired_after-1 stay under budget,
+            # the fired_after-th check crosses it and takes the early-return.
+            readings = [0.0] + [float(i) for i in range(1, fired_after)] + [301.0]
+            with (
+                patch.object(gm, "_check_secrets", return_value=GuardResult("secrets", True, "ok")),
+                patch.object(gm, "_check_lint", return_value=GuardResult("lint", True, "ok")),
+                patch.object(gm, "_check_tests", return_value=GuardResult("tests", True, "ok")),
+                patch("engine.guard_manager.time", self._fake_clock(readings)),
+            ):
+                result = gm.run_all()
+            assert any("timed out" in w for w in result.warnings), (
+                f"timeout after {fired_after} check(s) never fired"
+            )
+            assert result.extra.get("allow_skips") is True, (
+                f"timeout after {fired_after} check(s) lost allow_skips"
+            )
+
+    def test_low_hook_timeout_real_clock_extra_present(self, tmp_workdir):
+        """A real (unpatched) run with hook_timeout: 1 sees the same extra map.
+
+        Uses test_on_clean so the tests arm runs the full test_command
+        (which sleeps 5s, exceeding the 1s budget). The timeout fires
+        during the tests arm and the early-return carries allow_skips.
+        """
+        from pathlib import Path
+
+        test_file = Path(tmp_workdir) / "test_dummy.py"
+        test_file.write_text("def test_dummy():\n    pass\n")
+        gm = GuardManager(
+            tmp_workdir,
+            {
+                "guards": {
+                    "allow_skips": True,
+                    "hook_timeout": 1,
+                    "test_command": 'python -c "import time; time.sleep(5)"',
+                    "test_on_clean": True,
+                }
+            },
+        )
+        result = gm.run_all()
+        assert any("timed out" in w for w in result.warnings)
+        assert result.extra.get("allow_skips") is True
+        assert result.extra.get("test_mode") == "full"
+        assert result.extra.get("grade_full_tree") is False
+
+
 class TestGuardToggling:
     """Test guard toggling: run_all() only runs enabled guards — step-1-3-1-5."""
 

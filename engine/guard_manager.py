@@ -1006,7 +1006,7 @@ class GuardManager:
                     f"(hook_timeout). Remaining checks skipped — "
                     f"commit allowed to proceed (fail-open)."
                 )
-                return _finalize(Tier1Result(passed=True, results=results, warnings=warnings))
+                return _finalize(self._timeout_result(results, warnings))
 
         if self._enabled["lint"] and not self._is_go:
             results.append(self._check_lint())
@@ -1016,7 +1016,7 @@ class GuardManager:
                     f"(hook_timeout). Remaining checks skipped — "
                     f"commit allowed to proceed (fail-open)."
                 )
-                return _finalize(Tier1Result(passed=True, results=results, warnings=warnings))
+                return _finalize(self._timeout_result(results, warnings))
 
         if self._enabled["tests"] and not self._is_go:
             results.append(self._check_tests())
@@ -1026,7 +1026,7 @@ class GuardManager:
                     f"(hook_timeout). Remaining checks skipped — "
                     f"commit allowed to proceed (fail-open)."
                 )
-                return _finalize(Tier1Result(passed=True, results=results, warnings=warnings))
+                return _finalize(self._timeout_result(results, warnings))
 
         dead_code_enabled = self._enabled["dead_code"] or force_dead_code
         if dead_code_enabled and not self._is_go:
@@ -1037,7 +1037,7 @@ class GuardManager:
                     f"(hook_timeout). Remaining checks skipped — "
                     f"commit allowed to proceed (fail-open)."
                 )
-                return _finalize(Tier1Result(passed=True, results=results, warnings=warnings))
+                return _finalize(self._timeout_result(results, warnings))
 
         if self._enabled["skylos"]:
             results.append(self._check_skylos())
@@ -1047,7 +1047,7 @@ class GuardManager:
                     f"(hook_timeout). Remaining checks skipped — "
                     f"commit allowed to proceed (fail-open)."
                 )
-                return _finalize(Tier1Result(passed=True, results=results, warnings=warnings))
+                return _finalize(self._timeout_result(results, warnings))
 
         if self._enabled["static_analysis"]:
             results.append(self._check_static_analysis())
@@ -1057,7 +1057,7 @@ class GuardManager:
                     f"(hook_timeout). Remaining checks skipped — "
                     f"commit allowed to proceed (fail-open)."
                 )
-                return _finalize(Tier1Result(passed=True, results=results, warnings=warnings))
+                return _finalize(self._timeout_result(results, warnings))
 
         if self._enabled["lsp"] and not self._is_go:
             results.append(self._check_lsp())
@@ -1067,7 +1067,7 @@ class GuardManager:
                     f"(hook_timeout). Remaining checks skipped — "
                     f"commit allowed to proceed (fail-open)."
                 )
-                return _finalize(Tier1Result(passed=True, results=results, warnings=warnings))
+                return _finalize(self._timeout_result(results, warnings))
 
         if self._enabled.get("security_scan", False):
             results.append(self._check_security_scan())
@@ -1077,7 +1077,7 @@ class GuardManager:
                     f"(hook_timeout). Remaining checks skipped — "
                     f"commit allowed to proceed (fail-open)."
                 )
-                return _finalize(Tier1Result(passed=True, results=results, warnings=warnings))
+                return _finalize(self._timeout_result(results, warnings))
 
         if self._is_go:
             if self._go_guards.get("build", True):
@@ -1088,7 +1088,7 @@ class GuardManager:
                         f"(hook_timeout). Remaining checks skipped — "
                         f"commit allowed to proceed (fail-open)."
                     )
-                    return _finalize(Tier1Result(passed=True, results=results, warnings=warnings))
+                    return _finalize(self._timeout_result(results, warnings))
             if self._go_guards.get("lint", True):
                 results.append(self._check_go_lint())
                 if _timed_out():
@@ -1097,7 +1097,7 @@ class GuardManager:
                         f"(hook_timeout). Remaining checks skipped — "
                         f"commit allowed to proceed (fail-open)."
                     )
-                    return _finalize(Tier1Result(passed=True, results=results, warnings=warnings))
+                    return _finalize(self._timeout_result(results, warnings))
             if self._go_guards.get("tests", True):
                 results.append(self._check_go_tests())
                 if _timed_out():
@@ -1106,7 +1106,7 @@ class GuardManager:
                         f"(hook_timeout). Remaining checks skipped — "
                         f"commit allowed to proceed (fail-open)."
                     )
-                    return _finalize(Tier1Result(passed=True, results=results, warnings=warnings))
+                    return _finalize(self._timeout_result(results, warnings))
 
         passed = all(r.passed for r in results)
         extra = {
@@ -1134,6 +1134,28 @@ class GuardManager:
         result.extra["degraded"] = result.degraded
         result.extra["skipped_steps"] = result.skipped_steps
         return result
+
+    def _timeout_result(self, results: list[GuardResult], warnings: list[str]) -> Tier1Result:
+        """Build the Tier1Result for a hook_timeout early-return (GR-140).
+
+        Every timeout exit shares the normal exit's ``extra`` contract: the
+        CLI's DEGRADED PASS / exit-code policy (TRUST-001) reads
+        ``allow_skips`` from it, and MCP/library callers read ``test_mode``
+        and ``grade_full_tree``. The early-returns used to pass no extra at
+        all, so ``allow_skips`` read as False and a repo that opted into
+        fail-open got exit 2 anyway — the warning said the commit was
+        allowed while the hook blocked it.
+        """
+        return Tier1Result(
+            passed=True,
+            results=results,
+            extra={
+                "test_mode": self._test_mode,
+                "grade_full_tree": self._grade_full_tree,
+                "allow_skips": self._allow_skips,
+            },
+            warnings=warnings,
+        )
 
     def _remember_full_output(self, name: str, output: str) -> None:
         """Keep an untruncated guard output for the persisted run log (DF-018).
