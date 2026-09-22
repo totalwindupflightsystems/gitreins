@@ -12,11 +12,30 @@ python3 scripts/check_deployed_surface.py   # exits 1 on drift, prints what is m
 The probe compares the repo's subcommand list and version against the deployed binary and names any subcommand that exists only in the repo. Treat a non-zero exit as a failed deploy, not a warning. Release cuts run it as a checklist gate.
 
 
-### Remotes: both stay in sync
+### Remotes: the GitLab mirror is kept in step
 
-This repo has two remotes and pushes to both: `github` (github.com/totalwindupflightsystems/gitreins, the live one, where CI and releases run) and the GitLab mirror `origin` (gitlab.readydedis.com/totalwindup/gitreins-poc). The `github` remote carries a second push URL, so a single `git push github main` fans out to both — never push to only one of them, or the mirror silently rots (it sat three months behind after the June 2026 line). The pre-sync GitLab line is preserved on that remote as `archive/pre-gitreins-sync-2026-06`.
+This repo has two remotes: `github` (github.com/totalwindupflightsystems/gitreins — live, CI and releases run here)
+and the GitLab mirror `origin` (gitlab.readydedis.com/totalwindup/gitreins-poc). Keep both at the same content.
 
-Open question recorded for the owner: whether this project should move under the `coding-hermes` org/group instead of `totalwindupflightsystems` / `totalwindup`; until that is decided the rule is simply that both remotes stay at the same commit.
+The mirror **protects `main`** (push: no one, merge: maintainers), so you cannot just add a second push URL —
+a plain `git push` is rejected by its pre-receive hook. Sync it the way that project expects:
+
+```bash
+python3 scripts/sync_gitlab_mirror.py          # push mirror/main, open+merge the MR, verify
+python3 scripts/sync_gitlab_mirror.py --check  # verify only
+```
+
+It pushes this repo's `main` to the unprotected `mirror/main` branch on GitLab, opens (or reuses) a merge
+request into `main`, merges it with the API using `GITLAB_TOKEN` (environment or `~/.hermes/.env`), and then
+verifies that the mirror's `main` contains this repo's `main`. A mirror-side merge commit is reported as
+content-in-sync; the token is never printed.
+
+History: the mirror sat three months behind after the June 2026 v0.1.1 line; its `main` was force-synced on
+2026-09-22 and that old line is preserved on the remote as `archive/pre-gitreins-sync-2026-06`.
+
+Open question recorded for the owner: whether this project should move under the `coding-hermes` org/group
+instead of `totalwindupflightsystems` / `totalwindup`. Until that is decided the rule is simply that both
+remotes carry the same content.
 
 ## Setup
 
