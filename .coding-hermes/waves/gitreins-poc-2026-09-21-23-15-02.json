@@ -1,0 +1,57 @@
+{
+  "tick_id": "gitreins-poc-2026-09-21-23-15-02",
+  "project": "gitreins-poc",
+  "composed": true,
+  "created_at": "2026-09-21T23:30:00Z",
+  "base_ref": "main",
+  "base_sha": "f94a2f7",
+  "wave_budget": 9,
+  "workers": [
+    {
+      "task_id": "GR-140",
+      "worktree": "/home/kara/worktrees/gitreins-poc-GR-140",
+      "branch": "wt/GR-140",
+      "brief": "/tmp/gp-wave-brief-GR-140.md",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "depends_on": [],
+      "status": "failed_provider_chain",
+      "reason": "all providers in fallback chain failed \u2014 no commits"
+    },
+    {
+      "task_id": "JEVRES-003",
+      "worktree": "/home/kara/worktrees/gitreins-poc-JEVRES-003",
+      "branch": "wt/JEVRES-003",
+      "brief": "/tmp/gp-wave-brief-JEVRES-003.md",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "depends_on": [],
+      "status": "merged",
+      "commit": "230f067",
+      "merge_commit": "41fb53a",
+      "judge": "PASS 5ea32bd9"
+    },
+    {
+      "task_id": "JEVRES-004",
+      "worktree": "/home/kara/worktrees/gitreins-poc-JEVRES-004",
+      "branch": "wt/JEVRES-004",
+      "brief": "/tmp/gp-wave-brief-JEVRES-004.md",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "depends_on": [],
+      "status": "failed_provider_chain",
+      "reason": "all providers in fallback chain failed \u2014 no commits"
+    }
+  ],
+  "deferred": [
+    {
+      "task_id": "JEVRES-006",
+      "reason": "config knob surface overlaps JEVRES-003/004 wiring band \u2014 same-band collision per middle-out rule; next tick"
+    },
+    {
+      "task_id": "DF-GITREINS-POC-25",
+      "reason": "externally-owned: fix lives in ~/.hermes/scripts/bunker-qa.sh (fleet harness), not this repo \u2014 tick-297 doctrine"
+    }
+  ],
+  "finished_at": "2026-09-22T00:10:00Z"
+}
