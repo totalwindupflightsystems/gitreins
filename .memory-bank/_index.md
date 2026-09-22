@@ -5,7 +5,7 @@
 > are not in the code itself. Read `_index.md` first.
 
 **Status:** All 12 work items (GR-001 → GR-012) complete as of 2026-06-15.
-**Codebase:** ~/gitreins-poc/ — 7 engine modules, MCP server, CLI, 322 tests passing.
+**Codebase:** ~/gitreins/ — 7 engine modules, MCP server, CLI, 322 tests passing.
 **Source-of-truth priority when in conflict:**
   1. `engine/*.py` (the actual code)
   2. `.hermes/acceptance-criteria.md` (what passed)

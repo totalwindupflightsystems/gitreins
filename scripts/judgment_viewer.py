@@ -11,7 +11,7 @@ Scans a repo's judgment stores and emits ONE self-contained dark HTML page
   <repo>/.gitreins/qa-ledger.jsonl (or $GITREINS_QA_LEDGER) -> QA runs
 
 Usage:
-  python3 judgment_viewer.py --repo /home/kara/gitreins-poc --out /home/kara/gitreins-judgments.html
+  python3 judgment_viewer.py --repo /home/kara/gitreins --out /home/kara/gitreins-judgments.html
 """
 
 import argparse
@@ -153,7 +153,7 @@ def load_tasks(repo):
     return tasks
 
 
-def load_ticks(name="gitreins-poc"):
+def load_ticks(name="gitreins"):
     if not os.path.exists(TICKS_DB):
         return []
     try:
@@ -290,7 +290,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--repo", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--project", default="gitreins-poc", help="scheduler project name for ticks")
+    ap.add_argument("--project", default="gitreins", help="scheduler project name for ticks")
     args = ap.parse_args()
 
     verdicts = load_verdicts(args.repo)

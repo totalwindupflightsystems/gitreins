@@ -158,7 +158,7 @@
 
 **How to verify:**
 ```bash
-cd /home/kara/gitreins-poc && .venv/bin/python3 gitreins/cli.py guard 2>&1 | grep static_analysis
+cd /home/kara/gitreins && .venv/bin/python3 gitreins/cli.py guard 2>&1 | grep static_analysis
 # Expected: ✓ static_analysis
 ```
 
@@ -166,7 +166,7 @@ cd /home/kara/gitreins-poc && .venv/bin/python3 gitreins/cli.py guard 2>&1 | gre
 
 **How to verify:**
 ```bash
-cd /home/kara/gitreins-poc && .venv/bin/python3 -m pytest tests/test_static_analysis.py -x --tb=short -q 2>&1
+cd /home/kara/gitreins && .venv/bin/python3 -m pytest tests/test_static_analysis.py -x --tb=short -q 2>&1
 # Expected: 46 passed
 ```
 
@@ -185,7 +185,7 @@ cd /home/kara/gitreins-poc && .venv/bin/python3 -m pytest tests/test_static_anal
 **How to verify:**
 ```bash
 cd /tmp && mkdir -p gr-init-sa && cd gr-init-sa && git init -q && \
-  /home/kara/gitreins-poc/.venv/bin/python3 /home/kara/gitreins-poc/gitreins/cli.py init 2>&1 | grep -i 'static analysis'
+  /home/kara/gitreins/.venv/bin/python3 /home/kara/gitreins/gitreins/cli.py init 2>&1 | grep -i 'static analysis'
 # Expected: shows detected tools (mypy ✓, pyright ✓ for Python)
 ```
 
@@ -203,7 +203,7 @@ cd /tmp && mkdir -p gr-init-sa && cd gr-init-sa && git init -q && \
 
 **How to verify:**
 ```bash
-cd /home/kara/gitreins-poc && .venv/bin/python3 -m pytest tests/test_eval_static_analysis.py -x --tb=short -q 2>&1
+cd /home/kara/gitreins && .venv/bin/python3 -m pytest tests/test_eval_static_analysis.py -x --tb=short -q 2>&1
 # Expected: 10 passed
 ```
 
@@ -221,7 +221,7 @@ cd /home/kara/gitreins-poc && .venv/bin/python3 -m pytest tests/test_eval_static
 
 **How to verify:**
 ```bash
-cd /home/kara/gitreins-poc && .venv/bin/python3 gitreins/cli.py setup-tools 2>&1
+cd /home/kara/gitreins && .venv/bin/python3 gitreins/cli.py setup-tools 2>&1
 # Expected: shows mypy ✓ found, pyright ✓ found, exits 0
 ```
 
