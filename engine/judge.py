@@ -323,7 +323,18 @@ def judge_result_to_dict(task_id: str, workdir: str, result) -> dict:
     if tier2:
         d["verdict"] = tier2.verdict
         d["items"] = [
-            {"criterion": i.criterion, "status": i.status, "detail": i.detail} for i in tier2.items
+            {
+                "criterion": i.criterion,
+                "status": i.status,
+                "detail": i.detail,
+                **(
+                    {"resolution_probability": i.resolution_probability}
+                    if getattr(i, "resolution_probability", None) is not None
+                    else {}
+                ),
+                **({"cited_path": i.cited_path} if getattr(i, "cited_path", None) else {}),
+            }
+            for i in tier2.items
         ]
         d["summary"] = tier2.summary
     return d

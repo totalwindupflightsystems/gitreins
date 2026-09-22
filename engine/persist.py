@@ -769,6 +769,24 @@ class VerdictPersister:
 # ── Shared verdict persistence (CLI + MCP) ─────────────────────
 
 
+def _verdict_item_dict(item) -> dict:
+    """One verdict item as persisted — attribution keys only when present.
+
+    The three-key shape is today's contract; ``resolution_probability`` and
+    ``cited_path`` (JEVRES-004) appear only when the item actually carries
+    them, so a verdict from a degraded run serializes byte-identically to the
+    pre-JEVRES-004 shape.
+    """
+    d = {"criterion": item.criterion, "status": item.status, "detail": item.detail}
+    probability = getattr(item, "resolution_probability", None)
+    cited = getattr(item, "cited_path", None)
+    if probability is not None:
+        d["resolution_probability"] = probability
+    if cited:
+        d["cited_path"] = cited
+    return d
+
+
 def build_verdict_data(workdir: str, task, result) -> dict:
     """Build the verdict payload persisted for an evaluation.
 
@@ -815,14 +833,23 @@ def build_verdict_data(workdir: str, task, result) -> dict:
         "commit": source_commit,
     }
 
-    # Extract items from verdict or pipeline result
+    # Extract items from verdict or pipeline result. JEVRES-004: items carry
+    # the per-criterion resolution attribution when a pre-screen ran; the
+    # fields are omitted entirely when absent so verdicts from degraded
+    # (ABSTAIN) or pre-screen-era runs keep today's exact shape.
     if result.verdict and hasattr(result.verdict, "items"):
-        verdict_data["items"] = [
-            {"criterion": item.criterion, "status": item.status, "detail": item.detail}
-            for item in result.verdict.items
-        ]
+        verdict_data["items"] = [_verdict_item_dict(item) for item in result.verdict.items]
     else:
         verdict_data["items"] = []
+
+    # JEVRES-004 tier 1.5: the full pre-screen (per-criterion probabilities,
+    # missing kinds, evidence quality, and the engine's own verdict with its
+    # bundle manifest) persists INSIDE the existing verdict record, so
+    # `gitreins serve` shows it with the same entry it already lists — no new
+    # persistence surface to drift (DF-GITREINS-POC-23).
+    prescreen = getattr(result.verdict, "prescreen", None)
+    if prescreen:
+        verdict_data["prescreen"] = prescreen
 
     # Pipeline stages
     if result.pipeline_result:

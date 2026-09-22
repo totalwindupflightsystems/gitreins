@@ -95,6 +95,23 @@ _PYTEST_INVOCATION = re.compile(r"\bpytest\b")
 SKIP_SENTINEL = "GITREINS_SKIP:"
 
 
+def _verdict_item_data(item) -> dict:
+    """One verdict item for a step's ``data`` payload — attribution optional.
+
+    Same contract as ``engine.persist._verdict_item_dict``: the three
+    historical keys always, the JEVRES-004 attribution keys only when the
+    item carries them (i.e. a pre-screen ran).
+    """
+    d = {"criterion": item.criterion, "status": item.status, "detail": item.detail}
+    probability = getattr(item, "resolution_probability", None)
+    cited = getattr(item, "cited_path", None)
+    if probability is not None:
+        d["resolution_probability"] = probability
+    if cited:
+        d["cited_path"] = cited
+    return d
+
+
 def parse_skip_sentinels(output: str) -> list[tuple[str, str]]:
     """Extract ``(step_id, reason)`` pairs from a step's output.
 
@@ -756,10 +773,7 @@ class Pipeline:
                 output=f"{verdict.verdict}\n{items_output}\n{verdict.summary}",
                 data={
                     "verdict": verdict.verdict,
-                    "items": [
-                        {"criterion": i.criterion, "status": i.status, "detail": i.detail}
-                        for i in verdict.items
-                    ],
+                    "items": [_verdict_item_data(i) for i in verdict.items],
                     "summary": verdict.summary,
                 },
             )
