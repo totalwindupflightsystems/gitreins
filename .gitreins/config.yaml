@@ -10,9 +10,14 @@ guards:
   # collection step it consumes. Without the chain, test-count drift only
   # surfaces in CI (the guard cannot see this class; 3 CI reds: GR-GAP-019
   # era, INT-CI-12, tick 319). A drifted claim FAILS the commit before push.
+  # Interpreter-pinned 2026-09-22 (REVIEW-008): the bare `uv run pytest` form resolved
+  # `pytest` from PATH, and on a host where the agent runtime's venv sits first on PATH
+  # that is a DIFFERENT pytest (no pytest-xdist → `unrecognized arguments: -n` from
+  # addopts) — the test lane then FAILS for an environment reason and blocks every
+  # commit that touches pyproject/Makefile/.gitreins/config.yaml. Pin the repo venv.
   test_command: >-
-    python3 scripts/check_docs_drift.py &&
-    uv run pytest -x --tb=short
+    .venv/bin/python scripts/check_docs_drift.py &&
+    .venv/bin/python -m pytest -x --tb=short
   test_timeout: 900
   # TRUST-001: this repo's own gate is graded by `pytest tests/ -v` in CI, and
   # `gitreins guard` here runs on a clean checkout (nothing staged → lint/tests
@@ -24,7 +29,10 @@ guards:
   skylos: false
   static_analysis: false
   # static_analysis disabled 2026-07-19: 2150 pre-existing mypy --strict errors.
-  # Re-enable after GR-099 type annotation project. Ruff/lint covers quality meanwhile.
+  # Re-enable when the type-annotation project closes: board row TYPE-001 (filed
+  # 2026-09-22). The earlier pointer to GR-099 was wrong - GR-099 is the parked
+  # pydantic-core pin re-check, a different workstream. Ruff/lint covers quality
+  # meanwhile, and static analysis stays OFF here until TYPE-001 reaches zero.
   static_analysis_tools:
     python:
     - mypy

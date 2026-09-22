@@ -87,3 +87,7 @@ demo-slugify/
 .coding-hermes/board/board.db.wal
 .coding-hermes/board/*.parquet
 .coding-hermes/board/*.duckdb
+
+# Runtime locks are never committed: two agents holding one at once produce a tracked
+# conflict on a file that carries no information (REVIEW-006).
+.gitreins/*.lock
