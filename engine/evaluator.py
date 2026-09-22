@@ -27,6 +27,14 @@ from dataclasses import dataclass, field
 
 from engine.llm import LLMClient, ToolCall
 from engine.eval_cap import EvalCap, parse_eval_cap, eval_cap_from_config, _fmt_tokens
+from engine.prescreen import (
+    PRESCREEN_KEY,
+    WARN_TEMPLATE,
+    PrescreenResult,
+    assemble_prescreen_task,
+    attach_prescreen,
+    run_prescreen,
+)
 from engine import command_hygiene
 
 logger = logging.getLogger("gitreins.evaluator")
@@ -362,6 +370,11 @@ class VerdictItem:
     criterion: str
     status: str  # "PASS" | "FAIL"
     detail: str
+    # JEVRES-004 per-criterion attribution (spec §4 row 4). Both default
+    # to None so every verdict produced before the pre-screen existed — and
+    # every degraded (ABSTAIN) run — serializes exactly as before.
+    resolution_probability: float | None = None
+    cited_path: str | None = None
 
 
 @dataclass
@@ -369,6 +382,11 @@ class Verdict:
     verdict: str  # "COMPLETE" | "INCOMPLETE"
     items: list[VerdictItem] = field(default_factory=list)
     summary: str = ""
+    # JEVRES-004 (spec §4 row 2): the full tier-1.5 pre-screen dict (per-
+    # criterion probabilities, missing kinds, evidence quality, and the
+    # engine's own verdict incl. bundle manifest). None = no pre-screen ran
+    # (disabled or ABSTAIN) — the degraded path never fabricates one.
+    prescreen: dict | None = None
 
 
 # DF-GITREINS-POC-14: the summary prefix the evaluator writes when it cannot
@@ -1040,6 +1058,28 @@ class AgenticEvaluator:
         # any (2026-08-08 fix — was never wired through before).
         self._system_prompt_override = task.get("_system_prompt_override")
 
+        # ── Tier 1.5 pre-screen (JEVRES-004) ──
+        # Resolve the criteria against the repo with ONE cheap Jev call
+        # before the expensive loop starts (spec §4 row 2). Any ABSTAIN —
+        # no key, every key refused, transport, malformed answer, no hilo,
+        # no criteria — degrades to exactly today's path with ONE warning
+        # line: no injected block, no verdict attribution, no other
+        # behaviour change. The pre-screen is INPUT for the judge and
+        # attribution for the artifact; it can never skip the loop.
+        config = self._load_config()
+        evaluator_cfg = config.get("evaluator", {})
+        prescreen: PrescreenResult | None = None
+        if task.get(PRESCREEN_KEY) is not None:
+            # Forward hook: a caller (pipeline/MCP) may pass a pre-computed
+            # pre-screen on the task dict; it is used as-is.
+            passed = task.get(PRESCREEN_KEY)
+            prescreen = passed if isinstance(passed, PrescreenResult) else None
+        elif evaluator_cfg.get("prescreen", True):
+            prescreen = run_prescreen(task, workdir=self.workdir)
+            if prescreen.abstained:
+                logger.warning(WARN_TEMPLATE, prescreen.abstain_reason or "unknown")
+                prescreen = None
+
         # Build the task prompt
         criteria_list = task.get("criteria", [])
         criteria_text = "\n".join(f"  {i + 1}. {c}" for i, c in enumerate(criteria_list))
@@ -1072,9 +1112,13 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 diag_lines.append(f"  {file}:{line}:{severity}:{message} [{tool}]")
             task_prompt += "\n\n" + "\n".join(diag_lines)
 
-        # Build tools list based on config
-        config = self._load_config()
-        evaluator_cfg = config.get("evaluator", {})
+        # Inject the pre-screen block (GOAL A) — input only, after the tier-1
+        # diagnostics so the judge reads both as context, neither as verdict.
+        if prescreen is not None:
+            task_prompt += "\n\n" + assemble_prescreen_task(prescreen)
+
+        # Build tools list based on config — the same evaluator_cfg block the
+        # pre-screen read above; config is loaded exactly once per evaluation.
 
         # Compute file scope — which files the evaluator is allowed to touch
         file_scope = evaluator_cfg.get("file_scope", "changed")
@@ -1138,7 +1182,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 logger.warning("Eval cap exceeded: %s", cap_error)
                 partial = self._extract_partial_verdict(criteria_list)
                 if partial is not None:
-                    return partial
+                    return attach_prescreen(partial, prescreen)
                 return Verdict(
                     verdict="INCOMPLETE",
                     summary=f"Cap exceeded: {cap_error}",
@@ -1259,7 +1303,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 logger.warning("Eval cap exceeded: %s", cap_error)
                 partial = self._extract_partial_verdict(criteria_list)
                 if partial is not None:
-                    return partial
+                    return attach_prescreen(partial, prescreen)
                 return Verdict(
                     verdict="INCOMPLETE",
                     summary=f"Cap exceeded: {cap_error}",
@@ -1268,7 +1312,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             # No tool calls → LLM is delivering a verdict
             if not response.tool_calls:
                 if response.content:
-                    return self._parse_verdict(response.content)
+                    return attach_prescreen(self._parse_verdict(response.content), prescreen)
                 return Verdict(
                     verdict="INCOMPLETE",
                     summary="Evaluator returned empty response.",
