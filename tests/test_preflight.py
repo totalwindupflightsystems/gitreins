@@ -84,6 +84,13 @@ def _hermetic_credentials(monkeypatch, tmp_path):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.chdir(tmp_path)
+    # JEVRES-006: the predispatch surface ships config-disabled; pin it OPEN
+    # so the existing tests keep grading the policy they were written for.
+    from engine.config import GitReinsDefaults
+
+    defaults = GitReinsDefaults()
+    defaults.resolution_enabled_predispatch = True
+    monkeypatch.setattr(resolution, "resolution_config", lambda workdir=".": defaults)
 
 
 @pytest.fixture

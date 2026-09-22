@@ -74,6 +74,15 @@ class _StubResponse:
         return _jev_payload(self._noul, self._choice)
 
 
+def _enabled_resolution_defaults(surface: str):
+    """Built-in defaults with *surface*'s enable flag flipped to True (J-GATE)."""
+    from engine.config import GitReinsDefaults
+
+    defaults = GitReinsDefaults()
+    setattr(defaults, f"resolution_enabled_{surface}", True)
+    return defaults
+
+
 @pytest.fixture(autouse=True)
 def _hermetic_credentials(monkeypatch, tmp_path):
     """No ambient credentials, no reachable .env, no real egress."""
@@ -81,6 +90,14 @@ def _hermetic_credentials(monkeypatch, tmp_path):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.chdir(tmp_path)
+    # JEVRES-006: the predispatch surface ships config-disabled; these tests
+    # pin it OPEN so they keep grading the policy they were written for. The
+    # disabled (fail-open dispatch) contract has its own class below.
+    monkeypatch.setattr(
+        resolution,
+        "resolution_config",
+        lambda workdir=".": _enabled_resolution_defaults("predispatch"),
+    )
 
 
 def _script_assembler(monkeypatch) -> None:
@@ -290,3 +307,80 @@ class TestPreflightCLI:
                 except SystemExit as exc:
                     code = exc.code or 0
         assert code != 0
+
+
+class TestPreflightConfigGate:
+    """JEVRES-006 — the predispatch surface is config-gated, fail OPEN.
+
+    Disabled (the default), no resolution runs; the record is the usual
+    ABSTAIN-shaped dispatch record with the named ``surface-disabled`` reason
+    and the command still exits 0 — a dead config must never stop work.
+    """
+
+    def test_disabled_dispatches_with_named_reason_and_skips_resolution(
+        self, monkeypatch, tmp_path
+    ):
+        from engine.config import GitReinsDefaults
+
+        monkeypatch.setattr(resolution, "resolution_config", lambda workdir=".": GitReinsDefaults())
+
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        code, out, _ = run_preflight(monkeypatch, str(workdir), "row premise?", "--json")
+
+        assert code == 0, "disabled is a fail-open dispatch outcome, not an error"
+        record = json.loads(out)
+        assert record["decision"] == "dispatch"
+        assert record["band"] == "ABSTAIN"
+        assert record["abstain_reason"] == "surface-disabled"
+        assert record["probability"] is None
+        verdict = json.loads(record["verdict_json"])
+        assert "predispatch" in verdict["abstain_detail"]
+
+    def test_disabled_record_still_rides_the_dispatch_hook(self, monkeypatch, tmp_path):
+        from engine.config import GitReinsDefaults
+
+        from engine.preflight import preflight
+
+        monkeypatch.setattr(resolution, "resolution_config", lambda workdir=".": GitReinsDefaults())
+        dispatched = []
+        record = preflight(
+            "row premise?",
+            workdir=str(tmp_path),
+            defaults=GitReinsDefaults(),
+            dispatch=lambda: dispatched.append(True),
+        )
+        assert record["decision"] == "dispatch"
+        assert dispatched == [True], "the foreman's dispatch step still runs"
+
+    def test_enabled_in_config_runs_the_real_policy(self, monkeypatch, tmp_path):
+        """enabled.predispatch: true in config.yaml → the gate runs for real."""
+        import yaml
+
+        from engine.config import load_defaults
+
+        _script_assembler(monkeypatch)
+        monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("pf"))
+        monkeypatch.setattr(
+            resolution,
+            "requests",
+            type("E", (), {"post": staticmethod(lambda *a, **k: _StubResponse(0.87))})(),
+        )
+
+        workdir = tmp_path / "repo"
+        config_dir = workdir / ".gitreins"
+        config_dir.mkdir(parents=True)
+        with open(config_dir / "config.yaml", "w") as f:
+            yaml.safe_dump({"resolution": {"enabled": {"predispatch": True}}}, f)
+        monkeypatch.setattr(
+            resolution, "resolution_config", lambda wd=".": load_defaults(str(workdir))
+        )
+
+        code, out, _ = run_preflight(
+            monkeypatch, str(workdir), "Is JEVRES-003 already implemented?", "--json"
+        )
+        assert code == 0
+        record = json.loads(out)
+        assert record["band"] == "RESOLVED"
+        assert record["decision"] == "skip-dispatch"
+        assert record["probability"] == pytest.approx(0.87)

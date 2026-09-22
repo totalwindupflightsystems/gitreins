@@ -499,6 +499,21 @@ def cmd_init(args):
         fleet["disk_ceiling_mb"] = 4096
         changed.append("worktree_fleet.disk_ceiling_mb")
 
+    # Jev resolution gate (JEVRES-006) — additive like worktree_fleet: a fresh
+    # or upgraded config gets the full block with EVERY SURFACE DISABLED (the
+    # gate makes a real third-party egress and the judge-adjacent surfaces
+    # await JEVRES-005's calibration numbers); a user-authored block is never
+    # overwritten. See docs/jev-resolution-gate.md §9.
+    from engine.config import GitReinsDefaults
+
+    if "resolution" not in existing:
+        existing["resolution"] = GitReinsDefaults().to_config_dict()["resolution"]
+        changed.append("resolution")
+    elif not isinstance(existing["resolution"], dict):
+        # A user-written scalar (`resolution: true`) is data, not schema: keep
+        # it verbatim — the enable gate reads it as "all surfaces off".
+        changed.append("resolution (kept as written: not a mapping)")
+
     # Write config
     os.makedirs(gitreins_dir, exist_ok=True)
     bak = _safe_overwrite(
@@ -2516,12 +2531,52 @@ def cmd_resolve(args):
     for UNRESOLVED and for ABSTAIN — a low score and a dead key are both
     non-zero and distinguishable in the JSON (``abstain_reason`` names the
     ABSTAIN cause, e.g. ``no-credentials`` vs ``budget-exhausted``).
+
+    Config (JEVRES-006): this surface runs only when
+    ``resolution.enabled.cli: true`` in ``.gitreins/config.yaml`` (default
+    false — the gate makes a real third-party egress). Disabled, the command
+    abstains with ``surface-disabled`` (exit 1, no Hilo run, no key read, no
+    egress) instead of falling through to a hidden execution path. The
+    ``resolution:`` block also supplies the model pin, the token ceiling, the
+    band thresholds and the egress exclusions; ``--budget`` still overrides
+    the ceiling for one call.
     """
-    from engine.resolution import MAX_BUNDLE_TOKENS, resolve, verdict_json
+    from engine.resolution import (
+        resolution_config,
+        resolve,
+        surface_enabled,
+        verdict_json,
+    )
 
     workdir = get_workdir()
-    budget = args.budget if args.budget is not None else MAX_BUNDLE_TOKENS
-    verdict = resolve(args.question, workdir=workdir, max_tokens=budget)
+    cfg = resolution_config(workdir)
+    enabled, reason = surface_enabled("cli", workdir=workdir, defaults=cfg)
+    if not enabled:
+        from engine.resolution import ResolutionVerdict, VERDICT_ABSTAIN
+
+        verdict = ResolutionVerdict(
+            question=args.question,
+            verdict=VERDICT_ABSTAIN,
+            abstain_reason=reason,
+            abstain_detail=(
+                f"resolution.enabled.cli is false (or absent) in {workdir}/.gitreins/config.yaml"
+            ),
+        )
+        if args.json:
+            print(verdict_json(verdict))
+        else:
+            _print_resolve_verdict(verdict)
+        sys.exit(verdict.exit_code)
+
+    budget = args.budget if args.budget is not None else cfg.resolution_tokens_max
+    verdict = resolve(
+        args.question,
+        workdir=workdir,
+        max_tokens=budget,
+        model=cfg.resolution_model,
+        resolved_at=cfg.resolution_resolved_at,
+        review_at=cfg.resolution_review_at,
+    )
 
     if args.json:
         print(verdict_json(verdict))
@@ -2580,11 +2635,28 @@ def cmd_preflight(args):
     opposite doctrine from ``resolve``, which exits non-zero for it — so
     this command exits 0 for every verdict and non-zero only on hard
     usage errors.
+
+    Config (JEVRES-006): gated on ``resolution.enabled.predispatch`` (default
+    false — JEVRES-005 must produce its calibration numbers first). Disabled,
+    the command returns the fail-open dispatch record with the named
+    ``surface-disabled`` abstain reason and exits 0, exactly like any other
+    ABSTAIN on this fail-open surface.
     """
     from engine.preflight import preflight
+    from engine.resolution import resolution_config
 
     workdir = get_workdir()
-    record = preflight(args.question, workdir=workdir)
+    cfg = resolution_config(workdir)
+    record = preflight(
+        args.question,
+        workdir=workdir,
+        surface="predispatch",
+        defaults=cfg,
+        model=cfg.resolution_model,
+        max_tokens=cfg.resolution_tokens_max,
+        resolved_at=cfg.resolution_resolved_at,
+        review_at=cfg.resolution_review_at,
+    )
 
     if args.json:
         print(json.dumps(record, indent=2))

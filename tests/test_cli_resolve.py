@@ -83,6 +83,15 @@ class _ScriptedEndpoint:
         return _StubResponse(self._noul)
 
 
+def _enabled_resolution_defaults(surface: str):
+    """Built-in defaults with *surface*'s enable flag flipped to True (J-GATE)."""
+    from engine.config import GitReinsDefaults
+
+    defaults = GitReinsDefaults()
+    setattr(defaults, f"resolution_enabled_{surface}", True)
+    return defaults
+
+
 @pytest.fixture(autouse=True)
 def _hermetic_credentials(monkeypatch, tmp_path):
     """No ambient credentials, no reachable .env, no real egress."""
@@ -90,6 +99,14 @@ def _hermetic_credentials(monkeypatch, tmp_path):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.chdir(tmp_path)
+    # JEVRES-006: every resolution surface ships config-disabled; these tests
+    # pin the CLI surface OPEN so they keep grading the pipeline they were
+    # written for. The disabled contract has its own class below.
+    monkeypatch.setattr(
+        resolution,
+        "resolution_config",
+        lambda workdir=".": _enabled_resolution_defaults("cli"),
+    )
 
 
 @pytest.fixture
@@ -297,3 +314,102 @@ class TestResolveCLI:
         with contextlib.suppress(SystemExit):
             cli_module.cmd_resolve(args)
         assert seen["max_tokens"] == 4000
+
+
+class TestResolveConfigGate:
+    """JEVRES-006 — the per-surface config gate around the CLI.
+
+    Every surface ships DISABLED: `gitreins resolve` must abstain with the
+    named ``surface-disabled`` reason (exit 1, no Hilo run, no key read, no
+    egress) and run the real pipeline only for an explicit
+    ``resolution.enabled.cli: true``.
+    """
+
+    def _install_disabled(self, monkeypatch):
+        from engine.config import GitReinsDefaults
+
+        monkeypatch.setattr(resolution, "resolution_config", lambda workdir=".": GitReinsDefaults())
+
+    def test_disabled_abstains_with_named_reason_and_never_reaches_the_endpoint(
+        self, monkeypatch, tmp_path, script_endpoint
+    ):
+        """enabled.cli absent/false: ABSTAIN(surface-disabled), exit 1, zero calls."""
+        self._install_disabled(monkeypatch)
+        _script_assembler(monkeypatch)
+        calls = script_endpoint(0.99)  # must never be reached
+        monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("cli"))
+
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        code, out, _ = run_resolve(monkeypatch, str(workdir), "anything at all?", "--json")
+
+        assert code == 1
+        verdict = json.loads(out)
+        assert verdict["verdict"] == "ABSTAIN"
+        assert verdict["abstain_reason"] == "surface-disabled"
+        assert verdict["abstain_action"], "the verdict names the enabling fix"
+        assert verdict["probability"] is None
+        assert calls == [], "a disabled surface must not touch the network"
+
+    def test_absent_config_file_means_disabled(self, monkeypatch, tmp_path):
+        """With the REAL loader and no config.yaml anywhere, the gate is shut."""
+        from engine.config import load_defaults
+
+        monkeypatch.setattr(
+            resolution, "resolution_config", lambda workdir=".": load_defaults(workdir)
+        )
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        code, out, _ = run_resolve(monkeypatch, str(workdir), "q?", "--json")
+
+        assert code == 1
+        verdict = json.loads(out)
+        assert verdict["abstain_reason"] == "surface-disabled"
+        assert "cli" in verdict["abstain_detail"]
+
+    def test_config_block_supplies_model_budget_and_bands(self, monkeypatch, tmp_path):
+        """enabled.cli: true + knobs: the block pins model, ceiling, thresholds."""
+        import yaml
+
+        from engine.config import load_defaults
+
+        workdir = tmp_path / "repo"
+        config_dir = workdir / ".gitreins"
+        config_dir.mkdir(parents=True)
+        with open(config_dir / "config.yaml", "w") as f:
+            yaml.safe_dump(
+                {
+                    "resolution": {
+                        "enabled": {"cli": True},
+                        "model": "typesafe/jev-1.13-testpin",
+                        "tokens_max": 4000,
+                        "bands": {"resolved_at": 0.7, "review_at": 0.3},
+                    }
+                },
+                f,
+            )
+        monkeypatch.setattr(
+            resolution, "resolution_config", lambda wd=".": load_defaults(str(workdir))
+        )
+
+        seen: dict = {}
+
+        def fake_resolve(question, *, workdir, max_tokens, model, resolved_at, review_at, **kw):
+            seen.update(
+                max_tokens=max_tokens,
+                model=model,
+                resolved_at=resolved_at,
+                review_at=review_at,
+            )
+            return resolution.ResolutionVerdict(
+                question=question, verdict="RESOLVED", probability=0.9
+            )
+
+        monkeypatch.setattr(resolution, "resolve", fake_resolve)
+
+        code, out, _ = run_resolve(monkeypatch, str(workdir), "q?", "--json")
+        assert code == 0
+        assert seen["max_tokens"] == 4000
+        assert seen["model"] == "typesafe/jev-1.13-testpin"
+        assert seen["resolved_at"] == pytest.approx(0.7)
+        assert seen["review_at"] == pytest.approx(0.3)
