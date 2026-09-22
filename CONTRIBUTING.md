@@ -1,5 +1,17 @@
 # Contributing to GitReins
 
+### After merging: verify what you deployed
+
+The fleet does not run this checkout — it runs the installed `gitreins` (pre-commit hooks, agent shells, guard calls across every repo that has GitReins wired). A merge that is not reinstalled is invisible to all of them, and both copies report the same version string, so the drift is silent. After any merge that changes the CLI surface, run:
+
+```bash
+pipx install --force .                      # deploy this checkout
+python3 scripts/check_deployed_surface.py   # exits 1 on drift, prints what is missing
+```
+
+The probe compares the repo's subcommand list and version against the deployed binary and names any subcommand that exists only in the repo. Treat a non-zero exit as a failed deploy, not a warning. Release cuts run it as a checklist gate.
+
+
 ## Setup
 
 **Preferred: uv (fast, deterministic)**

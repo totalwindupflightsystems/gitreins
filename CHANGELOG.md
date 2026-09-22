@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+_No unreleased changes yet._
+
+## [0.15.0] - 2026-09-22
+
 ### Added
 - **The Jev resolution gate is reachable from both surfaces (JEVRES-002)** —
   JEVRES-001 built the pipeline (`engine/resolution.py`) but left it with no
