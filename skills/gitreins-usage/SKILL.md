@@ -457,12 +457,19 @@ never persisted: no .gitreins/history entry, no usage.jsonl line, nothing in
 `gitreins report`/`serve`. If you need the verdict later, capture `--json` output
 yourself. The records themselves are excellent (cost_usd, tokens, manifest, model
 build, attempts) — they just evaporate.
+*(Stale as of the POC-36 fix: a real band IS filed in `.gitreins/history` with
+`source: cli|mcp|predispatch` plus one `step: "resolution"` usage row, so `report`
+and `serve` show it. An ABSTAIN still writes nothing.)*
 
-**Pitfall 28 — two JSON shapes for one gate.** `resolve --json` → the verdict object
-(verdict/probability/manifest/…). `preflight --json` → a dispatch RECORD {band,
-decision, probability, missing_kind, question, abstain_reason, verdict_json} where
-`verdict_json` is an embedded JSON STRING — parse it twice. Scripts keyed on
-`verdict` find nothing in a preflight record; use `band` (or wait for POC-37).
+**Pitfall 28 — two JSON shapes for one gate (FIXED in POC-37).** In 0.15.0
+`resolve --json` → the verdict object (verdict/probability/manifest/…), while
+`preflight --json` → a dispatch RECORD {band, decision, probability, missing_kind,
+question, abstain_reason, verdict_json} where `verdict_json` was an embedded JSON
+STRING you had to parse twice; scripts keyed on `verdict` found nothing in a
+preflight record and had to fall back to `band`. Since DF-GITREINS-POC-37 the
+record is {band, decision, probability, missing_kind, question, reason,
+abstain_reason, **verdict**}, with `verdict` the SAME object `resolve --json`
+prints (`ResolutionVerdict.to_dict()`) — one shape, one parse on both surfaces.
 
 Verified behavior worth trusting (measured live, 0.15.0): real discrimination on real
 premises — true premise → RESOLVED 0.85 / skip-dispatch; open premise → UNRESOLVED

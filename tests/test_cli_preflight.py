@@ -183,11 +183,65 @@ class TestPreflightCLI:
         assert record["missing_kind"] == "none"
         assert record["reason"]
         assert record["abstain_reason"] is None
-        # The full verdict rides along — no blind skip.
-        verdict = json.loads(record["verdict_json"])
+        # The full verdict rides along — no blind skip (DF-GITREINS-POC-37:
+        # a first-class OBJECT, the same dict `resolve --json` prints).
+        verdict = record["verdict"]
+        assert isinstance(verdict, dict)
         assert verdict["verdict"] == "RESOLVED"
         assert verdict["probability"] == pytest.approx(0.87)
         assert err == ""
+
+    def test_json_verdict_is_a_first_class_object_with_resolves_shape(
+        self, monkeypatch, tmp_path
+    ):
+        """DF-GITREINS-POC-37 — one shape for one gate (dogfood run 7, Finding 3).
+
+        `preflight --json` nested the verdict as an ESCAPED JSON STRING under
+        `verdict_json`, while `resolve --json` printed the object, so a script
+        keying on `.verdict` found nothing in a preflight record and a jq user
+        had to parse twice. The record now carries `verdict` as exactly the
+        dict `ResolutionVerdict.to_dict()` produces — the reference shape — and
+        the escaped twin is gone.
+        """
+        from engine.resolution import ResolutionVerdict
+
+        _script_assembler(monkeypatch)
+        monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("cli"))
+        monkeypatch.setattr(
+            resolution,
+            "requests",
+            type("E", (), {"post": staticmethod(lambda *a, **k: _StubResponse(0.87))})(),
+        )
+
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        code, out, _ = run_preflight(
+            monkeypatch, str(workdir), "Is JEVRES-003 already implemented?", "--json"
+        )
+
+        assert code == 0
+        record = json.loads(out)
+        verdict = record["verdict"]
+        assert isinstance(verdict, dict)
+        # `resolve --json` prints exactly this dict (`verdict_json(verdict)` is
+        # `json.dumps(verdict.to_dict())`) — same keys, same values.
+        assert set(verdict) == set(
+            ResolutionVerdict(question="q?", verdict="RESOLVED").to_dict()
+        )
+        for key in ("verdict", "probability", "abstain_reason"):
+            assert key in verdict
+        assert verdict["verdict"] == "RESOLVED"
+        assert verdict["probability"] == pytest.approx(0.87)
+        assert verdict["abstain_reason"] is None
+        assert "verdict_json" not in record, "one shape for one gate (POC-37)"
+        # The dispatch record itself is unchanged — band/decision/reason/… keep
+        # working for the foremen already keying on them.
+        assert record["band"] == "RESOLVED"
+        assert record["decision"] == "skip-dispatch"
+        assert record["question"] == "Is JEVRES-003 already implemented?"
+        assert record["reason"]
+        assert record["abstain_reason"] is None
+        assert record["missing_kind"] == "none"
 
     def test_human_output_names_decision_band_probability_missing(
         self, monkeypatch, tmp_path, capsys
@@ -334,8 +388,7 @@ class TestPreflightConfigGate:
         assert record["band"] == "ABSTAIN"
         assert record["abstain_reason"] == "surface-disabled"
         assert record["probability"] is None
-        verdict = json.loads(record["verdict_json"])
-        assert "predispatch" in verdict["abstain_detail"]
+        assert "predispatch" in record["verdict"]["abstain_detail"]
 
     def test_disabled_record_still_rides_the_dispatch_hook(self, monkeypatch, tmp_path):
         from engine.config import GitReinsDefaults

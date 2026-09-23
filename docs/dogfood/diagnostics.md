@@ -768,10 +768,14 @@ is undocumented, so the flagship is invisible out of the box (POC-35).
    the enable knob. The right way: add the `resolution: enabled:` block to
    `.gitreins/config.yaml`. The wrong way: trust the hint string's "docs §9" pointer
    (the section does not exist; POC-35).
-2. **jq "Cannot index string" on the preflight record.** `preflight --json` returns a
-   dispatch RECORD {band, decision, probability, ...} whose `verdict_json` is an
-   embedded JSON STRING — parse it twice (`.verdict_json | fromjson`). `resolve --json`
-   returns the verdict object directly. Two shapes, one gate (POC-37).
+2. **jq "Cannot index string" on the preflight record** (fixed in DF-GITREINS-POC-37).
+   In 0.15.0 `preflight --json` was a dispatch RECORD {band, decision, probability, …}
+   whose `verdict_json` was an embedded JSON STRING — you had to parse it twice
+   (`.verdict_json | fromjson`) while `resolve --json` returned the verdict object
+   directly: two shapes, one gate. The record now carries `verdict` as that SAME
+   object (`{band, decision, probability, missing_kind, question, reason,
+   abstain_reason, verdict}`), so `.verdict.manifest` works on both surfaces and
+   there is exactly one parse. A 0.15.0 install still needs `.verdict_json | fromjson`.
 3. **Client timeout on `notifications/initialized`.** It is a JSON-RPC NOTIFICATION:
    fire-and-forget, no response will ever come. A client that waits on a matching id
    hangs. (Working client: docs/dogfood/2026-09-20-integration.md + run 7's
