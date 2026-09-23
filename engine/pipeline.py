@@ -235,14 +235,36 @@ def degradation_warning(stage: dict) -> str | None:
     )
 
 
+def _step_budget_timeout(step: StepResult) -> int | None:
+    """The budget a script step exhausted, from its machine-readable data.
+
+    GAP-058: :meth:`_run_script_step` stamps ``data["timed_out"]``/``data
+    ["timeout_s"]`` when :func:`command_hygiene.run_bounded` reports a
+    ``timed_out`` — the step's own budget, not an inference from prose.
+    Returns None for a step that ended any other way, so a REAL failing
+    test never carries the marker.
+    """
+    data = step.data if isinstance(step.data, dict) else {}
+    if step.type == "script" and data.get("timed_out"):
+        try:
+            return int(data["timeout_s"])
+        except (KeyError, TypeError, ValueError):
+            return 0
+    return None
+
+
 def _record_runtime_skips(stage: StageResult) -> None:
-    """Fold runtime skip sentinels into *stage*'s degradation marker.
+    """Fold runtime skip sentinels and budget timeouts into the degradation marker.
 
     TRUST-001: :func:`tier1_plan` declares the skips it knows statically (an
     undetectable tree). A step can also skip on the machine it actually runs
     on — ``_lint_step_run`` echoes :data:`SKIP_SENTINEL` and exits 0 when the
     linter is not on PATH. Without this pass, that run reads as a graded lint
     and the verdict carries no ``skipped_steps`` for a merge-back to refuse.
+    GAP-058: a script step that exhausted its own budget joins the same
+    record — it is the sibling case (a gate that ran OUT OF TIME, not a gate
+    that found code), and ``worktree_manager._tier1_skipped_steps`` must see
+    it in ``skipped_steps`` like any other gate that did not finish its work.
     Idempotent: ids are deduplicated and an existing reason is preserved.
     """
     found: list[tuple[str, str]] = []
@@ -251,6 +273,16 @@ def _record_runtime_skips(stage: StageResult) -> None:
             if step_id in stage.skipped_steps or step_id in [sid for sid, _ in found]:
                 continue
             found.append((step_id, reason))
+    # GAP-058: the timed-out lane itself — never an output parse, always the
+    # step's own data field, so a step whose output merely mentions a timeout
+    # cannot be misclassified.
+    for step in stage.steps:
+        if step.passed or step.id in stage.skipped_steps or step.id in [sid for sid, _ in found]:
+            continue
+        budget = _step_budget_timeout(step)
+        if budget is None:
+            continue
+        found.append((step.id, f"timed out after {budget}s (step budget)"))
     if not found:
         return
     stage.degraded = True
@@ -603,8 +635,21 @@ class Pipeline:
             if out.get("refused"):
                 return StepResult(id=step_id, type="script", passed=False, error=out["reason"])
             if out.get("timed_out"):
+                # GAP-058: a budget exhaustion is not a code finding. The step
+                # still fails (the gate did not finish), but the record must
+                # name the budget so a reader can tell "ran out of time" from
+                # "your code failed" without reading the source — the same
+                # honesty split TRUST-001 draws for a gate that did no work.
+                # run_bounded already reports the elapsed budget in its own
+                # error; the timeout value on the step def is the configured
+                # budget the run was held to.
+                budget = step_def.get("timeout", 120)
                 return StepResult(
-                    id=step_id, type="script", passed=False, error="Command timed out"
+                    id=step_id,
+                    type="script",
+                    passed=False,
+                    error=f"Command timed out after {budget}s (step budget)",
+                    data={"timed_out": True, "timeout_s": budget},
                 )
             output = out["output"]
             # A non-zero exit is a hard failure regardless of on_fail. on_fail
@@ -644,7 +689,16 @@ class Pipeline:
                 data=data,
             )
         except subprocess.TimeoutExpired:
-            return StepResult(id=step_id, type="script", passed=False, error="Command timed out")
+            # GAP-058: same budget attribution as the run_bounded path above —
+            # this except clause is the legacy safety net for the same event.
+            budget = step_def.get("timeout", 120)
+            return StepResult(
+                id=step_id,
+                type="script",
+                passed=False,
+                error=f"Command timed out after {budget}s (step budget)",
+                data={"timed_out": True, "timeout_s": budget},
+            )
         except Exception as e:
             return StepResult(id=step_id, type="script", passed=False, error=str(e))
 
@@ -1073,6 +1127,16 @@ class Pipeline:
         """
         lines = []
         for step in stage.steps:
+            budget = _step_budget_timeout(step) if not step.passed else None
+            if budget is not None:
+                # GAP-058: the ~ marker is the DEGRADED vocabulary (a gate
+                # that did no work prints it, never a ✓) — a gate that ran
+                # OUT OF TIME renders in the same register, and the line
+                # names the budget so "ran out of time" is readable without
+                # the source. The stage is still a failure: it did not
+                # finish grading.
+                lines.append(f"  ~ {step.id}: Command timed out after {budget}s (step budget)")
+                continue
             status = "✓" if step.passed else "✗"
             source = step.output or step.error
             detail = _first_nonblank_line(source)
