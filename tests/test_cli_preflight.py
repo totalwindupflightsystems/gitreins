@@ -191,9 +191,7 @@ class TestPreflightCLI:
         assert verdict["probability"] == pytest.approx(0.87)
         assert err == ""
 
-    def test_json_verdict_is_a_first_class_object_with_resolves_shape(
-        self, monkeypatch, tmp_path
-    ):
+    def test_json_verdict_is_a_first_class_object_with_resolves_shape(self, monkeypatch, tmp_path):
         """DF-GITREINS-POC-37 — one shape for one gate (dogfood run 7, Finding 3).
 
         `preflight --json` nested the verdict as an ESCAPED JSON STRING under
@@ -225,9 +223,7 @@ class TestPreflightCLI:
         assert isinstance(verdict, dict)
         # `resolve --json` prints exactly this dict (`verdict_json(verdict)` is
         # `json.dumps(verdict.to_dict())`) — same keys, same values.
-        assert set(verdict) == set(
-            ResolutionVerdict(question="q?", verdict="RESOLVED").to_dict()
-        )
+        assert set(verdict) == set(ResolutionVerdict(question="q?", verdict="RESOLVED").to_dict())
         for key in ("verdict", "probability", "abstain_reason"):
             assert key in verdict
         assert verdict["verdict"] == "RESOLVED"
