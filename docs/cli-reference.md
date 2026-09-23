@@ -183,7 +183,7 @@ the quality gate enforced by the pre-commit hook; it can also be run
 manually at any time.
 
 ```
-gitreins guard [--dead-code] [--staged-only] [--full]
+gitreins guard [--dead-code] [--staged-only] [--full] [--scope staged|working-tree] [--json]
 ```
 
 | Option | Description |
@@ -191,6 +191,8 @@ gitreins guard [--dead-code] [--staged-only] [--full]
 | `--dead-code` | Enable Python dead-code detection (overrides config) |
 | `--staged-only` | Run tests in diff mode — only packages with staged changes (overrides `guards.test_mode`) |
 | `--full` | Grade the whole tree even with an empty index: the tests lane runs and lint covers tracked+untracked Python files instead of skipping |
+| `--scope staged\|working-tree` | Which change set to grade: `staged` (default) is the Git index; `working-tree` adds unstaged and non-ignored untracked files |
+| `--json` | Emit one bounded, redacted [evidence v1](evidence-contract-v1.md) JSON document on stdout instead of the human summary (exit 0 pass, 1 non-pass) |
 
 **Exit codes**
 
@@ -203,6 +205,31 @@ gitreins guard [--dead-code] [--staged-only] [--full]
 Warnings are printed to stderr and do not affect the exit code. The
 output includes the active test mode (`diff` or `full`) and the tested
 targets.
+
+**`--scope` selects the change set (read-only).** `staged` is the index —
+what the pre-commit hook has always graded. `working-tree` grades the union of
+staged, unstaged and non-ignored untracked files, collected with read-only git
+commands (`git diff`, `git status`, `git ls-files --others --exclude-standard`);
+it never runs `git add`, `reset`, `stash` or `checkout`, so a guarded run
+cannot disturb what you staged. The mode note names the scope
+(`(test mode: diff, scope: working-tree)`) so a working-tree run is
+distinguishable from a staged one; the default scope adds no note, keeping the
+staged line byte for byte. `--scope` composes with `--full`/`--staged-only`,
+which choose WHICH tests run over that change set.
+
+**`--json` is the automation surface.** It writes exactly one UTF-8 JSON
+document to stdout — the update check, the mode note and the guard-log line are
+suppressed, and any narration a failing run produced goes to stderr instead. The
+document validates against
+[`schemas/evidence-v1.schema.json`](../schemas/evidence-v1.schema.json) (see the
+[evidence contract](evidence-contract-v1.md)), is capped at 32 KiB with
+truncation reported in `metadata.truncated`, and every string crosses the
+secret-redaction boundary (`metadata.redacted` is always true). Exit codes on
+this surface are `0` for a passing result (including a DEGRADED pass, which the
+document reports per check via `outcome: unknown` plus `metadata.degraded`), `1`
+for a non-passing one, and `2` for a usage error such as an unknown `--scope`.
+A run that does no work still exits 2 on the human surface when
+`guards.allow_skips` is false — read the JSON surface's `metadata.degraded`.
 
 **Degraded pass (`guards.allow_skips`, TRUST-001)**
 
@@ -237,18 +264,63 @@ index is non-empty, staged files are graded rather than the whole tree.
 ## 5. `gitreins judge`
 
 Evaluate a task: runs Tier 1 guards, then the Tier 2 LLM judge
-(unless skipped), and persists the verdict.
+(unless skipped), and persists the verdict. With `--ephemeral` the criteria are
+supplied inline and NOTHING is persisted — see
+[ephemeral runs](#ephemeral-runs-judge---ephemeral).
 
 ```
-gitreins judge <id> [--skip-tier2] [--async] [--status <job_id>]
+gitreins judge <id> [--skip-tier2] [--async] [--status <job_id>] [--scope staged|working-tree] [--json]
+gitreins judge [<id>] --ephemeral --title <title> --criterion <criterion> [--skip-tier2] [--scope staged|working-tree] [--json]
+gitreins judge rorca-run-42-US-001 --ephemeral --title "Story gate" --criterion "Acceptance criteria are satisfied" --json
 ```
 
 | Option | Description |
 |--------|-------------|
-| `id` | Task ID (or job ID with `--status`) |
+| `id` | Task ID (or job ID with `--status`). Optional with `--ephemeral`, where the task exists only for this invocation |
 | `--skip-tier2` | Skip Tier 2 LLM evaluation; Tier 1 guards only |
+| `--ephemeral` | Evaluate inline `--title`/`--criterion` values and persist nothing (EVID-003) |
+| `--title <title>` | Ephemeral task title (required with `--ephemeral`) |
+| `--criterion <text>` | Ephemeral criterion — repeatable, one flag per criterion (required with `--ephemeral`) |
 | `--async` | Dispatch evaluation as a detached background job; returns a job ID |
 | `--status <job_id>` | Show status/result of a background job (id = job id, not task id) |
+| `--scope staged\|working-tree` | Change set the Tier 1 guards grade — same semantics as `gitreins guard --scope` (default `staged`) |
+| `--json` | Emit one bounded, redacted [evidence v1](evidence-contract-v1.md) JSON document on stdout: the subject (task id/title/ephemeral), one check per Tier 2 criterion plus the Tier 1 stage evidence, and `metadata.historyPersisted` |
+
+`--json` captures the evaluator's and the persister's stdout narration, so the
+document is the ONLY thing on stdout (a FAIL verdict echoes that narration on
+stderr). The verdict is still persisted and the exit code is `0` for a passing
+result, `1` for a non-passing one. The single-flight guard that points a second
+synchronous run at an in-flight job is skipped in JSON mode: the caller asked
+for a document for this run.
+
+### Ephemeral runs (`judge --ephemeral`)
+
+A per-story execution gate has to grade a task that exists NOWHERE: no task
+store entry, no verdict history, nothing to undo afterwards. `--ephemeral`
+builds the task in memory from `--title` and the repeated `--criterion` values
+and leaves the repository exactly as it found it:
+
+- no `TaskManager`, so `.gitreins/tasks.yaml` is never opened — a corrupt or
+  absent store cannot fail the gate, and a run cannot create one;
+- no `VerdictPersister` and no `.gitreins/history` entry, so nothing is
+  attributed to a task that does not exist;
+- no commit on the `gitreins` branch, no branch create/switch, no stash;
+- no tier-1 guard run log and no `.gitreins/usage.jsonl` line either: both are
+  files INSIDE the judged tree (`persist_log`/`persist_telemetry` off), and a
+  gate that may not mutate the repository may not leave them behind.
+
+An explicit `id` (as in the third example above) is used verbatim as the
+document's `subject.taskId`; without one the id is `ephemeral:<slug-of-title>`.
+`--ephemeral` requires a non-empty `--title` and at least one non-empty
+`--criterion` (a gate with no criteria would pass vacuously), and it cannot be
+combined with `--async`/`--status`/`--run-job` — those modes read and write the
+task/job stores an ephemeral run deliberately has no part in. Both are usage
+errors: exit `2`, like a missing `id` without `--ephemeral`.
+
+Operator-configured pipeline commands still run as configured (see
+[the evidence contract](evidence-contract-v1.md)), and so does tooling the
+graded toolchain itself runs — a linter's own cache directory is written by the
+linter, exactly as in a `gitreins guard` run.
 
 **Exit codes (sync mode)**
 
@@ -256,13 +328,16 @@ gitreins judge <id> [--skip-tier2] [--async] [--status <job_id>]
 |------|---------|
 | 0 | Evaluation complete and the verdict PASSED (persisted) |
 | 1 | Task not found, or the evaluation verdict FAILED |
+| 2 | Usage error: a missing `id` without `--ephemeral`, `--ephemeral` without `--title`/`--criterion`, or `--ephemeral` combined with `--async`/`--status` |
 
 Sync `judge` propagates the verdict to the shell (DF-GITREINS-POC-16): a FAIL
 verdict exits 1, matching `gitreins guard` on the same tree, so a red gate can
 never be read as success by a script. Tier 1 grades the same check set the
 guard grades — see [the Tier 1 / guard parity contract](evaluator-loop.md#tier-1--guard-parity-contract-df-gitreins-poc-16)
 — and a tier1 narrower than the guard gate (nothing detectable) is marked
-degraded in `verdict.json` and warned about on the CLI.
+degraded in `verdict.json` and warned about on the CLI. An ephemeral run keeps
+the same exit codes and, without `--json`, the same summary on stdout, plus a
+line on stderr saying that nothing was written.
 
 **Exit codes (`--status` mode)**
 
@@ -430,18 +505,27 @@ install instructions).
 Show recent verdict history.
 
 ```
-gitreins report [-n <count>] [--interactive]
+gitreins report [-n <count>] [--interactive] [--json]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `-n <count>` | Number of recent verdicts to show (default 10) |
 | `-i`, `--interactive` | Interactive TUI mode (requires `textual`; falls back to text) |
+| `--json` | Emit one bounded, redacted [evidence v1](evidence-contract-v1.md) JSON document on stdout: `scope: history`, `passed: null` (history holds no single verdict), one check per recent verdict, and `metadata.storage` from the persister |
 
 A short QA-run block is printed after the verdict history when the QA ledger
 has rows (see section 13); with no recorded QA runs the output is unchanged.
+The QA block is a human surface and stays out of the `--json` path.
 
-Exit **0** on success.
+Resolution-gate records (`kind: "resolution"` — see sections 15/16) share the
+same store and are listed in their own `Resolution gate (N)` section, never
+counted in the `Recent`/`Pass`/`Fail` rollup: a resolution band is not a
+passed or failed judgment. With no such records the output is unchanged.
+
+Exit **0** on success. `report --json` exits `0` whenever it emitted a document,
+including for an empty history (`checks: []`, `outcome: unknown`), so a consumer
+distinguishes "no verdicts yet" from a failure by the document, not the code.
 
 ## 12. `gitreins worktree`
 
@@ -725,16 +809,39 @@ when the answer is UNRESOLVED) and the bundle manifest — every file that was s
 evidence, with its provenance, score and size. `--json` emits the same verdict object
 the MCP `context.resolve` tool returns (see `docs/mcp-api.md`).
 
+**Recorded.** A run that produced a real band is filed in `.gitreins/history` as a
+resolution record — `kind: "resolution"`, `source: "cli"`, the band, probability and
+question, and the full verdict object — written by the SAME shared helper the judge
+verdicts use, so `gitreins report` lists it (section 11) and `gitreins serve` shows it
+with no second store. One Jev call also appends one `step: "resolution"` row to
+`.gitreins/usage.jsonl` carrying the token counts the response reported. An ABSTAIN
+writes nothing — it is a non-event, not a verdict — and `history.enabled: false` means
+no record and no usage line.
+
 | Verdict | Meaning |
 |---------|---------|
 | `RESOLVED` | probability ≥ 0.85 — the evidence is sufficient |
 | `REVIEW` | 0.50–0.85 — a human or the full judge looks |
 | `UNRESOLVED` | probability < 0.50 — `missing_kind` names what to build |
-| `ABSTAIN` | any failure: no key, dead key, transport, exhausted budget, empty bundle — fail closed, with a named reason and a suggested fix |
+| `ABSTAIN` | any failure: surface disabled by config (`surface-disabled`), no key, dead key, transport, exhausted budget, empty bundle — fail closed, with a named reason and a suggested fix |
 
 The Jev call requires an OpenRouter key: `GITREINS_OPENROUTER_KEY` in the
 environment or in a known `.env` file (`~/.hermes/.env`, `./.env`,
 `~/.hermes/env-file`). Hilo must be installed for the bundle assembly.
+
+**Enabling.** The surface ships disabled. With no `resolution.enabled.cli: true` in
+`.gitreins/config.yaml` — a missing key, a `false` value and a wrong-typed block all read
+as OFF — the command fails closed with `abstain_reason: surface-disabled`, exit 1, and
+never reaches Hilo, the key ring or the network. Enabling is your explicit act, because the
+bundle then leaves the host for OpenRouter → TypeSafe; `gitreins init` writes the block with
+every surface disabled and never flips one for you. The complete block — all four surfaces,
+`model`, `tokens_max`, `bands`, `egress_exclude` — is in
+[docs/jev-resolution-gate.md](jev-resolution-gate.md) §9:
+
+```bash
+# with resolution.enabled.cli: true in .gitreins/config.yaml:
+gitreins resolve "Does engine/evidence_bounds.py truncate text?"
+```
 
 **Exit codes**
 
@@ -746,8 +853,9 @@ environment or in a known `.env` file (`~/.hermes/.env`, `./.env`,
 UNRESOLVED and ABSTAIN are both exit 1 by design — a gate that failed must not read
 as a gate that passed — and are distinguishable in `--json`: an UNRESOLVED verdict
 carries a real `probability` with `abstain_reason: null`, while an ABSTAIN carries
-`verdict: "ABSTAIN"`, a named `abstain_reason` (e.g. `no-credentials` vs
-`budget-exhausted` vs a dead key) and an `abstain_action` suggesting the fix.
+`verdict: "ABSTAIN"`, a named `abstain_reason` (e.g. `surface-disabled` when nobody
+enabled the surface, vs `no-credentials` vs `budget-exhausted` vs a dead key) and an
+`abstain_action` suggesting the fix.
 
 ```
 gitreins resolve "Does engine/evidence_bounds.py truncate text?" --json
@@ -789,6 +897,26 @@ the gate saw.
 
 This is a signal, not a gate: a skip annotates a row, it is never the sole
 authority for a merge or a commit (spec §6.5).
+
+**Recorded.** A run that produced a real band is filed in `.gitreins/history` as a
+resolution record with `source: "predispatch"` — the band, probability, question and
+the full verdict object — through the same shared helper `gitreins resolve` uses, so a
+skip-dispatch (no worker spawned) always leaves the audit trail that decision needs
+(`gitreins report`, `gitreins serve`). An ABSTAIN — including the `surface-disabled`
+one described below — writes nothing: a disabled surface does not even touch the store.
+
+**Enabling.** `predispatch` ships disabled too — and its failure mode is the opposite one:
+with `resolution.enabled.predispatch` absent or `false` the gate never runs and the record
+is an ABSTAIN mapped to plain `dispatch` (fail open, above). Set
+`resolution.enabled.predispatch: true` in `.gitreins/config.yaml` to run the real policy;
+the complete block is in [docs/jev-resolution-gate.md](jev-resolution-gate.md) §9. Do not
+enable it to "fix" a dispatch that is blocked for another reason — the ABSTAIN record
+already says the gate did not run.
+
+```bash
+# with resolution.enabled.predispatch: true in .gitreins/config.yaml:
+gitreins preflight "Is JEVRES-003 already implemented?"
+```
 
 **Exit codes**
 

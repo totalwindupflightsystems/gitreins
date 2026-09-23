@@ -42,6 +42,15 @@ for a job id instead of leaving both looking current: the older record gets
 abandoned attempt keeps its own verdict, summary and evidence for the audit
 trail. Records without a ``job_id`` (the sync surfaces) have no stable run
 identity to key on, so they are never superseded.
+
+Resolution-gate records (DF-GITREINS-POC-36): ``gitreins resolve``,
+``gitreins preflight`` and the MCP ``context.resolve`` tool file their verdicts
+in this SAME store through :func:`persist_resolution`, so ``gitreins report``
+and ``gitreins serve`` show the gate's decisions instead of a hole. A
+resolution record is not a task verdict — it carries ``kind: "resolution"``
+plus a ``source``, and no ``passed``/criteria — so readers that COUNT judgments
+(the pass/fail rollups in :func:`build_report` and ``/api/stats``) key on that
+marker and never let a resolution band read as a graded task.
 """
 
 import hashlib
@@ -52,11 +61,29 @@ import shutil
 import subprocess
 import tempfile
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timezone
 
+from engine import usage
 from engine.repo_paths import WorktreeResolutionError, resolve_worktree_identity
 
 logger = logging.getLogger("gitreins.persist")
+
+
+def _as_utc(when: datetime) -> datetime:
+    """A writer stamp as naive UTC — the shape ``evaluated_at`` has always had.
+
+    Readers treat the stamp as UTC (``gitreins/serve.py`` ``_epoch``), so an
+    aware datetime from a caller is converted rather than reformatted with an
+    offset that would only some readers understand.
+    """
+    if when.tzinfo is None:
+        return when
+    return when.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _as_epoch(when: datetime) -> float:
+    """Epoch seconds for a stamp, read exactly the way the readers read it."""
+    return _as_utc(when).replace(tzinfo=timezone.utc).timestamp()
 
 
 # ── Persistence config defaults ────────────────────────────────
@@ -123,6 +150,8 @@ class VerdictPersister:
         task_id: str,
         verdict_data: dict,
         collect_evidence: Callable[[str], dict] | None = None,
+        *,
+        evaluated_at: datetime | None = None,
     ) -> str:
         """Save verdict to history. Returns commit hash or "dry-run" or "disabled".
 
@@ -131,6 +160,13 @@ class VerdictPersister:
         worker-brief/driver-log/patch artifacts land in the SAME history commit
         as the verdict they belong to. A hook that raises is ignored: evidence
         is never allowed to fail a verdict.
+
+        ``evaluated_at`` is the stamp the record carries (naive UTC, defaulting
+        to now). It is keyword-only and optional — a caller that has already
+        timestamped something belonging to this record (the resolution gate
+        stamps its usage row with it, DF-GITREINS-POC-36) hands the SAME instant
+        in, so the two artifacts agree to the microsecond instead of depending on
+        which of two clock reads happened first.
 
         A record carrying a ``job_id`` supersedes the previous LIVE entry for
         that same job id (DF-GITREINS-POC-26): the predecessor is located before
@@ -142,7 +178,7 @@ class VerdictPersister:
             return "disabled"
 
         verdict_data["task_id"] = task_id
-        verdict_data["evaluated_at"] = datetime.utcnow().isoformat()
+        verdict_data["evaluated_at"] = _as_utc(evaluated_at or datetime.utcnow()).isoformat()
 
         # Generate deterministic short hash
         hash_input = f"{task_id}:{verdict_data['evaluated_at']}"
@@ -194,7 +230,12 @@ class VerdictPersister:
         # Git commit if configured
         commit_hash = "dry-run"
         if self.storage_mode == "git":
-            commit_hash = self._git_commit(entry_dir, task_id, verdict_data.get("passed", False))
+            commit_hash = self._git_commit(
+                entry_dir,
+                task_id,
+                verdict_data.get("passed", False),
+                subject=self._history_subject(task_id, verdict_data),
+            )
 
         # Prune old verdicts if over max
         self._prune_old()
@@ -399,6 +440,11 @@ class VerdictPersister:
     # ── Internal ─────────────────────────────────────────────
 
     def _build_summary(self, task_id: str, verdict_data: dict) -> str:
+        # Resolution records are not graded tasks: they have no pass/fail, no
+        # criteria and no pipeline stages, so the judge template would print a
+        # fabricated "✗ FAIL" for a band that simply says UNRESOLVED.
+        if verdict_data.get("kind") == KIND_RESOLUTION:
+            return self._build_resolution_summary(task_id, verdict_data)
         passed = verdict_data.get("passed", False)
         verdict = verdict_data.get("verdict", None)
         task_title = verdict_data.get("task_title", task_id)
@@ -459,6 +505,64 @@ class VerdictPersister:
             lines.append("")
 
         return "\n".join(lines)
+
+    def _build_resolution_summary(self, task_id: str, verdict_data: dict) -> str:
+        """Summary for a resolution record — band, question, bundle, tokens.
+
+        Deliberately NOT the judge template: a resolution record has no
+        criteria, no stages and no pass/fail, so it reports the band, the
+        question the gate was asked, where the verdict came from, the bundle
+        that grounded it and the tokens the call actually spent.
+        """
+        payload = verdict_data.get("verdict")
+        if not isinstance(payload, dict):
+            payload = {}
+        band = verdict_data.get("band") or payload.get("verdict") or "RESOLUTION"
+        question = (
+            verdict_data.get("question")
+            or payload.get("question")
+            or verdict_data.get("task_title")
+            or task_id
+        )
+        lines = [
+            f"# Resolution gate: {band}",
+            "",
+            f"**Question:** {question}",
+            f"**Surface:** {verdict_data.get('source') or '?'}",
+            f"**Evaluated:** {verdict_data.get('evaluated_at', '')}",
+        ]
+        probability = verdict_data.get("probability")
+        if isinstance(probability, (int, float)):
+            lines.append(f"**Probability:** {probability:.3f}")
+        if verdict_data.get("missing_kind"):
+            lines.append(f"**Missing:** {verdict_data['missing_kind']}")
+
+        manifest = payload.get("manifest") or []
+        if manifest:
+            lines.append("")
+            lines.append("## Bundle")
+            lines.append("")
+            for entry in manifest:
+                if isinstance(entry, dict):
+                    lines.append(
+                        f"- `{entry.get('file', '?')}` "
+                        f"({entry.get('provenance', '?')}, {entry.get('bytes', 0)}B)"
+                    )
+
+        tokens_in = payload.get("input_tokens")
+        tokens_out = payload.get("output_tokens")
+        if tokens_in is not None or tokens_out is not None:
+            lines.append("")
+            lines.append(f"**Tokens:** input={tokens_in} output={tokens_out}")
+
+        notes = payload.get("notes") or []
+        if notes:
+            lines.append("")
+            lines.append("## Notes")
+            lines.append("")
+            lines.extend(f"- {note}" for note in notes)
+
+        return "\n".join(lines) + "\n"
 
     # ── Supersede bookkeeping (DF-GITREINS-POC-26) ───────────
 
@@ -529,7 +633,13 @@ class VerdictPersister:
         except Exception as exc:
             logger.warning("Failed to mark %s superseded (non-fatal): %s", entry_rel, exc)
 
-    def _git_commit(self, entry_dir: str, task_id: str, passed: bool) -> str:
+    def _git_commit(
+        self,
+        entry_dir: str,
+        task_id: str,
+        passed: bool,
+        subject: str | None = None,
+    ) -> str:
         """Commit verdict entry to gitreins orphan branch. Returns short hash or 'dry-run'."""
         git_dir = os.path.join(self.workdir, ".git")
         if not os.path.exists(git_dir):
@@ -550,9 +660,9 @@ class VerdictPersister:
             branch_exists = result.returncode == 0
 
             if not branch_exists:
-                return self._create_orphan(rel_path, task_id, passed)
+                return self._create_orphan(rel_path, task_id, passed, subject=subject)
             else:
-                return self._commit_to_existing(rel_path, task_id, passed)
+                return self._commit_to_existing(rel_path, task_id, passed, subject=subject)
 
         except subprocess.TimeoutExpired:
             logger.warning("Git command timed out — files written but not committed")
@@ -561,7 +671,25 @@ class VerdictPersister:
             logger.warning("Git operation failed (non-fatal): %s", e)
             return "dry-run"
 
-    def _create_orphan(self, rel_path: str, task_id: str, passed: bool) -> str:
+    def _history_subject(self, task_id: str, verdict_data: dict) -> str:
+        """Commit subject for one history entry, judge or resolution record.
+
+        The ``gitreins`` branch's log is part of the audit trail, so a
+        resolution record names its band instead of borrowing the judge's
+        PASS/FAIL — a record with no pass/fail must not claim one in git log.
+        """
+        if verdict_data.get("kind") == KIND_RESOLUTION:
+            return f"resolution: {task_id} — {verdict_data.get('band') or 'RESOLUTION'}"
+        passed = verdict_data.get("passed", False)
+        return f"verdict: {task_id} — {'PASS' if passed else 'FAIL'}"
+
+    def _create_orphan(
+        self,
+        rel_path: str,
+        task_id: str,
+        passed: bool,
+        subject: str | None = None,
+    ) -> str:
         """Create gitreins orphan branch with initial verdict commit.
 
         Pure plumbing (hash-object → mktree → commit-tree → update-ref).
@@ -578,7 +706,7 @@ class VerdictPersister:
         """
         tree = self._write_tree_from_dir(rel_path)
 
-        message = f"verdict: {task_id} — {'PASS' if passed else 'FAIL'}"
+        message = subject or f"verdict: {task_id} — {'PASS' if passed else 'FAIL'}"
         commit = self._git(["commit-tree", tree, "-m", message])
 
         # All-zeros <old-oid> makes update-ref refuse if the branch sprang
@@ -670,9 +798,16 @@ class VerdictPersister:
         env.setdefault("GIT_COMMITTER_EMAIL", "gitreins@localhost")
         return env
 
-    def _commit_to_existing(self, rel_path: str, task_id: str, passed: bool) -> str:
+    def _commit_to_existing(
+        self,
+        rel_path: str,
+        task_id: str,
+        passed: bool,
+        subject: str | None = None,
+    ) -> str:
         """Commit to existing gitreins branch via worktree to avoid switching."""
         worktree_dir = tempfile.mkdtemp(prefix="gitreins-wt-")
+        message = subject or f"verdict: {task_id} — {'PASS' if passed else 'FAIL'}"
         try:
             subprocess.run(
                 ["git", "worktree", "add", worktree_dir, "gitreins"],
@@ -699,7 +834,7 @@ class VerdictPersister:
             if add.returncode != 0:
                 raise RuntimeError(f"git add failed in worktree: {add.stderr.strip()}")
             commit = subprocess.run(
-                ["git", "commit", "-m", f"verdict: {task_id} — {'PASS' if passed else 'FAIL'}"],
+                ["git", "commit", "-m", message],
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -895,11 +1030,167 @@ def persist_evaluation(
         return "error"
 
 
+# ── Shared resolution-gate persistence (DF-GITREINS-POC-36) ────
+
+#: ``kind`` marker on every resolution-gate record. A judge verdict carries no
+#: ``kind`` key at all, so a reader can separate the two instead of inferring
+#: the difference from which fields happen to be missing.
+KIND_RESOLUTION = "resolution"
+
+#: The id resolution records are filed under — a NAMESPACE, not a task. No task
+#: with this id exists and ``gitreins task`` never creates one, so a record
+#: never claims a task id it did not evaluate.
+RESOLUTION_ENTRY_ID = "resolution"
+
+#: ``step`` value of the usage row a resolution run appends. The judge's step is
+#: its pipeline step id (``tier2``); naming this one lets a cost reader tell the
+#: gate's calls from the judge's inside the one telemetry file.
+RESOLUTION_USAGE_STEP = "resolution"
+
+
+def _is_decision(verdict) -> bool:
+    """True only for a real band — an ABSTAIN is a non-event, not a verdict.
+
+    ABSTAIN is the engine's fail-closed answer for surface-disabled,
+    no-credential, transport, malformed and empty-bundle runs
+    (``engine/resolution.py``). A dead key is nothing to audit: recording it
+    would make the history read as "the gate ran and decided".
+    """
+    from engine.resolution import VERDICT_ABSTAIN
+
+    band = getattr(verdict, "verdict", None)
+    if not band or band == VERDICT_ABSTAIN:
+        return False
+    return getattr(verdict, "abstain_reason", None) is None
+
+
+def build_resolution_record(verdict, *, surface: str) -> dict:
+    """The persisted payload for one resolution-gate verdict.
+
+    A resolution record is NOT a task verdict: no ``passed`` (the gate returns a
+    band, not a pass/fail), no criteria, no task id — and it says so with
+    ``kind`` + ``source`` so no reader has to guess. The engine's own verdict
+    dict ships whole under ``verdict`` (the object ``gitreins resolve --json``
+    prints), so report/serve show the bundle manifest and the token and cost
+    accounting without a second serialization that could drift from it.
+    """
+    return {
+        "kind": KIND_RESOLUTION,
+        "source": surface,
+        "band": verdict.verdict,
+        "probability": verdict.probability,
+        "missing_kind": verdict.missing_kind,
+        "question": verdict.question,
+        # task_title is the label slot every existing reader already renders
+        # (report rows, serve list rows, report --json summaries). For a
+        # resolution record the one recognizable label is the question.
+        "task_title": verdict.question,
+        "verdict": verdict.to_dict(),
+    }
+
+
+def _token_count(value) -> int | None:
+    """A reported token count as the schema stores it, else ``None``.
+
+    The engine types both counts as ``int | None`` (a non-int usage value is
+    dropped in ``ResolutionVerdict``), so anything else here means the response
+    never reported a count — a bool included, which is an ``int`` in Python.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def _append_resolution_usage(workdir: str, verdict, *, ts: float) -> bool:
+    """Append the Jev call's real usage as one ``step: "resolution"`` row.
+
+    Only a parsed, completed HTTP response reaches this point (every ABSTAIN
+    returned from :func:`persist_resolution` before it), so the row carries what
+    the API reported: ``input_tokens``/``output_tokens`` off the response's
+    ``usage`` block. A response that reported no input tokens writes NO row
+    rather than a 0/0 line — a fabricated zero would read as "the call was
+    free" in the aggregates :mod:`engine.usage` feeds.
+
+    *ts* is the record's own ``evaluated_at`` instant, passed in by the caller so
+    the row and the record it belongs to share ONE measurement of the moment
+    (see :func:`persist_resolution`).
+
+    ``tokens_in`` already includes cache reads per the telemetry contract and
+    this endpoint reports no cache counters, so both cache fields stay 0.
+    """
+    tokens_in = _token_count(getattr(verdict, "input_tokens", None))
+    if not tokens_in:
+        return False
+    tokens_out = _token_count(getattr(verdict, "output_tokens", None))
+    return usage.append_usage_row(
+        workdir,
+        step=RESOLUTION_USAGE_STEP,
+        tokens_in=tokens_in,
+        tokens_out=tokens_out or 0,
+        ts=ts,
+    )
+
+
+def persist_resolution(workdir: str, verdict, *, surface: str) -> str:
+    """Persist one resolution-gate verdict — the ONE path every surface uses.
+
+    ``gitreins resolve``, ``gitreins preflight`` and the MCP ``context.resolve``
+    tool all call this and never their own writer, so the record on disk is
+    identical whichever surface ran the gate (the second-implementation drift
+    that bit DF-GITREINS-POC-12 / -16, and the POC-23 lesson: an invisible
+    verdict is not an audit trail).
+
+    Returns the verdict commit hash, ``"dry-run"`` (files written, git
+    unavailable), ``"disabled"`` (``history.enabled: false`` — NOTHING is
+    written: no history entry AND no usage line), ``"abstain"`` (nothing
+    written — a surface-disabled, no-credential, transport or parse failure is
+    a non-event, not a verdict) or ``"error"``.
+
+    One instant for both artifacts: the usage row and the record are written
+    with the SAME timestamp, and the row goes first. Attribution in
+    :func:`engine.usage.attribute_rows` is by time, so a row that merely
+    *preceded* the record by a wall-clock read could still be charged to the
+    next judge verdict when the two reads land in the same microsecond (a real
+    case under load); stamping the row with the record's own ``evaluated_at``
+    makes the record the earliest stamp at-or-after the row, deterministically.
+    Write-first additionally means a failed persist leaves an unattributed row
+    instead of a record with no telemetry.
+
+    Non-fatal by contract, like :func:`persist_evaluation`: a persistence
+    failure is logged and reported as ``"error"``, never raised into the run
+    that produced the verdict. Never prints — the MCP server's stdout is its
+    JSON-RPC channel.
+    """
+    if not _is_decision(verdict):
+        return "abstain"
+    try:
+        persister = VerdictPersister(workdir)
+        if not persister.enabled:
+            return "disabled"
+        stamp = datetime.utcnow()
+        _append_resolution_usage(workdir, verdict, ts=_as_epoch(stamp))
+        return persister.persist(
+            RESOLUTION_ENTRY_ID,
+            build_resolution_record(verdict, surface=surface),
+            evaluated_at=stamp,
+        )
+    except Exception as exc:  # persistence must never fail the run
+        logger.warning("Failed to persist resolution verdict (%s, non-fatal): %s", surface, exc)
+        return "error"
+
+
 # ── Report builder (shared between CLI and TUI) ────────────────
 
 
 def build_report(workdir: str, n: int = 10) -> str:
-    """Build a text report of recent verdicts."""
+    """Build a text report of recent verdicts.
+
+    The history store holds two kinds of record (DF-GITREINS-POC-36). A
+    RESOLUTION record is not a task verdict — it has no pass/fail — so it is
+    listed in its own section and never counted in the pass/fail rollup: a
+    RESOLVED band must not read as a passed judgment. A store with no
+    resolution records renders exactly the report it always did.
+    """
     persister = VerdictPersister(workdir)
 
     if not persister.enabled:
@@ -908,6 +1199,9 @@ def build_report(workdir: str, n: int = 10) -> str:
     entries = persister.list_verdicts(n=n)
     if not entries:
         return "No verdict history found."
+
+    resolution_entries = [e for e in entries if e.get("kind") == KIND_RESOLUTION]
+    entries = [e for e in entries if e.get("kind") != KIND_RESOLUTION]
 
     total = len(entries)
     passed_count = sum(1 for e in entries if e.get("passed", False))
@@ -948,11 +1242,36 @@ def build_report(workdir: str, n: int = 10) -> str:
         if title and title != task_id:
             lines.append(f"     {title}")
 
+    if resolution_entries:
+        lines.append("")
+        lines.append(f"─── Resolution gate ({len(resolution_entries)}) ───")
+        lines.extend(_resolution_line(entry) for entry in resolution_entries)
+
     lines.append("")
     lines.append(f"Storage: {persister.storage_mode} ({persister.history_dir})")
     lines.append(f"Total entries: {persister.count_verdicts()}")
 
     return "\n".join(lines)
+
+
+def _resolution_line(entry: dict) -> str:
+    """One report line for a resolution record: band, probability, date, source.
+
+    Reads only what the record itself carries (``band``/``probability`` →
+    fallback to the nested engine verdict) so a record written by an older or
+    partial writer still renders something true instead of an exception.
+    """
+    payload = entry.get("verdict") if isinstance(entry.get("verdict"), dict) else {}
+    band = entry.get("band") or payload.get("verdict") or "RESOLUTION"
+    probability = entry.get("probability")
+    if probability is None:
+        probability = payload.get("probability")
+    shown = f" ({probability:.2f})" if isinstance(probability, (int, float)) else ""
+    question = entry.get("task_title") or payload.get("question") or ""
+    line = f"  • {band}{shown}  {entry.get('_date', '?')}  [{entry.get('source') or '?'}]"
+    if question:
+        line += f"\n      {question}"
+    return line
 
 
 def _pct(part: int, total: int) -> str:

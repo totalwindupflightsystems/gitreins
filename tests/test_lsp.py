@@ -669,6 +669,46 @@ def gopls_environment_note(workdir):
     )
 
 
+def _tmpdir_allows_exec(path):
+    """REVIEW-009: can a file written into ``path`` actually be EXECUTED?
+
+    On a host whose pytest tmpdir sits on a ``noexec`` mount, the gopls
+    stand-in tests FAIL fast instead of skipping: ``chmod 0o755`` succeeds and
+    ``os.access(f, os.X_OK)`` still reports True, but the exec itself raises
+    ``OSError: [Errno 13] Permission denied`` — EACCES from the MOUNT OPTION,
+    not from the mode. The engine then reports "LSP tool 'gopls' not found on
+    PATH - skipping" and the recheck/published assertions fail for an
+    environment reason, which is the noise a fresh-machine run must not carry.
+
+    Probe once with a real exec of a throwaway file in ``path``:
+
+    * a returned ``CompletedProcess`` (ANY exit code, even non-zero) ⇒ the
+      mount allows exec ⇒ True
+    * ``OSError`` ⇒ noexec, or an interpreter/filesystem we cannot reason
+      about ⇒ False (conservative: skip with the reason named)
+
+    The probe file carries a ``#!`` line on purpose. A shebang-less file fails
+    with ENOEXEC ("Exec format error", Errno 8) on an exec-capable mount too
+    (measured on this host's /tmp and /dev/shm), so it cannot separate the two
+    environments; with the shebang the only failure mode left is the mount
+    option. The probe file is always unlinked.
+    """
+    probe = os.path.join(os.fspath(path), "gitreins-exec-probe")
+    try:
+        with open(probe, "w", encoding="utf-8") as handle:
+            handle.write(f"#!{sys.executable}\n")
+        os.chmod(probe, 0o755)
+        subprocess.run([probe], capture_output=True, timeout=10, stdin=subprocess.DEVNULL)
+    except OSError:
+        return False
+    finally:
+        try:
+            os.unlink(probe)
+        except OSError:
+            pass
+    return True
+
+
 PYLSP_SKIP_310 = pytest.mark.skipif(
     sys.version_info < (3, 11),
     reason="pylsp pyflakes/pycodestyle plugins may not activate on Python 3.10 — CI-only skip",
@@ -1384,6 +1424,10 @@ class TestGoplsIntegration:
         change forces the check, so the engine recovers it in one attempt."""
         quiet_bin = tmp_path / "bin"
         quiet_bin.mkdir()
+        # REVIEW-009: a noexec tmpdir mount fails the exec (EACCES) even though
+        # the mode is 0o755 — skip with the environment named, never FAIL.
+        if not _tmpdir_allows_exec(quiet_bin.parent):
+            pytest.skip("tmpdir mount is noexec — gopls stand-in cannot execute (environment)")
         fake = quiet_bin / "gopls"
         fake.write_text(
             ONLY_ON_CHANGE_LSP_SOURCE.replace("@PYTHON@", sys.executable), encoding="utf-8"
@@ -1432,6 +1476,10 @@ class TestGoplsIntegration:
         must be reported as STALLED, not mistaken for a clean tree."""
         quiet_bin = tmp_path / "bin"
         quiet_bin.mkdir()
+        # REVIEW-009: a noexec tmpdir mount fails the exec (EACCES) even though
+        # the mode is 0o755 — skip with the environment named, never FAIL.
+        if not _tmpdir_allows_exec(quiet_bin.parent):
+            pytest.skip("tmpdir mount is noexec — gopls stand-in cannot execute (environment)")
         fake = quiet_bin / "gopls"
         fake.write_text(QUIET_LSP_SOURCE.replace("@PYTHON@", sys.executable), encoding="utf-8")
         fake.chmod(0o755)

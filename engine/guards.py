@@ -79,20 +79,40 @@ def is_go_project(workdir: str) -> bool:
     return os.path.isfile(os.path.join(workdir, "go.mod"))
 
 
-def check_go_lint(workdir: str) -> GoGuardResult:
-    """Run go vet on staged Go files. Fall back to golangci-lint if available."""
-    # Get staged Go files
-    staged = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-        capture_output=True,
-        text=True,
-        timeout=10,
-        cwd=workdir,
-        env=_sanitized_env(),
-    )
-    go_files = [f for f in staged.stdout.strip().split("\n") if f.endswith(".go")]
+def _changed_go_files(workdir: str, changed_files: list[str] | None) -> list[str]:
+    """Go files to grade under the caller's change scope.
+
+    ``changed_files`` is the caller's collected scope (the guard's
+    ``--scope working-tree`` set) — paths that no longer exist are dropped,
+    since nothing can compile or lint them. ``None`` means "no scope was
+    handed in": the guards then run their own historical staged discovery,
+    unchanged, wording included.
+    """
+    if changed_files is None:
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=workdir,
+            env=_sanitized_env(),
+        )
+        return [f for f in staged.stdout.strip().split("\n") if f.endswith(".go")]
+    return [
+        f for f in changed_files if f.endswith(".go") and os.path.isfile(os.path.join(workdir, f))
+    ]
+
+
+def _no_go_files(changed_files: list[str] | None) -> str:
+    """The skip message for the scope that produced no Go file."""
+    return "No Go files staged" if changed_files is None else "No Go files in scope"
+
+
+def check_go_lint(workdir: str, changed_files: list[str] | None = None) -> GoGuardResult:
+    """Run go vet for the selected change scope. Fall back to golangci-lint if available."""
+    go_files = _changed_go_files(workdir, changed_files)
     if not go_files:
-        return GoGuardResult(name="go_lint", passed=True, output="No Go files staged")
+        return GoGuardResult(name="go_lint", passed=True, output=_no_go_files(changed_files))
 
     # Try golangci-lint first. run_bounded never raises for a missing
     # binary — it returns {"error": ...} without an exit_code — so any
@@ -127,28 +147,23 @@ def check_go_lint(workdir: str) -> GoGuardResult:
     return GoGuardResult(name="go_lint", passed=False, output=output)
 
 
-def check_go_tests(workdir: str, timeout: int | str = 180) -> GoGuardResult:
-    """Run go test on staged Go files.
+def check_go_tests(
+    workdir: str, timeout: int | str = 180, changed_files: list[str] | None = None
+) -> GoGuardResult:
+    """Run go test for the selected change scope.
 
     timeout is configurable so large Go projects (slow integration
     suites) can raise it via guards.test_timeout in .gitreins/config.yaml.
+    ``changed_files`` carries the caller's scope (see :func:`_changed_go_files`).
     """
     # Belt-and-braces: consumers may pass a raw string config value (e.g.
     # '300s'); subprocess.run(timeout='300s') raises TypeError instead of
     # timing out (GR-GAP-028). GuardManager already coerces at init — this
     # protects direct callers.
     timeout = _coerce_timeout(timeout, "test_timeout", 180)
-    staged = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-        capture_output=True,
-        text=True,
-        timeout=10,
-        cwd=workdir,
-        env=_sanitized_env(),
-    )
-    go_files = [f for f in staged.stdout.strip().split("\n") if f.endswith(".go")]
+    go_files = _changed_go_files(workdir, changed_files)
     if not go_files:
-        return GoGuardResult(name="go_tests", passed=True, output="No Go files staged")
+        return GoGuardResult(name="go_tests", passed=True, output=_no_go_files(changed_files))
 
     result = command_hygiene.run_bounded(
         ["go", "test", "-count=1", "-short", "./..."],
@@ -174,19 +189,11 @@ def check_go_tests(workdir: str, timeout: int | str = 180) -> GoGuardResult:
     return GoGuardResult(name="go_tests", passed=False, output=output)
 
 
-def check_go_build(workdir: str) -> GoGuardResult:
-    """Run go build on staged Go files to catch compile errors."""
-    staged = subprocess.run(
-        ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
-        capture_output=True,
-        text=True,
-        timeout=10,
-        cwd=workdir,
-        env=_sanitized_env(),
-    )
-    go_files = [f for f in staged.stdout.strip().split("\n") if f.endswith(".go")]
+def check_go_build(workdir: str, changed_files: list[str] | None = None) -> GoGuardResult:
+    """Run go build for the selected change scope to catch compile errors."""
+    go_files = _changed_go_files(workdir, changed_files)
     if not go_files:
-        return GoGuardResult(name="go_build", passed=True, output="No Go files staged")
+        return GoGuardResult(name="go_build", passed=True, output=_no_go_files(changed_files))
 
     result = command_hygiene.run_bounded(
         ["go", "build", "-buildvcs=false", "./..."],

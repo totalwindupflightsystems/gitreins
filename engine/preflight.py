@@ -28,6 +28,7 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from engine.persist import persist_resolution
 from engine.resolution import (
     VERDICT_ABSTAIN,
     VERDICT_RESOLVED,
@@ -153,6 +154,14 @@ def preflight(
 
     verdict = resolve(question, workdir=workdir, **resolve_kwargs)
     record = decide(verdict)
+    # DF-GITREINS-POC-36: the decision is filed in the same history store the
+    # judge writes to, through the SHARED helper — this surface must never grow
+    # its own writer (the POC-12/POC-16 second-implementation drift). An ABSTAIN
+    # (including the surface-disabled branch above, which returns before this
+    # point) writes nothing: it is a non-event, not a decision. The write is
+    # non-fatal by the helper's contract, so recording can never change the
+    # dispatch decision this surface exists to make.
+    persist_resolution(workdir, verdict, surface=surface)
     if dispatch is not None and record["decision"] != DECISION_SKIP:
         dispatch()
     return record

@@ -732,3 +732,69 @@ board dir); working message audit ~20 min (including reading `engine/pipeline.py
 0.14.0 wheel as well as HEAD. Regressions checked and still green: PyPI == HEAD (0.14.0),
 DF-011 hook pinning, `install`+`init` idempotence, QA-ledger fleet-schema interop, and the
 absence of a commit-msg hook (matching the docs).
+
+## 2026-09-23 — run 7: the resolution gate, explained from the outside
+
+### How the thing is built (and why)
+
+`gitreins resolve "<q>"` is a five-stage pipeline (engine/resolution.py, ~1.8k lines):
+TRACE (hilo graph search → seed files, then reverse-dependency paths) → ASSEMBLE (hilo
+`graph understand` bundles per seed) → BUDGET (measure the assembled text, enforce
+MAX_BUNDLE_TOKENS=28k with a conservative chars/token floor — `worst_case_tokens`;
+clipping is line-aligned via engine/evidence_bounds.py, never silent: every verdict
+carries `clipped` + `chars_dropped` + `clip_disclosure`) → JEV (ONE POST to
+openrouter.ai/api/alpha/decisions, model typesafe/jev-1.13, three typed questions in a
+single call: noul probability, missing_kind choice, evidence_quality score; credential
+failover across GITREINS_OPENROUTER_KEY, OPENROUTER_API_KEY, MYTHOS_OPENROUTER_KEY +
+documented .env files) → BANDS (≥.85 RESOLVED, ≥.50 REVIEW, <.50 UNRESOLVED, any failure
+ABSTAIN — thresholds live in code, never in the model).
+
+`gitreins preflight` (engine/preflight.py) is the same verdict mapped onto a dispatch
+decision. The asymmetry that confuses first-time readers is the design center: RESOLVE
+fails CLOSED (an ABSTAIN is exit 1 — it guards a merge decision, so a dead key must
+never read as "resolved"); PREFLIGHT fails OPEN (an ABSTAIN is exit 0 + decision
+"dispatch" — it is a dispatch signal, so a transport blip must never silently stop
+work). Both carry the abstain_reason in the record; no skip is blind.
+
+Surfaces are gated by `resolution.enabled.<surface>` (cli/mcp/predispatch/
+judge_prescreen) with default OFF everywhere (engine/resolution.py:238-260): the gate
+makes third-party egress, and the judge-adjacent surfaces wait on JEVRES-005
+calibration numbers. That default is defensible for egress — but as dogfood proved, it
+is undocumented, so the flagship is invisible out of the box (POC-35).
+
+### Errors hit during this run, and the right way through each
+
+1. **`abstain_reason: "surface-disabled"` in 0.12s on the very first call.** Not a bug —
+   the enable knob. The right way: add the `resolution: enabled:` block to
+   `.gitreins/config.yaml`. The wrong way: trust the hint string's "docs §9" pointer
+   (the section does not exist; POC-35).
+2. **jq "Cannot index string" on the preflight record.** `preflight --json` returns a
+   dispatch RECORD {band, decision, probability, ...} whose `verdict_json` is an
+   embedded JSON STRING — parse it twice (`.verdict_json | fromjson`). `resolve --json`
+   returns the verdict object directly. Two shapes, one gate (POC-37).
+3. **Client timeout on `notifications/initialized`.** It is a JSON-RPC NOTIFICATION:
+   fire-and-forget, no response will ever come. A client that waits on a matching id
+   hangs. (Working client: docs/dogfood/2026-09-20-integration.md + run 7's
+   /tmp/dogfood-gitreins/mcp_resolve_client.py pattern.)
+4. **exit 127 running `.venv/bin/gitreins` from a scratch cwd.** Relative paths die
+   after `cd`; use the absolute interpreter path. (Operator error, recorded so the next
+   runner skips it.)
+5. **"no key"/"garbage key" tests that still returned verdicts.** The credential
+   failover reads `.env` sources documented in the spec; on this host six candidates
+   exist. To drill fail-closed you must kill the TRANSPORT, not the key:
+   `HTTPS_PROXY=http://127.0.0.1:9 gitreins resolve ...` → ABSTAIN transport-error,
+   exit 1. That is also the only safe way to rehearse the ABSTAIN path without
+   touching real credentials.
+
+### The right way, condensed
+
+- Enable the surfaces first (cli+mcp+predispatch), then `gitreins resolve` for
+  "does the repo already answer X", `gitreins preflight` for "should I dispatch a
+  worker for this row".
+- Ask narrow questions: `--budget 2000` on a named file beat the default bundle
+  (RESOLVED 0.92 vs REVIEW 0.60) at one-tenth the tokens. Precision beats volume —
+  the spec predicted it; run 7 measured it.
+- Trust the exits: resolve 0=RESOLVED/REVIEW, 1=UNRESOLVED/ABSTAIN; preflight 0
+  (always — read the record), 2=usage. Verified live, including argparse exit 2.
+- Persist-audit gap: until POC-36 closes, capture `--json` output yourself if you
+  need the verdict later — the gate keeps no record of what it told you.

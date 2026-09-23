@@ -26,11 +26,28 @@ class Judge:
         workdir: str = ".",
         guard_config: dict | None = None,
         eval_cap: "str | EvalCap | None" = None,
+        scope: str = "staged",
+        *,
+        persist_log: bool = True,
+        persist_telemetry: bool = True,
     ):
         self.workdir = workdir
         self.llm = llm
         self.guard_config = guard_config or {}
-        self.guard_manager = GuardManager(workdir, self.guard_config)
+        # Change scope (EVID-002) for the Tier 1 guard this judge runs: the
+        # judge's tier-1 step grades the SAME change set the guard would, so
+        # `judge --scope working-tree` and `guard --scope working-tree` agree.
+        # Default "staged" keeps every existing caller's semantics.
+        self.scope = scope
+        # EVID-003: `persist_log=False` (the ephemeral judge) keeps the tier-1
+        # guard from writing its DF-018 run log inside the judged repository,
+        # and `persist_telemetry=False` keeps the pipeline's ai_eval step from
+        # appending to `.gitreins/usage.jsonl` there. Keyword-only and both
+        # defaulting True so no existing caller changes.
+        self.persist_telemetry = persist_telemetry
+        self.guard_manager = GuardManager(
+            workdir, self.guard_config, scope=scope, persist_log=persist_log
+        )
         self.eval_cap = eval_cap
 
     def evaluate_task(self, task: Task, skip_tier2: bool = False) -> "JudgeResult":
@@ -89,7 +106,9 @@ class Judge:
                 if stage.get("type") == "ai_eval":
                     stage["condition"] = "false"
 
-        pipeline = Pipeline(config, self.workdir, llm=self.llm)
+        pipeline = Pipeline(
+            config, self.workdir, llm=self.llm, persist_telemetry=self.persist_telemetry
+        )
 
         task_dict: dict[str, object] = {
             "id": task.id,
@@ -247,7 +266,9 @@ class Judge:
     def run_precommit(self) -> bool:
         """Run pre-commit pipeline stages only. Returns True if commit should proceed."""
         config = load_pipeline_config(self.workdir)
-        pipeline = Pipeline(config, self.workdir, llm=self.llm)
+        pipeline = Pipeline(
+            config, self.workdir, llm=self.llm, persist_telemetry=self.persist_telemetry
+        )
         result = pipeline.run(
             {"id": "_precommit", "title": "pre-commit", "criteria": []}, trigger="pre-commit"
         )

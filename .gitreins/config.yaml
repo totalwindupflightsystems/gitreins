@@ -55,3 +55,17 @@ history:
   enabled: true
   storage: git
   max_verdicts: 1000
+
+# Jev resolution gate (JEVRES-006). This repo runs the CLI and MCP surfaces for real;
+# the two judge-adjacent surfaces stay false — no calibration numbers exist until
+# JEVRES-005 lands, and an uncalibrated band must never drive a skip-dispatch or a judge
+# pre-screen. `model`, `tokens_max`, `bands` and `egress_exclude` are omitted on purpose:
+# an omitted key IS the built-in default, and those defaults are the measured ones in
+# docs/jev-resolution-gate.md §2/§9 (the single design authority). Only a literal `true`
+# opens a surface; absent/false/wrong-typed all read as OFF.
+resolution:
+  enabled:
+    cli: true
+    mcp: true
+    predispatch: false
+    judge_prescreen: false

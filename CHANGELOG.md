@@ -7,7 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_No unreleased changes yet._
+### Added
+- **`gitreins judge --ephemeral` — evaluate inline criteria and persist
+  nothing (EVID-003)** — the last row of the evidence-contract arc carried from
+  external PR #1 (rorca-hermes). `gitreins judge [<id>] --ephemeral --title <t>
+  --criterion <c> [--criterion <c> ...]` builds the task IN MEMORY from
+  `--title` and the repeated `--criterion` values and evaluates it without
+  touching any store: no `TaskManager` (so `.gitreins/tasks.yaml` is never
+  opened or created), no `VerdictPersister`, no `.gitreins/history` entry, no
+  commit on the `gitreins` branch, no branch create/switch, no stash — and,
+  because both writes land INSIDE the repository being graded, no tier-1 guard
+  run log (DF-018) and no `.gitreins/usage.jsonl` telemetry line either
+  (`GuardManager(persist_log=…)` / `Judge(persist_telemetry=…)`, both keyword-
+  only and defaulting to today's behaviour). The use case is a per-story
+  execution gate — Rorca's — that must not mutate the repository it is judging.
+  Exit codes and the `--json` document follow the v1 contract (EVID-001): `0`
+  pass, `1` non-pass, `2` usage error; `judge_evidence(..., ephemeral=True)`
+  gives `subject.ephemeral: true` and `metadata.historyPersisted: false`, and
+  the document is the only thing on stdout. `--scope working-tree` works in an
+  ephemeral run exactly as in a sync one, so uncommitted work is graded without
+  being committed or staged first. A missing `id` is allowed ONLY with
+  `--ephemeral` (every other mode keeps argparse's exit 2), `--ephemeral`
+  requires a non-empty `--title` and at least one non-empty `--criterion`
+  (a gate with no criteria would pass vacuously), and it cannot be combined
+  with `--async`/`--status`/`--run-job`. An explicit `id` is used verbatim as
+  `subject.taskId`; without one it is `ephemeral:<slug-of-title>`. Regression:
+  `tests/test_cli.py::TestJudgeEphemeralCLI` (6 tests) drives the real CLI
+  against a real scratch repository and asserts zero mutation of the five
+  surfaces criterion 1 names — `git status`, the index, `.gitreins/tasks.yaml`,
+  `.gitreins/history`, the current branch — plus refs, stash and an
+  ignore-proof census of `.gitreins`. Docs: `docs/cli-reference.md` §5
+  (ephemeral option table, a new usage fence the CLI-examples checker replays,
+  and the exit-code/`--async` refusals) and `docs/evidence-contract-v1.md`
+  (the v1 automation surface is now fenced, since all three commands parse).
 
 ## [0.15.0] - 2026-09-22
 

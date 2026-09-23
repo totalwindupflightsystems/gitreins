@@ -22,15 +22,19 @@ Usage:
     gitreins qa record --project <name> [--verdict PASS|FAIL --cell <name>=<status> ...]
     gitreins guard run
     gitreins judge <id>
+    gitreins judge [<id>] --ephemeral --title <title> --criterion <criterion> ...
     gitreins commit <message>
     gitreins mcp-server
     gitreins serve [--repo <path>] [--port <port>] [--project <name>]
 """
 
 import argparse
+import contextlib
+import io
 import json
 import logging
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -61,6 +65,11 @@ GITREINS_GITIGNORE_ENTRIES = (
     # tracked path.
     ".gitreins/qa-ledger.jsonl",
 )
+
+# EVID-003: the id an ephemeral judge run carries when none was given on the
+# command line. It is a LABEL, never a key in any store — an ephemeral task is
+# built in memory and persisted nowhere.
+EPHEMERAL_TASK_ID_PREFIX = "ephemeral"
 
 DEFAULT_GITREINS_CONFIG = """\
 # GitReins Configuration
@@ -1848,6 +1857,17 @@ def cmd_report(args):
     workdir = get_workdir()
     n = args.n if hasattr(args, "n") else 10
 
+    if getattr(args, "json_output", False):
+        # EVID-002: history as one bounded v1 document — the interactive TUI and
+        # the QA section are human surfaces and stay out of the JSON path.
+        from engine.evidence import dumps_evidence, report_evidence
+        from engine.persist import VerdictPersister
+
+        persister = VerdictPersister(workdir)
+        entries = persister.list_verdicts(n=n) if persister.enabled else []
+        print(dumps_evidence(report_evidence(entries, persister.storage_mode)))
+        return
+
     # Interactive TUI mode
     if args.interactive:
         _cmd_report_tui(workdir, n)
@@ -1912,7 +1932,7 @@ def cmd_serve(args):
 
 def _cmd_report_tui(workdir: str, n: int = 20):
     """Interactive TUI for verdict browsing (requires textual)."""
-    from engine.persist import build_report, VerdictPersister
+    from engine.persist import KIND_RESOLUTION, VerdictPersister, build_report
 
     try:
         from importlib.util import find_spec
@@ -1944,13 +1964,19 @@ def _cmd_report_tui(workdir: str, n: int = 20):
 
     verdict_lines = []
     for entry in entries:
-        icon = "✓" if entry.get("passed") else "✗"
+        # DF-GITREINS-POC-36: a resolution-gate record is not a graded verdict —
+        # it has no pass/fail — so it carries its band instead of the ✓/✗ icon,
+        # exactly as the text report lists it in its own section.
+        resolution = entry.get("kind") == KIND_RESOLUTION
+        icon = "•" if resolution else ("✓" if entry.get("passed") else "✗")
         task_id = entry.get("task_id", "?")
         date = entry.get("_date", "?")
         title = entry.get("task_title", task_id)
         items = entry.get("items", [])
         criteria = ""
-        if items:
+        if resolution:
+            criteria = f" [{entry.get('band') or 'RESOLUTION'}]"
+        elif items:
             parts = []
             for item in items:
                 if isinstance(item, dict):
@@ -1981,7 +2007,11 @@ def _cmd_report_tui(workdir: str, n: int = 20):
 
 
 def cmd_guard_run(args):
-    _check_for_updates()
+    # EVID-002: --json is the automation surface — the update check prints, so
+    # it is skipped there; the document must be the only thing on stdout.
+    json_output = getattr(args, "json_output", False)
+    if not json_output:
+        _check_for_updates()
     from engine.guard_manager import GuardManager
 
     workdir = get_workdir()
@@ -1991,7 +2021,7 @@ def cmd_guard_run(args):
     # ('diff' / 'full'). If both are passed, --staged-only wins (diff is the
     # narrower scope); neither → config value (default: 'full').
     # DF-GITREINS-POC-11: --full additionally grades the whole tree when the
-    # index is empty (tests run, lint grades tracked+untracked files) —
+    # index is empty (tests run, lint grades tracked+untracked files) — and
     # --staged-only must not.
     grade_full_tree = False
     if getattr(args, "staged_only", False):
@@ -1999,13 +2029,37 @@ def cmd_guard_run(args):
     elif getattr(args, "full", False):
         config.setdefault("guards", {})["test_mode"] = "full"
         grade_full_tree = True
-    gm = GuardManager(workdir, config=config, grade_full_tree=grade_full_tree)
+    # --scope selects the CHANGE SET (index vs index+worktree+untracked);
+    # --full/--staged-only select WHICH tests run over it. They compose.
+    scope = getattr(args, "scope", "staged")
+    gm = GuardManager(workdir, config=config, scope=scope, grade_full_tree=grade_full_tree)
+
+    if json_output:
+        from engine.evidence import dumps_evidence, guard_evidence
+
+        # Capture anything the run narrates so stdout carries exactly one
+        # parseable document; a red run explains itself on stderr instead.
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            result = gm.run_all(force_dead_code=getattr(args, "dead_code", False))
+        if not result.passed:
+            sys.stderr.write(captured.getvalue())
+        print(dumps_evidence(guard_evidence(result, scope)))
+        # Contract exit codes: 0 for a passing result, 1 for a non-passing one
+        # (a DEGRADED pass is a pass here — the document carries the skipped
+        # steps and metadata.degraded; write_guard_log already records it).
+        sys.exit(0 if result.passed else 1)
+
     result = gm.run_all(force_dead_code=getattr(args, "dead_code", False))
 
     # Build mode note
     mode = gm.test_mode
     extra = result.extra
     mode_note = f"  (test mode: {mode}"
+    if scope != "staged":
+        # Only a non-default scope adds a note: the staged line is the string
+        # every existing consumer greps, and it stays byte for byte.
+        mode_note += f", scope: {scope}"
     if extra.get("grade_full_tree"):
         mode_note += ", whole tree"
     if extra.get("test_targets"):
@@ -2060,26 +2114,85 @@ def cmd_guard_run(args):
         sys.exit(2)
 
 
+# Printed by `_judge_usage_error` — kept in argparse's shape so a reader (and a
+# caller matching on stderr) sees the same thing argparse itself would print.
+_JUDGE_USAGE = (
+    "gitreins judge <id> [--skip-tier2] [--async] [--status <job_id>] "
+    "[--scope staged|working-tree] [--json]\n"
+    "       gitreins judge [<id>] --ephemeral --title <title> --criterion <criterion> "
+    "[--criterion <criterion> ...] [--skip-tier2] [--scope staged|working-tree] [--json]"
+)
+
+
+def _judge_usage_error(message: str) -> None:
+    """Refuse a bad `judge` invocation exactly as argparse refuses one.
+
+    `judge`'s positional id is optional at the parser level (EVID-003: an
+    ephemeral run names a task that exists nowhere), so the modes that DO need
+    an id carry the requirement here. The message shape and the exit code are
+    argparse's own (2) because callers — scripts, CI steps, agents — must be
+    able to tell a malformed invocation from a failed gate (1).
+    """
+    print(f"usage: {_JUDGE_USAGE}", file=sys.stderr)
+    print(f"gitreins: error: {message}", file=sys.stderr)
+    sys.exit(2)
+
+
 def cmd_judge(args):
-    """Evaluate a task — sync (default), or dispatch a background job.
+    """Evaluate a task — sync (default), ephemeral, or dispatch a background job.
 
     ``--async`` detaches a worker process and returns a job id; the job
     record lives in the shared disk store, so it survives this CLI
     exiting and can be polled with ``gitreins judge --status <job_id>``
     (or the MCP ``judge.status`` tool). ``--run-job`` is the internal
     worker mode executed by the detached child.
+
+    ``--ephemeral`` (EVID-003) evaluates criteria supplied inline and persists
+    nothing at all — see ``_cmd_judge_ephemeral``.
     """
+    ephemeral = getattr(args, "ephemeral", False)
+    # The background modes all read a task out of the store and write a job
+    # record; neither exists for an ephemeral run, so the combination is a
+    # usage error rather than a flag that is silently ignored.
+    for flag, active in (
+        ("--status", getattr(args, "status", False)),
+        ("--run-job", getattr(args, "run_job", False)),
+        ("--async", getattr(args, "async_dispatch", False)),
+    ):
+        if active and ephemeral:
+            _judge_usage_error(f"argument {flag}: not allowed with argument --ephemeral")
+
     if getattr(args, "status", False):
+        if getattr(args, "id", None) is None:
+            _judge_usage_error("the following arguments are required: id")
         _cmd_judge_status(args.id)
         return
     if getattr(args, "run_job", False):
+        if getattr(args, "id", None) is None:
+            _judge_usage_error("the following arguments are required: id")
         _cmd_judge_worker(args.id)
         return
     if getattr(args, "async_dispatch", False):
+        if getattr(args, "id", None) is None:
+            _judge_usage_error("the following arguments are required: id")
         _cmd_judge_async(args.id)
         return
 
-    _check_for_updates()
+    # EVID-002: --json is the automation surface — the update check narrates on
+    # stdout, so it is skipped there.
+    json_output = getattr(args, "json_output", False)
+    scope = getattr(args, "scope", "staged")
+
+    if ephemeral:
+        _cmd_judge_ephemeral(args, scope=scope, json_output=json_output)
+        return
+
+    # A missing id is allowed ONLY with --ephemeral (EVID-003).
+    if getattr(args, "id", None) is None:
+        _judge_usage_error("the following arguments are required: id")
+
+    if not json_output:
+        _check_for_updates()
     from engine.task_manager import TaskManager
     from engine.llm import LLMClient
     from engine.judge import Judge
@@ -2088,7 +2201,10 @@ def cmd_judge(args):
     tm = TaskManager(workdir)
     task = tm.get(args.id)
     if not task:
-        print(f"Task not found: {args.id}")
+        # --json keeps the document channel clean: a caller parsing stdout must
+        # not receive a prose line where the evidence document should be. The
+        # message still reaches the operator, on stderr.
+        print(f"Task not found: {args.id}", file=sys.stderr if json_output else sys.stdout)
         sys.exit(1)
 
     # Single-flight (GR-GAP-046): while a background evaluation for this
@@ -2096,30 +2212,137 @@ def cmd_judge(args):
     # don't start a second evaluation inline. Point the user at the
     # running job instead. Only a LIVE pid blocks: a running record whose
     # owner died is an orphan and a sync run supersedes it.
+    # --json is exempt: its caller asked for a document for THIS run and has
+    # nowhere to read a "poll the other job" pointer from (that pointer would
+    # also be the only thing on a stdout that must hold one JSON document).
     from engine.job_store import find_running_job, pid_alive
 
-    running = find_running_job(args.id, workdir)
-    if running is not None and pid_alive(running.get("pid")):
-        print(f"Evaluation already in progress for {args.id} (job {running['id']})")
-        print(f"  poll:    gitreins judge --status {running['id']}")
-        return
+    if not json_output:
+        running = find_running_job(args.id, workdir)
+        if running is not None and pid_alive(running.get("pid")):
+            print(f"Evaluation already in progress for {args.id} (job {running['id']})")
+            print(f"  poll:    gitreins judge --status {running['id']}")
+            return
 
-    if getattr(args, "skip_tier2", False):
+    if getattr(args, "skip_tier2", False) and not json_output:
         print("Tier 2 skipped (--skip-tier2 flag)")
 
     llm = LLMClient()
     config = load_config(workdir)
-    judge = Judge(llm, workdir, guard_config=config)
-    result = judge.evaluate_task(task, skip_tier2=getattr(args, "skip_tier2", False))
-    print(result.summary)
+    judge = Judge(llm, workdir, guard_config=config, scope=scope)
 
-    # Persist verdict
-    _persist_result(workdir, task, result)
+    if json_output:
+        from engine.evidence import dumps_evidence, judge_evidence
+
+        # The evaluator and the persister both narrate on stdout ("Tier 1:
+        # Running static guards...", "📋 Verdict saved: ..."). Capture it so
+        # stdout holds exactly one parseable document; a FAIL keeps its
+        # narration on stderr, where a red run can still explain itself.
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            result = judge.evaluate_task(task, skip_tier2=getattr(args, "skip_tier2", False))
+            _persist_result(workdir, task, result)
+        if not result.passed:
+            sys.stderr.write(captured.getvalue())
+        print(dumps_evidence(judge_evidence(result, task, scope)))
+    else:
+        result = judge.evaluate_task(task, skip_tier2=getattr(args, "skip_tier2", False))
+        print(result.summary)
+        # Persist verdict
+        _persist_result(workdir, task, result)
 
     # DF-GITREINS-POC-16: a FAIL verdict must reach the shell. Printing
     # "Overall: FAIL" while exiting 0 lets a caller (script, CI step, agent)
     # treat a red gate as success — the same silent-pass class this task is
     # about. `gitreins guard` already exits 1 on the same tree.
+    if not result.passed:
+        sys.exit(1)
+
+
+def _ephemeral_task_id(title: str) -> str:
+    """A readable id for a task that was never stored (EVID-003).
+
+    Nothing is persisted, so the id is only a label for the printed summary and
+    the evidence document's ``subject.taskId``: it is derived from the title so
+    two different story gates are distinguishable, and falls back to the bare
+    prefix when the title has no slug-able characters.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:48].strip("-")
+    return f"{EPHEMERAL_TASK_ID_PREFIX}:{slug}" if slug else EPHEMERAL_TASK_ID_PREFIX
+
+
+def _cmd_judge_ephemeral(args, *, scope: str, json_output: bool) -> None:
+    """EVID-003: evaluate inline criteria with NOTHING persisted.
+
+    A per-story execution gate must not mutate the repository it is judging, so
+    this path never touches the stores or the git state a normal judge run
+    owns:
+
+    * no ``TaskManager`` — the task is built in memory from ``--title`` and the
+      repeatable ``--criterion`` values;
+    * no ``.gitreins/tasks.yaml`` write (that is the task store's, and it is
+      never opened);
+    * no ``_persist_result`` / ``VerdictPersister`` — so no
+      ``.gitreins/history`` entry and no verdict commit on the ``gitreins``
+      branch;
+    * no branch create/switch, no stash;
+    * and no tier-1 guard run log either: GuardManager's DF-018 log is written
+      inside the judged tree, which is exactly the mutation this mode exists to
+      avoid (``persist_log=False``).
+
+    Exit codes follow the v1 contract (EVID-001): 0 for a passing result, 1 for
+    a non-passing one; a bad invocation is the usage error above (2). With
+    ``--json`` stdout holds exactly one evidence document and
+    ``judge_evidence(..., ephemeral=True)`` marks it as unpersisted.
+    """
+    from engine.judge import Judge
+    from engine.llm import LLMClient
+    from engine.task_manager import Task
+
+    title = (getattr(args, "title", None) or "").strip()
+    criteria = [criterion for criterion in (getattr(args, "criteria", None) or [])]
+    if not title:
+        _judge_usage_error("argument --ephemeral: requires a non-empty --title")
+    if not criteria or any(not criterion.strip() for criterion in criteria):
+        # A gate with no criteria would evaluate nothing and pass — fail loud
+        # instead, like every other zero-work path in this harness.
+        _judge_usage_error("argument --ephemeral: requires at least one non-empty --criterion")
+
+    task_id = getattr(args, "id", None) or _ephemeral_task_id(title)
+    task = Task(id=task_id, title=title, criteria=criteria)
+
+    if not json_output:
+        _check_for_updates()
+        if getattr(args, "skip_tier2", False):
+            print("Tier 2 skipped (--skip-tier2 flag)")
+
+    workdir = get_workdir()
+    llm = LLMClient()
+    config = load_config(workdir)
+    judge = Judge(
+        llm, workdir, guard_config=config, scope=scope, persist_log=False, persist_telemetry=False
+    )
+
+    if json_output:
+        from engine.evidence import dumps_evidence, judge_evidence
+
+        # Same stdout discipline as the sync path: the evaluator narrates, so
+        # its output is captured and the document is the only thing on stdout
+        # (a FAIL echoes the narration on stderr).
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            result = judge.evaluate_task(task, skip_tier2=getattr(args, "skip_tier2", False))
+        if not result.passed:
+            sys.stderr.write(captured.getvalue())
+        print(dumps_evidence(judge_evidence(result, task, scope, ephemeral=True)))
+    else:
+        result = judge.evaluate_task(task, skip_tier2=getattr(args, "skip_tier2", False))
+        print(result.summary)
+        print(
+            "Ephemeral run — no task, verdict, branch or stash state was written.",
+            file=sys.stderr,
+        )
+
     if not result.passed:
         sys.exit(1)
 
@@ -2540,7 +2763,15 @@ def cmd_resolve(args):
     ``resolution:`` block also supplies the model pin, the token ceiling, the
     band thresholds and the egress exclusions; ``--budget`` still overrides
     the ceiling for one call.
+
+    Recorded (DF-GITREINS-POC-36): a run that produced a real band is filed in
+    ``.gitreins/history`` — with one ``step: "resolution"`` row in
+    ``.gitreins/usage.jsonl`` carrying the tokens the response reported — through
+    the shared ``engine.persist.persist_resolution`` helper, so ``gitreins
+    report`` and ``gitreins serve`` show this decision. An ABSTAIN writes
+    nothing, and so does ``history.enabled: false``.
     """
+    from engine.persist import persist_resolution
     from engine.resolution import (
         resolution_config,
         resolve,
@@ -2577,6 +2808,13 @@ def cmd_resolve(args):
         resolved_at=cfg.resolution_resolved_at,
         review_at=cfg.resolution_review_at,
     )
+
+    # DF-GITREINS-POC-36: file the decision in the same history store the judge
+    # writes to, through the SHARED helper (never a CLI-local writer). A real
+    # band gets one record + one `resolution` usage line; an ABSTAIN and a
+    # `history.enabled: false` checkout write nothing, and a persistence failure
+    # is non-fatal — it must never change the verdict this command reports.
+    persist_resolution(workdir, verdict, surface="cli")
 
     if args.json:
         print(verdict_json(verdict))
@@ -3035,12 +3273,90 @@ def main():
             "tracked+untracked Python files instead of skipping."
         ),
     )
+    guard_p.add_argument(
+        "--scope",
+        choices=["staged", "working-tree"],
+        default="staged",
+        help=(
+            "Change set to grade: 'staged' (default) is the Git index; "
+            "'working-tree' adds unstaged and non-ignored untracked files, "
+            "collected with read-only git commands (the index is never "
+            "touched). Selects WHICH files are graded — --full/--staged-only "
+            "still select which tests run over them."
+        ),
+    )
+    guard_p.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help=(
+            "Emit one bounded, redacted GitReins evidence v1 JSON document on "
+            "stdout (schemas/evidence-v1.schema.json) instead of the human "
+            "summary. Exit 0 pass, 1 non-pass."
+        ),
+    )
 
     # judge
-    judge_p = sub.add_parser("judge", help="Evaluate a task")
-    judge_p.add_argument("id")
+    judge_p = sub.add_parser(
+        "judge",
+        help="Evaluate a task",
+        description=(
+            "Evaluate a task: Tier 1 guards, then the Tier 2 LLM judge. With "
+            "--ephemeral the criteria are supplied inline and NOTHING is "
+            "persisted — no task entry, no verdict history, no branch or stash."
+        ),
+    )
+    # Optional ONLY so `judge --ephemeral --title ...` can name a task that
+    # exists nowhere (EVID-003); cmd_judge enforces the requirement for every
+    # other mode with argparse's own usage error and exit code 2.
+    judge_p.add_argument(
+        "id",
+        nargs="?",
+        default=None,
+        help=(
+            "Task ID (or job ID with --status). Optional with --ephemeral, "
+            "where the task exists only for this invocation"
+        ),
+    )
+    judge_p.add_argument(
+        "--ephemeral",
+        action="store_true",
+        help=(
+            "Evaluate inline --title/--criterion values and persist nothing: "
+            "no tasks.yaml entry, no verdict, no branch, no stash (EVID-003)"
+        ),
+    )
+    judge_p.add_argument(
+        "--title",
+        default=None,
+        help="Ephemeral task title (required with --ephemeral)",
+    )
+    judge_p.add_argument(
+        "--criterion",
+        dest="criteria",
+        action="append",
+        default=None,
+        metavar="TEXT",
+        help="Ephemeral criterion — repeat once per criterion (required with --ephemeral)",
+    )
     judge_p.add_argument(
         "--skip-tier2", action="store_true", help="Skip Tier 2 LLM evaluation; Tier 1 guards only"
+    )
+    judge_p.add_argument(
+        "--scope",
+        choices=["staged", "working-tree"],
+        default="staged",
+        help=("Change set the Tier 1 guards grade (same semantics as `gitreins guard --scope`)"),
+    )
+    judge_p.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help=(
+            "Emit one bounded, redacted GitReins evidence v1 JSON document on "
+            "stdout (schemas/evidence-v1.schema.json) instead of the human "
+            "summary. Exit 0 pass, 1 non-pass."
+        ),
     )
     judge_p.add_argument(
         "--async",
@@ -3250,6 +3566,16 @@ def main():
     report_p = sub.add_parser("report", help="Show verdict history")
     report_p.add_argument("-n", type=int, default=10, help="Number of recent verdicts to show")
     report_p.add_argument("--interactive", "-i", action="store_true", help="Interactive TUI mode")
+    report_p.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help=(
+            "Emit one bounded, redacted GitReins evidence v1 JSON document on "
+            "stdout (schemas/evidence-v1.schema.json) instead of the human "
+            "report. Always exits 0 when the document was emitted."
+        ),
+    )
 
     serve_p = sub.add_parser(
         "serve", help="Live judgment browser — local web server (Ctrl-C to stop)"

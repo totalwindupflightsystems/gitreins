@@ -21,6 +21,10 @@ paths = [
   '''tests/test_guard_exit\.py''',
   '''tests/test_config_priority\.py''',
   '''tests/test_llm\.py''',
+  # EVID-002: the evidence-contract suite pins the redaction boundary and the
+  # working-tree secrets gate, so it carries deliberately fake keys (they are
+  # asserted to be REPLACED by [REDACTED] / never echoed, not to be real).
+  '''tests/test_evidence_contract\.py''',
   '''tests/fixtures/secrets/.*''',
   '''\.hermes/.*''',
   '''tests/reliability/secret-leak/.*''',

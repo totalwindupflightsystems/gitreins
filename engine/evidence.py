@@ -1,10 +1,22 @@
-"""Worker execution evidence — bundle a verdict with the run that produced it.
+"""Evidence for automation consumers — bound a verdict's run, emit the v1 document.
 
-A verdict records *what* was decided; the run that produced it (the brief the
-worker was handed, the driver log it wrote, the patch the judge graded) usually
-lives outside the repository — often in ``/tmp`` — and dies with the tick. This
-module copies those artifacts next to ``verdict.json`` so one verdict directory
-is a self-contained audit unit, and serves them back to the judgment viewer.
+Two families live here:
+
+**Verdict evidence (EVID-001 era).** A verdict records *what* was decided; the
+run that produced it (the brief the worker was handed, the driver log it wrote,
+the patch the judge graded) usually lives outside the repository — often in
+``/tmp`` — and dies with the tick. This module copies those artifacts next to
+``verdict.json`` so one verdict directory is a self-contained audit unit, and
+serves them back to the judgment viewer.
+
+**Evidence v1 emitters (EVID-002).** :func:`guard_evidence`,
+:func:`judge_evidence` and :func:`report_evidence` build the bounded, redacted
+JSON document described by ``schemas/evidence-v1.schema.json`` and
+``docs/evidence-contract-v1.md``; :func:`dumps_evidence` serializes it under a
+hard 32 KiB ceiling. Every string crosses :func:`redact_text` (secret-shaped
+spans replaced, then capped at 2048 chars) and the whole document is re-swept
+before serialization, so ``metadata.redacted`` is always true and
+``redactionsApplied`` says whether a replacement actually happened.
 
 Sources (all optional; a verdict is never failed or delayed by missing
 evidence — every failure is swallowed and reported as a missing item):
@@ -25,10 +37,15 @@ tell a small artifact from a clipped one.
 
 from __future__ import annotations
 
+import copy
+import json
 import os
+import re
 import subprocess
 from datetime import datetime, timezone
 from typing import Any
+
+from engine.version import __version__ as _gitreins_version
 
 BRIEF_ENV = "GITREINS_WORKER_BRIEF"
 LOG_ENV = "GITREINS_DRIVER_LOG"
@@ -329,3 +346,487 @@ def read_evidence(entry_dir: str, verdict: dict[str, Any], name: str) -> tuple[s
         except OSError:
             return None
     return None
+
+
+# ── Evidence v1 emitters (EVID-002) ─────────────────────────────────────
+#
+# The document shape is the contract in schemas/evidence-v1.schema.json:
+# additive metadata fields are allowed (the schema leaves ``metadata`` open),
+# every other field is closed and typed. The emitters below are the only
+# producers of that shape, so the schema's consts are declared once here.
+
+#: ``$schema``/``schemaVersion`` identity — the schema pins both as consts, so
+#: an incompatible shape requires a NEW URL and major version.
+EVIDENCE_SCHEMA = "https://gitreins.dev/schemas/evidence/v1.json"
+EVIDENCE_SCHEMA_VERSION = "1.0"
+
+#: Hard ceiling for one serialized document (32 KiB), then the per-string and
+#: per-collection caps applied BEFORE it.
+MAX_EVIDENCE_BYTES = 32 * 1024
+MAX_TEXT_CHARS = 2048
+MAX_ID_CHARS = 128
+MAX_TITLE_CHARS = 512
+MAX_CHECKS = 32
+MAX_REPORT_ENTRIES = 50
+
+#: Scope vocabulary shared with the guard's ``--scope`` flag.
+GUARD_SCOPES = ("staged", "working-tree")
+HISTORY_SCOPE = "history"
+
+_TRUNCATION_MARKER = "[truncated]"
+
+#: Secret-shaped spans replaced by ``[REDACTED]``. Deliberately shaped, not
+#: exhaustive: a provider prefix, a credential assignment, or an obvious
+#: high-entropy blob. Pattern 2 keeps its group(1) (the ``token=`` label) so a
+#: reader still sees WHICH credential was dropped.
+_SECRET_PATTERNS = (
+    re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+"),
+    re.compile(
+        r"(?i)((?:token|secret|password|api[_-]?key|authorization|credential)\s*[:=]\s*)"
+        r"[^\s,;'\"}]+"
+    ),
+    re.compile(r"\b(?:gh[pousr]_|github_pat_|xox[baprs]-|sk-)[A-Za-z0-9_.-]{12,}\b"),
+    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"),
+    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"),
+)
+
+
+def redact_text(value: object, limit: int = MAX_TEXT_CHARS) -> tuple[str, bool, bool]:
+    """``(text, redacted, truncated)`` — secret spans replaced, then capped.
+
+    The cap is applied AFTER redaction so a secret that straddles the cap
+    cannot survive by being cut in half, and the marker keeps the result at
+    exactly ``limit`` characters (the schema's ``maxLength``).
+    """
+    text = "" if value is None else str(value)
+    redacted = False
+    for pattern in _SECRET_PATTERNS:
+        text, count = pattern.subn(
+            lambda match: (match.group(1) if match.lastindex else "") + "[REDACTED]",
+            text,
+        )
+        redacted = redacted or bool(count)
+    truncated = len(text) > limit
+    if truncated:
+        text = text[: max(0, limit - len(_TRUNCATION_MARKER))] + _TRUNCATION_MARKER
+    return text, redacted, truncated
+
+
+def redact_document(document: dict[str, Any]) -> tuple[bool, bool]:
+    """Redact/cap every string VALUE of a document in place.
+
+    The final boundary before serialization: the builders already redact what
+    they compose, and this sweep means a string added by a future caller
+    cannot reach stdout unredacted. Keys are never touched — the document's
+    shape is the contract, only its text crosses the boundary.
+
+    Returns ``(redacted, truncated)``.
+    """
+    redacted = False
+    truncated = False
+    stack: list[Any] = [document]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if isinstance(value, str):
+                    text, did_redact, did_truncate = redact_text(value)
+                    if did_redact:
+                        node[key] = text
+                        redacted = True
+                    truncated = truncated or did_truncate
+                elif isinstance(value, (dict, list)):
+                    stack.append(value)
+        elif isinstance(node, list):
+            for index, value in enumerate(node):
+                if isinstance(value, str):
+                    text, did_redact, did_truncate = redact_text(value)
+                    if did_redact:
+                        node[index] = text
+                        redacted = True
+                    truncated = truncated or did_truncate
+                elif isinstance(value, (dict, list)):
+                    stack.append(value)
+    return redacted, truncated
+
+
+def _safe_text(value: object, flags: dict[str, bool], limit: int = MAX_TEXT_CHARS) -> str:
+    """Redacted/capped text, recording both facts in the document's flags."""
+    text, redacted, truncated = redact_text(value, limit)
+    flags["redacted"] = flags["redacted"] or redacted
+    flags["truncated"] = flags["truncated"] or truncated
+    return text
+
+
+def evidence_outcome(passed: bool | None) -> str:
+    """The ``outcome`` vocabulary for a tri-state pass flag."""
+    if passed is None:
+        return "unknown"
+    return "pass" if passed else "fail"
+
+
+def _step_id(name: object) -> str:
+    """Base guard id for a result name ('tests (diff: 3 files)' → 'tests')."""
+    return str(name or "check").split(" ", 1)[0].strip() or "check"
+
+
+def _base_document(
+    command: str, scope: str, passed: bool | None, flags: dict[str, bool]
+) -> dict[str, Any]:
+    """A v1 document with every required field present and no checks yet."""
+    return {
+        "$schema": EVIDENCE_SCHEMA,
+        "schemaVersion": EVIDENCE_SCHEMA_VERSION,
+        "producer": {"name": "gitreins", "version": str(_gitreins_version)[:64]},
+        "command": command,
+        "generatedAt": _now(),
+        "scope": scope,
+        "outcome": evidence_outcome(passed),
+        "passed": passed,
+        "summary": "",
+        "checks": [],
+        "metadata": {
+            "redacted": True,
+            "redactionsApplied": False,
+            "truncated": False,
+        },
+    }
+
+
+def _guard_check(result: object, flags: dict[str, bool]) -> dict[str, Any]:
+    """One tier-1 step as a v1 check.
+
+    A SKIPPED step did no work, so it is reported as the honest no-grade
+    shape — ``outcome: unknown`` with ``passed: null`` — never as a green
+    ``pass`` (TRUST-001: a gate that never ran is not a passing gate). The
+    skip reason rides in the summary.
+    """
+    skipped = bool(getattr(result, "skipped", False))
+    passed = bool(getattr(result, "passed", False))
+    output = getattr(result, "output", "") or ""
+    error = getattr(result, "error", "") or ""
+    if skipped:
+        reason = getattr(result, "skip_reason", "") or "reason not recorded"
+        outcome, check_passed, raw = "unknown", None, f"skipped — {reason}"
+    elif error and not output:
+        outcome, check_passed, raw = "error", False, error
+    else:
+        outcome, check_passed = evidence_outcome(passed), passed
+        raw = output or error or ("check passed" if passed else "check failed")
+    return {
+        "id": _safe_text(_step_id(getattr(result, "name", "check")), flags, MAX_ID_CHARS),
+        "outcome": outcome,
+        "passed": check_passed,
+        "summary": _safe_text(raw, flags),
+    }
+
+
+def _item_field(item: object, name: str) -> Any:
+    """Read a criterion field off either a dict or a verdict item object."""
+    if isinstance(item, dict):
+        return item.get(name)
+    return getattr(item, name, None)
+
+
+def _verdict_items(result: object) -> list[Any]:
+    """The tier-2 criterion items of a JudgeResult, in either result shape.
+
+    The legacy path keeps them on ``result.verdict.items``; the pipeline path
+    buries the verdict in a stage step's ``data``. Both are tried so the
+    emitted checks describe what was actually graded.
+    """
+    verdict = getattr(result, "verdict", None)
+    items = getattr(verdict, "items", None) if verdict is not None else None
+    if isinstance(items, (list, tuple)) and items:
+        return list(items)
+    pipeline_result = getattr(result, "pipeline_result", None)
+    if not isinstance(pipeline_result, dict):
+        return []
+    for stage in (pipeline_result.get("stages") or {}).values():
+        if not isinstance(stage, dict):
+            continue
+        for step in stage.get("steps") or []:
+            data = step.get("data") if isinstance(step, dict) else None
+            if isinstance(data, dict) and data.get("verdict"):
+                return list(data.get("items") or [])
+    return []
+
+
+def _judge_gate_checks(result: object, flags: dict[str, bool], limit: int) -> list[dict]:
+    """Tier-1 evidence for a judge document: pipeline stages, else guard steps."""
+    pipeline_result = getattr(result, "pipeline_result", None)
+    stages = (pipeline_result.get("stages") or {}) if isinstance(pipeline_result, dict) else {}
+    checks: list[dict] = []
+    for stage_id, stage in list(stages.items())[:limit]:
+        stage = stage if isinstance(stage, dict) else {}
+        stage_passed = stage.get("passed") is True
+        summary = stage.get("summary") or ""
+        if stage.get("degraded"):
+            skipped = ", ".join(stage.get("skipped_steps") or []) or "steps"
+            summary = f"{summary}\nDEGRADED — did no work: {skipped}".strip()
+        checks.append(
+            {
+                "id": _safe_text(f"stage-{stage_id}", flags, MAX_ID_CHARS),
+                "outcome": evidence_outcome(stage_passed),
+                "passed": stage_passed,
+                "summary": _safe_text(summary, flags),
+            }
+        )
+    if checks:
+        return checks
+    tier1 = getattr(result, "tier1", None)
+    for item in list(getattr(tier1, "results", None) or [])[:limit]:
+        checks.append(_guard_check(item, flags))
+    return checks
+
+
+def guard_evidence(
+    result: object,
+    scope: str = "staged",
+    *,
+    changed_file_count: int | None = None,
+) -> dict[str, Any]:
+    """Build the ``guard`` evidence document from a Tier1Result.
+
+    ``passed`` mirrors ``result.passed`` — a DEGRADED pass is ``passed: true``
+    with the skipped steps reported per check (``outcome: unknown``), and
+    ``metadata.degraded`` / ``metadata.skippedSteps`` name the degradation, so
+    a green document can never hide a gate that never ran.
+    """
+    flags = {"redacted": False, "truncated": False}
+    passed = bool(getattr(result, "passed", False))
+    document = _base_document("guard", scope, passed, flags)
+
+    results = list(getattr(result, "results", None) or [])
+    checks = [_guard_check(item, flags) for item in results[:MAX_CHECKS]]
+    if len(results) > MAX_CHECKS:
+        flags["truncated"] = True
+
+    summary = getattr(result, "summary", "") or (
+        "All guards passed" if passed else "One or more guards failed"
+    )
+    if getattr(result, "degraded", False):
+        summary = f"{summary}\nDEGRADED PASS (skips: {getattr(result, 'skip_summary', '')})"
+    document["summary"] = _safe_text(summary, flags)
+    document["checks"] = checks
+
+    extra = getattr(result, "extra", None) or {}
+    if changed_file_count is None:
+        changed_file_count = extra.get("changed_count")
+        if changed_file_count is None:
+            changed_file_count = extra.get("staged_count", 0)
+    try:
+        # Emitting evidence must never raise: a caller that put a non-numeric
+        # count in `extra` degrades to 0 rather than breaking the document.
+        changed_file_count = max(0, int(changed_file_count or 0))
+    except (TypeError, ValueError):
+        changed_file_count = 0
+    document["metadata"].update(
+        {
+            "redactionsApplied": flags["redacted"],
+            "truncated": flags["truncated"],
+            "checkCount": len(results),
+            "changedFileCount": changed_file_count,
+            "degraded": bool(getattr(result, "degraded", False)),
+            "skippedSteps": [
+                str(step.get("step", "")) for step in getattr(result, "skipped_steps", None) or []
+            ],
+        }
+    )
+    return document
+
+
+def judge_evidence(
+    result: object,
+    task: object,
+    scope: str = "staged",
+    ephemeral: bool = False,
+) -> dict[str, Any]:
+    """Build the ``judge`` evidence document from a JudgeResult and its task.
+
+    The checks carry the TIER 2 criteria evaluation first (one check per
+    criterion: ``criterion-1``…), then the tier-1 evidence that gated it —
+    pipeline stages, or the guard steps on the legacy path.
+    """
+    flags = {"redacted": False, "truncated": False}
+    passed = bool(getattr(result, "passed", False))
+    document = _base_document("judge", scope, passed, flags)
+    document["subject"] = {
+        "taskId": _safe_text(getattr(task, "id", "") or "unknown", flags, MAX_ID_CHARS),
+        "title": _safe_text(getattr(task, "title", "") or "", flags, MAX_TITLE_CHARS),
+        "ephemeral": bool(ephemeral),
+    }
+
+    pipeline_result = getattr(result, "pipeline_result", None)
+    if isinstance(pipeline_result, dict) and pipeline_result.get("error"):
+        document["outcome"] = "error"
+
+    criteria = _verdict_items(result)
+    checks: list[dict[str, Any]] = []
+    for index, item in enumerate(criteria[:MAX_CHECKS]):
+        item_passed = _item_field(item, "status") == "PASS"
+        detail = _item_field(item, "detail") or ""
+        criterion = _item_field(item, "criterion") or f"criterion {index + 1}"
+        checks.append(
+            {
+                "id": f"criterion-{index + 1}",
+                "outcome": evidence_outcome(item_passed),
+                "passed": item_passed,
+                "summary": _safe_text(f"{criterion}: {detail}", flags),
+            }
+        )
+    if len(criteria) > MAX_CHECKS:
+        flags["truncated"] = True
+
+    remaining = max(0, MAX_CHECKS - len(checks))
+    if remaining:
+        checks.extend(_judge_gate_checks(result, flags, remaining))
+
+    document["summary"] = _safe_text(getattr(result, "summary", ""), flags)
+    document["checks"] = checks
+    document["metadata"].update(
+        {
+            "redactionsApplied": flags["redacted"],
+            "truncated": flags["truncated"],
+            "checkCount": len(checks),
+            "criterionCount": len(criteria),
+            "historyPersisted": not ephemeral,
+            "ephemeral": bool(ephemeral),
+        }
+    )
+    return document
+
+
+def report_evidence(entries: Any, storage_mode: str = "") -> dict[str, Any]:
+    """Build the ``report`` evidence document from verdict-history entries.
+
+    History has no single verdict, so ``passed`` stays ``null`` (``outcome:
+    unknown``) and the rollup lives in ``summary``/``metadata.checkCount``.
+    Each retained entry becomes one check, capped at :data:`MAX_REPORT_ENTRIES`.
+    """
+    raw_entries = [entry for entry in (entries or []) if isinstance(entry, dict)]
+    flags = {"redacted": False, "truncated": len(raw_entries) > MAX_REPORT_ENTRIES}
+    selected = raw_entries[:MAX_REPORT_ENTRIES]
+    passed_count = sum(1 for entry in selected if entry.get("passed") is True)
+    failed_count = sum(1 for entry in selected if entry.get("passed") is False)
+
+    document = _base_document("report", HISTORY_SCOPE, None, flags)
+    document["summary"] = _safe_text(
+        f"{len(selected)} recent verdicts: {passed_count} pass, {failed_count} fail", flags
+    )
+    checks = []
+    for entry in selected:
+        entry_passed = entry.get("passed") if isinstance(entry.get("passed"), bool) else None
+        title = entry.get("task_title") or entry.get("summary") or "verdict"
+        checks.append(
+            {
+                "id": _safe_text(entry.get("task_id") or "unknown", flags, MAX_ID_CHARS),
+                "outcome": evidence_outcome(entry_passed),
+                "passed": entry_passed,
+                "summary": _safe_text(title, flags),
+            }
+        )
+    document["checks"] = checks
+    document["metadata"].update(
+        {
+            "redactionsApplied": flags["redacted"],
+            "truncated": flags["truncated"],
+            "checkCount": len(raw_entries),
+            "storage": _safe_text(storage_mode, flags, 32),
+        }
+    )
+    return document
+
+
+def _encode(document: dict[str, Any]) -> str:
+    """Serialize an evidence document deterministically (sorted, no padding)."""
+    return json.dumps(document, separators=(",", ":"), ensure_ascii=False, sort_keys=True)
+
+
+def _byte_len(payload: str) -> int:
+    return len(payload.encode("utf-8"))
+
+
+def dumps_evidence(document: dict[str, Any], max_bytes: int = MAX_EVIDENCE_BYTES) -> str:
+    """Serialize an evidence document under a hard byte ceiling.
+
+    Applied in order — component text is capped by the builders, then the
+    whole document:
+
+    1. re-sweep every string (redaction boundary) and take the caps the
+       builders recorded,
+    2. drop checks from the tail while the document is over ``max_bytes``,
+    3. shrink the summary/subject title,
+    4. as a last resort emit a minimal, still schema-valid document naming the
+       overflow.
+
+    The caller's document is never mutated, ``metadata.truncated`` is set by
+    ANY of these steps, and ``metadata.checkCount`` keeps reporting how many
+    checks the run produced (pre-cap), so a clipped document says so.
+    """
+    bounded = copy.deepcopy(document)
+    redacted, truncated = redact_document(bounded)
+    metadata = bounded.setdefault("metadata", {})
+    metadata["redacted"] = True
+    metadata["redactionsApplied"] = bool(metadata.get("redactionsApplied")) or redacted
+    metadata["truncated"] = bool(metadata.get("truncated")) or truncated
+
+    checks = bounded.get("checks")
+    if not isinstance(checks, list):
+        checks = []
+        bounded["checks"] = checks
+
+    payload = _encode(bounded)
+    while _byte_len(payload) > max_bytes and checks:
+        checks.pop()
+        metadata["truncated"] = True
+        payload = _encode(bounded)
+
+    if _byte_len(payload) > max_bytes:
+        flags = {"redacted": False, "truncated": False}
+        bounded["summary"] = _safe_text(bounded.get("summary", ""), flags, 256)
+        subject = bounded.get("subject")
+        if isinstance(subject, dict) and "title" in subject:
+            subject["title"] = _safe_text(subject["title"], flags, 128)
+        if flags["redacted"]:
+            metadata["redactionsApplied"] = True
+        metadata["truncated"] = True
+        payload = _encode(bounded)
+
+    if _byte_len(payload) > max_bytes:
+        # Defensive fallback: a future v1 additive field could make even the
+        # fixed fields oversized. Emit the smallest document that still
+        # validates rather than an over-cap one.
+        command = document.get("command")
+        if command not in ("guard", "judge", "report"):
+            command = "guard"
+        scope = document.get("scope")
+        if scope not in (*GUARD_SCOPES, HISTORY_SCOPE):
+            scope = "staged"
+        outcome = document.get("outcome")
+        if outcome not in ("pass", "fail", "error", "unknown"):
+            outcome = "unknown"
+        passed = document.get("passed")
+        if not isinstance(passed, bool):
+            passed = None
+        bounded = {
+            "$schema": EVIDENCE_SCHEMA,
+            "schemaVersion": EVIDENCE_SCHEMA_VERSION,
+            "producer": {"name": "gitreins", "version": str(_gitreins_version)[:64]},
+            "command": command,
+            "generatedAt": document.get("generatedAt", _now()),
+            "scope": scope,
+            "outcome": outcome,
+            "passed": passed,
+            "summary": "Evidence exceeded the output limit",
+            "checks": [],
+            "metadata": {
+                "redacted": True,
+                "redactionsApplied": True,
+                "truncated": True,
+            },
+        }
+        payload = _encode(bounded)
+
+    return payload

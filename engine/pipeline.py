@@ -353,12 +353,26 @@ def commit_audit_skip_message(config: dict, trigger: str) -> str:
 class Pipeline:
     """Execute a pipeline of stages against a task."""
 
-    def __init__(self, config: dict, workdir: str = ".", llm=None):
+    def __init__(
+        self,
+        config: dict,
+        workdir: str = ".",
+        llm=None,
+        *,
+        persist_telemetry: bool = True,
+    ):
         self.workdir = os.path.abspath(workdir)
         self.config = config
         self.stages: list[dict] = config.get("pipeline", {}).get("stages", [])
         self._stage_results: dict[str, StageResult] = {}
         self._llm = llm  # Can be injected by Judge
+        # EVID-003: the judge's token telemetry is appended to
+        # ``<workdir>/.gitreins/usage.jsonl`` — a write INSIDE the graded tree.
+        # An ephemeral judge run (``persist_telemetry=False``) leaves nothing
+        # there; it also has no persisted verdict the line could ever be
+        # attributed to (see engine/usage.py), so nothing is lost. Keyword-only
+        # and defaulting True so every existing caller writes it as before.
+        self.persist_telemetry = persist_telemetry
 
     def run(self, task: dict, trigger: str = "pre-eval") -> dict:
         """Run all stages that match the trigger.
@@ -744,13 +758,16 @@ class Pipeline:
             # this, judge cost was invisible. Append to .gitreins/usage.jsonl,
             # timestamped, one JSON line per judge run. Best-effort — never
             # blocks or fails the eval on a write error. (2026-08-08)
+            # EVID-003: ``persist_telemetry=False`` (the ephemeral judge) skips
+            # it — the line lands inside the graded tree, and an ephemeral run
+            # has no persisted verdict to attribute it to anyway.
             try:
                 import json as _uj
                 import os as _uos
                 import time as _time
 
                 _cap = getattr(evaluator, "eval_cap", None)
-                if _cap is not None:
+                if _cap is not None and self.persist_telemetry:
                     usage_line = {
                         "ts": _time.time(),
                         "tokens_in": getattr(_cap, "cumulative_input_tokens", 0),

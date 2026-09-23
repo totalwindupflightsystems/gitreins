@@ -162,3 +162,66 @@ silent PASS here would let unresolved work through the cheapest gate in the syst
 - Every verdict artifact carries: probability, verdict band, `missing_kind`, bundle manifest,
   model build id, token counts, cost — and is **persisted where `gitreins serve` can show it**
   (the DF-GITREINS-POC-23 lesson: an invisible verdict is not an audit trail).
+- That persistence is closed for the gate's own surfaces (DF-GITREINS-POC-36): a real band from
+  `gitreins resolve`, `gitreins preflight` or MCP `context.resolve` lands in `.gitreins/history`
+  through ONE shared writer (`engine.persist.persist_resolution`) as a record marked
+  `kind: "resolution"` carrying its `source` and band. `gitreins report` lists those records in
+  their own section (they are never counted in the judge pass/fail rollup), `GET /api/verdicts`
+  hands back the marker, and `GET /api/stats` keeps counting judgments only. Each Jev call also
+  appends one `step: "resolution"` row to `.gitreins/usage.jsonl` with the tokens the API
+  reported. An `ABSTAIN` — surface-disabled, no credentials, transport error, malformed answer —
+  writes NOTHING: a non-event is not a verdict, and `history.enabled: false` means no record and
+  no usage line either.
+
+## 9. Enabling a surface
+
+Every surface of this gate ships **disabled**, and that is deliberate: resolving a question
+is a real egress (the assembled bundle leaves the host for OpenRouter → TypeSafe), and the
+two judge-adjacent surfaces have no calibration numbers until JEVRES-005 lands. Only an
+explicit literal `true` opens a surface — an absent key, an absent `resolution:` block and a
+wrong-typed value all read as OFF (`engine/resolution.py` `surface_enabled`). That is why a
+surface nobody enabled answers `ABSTAIN` with `abstain_reason: surface-disabled` and exit 1
+instead of guessing.
+
+One block in `.gitreins/config.yaml` drives all four surfaces (`engine/config.py`,
+JEVRES-006). This is the complete block — the comments are the contract, not decoration:
+
+```yaml
+resolution:
+  enabled:                 # a surface is ON only when its value is literally `true`
+    cli: true              # `gitreins resolve`
+    mcp: false             # the MCP `context.resolve` tool
+    predispatch: false     # `gitreins preflight` (JEVRES-003); stays false until JEVRES-005
+    judge_prescreen: false # judge tier-1.5 pre-screen (JEVRES-004); stays false until JEVRES-005
+  model: typesafe/jev-1.13 # the Jev build the bands were calibrated against; every verdict logs the id it returned
+  tokens_max: 28000        # bundle ceiling — an over-budget bundle is clipped and the omission disclosed, never silently truncated
+  bands:
+    resolved_at: 0.85      # probability >= this ⇒ RESOLVED (evidence is sufficient; a preflight may skip a dispatch)
+    review_at: 0.50        # >= this and < resolved_at ⇒ REVIEW (a human or the full judge looks)
+  egress_exclude:          # extra globs that are never assembled into a bundle, on top of the built-in secret floor
+    - internal/keys.py
+    - vendor/*
+```
+
+`gitreins init` already materializes exactly this block — with **all four surfaces
+`false`** — and preserves a hand-authored block verbatim on a rerun. `model`, `tokens_max`
+and `bands` may be omitted: an omitted key is the built-in default measured in §2, not a
+different posture. Enabling a surface is therefore an explicit user act, never an init side
+effect. The first time `cli` or `mcp` is `true`, the bundle you ask about leaves the host for
+a third party; `predispatch` and `judge_prescreen` additionally spend an unmeasured
+probability band (JEVRES-005). Type the `true` yourself — do not expect a default to do it.
+
+Enabled, the CLI surface runs for real:
+
+```bash
+gitreins resolve "Does engine/evidence_bounds.py truncate text?"
+```
+
+Disabled, the same command fails closed and names this section:
+
+```bash
+gitreins resolve "Does the Jev gate run when nothing enabled it?"
+# ABSTAIN (exit 1) — abstain_reason: surface-disabled
+#   fix: set resolution.enabled.cli: true in .gitreins/config.yaml to
+#   enable it (see docs/jev-resolution-gate.md §9)
+```

@@ -4,6 +4,7 @@ axiom:trace work_item=GR-003 spec=specs/09-CLI.md plan=.memory-bank/work-items/G
 """
 
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -1440,6 +1441,338 @@ class TestJudgeExtended:
         result = run_cli("judge", "judge-api", cwd=tmp_workdir, extra_env=mock_env)
         assert result.returncode in (0, 1)
         assert "Judge Result" in result.stdout or "Judge" in result.stdout
+
+
+# ── EVID-003: `judge --ephemeral` — inline criteria, nothing persisted ──────
+
+
+def _write_ephemeral_config(repo, body=""):
+    """Minimal ``.gitreins/config.yaml`` for the ephemeral-judge tests.
+
+    Three knobs, each for a hermeticity reason: ``test_command: echo ok`` keeps
+    the tier-1 tests lane off the project toolchain (nothing beyond git and the
+    interpreter is assumed), ``allow_skips`` keeps a clean-tree run honest, and
+    ``check_for_updates: false`` keeps the non-JSON path off the network. The
+    ``body`` hook is how a test selects the legacy tier-1 path (``pipeline:
+    stages: []``) when it needs GuardManager — and therefore ``--scope`` — to
+    be the thing under test.
+    """
+    cfg_dir = os.path.join(repo, ".gitreins")
+    os.makedirs(cfg_dir, exist_ok=True)
+    with open(os.path.join(cfg_dir, "config.yaml"), "w") as handle:
+        handle.write(
+            "guards:\n  test_command: echo ok\n  allow_skips: true\n"
+            "defaults:\n  check_for_updates: false\n" + body
+        )
+
+
+def _repo_snapshot(repo):
+    """The surfaces an ``--ephemeral`` run must leave untouched (EVID-003).
+
+    Criterion 1 names five: ``git status``, the index, ``.gitreins/tasks.yaml``,
+    ``.gitreins/history`` and the current branch. Captured here as one
+    comparable mapping, plus three additions that make the claim strict rather
+    than literal: every ref (a branch CREATED by the run leaves the current
+    branch alone), the stash list, and an ignore-proof census of every file
+    under ``.gitreins`` — the directory GitReins' own artifacts land in, where
+    a guard run log, a usage line or a verdict would show up even though the
+    installer's .gitignore template hides all three.
+
+    The index is compared through git's own view (the staged entry list, the
+    tree it writes, and the cached diff), NOT through the raw ``.git/index``
+    digest: ``git write-tree`` — one of this snapshot's own read-only commands
+    — refreshes the index's stat cache and rewrites the file bytes while
+    leaving the tree identical (measured: 3d533a2c -> 20a42b2e, same tree
+    c809f438). A byte digest would therefore report the probe's own footprint.
+    """
+
+    def _git(*args):
+        return subprocess.run(
+            ["git", *args], cwd=repo, capture_output=True, text=True, check=True
+        ).stdout
+
+    def _digest(path):
+        if not os.path.exists(path):
+            return None
+        with open(path, "rb") as handle:
+            return hashlib.sha256(handle.read()).hexdigest()
+
+    harness_dir = os.path.join(repo, ".gitreins")
+    harness = []
+    for root, _dirs, names in os.walk(harness_dir):
+        harness.extend(os.path.relpath(os.path.join(root, name), harness_dir) for name in names)
+
+    return {
+        "status": _git("status", "--porcelain"),
+        "indexEntries": _git("ls-files", "--stage"),
+        "indexTree": _git("write-tree").strip(),
+        "cachedDiff": _git("diff", "--cached", "--binary"),
+        "tasks": _digest(os.path.join(harness_dir, "tasks.yaml")),
+        "history": sorted(path for path in harness if path.startswith("history" + os.sep)),
+        "harness": sorted(harness),
+        "branch": _git("branch", "--show-current").strip(),
+        "refs": _git("for-each-ref", "refs/heads"),
+        "stash": _git("stash", "list"),
+    }
+
+
+def _assert_untouched(before, after):
+    """Fail naming the surface that moved, not with two whole mappings."""
+    changed = [surface for surface, value in before.items() if after[surface] != value]
+    assert not changed, f"--ephemeral mutated: {', '.join(changed)}\n{before}\n{after}"
+
+
+class TestJudgeEphemeralCLI:
+    """`judge --ephemeral`: evaluate inline criteria, persist nothing (EVID-003).
+
+    Every test here drives the real CLI against a REAL scratch repository (a
+    real index and real refs — the ``tmp_workdir`` fixture only fakes a `.git`
+    directory, which cannot show whether the index or a branch moved) and
+    asserts zero repository mutation. Tier 2 is mocked through
+    ``GITREINS_MOCK_LLM_RESPONSE`` (the repo's own subprocess-safe seam), so no
+    test dials a provider.
+    """
+
+    _PASS_VERDICT = json.dumps(
+        {
+            "verdict": "COMPLETE",
+            "items": [{"criterion": "1+1 is 2", "status": "PASS", "detail": "trivially true"}],
+            "summary": "all good",
+        }
+    )
+    _FAIL_VERDICT = json.dumps(
+        {
+            "verdict": "INCOMPLETE",
+            "items": [{"criterion": "1+1 is 2", "status": "FAIL", "detail": "not demonstrated"}],
+            "summary": "not good",
+        }
+    )
+    # A provider-shaped key in a string literal: the built-in scanner's own
+    # fixture shape, so the working-tree scope has something real to find
+    # without needing gitleaks (which may be absent on the host).
+    _UNTRACKED_SECRET = (
+        "# untracked and unstaged — only the working-tree scope can see this\n"
+        'OPENAI_API_KEY = "sk-proj-abc123def456ghi789jkl012mno345pqr678stuvwxyz"\n'
+    )
+
+    @staticmethod
+    def _mock_env(verdict):
+        return {"GITREINS_MOCK_LLM_RESPONSE": json.dumps({"content": verdict})}
+
+    def test_ephemeral_pass_emits_the_document_and_persists_nothing(self, tmp_path):
+        """A passing ephemeral run exits 0, prints one v1 document, writes nothing."""
+        repo = _init_real_git_repo(tmp_path)
+        _write_ephemeral_config(repo)
+        (Path(repo) / "notes.md").write_text("staged work\n", encoding="utf-8")
+        subprocess.run(["git", "-C", repo, "add", "notes.md"], check=True)
+
+        before = _repo_snapshot(repo)
+        result = run_cli(
+            "judge",
+            "--ephemeral",
+            "--title",
+            "Story gate",
+            "--criterion",
+            "1+1 is 2",
+            "--json",
+            cwd=repo,
+            extra_env=self._mock_env(self._PASS_VERDICT),
+        )
+        assert result.returncode == 0, _cli_failure(result)
+        # json.loads on the WHOLE stdout: a second document, or any narration
+        # ahead of the document, makes this raise (the v1 promise).
+        document = json.loads(result.stdout)
+        assert document["command"] == "judge"
+        assert document["scope"] == "staged"
+        assert document["passed"] is True
+        assert document["subject"] == {
+            "ephemeral": True,
+            "taskId": "ephemeral:story-gate",
+            "title": "Story gate",
+        }
+        assert document["metadata"]["ephemeral"] is True
+        assert document["metadata"]["historyPersisted"] is False
+
+        _assert_untouched(before, _repo_snapshot(repo))
+        assert "A  notes.md" in before["status"]  # the graded index was real
+
+    def test_ephemeral_fail_exits_1_and_persists_nothing(self, tmp_path):
+        """A failing ephemeral run exits 1 (not 0) and still writes nothing."""
+        repo = _init_real_git_repo(tmp_path)
+        _write_ephemeral_config(repo)
+        (Path(repo) / "notes.md").write_text("staged work\n", encoding="utf-8")
+        subprocess.run(["git", "-C", repo, "add", "notes.md"], check=True)
+
+        before = _repo_snapshot(repo)
+        result = run_cli(
+            "judge",
+            "--ephemeral",
+            "--title",
+            "Story gate",
+            "--criterion",
+            "1+1 is 2",
+            "--json",
+            cwd=repo,
+            extra_env=self._mock_env(self._FAIL_VERDICT),
+        )
+        assert result.returncode == 1, _cli_failure(result)
+        document = json.loads(result.stdout)
+        assert document["passed"] is False
+        assert document["outcome"] == "fail"
+        assert document["metadata"]["historyPersisted"] is False
+
+        _assert_untouched(before, _repo_snapshot(repo))
+
+    def test_missing_id_is_a_usage_error_only_outside_ephemeral(self, tmp_workdir):
+        """Criterion 2: no id is allowed ONLY with --ephemeral, else exit 2.
+
+        The exit code is pinned against argparse's own missing-argument code so
+        the hand-rolled check cannot drift into the 1 a failed GATE uses — a
+        caller must be able to tell a malformed invocation from a red verdict.
+        """
+        missing_id = run_cli("judge", cwd=tmp_workdir)
+        assert missing_id.returncode == 2, _cli_failure(missing_id)
+        assert "error: the following arguments are required: id" in missing_id.stderr
+        assert missing_id.stdout == ""
+
+        parser_code = run_cli("judge", "--not-a-flag", "some-task", cwd=tmp_workdir)
+        assert parser_code.returncode == 2, _cli_failure(parser_code)
+
+        # ...and the ephemeral form's own required values fail loud too, rather
+        # than evaluating a gate with no criteria (which would pass vacuously).
+        assert run_cli("judge", "--ephemeral", "--criterion", "c", cwd=tmp_workdir).returncode == 2
+        assert run_cli("judge", "--ephemeral", "--title", "t", cwd=tmp_workdir).returncode == 2
+        assert (
+            run_cli(
+                "judge",
+                "--ephemeral",
+                "--title",
+                "t",
+                "--criterion",
+                "c",
+                "--async",
+                cwd=tmp_workdir,
+            ).returncode
+            == 2
+        )
+
+    def test_ephemeral_builds_the_task_from_title_and_repeatable_criteria(self, tmp_path):
+        """Criterion 2: --title plus every repeated --criterion reach the judge."""
+        repo = _init_real_git_repo(tmp_path)
+        _write_ephemeral_config(repo)
+        verdict = json.dumps(
+            {
+                "verdict": "COMPLETE",
+                "items": [
+                    {"criterion": "first criterion", "status": "PASS", "detail": "one"},
+                    {"criterion": "second criterion", "status": "PASS", "detail": "two"},
+                ],
+                "summary": "both good",
+            }
+        )
+        before = _repo_snapshot(repo)
+        result = run_cli(
+            "judge",
+            "US-7",  # an explicit id is still accepted, and wins over the slug
+            "--ephemeral",
+            "--title",
+            "Two criterion gate",
+            "--criterion",
+            "first criterion",
+            "--criterion",
+            "second criterion",
+            "--json",
+            cwd=repo,
+            extra_env={"GITREINS_MOCK_LLM_RESPONSE": json.dumps({"content": verdict})},
+        )
+        assert result.returncode == 0, _cli_failure(result)
+        document = json.loads(result.stdout)
+        assert document["subject"]["taskId"] == "US-7"
+        assert document["subject"]["title"] == "Two criterion gate"
+        assert document["metadata"]["criterionCount"] == 2
+        assert [check["id"] for check in document["checks"]][:2] == ["criterion-1", "criterion-2"]
+
+        _assert_untouched(before, _repo_snapshot(repo))
+
+    def test_ephemeral_working_tree_scope_grades_uncommitted_changes(self, tmp_path):
+        """Criterion 4: --scope working-tree grades uncommitted work, uncommitted.
+
+        ``pipeline: stages: []`` routes tier 1 to GuardManager, which is where
+        ``--scope`` is observable — the default pipeline's tier-1 steps are
+        fixed commands over the whole tree. Same tree, same criteria, two
+        scopes: an untracked file is invisible to one run and graded by the
+        other, and neither stages, commits or stashes it. ``--skip-tier2``
+        keeps both runs free of any LLM at all.
+        """
+        repo = _init_real_git_repo(tmp_path)
+        _write_ephemeral_config(repo, body="pipeline:\n  stages: []\n")
+        (Path(repo) / "notes.py").write_text(self._UNTRACKED_SECRET, encoding="utf-8")
+
+        before = _repo_snapshot(repo)
+        assert "?? notes.py" in before["status"]
+
+        staged = run_cli(
+            "judge",
+            "--ephemeral",
+            "--title",
+            "Story gate",
+            "--criterion",
+            "1+1 is 2",
+            "--skip-tier2",
+            "--json",
+            cwd=repo,
+        )
+        assert staged.returncode == 0, _cli_failure(staged)
+        assert json.loads(staged.stdout)["scope"] == "staged"
+
+        working_tree = run_cli(
+            "judge",
+            "--ephemeral",
+            "--title",
+            "Story gate",
+            "--criterion",
+            "1+1 is 2",
+            "--skip-tier2",
+            "--scope",
+            "working-tree",
+            "--json",
+            cwd=repo,
+        )
+        assert working_tree.returncode == 1, _cli_failure(working_tree)
+        document = json.loads(working_tree.stdout)
+        assert document["scope"] == "working-tree"
+        assert document["passed"] is False
+        assert any(
+            check["id"] == "secrets" and check["passed"] is False for check in document["checks"]
+        )
+
+        after = _repo_snapshot(repo)
+        _assert_untouched(before, after)
+        assert "?? notes.py" in after["status"]  # graded, never staged
+
+    def test_ephemeral_human_output_mirrors_the_sync_summary(self, tmp_path):
+        """Criterion 3: without --json the summary goes to stdout, and the run
+        says out loud that it persisted nothing (stderr, so a caller parsing
+        the summary is unaffected)."""
+        repo = _init_real_git_repo(tmp_path)
+        _write_ephemeral_config(repo)
+        before = _repo_snapshot(repo)
+        result = run_cli(
+            "judge",
+            "--ephemeral",
+            "--title",
+            "Story gate",
+            "--criterion",
+            "1+1 is 2",
+            cwd=repo,
+            extra_env=self._mock_env(self._PASS_VERDICT),
+        )
+        assert result.returncode == 0, _cli_failure(result)
+        assert "Judge Result: ephemeral:story-gate" in result.stdout
+        assert "Overall: PASS" in result.stdout
+        assert "no task, verdict, branch or stash state was written" in result.stderr
+        assert "{" not in result.stdout  # no document on the human path
+        _assert_untouched(before, _repo_snapshot(repo))
 
 
 # ── DF-006: CLI async judge — --async / --status / --run-job ────────────────

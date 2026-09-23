@@ -100,6 +100,23 @@ commands are preserved on reruns; the detected test runner replaces only the
 untouched `install` default. `gitreins init --reset` rewrites the smart defaults
 from scratch when a config has drifted.
 
+### Resolution-gate surfaces are off until you enable them
+
+`gitreins init` also writes the `resolution:` block (JEVRES-006) — with **every surface
+`false`**. `gitreins resolve` and the MCP `context.resolve` tool read that block, and only
+a literal `true` opens a surface; a missing key, a missing block and a wrong-typed value
+all read as OFF. Enabling is your explicit act, never an init side effect: the assembled
+bundle then leaves the host for a third party (OpenRouter → TypeSafe), and the two
+judge-adjacent surfaces additionally have no calibration numbers until JEVRES-005:
+
+- `resolution.enabled.cli: true` — `gitreins resolve` runs for real
+- `resolution.enabled.mcp: true` — the MCP `context.resolve` tool runs for real
+- `resolution.enabled.predispatch` / `resolution.enabled.judge_prescreen` — leave `false`
+
+Disabled, both surfaces fail closed with `abstain_reason: surface-disabled` (exit 1) and
+print the enabling fix instead of guessing. The complete block, its defaults and the
+calibration caveat are in [docs/jev-resolution-gate.md](jev-resolution-gate.md) §9.
+
 ## 3. Gitleaks allowlist (no action needed)
 
 `gitreins init` generates a `.gitleaks.toml` allowlist with valid anchored Go

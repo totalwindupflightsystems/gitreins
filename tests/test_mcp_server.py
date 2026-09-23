@@ -2767,3 +2767,82 @@ class TestContextResolve:
         assert result["abstain_reason"] in {"no-credentials", "empty-bundle", "surface-disabled"}
         assert result["exit_code"] == 1
         assert "manifest" in result
+
+    def test_context_resolve_files_one_record_through_the_shared_helper(
+        self, tmp_workdir, monkeypatch
+    ):
+        """DF-GITREINS-POC-36: the tool's verdict lands in ``.gitreins/history``.
+
+        Asserted on the parsed artifact ``gitreins report`` / ``gitreins serve``
+        read, not on a call count — a helper that returned success while writing
+        nothing would pass a call-count test and leave the same hole.
+        """
+        mcp, _calls = self._server_with_scripted_endpoint(tmp_workdir, monkeypatch)
+
+        verdict = mcp._context_resolve("Does engine/evidence_bounds.py truncate text?")
+
+        records = sorted((Path(tmp_workdir) / ".gitreins" / "history").glob("*/*/verdict.json"))
+        assert len(records) == 1
+        record = json.loads(records[0].read_text())
+        assert record["kind"] == "resolution"
+        assert record["source"] == "mcp"
+        assert record["band"] == verdict["verdict"] == "RESOLVED"
+        assert record["question"] == "Does engine/evidence_bounds.py truncate text?"
+
+        rows = [
+            json.loads(line)
+            for line in (Path(tmp_workdir) / ".gitreins" / "usage.jsonl").read_text().splitlines()
+            if line.strip()
+        ]
+        assert [row["step"] for row in rows] == ["resolution"]
+        assert rows[0]["tokens_in"] == 520
+        assert rows[0]["tokens_out"] == 96
+
+    def test_context_resolve_uses_no_second_writer(self, tmp_workdir, monkeypatch):
+        """The MCP surface routes through ``engine.persist.persist_resolution``.
+
+        This class of bug (a surface growing its own persistence path) bit
+        POC-12/POC-16, so the routing itself is pinned: with the shared helper
+        replaced by a spy, nothing may be written by the tool.
+        """
+        import engine.persist as persist_module
+
+        mcp, _calls = self._server_with_scripted_endpoint(tmp_workdir, monkeypatch)
+        seen: dict = {}
+
+        def spy(workdir, verdict, *, surface):
+            seen.update(workdir=workdir, surface=surface, band=verdict.verdict)
+            return "dry-run"
+
+        monkeypatch.setattr(persist_module, "persist_resolution", spy)
+
+        mcp._context_resolve("Does engine/evidence_bounds.py truncate text?")
+
+        assert seen == {"workdir": str(tmp_workdir), "surface": "mcp", "band": "RESOLVED"}
+        assert not (Path(tmp_workdir) / ".gitreins" / "history").exists()
+
+    def test_context_resolve_abstain_files_nothing(self, tmp_workdir, monkeypatch):
+        """No credential: the ABSTAIN is a non-event, so nothing is filed."""
+        mcp, _calls = self._server_with_scripted_endpoint(tmp_workdir, monkeypatch, with_key=False)
+
+        verdict = mcp._context_resolve("anything at all?")
+
+        assert verdict["verdict"] == "ABSTAIN"
+        assert verdict["abstain_reason"] == "no-credentials"
+        assert not (Path(tmp_workdir) / ".gitreins" / "history").exists()
+        assert not (Path(tmp_workdir) / ".gitreins" / "usage.jsonl").exists()
+
+    def test_context_resolve_disabled_surface_files_nothing(self, tmp_workdir, monkeypatch):
+        """JEVRES-006 + POC-36: a disabled surface abstains and writes nothing."""
+        from engine.config import GitReinsDefaults
+
+        monkeypatch.setattr(
+            self._resolution, "resolution_config", lambda workdir=".": GitReinsDefaults()
+        )
+
+        mcp = GitReinsMCPServer(tmp_workdir)
+        verdict = mcp._context_resolve("anything at all?")
+
+        assert verdict["abstain_reason"] == "surface-disabled"
+        assert not (Path(tmp_workdir) / ".gitreins" / "history").exists()
+        assert not (Path(tmp_workdir) / ".gitreins" / "usage.jsonl").exists()
