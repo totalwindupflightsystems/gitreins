@@ -1932,7 +1932,7 @@ def cmd_serve(args):
 
 def _cmd_report_tui(workdir: str, n: int = 20):
     """Interactive TUI for verdict browsing (requires textual)."""
-    from engine.persist import build_report, VerdictPersister
+    from engine.persist import KIND_RESOLUTION, VerdictPersister, build_report
 
     try:
         from importlib.util import find_spec
@@ -1964,13 +1964,19 @@ def _cmd_report_tui(workdir: str, n: int = 20):
 
     verdict_lines = []
     for entry in entries:
-        icon = "✓" if entry.get("passed") else "✗"
+        # DF-GITREINS-POC-36: a resolution-gate record is not a graded verdict —
+        # it has no pass/fail — so it carries its band instead of the ✓/✗ icon,
+        # exactly as the text report lists it in its own section.
+        resolution = entry.get("kind") == KIND_RESOLUTION
+        icon = "•" if resolution else ("✓" if entry.get("passed") else "✗")
         task_id = entry.get("task_id", "?")
         date = entry.get("_date", "?")
         title = entry.get("task_title", task_id)
         items = entry.get("items", [])
         criteria = ""
-        if items:
+        if resolution:
+            criteria = f" [{entry.get('band') or 'RESOLUTION'}]"
+        elif items:
             parts = []
             for item in items:
                 if isinstance(item, dict):
@@ -2757,7 +2763,15 @@ def cmd_resolve(args):
     ``resolution:`` block also supplies the model pin, the token ceiling, the
     band thresholds and the egress exclusions; ``--budget`` still overrides
     the ceiling for one call.
+
+    Recorded (DF-GITREINS-POC-36): a run that produced a real band is filed in
+    ``.gitreins/history`` — with one ``step: "resolution"`` row in
+    ``.gitreins/usage.jsonl`` carrying the tokens the response reported — through
+    the shared ``engine.persist.persist_resolution`` helper, so ``gitreins
+    report`` and ``gitreins serve`` show this decision. An ABSTAIN writes
+    nothing, and so does ``history.enabled: false``.
     """
+    from engine.persist import persist_resolution
     from engine.resolution import (
         resolution_config,
         resolve,
@@ -2794,6 +2808,13 @@ def cmd_resolve(args):
         resolved_at=cfg.resolution_resolved_at,
         review_at=cfg.resolution_review_at,
     )
+
+    # DF-GITREINS-POC-36: file the decision in the same history store the judge
+    # writes to, through the SHARED helper (never a CLI-local writer). A real
+    # band gets one record + one `resolution` usage line; an ABSTAIN and a
+    # `history.enabled: false` checkout write nothing, and a persistence failure
+    # is non-fatal — it must never change the verdict this command reports.
+    persist_resolution(workdir, verdict, surface="cli")
 
     if args.json:
         print(verdict_json(verdict))

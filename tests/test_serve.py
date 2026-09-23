@@ -828,3 +828,92 @@ def test_cli_serve_rejects_a_repo_path_that_is_not_a_directory(tmp_path):
     assert result.returncode == 2
     assert "--repo is not a directory" in result.stderr
     assert "Judgment browser" not in result.stdout
+
+
+# ── Resolution-gate records in the viewer API (DF-GITREINS-POC-36) ──
+
+
+def _write_resolution_record(root: Path, date: str = "2026-09-03", h: str = "aa11bb22") -> dict:
+    """The record ``engine.persist.persist_resolution`` files, shape-faithful."""
+    record = {
+        "kind": "resolution",
+        "source": "cli",
+        "band": "RESOLVED",
+        "probability": 0.91,
+        "missing_kind": None,
+        "question": "Does the gate persist its verdicts?",
+        "task_title": "Does the gate persist its verdicts?",
+        "task_id": "resolution",
+        "evaluated_at": f"{date}T12:00:00Z",
+        "verdict": {
+            "question": "Does the gate persist its verdicts?",
+            "verdict": "RESOLVED",
+            "probability": 0.91,
+            "manifest": [{"file": "engine/persist.py", "provenance": "ast_exact", "bytes": 120}],
+        },
+    }
+    entry = root / ".gitreins" / "history" / date / h
+    entry.mkdir(parents=True)
+    (entry / "verdict.json").write_text(json.dumps(record), encoding="utf-8")
+    return record
+
+
+@pytest.fixture()
+def resolution_repo(tmp_path: Path) -> Path:
+    """A checkout holding one passing judge verdict AND one resolution record."""
+    judge = {
+        "task_id": "JVIEW-PASS",
+        "task_title": "Passing viewer fixture",
+        "passed": True,
+        "items": [],
+        "evaluated_at": "2026-09-01T12:00:00Z",
+    }
+    entry = tmp_path / ".gitreins" / "history" / "2026-09-01" / "a1b2c3d4"
+    entry.mkdir(parents=True)
+    (entry / "verdict.json").write_text(json.dumps(judge), encoding="utf-8")
+    _write_resolution_record(tmp_path)
+    return tmp_path
+
+
+class TestResolutionRecordsInTheViewerAPI:
+    """`gitreins serve` lists the gate's decisions without lying about them."""
+
+    def test_the_row_list_hands_back_the_kind_marker(self, resolution_repo: Path):
+        rows = serve.list_verdicts(str(resolution_repo))
+        by_task = {row["task_id"]: row for row in rows}
+
+        assert set(by_task) == {"JVIEW-PASS", "resolution"}
+        assert "kind" not in by_task["JVIEW-PASS"], "a judge row carries no kind key"
+        assert by_task["resolution"]["kind"] == "resolution"
+        assert by_task["resolution"]["band"] == "RESOLVED"
+        assert by_task["resolution"]["title"] == "Does the gate persist its verdicts?"
+
+    def test_stats_count_judgments_only(self, resolution_repo: Path):
+        stats = serve.stats(serve.list_verdicts(str(resolution_repo)))
+
+        assert stats == {"total": 1, "passed": 1, "failed": 0, "pass_rate": 100}
+
+    def test_http_api_lists_the_record_and_keeps_the_pass_rate_honest(self, resolution_repo: Path):
+        with running_server(str(resolution_repo)) as (host, port):
+            status, body = get((host, port), "/api/verdicts")
+            assert status == 200
+            rows = json_body(body)["verdicts"]
+
+            stats_status, stats_body = get((host, port), "/api/stats")
+            assert stats_status == 200
+            stats_payload = json_body(stats_body)
+
+            record_status, record_body = get((host, port), "/api/verdicts/2026-09-03/aa11bb22")
+
+        resolution = next(row for row in rows if row["task_id"] == "resolution")
+        assert resolution["kind"] == "resolution"
+        assert resolution["band"] == "RESOLVED"
+        # A resolution record must never be counted as a failed judgment.
+        assert stats_payload["total"] == 1
+        assert stats_payload["failed"] == 0
+        assert stats_payload["pass_rate"] == 100
+        # …and its full record (band + nested verdict) is fetchable at its route.
+        assert record_status == 200
+        full = json_body(record_body)
+        assert full["kind"] == "resolution"
+        assert full["verdict"]["manifest"][0]["file"] == "engine/persist.py"

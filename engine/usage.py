@@ -25,12 +25,18 @@ inventing a rate for a provider's current price list. ``tokens_in`` already
 includes cache reads (per the telemetry contract), so a cost is charged on
 ``tokens_in`` and ``tokens_out`` only — ``cache_read``/``cache_write`` are
 carried alongside for the reader's own arithmetic.
+
+The write side lives here too (:func:`append_usage_row`), next to the reader that
+has to parse the schema: the judge pipeline appends its ``tier2`` step inline
+(``engine/pipeline.py``) and the resolution gate appends its ``resolution`` step
+through this helper, both into the SAME file, so one module owns the shape.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Any
 
 USAGE_FILE = "usage.jsonl"
@@ -54,6 +60,58 @@ def _as_number(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     return float(value)
+
+
+def _counter(value: Any) -> int:
+    """A token count as the schema stores it: a non-negative int, never a bool."""
+    number = _as_number(value)
+    if number is None or number < 0:
+        return 0
+    return int(number)
+
+
+def append_usage_row(
+    workdir: str,
+    *,
+    step: str,
+    tokens_in: int = 0,
+    tokens_out: int = 0,
+    cache_read: int = 0,
+    cache_write: int = 0,
+    ts: float | None = None,
+) -> bool:
+    """Append one telemetry row to ``<workdir>/.gitreins/usage.jsonl``.
+
+    The single writer of the schema described in this module's docstring: the
+    row it writes is byte-for-byte the shape :func:`load_usage_rows` and
+    :func:`attribute_rows` read, so a new producer (the resolution gate's
+    ``resolution`` step) cannot drift from the judge's ``tier2`` rows.
+
+    Best-effort by contract, exactly like the judge's inline append: an
+    unwritable directory, a full disk or a bad value returns ``False`` and is
+    never raised into the run that produced the tokens. Returns ``True`` when
+    the line reached the file.
+
+    ``ts`` defaults to now. A caller that already measured the moment passes it,
+    because attribution is BY TIME (:func:`attribute_rows`): the row must land
+    before the verdict it belongs to, never after it.
+    """
+    row = {
+        "ts": time.time() if ts is None else _as_number(ts) or time.time(),
+        "tokens_in": _counter(tokens_in),
+        "tokens_out": _counter(tokens_out),
+        "cache_read": _counter(cache_read),
+        "cache_write": _counter(cache_write),
+        "step": step,
+    }
+    try:
+        path = usage_path(workdir)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row) + "\n")
+    except Exception:
+        return False
+    return True
 
 
 def load_usage_rows(workdir: str, limit: int = 5000) -> list[dict[str, Any]]:

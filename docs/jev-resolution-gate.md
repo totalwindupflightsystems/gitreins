@@ -162,6 +162,16 @@ silent PASS here would let unresolved work through the cheapest gate in the syst
 - Every verdict artifact carries: probability, verdict band, `missing_kind`, bundle manifest,
   model build id, token counts, cost — and is **persisted where `gitreins serve` can show it**
   (the DF-GITREINS-POC-23 lesson: an invisible verdict is not an audit trail).
+- That persistence is closed for the gate's own surfaces (DF-GITREINS-POC-36): a real band from
+  `gitreins resolve`, `gitreins preflight` or MCP `context.resolve` lands in `.gitreins/history`
+  through ONE shared writer (`engine.persist.persist_resolution`) as a record marked
+  `kind: "resolution"` carrying its `source` and band. `gitreins report` lists those records in
+  their own section (they are never counted in the judge pass/fail rollup), `GET /api/verdicts`
+  hands back the marker, and `GET /api/stats` keeps counting judgments only. Each Jev call also
+  appends one `step: "resolution"` row to `.gitreins/usage.jsonl` with the tokens the API
+  reported. An `ABSTAIN` — surface-disabled, no credentials, transport error, malformed answer —
+  writes NOTHING: a non-event is not a verdict, and `history.enabled: false` means no record and
+  no usage line either.
 
 ## 9. Enabling a surface
 

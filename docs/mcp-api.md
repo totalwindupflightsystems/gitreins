@@ -332,6 +332,12 @@ a named `abstain_reason` (`surface-disabled`, `no-credentials`, `all-credentials
 suggesting the fix. The same object is what `gitreins resolve --json` prints; the
 CLI's non-zero exit on UNRESOLVED/ABSTAIN corresponds to `exit_code: 1` here.
 
+A run that produced a real band (RESOLVED/REVIEW/UNRESOLVED) is also filed in the
+server workdir's `.gitreins/history` as a resolution record (`kind: "resolution"`,
+`source: "mcp"`) through the same shared writer the CLI and `gitreins preflight` use, so
+`gitreins report` and `gitreins serve` show the gate's decisions rather than a hole. An
+ABSTAIN files nothing. The tool never writes to stdout except its JSON-RPC reply.
+
 **Disabled by default.** Like every surface of the gate, this tool runs only when
 `resolution.enabled.mcp: true` is set in the repo's `.gitreins/config.yaml` — absent, the
 tool returns `ABSTAIN` with `abstain_reason: surface-disabled` (never a guess) and an

@@ -1031,6 +1031,14 @@ class GitReinsMCPServer:
             resolved_at=cfg.resolution_resolved_at,
             review_at=cfg.resolution_review_at,
         )
+        # DF-GITREINS-POC-36: the verdict is filed in the same history store the
+        # judge writes to, through the SHARED helper the CLI and preflight use —
+        # never a second writer that could drift from them (POC-12/POC-16). The
+        # helper never prints (this server's stdout is its JSON-RPC channel) and
+        # never raises; an ABSTAIN writes nothing.
+        from engine.persist import persist_resolution
+
+        persist_resolution(self.workdir, verdict, surface="mcp")
         return verdict.to_dict()
 
     def handle_request(self, request: dict) -> dict | None:

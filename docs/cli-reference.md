@@ -518,6 +518,11 @@ A short QA-run block is printed after the verdict history when the QA ledger
 has rows (see section 13); with no recorded QA runs the output is unchanged.
 The QA block is a human surface and stays out of the `--json` path.
 
+Resolution-gate records (`kind: "resolution"` — see sections 15/16) share the
+same store and are listed in their own `Resolution gate (N)` section, never
+counted in the `Recent`/`Pass`/`Fail` rollup: a resolution band is not a
+passed or failed judgment. With no such records the output is unchanged.
+
 Exit **0** on success. `report --json` exits `0` whenever it emitted a document,
 including for an empty history (`checks: []`, `outcome: unknown`), so a consumer
 distinguishes "no verdicts yet" from a failure by the document, not the code.
@@ -804,6 +809,15 @@ when the answer is UNRESOLVED) and the bundle manifest — every file that was s
 evidence, with its provenance, score and size. `--json` emits the same verdict object
 the MCP `context.resolve` tool returns (see `docs/mcp-api.md`).
 
+**Recorded.** A run that produced a real band is filed in `.gitreins/history` as a
+resolution record — `kind: "resolution"`, `source: "cli"`, the band, probability and
+question, and the full verdict object — written by the SAME shared helper the judge
+verdicts use, so `gitreins report` lists it (section 11) and `gitreins serve` shows it
+with no second store. One Jev call also appends one `step: "resolution"` row to
+`.gitreins/usage.jsonl` carrying the token counts the response reported. An ABSTAIN
+writes nothing — it is a non-event, not a verdict — and `history.enabled: false` means
+no record and no usage line.
+
 | Verdict | Meaning |
 |---------|---------|
 | `RESOLVED` | probability ≥ 0.85 — the evidence is sufficient |
@@ -883,6 +897,13 @@ the gate saw.
 
 This is a signal, not a gate: a skip annotates a row, it is never the sole
 authority for a merge or a commit (spec §6.5).
+
+**Recorded.** A run that produced a real band is filed in `.gitreins/history` as a
+resolution record with `source: "predispatch"` — the band, probability, question and
+the full verdict object — through the same shared helper `gitreins resolve` uses, so a
+skip-dispatch (no worker spawned) always leaves the audit trail that decision needs
+(`gitreins report`, `gitreins serve`). An ABSTAIN — including the `surface-disabled`
+one described below — writes nothing: a disabled surface does not even touch the store.
 
 **Enabling.** `predispatch` ships disabled too — and its failure mode is the opposite one:
 with `resolution.enabled.predispatch` absent or `false` the gate never runs and the record

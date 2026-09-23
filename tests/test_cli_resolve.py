@@ -413,3 +413,112 @@ class TestResolveConfigGate:
         assert seen["model"] == "typesafe/jev-1.13-testpin"
         assert seen["resolved_at"] == pytest.approx(0.7)
         assert seen["review_at"] == pytest.approx(0.3)
+
+
+class TestResolvePersistence:
+    """DF-GITREINS-POC-36 — a run is recorded; an abstention is not.
+
+    The assertions read the REAL artifacts (the parsed ``verdict.json`` and the
+    parsed usage row): ``gitreins report`` and ``gitreins serve`` read those
+    files, so a helper that returned "dry-run" while writing nothing would pass
+    a call-count test and still leave the hole this row closes.
+    """
+
+    @staticmethod
+    def _records(workdir) -> list:
+        return sorted((workdir / ".gitreins" / "history").glob("*/*/verdict.json"))
+
+    @staticmethod
+    def _usage_rows(workdir) -> list:
+        path = workdir / ".gitreins" / "usage.jsonl"
+        if not path.is_file():
+            return []
+        return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+    def test_a_successful_run_files_one_record_and_one_usage_line(
+        self, monkeypatch, tmp_path, script_endpoint
+    ):
+        _script_assembler(monkeypatch)
+        script_endpoint(0.87)
+        monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("cli"))
+
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        code, _, _ = run_resolve(
+            monkeypatch,
+            str(workdir),
+            "Does engine/evidence_bounds.py truncate text?",
+            "--json",
+        )
+
+        assert code == 0
+        records = self._records(workdir)
+        assert len(records) == 1, "one successful run appends exactly one record"
+        record = json.loads(records[0].read_text())
+        assert record["kind"] == "resolution"
+        assert record["source"] == "cli"
+        assert record["band"] == "RESOLVED"
+        assert record["probability"] == pytest.approx(0.87)
+        assert record["question"] == "Does engine/evidence_bounds.py truncate text?"
+        assert record["verdict"]["manifest"], "the bundle rides along with the record"
+
+        rows = self._usage_rows(workdir)
+        assert [row["step"] for row in rows] == ["resolution"]
+        assert rows[0]["tokens_in"] == 520
+        assert rows[0]["tokens_out"] == 96
+
+    def test_an_abstain_without_credentials_records_nothing(
+        self, monkeypatch, tmp_path, script_endpoint
+    ):
+        _script_assembler(monkeypatch)
+        script_endpoint(0.99)  # never reached — discovery fails first
+
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        code, out, _ = run_resolve(monkeypatch, str(workdir), "anything at all?", "--json")
+
+        assert code == 1
+        assert json.loads(out)["abstain_reason"] == "no-credentials"
+        assert self._records(workdir) == []
+        assert self._usage_rows(workdir) == []
+
+    def test_a_surface_disabled_run_records_nothing(self, monkeypatch, tmp_path, script_endpoint):
+        from engine.config import GitReinsDefaults
+
+        monkeypatch.setattr(resolution, "resolution_config", lambda workdir=".": GitReinsDefaults())
+        _script_assembler(monkeypatch)
+        calls = script_endpoint(0.99)  # must never be reached
+        monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("cli"))
+
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        code, _, _ = run_resolve(monkeypatch, str(workdir), "anything at all?", "--json")
+
+        assert code == 1 and calls == []
+        assert self._records(workdir) == []
+        assert self._usage_rows(workdir) == []
+
+    def test_the_cli_routes_through_the_one_shared_helper(
+        self, monkeypatch, tmp_path, script_endpoint
+    ):
+        """No CLI-local writer: the record is written by engine.persist."""
+        import engine.persist as persist_module
+
+        _script_assembler(monkeypatch)
+        script_endpoint(0.87)
+        monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("cli"))
+        seen: dict = {}
+
+        def spy(workdir, verdict, *, surface):
+            seen.update(workdir=workdir, surface=surface, band=verdict.verdict)
+            return "dry-run"
+
+        monkeypatch.setattr(persist_module, "persist_resolution", spy)
+
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        code, _, _ = run_resolve(monkeypatch, str(workdir), "q?", "--json")
+
+        assert code == 0
+        assert seen == {"workdir": str(workdir), "surface": "cli", "band": "RESOLVED"}
+        assert self._records(workdir) == [], "the CLI must not write a record itself"

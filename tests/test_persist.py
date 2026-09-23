@@ -4,13 +4,19 @@ import json
 import os
 import shutil
 import subprocess
+from datetime import datetime, timezone
 from unittest.mock import patch
+
+import pytest
 
 from engine.persist import (
     DEFAULT_HISTORY_CONFIG,
+    KIND_RESOLUTION,
+    RESOLUTION_ENTRY_ID,
     VerdictPersister,
     _pct,
     build_report,
+    persist_resolution,
 )
 
 
@@ -680,3 +686,285 @@ def test_plumbing_commands_touch_neither_index_nor_worktree(tmp_path, monkeypatc
     # persistence path tried a forbidden worktree-mutating verb and failed.
     assert commit_hash not in ("dry-run", "disabled")
     assert len(commit_hash) == 8
+
+
+# ── Resolution-gate records (DF-GITREINS-POC-36) ─────────────
+#
+# `gitreins resolve`, `gitreins preflight` and MCP `context.resolve` used to
+# evaporate on exit: `.gitreins/history` gained nothing and report/serve showed a
+# hole where the gate's decisions should be. These tests grade the SHARED writer
+# those three surfaces call — the record it files, the usage line it appends, and
+# what it deliberately does NOT write.
+
+
+def _resolution_verdict(band: str = "RESOLVED", probability: float = 0.91, **overrides):
+    """A real engine verdict object — the class ``resolve`` returns, unmodified."""
+    from engine.resolution import ResolutionVerdict
+
+    verdict = ResolutionVerdict(
+        question="Does engine/evidence_bounds.py truncate text?",
+        verdict=band,
+        probability=probability,
+        missing_kind=None if band == "RESOLVED" else "implementation",
+        model="typesafe/jev-1.13-20260917",
+        input_tokens=520,
+        output_tokens=96,
+        tokens_estimated=300,
+    )
+    for name, value in overrides.items():
+        setattr(verdict, name, value)
+    return verdict
+
+
+def _history_records(repo) -> list[tuple[str, str, dict]]:
+    """``[(date, hash, record)]`` — every history entry, oldest first."""
+    history = repo / ".gitreins" / "history"
+    if not history.is_dir():
+        return []
+    return [
+        (path.parent.parent.name, path.parent.name, json.loads(path.read_text()))
+        for path in sorted(history.glob("*/*/verdict.json"))
+    ]
+
+
+def _usage_rows(repo) -> list[dict]:
+    path = repo / ".gitreins" / "usage.jsonl"
+    if not path.is_file():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def _stamp(value: str) -> float:
+    """Epoch for a record's naive-UTC ``evaluated_at`` (exactly as the writer stamps it)."""
+    return datetime.fromisoformat(value).replace(tzinfo=timezone.utc).timestamp()
+
+
+def _write_judge_record(repo, task_id: str, passed: bool) -> None:
+    """Persist one judge verdict, through the persister the judge uses."""
+    persister = VerdictPersister(str(repo))
+    persister.config["storage"] = "filesystem"
+    persister.config["max_verdicts"] = 0
+    persister.persist(
+        task_id,
+        {
+            "passed": passed,
+            "task_title": f"Judged {task_id}",
+            "items": [{"criterion": "c1", "status": "PASS" if passed else "FAIL", "detail": "d"}],
+        },
+    )
+
+
+class TestPersistResolutionRecord:
+    """The record `gitreins report` / `gitreins serve` read."""
+
+    def test_successful_run_appends_one_record_marked_as_a_resolution(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        verdict = _resolution_verdict()
+
+        result = persist_resolution(str(repo), verdict, surface="cli")
+
+        assert result == "dry-run"  # files written; a bare tmp dir is no git repo
+        records = _history_records(repo)
+        assert len(records) == 1, "one successful run = exactly one record"
+        _, _, record = records[0]
+        assert record["kind"] == KIND_RESOLUTION
+        assert record["source"] == "cli"
+        assert record["band"] == "RESOLVED"
+        assert record["probability"] == pytest.approx(0.91)
+        assert record["question"] == verdict.question
+        assert record["task_id"] == RESOLUTION_ENTRY_ID
+        # A resolution record is NOT a task verdict: it must not borrow the
+        # judge's pass/fail or its criteria slot.
+        assert "passed" not in record
+        assert "items" not in record
+        # The engine's own verdict rides along whole, so report/serve show the
+        # bundle and the accounting without a second serialization.
+        assert record["verdict"]["verdict"] == "RESOLVED"
+        assert record["verdict"]["model"] == "typesafe/jev-1.13-20260917"
+        assert record["verdict"]["input_tokens"] == 520
+
+    def test_summary_is_the_gate_template_not_the_judge_template(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        persist_resolution(str(repo), _resolution_verdict(), surface="predispatch")
+
+        summary = next((repo / ".gitreins" / "history").glob("*/*/summary.md")).read_text()
+        assert summary.startswith("# Resolution gate: RESOLVED")
+        assert "**Surface:** predispatch" in summary
+        assert "**Tokens:** input=520 output=96" in summary
+        assert "✗ FAIL" not in summary
+        assert "## Criteria" not in summary
+
+    def test_history_disabled_writes_no_record_and_no_usage_line(self, tmp_path):
+        repo = tmp_path / "repo"
+        (repo / ".gitreins").mkdir(parents=True)
+        (repo / ".gitreins" / "config.yaml").write_text(
+            "history:\n  enabled: false\n", encoding="utf-8"
+        )
+
+        assert persist_resolution(str(repo), _resolution_verdict(), surface="cli") == "disabled"
+
+        assert not (repo / ".gitreins" / "history").exists()
+        assert _usage_rows(repo) == []
+
+    @pytest.mark.parametrize(
+        "reason",
+        [
+            "surface-disabled",
+            "no-credentials",
+            "all-credentials-rejected",
+            "transport-error",
+            "malformed-response",
+            "budget-exhausted",
+        ],
+    )
+    def test_abstain_paths_write_nothing_at_all(self, tmp_path, reason):
+        """An ABSTAIN is a non-event, not a verdict — even with tokens attached."""
+        from engine.resolution import VERDICT_ABSTAIN, ResolutionVerdict
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        verdict = ResolutionVerdict(
+            question="q?",
+            verdict=VERDICT_ABSTAIN,
+            abstain_reason=reason,
+            input_tokens=520,
+            output_tokens=96,
+        )
+
+        assert persist_resolution(str(repo), verdict, surface="cli") == "abstain"
+
+        assert _history_records(repo) == []
+        assert _usage_rows(repo) == []
+
+    def test_a_persistence_failure_is_reported_never_raised(self, tmp_path, monkeypatch):
+        """Non-fatal by contract: recording can never break the run that decided."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        def boom(*_args, **_kwargs):
+            raise RuntimeError("simulated history failure")
+
+        monkeypatch.setattr(VerdictPersister, "persist", boom)
+
+        assert persist_resolution(str(repo), _resolution_verdict(), surface="cli") == "error"
+
+
+class TestResolutionUsageRow:
+    """One Jev call = one `step: "resolution"` row, carrying what the API said."""
+
+    def test_one_completed_call_appends_one_row_with_the_schema_and_step(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        persist_resolution(str(repo), _resolution_verdict(), surface="cli")
+
+        rows = _usage_rows(repo)
+        assert len(rows) == 1
+        assert set(rows[0]) == {
+            "ts",
+            "tokens_in",
+            "tokens_out",
+            "cache_read",
+            "cache_write",
+            "step",
+        }
+        assert rows[0]["step"] == "resolution"
+        assert rows[0]["tokens_in"] == 520
+        assert rows[0]["tokens_out"] == 96
+        assert rows[0]["cache_read"] == 0 and rows[0]["cache_write"] == 0
+        assert isinstance(rows[0]["ts"], float) and rows[0]["ts"] > 0
+
+    def test_a_response_that_reported_no_tokens_writes_no_row(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        persist_resolution(
+            str(repo), _resolution_verdict(input_tokens=None, output_tokens=None), surface="cli"
+        )
+
+        assert _usage_rows(repo) == [], "a 0/0 row would read as 'the call was free'"
+        assert len(_history_records(repo)) == 1, "the record still lands"
+
+    def test_the_row_is_charged_to_the_resolution_record_not_the_next_verdict(self, tmp_path):
+        """The row and its record share one instant, so attribution is exact."""
+        from engine import usage
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        persist_resolution(str(repo), _resolution_verdict(), surface="cli")
+        # A judge verdict persisted right AFTER the gate run — the case the
+        # shared stamp exists for (a wall-clock read that merely preceded the
+        # record could fall in the same microsecond and lose the row to this).
+        _write_judge_record(repo, "task-judged", True)
+
+        records = _history_records(repo)
+        resolution = next(r for r in records if r[2].get("kind") == KIND_RESOLUTION)
+        judged = next(r for r in records if r[2].get("task_id") == "task-judged")
+        rows = _usage_rows(repo)
+
+        # The row carries the record's OWN evaluated_at instant, to the microsecond.
+        assert rows[0]["ts"] == _stamp(resolution[2]["evaluated_at"])
+
+        index = usage.attribute_rows(
+            [(r[0], r[1], _stamp(r[2]["evaluated_at"])) for r in (resolution, judged)],
+            usage.load_usage_rows(str(repo)),
+        )
+
+        key = f"{resolution[0]}/{resolution[1]}"
+        assert list(index) == [key], "the row belongs to the gate's own record"
+        assert index[key]["steps"] == ["resolution"]
+        assert index[key]["tokens_in"] == 520
+        assert index[key]["tokens_out"] == 96
+
+
+class TestResolutionRecordsCoexistWithJudgeHistory:
+    """A resolution record must not disturb the judge history readers."""
+
+    def test_judge_parsing_and_supersede_bookkeeping_are_untouched(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _write_judge_record(repo, "task-judged", True)
+        persist_resolution(str(repo), _resolution_verdict(), surface="cli")
+
+        persister = VerdictPersister(str(repo))
+        entries = persister.list_verdicts(n=10)
+        assert len(entries) == 2
+        judge = next(e for e in entries if e.get("task_id") == "task-judged")
+        assert judge["passed"] is True
+        assert judge["items"][0]["criterion"] == "c1"
+        assert "kind" not in judge
+        # No job id on a resolution record => it never supersedes a judge record.
+        assert judge["superseded_by"] is None
+        assert judge["supersedes"] is None
+        assert persister.count_verdicts() == 2
+
+    def test_report_lists_resolution_records_in_their_own_section(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _write_judge_record(repo, "task-judged", True)
+        persist_resolution(str(repo), _resolution_verdict(), surface="cli")
+
+        report = build_report(str(repo), n=10)
+
+        assert "Recent: 1 evaluations" in report, "a resolution band is not an evaluation"
+        assert "Pass:   1 (100%)" in report
+        assert "Fail:   0 (0%)" in report, "the resolution record is not a failed judgment"
+        assert "Resolution gate (1)" in report
+        assert "• RESOLVED (0.91)" in report
+        assert "[cli]" in report
+        assert "Does engine/evidence_bounds.py truncate text?" in report
+
+    def test_report_is_unchanged_when_only_judge_records_exist(self, tmp_path):
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        _write_judge_record(repo, "task-pass", True)
+        _write_judge_record(repo, "task-fail", False)
+
+        report = build_report(str(repo), n=10)
+
+        assert "Resolution gate" not in report
+        assert "Recent: 2 evaluations" in report
+        assert "Pass:   1 (50%)" in report
+        assert "Fail:   1 (50%)" in report

@@ -26,6 +26,12 @@ directory; ``--repo <path>`` (see :func:`resolve_workdir`) points the same
 server at any other GitReins checkout, so one install can review every
 project's judgment history without ``cd``.
 
+The viewer lists BOTH kinds of record in ``.gitreins/history`` (DF-GITREINS-POC-36):
+a judge verdict (no ``kind`` key) and a resolution-gate record (``kind:
+"resolution"``, carrying its ``band``). ``GET /api/verdicts`` hands a client the
+marker so the two are separable, and ``GET /api/stats`` counts JUDGMENTS only —
+a resolution band is not a pass/fail and never moves the pass rate.
+
 Security: binds 127.0.0.1 by default; path params are strictly validated;
 read-only — the server never writes to the repo.  The API is an unversioned
 but stable contract (additive changes only); docs/judgment-viewer.md records
@@ -43,6 +49,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, TypedDict
 
 from engine import evidence, qa_ledger, usage
+from engine.persist import KIND_RESOLUTION
 from engine.repo_paths import (
     WorktreeResolutionError,
     board_file_path,
@@ -61,14 +68,21 @@ _HASH_RE = re.compile(r"^[a-f0-9]{4,16}$")
 # ── identical to the untyped loaders; the types only describe the payloads) ──
 
 
-class _VerdictProvenance(TypedDict, total=False):
-    """Optional metadata stamped only on verdicts recorded after the first schema."""
+class _VerdictRowOptional(TypedDict, total=False):
+    """Metadata stamped only on SOME history records — never manufactured.
+
+    ``worktree``/``branch`` appear on verdicts recorded after the first schema;
+    ``kind``/``band`` appear on a resolution-gate record (DF-GITREINS-POC-36). A
+    judge verdict carries no ``kind`` at all, so its absence is the marker.
+    """
 
     worktree: str
     branch: str
+    kind: str
+    band: str
 
 
-class VerdictRow(_VerdictProvenance):
+class VerdictRow(_VerdictRowOptional):
     """One metadata-only row of ``GET /api/verdicts`` (no criteria/evidence)."""
 
     date: str
@@ -205,6 +219,13 @@ def list_verdicts(workdir: str) -> list[VerdictRow]:
                 row["worktree"] = v["worktree"]
             if "branch" in v:
                 row["branch"] = v["branch"]
+            # DF-GITREINS-POC-36: a resolution-gate record says what it is, so a
+            # client never has to tell it apart from a judgment by guessing from
+            # the missing criteria. Judge verdicts carry no kind => no key here.
+            if v.get("kind"):
+                row["kind"] = v["kind"]
+            if v.get("band"):
+                row["band"] = v["band"]
             out.append(row)
     return out
 
@@ -317,14 +338,29 @@ def load_qa(workdir: str, limit: int = 200) -> QaPayload:
     return {"ledger": ledger, "runs": rows}
 
 
+def graded_verdicts(verdicts: list[VerdictRow]) -> list[VerdictRow]:
+    """The rows that carry a pass/fail JUDGMENT (not resolution-gate records).
+
+    Both kinds live in the same history store (DF-GITREINS-POC-36), but a
+    resolution record has no ``passed`` — counting one as a failed judgment
+    would inflate the failure rate the stats header exists to report.
+    """
+    return [v for v in verdicts if v.get("kind") != KIND_RESOLUTION]
+
+
 def stats(verdicts: list[VerdictRow]) -> Stats:
-    """Counts block for ``GET /api/stats`` (``pass_rate`` is an integer percent)."""
-    n_pass = sum(1 for v in verdicts if v["passed"])
+    """Counts block for ``GET /api/stats`` (``pass_rate`` is an integer percent).
+
+    Resolution-gate records are excluded: they stay listable through
+    ``GET /api/verdicts``, and the header keeps counting judgments only.
+    """
+    graded = graded_verdicts(verdicts)
+    n_pass = sum(1 for v in graded if v["passed"])
     return {
-        "total": len(verdicts),
+        "total": len(graded),
         "passed": n_pass,
-        "failed": len(verdicts) - n_pass,
-        "pass_rate": round(100 * n_pass / len(verdicts)) if verdicts else 0,
+        "failed": len(graded) - n_pass,
+        "pass_rate": round(100 * n_pass / len(graded)) if graded else 0,
     }
 
 
@@ -449,6 +485,7 @@ a{color:#60a5fa}
 <script>
 const esc=s=>{const d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML};
 const badge=v=>v?'<span class="badge pass">PASS</span>':'<span class="badge fail">FAIL</span>';
+const kindBadge=v=>v.kind==='resolution'?'<span class="badge mute">'+esc(v.band||'resolution')+'</span>':badge(v.passed);
 let V=[],filter='all',q='',CUR=null;
 async function j(url){const r=await fetch(url);if(!r.ok)throw new Error(url);return r.json()}
 async function boot(){
@@ -522,12 +559,12 @@ function telemetry(v){
     '<div class="meta">cost: '+cost+'</div>';
 }
 function render(){
-  const rows=V.filter(v=>(filter==='all'||(filter==='pass')===v.passed)&&(!q||(v.task_id+' '+v.title).toLowerCase().includes(q)));
+  const rows=V.filter(v=>(filter==='all'||(v.kind!=='resolution'&&(filter==='pass')===v.passed))&&(!q||(v.task_id+' '+v.title).toLowerCase().includes(q)));
   document.getElementById('list').innerHTML=rows.map(v=>{
     const origin=[v.worktree?'worktree: '+v.worktree:'',v.branch?'branch: '+v.branch:''].filter(Boolean).join(' · ');
     return '<div class="row" onclick="show(\\''+v.date+'\\',\\''+v.hash+'\\')">'+
-    '<div class="top"><span class="task">'+esc(v.task_id)+'</span><span class="title">'+esc(v.title)+'</span>'+badge(v.passed)+'</div>'+
-    '<div class="meta">'+v.date+' · '+v.hash+' · '+v.n_criteria+' criteria · tier1: '+(v.tier1_passed==null?'—':(v.tier1_passed?'PASS':'FAIL'))+'</div>'+
+    '<div class="top"><span class="task">'+esc(v.task_id)+'</span><span class="title">'+esc(v.title)+'</span>'+kindBadge(v)+'</div>'+
+    '<div class="meta">'+v.date+' · '+v.hash+' · '+esc(v.kind==='resolution'?'resolution gate record':(v.n_criteria+' criteria · tier1: '+(v.tier1_passed==null?'—':(v.tier1_passed?'PASS':'FAIL'))))+'</div>'+
     (origin?'<div class="meta">'+esc(origin)+'</div>':'')+'</div>';
   }).join('')
     ||'<p style="color:#5a5a75;font-size:13px">no judgments match</p>';
@@ -541,7 +578,7 @@ async function show(date,hash){
   const d=document.getElementById('detail');
   d.innerHTML='<button class="close" onclick="document.getElementById(\\'detail\\').style.display=\\'none\\'">✕ close</button>'+
    '<h3>'+esc(v.task_id||'?')+' — '+esc(v.task_title||'')+'</h3>'+
-   '<div style="color:#8a8aa3;font-size:11px">'+date+' · '+hash+' · overall '+(v.passed?'PASS':'FAIL')+
+   '<div style="color:#8a8aa3;font-size:11px">'+date+' · '+hash+' · '+(v.kind==='resolution'?('resolution gate · band '+esc(v.band||'?')):('overall '+(v.passed?'PASS':'FAIL')))+
    costBadge(v)+'</div>'+
    (origin?'<div class="meta">'+esc(origin)+'</div>':'')+
    '<div class="sec">Criteria ('+items.length+')</div>'+

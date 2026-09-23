@@ -384,3 +384,97 @@ class TestPreflightConfigGate:
         assert record["band"] == "RESOLVED"
         assert record["decision"] == "skip-dispatch"
         assert record["probability"] == pytest.approx(0.87)
+
+
+class TestPreflightPersistence:
+    """DF-GITREINS-POC-36 — the predispatch surface records its decision.
+
+    A skip-dispatch is the most consequential thing this surface does (no worker
+    is spawned), so the record it leaves behind is the only audit trail for it.
+    An ABSTAIN and a disabled surface still write nothing, and a disabled
+    surface must not even touch the store.
+    """
+
+    @staticmethod
+    def _records(workdir) -> list:
+        return sorted((workdir / ".gitreins" / "history").glob("*/*/verdict.json"))
+
+    @staticmethod
+    def _usage_rows(workdir) -> list:
+        path = workdir / ".gitreins" / "usage.jsonl"
+        if not path.is_file():
+            return []
+        return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+    def _script_endpoint(self, monkeypatch, noul: float) -> None:
+        monkeypatch.setattr(
+            resolution,
+            "requests",
+            type("E", (), {"post": staticmethod(lambda *a, **k: _StubResponse(noul))})(),
+        )
+
+    def test_a_skip_dispatch_run_files_one_predispatch_record(self, monkeypatch, tmp_path):
+        _script_assembler(monkeypatch)
+        monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("cli"))
+        self._script_endpoint(monkeypatch, 0.87)
+
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        code, out, _ = run_preflight(
+            monkeypatch, str(workdir), "Is JEVRES-003 already implemented?", "--json"
+        )
+
+        assert code == 0
+        assert json.loads(out)["decision"] == "skip-dispatch"
+        records = self._records(workdir)
+        assert len(records) == 1
+        record = json.loads(records[0].read_text())
+        assert record["kind"] == "resolution"
+        assert record["source"] == "predispatch"
+        assert record["band"] == "RESOLVED"
+        assert record["question"] == "Is JEVRES-003 already implemented?"
+
+        rows = self._usage_rows(workdir)
+        assert [row["step"] for row in rows] == ["resolution"]
+        assert rows[0]["tokens_in"] == 520
+        assert rows[0]["tokens_out"] == 96
+
+    def test_a_disabled_surface_records_nothing_and_never_touches_the_store(
+        self, monkeypatch, tmp_path
+    ):
+        from engine.config import GitReinsDefaults
+
+        monkeypatch.setattr(resolution, "resolution_config", lambda workdir=".": GitReinsDefaults())
+
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        code, out, _ = run_preflight(monkeypatch, str(workdir), "row premise?", "--json")
+
+        assert code == 0
+        assert json.loads(out)["abstain_reason"] == "surface-disabled"
+        assert not (workdir / ".gitreins" / "history").exists()
+        assert not (workdir / ".gitreins" / "usage.jsonl").exists()
+
+    def test_an_abstain_from_the_engine_records_nothing(self, monkeypatch, tmp_path):
+        """All keys dead: the dispatch still happens, and nothing is filed."""
+        _script_assembler(monkeypatch)
+        # A key must exist for the failure to be "rejected" rather than "absent".
+        monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("dead"))
+
+        def dead_post(*_a, **_k):
+            response = _StubResponse(0.99)
+            response.status_code = 401
+            return response
+
+        monkeypatch.setattr(
+            resolution, "requests", type("E", (), {"post": staticmethod(dead_post)})()
+        )
+
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        code, out, _ = run_preflight(monkeypatch, str(workdir), "row premise?", "--json")
+
+        assert code == 0
+        assert json.loads(out)["abstain_reason"] == "all-credentials-rejected"
+        assert self._records(workdir) == []
+        assert self._usage_rows(workdir) == []
