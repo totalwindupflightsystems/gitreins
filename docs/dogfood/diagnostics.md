@@ -802,3 +802,75 @@ is undocumented, so the flagship is invisible out of the box (POC-35).
   (always — read the record), 2=usage. Verified live, including argparse exit 2.
 - Persist-audit gap: until POC-36 closes, capture `--json` output yourself if you
   need the verdict later — the gate keeps no record of what it told you.
+
+## 2026-09-23b — run 8: the security-scan guard, explained from the config outward
+
+The eighth run took the one README surface no prior run had exercised: the
+opt-in Antares CVE scanner (`security-scan`) and its life inside the real
+`gitreins guard` commit gate. The scratch repo carried deliberately vulnerable
+Python (string-formatted SQL, `pickle.loads`, MD5) — real enough to trip real
+scanners, fake enough to destroy freely.
+
+### How the feature is actually built (why the bug exists)
+
+The guard and the CLI were built in different GR-117 waves and never agreed on
+a config home:
+
+- `gitreins security-scan` (the manual CLI) reads
+  **`defaults.security_scan`** (`cli.py:2941`).
+- `gitreins guard` (the commit gate) reads
+  **`guards.security_scan.enabled`** (`guard_manager.py:950–954`).
+- The README, cli-reference §9, and onboarding all document the **`defaults:`
+  shape** — with an example block that, applied verbatim, enables the CLI and
+  leaves the guard OFF.
+
+That is why a README-faithful user gets `Tier 1 Guards: PASS` with no
+`security_scan` line: the enablement key lands where the guard never looks.
+It is the POC-30 class again (dead config documented in good faith), proven
+side-by-side this time: documented shape → PASS-no-scan; the same key
+duplicated under `guards:` → the gate fires and FAILs the commit (exit 1).
+
+### Why the tuning knob does nothing (POC-39)
+
+`min_confidence` was built for the CVE *feed* — the NVD/GitHub advisory list —
+where it filters advisories by CVSS-derived score (`cve_feed.py:221`). The
+scanner's findings pipeline never sees it. In heuristic mode (the default,
+and the only mode for a pip-only install) every finding is hard-coded to
+confidence **0.0** (`antares.py:258`), and `_check_security_scan` fails the
+gate on **any** finding regardless of confidence (`guard_manager.py:2416`).
+Net effect: the documented `min_confidence: 0.7` cannot suppress a heuristic
+hit — a COMMENT containing the word "injection" fails a real commit. The knob
+only starts meaning something once a user installs the ML stack and pays for
+real Antares-1b inference, which the README never says.
+
+### Errors hit, and the right way
+
+| Error | Cause | The right way |
+|---|---|---|
+| `--force-ml` "requires huggingface_hub" then exit 0 (first reading) | MY bug: `$?` after `\| head` reports head's exit — the exact pitfall this dogfood skill warns about | `${PIPESTATUS[0]}` → exit 2 as documented |
+| Guard PASS with no security_scan lane | README's `defaults:` shape (POC-38) | duplicate the key under `guards:` (until POC-38 closes) |
+| `security_scan` FAILs a commit on a comment-only keyword | conf 0.0 + no filter (POC-39) | until POC-39 closes, keep the keyword vocabulary out of comments, or accept the lane is a canary not a filter |
+| `--force-ml` names only huggingface_hub | inference also needs transformers (POC-40) | install BOTH: `pip install huggingface_hub transformers` |
+
+### What is genuinely good (measured)
+
+- Exit-code contract 0/1/2 holds exactly, text and json agree line-for-line.
+- 0.096s warm per staged scan — the heuristic path is genuinely lightweight,
+  no model download, no network dependency.
+- Fresh-box proof: bunker agent a8015da1 cloned (existing access only),
+  20s venv install, and the guard reproduced the same CVE-SIMULATED finding
+  end-to-end on a bare Debian user with zero toolchains; agent destroyed and
+  verified gone (list grep = 0).
+- gitleaks-absent degradation names the fallback and stays honest.
+
+### The right way, condensed
+
+- Enable the guard at the WORKING home (`guards.security_scan.enabled: true`)
+  — the README's `defaults:` block only feeds the manual `security-scan` CLI.
+- Verify enablement by the lane LINE in guard output (`✓/✗ security_scan`),
+  never by the PASS header — a silently-absent lane looks like success (the
+  same law as the DEGRADED-PASS banner: grep for the gate's name, not PASS).
+- For ML mode, install huggingface_hub AND transformers up front; the
+  single-package hint fails at guard time.
+- `min_confidence` today tunes the advisory FEED only; treat it as dead on
+  the heuristic findings path until POC-39 lands.

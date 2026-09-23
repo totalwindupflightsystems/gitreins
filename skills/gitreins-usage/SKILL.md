@@ -4,7 +4,7 @@ description: >-
   How to use the GitReins quality harness in this repo (and any repo it's
   installed in): task lifecycle, guards, LLM judge, MCP tools, and the known
   pitfalls that will bite you. Load this before committing or creating tasks.
-version: 1.5.0
+version: 1.6.0
 category: software-development
 ---
 
@@ -483,3 +483,59 @@ the 13-tool surface (client notes in the MCP section — remember: the initializ
 notification gets NO response). Exit codes exactly as documented. Cost ≈ $0.0005/call;
 ~2.3s warm (hyperfine 10 runs). Doc shapes: mcp-api.md §13 documents the tool; the CLI
 sections are §15 (resolve) / §16 (preflight).
+
+## The security-scan guard — the Antares CVE scanner (2026-09-23b run 8 — verified at 0.15.0)
+
+`gitreins security-scan` localizes known CVEs against staged Python (opt-in).
+Heuristic mode (default; no ML deps) matches keyword lines ("CVE", "injection",
+"exploit", "unsafe", "deserialization", "hardcoded", "vulnerability" —
+`engine/antares.py:48`) and emits `CVE-SIMULATED conf=0.00` findings; ML mode
+(`--force-ml`) needs huggingface_hub AND transformers and runs Antares-1b locally.
+
+**Pitfall 29 — the README's config home is DEAD for the guard (POC-38).**
+The README/cli-reference/onboarding block puts `security_scan:` under
+`defaults:` — that is where the manual CLI reads it (`cli.py:2941`). The
+commit-gate guard reads **`guards.security_scan.enabled`**
+(`guard_manager.py:950`). Following the README verbatim → `Tier 1 Guards:
+PASS` with NO `security_scan` line — the guard you enabled never runs, and
+nothing tells you. The working shape (verified locally + on a fresh bunker
+box; proven both shapes side-by-side):
+
+```yaml
+defaults:
+  security_scan:        # feeds ONLY `gitreins security-scan`
+    enabled: true
+guards:
+  security_scan:        # feeds the `gitreins guard` gate — the documented one is dead
+    enabled: true
+  secrets: true
+  lint: false
+  tests: false
+```
+
+Verify enablement by the LANE LINE (`✓/✗ security_scan ...`), never by the
+PASS header — a silently-absent lane looks like success.
+
+**Pitfall 30 — `min_confidence` is a no-op on findings (POC-39).** It filters
+only the CVE advisory FEED (`cve_feed.py:221`). Heuristic findings are
+hard-coded conf 0.0 (`antares.py:258`) and the guard fails on ANY finding
+(`guard_manager.py:2416`) — so the word "injection" in a COMMENT fails a real
+commit at the documented `min_confidence: 0.7`. Until POC-39 closes, keep the
+keyword vocabulary out of comments, or treat the lane as a canary not a filter.
+It starts meaning something only with the ML stack installed (real inference
+carries model confidences).
+
+**Pitfall 31 — ML-mode dep hint is half-written (POC-40).** `--force-ml`'s
+error names only `huggingface_hub` (the DOWNLOAD dep); inference additionally
+needs `transformers`. Install both up front: `pip install huggingface_hub
+transformers`. The guard-path config keys `model:`/`cve_source:` are read by
+nothing on the guard path (scanner constructed bare, `use_ml=False`
+hard-coded, `guard_manager.py:2395`) — ML on the GUARD path is not reachable
+via config at all today; `--force-ml` on the CLI is the only way in.
+
+Measured trust (0.15.0, fresh repo): exit codes 0/1/2 exactly as the README
+table promises (verify with `${PIPESTATUS[0]}` — `$?` after a pipe lies);
+text and json findings agree line-for-line; 0.096s warm per staged scan, no
+model download, no network in heuristic mode; gitleaks-absent degradation
+names the fallback and keeps the secrets lane honest. Fresh-box install: 20s
+pip venv install → guard reproduces the finding end-to-end on bare Debian.

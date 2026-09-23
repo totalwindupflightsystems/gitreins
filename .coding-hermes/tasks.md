@@ -97,3 +97,37 @@ Details: docs/dogfood/2026-09-23-integration.md; diagnostics.md 09-23 section;
 skills/gitreins-usage/SKILL.md v1.5.0 (resolution-gate section).
 Install leg: RUN — bunker-las-02 battery complete (16 cells: fresh-install OK, native suite
 PASS incl. 3G-cap run; act fallback documented in the log).
+
+## Dogfood Findings (2026-09-23b — run 8: the security-scan guard, never touched by runs 1-7)
+
+Ran the opt-in Antares CVE guard for real: enabled it via the README's documented
+config block, staged deliberately vulnerable Python (SQL string-format + pickle.loads +
+MD5), and drove `security-scan` (text/json/force-ml) and the live `gitreins guard`
+commit gate, locally AND on a fresh bunker box. The scanner pipeline WORKS end-to-end
+(heuristic fires on keyword lines, exit 0/1/2 exactly as the README table promises —
+one earlier exit-0 reading was my own PIPESTATUS bug, retracted). Findings:
+
+- [P1] DF-GITREINS-POC-38 config-home split: the guard reads
+  `guards.security_scan.enabled` but the README's documented block puts
+  `security_scan:` under `defaults:` — a user following the README verbatim gets a
+  guard that SILENTLY DOES NOT RUN (`Tier 1 Guards: PASS` with no security_scan
+  line; proven: documented shape → PASS-no-scan, duplicate key under `guards:` →
+  FAIL fires). CLI `security-scan` reads `defaults.security_scan` (cli.py:2941),
+  guard reads `guards.security_scan.enabled` (guard_manager.py:950-954). Two homes,
+  one documented, one not; README + cli-reference + onboarding all document the dead one.
+- [P1] DF-GITREINS-POC-39 `min_confidence` never filters scanner findings — it only
+  filters the CVE FEED (cve_feed.py:221); heuristic findings are hard-coded
+  confidence 0.0 (antares.py:258) and `_check_security_scan` fails on ANY finding
+  (guard_manager.py:2416), so the documented `min_confidence: 0.7` knob is a no-op
+  for heuristic users and the guard blocks on comment-only keyword matches (the
+  word "injection" in a comment fails a commit).
+- [P2] DF-GITREINS-POC-40 `--force-ml` failure message goes to stderr and the
+  README's `pip install huggingface_hub transformers` hint names only huggingface_hub
+  for the DOWNLOAD dep — a fresh user installing just that hits transformers-missing
+  at guard time; also the guard's not-available PASS line (guard_manager.py:2391)
+  is the only place the never-block-on-missing-infra promise is visible — guard
+  config `model:`/`cve_source:` keys are read by nothing (scanner constructed bare
+  at guard_manager.py:2395, `use_ml=False` hard-coded).
+Install leg: RUN on bunker-las-03 (agent a8015da1, spawn→install 20s→guard reproduced
+→destroyed+verified gone). Local probe timing: security-scan 0.096s warm — no PERF row.
+Foreman not woken, cooldowns untouched per the 2026-09-09 fleet law. No code changed.
