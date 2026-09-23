@@ -183,7 +183,7 @@ the quality gate enforced by the pre-commit hook; it can also be run
 manually at any time.
 
 ```
-gitreins guard [--dead-code] [--staged-only] [--full]
+gitreins guard [--dead-code] [--staged-only] [--full] [--scope staged|working-tree] [--json]
 ```
 
 | Option | Description |
@@ -191,6 +191,8 @@ gitreins guard [--dead-code] [--staged-only] [--full]
 | `--dead-code` | Enable Python dead-code detection (overrides config) |
 | `--staged-only` | Run tests in diff mode — only packages with staged changes (overrides `guards.test_mode`) |
 | `--full` | Grade the whole tree even with an empty index: the tests lane runs and lint covers tracked+untracked Python files instead of skipping |
+| `--scope staged\|working-tree` | Which change set to grade: `staged` (default) is the Git index; `working-tree` adds unstaged and non-ignored untracked files |
+| `--json` | Emit one bounded, redacted [evidence v1](evidence-contract-v1.md) JSON document on stdout instead of the human summary (exit 0 pass, 1 non-pass) |
 
 **Exit codes**
 
@@ -203,6 +205,31 @@ gitreins guard [--dead-code] [--staged-only] [--full]
 Warnings are printed to stderr and do not affect the exit code. The
 output includes the active test mode (`diff` or `full`) and the tested
 targets.
+
+**`--scope` selects the change set (read-only).** `staged` is the index —
+what the pre-commit hook has always graded. `working-tree` grades the union of
+staged, unstaged and non-ignored untracked files, collected with read-only git
+commands (`git diff`, `git status`, `git ls-files --others --exclude-standard`);
+it never runs `git add`, `reset`, `stash` or `checkout`, so a guarded run
+cannot disturb what you staged. The mode note names the scope
+(`(test mode: diff, scope: working-tree)`) so a working-tree run is
+distinguishable from a staged one; the default scope adds no note, keeping the
+staged line byte for byte. `--scope` composes with `--full`/`--staged-only`,
+which choose WHICH tests run over that change set.
+
+**`--json` is the automation surface.** It writes exactly one UTF-8 JSON
+document to stdout — the update check, the mode note and the guard-log line are
+suppressed, and any narration a failing run produced goes to stderr instead. The
+document validates against
+[`schemas/evidence-v1.schema.json`](../schemas/evidence-v1.schema.json) (see the
+[evidence contract](evidence-contract-v1.md)), is capped at 32 KiB with
+truncation reported in `metadata.truncated`, and every string crosses the
+secret-redaction boundary (`metadata.redacted` is always true). Exit codes on
+this surface are `0` for a passing result (including a DEGRADED pass, which the
+document reports per check via `outcome: unknown` plus `metadata.degraded`), `1`
+for a non-passing one, and `2` for a usage error such as an unknown `--scope`.
+A run that does no work still exits 2 on the human surface when
+`guards.allow_skips` is false — read the JSON surface's `metadata.degraded`.
 
 **Degraded pass (`guards.allow_skips`, TRUST-001)**
 
@@ -240,7 +267,7 @@ Evaluate a task: runs Tier 1 guards, then the Tier 2 LLM judge
 (unless skipped), and persists the verdict.
 
 ```
-gitreins judge <id> [--skip-tier2] [--async] [--status <job_id>]
+gitreins judge <id> [--skip-tier2] [--async] [--status <job_id>] [--scope staged|working-tree] [--json]
 ```
 
 | Option | Description |
@@ -249,6 +276,15 @@ gitreins judge <id> [--skip-tier2] [--async] [--status <job_id>]
 | `--skip-tier2` | Skip Tier 2 LLM evaluation; Tier 1 guards only |
 | `--async` | Dispatch evaluation as a detached background job; returns a job ID |
 | `--status <job_id>` | Show status/result of a background job (id = job id, not task id) |
+| `--scope staged\|working-tree` | Change set the Tier 1 guards grade — same semantics as `gitreins guard --scope` (default `staged`) |
+| `--json` | Emit one bounded, redacted [evidence v1](evidence-contract-v1.md) JSON document on stdout: the subject (task id/title/ephemeral), one check per Tier 2 criterion plus the Tier 1 stage evidence, and `metadata.historyPersisted` |
+
+`--json` captures the evaluator's and the persister's stdout narration, so the
+document is the ONLY thing on stdout (a FAIL verdict echoes that narration on
+stderr). The verdict is still persisted and the exit code is `0` for a passing
+result, `1` for a non-passing one. The single-flight guard that points a second
+synchronous run at an in-flight job is skipped in JSON mode: the caller asked
+for a document for this run.
 
 **Exit codes (sync mode)**
 
@@ -430,18 +466,22 @@ install instructions).
 Show recent verdict history.
 
 ```
-gitreins report [-n <count>] [--interactive]
+gitreins report [-n <count>] [--interactive] [--json]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `-n <count>` | Number of recent verdicts to show (default 10) |
 | `-i`, `--interactive` | Interactive TUI mode (requires `textual`; falls back to text) |
+| `--json` | Emit one bounded, redacted [evidence v1](evidence-contract-v1.md) JSON document on stdout: `scope: history`, `passed: null` (history holds no single verdict), one check per recent verdict, and `metadata.storage` from the persister |
 
 A short QA-run block is printed after the verdict history when the QA ledger
 has rows (see section 13); with no recorded QA runs the output is unchanged.
+The QA block is a human surface and stays out of the `--json` path.
 
-Exit **0** on success.
+Exit **0** on success. `report --json` exits `0` whenever it emitted a document,
+including for an empty history (`checks: []`, `outcome: unknown`), so a consumer
+distinguishes "no verdicts yet" from a failure by the document, not the code.
 
 ## 12. `gitreins worktree`
 

@@ -1,12 +1,18 @@
 # GitReins evidence contract v1
 
 **Status (2026-09-22):** the v1 JSON Schema is published at
-[`schemas/evidence-v1.schema.json`](../schemas/evidence-v1.schema.json). The CLI
-emitters are adopted incrementally: `guard`/`judge`/`report` JSON output and the
-`--scope` flag land with EVID-002, `judge --ephemeral` with EVID-003. The
-invocations below are the contract that work implements — they are not yet
-runnable commands on the current CLI (`scripts/check_cli_examples.py` grades
-only examples that must parse today).
+[`schemas/evidence-v1.schema.json`](../schemas/evidence-v1.schema.json) and the
+CLI emitters are LANDED (EVID-002). `guard`, `judge` and `report` each accept
+`--json` and emit the document described below; `guard` and `judge` accept
+`--scope staged|working-tree`. `judge --ephemeral` is still pending (EVID-003),
+so the `--ephemeral` invocation below is the contract that work implements — it
+is not yet a runnable command (`scripts/check_cli_examples.py` grades only
+examples that must parse today).
+
+Emitted documents are graded by `tests/test_evidence_contract.py`: each
+command's output is validated against the schema, held under the 32 KiB cap,
+and checked for the redaction flags; the `--scope working-tree` collection is
+tested for read-only git use (the index is byte-identical after a run).
 
 ## The v1 automation surface
 

@@ -35,7 +35,7 @@ from engine.guards import (
     check_go_tests,
     check_go_build,
 )
-from engine.lsp import find_lsp_tool, run_lsp_check
+from engine.lsp import find_lsp_tool, run_lsp_check, select_lsp_files
 from engine.repo_paths import WorktreeResolutionError, resolve_worktree_identity
 from engine.types import (
     SCANNER_CLEAN,
@@ -133,7 +133,9 @@ _FORCE_FULL_TEST_GLOBS = [
 ]
 
 
-def _discover_test_targets(workdir: str) -> list[str] | None:
+def _discover_test_targets(
+    workdir: str, changed_files: list[str] | None = None
+) -> list[str] | None:
     """Return a list of test file paths to run, or None for full suite.
 
     None means "full suite" — returned when:
@@ -141,11 +143,17 @@ def _discover_test_targets(workdir: str) -> list[str] | None:
     - A force-full file was changed
     - No test files map to the changed sources (safety fallback)
 
+    ``changed_files`` lets the caller hand in the ALREADY COLLECTED change set
+    for its scope (the guard's ``--scope working-tree`` set); omitting it keeps
+    the historical discovery — staged files plus a registered linked
+    worktree's committed task-branch changes.
+
     Returns absolute paths to test files.
     """
     # In a registered linked worktree this includes committed task-branch
     # changes, while ordinary repositories remain staged-only.
-    changed_files = _get_worktree_changed_files(workdir)
+    if changed_files is None:
+        changed_files = _get_worktree_changed_files(workdir)
     if not changed_files:
         return None
 
@@ -233,6 +241,45 @@ def _get_staged_files(workdir: str) -> list[str]:
         return [f.strip() for f in result.stdout.split("\n") if f.strip()]
     except Exception:
         return []
+
+
+def _get_working_tree_files(workdir: str) -> list[str]:
+    """Staged + unstaged + non-ignored untracked paths, collected READ-ONLY.
+
+    The working-tree scope is the change set a reviewer would see in the tree,
+    not just what is in the index. Collection therefore uses read-only git
+    queries only — ``git diff``, ``git ls-files`` and the ``_get_staged_files``
+    helper (a ``git diff --cached``/``git ls-files --cached`` read). It never
+    calls ``git add``, ``git reset``, ``git stash``, ``git checkout`` or any
+    other index-mutating operation, so a guard run cannot disturb what the
+    caller staged (EVID-002 acceptance criterion 1).
+
+    Sources:
+      ``git diff --name-only --diff-filter=ACMRD HEAD``  tracked changes, staged or not
+      ``git ls-files --others --exclude-standard``       untracked, non-ignored files
+      ``_get_staged_files(workdir)``                     index entries (also the
+                                                         no-HEAD / fresh-repo case)
+    """
+    files: set[str] = set()
+    for command in (
+        ["git", "diff", "--name-only", "--diff-filter=ACMRD", "HEAD"],
+        ["git", "ls-files", "--others", "--exclude-standard"],
+    ):
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                cwd=workdir,
+                env=_sanitized_env(),
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if result.returncode == 0:
+            files.update(line.strip() for line in result.stdout.splitlines() if line.strip())
+    files.update(_get_staged_files(workdir))
+    return sorted(files)
 
 
 def _get_worktree_changed_files(workdir: str) -> list[str]:
@@ -869,10 +916,19 @@ class GuardManager:
         self,
         workdir: str = ".",
         config: dict | None = None,
+        scope: str = "staged",
         *,
         grade_full_tree: bool = False,
     ):
         self.workdir = os.path.abspath(workdir)
+        # Change scope (EVID-002): "staged" is the index (today's behaviour,
+        # byte for byte); "working-tree" is the union of staged, unstaged and
+        # non-ignored untracked files, collected read-only. Keyword-only and
+        # defaulting to "staged" so every existing caller — judge, worktree
+        # manager, MCP server, pipeline — keeps today's semantics.
+        if scope not in ("staged", "working-tree"):
+            raise ValueError("scope must be 'staged' or 'working-tree'")
+        self.scope = scope
         if config is None:
             config = _load_guard_config(self.workdir)
         self.config = config
@@ -953,14 +1009,34 @@ class GuardManager:
             "cpp" in signatures
             or "c" in signatures
             or os.path.isfile(os.path.join(self.workdir, "compile_commands.json"))
-            or any(
-                f.endswith(lang_detect.CPP_SOURCE_SUFFIXES) for f in _get_staged_files(self.workdir)
-            )
+            or any(f.endswith(lang_detect.CPP_SOURCE_SUFFIXES) for f in self.changed_files)
         )
         self._is_rust = "rust" in signatures
-        self._has_sql = any(
-            f.endswith(".sql") for f in _get_staged_files(self.workdir)
-        ) or os.path.isdir(os.path.join(self.workdir, "migrations"))
+        self._has_sql = any(f.endswith(".sql") for f in self.changed_files) or os.path.isdir(
+            os.path.join(self.workdir, "migrations")
+        )
+
+    @property
+    def changed_files(self) -> list[str]:
+        """The change set this manager grades, per the selected scope.
+
+        Read on demand rather than cached at construction: a retry (or a
+        sibling step that just wrote a file) must see the current set.
+        ``staged`` is the index — exactly what the guard has always graded.
+        """
+        if self.scope == "working-tree":
+            return _get_working_tree_files(self.workdir)
+        return _get_staged_files(self.workdir)
+
+    def _scope_files_or_none(self) -> list[str] | None:
+        """The scope's file list for delegated discovery, or ``None`` when staged.
+
+        ``None`` keeps the delegated helpers' own staged discovery — the Go
+        guards' historical wording ("No Go files staged") and the test
+        discovery's linked-worktree behaviour — byte for byte; the
+        working-tree scope hands them the collected set instead.
+        """
+        return self.changed_files if self.scope == "working-tree" else None
 
     def run_all(self, force_dead_code: bool = False) -> Tier1Result:
         """Run all enabled Tier 1 guards.
@@ -1111,6 +1187,10 @@ class GuardManager:
         passed = all(r.passed for r in results)
         extra = {
             "test_mode": self._test_mode,
+            # EVID-002: how many files the selected scope held, so the evidence
+            # document can distinguish a clean 200-file run from a vacuous pass
+            # over an empty change set.
+            "changed_count": len(self.changed_files),
             # DF-GITREINS-POC-11: the CLI reads this for the whole-tree mode
             # note ("test mode: full, whole tree"); library callers can use
             # it to distinguish a whole-tree run from a staged run.
@@ -1121,11 +1201,11 @@ class GuardManager:
             "allow_skips": self._allow_skips,
         }
         if self._test_mode == "diff" and self._enabled.get("tests"):
-            staged = _get_staged_files(self.workdir)
-            targets = _discover_test_targets(self.workdir)
+            changed = self.changed_files
+            targets = _discover_test_targets(self.workdir, self._scope_files_or_none())
             if targets:
                 extra["test_targets"] = len(targets)
-                extra["staged_count"] = len(staged)
+                extra["staged_count"] = len(changed)
             else:
                 extra["test_targets"] = None  # full suite triggered
         result = _finalize(
@@ -1188,7 +1268,21 @@ class GuardManager:
         return self._test_mode
 
     def _check_secrets(self) -> GuardResult:
-        """Scan staged changes for secrets using gitleaks or built-in scanner."""
+        """Scan the selected change scope for secrets using gitleaks or built-in scanner."""
+        if self.scope == "working-tree":
+            # gitleaks' `protect --staged` grades the INDEX only, so it cannot
+            # see unstaged or untracked files — the whole point of this scope.
+            # `detect --no-git` would see everything (a superset, with every
+            # pre-existing tree secret attached to this run). Grade exactly the
+            # scope instead with the built-in provider-pattern scanner, and
+            # NAME gitleaks as not-run so "clean" is never read as "both
+            # scanners ran" (TRUST-003).
+            result = self._builtin_secrets_scan(files=self.changed_files)
+            return replace(
+                result,
+                scanners=((GITLEAKS_SCANNER, SCANNER_NOT_RUN), *result.scanners),
+            )
+
         # Try gitleaks first
         try:
             cmd = [
@@ -1287,7 +1381,9 @@ class GuardManager:
             return "reported findings (count unavailable)"
         return scanner_finding_status(count)
 
-    def _builtin_secrets_scan(self, staged_only: bool = True) -> GuardResult:
+    def _builtin_secrets_scan(
+        self, staged_only: bool = True, files: list[str] | None = None
+    ) -> GuardResult:
         """
         Built-in secrets scanner with whitelist patterns.
 
@@ -1298,6 +1394,10 @@ class GuardManager:
         ``staged_only=True`` scans the staged diff (pre-commit hook path).
         ``staged_only=False`` scans the whole workdir (judge/pipeline path,
         where the changes under evaluation are already committed — DF-012).
+        ``files`` grades an EXPLICIT change set instead — the guard's
+        ``--scope working-tree`` scope — reading each path from the working
+        tree, so unstaged and untracked content is graded while the index is
+        left untouched.
         """
         # Patterns that LIKELY represent actual secrets (high confidence)
         danger_patterns = [
@@ -1370,22 +1470,28 @@ class GuardManager:
 
         findings = []
         allowlist = self._load_gitleaks_allowlist()
+        explicit_scope = files is not None
         try:
-            if staged_only:
-                files = _get_staged_files(self.workdir)
+            if explicit_scope:
+                scan_files = list(files or [])
+            elif staged_only:
+                scan_files = _get_staged_files(self.workdir)
             else:
-                files = self._workdir_files()
+                scan_files = self._workdir_files()
 
-            if not files:
-                scope = "staged" if staged_only else "workdir"
+            if not scan_files:
+                if explicit_scope:
+                    label = "No files in scope to scan"
+                else:
+                    label = f"No {'staged' if staged_only else 'workdir'} files to scan"
                 return GuardResult(
                     name="secrets",
                     passed=True,
-                    output=f"No {scope} files to scan",
+                    output=label,
                     scanners=((BUILTIN_SCANNER, SCANNER_CLEAN),),
                 )
 
-            for fpath in files:
+            for fpath in scan_files:
                 # POC-17 / TRUST-002: the harness's own state directory is
                 # never graded — neither scanner may fail a judgement on
                 # GitReins' config, logs, verdict history or disposable
@@ -1420,7 +1526,7 @@ class GuardManager:
                     continue
 
                 try:
-                    if staged_only:
+                    if staged_only and not explicit_scope:
                         staged_result = subprocess.run(
                             ["git", "show", f":{fpath}"],
                             capture_output=True,
@@ -1468,7 +1574,7 @@ class GuardManager:
                 name="secrets",
                 passed=True,
                 output=(
-                    f"Scanned {len(files)} files — clean "
+                    f"Scanned {len(scan_files)} files — clean "
                     f"(excluded harness state: {', '.join(d + '/**' for d in HARNESS_STATE_DIRS)})"
                 ),
                 scanners=((BUILTIN_SCANNER, SCANNER_CLEAN),),
@@ -1579,9 +1685,13 @@ class GuardManager:
         command that fixes them.
         """
         linters = ["ruff", "flake8"]
-        # Get staged Python files
-        staged_files = _get_staged_files(self.workdir)
-        py_files = [f for f in staged_files if f.endswith(".py")]
+        # Get the Python files in the selected change scope
+        changed_files = self.changed_files
+        py_files = [f for f in changed_files if f.endswith(".py")]
+        if self.scope == "working-tree":
+            # A DELETED path is part of the working-tree change set but no
+            # longer exists, and a linter cannot grade a file that is gone.
+            py_files = [f for f in py_files if os.path.isfile(os.path.join(self.workdir, f))]
         if not py_files and self._grade_full_tree:
             # Nothing staged but whole-tree grading is on: lint the tree
             # (tracked + untracked-but-not-ignored). Never invoke the
@@ -1590,12 +1700,19 @@ class GuardManager:
             py_files = _tree_python_files(self.workdir)
         if not py_files:
             # TRUST-001: nothing staged is not a graded lint pass.
+            no_files_reason = (
+                "no files in scope" if self.scope == "working-tree" else "no staged files"
+            )
             return GuardResult(
                 name="lint",
                 passed=True,
-                output="No Python files staged",
+                output=(
+                    "No Python files in scope"
+                    if self.scope == "working-tree"
+                    else "No Python files staged"
+                ),
                 skipped=True,
-                skip_reason="no staged files",
+                skip_reason=no_files_reason,
             )
 
         for linter in linters:
@@ -1747,13 +1864,13 @@ class GuardManager:
         # A linked task may have committed branch changes with an empty index.
         # Keep ordinary clean-tree behavior unchanged while allowing those
         # committed changes to participate in diff-mode discovery.
-        staged = _get_staged_files(self.workdir)
+        in_scope = self.changed_files
         changed = (
             _get_worktree_changed_files(self.workdir)
-            if self._test_mode == "diff" and not staged
+            if self._test_mode == "diff" and not in_scope
             else []
         )
-        if not staged and not changed:
+        if not in_scope and not changed:
             if self._grade_full_tree:
                 # DF-GITREINS-POC-11: --full grades the whole tree even with
                 # an empty index — fall through to the full test_command
@@ -1765,12 +1882,15 @@ class GuardManager:
                 # TRUST-001: the vacuous-green case from the dogfood verdict —
                 # no tests ran, so this is a skip with a named reason, never a
                 # silent pass.
+                nothing_to_test = self.scope == "working-tree"
                 return GuardResult(
                     name="tests",
                     passed=True,
-                    output="No files staged — skipped",
+                    output="No files in scope — skipped"
+                    if nothing_to_test
+                    else "No files staged — skipped",
                     skipped=True,
-                    skip_reason="no staged files",
+                    skip_reason="no files in scope" if nothing_to_test else "no staged files",
                 )
             else:
                 logger.info("test_on_clean: no files staged — running full test_command")
@@ -1778,7 +1898,7 @@ class GuardManager:
         if self._test_mode == "diff":
             if not changed and self._test_on_clean:
                 return self._run_test_command(test_command, "tests (full)")
-            test_files = _discover_test_targets(self.workdir)
+            test_files = _discover_test_targets(self.workdir, self._scope_files_or_none())
             if test_files is not None:
                 if not test_files:
                     # No test files map to the changed sources — skip
@@ -2166,9 +2286,17 @@ class GuardManager:
                 missing.append(tool)
                 continue
             try:
+                # The staged scope keeps the LSP helper's own index discovery
+                # (files=None) byte for byte; the working-tree scope hands it
+                # the collected set, filtered to the files this tool can grade.
                 diags = run_lsp_check(
                     tool,
                     self.workdir,
+                    files=(
+                        select_lsp_files(tool, self.workdir, self.changed_files)
+                        if self.scope == "working-tree"
+                        else None
+                    ),
                     timeout_per_file=self._lsp_per_file_timeout,
                     init_timeout=self._lsp_init_timeout,
                 )
@@ -2274,15 +2402,17 @@ class GuardManager:
 
     def _check_go_lint(self) -> GuardResult:
         """Run Go lint checks (delegates to engine.guards)."""
-        r = check_go_lint(self.workdir)
+        r = check_go_lint(self.workdir, self._scope_files_or_none())
         return GuardResult(name=r.name, passed=r.passed, output=r.output, error=r.error)
 
     def _check_go_tests(self) -> GuardResult:
         """Run Go tests (delegates to engine.guards)."""
-        r = check_go_tests(self.workdir, timeout=self._test_timeout)
+        r = check_go_tests(
+            self.workdir, timeout=self._test_timeout, changed_files=self._scope_files_or_none()
+        )
         return GuardResult(name=r.name, passed=r.passed, output=r.output, error=r.error)
 
     def _check_go_build(self) -> GuardResult:
         """Run Go build (delegates to engine.guards)."""
-        r = check_go_build(self.workdir)
+        r = check_go_build(self.workdir, self._scope_files_or_none())
         return GuardResult(name=r.name, passed=r.passed, output=r.output, error=r.error)

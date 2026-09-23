@@ -28,6 +28,8 @@ Usage:
 """
 
 import argparse
+import contextlib
+import io
 import json
 import logging
 import os
@@ -1848,6 +1850,17 @@ def cmd_report(args):
     workdir = get_workdir()
     n = args.n if hasattr(args, "n") else 10
 
+    if getattr(args, "json_output", False):
+        # EVID-002: history as one bounded v1 document — the interactive TUI and
+        # the QA section are human surfaces and stay out of the JSON path.
+        from engine.evidence import dumps_evidence, report_evidence
+        from engine.persist import VerdictPersister
+
+        persister = VerdictPersister(workdir)
+        entries = persister.list_verdicts(n=n) if persister.enabled else []
+        print(dumps_evidence(report_evidence(entries, persister.storage_mode)))
+        return
+
     # Interactive TUI mode
     if args.interactive:
         _cmd_report_tui(workdir, n)
@@ -1981,7 +1994,11 @@ def _cmd_report_tui(workdir: str, n: int = 20):
 
 
 def cmd_guard_run(args):
-    _check_for_updates()
+    # EVID-002: --json is the automation surface — the update check prints, so
+    # it is skipped there; the document must be the only thing on stdout.
+    json_output = getattr(args, "json_output", False)
+    if not json_output:
+        _check_for_updates()
     from engine.guard_manager import GuardManager
 
     workdir = get_workdir()
@@ -1991,7 +2008,7 @@ def cmd_guard_run(args):
     # ('diff' / 'full'). If both are passed, --staged-only wins (diff is the
     # narrower scope); neither → config value (default: 'full').
     # DF-GITREINS-POC-11: --full additionally grades the whole tree when the
-    # index is empty (tests run, lint grades tracked+untracked files) —
+    # index is empty (tests run, lint grades tracked+untracked files) — and
     # --staged-only must not.
     grade_full_tree = False
     if getattr(args, "staged_only", False):
@@ -1999,13 +2016,37 @@ def cmd_guard_run(args):
     elif getattr(args, "full", False):
         config.setdefault("guards", {})["test_mode"] = "full"
         grade_full_tree = True
-    gm = GuardManager(workdir, config=config, grade_full_tree=grade_full_tree)
+    # --scope selects the CHANGE SET (index vs index+worktree+untracked);
+    # --full/--staged-only select WHICH tests run over it. They compose.
+    scope = getattr(args, "scope", "staged")
+    gm = GuardManager(workdir, config=config, scope=scope, grade_full_tree=grade_full_tree)
+
+    if json_output:
+        from engine.evidence import dumps_evidence, guard_evidence
+
+        # Capture anything the run narrates so stdout carries exactly one
+        # parseable document; a red run explains itself on stderr instead.
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            result = gm.run_all(force_dead_code=getattr(args, "dead_code", False))
+        if not result.passed:
+            sys.stderr.write(captured.getvalue())
+        print(dumps_evidence(guard_evidence(result, scope)))
+        # Contract exit codes: 0 for a passing result, 1 for a non-passing one
+        # (a DEGRADED pass is a pass here — the document carries the skipped
+        # steps and metadata.degraded; write_guard_log already records it).
+        sys.exit(0 if result.passed else 1)
+
     result = gm.run_all(force_dead_code=getattr(args, "dead_code", False))
 
     # Build mode note
     mode = gm.test_mode
     extra = result.extra
     mode_note = f"  (test mode: {mode}"
+    if scope != "staged":
+        # Only a non-default scope adds a note: the staged line is the string
+        # every existing consumer greps, and it stays byte for byte.
+        mode_note += f", scope: {scope}"
     if extra.get("grade_full_tree"):
         mode_note += ", whole tree"
     if extra.get("test_targets"):
@@ -2079,7 +2120,12 @@ def cmd_judge(args):
         _cmd_judge_async(args.id)
         return
 
-    _check_for_updates()
+    # EVID-002: --json is the automation surface — the update check narrates on
+    # stdout, so it is skipped there.
+    json_output = getattr(args, "json_output", False)
+    scope = getattr(args, "scope", "staged")
+    if not json_output:
+        _check_for_updates()
     from engine.task_manager import TaskManager
     from engine.llm import LLMClient
     from engine.judge import Judge
@@ -2088,7 +2134,10 @@ def cmd_judge(args):
     tm = TaskManager(workdir)
     task = tm.get(args.id)
     if not task:
-        print(f"Task not found: {args.id}")
+        # --json keeps the document channel clean: a caller parsing stdout must
+        # not receive a prose line where the evidence document should be. The
+        # message still reaches the operator, on stderr.
+        print(f"Task not found: {args.id}", file=sys.stderr if json_output else sys.stdout)
         sys.exit(1)
 
     # Single-flight (GR-GAP-046): while a background evaluation for this
@@ -2096,25 +2145,44 @@ def cmd_judge(args):
     # don't start a second evaluation inline. Point the user at the
     # running job instead. Only a LIVE pid blocks: a running record whose
     # owner died is an orphan and a sync run supersedes it.
+    # --json is exempt: its caller asked for a document for THIS run and has
+    # nowhere to read a "poll the other job" pointer from (that pointer would
+    # also be the only thing on a stdout that must hold one JSON document).
     from engine.job_store import find_running_job, pid_alive
 
-    running = find_running_job(args.id, workdir)
-    if running is not None and pid_alive(running.get("pid")):
-        print(f"Evaluation already in progress for {args.id} (job {running['id']})")
-        print(f"  poll:    gitreins judge --status {running['id']}")
-        return
+    if not json_output:
+        running = find_running_job(args.id, workdir)
+        if running is not None and pid_alive(running.get("pid")):
+            print(f"Evaluation already in progress for {args.id} (job {running['id']})")
+            print(f"  poll:    gitreins judge --status {running['id']}")
+            return
 
-    if getattr(args, "skip_tier2", False):
+    if getattr(args, "skip_tier2", False) and not json_output:
         print("Tier 2 skipped (--skip-tier2 flag)")
 
     llm = LLMClient()
     config = load_config(workdir)
-    judge = Judge(llm, workdir, guard_config=config)
-    result = judge.evaluate_task(task, skip_tier2=getattr(args, "skip_tier2", False))
-    print(result.summary)
+    judge = Judge(llm, workdir, guard_config=config, scope=scope)
 
-    # Persist verdict
-    _persist_result(workdir, task, result)
+    if json_output:
+        from engine.evidence import dumps_evidence, judge_evidence
+
+        # The evaluator and the persister both narrate on stdout ("Tier 1:
+        # Running static guards...", "📋 Verdict saved: ..."). Capture it so
+        # stdout holds exactly one parseable document; a FAIL keeps its
+        # narration on stderr, where a red run can still explain itself.
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            result = judge.evaluate_task(task, skip_tier2=getattr(args, "skip_tier2", False))
+            _persist_result(workdir, task, result)
+        if not result.passed:
+            sys.stderr.write(captured.getvalue())
+        print(dumps_evidence(judge_evidence(result, task, scope)))
+    else:
+        result = judge.evaluate_task(task, skip_tier2=getattr(args, "skip_tier2", False))
+        print(result.summary)
+        # Persist verdict
+        _persist_result(workdir, task, result)
 
     # DF-GITREINS-POC-16: a FAIL verdict must reach the shell. Printing
     # "Overall: FAIL" while exiting 0 lets a caller (script, CI step, agent)
@@ -3035,12 +3103,50 @@ def main():
             "tracked+untracked Python files instead of skipping."
         ),
     )
+    guard_p.add_argument(
+        "--scope",
+        choices=["staged", "working-tree"],
+        default="staged",
+        help=(
+            "Change set to grade: 'staged' (default) is the Git index; "
+            "'working-tree' adds unstaged and non-ignored untracked files, "
+            "collected with read-only git commands (the index is never "
+            "touched). Selects WHICH files are graded — --full/--staged-only "
+            "still select which tests run over them."
+        ),
+    )
+    guard_p.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help=(
+            "Emit one bounded, redacted GitReins evidence v1 JSON document on "
+            "stdout (schemas/evidence-v1.schema.json) instead of the human "
+            "summary. Exit 0 pass, 1 non-pass."
+        ),
+    )
 
     # judge
     judge_p = sub.add_parser("judge", help="Evaluate a task")
     judge_p.add_argument("id")
     judge_p.add_argument(
         "--skip-tier2", action="store_true", help="Skip Tier 2 LLM evaluation; Tier 1 guards only"
+    )
+    judge_p.add_argument(
+        "--scope",
+        choices=["staged", "working-tree"],
+        default="staged",
+        help=("Change set the Tier 1 guards grade (same semantics as `gitreins guard --scope`)"),
+    )
+    judge_p.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help=(
+            "Emit one bounded, redacted GitReins evidence v1 JSON document on "
+            "stdout (schemas/evidence-v1.schema.json) instead of the human "
+            "summary. Exit 0 pass, 1 non-pass."
+        ),
     )
     judge_p.add_argument(
         "--async",
@@ -3250,6 +3356,16 @@ def main():
     report_p = sub.add_parser("report", help="Show verdict history")
     report_p.add_argument("-n", type=int, default=10, help="Number of recent verdicts to show")
     report_p.add_argument("--interactive", "-i", action="store_true", help="Interactive TUI mode")
+    report_p.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help=(
+            "Emit one bounded, redacted GitReins evidence v1 JSON document on "
+            "stdout (schemas/evidence-v1.schema.json) instead of the human "
+            "report. Always exits 0 when the document was emitted."
+        ),
+    )
 
     serve_p = sub.add_parser(
         "serve", help="Live judgment browser — local web server (Ctrl-C to stop)"

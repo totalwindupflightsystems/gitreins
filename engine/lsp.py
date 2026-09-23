@@ -510,6 +510,28 @@ def _staged_files_by_language(workdir: str) -> dict[str, list[str]]:
     return by_lang
 
 
+def select_lsp_files(tool: str, workdir: str, paths: list[str]) -> list[str]:
+    """Absolute file paths from ``paths`` that ``tool`` can actually grade.
+
+    The counterpart of :func:`_staged_files_by_language` for a caller that
+    already holds its own change set (the guard's ``--scope working-tree``
+    scope): the same extension → language map and the same per-tool language
+    table decide, so a whole-tree scope cannot send a Markdown file to pylsp
+    or a Rust file to clangd. Paths that no longer exist are dropped, and the
+    input order is preserved.
+    """
+    selected: list[str] = []
+    for path in paths:
+        ext = os.path.splitext(path)[1].lower()
+        lang = _LANGUAGE_MAP.get(ext)
+        if lang is None or not _tool_supports_language(tool, lang):
+            continue
+        full = path if os.path.isabs(path) else os.path.join(workdir, path)
+        if os.path.isfile(full):
+            selected.append(full)
+    return selected
+
+
 def _tool_supports_language(tool: str, lang: str) -> bool:
     supported = _TOOL_LANGUAGES.get(tool, [])
     return lang in supported

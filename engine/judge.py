@@ -26,11 +26,17 @@ class Judge:
         workdir: str = ".",
         guard_config: dict | None = None,
         eval_cap: "str | EvalCap | None" = None,
+        scope: str = "staged",
     ):
         self.workdir = workdir
         self.llm = llm
         self.guard_config = guard_config or {}
-        self.guard_manager = GuardManager(workdir, self.guard_config)
+        # Change scope (EVID-002) for the Tier 1 guard this judge runs: the
+        # judge's tier-1 step grades the SAME change set the guard would, so
+        # `judge --scope working-tree` and `guard --scope working-tree` agree.
+        # Default "staged" keeps every existing caller's semantics.
+        self.scope = scope
+        self.guard_manager = GuardManager(workdir, self.guard_config, scope=scope)
         self.eval_cap = eval_cap
 
     def evaluate_task(self, task: Task, skip_tier2: bool = False) -> "JudgeResult":
