@@ -4,7 +4,7 @@ description: >-
   How to use the GitReins quality harness in this repo (and any repo it's
   installed in): task lifecycle, guards, LLM judge, MCP tools, and the known
   pitfalls that will bite you. Load this before committing or creating tasks.
-version: 1.4.0
+version: 1.5.0
 category: software-development
 ---
 
@@ -432,3 +432,47 @@ a prerequisite. `mkdir -p .coding-hermes/board` and the same command passes
     `engine/pipeline.py:253` (stages) and `_load_commit_audit_config` (top-level
     `commit_audit`) before concluding a capability is missing — and prefer
     `gitreins <cmd> --help` plus a controlled re-run over a confident bug report.
+
+## The resolution gate — resolve / preflight / context.resolve (2026-09-23 dogfood run 7 — verified at 0.15.0)
+
+The v0.15.0 flagship answers "does the repo already answer this?" (the Jev resolution
+gate, JEVRES-001..006, spec docs/jev-resolution-gate.md).
+
+**Pitfall 26 — every surface ships OFF, and nothing but this skill says so (POC-35).**
+`surface_enabled()` (engine/resolution.py:238-260) requires an explicit block in
+`.gitreins/config.yaml`; absent/empty/wrong-typed all mean disabled, and the first
+flagship call dies in ~0.1s with `abstain_reason: surface-disabled`. The error's hint
+points at a nonexistent "docs/jev-resolution-gate.md §9". The fix that works:
+
+```yaml
+resolution:
+  enabled:
+    cli: true
+    mcp: true
+    predispatch: true
+```
+
+**Pitfall 27 — the gate keeps no record of what it told you (POC-36).** Verdicts are
+never persisted: no .gitreins/history entry, no usage.jsonl line, nothing in
+`gitreins report`/`serve`. If you need the verdict later, capture `--json` output
+yourself. The records themselves are excellent (cost_usd, tokens, manifest, model
+build, attempts) — they just evaporate.
+
+**Pitfall 28 — two JSON shapes for one gate.** `resolve --json` → the verdict object
+(verdict/probability/manifest/…). `preflight --json` → a dispatch RECORD {band,
+decision, probability, missing_kind, question, abstain_reason, verdict_json} where
+`verdict_json` is an embedded JSON STRING — parse it twice. Scripts keyed on
+`verdict` find nothing in a preflight record; use `band` (or wait for POC-37).
+
+Verified behavior worth trusting (measured live, 0.15.0): real discrimination on real
+premises — true premise → RESOLVED 0.85 / skip-dispatch; open premise → UNRESOLVED
+0.29 / dispatch; nonsense question → 0.05; `--budget 2000` enforced (1963 est tokens,
+1-file manifest) and the verdict IMPROVED to 0.92 (precision beats volume); truncation
+always disclosed (`clipped` + `chars_dropped`); resolve fail-CLOSED (dead transport →
+ABSTAIN exit 1, named reason+action — rehearse with
+`HTTPS_PROXY=http://127.0.0.1:9`, NOT by touching real keys); preflight fail-OPEN
+(ABSTAIN → exit 0, decision dispatch, reason carried); MCP `context.resolve` live on
+the 13-tool surface (client notes in the MCP section — remember: the initialized
+notification gets NO response). Exit codes exactly as documented. Cost ≈ $0.0005/call;
+~2.3s warm (hyperfine 10 runs). Doc shapes: mcp-api.md §13 documents the tool; the CLI
+sections are §15 (resolve) / §16 (preflight).

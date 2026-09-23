@@ -71,3 +71,29 @@ Full rows on the real board (.coding-hermes/board/tasks.jsonl):
 - [P2] DF-GITREINS-POC-32 rotation at `max_entries` is silent: with the ledger full, `qa record` exits 0 ("recorded") and the row count is unchanged — oldest row evicted without a word.
 Details: docs/dogfood/2026-09-20b-integration.md + diagnostics.md 09-20b section; skills/gitreins-usage/SKILL.md v1.4.0 (pitfalls 21-25).
 Install leg: RUN on las-bunker-03 (host UP; agent 3f4f7cdc spawned, used, destroyed and verified gone); all three P1s reproduce on the shipped 0.14.0 wheel. Foreman not woken; cooldowns untouched (2026-09-09 fleet law).
+
+## Dogfood Findings (2026-09-23 — run 7: the v0.15.0 resolution gate)
+
+Ran the never-dogfooded flagship surface: `gitreins resolve`, `gitreins preflight`, MCP
+`context.resolve` (JEVRES-001..006). The gate itself WORKS — real discrimination on real
+premises (true premise 0.85 → skip-dispatch; open premise 0.29 → dispatch; unanswerable
+0.05; budget law enforced and disclosed; fail-closed ABSTAIN exit 1 vs preflight's
+documented fail-open dispatch). ~2.3s warm per call at $0.0005 — fast enough that no PERF
+row is filed (hyperfine warm+cold numbers in the integration report). Findings:
+
+- [P1] DF-GITREINS-POC-35 Every resolution surface ships disabled with zero documentation —
+  `preflight` on this very repo fails in 0.12s with `abstain_reason: surface-disabled`, the
+  fix hint cites docs/jev-resolution-gate.md "§9" which does not exist (doc ends at §8),
+  no doc (README quickstart, onboarding, cli-reference §15/16, mcp-api §13) mentions the
+  `resolution.enabled.<surface>` knob, and this repo's own tracked config has no resolution
+  block (the project does not run its own flagship).
+- [P1] DF-GITREINS-POC-36 resolution verdicts are never persisted — no .gitreins/history
+  entry, no usage.jsonl line, report/serve show nothing; violates the spec's own §8
+  acceptance criterion and repeats the POC-23 invisibility class.
+- [P2] DF-GITREINS-POC-37 preflight --json embeds verdict_json as an escaped string and
+  has no top-level `verdict` field (resolve uses `verdict`; preflight exposes `band`) —
+  dual shape for the same gate's output is scripting friction.
+Details: docs/dogfood/2026-09-23-integration.md; diagnostics.md 09-23 section;
+skills/gitreins-usage/SKILL.md v1.5.0 (resolution-gate section).
+Install leg: see dogfood-log.md entry 2026-09-23 (bunker-las-02 battery, evidence
+/tmp/dogfood-gitreins/bunker-qa-evidence.jsonl).
