@@ -231,3 +231,31 @@ def test_missing_doc_fails_loudly(tmp_path):
     code, message = _load_module().check_cli_doc_sync(REPO_ROOT, doc_path=tmp_path / "absent.md")
     assert code == 1
     assert "not found" in message
+
+
+def test_live_surface_restores_cmd_handlers():
+    """live_surface() stubs every `cmd_*` handler on the shared CLI module.
+
+    Those stubs must be undone before it returns: the module object is shared
+    with every later in-process CLI call, so a leaked stub makes a sibling
+    test's ``run_cli()`` return empty stdout with exit 0. Serial (non ``-n 4``)
+    runs sort this file before test_commit_audit.py, so the leak shows up there
+    as unexplained failures.
+    """
+    import gitreins.cli as cli
+
+    before = {name: getattr(cli, name) for name in dir(cli) if name.startswith("cmd_")}
+    assert before, "the CLI module exposes no cmd_* handlers to protect"
+    before_ids = {name: id(handler) for name, handler in before.items()}
+
+    _load_module().live_surface(REPO_ROOT)
+
+    after = {name: getattr(cli, name) for name in dir(cli) if name.startswith("cmd_")}
+    assert sorted(after) == sorted(before), (
+        f"live_surface() changed the cmd_* attribute set: {sorted(set(after) ^ set(before))}"
+    )
+    for name in sorted(before):
+        assert id(after[name]) == before_ids[name], (
+            f"live_surface() left `{name}` stubbed ({after[name]!r}); "
+            "the original handler was never restored"
+        )
