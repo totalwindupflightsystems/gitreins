@@ -41,7 +41,7 @@ guards:
   - pylsp
 evaluator:
   max_iterations: 200
-  max_time: 45m
+  max_time: 60m  # 45m→60m (DF-GITREINS-POC-37 tick: tier2 capped at 45m9s re-running the full 259s suite through deepseek)
   max_input_tokens: 10M
   max_output_tokens: 131072  # 128K — deepseek API caps max_tokens at 393216; 1M caused HTTP 400 on every judge call (2026-08-20)
   tool_call_weight: 0.1
