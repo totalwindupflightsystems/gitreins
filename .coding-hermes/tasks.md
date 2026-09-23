@@ -95,5 +95,5 @@ row is filed (hyperfine warm+cold numbers in the integration report). Findings:
   dual shape for the same gate's output is scripting friction.
 Details: docs/dogfood/2026-09-23-integration.md; diagnostics.md 09-23 section;
 skills/gitreins-usage/SKILL.md v1.5.0 (resolution-gate section).
-Install leg: see dogfood-log.md entry 2026-09-23 (bunker-las-02 battery, evidence
-/tmp/dogfood-gitreins/bunker-qa-evidence.jsonl).
+Install leg: RUN — bunker-las-02 battery complete (16 cells: fresh-install OK, native suite
+PASS incl. 3G-cap run; act fallback documented in the log).

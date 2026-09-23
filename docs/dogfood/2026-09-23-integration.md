@@ -106,6 +106,12 @@ costs minutes. **No PERF row filed** — a win nobody can feel is not a finding.
 
 ## Install leg
 
-Ephemeral fresh-system battery via `bunker-qa.sh` on bunker-las-02 (agent dedef735,
-ttl 4h) — see the dogfood log entry for its cells; numbers recorded there, run after
-this report was drafted.
+RUN — ephemeral fresh-system battery via `bunker-qa.sh` on bunker-las-02 (agent
+dedef735, ttl 4h, spawned → used → destroyed cleanly; 16 evidence rows). Fresh-install
+OK: gitreins 0.15.0 installed from source on bare Debian after the harness bootstrapped
+venv + zig-cc toolchain + GNU make; the native test suite PASSED, including a run under
+a 3G memory cap; upgrade path 0.14.0 → HEAD clean. `act`-based CI failed rc=1 inside
+its own docker environment (the harness's designed native-suite fallback carried the
+cell). docker-deploy/chaos-shutdown/chaos-corruption were honestly N/A (no compose
+file, no db files — this is a CLI library). Evidence:
+/tmp/dogfood-gitreins/bunker-qa-evidence.jsonl.
