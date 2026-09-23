@@ -874,3 +874,164 @@ real Antares-1b inference, which the README never says.
   single-package hint fails at guard time.
 - `min_confidence` today tunes the advisory FEED only; treat it as dead on
   the heuristic findings path until POC-39 lands.
+
+## 2026-09-23c — run 9: the Go guard lane, explained from the code outward
+
+Run 9 took the one lane the previous eight runs never touched. Runs 1–8 were all
+Python: the CLI, the guard, the judge, the PyPI wheel, the MCP server, the QA
+ledger, the resolution gate, the security scanner. The Go lane
+(`guards.go: build/lint/tests`, implemented in `engine/guards.py`) sat behind a
+`go.mod` signature the test-suite exercises only with fixtures. It is the lane a
+user with a Go repo meets first, so it is the lane whose false greens matter
+most.
+
+### How the Go lane is wired (the mental model)
+
+`GuardManager.run_all` walks a fixed gate order and appends one `GuardResult`
+per lane: secrets → (Python) lint → (Python) tests → lsp → static_analysis →
+security_scan → **Go build → Go lint → Go tests**, each followed by a
+`hook_timeout` check that fail-opens the rest of the run
+(`engine/guard_manager.py:1173-1200`). The Go branch is entered when
+`self._is_go`, which is set once at init from
+`lang_detect.signature_languages(workdir)` containing `"go"` — a **real
+ecosystem marker** (`go.mod`), not an inferred extension
+(`guard_manager.py:1008-1011`). That part is sound: `init` reported
+`Language: Go`, and `guards.go` defaults arrived pre-filled and enabled.
+
+Each lane then delegates to a module-level function in `engine/guards.py`, and
+every one of those functions opens with the same guard clause:
+
+```python
+go_files = _changed_go_files(workdir, changed_files)
+if not go_files:
+    return GoGuardResult(name="go_build", passed=True, output=_no_go_files(changed_files))
+```
+
+So "there is no Go file in my scope" is a **PASS with a note**, not a skip and
+not a failure. That is the hinge the whole run turns on.
+
+### Why the scope is the index, and why `--full` does not change it
+
+`_changed_go_files` has two branches (`guards.py:82-103`): if the caller hands in
+a `changed_files` list, it filters that list for `.go` files that still exist; if
+the caller hands in `None`, it runs its own historical discovery —
+`git diff --cached --name-only --diff-filter=ACM`, i.e. **the index**.
+
+The caller is `GuardManager._check_go_*`, which passes
+`self._scope_files_or_none()`. That helper is three lines
+(`guard_manager.py:1037-1045`):
+
+```python
+return self.changed_files if self.scope == "working-tree" else None
+```
+
+`--full` ("grade the whole tree") populates `self.changed_files` with every
+tracked + untracked-not-ignored file and sets `grade_full_tree=True` — but it
+does **not** change `self.scope`, which stays `staged`. So `--full` hands the Go
+lanes `None`, they fall back to `git diff --cached`, and with an empty index they
+all return PASS before spawning anything. The mode note prints
+`(test mode: full, whole tree)` and the plain `Tier 1 Guards: PASS` header (the
+header that, per TRUST-001, is supposed to *prove* the gates ran), while the
+run log's own per-lane output says `No Go files staged` three times.
+
+This is not a `--full`-specific bug: a bare `gitreins guard` on an empty index
+does the same thing, and so does a pre-commit hook on a repo whose broken code is
+already committed (the hook fires on an empty index and grades nothing). The
+working invocation is `--scope working-tree`, which is exactly the branch that
+passes a real file list in.
+
+The judge does not share the defect: its Tier-1 `tests` step shells the Go suite
+against the tree, so on the committed-broken-HEAD probe the guard said PASS and
+the judge's verdict said FAIL with the compiler error quoted
+(`.gitreins/history/2026-09-23/45186e59/verdict.json`). Guard and judge
+disagreeing on the same tree is precisely the POC-12/POC-16 class — closed once
+for the Python lanes, alive on the Go ones.
+
+### Why `go_lint` is a `go vet` lane wearing a linter's name
+
+`check_go_lint` (`guards.py:111-147`) is a two-stage ladder whose comment states
+the intent: run golangci-lint, and if that is unusable, fall back to `go vet`.
+The implementation tests usability with the *result* rather than the *spawn*:
+
+```python
+result = run_bounded(["golangci-lint", "run", "--new-from-rev=HEAD~1", *go_files], ...)
+if result.get("exit_code") == 0:
+    return GoGuardResult(name="go_lint", passed=True, output="golangci-lint: clean")
+# Fall through to go vet on failure
+```
+
+`run_bounded` returns `{"error": ...}` only when `Popen` itself fails
+(`command_hygiene.py:214-215`); a linter that ran and *found problems* returns a
+populated `exit_code=1`. Both look the same to that `if`, so the fallback fires
+on findings as well, and the final `GoGuardResult` carries **`go vet`'s**
+verdict — PASS if vet is clean. The comment even names its own intent
+("DF-CRIER-258: a missing/absent outcome falls through to go vet"), which is the
+right rule for a missing binary and the wrong one for a dirty result.
+
+Proven with one file that isolates the difference: an ignored `os.Mkdir` error
+compiles, passes `go vet`, and is a textbook errcheck violation. golangci-lint
+2.12.2 with gitreins' exact argv exits 1 naming it; the lane reports
+`✓ go_lint — ok` with `output: go vet: clean`. Across 28 `go_lint` results
+captured during the run, 15 were vet-graded fallbacks, 9 never ran, 2 truly ran
+golangci-lint, 2 genuinely failed — so the lane functions as `go vet`, which
+`go_build` already subsumes.
+
+A sharpener, recorded honestly as unproven: `--new-from-rev=HEAD~1` needs a
+second commit. In a one-commit repo golangci-lint logs
+`fatal: bad revision 'HEAD~1'` and disables its diff processor. That warning does
+**not** by itself change the exit code — a no-issue repo with no `HEAD~1` still
+reports `golangci-lint: clean` and exit 0 (observed in `go-clean`) — so it is a
+sharpener, not the root cause. The root cause is the exit-code test above.
+
+### Why nothing escalates: the DEGRADED-PASS net is keyed on lane NAMES
+
+TRUST-001 built a net for exactly this failure mode: a run where a substantive
+gate did no work is a DEGRADED PASS, it never prints the green header, and it can
+exit 2 under `allow_skips: false`. The net's membership test is
+`_SUBSTANTIVE_STEPS = frozenset({"lint", "tests", "lsp"})` (`engine/types.py:44`),
+compared against the step id derived from a result's **name**
+(`_step_id`, `types.py:47`). Go results are named `go_lint`, `go_tests`,
+`go_build` — none of them is in that set — so a Go run in which every lane did
+zero work is not degraded, prints the plain green PASS, and exits 0 even under
+the strictest policy. The net's hazard (a gate that never ran reading as a gate
+that passed) was understood and solved for Python names only; a new language
+later reused the same machinery through new names.
+
+The same composition explains the odd pair in the logs: `guards: 4 (0 failed,
+0 skipped)` alongside three lanes whose output is `No Go files staged`. Nothing
+threw, nothing was skipped — the lanes *passed vacuously*, which neither counter
+tracks.
+
+### Why the toolchain case reads as broken code
+
+`check_go_build`/`check_go_lint`/`check_go_tests` all start from the same two
+exits: a timed-out run (`go_tests` only) or a spawn failure, which is returned as
+`GoGuardResult(name=..., passed=False, error=result["error"])`
+(`guards.py:204-206`). `GuardResult.summary` renders `passed`/`output` but never
+`error` (`types.py:520-581`), so the cause reaches the persisted run log
+(`error: [Errno 2] No such file or directory: 'go'`) and stops there — the
+console shows three bare ✗ lines. The Python lane in the same product solved
+this class twice on purpose (`_resolve_test_command`, GR-GAP-037, names the
+missing runner and the fix; `_pytest_not_found_hint` names the interpreter), so
+the gap is lane-local, not a design position.
+
+### What a future run should not redo
+
+Do not re-derive the vacuous-pass mechanism from the console alone — the console
+is the thing that lies. Read `.gitreins/logs/guard-*.log`; the per-lane
+`--- output (untruncated) ---` block is the only place where `No Go files staged`
+(vacuous), `golangci-lint: clean` (real), `go vet: clean` (fallback) and
+`error: [Errno 2] ...` (missing toolchain) are distinguishable. And take the
+scope branch seriously before concluding "the gate is broken": with
+`--scope working-tree` the same repo, same commit, same broken file FAILs with
+exit 1 and the real compiler text, on this host and on a fresh bunker box.
+
+### Evidence for this section
+
+`docs/dogfood/evidence/go-lane-2026-09-23c/` — `01-full-tree-misses-untracked-go.log`
+(F1 vacuous PASS with the three `No Go files staged` lines),
+`02-committed-broken-head-false-pass.log` (committed broken HEAD, clean index,
+PASS), `03-lint-fallback-govet-clean.log` (F2: errcheck file, `go vet: clean`,
+PASS), `03b-…`/`03c-…` (same with `HEAD~1` resolvable), `04-golangci-direct-errcheck.txt`
+(the A/B: golangci-lint exit 1, errcheck named), `05-staged-broken-go-FAIL.log`
+(the lane working as promised). `README.txt` indexes them.

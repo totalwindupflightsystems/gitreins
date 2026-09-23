@@ -4,7 +4,7 @@ description: >-
   How to use the GitReins quality harness in this repo (and any repo it's
   installed in): task lifecycle, guards, LLM judge, MCP tools, and the known
   pitfalls that will bite you. Load this before committing or creating tasks.
-version: 1.6.0
+version: 1.7.0
 category: software-development
 ---
 
@@ -539,3 +539,78 @@ text and json findings agree line-for-line; 0.096s warm per staged scan, no
 model download, no network in heuristic mode; gitleaks-absent degradation
 names the fallback and keeps the secrets lane honest. Fresh-box install: 20s
 pip venv install → guard reproduces the finding end-to-end on bare Debian.
+
+## The Go guard lane (2026-09-23c run 9 — verified at 0.15.0, HEAD beda743)
+
+`gitreins init` on a repo with `go.mod` detects Go reliably and writes the lane's
+defaults (Python lanes correctly off):
+
+```yaml
+guards:
+  secrets: true
+  lint: false        # Python lint — no-op on a Go repo
+  tests: false       # Python tests — no-op
+  test_mode: full
+  go:
+    build: true      # go build ./...
+    lint: true       # golangci-lint, falling back to go vet (see pitfall 30)
+    tests: true      # go test -count=1 -short ./...
+  allow_skips: true
+```
+
+What actually works: a **staged** uncompilable `.go` file FAILs the run (all
+three lanes), exit 1, and the pre-commit hook refuses the commit with the real
+compiler text; `guards.go.lint: false` / `guards.go.tests: false` really do drop
+those lanes; a no-scope run is honest in the log (`No Go files staged`) and does
+not crash. Whole-run cost on a small repo: ~0.8s warm (nothing worth optimizing).
+
+**Pitfall 29 — the Go lanes grade the INDEX, so `--full` is a false green
+(POC-42).** `_changed_go_files` (`engine/guards.py:82-100`) falls back to
+`git diff --cached` whenever the caller passes no scope, and
+`GuardManager._scope_files_or_none()` (`guard_manager.py:1037`) passes `None` for
+every scope except `working-tree`. With an empty index all three lanes return
+`passed=True, output="No Go files staged"` **before running any tool** — in
+`--full`, and in a bare `gitreins guard`, so a Go tree that does not compile
+prints `Tier 1 Guards: PASS` and (on an empty index) commits unguarded. The tell
+is the log line `No Go files staged` (or its working-tree twin `No Go files in
+scope`); the console prints `✓ go_build — ok` and says nothing. **Use
+`gitreins guard --scope working-tree` to grade what is on disk** — it is
+documented only in `--help`, and it is the difference between a gate and a
+rubber stamp. (The judge's Tier-1 `tests` step sees the file that the guard
+missed — guard and judge disagree on the same tree, POC-12/POC-16's class.)
+
+**Pitfall 30 — `✓ go_lint — ok` may mean "golangci-lint found things and
+`go vet` disagreed" (POC-43).** `engine/guards.py:111-147` treats **any**
+non-zero golangci-lint exit as "linter unavailable" and falls through to
+`go vet ./...`, whose verdict becomes the lane's verdict. A non-zero exit caused
+by real findings is indistinguishable from a missing binary, so an
+errcheck-class error (`os.Mkdir` ignored — compiles, vets clean, golangci-lint
+exit 1) reports `✓ go_lint — ok`. The run log names the fallback
+(`output: go vet: clean`) but the console does not. Read `go_lint`'s detail line
+in `.gitreins/logs/guard-*.log` before trusting it; the lane as shipped is a
+`go vet` lane, and `go_build` already covers what that catches. Bonus sharpener:
+`--new-from-rev=HEAD~1` cannot resolve in a single-commit repo
+(`fatal: bad revision 'HEAD~1'`), which disables golangci-lint's diff processor
+(it does not by itself change the exit code).
+
+**Pitfall 31 — the DEGRADED-PASS machinery does not know the Go lane names
+(POC-44).** `_SUBSTANTIVE_STEPS = {"lint", "tests", "lsp"}` (`engine/types.py:44`)
+arms `degraded`; the Go lanes are `go_lint`/`go_tests`/`go_build`, so a Go run in
+which a lane did no work is **not** flagged, never prints `Tier 1: DEGRADED
+PASS`, and exits 0 even with `allow_skips: false`. Combined with pitfall 29,
+`Tier 1 Guards: PASS (test mode: full, whole tree)` on a Go repo carries no
+evidence; the guard log's `guards: N (0 failed, 0 skipped)` plus the per-lane
+output lines are the only honest read.
+
+**Pitfall 32 — `guards.test_command` is not the Go test command (POC-45).**
+`init` prints `Test cmd: go test -short -count=1 ./...` but writes no
+`test_command` key for a Go repo, and the Go lane hard-codes its argv
+(`guards.py:168-173`) — nothing on the Go path reads `guards.test_command`. To
+change how Go tests run you must change the lane's argv (a code change), not the
+config.
+
+**Pitfall 33 — no Go toolchain reads as broken code (POC-46).** With no `go` on
+`PATH`, staged `.go` files FAIL all three lanes; the console shows a bare
+`✗ go_build` / `✗ go_lint` / `✗ go_tests` and only the run log carries the cause
+(`error: [Errno 2] No such file or directory: 'go'`). On a fresh machine, read
+the log before believing the code is at fault.

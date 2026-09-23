@@ -59,3 +59,21 @@ DF-GITREINS-POC-27..-32 (6 rows: 4xP1, 2xP2).
 Install leg: RUN on las-bunker-03 (host UP this time; agent 3f4f7cdc spawned, used, destroyed and
 verified gone) — 32s venv install of the 0.14.0 wheel; all three P1s reproduce on the wheel.
 Foreman not woken, cooldowns untouched per the 2026-09-09 fleet law. No code changed.
+
+| 2026-09-23c | 🟡 PROMISING-BUT-ROUGH | "On a Go project, install/init wires a commit gate that compiles, vets and tests my Go code — and refuses a commit whose Go code does not build" — the Go guard lane (`guards.go` build/lint/tests), the one lane runs 1-8 never touched (all Python consumer repos) | (1) P1 POC-42 the lanes grade the INDEX: `guard --full` on a tree with an untracked uncompilable `.go` file prints `Tier 1 Guards: PASS (test mode: full, whole tree)` (all three lanes `No Go files staged`, before any tool runs — `_changed_go_files` falls back to `git diff --cached`; `--full` never hands over the whole-tree set); same with the broken file COMMITTED, so the pre-commit hook passes it — `--scope working-tree` FAILs correctly; the judge sees what the guard missed (verdict 45186e59); (2) P1 POC-43 `go_lint` treats every golangci-lint FINDING as "linter unavailable" and falls through to `go vet`, whose verdict becomes the lane's — an ignored `os.Mkdir` (compiles, vets clean) reports `✓ go_lint — ok` while golangci-lint exits 1 naming errcheck; 28 results captured: 15 vet-graded, 9 vacuous, 2 real, 2 correct FAILs; (3) P2 POC-44 the DEGRADED-PASS net is keyed on lane NAMES ({lint,tests,lsp} vs go_lint/go_tests/go_build), so a Go run where every gate did nothing is not degraded and exits 0 even under allow_skips:false. Plus P2 POC-45 (`init` prints a Go Test cmd it never writes; the lane never reads `guards.test_command`) and P2 POC-46 (missing Go toolchain = bare ✗ on the console; cause only in the run log). Regression facts GREEN: init detects Go + correct defaults, a STAGED uncompilable file FAILs all three lanes (exit 1, hook refuses the commit), `go.lint/tests: false` really drop their lanes, no-scope run honest + no crash, judge tier1 catches a committed-broken HEAD | ~1 min to first success (init + one guard run); friction 5 (all 5 inside the documented flow, none a crash — every one the product asserting something untrue); perf: guard 822ms ±33 warm / 736ms ±8 whole-tree — no PERF row (nothing a user feels) |
+
+Details: `docs/dogfood/2026-09-23c-integration.md` (promise, probe table G1-G10,
+findings F1-F5, working config, perf numbers), `docs/dogfood/diagnostics.md`
+(09-23c section: gate order, `_scope_files_or_none`, why `--full` stops at the
+index, why the golangci-lint fallback can never lose, why the degraded net misses
+Go names), `docs/dogfood/evidence/go-lane-2026-09-23c/` (raw run logs).
+`skills/gitreins-usage/SKILL.md` v1.7.0 (Go lane section + pitfalls 29-33).
+Board rows: DF-GITREINS-POC-42 (P1), -43 (P1), -44 (P2), -45 (P2), -46 (P2) —
+filed to `.coding-hermes/board/tasks.jsonl` (330 -> 335 rows, `check_board_ids`
+green) and summarised in the run-9 section of `.coding-hermes/tasks.md`.
+Install leg: RUN on las-bunker-03 (agent 2db38df6, ttl 2h): PEP-668 blocks the
+README's literal pip line on fresh Debian (known), venv install ~24s, clone OK
+with existing public access (no visibility/permission change), init + gate +
+commit reproduced on a box with NO Go toolchain, agent DESTROYED and verified
+gone. Foreman not woken, cooldowns untouched per the 2026-09-09 fleet law.
+No code changed.

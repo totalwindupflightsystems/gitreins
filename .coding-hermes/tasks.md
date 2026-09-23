@@ -131,3 +131,63 @@ one earlier exit-0 reading was my own PIPESTATUS bug, retracted). Findings:
 Install leg: RUN on bunker-las-03 (agent a8015da1, spawn→install 20s→guard reproduced
 →destroyed+verified gone). Local probe timing: security-scan 0.096s warm — no PERF row.
 Foreman not woken, cooldowns untouched per the 2026-09-09 fleet law. No code changed.
+
+## Dogfood Findings (2026-09-23c) — run 9: the Go guard lane
+
+Real use: a fresh Go consumer repo (`example.com/quotasvc` — quota package, a
+cmd, tests) with `gitreins init`, real commits through the installed pre-commit
+hook, plus the same probe on a fresh bunker box. Promise tested: "on a Go project
+the commit gate compiles, vets and tests my code and refuses a commit that does
+not build." Verdict: **PROMISING-BUT-ROUGH** — the lane works when files are
+staged, and returns a false green in the two places a Go user needs it to be
+honest. Full report: `docs/dogfood/2026-09-23c-integration.md`.
+
+- [P1] DF-GITREINS-POC-42 Go lanes grade the INDEX: `gitreins guard --full` on a
+  tree with an untracked uncompilable `.go` file prints `Tier 1 Guards: PASS
+  (test mode: full, whole tree)` while `go build ./...` fails — all three lanes
+  return PASS with `output: No Go files staged` before running any tool
+  (`_changed_go_files` falls back to `git diff --cached`, `guards.py:82-103`;
+  `_scope_files_or_none()` passes None unless scope == working-tree,
+  `guard_manager.py:1037-1045`). Same with the broken file COMMITTED and a clean
+  index — so the pre-commit hook passes it. `--scope working-tree` FAILs
+  correctly (exit 1, real compiler text); the judge's tier1 tests step sees the
+  file the guard missed (verdict 45186e59). Evidence:
+  `docs/dogfood/evidence/go-lane-2026-09-23c/`.
+- [P1] DF-GITREINS-POC-43 `go_lint` treats every golangci-lint FINDING as
+  "linter unavailable" and falls through to `go vet`, whose verdict becomes the
+  lane's (`guards.py:117-147` tests `exit_code == 0`, and `run_bounded` returns an
+  `error` key only on spawn failure). An ignored `os.Mkdir` error (compiles, vets
+  clean) → console `✓ go_lint — ok`, log `go vet: clean`, while
+  `golangci-lint run --new-from-rev=HEAD~1 <file>` exits 1 naming errcheck.
+  28 captured go_lint results: 15 vet-graded fallbacks, 9 vacuous, 2 real, 2
+  correct FAILs. `go_build` already covers what `go vet` catches.
+- [P2] DF-GITREINS-POC-44 the DEGRADED-PASS net is keyed on lane NAMES
+  (`_SUBSTANTIVE_STEPS = {lint, tests, lsp}`, `types.py:44` vs `go_lint`/
+  `go_tests`/`go_build`), so a Go run where every gate did no work is not
+  degraded, prints the plain green header, and exits 0 even under
+  `allow_skips: false`. The vacuous PASS is also neither failed nor skipped, so
+  `guards: 4 (0 failed, 0 skipped)` reads as a full clean run.
+- [P2] DF-GITREINS-POC-45 `init` prints `Test cmd: go test -short -count=1 ./...`
+  but writes no `test_command` key for Go, and the Go tests lane never reads
+  `guards.test_command` (hard-coded argv, `guards.py:168-173`). Python honours the
+  key (control: exit 127 when pointed at a broken command).
+- [P2] DF-GITREINS-POC-46 a missing Go toolchain fails all three lanes with no
+  reason on the console (`passed=False, error=...`; `error` never reaches
+  `summary`) — only the run log says `error: [Errno 2] No such file or directory:
+  'go'`. Reproduced on the fresh bunker box; Python solved this class on purpose
+  (`_resolve_test_command`, GR-GAP-037).
+
+Regression facts GREEN this run: `init` detects Go and writes the lane defaults
+(Python lanes correctly off); a STAGED uncompilable file FAILs all three lanes
+with exit 1 and the pre-commit hook refuses the commit; `guards.go.lint: false`
+and `tests: false` really drop their lanes; a no-scope run is honest in the log
+and does not crash; the judge's tier1 leg catches a committed-broken HEAD.
+Perf: whole run 822ms ± 33 warm / 736ms ± 8 whole-tree — nothing a user feels,
+NO PERF row filed.
+
+Install leg: RUN on las-bunker-03 (agent 2db38df6, ttl 2h) — README `pip install
+gitreins` blocked by PEP-668 on fresh Debian (known, not re-filed); venv install
+~24s; clone OK with existing public access (no visibility/permission change);
+`init` + gate + commit reproduced on a box with NO Go toolchain; agent DESTROYED
+and verified gone (`bunker list | grep` = 0). Foreman not woken, cooldowns
+untouched per the 2026-09-09 fleet law. No code changed.
