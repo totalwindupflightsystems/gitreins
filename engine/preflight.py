@@ -16,7 +16,8 @@ one: a transport blip or a dead key must never become the reason work silently
 stops happening. So an ABSTAIN dispatches and carries ``abstain_reason`` for the
 operator; only a real RESOLVED probability (>= 0.85) is ever allowed to skip a
 dispatch, and every record — including the skip — carries the probability,
-``missing_kind`` and the full verdict JSON, so no skip is blind and every row can
+``missing_kind`` and the full verdict object (``verdict``, the same dict
+``gitreins resolve --json`` prints), so no skip is blind and every row can
 be annotated with what the gate saw (spec §4 row 1: "annotate the row with the
 bundle + probability").
 
@@ -34,7 +35,6 @@ from engine.resolution import (
     VERDICT_RESOLVED,
     ResolutionVerdict,
     resolve,
-    verdict_json,
 )
 
 __all__ = [
@@ -83,8 +83,11 @@ def decide(verdict: ResolutionVerdict) -> dict[str, Any]:
     Pure policy over the verdict — no resolution runs here. The returned record
     carries the band, the probability, ``missing_kind``, the decision, the
     reason, the abstain reason when the verdict abstained, and the full verdict
-    JSON (``verdict_json(verdict)``): a skip must never be blind, and an
-    annotation must be able to show what the gate actually saw.
+    as a first-class OBJECT (``verdict`` — ``ResolutionVerdict.to_dict()``, the
+    exact dict ``gitreins resolve --json`` prints; DF-GITREINS-POC-37 removed
+    the old escaped ``verdict_json`` STRING that forced a second parse): a skip
+    must never be blind, and an annotation must be able to show what the gate
+    actually saw.
     """
     decision = DECISIONS[verdict.verdict]
     record: dict[str, Any] = {
@@ -95,7 +98,7 @@ def decide(verdict: ResolutionVerdict) -> dict[str, Any]:
         "decision": decision,
         "reason": _REASONS[decision],
         "abstain_reason": verdict.abstain_reason,
-        "verdict_json": verdict_json(verdict),
+        "verdict": verdict.to_dict(),
     }
     return record
 

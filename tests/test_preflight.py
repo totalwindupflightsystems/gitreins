@@ -171,12 +171,10 @@ class TestDecide:
         assert record["decision"] == DECISION_DISPATCH
         assert record["abstain_reason"] == "no-credentials"
 
-    def test_every_record_carries_probability_and_full_verdict_json(
+    def test_every_record_carries_probability_and_the_verdict_object(
         self, script_assembler, monkeypatch
     ):
         """No blind skip: even the skip record carries the probability + verdict."""
-        import json as _json
-
         script_assembler()
         monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("dec"))
         verdict = resolution.resolve("q?", poster=lambda *a, **k: _StubResponse(0.93))
@@ -184,10 +182,13 @@ class TestDecide:
         assert record["probability"] == pytest.approx(0.93)
         assert record["missing_kind"] == "none"
         assert record["reason"]
-        # The full verdict JSON round-trips — the annotation shows what the gate saw.
-        parsed = _json.loads(record["verdict_json"])
-        assert parsed["verdict"] == "RESOLVED"
-        assert parsed["probability"] == pytest.approx(0.93)
+        # DF-GITREINS-POC-37: the full verdict rides along as a first-class
+        # OBJECT — the exact dict `resolve --json` prints, not an escaped
+        # JSON string needing a second parse.
+        assert isinstance(record["verdict"], dict)
+        assert record["verdict"] == verdict.to_dict()
+        assert record["verdict"]["verdict"] == "RESOLVED"
+        assert record["verdict"]["probability"] == pytest.approx(0.93)
 
 
 class TestPreflightDispatchHook:

@@ -3443,7 +3443,8 @@ def main():
             " dispatch outcome — read the record); non-zero only for hard"
             " usage errors. With --json the full machine record is printed"
             " (band, probability, missing_kind, decision, reason,"
-            " abstain_reason, verdict_json) for a foreman to consume."
+            " abstain_reason, verdict) for a foreman to consume — `verdict`"
+            " is the OBJECT `resolve --json` prints, not an escaped string."
         ),
     )
     preflight_p.add_argument(

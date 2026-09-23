@@ -891,9 +891,12 @@ decision; this policy consumes the same verdict as a DISPATCH signal, where
 the dangerous failure is the opposite one — a dead key or a transport blip
 must never be the reason work silently stops. Only a real RESOLVED probability
 is ever allowed to skip a dispatch, and every record — including the skip —
-carries the probability, `missing_kind` and the full verdict JSON
-(`verdict_json`): no skip is blind, and every row can be annotated with what
-the gate saw.
+carries the probability, `missing_kind` and the full verdict OBJECT (`verdict`)
+— the same dict `gitreins resolve --json` prints
+(`ResolutionVerdict.to_dict()`), never an escaped JSON string: no skip is
+blind, and every row can be annotated with what the gate saw. The `--json`
+record is exactly `{question, band, probability, missing_kind, decision,
+reason, abstain_reason, verdict}`.
 
 This is a signal, not a gate: a skip annotates a row, it is never the sole
 authority for a merge or a commit (spec §6.5).
