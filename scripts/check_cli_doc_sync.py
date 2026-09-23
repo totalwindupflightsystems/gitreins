@@ -172,7 +172,9 @@ def live_surface(repo_root):
     """Read the live CLI surface from the parser ``gitreins.cli.main`` builds.
 
     Handlers are stubbed and ``main()`` is driven with ``--help`` so nothing
-    executes — only argparse runs. Returns
+    executes — only argparse runs. The stubs are put back before returning:
+    ``gitreins.cli`` is a shared module, so a leaked stub would leave every
+    later in-process CLI call returning empty output. Returns
     ``(top_level_names, {worktree_sub: options}, {qa_sub: options})``.
     """
     import argparse as _argparse
@@ -182,9 +184,9 @@ def live_surface(repo_root):
         sys.path.insert(0, repo_root)
     from gitreins import cli
 
-    for attr in dir(cli):
-        if attr.startswith("cmd_"):
-            setattr(cli, attr, lambda args: None)
+    original_handlers = {attr: getattr(cli, attr) for attr in dir(cli) if attr.startswith("cmd_")}
+    for attr in original_handlers:
+        setattr(cli, attr, lambda args: None)
 
     created = []
     original = _argparse.ArgumentParser.add_subparsers
@@ -205,6 +207,8 @@ def live_surface(repo_root):
     finally:
         _argparse.ArgumentParser.add_subparsers = original
         sys.argv = saved_argv
+        for attr, handler in original_handlers.items():
+            setattr(cli, attr, handler)
 
     top = next(
         (
