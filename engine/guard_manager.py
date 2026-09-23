@@ -30,6 +30,7 @@ from datetime import datetime, timezone
 from engine import lang_detect
 from engine import command_hygiene
 from engine.guards import (
+    GoGuardResult,
     _coerce_timeout,
     check_go_lint,
     check_go_tests,
@@ -317,13 +318,17 @@ def _get_worktree_changed_files(workdir: str) -> list[str]:
     return sorted(changed)
 
 
-def _tree_python_files(workdir: str) -> list[str]:
-    """Tracked + untracked-but-not-ignored Python files, repo-relative (deduped).
+def _tree_source_files(workdir: str, suffixes: tuple[str, ...]) -> list[str]:
+    """Tracked + untracked-but-not-ignored source files, repo-relative (deduped).
 
     Same git invocation ``engine.lang_detect`` uses for its source-file
     listing, so whole-tree grading and language detection can never disagree
     about what the tree contains. Empty index is the normal case here — this
     is the whole-tree listing, not a staged-files listing.
+
+    Parameterised by *suffixes* (DF-GITREINS-POC-42) so the Go lanes can ask
+    for the same listing with ``.go`` instead of forking a second copy of the
+    git call: the whole-tree promise must mean the same thing per language.
     """
     try:
         proc = subprocess.run(
@@ -342,10 +347,44 @@ def _tree_python_files(workdir: str) -> list[str]:
     files: list[str] = []
     for path in out.split("\0"):
         # --cached + --others can list the same path twice (index + worktree).
-        if path.endswith(".py") and path not in seen:
+        if path.endswith(suffixes) and path not in seen:
             seen.add(path)
             files.append(path)
     return files
+
+
+def _tree_python_files(workdir: str) -> list[str]:
+    """Whole-tree Python files (see :func:`_tree_source_files`)."""
+    return _tree_source_files(workdir, (".py",))
+
+
+def _tree_go_files(workdir: str) -> list[str]:
+    """Whole-tree Go files — the Go lanes' ``--full`` scope (DF-GITREINS-POC-42).
+
+    Twin of :func:`_tree_python_files`, deliberately sharing its git call: the
+    Go lanes used to grade the INDEX while ``--full`` advertised the whole
+    tree, so a Go tree that did not compile reported a green PASS off an empty
+    index. The listing is what the flag always promised the lanes.
+    """
+    return _tree_source_files(workdir, (".go",))
+
+
+def _go_guard_result(r: GoGuardResult) -> GuardResult:
+    """Convert a GoGuardResult into the tier-1 GuardResult, signal included.
+
+    DF-GITREINS-POC-42: the conversion used to drop everything but
+    name/passed/output/error, so a Go lane that graded no file reached the
+    DEGRADED-PASS machinery looking exactly like a lane that passed. The skip
+    signal (TRUST-001 shape) now rides through.
+    """
+    return GuardResult(
+        name=r.name,
+        passed=r.passed,
+        output=r.output,
+        error=r.error,
+        skipped=r.skipped,
+        skip_reason=r.skip_reason,
+    )
 
 
 def _ruff_scoped_files(workdir: str, py_files: list[str]) -> list[str] | None:
@@ -1043,6 +1082,34 @@ class GuardManager:
         working-tree scope hands them the collected set instead.
         """
         return self.changed_files if self.scope == "working-tree" else None
+
+    def _go_scope_files_or_none(self) -> list[str] | None:
+        """The Go lanes' file scope for this run, or ``None`` for staged discovery.
+
+        DF-GITREINS-POC-42: the Go lanes were handed ``None`` for every scope
+        except ``working-tree``, so they ran their own ``git diff --cached``
+        discovery. Under ``--full`` (``grade_full_tree``) that graded the INDEX
+        while the run advertised the whole tree — an empty index made all three
+        lanes return a silent pass over a Go tree that does not compile.
+        Precedence, in order:
+
+        1. an explicit ``--scope working-tree`` hands over the collected set
+           (unchanged behaviour);
+        2. a non-empty staged ``.go`` set keeps ``None`` — the lanes then do
+           their own index discovery byte for byte, which is exactly what the
+           pre-commit hook grades;
+        3. otherwise, under ``grade_full_tree``, the whole-tree Go listing.
+
+        ``_scope_files_or_none`` is deliberately left alone: the Python test
+        discovery reads it too, and that caller's contract is unchanged.
+        """
+        if self.scope == "working-tree":
+            return self.changed_files
+        if any(f.endswith(".go") for f in self.changed_files):
+            return None
+        if self._grade_full_tree:
+            return _tree_go_files(self.workdir)
+        return None
 
     def run_all(self, force_dead_code: bool = False) -> Tier1Result:
         """Run all enabled Tier 1 guards.
@@ -2417,17 +2484,17 @@ class GuardManager:
 
     def _check_go_lint(self) -> GuardResult:
         """Run Go lint checks (delegates to engine.guards)."""
-        r = check_go_lint(self.workdir, self._scope_files_or_none())
-        return GuardResult(name=r.name, passed=r.passed, output=r.output, error=r.error)
+        r = check_go_lint(self.workdir, self._go_scope_files_or_none())
+        return _go_guard_result(r)
 
     def _check_go_tests(self) -> GuardResult:
         """Run Go tests (delegates to engine.guards)."""
         r = check_go_tests(
-            self.workdir, timeout=self._test_timeout, changed_files=self._scope_files_or_none()
+            self.workdir, timeout=self._test_timeout, changed_files=self._go_scope_files_or_none()
         )
-        return GuardResult(name=r.name, passed=r.passed, output=r.output, error=r.error)
+        return _go_guard_result(r)
 
     def _check_go_build(self) -> GuardResult:
         """Run Go build (delegates to engine.guards)."""
-        r = check_go_build(self.workdir, self._scope_files_or_none())
-        return GuardResult(name=r.name, passed=r.passed, output=r.output, error=r.error)
+        r = check_go_build(self.workdir, self._go_scope_files_or_none())
+        return _go_guard_result(r)

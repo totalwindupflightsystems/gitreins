@@ -43,6 +43,20 @@ _BUILTIN_FINDING_LINE = re.compile(r"^(\S+:\d+): \[[^\]]+\]")
 # is not one either.
 _SUBSTANTIVE_STEPS = frozenset({"lint", "tests", "lsp"})
 
+# DF-GITREINS-POC-44 / POC-42: a Go repo runs the Go-native lanes INSTEAD of
+# the Python steps above (GuardManager.run_all) — the same substantive gates
+# under different names. Keyed on the Python names alone, the degradation net
+# never armed on a Go repo: a run where all three Go lanes graded no file
+# printed a green PASS and exited 0 even with allow_skips: false. The alias set
+# is the minimal honest fix — it extends the id mapping without restructuring
+# Tier1Result, and it keeps `~ go_build — skipped (...)` naming the real lane.
+_SUBSTANTIVE_STEP_ALIASES = frozenset({"go_lint", "go_tests", "go_build"})
+
+
+def _is_substantive_step(step_id: str) -> bool:
+    """True when *step_id* is a substantive gate under either lane naming."""
+    return step_id in _SUBSTANTIVE_STEPS or step_id in _SUBSTANTIVE_STEP_ALIASES
+
 
 def _step_id(name: str) -> str:
     """Base guard id for a result name ('tests (diff: 3 files)' → 'tests')."""
@@ -504,8 +518,8 @@ class Tier1Result:
 
     @property
     def degraded_steps(self) -> list[dict[str, str]]:
-        """Skipped steps among the SUBSTANTIVE gates (lint/tests/lsp)."""
-        return [s for s in self.skipped_steps if s["step"] in _SUBSTANTIVE_STEPS]
+        """Skipped steps among the SUBSTANTIVE gates (lint/tests/lsp, Go twins)."""
+        return [s for s in self.skipped_steps if _is_substantive_step(s["step"])]
 
     @property
     def degraded(self) -> bool:

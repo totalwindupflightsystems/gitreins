@@ -72,6 +72,12 @@ class GoGuardResult:
     passed: bool
     output: str = ""
     error: str = ""
+    # DF-GITREINS-POC-42: a Go lane that graded no file did no work. It keeps
+    # ``passed=True`` (the toolchain is not at fault) but says so, mirroring
+    # ``GuardResult`` — without the signal the DEGRADED-PASS machinery
+    # (TRUST-001) could not tell "no Go files" from "Go files, all clean".
+    skipped: bool = False
+    skip_reason: str = ""
 
 
 def is_go_project(workdir: str) -> bool:
@@ -108,11 +114,23 @@ def _no_go_files(changed_files: list[str] | None) -> str:
     return "No Go files staged" if changed_files is None else "No Go files in scope"
 
 
+def _no_go_files_result(name: str, changed_files: list[str] | None) -> GoGuardResult:
+    """The honest SKIP for a lane that graded no Go file (DF-GITREINS-POC-42).
+
+    ``passed=True`` because the lane itself did not fail, plus ``skipped`` /
+    ``skip_reason`` so the run is a DEGRADED pass rather than an
+    indistinguishable green (the message names the reason: the index was the
+    scope, or a working-tree/whole-tree scope held no Go file).
+    """
+    message = _no_go_files(changed_files)
+    return GoGuardResult(name=name, passed=True, output=message, skipped=True, skip_reason=message)
+
+
 def check_go_lint(workdir: str, changed_files: list[str] | None = None) -> GoGuardResult:
     """Run go vet for the selected change scope. Fall back to golangci-lint if available."""
     go_files = _changed_go_files(workdir, changed_files)
     if not go_files:
-        return GoGuardResult(name="go_lint", passed=True, output=_no_go_files(changed_files))
+        return _no_go_files_result("go_lint", changed_files)
 
     # Try golangci-lint first. run_bounded never raises for a missing
     # binary — it returns {"error": ...} without an exit_code — so any
@@ -163,7 +181,7 @@ def check_go_tests(
     timeout = _coerce_timeout(timeout, "test_timeout", 180)
     go_files = _changed_go_files(workdir, changed_files)
     if not go_files:
-        return GoGuardResult(name="go_tests", passed=True, output=_no_go_files(changed_files))
+        return _no_go_files_result("go_tests", changed_files)
 
     result = command_hygiene.run_bounded(
         ["go", "test", "-count=1", "-short", "./..."],
@@ -193,7 +211,7 @@ def check_go_build(workdir: str, changed_files: list[str] | None = None) -> GoGu
     """Run go build for the selected change scope to catch compile errors."""
     go_files = _changed_go_files(workdir, changed_files)
     if not go_files:
-        return GoGuardResult(name="go_build", passed=True, output=_no_go_files(changed_files))
+        return _no_go_files_result("go_build", changed_files)
 
     result = command_hygiene.run_bounded(
         ["go", "build", "-buildvcs=false", "./..."],

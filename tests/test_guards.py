@@ -69,10 +69,18 @@ def test_is_go_project_requires_go_mod_file(tmp_path):
     ],
 )
 def test_checkers_skip_when_no_go_files_are_staged(checker, name):
+    """DF-GITREINS-POC-42: a lane that graded no file is a SKIP, not a silent
+    pass — the historical wording stays, the skip signal is now recorded."""
     with patch("engine.guards.subprocess.run", return_value=completed("README.md\n")) as run:
         result = checker("/repo")
 
-    assert result == GoGuardResult(name=name, passed=True, output="No Go files staged")
+    assert result == GoGuardResult(
+        name=name,
+        passed=True,
+        output="No Go files staged",
+        skipped=True,
+        skip_reason="No Go files staged",
+    )
     run.assert_called_once_with(
         ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
         capture_output=True,

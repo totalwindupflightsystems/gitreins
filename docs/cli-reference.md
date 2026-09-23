@@ -190,8 +190,8 @@ gitreins guard [--dead-code] [--staged-only] [--full] [--scope staged|working-tr
 |--------|-------------|
 | `--dead-code` | Enable Python dead-code detection (overrides config) |
 | `--staged-only` | Run tests in diff mode — only packages with staged changes (overrides `guards.test_mode`) |
-| `--full` | Grade the whole tree even with an empty index: the tests lane runs and lint covers tracked+untracked Python files instead of skipping |
-| `--scope staged\|working-tree` | Which change set to grade: `staged` (default) is the Git index; `working-tree` adds unstaged and non-ignored untracked files |
+| `--full` | Grade the whole tree even with an empty index: the tests lane runs and lint covers tracked+untracked Python files instead of skipping. On a Go project (`go.mod`) the same rule lands on the `go_build`/`go_lint`/`go_tests` lanes — they grade the whole tree instead of the index |
+| `--scope staged\|working-tree` | Which change set to grade: `staged` (default) is the Git index; `working-tree` adds unstaged and non-ignored untracked files (the escape hatch when the files you care about are neither staged nor committed) |
 | `--json` | Emit one bounded, redacted [evidence v1](evidence-contract-v1.md) JSON document on stdout instead of the human summary (exit 0 pass, 1 non-pass) |
 
 **Exit codes**
@@ -200,7 +200,7 @@ gitreins guard [--dead-code] [--staged-only] [--full] [--scope staged|working-tr
 |------|---------|
 | 0 | All guards PASS (or a DEGRADED pass with `guards.allow_skips: true`) |
 | 1 | One or more guards FAIL (fix issues and re-run) |
-| 2 | DEGRADED PASS — a substantive gate (lint/tests/lsp) did no work and `guards.allow_skips` is false |
+| 2 | DEGRADED PASS — a substantive gate (`lint`/`tests`/`lsp`, or a Go project's `go_lint`/`go_tests`/`go_build`) did no work and `guards.allow_skips` is false |
 
 Warnings are printed to stderr and do not affect the exit code. The
 output includes the active test mode (`diff` or `full`) and the tested
@@ -260,6 +260,23 @@ whole-tree run is distinguishable from a staged run, and the plain PASS
 header is only printed when the gates actually ran. `--staged-only` and a
 bare `gitreins guard` keep the degraded-pass semantics above; when the
 index is non-empty, staged files are graded rather than the whole tree.
+
+**Go projects are graded by the same rule.** On a repo with a `go.mod`, three
+Go-native lanes replace the Python ones: `go_build` (`go build ./...`),
+`go_lint` (golangci-lint, falling back to `go vet`) and `go_tests`
+(`go test -count=1 -short ./...`). Their scope follows `--scope` and `--full`
+exactly like the Python lanes: under `--full` they grade the whole tree —
+tracked plus untracked-but-not-ignored `.go` files — so an uncompilable file
+that was never staged still fails the run, and its compiler text is in the lane
+output. A non-empty index of `.go` files keeps grading the staged set, which is
+what the pre-commit hook grades. When the files you are worried about are
+neither staged nor committed, `gitreins guard --scope working-tree` grades what
+is on disk — the escape hatch when a bare `gitreins guard` reports a clean
+index. A Go run in which no `.go` file was in scope is a DEGRADED pass —
+`~ go_build — skipped (No Go files in scope)`, never `✓ go_build — ok` — and
+exits 2 unless the repo sets `guards.allow_skips: true`. The reason names which
+scope was empty: `No Go files staged` (the index) or `No Go files in scope`
+(working-tree / whole tree).
 
 ## 5. `gitreins judge`
 

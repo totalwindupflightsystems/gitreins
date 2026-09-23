@@ -564,20 +564,26 @@ compiler text; `guards.go.lint: false` / `guards.go.tests: false` really do drop
 those lanes; a no-scope run is honest in the log (`No Go files staged`) and does
 not crash. Whole-run cost on a small repo: ~0.8s warm (nothing worth optimizing).
 
-**Pitfall 29 — the Go lanes grade the INDEX, so `--full` is a false green
-(POC-42).** `_changed_go_files` (`engine/guards.py:82-100`) falls back to
-`git diff --cached` whenever the caller passes no scope, and
-`GuardManager._scope_files_or_none()` (`guard_manager.py:1037`) passes `None` for
-every scope except `working-tree`. With an empty index all three lanes return
+**Pitfall 29 — a lane's SCOPE must be the scope it graded (POC-42, fixed).**
+The Go lanes originally graded the INDEX: `_changed_go_files`
+(`engine/guards.py`) fell back to `git diff --cached` whenever the caller passed
+no scope, and `GuardManager._scope_files_or_none()` passed `None` for every
+scope except `working-tree`. With an empty index all three lanes returned
 `passed=True, output="No Go files staged"` **before running any tool** — in
-`--full`, and in a bare `gitreins guard`, so a Go tree that does not compile
-prints `Tier 1 Guards: PASS` and (on an empty index) commits unguarded. The tell
-is the log line `No Go files staged` (or its working-tree twin `No Go files in
-scope`); the console prints `✓ go_build — ok` and says nothing. **Use
-`gitreins guard --scope working-tree` to grade what is on disk** — it is
-documented only in `--help`, and it is the difference between a gate and a
-rubber stamp. (The judge's Tier-1 `tests` step sees the file that the guard
-missed — guard and judge disagree on the same tree, POC-12/POC-16's class.)
+`--full`, and in a bare `gitreins guard` — so a Go tree that does not compile
+printed `Tier 1 Guards: PASS` / `✓ go_build — ok` and exited 0. Fixed:
+`GuardManager._go_scope_files_or_none()` now resolves the scope — an explicit
+`--scope working-tree` hands over the collected set, a non-empty index of `.go`
+files keeps the lanes' own index discovery (byte for byte, what the pre-commit
+hook grades), and otherwise `--full` hands them the whole-tree listing
+(`_tree_go_files`, the Go twin of `_tree_python_files`). The general lesson
+outlives the fix: a lane whose scope was empty must SAY so — `No Go files
+staged` (the index was the scope) vs `No Go files in scope` (a working-tree or
+whole-tree scope held none) — and that is now a SKIP (`~ go_build — skipped
+(...)`), never `✓ ... ok`. `gitreins guard --scope working-tree` remains the
+escape hatch when the files you care about are neither staged nor committed.
+(The judge's Tier-1 `tests` step sees the file that the guard missed — guard and
+judge disagree on the same tree, POC-12/POC-16's class.)
 
 **Pitfall 30 — `✓ go_lint — ok` may mean "golangci-lint found things and
 `go vet` disagreed" (POC-43).** `engine/guards.py:111-147` treats **any**
@@ -593,14 +599,20 @@ in `.gitreins/logs/guard-*.log` before trusting it; the lane as shipped is a
 (`fatal: bad revision 'HEAD~1'`), which disables golangci-lint's diff processor
 (it does not by itself change the exit code).
 
-**Pitfall 31 — the DEGRADED-PASS machinery does not know the Go lane names
-(POC-44).** `_SUBSTANTIVE_STEPS = {"lint", "tests", "lsp"}` (`engine/types.py:44`)
-arms `degraded`; the Go lanes are `go_lint`/`go_tests`/`go_build`, so a Go run in
-which a lane did no work is **not** flagged, never prints `Tier 1: DEGRADED
-PASS`, and exits 0 even with `allow_skips: false`. Combined with pitfall 29,
-`Tier 1 Guards: PASS (test mode: full, whole tree)` on a Go repo carries no
-evidence; the guard log's `guards: N (0 failed, 0 skipped)` plus the per-lane
-output lines are the only honest read.
+**Pitfall 31 — the DEGRADED-PASS machinery now sees the Go lane names (POC-44,
+fixed for the Go lanes).** `_SUBSTANTIVE_STEPS = {"lint", "tests", "lsp"}`
+(`engine/types.py`) keys the net on the PYTHON lane names; the Go lanes are
+`go_lint`/`go_tests`/`go_build`, so a Go run in which a lane did no work was
+**not** flagged, never printed `Tier 1: DEGRADED PASS`, and exited 0 even with
+`allow_skips: false` — combined with pitfall 29, `Tier 1 Guards: PASS (test
+mode: full, whole tree)` on a Go repo carried no evidence.
+`_SUBSTANTIVE_STEP_ALIASES` + `_is_substantive_step()` now extend the
+substantive-id mapping to the Go lane names (minimal surgery — `Tier1Result` is
+not restructured), so the three lanes ride the same TRUST-001 machinery:
+`Tier 1: DEGRADED PASS (skips: go_build=No Go files staged, ...)`, `~` markers
+per lane, and exit 2 unless `guards.allow_skips: true`. The guard log's
+`guards: N (0 failed, N skipped)` plus the per-lane `[SKIP]` entries and their
+`skip_reason` remain the honest read of which lanes graded nothing.
 
 **Pitfall 32 — `guards.test_command` is not the Go test command (POC-45).**
 `init` prints `Test cmd: go test -short -count=1 ./...` but writes no
