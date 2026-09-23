@@ -1148,6 +1148,111 @@ class TestStageSummaryDiagnostics:
         assert summary == "  ✗ tests: Command timed out"
 
 
+# ── GAP-058: a budget timeout is a DEGRADED lane, never a bare code failure ──
+
+
+class TestBudgetTimeoutAttribution:
+    """A step that exhausted its own budget must not read as a code finding.
+
+    GAP-058: grading ffbb57eb printed ``secrets: Command timed out`` against a
+    clean change — a budget overrun was indistinguishable from a failure. The
+    contract pinned here: the step's data carries ``timed_out``/``timeout_s``,
+    the error names the budget, the summary renders the lane in the ~
+    (DEGRADED) register, and a REAL failing test never picks up any of it.
+    """
+
+    def test_over_budget_step_carries_budget_data_and_named_error(self, tmp_workdir):
+        """run_bounded's timed_out → data fields + error that names the budget."""
+        pipeline = Pipeline({"pipeline": {"stages": []}}, tmp_workdir)
+        result = pipeline._run_script_step(
+            {"id": "tests", "type": "script", "run": "sleep 3; echo NEVER", "timeout": 1}, {}
+        )
+        assert result.passed is False
+        assert result.data["timed_out"] is True
+        assert result.data["timeout_s"] == 1
+        assert result.error == "Command timed out after 1s (step budget)"
+
+    def test_code_failure_is_never_classified_as_budget_timeout(self, tmp_workdir):
+        """The criterion-3 guard: `exit 1` is a plain failure, no timed_out flag."""
+        pipeline = Pipeline({"pipeline": {"stages": []}}, tmp_workdir)
+        result = pipeline._run_script_step(
+            {"id": "tests", "type": "script", "run": "echo boom; exit 1", "timeout": 30}, {}
+        )
+        assert result.passed is False
+        assert result.data.get("timed_out") is not True
+        assert "timed out" not in result.error
+        assert result.data["exit_code"] == 1
+
+    def test_stage_summary_renders_the_two_lanes_distinctly(self, tmp_workdir):
+        """~ + budget wording for the timeout, ✗ + output for the code failure."""
+        timed_out = StepResult(
+            id="tests",
+            type="script",
+            passed=False,
+            error="Command timed out after 3s (step budget)",
+            data={"timed_out": True, "timeout_s": 3},
+        )
+        code_fail = StepResult(
+            id="lint", type="script", passed=False, output="E501 found", data={"exit_code": 1}
+        )
+        stage = StageResult(id="tier1", passed=False, steps=[timed_out, code_fail])
+        summary = Pipeline({"pipeline": {"stages": []}}, tmp_workdir)._summarize_stage(stage)
+        assert summary == (
+            "  ~ tests: Command timed out after 3s (step budget)\n  ✗ lint: E501 found"
+        )
+
+    def test_stage_record_and_verdict_json_name_the_budget(self, tmp_workdir):
+        """to_dict() carries the data fields AND the stage degradation marker."""
+        from engine.pipeline import _record_runtime_skips
+
+        pipeline = Pipeline({"pipeline": {"stages": []}}, tmp_workdir)
+        step_result = pipeline._run_script_step(
+            {"id": "tests", "type": "script", "run": "sleep 3; echo NEVER", "timeout": 1}, {}
+        )
+        stage = StageResult(id="tier1", passed=False, steps=[step_result])
+        _record_runtime_skips(stage)
+        d = stage.to_dict()
+        timed = d["steps"][0]
+        assert timed["data"]["timed_out"] is True
+        assert timed["data"]["timeout_s"] == 1
+        assert "timed out after 1s (step budget)" in timed["error"]
+        assert d["degraded"] is True
+        assert d["skipped_steps"] == ["tests"]
+        assert "timed out after 1s (step budget)" in d["degradation_reason"]
+
+    def test_full_run_marks_the_stage_degraded_not_just_failed(self, tmp_workdir):
+        """End-to-end: the stage summary and verdict dict tell the two apart."""
+        config = {
+            "pipeline": {
+                "stages": [
+                    {
+                        "id": "tier1",
+                        "parallel": True,
+                        "on": ["pre-eval"],
+                        "steps": [
+                            {
+                                "id": "tests",
+                                "type": "script",
+                                "run": "sleep 3; echo NEVER",
+                                "timeout": 1,
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+        result = Pipeline(config, tmp_workdir).run(
+            {"id": "T", "title": "t", "criteria": []}, trigger="pre-eval"
+        )
+        tier1 = result["stages"]["tier1"]
+        assert result["passed"] is False
+        assert tier1["any_failed"] is True
+        assert tier1["degraded"] is True
+        assert tier1["skipped_steps"] == ["tests"]
+        assert "timed out after 1s (step budget)" in tier1["summary"]
+        assert "~ tests" in tier1["summary"]
+
+
 class TestSecretsScannerAttribution:
     """DF-GITREINS-POC-15: the scanner that ran is machine-readable."""
 
