@@ -264,16 +264,23 @@ index is non-empty, staged files are graded rather than the whole tree.
 ## 5. `gitreins judge`
 
 Evaluate a task: runs Tier 1 guards, then the Tier 2 LLM judge
-(unless skipped), and persists the verdict.
+(unless skipped), and persists the verdict. With `--ephemeral` the criteria are
+supplied inline and NOTHING is persisted — see
+[ephemeral runs](#ephemeral-runs-judge---ephemeral).
 
 ```
 gitreins judge <id> [--skip-tier2] [--async] [--status <job_id>] [--scope staged|working-tree] [--json]
+gitreins judge [<id>] --ephemeral --title <title> --criterion <criterion> [--skip-tier2] [--scope staged|working-tree] [--json]
+gitreins judge rorca-run-42-US-001 --ephemeral --title "Story gate" --criterion "Acceptance criteria are satisfied" --json
 ```
 
 | Option | Description |
 |--------|-------------|
-| `id` | Task ID (or job ID with `--status`) |
+| `id` | Task ID (or job ID with `--status`). Optional with `--ephemeral`, where the task exists only for this invocation |
 | `--skip-tier2` | Skip Tier 2 LLM evaluation; Tier 1 guards only |
+| `--ephemeral` | Evaluate inline `--title`/`--criterion` values and persist nothing (EVID-003) |
+| `--title <title>` | Ephemeral task title (required with `--ephemeral`) |
+| `--criterion <text>` | Ephemeral criterion — repeatable, one flag per criterion (required with `--ephemeral`) |
 | `--async` | Dispatch evaluation as a detached background job; returns a job ID |
 | `--status <job_id>` | Show status/result of a background job (id = job id, not task id) |
 | `--scope staged\|working-tree` | Change set the Tier 1 guards grade — same semantics as `gitreins guard --scope` (default `staged`) |
@@ -286,19 +293,51 @@ result, `1` for a non-passing one. The single-flight guard that points a second
 synchronous run at an in-flight job is skipped in JSON mode: the caller asked
 for a document for this run.
 
+### Ephemeral runs (`judge --ephemeral`)
+
+A per-story execution gate has to grade a task that exists NOWHERE: no task
+store entry, no verdict history, nothing to undo afterwards. `--ephemeral`
+builds the task in memory from `--title` and the repeated `--criterion` values
+and leaves the repository exactly as it found it:
+
+- no `TaskManager`, so `.gitreins/tasks.yaml` is never opened — a corrupt or
+  absent store cannot fail the gate, and a run cannot create one;
+- no `VerdictPersister` and no `.gitreins/history` entry, so nothing is
+  attributed to a task that does not exist;
+- no commit on the `gitreins` branch, no branch create/switch, no stash;
+- no tier-1 guard run log and no `.gitreins/usage.jsonl` line either: both are
+  files INSIDE the judged tree (`persist_log`/`persist_telemetry` off), and a
+  gate that may not mutate the repository may not leave them behind.
+
+An explicit `id` (as in the third example above) is used verbatim as the
+document's `subject.taskId`; without one the id is `ephemeral:<slug-of-title>`.
+`--ephemeral` requires a non-empty `--title` and at least one non-empty
+`--criterion` (a gate with no criteria would pass vacuously), and it cannot be
+combined with `--async`/`--status`/`--run-job` — those modes read and write the
+task/job stores an ephemeral run deliberately has no part in. Both are usage
+errors: exit `2`, like a missing `id` without `--ephemeral`.
+
+Operator-configured pipeline commands still run as configured (see
+[the evidence contract](evidence-contract-v1.md)), and so does tooling the
+graded toolchain itself runs — a linter's own cache directory is written by the
+linter, exactly as in a `gitreins guard` run.
+
 **Exit codes (sync mode)**
 
 | Code | Meaning |
 |------|---------|
 | 0 | Evaluation complete and the verdict PASSED (persisted) |
 | 1 | Task not found, or the evaluation verdict FAILED |
+| 2 | Usage error: a missing `id` without `--ephemeral`, `--ephemeral` without `--title`/`--criterion`, or `--ephemeral` combined with `--async`/`--status` |
 
 Sync `judge` propagates the verdict to the shell (DF-GITREINS-POC-16): a FAIL
 verdict exits 1, matching `gitreins guard` on the same tree, so a red gate can
 never be read as success by a script. Tier 1 grades the same check set the
 guard grades — see [the Tier 1 / guard parity contract](evaluator-loop.md#tier-1--guard-parity-contract-df-gitreins-poc-16)
 — and a tier1 narrower than the guard gate (nothing detectable) is marked
-degraded in `verdict.json` and warned about on the CLI.
+degraded in `verdict.json` and warned about on the CLI. An ephemeral run keeps
+the same exit codes and, without `--json`, the same summary on stdout, plus a
+line on stderr saying that nothing was written.
 
 **Exit codes (`--status` mode)**
 

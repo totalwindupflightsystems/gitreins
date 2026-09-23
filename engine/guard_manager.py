@@ -919,6 +919,7 @@ class GuardManager:
         scope: str = "staged",
         *,
         grade_full_tree: bool = False,
+        persist_log: bool = True,
     ):
         self.workdir = os.path.abspath(workdir)
         # Change scope (EVID-002): "staged" is the index (today's behaviour,
@@ -929,6 +930,11 @@ class GuardManager:
         if scope not in ("staged", "working-tree"):
             raise ValueError("scope must be 'staged' or 'working-tree'")
         self.scope = scope
+        # EVID-003: the run log (DF-018) is written INSIDE the graded tree, so
+        # a caller whose contract is "do not mutate the repository being
+        # graded" (the ephemeral judge) turns it off here. Keyword-only and
+        # defaulting True so every existing caller keeps writing the log.
+        self.persist_log = persist_log
         if config is None:
             config = _load_guard_config(self.workdir)
         self.config = config
@@ -1070,8 +1076,17 @@ class GuardManager:
             verdict — a write failure is recorded in ``extra`` (the CLI
             prints the reason instead of a path) and the result is returned
             untouched.
+
+            EVID-003: ``persist_log=False`` (the ephemeral judge) skips the
+            write entirely — the log lives inside the graded tree, and that
+            caller's contract is not to leave anything there. The skip is
+            recorded so the absence of a ``guard_log`` path is attributable
+            rather than a silent gap.
             """
-            self._persist_run_log(result)
+            if self.persist_log:
+                self._persist_run_log(result)
+            else:
+                result.extra["guard_log_skipped"] = "persist_log=False"
             return result
 
         if self._enabled["secrets"]:

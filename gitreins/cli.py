@@ -22,6 +22,7 @@ Usage:
     gitreins qa record --project <name> [--verdict PASS|FAIL --cell <name>=<status> ...]
     gitreins guard run
     gitreins judge <id>
+    gitreins judge [<id>] --ephemeral --title <title> --criterion <criterion> ...
     gitreins commit <message>
     gitreins mcp-server
     gitreins serve [--repo <path>] [--port <port>] [--project <name>]
@@ -33,6 +34,7 @@ import io
 import json
 import logging
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -63,6 +65,11 @@ GITREINS_GITIGNORE_ENTRIES = (
     # tracked path.
     ".gitreins/qa-ledger.jsonl",
 )
+
+# EVID-003: the id an ephemeral judge run carries when none was given on the
+# command line. It is a LABEL, never a key in any store — an ephemeral task is
+# built in memory and persisted nowhere.
+EPHEMERAL_TASK_ID_PREFIX = "ephemeral"
 
 DEFAULT_GITREINS_CONFIG = """\
 # GitReins Configuration
@@ -2101,22 +2108,67 @@ def cmd_guard_run(args):
         sys.exit(2)
 
 
+# Printed by `_judge_usage_error` — kept in argparse's shape so a reader (and a
+# caller matching on stderr) sees the same thing argparse itself would print.
+_JUDGE_USAGE = (
+    "gitreins judge <id> [--skip-tier2] [--async] [--status <job_id>] "
+    "[--scope staged|working-tree] [--json]\n"
+    "       gitreins judge [<id>] --ephemeral --title <title> --criterion <criterion> "
+    "[--criterion <criterion> ...] [--skip-tier2] [--scope staged|working-tree] [--json]"
+)
+
+
+def _judge_usage_error(message: str) -> None:
+    """Refuse a bad `judge` invocation exactly as argparse refuses one.
+
+    `judge`'s positional id is optional at the parser level (EVID-003: an
+    ephemeral run names a task that exists nowhere), so the modes that DO need
+    an id carry the requirement here. The message shape and the exit code are
+    argparse's own (2) because callers — scripts, CI steps, agents — must be
+    able to tell a malformed invocation from a failed gate (1).
+    """
+    print(f"usage: {_JUDGE_USAGE}", file=sys.stderr)
+    print(f"gitreins: error: {message}", file=sys.stderr)
+    sys.exit(2)
+
+
 def cmd_judge(args):
-    """Evaluate a task — sync (default), or dispatch a background job.
+    """Evaluate a task — sync (default), ephemeral, or dispatch a background job.
 
     ``--async`` detaches a worker process and returns a job id; the job
     record lives in the shared disk store, so it survives this CLI
     exiting and can be polled with ``gitreins judge --status <job_id>``
     (or the MCP ``judge.status`` tool). ``--run-job`` is the internal
     worker mode executed by the detached child.
+
+    ``--ephemeral`` (EVID-003) evaluates criteria supplied inline and persists
+    nothing at all — see ``_cmd_judge_ephemeral``.
     """
+    ephemeral = getattr(args, "ephemeral", False)
+    # The background modes all read a task out of the store and write a job
+    # record; neither exists for an ephemeral run, so the combination is a
+    # usage error rather than a flag that is silently ignored.
+    for flag, active in (
+        ("--status", getattr(args, "status", False)),
+        ("--run-job", getattr(args, "run_job", False)),
+        ("--async", getattr(args, "async_dispatch", False)),
+    ):
+        if active and ephemeral:
+            _judge_usage_error(f"argument {flag}: not allowed with argument --ephemeral")
+
     if getattr(args, "status", False):
+        if getattr(args, "id", None) is None:
+            _judge_usage_error("the following arguments are required: id")
         _cmd_judge_status(args.id)
         return
     if getattr(args, "run_job", False):
+        if getattr(args, "id", None) is None:
+            _judge_usage_error("the following arguments are required: id")
         _cmd_judge_worker(args.id)
         return
     if getattr(args, "async_dispatch", False):
+        if getattr(args, "id", None) is None:
+            _judge_usage_error("the following arguments are required: id")
         _cmd_judge_async(args.id)
         return
 
@@ -2124,6 +2176,15 @@ def cmd_judge(args):
     # stdout, so it is skipped there.
     json_output = getattr(args, "json_output", False)
     scope = getattr(args, "scope", "staged")
+
+    if ephemeral:
+        _cmd_judge_ephemeral(args, scope=scope, json_output=json_output)
+        return
+
+    # A missing id is allowed ONLY with --ephemeral (EVID-003).
+    if getattr(args, "id", None) is None:
+        _judge_usage_error("the following arguments are required: id")
+
     if not json_output:
         _check_for_updates()
     from engine.task_manager import TaskManager
@@ -2188,6 +2249,94 @@ def cmd_judge(args):
     # "Overall: FAIL" while exiting 0 lets a caller (script, CI step, agent)
     # treat a red gate as success — the same silent-pass class this task is
     # about. `gitreins guard` already exits 1 on the same tree.
+    if not result.passed:
+        sys.exit(1)
+
+
+def _ephemeral_task_id(title: str) -> str:
+    """A readable id for a task that was never stored (EVID-003).
+
+    Nothing is persisted, so the id is only a label for the printed summary and
+    the evidence document's ``subject.taskId``: it is derived from the title so
+    two different story gates are distinguishable, and falls back to the bare
+    prefix when the title has no slug-able characters.
+    """
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:48].strip("-")
+    return f"{EPHEMERAL_TASK_ID_PREFIX}:{slug}" if slug else EPHEMERAL_TASK_ID_PREFIX
+
+
+def _cmd_judge_ephemeral(args, *, scope: str, json_output: bool) -> None:
+    """EVID-003: evaluate inline criteria with NOTHING persisted.
+
+    A per-story execution gate must not mutate the repository it is judging, so
+    this path never touches the stores or the git state a normal judge run
+    owns:
+
+    * no ``TaskManager`` — the task is built in memory from ``--title`` and the
+      repeatable ``--criterion`` values;
+    * no ``.gitreins/tasks.yaml`` write (that is the task store's, and it is
+      never opened);
+    * no ``_persist_result`` / ``VerdictPersister`` — so no
+      ``.gitreins/history`` entry and no verdict commit on the ``gitreins``
+      branch;
+    * no branch create/switch, no stash;
+    * and no tier-1 guard run log either: GuardManager's DF-018 log is written
+      inside the judged tree, which is exactly the mutation this mode exists to
+      avoid (``persist_log=False``).
+
+    Exit codes follow the v1 contract (EVID-001): 0 for a passing result, 1 for
+    a non-passing one; a bad invocation is the usage error above (2). With
+    ``--json`` stdout holds exactly one evidence document and
+    ``judge_evidence(..., ephemeral=True)`` marks it as unpersisted.
+    """
+    from engine.judge import Judge
+    from engine.llm import LLMClient
+    from engine.task_manager import Task
+
+    title = (getattr(args, "title", None) or "").strip()
+    criteria = [criterion for criterion in (getattr(args, "criteria", None) or [])]
+    if not title:
+        _judge_usage_error("argument --ephemeral: requires a non-empty --title")
+    if not criteria or any(not criterion.strip() for criterion in criteria):
+        # A gate with no criteria would evaluate nothing and pass — fail loud
+        # instead, like every other zero-work path in this harness.
+        _judge_usage_error("argument --ephemeral: requires at least one non-empty --criterion")
+
+    task_id = getattr(args, "id", None) or _ephemeral_task_id(title)
+    task = Task(id=task_id, title=title, criteria=criteria)
+
+    if not json_output:
+        _check_for_updates()
+        if getattr(args, "skip_tier2", False):
+            print("Tier 2 skipped (--skip-tier2 flag)")
+
+    workdir = get_workdir()
+    llm = LLMClient()
+    config = load_config(workdir)
+    judge = Judge(
+        llm, workdir, guard_config=config, scope=scope, persist_log=False, persist_telemetry=False
+    )
+
+    if json_output:
+        from engine.evidence import dumps_evidence, judge_evidence
+
+        # Same stdout discipline as the sync path: the evaluator narrates, so
+        # its output is captured and the document is the only thing on stdout
+        # (a FAIL echoes the narration on stderr).
+        captured = io.StringIO()
+        with contextlib.redirect_stdout(captured):
+            result = judge.evaluate_task(task, skip_tier2=getattr(args, "skip_tier2", False))
+        if not result.passed:
+            sys.stderr.write(captured.getvalue())
+        print(dumps_evidence(judge_evidence(result, task, scope, ephemeral=True)))
+    else:
+        result = judge.evaluate_task(task, skip_tier2=getattr(args, "skip_tier2", False))
+        print(result.summary)
+        print(
+            "Ephemeral run — no task, verdict, branch or stash state was written.",
+            file=sys.stderr,
+        )
+
     if not result.passed:
         sys.exit(1)
 
@@ -3127,8 +3276,48 @@ def main():
     )
 
     # judge
-    judge_p = sub.add_parser("judge", help="Evaluate a task")
-    judge_p.add_argument("id")
+    judge_p = sub.add_parser(
+        "judge",
+        help="Evaluate a task",
+        description=(
+            "Evaluate a task: Tier 1 guards, then the Tier 2 LLM judge. With "
+            "--ephemeral the criteria are supplied inline and NOTHING is "
+            "persisted — no task entry, no verdict history, no branch or stash."
+        ),
+    )
+    # Optional ONLY so `judge --ephemeral --title ...` can name a task that
+    # exists nowhere (EVID-003); cmd_judge enforces the requirement for every
+    # other mode with argparse's own usage error and exit code 2.
+    judge_p.add_argument(
+        "id",
+        nargs="?",
+        default=None,
+        help=(
+            "Task ID (or job ID with --status). Optional with --ephemeral, "
+            "where the task exists only for this invocation"
+        ),
+    )
+    judge_p.add_argument(
+        "--ephemeral",
+        action="store_true",
+        help=(
+            "Evaluate inline --title/--criterion values and persist nothing: "
+            "no tasks.yaml entry, no verdict, no branch, no stash (EVID-003)"
+        ),
+    )
+    judge_p.add_argument(
+        "--title",
+        default=None,
+        help="Ephemeral task title (required with --ephemeral)",
+    )
+    judge_p.add_argument(
+        "--criterion",
+        dest="criteria",
+        action="append",
+        default=None,
+        metavar="TEXT",
+        help="Ephemeral criterion — repeat once per criterion (required with --ephemeral)",
+    )
     judge_p.add_argument(
         "--skip-tier2", action="store_true", help="Skip Tier 2 LLM evaluation; Tier 1 guards only"
     )

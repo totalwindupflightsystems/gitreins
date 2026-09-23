@@ -20,8 +20,10 @@ the emitters, so this module now grades BOTH halves:
   the git index byte-identical after the run (EVID-002 AC1/AC2/AC3),
 - the contract document's normative promises stay in the doc.
 
-`judge --ephemeral` is still unimplemented (EVID-003); its subject shape is
-pinned at the schema level below.
+`judge --ephemeral` is implemented (EVID-003): its subject shape is pinned at
+the schema level below, and the command itself — including the assertion that
+it persists nothing — is exercised end-to-end against a real repository in
+`tests/test_cli.py::TestJudgeEphemeralCLI`.
 """
 
 import hashlib
@@ -212,9 +214,10 @@ def test_report_document_uses_history_scope(schema, validate):
 
 
 # Adapted from the PR's test_ephemeral_judge_has_no_task_history_stash_or_
-# branch_side_effects (payload["subject"]["ephemeral"] is True): the
-# side-effect-free ephemeral behaviour cannot be exercised until the
-# `judge --ephemeral` CLI exists (EVID-002); the subject shape is pinned here.
+# branch_side_effects (payload["subject"]["ephemeral"] is True): the subject
+# shape is pinned here, and the side-effect-free behaviour it describes is
+# exercised against the real CLI by
+# tests/test_cli.py::TestJudgeEphemeralCLI (EVID-003).
 def test_judge_document_subject_shape(schema, validate):
     subject = schema["properties"]["subject"]
     assert subject["additionalProperties"] is False
