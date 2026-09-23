@@ -326,11 +326,20 @@ truncated, source, lines}], "model", "input_tokens", "tokens_estimated",
 (≥ 0.85 — the evidence is sufficient), **REVIEW** (0.50–0.85 — a human or the full
 judge looks), **UNRESOLVED** (< 0.50 — `missing_kind` names what is absent), and
 **ABSTAIN** for any failure. An ABSTAIN is fail-closed, never "looks fine": it carries
-a named `abstain_reason` (`no-credentials`, `all-credentials-rejected`,
+a named `abstain_reason` (`surface-disabled`, `no-credentials`, `all-credentials-rejected`,
 `transport-error`, `http-error`, `malformed-response`, `bundle-over-server-ceiling`,
 `budget-exhausted`, `empty-bundle`, `empty-question`) and an `abstain_action`
 suggesting the fix. The same object is what `gitreins resolve --json` prints; the
 CLI's non-zero exit on UNRESOLVED/ABSTAIN corresponds to `exit_code: 1` here.
+
+**Disabled by default.** Like every surface of the gate, this tool runs only when
+`resolution.enabled.mcp: true` is set in the repo's `.gitreins/config.yaml` — absent, the
+tool returns `ABSTAIN` with `abstain_reason: surface-disabled` (never a guess) and an
+`abstain_action` naming the enabling fix. It is an explicit act because the bundle then
+leaves the host for OpenRouter → TypeSafe; `gitreins init` writes the block with every
+surface disabled and never flips one for you. The complete block — all four surfaces,
+`model`, `tokens_max`, `bands` and `egress_exclude` — is in
+`docs/jev-resolution-gate.md` §9.
 
 ## Async Judge-Job Lifecycle
 

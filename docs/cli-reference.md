@@ -809,11 +809,25 @@ the MCP `context.resolve` tool returns (see `docs/mcp-api.md`).
 | `RESOLVED` | probability ≥ 0.85 — the evidence is sufficient |
 | `REVIEW` | 0.50–0.85 — a human or the full judge looks |
 | `UNRESOLVED` | probability < 0.50 — `missing_kind` names what to build |
-| `ABSTAIN` | any failure: no key, dead key, transport, exhausted budget, empty bundle — fail closed, with a named reason and a suggested fix |
+| `ABSTAIN` | any failure: surface disabled by config (`surface-disabled`), no key, dead key, transport, exhausted budget, empty bundle — fail closed, with a named reason and a suggested fix |
 
 The Jev call requires an OpenRouter key: `GITREINS_OPENROUTER_KEY` in the
 environment or in a known `.env` file (`~/.hermes/.env`, `./.env`,
 `~/.hermes/env-file`). Hilo must be installed for the bundle assembly.
+
+**Enabling.** The surface ships disabled. With no `resolution.enabled.cli: true` in
+`.gitreins/config.yaml` — a missing key, a `false` value and a wrong-typed block all read
+as OFF — the command fails closed with `abstain_reason: surface-disabled`, exit 1, and
+never reaches Hilo, the key ring or the network. Enabling is your explicit act, because the
+bundle then leaves the host for OpenRouter → TypeSafe; `gitreins init` writes the block with
+every surface disabled and never flips one for you. The complete block — all four surfaces,
+`model`, `tokens_max`, `bands`, `egress_exclude` — is in
+[docs/jev-resolution-gate.md](jev-resolution-gate.md) §9:
+
+```bash
+# with resolution.enabled.cli: true in .gitreins/config.yaml:
+gitreins resolve "Does engine/evidence_bounds.py truncate text?"
+```
 
 **Exit codes**
 
@@ -825,8 +839,9 @@ environment or in a known `.env` file (`~/.hermes/.env`, `./.env`,
 UNRESOLVED and ABSTAIN are both exit 1 by design — a gate that failed must not read
 as a gate that passed — and are distinguishable in `--json`: an UNRESOLVED verdict
 carries a real `probability` with `abstain_reason: null`, while an ABSTAIN carries
-`verdict: "ABSTAIN"`, a named `abstain_reason` (e.g. `no-credentials` vs
-`budget-exhausted` vs a dead key) and an `abstain_action` suggesting the fix.
+`verdict: "ABSTAIN"`, a named `abstain_reason` (e.g. `surface-disabled` when nobody
+enabled the surface, vs `no-credentials` vs `budget-exhausted` vs a dead key) and an
+`abstain_action` suggesting the fix.
 
 ```
 gitreins resolve "Does engine/evidence_bounds.py truncate text?" --json
@@ -868,6 +883,19 @@ the gate saw.
 
 This is a signal, not a gate: a skip annotates a row, it is never the sole
 authority for a merge or a commit (spec §6.5).
+
+**Enabling.** `predispatch` ships disabled too — and its failure mode is the opposite one:
+with `resolution.enabled.predispatch` absent or `false` the gate never runs and the record
+is an ABSTAIN mapped to plain `dispatch` (fail open, above). Set
+`resolution.enabled.predispatch: true` in `.gitreins/config.yaml` to run the real policy;
+the complete block is in [docs/jev-resolution-gate.md](jev-resolution-gate.md) §9. Do not
+enable it to "fix" a dispatch that is blocked for another reason — the ABSTAIN record
+already says the gate did not run.
+
+```bash
+# with resolution.enabled.predispatch: true in .gitreins/config.yaml:
+gitreins preflight "Is JEVRES-003 already implemented?"
+```
 
 **Exit codes**
 

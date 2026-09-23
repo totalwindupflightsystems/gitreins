@@ -13,12 +13,16 @@ Covers the plumbing only; the measured numbers stay in
   tree whose ``.env`` and internal key material must never reach the bundle.
 * ``gitreins init`` writes the disabled-by-default block and preserves a
   user-authored one.
+* The guide the fail-closed hint points at stays true: ``docs/jev-resolution-gate.md``
+  §9 exists, its YAML block parses, and this repo's own tracked config is the
+  enabled posture it claims (DF-GITREINS-POC-35).
 """
 
 from __future__ import annotations
 
 import importlib.util
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -151,8 +155,15 @@ class TestSurfaceEnabled:
         with pytest.raises(ValueError, match="unknown resolution surface"):
             resolution.surface_enabled("carrier-pigeon", defaults=GitReinsDefaults())
 
-    def test_none_defaults_means_off(self):
-        enabled, reason = resolution.surface_enabled("cli", defaults=None)
+    def test_none_defaults_means_off(self, tmp_path):
+        """No `defaults` passed: the real loader runs, and absent config is OFF.
+
+        Hermetic on purpose (an explicit empty workdir): with the process CWD in
+        charge, this assertion depended on whatever the CHECKOUT's own
+        `.gitreins/config.yaml` happened to say — and this repo now enables its
+        `cli`/`mcp` surfaces, a legal config rather than a gate failure.
+        """
+        enabled, reason = resolution.surface_enabled("cli", workdir=str(tmp_path), defaults=None)
         assert enabled is False
         assert reason == "surface-disabled"
 
@@ -408,3 +419,108 @@ class TestInitWritesResolutionDefaults:
         verdict = _json.loads(out)
         assert verdict["verdict"] == "ABSTAIN"
         assert verdict["abstain_reason"] == "surface-disabled"
+
+
+# ── The docs the fail-closed hint points at (DF-GITREINS-POC-35) ─────────────
+
+GUIDE_PATH = REPO_ROOT / "docs" / "jev-resolution-gate.md"
+_ENABLING_HEADING = "## 9. Enabling a surface"
+
+
+def _guide_text() -> str:
+    return GUIDE_PATH.read_text(encoding="utf-8")
+
+
+def _section_text(heading: str) -> str:
+    """Everything from *heading* to the next `## ` heading (or EOF)."""
+    lines = _guide_text().splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip() == heading)
+    rest = lines[start + 1 :]
+    end = next((i for i, line in enumerate(rest) if line.startswith("## ")), len(rest))
+    return "\n".join(rest[:end])
+
+
+def _yaml_block_under(heading: str) -> dict:
+    """The first ```yaml fence after *heading* in the guide, parsed as YAML."""
+    lines = _guide_text().splitlines()
+    start = next(i for i, line in enumerate(lines) if line.strip() == heading)
+    fence = next(i for i in range(start, len(lines)) if lines[i].strip().startswith("```yaml"))
+    body: list[str] = []
+    for line in lines[fence + 1 :]:
+        if line.strip() == "```":
+            break
+        body.append(line)
+    parsed = yaml.safe_load("\n".join(body))
+    assert isinstance(parsed, dict), parsed
+    return parsed
+
+
+class TestEnablingDocs:
+    """The `surface-disabled` hint sends the user to §9 of this guide.
+
+    Disabled is the DEFAULT posture, so that pointer is the only documented way
+    out of the dead end. These tests keep it true — the section exists, its
+    block is real YAML naming every surface — and keep this repo's own tracked
+    config honest about the posture it actually runs.
+    """
+
+    def test_enabling_section_exists_and_closes_the_guide(self):
+        headings = [line.strip() for line in _guide_text().splitlines() if line.startswith("## ")]
+        assert _ENABLING_HEADING in headings
+        assert headings[-1] == _ENABLING_HEADING, "§9 must be the final section"
+        assert [line for line in _guide_text().splitlines() if "## 9" in line] == [
+            _ENABLING_HEADING
+        ], "exactly one '## 9' heading — the hint's section reference"
+
+    def test_enabling_block_is_real_yaml_covering_every_knob(self):
+        block = _yaml_block_under(_ENABLING_HEADING)["resolution"]
+        enabled = block["enabled"]
+        assert set(enabled) == {"cli", "mcp", "predispatch", "judge_prescreen"}
+        assert all(isinstance(value, bool) for value in enabled.values()), enabled
+        assert block["model"] == resolution.JEV_MODEL
+        assert block["tokens_max"] == resolution.MAX_BUNDLE_TOKENS
+        assert block["bands"] == {
+            "resolved_at": pytest.approx(resolution.RESOLVED_AT),
+            "review_at": pytest.approx(resolution.REVIEW_AT),
+        }
+        assert isinstance(block["egress_exclude"], list)
+
+    def test_enabling_section_says_init_writes_the_block_disabled(self):
+        section = _section_text(_ENABLING_HEADING)
+        assert "`gitreins init`" in section
+        assert "explicit" in section.lower()
+        assert "disabl" in section.lower()
+        assert "third party" in section.lower() or "egress" in section.lower()
+
+    def test_surface_disabled_hint_reference_resolves_to_a_real_heading(self):
+        """The hint's path AND section must exist — that was the dead end."""
+        hint = resolution._REASON_ACTIONS["surface-disabled"]
+        match = re.search(r"(docs/[\w./-]+\.md)\s*§(\d+)", hint)
+        assert match, f"the hint no longer names a doc section: {hint!r}"
+        doc_path, section = match.group(1), match.group(2)
+        path = REPO_ROOT / doc_path
+        assert path.is_file(), f"the hint cites a missing doc: {doc_path}"
+        text = path.read_text(encoding="utf-8")
+        assert re.search(rf"^## {section}\.", text, re.MULTILINE), (
+            f"the hint cites {doc_path} §{section}; that section does not exist"
+        )
+
+    def test_repo_config_enables_cli_and_mcp_only(self):
+        """Tracked config: cli+mcp on, judge-adjacent off (no JEVRES-005 numbers)."""
+        with open(REPO_ROOT / ".gitreins" / "config.yaml", encoding="utf-8") as handle:
+            config = yaml.safe_load(handle)
+        assert config["resolution"]["enabled"] == {
+            "cli": True,
+            "mcp": True,
+            "predispatch": False,
+            "judge_prescreen": False,
+        }
+        # The live gate agrees — same file, real loader, no network, no credentials.
+        defaults = load_defaults(str(REPO_ROOT))
+        assert resolution.surface_enabled("cli", defaults=defaults) == (True, None)
+        assert resolution.surface_enabled("mcp", defaults=defaults) == (True, None)
+        for surface in ("predispatch", "judge_prescreen"):
+            assert resolution.surface_enabled(surface, defaults=defaults) == (
+                False,
+                "surface-disabled",
+            )
