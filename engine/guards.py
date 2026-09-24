@@ -133,35 +133,51 @@ def check_go_lint(workdir: str, changed_files: list[str] | None = None) -> GoGua
         return _no_go_files_result("go_lint", changed_files)
 
     # Try golangci-lint first. run_bounded never raises for a missing
-    # binary — it returns {"error": ...} without an exit_code — so any
-    # non-zero/absent outcome falls through to go vet (DF-CRIER-258:
-    # DF-008's kill-group discipline now covers this spawn too).
+    # binary — it returns {"error": ...} without an exit_code — so a
+    # spawn failure falls through to go vet (DF-CRIER-258: DF-008's
+    # kill-group discipline now covers this spawn too).
     result = command_hygiene.run_bounded(
         ["golangci-lint", "run", "--new-from-rev=HEAD~1", *go_files],
         cwd=workdir,
         timeout=60,
         env=_sanitized_env(),
     )
-    if result.get("exit_code") == 0:
-        return GoGuardResult(name="go_lint", passed=True, output="golangci-lint: clean")
-    # Fall through to go vet on failure
-
-    # Fallback: go vet (per package or per file)
-    result = command_hygiene.run_bounded(
-        ["go", "vet", "./..."],
-        cwd=workdir,
-        timeout=60,
-        env=_sanitized_env(),
-    )
-    if "error" in result and "exit_code" not in result:
-        # Spawn failure (e.g. go itself missing) — surfaced in error,
-        # matching the old except-Exception contract.
-        return GoGuardResult(name="go_lint", passed=False, error=result["error"])
+    if "exit_code" not in result:
+        # DF-GITREINS-POC-43: the linter never RAN — every shape run_bounded
+        # can return without a verdict: spawn failure ({"error": ...}, no
+        # exit_code) or a refused busy-wait ({"refused", "reason"}). Only
+        # this may fall through to go vet; exit_code=1 (incl. a timed-out
+        # kill's -9) means the process ran and its verdict must be graded.
+        detail = result.get("error") or result.get("reason") or "linter did not run"
+        note = f"golangci-lint unavailable ({detail}); "
+        vet = command_hygiene.run_bounded(
+            ["go", "vet", "./..."],
+            cwd=workdir,
+            timeout=60,
+            env=_sanitized_env(),
+        )
+        if "error" in vet and "exit_code" not in vet:
+            # Spawn failure (e.g. go itself missing) — surfaced in error,
+            # matching the old except-Exception contract.
+            return GoGuardResult(name="go_lint", passed=False, error=vet["error"])
+        output = vet.get("output") or ""
+        if len(output) > 2000:
+            output = output[:2000] + "\n... [truncated]"
+        if vet.get("exit_code") == 0:
+            return GoGuardResult(
+                name="go_lint", passed=True, output=f"{note}graded by go vet: clean"
+            )
+        return GoGuardResult(
+            name="go_lint", passed=False, output=f"{note}graded by go vet:\n{output}"
+        )
+    # The linter ran: its verdict is authoritative. A real exit 1 with
+    # findings must never masquerade as "ok" via a clean go vet
+    # (DF-GITREINS-POC-43 false-PASS).
     output = result.get("output") or ""
     if len(output) > 2000:
         output = output[:2000] + "\n... [truncated]"
-    if result.get("exit_code") == 0:
-        return GoGuardResult(name="go_lint", passed=True, output="go vet: clean")
+    if result["exit_code"] == 0:
+        return GoGuardResult(name="go_lint", passed=True, output="golangci-lint: clean")
     return GoGuardResult(name="go_lint", passed=False, output=output)
 
 
