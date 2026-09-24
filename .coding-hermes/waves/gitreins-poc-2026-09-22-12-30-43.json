@@ -1,0 +1,33 @@
+{
+  "tick": "gitreins-poc-2026-09-22-12-30-43",
+  "base_sha": "8450ef6",
+  "armed_at": "2026-09-22T12:30:43Z",
+  "workers": [
+    {
+      "task_id": "GR-140",
+      "worktree": "/home/kara/worktrees/gitreins-poc-GR-140",
+      "branch": "wt/GR-140",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "status": "merged"
+    },
+    {
+      "task_id": "JEVRES-004",
+      "worktree": "/home/kara/worktrees/gitreins-poc-JEVRES-004",
+      "branch": "wt/JEVRES-004",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "status": "merged"
+    },
+    {
+      "task_id": "JEVRES-006",
+      "worktree": "/home/kara/worktrees/gitreins-poc-JEVRES-006",
+      "branch": "wt/JEVRES-006",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "status": "merged"
+    }
+  ],
+  "finished_at": "2026-09-24T21:42:00Z",
+  "closeout_note": "closed retroactively 2026-09-24: GR-140/JEVRES-004/JEVRES-006 all complete on board; worktrees no longer present"
+}

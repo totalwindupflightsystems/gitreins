@@ -1,0 +1,47 @@
+{
+  "tick_id": "gitreins-2026-09-24-09-36-00",
+  "created_at": "2026-09-24T10:00:00Z",
+  "project": "gitreins",
+  "budget": 2,
+  "base_sha": "ebb9e3f",
+  "base_ref": "main",
+  "workers": [
+    {
+      "task_id": "DF-GITREINS-POC-49",
+      "branch": "wt/DF-GITREINS-POC-49",
+      "worktree": "~/worktrees/gitreins-DF-GITREINS-POC-49",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "scope": [
+        "engine/pipeline.py",
+        "tests/test_pipeline.py",
+        "engine/types.py"
+      ],
+      "status": "merged",
+      "sha": "b2ffff4ff92c515d7ae1c1a36bdef4222f88141b",
+      "judge": "a6bf542a PASS tier1+tier2 3/3",
+      "merge": "57704f2",
+      "merge_result": "merged --no-ff; merged-tree guard --full PASS; pushed github/main (rev-list 0); worktree removed"
+    },
+    {
+      "task_id": "DF-GITREINS-POC-50",
+      "branch": "wt/DF-GITREINS-POC-50",
+      "worktree": "~/worktrees/gitreins-DF-GITREINS-POC-50",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "scope": [
+        "engine/worktree_manager.py",
+        "cli.py",
+        "tests/test_worktree.py",
+        "docs/cli-reference.md"
+      ],
+      "status": "merged",
+      "sha": "23098fd6b5237dc6c8f78e7bad104e37575c9dcd",
+      "judge": "02a84919 PASS tier1+tier2 3/3",
+      "merge": "f9b6743",
+      "merge_result": "merged --no-ff; merged-tree guard --full PASS; pushed github/main (rev-list 0); worktree removed"
+    }
+  ],
+  "recovered_by_tick": "gitreins-2026-09-24-21-14-13",
+  "finished_at": "2026-09-24T21:42:00Z"
+}
