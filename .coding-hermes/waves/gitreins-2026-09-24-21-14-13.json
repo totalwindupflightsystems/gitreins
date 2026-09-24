@@ -1,0 +1,29 @@
+{
+  "tick_id": "gitreins-2026-09-24-21-14-13",
+  "created_at": "2026-09-24T21:46:00Z",
+  "project": "gitreins",
+  "budget": 4,
+  "base_sha": "8a7df4c",
+  "base_ref": "main",
+  "note": "wave phase 2 — recovery of tick gitreins-2026-09-24-09-36-00 completed first (POC-49/POC-50 merged); this manifest covers only the NEW wave dispatched after recovery",
+  "workers": [
+    {
+      "task_id": "DF-GITREINS-POC-56",
+      "branch": "wt/DF-GITREINS-POC-56",
+      "worktree": "~/worktrees/gitreins-DF-GITREINS-POC-56",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "scope": ["gitreins/serve.py", "tests/", "README.md", "CONTRIBUTING.md"],
+      "status": "dispatched"
+    },
+    {
+      "task_id": "DF-GITREINS-POC-51",
+      "branch": "wt/DF-GITREINS-POC-51",
+      "worktree": "~/worktrees/gitreins-DF-GITREINS-POC-51",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "scope": ["engine/guard_manager.py", "engine/pipeline.py", "tests/", "README.md", "CONTRIBUTING.md"],
+      "status": "dispatched"
+    }
+  ]
+}
