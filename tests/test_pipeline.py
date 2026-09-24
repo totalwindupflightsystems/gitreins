@@ -4,6 +4,8 @@ axiom:trace work_item=GR-001 spec=specs/06-Pipeline-Engine.md plan=.memory-bank/
 """
 
 import os
+import shlex
+import sys
 from unittest.mock import MagicMock, patch
 
 import yaml
@@ -1309,3 +1311,148 @@ class TestSecretsScannerAttribution:
         step = {"id": "lint", "run": "echo 'secrets: scanners=gitleaks'"}
         result = pipeline._run_script_step(step, {})
         assert "secrets_scanners" not in result.data
+
+
+# ── DF-GITREINS-POC-49: tier1 grades a benign pytest exit 5, like the guard ──
+
+
+class TestPytestExit5BenignSkip:
+    """A tree that collects zero tests must not read as a tier-1 failure.
+
+    DF-GITREINS-POC-49: `gitreins guard` classifies pytest exit 5 carrying
+    pytest's own "no tests ran" summary and NO collection errors as a benign
+    skipped pass (GR-GAP-048 — engine/guard_manager.py:2081). The judge's tier1
+    step graded only the number (``passed = out["exit_code"] == 0``), so the
+    SAME tree and commit read `Stage tier1: FAIL` / `Overall: FAIL` under
+    `gitreins judge` while the pre-commit hook had just passed it. The step now
+    consults the guard's own classifier (imported, not re-implemented) and
+    records the same skip facts its GuardResult carries.
+
+    Pinned here: the benign exit-5 decision and its skip facts; that a
+    collection-error exit 5, a non-pytest exit 5 and a pytest exit 127 all stay
+    failures; and that the stage summary renders the skip in the ~ register
+    instead of a ✓ that would claim the tests ran.
+    """
+
+    def _pipeline(self, workdir) -> Pipeline:
+        return Pipeline({"pipeline": {"stages": []}}, str(workdir))
+
+    @staticmethod
+    def _pytest_step(run: str) -> dict:
+        return {"id": "tests", "type": "script", "run": run}
+
+    def test_benign_exit_5_from_a_real_pytest_run_is_a_skip_not_a_failure(self, tmp_workdir):
+        """AC1: a workdir with no tests collects nothing → pass with the reason."""
+        step = self._pipeline(tmp_workdir)._run_script_step(
+            self._pytest_step(f"{shlex.quote(sys.executable)} -m pytest -p no:cacheprovider"),
+            {"id": "DF-GITREINS-POC-49", "criteria": []},
+        )
+
+        assert step.data["exit_code"] == 5, step.output[-2000:]
+        # Evidence preserved: neither the number nor the classification is
+        # swallowed by the decision below.
+        assert step.data["pytest_outcome"]["kind"] == "no-tests-collected"
+        assert step.passed is True
+        assert step.data["skipped"] is True
+        assert step.data["skip_reason"] == "no tests collected"
+
+    def test_collection_error_exit_5_still_fails(self, tmp_workdir):
+        """AC2: the benign classifier rejects an exit 5 with collection errors."""
+        step = self._pipeline(tmp_workdir)._run_script_step(
+            self._pytest_step(
+                "echo 'ERROR collecting test_broken.py'; "
+                "echo 'pytest: no tests ran in 0.01s'; exit 5"
+            ),
+            {},
+        )
+
+        assert step.passed is False
+        assert step.data["exit_code"] == 5
+        # The classification is still recorded — only the DECISION differs.
+        assert step.data["pytest_outcome"]["kind"] == "no-tests-collected"
+        assert "skipped" not in step.data
+        assert "skip_reason" not in step.data
+
+    def test_non_pytest_exit_5_still_fails(self, tmp_workdir):
+        """AC3: the invocation gate holds — some other tool's 5 is not a skip."""
+        step = self._pipeline(tmp_workdir)._run_script_step(
+            {"id": "lint", "type": "script", "run": "echo 'no tests ran in 0.01s'; exit 5"},
+            {},
+        )
+
+        assert step.passed is False
+        assert step.data["exit_code"] == 5
+        assert "pytest_outcome" not in step.data
+        assert "skipped" not in step.data
+
+    def test_pytest_exit_127_still_fails(self, tmp_workdir):
+        """AC4: a missing runner stays a failure in both surfaces (GR-GAP-064)."""
+        step = self._pipeline(tmp_workdir)._run_script_step(
+            self._pytest_step("pytest --version >/dev/null 2>&1; exit 127"),
+            {},
+        )
+
+        assert step.passed is False
+        assert step.data["exit_code"] == 127
+        assert "skipped" not in step.data
+
+    def test_stage_summary_renders_the_skip_never_a_tick(self, tmp_workdir):
+        """A skipped pass is the ~ (DEGRADED) register the guard console uses."""
+        stage = StageResult(
+            id="tier1",
+            passed=True,
+            steps=[
+                StepResult(
+                    id="tests",
+                    type="script",
+                    passed=True,
+                    output="============================ no tests ran in 0.35s ============================",
+                    data={
+                        "exit_code": 5,
+                        "pytest_outcome": {"kind": "no-tests-collected"},
+                        "skipped": True,
+                        "skip_reason": "no tests collected",
+                    },
+                )
+            ],
+        )
+        summary = self._pipeline(tmp_workdir)._summarize_stage(stage)
+        assert summary == "  ~ tests: skipped (no tests collected)"
+
+    def test_full_tier1_run_passes_and_names_the_skip(self, tmp_workdir):
+        """AC1 end-to-end: a full pipeline run is not failed by this step."""
+        config = {
+            "pipeline": {
+                "stages": [
+                    {
+                        "id": "tier1",
+                        "parallel": True,
+                        "on": ["pre-eval"],
+                        "steps": [
+                            self._pytest_step(
+                                f"{shlex.quote(sys.executable)} -m pytest -p no:cacheprovider"
+                            )
+                        ],
+                    }
+                ]
+            }
+        }
+        result = Pipeline(config, str(tmp_workdir)).run(
+            {"id": "T", "title": "t", "criteria": []}, trigger="pre-eval"
+        )
+
+        tier1 = result["stages"]["tier1"]
+        assert result["passed"] is True
+        assert tier1["passed"] is True
+        assert tier1["any_failed"] is False
+        assert tier1["steps"][0]["passed"] is True
+        assert tier1["steps"][0]["data"]["exit_code"] == 5
+        assert tier1["steps"][0]["data"]["skip_reason"] == "no tests collected"
+        assert "~ tests: skipped (no tests collected)" in tier1["summary"]
+        # Deliberately NOT a stage-level degradation: a skip recorded in
+        # stages.tier1.skipped_steps makes worktree_manager._tier1_skipped_steps
+        # refuse every merge-back in a repo that has no tests — the same class
+        # of breakage GR-GAP-048 fixed on the guard side. The step's own data
+        # carries the skip facts for a consumer that wants to refuse on them.
+        assert tier1.get("degraded") is not True
+        assert tier1.get("skipped_steps") is None
