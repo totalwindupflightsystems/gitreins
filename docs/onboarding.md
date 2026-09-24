@@ -279,10 +279,10 @@ gitreins worktree clean
 N times from one captured `HEAD` to measure flakiness (the JSON record carries
 `pass_rate` and per-run exit codes), and `dogfood` exercises `init`, task
 creation/start, `guard` and the judge inside a throwaway checkout. `clean` reaps
-merged worktrees immediately and asks for confirmation before touching
-stale/orphaned ones. Fleet lanes (`gitreins worktree fleet lanes.json`) run an
-explicit manifest of independent tasks concurrently — see README's "Parallel
-worktree fleet".
+merged and failed worktrees immediately, and asks for confirmation before
+touching stale/orphaned ones. Fleet lanes (`gitreins worktree fleet lanes.json`)
+run an explicit manifest of independent tasks concurrently — see README's
+"Parallel worktree fleet".
 
 ## 9. What else the CLI gives you
 

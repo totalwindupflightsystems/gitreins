@@ -117,6 +117,33 @@ def test_fleet_failure_retains_tree_and_evidence(fleet_repo: Path, tmp_path: Pat
     assert _git(fleet_repo, "rev-parse", "--verify", record.branch).returncode == 0
 
 
+def test_fleet_rerun_over_failed_lane_refuses_and_the_hint_resolves_it(fleet_repo: Path):
+    """DF-GITREINS-POC-50 AC3: a failed lane's stale tree is never silently reused.
+
+    The re-run must fail LOUD (the old behaviour reused the tree at the OLD
+    HEAD, so the next lane ran against a pre-feature tree), and the message
+    must name the command that actually clears the lane.
+    """
+    code = (sys.executable, "-c", "import sys; print('lane boom'); sys.exit(7)")
+    first = WorktreeFleet(fleet_repo).run([FleetLane("FLEET-RERUN", code)])
+    assert first["lanes"][0]["state"] == "failed"
+
+    with pytest.raises(WorktreeError) as excinfo:
+        WorktreeFleet(fleet_repo).run([FleetLane("FLEET-RERUN", code)])
+
+    message = str(excinfo.value)
+    assert "FAILED worktree" in message
+    assert "gitreins worktree clean" in message
+
+    # Following the hint works end to end: plain clean reaps the failed lane,
+    # and the re-run then builds a fresh tree instead of reusing the stale one.
+    manager = WorktreeManager(fleet_repo)
+    assert manager.clean()["removed"] == ["FLEET-RERUN"]
+    rerun = WorktreeFleet(fleet_repo, manager=manager).run([FleetLane("FLEET-RERUN", code)])
+    assert rerun["lanes"][0]["state"] == "failed"
+    assert Path(rerun["lanes"][0]["worktree"]).is_dir()
+
+
 def test_fleet_runs_guard_and_judge_phases_without_shell(fleet_repo: Path):
     phases = (sys.executable, "-c", "print('phase')")
     report = WorktreeFleet(fleet_repo).run(
