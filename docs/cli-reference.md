@@ -46,8 +46,11 @@ There are **16 top-level subcommands**:
 One-command GitReins activation for the current repo. Creates
 `.gitreins/config.yaml` (if missing), installs the `pre-commit` hook,
 and adds the GitReins runtime exclusions to `.gitignore`: `.gitreins/tasks.yaml`,
-`.gitreins/config.yaml.bak`, `.gitreins/usage.jsonl`, `.gitreins/logs/` and
-`.gitreins/qa-ledger.jsonl` (Python projects also get `__pycache__/`; existing
+`.gitreins/config.yaml.bak`, `.gitreins/usage.jsonl`, `.gitreins/logs/`,
+`.gitreins/qa-ledger.jsonl`, `.gitreins/worktrees.json`,
+`.gitreins/worktrees.lock`, `.gitreins/disposable.json`,
+`.gitreins/disposable.lock` and `.gitreins/tasks.yaml.lock` (Python projects
+also get `__pycache__/`; existing
 entries are preserved and never duplicated).
 
 ```

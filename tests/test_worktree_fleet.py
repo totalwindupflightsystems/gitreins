@@ -249,3 +249,82 @@ def test_empty_fleet_is_a_loud_noop(fleet_repo: Path):
     with pytest.raises(FleetValidationError, match="at least one lane"):
         WorktreeFleet(fleet_repo).run([])
     assert not (fleet_repo / ".gitreins" / "worktrees.json").exists()
+
+
+# ── DF-GITREINS-POC-47 — `worktree fleet --merge` on a stock consumer install ──
+
+#: Runtime files an ordinary run leaves in the canonical main checkout (the
+#: disposable verifier registry + lock, the task store's flock sidecar, and the
+#: worktree registry + its lock).  None of them is user work.
+RUNTIME_ARTIFACTS_IN_MAIN = (
+    ".gitreins/worktrees.json",
+    ".gitreins/worktrees.lock",
+    ".gitreins/disposable.json",
+    ".gitreins/disposable.lock",
+    ".gitreins/tasks.yaml.lock",
+)
+
+#: A lane that commits its one file and then leaves the regenerated venv the
+#: configured guard (`uv run pytest`) produces inside the tree.  The tree is
+#: otherwise clean — but `.venv` is untracked, and a consumer whose .gitignore
+#: predates the venv cannot commit it.
+LANE_WITH_REGENERATED_VENV = (
+    "from pathlib import Path; import subprocess;"
+    "Path('.venv').mkdir(exist_ok=True);"
+    "Path('.venv', 'python').write_text('');"
+    "Path('lane.txt').write_text('lane\\n');"
+    "subprocess.run(['git', 'add', 'lane.txt'], check=True);"
+    "subprocess.run(['git', 'commit', '-qm', 'lane work'], check=True)"
+)
+
+
+def _write_runtime_artifacts_in_main(repo: Path) -> None:
+    for name in RUNTIME_ARTIFACTS_IN_MAIN:
+        path = repo / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+
+
+def test_fleet_merge_passes_when_only_runtime_artifacts_are_present(fleet_repo: Path):
+    """The whole fleet was unmergeable on a stock install (DF-GITREINS-POC-47).
+
+    Nothing in this setup is user work: canonical main carries only the runtime
+    files an ordinary run writes, and the lane tree carries the regenerated
+    venv.  Every one of them used to read as dirt, so `worktree fleet --merge`
+    refused each lane with "canonical main has uncommitted changes" /
+    "task worktree has uncommitted changes" — permanently, on a fresh consumer
+    repo that had not yet ignored them.
+    """
+    _write_runtime_artifacts_in_main(fleet_repo)
+    fleet = WorktreeFleet(fleet_repo)
+
+    report = fleet.run(
+        [FleetLane("MERGE-RUNTIME", (sys.executable, "-c", LANE_WITH_REGENERATED_VENV))],
+        merge=True,
+        force_merge=True,
+        merge_actor="fleet-test",
+    )
+
+    assert report["merge_errors"] == {}, report["merge_errors"]
+    assert report["merge_order"] == ["MERGE-RUNTIME"]
+    assert (fleet_repo / "lane.txt").read_text(encoding="utf-8") == "lane\n"
+    assert WorktreeManager(fleet_repo).list_records() == []
+
+
+def test_fleet_merge_still_refuses_real_dirt_beside_runtime_artifacts(fleet_repo: Path):
+    """The exemption is narrow: one stray edit still stops the merge."""
+    _write_runtime_artifacts_in_main(fleet_repo)
+    code = LANE_WITH_REGENERATED_VENV + ";Path('stray.txt').write_text('uncommitted')"
+    fleet = WorktreeFleet(fleet_repo)
+
+    report = fleet.run(
+        [FleetLane("MERGE-STRAY", (sys.executable, "-c", code))],
+        merge=True,
+        force_merge=True,
+        merge_actor="fleet-test",
+    )
+
+    assert report["merge_order"] == []
+    assert "uncommitted changes" in report["merge_errors"]["MERGE-STRAY"]
+    assert not (fleet_repo / "lane.txt").exists()
+    assert Path(fleet_repo.parent / "main-wt" / "MERGE-STRAY").is_dir()

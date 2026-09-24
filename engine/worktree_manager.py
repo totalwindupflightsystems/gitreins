@@ -212,6 +212,60 @@ def _default_tree_root(main_root: Path, task_id: str) -> Path:
     return main_root.parent / f"{repo_name}-wt" / task_id
 
 
+# ── runtime artifact exemptions (DF-GITREINS-POC-47) ─────────────────────
+#
+# GitReins writes state into whatever checkout it runs in.  Those files are
+# never uncommitted user work, but a consumer whose .gitignore predates them
+# (install/init only writes gitreins.cli.GITREINS_GITIGNORE_ENTRIES) sees them
+# in `git status`, and merge() refuses to touch main or a task worktree that is
+# not clean — so one ordinary run used to make the whole fleet unmergeable
+# with "canonical main has uncommitted changes; refusing merge".
+#
+# Explicit names (never a blanket `.gitreins/` exemption — real user work can
+# live there), plus lock files under the GitReins store: a lock carries no
+# information (two agents holding one at once produce a tracked conflict —
+# REVIEW-006) and every writer that takes one recreates it on the next run.
+RUNTIME_ARTIFACT_FILES = frozenset(
+    {
+        ".gitreins/worktrees.json",  # this module's worktree registry
+        ".gitreins/worktrees.lock",  # ... and its flock sidecar
+        ".gitreins/disposable.json",  # disposable verifier registry
+        ".gitreins/disposable.lock",  # ... and its flock
+        ".gitreins/tasks.yaml.lock",  # task store flock (engine/task_manager.py)
+        ".coding-hermes/board/events.jsonl",  # fleet board event log
+    }
+)
+# Runtime artifact DIRECTORIES written by GitReins itself: a guard run inside a
+# task worktree writes its run log (DF-018) into .gitreins/logs/, and judge
+# verdicts land in .gitreins/history/.
+RUNTIME_ARTIFACT_PREFIXES = (".gitreins/history/", ".gitreins/logs/")
+RUNTIME_ARTIFACT_LOCK_ROOT = ".gitreins/"
+# The files `uv run <guard>` regenerates beside the venv it links into a task
+# worktree.  Exempt only while UNTRACKED: a tracked lockfile that differs from
+# HEAD is real repo state the consumer should decide about.
+WORKTREE_VENV_LOCKFILES = ("uv.lock", ".uv.lock")
+
+
+def _is_runtime_artifact(path: str) -> bool:
+    """True when ``path`` (repo-relative) is a file GitReins itself wrote."""
+    if path in RUNTIME_ARTIFACT_FILES or path.startswith(RUNTIME_ARTIFACT_PREFIXES):
+        return True
+    return path.startswith(RUNTIME_ARTIFACT_LOCK_ROOT) and path.endswith(".lock")
+
+
+def _matches_exemption(path: str, names: tuple[str, ...]) -> bool:
+    """Match a bare name both as a file and as an expanded directory.
+
+    ``git status --untracked-files=all`` reports a symlinked venv as one entry
+    (``.venv``) but a regenerated real directory as one entry per file
+    (``.venv/bin/python``), so both shapes have to be recognised.
+    """
+    for name in names:
+        if path == name or path.startswith(f"{name}/"):
+            return True
+    return False
+
+
 def _exclusive_operation(method):
     """Serialize registry read-modify-write operations across processes."""
 
@@ -872,23 +926,46 @@ class WorktreeManager:
             "worktree": str(tree),
         }
 
+    def _is_task_worktree(self, workdir: Path) -> bool:
+        """True when ``workdir`` is a linked task worktree, not canonical main.
+
+        The venv exemption below is scoped to task trees on purpose:
+        :meth:`_link_venv` symlinks the configured venv into every tree it
+        creates, so an untracked venv there is the harness's own artifact.  An
+        untracked ``.venv`` in canonical main is the consumer's real
+        uncommitted state (their repo never gitignored it) and must still hold
+        the merge, so main never gets this exemption.
+        """
+        return Path(workdir).resolve() != self.main_root.resolve()
+
     def _is_clean(self, workdir: Path) -> bool:
+        """True when ``workdir`` holds no uncommitted work of its own.
+
+        GitReins' runtime artifacts (:data:`RUNTIME_ARTIFACT_FILES` /
+        :data:`RUNTIME_ARTIFACT_PREFIXES`, plus any lock inside the store) are
+        exempt everywhere — they are written by the harness, not by the user,
+        and counting them as dirt made every fleet merge refuse on a stock
+        install (DF-GITREINS-POC-47).
+
+        Inside a TASK worktree the configured venv name (``self.venv_name``,
+        default ``.venv``) is exempt too, plus an untracked ``uv.lock`` /
+        ``.uv.lock`` next to it: :meth:`_link_venv` creates the one and the
+        configured guard (``uv run pytest``) regenerates the other inside the
+        tree.  Everything else — an untracked or modified file — is real work
+        and keeps the gate closed.
+        """
         status = _git(workdir, "status", "--porcelain", "--untracked-files=all").stdout
-        ignored = {
-            ".gitreins/worktrees.json",
-            ".gitreins/worktrees.lock",
-            ".coding-hermes/board/events.jsonl",
-        }
-        # Runtime artifact DIRECTORIES written by GitReins itself. They are
-        # never uncommitted work: a guard run inside a task worktree writes
-        # its run log (DF-018) into .gitreins/logs/, and counting that as
-        # dirt held every fleet merge with "Git safety precondition changed
-        # before merge".
-        ignored_prefixes = (".gitreins/history/", ".gitreins/logs/")
+        in_task_tree = self._is_task_worktree(workdir)
         for line in status.splitlines():
-            path = line[3:] if len(line) >= 4 else ""
-            if path in ignored or path.startswith(ignored_prefixes):
+            if len(line) < 4:
+                return False
+            code, path = line[:2], line[3:]
+            if _is_runtime_artifact(path):
                 continue
+            if in_task_tree:
+                exempt = (self.venv_name, *(WORKTREE_VENV_LOCKFILES if code == "??" else ()))
+                if _matches_exemption(path, exempt):
+                    continue
             return False
         return True
 

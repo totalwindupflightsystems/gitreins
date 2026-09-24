@@ -64,6 +64,17 @@ GITREINS_GITIGNORE_ENTRIES = (
     # repo. Versioning the ledger is an opt-IN: point GITREINS_QA_LEDGER at a
     # tracked path.
     ".gitreins/qa-ledger.jsonl",
+    # DF-GITREINS-POC-47: the rest of the runtime surface an ordinary run
+    # writes.  Without these entries `git status` reports the harness's own
+    # bookkeeping as untracked dirt, and `worktree fleet --merge` then refuses
+    # EVERY lane with "canonical main has uncommitted changes" — a stock
+    # consumer install could not merge at all (the main-tree gate exempts
+    # exactly this surface; keep the two lists in step).
+    ".gitreins/worktrees.json",
+    ".gitreins/worktrees.lock",
+    ".gitreins/disposable.json",
+    ".gitreins/disposable.lock",
+    ".gitreins/tasks.yaml.lock",
 )
 
 # EVID-003: the id an ephemeral judge run carries when none was given on the
