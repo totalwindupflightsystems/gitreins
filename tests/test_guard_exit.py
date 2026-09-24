@@ -13,6 +13,8 @@ import sys
 
 import yaml
 
+from engine.guard_manager import GuardManager
+
 CLI_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "gitreins")
 CLI_SCRIPT = os.path.join(CLI_DIR, "cli.py")
 
@@ -286,3 +288,96 @@ class TestCommitBlocksSecret:
         assert result.returncode == 0, (
             f"commit must exit 0 on clean, got {result.returncode}. output: {output[:300]}"
         )
+
+
+class TestRunnerMissingHookParity:
+    """DF-GITREINS-POC-51: the hook path and the standalone guard agree.
+
+    The pre-commit hook runs `<pinned python> -m gitreins guard` in the repo
+    root — the SAME command the user runs by hand — so the two invocations must
+    grade a missing pytest runner the same way: skipped with the fix named,
+    never a FAIL that blocks a repo's first commit. That is what the row
+    reproduced: the hook died with `✗ tests (full) — /bin/sh: 1: pytest: not
+    found` (exit 1) while the standalone guard had printed green a minute
+    earlier, because an empty index skips the tests lane by scope.
+
+    Both arms are exercised here on real trees through the real CLI: a repo
+    whose only problem is an unprovisioned environment, and a fully provisioned
+    one where the lane must really run.
+    """
+
+    def _zero_deps_repo(self, tmp_path) -> str:
+        """A fresh repo whose pinned interpreter does not exist yet."""
+        d = str(tmp_path / "fresh")
+        os.makedirs(d)
+        _init_repo(d)
+        _write_config(
+            d,
+            {
+                "guards": {
+                    "secrets": False,
+                    "lint": False,
+                    "tests": True,
+                    "test_mode": "full",
+                    "test_command": ".venv/bin/python -m pytest -x --tb=short",
+                    "allow_skips": True,
+                }
+            },
+        )
+        _stage_file(d, "app.py", "print('hi')\n")
+        return d
+
+    def test_zero_deps_repo_first_commit_is_not_blocked(self, tmp_path):
+        """The hook's own command on a bare box: a DEGRADED pass naming the fix."""
+        d = self._zero_deps_repo(tmp_path)
+
+        result = _run_cli("guard", cwd=d)
+        output = result.stdout + result.stderr
+
+        assert result.returncode == 0, f"hook command must not block commit #1: {output[:400]}"
+        assert "✗ tests" not in result.stdout
+        assert "~ tests (full) — skipped (" in result.stdout
+        assert "uv sync" in result.stdout
+        assert "Tier 1: DEGRADED PASS" in result.stdout
+        # Never a silent green: the gates that did not run are named.
+        assert "Tier 1 Guards: PASS" not in result.stdout
+
+    def test_zero_deps_repo_skip_facts_match_the_library_path(self, tmp_path):
+        """Same tree, same skip facts: the CLI (hook) and the in-process guard."""
+        d = self._zero_deps_repo(tmp_path)
+
+        cli = _run_cli("guard", cwd=d)
+        with open(os.path.join(d, ".gitreins", "config.yaml")) as f:
+            config = yaml.safe_load(f)
+        result = GuardManager(d, config=config)._check_tests()
+
+        assert result.skipped is True
+        assert result.skip_reason in cli.stdout
+        assert "✗ tests" not in cli.stdout
+
+    def test_provisioned_repo_grades_the_tests_lane(self, tmp_path):
+        """The other arm of the parity: with pytest provisioned the lane runs."""
+        d = str(tmp_path / "provisioned")
+        os.makedirs(d)
+        _init_repo(d)
+        _write_config(
+            d,
+            {
+                "guards": {
+                    "secrets": False,
+                    "lint": False,
+                    "tests": True,
+                    "test_mode": "full",
+                    "test_command": f"{sys.executable} -m pytest -x --tb=short",
+                    "allow_skips": True,
+                }
+            },
+        )
+        _stage_file(d, "test_ok.py", "def test_ok():\n    assert True\n")
+
+        result = _run_cli("guard", cwd=d)
+        output = result.stdout + result.stderr
+
+        assert result.returncode == 0, f"provisioned repo must pass: {output[:400]}"
+        assert "✓ tests (full)" in result.stdout
+        assert "DEGRADED" not in result.stdout

@@ -11,7 +11,7 @@
 
 GitReins lives inside your git repository as a quality harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ✅ **v0.15.0** — the release that closes the loop between what is merged and what actually runs. `gitreins resolve "<question>"` (and the `context.resolve` MCP tool) traces a question to its seed files through Hilo, assembles a measured evidence bundle and returns a calibrated verdict band; `gitreins preflight` checks the premises of a task *before* a worker is dispatched, and annotates instead of dispatching when they do not hold; the judge pre-screens candidates and attributes a verdict per acceptance criterion; per-surface config knobs make the resolution gate tunable without touching code. On the guard side, the `hook_timeout` early-return now carries `allow_skips` (a slow repo's docs/board commits were being blocked with exit 2 by a run whose own warning said the commit was allowed), the test lane pins its interpreter so a host whose PATH carries another virtualenv can no longer fail the lane with `unrecognized arguments: -n`, Go guard commands run through bounded execution, and the evaluator reaps the last run's process group on exit. `scripts/check_deployed_surface.py` is new: it compares the *deployed* CLI surface with this checkout and fails loudly when a merged subcommand exists only in the repo — the drift that used to be invisible because both copies reported the same version. 2394 tests pass / 68 test files, verified by collection (optional-tool skips vary).
+> ✅ **v0.15.0** — the release that closes the loop between what is merged and what actually runs. `gitreins resolve "<question>"` (and the `context.resolve` MCP tool) traces a question to its seed files through Hilo, assembles a measured evidence bundle and returns a calibrated verdict band; `gitreins preflight` checks the premises of a task *before* a worker is dispatched, and annotates instead of dispatching when they do not hold; the judge pre-screens candidates and attributes a verdict per acceptance criterion; per-surface config knobs make the resolution gate tunable without touching code. On the guard side, the `hook_timeout` early-return now carries `allow_skips` (a slow repo's docs/board commits were being blocked with exit 2 by a run whose own warning said the commit was allowed), the test lane pins its interpreter so a host whose PATH carries another virtualenv can no longer fail the lane with `unrecognized arguments: -n`, Go guard commands run through bounded execution, and the evaluator reaps the last run's process group on exit. `scripts/check_deployed_surface.py` is new: it compares the *deployed* CLI surface with this checkout and fails loudly when a merged subcommand exists only in the repo — the drift that used to be invisible because both copies reported the same version. 2414 tests pass / 68 test files, verified by collection (optional-tool skips vary).
 
 Every resolution-gate surface ships **disabled**, because resolving a question sends the assembled bundle off the host: enabling one is an explicit act, `resolution.enabled.<surface>: true` (`cli`, `mcp`, `predispatch`, `judge_prescreen`) in `.gitreins/config.yaml` — `gitreins init` writes the block with all four `false`, and only a literal `true` opens a surface. A disabled surface fails closed with `abstain_reason: surface-disabled` and prints the enabling fix. The complete block, the defaults it may omit and the calibration caveat on the judge-adjacent surfaces are in [docs/jev-resolution-gate.md §9](docs/jev-resolution-gate.md).
 
@@ -53,6 +53,20 @@ setup).
 > (`uv run` / `pipenv run` / `poetry run`) whose binary is missing from
 > PATH, the guard automatically falls back to `python -m pytest ...` and
 > prints a warning line. pip-only users never see `uv: command not found`.
+
+> **A missing pytest runner is a skip, not a blocked commit.** If the
+> configured `guards.test_command` names a pytest runner this machine does not
+> have — no `pytest` on PATH and nothing importable, a pinned
+> `.venv/bin/python` that was never created, an interpreter that exists without
+> pytest installed in it, a `.venv/bin/pytest` that does not exist — the tests
+> lane is graded **skipped**, with the fix named in the reason (`pip install
+> pytest`, `uv sync`, `pip install -e .[dev]`), exactly like a linter that is
+> not on PATH. Nothing is graded, so it is never a green `✓` and never the
+> `✗ tests (full)` that used to block a fresh repo's first commit while the
+> standalone guard printed green. Because `gitreins init` writes
+> `guards.allow_skips: true`, that first commit lands as a DEGRADED pass naming
+> the lane it did not grade; with `allow_skips: false` the run exits 2 instead.
+> A pytest run that actually executes and fails still blocks the commit.
 
 ## How It Works
 
@@ -325,7 +339,15 @@ Tier 1 Guards: FAIL  (test mode: full)
 `~` marks a step that was skipped, and a degraded run never prints the green
 `Tier 1 Guards: PASS` header — so grepping that string is proof the gates
 actually ran. With `guards.allow_skips: false` (code default) it exits **2**;
-`gitreins init` writes `allow_skips: true` for ergonomic first commits.
+`gitreins init` writes `allow_skips: true` for ergonomic first commits. A
+missing pytest runner is one such skip — the summary line names the lane that
+graded nothing and the fix:
+
+```
+~ tests (full) — skipped (pytest is not installed in '.venv/bin/python' —
+  run `.venv/bin/python -m pip install pytest` (or `uv sync`), or set
+  guards.test_command)
+```
 
 **Full mode on a clean tree (`gitreins guard --full`):**
 ```
@@ -559,7 +581,7 @@ history:
 - **MCP Transport:** stdio (13 tools)
 - **Config:** YAML in `.gitreins/` directory
 - **Evaluator Default Model:** DeepSeek V4 Flash (~$0.01/eval)
-- **Test suite:** 2394 tests across 68 test files (collection total; optional-tool skips vary)
+- **Test suite:** 2414 tests across 68 test files (collection total; optional-tool skips vary)
 
 ## Architecture & Docs
 

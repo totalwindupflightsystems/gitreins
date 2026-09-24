@@ -65,6 +65,7 @@ from engine.evidence_bounds import (
 from engine.guard_manager import (
     HARNESS_STATE_DIRS,
     _pytest_no_tests_benign,
+    _pytest_runner_missing_hint,
     _resolve_test_command,
     harness_state_allowlist_paths,
 )
@@ -715,6 +716,23 @@ class Pipeline:
                     passed = True
                     data["skipped"] = True
                     data["skip_reason"] = _PYTEST_SKIP_NO_TESTS
+                # DF-GITREINS-POC-51: the pytest RUNNER itself is missing (no
+                # pytest on PATH, a pinned interpreter without it, a venv that
+                # was never created), so the step graded nothing. The guard
+                # grades the same lane SKIPPED with this fix line as its reason
+                # (engine/guard_manager.py), and the judge must not report
+                # `Stage tier1: FAIL` for a tree whose only problem is an
+                # unprovisioned environment — the hook/guard disagreement the
+                # row was filed for, same shape as POC-49 above (one predicate,
+                # imported never copied). A real failing run never lands here:
+                # the classifier demands both the not-started evidence and an
+                # unresolvable runner.
+                elif runner_missing := _pytest_runner_missing_hint(
+                    cmd, self.workdir, exit_code, output
+                ):
+                    passed = True
+                    data["skipped"] = True
+                    data["skip_reason"] = runner_missing
             # DF-018: the tier-1 stage points the written verdict at the raw
             # guard evidence (complete, untruncated run log) when one exists.
             guard_log = self._guard_log_ref(stage_id)

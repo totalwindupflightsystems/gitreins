@@ -1329,9 +1329,10 @@ class TestPytestExit5BenignSkip:
     records the same skip facts its GuardResult carries.
 
     Pinned here: the benign exit-5 decision and its skip facts; that a
-    collection-error exit 5, a non-pytest exit 5 and a pytest exit 127 all stay
-    failures; and that the stage summary renders the skip in the ~ register
-    instead of a ✓ that would claim the tests ran.
+    collection-error exit 5, a non-pytest exit 5, and a 127 whose pytest runner
+    IS present all stay failures (the missing-runner case is the sibling class
+    below, DF-GITREINS-POC-51); and that the stage summary renders the skip in
+    the `~` register instead of a ✓ that would claim the tests ran.
     """
 
     def _pipeline(self, workdir) -> Pipeline:
@@ -1385,16 +1386,24 @@ class TestPytestExit5BenignSkip:
         assert "pytest_outcome" not in step.data
         assert "skipped" not in step.data
 
-    def test_pytest_exit_127_still_fails(self, tmp_workdir):
-        """AC4: a missing runner stays a failure in both surfaces (GR-GAP-064)."""
+    def test_exit_127_with_a_resolvable_runner_still_fails(self, tmp_workdir):
+        """A 127 whose pytest runner IS present stays a failure (no over-skip).
+
+        GR-GAP-064's invocation gate still holds: the runner-missing skip needs
+        an UNRESOLVABLE runner, so a non-zero exit from an interpreter that has
+        pytest is graded as the failure it is.
+        """
         step = self._pipeline(tmp_workdir)._run_script_step(
-            self._pytest_step("pytest --version >/dev/null 2>&1; exit 127"),
+            self._pytest_step(
+                f"{shlex.quote(sys.executable)} -m pytest --version >/dev/null 2>&1; exit 127"
+            ),
             {},
         )
 
         assert step.passed is False
         assert step.data["exit_code"] == 127
         assert "skipped" not in step.data
+        assert "skip_reason" not in step.data
 
     def test_stage_summary_renders_the_skip_never_a_tick(self, tmp_workdir):
         """A skipped pass is the ~ (DEGRADED) register the guard console uses."""
@@ -1456,3 +1465,62 @@ class TestPytestExit5BenignSkip:
         # carries the skip facts for a consumer that wants to refuse on them.
         assert tier1.get("degraded") is not True
         assert tier1.get("skipped_steps") is None
+
+
+# ── DF-GITREINS-POC-51: the judge grades a missing runner like the guard ─────
+
+
+class TestPytestRunnerMissingSkip:
+    """A missing pytest runner must not read as a tier-1 failure.
+
+    DF-GITREINS-POC-51: the guard grades an unresolvable pytest runner as a
+    SKIPPED lane with the fix named (engine/guard_manager.py), so the
+    pre-commit hook no longer blocks a fresh box's first commit. The judge's
+    tier-1 step graded the exit code for itself, so the SAME tree and commit
+    would read `Stage tier1: FAIL` / `Overall: FAIL` under `gitreins judge`.
+    The step now consults the guard's own classifier (imported, not
+    re-implemented) and records the same skip facts, exactly as POC-49 did for
+    pytest's benign exit 5.
+
+    Pinned here: the real end-to-end shape (a pinned `.venv` that was never
+    created → shell 127 → skip facts with the fix in the reason), and that a
+    REAL failing pytest run still fails.
+    """
+
+    def _pipeline(self, workdir) -> Pipeline:
+        return Pipeline({"pipeline": {"stages": []}}, str(workdir))
+
+    @staticmethod
+    def _pytest_step(run: str) -> dict:
+        return {"id": "tests", "type": "script", "run": run}
+
+    def test_missing_runner_is_a_skip_not_a_tier1_failure(self, tmp_workdir):
+        """AC3: the pinned venv was never created → skip, exit 127 recorded."""
+        step = self._pipeline(tmp_workdir)._run_script_step(
+            self._pytest_step(".venv/bin/python -m pytest -x --tb=short"),
+            {"id": "DF-GITREINS-POC-51", "criteria": []},
+        )
+
+        assert step.data["exit_code"] == 127, step.output[-2000:]
+        assert step.passed is True
+        assert step.data["skipped"] is True
+        assert "uv sync" in step.data["skip_reason"]
+        # Evidence kept: the shell's own line is still in the step output.
+        assert "not found" in step.output
+
+    def test_real_failing_pytest_run_is_still_a_failure(self, tmp_workdir):
+        """AC2 end-to-end: the runner is present, the test fails → FAIL."""
+        with open(os.path.join(tmp_workdir, "test_poc51_boom.py"), "w") as f:
+            f.write("def test_boom():\n    assert 1 + 1 == 3\n")
+
+        step = self._pipeline(tmp_workdir)._run_script_step(
+            self._pytest_step(
+                f"{shlex.quote(sys.executable)} -m pytest -x --tb=short test_poc51_boom.py"
+            ),
+            {"id": "DF-GITREINS-POC-51", "criteria": []},
+        )
+
+        assert step.passed is False
+        assert step.data["exit_code"] != 127
+        assert "skipped" not in step.data
+        assert step.data["pytest_outcome"]["kind"] in ("failed", "maxfail")

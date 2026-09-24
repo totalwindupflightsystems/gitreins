@@ -19,7 +19,11 @@ from engine.guard_manager import (
     Tier1Result,
     _build_diff_test_command,
     _discover_test_targets,
+    _pytest_interpreter_has_pytest,
+    _pytest_invocations,
+    _pytest_runner_missing_hint,
     _resolve_test_command,
+    _shell_not_found_names,
 )
 
 
@@ -1283,8 +1287,16 @@ class TestBarePytestFallback:
         assert result.warning and "pytest not found on PATH" in result.warning
         assert result.warning in result.output
 
-    def test_exit127_pytest_failure_gets_actionable_hint(self, tmp_workdir):
-        """Exit 127 + sh not-found on a pytest command → hint prepended, still FAIL."""
+    def test_exit127_pytest_runner_missing_skips_with_actionable_hint(self, tmp_workdir):
+        """Exit 127 + sh not-found on a pytest command → hint, and a SKIP.
+
+        DF-GITREINS-POC-51: this case used to stay a FAIL whose output merely
+        carried the GR-GAP-064 hint — which blocked a fresh repo's first commit
+        while the standalone guard (empty index) passed the same tree. A runner
+        that is not on this machine graded nothing, so the lane is SKIPPED with
+        the fix as its reason, exactly like a missing linter; the raw shell line
+        stays under the hint and the exit code stays on the result.
+        """
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x --tb=short"}})
         with (
             patch("shutil.which", return_value=None),
@@ -1295,11 +1307,13 @@ class TestBarePytestFallback:
             ),
         ):
             result = gm._run_test_command("pytest -x --tb=short", "tests (full)")
-        assert result.passed is False
+        assert result.passed is True
+        assert result.skipped is True
         assert result.exit_code == 127
-        assert result.output.startswith(
+        assert result.skip_reason.startswith(
             f"test runner 'pytest' not found on PATH and not importable by {sys.executable}"
         )
+        assert "pip install pytest" in result.skip_reason
         # The raw shell failure stays visible below the hint line
         assert "/bin/sh: 1: pytest: not found" in result.output
 
@@ -1435,6 +1449,302 @@ class TestPytestExit5NoTests:
             result = gm._run_test_command("pytest -x --tb=short", "tests (full)")
         assert result.passed is False
         assert "1 failed" in result.output
+
+
+class TestPytestRunnerMissingSkip:
+    """DF-GITREINS-POC-51: a MISSING pytest runner is a skip, not a block.
+
+    On a fresh box `gitreins install` + `init` are green, then the pre-commit
+    hook blocks the repo's FIRST commit with `✗ tests (full) — /bin/sh: 1:
+    pytest: not found` (exit 1) while the standalone guard a minute earlier
+    printed green — an empty index skips the tests lane by scope (TRUST-001),
+    so two invocations of the same command graded the same tree differently.
+
+    The lane now grades an unresolvable runner as SKIPPED with the fix named,
+    the way a missing linter is graded, and a REAL failing pytest run still
+    FAILS. Pinned here: the four runner shapes (bare / missing pinned
+    interpreter / interpreter without pytest / missing venv script), the skip
+    facts every caller reads, the ~ register in the summary, and the
+    anti-swallow guards (resolvable runner, pytest progress in the output, a
+    chained command whose missing binary is something else, non-pytest
+    runners).
+    """
+
+    def _stub_lane(self, returncode, stdout, stderr=""):
+        """run_bounded-shaped stub result for the lane (DF-CRIER-258 seam)."""
+        return _stub_lane_result(returncode, stdout, stderr)
+
+    def _no_pytest_interpreter(self, workdir) -> str:
+        """A real, executable 'interpreter' that cannot import pytest.
+
+        The probe is not stubbed: the file exists and is executable, so the
+        lane takes the production path and the script's exit 3 is what makes
+        `_pytest_interpreter_has_pytest` answer False.
+        """
+        path = os.path.join(workdir, "nopytest-venv", "bin", "python")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write("#!/bin/sh\nexit 3\n")
+        os.chmod(path, 0o755)
+        return path
+
+    # ── the skip side ────────────────────────────────────────────────────
+
+    def test_bare_pytest_missing_skips_with_the_fix_named(self, tmp_workdir):
+        """AC1: `pytest` not on PATH and not importable → skip facts."""
+        gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x --tb=short"}})
+        with (
+            patch("shutil.which", return_value=None),
+            patch("importlib.util.find_spec", return_value=None),
+            patch(
+                "engine.command_hygiene.run_bounded",
+                return_value=self._stub_lane(127, "", "/bin/sh: 1: pytest: not found\n"),
+            ),
+        ):
+            result = gm._run_test_command("pytest -x --tb=short", "tests (full)")
+
+        assert result.passed is True
+        assert result.skipped is True
+        assert "pip install pytest" in result.skip_reason
+        # Evidence is kept, not swallowed: the exit code and the shell line.
+        assert result.exit_code == 127
+        assert result.output.startswith(result.skip_reason)
+        assert "/bin/sh: 1: pytest: not found" in result.output
+
+    def test_pinned_interpreter_without_pytest_skips(self, tmp_workdir):
+        """AC1 (the bunker shape): the interpreter exists, pytest is not in it.
+
+        The pinned command is exactly what this repo's own `.gitreins/config.yaml`
+        uses, so the case a user hits is the case graded here: exit 1 with the
+        interpreter's own `No module named pytest`, no pytest session output.
+        """
+        interpreter = self._no_pytest_interpreter(tmp_workdir)
+        cmd = f"{interpreter} -m pytest -x --tb=short"
+        gm = GuardManager(tmp_workdir, {"guards": {"test_command": cmd}})
+        with patch(
+            "engine.command_hygiene.run_bounded",
+            return_value=self._stub_lane(1, "", f"{interpreter}: No module named pytest\n"),
+        ):
+            result = gm._run_test_command(cmd, "tests (full)")
+
+        assert result.passed is True
+        assert result.skipped is True
+        assert result.skip_reason.startswith("pytest is not installed in")
+        assert "pip install pytest" in result.skip_reason
+        assert result.exit_code == 1
+
+    def test_interpreter_that_does_not_exist_skips_naming_the_setup(self, tmp_workdir):
+        """A pinned `.venv/bin/python` that was never created: shell 127, a skip."""
+        cmd = ".venv/bin/python -m pytest -x"
+        gm = GuardManager(tmp_workdir, {"guards": {"test_command": cmd}})
+        with patch(
+            "engine.command_hygiene.run_bounded",
+            return_value=self._stub_lane(127, "", "/bin/sh: 1: .venv/bin/python: not found\n"),
+        ):
+            result = gm._run_test_command(cmd, "tests (full)")
+
+        assert result.passed is True
+        assert result.skipped is True
+        assert "test interpreter '.venv/bin/python' not found" in result.skip_reason
+        assert "uv sync" in result.skip_reason
+        assert result.exit_code == 127
+
+    def test_missing_venv_console_script_skips(self, tmp_workdir):
+        """`.venv/bin/pytest` that does not exist is the same class as a bare one."""
+        cmd = ".venv/bin/pytest -x --tb=short"
+        gm = GuardManager(tmp_workdir, {"guards": {"test_command": cmd}})
+        with patch(
+            "engine.command_hygiene.run_bounded",
+            return_value=self._stub_lane(127, "", "/bin/sh: 1: .venv/bin/pytest: not found\n"),
+        ):
+            result = gm._run_test_command(cmd, "tests (full)")
+
+        assert result.passed is True
+        assert result.skipped is True
+        assert "test runner '.venv/bin/pytest' not found" in result.skip_reason
+        assert "uv sync" in result.skip_reason
+
+    def test_path_resolved_bare_interpreter_is_probed_not_assumed_missing(self, tmp_workdir):
+        """`python -m pytest` with `python` on PATH but no pytest in it.
+
+        A bare interpreter name goes through PATH like the shell resolves it, so
+        the hint names the real gap (pytest not installed in it) instead of
+        blaming an uncreated venv.
+        """
+        interpreter = self._no_pytest_interpreter(tmp_workdir)
+        cmd = "python -m pytest -x"
+        gm = GuardManager(tmp_workdir, {"guards": {"test_command": cmd}})
+        with (
+            patch("shutil.which", return_value=interpreter),
+            patch(
+                "engine.command_hygiene.run_bounded",
+                return_value=self._stub_lane(1, "", "python: No module named pytest\n"),
+            ),
+        ):
+            result = gm._run_test_command(cmd, "tests (full)")
+
+        assert result.passed is True
+        assert result.skipped is True
+        assert result.skip_reason.startswith("pytest is not installed in 'python'")
+        assert "python -m pip install pytest" in result.skip_reason
+
+    def test_skip_renders_in_the_tilde_register_and_reads_degraded(self, tmp_workdir):
+        """TRUST-001: never a green ✓, and the run is a DEGRADED pass."""
+        gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x"}})
+        with (
+            patch("shutil.which", return_value=None),
+            patch("importlib.util.find_spec", return_value=None),
+            patch(
+                "engine.command_hygiene.run_bounded",
+                return_value=self._stub_lane(127, "", "/bin/sh: 1: pytest: not found\n"),
+            ),
+        ):
+            result = gm._run_test_command("pytest -x", "tests (full)")
+
+        tier1 = Tier1Result(passed=True, results=[result])
+        assert "~ tests (full) — skipped (test runner 'pytest' not found" in tier1.summary
+        assert "✓ tests (full)" not in tier1.summary
+        assert tier1.degraded is True
+        assert tier1.skipped_steps == [{"step": "tests", "reason": result.skip_reason}]
+
+    # ── the anti-swallow side ────────────────────────────────────────────
+
+    def test_real_failure_with_the_runner_present_still_fails(self, tmp_workdir):
+        """AC2: resolvable runner + failed tests → FAIL, never a skip."""
+        gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x --tb=short"}})
+        stdout = (
+            "FAILED tests/test_calc.py::test_add - assert 1 + 1 == 3\n"
+            "===================== 1 failed, 2 passed in 0.12s =====================\n"
+        )
+        with (
+            patch("shutil.which", return_value="/usr/bin/pytest"),
+            patch(
+                "engine.command_hygiene.run_bounded",
+                return_value=self._stub_lane(1, stdout),
+            ),
+        ):
+            result = gm._run_test_command("pytest -x --tb=short", "tests (full)")
+
+        assert result.passed is False
+        assert result.skipped is False
+        assert result.exit_code == 1
+
+    def test_pytest_progress_output_vetoes_the_skip(self, tmp_workdir):
+        """AC2: pytest RAN → its progress output stands the skip down.
+
+        A suite that shells out to a python without pytest prints the same
+        `No module named pytest` line the classifier looks for; the progress
+        veto is what keeps that real failure a FAIL.
+        """
+        gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x"}})
+        stdout = (
+            "============================= test session starts ==============================\n"
+            "FAILED tests/test_probe.py::test_subprocess - AssertionError\n"
+            "___________________________ test_subprocess ___________________________\n"
+            "E   ModuleNotFoundError: No module named 'pytest'\n"
+            "============================= 1 failed in 0.12s ==============================\n"
+        )
+        with (
+            patch("shutil.which", return_value="/usr/bin/pytest"),
+            patch(
+                "engine.command_hygiene.run_bounded",
+                return_value=self._stub_lane(1, stdout),
+            ),
+        ):
+            result = gm._run_test_command("pytest -x", "tests (full)")
+
+        assert result.passed is False
+        assert result.skipped is False
+        assert "ModuleNotFoundError" in result.output
+
+    def test_chained_command_missing_something_else_still_fails(self, tmp_workdir):
+        """AC2: `tools/check.sh && pytest` where the missing binary is not pytest."""
+        cmd = "tools/check.sh && pytest -x"
+        gm = GuardManager(tmp_workdir, {"guards": {"test_command": cmd}})
+        with (
+            patch("shutil.which", return_value=None),
+            patch("importlib.util.find_spec", return_value=None),
+            patch(
+                "engine.command_hygiene.run_bounded",
+                return_value=self._stub_lane(127, "", "/bin/sh: 1: tools/check.sh: not found\n"),
+            ),
+        ):
+            result = gm._run_test_command(cmd, "tests (full)")
+
+        assert result.passed is False
+        assert result.skipped is False
+
+    def test_non_pytest_runner_not_found_still_fails(self, tmp_workdir):
+        """The invocation gate: `make test` missing is not a pytest runner gap."""
+        gm = GuardManager(tmp_workdir, {"guards": {"test_command": "make test"}})
+        with patch(
+            "engine.command_hygiene.run_bounded",
+            return_value=self._stub_lane(127, "", "/bin/sh: 1: make: not found\n"),
+        ):
+            result = gm._run_test_command("make test", "tests (full)")
+
+        assert result.passed is False
+        assert result.skipped is False
+        assert result.skip_reason == ""
+
+    def test_intact_runner_exiting_127_is_not_a_runner_gap(self, tmp_workdir):
+        """AC2: the skip needs an UNRESOLVABLE runner, not just a non-zero exit."""
+        cmd = f"{sys.executable} -m pytest -x"
+        gm = GuardManager(tmp_workdir, {"guards": {"test_command": cmd}})
+        with patch(
+            "engine.command_hygiene.run_bounded",
+            return_value=self._stub_lane(127, "", "boom\n"),
+        ):
+            result = gm._run_test_command(cmd, "tests (full)")
+
+        assert result.passed is False
+        assert result.skipped is False
+
+
+class TestPytestRunnerResolution:
+    """The resolver behind the runner-missing skip, unit by unit."""
+
+    def test_invocations_cover_the_bare_interpreter_and_path_forms(self):
+        assert _pytest_invocations("pytest -x --tb=short") == [("bare", "pytest")]
+        assert _pytest_invocations(".venv/bin/python -m pytest -x") == [
+            ("interpreter", ".venv/bin/python")
+        ]
+        assert _pytest_invocations("/usr/bin/python3 -m pytest") == [
+            ("interpreter", "/usr/bin/python3")
+        ]
+        assert _pytest_invocations(".venv/bin/pytest -x") == [("path", ".venv/bin/pytest")]
+        assert _pytest_invocations("scripts/check_docs_drift.py && pytest -q") == [
+            ("bare", "pytest")
+        ]
+        assert _pytest_invocations("make test") == []
+        assert _pytest_invocations("") == []
+
+    def test_shell_not_found_shapes(self):
+        assert _shell_not_found_names("/bin/sh: 1: pytest: not found\n") == {"pytest"}
+        assert _shell_not_found_names("sh: 1: .venv/bin/python: not found\n") == {
+            ".venv/bin/python"
+        }
+        assert _shell_not_found_names("bash: line 3: pytest: command not found\n") == {"pytest"}
+        assert _shell_not_found_names("zsh: command not found: pytest\n") == {"pytest"}
+        assert _shell_not_found_names("all good\n") == set()
+
+    def test_interpreter_probe_reads_the_real_interpreter(self, tmp_workdir):
+        """True/False/None come from a real interpreter start, not a stub."""
+        assert _pytest_interpreter_has_pytest(sys.executable, tmp_workdir) is True
+        assert _pytest_interpreter_has_pytest("/bin/false", tmp_workdir) is False
+        assert _pytest_interpreter_has_pytest("/nonexistent/python", tmp_workdir) is None
+
+    def test_hint_is_none_without_not_started_evidence(self, tmp_workdir):
+        """No shell/not-found line and no module error → the run is graded."""
+        cmd = ".venv/bin/python -m pytest -x"
+        assert _pytest_runner_missing_hint(cmd, tmp_workdir, 1, "some other failure\n") is None
+        assert _pytest_runner_missing_hint(cmd, tmp_workdir, 0, "1 passed\n") is None
+        assert (
+            _pytest_runner_missing_hint(
+                cmd, tmp_workdir, 127, "/bin/sh: 1: .venv/bin/python: not found\n"
+            )
+            is not None
+        )
 
 
 class TestExtendedGuardManager:

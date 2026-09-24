@@ -24,6 +24,20 @@ tests guard automatically falls back to `python -m pytest ...` — you get a
 warning line in guard output, never a `uv: command not found` failure. The same
 fallback covers `pipenv run` and `poetry run`.
 
+**A missing pytest runner is a skip, not a blocked first commit.** On a bare
+machine (`pip install gitreins` → `install` → `init`, nothing else) the tests
+lane has no runner to grade with. When the configured
+`guards.test_command` names a pytest runner this machine does not have — no
+`pytest` on PATH and nothing importable, a pinned `.venv/bin/python` that was
+never created, an interpreter that exists with pytest not installed in it, a
+`.venv/bin/pytest` that does not exist — the lane is graded **skipped** with the
+fix named in the reason (`pip install pytest`, `uv sync`, `pip install -e
+.[dev]`), the same way a linter that is not on PATH is skipped. Because
+`install` and `init` write `guards.allow_skips: true`, that first commit lands
+as a DEGRADED pass naming the lane it did not grade (§4); with `allow_skips:
+false` the run exits 2 instead. A pytest run that actually executes and fails
+still blocks the commit — only a runner that never started is a skip.
+
 **Running from a source checkout** (contributing to GitReins itself, no pip
 install): the console script is only on PATH after activating the repo's
 virtualenv — a fresh shell gets `command not found` otherwise.
@@ -174,7 +188,11 @@ steps cannot be merged back (`gitreins worktree merge` refuses it).
 Full, untruncated guard output is persisted per run to `.gitreins/logs/guard-*.log`
 (the console prints a bounded summary that names the first failing test id and
 every secrets scanner that ran). The pre-commit hook runs the same guard on
-`git commit`, so a blocked commit and a blocked guard are the same failure.
+`git commit`, so a blocked commit and a blocked guard are the same failure; the
+one thing that legitimately differs is the change set the run grades — a hook
+run grades the staged files, and with an empty index the lint/tests lanes skip by
+scope (the situation T4 describes). A lane that could not run at all because its
+runner is missing is a skip in both, with the fix in the reason (§1).
 
 ## 5. Task workflow (create → work → judge)
 
@@ -390,6 +408,33 @@ gitreins task complete <id> --skip-tier2 # Tier 1 only, no LLM needed
 An unknown task id needs no credential: `task start` / `task complete` /
 `task delete` print `Task not found: <id>` and exit 1, exactly like
 `gitreins judge`.
+
+### T6. `~ tests (full) — skipped (test runner 'pytest' not found …)`
+
+**Symptom:** the guard (and the first `git commit`) reports the tests lane as
+skipped with a reason naming a fix, e.g.
+
+```
+~ tests (full) — skipped (pytest is not installed in '.venv/bin/python' —
+  run `.venv/bin/python -m pip install pytest` (or `uv sync`), or set
+  guards.test_command)
+```
+
+**Cause:** the pytest runner named by `guards.test_command` is not on this
+machine, so nothing was graded — the lane never started. This is the fresh-box
+case (POC-51): `install` + `init` are green, pytest is not installed, and the
+reason names which of the four forms is missing — no `pytest` on PATH and
+nothing importable, a pinned `interpreter` that does not exist, an interpreter
+that exists without pytest in it, or a `.venv/bin/pytest` that was never
+created. It is deliberately NOT an `✗` (a missing runner is an environment
+gap, not a finding about your code) and NOT a silent `✓`.
+
+**Fix:** install the runner — `pip install pytest` / `uv sync` / the
+interpreter named in the reason, or point `guards.test_command` at your own
+interpreter. Until you do, the run is a DEGRADED pass: with
+`guards.allow_skips: true` (what `install`/`init` write) it exits 0 and the
+lane is named as skipped; with `false` it exits 2 (T4). A pytest run that
+starts and fails still blocks the commit.
 
 ## Checklist: done when
 

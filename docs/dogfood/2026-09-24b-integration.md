@@ -63,8 +63,10 @@ loopback default, warned non-loopback opt-out).
    docs offer as the fresh-clone fallback has never been pushed anywhere
    (POC-58).
 6. The onboarding first-commit loop still hits the known POC-51 wall on a
-   fresh box (pytest not installed → hook blocks the first commit); POC-47
-   (fleet merge gate) verified FIXED on HEAD.
+   fresh box (pytest not installed → hook blocks the first commit) — **fixed by
+   DF-GITREINS-POC-51 after this run** (a missing runner is now a skip naming
+   the fix, in the hook and the standalone guard alike; see the table below);
+   POC-47 (fleet merge gate) verified FIXED on HEAD.
 
 ## The serve API: what held up (nearly everything)
 
@@ -158,6 +160,16 @@ bunker-las-03, agent `fbf41e9d`, ttl 2h, bare Debian agent user:
 | `serve` + `/api/stats` | 200 — and `total: 2` (the tracked-history surprise, POC-58) |
 | onboarding loop: install → init → guard | all rc=0; honest degraded hints (gitleaks path, lint/tests skip reasons) |
 | onboarding's own first commit | **BLOCKED, rc=1** — `✗ tests (full) — /bin/sh: 1: pytest: not found` (POC-51 class, known open row; init wrote `test_command: pytest`, pytest not installed, bare name not resolvable) |
+
+**Status of the POC-51 row: FIXED** (after this run). A pytest runner that is
+missing on the host — no `pytest` on PATH and nothing importable, a pinned
+interpreter that does not exist, an interpreter that exists without pytest
+installed in it, a `.venv/bin/pytest` that was never created — is graded
+**skipped** with the fix named, in the hook and in the standalone guard alike,
+exactly like a linter that is not on PATH. The onboarding first commit above
+now lands as a DEGRADED pass (exit 0 with the `allow_skips: true` that
+`install`/`init` write, exit 2 with `allow_skips: false`), and a pytest run that
+starts and fails still blocks the commit.
 
 Agent destroyed and verified gone (`bunker list` → 0 matches).
 
