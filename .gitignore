@@ -64,6 +64,12 @@ hivemind-audit.md
 .gitreins/worktrees.lock
 .gitreins/disposable.json
 .gitreins/disposable.lock
+# DF-GITREINS-POC-47: the task store's flock sidecar. The `.gitreins/*.lock`
+# rule further down already covers it; it is listed literally because the
+# installer template (gitreins.cli.GITREINS_GITIGNORE_ENTRIES) is pinned to
+# this file entry-for-entry by tests/test_cli.py
+# (test_vendor_gitignore_covers_every_template_entry).
+.gitreins/tasks.yaml.lock
 .gitreins/config.yaml.bak
 
 # Hilo — local cache files (rebuildable)

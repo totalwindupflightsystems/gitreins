@@ -975,3 +975,163 @@ def test_cli_worktree_merge_without_verdict_prints_reference(wt_repo):
     assert refused.returncode != 0
     assert ".gitreins/history" in refused.stderr
     assert tree.exists()
+
+
+# ── DF-GITREINS-POC-47 — the clean-tree gate vs GitReins' own runtime files ──
+
+
+#: Every runtime file an ordinary GitReins run leaves in the canonical main
+#: checkout.  ``worktrees.json``/``worktrees.lock`` come from this module's
+#: registry, ``disposable.json``/``disposable.lock`` from the disposable
+#: verifier (``engine/worktree_disposable.py``: ``DISPOSABLE_FILE`` /
+#: ``DISPOSABLE_LOCK``), and ``tasks.yaml.lock`` from the task store's flock
+#: sidecar (``engine/task_manager.py``).
+RUNTIME_ARTIFACTS_IN_MAIN = (
+    ".gitreins/worktrees.json",
+    ".gitreins/worktrees.lock",
+    ".gitreins/disposable.json",
+    ".gitreins/disposable.lock",
+    ".gitreins/tasks.yaml.lock",
+)
+
+
+def _write_runtime_artifacts(repo: Path, names=RUNTIME_ARTIFACTS_IN_MAIN) -> None:
+    """Drop the runtime files an ordinary GitReins run leaves behind.
+
+    Never clobbers an existing file: ``worktrees.json`` is the live registry,
+    and overwriting it would erase real state instead of simulating dirt.
+    """
+    for name in names:
+        path = repo / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if not path.exists():
+            path.write_text("", encoding="utf-8")
+
+
+def _porcelain_status(repo: Path) -> str:
+    return subprocess.run(
+        ["git", "-C", str(repo), "status", "--porcelain", "--untracked-files=all"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+
+
+def _linked_venv_manager(wt_repo: Path, task_id: str = "VENV-TREE"):
+    """A manager whose create() symlinks a shared venv into the task tree.
+
+    This is the production shape: ``_link_venv`` points the tree's configured
+    venv name at an existing checkout, so an untracked ``.venv`` in a task
+    worktree is harness-created, not leftover work.
+    """
+    (wt_repo / "shared-env").mkdir(exist_ok=True)
+    manager = WorktreeManager(wt_repo, venv_source="shared-env")
+    record, _ = manager.create(task_id)
+    return manager, Path(record.path)
+
+
+def test_is_clean_exempts_every_runtime_file_gitreins_writes_in_main(wt_repo: Path):
+    """DF-GITREINS-POC-47: harness runtime files are never uncommitted work.
+
+    A stock consumer install generates only the install-time gitignore entries,
+    and ``_is_clean``'s exemption set was hand-kept alongside them; both missed
+    the disposable verifier's registry + lock and the task store's lock.  The
+    only dirt an ordinary run left behind therefore read as user work and the
+    fleet merge refused with "canonical main has uncommitted changes".
+    """
+    manager = WorktreeManager(wt_repo)
+    assert manager._is_clean(wt_repo) is True
+
+    _write_runtime_artifacts(wt_repo)
+
+    status = _porcelain_status(wt_repo)
+    for name in RUNTIME_ARTIFACTS_IN_MAIN:
+        assert name in status, f"premise: {name} must reach `git status` as dirt"
+
+    assert manager._is_clean(wt_repo) is True
+
+
+def test_is_clean_exempts_the_linked_venv_inside_a_task_worktree(wt_repo: Path):
+    """The tree gate must survive the venv ``_link_venv`` puts there by design."""
+    manager, tree = _linked_venv_manager(wt_repo)
+
+    assert (tree / ".venv").is_symlink(), "premise: create() links the shared venv"
+    assert manager._is_clean(tree) is True
+
+    # The configured guard (`uv run pytest`) regenerates the interpreter inside
+    # the tree, replacing the symlink with a real directory, and refreshes the
+    # uv lockfile next to it.  A consumer whose .gitignore predates the venv
+    # cannot commit either one.
+    (tree / ".venv").unlink()
+    (tree / ".venv" / "bin").mkdir(parents=True)
+    (tree / ".venv" / "bin" / "python").write_text("", encoding="utf-8")
+    (tree / "uv.lock").write_text("", encoding="utf-8")
+    (tree / ".uv.lock").write_text("", encoding="utf-8")
+    _write_runtime_artifacts(tree, names=(".gitreins/disposable.json",))
+
+    assert ".venv/bin/python" in _porcelain_status(tree)
+    assert manager._is_clean(tree) is True
+
+
+def test_is_clean_still_counts_an_untracked_venv_in_canonical_main(wt_repo: Path):
+    """The venv exemption is scoped to task trees — main stays honest.
+
+    In canonical main an untracked .venv is the consumer's own uncommitted
+    state (their repo never gitignored it); only the harness's own symlink
+    inside a task worktree is exempt.
+    """
+    (wt_repo / ".venv" / "bin").mkdir(parents=True)
+    (wt_repo / ".venv" / "bin" / "python").write_text("", encoding="utf-8")
+    (wt_repo / "uv.lock").write_text("", encoding="utf-8")
+
+    assert WorktreeManager(wt_repo)._is_clean(wt_repo) is False
+
+
+def test_is_clean_still_refuses_real_work_in_canonical_main(wt_repo: Path):
+    """Regression guard against over-exemption: user work is still dirt."""
+    manager = WorktreeManager(wt_repo)
+    _write_runtime_artifacts(wt_repo)
+    assert manager._is_clean(wt_repo) is True
+
+    (wt_repo / "foo.txt").write_text("work in progress\n", encoding="utf-8")
+    assert manager._is_clean(wt_repo) is False
+
+    (wt_repo / "foo.txt").unlink()
+    (wt_repo / "base.txt").write_text("edited\n", encoding="utf-8")
+    assert manager._is_clean(wt_repo) is False
+
+    # A runtime-looking path OUTSIDE the harness store is not exempt either.
+    (wt_repo / "base.txt").write_text("base\n", encoding="utf-8")
+    (wt_repo / "notes.txt.lock").write_text("", encoding="utf-8")
+    assert manager._is_clean(wt_repo) is False
+
+
+def test_is_clean_still_refuses_real_work_inside_a_task_worktree(wt_repo: Path):
+    manager, tree = _linked_venv_manager(wt_repo, "DIRTY-TREE")
+    assert manager._is_clean(tree) is True
+
+    (tree / "foo.txt").write_text("work in progress\n", encoding="utf-8")
+    assert manager._is_clean(tree) is False
+
+    (tree / "foo.txt").unlink()
+    (tree / "base.txt").write_text("edited in tree\n", encoding="utf-8")
+    assert manager._is_clean(tree) is False
+
+    # User files that merely sit inside .gitreins/ are still real work.
+    (tree / "base.txt").write_text("base\n", encoding="utf-8")
+    (tree / ".gitreins").mkdir(parents=True, exist_ok=True)
+    (tree / ".gitreins" / "notes.md").write_text("mine\n", encoding="utf-8")
+    assert manager._is_clean(tree) is False
+
+
+def test_merge_proceeds_when_only_runtime_artifacts_are_present(wt_repo: Path):
+    """End-to-end: the merge-back no longer refuses on harness bookkeeping."""
+    manager = WorktreeManager(wt_repo)
+    record, tree = _make_task_commit(manager, "MERGE-RUNTIME")
+    _write_runtime_artifacts(wt_repo)
+
+    result = manager.merge(record.task_id, force=True, actor="runtime-test")
+
+    assert result["mode"] == "fast-forward"
+    assert (wt_repo / "task.txt").read_text(encoding="utf-8") == "task.txt\n"
+    assert not tree.exists()

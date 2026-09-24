@@ -2645,7 +2645,13 @@ class TestInitRunnerGitignoreAndWarning:
         assert content.startswith("__pycache__/\n"), "existing entries must be preserved"
 
     def test_init_does_not_duplicate_gitignore_entry(self, tmp_workdir):
-        """init leaves an existing .gitreins/tasks.yaml entry untouched."""
+        """init leaves an existing .gitreins/tasks.yaml entry untouched.
+
+        Counted over whole lines: the template also carries
+        ``.gitreins/tasks.yaml.lock`` (DF-GITREINS-POC-47), which contains the
+        older entry as a prefix, so a substring count would report a duplicate
+        that does not exist.
+        """
         self._make_python_repo(tmp_workdir)
         gi_path = os.path.join(tmp_workdir, ".gitignore")
         with open(gi_path, "w") as f:
@@ -2653,7 +2659,9 @@ class TestInitRunnerGitignoreAndWarning:
         result = run_cli("init", cwd=tmp_workdir)
         assert result.returncode == 0
         content = open(gi_path).read()
-        assert content.count(".gitreins/tasks.yaml") == 1, "entry must not be duplicated"
+        lines = content.splitlines()
+        assert lines.count(".gitreins/tasks.yaml") == 1, "entry must not be duplicated"
+        assert lines.count(".gitreins/tasks.yaml.lock") == 1, "entry must be written once"
 
     # ── GR-GAP-026: inconclusive-detection warning ────────────────────────
 
