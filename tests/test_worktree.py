@@ -268,6 +268,11 @@ def _branch_exists(main: Path, branch: str) -> bool:
     return result.returncode == 0
 
 
+def _switch_tree_branch(tree: Path, branch: str) -> None:
+    """Move a worktree onto another branch (registry/git metadata drift)."""
+    subprocess.run(["git", "-C", str(tree), "checkout", "-q", "-b", branch], check=True)
+
+
 # ── validation ───────────────────────────────────────────────────────────
 
 
@@ -518,6 +523,185 @@ def test_confirmed_clean_keeps_unmerged_branch_of_stale_work(wt_repo):
     assert report["branches_deleted"] == []
 
 
+# ── DF-GITREINS-POC-50 — failed lanes are reapable, never silently reusable ──
+
+
+def test_clean_reaps_failed_lane_tree_and_branch(wt_repo):
+    """A failed lane is terminal, so plain clean reaps it like a merged one."""
+    manager = WorktreeManager(wt_repo)
+    record, _created = manager.create("WT-FAIL")
+    manager.mark_lane("WT-FAIL", "failed", exit_code=7, error="lane boom")
+
+    report = manager.clean()
+
+    assert report["removed"] == ["WT-FAIL"]
+    assert report["kept"] == []
+    assert report["kept_reasons"] == {}
+    assert "gitreins/task/WT-FAIL" in report["branches_deleted"]
+    assert not Path(record.path).exists()
+    assert not _branch_exists(wt_repo, "gitreins/task/WT-FAIL")
+    assert manager._load_registry() == {}
+
+
+def test_clean_reaps_failed_tree_but_keeps_its_unmerged_branch(wt_repo):
+    """Removal never destroys committed work the branch still carries."""
+    manager = WorktreeManager(wt_repo)
+    record, _created = manager.create("WT-FAIL-WIP")
+    _commit_in(Path(record.path), "wip.txt", "failed lane work")
+    manager.mark_lane("WT-FAIL-WIP", "failed", exit_code=1)
+
+    report = manager.clean()
+
+    assert report["removed"] == ["WT-FAIL-WIP"]
+    assert not Path(record.path).exists()
+    assert report["branches_deleted"] == []  # unmerged branch survives `-d`
+    assert _branch_exists(wt_repo, "gitreins/task/WT-FAIL-WIP")
+    assert manager._load_registry() == {}
+
+
+def test_clean_keeps_failed_tree_holding_uncommitted_files_and_says_why(wt_repo):
+    """The uncommitted-file doctrine: reap the tree, never its unread dirt."""
+    manager = WorktreeManager(wt_repo)
+    record, _created = manager.create("WT-FAIL-DIRTY")
+    manager.mark_lane("WT-FAIL-DIRTY", "failed", exit_code=1)
+    tree = Path(record.path)
+    (tree / "scratch.txt").write_text("uncommitted\n", encoding="utf-8")
+
+    report = manager.clean()
+
+    assert report["removed"] == []
+    assert report["kept"] == [("WT-FAIL-DIRTY", "failed")]
+    assert tree.is_dir()
+    assert _branch_exists(wt_repo, "gitreins/task/WT-FAIL-DIRTY")
+    reason = report["kept_reasons"]["WT-FAIL-DIRTY"]
+    assert "uncommitted" in reason
+    assert "gitreins worktree clean" in reason
+    assert (
+        report["kept_reasons"]["WT-FAIL-DIRTY"] in manager._load_registry()["WT-FAIL-DIRTY"].notes
+    )
+
+    # Committing the scratch file clears the block: the same run then reaps it.
+    _commit_in(tree, "scratch.txt", "commit the evidence")
+    assert manager.clean()["removed"] == ["WT-FAIL-DIRTY"]
+
+
+def test_create_refuses_reuse_of_failed_lane_and_names_the_fix(wt_repo):
+    """A failed lane's tree sits at a stale HEAD — never reuse it silently."""
+    manager = WorktreeManager(wt_repo)
+    manager.create("WT-RERUN")
+    manager.mark_lane("WT-RERUN", "failed", exit_code=9, error="guard failed")
+
+    with pytest.raises(WorktreeError) as excinfo:
+        manager.create("WT-RERUN")
+
+    message = str(excinfo.value)
+    assert "FAILED worktree" in message
+    assert "gitreins worktree clean" in message
+    assert "--confirm-stale-orphan" not in message  # plain clean is the fix here
+    assert Path(wt_repo.parent / "main-wt" / "WT-RERUN").is_dir()  # nothing destroyed
+
+    # Following the hint actually resolves it, and the re-run then succeeds.
+    assert manager.clean()["removed"] == ["WT-RERUN"]
+    _record, created = manager.create("WT-RERUN")
+    assert created is True
+
+
+def test_failed_lane_aged_past_stale_is_refused_with_the_confirm_hint(wt_repo):
+    """Reconcile rewrites an old failure to `stale`; lane_phase keeps the memory.
+
+    The hint must still be the command that resolves it: plain clean protects
+    stale entries, so the refusal names `--confirm-stale-orphan`.
+    """
+    clock = FakeClock()
+    manager = WorktreeManager(wt_repo, clock=clock)
+    record, _created = manager.create("WT-AGED")
+    _commit_in(Path(record.path), "aged.txt", "failed lane work")
+    manager.mark_lane("WT-AGED", "failed", exit_code=9)
+    clock.advance(STALE_AFTER_SECONDS + 120)
+
+    with pytest.raises(WorktreeError) as excinfo:
+        manager.create("WT-AGED")
+
+    message = str(excinfo.value)
+    assert "FAILED worktree" in message
+    assert "gitreins worktree clean --confirm-stale-orphan" in message
+
+    unconfirmed = manager.clean()
+    assert unconfirmed["removed"] == []
+    assert ("WT-AGED", "stale") in unconfirmed["kept"]  # plain clean cannot fix it
+    assert manager.clean(confirm_stale_orphan=True)["removed"] == ["WT-AGED"]
+
+
+def test_reconcile_hint_names_the_confirm_flag_for_an_orphaned_failed_lane(wt_repo):
+    """DF-GITREINS-POC-50 AC4: the hint fits the problem class (orphan → flag)."""
+    manager = WorktreeManager(wt_repo)
+    record, _created = manager.create("WT-ORPHANED")
+    manager.mark_lane("WT-ORPHANED", "failed", exit_code=9)
+    shutil.rmtree(record.path)
+
+    with pytest.raises(WorktreeError) as excinfo:
+        manager.create("WT-ORPHANED")
+
+    message = str(excinfo.value)
+    assert "does not match git reality" in message
+    assert "gitreins worktree clean --confirm-stale-orphan" in message
+
+    # The named command is the one that works: plain clean keeps the orphan.
+    assert manager.clean()["kept"] == [("WT-ORPHANED", "orphan")]
+    assert manager.clean(confirm_stale_orphan=True)["removed"] == ["WT-ORPHANED"]
+
+
+def test_reconcile_hint_escalates_when_clean_cannot_reap_the_entry(wt_repo):
+    """A live entry on the wrong branch is not reapable by clean, and says so.
+
+    The old hint pointed every mismatch at plain `clean`, the command that
+    cannot resolve this one — the consumer re-ran it and stayed stuck.
+    """
+    manager = WorktreeManager(wt_repo)
+    record, _created = manager.create("WT-DRIFTED")
+    _switch_tree_branch(Path(record.path), "side-drift")
+
+    with pytest.raises(WorktreeError) as excinfo:
+        manager.create("WT-DRIFTED")
+
+    message = str(excinfo.value)
+    assert "does not match git reality" in message
+    assert "git worktree remove --force" in message
+
+    # Honest: plain clean really does keep it (it is not stale, not failed).
+    assert manager.clean()["kept"] == [("WT-DRIFTED", "running")]
+
+
+def test_failed_lane_aged_past_stale_but_merged_is_reaped_by_plain_clean(wt_repo):
+    """When the branch reached HEAD, plain clean IS the fix and the hint says so."""
+    clock = FakeClock()
+    manager = WorktreeManager(wt_repo, clock=clock)
+    record, _created = manager.create("WT-AGED-MERGED")
+    _commit_in(Path(record.path), "merged.txt", "lane work")
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(wt_repo),
+            "merge",
+            "--ff-only",
+            "-q",
+            "gitreins/task/WT-AGED-MERGED",
+        ],
+        check=True,
+    )
+    manager.mark_lane("WT-AGED-MERGED", "failed", exit_code=9)
+    clock.advance(STALE_AFTER_SECONDS + 120)
+
+    with pytest.raises(WorktreeError) as excinfo:
+        manager.create("WT-AGED-MERGED")
+
+    message = str(excinfo.value)
+    assert "FAILED worktree" in message
+    assert "--confirm-stale-orphan" not in message
+    assert manager.clean()["removed"] == ["WT-AGED-MERGED"]
+
+
 # ── listing ──────────────────────────────────────────────────────────────
 
 
@@ -642,6 +826,36 @@ def test_cli_worktree_clean_requires_confirmation_then_reaps(wt_repo):
     confirmed = _run_cli("worktree", "clean", "--confirm-stale-orphan", cwd=wt_repo)
     assert confirmed.returncode == 0, confirmed.stderr
     assert "Reaped 1 worktree(s): CLI-O" in confirmed.stdout
+
+
+def test_cli_worktree_clean_reaps_failed_lane_without_flags(wt_repo):
+    """DF-GITREINS-POC-50 AC1: plain clean must reap a failed lane."""
+    _run_cli("task", "worktree", "CLI-F", cwd=wt_repo)
+    WorktreeManager(wt_repo).mark_lane("CLI-F", "failed", exit_code=3, error="lane boom")
+
+    result = _run_cli("worktree", "clean", cwd=wt_repo)
+
+    assert result.returncode == 0, result.stderr
+    assert "Reaped 1 worktree(s): CLI-F" in result.stdout
+    assert "Kept" not in result.stdout
+    assert not (wt_repo.parent / "main-wt" / "CLI-F").exists()
+    assert not _branch_exists(wt_repo, "gitreins/task/CLI-F")
+
+
+def test_cli_worktree_clean_reports_why_a_failed_tree_was_kept(wt_repo):
+    """A kept failed tree is never a mystery: the reason is printed."""
+    _run_cli("task", "worktree", "CLI-FD", cwd=wt_repo)
+    WorktreeManager(wt_repo).mark_lane("CLI-FD", "failed", exit_code=3)
+    tree = wt_repo.parent / "main-wt" / "CLI-FD"
+    (tree / "scratch.txt").write_text("uncommitted\n", encoding="utf-8")
+
+    result = _run_cli("worktree", "clean", cwd=wt_repo)
+
+    assert result.returncode == 0, result.stderr
+    assert "Nothing to reap." in result.stdout
+    assert "CLI-FD [failed]" in result.stdout
+    assert "uncommitted" in result.stdout
+    assert tree.is_dir()
 
 
 def test_cli_worktree_help_lists_new_subcommands():

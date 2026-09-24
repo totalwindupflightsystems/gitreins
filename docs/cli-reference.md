@@ -670,12 +670,15 @@ failed, and exit 2 means GitReins infrastructure failed. Evidence contains
 gitreins worktree clean [--confirm-stale-orphan]
 ```
 
-Reaps merged task worktrees immediately and finished disposable runs, then
-reports what it kept. Stale (>24h without a heartbeat) and orphan trees are
-**reported and kept** unless you pass `--confirm-stale-orphan`, which also
-removes them. Exit **0** whether or not anything was reaped (it prints
-`Nothing to reap.`); exit **1** means the reap itself failed
-(`worktree clean: failed`).
+Reaps merged and **failed** task worktrees immediately and finished
+disposable runs, then reports what it kept. A failed lane is terminal (a fleet
+re-run is expected to start from a fresh tree), so plain `clean` removes its
+tree and branch like a merged one — *unless* the tree still holds uncommitted
+files, which are kept and reported as the reason. Stale (>24h without a
+heartbeat) and orphan trees are **reported and kept** unless you pass
+`--confirm-stale-orphan`, which also removes them. Exit **0** whether or not
+anything was reaped (it prints `Nothing to reap.`); exit **1** means the reap
+itself failed (`worktree clean: failed`).
 
 ### `worktree merge`
 

@@ -1704,7 +1704,7 @@ def cmd_worktree_dogfood(args):
 
 
 def cmd_worktree_clean(args):
-    """Reap merged task worktrees and finished disposable runs."""
+    """Reap merged and failed task worktrees and finished disposable runs."""
     from engine.worktree_disposable import DisposableWorktreeManager
     from engine.worktree_manager import PROTECTED_STATES, WorktreeError, WorktreeManager
 
@@ -1731,11 +1731,14 @@ def cmd_worktree_clean(args):
 
     kept = report["kept"]
     if kept:
+        reasons = report.get("kept_reasons", {})
         print(f"Kept {len(kept)} worktree(s):")
         for task_id, state in kept:
             line = f"  {task_id} [{state}]"
             if state in PROTECTED_STATES and not confirm:
                 line += " — reaping requires --confirm-stale-orphan"
+            elif task_id in reasons:
+                line += f" — {reasons[task_id]}"
             print(line)
 
 

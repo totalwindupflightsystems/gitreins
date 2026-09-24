@@ -5,8 +5,10 @@ creates ``../<repo>-wt/<task-id>`` on branch ``gitreins/task/<task-id>``, and
 the creation is recorded in the main checkout's ``.gitreins/worktrees.json``
 so the mapping survives process restarts.  Every lifecycle entry point
 reconciles the registry against real ``git worktree`` metadata before acting:
-work is never destroyed silently — merged trees are the only thing removal
-reaps without an explicit confirmation flag.
+work is never destroyed silently — merged and failed trees are the only thing
+removal reaps without an explicit confirmation flag (a failed tree that still
+holds uncommitted files is kept and the reason is reported), and stale/orphan
+trees are removed only with ``--confirm-stale-orphan``.
 
 State semantics (deterministic, derived — never stored as truth):
 
@@ -17,6 +19,10 @@ State semantics (deterministic, derived — never stored as truth):
 - ``guarding`` / ``judging`` — recorded in the registry when a guard/judge run
                  touches the entry (via :meth:`mark_phase`); reconcile keeps
                  them while the tree exists and the branch is unmerged.
+- ``failed``   — the last fleet lane run exited non-zero (recorded via
+                 :meth:`mark_lane`).  Terminal: there is no retry path, so
+                 :meth:`clean` reaps a failed tree like a merged one and a
+                 fleet re-run starts from a fresh tree.
 - ``stale``    — tree exists, branch unmerged, and no heartbeat for longer
                  than ``STALE_AFTER_SECONDS`` (default 24h).
 - ``orphan``   — the recorded tree is missing from git's worktree metadata, or
@@ -639,8 +645,16 @@ class WorktreeManager:
             raise WorktreeError(
                 f"registry entry for task {task_id!r} does not match git reality: "
                 + "; ".join(problems)
-                + " — run `gitreins worktree clean` to reconcile first"
+                + self._reconcile_hint(record)
             )
+        refusal = self._failed_lane_refusal(record)
+        if refusal is not None:
+            # A failed lane's tree sits at whatever HEAD the failed run left and
+            # nothing resets it, so reusing it silently would run the next lane
+            # against a pre-feature tree.  Refusing (rather than auto-resetting)
+            # keeps whatever evidence the tree holds: the caller reaps it with
+            # `clean` and re-runs from a fresh tree.
+            raise WorktreeError(refusal)
         changed = False
         if brief_path is not None and record.brief_path != brief_path:
             record.brief_path = brief_path
@@ -658,6 +672,54 @@ class WorktreeManager:
             records[task_id] = record
             self._save_registry(records)
         return record, False
+
+    def _failed_lane_refusal(self, record: WorktreeRecord) -> str | None:
+        """The message refusing reuse of a failed lane's stale tree, or ``None``.
+
+        ``record.state`` is the *reconciled* state, and reconcile reclassifies a
+        failure older than :data:`STALE_AFTER_SECONDS` as ``stale``.
+        ``record.lane_phase`` (written by :meth:`mark_lane`) remembers the
+        terminal lane outcome across that reclassification, so a failed-then-aged
+        tree is not silently reused at its old HEAD either.
+        """
+        if record.state != "failed" and record.lane_phase != "failed":
+            return None
+        if record.state in PROTECTED_STATES:
+            return (
+                f"lane {record.task_id!r} has a FAILED worktree at a stale HEAD: run "
+                "`gitreins worktree clean --confirm-stale-orphan` to reap it and start fresh"
+            )
+        return (
+            f"lane {record.task_id!r} has a FAILED worktree at a stale HEAD: run "
+            "`gitreins worktree clean` (failed lanes are reaped by clean) to start fresh"
+        )
+
+    @staticmethod
+    def _reconcile_hint(record: WorktreeRecord) -> str:
+        """The hint naming the command that ACTUALLY resolves this mismatch.
+
+        The hint must fit the problem class: plain ``clean`` reaps merged and
+        failed entries, a stale/orphan mismatch is protected behind
+        ``--confirm-stale-orphan``, and a live entry (running/guarding/judging)
+        is not reaped by anything, so it names the manual escalation.  Pointing
+        every class at plain ``clean`` is what left consumers re-running a
+        command that could not fix the state.
+        """
+        if record.state in PROTECTED_STATES:
+            return (
+                " — run `gitreins worktree clean --confirm-stale-orphan` to reconcile first "
+                "(stale/orphan entries are only reaped with the confirmation flag)"
+            )
+        if record.state in ("merged", "failed"):
+            return (
+                " — run `gitreins worktree clean` to reconcile first "
+                "(clean reaps merged and failed entries)"
+            )
+        return (
+            " — run `gitreins worktree clean` first; if `clean` keeps this entry, "
+            "remove the tree by hand (`git worktree remove --force` then "
+            "`git branch -D`) once its work is accounted for"
+        )
 
     # ── heartbeat / phase ───────────────────────────────────────────
 
@@ -1134,23 +1196,42 @@ class WorktreeManager:
         *,
         confirm_stale_orphan: bool = False,
     ) -> dict[str, list[str]]:
-        """Reap merged trees immediately; stale/orphan only when confirmed.
+        """Reap merged and failed trees immediately; stale/orphan when confirmed.
+
+        ``failed`` is terminal — there is no retry path through ``clean`` (a
+        fleet re-run is expected to create a fresh tree), so a failed lane's
+        tree and branch are reaped exactly like a merged one: the tree goes, and
+        the branch is deleted only when it is fully merged into HEAD
+        (``branches_deleted`` names the ones removed; a branch still carrying
+        unmerged commits survives, exactly as it does for a merged entry).  The
+        one exception to removal is a failed tree that still holds uncommitted
+        work of its own (:meth:`_is_clean`): that is evidence nobody has
+        committed yet, so the tree is kept and the reason is reported — the same
+        doctrine as ``worktree.sh reap``, which never touches a worktree with
+        uncommitted files.
 
         Stale and orphan trees carry unverified work or unexplained absence —
         they are never removed without ``confirm_stale_orphan=True``.  Returns
         a report: ``{"removed": [...], "kept": [(task_id, state), ...],
-        "branches_deleted": [...]}``.
+        "branches_deleted": [...], "kept_reasons": {task_id: reason}}``.
         """
         records = self.reconcile_and_persist()
         removed: list[str] = []
         branches_deleted: list[str] = []
         kept: list[tuple[str, str]] = []
+        kept_reasons: dict[str, str] = {}
 
         for task_id, record in list(records.items()):
-            if record.state == "merged":
-                self._remove_tree(record, branches_deleted)
-                removed.append(task_id)
-                del records[task_id]
+            if record.state in ("merged", "failed"):
+                reason = self._failed_reap_blocker(record) if record.state == "failed" else None
+                if reason is None:
+                    self._remove_tree(record, branches_deleted)
+                    removed.append(task_id)
+                    del records[task_id]
+                else:
+                    record.notes = [reason]
+                    kept.append((task_id, record.state))
+                    kept_reasons[task_id] = reason
             elif record.state in PROTECTED_STATES:
                 if confirm_stale_orphan:
                     self._remove_tree(record, branches_deleted)
@@ -1162,7 +1243,35 @@ class WorktreeManager:
                 kept.append((task_id, record.state))
 
         self._save_registry(records)
-        return {"removed": removed, "kept": kept, "branches_deleted": branches_deleted}
+        return {
+            "removed": removed,
+            "kept": kept,
+            "branches_deleted": branches_deleted,
+            "kept_reasons": kept_reasons,
+        }
+
+    def _failed_reap_blocker(self, record: WorktreeRecord) -> str | None:
+        """Why a failed tree must be kept, or ``None`` when it can be reaped.
+
+        Read-only and fail-closed: an unreadable tree is never removed on a
+        guess.  A tree that is already gone has nothing left to destroy.
+        """
+        tree = Path(record.path)
+        if not tree.is_dir():
+            return None
+        try:
+            clean_tree = self._is_clean(tree)
+        except WorktreeError:
+            return (
+                "worktree state could not be read; inspect it by hand before reaping "
+                "(clean never removes a tree it cannot verify)"
+            )
+        if clean_tree:
+            return None
+        return (
+            "worktree has uncommitted files; commit or discard them, then re-run "
+            "`gitreins worktree clean`"
+        )
 
     def _remove_tree(self, record: WorktreeRecord, branches_deleted: list[str]) -> None:
         """Remove the git worktree (never touching the branch) plus its branch."""
