@@ -1116,3 +1116,104 @@ board rows DF-GITREINS-POC-47...53, scratch run records in `/tmp/dg-fleet/`
 (fleet-run2..12.json), consumer-worktree verdict
 `.gitreins/history/2026-09-24/28c87900/verdict.json` (guard-PASS/judge-FAIL
 divergence, commit + output quoted).
+
+## 2026-09-24b — `gitreins serve`: how the browser is built, why the pane
+shows nothing below the header, and the right way to consume it
+
+### How serve is built (the 2-minute tour)
+
+One file, `gitreins/serve.py` (~770 lines): a `ThreadingHTTPServer` with a
+single `Handler` whose `do_GET` dispatches on exact path strings. There is no
+framework and no state — every request re-reads the filesystem
+(`list_verdicts`, `load_jsonl` with a 2000-line tail cap, `load_ticks` from
+`~/.hermes/coding-hermes/scheduler.db` opened `mode=ro`, `load_qa`). The SPA
+is one Python string constant (`_PAGE`) with the JS inline; the "API" and the
+"UI" are therefore maintained by two different skill sets inside one string
+template — which is exactly where this run's P0 lives.
+
+Telemetry attribution (JVIEW-006) is a three-step join: `verdict_stamps()`
+collects `(date, hash, evaluated_at)` for every verdict and `_epoch()`
+normalizes the stored ISO strings (naive = UTC) to epoch seconds;
+`engine/usage.attribute_rows()` then charges each `usage.jsonl` line to the
+earliest verdict at-or-after its `ts` (1:1, unattributed lines are dropped,
+never mis-blamed); `summarize()` builds the header aggregate. The
+`unattributed` number counts VERDICTS with no telemetry, not lines (see
+POC-57's doc drift).
+
+Evidence serving is the trust anchor: `load_verdict_evidence` reads the
+verdict's own `evidence.items` manifest and serves only names it declares —
+anything else on disk in that directory (e.g. `summary.md`) is a 404. Path
+segments are regex-validated (`^\d{4}-\d{2}-\d{2}$`, `^[a-f0-9]{4,16}$`)
+before any open, so traversal dies at the validator. This all held up under
+attack.
+
+### The pane bug, and why it survived eight months
+
+The detail pane is composed in JS inside `_PAGE`. The `join('') || fallback`
+idiom appears three times in that file. In the ticks and QA lists it is
+correct: the left operand is a bare `.join('')`, so an empty list yields `''`
+→ falsy → the fallback paragraph renders. In `show()` (detail pane) the same
+idiom is broken because the left operand accumulated the header + title +
+meta + criteria-header before the join — a non-empty string no matter what —
+so the fallback AND every section concatenated after it (tier1, tier2,
+summary, telemetry, evidence) are unreachable. `git show c377f0f` proves it
+was born with the feature (2026-09-12); `e5a7fbf` (JVIEW-005) extended the
+dead operand with the evidence section, which is why the evidence UI shipped
+"complete" and was never seen.
+
+Why every test stayed green: nothing unit-tests the rendered HTML against the
+served payload. The API tests pass (they should — the API is right), and the
+JS has no test at all. The general lesson for this repo (already filed for
+hand-written templates on 2026-09-20 boardctl): **when Python builds a JS
+string that builds DOM, only a render-and-assert test sees the truth.**
+Suggested gate (filed with POC-56): fetch a payload with tier1/tier2/evidence
+and assert the pane's innerText contains `Tier 1 — static gates` and
+`Evidence (`.
+
+### The right way to consume serve today
+
+- Programmatic audit: use the API, not the pane. The contract table in
+  judgment-viewer.md is accurate on error codes, emptiness semantics and
+  manifest binding; add the two facts the doc misses (stats excludes
+  kind=resolution rows; `unattributed` counts verdicts without telemetry).
+- Human reading: `gitreins report -n N` (terminal) and
+  `scripts/judgment_viewer.py --repo . --out report.html` (static) both
+  render the full verdict content the live pane hides. Until POC-56 lands,
+  prefer these over `serve` for review.
+- Tick-ledger joins: `--project` is the SCHEDULER project name and is
+  case-sensitive; the project was renamed to `gitreins` (09-22) — docs
+  examples still say `gitreins-poc`, which has zero tick rows. The panel's
+  "no ticks recorded" message is honest in that case, not a defect.
+
+### Errors hit during the run (ours, not the product's — recorded because
+they shaped the evidence)
+
+- **SIGTERM + block-buffered stdout swallowed the serve banner** and made
+  `--port 0` look undocumented and `--host`'s warning look missing. A
+  backgrounded `cmd > file` buffers; killing the process discards the buffer.
+  Right way: `timeout -s INT` (SIGINT → graceful "stopped" → flush) with
+  `stdbuf -oL`, or read the listening socket from `ss -tlnp`. Both "defects"
+  were our artifacts; the real stdout/stderr defect is POC-57 #3.
+- **`$?` after a pipe is the pipe's status** — the first `rc=0` next to a
+  permission-denied clone log was the shell's, not the clone's. Right way:
+  `${PIPESTATUS[0]}` (this bit the 09-20 boardctl run the same way).
+- **pkill -f 'gitreins serve' matches the caller's own bash** (the pattern
+  text is in its command line) → SIGTERM to self, twice. Right way:
+  `fuser -k <port>/tcp` or `pkill -f '[g]itreins serve'`.
+- **Search-then-first-row is not a locator**: the SPA's search box matches
+  task_id+title only, so searching a hash matched nothing, and "first
+  matching row" for a title matched a different verdict than intended
+  (newest-last ordering). Right way: find the row whose innerText contains
+  the hash, then click it.
+
+### Fresh-clone rot (POC-58), mechanism
+
+`.gitreins/history/` entered `.gitignore` (line 23) only after two verdict
+directories had been added; gitignore never untracks files. Whoever next runs
+`git add -A` in this repo keeps re-affirming them. Fix is one command
+(`git rm -r --cached .gitreins/history`) plus a CI check
+(`git ls-files .gitreins/history` must be empty). The verdict branch
+`refs/heads/gitreins` is host-local by default and no release flow pushes it,
+so the documented fresh-clone fallback (`gitreins report` → branch) reads a
+ref that does not exist anywhere else. Either the release flow pushes the
+branch or the docs must stop offering it.

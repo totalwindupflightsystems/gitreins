@@ -4,7 +4,7 @@ description: >-
   How to use the GitReins quality harness in this repo (and any repo it's
   installed in): task lifecycle, guards, LLM judge, MCP tools, and the known
   pitfalls that will bite you. Load this before committing or creating tasks.
-version: 1.8.0
+version: 1.9.0
 category: software-development
 ---
 
@@ -681,3 +681,33 @@ The history branch ref `refs/heads/gitreins` collides with the fleet's own
 `gitreins/task/<id>` branches (ref-lock prefix conflict): "Verdict saved to
 disk but not committed (git unavailable)". Non-fatal; verdict.json is still
 on disk.
+
+## Pitfalls 40–43 (2026-09-24b run — `gitreins serve`, the judgment browser)
+
+**Pitfall 40 — the serve detail pane shows ONLY the header (POC-56, P0).**
+`show()` in `gitreins/serve.py` composes
+`header + criteria-join || fallback + tier1 + tier2 + summary + telemetry +
+evidence`; `||` sees the whole left chain (always truthy) and drops the
+right side, so no verdict ever renders its gates, judge summary, cost or
+evidence. Until fixed: use `gitreins report`, the static
+`scripts/judgment_viewer.py`, or the `/api/verdicts/<date>/<hash>` JSON —
+the API serves everything correctly.
+
+**Pitfall 41 — the SPA search box matches task_id + title only.** Searching
+a verdict hash matches nothing; locate rows by their rendered text (row
+innerText contains `date · hash`). The list is newest-LAST, so "first
+matching row" for a title can be a different verdict than you assume.
+
+**Pitfall 42 — `--project` is the scheduler project name, case-sensitive,
+and the project was renamed.** Docs examples say `gitreins-poc`; the fleet
+project has been `gitreins` since 09-22, so `--project gitreins-poc` shows
+"no ticks recorded" forever. Ticks come from
+`~/.hermes/coding-hermes/scheduler.db` on the host running serve.
+
+**Pitfall 43 — a fresh clone carries two stale verdicts and no verdict
+branch (POC-58).** `2026-08-17/96dd2464` and `2026-08-18/9b129d91` are
+git-TRACKED despite `.gitignore`, so a fresh clone's serve/report shows
+those two (and nothing else locally); and `refs/heads/gitreins` is pushed
+nowhere, so the documented branch-fallback for `report` is empty. Prefer
+the API (`serve --repo`) against a checkout that actually has history, or
+fetch the branch if it ever lands on a remote.

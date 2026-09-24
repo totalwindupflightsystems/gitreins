@@ -225,3 +225,46 @@ docs/dogfood/2026-09-24-integration.md. Install leg RUN on las-bunker-03
 - [P2] DF-GITREINS-POC-53: docs never state the fleet's operations contract
   (commit harness config, in-tree task creation, committing idempotent lanes,
   judge/verdict gate); README quickstart flow cannot merge.
+
+## Dogfood Findings (2026-09-24b — run 11: `gitreins serve`, the judgment browser)
+
+Angle: runs 1-10 swept CLI/guards/judge/MCP/resolve/security-scan/Go/fleet and
+`report`; this run took the human-facing surface — `gitreins serve` (documented
+API contract + security model) — plus the fresh-clone/install leg. Verdict
+evidence: docs/dogfood/2026-09-24b-integration.md. Install leg RUN on
+las-bunker-03 (agent fbf41e9d, clone+18s venv install, smoke loop, destroyed +
+verified gone).
+
+- [P0] DF-GITREINS-POC-56: serve detail pane renders ONLY the header for every
+  verdict — serve.py:584-591 show() composes
+  `header + criteria-join || fallback + Tier1 + Tier2 + summary + telemetry +
+  evidence`; the left operand of `||` is always a truthy string, so everything
+  from the fallback through the Evidence section is unreachable. Verified in
+  Chrome: 216/216 verdict panes show just the header + "CRITERIA (0)" while
+  /api/verdicts/<date>/<hash> serves all of it (0 of 216 render Tier 1/2,
+  telemetry or evidence). Born in the original serve commit c377f0f (09-12).
+  Standalone node repro + Playwright sweeps in the integration report.
+- [P2] DF-GITREINS-POC-57: serve contract drift, 4 items — stats excludes
+  kind=resolution rows (total 212 vs list 216) with no payload field or doc
+  line saying so and the SPA card labels the 212 "JUDGMENTS" over a 216-row
+  list; judgment-viewer.md:152 describes `unattributed` as unattributed usage
+  LINES but usage.py summarize() counts verdicts with no telemetry;
+  judgment-viewer.md:216 promises the --host warning on stderr but serve.py
+  prints it to stdout (verified); aggregate cost_usd ships 0.0 where the doc
+  says unpriced is null.
+- [P2] DF-GITREINS-POC-58: verdict-history surface rots silently — two verdict
+  dirs (2026-08-17/96dd2464, 2026-08-18/9b129d91) are git-TRACKED despite
+  .gitignore:23, so a fresh clone serves stale history (bunker clone served
+  total: 2) against README's "fresh clone therefore has no local
+  .gitreins/history/"; and refs/heads/gitreins has no upstream and is on
+  neither remote, so report's documented branch fallback can only ever be
+  empty for anyone else.
+- Install-leg regression: POC-51 reproduced on HEAD (fresh repo first commit
+  blocked by `pytest: not found` — known open row, not refiled). POC-47
+  verified FIXED (0.15.0 merge gate ignores the runtime files; commit c4a4c05).
+- Serve perf: /api/stats 43.5ms±4.5 warm; SPA cold boot 844ms, reload 722ms,
+  detail open 201ms, 0 longtasks (1360px Chrome, 216-row board); CLI report
+  87.6ms±5.9. Nothing a user feels — no PERF row.
+- Security model verified: 5 traversal shapes on verdict/evidence routes all
+  400/404, evidence strictly manifest-bound, board name-bound, 0.0.0.0 bind
+  works with the documented (mis-streamed) warning.
