@@ -36,7 +36,9 @@ GITLAB = "https://gitlab.readydedis.com"
 # cuts the link, then delete it. Seeded and verified 2026-09-24: trees identical,
 # 0 missing commits, 0 differing files, 42/42 tags.
 PROJECT_PATH = "coding-hermes/gitreins-mirror"
-REMOTE = "origin"  # the GitLab remote in this checkout
+# The mirror-side remote: `origin` still points at the OLD totalwindup/gitreins-poc
+# project (frozen until Bane cuts the link) - do not point this back at it.
+REMOTE = "gitlab-mirror"  # the GitLab remote in this checkout
 MIRROR_BRANCH = "mirror/main"
 
 
