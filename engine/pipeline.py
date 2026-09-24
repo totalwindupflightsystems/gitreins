@@ -64,6 +64,7 @@ from engine.evidence_bounds import (
 )
 from engine.guard_manager import (
     HARNESS_STATE_DIRS,
+    _pytest_no_tests_benign,
     _resolve_test_command,
     harness_state_allowlist_paths,
 )
@@ -87,6 +88,11 @@ logger = logging.getLogger("gitreins.pipeline")
 # exit code in the verdict. Matches `pytest`, `python -m pytest`, `uv run
 # pytest`, and a venv console script — the whole `\bpytest\b` word.
 _PYTEST_INVOCATION = re.compile(r"\bpytest\b")
+
+# DF-GITREINS-POC-49: the skip reason a benign pytest exit-5 step records. The
+# exact wording engine/guard_manager.py:2098 puts on its GuardResult, so the two
+# surfaces report the same tree with the same words.
+_PYTEST_SKIP_NO_TESTS = "no tests collected"
 
 # TRUST-001: a step that SKIPS (e.g. the linter is not on PATH) prints this
 # marker and exits 0, so the stage can record the gate it never graded instead
@@ -233,6 +239,24 @@ def degradation_warning(stage: dict) -> str | None:
         f"WARNING: coverage is {stage.get('coverage') or 'unknown'} — {skipped} did not run "
         f"({reason}); run `gitreins guard` for the full gate"
     )
+
+
+def _step_skip_reason(step: StepResult) -> str:
+    """The reason a PASSING step graded nothing, from its own data.
+
+    DF-GITREINS-POC-49: :meth:`Pipeline._run_script_step` marks a benign
+    pytest exit 5 (pytest collected no tests) as passed-with-skip and records
+    ``data["skipped"]``/``data["skip_reason"]`` — the same facts the guard's
+    ``GuardResult`` carries for the same tree. This is the reader: the stage
+    summary renders such a step in the ``~`` (DEGRADED) register instead of a
+    ✓ that would claim the tests ran. Returns "" for every other step, and
+    never trusts the marker on a FAILED step — a malformed record must not be
+    able to hide a failure behind a skip.
+    """
+    data = step.data if isinstance(step.data, dict) else {}
+    if not step.passed or not data.get("skipped"):
+        return ""
+    return str(data.get("skip_reason") or "") or "unknown reason"
 
 
 def _step_budget_timeout(step: StepResult) -> int | None:
@@ -652,13 +676,14 @@ class Pipeline:
                     data={"timed_out": True, "timeout_s": budget},
                 )
             output = out["output"]
+            exit_code = out["exit_code"]
             # A non-zero exit is a hard failure regardless of on_fail. on_fail
             # only controls whether later steps still run; it must never turn a
             # failed lint/test into a pass (previously `on_fail: continue` and
             # generated `cmd || true` both zeroed the failure). 2026-08-08.
-            passed = out["exit_code"] == 0
+            passed = exit_code == 0
 
-            data: dict = {"exit_code": out["exit_code"]}
+            data: dict = {"exit_code": exit_code}
             if out.get("leftover_pids"):
                 # Never hide a reap failure: the verdict carries the evidence.
                 data["leftover_pids"] = out["leftover_pids"]
@@ -667,7 +692,29 @@ class Pipeline:
             # like a signalled run. Classify from the output so the verdict
             # names the cause instead of the reader's guess.
             if _PYTEST_INVOCATION.search(cmd):
-                data["pytest_outcome"] = pytest_outcome(out["exit_code"], output)
+                outcome = pytest_outcome(exit_code, output)
+                data["pytest_outcome"] = outcome
+                # DF-GITREINS-POC-49: the guard and the judge grade the SAME
+                # tree, so they must reach the SAME verdict on it. `gitreins
+                # guard` has treated pytest exit 5 carrying pytest's own "no
+                # tests ran" summary — and no collection errors — as a benign
+                # SKIPPED pass since GR-GAP-048 (engine/guard_manager.py:2081),
+                # but this step graded only the number, so a consumer repo with
+                # no test suite got an automatic `Stage tier1: FAIL` /
+                # `Overall: FAIL` from `gitreins judge` on the commit the
+                # pre-commit hook had just passed.
+                #
+                # Classify with the guard's own predicate (imported, never
+                # copied — one definition, two callers) and record the same
+                # skip facts its GuardResult carries. Nothing is swallowed: the
+                # number stays in data["exit_code"] and the classification in
+                # data["pytest_outcome"], so the verdict still shows a 5 that
+                # graded nothing. An exit 5 WITH collection errors fails the
+                # benign check and stays a failure, exactly as before.
+                if outcome.get("kind") == "no-tests-collected" and _pytest_no_tests_benign(output):
+                    passed = True
+                    data["skipped"] = True
+                    data["skip_reason"] = _PYTEST_SKIP_NO_TESTS
             # DF-018: the tier-1 stage points the written verdict at the raw
             # guard evidence (complete, untruncated run log) when one exists.
             guard_log = self._guard_log_ref(stage_id)
@@ -1127,6 +1174,14 @@ class Pipeline:
         """
         lines = []
         for step in stage.steps:
+            skip_reason = _step_skip_reason(step)
+            if skip_reason:
+                # DF-GITREINS-POC-49: a benign pytest exit 5 PASSES but graded
+                # nothing — render it in the same ~ (DEGRADED) register the guard
+                # console uses for a skipped gate ("~ tests — skipped (no tests
+                # collected)"), never as a ✓ that claims the tests ran.
+                lines.append(f"  ~ {step.id}: skipped ({skip_reason})")
+                continue
             budget = _step_budget_timeout(step) if not step.passed else None
             if budget is not None:
                 # GAP-058: the ~ marker is the DEGRADED vocabulary (a gate
