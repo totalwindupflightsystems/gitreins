@@ -117,10 +117,10 @@ def test_check_go_lint_uses_golangci_lint_when_it_passes():
     assert "GIT_INDEX_FILE" not in run.call_args.kwargs["env"]
 
 
-@pytest.mark.parametrize("lint_exit", [1, None])
-def test_check_go_lint_falls_back_to_go_vet(lint_exit):
-    """golangci-lint failure (exit 1) or spawn failure (no exit_code) → go vet."""
-    first = lane(1) if lint_exit is not None else lane(error="[Errno 2] golangci-lint")
+def test_check_go_lint_falls_back_to_go_vet():
+    """DF-GITREINS-POC-43: only a SPAWN failure ({"error": ...}, no exit_code)
+    falls through to go vet — a real exit 1 is graded as findings instead."""
+    error = "[Errno 2] No such file or directory: 'golangci-lint'"
     with (
         patch(
             "engine.guards.subprocess.run",
@@ -128,14 +128,49 @@ def test_check_go_lint_falls_back_to_go_vet(lint_exit):
         ),
         patch(
             "engine.guards.command_hygiene.run_bounded",
-            side_effect=[first, lane(0)],
+            side_effect=[lane(error=error), lane(0)],
         ) as run,
     ):
         result = check_go_lint("/repo")
 
-    assert result == GoGuardResult(name="go_lint", passed=True, output="go vet: clean")
+    assert result == GoGuardResult(
+        name="go_lint",
+        passed=True,
+        output=f"golangci-lint unavailable ({error}); graded by go vet: clean",
+    )
+    assert run.call_args_list[0].args[0][0] == "golangci-lint"
     assert run.call_args_list[-1].args[0] == ["go", "vet", "./..."]
     assert run.call_args_list[-1].kwargs["timeout"] == 60
+
+
+def test_check_go_lint_grades_real_golangci_findings_without_vet_fallback():
+    """DF-GITREINS-POC-43: golangci-lint exit 1 with findings is a real failure.
+
+    The old code treated any non-zero exit as "linter unusable" and fell
+    through to go vet, so real findings could report `ok go_lint — ok` when
+    go vet was clean — a false PASS. The linter ran, so its verdict stands
+    and go vet is never invoked."""
+    findings = (
+        "main.go:12:5: unusedvar: variable x is unused (unused)\n"
+        "pkg/lib.go:3:1: errcheck: type assertion on error will panic (errcheck)"
+    )
+    with (
+        patch(
+            "engine.guards.subprocess.run",
+            return_value=completed("main.go\n"),
+        ) as git_run,
+        patch(
+            "engine.guards.command_hygiene.run_bounded",
+            return_value=lane(1, findings),
+        ) as run,
+    ):
+        result = check_go_lint("/repo")
+
+    assert result == GoGuardResult(name="go_lint", passed=False, output=findings)
+    # Exactly one tool call (golangci-lint); go vet never ran.
+    assert run.call_count == 1
+    assert run.call_args.args[0][0] == "golangci-lint"
+    git_run.assert_called_once()
 
 
 def test_check_go_lint_returns_truncated_vet_failure():
@@ -153,7 +188,12 @@ def test_check_go_lint_returns_truncated_vet_failure():
         result = check_go_lint("/repo")
 
     assert result.passed is False
-    assert result.output == output[:2000] + "\n... [truncated]"
+    # DF-GITREINS-POC-43: the fall-through now labels the grader, and the
+    # vet findings keep the same head truncation as before.
+    assert result.output == (
+        "golangci-lint unavailable ([Errno 2] golangci-lint); "
+        "graded by go vet:\n" + output[:2000] + "\n... [truncated]"
+    )
 
 
 def test_check_go_lint_reports_vet_spawn_failure_as_error():
