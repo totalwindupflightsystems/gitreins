@@ -4,7 +4,7 @@ description: >-
   How to use the GitReins quality harness in this repo (and any repo it's
   installed in): task lifecycle, guards, LLM judge, MCP tools, and the known
   pitfalls that will bite you. Load this before committing or creating tasks.
-version: 1.7.0
+version: 1.8.0
 category: software-development
 ---
 
@@ -626,3 +626,58 @@ config.
 `✗ go_build` / `✗ go_lint` / `✗ go_tests` and only the run log carries the cause
 (`error: [Errno 2] No such file or directory: 'go'`). On a fresh machine, read
 the log before believing the code is at fault.
+
+
+## The parallel worktree fleet (2026-09-24 run 10 — verified at HEAD 412067d, 0.15.0)
+
+`gitreins worktree fleet lanes.json [--merge]` runs manifest lanes in
+branch-backed worktrees. The guard engine inside it is solid; the merge path
+on a STOCK install cannot succeed. Rows POC-47..53.
+
+**Pitfall 34 — commit the harness config BEFORE the first fleet run (POC-47/53).**
+`init` leaves `.gitreins/config.yaml` untracked; worktrees branch from HEAD, so
+lane guards die with "no .gitreins/config.yaml — run `gitreins init` first"
+(a hint that cannot fix it inside the tree). Commit config + `.gitleaks.toml`
+first, and commit the manifest itself too — the merge gate counts it.
+
+**Pitfall 35 — the harness's own runtime files jam the merge gate (POC-47).**
+The gate is `git status --porcelain -uall` minus a hardcoded ignore list
+(worktrees.json/lock, board events, history//logs/). NOT exempted and written
+by every fleet run: disposable.json, disposable.lock, tasks.yaml.lock; inside
+the worktree also the `.venv` symlink + `uv.lock` (created by the guard's
+`uv run pytest`). The installer's gitignore template misses all of them.
+Fix as a user: gitignore `.gitreins/worktrees.*`, `.gitreins/disposable.*`,
+`.gitreins/tasks.yaml.lock`, `.venv/`, and commit your manifest.
+
+**Pitfall 36 — judge-gated --merge is effectively unreachable (POC-48/49).**
+The gate needs a persisted PASS verdict for the exact lane commit. The
+README's example judge phase (`gitreins judge <id>`) fails in-tree
+("Task not found" — tasks.yaml is gitignored); `judge --ephemeral` persists
+nothing so it can never satisfy the gate; and even with the working pattern
+(lane command runs `gitreins task create <id> ...` in-tree, judge phase runs
+`gitreins judge <id>`) the judge's Tier 1 grades pytest exit-5 as a hard FAIL
+(pipeline.py:663 exit-code-only; the guard's benign exit-5 PASS at
+guard_manager.py:2081 is not consulted) — a repo without tests cannot get a
+PASS verdict while its hook passes. Also: judge-failed lanes report
+`error: null` with the refusal reason dropped — read `stages[].output`.
+
+**Pitfall 37 — failed lanes are a tarpit (POC-50).** `worktree clean` keeps
+failed lanes forever (exit 0, "Nothing to reap"); --confirm-stale-orphan does
+not reap them either; the reconcile error hint names plain `clean`; and a
+fleet re-run REUSES the failed lane's stale-HEAD tree. Recovery:
+`git worktree remove --force` each tree + `git branch -D gitreins/task/<id>`
++ `gitreins worktree clean --confirm-stale-orphan`. Make lane commands
+idempotent: `git add -A && (git diff --cached --quiet || git commit -m ...)`.
+
+**Pitfall 38 — fresh box, no pytest: the hook blocks commit #1 (POC-51).**
+On a bare machine, `pip install gitreins` is PEP-668 blocked (use
+`python3 -m venv`), and the pre-commit hook FAILs the first commit with
+`pytest: not found` (exit 127 = hard FAIL, not the benign exit-5 skip).
+Install pytest before your first commit, or expect the block. venv install
+measured 17 s on las-bunker-03 (Debian 13, Python 3.13).
+
+**Pitfall 39 — verdict history fails to commit in fleet repos (POC-52).**
+The history branch ref `refs/heads/gitreins` collides with the fleet's own
+`gitreins/task/<id>` branches (ref-lock prefix conflict): "Verdict saved to
+disk but not committed (git unavailable)". Non-fatal; verdict.json is still
+on disk.

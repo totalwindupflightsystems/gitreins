@@ -1035,3 +1035,84 @@ PASS), `03-lint-fallback-govet-clean.log` (F2: errcheck file, `go vet: clean`,
 PASS), `03b-…`/`03c-…` (same with `HEAD~1` resolvable), `04-golangci-direct-errcheck.txt`
 (the A/B: golangci-lint exit 1, errcheck named), `05-staged-broken-go-FAIL.log`
 (the lane working as promised). `README.txt` indexes them.
+
+## 2026-09-24 — run 10: the parallel worktree fleet, explained from the gates outward
+
+The fleet (`worktree fleet`, `worktree merge`) is four systems stacked: a
+worktree registry (`.gitreins/worktrees.json`), a lane runner
+(`engine/worktree_fleet.py`), a two-sided cleanliness gate
+(`WorktreeManager._is_clean`, run against canonical main AND the lane
+worktree), and a verdict gate (a persisted PASS verdict must name the exact
+lane commit). Understanding the stack explains every failure this run hit.
+
+### How the pieces actually work
+
+- Worktrees are BRANCH-BACKED from the invoking repo's current HEAD at creation
+  time. If the repo has an untracked `.gitreins/config.yaml` (the state
+  `gitreins init` leaves), every lane tree lacks it and the in-tree guard dies
+  with "no .gitreins/config.yaml — run `gitreins init` first" — a hint that
+  cannot work inside the tree. The right way: COMMIT the harness config before
+  the first fleet run. The docs don't say this anywhere (POC-53).
+- Lane reuse is unconditional when registry and git agree
+  (`worktree_manager.py:474-499`): a FAILED lane's tree sits at its old HEAD
+  and a re-run silently runs the new manifest there. Failed lanes are reaped by
+  nothing — `clean` keeps them (not merged, not stale), so the only recovery is
+  `git worktree remove --force` + `git branch -D` + `clean
+  --confirm-stale-orphan` (POC-50).
+- The merge gate is `git status --porcelain --untracked-files=all` minus a
+  HARDCODED ignore list (`worktree_manager.py:815-822`: worktrees.json/lock,
+  board events, history//logs/ prefixes). Every file the fleet writes that is
+  NOT on that list — disposable.json, disposable.lock, tasks.yaml.lock, the
+  manifest itself, the .venv symlink + uv.lock that the guard's
+  `uv run pytest` creates inside the worktree — jams the gate. The installer's
+  gitignore template (GITREINS_GITIGNORE_ENTRIES, cli.py:51) predates the
+  fleet feature and misses the same set (POC-47). A clean merge therefore
+  requires gitignoring or committing the harness's own churn, per repo, by
+  hand.
+- The verdict gate reads the lane worktree's `.gitreins/history/` and matches
+  `commit == lane HEAD` (`_find_verdict`, `_matching_verdicts`). The README's
+  example judge phase (`gitreins judge <id>`) fails inside a lane tree
+  ("Task not found") because `tasks.yaml` is gitignored, and the
+  persistence-free alternative (`--ephemeral`, EVID-003) can never satisfy a
+  gate that reads persisted verdicts (POC-48). The pattern that CAN work: the
+  lane command creates its task in-tree (`gitreins task create ...`), then the
+  judge phase runs `gitreins judge <id>` in the same tree — but Tier 1 inside
+  the judge then grades pytest exit-5 as FAIL (pipeline.py:663 grades the exit
+  code only; the guard's benign classification at guard_manager.py:2081 is
+  never consulted), so a repo without a test suite cannot produce a PASS
+  verdict even when the LLM verifies every criterion (POC-49).
+
+### The judge's read-path bug this run exposed (unresolved, worth its own row later)
+
+`gitreins judge fix-add` executed INSIDE the lane worktree graded main's
+file content (md5 of the canonical checkout) while `judge --ephemeral` from
+the same directory read the worktree correctly — the ephemeral probe printed
+`pwd` = the worktree, md5 = the worktree's file. The task-based judge path
+resolves a different workdir somewhere between `cmd_judge` and the
+evaluator/pipeline; we did not bisect it to the line this run. Anyone
+debugging fleet judges: run the --ephemeral cwd/md5 probe FIRST, before
+trusting any criterion evidence the task-based judge prints.
+
+### What a future run should not redo
+
+- Do not fight the merge gate by hand — enumerate
+  `git status --porcelain -uall` in BOTH main and the lane tree, gitignore
+  everything under `.gitreins/` that is not config, commit the manifest, and
+  make lane commands idempotent
+  (`git add -A && (git diff --cached --quiet || git commit -m ...)`.
+- Do not trust a lane's `passed` field alone: a judge-failed lane reports
+  `state: failed, passed: false, error: null` with the refusal reason dropped
+  (worktree_fleet.py:238-243 only annotates lanes that reached the merge
+  step). Read the `stages[].output` tail.
+- The bunker leg pattern that worked: clone (public repo, no credential
+  changes) -> `python3 -m venv` -> `pip install <repo>` -> install/init/guard ->
+  smoke with a real commit through the hook -> destroy and verify. Full chain
+  17 s install + ~2 min everything else on las-bunker-03.
+
+### Evidence for this section
+
+`docs/dogfood/2026-09-24-integration.md` (the consumer narrative),
+board rows DF-GITREINS-POC-47...53, scratch run records in `/tmp/dg-fleet/`
+(fleet-run2..12.json), consumer-worktree verdict
+`.gitreins/history/2026-09-24/28c87900/verdict.json` (guard-PASS/judge-FAIL
+divergence, commit + output quoted).

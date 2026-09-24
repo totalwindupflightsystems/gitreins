@@ -191,3 +191,37 @@ gitreins` blocked by PEP-668 on fresh Debian (known, not re-filed); venv install
 `init` + gate + commit reproduced on a box with NO Go toolchain; agent DESTROYED
 and verified gone (`bunker list | grep` = 0). Foreman not woken, cooldowns
 untouched per the 2026-09-09 fleet law. No code changed.
+
+## Dogfood Findings (2026-09-24 — run 10: the parallel worktree fleet)
+
+Scenario: scratch consumer repo (/tmp/dg-fleet/consumer), 3 tasks with real
+criteria, 3-lane manifest, guard+judge phases, --merge. 12 fleet invocations;
+--merge never merged a lane on a stock install. Full narrative:
+docs/dogfood/2026-09-24-integration.md. Install leg RUN on las-bunker-03
+(agent 93435c08, destroyed + verified gone).
+
+- [P0] DF-GITREINS-POC-47: `worktree fleet --merge` can never merge on a stock
+  install — the harness's own runtime files (disposable.json/lock,
+  tasks.yaml.lock, the manifest, .venv+uv.lock in the worktree) sit untracked
+  and the merge gate's hardcoded ignore set (engine/worktree_manager.py:815-822)
+  misses them; GITREINS_GITIGNORE_ENTRIES (gitreins/cli.py:51) predates the
+  fleet feature.
+- [P1] DF-GITREINS-POC-48: judge-gated --merge unreachable in practice —
+  README's example judge phase fails 'Task not found' in-tree (tasks.yaml
+  gitignored), --ephemeral persists nothing; judge-failed lanes report
+  error:null with the refusal reason dropped (worktree_fleet.py:238-243).
+- [P1] DF-GITREINS-POC-49: judge and guard disagree — pytest exit-5 is
+  'PASS + not blocking' in guard (guard_manager.py:2081) but hard FAIL in the
+  judge's Tier 1 (engine/pipeline.py:663 grades exit code only); no-test-suite
+  repos get Overall FAIL even when the LLM verifies every criterion.
+- [P1] DF-GITREINS-POC-50: failed fleet lanes unrecoverable through the CLI —
+  clean keeps them forever, the error hint names the wrong command, a re-run
+  reuses the stale-HEAD tree (worktree_manager.py:474-499).
+- [P1] DF-GITREINS-POC-51: fresh box, zero-deps repo — the pre-commit hook
+  blocks the repo's FIRST commit ('pytest: not found' = hard FAIL) while the
+  same repo's standalone guard passes (reproduced on las-bunker-03).
+- [P2] DF-GITREINS-POC-52: verdict persistence fails inside fleet worktrees —
+  refs/heads/gitreins collides with gitreins/task/<id> branch namespace.
+- [P2] DF-GITREINS-POC-53: docs never state the fleet's operations contract
+  (commit harness config, in-tree task creation, committing idempotent lanes,
+  judge/verdict gate); README quickstart flow cannot merge.
