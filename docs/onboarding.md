@@ -69,14 +69,13 @@ gitreins install
 - `.gitreins/config.yaml` — default config (skipped if already present)
 - `.git/hooks/pre-commit` — runs `gitreins guard` on every commit
   (overwritten if a hook already exists)
-- `.gitignore` — appends exactly five local GitReins runtime exclusions:
+- `.gitignore` — appends exactly eleven local GitReins runtime exclusions:
   `.gitreins/tasks.yaml`, `.gitreins/config.yaml.bak`,
-  `.gitreins/usage.jsonl`, `.gitreins/logs/` and
-  `.gitreins/qa-ledger.jsonl`; Python projects also get `__pycache__/`
-  (existing entries are preserved and never duplicated). Several other
-  runtime files are **not** written by `install` — the commands that use
-  them create them when they run: `worktrees.json`, `worktrees.lock`,
-  `disposable.json`, `disposable.lock` and `tasks.yaml.lock`.
+  `.gitreins/usage.jsonl`, `.gitreins/logs/`, `.gitreins/qa-ledger.jsonl`,
+  `.gitreins/worktrees.json`, `.gitreins/worktrees.lock`,
+  `.gitreins/disposable.json`, `.gitreins/disposable.lock`,
+  `.gitreins/tasks.yaml.lock` and `.gitreins/verdicts/`; Python projects
+  also get `__pycache__/` (existing entries are preserved and never duplicated).
 
 `install` writes the **pre-commit hook only**. The commit-message auditor
 (`gitreins commit-audit`, which reads `.git/COMMIT_EDITMSG` when given no
