@@ -44,6 +44,7 @@ import json
 import os
 import re
 import sqlite3
+import sys
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, TypedDict
@@ -101,6 +102,7 @@ class Stats(TypedDict):
     passed: int
     failed: int
     pass_rate: int
+    resolution_records: int
 
 
 class QaPayload(TypedDict):
@@ -139,7 +141,7 @@ class UsageSummary(TypedDict):
     tokens_out: int
     cache_read: int
     cache_write: int
-    cost_usd: float
+    cost_usd: float | None
     priced: int
     unpriced: int
     model: str
@@ -351,8 +353,10 @@ def graded_verdicts(verdicts: list[VerdictRow]) -> list[VerdictRow]:
 def stats(verdicts: list[VerdictRow]) -> Stats:
     """Counts block for ``GET /api/stats`` (``pass_rate`` is an integer percent).
 
-    Resolution-gate records are excluded: they stay listable through
-    ``GET /api/verdicts``, and the header keeps counting judgments only.
+    Resolution-gate records are excluded from ``total`` (they stay listable
+    through ``GET /api/verdicts``) and are reported separately as
+    ``resolution_records``, so ``total + resolution_records`` always equals
+    the verdict-list length a client sees.
     """
     graded = graded_verdicts(verdicts)
     n_pass = sum(1 for v in graded if v["passed"])
@@ -361,6 +365,7 @@ def stats(verdicts: list[VerdictRow]) -> Stats:
         "passed": n_pass,
         "failed": len(graded) - n_pass,
         "pass_rate": round(100 * n_pass / len(graded)) if graded else 0,
+        "resolution_records": len(verdicts) - len(graded),
     }
 
 
@@ -750,9 +755,12 @@ def serve(
     else:
         print(f"board: {BOARD_NOT_CONFIGURED} ({board['path']})")
     if host not in ("127.0.0.1", "localhost", "::1"):
+        # Docs (docs/judgment-viewer.md) promise stderr for this warning; the
+        # banner above stays on stdout so redirection can separate the two.
         print(
             f"warning: --host {host} serves judgment data over the network with NO "
-            "authentication; keep 127.0.0.1 unless the network is trusted"
+            "authentication; keep 127.0.0.1 unless the network is trusted",
+            file=sys.stderr,
         )
     if open_browser:
         import webbrowser

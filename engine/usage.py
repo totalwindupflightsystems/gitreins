@@ -254,8 +254,10 @@ def summarize(
 ) -> dict[str, Any]:
     """Aggregate for the viewer's stats header.
 
-    ``cost_usd`` is the priced subtotal only; ``unpriced`` counts attributed
-    judgements that could not be costed and ``unattributed`` the verdicts with no
+    ``cost_usd`` is the priced subtotal only, and is ``None`` when nothing was
+    priced (``priced == 0``) — the same absent-means-absent shape the
+    per-verdict usage blocks use; ``unpriced`` counts attributed judgements
+    that could not be costed and ``unattributed`` the verdicts with no
     telemetry at all, so a partial total is never presented as the whole truth.
     """
     prices = dict(DEFAULT_PRICE_CONFIG if prices is None else prices)
@@ -268,7 +270,7 @@ def summarize(
         "tokens_out": 0,
         "cache_read": 0,
         "cache_write": 0,
-        "cost_usd": 0.0,
+        "cost_usd": None,
         "priced": 0,
         "unpriced": 0,
         "model": prices.get("model", ""),
@@ -280,6 +282,6 @@ def summarize(
         if entry.get("cost_usd") is None:
             total["unpriced"] += 1
         else:
-            total["cost_usd"] = round(total["cost_usd"] + float(entry["cost_usd"]), 6)
+            total["cost_usd"] = round((total["cost_usd"] or 0.0) + float(entry["cost_usd"]), 6)
             total["priced"] += 1
     return total
