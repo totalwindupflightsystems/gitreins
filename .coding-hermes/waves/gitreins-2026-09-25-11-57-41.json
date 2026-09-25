@@ -5,30 +5,46 @@
   "workers": [
     {
       "task_id": "wt-poc-63-65",
-      "board_rows": ["DF-GITREINS-POC-63", "DF-GITREINS-POC-64", "DF-GITREINS-POC-65"],
+      "board_rows": [
+        "DF-GITREINS-POC-63",
+        "DF-GITREINS-POC-64",
+        "DF-GITREINS-POC-65"
+      ],
       "worktree": "~/worktrees/gitreins-wt-poc-63-65",
       "branch": "wt/wt-poc-63-65",
       "model": "glm-5.3-flash",
       "provider": "zai-glm-default",
-      "status": "dispatched"
+      "status": "merged",
+      "merge_commit": "9afecd35a7b2df80ed661006092d666d3e7960b3",
+      "verdict": "PASS e98582d6"
     },
     {
       "task_id": "wt-poc-57",
-      "board_rows": ["DF-GITREINS-POC-57"],
+      "board_rows": [
+        "DF-GITREINS-POC-57"
+      ],
       "worktree": "~/worktrees/gitreins-wt-poc-57",
       "branch": "wt/wt-poc-57",
       "model": "glm-5.3-flash",
       "provider": "zai-glm-default",
-      "status": "dispatched"
+      "status": "merged",
+      "merge_commit": "a57bdce57b51eb7315b03395b85fa1a869b72a6e",
+      "verdict": "PASS 8e1761fe"
     },
     {
       "task_id": "wt-poc-59",
-      "board_rows": ["DF-GITREINS-POC-59"],
+      "board_rows": [
+        "DF-GITREINS-POC-59"
+      ],
       "worktree": "~/worktrees/gitreins-wt-poc-59",
       "branch": "wt/wt-poc-59",
       "model": "glm-5.3-flash",
       "provider": "zai-glm-default",
-      "status": "dispatched"
+      "status": "merged",
+      "merge_commit": "7048e69fc6712aa7ab425fcf8ea4adf59dbf834e",
+      "verdict": "PASS bd4c62e9"
     }
-  ]
+  ],
+  "outcomes": "all 3 workers merged --no-ff; full suite 2434 passed/16 skip; foreman-direct followup 5692cc1 for scan_directory disclosure",
+  "finished_at": "2026-09-25T13:55:00Z"
 }
