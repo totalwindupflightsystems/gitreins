@@ -57,10 +57,16 @@ So on any repo where the user completed a task BEFORE their first
 100% of the time, with a raw git error that names neither cause nor fix.
 Reproduced on PyPI 0.15.0 in a fresh scratch repo (verdict 058d12b9 existed on
 branch `gitreins` at the time of the failure; `git branch -a` shows
-`gitreins`, `master`). Fix direction: rename one of the two namespaces
-(verdict branch → `gitreins-history`, or task-worktree branches →
-`gitreins-tasks/<id>`); if backward compat with existing `gitreins` branches
-is required, task-worktree names are the safer side to move.
+`gitreins`, `master`).
+
+**ADDENDUM (same day, 11:10Z): already fixed at repo HEAD.** While pushing,
+the fetch revealed commit 8922d7d (board row DF-GITREINS-POC-52, merged this
+morning by the foreman's wave tick) which moves verdict history to
+`refs/gitreins/history` — no refs/heads prefix collision. Re-tested against a
+source checkout of HEAD: verdict persists, `task worktree t1` succeeds, no
+`refs/heads/gitreins` exists. The defect is therefore live for every PyPI
+consumer (0.15.0) until the next release; the remaining action is RELEASE,
+not code. Row POC-62 updated accordingly.
 
 ### F2 — P2 — Board: DF-GITREINS-POC-63 — onboarding §1 gitignore list has drifted from what `install` writes
 
@@ -114,7 +120,8 @@ PERF row. Fresh-box install time: 20s (venv + `-e .` on las-bunker-03).
 
 Every §1–§8 command worked as written except §8's first command, which fails
 categorically due to F1 — a one-branch-rename fix away from a clean
-first-hour story. The harness core (install → init → guard → judge) is solid,
+first-hour story (fixed at HEAD by POC-52; PyPI release is the gap). The
+harness core (install → init → guard → judge) is solid,
 honest (degraded passes named, disabled gates fail closed with the fix) and
 fast. For the first-hour surface: SHIPPABLE, with F1 as the must-fix before
 the next release.
