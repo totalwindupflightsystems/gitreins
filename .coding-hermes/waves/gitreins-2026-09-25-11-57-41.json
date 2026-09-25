@@ -1,0 +1,34 @@
+{
+  "tick": "gitreins-2026-09-25-11-57-41",
+  "base_sha": "843d466",
+  "armed_at": "2026-09-25T12:20:00Z",
+  "workers": [
+    {
+      "task_id": "wt-poc-63-65",
+      "board_rows": ["DF-GITREINS-POC-63", "DF-GITREINS-POC-64", "DF-GITREINS-POC-65"],
+      "worktree": "~/worktrees/gitreins-wt-poc-63-65",
+      "branch": "wt/wt-poc-63-65",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "status": "dispatched"
+    },
+    {
+      "task_id": "wt-poc-57",
+      "board_rows": ["DF-GITREINS-POC-57"],
+      "worktree": "~/worktrees/gitreins-wt-poc-57",
+      "branch": "wt/wt-poc-57",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "status": "dispatched"
+    },
+    {
+      "task_id": "wt-poc-59",
+      "board_rows": ["DF-GITREINS-POC-59"],
+      "worktree": "~/worktrees/gitreins-wt-poc-59",
+      "branch": "wt/wt-poc-59",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "status": "dispatched"
+    }
+  ]
+}
