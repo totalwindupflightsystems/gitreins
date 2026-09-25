@@ -1,0 +1,52 @@
+{
+  "tick_id": "gitreins-2026-09-25-05-33-05",
+  "project": "gitreins",
+  "created_at": "2026-09-25T07:05:00Z",
+  "note": "post-recovery wave — tick opened as WAVE RECOVERY of gitreins-2026-09-24-21-14-13 (both workers merged: POC-51 142506d, POC-56 25cf9a2, judges PASS, pushed, manifest closed) before this wave was composed",
+  "base_ref": "main",
+  "base_sha": "3cd3552",
+  "wave_budget": 7,
+  "workers": [
+    {
+      "task_id": "DF-GITREINS-POC-48",
+      "priority": "P1",
+      "worktree": "/home/kara/worktrees/gitreins-DF-GITREINS-POC-48",
+      "branch": "wt/DF-GITREINS-POC-48",
+      "brief": "/tmp/gitreins-336-brief-DF-GITREINS-POC-48.txt",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "scope": ["gitreins/cli.py", "engine/worktree_fleet.py", "engine/worktree_manager.py", "README.md", "docs/", "tests/"],
+      "status": "dispatched"
+    },
+    {
+      "task_id": "DF-GITREINS-POC-52",
+      "priority": "P2",
+      "worktree": "/home/kara/worktrees/gitreins-DF-GITREINS-POC-52",
+      "branch": "wt/DF-GITREINS-POC-52",
+      "brief": "/tmp/gitreins-336-brief-DF-GITREINS-POC-52.txt",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "scope": ["engine/persist.py", "tests/", "docs/"],
+      "status": "dispatched"
+    },
+    {
+      "task_id": "DF-GITREINS-POC-37",
+      "priority": "P2",
+      "worktree": "/home/kara/worktrees/gitreins-DF-GITREINS-POC-37",
+      "branch": "wt/DF-GITREINS-POC-37",
+      "brief": "/tmp/gitreins-336-brief-DF-GITREINS-POC-37.txt",
+      "model": "deepseek-v4-flash",
+      "provider": "deepseek-foreman",
+      "scope": ["engine/preflight.py", "engine/resolution.py", "gitreins/cli.py", "docs/cli-reference.md", "tests/"],
+      "status": "dispatched"
+    }
+  ],
+  "excluded": [
+    {"task_id": "POC-44/45/46 (Go guard band)", "reason": "share the Go guard/test-command surface with each other — same-band collision per middle-out rule"},
+    {"task_id": "POC-53", "reason": "docs contract for the fleet merge flow overlaps POC-48's README/manifest-pattern work — lands after POC-48's shape is known"},
+    {"task_id": "REVIEW-006", "reason": "P3 hygiene; candidate for a later tick"},
+    {"task_id": "GR-099", "reason": "blocked DEPS"}
+  ],
+  "independence_proof": "Disjoint clusters verified by grep: POC-48 = gitreins/cli.py judge/merge flags + engine/worktree_fleet.py (fleet merge path, worktree_manager constants touched only for the task-create flow); POC-52 = engine/persist.py verdict-history ref (persist.py:714 sole writer of refs/heads/gitreins); POC-37 = engine/preflight.py + engine/resolution.py record shape (persist.py and worktree_fleet.py untouched). No depends_on edges between rows (all []). cli.py is shared by POC-48 and POC-37 only as a CLI surface — POC-37's edit is the preflight --json record build in engine/, POC-48's is the judge/merge flag flow; different functions. Merge order chosen: POC-52, POC-37, POC-48 (P1 last so its bigger surface lands on the most current tree).",
+  "merge_plan": "serial merges to main after per-worker RED-proof + scoped gates on the merged tree (docs drift + scoped pytest; full suite once at the end); gitreins tier-2 task complete per task post-merge (fresh task lifecycle: create/start/complete, async judges); push github main after all three landed"
+}
