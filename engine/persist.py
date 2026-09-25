@@ -2,14 +2,16 @@
 Verdict Persister — Save verdicts to .gitreins/history/ with configurable storage.
 
 Storage modes:
-    "git"        — auto-commit to a `gitreins` orphan branch (default)
+    "git"        — auto-commit to the gitreins history ref (default)
     "filesystem" — write files to .gitreins/history/ only, no git commits
 
 Reads: list_verdicts()/count_verdicts() prefer the local .gitreins/history/
 files. When the local dir is missing or holds no entries and storage is
-"git", they fall back to the verdicts committed on the `gitreins` branch —
-so a fresh clone (whose working tree has no .gitreins/history/, since it is
-gitignored) can still browse the full verdict history via `gitreins report`.
+"git", they fall back to the verdicts committed on the history REF
+(``HISTORY_REF``; a repo written before DF-GITREINS-POC-52 is read through
+its legacy ``refs/heads/gitreins`` branch as well) — so a fresh clone (whose
+working tree has no .gitreins/history/, since it is gitignored) can still
+browse the full verdict history via `gitreins report`.
 
 Config (.gitreins/config.yaml):
     history:
@@ -119,6 +121,40 @@ def load_history_config(workdir: str) -> dict:
 
 
 # ── Persister ──────────────────────────────────────────────────
+
+# ── Verdict-history ref (DF-GITREINS-POC-52) ───────────────────
+#
+# The verdict history is a REF, not a working branch.  It used to live on
+# ``refs/heads/gitreins``, whose name is a path-prefix of the fleet's own
+# per-task branches ``refs/heads/gitreins/task/<id>`` (BRANCH_PREFIX in
+# engine/worktree_manager.py).  Git refuses to create a ref that is a prefix
+# of an existing one — "cannot lock ref refs/heads/gitreins:
+# refs/heads/gitreins/task/fix-add exists; cannot create refs/heads/gitreins"
+# — so in ANY repo that had ever run a fleet lane the verdict-history commit
+# silently degraded to "dry-run": verdict.json on disk, nothing in git, no
+# audit trail and no cross-clone fallback for report/serve.
+#
+# The collision class exists only between refs git may create under
+# ``refs/heads/``.  The history therefore lives in its own namespace, outside
+# the branch namespace: nothing in GitReins (or the fleet) creates a ref under
+# ``refs/gitreins/``, and no branch name — shipped today or added later — can
+# become a prefix of it or have it as a prefix.  Being outside refs/heads also
+# keeps it out of ``git branch`` lists and unreachable by a checkout, which is
+# right for a store that is never checked out.
+#
+# Read it with the full name (``git show refs/gitreins/history:<path>``) or the
+# DWIM shorthand ``gitreins/history:<path>``; both resolve the same ref.
+HISTORY_REF = "refs/gitreins/history"
+
+# Clones written before the move keep their history on this branch.  Reads
+# consult BOTH refs (union, deduped by entry path) so a repo that predates the
+# move keeps every verdict it ever filed, and the first write after the upgrade
+# SEEDS the new ref from the legacy tip (see _git_commit) so the old history
+# rides along instead of being stranded.  Nothing here deletes the legacy
+# branch; a repo that wants a single ref can migrate with:
+#     git update-ref refs/gitreins/history refs/heads/gitreins
+#     git branch -D gitreins          # only once a copy exists elsewhere
+LEGACY_HISTORY_REF = "refs/heads/gitreins"
 
 
 class VerdictPersister:
@@ -314,80 +350,115 @@ class VerdictPersister:
     def _branch_history_prefix(self) -> str:
         """History path relative to workdir, git-style (forward slashes).
 
-        Verdicts are committed to the `gitreins` branch at the path
+        Verdicts are committed to the history ref (HISTORY_REF) at the path
         relative to the repo root (persist() commits os.path.relpath of the
-        entry dir), so this is the prefix to enumerate on the branch.
+        entry dir), so this is the prefix to enumerate on that ref.
         """
         return os.path.relpath(self.history_dir, self.workdir).replace(os.sep, "/")
 
-    def _list_branch_verdicts(self, n: int = 20, task_id: str | None = None) -> list[dict]:
-        """Read verdict entries committed to the `gitreins` branch.
+    @staticmethod
+    def _history_refs() -> list[str]:
+        """Refs that hold verdict history, current scheme first.
 
-        Enumerates verdict.json files under the history path with
-        `git ls-tree -r --name-only gitreins -- <prefix>` and reads each
-        via `git show gitreins:<path>`. Returns [] on any git failure
-        (branch absent, not a git repo, timeout) — callers degrade to
-        "No verdict history found." exactly as before.
+        Two refs can legitimately hold history at once: the legacy branch in a
+        repo written before DF-GITREINS-POC-52, and the current ref. Readers
+        union them (deduped by entry path) so nothing a repo already filed
+        disappears from report/serve after the move.
         """
-        prefix = self._branch_history_prefix()
+        return [HISTORY_REF, LEGACY_HISTORY_REF]
+
+    def _ls_tree_verdict_paths(self, ref: str, prefix: str) -> list[str]:
+        """Verdict.json paths on *ref* under *prefix*; [] when the ref is absent.
+
+        Never raises: a missing ref, a non-repo workdir and a git timeout all
+        read as "no history here", so callers degrade to "No verdict history
+        found." exactly as before.
+        """
         try:
             result = subprocess.run(
-                ["git", "ls-tree", "-r", "--name-only", "gitreins", "--", prefix],
+                ["git", "ls-tree", "-r", "--name-only", ref, "--", prefix],
                 capture_output=True,
                 text=True,
                 timeout=10,
                 cwd=self.workdir,
             )
         except (subprocess.TimeoutExpired, OSError) as e:
-            logger.warning("git ls-tree failed on gitreins branch (non-fatal): %s", e)
+            logger.warning("git ls-tree failed on %s (non-fatal): %s", ref, e)
             return []
         if result.returncode != 0:
-            return []  # branch missing or not a git repo
+            return []  # ref missing or not a git repo
+        return [
+            line.strip()
+            for line in result.stdout.splitlines()
+            if line.strip().endswith("/verdict.json")
+        ]
 
-        # Paths are <prefix>/<date>/<hash>/verdict.json — reverse lexical
-        # order matches the local reader's newest-first (date desc, hash desc).
-        paths = sorted(
-            (
-                line.strip()
-                for line in result.stdout.splitlines()
-                if line.strip().endswith("/verdict.json")
-            ),
-            reverse=True,
-        )
+    def _branch_entry_paths(self) -> list[tuple[str, str]]:
+        """``[(ref, path)]`` for every verdict.json on the history refs, newest first.
+
+        The union of both refs, deduped by entry path — the current ref wins
+        when both carry the same path (the same record, byte for byte).
+        """
+        prefix = self._branch_history_prefix()
+        holder: dict[str, str] = {}
+        for ref in self._history_refs():
+            for path in self._ls_tree_verdict_paths(ref, prefix):
+                holder.setdefault(path, ref)
+        # Paths are <prefix>/<date>/<hash>/verdict.json — reverse lexical order
+        # matches the local reader's newest-first (date desc, hash desc).
+        return [(path, holder[path]) for path in sorted(holder, reverse=True)]
+
+    def _read_branch_verdict(self, ref: str, path: str) -> dict | None:
+        """Parse one verdict.json off *ref*; None when it cannot be read."""
+        try:
+            show = subprocess.run(
+                ["git", "show", f"{ref}:{path}"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+                cwd=self.workdir,
+            )
+        except (subprocess.TimeoutExpired, OSError) as e:
+            logger.warning("Failed to read verdict %s from %s (non-fatal): %s", path, ref, e)
+            return None
+        if show.returncode != 0:
+            return None
+        try:
+            return json.loads(show.stdout)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            logger.warning("Failed to parse verdict %s from %s (non-fatal): %s", path, ref, e)
+            return None
+
+    def _list_branch_verdicts(self, n: int = 20, task_id: str | None = None) -> list[dict]:
+        """Read verdict entries committed to the history ref(s).
+
+        Enumerates verdict.json files under the history path on each history
+        ref (HISTORY_REF, then the legacy branch) and reads each with
+        ``git show <ref>:<path>``. Returns [] on any git failure (ref absent,
+        not a git repo, timeout) — callers degrade to "No verdict history
+        found." exactly as before.
+        """
+        prefix = self._branch_history_prefix()
+        rel_prefix = prefix.rstrip("/") + "/"
 
         entries = []
-        rel_prefix = prefix.rstrip("/") + "/"
-        for path in paths:
+        for path, ref in self._branch_entry_paths():
             rel = path[len(rel_prefix) :] if path.startswith(rel_prefix) else path
             parts = rel.split("/")
             if len(parts) != 3 or parts[2] != "verdict.json":
                 continue
             date_dir, hash_dir = parts[0], parts[1]
-            try:
-                show = subprocess.run(
-                    ["git", "show", f"gitreins:{path}"],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                    cwd=self.workdir,
-                )
-                if show.returncode != 0:
-                    continue
-                data = json.loads(show.stdout)
-            except (
-                subprocess.TimeoutExpired,
-                OSError,
-                json.JSONDecodeError,
-                UnicodeDecodeError,
-            ) as e:
-                logger.warning(
-                    "Failed to read verdict %s from gitreins branch (non-fatal): %s", path, e
-                )
+            data = self._read_branch_verdict(ref, path)
+            if not isinstance(data, dict):
                 continue
             if task_id and data.get("task_id") != task_id:
                 continue
             data["_date"] = date_dir
             data["_hash"] = hash_dir
+            # Which ref holds this entry: a consumer that has to NAME it for a
+            # human (worktree_manager's verdict reference) must name the ref it
+            # is actually readable from, not assume the current one.
+            data["_ref"] = ref
             entries.append(data)
             if len(entries) >= n:
                 break
@@ -399,7 +470,7 @@ class VerdictPersister:
 
         Local filesystem entries take precedence; when the local history
         dir is missing or empty and storage mode is "git", counts the
-        verdict.json files on the `gitreins` branch instead.
+        verdict.json files on the history ref(s) instead.
         """
         count = 0
         if os.path.isdir(self.history_dir):
@@ -418,24 +489,8 @@ class VerdictPersister:
         return count
 
     def _count_branch_verdicts(self) -> int:
-        """Count verdict.json files on the `gitreins` branch (no content reads)."""
-        prefix = self._branch_history_prefix()
-        try:
-            result = subprocess.run(
-                ["git", "ls-tree", "-r", "--name-only", "gitreins", "--", prefix],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                cwd=self.workdir,
-            )
-        except (subprocess.TimeoutExpired, OSError) as e:
-            logger.warning("git ls-tree failed on gitreins branch (non-fatal): %s", e)
-            return 0
-        if result.returncode != 0:
-            return 0
-        return sum(
-            1 for line in result.stdout.splitlines() if line.strip().endswith("/verdict.json")
-        )
+        """Count verdict.json files on the history refs (no content reads)."""
+        return len(self._branch_entry_paths())
 
     # ── Internal ─────────────────────────────────────────────
 
@@ -640,7 +695,16 @@ class VerdictPersister:
         passed: bool,
         subject: str | None = None,
     ) -> str:
-        """Commit verdict entry to gitreins orphan branch. Returns short hash or 'dry-run'."""
+        """Commit verdict entry to the history ref. Returns short hash or 'dry-run'.
+
+        Both the create and the append case are pure plumbing (hash-object /
+        mktree, or read-tree in a throwaway index / write-tree, then
+        commit-tree / update-ref), so the caller's HEAD, index and working tree
+        are never touched — the property DF-GITREINS-POC-1 established. The ref
+        lives outside ``refs/heads`` (HISTORY_REF), so a repo whose branches
+        include the fleet's own ``gitreins/task/<id>`` can still commit its
+        verdict history.
+        """
         git_dir = os.path.join(self.workdir, ".git")
         if not os.path.exists(git_dir):
             logger.warning("No .git directory — verdict files written but not committed")
@@ -648,21 +712,29 @@ class VerdictPersister:
 
         try:
             rel_path = os.path.relpath(entry_dir, self.workdir)
+            message = subject or f"verdict: {task_id} — {'PASS' if passed else 'FAIL'}"
 
-            # Check if gitreins branch exists
-            result = subprocess.run(
-                ["git", "rev-parse", "--verify", "gitreins"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                cwd=self.workdir,
-            )
-            branch_exists = result.returncode == 0
-
-            if not branch_exists:
-                return self._create_orphan(rel_path, task_id, passed, subject=subject)
+            current = self._resolve_ref(HISTORY_REF)
+            if current is not None:
+                parent = current
             else:
-                return self._commit_to_existing(rel_path, task_id, passed, subject=subject)
+                # First entry under the new ref. A repo written before
+                # DF-GITREINS-POC-52 still carries its history on the legacy
+                # branch: chain onto that tip so the entries already filed stay
+                # in the log instead of starting a second, stranded root (the
+                # same thing the documented one-liner does —
+                # ``git update-ref refs/gitreins/history refs/heads/gitreins``).
+                parent = self._resolve_ref(LEGACY_HISTORY_REF)
+
+            commit = self._commit_entry(rel_path, message, parent)
+
+            # All-zeros <old-oid> makes update-ref refuse if the ref sprang into
+            # existence concurrently (first verdict must be the sole creator);
+            # otherwise the <old-oid> we read is what guards a racing writer
+            # from dropping a verdict chain.
+            self._git(["update-ref", HISTORY_REF, commit, current or "0" * 40])
+
+            return commit[:8]
 
         except subprocess.TimeoutExpired:
             logger.warning("Git command timed out — files written but not committed")
@@ -683,87 +755,79 @@ class VerdictPersister:
         passed = verdict_data.get("passed", False)
         return f"verdict: {task_id} — {'PASS' if passed else 'FAIL'}"
 
-    def _create_orphan(
-        self,
-        rel_path: str,
-        task_id: str,
-        passed: bool,
-        subject: str | None = None,
-    ) -> str:
-        """Create gitreins orphan branch with initial verdict commit.
+    def _commit_entry(self, rel_path: str, message: str, parent: str | None) -> str:
+        """Commit object holding the parent history tree plus the new entry.
 
-        Pure plumbing (hash-object → mktree → commit-tree → update-ref).
-        The previous implementation stashed the caller's dirty state,
-        checked out an orphan branch in the caller's worktree, then ran a
-        plain `git stash pop` — which demoted staged files to unstaged and
-        silently dropped the evaluated payload from the next commit when
-        the pop failed (DF-GITREINS-POC-1). Plumbing never touches the
-        caller's index, working tree, or HEAD.
-
-        Raises RuntimeError when the commit cannot be created so
-        _git_commit can degrade honestly ("dry-run") without destroying
-        the evaluated payload or leaving a half-created branch.
+        The entry is the ONLY thing added to the tree, so a history commit can
+        never carry the repo's own files: the first verdict (no parent) roots a
+        tree holding just its own entry, and every later one extends the
+        previous tree.
         """
-        tree = self._write_tree_from_dir(rel_path)
+        tree = self._tree_with_entry(parent, rel_path)
+        if parent is None:
+            return self._git(["commit-tree", tree, "-m", message])
+        return self._git(["commit-tree", tree, "-p", parent, "-m", message])
 
-        message = subject or f"verdict: {task_id} — {'PASS' if passed else 'FAIL'}"
-        commit = self._git(["commit-tree", tree, "-m", message])
+    def _tree_with_entry(self, parent: str | None, rel_path: str) -> str:
+        """Tree of *parent* (empty when None) plus the entry at *rel_path*.
 
-        # All-zeros <old-oid> makes update-ref refuse if the branch sprang
-        # into existence concurrently (first verdict must be the sole creator).
-        self._git(["update-ref", "refs/heads/gitreins", commit, "0" * 40])
+        One mechanism for both the first verdict and every later one: a
+        throwaway index (GIT_INDEX_FILE, so the caller's index is untouched)
+        loaded from the parent's tree — every earlier entry survives — with the
+        entry dir added from disk at its real path.
 
-        return commit[:8]
-
-    def _write_tree_from_dir(self, rel_path: str) -> str:
-        """Write a git tree object containing exactly the files under rel_path.
-
-        Blobs are hashed straight into this repo's object database from the
-        verdict entry files, then nested trees are built bottom-up (mktree
-        takes one level per invocation). The resulting root tree holds only
-        the verdict paths, which is what makes an orphan-style root commit
-        possible without any checkout.
+        This replaced two writers that each had a hole (DF-GITREINS-POC-52): the
+        branch-checkout worktree could not update a ref living outside
+        ``refs/heads/`` at all, and its plain ``git add`` refused the entry
+        whenever the repo ships ``.gitignore``'s ``.gitreins/history/`` rule
+        (every GitReins repo does); the mktree root-commit builder dropped the
+        path prefix, so the first verdict landed at the tree ROOT and no
+        branch-backed reader (which filters on the history path) could ever see
+        it.
         """
-        entry_base = os.path.join(self.workdir, rel_path)
-        if not os.path.isdir(entry_base):
-            raise RuntimeError(f"verdict entry dir disappeared before commit: {entry_base}")
+        index_dir = tempfile.mkdtemp(prefix="gitreins-idx-")
+        env = self._git_env()
+        # Redirecting GIT_INDEX_FILE keeps every index write (read-tree, add,
+        # write-tree) inside the throwaway file: the caller's index stays
+        # byte-identical, which is what DF-GITREINS-POC-1 was about.
+        env["GIT_INDEX_FILE"] = os.path.join(index_dir, "index")
+        try:
+            self._git(
+                ["read-tree", "--empty"] if parent is None else ["read-tree", parent], env=env
+            )
+            # -f because .gitreins/history/ is gitignored: the ref IS the
+            # versioned copy, so the working-tree store has to be forced in.
+            self._git(["add", "-f", "--", rel_path], env=env)
+            return self._git(["write-tree"], env=env)
+        finally:
+            shutil.rmtree(index_dir, ignore_errors=True)
 
-        prefix = rel_path.replace(os.sep, "/").rstrip("/") + "/"
-        entries = []  # (abs_path, path relative to the entry dir, "/"-separated)
-        for root, dirs, files in os.walk(entry_base):
-            dirs.sort()
-            for name in sorted(files):
-                full = os.path.join(root, name)
-                entry_rel = os.path.relpath(full, entry_base).replace(os.sep, "/")
-                entries.append((full, entry_rel))
-        if not entries:
-            raise RuntimeError(f"no verdict files to commit under: {entry_base}")
+    def _resolve_ref(self, ref: str) -> str | None:
+        """Commit oid *ref* points at, or None when the ref does not exist.
 
-        return self._build_tree_level(entries, prefix)
+        ``--verify --quiet`` keeps an absent ref from printing to stderr; a
+        target that is not a commit reads as absent too, since only a commit can
+        parent a history entry.
+        """
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=self.workdir,
+            env=self._git_env(),
+        )
+        if result.returncode != 0:
+            return None
+        return result.stdout.strip() or None
 
-    def _build_tree_level(self, entries: list, prefix: str) -> str:
-        """Build one tree level; recurse into subdirectories bottom-up."""
-        lines = []
-        by_first_component: dict[str, list] = {}
-        for full, entry_rel in entries:
-            first, _, rest = entry_rel.partition("/")
-            if rest:
-                by_first_component.setdefault(first, []).append((full, rest))
-            else:
-                oid = self._git(["hash-object", "-w", "--", full])
-                mode = "100755" if os.access(full, os.X_OK) else "100644"
-                lines.append((f"{mode} blob {oid}\t{first}", False))
-
-        for name, sub_entries in sorted(by_first_component.items()):
-            sub_oid = self._build_tree_level(sub_entries, prefix + name + "/")
-            lines.append((f"040000 tree {sub_oid}\t{name}", True))
-
-        # Canonical tree order: directories compare as name + "/"
-        lines.sort(key=lambda item: item[0].split("\t", 1)[1] + ("/" if item[1] else ""))
-        return self._git(["mktree"], input_text="".join(line + "\n" for line, _ in lines))
-
-    def _git(self, args: list[str], input_text: str | None = None) -> str:
+    def _git(self, args: list[str], env: dict | None = None) -> str:
         """Run a git plumbing command in the repo and return stripped stdout.
+
+        *env* replaces the plumbing environment wholesale — the tree-building
+        path hands in an environment whose GIT_INDEX_FILE points at a throwaway
+        index, so its index writes never reach the caller's index. It defaults
+        to :meth:`_git_env`.
 
         Non-zero exits raise RuntimeError with git's stderr — verdict
         persistence must fail loudly rather than report success while the
@@ -775,8 +839,7 @@ class VerdictPersister:
             text=True,
             timeout=30,
             cwd=self.workdir,
-            input=input_text,
-            env=self._git_env(),
+            env=self._git_env() if env is None else env,
         )
         if result.returncode != 0:
             raise RuntimeError(
@@ -797,77 +860,6 @@ class VerdictPersister:
         env.setdefault("GIT_COMMITTER_NAME", "GitReins")
         env.setdefault("GIT_COMMITTER_EMAIL", "gitreins@localhost")
         return env
-
-    def _commit_to_existing(
-        self,
-        rel_path: str,
-        task_id: str,
-        passed: bool,
-        subject: str | None = None,
-    ) -> str:
-        """Commit to existing gitreins branch via worktree to avoid switching."""
-        worktree_dir = tempfile.mkdtemp(prefix="gitreins-wt-")
-        message = subject or f"verdict: {task_id} — {'PASS' if passed else 'FAIL'}"
-        try:
-            subprocess.run(
-                ["git", "worktree", "add", worktree_dir, "gitreins"],
-                capture_output=True,
-                text=True,
-                timeout=30,
-                cwd=self.workdir,
-            )
-
-            # Copy verdict files into worktree
-            src = os.path.join(self.workdir, rel_path)
-            dst = os.path.join(worktree_dir, rel_path)
-            os.makedirs(os.path.dirname(dst), exist_ok=True)
-            shutil.copytree(src, dst)
-
-            add = subprocess.run(
-                ["git", "add", rel_path],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                cwd=worktree_dir,
-                env=self._git_env(),
-            )
-            if add.returncode != 0:
-                raise RuntimeError(f"git add failed in worktree: {add.stderr.strip()}")
-            commit = subprocess.run(
-                ["git", "commit", "-m", message],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                cwd=worktree_dir,
-                env=self._git_env(),
-            )
-            if commit.returncode != 0:
-                raise RuntimeError(f"git commit failed in worktree: {commit.stderr.strip()}")
-            hash_result = subprocess.run(
-                ["git", "rev-parse", "HEAD"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                cwd=worktree_dir,
-            )
-            commit_hash = hash_result.stdout.strip()[:8]
-
-            return commit_hash
-
-        except Exception:
-            logger.debug("Worktree commit failed, falling back to direct", exc_info=True)
-            return "dry-run"
-        finally:
-            try:
-                subprocess.run(
-                    ["git", "worktree", "remove", "--force", worktree_dir],
-                    capture_output=True,
-                    text=True,
-                    timeout=10,
-                    cwd=self.workdir,
-                )
-            except Exception:
-                pass
 
     def _prune_old(self) -> None:
         """Remove oldest verdict entries if over max_verdicts."""

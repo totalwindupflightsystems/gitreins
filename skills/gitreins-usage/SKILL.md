@@ -100,10 +100,12 @@ The MCP `commit` tool runs guards first and rejects the commit if they fail.
 8. **MCP `commit` refuses while any task is `in_progress`** — "Tasks still in
    progress — complete or delete them first". Complete (judge) the task first, then
    commit. The pre-commit hook does not have this rule.
-9. **`gitreins report` only sees verdicts on the `gitreins` branch** — with
-   `history.storage: git`, verdicts commit to a separate branch; on `main` the
-   report says "No verdict history found". Check out the branch or read the verdict
-   files via `git show gitreins:.gitreins/history/...`.
+9. **`gitreins report` only sees verdicts on the history ref** — with
+   `history.storage: git`, verdicts commit to a separate ref (`refs/gitreins/history`
+   since POC-52; older repos also have them on the legacy `gitreins` branch, which the
+   reader still checks); on `main` the report says "No verdict history found" when
+   neither ref is readable. Read the verdict files via
+   `git show refs/gitreins/history:.gitreins/history/...`.
 10. **PyPI is 11 days behind HEAD (2026-08-14): 0.11.0 predates the DF-001
     gitleaks-regex fix.** `pip install gitreins` → `gitreins init` writes a
     BROKEN `.gitleaks.toml` (bare `*.log` globs) → `gitreins guard` = `✗ secrets
@@ -676,11 +678,17 @@ On a bare machine, `pip install gitreins` is PEP-668 blocked (use
 Install pytest before your first commit, or expect the block. venv install
 measured 17 s on las-bunker-03 (Debian 13, Python 3.13).
 
-**Pitfall 39 — verdict history fails to commit in fleet repos (POC-52).**
-The history branch ref `refs/heads/gitreins` collides with the fleet's own
-`gitreins/task/<id>` branches (ref-lock prefix conflict): "Verdict saved to
-disk but not committed (git unavailable)". Non-fatal; verdict.json is still
-on disk.
+**Pitfall 39 — verdict history fails to commit in fleet repos (POC-52). FIXED.**
+The history ref used to be the branch `refs/heads/gitreins`, which collides with
+the fleet's own `gitreins/task/<id>` branches (ref-lock prefix conflict):
+"Verdict saved to disk but not committed (git unavailable)". History now lives
+on `refs/gitreins/history` — outside `refs/heads/`, so no branch name can
+prefix-collide with it. Read it via `git show refs/gitreins/history:<path>` (the
+shorthand `gitreins/history:<path>` resolves the same ref); a repo whose old
+history is still on the legacy branch keeps it, because reads union both refs
+and the first write after the upgrade chains onto the legacy tip. One-ref
+migration, if you want it:
+`git update-ref refs/gitreins/history refs/heads/gitreins`.
 
 ## Pitfalls 40–43 (2026-09-24b run — `gitreins serve`, the judgment browser)
 

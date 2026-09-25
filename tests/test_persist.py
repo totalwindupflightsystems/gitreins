@@ -11,13 +11,16 @@ import pytest
 
 from engine.persist import (
     DEFAULT_HISTORY_CONFIG,
+    HISTORY_REF,
     KIND_RESOLUTION,
+    LEGACY_HISTORY_REF,
     RESOLUTION_ENTRY_ID,
     VerdictPersister,
     _pct,
     build_report,
     persist_resolution,
 )
+from engine.worktree_manager import BRANCH_PREFIX
 
 
 # ── _pct ─────────────────────────────────────────────────────
@@ -246,13 +249,14 @@ def _git_env() -> dict:
     return env
 
 
-def _make_gitreins_branch_repo(repo, verdicts):
-    """Init a temp git repo with verdicts committed on a `gitreins` branch.
+def _make_legacy_history_repo(repo, verdicts):
+    """Init a temp git repo carrying history on the LEGACY history branch.
 
-    verdicts: iterable of (date, hash, task_id, passed). After committing,
-    the local .gitreins/history/ dir is removed from the working tree so the
-    repo looks like a fresh clone — the branch holds the files, the working
-    tree does not.
+    This is the pre-DF-GITREINS-POC-52 shape: verdicts committed on the
+    ``gitreins`` BRANCH (``LEGACY_HISTORY_REF``). verdicts: iterable of
+    (date, hash, task_id, passed). After committing, the local
+    .gitreins/history/ dir is removed from the working tree so the repo looks
+    like a fresh clone — the ref holds the files, the working tree does not.
     """
     env = _git_env()
     repo.mkdir()
@@ -278,9 +282,9 @@ def _make_gitreins_branch_repo(repo, verdicts):
     return env
 
 
-def test_list_verdicts_falls_back_to_gitreins_branch(tmp_path):
+def test_list_verdicts_falls_back_to_the_legacy_history_branch(tmp_path):
     repo = tmp_path / "repo"
-    _make_gitreins_branch_repo(
+    _make_legacy_history_repo(
         repo,
         [
             ("2026-06-21", "aaaa1111", "old-task", True),
@@ -299,11 +303,13 @@ def test_list_verdicts_falls_back_to_gitreins_branch(tmp_path):
     assert entries[0]["passed"] is False
     assert entries[1]["_date"] == "2026-06-21"
     assert entries[1]["_hash"] == "aaaa1111"
+    # the entries name the ref they were actually read from (DF-GITREINS-POC-52)
+    assert {e["_ref"] for e in entries} == {LEGACY_HISTORY_REF}
 
 
 def test_list_verdicts_branch_fallback_respects_n_limit(tmp_path):
     repo = tmp_path / "repo"
-    _make_gitreins_branch_repo(
+    _make_legacy_history_repo(
         repo, [("2026-07-01", f"h000000{i}", f"task-{i}", True) for i in range(5)]
     )
 
@@ -315,7 +321,7 @@ def test_list_verdicts_branch_fallback_respects_n_limit(tmp_path):
 
 def test_list_verdicts_branch_fallback_filters_by_task_id(tmp_path):
     repo = tmp_path / "repo"
-    _make_gitreins_branch_repo(
+    _make_legacy_history_repo(
         repo,
         [
             ("2026-07-01", "h0000001", "task-a", True),
@@ -386,7 +392,7 @@ def test_list_verdicts_branch_fallback_graceful_without_git(tmp_path):
 
 def test_list_verdicts_local_entries_take_precedence_over_branch(tmp_path):
     repo = tmp_path / "repo"
-    _make_gitreins_branch_repo(repo, [("2026-06-21", "aaaa1111", "branch-task", True)])
+    _make_legacy_history_repo(repo, [("2026-06-21", "aaaa1111", "branch-task", True)])
     # A later judge run wrote a local verdict with a different task.
     local = repo / ".gitreins" / "history" / "2026-08-03" / "cccc3333"
     local.mkdir(parents=True)
@@ -403,7 +409,7 @@ def test_list_verdicts_local_entries_take_precedence_over_branch(tmp_path):
 
 def test_list_verdicts_filesystem_mode_never_consults_branch(tmp_path):
     repo = tmp_path / "repo"
-    _make_gitreins_branch_repo(repo, [("2026-06-21", "aaaa1111", "branch-task", True)])
+    _make_legacy_history_repo(repo, [("2026-06-21", "aaaa1111", "branch-task", True)])
 
     p = VerdictPersister(str(repo))
     p.config["storage"] = "filesystem"
@@ -415,7 +421,7 @@ def test_list_verdicts_filesystem_mode_never_consults_branch(tmp_path):
 
 def test_count_verdicts_falls_back_to_branch(tmp_path):
     repo = tmp_path / "repo"
-    _make_gitreins_branch_repo(
+    _make_legacy_history_repo(
         repo,
         [
             ("2026-06-21", "aaaa1111", "t1", True),
@@ -428,9 +434,9 @@ def test_count_verdicts_falls_back_to_branch(tmp_path):
     assert p.count_verdicts() == 3
 
 
-def test_build_report_reads_verdicts_from_gitreins_branch(tmp_path):
+def test_build_report_reads_verdicts_from_the_legacy_history_branch(tmp_path):
     repo = tmp_path / "repo"
-    _make_gitreins_branch_repo(
+    _make_legacy_history_repo(
         repo,
         [
             ("2026-06-21", "aaaa1111", "old-task", True),
@@ -443,6 +449,210 @@ def test_build_report_reads_verdicts_from_gitreins_branch(tmp_path):
     assert "old-task" in report
     assert "new-task" in report
     assert "Total entries: 2" in report
+
+
+# ── history-ref vs fleet task branches (DF-GITREINS-POC-52) ────
+#
+# The history used to live on the branch `refs/heads/gitreins`, a path prefix
+# of the fleet's own per-task branches `refs/heads/gitreins/task/<id>`
+# (engine/worktree_manager.BRANCH_PREFIX). Git refuses to create a ref that is a
+# prefix of an existing one, so in any repo that had ever run a fleet lane every
+# verdict-history commit degraded to "dry-run" — verdict.json on disk, nothing in
+# git. The history now lives OUTSIDE refs/heads (HISTORY_REF), which no branch
+# name can prefix-collide with, and reads union the legacy ref so history filed
+# before the move stays discoverable.
+
+
+def _make_fleet_lane_repo(repo):
+    """A repo shaped like a fleet lane: the task-branch family already exists.
+
+    `gitreins/task/fix-add` is minted from the live BRANCH_PREFIX, so the
+    fixture reproduces the exact ref state that made the old history ref
+    uncreatable, and the repo ships GitReins' own `.gitignore` (the rule that
+    ignores the history store, so the writer's `git add -f` is load-bearing).
+    Returns the git env for the test's own subprocess calls.
+    """
+    env = _git_env()
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True, env=env)
+    (repo / "readme.txt").write_text("hello")
+    (repo / ".gitignore").write_text(".gitreins/history/\n")
+    subprocess.run(
+        ["git", "add", "readme.txt", ".gitignore"],
+        check=True,
+        capture_output=True,
+        cwd=str(repo),
+        env=env,
+    )
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "init"],
+        check=True,
+        capture_output=True,
+        cwd=str(repo),
+        env=env,
+    )
+    subprocess.run(["git", "branch", f"{BRANCH_PREFIX}fix-add"], check=True, cwd=str(repo), env=env)
+    return env
+
+
+def _git_out(repo, env, *args: str) -> str:
+    """stdout of one git command in *repo* (the tests' own observation channel)."""
+    return subprocess.run(
+        ["git", *args], capture_output=True, text=True, cwd=str(repo), env=env
+    ).stdout
+
+
+def _ref_exists(repo, env, ref: str) -> bool:
+    return (
+        subprocess.run(
+            ["git", "rev-parse", "--verify", "-q", ref],
+            capture_output=True,
+            cwd=str(repo),
+            env=env,
+        ).returncode
+        == 0
+    )
+
+
+def test_legacy_history_ref_collides_with_a_fleet_task_branch(tmp_path):
+    """The reported bug, against git itself — the fixture is not vacuous.
+
+    `gitreins/task/fix-add` is a plain path-prefix sibling of `refs/heads/
+    gitreins`, so the legacy name cannot be created there. Without this the
+    regression test below could pass on a repo that never had the collision.
+    """
+    repo = tmp_path / "repo"
+    env = _make_fleet_lane_repo(repo)
+
+    result = subprocess.run(
+        ["git", "update-ref", LEGACY_HISTORY_REF, "HEAD"],
+        capture_output=True,
+        text=True,
+        cwd=str(repo),
+        env=env,
+    )
+
+    assert result.returncode != 0, "expected the legacy ref name to collide"
+    assert "cannot lock ref" in result.stderr, result.stderr
+    # the collision is exactly a path-prefix relation between the two ref names
+    assert f"refs/heads/{BRANCH_PREFIX}fix-add".startswith(LEGACY_HISTORY_REF + "/")
+
+
+def test_history_store_is_gitignored_so_the_writer_must_force_it(tmp_path):
+    """Non-vacuity for the writer's `-f`: the shipped ignore rule refuses a plain add.
+
+    `.gitignore` ignores `.gitreins/history/` (the ref is the versioned copy),
+    so a writer that ran a bare `git add` — as the pre-POC-52 worktree writer
+    did — could not have committed the entry at all.
+    """
+    repo = tmp_path / "repo"
+    env = _make_fleet_lane_repo(repo)
+    entry = repo / ".gitreins" / "history" / "2026-09-25" / "deadbeef"
+    entry.mkdir(parents=True)
+    (entry / "verdict.json").write_text("{}")
+
+    plain = subprocess.run(
+        ["git", "add", entry.relative_to(repo).as_posix()],
+        capture_output=True,
+        text=True,
+        cwd=str(repo),
+        env=env,
+    )
+
+    assert plain.returncode != 0
+    assert "ignored" in plain.stderr, plain.stderr
+
+
+def test_verdict_history_commits_alongside_a_fleet_task_branch(tmp_path):
+    """AC1: writing history in a repo that has `gitreins/task/<id>` succeeds."""
+    repo = tmp_path / "repo"
+    env = _make_fleet_lane_repo(repo)
+
+    p = VerdictPersister(str(repo))
+    p.config["max_verdicts"] = 0
+    commit_hash = p.persist("df-task", {"passed": True, "task_title": "DF Task"})
+
+    assert commit_hash not in ("dry-run", "disabled"), "history commit degraded to dry-run"
+    assert len(commit_hash) == 8
+    listing = _git_out(repo, env, "ls-tree", "-r", "--name-only", HISTORY_REF)
+    assert any(path.endswith("verdict.json") for path in listing.splitlines()), listing
+
+    # the fleet branch naming is untouched and both refs resolve side by side
+    assert _ref_exists(repo, env, f"refs/heads/{BRANCH_PREFIX}fix-add")
+    assert _ref_exists(repo, env, HISTORY_REF)
+    # ...while the history ref is not a branch at all
+    assert HISTORY_REF not in _git_out(repo, env, "branch", "--format=%(refname)").split()
+    # the documented DWIM shorthand resolves the same ref
+    assert (
+        _git_out(repo, env, "rev-parse", "gitreins/history").strip()
+        == _git_out(repo, env, "rev-parse", HISTORY_REF).strip()
+    )
+
+    # a second verdict appends to the same ref (chain, not a second root)
+    second = VerdictPersister(str(repo)).persist("df-task-2", {"passed": False})
+    assert second not in ("dry-run", "disabled")
+    assert len(_git_out(repo, env, "rev-list", HISTORY_REF).split()) == 2
+
+    # and the branch-backed reader finds it with the fleet branch still present
+    shutil.rmtree(repo / ".gitreins" / "history")
+    entries = p.list_verdicts()
+    # both entries, newest first by DATE; within one date the documented order is
+    # by entry hash, which carries no time meaning, so compare as a set.
+    assert {e["task_id"] for e in entries} == {"df-task", "df-task-2"}
+    assert len(entries) == 2
+    assert {e["_ref"] for e in entries} == {HISTORY_REF}
+    assert p.count_verdicts() == 2
+
+
+def test_history_ref_is_outside_the_branch_namespace():
+    """AC3: the collision class is gone by construction, not by naming.
+
+    A ref under refs/heads/ can only be protected by choosing a name the fleet
+    never prefixes. Living outside refs/heads/ removes the class outright: no
+    branch name — the fleet's today, or anything added later — is a prefix of
+    the history ref or has it as a prefix.
+    """
+    fleet_branch = f"refs/heads/{BRANCH_PREFIX}fix-add"
+
+    # the legacy name was a prefix of every fleet task branch...
+    assert fleet_branch.startswith(LEGACY_HISTORY_REF + "/")
+    # ...and what replaced it cannot be, in either direction.
+    assert not HISTORY_REF.startswith("refs/heads/")
+    assert not fleet_branch.startswith(HISTORY_REF)
+    assert not HISTORY_REF.startswith(fleet_branch + "/")
+
+
+def test_first_write_after_the_move_chains_onto_the_legacy_history(tmp_path):
+    """AC2: pre-move history stays readable AND rides into the new ref.
+
+    A repo that already has verdicts on the legacy branch keeps them: the first
+    write after the upgrade parents onto the legacy tip (the automatic form of
+    the documented `git update-ref` migration), and the legacy ref itself is
+    left exactly where it was.
+    """
+    repo = tmp_path / "repo"
+    env = _make_legacy_history_repo(repo, [("2026-06-21", "aaaa1111", "legacy-task", True)])
+    legacy_tip = _git_out(repo, env, "rev-parse", LEGACY_HISTORY_REF).strip()
+
+    p = VerdictPersister(str(repo))
+    p.config["max_verdicts"] = 0
+    commit_hash = p.persist("new-task", {"passed": True})
+
+    assert commit_hash not in ("dry-run", "disabled")
+    log = _git_out(repo, env, "log", "--format=%s", HISTORY_REF).splitlines()
+    assert len(log) == 2, log  # one linear history, not a stranded second root
+    assert log[1] == "verdicts"  # the legacy tip's own subject
+    assert _git_out(repo, env, "rev-parse", LEGACY_HISTORY_REF).strip() == legacy_tip
+
+    # reads union both refs (fresh-clone shape: no local .gitreins/history/).
+    # The legacy entries are IN the new ref's tree — the first write after the
+    # move seeds it from the legacy tip — so both are read from the new ref.
+    shutil.rmtree(repo / ".gitreins" / "history")
+    entries = p.list_verdicts()
+    assert [e["task_id"] for e in entries] == ["new-task", "legacy-task"]
+    assert {e["_ref"] for e in entries} == {HISTORY_REF}
+    assert p.count_verdicts() == 2
+    assert "Total entries: 2" in build_report(str(repo))
 
 
 # ── evaluated-payload preservation (DF-GITREINS-POC-1) ─────────
@@ -522,16 +732,16 @@ def _make_payload_repo(repo) -> dict:
 
 
 def _persist_first_verdict(repo) -> str:
-    """Persist one verdict on a repo whose `gitreins` branch does not exist."""
+    """Persist one verdict on a repo whose history ref does not exist."""
     p = VerdictPersister(str(repo))
     p.config["max_verdicts"] = 0  # no pruning
     assert p.storage_mode == "git"
     result = subprocess.run(
-        ["git", "rev-parse", "--verify", "-q", "gitreins"],
+        ["git", "rev-parse", "--verify", "-q", HISTORY_REF],
         capture_output=True,
         cwd=str(repo),
     )
-    assert result.returncode != 0  # precondition: no gitreins branch yet
+    assert result.returncode != 0  # precondition: no history ref yet
     return p.persist("df-task", {"passed": True, "task_title": "DF Task"})
 
 
@@ -564,7 +774,7 @@ def test_first_verdict_preserves_staged_and_unstaged_state(tmp_path):
     _assert_index_and_worktree_preserved(repo, before)
 
 
-def test_first_verdict_lands_on_gitreins_branch(tmp_path):
+def test_first_verdict_lands_on_the_history_ref(tmp_path):
     repo = tmp_path / "repo"
     before = _make_payload_repo(repo)
 
@@ -572,19 +782,24 @@ def test_first_verdict_lands_on_gitreins_branch(tmp_path):
 
     env = before["env"]
     tree_paths = subprocess.run(
-        ["git", "ls-tree", "-r", "--name-only", "gitreins"],
+        ["git", "ls-tree", "-r", "--name-only", HISTORY_REF],
         capture_output=True,
         text=True,
         cwd=str(repo),
         env=env,
     ).stdout.split()
-    assert len(tree_paths) == 2  # orphan branch holds only verdict entry files
-    assert all(p.endswith(("verdict.json", "summary.md")) for p in tree_paths)
+    # The root commit holds ONLY the entry's own files, at the entry's real path
+    # (DF-GITREINS-POC-52: the old root-commit builder dropped that prefix, so
+    # the first verdict sat at the tree root where no branch-backed reader —
+    # they all filter on the history path — could see it).
+    assert len(tree_paths) == 2
+    assert all(path.startswith(".gitreins/history/") for path in tree_paths), tree_paths
+    assert all(path.endswith(("verdict.json", "summary.md")) for path in tree_paths)
 
     verdict_path = next(p for p in tree_paths if p.endswith("verdict.json"))
     stored = json.loads(
         subprocess.run(
-            ["git", "show", f"gitreins:{verdict_path}"],
+            ["git", "show", f"{HISTORY_REF}:{verdict_path}"],
             capture_output=True,
             text=True,
             cwd=str(repo),
@@ -598,8 +813,15 @@ def test_first_verdict_lands_on_gitreins_branch(tmp_path):
     # Caller remains on main with an intact index (no orphan checkout fallout)
     _assert_index_and_worktree_preserved(repo, before)
 
+    # The ref alone is enough to read the FIRST verdict back — the fresh-clone
+    # shape report/serve fall back to (local .gitreins/history/ is gitignored).
+    shutil.rmtree(repo / ".gitreins" / "history")
+    entries = VerdictPersister(str(repo)).list_verdicts()
+    assert [e["task_id"] for e in entries] == ["df-task"]
+    assert entries[0]["_ref"] == HISTORY_REF
 
-def test_second_verdict_appends_to_gitreins_branch(tmp_path):
+
+def test_second_verdict_appends_to_the_history_ref(tmp_path):
     repo = tmp_path / "repo"
     before = _make_payload_repo(repo)
     first = _persist_first_verdict(repo)
@@ -611,13 +833,13 @@ def test_second_verdict_appends_to_gitreins_branch(tmp_path):
     assert first != second
     env = before["env"]
     ls = subprocess.run(
-        ["git", "rev-list", "gitreins"],
+        ["git", "rev-list", HISTORY_REF],
         capture_output=True,
         text=True,
         cwd=str(repo),
         env=env,
     ).stdout.split()
-    assert len(ls) == 2  # verdict commits chain on the branch, parentless root first
+    assert len(ls) == 2  # verdict commits chain on the ref, parentless root first
 
     _assert_index_and_worktree_preserved(repo, before)
 
@@ -662,22 +884,35 @@ def test_verdict_persistence_failure_returns_dry_run_and_preserves_payload(tmp_p
     result = _persist_first_verdict(repo)
 
     assert result == "dry-run"  # _git_commit catches and reports honestly
-    assert not (repo / ".git" / "refs" / "heads" / "gitreins").exists()
+    assert not (repo / ".git" / "refs" / "gitreins" / "history").exists()
     _assert_index_and_worktree_preserved(repo, before)
 
 
 def test_plumbing_commands_touch_neither_index_nor_worktree(tmp_path, monkeypatch):
-    """Defense in depth: the orphan path must not invoke worktree-mutating git verbs."""
+    """Defense in depth: the history writer never mutates the caller's state.
+
+    Index verbs (read-tree / add / write-tree) are allowed only with
+    GIT_INDEX_FILE redirected to a throwaway file — run against the caller's
+    index they would rewrite the staged payload DF-GITREINS-POC-1 is about.
+    Working-tree and HEAD verbs are never allowed, redirect or not.
+    """
     repo = tmp_path / "repo"
     _make_payload_repo(repo)
 
     real_run = subprocess.run
-    forbidden = ("checkout", "stash", "restore", "reset", "clean", "read-tree", "sparse-checkout")
+    worktree_verbs = ("checkout", "stash", "restore", "reset", "clean", "sparse-checkout")
+    index_verbs = ("read-tree", "add", "write-tree", "update-index")
 
     def spy_run(cmd, *args, **kwargs):
         if isinstance(cmd, list) and cmd and cmd[0] == "git":
             verb = next((c for c in cmd[1:] if not c.startswith("-")), None)
-            assert verb not in forbidden, f"worktree-mutating git verb invoked: {verb}"
+            assert verb not in worktree_verbs, f"worktree-mutating git verb invoked: {verb}"
+            if verb in index_verbs:
+                index = (kwargs.get("env") or {}).get("GIT_INDEX_FILE")
+                assert index, f"{verb} ran without a redirected GIT_INDEX_FILE"
+                assert not index.startswith(str(repo / ".git")), (
+                    f"{verb} pointed at the caller's own index: {index}"
+                )
         return real_run(cmd, *args, **kwargs)
 
     monkeypatch.setattr(subprocess, "run", spy_run)

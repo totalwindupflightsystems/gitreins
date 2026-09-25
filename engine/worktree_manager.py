@@ -1053,7 +1053,7 @@ class WorktreeManager:
     def _verdict_reference(
         self, task_id: str, record: WorktreeRecord, verdict: dict | None = None
     ) -> str:
-        from engine.persist import VerdictPersister
+        from engine.persist import HISTORY_REF, VerdictPersister
 
         # Verdicts are produced in the task checkout, not canonical main.  A
         # branch-backed verdict may no longer have a local copy, so identify
@@ -1074,7 +1074,12 @@ class WorktreeManager:
                 f"{persister._branch_history_prefix().rstrip('/')}/"
                 f"{verdict['_date']}/{verdict['_hash']}/verdict.json"
             )
-            return f"gitreins:{branch_path} (from {task_tree})"
+            # Name the ref this entry is actually readable from: the history
+            # moved out of refs/heads in DF-GITREINS-POC-52, and a repo can
+            # still hold older entries on the legacy branch (the reader stamps
+            # ``_ref`` per entry; the current ref is the fallback for a caller
+            # that handed in a verdict without that stamp).
+            return f"{verdict.get('_ref') or HISTORY_REF}:{branch_path} (from {task_tree})"
         return f"{persister.history_dir} (task {task_id})"
 
     def _matching_verdicts(self, task_id: str, record: WorktreeRecord) -> list[dict]:
