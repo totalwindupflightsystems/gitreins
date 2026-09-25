@@ -298,3 +298,9 @@ docs/dogfood/2026-09-25b-integration.md + evidence/onboarding-2026-09-25b/run13.
 - Perf: guard 258.6ms±11.7 warm (hyperfine, 20 runs), task list 83.2ms±5.1 —
   nothing a user feels, no PERF row. Install leg RUN on las-bunker-03 (agent
   caeeca94, clone 6.6s @ 3817cc4, destroyed + verified gone).
+- Run-13 addendum (11:10Z): POC-62 verified FIXED at repo HEAD — POC-52
+  (8922d7d) moved verdict history to refs/gitreins/history; re-tested in a
+  scratch repo from HEAD: verdict persists, `task worktree t1` succeeds, no
+  refs/heads/gitreins. Run 13's failure reproduces on PyPI 0.15.0 only → the
+  live gap is RELEASE, not code. Row 62 updated (P1→fixed-at-HEAD, complete);
+  rows 63-65 unchanged (re-verified against HEAD docs).
