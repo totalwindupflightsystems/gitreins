@@ -524,6 +524,17 @@ gitreins security-scan [-d <dir>] [--output text|json] [--force-ml]
 | 1 | Findings reported (or scan failed) |
 | 2 | Required ML dependencies missing (with `--force-ml`) |
 
+**Limitations** — ML inference runs only when the `huggingface_hub` +
+`transformers` (+ `torch`) stack is installed. Without it the scanner falls
+back to a 7-keyword substring heuristic (`CVE`, `vulnerability`, `injection`,
+`exploit`, `unsafe`, `deserialization`, `hardcoded`), so a file with a real
+command injection but none of those keywords scans clean, while a comment
+merely mentioning a keyword is reported. Findings from the fallback carry the
+`CVE-SIMULATED` id with `conf=0.00`, and text output prints an explicit
+`Antares: heuristic mode (no ML stack installed) — keyword fallback, NOT a full
+scan` line instead of presenting the result as a full scan. Use `--force-ml`
+to require real ML inference (exit 2 instead of falling back).
+
 ## 10. `gitreins setup-tools`
 
 Show available static analysis tools for the detected language and

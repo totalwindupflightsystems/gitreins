@@ -22,7 +22,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
-from engine.antares import AntaresScanner
+from engine.antares import AntaresFinding, AntaresScanner
 from engine.cve_feed import CveEntry, CveFeed, _severity_to_score
 
 
@@ -52,6 +52,11 @@ def _isolated_feed(workdir: str, tmp_path, **kwargs) -> CveFeed:
     """Build a CveFeed whose cache is under tmp_path, not ~/.cache."""
     cache_dir = os.path.join(str(tmp_path), "cve_cache")
     return CveFeed(workdir, cache_dir=cache_dir, **kwargs)
+
+
+# DF-GITREINS-POC-59: heuristic mode must never present itself as a full
+# scan. The CLI and the scanner both disclose via this exact phrase.
+HEURISTIC_DISCLOSURE = "heuristic mode (no ML stack installed) — keyword fallback, NOT a full scan"
 
 
 # ── AntaresScanner.scan_file ────────────────────────────────────
@@ -104,6 +109,64 @@ class TestAntaresScannerScanFile:
         """Missing files produce no findings and don't raise."""
         scanner = AntaresScanner(tmp_workdir)
         assert scanner.scan_file(os.path.join(tmp_workdir, "nope.py")) == []
+
+
+class TestAntaresHeuristicDisclosure:
+    """DF-GITREINS-POC-59: heuristic mode must disclose itself.
+
+    The default scanner (no ML stack) is a 7-keyword substring grep. A
+    clean verdict from it must never read as a bare "Antares: clean" —
+    the scanner exposes ``used_heuristic`` and the CLI renders an
+    explicit mode line.
+    """
+
+    def test_used_heuristic_flag_true_on_clean_file_without_ml(self, tmp_workdir, tmp_path):
+        """A clean scan_file run in keyword mode sets used_heuristic=True."""
+        full = os.path.join(tmp_workdir, "clean.py")
+        _write_file(full, "def add(a, b):\n    return a + b\n")
+        scanner = AntaresScanner(tmp_workdir)
+        assert scanner.used_heuristic is False
+        assert scanner.scan_file(full) == []
+        assert scanner.used_heuristic is True
+
+    def test_used_heuristic_flag_true_when_keyword_findings(self, tmp_workdir, tmp_path):
+        """Keyword findings also mean the heuristic ran."""
+        full = os.path.join(tmp_workdir, "kw.py")
+        _write_file(full, "# this comment mentions vulnerability\nx = 1\n")
+        scanner = AntaresScanner(tmp_workdir)
+        findings = scanner.scan_file(full)
+        assert len(findings) == 1
+        assert findings[0].cve_id == "CVE-SIMULATED"
+        assert findings[0].confidence == 0.0
+        assert scanner.used_heuristic is True
+
+    def test_used_heuristic_stays_false_when_ml_succeeds(self, tmp_workdir, tmp_path):
+        """A successful ML scan must NOT raise the heuristic flag."""
+        full = os.path.join(tmp_workdir, "ml.py")
+        _write_file(full, "def add(a, b):\n    return a + b\n")
+        scanner = AntaresScanner(tmp_workdir, use_ml=True)
+        ml_finding = AntaresFinding(full, 1, "CVE-2024-1234", 0.9, "model-localized")
+        with patch.object(scanner, "_scan_with_model", return_value=[ml_finding]):
+            findings = scanner.scan_file(full)
+        assert len(findings) == 1
+        assert findings[0].cve_id == "CVE-2024-1234"
+        assert scanner.used_heuristic is False
+
+    def test_used_heuristic_true_when_ml_falls_back(self, tmp_workdir, tmp_path):
+        """ML requested but inference unavailable → heuristic disclosure."""
+        full = os.path.join(tmp_workdir, "fb.py")
+        _write_file(full, "def add(a, b):\n    return a + b\n")
+        scanner = AntaresScanner(tmp_workdir, use_ml=True)
+        with patch.object(scanner, "_scan_with_model", side_effect=RuntimeError("model down")):
+            assert scanner.scan_file(full) == []
+        assert scanner.used_heuristic is True
+
+    def test_scan_staged_files_propagates_heuristic_flag(self, tmp_workdir, tmp_path):
+        """Multi-file scans: the flag must survive scan_staged_files."""
+        _stage_file(tmp_workdir, "clean_app.py", "def add(a, b):\n    return a + b\n")
+        scanner = AntaresScanner(tmp_workdir)
+        assert scanner.scan_staged_files() == []
+        assert scanner.used_heuristic is True
 
 
 # ── AntaresScanner.scan_staged_files ────────────────────────────
@@ -581,7 +644,11 @@ class TestSecurityScanCLI:
             with pytest.raises(SystemExit) as exc:
                 cmd_security_scan(args)
         assert exc.value.code == 0
-        assert "clean" in capsys.readouterr().out.lower()
+        out = capsys.readouterr().out
+        assert "clean" in out.lower()
+        # DF-GITREINS-POC-59: heuristic mode (the default without --force-ml)
+        # must be disclosed explicitly — never a bare "Antares: clean" line.
+        assert HEURISTIC_DISCLOSURE in out
 
     def test_json_output_format(self, tmp_workdir, tmp_path, capsys):
         from gitreins.cli import cmd_security_scan
@@ -600,6 +667,64 @@ class TestSecurityScanCLI:
         assert payload[0]["cve_id"] == "CVE-SIMULATED"
         assert payload[0]["file"].endswith("vuln.py")
         assert payload[0]["line"] == 1
+
+    def test_clean_heuristic_run_prints_mode_line(self, tmp_workdir, tmp_path, capsys):
+        """DF-GITREINS-POC-59: a keyword-mode clean run discloses the mode.
+
+        `subprocess.call(input(), shell=True)` contains none of the seven
+        heuristic keywords — the old output was a bare "Antares: clean"
+        with exit 0, hiding that the scan was a grep, not ML inference.
+        """
+        from gitreins.cli import cmd_security_scan
+
+        _write_file(
+            os.path.join(tmp_workdir, "blind.py"),
+            "import subprocess\nsubprocess.call(input(), shell=True)\n",
+        )
+        args = _make_args(directory=tmp_workdir)
+        with patch("gitreins.cli.get_workdir", return_value=tmp_workdir):
+            with pytest.raises(SystemExit) as exc:
+                cmd_security_scan(args)
+        # The blind spot: real command injection, zero findings, exit 0.
+        assert exc.value.code == 0
+        out = capsys.readouterr().out
+        assert "clean" in out.lower()
+        assert HEURISTIC_DISCLOSURE in out
+
+    def test_keyword_findings_output_names_heuristic_mode(self, tmp_workdir, tmp_path, capsys):
+        """DF-GITREINS-POC-59: summary line for findings names heuristic mode."""
+        from gitreins.cli import cmd_security_scan
+
+        _write_file(
+            os.path.join(tmp_workdir, "comment.py"),
+            "# a harmless comment mentioning vulnerability\n",
+        )
+        args = _make_args(directory=tmp_workdir)
+        with patch("gitreins.cli.get_workdir", return_value=tmp_workdir):
+            with pytest.raises(SystemExit) as exc:
+                cmd_security_scan(args)
+        assert exc.value.code == 1
+        out = capsys.readouterr().out
+        assert "CVE-SIMULATED" in out
+        assert "conf=0.00" in out
+        assert HEURISTIC_DISCLOSURE in out
+
+    def test_clean_ml_run_output_unchanged(self, tmp_workdir, tmp_path, capsys):
+        """DF-GITREINS-POC-59: ML-mode clean output stays bare (no mode line)."""
+        from gitreins.cli import cmd_security_scan
+
+        args = _make_args(directory=tmp_workdir, force_ml=True)
+        # The shared test venv has no ML stack; stub the two pre-flight
+        # imports so the command reaches the (mocked) scanner.
+        with patch.dict(sys.modules, {"huggingface_hub": MagicMock(), "transformers": MagicMock()}):
+            with patch("gitreins.cli.get_workdir", return_value=tmp_workdir):
+                with patch("engine.antares.AntaresScanner.scan_directory", return_value=[]):
+                    with pytest.raises(SystemExit) as exc:
+                        cmd_security_scan(args)
+        assert exc.value.code == 0
+        out = capsys.readouterr().out
+        assert "clean" in out.lower()
+        assert HEURISTIC_DISCLOSURE not in out
 
     def test_force_ml_exits_2_when_huggingface_missing(self, tmp_workdir, tmp_path, capsys):
         """--force-ml + missing huggingface_hub → exit 2, not fallback."""
@@ -637,8 +762,9 @@ class TestGuardSecurityScanIntegration:
         gm = GuardManager(tmp_workdir, {"guards": {"security_scan": {"enabled": True}}})
         assert gm._enabled.get("security_scan") is True
         # Don't actually trigger a network/ML run — mock the scanner
-        # to return a clean result.
-        fake = GuardResult("security_scan", True, "Antares: clean")
+        # to return a clean result. The output string mirrors what
+        # _check_security_scan prints on a real clean run.
+        fake = GuardResult("security_scan", True, "Antares: clean — no findings in staged files")
         with patch.object(gm, "_check_security_scan", return_value=fake):
             tier1 = gm.run_all()
         # The mocked result is in the tier1.results list.

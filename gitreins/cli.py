@@ -3003,6 +3003,11 @@ def cmd_security_scan(args):
         0  — clean (no findings)
         1  — one or more findings produced
         2  — forced ML mode but dependencies missing
+
+    Without ``--force-ml`` the scan runs the keyword heuristic (or ML
+    inference that fell back to it); such runs print an explicit mode
+    line — they are a 7-keyword fallback, not a full ML scan
+    (DF-GITREINS-POC-59).
     """
     import json as _json
 
@@ -3015,7 +3020,7 @@ def cmd_security_scan(args):
     directory = getattr(args, "directory", None)
 
     try:
-        from engine.antares import AntaresScanner
+        from engine.antares import HEURISTIC_DISCLOSURE, AntaresScanner
     except ImportError as exc:
         print(f"Antares scanner unavailable: {exc}", file=sys.stderr)
         if force_ml:
@@ -3082,11 +3087,16 @@ def cmd_security_scan(args):
         ]
         print(_json.dumps(payload, indent=2))
     else:
+        target = directory or "staged files"
+        # DF-GITREINS-POC-59: a keyword-heuristic run is a 7-keyword grep,
+        # not a full scan — disclose the mode on both the clean and the
+        # findings summary line (finding lines already carry
+        # CVE-SIMULATED conf=0.00). ML-mode output stays unchanged.
+        if scanner.used_heuristic:
+            print(f"Antares: {HEURISTIC_DISCLOSURE}")
         if not findings:
-            target = directory or "staged files"
             print(f"Antares: clean — no findings in {target}")
         else:
-            target = directory or "staged files"
             print(f"Antares: {len(findings)} potential finding(s) in {target}:")
             for f in findings:
                 print(f"  • {f.file}:{f.line} [{f.cve_id} conf={f.confidence:.2f}] {f.description}")
