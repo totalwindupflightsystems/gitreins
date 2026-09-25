@@ -69,6 +69,12 @@ include = ["engine*", "gitreins*", "gitreins_mcp*"]
 addopts = "-n 4 --timeout=120 --timeout-method=thread"
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    # DF-GITREINS-POC-61: a real-egress test (OpenRouter/hilo). tests/conftest.py
+    # skips these inside judge tier-1 (GITREINS_TIER1=1) and flock-serializes
+    # them outside it, so concurrent judges never fire the live call together.
+    "live: makes a real network call to an external host; excluded from judge tier-1",
+]
 
 [tool.mypy]
 exclude = [
