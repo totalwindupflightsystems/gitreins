@@ -4,7 +4,7 @@ description: >-
   How to use the GitReins quality harness in this repo (and any repo it's
   installed in): task lifecycle, guards, LLM judge, MCP tools, and the known
   pitfalls that will bite you. Load this before committing or creating tasks.
-version: 1.11.0
+version: 1.12.0
 category: software-development
 ---
 
@@ -771,3 +771,53 @@ doc promises (worktree/disposable lock files appear untracked later); literal
 `pip install gitreins` is PEP-668-blocked on stock Debian/Ubuntu — use a venv;
 `--depends-on` ids are not validated at create time, so doc examples can point at
 tasks that never exist.
+
+## Report / commit / setup-tools — run 14 (2026-09-25, dogfood)
+
+The maintenance loop — `gitreins report`, `gitreins commit`, `gitreins
+setup-tools` — walked in a fresh consumer clone (fresh clone → report → task →
+guard-blocked commit → re-stage → `gitreins commit` → verdict → report).
+TTFS ~1 min; every blocking path blocks with the right exit code; a
+self-built 37-line app (`consumer-app.py`, reads `report --json`) passed its
+criteria via `task complete --skip-tier2`. If you maintain this repo, load
+this section before touching commit/report surfaces.
+
+**Pitfall 47 — the two commit doors disagree (POC-66).** MCP `commit` refuses
+while any task is `in_progress` (re-verified at HEAD, 13-tool server); CLI
+`gitreins commit` runs the same guards and commits the same tree with zero
+mention of the open task. The README's "MCP commit rule" names only one door.
+If you script agents on the CLI quickstart, know that the judge-skip protection
+is MCP-only today (row DF-GITREINS-POC-66).
+
+**Pitfall 48 — `test_targets=None` is a two-meaning sentinel (POC-67).**
+`cli.py:2087-2088` prints "full suite — safety trigger" whenever diff-mode
+discovery found no test targets, but guard_manager sets that same `None` both
+for a REAL full-suite fallback and for "no test files matched → skipped" — so
+the banner (and the run log via `_log_test_scope`) can say "full suite" on a
+run whose tests lane never executed anything. Grep-proof: match the lane line
+(`~ tests — skipped`), not the banner.
+
+**Pitfall 49 — fresh-clone verdict fallback is still dead, twice over (POC-68,
+updated POC-58).** (1) The 2 stale git-TRACKED history dirs are STILL tracked
+at HEAD, so `report` serves 2 August verdicts instead of the fallback; (2)
+after untracking them (scratch probe), `report` reads ONLY a local
+`refs/heads/gitreins` — a fresh clone has none, so "No verdict history found."
+even though `origin/gitreins` carries 617 verdicts (manually
+`git branch gitreins origin/gitreins` to activate it); (3) canonical storage
+moved to `refs/gitreins/history` (POC-52, 626 entries), which `git clone`
+never fetches, and the legacy branch is 9 verdicts behind. For a fresh-clone
+tour today: create the local branch from origin, then report/serve.
+
+**Pitfall 50 — setup-tools' header overpromises and its pip hint PEP-668-fails
+(POC-69).** The banner prints the detected language NAME ("Python + C + SQL")
+while the tool list keys on the primary type only (cli.py:3114-3126) — no C/SQL
+tools are ever listed. Missing-tool guidance is a bare `pip install mypy` —
+the exact line PEP-668 blocks on stock Linux (same class as POC-64). Honest
+zero-state is fine: unknown-language repos print "No static analysis tools are
+tracked for unknown" exit 0.
+
+Also known (row 70): `gitreins commit` with nothing staged prints the green
+"Tier 1 PASSED — committing..." first, then git's "nothing to commit", exit 1,
+guard summary last — a fresh user reads a green gate, a red exit, and the
+cause in the middle. Run `git status` first.
+

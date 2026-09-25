@@ -1286,3 +1286,45 @@ block in §1 closes it. On the bunker leg everything downstream of that
 an honest DEGRADED pass naming the missing gitleaks binary and its exact
 install command — that fail-loud degraded behavior is the correct model for
 missing-tool lanes.
+
+## Run 14 — report / commit / setup-tools (2026-09-25)
+
+**Why the "MCP commit rule" has a hole (POC-66).** The in_progress refusal
+lives in the MCP server's commit tool (gitreins_mcp/server.py), not in
+`cmd_commit` (gitreins/cli.py). The rule's rationale — commit must be judged
+against its committed state, else the judge grades a moving tree — applies
+to any door into git, but the CLI door was built first and the gate was
+added later only on the agent-facing surface. Every quickstart teaches the
+CLI door, so the protection is one habit away from bypassed. Fix shape: one
+guard call in cmd_commit sharing the MCP wording, plus an explicit
+`--allow-in-progress` for the human door.
+
+**Why the banner can lie (POC-67).** `_discover_test_targets` returns
+`None` to mean "run the whole suite" (a real fallback), and the diff-mode
+skip path in `_run_tests_lanes` (guard_manager.py:2201-2209) reuses the
+same `None` for "no test files matched, skip". The console layer
+(cli.py:2087-2088) can only see `None`, so it renders the scariest of the
+two meanings on every skip. Any future "did the safety net actually run"
+logic reading `extra["test_targets"]` inherits the ambiguity — the fix is a
+third value (empty list) or a sibling key, not a wording patch.
+
+**Why the fresh-clone fallback stays dead (POC-68).** Three layers
+interact: (1) two verdict dirs tracked before `.gitignore` existed shadow
+everything local-first; (2) the fallback's ref resolution wants
+`refs/heads/gitreins` — a branch name — while clones only have
+`refs/remotes/origin/gitreins`; (3) canonical history moved to
+`refs/gitreins/history` (POC-52), a non-branch ref outside the default
+fetch spec, and the legacy branch it superseded is 9 verdicts stale. Any
+fix that patches one layer leaves the other two; they should land together
+(untrack dirs, widen fallback to remote refs, either fetch
+`refs/gitreins/history` in docs or push/refresh the legacy branch). The
+run-14 probe trail that isolates each layer is in
+evidence/maintenance-loop-2026-09-25/run14.md (F3 section).
+
+**setup-tools was written for the single-language repo (POC-69).**
+`lang_tools_map` keys on `lang["type"]` (one primary type) while the header
+prints `lang["name"]` (the composite). The tool rows themselves are correct
+for the primary language — the gap is presentation plus the PEP-668-vulnerable
+`pip install <tool>` hint template, which will fail exactly where the
+product's own POC-64 does. `_TOOL_INSTALL_GUIDE` is the single place to fix
+both.
