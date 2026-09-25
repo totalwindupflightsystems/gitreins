@@ -1,6 +1,6 @@
 # GitReins Onboarding Guide
 
-**Version-stamped: verified against `gitreins 0.14.0` (2026-09-18).** The guide
+**Version-stamped: verified against `gitreins 0.15.0` (2026-09-25).** The guide
 started as the 2026-08-03 dogfood report (`docs/dogfood/2026-08-03-integration.md`)
 and has been refreshed so every command matches the current CLI: `init`, `task`,
 `guard`, `judge`, `serve` and `worktree` are all exercised as written.
@@ -17,6 +17,15 @@ integration failures.
 ```bash
 pip install gitreins
 ```
+
+On distros that enforce PEP 668 (Debian 13, Fedora, Ubuntu 23.04+), bare pip
+exits 1 with `externally-managed-environment` — use a venv instead:
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install gitreins
+```
+
+Downstream commands run via `.venv/bin/gitreins` (or an activated venv).
 
 **uv is optional, not required.** `gitreins init` writes `uv run pytest` as the
 test command only when uv is on PATH. On a machine without uv (pip-only), the
@@ -60,14 +69,14 @@ gitreins install
 - `.gitreins/config.yaml` — default config (skipped if already present)
 - `.git/hooks/pre-commit` — runs `gitreins guard` on every commit
   (overwritten if a hook already exists)
-- `.gitignore` — appends the local GitReins runtime exclusions
+- `.gitignore` — appends exactly five local GitReins runtime exclusions:
   `.gitreins/tasks.yaml`, `.gitreins/config.yaml.bak`,
-  `.gitreins/usage.jsonl`, `.gitreins/logs/`,
-  `.gitreins/qa-ledger.jsonl`, `.gitreins/worktrees.json`,
-  `.gitreins/worktrees.lock`, `.gitreins/disposable.json`,
-  `.gitreins/disposable.lock` and `.gitreins/tasks.yaml.lock`; Python
-  projects also get `__pycache__/`
-  (existing entries are preserved and never duplicated)
+  `.gitreins/usage.jsonl`, `.gitreins/logs/` and
+  `.gitreins/qa-ledger.jsonl`; Python projects also get `__pycache__/`
+  (existing entries are preserved and never duplicated). Several other
+  runtime files are **not** written by `install` — the commands that use
+  them create them when they run: `worktrees.json`, `worktrees.lock`,
+  `disposable.json`, `disposable.lock` and `tasks.yaml.lock`.
 
 `install` writes the **pre-commit hook only**. The commit-message auditor
 (`gitreins commit-audit`, which reads `.git/COMMIT_EDITMSG` when given no
@@ -218,7 +227,10 @@ Notes that match the current CLI:
 - Dependencies: `gitreins task create api-crud "CRUD endpoints" "POST /api/users
   creates a user" --depends-on build` — put `--depends-on` **after** the
   criteria, because the criteria are one repeated positional argument and
-  argparse rejects criteria written after an option.
+  argparse rejects criteria written after an option. `create` does not
+  validate the referenced id: `--depends-on` is a naming convention, not a
+  foreign key, and a dependency on a task that never exists simply never
+  unblocks.
 - `gitreins task list` filters with `--status pending|in_progress|complete`, and
   `gitreins task delete <id>` removes a task that was never attempted.
 
