@@ -522,11 +522,18 @@ class AntaresScanner:
         return findings
 
     def scan_directory(self, directory: str) -> list[AntaresFinding]:
-        """Recursively scan every ``.py`` file under ``directory``."""
+        """Recursively scan every ``.py`` file under ``directory``.
+
+        Like ``scan_staged_files``, a zero-file (or no-Python-file) run in
+        fallback mode still sets ``used_heuristic`` so the CLI disclosure
+        stays honest (DF-GITREINS-POC-59).
+        """
         findings: list[AntaresFinding] = []
         if not os.path.isabs(directory):
             directory = os.path.join(self.workdir, directory)
         if not os.path.isdir(directory):
+            if not self._use_ml:
+                self.used_heuristic = True
             return findings
 
         # Skip the same noise dirs as engine.dead_code.DeadCodeDetector.
@@ -551,6 +558,10 @@ class AntaresScanner:
                     continue
                 full = os.path.join(root, fname)
                 findings.extend(self.scan_file(full))
+        # Zero-Python-file directories still operated in fallback mode when
+        # ML is off — keep the mode disclosure honest (DF-GITREINS-POC-59).
+        if not self._use_ml:
+            self.used_heuristic = True
         return findings
 
     # ── Internals ────────────────────────────────────────────────

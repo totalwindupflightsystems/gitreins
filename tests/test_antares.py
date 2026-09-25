@@ -168,6 +168,32 @@ class TestAntaresHeuristicDisclosure:
         assert scanner.scan_staged_files() == []
         assert scanner.used_heuristic is True
 
+    def test_scan_directory_sets_heuristic_flag_on_zero_py_dir(self, tmp_workdir, tmp_path):
+        """A directory with no .py files still ran the fallback — flag it.
+
+        DF-GITREINS-POC-59 gap found by foreman probe: the CLI printed a bare
+        ``Antares: clean`` for ``-d <dir-with-no-python>`` because the walk
+        never entered scan_file. The mode disclosure must not depend on the
+        directory containing Python files.
+        """
+        pyless = tmp_path / "pyless"
+        pyless.mkdir()
+        (pyless / "notes.txt").write_text("plain text, no python\n")
+        scanner = AntaresScanner(tmp_workdir)
+        assert scanner.scan_directory(str(pyless)) == []
+        assert scanner.used_heuristic is True
+
+    def test_scan_directory_sets_heuristic_flag_when_findings(self, tmp_workdir, tmp_path):
+        """A directory whose .py file carries a keyword: findings + flag."""
+        subdir = tmp_path / "pkg"
+        subdir.mkdir()
+        _write_file(str(subdir / "mod.py"), "# mentions vulnerability\nx = 1\n")
+        scanner = AntaresScanner(tmp_workdir)
+        findings = scanner.scan_directory(str(subdir))
+        assert len(findings) == 1
+        assert findings[0].cve_id == "CVE-SIMULATED"
+        assert scanner.used_heuristic is True
+
 
 # ── AntaresScanner.scan_staged_files ────────────────────────────
 
