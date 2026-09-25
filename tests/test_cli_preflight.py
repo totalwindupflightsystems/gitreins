@@ -266,7 +266,15 @@ class TestPreflightCLI:
         assert "Abstain:" not in out
 
     def test_abstain_is_a_valid_dispatch_outcome_exit_zero(self, monkeypatch, tmp_path):
-        """No key: ABSTAIN -> decision dispatch, abstain_reason present, exit 0."""
+        """No key: ABSTAIN -> decision dispatch, abstain_reason present, exit 0.
+
+        DF-GITREINS-POC-37: the no-verdict case is not a second shape. An
+        ABSTAIN record carries the SAME eight fields as a real band, with
+        ``verdict`` the same OBJECT (`ResolutionVerdict.to_dict()`) — a
+        consumer keying on ``.verdict`` must not need an ABSTAIN code path.
+        """
+        from engine.resolution import ResolutionVerdict
+
         _script_assembler(monkeypatch)
         # Deliberately NO credential: discovery must fail, the policy must not.
 
@@ -280,6 +288,26 @@ class TestPreflightCLI:
         assert record["band"] == "ABSTAIN"
         assert record["abstain_reason"] == "no-credentials"
         assert record["probability"] is None
+        # One record shape for every band — including the one with no verdict
+        # to report (`probability: null`): same keys, `verdict` still an object.
+        assert set(record) == {
+            "question",
+            "band",
+            "probability",
+            "missing_kind",
+            "decision",
+            "reason",
+            "abstain_reason",
+            "verdict",
+        }
+        verdict = record["verdict"]
+        assert isinstance(verdict, dict), "no second parse, on the ABSTAIN path either"
+        assert set(verdict) == set(ResolutionVerdict(question="q?", verdict="ABSTAIN").to_dict())
+        assert verdict["verdict"] == "ABSTAIN"
+        assert verdict["abstain_reason"] == "no-credentials"
+        assert verdict["question"] == "anything at all?", "the real verdict, not a stub"
+        assert "abstain_detail" in verdict, "the ABSTAIN object keeps the gate's own detail field"
+        assert "verdict_json" not in record
 
     def test_band_boundary_085_inclusive_is_resolved(self, monkeypatch, tmp_path):
         """0.85 belongs to the better band: RESOLVED -> skip-dispatch."""
