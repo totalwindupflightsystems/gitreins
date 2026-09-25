@@ -4,6 +4,7 @@ import http.client
 import json
 import os
 import re
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -917,3 +918,316 @@ class TestResolutionRecordsInTheViewerAPI:
         full = json_body(record_body)
         assert full["kind"] == "resolution"
         assert full["verdict"]["manifest"][0]["file"] == "engine/persist.py"
+
+
+# ── detail pane: the criteria fallback must not swallow the sections ────────
+# DF-GITREINS-POC-56. The pane expression used to end its criteria block with
+#     items.map(...).join('')
+#     ||'<p ...>no per-criterion items recorded</p>'+
+#     ((t1.summary)?...)+ ... + telemetry(v)+ evidenceSection(v);
+# JS binds `||` tighter than `+`, and the left operand of that `||` was the
+# whole `'<button...'+ ... + items.map(...).join('')` concatenation — a
+# non-empty string for every record — so the right operand (the fallback AND
+# every section after it) was never concatenated: the pane showed only the
+# header, for every verdict. The tests below run the REAL viewer JavaScript,
+# extracted from the served page, in node, so they fail on that expression and
+# pass on the parenthesized one. The `||`-after-`join('')` idioms in
+# render()/boot() (verdict list, scheduler ticks, QA runs) are correct — their
+# left operand is the bare join, whose empty string is falsy — and are pinned
+# by the last test so "fix the precedence" cannot be misread as "parenthesize
+# every `||`".
+
+_NODE = shutil.which("node")
+
+_DETAIL_FALLBACK = "no per-criterion items recorded"
+
+# Functions the viewer page defines that the harness below needs in scope to
+# run show() and boot(). Extraction is by signature; the harness never
+# re-implements viewer behaviour.
+_VIEWER_FUNCTIONS = (
+    "const esc=",
+    "const badge=",
+    "const kindBadge=",
+    "function money(",
+    "function costBadge(",
+    "function spendCard(",
+    "function telemetry(",
+    "function evidenceSection(",
+    "async function j(",
+    "function render(",
+    "async function show(",
+    "async function boot(",
+)
+
+# A DOM/fetch stand-in just large enough for the extracted viewer functions:
+# getElementById hands out stable elements whose innerHTML we can read back,
+# and fetch answers from the fixture JSON by URL.
+_NODE_HARNESS_HEAD = """\
+const CAPTURED = {};
+const makeEl = () => ({style: {}, innerHTML: "", textContent: "", scrollIntoView() {}, addEventListener() {}});
+const escHtml = s => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const FIXTURE = JSON.parse(require("fs").readFileSync(process.argv[2], "utf8"));
+globalThis.document = {
+  getElementById: id => CAPTURED[id] || (CAPTURED[id] = makeEl()),
+  createElement: () => ({set textContent(v) {this._t = v;}, get innerHTML() {return escHtml(this._t);}}),
+  querySelectorAll: () => [],
+};
+let V = [], filter = "all", q = "", CUR = null;
+globalThis.fetch = async url => ({ok: true, json: async () => FIXTURE[url]});
+const dumpPanes = () => JSON.stringify(
+  Object.fromEntries(Object.entries(CAPTURED).map(([id, el]) => [id, el.innerHTML]))
+);
+"""
+
+
+def viewer_script(live_server: tuple[str, int]) -> str:
+    """The `<script>` block of the viewer page the server actually serves."""
+    status, body = get(live_server, "/")
+    assert status == 200
+    match = re.search(r"<script>(.*?)</script>", body.decode("utf-8"), re.S)
+    assert match, "the viewer page carries no <script> block"
+    return match.group(1)
+
+
+def extract_statement(script: str, header: str) -> str:
+    """One statement from the script, from `header` to its closing brace/semi.
+
+    Views are defined either as `function f(...){...}` or as an arrow whose
+    body is a block or an expression; both are terminated by a `}` at depth 0
+    or, for the expression form, by a `;` at depth 0.
+    """
+    start = script.index(header)
+    depth = 0
+    for index in range(start, len(script)):
+        char = script[index]
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth <= 0:
+                return script[start : index + 1]
+        elif char == ";" and depth == 0:
+            return script[start : index + 1]
+    raise AssertionError(f"unterminated viewer function after {header!r}")
+
+
+def run_viewer_js(script: str, tmp_path: Path, fixture: dict, call: str) -> dict[str, str]:
+    """Run the served viewer JS in node; return every element's innerHTML."""
+    if not _NODE:
+        pytest.skip("node is not on PATH; the extracted viewer JS cannot be executed")
+    harness = [_NODE_HARNESS_HEAD]
+    harness.extend(extract_statement(script, header) + ";" for header in _VIEWER_FUNCTIONS)
+    harness.append(call)
+    harness_path = tmp_path / "viewer-harness.cjs"
+    fixture_path = tmp_path / "viewer-fixture.json"
+    harness_path.write_text("\n".join(harness), encoding="utf-8")
+    fixture_path.write_text(json.dumps(fixture), encoding="utf-8")
+
+    result = subprocess.run(
+        [_NODE, str(harness_path), str(fixture_path)],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+        timeout=60,
+    )
+    assert result.returncode == 0, f"node failed to run the viewer JS:\n{result.stderr}"
+    return json.loads(result.stdout)
+
+
+_SHOW_CALL = """\
+(async () => {
+  const v = FIXTURE["/api/verdicts/2026-09-01/a1b2c3d4"];
+  globalThis.fetch = async () => ({ok: true, json: async () => v});
+  await show("2026-09-01", "a1b2c3d4");
+  process.stdout.write(dumpPanes());
+})();
+"""
+
+_DETAIL_SECTIONS = (
+    "Tier 1 — static gates",
+    "all static gates passed",
+    "Tier 2 — judge summary",
+    "fixture judgment passed",
+    "Verdict summary",
+    "fixture verdict summary",
+    "Judge telemetry",
+    "Evidence (1)",
+    "Worker brief",
+)
+
+
+def _detail_verdict(items: list[dict]) -> dict:
+    """A full verdict record: both stage summaries, a summary, usage, evidence."""
+    return {
+        "task_id": "JVIEW-PANE",
+        "task_title": "Detail pane precedence",
+        "passed": True,
+        "items": items,
+        "stages": {
+            "tier1": {"id": "tier1", "passed": True, "summary": "all static gates passed"},
+            "tier2": {
+                "id": "tier2",
+                "passed": True,
+                "summary": "fixture judgment passed",
+                "items": [
+                    {
+                        "criterion": "The pane renders the tier-2 item",
+                        "status": "PASS",
+                        "detail": "tier-2 item detail",
+                    }
+                ],
+            },
+        },
+        "summary": "fixture verdict summary",
+        "evaluated_at": "2026-09-01T12:00:00Z",
+        "usage": {
+            "priced": False,
+            "cost_usd": None,
+            "rows": 3,
+            "tokens_in": 1000,
+            "tokens_out": 250,
+            "cache_read": 0,
+            "steps": ["ai_eval"],
+            "model": "",
+        },
+        "evidence": {
+            "items": [
+                {
+                    "name": "brief",
+                    "label": "Worker brief",
+                    "bytes": 42,
+                    "truncated": False,
+                    "source": "GITREINS_WORKER_BRIEF: /tmp/brief.md",
+                }
+            ]
+        },
+    }
+
+
+def test_detail_pane_parenthesizes_the_criteria_fallback(live_server):
+    """`||` binds to the criteria join alone, never to the whole header.
+
+    Structural check on the served page source, independent of node: the
+    fallback paragraph must sit inside a parenthesized group whose other
+    operand is the criteria join, and the tier-1 section must follow that
+    group as its own concatenated operand.
+    """
+    show = extract_statement(viewer_script(live_server), "async function show(")
+
+    assert re.search(
+        r"\)\.join\(''\)\s*\|\|\s*'<p[^']*" + _DETAIL_FALLBACK + r"</p>'\)\s*\+",
+        show,
+        re.S,
+    ), "the criteria fallback is not parenthesized against the concatenation"
+    assert not re.search(_DETAIL_FALLBACK + r"</p>'\s*\+", show), (
+        "the criteria fallback is still concatenated straight into the tier-1 "
+        "section, so `||` binds to the whole header string and every section "
+        "after the criteria block is unreachable"
+    )
+
+
+def test_detail_pane_renders_the_fallback_and_every_section(live_server, tmp_path):
+    """Empty top-level items: fallback paragraph AND all sections render."""
+    panes = run_viewer_js(
+        viewer_script(live_server),
+        tmp_path,
+        {"/api/verdicts/2026-09-01/a1b2c3d4": _detail_verdict([])},
+        _SHOW_CALL,
+    )
+    html = panes["detail"]
+
+    assert _DETAIL_FALLBACK in html, "the empty-items fallback never reached the pane"
+    for section in _DETAIL_SECTIONS:
+        assert section in html, f"section {section!r} never reached the pane"
+
+
+def test_detail_pane_renders_the_items_and_every_section(live_server, tmp_path):
+    """Non-empty items: the graded items AND all sections render."""
+    panes = run_viewer_js(
+        viewer_script(live_server),
+        tmp_path,
+        {
+            "/api/verdicts/2026-09-01/a1b2c3d4": _detail_verdict(
+                [
+                    {
+                        "criterion": "The pane renders the graded item",
+                        "status": "PASS",
+                        "detail": "graded item detail",
+                    }
+                ]
+            )
+        },
+        _SHOW_CALL,
+    )
+    html = panes["detail"]
+
+    assert "The pane renders the graded item" in html
+    assert "graded item detail" in html
+    assert _DETAIL_FALLBACK not in html
+    for section in _DETAIL_SECTIONS:
+        assert section in html, f"section {section!r} never reached the pane"
+
+
+_BOOT_CALL = """\
+(async () => {
+  await boot();
+  process.stdout.write(dumpPanes());
+})();
+"""
+
+_EMPTY_LISTS = {
+    "/api/stats": {"repo": "fixture", "generated": "now", "path": "/tmp/fixture", "usage": None},
+    "/api/verdicts": {"verdicts": []},
+    "/api/events": {"events": []},
+    "/api/ticks": {"ticks": [], "project": "fixture-project"},
+    "/api/qa": {"runs": [], "ledger": "/tmp/fixture/qa.jsonl"},
+}
+
+
+def test_list_panels_keep_the_bare_join_fallback(live_server, tmp_path):
+    """The other `X.join('')||'<p…>'` panels still work in both directions.
+
+    Their left operand is the bare join — an empty string is falsy — so the
+    fallback fires on an empty list and never swallows the rows on a populated
+    one. Pinned here so the detail-pane fix stays local to the detail pane.
+    """
+    script = viewer_script(live_server)
+
+    empty = run_viewer_js(script, tmp_path, dict(_EMPTY_LISTS), _BOOT_CALL)
+    assert "no judgments match" in empty["list"]
+    assert "no scheduler ticks recorded for fixture-project" in empty["ticklist"]
+    assert "no QA runs recorded" in empty["qalist"]
+
+    populated = {key: value for key, value in _EMPTY_LISTS.items()}
+    populated["/api/ticks"] = {
+        "ticks": [
+            {
+                "status": "completed",
+                "outcome": "committed",
+                "spawned_at": "2026-09-01T12:00:00",
+                "commits": 2,
+                "files": 3,
+                "cost": 0.01,
+            }
+        ],
+        "project": "fixture-project",
+    }
+    populated["/api/qa"] = {
+        "runs": [
+            {
+                "ts": "2026-09-01T12:05:00",
+                "verdict": "PASS",
+                "kind": "repro",
+                "cells": {"a": "pass"},
+                "exit_code": 0,
+                "commit": "deadbee",
+            }
+        ],
+        "ledger": "/tmp/fixture/qa.jsonl",
+    }
+    filled = run_viewer_js(script, tmp_path, populated, _BOOT_CALL)
+
+    assert "committed" in filled["ticklist"]
+    assert "no scheduler ticks recorded" not in filled["ticklist"]
+    assert "cells 1/1 passed" in filled["qalist"]
+    assert "no QA runs recorded" not in filled["qalist"]

@@ -582,8 +582,8 @@ async function show(date,hash){
    costBadge(v)+'</div>'+
    (origin?'<div class="meta">'+esc(origin)+'</div>':'')+
    '<div class="sec">Criteria ('+items.length+')</div>'+
-   items.map(it=>'<div class="crit '+(it.status=='PASS'?'p':'f')+'"><div class="c">'+(it.status=='PASS'?'✅':'❌')+' '+esc(it.criterion)+'</div><div class="d">'+esc(it.detail)+'</div></div>').join('')
-   ||'<p style="color:#5a5a75;font-size:12px">no per-criterion items recorded</p>'+
+   (items.map(it=>'<div class="crit '+(it.status=='PASS'?'p':'f')+'"><div class="c">'+(it.status=='PASS'?'✅':'❌')+' '+esc(it.criterion)+'</div><div class="d">'+esc(it.detail)+'</div></div>').join('')
+   ||'<p style="color:#5a5a75;font-size:12px">no per-criterion items recorded</p>')+
    ((t1.summary)?'<div class="sec">Tier 1 — static gates</div><pre>'+esc(t1.summary)+'</pre>':'')+
    ((t2.summary)?'<div class="sec">Tier 2 — judge summary</div><pre>'+esc(t2.summary)+'</pre>':'')+
    (v.summary?'<div class="sec">Verdict summary</div><pre>'+esc(v.summary)+'</pre>':'')+
