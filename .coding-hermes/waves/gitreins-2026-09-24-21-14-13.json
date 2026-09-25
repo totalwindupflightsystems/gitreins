@@ -13,8 +13,16 @@
       "worktree": "~/worktrees/gitreins-DF-GITREINS-POC-56",
       "model": "deepseek-v4-flash",
       "provider": "deepseek-foreman",
-      "scope": ["gitreins/serve.py", "tests/", "README.md", "CONTRIBUTING.md"],
-      "status": "dispatched"
+      "scope": [
+        "gitreins/serve.py",
+        "tests/",
+        "README.md",
+        "CONTRIBUTING.md"
+      ],
+      "status": "merged",
+      "sha": "1f8b046",
+      "judge": "PASS tier1+tier2 4/4 (633f841d)",
+      "merge": "25cf9a2 (doc test-count race vs POC-51 resolved to 2418)"
     },
     {
       "task_id": "DF-GITREINS-POC-51",
@@ -22,8 +30,20 @@
       "worktree": "~/worktrees/gitreins-DF-GITREINS-POC-51",
       "model": "deepseek-v4-flash",
       "provider": "deepseek-foreman",
-      "scope": ["engine/guard_manager.py", "engine/pipeline.py", "tests/", "README.md", "CONTRIBUTING.md"],
-      "status": "dispatched"
+      "scope": [
+        "engine/guard_manager.py",
+        "engine/pipeline.py",
+        "tests/",
+        "README.md",
+        "CONTRIBUTING.md"
+      ],
+      "status": "merged",
+      "sha": "2bf3ec8",
+      "judge": "PASS tier1+tier2 (ce1fe6d3; first run 581a25b5 FAIL = tier1 live-smoke flake not in diff, passed on rerun + in isolation)",
+      "merge": "142506d"
     }
-  ]
+  ],
+  "finished_at": "2026-09-25T06:35:00Z",
+  "recovered_by_tick": "gitreins-2026-09-25-05-33-05",
+  "closeout_note": "both workers merged --no-ff, scoped gates green on merged trees, full suite 2402 passed/16 skipped, pushed 36894b9..25cf9a2 unpushed=0; POC-56 worktree removed, branches kept as evidence"
 }
