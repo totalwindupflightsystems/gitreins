@@ -23,6 +23,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import subprocess
 import time
 from dataclasses import replace
@@ -622,6 +623,217 @@ def _pytest_not_found_hint(exit_code: int, cmd: str) -> str | None:
         f"{sys.executable} — install it with {sys.executable} -m pip install "
         "pytest (or set guards.test_command)"
     )
+
+
+# ── pytest runner-missing classification (DF-GITREINS-POC-51) ──────────────
+# A configured test_command whose pytest RUNNER is not on this machine — no
+# `pytest` on PATH and not importable, a pinned `.venv/bin/python` that does
+# not exist, a pinned interpreter that exists with pytest not installed in it,
+# a `.venv/bin/pytest` that was never created — is a gap in the ENVIRONMENT,
+# not a finding about the tree: nothing graded the code. The lane is SKIPPED
+# with the fix named, exactly the way a missing linter is (`_check_lint`:
+# "no linter on PATH"), so it is never a silent PASS and never the hard FAIL
+# that blocked a fresh box's first commit.
+#
+# The row (POC-51): on a bare Debian box `gitreins install` + `init` were
+# green, then `git commit` #1 died with `✗ tests (full) — /bin/sh: 1: pytest:
+# not found` (hook exit 1) while the standalone guard a minute earlier printed
+# green. Two invocations of the SAME command disagreed on the same tree: an
+# empty index SKIPS the tests lane by scope (TRUST-001), and the staged hook
+# run graded the runner's own exit code as FAIL. The user's only escapes were
+# `--no-verify` (forbidden by the project's own doctrine) or hand-installing
+# pytest, which no doc said.
+#
+# A REAL failing pytest run still FAILS. The classification needs BOTH
+#   * output proving pytest never started — the shell's `not found` naming
+#     that runner, or the interpreter's own `No module named pytest` — and
+#   * the named runner genuinely unresolvable from this machine, checked per
+#     invocation form below (PATH lookup, file existence, interpreter probe),
+# and it stands down entirely when the output carries any pytest progress (a
+# session banner, a passed/failed/error summary, a collection interrupt), so a
+# failing suite can never be swallowed into a skip.
+_SHELL_NOT_FOUND_RES: tuple[re.Pattern[str], ...] = (
+    # dash/sh: "/bin/sh: 1: pytest: not found", "sh: 1: .venv/bin/python: not found"
+    re.compile(r"(?m)^(?:[^\s:]+:\s+)?\d+:\s*(?P<name>[^\s:]+):\s*not found\s*$"),
+    # bash: "bash: line 1: pytest: command not found"
+    re.compile(r"(?m)^[^\s:]+:\s*line\s+\d+:\s*(?P<name>[^\s:]+):\s*command not found\s*$"),
+    # zsh: "zsh: command not found: pytest"
+    re.compile(r"(?m)^[^\s:]+:\s*command not found:\s*(?P<name>[^\s:]+)\s*$"),
+)
+# The pinned interpreter ran and could not import pytest (exit 1, no pytest
+# session output). This is the bunker case: the interpreter exists, pytest was
+# never installed inside it.
+_PYTEST_MODULE_MISSING_RE = re.compile(r"(?m)^.*\bNo module named\s+['\"]?pytest['\"]?\s*$")
+# Anything pytest itself prints once it starts — the veto that keeps a real
+# failure out of the skip classification. Deliberately broad: a false positive
+# here can only turn a skip back into a FAIL.
+_PYTEST_PROGRESS_RE = re.compile(
+    r"test session starts|no tests ran|=\s*(?:FAILURES|ERRORS)\s*=|"
+    r"\b\d+\s+(?:passed|failed|error|errors|skipped|xfailed)\b|"
+    r"short test summary info|Interrupted:",
+    re.IGNORECASE,
+)
+# Shell separators that end one command and start the next in a chained
+# test_command (`check_docs_drift.py && pytest ...`).
+_SHELL_SEGMENT_RE = re.compile(r"&&|\|\||;|\|")
+
+
+def _pytest_invocations(cmd: str) -> list[tuple[str, str]]:
+    """Every pytest invocation in *cmd* as ``(kind, token)``.
+
+    ``kind`` is the form the runner is named in, which decides how it is
+    resolved:
+
+    ``interpreter`` — ``<py> -m pytest``; *token* is the interpreter.
+    ``path``        — ``.venv/bin/pytest``; *token* is the script path.
+    ``bare``        — ``pytest``; *token* is the console script (PATH lookup).
+
+    Returns [] when *cmd* runs no pytest at all — a custom runner such as
+    ``make test`` is not ours to resolve.
+    """
+    found: list[tuple[str, str]] = []
+    for segment in _SHELL_SEGMENT_RE.split(cmd or ""):
+        try:
+            tokens = shlex.split(segment)
+        except ValueError:
+            # Unbalanced quotes: a shell would fail the same way, so fall back
+            # to a whitespace split rather than dropping the invocation.
+            tokens = segment.split()
+        for i, token in enumerate(tokens):
+            if os.path.basename(token) != "pytest":
+                continue
+            if i >= 2 and tokens[i - 1] == "-m":
+                found.append(("interpreter", tokens[i - 2]))
+            elif "/" in token:
+                found.append(("path", token))
+            else:
+                found.append(("bare", token))
+    return found
+
+
+def _shell_not_found_names(output: str) -> set[str]:
+    """Executable names a shell reported as ``not found``/``command not found``."""
+    names: set[str] = set()
+    for pattern in _SHELL_NOT_FOUND_RES:
+        names.update(match.group("name") for match in pattern.finditer(output or ""))
+    return names
+
+
+def _pytest_interpreter_has_pytest(exe: str, workdir: str) -> bool | None:
+    """True/False whether *exe* can import pytest; None when unprobeable.
+
+    Only a literal False marks the interpreter as a missing runner — a probe
+    that could not run (OSError, an exotic interpreter) leaves the verdict to
+    the exit code, i.e. FAIL, the conservative direction. ``find_spec``
+    answers without importing pytest, so the probe costs one interpreter
+    start and no plugins.
+    """
+    probe = "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('pytest') else 3)"
+    try:
+        proc = subprocess.run(
+            [exe, "-c", probe],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=workdir,
+            env=_sanitized_env(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return proc.returncode == 0
+
+
+def _pytest_runner_missing_reason(kind: str, token: str, workdir: str) -> str | None:
+    """Why *token* cannot run pytest here, as a fix line — None when it can."""
+    import shutil
+    import sys
+
+    if kind == "bare":
+        if shutil.which(token) is not None or importlib.util.find_spec("pytest") is not None:
+            return None
+        return (
+            f"test runner '{token}' not found on PATH and not importable by "
+            f"{sys.executable} — install it with `{sys.executable} -m pip install "
+            "pytest` (or set guards.test_command to your interpreter)"
+        )
+
+    # Resolve the interpreter/script the way the shell would: an absolute or
+    # repo-relative path is a file check, a bare name (`python -m pytest`,
+    # `env python -m pytest`) goes through PATH. A bare name that resolves must
+    # then be probed, or the hint would blame a missing venv for an interpreter
+    # that exists without pytest in it.
+    if "/" in token:
+        exe = token if os.path.isabs(token) else os.path.join(workdir, token)
+    else:
+        exe = shutil.which(token)
+    if not (exe and os.path.isfile(exe) and os.access(exe, os.X_OK)):
+        where = f"looked for {exe}" if exe else f"'{token}' is not on PATH"
+        if kind == "path":
+            return (
+                f"test runner '{token}' not found ({where}) — install the repo's test "
+                "extras (`uv sync`, or `pip install -e .[dev]`), or set "
+                "guards.test_command"
+            )
+        return (
+            f"test interpreter '{token}' not found ({where}) — create the environment "
+            "(`uv sync`, or `python -m venv .venv && .venv/bin/pip install -e .[dev]`), "
+            "or set guards.test_command"
+        )
+    if kind == "interpreter" and _pytest_interpreter_has_pytest(exe, workdir) is False:
+        return (
+            f"pytest is not installed in '{token}' — run `{token} -m pip install "
+            "pytest` (or `uv sync`), or set guards.test_command"
+        )
+    return None
+
+
+def _pytest_runner_missing_hint(
+    cmd: str, workdir: str, exit_code: int | None, output: str
+) -> str | None:
+    """DF-GITREINS-POC-51: the fix line when the pytest RUNNER is missing.
+
+    Returns None unless the run's own output shows pytest never started AND
+    the named runner cannot be resolved from this machine. Callers grade a
+    non-None return as SKIPPED, carrying this text as the reason — never as a
+    pass (the raw exit code stays in the result) and never as the FAIL that
+    blocked a repo whose only problem was an unprovisioned environment. The
+    full contract is the block comment above.
+    """
+    if exit_code in (None, 0) or not output:
+        return None
+    invocations = _pytest_invocations(cmd)
+    if not invocations:
+        return None
+    if _PYTEST_PROGRESS_RE.search(output):
+        # pytest ran, or said why it did not — grade the run itself.
+        return None
+
+    not_found = _shell_not_found_names(output)
+    module_missing = _PYTEST_MODULE_MISSING_RE.search(output) is not None
+    if not not_found and not module_missing:
+        return None
+
+    if module_missing:
+        # `<interpreter> -m pytest` whose interpreter cannot import pytest:
+        # the interpreter is the runner to resolve. Prefer the interpreter
+        # forms — a bare `pytest` earlier in the same chain did not report.
+        candidates = [inv for inv in invocations if inv[0] == "interpreter"] or invocations
+    else:
+        # The shell named the executable it could not find, so only a pytest
+        # invocation naming THAT executable is a runner gap (`make: not found`
+        # in a chained command stays somebody else's failure, and a genuine
+        # pytest failure never reaches this branch — the progress veto above).
+        candidates = [
+            inv
+            for inv in invocations
+            if inv[1] in not_found or os.path.basename(inv[1]) in not_found
+        ]
+
+    for kind, token in candidates:
+        reason = _pytest_runner_missing_reason(kind, token, workdir)
+        if reason:
+            return reason
+    return None
 
 
 # ── pytest exit-5 ("no tests collected") handling ─────────────
@@ -2044,6 +2256,11 @@ class GuardManager:
                 warning=fallback_warning or "",
             )
         output = result.get("output") or ""
+        # DF-GITREINS-POC-51: the run's own words, before the GR-GAP-037
+        # fallback warning is prepended. The runner-missing classifier reads
+        # this copy so a warning ABOUT a missing runner cannot be mistaken for
+        # the run's own evidence.
+        raw_output = output
         if fallback_warning:
             output = f"{fallback_warning}\n{output}"
         # DF-018: keep the untruncated output for the run log BEFORE the
@@ -2056,6 +2273,15 @@ class GuardManager:
         # earlier and must survive truncation for the check below).
         return_code = result.get("exit_code")
         no_tests_benign = return_code == 5 and _pytest_no_tests_benign(output)
+        # DF-GITREINS-POC-51: the same reasoning for the runner-missing skip —
+        # the evidence is a TAIL line (the shell's `not found`, the
+        # interpreter's `No module named pytest`) while the veto against
+        # swallowing a real failure must see the WHOLE output, because a
+        # truncated view could hide pytest's session banner. Classified on the
+        # raw output, before the tail cap below.
+        runner_missing_hint = _pytest_runner_missing_hint(
+            resolved_cmd, self.workdir, return_code, raw_output
+        )
         if len(output) > 2000:
             output = output[-2000:]  # Keep last 2000 chars for failure context
         if result.get("timed_out"):
@@ -2096,6 +2322,31 @@ class GuardManager:
                 # nothing, so say so instead of reporting a green step.
                 skipped=True,
                 skip_reason="no tests collected",
+            )
+        elif runner_missing_hint:
+            # DF-GITREINS-POC-51: the runner itself is missing, so this lane
+            # graded nothing — SKIPPED with the fix named, exactly like the
+            # missing-linter case, instead of the FAIL that blocked a fresh
+            # repo's first commit while the standalone guard (empty index)
+            # passed the same tree. TRUST-001 keeps it honest: the skip makes
+            # the run DEGRADED, the raw exit code stays on the result, and the
+            # reason names the fix. A real failing run never lands here — the
+            # classifier requires both the not-started evidence and an
+            # unresolvable runner.
+            tail_budget = max(0, 2000 - len(runner_missing_hint) - 1)
+            shown = (
+                f"{runner_missing_hint}\n{raw_output[-tail_budget:]}"
+                if tail_budget and raw_output
+                else runner_missing_hint[:2000]
+            )
+            return GuardResult(
+                name=label,
+                passed=True,
+                output=shown,
+                warning=fallback_warning or "",
+                exit_code=return_code,
+                skipped=True,
+                skip_reason=runner_missing_hint,
             )
         else:
             # GR-GAP-064: make a genuine not-found (127) actionable —
