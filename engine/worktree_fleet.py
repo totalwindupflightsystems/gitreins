@@ -124,6 +124,52 @@ def _evidence(output: str) -> str:
     return bound_evidence(output.strip(), cap=MAX_EVIDENCE_CHARS)
 
 
+#: How much of a failing phase's output the lane-level error carries.  The lane
+#: error is what a foreman reads in a tick report (and what the next actor gets
+#: when a merge refuses), so it has to name WHY in one line — the phase, the
+#: exit code and the failing criterion the judge printed — while staying short.
+_FAILURE_DETAIL_LINES = 4
+_FAILURE_DETAIL_CHARS = 400
+
+
+def _failure_detail(output: str) -> str:
+    """The tail of a failing phase's output, on line boundaries."""
+    lines = [line.strip() for line in (output or "").splitlines() if line.strip()]
+    if not lines:
+        return ""
+    return " | ".join(lines[-_FAILURE_DETAIL_LINES:])[:_FAILURE_DETAIL_CHARS]
+
+
+def _phase_error(phase: str, exit_code: int, output: str) -> str:
+    """WHY a lane phase failed — the lane result's own error field.
+
+    DF-GITREINS-POC-48: a failed lane used to report ``passed: false`` with an
+    EMPTY ``error`` (the registry had a terse one, the tick report had none) and
+    no merge error, so a judge-phase failure and a merge refusal looked
+    identical from the outside.  A judge failure in particular means there is
+    no verdict for this commit, which is exactly why ``--merge`` will refuse
+    the lane: say that, plus the line the judge actually printed.
+    """
+    message = f"{phase} phase failed: command exited {exit_code}"
+    if phase == "judging":
+        message += (
+            " — no PASS verdict exists for this worktree's commit, so the "
+            "judge-gated merge will refuse this lane"
+        )
+    if "Task not found" in (output or ""):
+        message += (
+            ". The judge command named a task that does not exist in this lane's "
+            "store: `.gitreins/tasks.yaml` is per-checkout and untracked, so a "
+            "fresh worktree starts empty — create the task in the canonical "
+            "checkout before the run (the fleet copies it into the lane) or in "
+            "the lane's own command phase"
+        )
+    detail = _failure_detail(output)
+    if detail:
+        message += f"; last output: {detail}"
+    return message
+
+
 class WorktreeFleet:
     """Run explicit lanes concurrently, bounded by a host-safe cap."""
 
@@ -167,7 +213,10 @@ class WorktreeFleet:
         Worktrees are created before execution, so every accepted lane has one
         deterministic task tree.  Lane execution is bounded by the configured
         cap.  If ``merge`` is true, successful lanes are applied in priority,
-        task-id order through WorktreeManager's inter-process merge lock.
+        task-id order through WorktreeManager's inter-process merge lock, and
+        every lane that did NOT merge — a failed phase, or the verdict gate's
+        refusal — is reported in ``merge_errors`` with its reason, so a tick
+        report never shows a lane that silently went missing (DF-GITREINS-POC-48).
         """
         lanes = list(lanes)
         if not lanes:
@@ -223,6 +272,15 @@ class WorktreeFleet:
             for lane in sorted(lanes, key=lambda item: (item.priority, item.task_id)):
                 result = results[lane.task_id]
                 if result.get("state") != "completed":
+                    # DF-GITREINS-POC-48: a lane that failed its own phases never
+                    # reaches the verdict gate, and this loop used to skip it
+                    # silently — a tick report then showed a failed lane with no
+                    # merge error at all.  Record WHY it was not merged, from the
+                    # lane's own error.
+                    merge_errors[lane.task_id] = (
+                        f"not merged: {result.get('error') or 'lane did not complete'}"
+                    )
+                    result["merge"] = "not-merged"
                     continue
                 try:
                     merged = self.manager.merge(
@@ -258,6 +316,42 @@ class WorktreeFleet:
             "merge_errors": {key: merge_errors[key] for key in sorted(merge_errors)},
         }
 
+    def _seed_judge_task(self, lane: FleetLane, tree: Path) -> bool:
+        """Give the lane tree the task its judge phase will name.
+
+        DF-GITREINS-POC-48: ``.gitreins/tasks.yaml`` is per-checkout and
+        untracked by design, so a freshly created lane tree has no task store —
+        a manifest lane whose judge phase names the lane id (``["gitreins",
+        "judge", "API-1"]``, the pattern the README documents) died with the
+        CLI's bare ``Task not found`` even though the task existed in canonical
+        main.  The fleet knows both the lane id and the main store, so it seeds
+        the lane's own copy *before* the judge phase runs.
+
+        Only copies: the task is taken verbatim (title + criteria) from the
+        canonical store, so nothing is invented and a manifest cannot smuggle
+        in criteria the task does not have.  A lane that already created (or a
+        previous phase that already seeded) its own task is left untouched, and
+        a lane whose id names no task anywhere is left to fail loudly with the
+        reason attached (:func:`_phase_error`).
+
+        Returns True when this run wrote the lane's store.
+        """
+        from engine.task_manager import TaskManager
+
+        task = TaskManager(str(self.manager.main_root)).get(lane.task_id)
+        if task is None:
+            return False
+        lane_store = TaskManager(str(tree))
+        if lane_store.get(lane.task_id) is not None:
+            return False
+        lane_store.create(
+            lane.task_id,
+            task.title,
+            list(task.criteria),
+            depends_on=list(task.depends_on),
+        )
+        return True
+
     def _run_lane(self, lane: FleetLane, record) -> dict:
         stages = [("running", lane.command)]
         if lane.guard is not None:
@@ -266,6 +360,17 @@ class WorktreeFleet:
             stages.append(("judging", lane.judge))
         stage_results = []
         for phase, command in stages:
+            if phase == "judging" and self._seed_judge_task(lane, Path(record.path)):
+                # Not a stage of its own: seeding is bookkeeping for the judge
+                # phase, so it is recorded as an event, never as a phase that
+                # could silently absorb a failure.
+                self.manager._append_board_event(
+                    {
+                        "event_type": "worktree_lane_task_seeded",
+                        "task_id": lane.task_id,
+                        "task": lane.task_id,
+                    }
+                )
             self.manager.mark_lane(lane.task_id, phase, command=list(command))
             self.manager._append_board_event(
                 {"event_type": "worktree_lane_phase", "task_id": lane.task_id, "phase": phase}
@@ -275,14 +380,15 @@ class WorktreeFleet:
             )
             stage_results.append({"phase": phase, **stage})
             if stage["exit_code"] != 0:
-                result = {"passed": False, "stages": stage_results}
+                error = _phase_error(phase, stage["exit_code"], stage["output"])
+                result = {"passed": False, "stages": stage_results, "error": error}
                 self.manager.mark_lane(
                     lane.task_id,
                     "failed",
                     result=result,
                     exit_code=stage["exit_code"],
                     output=stage["output"],
-                    error=f"{phase} command exited {stage['exit_code']}",
+                    error=error,
                 )
                 return {
                     "task_id": lane.task_id,
@@ -290,6 +396,7 @@ class WorktreeFleet:
                     "passed": False,
                     "exit_code": stage["exit_code"],
                     "output": stage["output"],
+                    "error": error,
                     "stages": stage_results,
                     "worktree": record.path,
                     "branch": record.branch,

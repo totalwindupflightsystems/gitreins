@@ -1774,6 +1774,105 @@ class TestJudgeEphemeralCLI:
         assert "{" not in result.stdout  # no document on the human path
         _assert_untouched(before, _repo_snapshot(repo))
 
+    # ── DF-GITREINS-POC-48: the merge gate and the ephemeral verdict ────────
+
+    def test_ephemeral_persist_verdict_writes_only_the_merge_gate_document(self, tmp_path):
+        """`--persist-verdict` is the ONE opt-in write, and it is not history.
+
+        An ephemeral verdict used to be able to satisfy nothing: EVID-003
+        persists nothing, so a judge-gated `worktree merge` could never find it
+        (the row's repro 2). The flag writes exactly the one document that gate
+        reads — stamped with the worktree/branch/commit the gate matches on —
+        and still no history entry, no task store, no branch and no stash.
+        """
+        from engine.worktree_manager import disk_verdict_path
+
+        repo = _init_real_git_repo(tmp_path)
+        _write_ephemeral_config(repo)
+        (Path(repo) / "notes.md").write_text("staged work\n", encoding="utf-8")
+        subprocess.run(["git", "-C", repo, "add", "notes.md"], check=True)
+
+        before = _repo_snapshot(repo)
+        result = run_cli(
+            "judge",
+            "--ephemeral",
+            "--title",
+            "Story gate",
+            "--criterion",
+            "1+1 is 2",
+            "--persist-verdict",
+            "--json",
+            cwd=repo,
+            extra_env=self._mock_env(self._PASS_VERDICT),
+        )
+
+        assert result.returncode == 0, _cli_failure(result)
+        document = json.loads(result.stdout)  # stdout still holds ONE document
+        assert document["metadata"]["historyPersisted"] is False
+        assert "Merge-gate verdict written" in result.stderr
+
+        path = disk_verdict_path(repo)
+        assert path.is_file(), result.stderr
+        verdict = json.loads(path.read_text(encoding="utf-8"))
+        assert verdict["passed"] is True
+        assert verdict["task_id"] == "ephemeral:story-gate"
+        assert verdict["worktree"] == str(Path(repo).resolve())
+        assert verdict["branch"] == self._git(repo, "branch", "--show-current")
+        assert verdict["commit"] == self._git(repo, "rev-parse", "HEAD")
+
+        after = _repo_snapshot(repo)
+        assert after["tasks"] == before["tasks"], "the task store was written"
+        assert after["history"] == before["history"] == [], "history was written"
+        assert after["refs"] == before["refs"]
+        assert after["branch"] == before["branch"]
+        assert after["stash"] == before["stash"]
+        assert set(after["harness"]) - set(before["harness"]) == {"verdicts/verdict.json"}
+
+    def test_ephemeral_without_persist_verdict_writes_no_gate_document(self, tmp_path):
+        """The flag is the ONLY thing that writes: without it nothing appears."""
+        from engine.worktree_manager import disk_verdict_path
+
+        repo = _init_real_git_repo(tmp_path)
+        _write_ephemeral_config(repo)
+        (Path(repo) / "notes.md").write_text("staged work\n", encoding="utf-8")
+        subprocess.run(["git", "-C", repo, "add", "notes.md"], check=True)
+
+        before = _repo_snapshot(repo)
+        result = run_cli(
+            "judge",
+            "--ephemeral",
+            "--title",
+            "Story gate",
+            "--criterion",
+            "1+1 is 2",
+            "--json",
+            cwd=repo,
+            extra_env=self._mock_env(self._PASS_VERDICT),
+        )
+
+        assert result.returncode == 0, _cli_failure(result)
+        assert not disk_verdict_path(repo).exists()
+        assert not (Path(repo) / ".gitreins" / "verdicts").exists()
+        _assert_untouched(before, _repo_snapshot(repo))
+
+    def test_persist_verdict_without_ephemeral_is_a_usage_error(self, tmp_workdir):
+        """`--persist-verdict` describes a gap only the ephemeral mode has.
+
+        A sync judge already writes durable history; letting the flag through
+        there would write the same commit twice and leave the caller wondering
+        which record is the gate's.
+        """
+        result = run_cli("judge", "some-task", "--persist-verdict", cwd=tmp_workdir)
+        assert result.returncode == 2
+        assert "--persist-verdict: not allowed without argument --ephemeral" in result.stderr
+        assert "--persist-verdict" in result.stderr  # the usage block names it
+
+    @staticmethod
+    def _git(repo, *args) -> str:
+        return subprocess.run(
+            ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
+        ).stdout.strip()
+
 
 # ── DF-006: CLI async judge — --async / --status / --run-job ────────────────
 

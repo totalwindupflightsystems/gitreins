@@ -75,6 +75,12 @@ GITREINS_GITIGNORE_ENTRIES = (
     ".gitreins/disposable.json",
     ".gitreins/disposable.lock",
     ".gitreins/tasks.yaml.lock",
+    # DF-GITREINS-POC-48: the merge-gate verdict document an ephemeral judge
+    # run writes when asked (`judge --ephemeral --persist-verdict`).  It is a
+    # runtime artifact, not history (the durable record lives in
+    # .gitreins/history/) — without this entry every lane that used the flag
+    # would show an untracked `.gitreins/verdicts/` in `git status`.
+    ".gitreins/verdicts/",
 )
 
 # EVID-003: the id an ephemeral judge run carries when none was given on the
@@ -2134,7 +2140,8 @@ _JUDGE_USAGE = (
     "gitreins judge <id> [--skip-tier2] [--async] [--status <job_id>] "
     "[--scope staged|working-tree] [--json]\n"
     "       gitreins judge [<id>] --ephemeral --title <title> --criterion <criterion> "
-    "[--criterion <criterion> ...] [--skip-tier2] [--scope staged|working-tree] [--json]"
+    "[--criterion <criterion> ...] [--persist-verdict] [--skip-tier2] "
+    "[--scope staged|working-tree] [--json]"
 )
 
 
@@ -2165,6 +2172,7 @@ def cmd_judge(args):
     nothing at all — see ``_cmd_judge_ephemeral``.
     """
     ephemeral = getattr(args, "ephemeral", False)
+    persist_verdict = getattr(args, "persist_verdict", False)
     # The background modes all read a task out of the store and write a job
     # record; neither exists for an ephemeral run, so the combination is a
     # usage error rather than a flag that is silently ignored.
@@ -2175,6 +2183,11 @@ def cmd_judge(args):
     ):
         if active and ephemeral:
             _judge_usage_error(f"argument {flag}: not allowed with argument --ephemeral")
+    # --persist-verdict writes the merge-gate document INSTEAD of history, which
+    # only the ephemeral mode lacks; a sync run would write both and claim the
+    # same commit twice (DF-GITREINS-POC-48).
+    if persist_verdict and not ephemeral:
+        _judge_usage_error("argument --persist-verdict: not allowed without argument --ephemeral")
 
     if getattr(args, "status", False):
         if getattr(args, "id", None) is None:
@@ -2198,7 +2211,9 @@ def cmd_judge(args):
     scope = getattr(args, "scope", "staged")
 
     if ephemeral:
-        _cmd_judge_ephemeral(args, scope=scope, json_output=json_output)
+        _cmd_judge_ephemeral(
+            args, scope=scope, json_output=json_output, persist_verdict=persist_verdict
+        )
         return
 
     # A missing id is allowed ONLY with --ephemeral (EVID-003).
@@ -2285,7 +2300,9 @@ def _ephemeral_task_id(title: str) -> str:
     return f"{EPHEMERAL_TASK_ID_PREFIX}:{slug}" if slug else EPHEMERAL_TASK_ID_PREFIX
 
 
-def _cmd_judge_ephemeral(args, *, scope: str, json_output: bool) -> None:
+def _cmd_judge_ephemeral(
+    args, *, scope: str, json_output: bool, persist_verdict: bool = False
+) -> None:
     """EVID-003: evaluate inline criteria with NOTHING persisted.
 
     A per-story execution gate must not mutate the repository it is judging, so
@@ -2303,6 +2320,15 @@ def _cmd_judge_ephemeral(args, *, scope: str, json_output: bool) -> None:
     * and no tier-1 guard run log either: GuardManager's DF-018 log is written
       inside the judged tree, which is exactly the mutation this mode exists to
       avoid (``persist_log=False``).
+
+    ``--persist-verdict`` (DF-GITREINS-POC-48) is the one opt-in exception, and
+    it is deliberately narrow: it writes the single verdict document the
+    judge-gated ``worktree merge`` discovers (``.gitreins/verdicts/verdict.json``
+    — a runtime artifact, written through :func:`write_disk_verdict`, which is
+    also where the gate takes the path from).  It is NOT history: nothing lands
+    in ``.gitreins/history``, no ``gitreins`` branch commit is made, and a
+    re-run overwrites the document, so a duplicate commit can never be claimed.
+    Without the flag nothing is written at all, exactly as before.
 
     Exit codes follow the v1 contract (EVID-001): 0 for a passing result, 1 for
     a non-passing one; a bad invocation is the usage error above (2). With
@@ -2352,13 +2378,43 @@ def _cmd_judge_ephemeral(args, *, scope: str, json_output: bool) -> None:
     else:
         result = judge.evaluate_task(task, skip_tier2=getattr(args, "skip_tier2", False))
         print(result.summary)
-        print(
-            "Ephemeral run — no task, verdict, branch or stash state was written.",
-            file=sys.stderr,
-        )
+        if not persist_verdict:
+            print(
+                "Ephemeral run — no task, verdict, branch or stash state was written.",
+                file=sys.stderr,
+            )
+
+    if persist_verdict:
+        _write_merge_gate_verdict(workdir, task, result)
 
     if not result.passed:
         sys.exit(1)
+
+
+def _write_merge_gate_verdict(workdir: str, task, result) -> None:
+    """Write the ONE verdict document a judge-gated merge reads (POC-48).
+
+    ``engine.persist.build_verdict_data`` is reused — the same payload the
+    durable path persists — so the document carries the worktree/branch/commit
+    stamps the gate matches on and the tier-1 ``skipped_steps`` it refuses on;
+    ``engine.worktree_manager.write_disk_verdict`` is the same module the gate
+    reads the path from, so writer and gate cannot drift.
+
+    Nothing else is written: no ``.gitreins/history`` entry, no ``gitreins``
+    branch commit, no task store. The path goes to stderr, never stdout —
+    with ``--json`` stdout holds exactly one evidence document.
+    """
+    from engine.persist import build_verdict_data
+    from engine.worktree_manager import write_disk_verdict
+
+    document = build_verdict_data(workdir, task, result)
+    path = write_disk_verdict(workdir, document)
+    print(f"Merge-gate verdict written: {path}", file=sys.stderr)
+    print(
+        "Ephemeral run — no task store, verdict history, branch or stash state was "
+        "written; the merge-gate document above is the only file written.",
+        file=sys.stderr,
+    )
 
 
 def _cmd_judge_async(task_id: str) -> None:
@@ -3352,6 +3408,17 @@ def main():
         default=None,
         metavar="TEXT",
         help="Ephemeral criterion — repeat once per criterion (required with --ephemeral)",
+    )
+    judge_p.add_argument(
+        "--persist-verdict",
+        dest="persist_verdict",
+        action="store_true",
+        help=(
+            "With --ephemeral: also write the verdict document "
+            ".gitreins/verdicts/verdict.json in the graded tree, so a "
+            "judge-gated `worktree merge` can find it (still no history entry, "
+            "no task store, no branch)"
+        ),
     )
     judge_p.add_argument(
         "--skip-tier2", action="store_true", help="Skip Tier 2 LLM evaluation; Tier 1 guards only"

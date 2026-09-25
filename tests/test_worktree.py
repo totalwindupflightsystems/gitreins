@@ -1265,6 +1265,53 @@ def test_is_clean_exempts_every_runtime_file_gitreins_writes_in_main(wt_repo: Pa
     assert manager._is_clean(wt_repo) is True
 
 
+def test_is_clean_exempts_the_stores_a_judge_phase_writes_while_untracked(wt_repo: Path):
+    """DF-GITREINS-POC-48: the judge phase's own artifacts are not user work.
+
+    A lane's judge phase writes the task store it read (``tasks.yaml``, seeded
+    by the fleet from the canonical checkout), the judge's token telemetry
+    (``usage.jsonl``) and the QA ledger of any nested run — all inside the lane
+    tree, all gitignored by a CURRENT install's template.  A consumer whose
+    .gitignore predates those entries saw them as uncommitted work, so the merge
+    refused the very lane they describe ("task worktree has uncommitted
+    changes"): the same hand-kept-list drift DF-GITREINS-POC-47 fixed for the
+    lock files.
+    """
+    manager = WorktreeManager(wt_repo)
+    stores = (
+        ".gitreins/tasks.yaml",
+        ".gitreins/usage.jsonl",
+        ".gitreins/qa-ledger.jsonl",
+    )
+    _write_runtime_artifacts(wt_repo, names=stores)
+
+    status = _porcelain_status(wt_repo)
+    for name in stores:
+        assert name in status, f"premise: {name} must reach `git status` as dirt"
+
+    assert manager._is_clean(wt_repo) is True
+
+
+def test_is_clean_still_counts_a_tracked_store_that_differs(wt_repo: Path):
+    """The store exemption is untracked-only — a versioned store is real state.
+
+    Someone who opts into versioning ``.gitreins/tasks.yaml`` (the README's
+    "committed separately on the gitreins branch" pattern) gets the opposite
+    treatment: a tracked store that differs from HEAD is their own edit and
+    keeps the merge gate closed, exactly like the venv lockfiles.
+    """
+    manager = WorktreeManager(wt_repo)
+    store = wt_repo / ".gitreins" / "tasks.yaml"
+    store.parent.mkdir(parents=True, exist_ok=True)
+    store.write_text("tasks: []\n", encoding="utf-8")
+    _git(wt_repo, "add", ".gitreins/tasks.yaml")
+    _git(wt_repo, "commit", "-qm", "version the task store")
+    store.write_text("tasks:\n- id: API-1\n  title: tracked\n  criteria: []\n  status: pending\n")
+
+    assert " M .gitreins/tasks.yaml" in _porcelain_status(wt_repo)
+    assert manager._is_clean(wt_repo) is False
+
+
 def test_is_clean_exempts_the_linked_venv_inside_a_task_worktree(wt_repo: Path):
     """The tree gate must survive the venv ``_link_venv`` puts there by design."""
     manager, tree = _linked_venv_manager(wt_repo)

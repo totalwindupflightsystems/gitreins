@@ -290,7 +290,7 @@ supplied inline and NOTHING is persisted — see
 
 ```
 gitreins judge <id> [--skip-tier2] [--async] [--status <job_id>] [--scope staged|working-tree] [--json]
-gitreins judge [<id>] --ephemeral --title <title> --criterion <criterion> [--skip-tier2] [--scope staged|working-tree] [--json]
+gitreins judge [<id>] --ephemeral --title <title> --criterion <criterion> [--persist-verdict] [--skip-tier2] [--scope staged|working-tree] [--json]
 gitreins judge rorca-run-42-US-001 --ephemeral --title "Story gate" --criterion "Acceptance criteria are satisfied" --json
 ```
 
@@ -301,6 +301,7 @@ gitreins judge rorca-run-42-US-001 --ephemeral --title "Story gate" --criterion 
 | `--ephemeral` | Evaluate inline `--title`/`--criterion` values and persist nothing (EVID-003) |
 | `--title <title>` | Ephemeral task title (required with `--ephemeral`) |
 | `--criterion <text>` | Ephemeral criterion — repeatable, one flag per criterion (required with `--ephemeral`) |
+| `--persist-verdict` | With `--ephemeral`: also write the merge-gate verdict document `.gitreins/verdicts/verdict.json` in the graded tree, so a judge-gated `worktree merge` can find it. Still no history entry, task store or branch commit (DF-GITREINS-POC-48) |
 | `--async` | Dispatch evaluation as a detached background job; returns a job ID |
 | `--status <job_id>` | Show status/result of a background job (id = job id, not task id) |
 | `--scope staged\|working-tree` | Change set the Tier 1 guards grade — same semantics as `gitreins guard --scope` (default `staged`) |
@@ -336,6 +337,22 @@ document's `subject.taskId`; without one the id is `ephemeral:<slug-of-title>`.
 combined with `--async`/`--status`/`--run-job` — those modes read and write the
 task/job stores an ephemeral run deliberately has no part in. Both are usage
 errors: exit `2`, like a missing `id` without `--ephemeral`.
+
+**`--persist-verdict` (DF-GITREINS-POC-48)** is the one opt-in exception to "no
+artifacts", because an ephemeral verdict used to be able to satisfy nothing: a
+judge-gated `worktree merge` needs a verdict that mentions the lane's exact
+worktree, branch and commit, and a run that writes nothing can never produce
+one. The flag writes exactly one file —
+`.gitreins/verdicts/verdict.json` in the graded tree, a runtime artifact (the
+installer's `.gitignore` covers it and the merge gate exempts it from
+cleanliness) — carrying the same payload `gitreins judge` persists
+(`engine.persist.build_verdict_data`: `task_id`, `passed`, `worktree`, `branch`,
+`commit`, `stages`). It is deliberately NOT history: nothing lands in
+`.gitreins/history`, no commit is made on the `gitreins` branch, a re-run
+overwrites the document, and the gate still refuses a PASS whose Tier 1 carries
+skipped checks. The flag requires `--ephemeral` (a sync run already writes
+durable history) and its path is printed on stderr, so `--json` stdout still
+holds exactly one document.
 
 Operator-configured pipeline commands still run as configured (see
 [the evidence contract](evidence-contract-v1.md)), and so does tooling the
@@ -609,6 +626,23 @@ in isolated worktrees and prints the tick report as JSON.
 | `--merge` | Apply successful lanes serially after execution |
 | `--force-merge` | Bypass verdict gates when used with `--merge` |
 | `--actor <identity>` | Identity required by `--force-merge` |
+
+Each lane may carry optional `guard` and `judge` argv arrays, run in the lane's
+own tree after `command`. A lane's judge phase can name the lane's task id
+(`"judge": ["gitreins", "judge", "API-1"]`): the fleet copies that task from the
+canonical checkout into the lane's store before the phase runs, because
+`.gitreins/tasks.yaml` is per-checkout and untracked, so a fresh worktree starts
+empty (DF-GITREINS-POC-48). A lane that must not write task or verdict state can
+judge with `judge --ephemeral --persist-verdict` instead: no history, but the
+one document the merge gate reads.
+
+`--merge` applies each completed lane in priority/task-id order under the
+inter-process merge lock, and only when a PASS verdict exists for the lane's
+exact worktree, branch and commit — a verdict whose Tier 1 carries skipped
+checks is held back, not merged. Every lane that did NOT merge is named in
+`merge_errors` with its reason, including a lane that failed its own phases (its
+`error` says which phase failed and why), so a tick report never shows a lane
+that silently went missing.
 
 Exit **0** prints the report; exit **1** means the manifest or a lane failed
 validation (`worktree fleet: failed` with the error on stderr).

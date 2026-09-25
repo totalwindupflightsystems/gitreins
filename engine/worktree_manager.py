@@ -58,6 +58,19 @@ LANE_STATES = ("running", "guarding", "judging", "completed", "failed")
 # States whose trees may only be removed with an explicit confirmation flag.
 PROTECTED_STATES = ("stale", "orphan")
 
+# ── the disk verdict a judge-gated merge can discover (DF-GITREINS-POC-48) ──
+#
+# A fleet lane's judge phase runs inside the lane's own tree; the merge that
+# needs its verdict runs later, against that tree's branch tip.  The primary
+# route is the shared verdict history (``.gitreins/history/``, stamped with the
+# producing worktree/branch/commit).  The second is this runtime artifact: a
+# judge run that must NOT write history (EVID-003's ``judge --ephemeral``) can
+# still leave the ONE document the gate reads.  Both the writer
+# (:func:`write_disk_verdict`) and the gate take the path from this module, so
+# the two surfaces cannot drift on where it lives.
+DISK_VERDICT_DIR = ".gitreins/verdicts"
+DISK_VERDICT_FILE = "verdict.json"
+
 
 class WorktreeError(RuntimeError):
     """Raised when a worktree lifecycle operation cannot be completed."""
@@ -241,10 +254,34 @@ RUNTIME_ARTIFACT_FILES = frozenset(
         ".coding-hermes/board/events.jsonl",  # fleet board event log
     }
 )
+# Runtime artifact FILES exempt only while UNTRACKED — the per-checkout stores a
+# run writes into whatever tree it runs in.  DF-GITREINS-POC-48's judge phase
+# writes all three inside a lane: `tasks.yaml` is seeded for the judge phase
+# (the store is per-checkout and untracked by design, so a fresh lane starts
+# empty and `gitreins judge <id>` there answered "Task not found"), `usage.jsonl`
+# takes the judge's token telemetry, and `qa-ledger.jsonl` records a nested
+# `worktree fresh|repro|dogfood` run.  All three are in the installer's
+# .gitignore template, so this is the other half of that list catching up — a
+# consumer whose .gitignore predates them otherwise sees the judge phase's own
+# artifacts as uncommitted work and the merge refuses the lane they describe.
+# Untracked ONLY: a TRACKED store that differs from HEAD is real repo state the
+# consumer chose to version (the rule the venv lockfiles already use).
+RUNTIME_ARTIFACT_UNTRACKED_FILES = frozenset(
+    {
+        ".gitreins/tasks.yaml",
+        ".gitreins/usage.jsonl",
+        ".gitreins/qa-ledger.jsonl",
+    }
+)
 # Runtime artifact DIRECTORIES written by GitReins itself: a guard run inside a
-# task worktree writes its run log (DF-018) into .gitreins/logs/, and judge
-# verdicts land in .gitreins/history/.
-RUNTIME_ARTIFACT_PREFIXES = (".gitreins/history/", ".gitreins/logs/")
+# task worktree writes its run log (DF-018) into .gitreins/logs/, judge
+# verdicts land in .gitreins/history/, and the opt-in merge-gate verdict an
+# ephemeral judge run writes (DF-GITREINS-POC-48) lands in .gitreins/verdicts/.
+RUNTIME_ARTIFACT_PREFIXES = (
+    ".gitreins/history/",
+    ".gitreins/logs/",
+    DISK_VERDICT_DIR + "/",
+)
 RUNTIME_ARTIFACT_LOCK_ROOT = ".gitreins/"
 # The files `uv run <guard>` regenerates beside the venv it links into a task
 # worktree.  Exempt only while UNTRACKED: a tracked lockfile that differs from
@@ -270,6 +307,50 @@ def _matches_exemption(path: str, names: tuple[str, ...]) -> bool:
         if path == name or path.startswith(f"{name}/"):
             return True
     return False
+
+
+def disk_verdict_path(tree: str | os.PathLike[str]) -> Path:
+    """The merge-gate verdict document inside ``tree`` (DF-GITREINS-POC-48)."""
+    return Path(tree) / DISK_VERDICT_DIR / DISK_VERDICT_FILE
+
+
+def write_disk_verdict(tree: str | os.PathLike[str], verdict: dict) -> Path:
+    """Write the ONE verdict document the merge gate reads, and nothing else.
+
+    Used by ``gitreins judge --ephemeral --persist-verdict``: a mode whose
+    whole point is that it writes no history, no task store and no branch, but
+    whose verdict a judge-gated merge still has to be able to find.  Written
+    through a sibling temp file + ``os.replace`` so a reader never sees a
+    half-written document, and it is deliberately NOT history — a re-run
+    overwrites it, and it answers exactly one question ("is there a verdict for
+    the commit at the tip of this tree's branch?").
+    """
+    path = disk_verdict_path(tree)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.tmp")
+    tmp.write_text(
+        json.dumps(verdict, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8"
+    )
+    os.replace(tmp, path)
+    return path
+
+
+def read_disk_verdict(tree: str | os.PathLike[str]) -> dict | None:
+    """Read ``tree``'s disk verdict document, or ``None`` when absent/unusable.
+
+    The returned mapping is stamped with ``_disk_verdict`` (the file it came
+    from) so a refusal message can name the artifact instead of pointing at the
+    history directory that was never written.
+    """
+    path = disk_verdict_path(tree)
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    data["_disk_verdict"] = str(path)
+    return data
 
 
 def _exclusive_operation(method):
@@ -1004,10 +1085,11 @@ class WorktreeManager:
         """True when ``workdir`` holds no uncommitted work of its own.
 
         GitReins' runtime artifacts (:data:`RUNTIME_ARTIFACT_FILES` /
-        :data:`RUNTIME_ARTIFACT_PREFIXES`, plus any lock inside the store) are
-        exempt everywhere — they are written by the harness, not by the user,
-        and counting them as dirt made every fleet merge refuse on a stock
-        install (DF-GITREINS-POC-47).
+        :data:`RUNTIME_ARTIFACT_PREFIXES`, the stores in
+        :data:`RUNTIME_ARTIFACT_UNTRACKED_FILES` while they are untracked, plus
+        any lock inside the store) are exempt everywhere — they are written by
+        the harness, not by the user, and counting them as dirt made every fleet
+        merge refuse on a stock install (DF-GITREINS-POC-47, DF-GITREINS-POC-48).
 
         Inside a TASK worktree the configured venv name (``self.venv_name``,
         default ``.venv``) is exempt too, plus an untracked ``uv.lock`` /
@@ -1023,6 +1105,8 @@ class WorktreeManager:
                 return False
             code, path = line[:2], line[3:]
             if _is_runtime_artifact(path):
+                continue
+            if code == "??" and path in RUNTIME_ARTIFACT_UNTRACKED_FILES:
                 continue
             if in_task_tree:
                 exempt = (self.venv_name, *(WORKTREE_VENV_LOCKFILES if code == "??" else ()))
@@ -1061,6 +1145,11 @@ class WorktreeManager:
         # checkout history directory.
         task_tree = Path(record.path).resolve()
         persister = VerdictPersister(str(task_tree))
+        if verdict and verdict.get("_disk_verdict"):
+            # A disk verdict (DF-GITREINS-POC-48) names its own artifact: the
+            # history directory below was never written for a run that chose
+            # not to write one.
+            return str(verdict["_disk_verdict"])
         if verdict and verdict.get("_date") and verdict.get("_hash"):
             local_path = (
                 Path(persister.history_dir)
@@ -1091,11 +1180,33 @@ class WorktreeManager:
         except Exception as exc:
             raise WorktreeError(f"could not read verdict history: {exc}") from exc
         worktree = str(task_tree)
-        return [
+        matching = [
             entry
             for entry in entries
             if str(entry.get("worktree", "")) == worktree and entry.get("branch") == record.branch
         ]
+        # DF-GITREINS-POC-48: the second source.  A judge run that wrote no
+        # history (`judge --ephemeral --persist-verdict`) leaves one document
+        # in the tree it graded; it is judged by the same keys as a history
+        # entry, so a verdict only ever speaks for the worktree, branch and
+        # commit it actually graded.  Newest first: it is the most recent
+        # judgment of this tree, so a FAIL there outranks an older PASS.
+        #
+        # Deliberately NOT scoped by task id, unlike the history filter above:
+        # an ephemeral judge names no stored task at all (`ephemeral:<slug>`, or
+        # whatever id the lane passed), and requiring it to equal the LANE id
+        # would refuse exactly the reconciliation this document exists for.  The
+        # three stamps below are the evidence that matters — they say this
+        # document was produced in THIS tree, for THIS branch, about THIS
+        # commit.
+        disk = read_disk_verdict(task_tree)
+        if (
+            disk is not None
+            and str(disk.get("worktree", "")) == worktree
+            and disk.get("branch") == record.branch
+        ):
+            matching.insert(0, disk)
+        return matching
 
     def _find_verdict(self, task_id: str, record: WorktreeRecord, source_head: str) -> dict | None:
         for entry in self._matching_verdicts(task_id, record):

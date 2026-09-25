@@ -71,6 +71,10 @@ hivemind-audit.md
 # (test_vendor_gitignore_covers_every_template_entry).
 .gitreins/tasks.yaml.lock
 .gitreins/config.yaml.bak
+# DF-GITREINS-POC-48: the merge-gate verdict document an ephemeral judge run
+# writes when asked (`judge --ephemeral --persist-verdict`). Runtime artifact,
+# not history — `.gitreins/history/` above stays the durable record.
+.gitreins/verdicts/
 
 # Hilo — local cache files (rebuildable)
 .vfs/graph/graph.db
