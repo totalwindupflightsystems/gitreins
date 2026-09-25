@@ -355,3 +355,310 @@ def test_fleet_merge_still_refuses_real_dirt_beside_runtime_artifacts(fleet_repo
     assert "uncommitted changes" in report["merge_errors"]["MERGE-STRAY"]
     assert not (fleet_repo / "lane.txt").exists()
     assert Path(fleet_repo.parent / "main-wt" / "MERGE-STRAY").is_dir()
+
+
+# ── DF-GITREINS-POC-48 — the judge phase and the merge gate ──────────────
+#
+# The row's three repros, each as an executable claim:
+#   (a) a lane's judge phase could not name the lane's task at all —
+#       `.gitreins/tasks.yaml` is per-checkout and untracked, so a fresh lane
+#       tree has no store and `gitreins judge <id>` answered "Task not found";
+#   (b) an ephemeral judge verdict could never reach the merge gate (nothing is
+#       persisted);
+#   (c) a judge-failed lane reported `error=None` and no merge error, so the
+#       refusal reason was dropped.
+
+
+#: A lane phase argv that runs *code* in the lane tree.  Engine imports need the
+#: repo root on PYTHONPATH (the tests that use them set it).
+def _lane_phase(code: str) -> tuple[str, ...]:
+    return (sys.executable, "-c", code)
+
+
+#: Stand-in for a lane's judge phase: write the merge-gate verdict document the
+#: way the real CLI writes it — `engine.persist.build_verdict_data` (the shared
+#: payload builder) into `engine.worktree_manager.write_disk_verdict` (the same
+#: writer, and the same path constant, the gate reads).
+JUDGE_PHASE_WRITES_THE_GATE_VERDICT = """
+import sys
+from pathlib import Path
+
+src, task_id = sys.argv[1], sys.argv[2]
+sys.path.insert(0, src)
+
+from engine.persist import build_verdict_data
+from engine.worktree_manager import write_disk_verdict
+
+tree = Path.cwd()
+
+
+class Task:
+    id = task_id
+    title = "Serve GET /status"
+    criteria = ["GET /status returns 200"]
+
+
+class Result:
+    passed = True
+    summary = "lane judged PASS"
+    verdict = None
+    pipeline_result = None
+
+
+path = write_disk_verdict(tree, build_verdict_data(str(tree), Task(), Result()))
+print("merge-gate verdict:", path)
+"""
+
+
+def test_fleet_seeds_the_lane_task_for_the_judge_phase(
+    fleet_repo: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """AC-1 (a): a lane's judge phase can name the lane's own task.
+
+    The README's manifest pattern (`["gitreins", "judge", "API-1"]` in the same
+    worktree the command ran in) is unreachable without this: the task store is
+    per-checkout and gitignored, so the lane starts empty.  The fleet copies the
+    task from canonical main before the judge phase runs — verbatim, so nothing
+    is invented — and leaves the main store untouched.
+    """
+    from engine.task_manager import TaskManager
+
+    monkeypatch.setenv("PYTHONPATH", str(CLI_SCRIPT.parents[1]))
+    TaskManager(str(fleet_repo)).create(
+        "SEED-1", "Serve GET /status", ["GET /status returns 200", "A test covers the endpoint"]
+    )
+    main_store = (fleet_repo / ".gitreins" / "tasks.yaml").read_bytes()
+
+    judge = _lane_phase(
+        "from engine.task_manager import TaskManager; import sys; "
+        "task = TaskManager('.').get('SEED-1'); "
+        "sys.exit(0 if task and task.title == 'Serve GET /status' "
+        "and task.criteria == ['GET /status returns 200', 'A test covers the endpoint'] else 3)"
+    )
+    report = WorktreeFleet(fleet_repo).run([FleetLane("SEED-1", _lane_phase("pass"), judge=judge)])
+
+    lane = report["lanes"][0]
+    assert lane["state"] == "completed", lane
+    seeded = TaskManager(lane["worktree"]).get("SEED-1")
+    assert seeded is not None, "the judge phase ran against a lane with no task store"
+    assert seeded.criteria == ["GET /status returns 200", "A test covers the endpoint"]
+    assert (fleet_repo / ".gitreins" / "tasks.yaml").read_bytes() == main_store
+    board = (fleet_repo / ".coding-hermes" / "board" / "events.jsonl").read_text()
+    assert "worktree_lane_task_seeded" in board
+
+
+def test_fleet_reports_why_a_failed_judge_phase_blocks_the_merge(
+    fleet_repo: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """AC-1 (c): a judge-failed lane carries WHY, in the lane result itself.
+
+    The row's repro 3: state=failed / passed=false with `error=None` and no
+    merge error, so a tick report could not distinguish "the judge failed, so no
+    verdict exists and --merge will refuse this lane" from a merge refusal.
+    """
+    monkeypatch.setenv("PYTHONPATH", str(CLI_SCRIPT.parents[1]))
+    judge = _lane_phase(
+        "import sys; "
+        "print('Stage tier2: FAIL'); "
+        "print('  FAIL GET /status returns 200: endpoint missing'); "
+        "print('Overall: FAIL'); "
+        "sys.exit(1)"
+    )
+    report = WorktreeFleet(fleet_repo).run(
+        [FleetLane("JUDGE-FAIL", _lane_phase("pass"), judge=judge)], merge=True
+    )
+
+    lane = report["lanes"][0]
+    assert lane["state"] == "failed" and lane["passed"] is False
+    error = lane["error"]
+    assert "judging phase failed" in error
+    assert "no PASS verdict" in error
+    assert "endpoint missing" in error, error  # the criterion the judge printed
+    assert report["merge_order"] == []
+    assert report["merge_errors"]["JUDGE-FAIL"].startswith("not merged: judging phase failed")
+
+    record = WorktreeManager(fleet_repo).list_records()[0]
+    assert record.error == error
+    assert record.lane_result["error"] == error
+
+
+def test_fleet_judge_phase_naming_an_unknown_task_says_where_tasks_live(
+    fleet_repo: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """AC-1 (c), the (a)-shaped failure: no task anywhere names the fix."""
+    monkeypatch.setenv("PYTHONPATH", str(CLI_SCRIPT.parents[1]))
+    judge = _lane_phase("import sys; print('Task not found: GHOST-1'); sys.exit(1)")
+
+    report = WorktreeFleet(fleet_repo).run([FleetLane("GHOST-1", _lane_phase("pass"), judge=judge)])
+
+    error = report["lanes"][0]["error"]
+    assert "Task not found" in error
+    assert "per-checkout and untracked" in error
+    assert "canonical checkout" in error
+
+
+def test_merge_gate_accepts_the_verdict_a_lane_wrote_in_its_own_tree(
+    fleet_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """AC-2: a verdict produced in the lane tree satisfies the `--merge` gate.
+
+    The end-to-end shape the row calls unreachable: the task lives in canonical
+    main, the fleet seeds it into the lane, the lane's judge phase writes the
+    merge-gate verdict document in the lane tree, and `--merge` (WITHOUT
+    `--force`) applies the lane.  Two runtime artifacts an ordinary lane now
+    leaves behind — the seeded task store and the verdict document — must both
+    read as harness state rather than as uncommitted work, or the gate would
+    refuse the very lane they describe.
+    """
+    from engine.task_manager import TaskManager
+
+    monkeypatch.setenv("PYTHONPATH", str(CLI_SCRIPT.parents[1]))
+    TaskManager(str(fleet_repo)).create("GATE-1", "Serve GET /status", ["GET /status returns 200"])
+    judge_script = tmp_path / "judge_lane.py"
+    judge_script.write_text(JUDGE_PHASE_WRITES_THE_GATE_VERDICT, encoding="utf-8")
+    lane_command = _lane_phase(
+        "from pathlib import Path; import subprocess; "
+        "Path('status.txt').write_text('ok'); "
+        "subprocess.run(['git', 'add', 'status.txt'], check=True); "
+        "subprocess.run(['git', 'commit', '-qm', 'GATE-1 status endpoint'], check=True)"
+    )
+
+    report = WorktreeFleet(fleet_repo).run(
+        [
+            FleetLane(
+                "GATE-1",
+                lane_command,
+                judge=(
+                    sys.executable,
+                    str(judge_script),
+                    str(CLI_SCRIPT.parents[1]),
+                    "GATE-1",
+                ),
+            )
+        ],
+        merge=True,
+    )
+
+    assert report["merge_errors"] == {}, report["merge_errors"]
+    assert report["merge_order"] == ["GATE-1"]
+    assert (fleet_repo / "status.txt").read_text(encoding="utf-8") == "ok"
+    assert WorktreeManager(fleet_repo).list_records() == []
+
+
+def test_fleet_lane_can_judge_ephemerally_and_still_merge(
+    fleet_repo: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """AC-2, the ephemeral route: `--persist-verdict` makes an ephemeral PASS usable.
+
+    Repro 2 from the row: `judge --ephemeral` writes nothing (EVID-003) and the
+    merge gate accepts nothing without a verdict, so the two were irreconcilable.
+    Here the lane's judge phase IS the real CLI in ephemeral mode with
+    `--persist-verdict`, and the lane merges: no history entry, no task store
+    (there is no task at all), just the one document the gate reads.
+    """
+    source_root = CLI_SCRIPT.parents[1]
+    monkeypatch.setenv("PYTHONPATH", str(source_root))
+    monkeypatch.setenv(
+        "GITREINS_MOCK_LLM_RESPONSE",
+        json.dumps(
+            {
+                "content": json.dumps(
+                    {
+                        "verdict": "COMPLETE",
+                        "items": [
+                            {
+                                "criterion": "GET /status returns 200",
+                                "status": "PASS",
+                                "detail": "app.status() returns ok",
+                            }
+                        ],
+                        "summary": "criterion satisfied",
+                    }
+                )
+            }
+        ),
+    )
+    # A Python tree, so Tier 1 plans lint AND tests rather than degrading to
+    # secrets-only (a degraded PASS is refused by the gate on purpose), with the
+    # toolchain this test actually has: lint off, a test command that needs no
+    # project setup.
+    (fleet_repo / "app.py").write_text("def status():\n    return 'ok'\n", encoding="utf-8")
+    config = fleet_repo / ".gitreins" / "config.yaml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(
+        f'guards:\n  lint: false\n  test_command: "{sys.executable} -c pass"\n'
+        "defaults:\n  check_for_updates: false\n",
+        encoding="utf-8",
+    )
+    _git(fleet_repo, "add", "app.py", ".gitreins/config.yaml")
+    _git(fleet_repo, "commit", "-qm", "python tree + fleet config")
+
+    lane_command = _lane_phase(
+        "from pathlib import Path; import subprocess; "
+        "Path('status.txt').write_text('ok'); "
+        "subprocess.run(['git', 'add', 'status.txt'], check=True); "
+        "subprocess.run(['git', 'commit', '-qm', 'API-1 status endpoint'], check=True)"
+    )
+    judge = (
+        sys.executable,
+        str(CLI_SCRIPT),
+        "judge",
+        "API-1",
+        "--ephemeral",
+        "--title",
+        "Serve GET /status",
+        "--criterion",
+        "GET /status returns 200",
+        "--persist-verdict",
+    )
+
+    report = WorktreeFleet(fleet_repo).run(
+        [FleetLane("API-1", lane_command, judge=judge)], merge=True
+    )
+
+    assert report["merge_errors"] == {}, report["merge_errors"]
+    assert report["merge_order"] == ["API-1"]
+    assert (fleet_repo / "status.txt").read_text(encoding="utf-8") == "ok"
+    # The ephemeral route never opened a task store, in main or in the lane.
+    assert not (fleet_repo / ".gitreins" / "tasks.yaml").exists()
+    assert WorktreeManager(fleet_repo).list_records() == []
+
+
+def test_merge_gate_reads_the_disk_verdict_for_the_commit_it_grades(fleet_repo: Path):
+    """AC-2's two-sided control: the disk document is read, and scoped.
+
+    One-sided, "the gate accepted the document" could equally mean "the gate
+    never looked" — a history verdict or no verdict at all would answer the
+    same.  So the same file is tried twice: for the commit the branch actually
+    points at (the merge must proceed on THAT evidence alone) and for an older
+    commit (the merge must refuse).
+    """
+    from engine.worktree_manager import write_disk_verdict
+
+    manager = WorktreeManager(fleet_repo)
+    record, _created = manager.create("GATE-DISK")
+    tree = Path(record.path)
+    (tree / "lane.txt").write_text("lane\n", encoding="utf-8")
+    _git(tree, "add", "lane.txt")
+    _git(tree, "commit", "-qm", "lane work")
+    older_commit = _git(tree, "rev-parse", "HEAD").stdout.strip()
+    _git(tree, "commit", "-q", "--allow-empty", "-m", "tip moves on")
+    tip = _git(tree, "rev-parse", "HEAD").stdout.strip()
+
+    def _verdict(commit: str) -> dict:
+        return {
+            "task_id": record.task_id,
+            "passed": True,
+            "worktree": str(tree.resolve()),
+            "branch": record.branch,
+            "commit": commit,
+        }
+
+    write_disk_verdict(tree, _verdict(older_commit))
+    with pytest.raises(WorktreeError, match="no PASS verdict"):
+        manager.merge(record.task_id)
+
+    write_disk_verdict(tree, _verdict(tip))
+    merged = manager.merge(record.task_id)
+    assert merged["source_commit"] == tip
+    assert _git(fleet_repo, "rev-parse", "HEAD").stdout.strip() == tip

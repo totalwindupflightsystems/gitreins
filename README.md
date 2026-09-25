@@ -11,7 +11,7 @@
 
 GitReins lives inside your git repository as a quality harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ✅ **v0.15.0** — the release that closes the loop between what is merged and what actually runs. `gitreins resolve "<question>"` (and the `context.resolve` MCP tool) traces a question to its seed files through Hilo, assembles a measured evidence bundle and returns a calibrated verdict band; `gitreins preflight` checks the premises of a task *before* a worker is dispatched, and annotates instead of dispatching when they do not hold; the judge pre-screens candidates and attributes a verdict per acceptance criterion; per-surface config knobs make the resolution gate tunable without touching code. On the guard side, the `hook_timeout` early-return now carries `allow_skips` (a slow repo's docs/board commits were being blocked with exit 2 by a run whose own warning said the commit was allowed), the test lane pins its interpreter so a host whose PATH carries another virtualenv can no longer fail the lane with `unrecognized arguments: -n`, Go guard commands run through bounded execution, and the evaluator reaps the last run's process group on exit. `scripts/check_deployed_surface.py` is new: it compares the *deployed* CLI surface with this checkout and fails loudly when a merged subcommand exists only in the repo — the drift that used to be invisible because both copies reported the same version. 2423 tests pass / 68 test files, verified by collection (optional-tool skips vary).
+> ✅ **v0.15.0** — the release that closes the loop between what is merged and what actually runs. `gitreins resolve "<question>"` (and the `context.resolve` MCP tool) traces a question to its seed files through Hilo, assembles a measured evidence bundle and returns a calibrated verdict band; `gitreins preflight` checks the premises of a task *before* a worker is dispatched, and annotates instead of dispatching when they do not hold; the judge pre-screens candidates and attributes a verdict per acceptance criterion; per-surface config knobs make the resolution gate tunable without touching code. On the guard side, the `hook_timeout` early-return now carries `allow_skips` (a slow repo's docs/board commits were being blocked with exit 2 by a run whose own warning said the commit was allowed), the test lane pins its interpreter so a host whose PATH carries another virtualenv can no longer fail the lane with `unrecognized arguments: -n`, Go guard commands run through bounded execution, and the evaluator reaps the last run's process group on exit. `scripts/check_deployed_surface.py` is new: it compares the *deployed* CLI surface with this checkout and fails loudly when a merged subcommand exists only in the repo — the drift that used to be invisible because both copies reported the same version. 2436 tests pass / 68 test files, verified by collection (optional-tool skips vary).
 
 Every resolution-gate surface ships **disabled**, because resolving a question sends the assembled bundle off the host: enabling one is an explicit act, `resolution.enabled.<surface>: true` (`cli`, `mcp`, `predispatch`, `judge_prescreen`) in `.gitreins/config.yaml` — `gitreins init` writes the block with all four `false`, and only a literal `true` opens a surface. A disabled surface fails closed with `abstain_reason: surface-disabled` and prints the enabling fix. The complete block, the defaults it may omit and the calibration caveat on the judge-adjacent surfaces are in [docs/jev-resolution-gate.md §9](docs/jev-resolution-gate.md).
 
@@ -127,17 +127,58 @@ gitreins worktree fleet lanes.json --merge --force-merge --actor release-bot
 gitreins worktree list
 ```
 
-Manifest example:
+A judge-gated merge needs a verdict for the lane's exact branch commit, so the
+lane that reviews is the lane that runs the judge. Create the task in the
+canonical checkout, name it in the lane's `judge` phase, and let `--merge` do
+the gating — the whole sequence below is copy-paste runnable:
 
-```json
+```bash
+# 0. A repository that already passes its own gate. `init` writes the guard
+#    config, the pre-commit hook and the .gitignore entries — commit them, so
+#    every lane inherits them with the branch.
+gitreins init
+git add -A && git commit -m "gitreins: init"
+
+# 1. The task and its criteria belong to the repository, not to one lane.
+gitreins task create API-1 "Serve GET /status" \
+  "GET /status returns 200" \
+  "A test covers the endpoint"
+
+# 2. lanes.json — `command` is the lane's work, `judge` names the task above.
+#    The fleet copies that task into the lane's own tree before the judge phase
+#    runs: `.gitreins/tasks.yaml` is per-checkout and never committed, so a
+#    fresh worktree starts with an empty store.  Keep the manifest OUTSIDE the
+#    checkout (or commit it): an untracked file in canonical main is dirt, and
+#    the merge gate refuses a dirty canonical main.
+cat > ../lanes.json <<'JSON'
 {
   "lanes": [
-    {"task_id": "API-1", "priority": 10, "command": ["./worker", "API-1"],
-     "guard": ["gitreins", "guard", "--full"]},
-    {"task_id": "UI-1", "priority": 20, "command": ["./worker", "UI-1"]}
+    {
+      "task_id": "API-1",
+      "priority": 10,
+      "command": ["bash", "-c", "echo ok > status.txt && git add status.txt && git commit -qm 'API-1 status endpoint'"],
+      "guard": ["gitreins", "guard"],
+      "judge": ["gitreins", "judge", "API-1"]
+    }
   ]
 }
+JSON
+
+# 3. Run the lanes, then merge the ones that earned a PASS verdict.
+gitreins worktree fleet ../lanes.json --merge
+# Inspect cap, phase, exit status, and retained evidence:
+gitreins worktree list
 ```
+
+`guard` and `judge` are both optional (`guard` runs `gitreins guard` in the lane
+before the judge; a lane with no judge phase merges only with `--force-merge`).
+A lane that must not write task or verdict state can judge with
+`judge --ephemeral --persist-verdict`: still no history and no task store, but
+the single document the merge gate reads (`.gitreins/verdicts/verdict.json`)
+makes its PASS usable by `--merge`. Either way the gate compares the verdict's
+own `worktree`/`branch`/`commit` stamps with the lane's branch tip, so a verdict
+that graded a different commit is not a verdict; a lane whose judge phase failed
+(or whose PASS carries skipped Tier 1 checks) is reported, never merged.
 
 The default cap is 2 and can be overridden in `.gitreins/config.yaml`:
 
@@ -581,7 +622,7 @@ history:
 - **MCP Transport:** stdio (13 tools)
 - **Config:** YAML in `.gitreins/` directory
 - **Evaluator Default Model:** DeepSeek V4 Flash (~$0.01/eval)
-- **Test suite:** 2423 tests across 68 test files (collection total; optional-tool skips vary)
+- **Test suite:** 2436 tests across 68 test files (collection total; optional-tool skips vary)
 
 ## Architecture & Docs
 
