@@ -277,14 +277,16 @@ class TestMcpAsyncVerdictPersistence:
         assert captured.out == ""
         assert len(_verdict_files(mcp_server.workdir)) == 1
 
-    def test_async_persist_commits_verdict_to_gitreins_branch(self, tmp_path, monkeypatch):
+    def test_async_persist_commits_verdict_to_the_history_ref(self, tmp_path, monkeypatch):
         """`storage: git` (the shipped default) commits the verdict, MCP side.
 
-        The committed path is read from the real tree (an orphan ``gitreins``
-        branch on first verdict holds bare ``verdict.json``/``summary.md`` at
-        the root; a later verdict nests them under ``<date>/<hash>/``), so this
-        proves the ARGUMENT the persister hands git, not the test's copy of the
-        path prefix.
+        The committed path is read from the real tree (the first verdict's root
+        commit holds bare ``verdict.json``/``summary.md`` at the root; a later
+        verdict nests them under ``<date>/<hash>/``), so this proves the
+        ARGUMENT the persister hands git, not the test's copy of the path
+        prefix. The ref is read by its full name (DF-GITREINS-POC-52: it lives
+        outside refs/heads so the fleet's ``gitreins/task/<id>`` branches can
+        never prefix-collide with it).
         """
         repo = _init_real_git_repo(tmp_path)
         server = GitReinsMCPServer(repo)
@@ -296,13 +298,13 @@ class TestMcpAsyncVerdictPersistence:
         assert _poll_status(server, job_id)["status"] == "complete"
 
         branch = subprocess.run(
-            ["git", "-C", repo, "rev-parse", "--verify", "gitreins"],
+            ["git", "-C", repo, "rev-parse", "--verify", engine.persist.HISTORY_REF],
             capture_output=True,
             text=True,
         )
-        assert branch.returncode == 0, "verdict was not committed to the gitreins branch"
+        assert branch.returncode == 0, "verdict was not committed to the history ref"
         listing = subprocess.run(
-            ["git", "-C", repo, "ls-tree", "-r", "--name-only", "gitreins"],
+            ["git", "-C", repo, "ls-tree", "-r", "--name-only", engine.persist.HISTORY_REF],
             capture_output=True,
             text=True,
             check=True,
@@ -310,7 +312,7 @@ class TestMcpAsyncVerdictPersistence:
         committed = [p for p in listing.splitlines() if p.endswith("verdict.json")]
         assert len(committed) == 1, listing
         blob = subprocess.run(
-            ["git", "-C", repo, "show", f"gitreins:{committed[0]}"],
+            ["git", "-C", repo, "show", f"{engine.persist.HISTORY_REF}:{committed[0]}"],
             capture_output=True,
             text=True,
             check=True,
