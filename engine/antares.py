@@ -14,6 +14,14 @@ Antares-1B is a causal language model trained for agentic vulnerability
 localization. Its generated JSON findings are normalized into AntaresFinding
 records. The model is downloaded lazily into the GitReins cache on first ML
 scan, so importing and using the default scanner remains lightweight.
+
+Honesty contract (DF-GITREINS-POC-59): the keyword fallback is a 7-keyword
+substring grep, not a vulnerability analysis — a real command injection with
+none of the keywords scans clean, and a keyword-bearing comment is a finding.
+Heuristic findings therefore carry the ``CVE-SIMULATED`` placeholder id and
+``confidence=0.0``, and the scanner exposes ``used_heuristic`` so callers
+(the ``security-scan`` CLI, guard output) can disclose that a run was the
+fallback and not ML inference.
 """
 
 import json
@@ -55,6 +63,11 @@ _SIMULATED_KEYWORDS = (
     "hardcoded",
 )
 
+# DF-GITREINS-POC-59: rendered whenever a scan ran the keyword fallback,
+# so its output is never mistaken for a full ML scan. Shared by the CLI
+# and asserted verbatim in tests/test_antares.py.
+HEURISTIC_DISCLOSURE = "heuristic mode (no ML stack installed) — keyword fallback, NOT a full scan"
+
 # Prompt and output limits keep a single scan bounded for local inference.
 _MAX_SOURCE_CHARS = 32_000
 _MAX_NEW_TOKENS = 512
@@ -93,6 +106,12 @@ class AntaresScanner:
             inference. If model loading or inference fails, scan_file falls
             back to the keyword heuristic. When False (default), keyword mode
             is used without importing the optional ML stack.
+
+    Attributes:
+        used_heuristic: Whether the most recent scan actually ran the
+            keyword fallback (True) or real ML inference (False). The CLI
+            prints an explicit mode line from this so heuristic output is
+            never mistaken for a full ML scan.
     """
 
     def __init__(
@@ -112,6 +131,10 @@ class AntaresScanner:
         # Context window in tokens — populated lazily once the tokenizer is
         # loaded so chunked inference can size its windows correctly.
         self._token_limit: int | None = None
+        # DF-GITREINS-POC-59: set True whenever a scan actually ran the
+        # keyword heuristic (including an ML-mode run that fell back), so
+        # callers can disclose the mode instead of implying a full scan.
+        self.used_heuristic = False
 
     # ── Model loading ─────────────────────────────────────────────
 
@@ -440,6 +463,11 @@ class AntaresScanner:
 
         Returns:
             A list of AntaresFinding objects (possibly empty).
+
+        After the call, ``self.used_heuristic`` reports which path actually
+        produced the findings — True when the keyword fallback ran (the
+        default mode, or an ML attempt that was unavailable), False when
+        real ML inference produced them.
         """
         # Make absolute against the workdir when needed.
         if not os.path.isabs(filepath):
@@ -464,9 +492,11 @@ class AntaresScanner:
                 rel = self._relpath(filepath)
                 for finding in ml_findings:
                     finding.file = rel
+                self.used_heuristic = False
                 return ml_findings
 
         # Keyword fallback preserves the lightweight default guard behavior.
+        self.used_heuristic = True
         return self._scan_with_heuristic(filepath)
 
     def scan_staged_files(self) -> list[AntaresFinding]:
@@ -485,6 +515,10 @@ class AntaresScanner:
             if not os.path.isfile(full):
                 continue
             findings.extend(self.scan_file(full))
+        # Zero-file runs still operated in fallback mode when ML is off —
+        # keep the mode disclosure honest (DF-GITREINS-POC-59).
+        if not self._use_ml:
+            self.used_heuristic = True
         return findings
 
     def scan_directory(self, directory: str) -> list[AntaresFinding]:
