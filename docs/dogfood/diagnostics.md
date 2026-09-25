@@ -1217,3 +1217,39 @@ directories had been added; gitignore never untracks files. Whoever next runs
 so the documented fresh-clone fallback (`gitreins report` → branch) reads a
 ref that does not exist anywhere else. Either the release flow pushes the
 branch or the docs must stop offering it.
+
+## 2026-09-25 — QA ledger + security-scan (run 12)
+
+**The QA ledger resolution chain.** `engine/config.py` resolves the ledger path in three
+steps: env `GITREINS_QA_LEDGER` (file OR directory — a directory receives `qa-ledger.jsonl`,
+which is how a fleet lane points the harness at its own fleet ledger), then
+`qa_ledger.path` in `.gitreins/config.yaml` (relative → repo root), then
+`<repo>/.gitreins/qa-ledger.jsonl`. Recording is off only when `qa_ledger.enabled: false`
+(the run still succeeds; the not-recorded line goes to stderr, never stdout). Appends are
+JSONL with the fleet keys plus harness extras, so a fleet-schema reader consumes harness
+rows unchanged.
+
+**Cell semantics are correct — check the denominator before suspecting them.** `cells` with
+statuses `skipped`/`unknown` are excluded from the passed-count denominator: a row
+`{smoke: failed, judge: skipped}` renders `0/1 passed, 1 skipped`, and an all-UNKNOWN row
+renders `no graded outcome, 1 unknown` with a neutral glyph. Run 12 briefly suspected a
+2/3 denominator; recomputation from the ledger rows proved the display right.
+
+**`--evidence` is stamped, never dropped.** A nonexistent evidence path records
+`evidence_missing: true` on the row plus a stderr warning — the ledger never silently points
+at nothing, and never refuses the row either. Evidence integrity lives with the row.
+
+**Why security-scan "passes" a vulnerable file without ML.** `engine/antares.py` ships two
+paths: the ML path (fdtn-ai/antares-1b via transformers, chunked 8k-token inference) and
+`_scan_with_heuristic` (:236), which is a per-line substring match against a 7-keyword tuple
+(`CVE, vulnerability, injection, exploit, unsafe, deserialization, hardcoded`) producing
+zero-confidence `CVE-SIMULATED` findings. Without transformers installed — the default on
+any fresh box — the heuristic IS the scanner, so real vulnerability patterns that don't
+contain the keywords scan clean while keyword-bearing comments find. The right way to read
+a scan: treat "clean" as "heuristic ran, nothing matched" unless the ML stack is present.
+The docs fix belongs in cli-reference §9 (POC-59).
+
+**Repo rename vs ledger identity.** `qa record` defaults `--project` to the directory name
+at record time. The repo's one pre-run-12 row says `gitreins-poc` (recorded when the dir had
+that name); new rows say `gitreins`. Both are true records; consumers that group by project
+should normalize (POC-60).

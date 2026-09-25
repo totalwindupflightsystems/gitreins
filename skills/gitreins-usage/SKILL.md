@@ -4,7 +4,7 @@ description: >-
   How to use the GitReins quality harness in this repo (and any repo it's
   installed in): task lifecycle, guards, LLM judge, MCP tools, and the known
   pitfalls that will bite you. Load this before committing or creating tasks.
-version: 1.9.0
+version: 1.10.0
 category: software-development
 ---
 
@@ -711,3 +711,34 @@ those two (and nothing else locally); and `refs/heads/gitreins` is pushed
 nowhere, so the documented branch-fallback for `report` is empty. Prefer
 the API (`serve --repo`) against a checkout that actually has history, or
 fetch the branch if it ever lands on a remote.
+
+## QA ledger (`gitreins qa`) — pitfalls 44–45 (2026-09-25 dogfood run 12)
+
+`gitreins qa list [-n N] [--json]` reads the QA ledger; `gitreins qa record ...` appends a
+row for a run produced OUTSIDE the harness (fleet lane, bunker battery, dogfood tick).
+Ledger resolution: `GITREINS_QA_LEDGER` (file or dir) > `qa_ledger.path` in
+`.gitreins/config.yaml` > `<repo>/.gitreins/qa-ledger.jsonl`. Recording off when
+`qa_ledger.enabled: false` (stderr notice, run still succeeds).
+
+```bash
+gitreins qa record --kind bunker --cell clone=passed --cell install=passed \
+  --cell smoke=passed --server las-bunker-03 --agent <lane-id> \
+  --evidence docs/dogfood/evidence/<run>/log.txt --note "what ran"
+```
+
+**Pitfall 44 — cell denominators exclude skipped/unknown.** A cell marked `skipped` does
+not count in "N/M passed": `{smoke: failed, judge: skipped}` renders `0/1 passed, 1
+skipped`, and all-UNKNOWN renders `no graded outcome, 1 unknown`. Don't "fix" this — it is
+correct. Also: a missing `--evidence` path is stamped `evidence_missing: true` with a
+stderr warning, not dropped; bad `--cell` (not `NAME=STATUS`) exits 2.
+
+**Pitfall 45 — `security-scan` without the ML stack is a keyword grep (POC-59).** No
+transformers installed (the fresh-box default) → `_scan_with_heuristic`
+(engine/antares.py:236) flags only lines containing one of 7 keywords (CVE, vulnerability,
+injection, exploit, unsafe, deserialization, hardcoded), as `CVE-SIMULATED conf=0.00`.
+`subprocess.call(input(), shell=True)` scans CLEAN; a comment saying "vulnerability" is a
+finding. Read "clean" as "heuristic ran, nothing matched" unless the ML stack is present.
+
+**Project identity in the ledger is the directory name at record time.** Rows recorded
+before the gitreins-poc→gitreins rename say `gitreins-poc` (POC-60); group/normalize by
+this field knowing both spellings exist in history.
