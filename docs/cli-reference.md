@@ -921,6 +921,29 @@ blind, and every row can be annotated with what the gate saw. The `--json`
 record is exactly `{question, band, probability, missing_kind, decision,
 reason, abstain_reason, verdict}`.
 
+| Field | Type | Meaning |
+|-------|------|---------|
+| `question` | string | the premise, as passed on the command line |
+| `band` | string | `RESOLVED` / `REVIEW` / `UNRESOLVED` / `ABSTAIN` |
+| `probability` | number or `null` | the gate's resolution probability — `null` on an ABSTAIN |
+| `missing_kind` | string or `null` | what the evidence lacks (`none` / `implementation` / `test` / …) |
+| `decision` | string | `skip-dispatch` / `dispatch-with-note` / `dispatch` |
+| `reason` | string | the policy's one-line why for that decision |
+| `abstain_reason` | string or `null` | why the gate abstained (`no-credentials`, `surface-disabled`, …); `null` for a real band |
+| `verdict` | object | the full verdict — the SAME object `gitreins resolve --json` prints (`ResolutionVerdict.to_dict()`) |
+
+An ABSTAIN is not a second record shape: no credentials, a dead transport and
+the `surface-disabled` gate all return the same eight fields, with `probability`
+`null` and the reason spelled out inside `verdict.abstain_detail`, so a consumer
+keying on `.verdict` needs no ABSTAIN branch of its own.
+
+**Upgrading from 0.15.0.** Before DF-GITREINS-POC-37 this record nested the
+verdict as an ESCAPED JSON STRING under `verdict_json`, so a script had to parse
+it twice (`jq -r '.verdict_json | fromjson'`) while `resolve --json` printed the
+object directly. That field is no longer emitted — one shape for one gate.
+A script written against 0.15.0 reads `.verdict` instead (and `.verdict.manifest`
+then works identically on `preflight --json` and `resolve --json`).
+
 This is a signal, not a gate: a skip annotates a row, it is never the sole
 authority for a merge or a commit (spec §6.5).
 
