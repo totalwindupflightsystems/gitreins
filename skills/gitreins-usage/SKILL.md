@@ -4,7 +4,7 @@ description: >-
   How to use the GitReins quality harness in this repo (and any repo it's
   installed in): task lifecycle, guards, LLM judge, MCP tools, and the known
   pitfalls that will bite you. Load this before committing or creating tasks.
-version: 1.10.0
+version: 1.11.0
 category: software-development
 ---
 
@@ -750,3 +750,24 @@ finding. Read "clean" as "heuristic ran, nothing matched" unless the ML stack is
 **Project identity in the ledger is the directory name at record time.** Rows recorded
 before the gitreins-poc→gitreins rename say `gitreins-poc` (POC-60); group/normalize by
 this field knowing both spellings exist in history.
+
+## Onboarding surface — pitfall 46 (2026-09-25 dogfood run 13)
+
+docs/onboarding.md §1–§8 was walked verbatim from the PyPI wheel (0.15.0): 15/17
+steps work exactly as written, TTFS ~3 min, guard warm 259ms. Load this before
+teaching a new user the harness.
+
+**Pitfall 46 — the default verdict branch kills task worktrees (POC-62).**
+`history.storage: "git"` (install/init default) auto-commits verdicts to an orphan
+branch named `gitreins`; task worktrees want `gitreins/task/<id>` — a child ref
+path. Git cannot lock `refs/heads/gitreins/task/x` while `refs/heads/gitreins`
+exists, so `gitreins task worktree <id>` fails 100% of the time once ONE task has
+been completed (the order the guide teaches). Workaround today: set
+`history.storage: "filesystem"` before your first verdict, or manually rename the
+branch. Real fix = one namespace rename (board row DF-GITREINS-POC-62).
+
+Also known (rows 63–65): `install`'s .gitignore list is shorter than the onboarding
+doc promises (worktree/disposable lock files appear untracked later); literal
+`pip install gitreins` is PEP-668-blocked on stock Debian/Ubuntu — use a venv;
+`--depends-on` ids are not validated at create time, so doc examples can point at
+tasks that never exist.

@@ -268,3 +268,33 @@ verified gone).
 - Security model verified: 5 traversal shapes on verdict/evidence routes all
   400/404, evidence strictly manifest-bound, board name-bound, 0.0.0.0 bind
   works with the documented (mis-streamed) warning.
+
+## Dogfood Findings (2026-09-25b) — run 13: docs/onboarding.md, the first-hour path
+
+Angle: runs 1-12 never walked the onboarding guide itself — the one document
+every real new user reads first (still version-stamped 0.14.0 while PyPI/HEAD
+are 0.15.0). This run followed §1-§8 VERBATIM from the PyPI wheel 0.15.0 in a
+scratch repo, plus the bunker install leg. Verdict: 🟢 SHIPPABLE for this
+surface (first run ever to earn it): 15 of 17 documented steps worked exactly
+as written; time-to-first-success ~3 min. Evidence:
+docs/dogfood/2026-09-25b-integration.md + evidence/onboarding-2026-09-25b/run13.md.
+
+- [P1] DF-GITREINS-POC-62: default verdict branch 'gitreins' (history.storage:
+  git) permanently breaks task worktrees — git cannot lock
+  refs/heads/gitreins/task/<id> once refs/heads/gitreins exists, so §8's first
+  command fails 100% on any repo where a task was completed before the first
+  worktree (the order the guide teaches). Reproduced on 0.15.0; raw git error
+  names no fix. Fix: rename one namespace.
+- [P2] DF-GITREINS-POC-63: onboarding §1 gitignore list drifted — install
+  writes 6 entries, doc promises 11 (missing tasks.yaml.lock, worktrees.json,
+  worktrees.lock, disposable.json, disposable.lock); header stamp still 0.14.0.
+- [P2] DF-GITREINS-POC-64: literal `pip install gitreins` PEP-668-blocked on
+  stock Linux (3rd sighting: runs 9/12/13); no documented venv route for PyPI
+  consumers — one fenced block in §1 closes it. Bunker leg otherwise green
+  (venv install 20s, smoke DEGRADED-pass with honest gitleaks warning).
+- [P2] DF-GITREINS-POC-65: §5's `--depends-on build` example references a task
+  that is never created — dependencies are unvalidated at create time, doc
+  doesn't say. (POC-13's ordering fix itself re-verified green.)
+- Perf: guard 258.6ms±11.7 warm (hyperfine, 20 runs), task list 83.2ms±5.1 —
+  nothing a user feels, no PERF row. Install leg RUN on las-bunker-03 (agent
+  caeeca94, clone 6.6s @ 3817cc4, destroyed + verified gone).

@@ -1253,3 +1253,36 @@ The docs fix belongs in cli-reference §9 (POC-59).
 at record time. The repo's one pre-run-12 row says `gitreins-poc` (recorded when the dir had
 that name); new rows say `gitreins`. Both are true records; consumers that group by project
 should normalize (POC-60).
+
+## Run 13 (2026-09-25b) — the onboarding surface: how the first hour actually behaves
+
+Run 13 walked docs/onboarding.md §1–§8 verbatim from the PyPI wheel (0.15.0,
+matching HEAD) in a scratch repo, plus a bunker re-run of the install path.
+Three mechanics worth explaining beyond the findings:
+
+**The gitreins branch collision (POC-62) is a git-namespaced landmine, not a
+gitreins logic bug.** Verdict persistence under `history.storage: "git"` uses
+an orphan branch literally named `gitreins`, while task worktrees use
+`gitreins/task/<id>` — a child ref path of the first. Git cannot lock
+`refs/heads/gitreins/task/x` once `refs/heads/gitreins` exists, so the FIRST
+thing a user does in §8 fails the moment they have completed one task (the
+order the guide itself teaches). Any future surface that invents a branch
+name must check it is not a prefix of, or prefixed by, another branch the
+harness creates. Fix is one rename; the guide needs no change.
+
+**`--depends-on` is unvalidated at create time (POC-65).** The parser-level
+ordering fix from POC-13 holds — criteria before the flag, always. But the
+guide's own example points at a task `build` that nothing ever creates, and
+create accepts it silently. Task dependencies are a naming convention, not a
+foreign key; any doc example that invents an id teaches a task that can never
+satisfy its dependency.
+
+**PEP 668 is the default fresh-Linux experience (POC-64, third sighting).**
+Debian 13's pip refuses system installs, and the error names no gitreins fix.
+The onboarding guide only documents a venv for the source-checkout path; the
+PyPI consumer's first command in §1 is the one that fails. One fenced venv
+block in §1 closes it. On the bunker leg everything downstream of that
+(install → init → guard → hook commit) ran green off the venv path, including
+an honest DEGRADED pass naming the missing gitleaks binary and its exact
+install command — that fail-loud degraded behavior is the correct model for
+missing-tool lanes.
