@@ -15,8 +15,18 @@
       "brief": "/tmp/gitreins-336-brief-DF-GITREINS-POC-48.txt",
       "model": "deepseek-v4-flash",
       "provider": "deepseek-foreman",
-      "scope": ["gitreins/cli.py", "engine/worktree_fleet.py", "engine/worktree_manager.py", "README.md", "docs/", "tests/"],
-      "status": "dispatched"
+      "scope": [
+        "gitreins/cli.py",
+        "engine/worktree_fleet.py",
+        "engine/worktree_manager.py",
+        "README.md",
+        "docs/",
+        "tests/"
+      ],
+      "status": "merged",
+      "branch_commit": "e84e7f2",
+      "merge_commit": "038a784",
+      "judge": "PASS tier1+tier2 (c207a0b4)"
     },
     {
       "task_id": "DF-GITREINS-POC-52",
@@ -26,8 +36,15 @@
       "brief": "/tmp/gitreins-336-brief-DF-GITREINS-POC-52.txt",
       "model": "deepseek-v4-flash",
       "provider": "deepseek-foreman",
-      "scope": ["engine/persist.py", "tests/", "docs/"],
-      "status": "dispatched"
+      "scope": [
+        "engine/persist.py",
+        "tests/",
+        "docs/"
+      ],
+      "status": "merged",
+      "branch_commit": "d21c62b",
+      "merge_commit": "8922d7d",
+      "judge": "PASS tier1+tier2 (1fbcd56e)"
     },
     {
       "task_id": "DF-GITREINS-POC-37",
@@ -37,16 +54,39 @@
       "brief": "/tmp/gitreins-336-brief-DF-GITREINS-POC-37.txt",
       "model": "deepseek-v4-flash",
       "provider": "deepseek-foreman",
-      "scope": ["engine/preflight.py", "engine/resolution.py", "gitreins/cli.py", "docs/cli-reference.md", "tests/"],
-      "status": "dispatched"
+      "scope": [
+        "engine/preflight.py",
+        "engine/resolution.py",
+        "gitreins/cli.py",
+        "docs/cli-reference.md",
+        "tests/"
+      ],
+      "status": "merged",
+      "branch_commit": "b712309",
+      "merge_commit": "6d3a873",
+      "judge": "PASS tier1+tier2 (9ce25045); task already fixed earlier — worker pinned the one-record shape + docs"
     }
   ],
   "excluded": [
-    {"task_id": "POC-44/45/46 (Go guard band)", "reason": "share the Go guard/test-command surface with each other — same-band collision per middle-out rule"},
-    {"task_id": "POC-53", "reason": "docs contract for the fleet merge flow overlaps POC-48's README/manifest-pattern work — lands after POC-48's shape is known"},
-    {"task_id": "REVIEW-006", "reason": "P3 hygiene; candidate for a later tick"},
-    {"task_id": "GR-099", "reason": "blocked DEPS"}
+    {
+      "task_id": "POC-44/45/46 (Go guard band)",
+      "reason": "share the Go guard/test-command surface with each other — same-band collision per middle-out rule"
+    },
+    {
+      "task_id": "POC-53",
+      "reason": "docs contract for the fleet merge flow overlaps POC-48's README/manifest-pattern work — lands after POC-48's shape is known"
+    },
+    {
+      "task_id": "REVIEW-006",
+      "reason": "P3 hygiene; candidate for a later tick"
+    },
+    {
+      "task_id": "GR-099",
+      "reason": "blocked DEPS"
+    }
   ],
   "independence_proof": "Disjoint clusters verified by grep: POC-48 = gitreins/cli.py judge/merge flags + engine/worktree_fleet.py (fleet merge path, worktree_manager constants touched only for the task-create flow); POC-52 = engine/persist.py verdict-history ref (persist.py:714 sole writer of refs/heads/gitreins); POC-37 = engine/preflight.py + engine/resolution.py record shape (persist.py and worktree_fleet.py untouched). No depends_on edges between rows (all []). cli.py is shared by POC-48 and POC-37 only as a CLI surface — POC-37's edit is the preflight --json record build in engine/, POC-48's is the judge/merge flag flow; different functions. Merge order chosen: POC-52, POC-37, POC-48 (P1 last so its bigger surface lands on the most current tree).",
-  "merge_plan": "serial merges to main after per-worker RED-proof + scoped gates on the merged tree (docs drift + scoped pytest; full suite once at the end); gitreins tier-2 task complete per task post-merge (fresh task lifecycle: create/start/complete, async judges); push github main after all three landed"
+  "merge_plan": "serial merges to main after per-worker RED-proof + scoped gates on the merged tree (docs drift + scoped pytest; full suite once at the end); gitreins tier-2 task complete per task post-merge (fresh task lifecycle: create/start/complete, async judges); push github main after all three landed",
+  "finished_at": "2026-09-25T07:55:00Z",
+  "closeout_note": "3/3 merged --no-ff (POC-52 8922d7d, POC-37 6d3a873, POC-48 038a784); doc test-count race POC-52×POC-48 resolved to 2436; full suite 2420 passed/16 skipped; worktrees removed, branches kept as evidence"
 }
