@@ -167,7 +167,7 @@ def test_summarize_counts_unpriced_judgements_that_were_attributed():
     summary = usage.summarize(index, total_verdicts=2)
 
     assert (summary["priced"], summary["unpriced"], summary["unattributed"]) == (0, 1, 1)
-    assert summary["cost_usd"] == 0.0
+    assert summary["cost_usd"] is None
     assert summary["prices_configured"] is False
 
 
@@ -179,7 +179,31 @@ def test_summarize_of_an_empty_index_is_zero_and_unpriced_aware():
     assert summary["judgements"] == 0
     assert summary["verdicts"] == 0
     assert summary["unattributed"] == 0
-    assert summary["cost_usd"] == 0.0
+    assert summary["cost_usd"] is None
     assert summary["priced"] == 0
     assert summary["unpriced"] == 0
     assert summary["prices_configured"] is False
+
+
+def test_summarize_aggregate_cost_is_null_when_nothing_is_priced():
+    """The aggregate ships `cost_usd: null` with `priced: 0`, like a per-verdict block."""
+    index = usage.attribute_rows([("2026-09-01", "aaaa1111", 100.0)], [_row(50.0, 500, 25)])
+
+    summary = usage.summarize(index, total_verdicts=1)
+
+    assert summary["priced"] == 0
+    assert summary["cost_usd"] is None
+
+
+def test_summarize_aggregate_cost_is_a_float_once_anything_is_priced():
+    index = usage.attribute_rows(
+        [("2026-09-01", "aaaa1111", 100.0)],
+        [_row(50.0, 500, 25)],
+        {"model": "m", "price_per_1m_input": 0.28, "price_per_1m_output": 0.42},
+    )
+
+    summary = usage.summarize(index)
+
+    assert summary["priced"] == 1
+    assert isinstance(summary["cost_usd"], float)
+    assert summary["cost_usd"] == round((500 * 0.28 + 25 * 0.42) / 1_000_000, 6)

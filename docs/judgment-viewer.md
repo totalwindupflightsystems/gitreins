@@ -75,7 +75,7 @@ changed one. Data is re-read from disk on every request, so the contract is
 | Method | Path | Success | Payload | Errors |
 |--------|------|---------|---------|--------|
 | GET | `/` | 200 HTML | the single-page viewer (no server-side data; it fetches `/api/*`) | — |
-| GET | `/api/stats` | 200 | `total`, `passed`, `failed`, `pass_rate`, `usage` (aggregate judge tokens/cost), `board` (`configured`/`path`/`message` for the fleet board), `repo`, `path`, `generated` | — |
+| GET | `/api/stats` | 200 | `total`, `passed`, `failed`, `pass_rate`, `resolution_records`, `usage` (aggregate judge tokens/cost), `board` (`configured`/`path`/`message` for the fleet board), `repo`, `path`, `generated`. `total` counts judgments only: resolution-gate records are excluded from it but still listed by `/api/verdicts`, and are reported as `resolution_records`, so `total + resolution_records` always equals the `/api/verdicts` list length | — |
 | GET | `/api/verdicts` | 200 | `{"verdicts": [row, …]}` — metadata only, newest last | — |
 | GET | `/api/verdicts/<date>/<hash>` | 200 | the full `verdict.json` (criteria, `stages.tier1`, `stages.tier2`, `evidence` manifest when one was collected) plus a joined `usage` block when judge telemetry is traceable to it | `400` malformed path (not `<date>/<hash>`), `404` unknown date/hash |
 | GET | `/api/verdicts/<date>/<hash>/evidence/<name>` | 200 `text/plain` | one worker-evidence artifact declared by that verdict's `evidence` manifest (`brief`, `log`, `patch`) | `400` missing `<name>`, `404` unknown verdict or a name the manifest does not declare (including an artifact deleted since) |
@@ -148,8 +148,10 @@ in a separate file.
   `evaluated_at` is the earliest one at or after the line's `ts`. A line is
   therefore charged to at most one verdict (no double counting across two rows),
   and a line that precedes no verdict — a pre-commit pass, an evaluation whose
-  verdict was never persisted — stays unattributed rather than being blamed on an
-  unrelated judgment. The stats header reports those as `unattributed`.
+  verdict was never persisted — is never blamed on an unrelated judgment. The
+  stats header reports `unattributed` as the verdicts that carry no usage
+  telemetry lines at all (verdicts minus attributed verdicts) — not as lines
+  lacking a verdict.
 - **Absent means absent.** A verdict with no traceable lines has no `usage` block
   in the detail payload; the aggregate counts it in `unattributed`. Neither is
   zero-filled.
@@ -166,7 +168,10 @@ usage:
 With no rates configured, the API still reports `tokens_in`/`tokens_out` (and
 `cache_read`/`cache_write` alongside) with `priced: false` and `cost_usd: null`,
 the detail pane shows a `cost unpriced` badge, and the stats header says so —
-a fabricated rate would be worse than a visible gap. `tokens_in` already
+a fabricated rate would be worse than a visible gap. The aggregate `usage`
+block in `/api/stats` follows the same rule: with nothing priced
+(`priced: 0`) its `cost_usd` is `null`, and once at least one judgment is
+priced it is the rounded subtotal. `tokens_in` already
 includes cache reads, so a cost is charged on input + output only. The rates
 belong to the model named by `usage.model` (else `defaults.model`), and usage
 lines do not carry a model of their own.
