@@ -11,7 +11,7 @@
 
 GitReins lives inside your git repository as a quality harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ✅ **v0.15.0** — the release that closes the loop between what is merged and what actually runs. `gitreins resolve "<question>"` (and the `context.resolve` MCP tool) traces a question to its seed files through Hilo, assembles a measured evidence bundle and returns a calibrated verdict band; `gitreins preflight` checks the premises of a task *before* a worker is dispatched, and annotates instead of dispatching when they do not hold; the judge pre-screens candidates and attributes a verdict per acceptance criterion; per-surface config knobs make the resolution gate tunable without touching code. On the guard side, the `hook_timeout` early-return now carries `allow_skips` (a slow repo's docs/board commits were being blocked with exit 2 by a run whose own warning said the commit was allowed), the test lane pins its interpreter so a host whose PATH carries another virtualenv can no longer fail the lane with `unrecognized arguments: -n`, Go guard commands run through bounded execution, and the evaluator reaps the last run's process group on exit. `scripts/check_deployed_surface.py` is new: it compares the *deployed* CLI surface with this checkout and fails loudly when a merged subcommand exists only in the repo — the drift that used to be invisible because both copies reported the same version. 2462 tests pass / 70 test files, verified by collection (optional-tool skips vary).
+> ✅ **v0.15.0** — the release that closes the loop between what is merged and what actually runs. `gitreins resolve "<question>"` (and the `context.resolve` MCP tool) traces a question to its seed files through Hilo, assembles a measured evidence bundle and returns a calibrated verdict band; `gitreins preflight` checks the premises of a task *before* a worker is dispatched, and annotates instead of dispatching when they do not hold; the judge pre-screens candidates and attributes a verdict per acceptance criterion; per-surface config knobs make the resolution gate tunable without touching code. On the guard side, the `hook_timeout` early-return now carries `allow_skips` (a slow repo's docs/board commits were being blocked with exit 2 by a run whose own warning said the commit was allowed), the test lane pins its interpreter so a host whose PATH carries another virtualenv can no longer fail the lane with `unrecognized arguments: -n`, Go guard commands run through bounded execution, and the evaluator reaps the last run's process group on exit. `scripts/check_deployed_surface.py` is new: it compares the *deployed* CLI surface with this checkout and fails loudly when a merged subcommand exists only in the repo — the drift that used to be invisible because both copies reported the same version. 2467 tests pass / 70 test files, verified by collection (optional-tool skips vary).
 
 Every resolution-gate surface ships **disabled**, because resolving a question sends the assembled bundle off the host: enabling one is an explicit act, `resolution.enabled.<surface>: true` (`cli`, `mcp`, `predispatch`, `judge_prescreen`) in `.gitreins/config.yaml` — `gitreins init` writes the block with all four `false`, and only a literal `true` opens a surface. A disabled surface fails closed with `abstain_reason: surface-disabled` and prints the enabling fix. The complete block, the defaults it may omit and the calibration caveat on the judge-adjacent surfaces are in [docs/jev-resolution-gate.md §9](docs/jev-resolution-gate.md).
 
@@ -453,32 +453,59 @@ gitreins report --interactive  # TUI with arrow-key navigation (requires textual
 ### Branch mechanics (git storage)
 
 With `storage: "git"` (the default), every verdict is auto-committed to a
-dedicated orphan `gitreins` branch — never to `main`. The branch is only
-checked out transiently (or updated via a temporary worktree), so your
-working tree is never disturbed. `.gitreins/history/` is intentionally
-gitignored: the verdict files are runtime artifacts whose canonical home is
-the `gitreins` branch, and a fresh clone therefore has no local
+dedicated git ref — `refs/gitreins/history`, an orphan ref outside the
+branch namespace (older repos kept their history on the `gitreins` branch,
+which reads still union). The ref is never checked out, so your working
+tree is never disturbed. `.gitreins/history/` is intentionally gitignored:
+the verdict files are runtime artifacts whose canonical home is the
+`refs/gitreins/history` ref, and a fresh clone therefore has no local
 `.gitreins/history/` directory.
 
 `gitreins report` reads verdicts in this order:
 
 1. **Local filesystem** — `.gitreins/history/` in the working tree (used
    when present, e.g. right after a judge run in the same checkout).
-2. **`gitreins` branch fallback** — when the local directory is missing or
-   empty and storage is `"git"`, verdicts are read straight from the branch
-   (`git ls-tree` / `git show`), so a fresh clone can still browse the full
-   verdict history.
+2. **Verdict refs fallback** — when the local directory is missing or
+   empty and storage is `"git"`, verdicts are read from the git refs, most
+   authoritative first: `refs/gitreins/history`, then the legacy `gitreins`
+   branch, then their remote-tracking copies
+   (`refs/remotes/origin/gitreins/history`,
+   `refs/remotes/origin/gitreins`). A fresh clone has no local history ref
+   (`git clone` fetches only `refs/heads/*`) but still browses the full
+   verdict history from its origin instead of printing "No verdict history
+   found."
 
-To inspect the branch directly:
+To inspect the ref directly:
 
 ```bash
-git log --oneline gitreins                                            # verdict commits
-git ls-tree -r --name-only gitreins -- .gitreins/history              # stored files
-git show gitreins:.gitreins/history/<date>/<hash>/verdict.json        # one verdict
+git log --oneline gitreins/history                               # verdict commits
+git ls-tree -r --name-only gitreins/history -- .gitreins/history  # stored files
+git show gitreins/history:.gitreins/history/<date>/<hash>/verdict.json  # one verdict
 ```
 
-With `storage: "filesystem"`, verdicts are written locally only — no branch
-is created and the fallback is skipped.
+#### Fresh clones: fetching the canonical history ref
+
+`git clone` maps only `refs/heads/*` to `refs/remotes/origin/*`, so a fresh
+clone sees neither verdict-history ref locally: the legacy branch exists
+only as its remote-tracking copy, and the canonical `refs/gitreins/history`
+is not fetched at all. Report degrades gracefully (remote-tracking
+fallback), but the copy it serves can be stale. To make a clone fetch — and
+keep updating — the canonical history ref:
+
+```bash
+git config --add remote.origin.fetch '+refs/gitreins/history:refs/gitreins/history'
+git fetch origin
+```
+
+This is a self-named refspec: it writes `refs/gitreins/history` directly in
+the clone, where it outranks the remote-tracking fallbacks. (The
+remote-tracking spelling `refs/remotes/origin/gitreins/history` is not
+reachable from a default clone: git cannot track `refs/gitreins/history`
+under `refs/remotes/origin/gitreins/` as a directory while the legacy
+`gitreins` branch is also tracked there as a file.)
+
+With `storage: "filesystem"`, verdicts are written locally only — no ref is
+created and the fallback is skipped.
 
 ### Judge token usage (`.gitreins/usage.jsonl`)
 
@@ -622,7 +649,7 @@ history:
 - **MCP Transport:** stdio (13 tools)
 - **Config:** YAML in `.gitreins/` directory
 - **Evaluator Default Model:** DeepSeek V4 Flash (~$0.01/eval)
-- **Test suite:** 2462 tests across 70 test files (collection total; optional-tool skips vary)
+- **Test suite:** 2467 tests across 70 test files (collection total; optional-tool skips vary)
 
 ## Architecture & Docs
 

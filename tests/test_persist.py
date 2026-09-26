@@ -1203,3 +1203,277 @@ class TestResolutionRecordsCoexistWithJudgeHistory:
         assert "Recent: 2 evaluations" in report
         assert "Pass:   1 (50%)" in report
         assert "Fail:   1 (50%)" in report
+
+
+# ── fresh-clone verdict-history fallback (DF-GITREINS-POC-68) ──
+#
+# ``git clone`` maps only ``refs/heads/*`` to ``refs/remotes/origin/*``, so a
+# fresh clone has NO local verdict-history ref at all: the canonical
+# refs/gitreins/history is not fetched by default and the legacy branch
+# appears only as refs/remotes/origin/gitreins. The reader must consult the
+# remote-tracking copies (after the local refs) or a clone prints
+# "No verdict history found." while its origin carries the whole history.
+
+REMOTE_CANONICAL = "refs/remotes/origin/gitreins/history"
+REMOTE_LEGACY = "refs/remotes/origin/gitreins"
+
+
+def _git_plumbing(repo, env, *args, inp=None):
+    """stdout of one plumbing git command in *repo* (fixture helper)."""
+    out = subprocess.run(
+        ["git", *args],
+        input=inp,
+        capture_output=True,
+        text=True,
+        cwd=str(repo),
+        env=env,
+        check=True,
+    )
+    return out.stdout.strip()
+
+
+def _verdict_commit(repo, env, verdicts):
+    """Build a verdict-history commit purely with plumbing; return its oid.
+
+    Layout: ``.gitreins/history/<date>/<hash>/verdict.json`` — the same paths
+    the persister commits, assembled without touching a working tree or index
+    so the fixture works inside any repo shape.
+    """
+    dates: dict[str, dict[str, str]] = {}
+    for date, hash_, task_id, passed in verdicts:
+        blob = _git_plumbing(
+            repo,
+            env,
+            "hash-object",
+            "-w",
+            "--stdin",
+            inp=json.dumps(
+                {"task_id": task_id, "passed": passed, "evaluated_at": f"{date}T00:00:00"}
+            ),
+        )
+        dates.setdefault(date, {})[hash_] = blob
+    history_entries = []
+    for date in sorted(dates):
+        inner = _git_plumbing(
+            repo,
+            env,
+            "mktree",
+            inp="".join(f"100644 blob {b}\tverdict.json\n" for b in dates[date].values()),
+        )
+        date_tree = _git_plumbing(
+            repo,
+            env,
+            "mktree",
+            inp="".join(f"040000 tree {inner}\t{h}\n" for h in sorted(dates[date])),
+        )
+        history_entries.append(f"040000 tree {date_tree}\t{date}\n")
+    history_tree = _git_plumbing(repo, env, "mktree", inp="".join(history_entries))
+    gitreins_tree = _git_plumbing(repo, env, "mktree", inp=f"040000 tree {history_tree}\thistory\n")
+    root = _git_plumbing(repo, env, "mktree", inp=f"040000 tree {gitreins_tree}\t.gitreins\n")
+    return _git_plumbing(repo, env, "commit-tree", root, inp="verdicts\n")
+
+
+def _make_fresh_clone(tmp_path, verdicts, *, canonical_remote_tracking: bool):
+    """Origin repo + a fresh clone that holds ONLY remote-tracking verdict refs.
+
+    Origin: a ``main`` branch checked out (so the clone's working tree is
+    clean — the fresh-clone shape) and the verdict commit pointed at by the
+    legacy ``gitreins`` branch AND the canonical ``refs/gitreins/history``
+    ref (storage moved there in DF-GITREINS-POC-52; ``git clone`` fetches
+    neither by default).
+
+    The two remote-tracking shapes are mutually exclusive in git (a D/F
+    conflict: ``refs/remotes/origin/gitreins`` exists as a FILE when it tracks
+    the legacy branch, and as a DIRECTORY when it holds the canonical
+    remote-tracking ref), so *canonical_remote_tracking* picks which one the
+    clone carries:
+
+    - True  — a fully migrated origin: the legacy branch is gone, only
+      ``refs/gitreins/history`` exists, and the clone's wildcard refspec maps
+      it to ``refs/remotes/origin/gitreins/history``.
+    - False — the realistic shape today: origin carries the legacy branch AND
+      the canonical ref, the plain clone tracks only the legacy branch.
+    """
+    origin = tmp_path / "origin"
+    env = _git_env()
+    origin.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", "-b", "main", str(origin)], check=True, env=env)
+    (origin / "README.md").write_text("project repo\n")
+    subprocess.run(
+        ["git", "add", "README.md"], check=True, capture_output=True, cwd=str(origin), env=env
+    )
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "project"],
+        check=True,
+        capture_output=True,
+        cwd=str(origin),
+        env=env,
+    )
+    verdict_commit = _verdict_commit(origin, env, verdicts)
+    if not canonical_remote_tracking:
+        subprocess.run(
+            ["git", "update-ref", LEGACY_HISTORY_REF, verdict_commit],
+            check=True,
+            capture_output=True,
+            cwd=str(origin),
+            env=env,
+        )
+    subprocess.run(
+        ["git", "update-ref", HISTORY_REF, verdict_commit],
+        check=True,
+        capture_output=True,
+        cwd=str(origin),
+        env=env,
+    )
+
+    clone = tmp_path / "clone"
+    subprocess.run(
+        ["git", "clone", "-q", str(origin), str(clone)], check=True, capture_output=True, env=env
+    )
+    assert not (clone / ".gitreins").exists(), "fresh-clone shape: no local history in the tree"
+    if canonical_remote_tracking:
+        subprocess.run(
+            [
+                "git",
+                "config",
+                "--add",
+                "remote.origin.fetch",
+                "+refs/gitreins/*:refs/remotes/origin/gitreins/*",
+            ],
+            check=True,
+            capture_output=True,
+            cwd=str(clone),
+            env=env,
+        )
+        subprocess.run(
+            ["git", "fetch", "-q", "origin"],
+            check=True,
+            capture_output=True,
+            cwd=str(clone),
+            env=env,
+        )
+    if canonical_remote_tracking:
+        present, absent = [REMOTE_CANONICAL], [REMOTE_LEGACY]
+    else:
+        present, absent = [REMOTE_LEGACY], [REMOTE_CANONICAL]
+    for ref in present:
+        assert _ref_exists(clone, env, ref), f"fixture setup: {ref} missing in clone"
+    for ref in absent:
+        assert not _ref_exists(clone, env, ref), f"fixture setup: {ref} must be absent"
+    assert not _ref_exists(clone, env, HISTORY_REF), "fixture: canonical ref must not be local"
+    assert not _ref_exists(clone, env, LEGACY_HISTORY_REF), "fixture: no local legacy branch"
+    return clone, env
+
+
+def test_history_refs_rank_canonical_then_legacy_then_remote_tracking():
+    """Resolution order: local canonical, local legacy, then remote-tracking."""
+    order = VerdictPersister()._history_refs()
+    assert order == [HISTORY_REF, LEGACY_HISTORY_REF, REMOTE_CANONICAL, REMOTE_LEGACY]
+
+
+def test_list_verdicts_serves_history_from_remote_tracking_refs_in_a_fresh_clone(tmp_path):
+    clone, _env = _make_fresh_clone(
+        tmp_path,
+        [
+            ("2026-06-21", "aaaa1111", "remote-old-task", True),
+            ("2026-06-22", "bbbb2222", "remote-new-task", False),
+        ],
+        canonical_remote_tracking=True,
+    )
+
+    p = VerdictPersister(str(clone))
+    assert not os.path.isdir(p.history_dir)  # fresh-clone shape
+    assert [e["task_id"] for e in p.list_verdicts()] == ["remote-new-task", "remote-old-task"]
+    # entries name the ref they were actually read from — among the
+    # remote-tracking fallbacks the canonical copy outranks the legacy one.
+    assert {e["_ref"] for e in p.list_verdicts()} == {REMOTE_CANONICAL}
+    assert p.count_verdicts() == 2
+    report = build_report(str(clone))
+    assert "remote-new-task" in report
+    assert "No verdict history found" not in report
+
+
+def test_list_verdicts_reads_the_plain_clone_legacy_remote_tracking_ref(tmp_path):
+    """A default-recipe clone (no canonical tracking ref) still serves history."""
+    clone, _env = _make_fresh_clone(
+        tmp_path,
+        [
+            ("2026-06-21", "aaaa1111", "remote-old-task", True),
+            ("2026-06-22", "bbbb2222", "remote-new-task", False),
+        ],
+        canonical_remote_tracking=False,
+    )
+
+    p = VerdictPersister(str(clone))
+    assert [e["task_id"] for e in p.list_verdicts()] == ["remote-new-task", "remote-old-task"]
+    assert {e["_ref"] for e in p.list_verdicts()} == {REMOTE_LEGACY}
+    assert p.count_verdicts() == 2
+    assert "No verdict history found" not in build_report(str(clone))
+
+
+def test_list_verdicts_prefers_local_refs_over_remote_tracking_fallback(tmp_path):
+    clone, env = _make_fresh_clone(
+        tmp_path,
+        [
+            ("2026-06-21", "aaaa1111", "remote-old-task", True),
+            ("2026-06-22", "bbbb2222", "remote-new-task", False),
+        ],
+        canonical_remote_tracking=True,
+    )
+
+    # A later local write/fetch lands the canonical ref in the clone, carrying
+    # a LOCAL copy of an entry path the remote also has (same date/hash dir,
+    # different content) — the local ref must win that path, while the
+    # remote-only entry stays served from the remote-tracking fallback.
+    blob = _git_plumbing(
+        clone,
+        env,
+        "hash-object",
+        "-w",
+        "--stdin",
+        inp=json.dumps(
+            {
+                "task_id": "local-canonical-task",
+                "passed": True,
+                "evaluated_at": "2026-06-22T00:00:00",
+            }
+        ),
+    )
+    inner = _git_plumbing(clone, env, "mktree", inp=f"100644 blob {blob}\tverdict.json\n")
+    d3 = _git_plumbing(clone, env, "mktree", inp=f"040000 tree {inner}\tbbbb2222\n")
+    d2 = _git_plumbing(clone, env, "mktree", inp=f"040000 tree {d3}\t2026-06-22\n")
+    d1 = _git_plumbing(clone, env, "mktree", inp=f"040000 tree {d2}\thistory\n")
+    root = _git_plumbing(clone, env, "mktree", inp=f"040000 tree {d1}\t.gitreins\n")
+    commit = _git_plumbing(clone, env, "commit-tree", root, inp="local canonical verdicts\n")
+    _git_plumbing(clone, env, "update-ref", HISTORY_REF, commit)
+
+    p = VerdictPersister(str(clone))
+    entries = p.list_verdicts()
+    assert [e["task_id"] for e in entries] == ["local-canonical-task", "remote-old-task"]
+    assert entries[0]["_ref"] == HISTORY_REF  # local canonical outranks the remote copy
+    assert entries[1]["_ref"] == REMOTE_CANONICAL
+
+
+def test_readme_fetch_recipe_makes_canonical_history_visible_in_a_clone(tmp_path):
+    """Exactly the refspec the README documents, applied to a plain clone."""
+    clone, env = _make_fresh_clone(
+        tmp_path,
+        [
+            ("2026-06-21", "aaaa1111", "remote-old-task", True),
+            ("2026-06-22", "bbbb2222", "remote-new-task", False),
+        ],
+        canonical_remote_tracking=False,
+    )
+    # The recipe is a SELF-NAMED refspec: it writes refs/gitreins/history in
+    # the clone itself — never refs/remotes/origin/gitreins/history, which is
+    # unrepresentable in a default clone (D/F conflict with the legacy
+    # branch's tracking ref). Applied here via the refspec round-trip.
+    config_refspec = "+refs/gitreins/history:refs/gitreins/history"
+    _git_plumbing(clone, env, "config", "--add", "remote.origin.fetch", config_refspec)
+    _git_plumbing(clone, env, "fetch", "-q", "origin")
+    assert _ref_exists(clone, env, HISTORY_REF)
+
+    p = VerdictPersister(str(clone))
+    assert [e["task_id"] for e in p.list_verdicts()] == ["remote-new-task", "remote-old-task"]
+    assert {e["_ref"] for e in p.list_verdicts()} == {HISTORY_REF}
+    assert "No verdict history found" not in build_report(str(clone))
