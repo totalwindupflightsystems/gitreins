@@ -3,7 +3,114 @@ Shared pytest fixtures for GitReins tests.
 axiom:trace work_item=GR-001 spec=specs/05-Task-Manager.md plan=.memory-bank/work-items/GR-001/plan.yaml step=step-1-1-1-1
 """
 
+from __future__ import annotations
+
+import fcntl
+import hashlib
+import os
+import tempfile
+
 import pytest
+
+# DF-GITREINS-POC-61: the tier-1 stamp is IMPORTED from the module that sets it
+# (``engine.pipeline`` tier1_plan → the tests step's per-step ``env``) — one
+# definition, two sides of the contract, so the name can never drift apart.
+# `import engine.pipeline` is ~0.08s and already happens for most test modules.
+from engine.pipeline import TIER1_ENV_VAR
+
+# ── DF-GITREINS-POC-61: live/egress tests never grade a deterministic gate ───
+#
+# A judge's Tier 1 runs the guard's test command VERBATIM (``guards.test_mode:
+# diff`` is a guard-only narrowing), so the FULL suite — including a
+# skipif-guarded live smoke test that calls OpenRouter + hilo — executed on
+# every judge run. Under concurrent judges the live call came back
+# rate-limited/5xx, pytest exited non-zero, and the tier-1 FAIL short-circuited
+# Tier 2: one host-global flake burned a whole judge cycle.
+#
+# Two hooks below: skip ``live``-marked tests inside tier 1, and flock-serialize
+# them everywhere else so two concurrent runs can never fire the live call at
+# the same moment.
+
+LIVE_MARKER = "live"
+
+_LIVE_SKIP_REASON = (
+    "live/egress test excluded from judge tier-1 (DF-GITREINS-POC-61): a "
+    "non-deterministic host-global network smoke must not decide a "
+    "deterministic gate — run `pytest -m live` outside the judge to exercise it"
+)
+
+# fd/handle of the per-repo live-run lock, held for the duration of the test.
+_LIVE_LOCK_FD: int | None = None
+
+
+def _in_tier1() -> bool:
+    """True when this pytest process is the child of a judge Tier 1 tests step."""
+    return os.environ.get(TIER1_ENV_VAR) == "1"
+
+
+def _live_lock_path() -> str:
+    """Per-repo lock file, OUTSIDE the repo — a run never writes an in-tree file.
+
+    Keyed by the repo root so two checkouts of different repos never contend,
+    while two concurrent runs of THIS repo do.
+    """
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    digest = hashlib.sha1(repo_root.encode("utf-8")).hexdigest()[:12]
+    return os.path.join(tempfile.gettempdir(), f"gitreins-live-{digest}.lock")
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip ``live``-marked (real-egress) tests when running inside judge tier-1.
+
+    The skip is applied to the collected item, so the reason lands in the run's
+    short summary and in ``-rs`` output; nothing is silently dropped.
+    """
+    if not _in_tier1():
+        return
+    skip = pytest.mark.skip(reason=_LIVE_SKIP_REASON)
+    for item in items:
+        if item.get_closest_marker(LIVE_MARKER) is not None:
+            item.add_marker(skip)
+
+
+def pytest_runtest_setup(item):
+    """Take the per-repo live lock, or skip if another process holds it.
+
+    Outside tier 1 the live test still runs for real (manual ``pytest`` with a
+    key, ``gitreins guard``) — it just cannot run CONCURRENTLY with another
+    live run in the same repo. Non-blocking acquire: the loser skips instead of
+    queueing, because a skipped egress smoke is honest and a queued judge is
+    not.
+    """
+    global _LIVE_LOCK_FD
+    if item.get_closest_marker(LIVE_MARKER) is None or _in_tier1():
+        return
+    path = _live_lock_path()
+    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        os.close(fd)
+        pytest.skip(
+            reason=(
+                "another process is already running the live/egress tests "
+                f"(flock on {path} is held) — skipped so only one live call is "
+                "in flight at a time (DF-GITREINS-POC-61)"
+            )
+        )
+    _LIVE_LOCK_FD = fd
+
+
+def pytest_runtest_teardown(item, nextitem):
+    """Release the live-run lock taken in :func:`pytest_runtest_setup`."""
+    global _LIVE_LOCK_FD
+    if _LIVE_LOCK_FD is None:
+        return
+    fd, _LIVE_LOCK_FD = _LIVE_LOCK_FD, None
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
 
 
 def init_fake_git_workdir(workdir) -> None:

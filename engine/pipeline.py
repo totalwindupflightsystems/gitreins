@@ -101,6 +101,15 @@ _PYTEST_SKIP_NO_TESTS = "no tests collected"
 #   <marker> <step-id>=<short reason>
 SKIP_SENTINEL = "GITREINS_SKIP:"
 
+# DF-GITREINS-POC-61: the env var this module's Tier 1 tests step stamps into
+# its own CHILD environment (never into this process — see _run_script_step's
+# per-step `env` merge). tests/conftest.py imports this name: when the child
+# sees it set to "1" the `live`-marked (real-egress) tests are skipped, so a
+# skipif-guarded host-global smoke test can never grade a judge run. It is
+# deliberately NOT set by the guard: `gitreins guard` and manual `pytest` runs
+# still execute the live test (flock-serialized).
+TIER1_ENV_VAR = "GITREINS_TIER1"
+
 
 def _verdict_item_data(item) -> dict:
     """One verdict item for a step's ``data`` payload — attribution optional.
@@ -647,6 +656,16 @@ class Pipeline:
             # pre-commit hook — they poison nested git commands in tests
             # (same class as DF-008; guards.py got this in 3cad082).
             sanitized_env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+            # DF-GITREINS-POC-61: a step def may declare extra child env
+            # (`env: {NAME: value}`), merged OVER the sanitized ambient env so
+            # the step wins. Per-step on purpose: the stamp reaches the child
+            # process only — this process's environ stays untouched, so a
+            # step's marker can never leak into a sibling step (secrets, lint)
+            # or into the caller's own environment. Values are stringified:
+            # the child env is str → str.
+            step_env = step_def.get("env") or {}
+            if step_env:
+                sanitized_env.update({str(k): str(v) for k, v in step_env.items()})
             # 2026-09-18: run through command_hygiene so a step that backgrounds work
             # cannot leak orphans (the tier-2 run_command path caused 278 survivors
             # reparented to systemd --user) and a busy-wait step is refused with a
@@ -1469,7 +1488,23 @@ def tier1_plan(workdir: str, config: dict | None = None) -> tuple[list[dict], di
     # a missing runner prefix (`uv run` on a pip-only machine) degrades the
     # same way in both engines.
     resolved_test_cmd, resolution_warning = _resolve_test_command(configured_test_cmd or test_cmd)
-    test_step: dict = {"id": "tests", "type": "script", "run": resolved_test_cmd}
+    # DF-GITREINS-POC-61: Tier 1 grades the same TREE the guard grades, but it
+    # runs the FULL test command — `guards.test_mode: diff` is a guard-only
+    # narrowing, so every judge run executed the whole suite including a
+    # skipif-guarded LIVE egress test (OpenRouter + hilo). That is a category
+    # error: a non-deterministic host-global network smoke cannot decide a
+    # deterministic gate. Under concurrent judges the losers came back
+    # rate-limited and the tier-1 FAIL short-circuited tier-2 — one flake cost a
+    # whole judge cycle. The fix is a per-step env stamp; tests/conftest.py
+    # skips `live`-marked tests when it sees TIER1_ENV_VAR=1. Manual `pytest`
+    # runs and `gitreins guard` do not set it, so the live test still runs there
+    # (flock-serialized against a concurrent run).
+    test_step: dict = {
+        "id": "tests",
+        "type": "script",
+        "run": resolved_test_cmd,
+        "env": {TIER1_ENV_VAR: "1"},
+    }
     if resolution_warning:
         test_step["resolution_warning"] = resolution_warning
     if test_timeout > 0:

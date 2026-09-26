@@ -1,0 +1,18 @@
+{
+  "tick": "gitreins-2026-09-25-23-11-19",
+  "budget": 1,
+  "base_sha": "aa65249",
+  "armed_at": "2026-09-25T19:05:00Z",
+  "note": "serial tick (WAVE_BUDGET=1); worktree helper based on origin/main (stale GitLab mirror d8b0e65) — branch reset --hard to github/main (aa65249) before dispatch, per REVIEW-005",
+  "workers": [
+    {
+      "task_id": "DF-GITREINS-POC-66",
+      "worktree": "/home/kara/worktrees/gitreins-wt-poc-66",
+      "branch": "wt/wt-poc-66",
+      "base": "github/main",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "status": "dispatched"
+    }
+  ]
+}

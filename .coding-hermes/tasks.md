@@ -304,3 +304,96 @@ docs/dogfood/2026-09-25b-integration.md + evidence/onboarding-2026-09-25b/run13.
   refs/heads/gitreins. Run 13's failure reproduces on PyPI 0.15.0 only → the
   live gap is RELEASE, not code. Row 62 updated (P1→fixed-at-HEAD, complete);
   rows 63-65 unchanged (re-verified against HEAD docs).
+
+## Dogfood Findings (2026-09-25c) — run 14: `report` / `commit` / `setup-tools`
+
+Promise: "After judging, a user browses verdict history via `gitreins report`
+(human / `--json` / `--interactive`, with the documented fresh-clone branch
+fallback), commits finished work with `gitreins commit` (guards wired in,
+MCP-style in_progress refusal), and `gitreins setup-tools` tells them which
+static-analysis tools exist and how to get missing ones." Runs 1-13 never
+promised these three. Method: fresh consumer clone of HEAD 5e9d38d, real
+task loop (task → guards-blocked commit → fix → committed → verdict →
+report), hook block/pass with a planted sk- token, MCP commit-refusal
+regression check, empty-repo and empty-index edge probes, three-clone probe
+of the fallback layers. Full detail: docs/dogfood/2026-09-25c-integration.md
++ evidence/maintenance-loop-2026-09-25/run14.md. Verdict: 🟢 SHIPPABLE for
+the surfaces tested; TTFS ~1 min; friction 5 (1×P1, 4×P2).
+
+- [P1] DF-GITREINS-POC-66: CLI `gitreins commit` has NO in_progress refusal
+  — with consumer-14 in_progress it ran guards and committed (8e1c239);
+  MCP `commit` refuses the same state with the documented rationale
+  (re-verified, 13-tool server). Two doors, one gate; the quickstarts teach
+  the ungated one.
+- [P2] DF-GITREINS-POC-67: guard banner asserts "full suite — safety
+  trigger" on runs whose tests lane SKIPPED in diff mode — test_targets=None
+  is a shared sentinel (real full-suite fallback vs zero-match skip);
+  cli.py:2087-2088 + guard_manager.py:1499-1500/2201-2209/1028. Banner and
+  run-log both overstate coverage.
+- [P2] DF-GITREINS-POC-68: fresh-clone verdict fallback still dead at HEAD,
+  now in layers: 2 stale TRACKED history dirs still win precedence (POC-58
+  part 1 pending); after untracking, report reads only LOCAL
+  refs/heads/gitreins ("No verdict history found." with origin/gitreins
+  carrying 617 verdicts; manual `git branch gitreins origin/gitreins`
+  activates it); canonical refs/gitreins/history (626, post-POC-52) is
+  clone-invisible and the legacy branch is 9 verdicts stale. NOTE: POC-58's
+  part 2 ("branch pushed") was true but is masked — my first draft credited
+  the fallback as fixed; corrected before filing.
+- [P2] DF-GITREINS-POC-69: setup-tools prints "Python + C + SQL" header over
+  a Python-only tool list (lang name vs primary type, cli.py:3114-3126);
+  missing-tool hint is bare `pip install mypy` (PEP-668, POC-64 class);
+  unknown-lang zero state honest, exit 0.
+- [P2] DF-GITREINS-POC-70: `gitreins commit` with nothing staged prints
+  green "Tier 1 PASSED — committing..." then git's "nothing to commit",
+  exit 1, guard summary last — cause sandwiched; unstaged-only edits get no
+  `git add` hint.
+- Regression sweeps GREEN: hook blocks planted sk- token (gitleaks + builtin
+  cross-check) and passes clean commits, hook path pinned to repo venv
+  (DF-011 holds), MCP refusal message intact, report --json schema/redaction
+  contract exact, empty-repo zero state honest, verdict persistence
+  (23211bc6) visible through report, -n bound respected.
+- Perf: report 89.0ms±4.6 warm / 0.08s cold (hyperfine 20 runs); commit
+  happy path 0.51s wall incl. guards. Nothing a user feels — no PERF row.
+- Install leg: SKIPPED-install-bunker — bunker-las-03 (the skill's assigned
+  host) unreachable: ssh connect timeout ×2 to 100.69.3.13, tailscale
+  status "offline, last seen 9m ago", tailscale ping timeout. Alternate
+  bunker-las-02 (precedent: run 09-15) is UP but bunkerd is crash-looping
+  (systemctl: activating, ExecStart status=1/FAILURE, Restart=on-failure;
+  API port 10001 connection refused). No other bunker node online. Run
+  record via `gitreins qa record` instead; infra follow-up needed on both
+  nodes.
+- Foreman not woken, cooldowns untouched per the 2026-09-09 fleet law. No
+  code changed; 5 board rows appended surgically (354→359, byte-exact
+  restore verified, 5/0 numstat).
+
+## Dogfood Findings (2026-09-26) — run 15: disposable verification (`worktree fresh` / `repro` / `dogfood`)
+
+Surface untouched by runs 1-14: the throwaway-tree QA trio. Consumer clone at /tmp/dogfood-repro
+(gitreins 0.15.0), deliberately flaky test, documented commands only. Full detail:
+docs/dogfood/2026-09-26-integration.md; diagnostics: docs/dogfood/diagnostics.md run-15 section;
+evidence rows: DF-GITREINS-POC-71..74 on the board (359→363, appended surgically, byte-exact
+verification of untouched rows).
+
+- [P2] DF-GITREINS-POC-71: kept failure trees are not self-contained — disposable-run children
+  inherit the parent PATH, so re-running a kept failure resolves the consumer's pytest and PASSED
+  where the run FAILED; --keep-failures preserves evidence-of-exit-code, not a repro environment.
+  Related: home .venv/bin/pytest dead shebang (pre-rename gitreins-poc path) — guard grades the
+  lane, hand-run gets `bad interpreter`. Fix: document the PATH contract or pin the child env;
+  `uv venv --recreate` for the shebang.
+- [P2] DF-GITREINS-POC-72: no documented perf envelope. hyperfine (warm, 10 runs): fresh 0.3505s
+  ±0.0127 vs raw pytest 0.0800s ±0.0121 (~4.4x/-run at toy scale, amortized at real sizes); repro
+  k=10 --concurrency 3 = 1.258s ±0.116 vs 2.181s ±0.283 sequential raw — the harness WINS at k=10
+  and no doc says so or helps size -k. No cold-cache anomaly (0.61→0.57s across runs). No PERF row
+  (nothing a user feels at real test sizes); the gap is documentation.
+- [P2] DF-GITREINS-POC-73: `worktree dogfood --skip-judge` human line "3/4 steps passed; judge
+  skipped" reads as a failure; skip reason lives only in JSON. Fix: separate skipped from failed
+  in the human counts.
+- [P2] SKIPPED-install-bunker — bunker-las-03 offline 7h (ssh timeout, ping 100% loss); fallback
+  bunker-las-02 UP but bunkerd crash-looping: "refusing to bind non-loopback plaintext listener
+  :10002, :10001: set tls.enabled: true …" restart counter 27343, port 10001 refused. Second
+  consecutive run blocked at the same node pair (DF-GITREINS-POC-74 carries the journal evidence).
+  No visibility/permission change (hard rule honored).
+- Value verdict: 🟢 SHIPPABLE for this surface — exit contracts exact (child failure propagates,
+  exit 2 = harness infra only), JSON evidence shape as documented, QA ledger rows outlived reaped
+  trees, honest zero-states (list/doctor). Time-to-first-success ~2 min.
+- Foreman not woken, cooldowns untouched per the 2026-09-09 fleet law. No code changed.

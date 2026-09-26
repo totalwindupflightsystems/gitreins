@@ -710,8 +710,19 @@ class TestCommitCLI:
     """Test commit CLI — step-3-3-1-3."""
 
     def test_commit_in_clean_repo(self, tmp_workdir):
-        """Commit in clean repo (no staged) runs guards then attempts commit."""
+        """Commit with a staged file runs guards then attempts the commit.
+
+        DF-GITREINS-POC-70: an empty index now refuses before the guard stage
+        (no "Tier 1" banner on that path), so the guarded path this test
+        exercises needs a staged file — the same setup its siblings use.
+        """
         write_guard_config(tmp_workdir)
+        staged_file = os.path.join(tmp_workdir, "staged.py")
+        with open(staged_file, "w") as f:
+            f.write("x = 1\n")
+        subprocess.run(
+            ["git", "add", "staged.py"], cwd=tmp_workdir, capture_output=True, timeout=15
+        )
         result = run_cli("commit", "test commit", cwd=tmp_workdir)
         output = result.stdout + result.stderr
         assert "Tier 1" in output
@@ -1153,7 +1164,17 @@ class TestGuardAndCommit:
 
     def test_commit_shows_guard_output(self, tmp_workdir):
         """Commit shows guard result in output."""
+        # DF-GITREINS-POC-70: an empty index now refuses BEFORE the guard
+        # stage, so the guarded path this test exists to exercise needs a
+        # staged file — the same setup its sibling tests below use.
+        subprocess.run(["git", "init"], cwd=tmp_workdir, capture_output=True, timeout=15)
         write_guard_config(tmp_workdir)
+        staged_file = os.path.join(tmp_workdir, "staged.py")
+        with open(staged_file, "w") as f:
+            f.write("x = 1\n")
+        subprocess.run(
+            ["git", "add", "staged.py"], cwd=tmp_workdir, capture_output=True, timeout=15
+        )
         result = run_cli("commit", "test message", cwd=tmp_workdir)
         assert "Tier 1" in result.stdout
 

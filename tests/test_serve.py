@@ -12,6 +12,7 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -238,6 +239,26 @@ def test_stats_counts_fixture_verdicts(live_server):
         "failed": 1,
         "pass_rate": 50,
     }
+
+
+def test_stderr_carries_the_non_loopback_host_warning(tmp_path, capsys):
+    """`--host` beyond loopback warns on stderr, keeping stdout for the banner."""
+    (tmp_path / ".gitreins" / "history").mkdir(parents=True)
+    with (
+        mock.patch.object(sys, "stdin", open(os.devnull)),
+        mock.patch.object(serve, "webbrowser", create=True),
+        mock.patch.object(
+            serve.ThreadingHTTPServer, "serve_forever", side_effect=KeyboardInterrupt
+        ),
+    ):
+        # serve() itself catches the KeyboardInterrupt and prints "stopped".
+        serve.serve(str(tmp_path), host="0.0.0.0", port=0, open_browser=False)
+
+    captured = capsys.readouterr()
+    assert "stopped" in captured.out, "the interrupt-driven shutdown path must have run"
+    assert "warning: --host 0.0.0.0" in captured.err
+    assert "NO authentication" in captured.err
+    assert "warning: --host 0.0.0.0" not in captured.out
 
 
 def test_verdicts_lists_fixture_metadata(live_server, repo_fixture):
@@ -708,7 +729,7 @@ def test_stats_include_the_aggregate_judge_spend(live_server, repo_fixture):
     assert usage["tokens_out"] == 1863 + 2000 + 794
     assert usage["unpriced"] == 2
     assert usage["priced"] == 0
-    assert usage["cost_usd"] == 0.0
+    assert usage["cost_usd"] is None
     assert usage["prices_configured"] is False
     assert usage["model"] == ""
 
@@ -890,9 +911,33 @@ class TestResolutionRecordsInTheViewerAPI:
         assert by_task["resolution"]["title"] == "Does the gate persist its verdicts?"
 
     def test_stats_count_judgments_only(self, resolution_repo: Path):
-        stats = serve.stats(serve.list_verdicts(str(resolution_repo)))
+        rows = serve.list_verdicts(str(resolution_repo))
+        stats = serve.stats(rows)
 
-        assert stats == {"total": 1, "passed": 1, "failed": 0, "pass_rate": 100}
+        assert stats == {
+            "total": 1,
+            "passed": 1,
+            "failed": 0,
+            "pass_rate": 100,
+            "resolution_records": 1,
+        }
+        # The exclusion must be reconcilable: header total + gate records = the list.
+        assert stats["total"] + stats["resolution_records"] == len(rows)
+
+    def test_stats_api_carries_resolution_records_next_to_the_listed_rows(
+        self, resolution_repo: Path
+    ):
+        """/api/stats exposes the count so a client can reconcile list vs header."""
+        with running_server(str(resolution_repo)) as (host, port):
+            _, list_body = get((host, port), "/api/verdicts")
+            _, stats_body = get((host, port), "/api/stats")
+
+        rows = json_body(list_body)["verdicts"]
+        payload = json_body(stats_body)
+
+        assert payload["resolution_records"] == 1
+        assert payload["total"] == 1
+        assert payload["total"] + payload["resolution_records"] == len(rows)
 
     def test_http_api_lists_the_record_and_keeps_the_pass_rate_honest(self, resolution_repo: Path):
         with running_server(str(resolution_repo)) as (host, port):

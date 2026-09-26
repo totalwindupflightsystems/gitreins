@@ -1017,8 +1017,21 @@ def _bound_guard_log(content: str, max_bytes: int | None = None) -> str:
 
 
 def _log_test_scope(extra: dict) -> str:
-    """Human-readable test scope for the log header."""
+    """Human-readable test scope for the log header.
+
+    DF-GITREINS-POC-67: diff-mode runs carry ``extra["test_scope"]`` —
+    ``"no-match"`` (changed sources mapped to zero test files: the lane
+    SKIPPED) or ``"full-fallback"`` (the real safety-trigger full suite) —
+    because ``test_targets=None`` alone cannot tell the two apart. Extras
+    without the key render exactly as before (count, legacy None, whole
+    tree, full mode).
+    """
     mode = extra.get("test_mode", "unknown")
+    scope = extra.get("test_scope")
+    if scope == "no-match":
+        return "no test files matched (diff mode skipped)"
+    if scope == "full-fallback":
+        return "full suite (safety trigger)"
     if "test_targets" not in extra:
         if extra.get("grade_full_tree"):
             return "all (whole tree)"
@@ -1496,12 +1509,37 @@ class GuardManager:
         }
         if self._test_mode == "diff" and self._enabled.get("tests"):
             changed = self.changed_files
+            # DF-GITREINS-POC-67: _discover_test_targets returns None for the
+            # REAL full-suite fallback (no change set, or a force-full file
+            # changed) and [] when the changed sources map to zero test files
+            # — the lane then SKIPS. Collapsing both into test_targets=None
+            # made the banner and the run log claim "full suite — safety
+            # trigger" for runs where the full suite never ran. The extra
+            # ``test_scope`` key carries the distinction; test_targets keeps
+            # its historical count/None shape for existing consumers.
             targets = _discover_test_targets(self.workdir, self._scope_files_or_none())
             if targets:
                 extra["test_targets"] = len(targets)
                 extra["staged_count"] = len(changed)
+            elif targets is not None:
+                # [] — no test files map to the changed sources: skip, not
+                # a full suite.
+                extra["test_targets"] = None
+                extra["test_scope"] = "no-match"
+            elif changed or _get_worktree_changed_files(self.workdir):
+                # None with a non-empty change set — a force-full glob fired;
+                # the lane really runs the full suite.
+                extra["test_targets"] = None
+                extra["test_scope"] = "full-fallback"
+            elif self._test_on_clean or self._grade_full_tree:
+                # No change set, but the lane runs the full command by design
+                # (test_on_clean / --full); legacy rendering applies.
+                extra["test_targets"] = None
             else:
-                extra["test_targets"] = None  # full suite triggered
+                # Empty change set — the lane skips ("no staged files"); the
+                # run must not claim the full suite either.
+                extra["test_targets"] = None
+                extra["test_scope"] = "no-changes"
         result = _finalize(
             Tier1Result(passed=passed, results=results, extra=extra, warnings=warnings)
         )

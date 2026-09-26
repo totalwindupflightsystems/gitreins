@@ -89,6 +89,39 @@ class TestDefaultPipelineLanguageDetection:
             test_cmd = next(s["run"] for s in steps if s["id"] == "tests")
             assert "ruff" in lint_cmd
             assert "pytest" in test_cmd
+
+            # DF-GITREINS-POC-61: the tests step carries the judge marker in its
+            # own CHILD env, which is what makes tests/conftest.py skip the
+            # live/egress smoke inside tier 1 — a host-global rate limit must
+            # never decide a deterministic gate. Per-step on purpose: only the
+            # tests step is stamped, and planning must not mutate the parent
+            # environment (the judge's own process is not the graded child).
+            ambient = os.environ.get("GITREINS_TIER1")
+            tests_step = next(s for s in steps if s["id"] == "tests")
+            assert tests_step["env"] == {"GITREINS_TIER1": "1"}
+            assert all("env" not in s for s in steps if s["id"] != "tests")
+            assert os.environ.get("GITREINS_TIER1") == ambient, (
+                "planning a pipeline must never mutate the parent environment"
+            )
+
+            # …and _run_script_step must actually hand that env to the child
+            # (a declared-but-ignored `env` key would leave the live test
+            # running inside every judge, which is the bug this pins).
+            from engine.pipeline import Pipeline
+
+            pipeline = Pipeline({"pipeline": {"stages": []}}, d)
+            probe = pipeline._run_script_step(
+                {
+                    "id": "tests",
+                    "type": "script",
+                    "run": 'echo "[$GITREINS_TIER1]"',
+                    "env": tests_step["env"],
+                },
+                {},
+                "tier1",
+            )
+            assert probe.passed, probe.error
+            assert probe.output.strip() == "[1]", probe.output
         finally:
             import shutil
 

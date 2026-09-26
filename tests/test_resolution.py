@@ -1281,8 +1281,17 @@ def test_pack_blocks_never_exceeds_its_budget_across_a_sweep():
 
 
 # ── One live smoke test (skipped without a real key in the env) ──────────────
+#
+# `live` marks a test that makes a REAL egress call to a third-party host. It is
+# registered in pyproject.toml and honored by tests/conftest.py: skipped inside a
+# judge run (GITREINS_TIER1=1, stamped by engine/pipeline.py tier1_plan) and
+# serialized with a per-repo flock on manual runs, so a non-deterministic,
+# host-global egress smoke can never decide a deterministic gate — two
+# concurrent judges used to race here and the losing one burned a whole
+# tier1+tier2 cycle on a rate-limited 5xx (DF-GITREINS-POC-61).
 
 
+@pytest.mark.live
 @pytest.mark.skipif(not LIVE_KEY, reason="no GITREINS_OPENROUTER_KEY in env")
 def test_live_smoke_jev_resolution():
     """Real hilo + real endpoint, once. The verdict JSON is the evidence.

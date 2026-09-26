@@ -1682,6 +1682,34 @@ def cmd_worktree_repro(args):
         raise SystemExit(1)
 
 
+def _format_dogfood_summary(report: dict) -> str:
+    """One honest human line for a dogfood report (DF-GITREINS-POC-73).
+
+    The summary is also an API: a CI consumer keys on it, so a skipped step
+    must never be counted as not-passed. Passed / failed / skipped each get
+    their own count, and every non-passed step is named with its skip reason
+    or exit code, mirroring the ``{"status": ..., "reason": ...}`` the JSON
+    report already carries.
+    """
+    steps = report.get("steps") or []
+    passed = sum(step.get("status") == "passed" for step in steps)
+    failed = sum(step.get("status") == "failed" for step in steps)
+    skipped = [step for step in steps if step.get("status") == "skipped"]
+    summary = f"dogfood: {passed} passed, {failed} failed, {len(skipped)} skipped"
+    notes = [
+        f"{step.get('name', 'step')} failed (exit {step.get('exit_code', '?')})"
+        for step in steps
+        if step.get("status") == "failed"
+    ]
+    notes += [
+        f"{step.get('name', 'step')} skipped ({step.get('reason') or 'no reason recorded'})"
+        for step in skipped
+    ]
+    if notes:
+        summary = f"{summary} ({', '.join(notes)})"
+    return summary
+
+
 def cmd_worktree_dogfood(args):
     """Exercise init, task, guard, and judge in a disposable tree."""
     from engine.worktree_disposable import DisposableWorktreeManager
@@ -1701,10 +1729,7 @@ def cmd_worktree_dogfood(args):
         raise SystemExit(2) from exc
 
     _record_qa_run("dogfood", report)
-    print(
-        f"dogfood: {sum(step['status'] == 'passed' for step in report['steps'])}/"
-        f"{len(report['steps'])} steps passed; judge {report['judge']['status']}"
-    )
+    print(_format_dogfood_summary(report))
     if report["exit_code"]:
         raise SystemExit(report["exit_code"])
 
@@ -2084,6 +2109,15 @@ def cmd_guard_run(args):
         mode_note += ", whole tree"
     if extra.get("test_targets"):
         mode_note += f", {extra['test_targets']} test file(s)"
+    elif extra.get("test_scope") == "no-match":
+        # DF-GITREINS-POC-67: zero test files mapped to the changed sources —
+        # the tests lane SKIPPED; saying "full suite — safety trigger" here
+        # contradicted the "~ tests — skipped" line right below it.
+        mode_note += ", no test files matched — diff mode skipped"
+    elif extra.get("test_scope") == "no-changes":
+        # Empty change set: the lane-level skip ("no staged files") already
+        # narrates this run; the banner adds no test-scope claim.
+        pass
     elif extra.get("test_targets") is None and mode == "diff":
         mode_note += ", full suite — safety trigger"
     mode_note += ")"
@@ -2636,6 +2670,24 @@ def _snapshot_staged_paths(workdir: str) -> set[bytes]:
     )
 
 
+def _working_tree_is_clean(workdir: str) -> bool:
+    """True when git status reports no unstaged or untracked changes.
+
+    Used to tell the two nothing-staged cases apart (DF-GITREINS-POC-70):
+    a clean tree means there is nothing to commit at all, while a dirty
+    tree means the user forgot `git add`.
+    """
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        capture_output=True,
+        cwd=workdir,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or b"").decode(errors="replace").strip()
+        raise RuntimeError(detail or "git status --porcelain failed")
+    return not result.stdout.strip()
+
+
 def _git_head(workdir: str) -> bytes | None:
     """Return HEAD's object ID, or None for a repository with no commits."""
     result = subprocess.run(
@@ -2671,10 +2723,66 @@ def _display_git_path(path: bytes) -> str:
 
 def cmd_commit(args):
     from engine.guard_manager import GuardManager
+    from engine.task_manager import TaskManager
 
     workdir = get_workdir()
+    # DF-GITREINS-POC-66: MCP parity for the in-progress door. The MCP commit
+    # tool refuses while any task is in_progress (task.complete grades the
+    # committed state — README's "MCP commit rule"); the CLI door ran guards
+    # and committed silently. Same source of truth, same rationale wording.
+    in_progress = TaskManager(workdir).list_tasks("in_progress")
+    if in_progress and not getattr(args, "allow_in_progress", False):
+        ids = ", ".join(t.id for t in in_progress)
+        print(
+            f"Tasks still in progress: {ids} — commits are blocked while "
+            "a task is in_progress because task.complete runs the quality "
+            "judge against the committed state. Complete them via "
+            "task.complete, or delete them via task.delete, then retry "
+            "commit (or pass --allow-in-progress to override).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if in_progress:
+        ids = ", ".join(t.id for t in in_progress)
+        print(
+            f"WARNING: committing with {len(in_progress)} task(s) in_progress: "
+            f"{ids} (--allow-in-progress)",
+            file=sys.stderr,
+        )
     # GR-GAP-051: never commit unguarded — same refusal as `gitreins guard`.
+    # Kept AHEAD of the DF-GITREINS-POC-70 staged check: the config-less
+    # refusal is a prerequisite, not a guard lane, and GR-GAP-051 pins its
+    # message even for a clean repo.
     _require_guard_config(workdir)
+    # DF-GITREINS-POC-70: refuse a doomed commit BEFORE the guard stage. With
+    # nothing staged the guard lanes all skip, the green "Tier 1 PASSED"
+    # banner prints, and `git commit` then fails "nothing to commit" — a
+    # fresh user reads a green gate, a red exit, and the real cause wedged
+    # in between. Same early-refusal shape as the POC-66 check above.
+    try:
+        staged = _snapshot_staged_paths(workdir)
+    except RuntimeError as exc:
+        print(
+            f"COMMIT INTEGRITY CHECK FAILED — cannot inspect the git index: {exc}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if not staged:
+        if _working_tree_is_clean(workdir):
+            print(
+                "Nothing to commit: the index is empty and the working tree "
+                "is clean. Stage changes with `git add <files>` first, then "
+                "retry commit.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "Nothing staged: the index is empty, but the working tree "
+                "has unstaged or untracked changes. Stage them with "
+                "`git add <files>`, then retry commit.",
+                file=sys.stderr,
+            )
+        sys.exit(1)
     config = load_config(workdir)
     gm = GuardManager(workdir, config=config)
     tier1 = gm.run_all()
@@ -3003,6 +3111,11 @@ def cmd_security_scan(args):
         0  — clean (no findings)
         1  — one or more findings produced
         2  — forced ML mode but dependencies missing
+
+    Without ``--force-ml`` the scan runs the keyword heuristic (or ML
+    inference that fell back to it); such runs print an explicit mode
+    line — they are a 7-keyword fallback, not a full ML scan
+    (DF-GITREINS-POC-59).
     """
     import json as _json
 
@@ -3015,7 +3128,7 @@ def cmd_security_scan(args):
     directory = getattr(args, "directory", None)
 
     try:
-        from engine.antares import AntaresScanner
+        from engine.antares import HEURISTIC_DISCLOSURE, AntaresScanner
     except ImportError as exc:
         print(f"Antares scanner unavailable: {exc}", file=sys.stderr)
         if force_ml:
@@ -3082,11 +3195,16 @@ def cmd_security_scan(args):
         ]
         print(_json.dumps(payload, indent=2))
     else:
+        target = directory or "staged files"
+        # DF-GITREINS-POC-59: a keyword-heuristic run is a 7-keyword grep,
+        # not a full scan — disclose the mode on both the clean and the
+        # findings summary line (finding lines already carry
+        # CVE-SIMULATED conf=0.00). ML-mode output stays unchanged.
+        if scanner.used_heuristic:
+            print(f"Antares: {HEURISTIC_DISCLOSURE}")
         if not findings:
-            target = directory or "staged files"
             print(f"Antares: clean — no findings in {target}")
         else:
-            target = directory or "staged files"
             print(f"Antares: {len(findings)} potential finding(s) in {target}:")
             for f in findings:
                 print(f"  • {f.file}:{f.line} [{f.cve_id} conf={f.confidence:.2f}] {f.description}")
@@ -3462,6 +3580,11 @@ def main():
     commit_p.add_argument("message")
     commit_p.add_argument(
         "--skip-tier2", action="store_true", help="Skip any Tier 2 processing; Tier 1 guards only"
+    )
+    commit_p.add_argument(
+        "--allow-in-progress",
+        action="store_true",
+        help="Allow committing while tasks are in_progress (prints a warning)",
     )
 
     # commit-audit

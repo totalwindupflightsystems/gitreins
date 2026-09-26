@@ -80,6 +80,103 @@ def _evidence(output: str) -> str:
     return bound_evidence(output.strip(), cap=MAX_EVIDENCE_CHARS)
 
 
+# ── Child environment contract (DF-GITREINS-POC-71) ─────────────────────────
+#
+# Every child started inside a disposable tree — the `sh -c` command of
+# `worktree fresh`/`repro` and the harness-CLI steps of `worktree dogfood` —
+# gets a NORMALIZED environment, never the consumer session's raw one:
+#
+# 1. TOOLCHAIN: PATH leads with the tree's linked venv ``bin`` (the symlink
+#    ``WorktreeManager._link_venv`` created from ``worktree_venv_source``),
+#    so ``pytest``, ``git``, and every other tool resolve to the toolchain
+#    captured at the tree's HEAD — not to whatever binary the consumer
+#    session happened to have first on PATH. Without this, a kept failure
+#    tree re-runs the SESSION's pytest and the captured failure is not
+#    reproducible in the artifact ``--keep``/``--keep-failures`` exists to
+#    preserve (dogfood run 15, 2026-09-26). When the tree's venv link is
+#    missing the harness checkout's own source venv bin is used, then the
+#    session PATH as a last resort — resolution degrades in a documented
+#    order instead of silently picking up the session toolchain.
+# 2. HARNESS CLI: the dogfood step runner invokes
+#    ``<harness_root>/gitreins/cli.py`` with an interpreter that can import
+#    the harness package (the tree's venv python, else ``sys.executable``),
+#    and pins ``PYTHONPATH`` to the harness root so the import succeeds
+#    regardless of the parent interpreter's provenance (a foreign runtime
+#    python otherwise dies with ``ModuleNotFoundError: No module named
+#    'engine'``). ``PYTHONPATH`` is REPLACED, not prepended: a hostile
+#    session value must not shadow the harness's own ``engine`` package.
+#
+# ``_child_command_env`` and ``_child_cli_env`` are the only two builders;
+# subprocess sites pass their ``env=`` through one of them.
+
+
+def _tree_venv_bin(
+    tree_path: Path, manager: WorktreeManager | DisposableWorktreeManager
+) -> Path | None:
+    """Best toolchain ``bin`` dir for a disposable tree, or None.
+
+    Prefers the tree's linked venv, then the harness checkout's source venv
+    (the same source ``_link_venv`` links from), so a missing link degrades
+    to the checkout toolchain instead of the session PATH. Accepts either
+    manager surface; ``DisposableWorktreeManager`` delegates to its inner
+    ``WorktreeManager``.
+    """
+    manager = getattr(manager, "manager", manager)
+    destination, source = manager._venv_paths(tree_path)
+    for candidate in (destination / "bin", None if source is None else source / "bin"):
+        if candidate is not None and candidate.is_dir():
+            return candidate
+    return None
+
+
+def _child_command_env(
+    tree_path: Path,
+    manager: WorktreeManager | DisposableWorktreeManager,
+    *,
+    base: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Env for a child COMMAND run inside ``tree_path`` (fresh/repro)."""
+    env = dict(os.environ if base is None else base)
+    venv_bin = _tree_venv_bin(tree_path, manager)
+    if venv_bin is not None:
+        env["PATH"] = os.pathsep.join([str(venv_bin), env.get("PATH", "")])
+    return env
+
+
+def _child_cli_env(
+    tree_path: Path,
+    manager: WorktreeManager | DisposableWorktreeManager,
+    *,
+    base: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Env for a child HARNESS-CLI step run inside ``tree_path`` (dogfood)."""
+    env = _child_command_env(tree_path, manager, base=base)
+    harness_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    env["PYTHONPATH"] = harness_root
+    python_override = env.get("GITREINS_CHILD_PYTHON")
+    if python_override:
+        env["PYTHONPATH"] = os.pathsep.join(
+            [harness_root] + [part for part in env["PYTHONPATH"].split(os.pathsep) if part]
+        )
+    return env
+
+
+def _child_python(tree_path: Path, manager: WorktreeManager | DisposableWorktreeManager) -> str:
+    """Interpreter that can import the harness package for CLI steps.
+
+    The tree's venv python (its ``.pth`` makes ``engine`` importable, and it
+    is the interpreter the tree's toolchain was built for), else the parent
+    ``sys.executable`` — which the ``PYTHONPATH`` pin from
+    ``_child_cli_env`` makes importable regardless of provenance.
+    """
+    manager = getattr(manager, "manager", manager)
+    destination, _source = manager._venv_paths(tree_path)
+    candidate = destination / "bin" / "python"
+    if candidate.is_file():
+        return os.fspath(candidate)
+    return sys.executable
+
+
 def _tree_size(path: Path) -> int:
     """Return recursive regular-file bytes, ignoring symlinks and Git objects."""
     total = 0
@@ -484,6 +581,7 @@ class DisposableWorktreeManager:
                     stderr=subprocess.STDOUT,
                     text=True,
                     start_new_session=True,
+                    env=_child_command_env(Path(record.path), self),
                 )
             except OSError as exc:
                 output = str(exc)
@@ -542,8 +640,20 @@ class DisposableWorktreeManager:
         """Exercise the CLI lifecycle in one throwaway tree.
 
         The child uses the source checkout's ``gitreins/cli.py`` entry point
-        with this interpreter, rather than relying on a console script or a
-        ``gitreins.__main__`` module that may not exist in a source checkout.
+        with an interpreter that can import the harness package, rather than
+        relying on a console script or a ``gitreins.__main__`` module that may
+        not exist in a source checkout.
+
+        DF-GITREINS-POC-71: each step runs in a NORMALIZED child environment
+        (see the module's child-environment contract) — the step runner
+        prefers the tree's own venv python over ``sys.executable`` so the
+        interpreter matches the toolchain captured at the tree's HEAD, and
+        pins ``PYTHONPATH`` to the harness root (replacing any session value)
+        so the CLI boots regardless of what interpreter or ``PYTHONPATH`` the
+        consumer session carries. The raw parent environment is never
+        forwarded: a foreign runtime python on the session PATH would
+        otherwise die with ``ModuleNotFoundError: No module named 'engine'``
+        and the whole dogfood run would report init failed.
         """
         run_id = f"dogfood-{uuid.uuid4().hex}"
         record = self.create("dogfood", run_id=run_id, keep=keep)
@@ -556,15 +666,19 @@ class DisposableWorktreeManager:
             step_started = time.time()
             try:
                 # The source checkout has no gitreins.__main__; invoke its
-                # own CLI script with this interpreter from the tree's CWD.
+                # own CLI script. The interpreter comes from the tree's venv
+                # when one is linked (sys.executable otherwise), and the env
+                # carries the pinned PYTHONPATH so either can import the
+                # harness package from the tree's CWD (DF-GITREINS-POC-71).
                 cli_entry = Path(__file__).resolve().parents[1] / "gitreins" / "cli.py"
                 result = subprocess.run(
-                    [sys.executable, os.fspath(cli_entry), *arguments],
+                    [_child_python(Path(record.path), self), os.fspath(cli_entry), *arguments],
                     cwd=record.path,
                     capture_output=True,
                     text=True,
                     timeout=timeout,
                     check=False,
+                    env=_child_cli_env(Path(record.path), self),
                 )
                 output = _evidence((result.stdout or "") + (result.stderr or ""))
                 return {

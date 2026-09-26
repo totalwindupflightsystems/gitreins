@@ -1286,3 +1286,89 @@ block in §1 closes it. On the bunker leg everything downstream of that
 an honest DEGRADED pass naming the missing gitleaks binary and its exact
 install command — that fail-loud degraded behavior is the correct model for
 missing-tool lanes.
+
+## Run 14 — report / commit / setup-tools (2026-09-25)
+
+**Why the "MCP commit rule" has a hole (POC-66).** The in_progress refusal
+lives in the MCP server's commit tool (gitreins_mcp/server.py), not in
+`cmd_commit` (gitreins/cli.py). The rule's rationale — commit must be judged
+against its committed state, else the judge grades a moving tree — applies
+to any door into git, but the CLI door was built first and the gate was
+added later only on the agent-facing surface. Every quickstart teaches the
+CLI door, so the protection is one habit away from bypassed. Fix shape: one
+guard call in cmd_commit sharing the MCP wording, plus an explicit
+`--allow-in-progress` for the human door.
+
+**Why the banner can lie (POC-67).** `_discover_test_targets` returns
+`None` to mean "run the whole suite" (a real fallback), and the diff-mode
+skip path in `_run_tests_lanes` (guard_manager.py:2201-2209) reuses the
+same `None` for "no test files matched, skip". The console layer
+(cli.py:2087-2088) can only see `None`, so it renders the scariest of the
+two meanings on every skip. Any future "did the safety net actually run"
+logic reading `extra["test_targets"]` inherits the ambiguity — the fix is a
+third value (empty list) or a sibling key, not a wording patch.
+
+**Why the fresh-clone fallback stays dead (POC-68).** Three layers
+interact: (1) two verdict dirs tracked before `.gitignore` existed shadow
+everything local-first; (2) the fallback's ref resolution wants
+`refs/heads/gitreins` — a branch name — while clones only have
+`refs/remotes/origin/gitreins`; (3) canonical history moved to
+`refs/gitreins/history` (POC-52), a non-branch ref outside the default
+fetch spec, and the legacy branch it superseded is 9 verdicts stale. Any
+fix that patches one layer leaves the other two; they should land together
+(untrack dirs, widen fallback to remote refs, either fetch
+`refs/gitreins/history` in docs or push/refresh the legacy branch). The
+run-14 probe trail that isolates each layer is in
+evidence/maintenance-loop-2026-09-25/run14.md (F3 section).
+
+**setup-tools was written for the single-language repo (POC-69).**
+`lang_tools_map` keys on `lang["type"]` (one primary type) while the header
+prints `lang["name"]` (the composite). The tool rows themselves are correct
+for the primary language — the gap is presentation plus the PEP-668-vulnerable
+`pip install <tool>` hint template, which will fail exactly where the
+product's own POC-64 does. `_TOOL_INSTALL_GUIDE` is the single place to fix
+both.
+
+
+## Run 15 (2026-09-26) — disposable verification: how the tree factory works, and why a kept tree can lie
+
+`worktree fresh|repro|dogfood` are three front doors to one mechanism: **capture HEAD → materialize a
+detached worktree under `../<repo>-wt/.disposable/run-<hash>` → `sh -c` the command → reap in a
+`finally`**. Knowing the mechanism explains every behavior this run hit:
+
+- **Why exit codes propagate unchanged** (repro exit 1 on 7/10, fresh exit 1 with a failing `--cmd`):
+  the harness deliberately does not translate child failures into its own exit vocabulary — exit 2 is
+  reserved for *harness* infrastructure failure (tree create/reap/evidence). The three-value contract is
+  the whole API; anything that "normalized" failures would destroy it.
+- **Why the QA ledger outlives the reaped tree**: the tree is disposable by design, so the ledger row
+  (written at reap time) is the durable artifact. This is the same lesson as the bunker QA runs
+  (run 12): evidence must live somewhere that is not the thing being destroyed. `qa list` after `clean`
+  showed all three rows — the design holds.
+- **The bug class of this run: environment inheritance.** The disposable run's child gets the *parent
+  process environment*, including PATH. That means "pytest" inside a disposable tree resolves to
+  whatever pytest the *consumer session* had — not the tree's own toolchain (a fresh worktree has no
+  venv of its own anyway). Consequence: `--keep-failures` preserves a *directory*, not a *reproduction*.
+  The failure is real (exit code, JSON evidence, ledger row) but re-running inside the kept tree uses a
+  different interpreter and can pass. The right fix is contract-level: either pin the child PATH to the
+  repo's configured test runner or document the inheritance loudly on the reference page. The same
+  inheritance, seen from the other side, is why the home repo's `.venv/bin/pytest` dead shebang matters:
+  the harness grades the lane (PATH lookup during guard) while a human running the same binary by hand
+  hits `bad interpreter`. Guard-pass and hand-run are only guaranteed to agree if the shebang chain is
+  intact — `uv venv --recreate` after a repo rename fixes it.
+- **Why the perf shape is what it is** (0.35s fresh vs 0.08s raw pytest at toy scale): the overhead is
+  `git worktree add` + env assembly + reaping, which is roughly constant, so at toy scale it dominates
+  and at real test sizes it amortizes. The k=10 concurrency win (1.26s vs 2.18s sequential) is the
+  actual product: the tree factory makes N independent runs cheaper than N sequential ones *because*
+  each run is disposable and CPU-bound work parallelizes. That is the number a user sizing `-k` needs,
+  and it was documented nowhere.
+- **dogfood --skip-judge honest-skip vs human readability**: the JSON contract carries
+  `{"status": "skipped", "reason": "--skip-judge"}` per step — never a fake pass. The human summary's
+  "3/4 steps passed; judge skipped" is *true but misreadable*: a CI consumer keying on the count grades
+  it as a failure. Lesson the repo keeps re-learning (cf. POC-67's banner): a summary line is also an
+  API, and skipped ≠ failed must be visible in every representation, not just the machine one.
+- **Install leg infrastructure lesson**: bunker-las-02's bunkerd is crash-looping on a *config
+  validation refusal* (TLS not enabled for non-loopback listeners), restart counter 27343. The daemon's
+  fail-closed behavior is correct — the same refusal that blocks the dogfood install leg is the
+  mechanism that prevents a plaintext credential-bearing listener on a tailnet address. The gap is
+  operational: nobody who owns the box config has been paged by the counter, and the skill's fallback
+  chain now has two consecutive runs blocked at the same node pair.
