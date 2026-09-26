@@ -9,9 +9,11 @@ Reads: list_verdicts()/count_verdicts() prefer the local .gitreins/history/
 files. When the local dir is missing or holds no entries and storage is
 "git", they fall back to the verdicts committed on the history REF
 (``HISTORY_REF``; a repo written before DF-GITREINS-POC-52 is read through
-its legacy ``refs/heads/gitreins`` branch as well) — so a fresh clone (whose
-working tree has no .gitreins/history/, since it is gitignored) can still
-browse the full verdict history via `gitreins report`.
+its legacy ``refs/heads/gitreins`` branch as well, and a fresh clone — which
+fetches neither local ref — through their remote-tracking copies,
+DF-GITREINS-POC-68) — so a fresh clone (whose working tree has no
+.gitreins/history/, since it is gitignored) can still browse the full
+verdict history via `gitreins report`.
 
 Config (.gitreins/config.yaml):
     history:
@@ -122,7 +124,7 @@ def load_history_config(workdir: str) -> dict:
 
 # ── Persister ──────────────────────────────────────────────────
 
-# ── Verdict-history ref (DF-GITREINS-POC-52) ───────────────────
+# ── Verdict-history refs (DF-GITREINS-POC-52, fresh-clone fallback POC-68) ──
 #
 # The verdict history is a REF, not a working branch.  It used to live on
 # ``refs/heads/gitreins``, whose name is a path-prefix of the fleet's own
@@ -155,6 +157,18 @@ HISTORY_REF = "refs/gitreins/history"
 #     git update-ref refs/gitreins/history refs/heads/gitreins
 #     git branch -D gitreins          # only once a copy exists elsewhere
 LEGACY_HISTORY_REF = "refs/heads/gitreins"
+
+# Fresh-clone fallbacks (DF-GITREINS-POC-68).  ``git clone`` maps only
+# ``refs/heads/*`` to ``refs/remotes/origin/*``, so a fresh clone has NO local
+# verdict-history ref: the canonical ref is not fetched by default and the
+# legacy branch appears only as its remote-tracking copy — the reader used to
+# print "No verdict history found." in exactly that shape.  The remote-tracking
+# refs are the LAST resorts (after both local refs): a clone that later gains
+# local refs must prefer them, and among the fallbacks the canonical copy
+# outranks the legacy one.  See README "Verdict History" for the fetch config
+# that makes the canonical ref visible to a clone.
+REMOTE_HISTORY_REF = "refs/remotes/origin/gitreins/history"
+REMOTE_LEGACY_HISTORY_REF = "refs/remotes/origin/gitreins"
 
 
 class VerdictPersister:
@@ -285,17 +299,19 @@ class VerdictPersister:
 
         Local filesystem entries take precedence. When the local history
         dir is missing or holds no verdict.json files at all and storage
-        mode is "git", falls back to verdicts committed on the `gitreins`
-        branch — fresh clones (no local .gitreins/history/, it is
-        gitignored) can still browse history via `gitreins report`.
+        mode is "git", falls back to the verdict refs — canonical, then
+        legacy, then their remote-tracking copies — so fresh clones (no
+        local .gitreins/history/, it is gitignored; no local history ref,
+        ``git clone`` fetches neither by default) can still browse history
+        via `gitreins report`.
         """
         entries = self._list_local_verdicts(n=n, task_id=task_id)
         if entries:
             return entries
-        # Local pass yielded nothing: fall back to the `gitreins` branch
-        # only when git storage is active AND the local dir holds no
+        # Local pass yielded nothing: fall back to the verdict refs only
+        # when git storage is active AND the local dir holds no
         # verdict.json files at all (a task_id filter that matches nothing
-        # locally must not pull branch entries in — sources are never merged).
+        # locally must not pull ref entries in — sources are never merged).
         if self.storage_mode == "git" and not self._local_history_has_entries():
             return self._list_branch_verdicts(n=n, task_id=task_id)
         return []
@@ -358,14 +374,24 @@ class VerdictPersister:
 
     @staticmethod
     def _history_refs() -> list[str]:
-        """Refs that hold verdict history, current scheme first.
+        """Refs that hold verdict history, most authoritative first.
 
-        Two refs can legitimately hold history at once: the legacy branch in a
-        repo written before DF-GITREINS-POC-52, and the current ref. Readers
-        union them (deduped by entry path) so nothing a repo already filed
-        disappears from report/serve after the move.
+        Four refs can legitimately hold history at once: the current scheme's
+        canonical ref, the legacy branch in a repo written before
+        DF-GITREINS-POC-52, and — in a fresh clone, where ``git clone`` maps
+        only ``refs/heads/*`` to ``refs/remotes/origin/*`` and so fetches
+        NEITHER local history ref — their remote-tracking copies.  Readers
+        union them (deduped by entry path, earlier refs winning) so nothing a
+        repo already filed disappears from report/serve after the move, and a
+        fresh clone serves its origin's history instead of degrading to
+        "No verdict history found."
         """
-        return [HISTORY_REF, LEGACY_HISTORY_REF]
+        return [
+            HISTORY_REF,
+            LEGACY_HISTORY_REF,
+            REMOTE_HISTORY_REF,
+            REMOTE_LEGACY_HISTORY_REF,
+        ]
 
     def _ls_tree_verdict_paths(self, ref: str, prefix: str) -> list[str]:
         """Verdict.json paths on *ref* under *prefix*; [] when the ref is absent.
@@ -396,8 +422,9 @@ class VerdictPersister:
     def _branch_entry_paths(self) -> list[tuple[str, str]]:
         """``[(ref, path)]`` for every verdict.json on the history refs, newest first.
 
-        The union of both refs, deduped by entry path — the current ref wins
-        when both carry the same path (the same record, byte for byte).
+        The union of all history refs (canonical, legacy, remote-tracking —
+        see ``_history_refs``), deduped by entry path — a more authoritative
+        ref wins when several carry the same path.
         """
         prefix = self._branch_history_prefix()
         holder: dict[str, str] = {}
@@ -433,10 +460,11 @@ class VerdictPersister:
         """Read verdict entries committed to the history ref(s).
 
         Enumerates verdict.json files under the history path on each history
-        ref (HISTORY_REF, then the legacy branch) and reads each with
-        ``git show <ref>:<path>``. Returns [] on any git failure (ref absent,
-        not a git repo, timeout) — callers degrade to "No verdict history
-        found." exactly as before.
+        ref (canonical, then the legacy branch, then the remote-tracking
+        fallbacks a fresh clone has) and reads each with ``git show
+        <ref>:<path>``. Returns [] on any git failure (refs absent, not a git
+        repo, timeout) — callers degrade to "No verdict history found."
+        exactly as before.
         """
         prefix = self._branch_history_prefix()
         rel_prefix = prefix.rstrip("/") + "/"
