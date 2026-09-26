@@ -2671,8 +2671,32 @@ def _display_git_path(path: bytes) -> str:
 
 def cmd_commit(args):
     from engine.guard_manager import GuardManager
+    from engine.task_manager import TaskManager
 
     workdir = get_workdir()
+    # DF-GITREINS-POC-66: MCP parity for the in-progress door. The MCP commit
+    # tool refuses while any task is in_progress (task.complete grades the
+    # committed state — README's "MCP commit rule"); the CLI door ran guards
+    # and committed silently. Same source of truth, same rationale wording.
+    in_progress = TaskManager(workdir).list_tasks("in_progress")
+    if in_progress and not getattr(args, "allow_in_progress", False):
+        ids = ", ".join(t.id for t in in_progress)
+        print(
+            f"Tasks still in progress: {ids} — commits are blocked while "
+            "a task is in_progress because task.complete runs the quality "
+            "judge against the committed state. Complete them via "
+            "task.complete, or delete them via task.delete, then retry "
+            "commit (or pass --allow-in-progress to override).",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if in_progress:
+        ids = ", ".join(t.id for t in in_progress)
+        print(
+            f"WARNING: committing with {len(in_progress)} task(s) in_progress: "
+            f"{ids} (--allow-in-progress)",
+            file=sys.stderr,
+        )
     # GR-GAP-051: never commit unguarded — same refusal as `gitreins guard`.
     _require_guard_config(workdir)
     config = load_config(workdir)
@@ -3472,6 +3496,11 @@ def main():
     commit_p.add_argument("message")
     commit_p.add_argument(
         "--skip-tier2", action="store_true", help="Skip any Tier 2 processing; Tier 1 guards only"
+    )
+    commit_p.add_argument(
+        "--allow-in-progress",
+        action="store_true",
+        help="Allow committing while tasks are in_progress (prints a warning)",
     )
 
     # commit-audit
