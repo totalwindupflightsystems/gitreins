@@ -1,0 +1,23 @@
+{
+  "tick_id": "gitreins-2026-09-26-03-07-48",
+  "started_at": "2026-09-26T03:27:15Z",
+  "mode": "serial-fallback",
+  "wave_budget": 1,
+  "workers": [
+    {
+      "task": "DF-GITREINS-POC-70",
+      "worktree": "~/worktrees/gitreins-DF-GITREINS-POC-70",
+      "branch": "wt/DF-GITREINS-POC-70",
+      "base_sha": "332cc21",
+      "model": "glm-5.3-flash",
+      "provider": "xkiro",
+      "status": "merged",
+      "commit": "86ac4c95000d0ef250d9a2b526a4b3706098364b",
+      "verdict": "PASS c00cea90",
+      "guard": "PASS staged diff; full suite 2443 passed, 16 skipped",
+      "merge": "pending serial merge"
+    }
+  ],
+  "finished_at": "2026-09-26T11:02:00Z",
+  "status": "recovered"
+}
