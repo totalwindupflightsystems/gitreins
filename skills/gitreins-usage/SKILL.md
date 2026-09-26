@@ -4,7 +4,7 @@ description: >-
   How to use the GitReins quality harness in this repo (and any repo it's
   installed in): task lifecycle, guards, LLM judge, MCP tools, and the known
   pitfalls that will bite you. Load this before committing or creating tasks.
-version: 1.12.0
+version: 1.13.0
 category: software-development
 ---
 
@@ -821,3 +821,19 @@ Also known (row 70): `gitreins commit` with nothing staged prints the green
 guard summary last — a fresh user reads a green gate, a red exit, and the
 cause in the middle. Run `git status` first.
 
+
+## Disposable verification (`worktree fresh` / `repro` / `dogfood`) — pitfall 51 (2026-09-26 dogfood run 15)
+
+- **A kept failure tree is a directory, not a reproduction.** Disposable-run children inherit the
+  *parent session's PATH*, so re-running a failed command inside a `--keep-failures` tree resolves a
+  different interpreter (proved: `fresh --cmd "which pytest"` printed the home checkout's pytest) and
+  can PASS where the run FAILED. Treat kept trees as evidence-of-exit-code, not repro environments.
+- **`repro` beats sequential runs from k≈10** on this host: k=10 `--concurrency 3` = 1.26s vs 2.18s
+  for 10 sequential pytest runs on a 1-test repo. Per-run harness overhead ≈0.27s (0.35s fresh vs
+  0.08s raw pytest at toy scale) — amortized at real test sizes. Size `-k` accordingly.
+- **`--skip-judge` human summary says "3/4 steps passed"** — that is a skip, not a failure (exit 0,
+  JSON `steps[].status == "skipped"` with reason). Grade CI consumers on the JSON, not the line.
+- **Exit contract is the API**: child failure propagates unchanged (1), harness infra failure = 2.
+  Never "normalize" a nonzero `--cmd` exit into 2, and never read exit 1 as harness breakage.
+- **After a repo rename, `uv venv --recreate`**: stale `.venv/bin/*` shebangs pointing at the old path
+  make guard-graded lanes unrunnable by hand (`bad interpreter`) — guard passes, hand-run fails.

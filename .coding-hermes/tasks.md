@@ -365,3 +365,35 @@ the surfaces tested; TTFS ~1 min; friction 5 (1×P1, 4×P2).
 - Foreman not woken, cooldowns untouched per the 2026-09-09 fleet law. No
   code changed; 5 board rows appended surgically (354→359, byte-exact
   restore verified, 5/0 numstat).
+
+## Dogfood Findings (2026-09-26) — run 15: disposable verification (`worktree fresh` / `repro` / `dogfood`)
+
+Surface untouched by runs 1-14: the throwaway-tree QA trio. Consumer clone at /tmp/dogfood-repro
+(gitreins 0.15.0), deliberately flaky test, documented commands only. Full detail:
+docs/dogfood/2026-09-26-integration.md; diagnostics: docs/dogfood/diagnostics.md run-15 section;
+evidence rows: DF-GITREINS-POC-71..74 on the board (359→363, appended surgically, byte-exact
+verification of untouched rows).
+
+- [P2] DF-GITREINS-POC-71: kept failure trees are not self-contained — disposable-run children
+  inherit the parent PATH, so re-running a kept failure resolves the consumer's pytest and PASSED
+  where the run FAILED; --keep-failures preserves evidence-of-exit-code, not a repro environment.
+  Related: home .venv/bin/pytest dead shebang (pre-rename gitreins-poc path) — guard grades the
+  lane, hand-run gets `bad interpreter`. Fix: document the PATH contract or pin the child env;
+  `uv venv --recreate` for the shebang.
+- [P2] DF-GITREINS-POC-72: no documented perf envelope. hyperfine (warm, 10 runs): fresh 0.3505s
+  ±0.0127 vs raw pytest 0.0800s ±0.0121 (~4.4x/-run at toy scale, amortized at real sizes); repro
+  k=10 --concurrency 3 = 1.258s ±0.116 vs 2.181s ±0.283 sequential raw — the harness WINS at k=10
+  and no doc says so or helps size -k. No cold-cache anomaly (0.61→0.57s across runs). No PERF row
+  (nothing a user feels at real test sizes); the gap is documentation.
+- [P2] DF-GITREINS-POC-73: `worktree dogfood --skip-judge` human line "3/4 steps passed; judge
+  skipped" reads as a failure; skip reason lives only in JSON. Fix: separate skipped from failed
+  in the human counts.
+- [P2] SKIPPED-install-bunker — bunker-las-03 offline 7h (ssh timeout, ping 100% loss); fallback
+  bunker-las-02 UP but bunkerd crash-looping: "refusing to bind non-loopback plaintext listener
+  :10002, :10001: set tls.enabled: true …" restart counter 27343, port 10001 refused. Second
+  consecutive run blocked at the same node pair (DF-GITREINS-POC-74 carries the journal evidence).
+  No visibility/permission change (hard rule honored).
+- Value verdict: 🟢 SHIPPABLE for this surface — exit contracts exact (child failure propagates,
+  exit 2 = harness infra only), JSON evidence shape as documented, QA ledger rows outlived reaped
+  trees, honest zero-states (list/doctor). Time-to-first-success ~2 min.
+- Foreman not woken, cooldowns untouched per the 2026-09-09 fleet law. No code changed.
