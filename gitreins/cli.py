@@ -2109,6 +2109,15 @@ def cmd_guard_run(args):
         mode_note += ", whole tree"
     if extra.get("test_targets"):
         mode_note += f", {extra['test_targets']} test file(s)"
+    elif extra.get("test_scope") == "no-match":
+        # DF-GITREINS-POC-67: zero test files mapped to the changed sources —
+        # the tests lane SKIPPED; saying "full suite — safety trigger" here
+        # contradicted the "~ tests — skipped" line right below it.
+        mode_note += ", no test files matched — diff mode skipped"
+    elif extra.get("test_scope") == "no-changes":
+        # Empty change set: the lane-level skip ("no staged files") already
+        # narrates this run; the banner adds no test-scope claim.
+        pass
     elif extra.get("test_targets") is None and mode == "diff":
         mode_note += ", full suite — safety trigger"
     mode_note += ")"
