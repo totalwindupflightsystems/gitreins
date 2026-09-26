@@ -128,18 +128,44 @@ gitreins worktree list
 ```
 
 A judge-gated merge needs a verdict for the lane's exact branch commit, so the
-lane that reviews is the lane that runs the judge. Create the task in the
-canonical checkout, name it in the lane's `judge` phase, and let `--merge` do
-the gating — the whole sequence below is copy-paste runnable:
+lane that reviews is the lane that runs the judge. A mergeable fleet run is a
+CONTRACT between three checkouts, and every step below is required — skipping
+one produces a fleet that runs but can never merge. The full walkthrough (with
+real transcripts, the verdict gate, and retry recovery) lives in
+[docs/worktree-fleet-quickstart.md](docs/worktree-fleet-quickstart.md):
+
+1. **`gitreins init` in the canonical checkout, then COMMIT its output** —
+   `.gitreins/config.yaml` above all: it is the one init artifact that is not
+   gitignored, and a lane tree is a fresh checkout of committed files, so an
+   uncommitted config never reaches a lane and every lane's guard/judge phase
+   dies with `no .gitreins/config.yaml`. (The lane-side message says
+   `run 'gitreins init' first` — re-initialising the lane cannot fix the next
+   lane; only committing the config in canonical main can.)
+2. **Create the task in the canonical checkout** (`gitreins task create`),
+   never inside a lane. The task store is per-checkout, so the fleet seeds the
+   lane's copy before the judge phase runs — but only if the task exists in
+   canonical main.
+3. **Write the manifest OUTSIDE the checkout (or commit it)** — an untracked
+   file in canonical main is dirt, and the merge gate refuses a dirty
+   canonical main.
+4. **The lane's `command` must commit its work in the lane tree** (the merge
+   gate rejects a dirty lane) **and must be idempotent across retries** — the
+   same manifest gets re-run after refused merges and scheduler retries, and a
+   plain `git commit` fails the second time with `nothing to commit`. See the
+   `git diff --cached --quiet ||` idiom in the example below.
+5. **The judge phase runs in the lane** (`judge` argv, task seeded by the
+   fleet) and `--merge` enforces the verdict gate: a PASS for the lane's exact
+   branch commit, with no skipped Tier 1 steps. No verdict, no merge.
 
 ```bash
 # 0. A repository that already passes its own gate. `init` writes the guard
 #    config, the pre-commit hook and the .gitignore entries — commit them, so
-#    every lane inherits them with the branch.
+#    every lane inherits them with the branch (step 1 above).
 gitreins init
 git add -A && git commit -m "gitreins: init"
 
-# 1. The task and its criteria belong to the repository, not to one lane.
+# 1. The task and its criteria belong to the repository, not to one lane
+#    (step 2 above).
 gitreins task create API-1 "Serve GET /status" \
   "GET /status returns 200" \
   "A test covers the endpoint"
@@ -149,22 +175,25 @@ gitreins task create API-1 "Serve GET /status" \
 #    runs: `.gitreins/tasks.yaml` is per-checkout and never committed, so a
 #    fresh worktree starts with an empty store.  Keep the manifest OUTSIDE the
 #    checkout (or commit it): an untracked file in canonical main is dirt, and
-#    the merge gate refuses a dirty canonical main.
+#    the merge gate refuses a dirty canonical main (step 3 above).  The commit
+#    guard `(git diff --cached --quiet || git commit ...)` makes the lane
+#    idempotent: a re-run after a refused merge does not die on the lane's own
+#    already-committed work (step 4 above).
 cat > ../lanes.json <<'JSON'
 {
   "lanes": [
     {
       "task_id": "API-1",
       "priority": 10,
-      "command": ["bash", "-c", "echo ok > status.txt && git add status.txt && git commit -qm 'API-1 status endpoint'"],
+      "command": ["bash", "-c", "echo ok > status.txt && git add status.txt && (git diff --cached --quiet || git commit -qm 'API-1 status endpoint')"],
       "guard": ["gitreins", "guard"],
-      "judge": ["gitreins", "judge", "API-1"]
+      "judge": ["gitreins", "judge", "API-1", "--skip-tier2"]
     }
   ]
 }
 JSON
 
-# 3. Run the lanes, then merge the ones that earned a PASS verdict.
+# 3. Run the lanes, then merge the ones that earned a PASS verdict (step 5).
 gitreins worktree fleet ../lanes.json --merge
 # Inspect cap, phase, exit status, and retained evidence:
 gitreins worktree list
@@ -172,7 +201,11 @@ gitreins worktree list
 
 `guard` and `judge` are both optional (`guard` runs `gitreins guard` in the lane
 before the judge; a lane with no judge phase merges only with `--force-merge`).
-A lane that must not write task or verdict state can judge with
+The judge phase needs an LLM credential for Tier 2 (`GITREINS_LLM_API_KEY`, or
+a supported provider key) in the environment the fleet runs in; without one,
+append `--skip-tier2` to the judge argv for an explicit Tier 1-only evaluation
+— its PASS merges exactly like a full one. A lane that must not write task or
+verdict state can judge with
 `judge --ephemeral --persist-verdict`: still no history and no task store, but
 the single document the merge gate reads (`.gitreins/verdicts/verdict.json`)
 makes its PASS usable by `--merge`. Either way the gate compares the verdict's
@@ -622,6 +655,83 @@ history:
 
 ---
 
+## Troubleshooting
+
+Fleet-related failures first; the onboarding guide's
+[Troubleshooting](docs/onboarding.md#troubleshooting) covers first-run guard
+failures.
+
+### F1. Every lane dies with `no .gitreins/config.yaml — run 'gitreins init' first`
+
+**Symptom:** the fleet creates the lane trees, then the `guard`/`judge` phase
+of every lane fails with `no .gitreins/config.yaml — run 'gitreins init'
+first` — while `gitreins guard` passes fine in canonical main.
+
+**Cause:** `.gitreins/config.yaml` was never COMMITTED to the consumer repo.
+`gitreins init` writes it but only the runtime artifacts (tasks.yaml, logs,
+worktree registry) are gitignored — the config itself must be committed by
+hand. A lane tree is a fresh checkout of the repo's committed files, so an
+untracked config never reaches a lane.
+
+**The misleading advice:** the error says `run 'gitreins init' first`, and
+running `gitreins init` inside the lane tree does make THAT lane's phase
+succeed — but the fix cannot stick. It writes an untracked config into the
+lane (dirt the merge gate rejects) and the next lane, the next re-run, and the
+next worktree all hit the same error, because they check out the repo's
+committed files again. Ignore the advice where you find it; fix the repo.
+
+**Fix:** in the canonical checkout:
+
+```bash
+git add .gitreins/config.yaml .gitignore .gitleaks.toml
+git commit -m "gitreins: commit guard config"
+```
+
+Then delete any branch the failed run left behind (a lane that died before
+committing work leaves an empty one, which `worktree clean` does not reap):
+
+```bash
+gitreins worktree clean
+git branch -D gitreins/task/<id>   # only if the next run names it as unregistered
+gitreins worktree fleet ../lanes.json --merge
+```
+
+### F2. `canonical main has uncommitted changes; refusing merge`
+
+**Symptom:** every lane passes its judge phase, but the merge reports
+`canonical main has uncommitted changes; refusing merge` (in the per-lane
+`merge_errors`) or the standalone `gitreins worktree merge <id>` refuses the
+same way.
+
+**Cause:** the merge gate requires a clean tree on BOTH sides and refuses to
+touch canonical main while any file there is uncommitted or untracked. The
+usual suspects:
+
+- an untracked `lanes.json` (or any scratch file) inside the canonical
+  checkout — keep the manifest outside the repo or commit it;
+- local edits you have not committed;
+- GitReins' own runtime artifacts (`worktrees.json`, tasks.yaml, logs,
+  verdicts) in repos whose `.gitignore` predates them — `gitreins init` adds
+  the current ignore list, and the gate exempts those artifacts while they are
+  untracked, so an up-to-date `.gitignore` makes this class vanish.
+
+Note the command still exits 0 after a refused merge: the refusal is reported
+per lane in the JSON report, so read `merge_errors`, not the exit code.
+
+**Fix:** commit or move the dirt, then merge the already-judged lanes without
+re-running their work:
+
+```bash
+git status --short                # see exactly what the gate counted
+# commit or remove it, then:
+gitreins worktree merge <task-id> # fast-forwards the judged lane, reaps the tree
+```
+
+A lane whose own TREE is dirty fails the mirror-image check
+(`task worktree has uncommitted changes; refusing merge`): the lane's
+`command` must commit its work — see the fleet contract in
+[Parallel worktree fleet](#parallel-worktree-fleet).
+
 ## Tech Stack
 
 - **Language:** Python 3.10+
@@ -638,6 +748,7 @@ history:
 | Document | What it covers |
 |---|---|
 | [Full Architecture](docs/architecture.md) | System design and data flow |
+| [Worktree Fleet Quickstart](docs/worktree-fleet-quickstart.md) | Full mergeable fleet walkthrough: committed config, in-tree tasks, idempotent lane commands, judge phases, retry recovery |
 | [Component Map](docs/component-map.md) | Module inventory with paths and line counts |
 | [Agentic Evaluator Design](docs/evaluator-loop.md) | How the evaluator loop works |
 | [Judgment Viewer](docs/judgment-viewer.md) | Verdict browser: API contract, data sources, security model, `--repo` |
