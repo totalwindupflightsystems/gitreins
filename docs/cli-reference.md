@@ -672,6 +672,15 @@ and `--json` writes a machine-readable run record. The outcome is also appended
 to the QA ledger (`gitreins qa list`), so a QA verdict outlives the reaped
 tree.
 
+Performance envelope, measured with hyperfine (10 runs, warm cache, this
+host, toy repo with 1 test): one `worktree fresh` run of
+`pytest test_flaky.py -q` takes 0.3505s +/- 0.0127 vs 0.0800s +/- 0.0121 for
+running pytest directly in an existing checkout — ~4.4x per-run
+overhead (tree creation + reaping + env). There is no cold-cache cliff on
+this host (fresh run 1 0.61s settles to run 4 0.57s, no warm-up anomaly);
+cold-cache (dropped page cache) numbers were not measured because dropping
+caches needs root, so this envelope is warm-cache only, stated as such.
+
 ### `worktree repro`
 
 ```bash
@@ -694,6 +703,21 @@ The JSON record has this shape:
 
 `--keep-failures` keeps failed trees only; successful trees are always reaped.
 
+Performance envelope, measured with hyperfine (10 runs, warm cache, this
+host, toy repo with 1 test): `worktree repro -k 10 --concurrency 3` finishes
+in 1.258s +/- 0.116 wall, while 10 sequential raw pytest runs of the same
+command take ~2.18s — at k=10 the harness is FASTER than raw sequential
+runs despite the ~4.4x per-run overhead, because fresh trees run concurrently.
+That crossover is the sizing rule of thumb: for small k (roughly k <= 3), a
+bare loop of raw runs is cheaper unless you need the hermetic fresh tree or
+the recorded pass rate; for larger k, raise `--concurrency`. Internally the
+k runs are distributed over a thread pool of `min(--concurrency, k)` workers,
+each running one full fresh cycle (tree creation + command + reap), so the
+wall is roughly `ceil(k / C)` cycles: set C near your CPU core count when the
+command is light, and lower (or leave the default cap) when the command
+itself is multithreaded and already saturates the cores. The numbers above
+are warm-cache only (cold-cache drop needs root to measure), stated as such.
+
 ### `worktree dogfood`
 
 ```bash
@@ -708,6 +732,18 @@ key is configured, the judge is recorded as skipped rather than passed.
 0 means executed steps passed or judge was skipped, exit 1 means a step
 failed, and exit 2 means GitReins infrastructure failed. Evidence contains
 `steps`, a `judge` object, timestamps, the tree path, and keep status.
+
+Performance envelope, measured with the same hyperfine method as
+`worktree fresh` (10 runs, warm cache, this host, toy repo with 1 test):
+dogfood runs a single disposable tree, so it carries the same fresh-cycle
+overhead (~4.4x the raw command at toy scale) on top of its scripted steps
+(`init`, task creation, `guard`, and the Tier 2 judge). It takes no `-k`, so
+k-scaling and the `--concurrency` sweet spot are the `worktree repro`
+envelope above. `--skip-judge` bounds the top end: with it, dogfood is
+roughly one fresh cycle plus a guard run; without it, the judge is an LLM
+network call whose latency varies with the model backend and is not part of
+the local warm-cache envelope here. Warm-cache only (cold-cache drop needs
+root to measure), stated as such.
 
 ### `worktree clean`
 
