@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import shutil
@@ -230,6 +231,135 @@ def test_dogfood_skip_judge_runs_four_steps_and_reaps(disposable_repo, tmp_path)
     assert report["judge"]["status"] == "skipped"
     assert not Path(report["tree"]).exists()
     assert not any(_disposable_dir(disposable_repo).iterdir())
+    # DF-GITREINS-POC-73: the human line must not present the skipped judge as
+    # a failure ("3/4 steps passed") — skipped steps are named, not counted as
+    # not-passed.
+    assert "judge skipped" in result.stdout
+    assert "--skip-judge" in result.stdout
+    assert "3/4 steps passed" not in result.stdout
+
+
+def test_dogfood_human_summary_separates_skipped_from_passed(disposable_repo, tmp_path):
+    """DF-GITREINS-POC-73 — the summary is also an API.
+
+    A CI consumer keying on the old ``3/4 steps passed`` line graded a
+    deterministic judge skip as a failure. The renderer now reports the
+    executed count separately from the skipped remainder and suffixes each
+    skipped step with its recorded reason, mirroring the honest JSON.
+    """
+    evidence = tmp_path / "dogfood.json"
+    result = _run_cli(
+        disposable_repo,
+        "worktree",
+        "dogfood",
+        "--skip-judge",
+        "--test-command",
+        "true",
+        "--json",
+        str(evidence),
+    )
+    assert result.returncode == 0, result.stderr
+    report = json.loads(evidence.read_text(encoding="utf-8"))
+
+    passed = sum(step["status"] == "passed" for step in report["steps"])
+    failed = sum(step["status"] == "failed" for step in report["steps"])
+    skipped = [step for step in report["steps"] if step["status"] == "skipped"]
+    # Contract: counts that separate skipped from failed, plus the skip reason.
+    assert "dogfood: 3 passed, 0 failed, 1 skipped" in result.stdout
+    for step in skipped:
+        assert f"{step['name']} skipped ({step['reason']})" in result.stdout
+    # The old misleading rendering is gone, and a clean skip stays exit 0.
+    assert "3/4 steps passed" not in result.stdout
+    assert passed == 3 and failed == 0
+
+
+def test_format_dogfood_summary_renders_each_status_honestly():
+    """Unit contract for the pure renderer: passed / failed / skipped each get
+    their own count, skipped steps carry their reason, and no rendering can
+    re-introduce the misleading ``N/M steps passed`` shape."""
+    from gitreins import cli as cli_mod
+
+    # Skip case: judge skipped with its reason — must not read as a failure.
+    skipped_report = {
+        "steps": [
+            {"name": "init", "status": "passed", "reason": ""},
+            {"name": "task", "status": "passed", "reason": ""},
+            {"name": "guard", "status": "passed", "reason": ""},
+            {"name": "judge", "status": "skipped", "reason": "--skip-judge"},
+        ],
+        "judge": {"status": "skipped", "reason": "--skip-judge"},
+        "exit_code": 0,
+    }
+    summary = cli_mod._format_dogfood_summary(skipped_report)
+    assert summary == ("dogfood: 3 passed, 0 failed, 1 skipped (judge skipped (--skip-judge))")
+    assert "3/4" not in summary
+
+    # Full-execution success: identical shape, zero skipped, no skip suffix.
+    passed_report = {
+        "steps": [
+            {"name": "init", "status": "passed", "reason": ""},
+            {"name": "task", "status": "passed", "reason": ""},
+            {"name": "guard", "status": "passed", "reason": ""},
+            {"name": "judge", "status": "passed", "reason": ""},
+        ],
+        "judge": {"status": "passed", "reason": ""},
+        "exit_code": 0,
+    }
+    assert (
+        cli_mod._format_dogfood_summary(passed_report) == "dogfood: 4 passed, 0 failed, 0 skipped"
+    )
+
+    # Real failure stays visibly failed and exit-code-truthful.
+    failed_report = {
+        "steps": [
+            {"name": "init", "status": "passed", "reason": ""},
+            {"name": "task", "status": "failed", "reason": ""},
+            {"name": "judge", "status": "skipped", "reason": "previous dogfood step failed"},
+        ],
+        "judge": {"status": "skipped", "reason": "previous dogfood step failed"},
+        "exit_code": 1,
+    }
+    failed_summary = cli_mod._format_dogfood_summary(failed_report)
+    assert "1 failed" in failed_summary
+    assert "judge skipped (previous dogfood step failed)" in failed_summary
+    assert "skipped (previous dogfood step failed)" in failed_summary
+
+
+def test_dogfood_failure_keeps_failed_count_visible(disposable_repo, monkeypatch, capsys):
+    """DF-GITREINS-POC-73 control — a genuinely failed step stays failed.
+
+    Drives the real command function in-process with only the guard CLI
+    invocation stubbed to exit 3 (in a disposable tree every lane that could
+    fail naturally is diff-scoped against a clean HEAD and skips instead).
+    The run must exit 1, count the guard failure separately, and name both
+    the failure and the judge skip with its recorded reason — the honest-skip
+    rendering must not soften real failures. (--skip-judge's own reason wins
+    over the failure reason by the documented branch order.)
+    """
+    import engine.worktree_disposable as disposable_mod
+    from gitreins import cli as cli_mod
+
+    real_run = disposable_mod.subprocess.run
+
+    def failing_guard_run(cmd, **kwargs):
+        if cmd[-1] == "guard":
+            return subprocess.CompletedProcess(cmd, 3, "", "guard exploded")
+        return real_run(cmd, **kwargs)
+
+    monkeypatch.setattr(disposable_mod.subprocess, "run", failing_guard_run)
+    monkeypatch.setattr(cli_mod, "get_workdir", lambda: str(disposable_repo))
+
+    args = argparse.Namespace(
+        keep=False, skip_judge=True, test_command="true", timeout=None, json_path=None
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        cli_mod.cmd_worktree_dogfood(args)
+    assert excinfo.value.code == 1
+    out = capsys.readouterr().out
+    assert "1 failed" in out
+    assert "guard failed (exit 3)" in out
+    assert "judge skipped (--skip-judge)" in out
+    assert "0 failed" not in out
 
 
 def test_dogfood_keep_retains_tree(disposable_repo):
