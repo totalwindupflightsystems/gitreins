@@ -1682,6 +1682,34 @@ def cmd_worktree_repro(args):
         raise SystemExit(1)
 
 
+def _format_dogfood_summary(report: dict) -> str:
+    """One honest human line for a dogfood report (DF-GITREINS-POC-73).
+
+    The summary is also an API: a CI consumer keys on it, so a skipped step
+    must never be counted as not-passed. Passed / failed / skipped each get
+    their own count, and every non-passed step is named with its skip reason
+    or exit code, mirroring the ``{"status": ..., "reason": ...}`` the JSON
+    report already carries.
+    """
+    steps = report.get("steps") or []
+    passed = sum(step.get("status") == "passed" for step in steps)
+    failed = sum(step.get("status") == "failed" for step in steps)
+    skipped = [step for step in steps if step.get("status") == "skipped"]
+    summary = f"dogfood: {passed} passed, {failed} failed, {len(skipped)} skipped"
+    notes = [
+        f"{step.get('name', 'step')} failed (exit {step.get('exit_code', '?')})"
+        for step in steps
+        if step.get("status") == "failed"
+    ]
+    notes += [
+        f"{step.get('name', 'step')} skipped ({step.get('reason') or 'no reason recorded'})"
+        for step in skipped
+    ]
+    if notes:
+        summary = f"{summary} ({', '.join(notes)})"
+    return summary
+
+
 def cmd_worktree_dogfood(args):
     """Exercise init, task, guard, and judge in a disposable tree."""
     from engine.worktree_disposable import DisposableWorktreeManager
@@ -1701,10 +1729,7 @@ def cmd_worktree_dogfood(args):
         raise SystemExit(2) from exc
 
     _record_qa_run("dogfood", report)
-    print(
-        f"dogfood: {sum(step['status'] == 'passed' for step in report['steps'])}/"
-        f"{len(report['steps'])} steps passed; judge {report['judge']['status']}"
-    )
+    print(_format_dogfood_summary(report))
     if report["exit_code"]:
         raise SystemExit(report["exit_code"])
 
