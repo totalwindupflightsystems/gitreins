@@ -542,3 +542,111 @@ def test_disposable_manager_api_works_without_a_board(plain_repo: Path):
     verifier.reap()
     assert verifier._load() == []
     assert not (plain_repo / ".coding-hermes").exists()
+
+
+# ── DF-GITREINS-POC-71: child environment must not inherit the session ──────
+
+
+def _write_tool_stub(bin_dir: Path, name: str, body: str) -> None:
+    """Drop a stand-in shell tool into a toolchain bin dir."""
+    bin_dir.mkdir(parents=True, exist_ok=True)
+    stub = bin_dir / name
+    stub.write_text(f"#!/bin/sh\n{body}\n", encoding="utf-8")
+    stub.chmod(0o755)
+
+
+def test_fresh_child_resolves_tree_toolchain_over_session_path(disposable_repo: Path, monkeypatch):
+    """DF-GITREINS-POC-71 — `worktree fresh` runs the TREE's toolchain.
+
+    The disposable run's child inherits the consumer session's PATH, so a
+    deliberately flaky command kept via --keep-failures re-ran the session's
+    own pytest (a different interpreter/checkout) inside the kept tree and
+    passed — the captured failure was not reproducible in the artifact the
+    flag exists to preserve. Dogfood run 15, 2026-09-26. Mirrored here: the
+    tree carries a pytest that self-identifies and exits 0, while the
+    session PATH leads with a pytest that exits 42. The child must run the
+    tree's pytest (PATH resolves the tree's linked venv bin first).
+    """
+    _write_tool_stub(disposable_repo / ".venv" / "bin", "pytest", 'echo "venv-pytest $@"\nexit 0')
+    foreign_bin = disposable_repo.parent / "foreign-bin"
+    _write_tool_stub(foreign_bin, "pytest", "echo session-pytest\nexit 42")
+    _write_tool_stub(foreign_bin, "python", "exit 42")
+    monkeypatch.setenv("PATH", f"{foreign_bin}:{os.environ['PATH']}")
+
+    manager = DisposableWorktreeManager(disposable_repo)
+    result = manager.run("pytest test_flaky.py -q")
+
+    assert result["exit_code"] == 0, result["output"]
+    assert "venv-pytest" in result["output"]
+    assert "session-pytest" not in result["output"]
+
+
+def test_dogfood_steps_boot_the_harness_cli_under_hostile_session_env(
+    disposable_repo: Path, monkeypatch
+):
+    """DF-GITREINS-POC-71 — dogfood steps boot the harness CLI deterministically.
+
+    Reproduces the verified live failure: the parent interpreter is foreign
+    to the harness checkout (an agent runtime's python first on PATH) and the
+    child dies with ``ModuleNotFoundError: No module named 'engine'`` — the
+    dogfood init step exits 1 and the whole run reports init failed. The step
+    runner now pins PYTHONPATH to the harness root (replacing any session
+    value) and prefers the tree's own venv interpreter, so a hostile session
+    PATH/PYTHONPATH cannot change what the child imports or runs.
+    """
+    hostile_site = disposable_repo.parent / "hostile-site"
+    (hostile_site / "engine").mkdir(parents=True)
+    (hostile_site / "engine" / "__init__.py").write_text(
+        "raise RuntimeError('session PYTHONPATH shadowed the harness engine package')\n",
+        encoding="utf-8",
+    )
+    foreign_bin = disposable_repo.parent / "foreign-bin"
+    _write_tool_stub(foreign_bin, "python3", "exit 42")
+    monkeypatch.setenv("PYTHONPATH", str(hostile_site))
+    monkeypatch.setenv("PATH", f"{foreign_bin}:{os.environ['PATH']}")
+
+    manager = DisposableWorktreeManager(disposable_repo)
+    report = manager.dogfood(skip_judge=True, test_command="true")
+
+    assert report["exit_code"] == 0, [
+        (step["name"], step["status"], step["output"]) for step in report["steps"]
+    ]
+    assert [step["name"] for step in report["steps"]] == ["init", "task", "guard", "judge"]
+    statuses = {step["name"]: step["status"] for step in report["steps"]}
+    # --skip-judge keeps the judge step recorded as skipped (documented
+    # contract); the harness-CLI steps must all PASS under the hostile env.
+    assert statuses == {
+        "init": "passed",
+        "task": "passed",
+        "guard": "passed",
+        "judge": "skipped",
+    }
+    # The hostile value belongs to the parent session; the child's pin must
+    # not leak back into it.
+    assert str(hostile_site) in (os.environ.get("PYTHONPATH") or "")
+
+
+def test_child_env_helpers_pin_the_tree_toolchain_and_harness_root(tmp_path: Path):
+    """The env-pinning contract lives in named helpers, not ad-hoc literals.
+
+    Both builders must point PATH at the disposable tree's linked venv bin
+    (falling back to the harness checkout's source venv when the link is
+    missing) and the CLI builder must set PYTHONPATH to the harness root —
+    the session value is replaced, not prepended, so a hostile PYTHONPATH
+    cannot shadow the engine package.
+    """
+    from engine import worktree_disposable as disposable_mod
+    from engine.worktree_manager import WorktreeManager
+
+    _git(tmp_path, "init", "-q")
+    manager = WorktreeManager(tmp_path)
+    tree = tmp_path / "main-wt" / ".disposable" / "run-x"
+    venv_bin = tree / manager.venv_name / "bin"
+    venv_bin.mkdir(parents=True)
+
+    run_env = disposable_mod._child_command_env(tree, manager)
+    assert run_env["PATH"].split(os.pathsep)[0] == str(venv_bin)
+
+    cli_env = disposable_mod._child_cli_env(tree, manager)
+    assert cli_env["PYTHONPATH"] == str(Path(disposable_mod.__file__).resolve().parents[1])
+    assert cli_env["PATH"].split(os.pathsep)[0] == str(venv_bin)
