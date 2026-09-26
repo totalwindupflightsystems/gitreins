@@ -2636,6 +2636,24 @@ def _snapshot_staged_paths(workdir: str) -> set[bytes]:
     )
 
 
+def _working_tree_is_clean(workdir: str) -> bool:
+    """True when git status reports no unstaged or untracked changes.
+
+    Used to tell the two nothing-staged cases apart (DF-GITREINS-POC-70):
+    a clean tree means there is nothing to commit at all, while a dirty
+    tree means the user forgot `git add`.
+    """
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        capture_output=True,
+        cwd=workdir,
+    )
+    if result.returncode != 0:
+        detail = (result.stderr or b"").decode(errors="replace").strip()
+        raise RuntimeError(detail or "git status --porcelain failed")
+    return not result.stdout.strip()
+
+
 def _git_head(workdir: str) -> bytes | None:
     """Return HEAD's object ID, or None for a repository with no commits."""
     result = subprocess.run(
@@ -2698,7 +2716,39 @@ def cmd_commit(args):
             file=sys.stderr,
         )
     # GR-GAP-051: never commit unguarded — same refusal as `gitreins guard`.
+    # Kept AHEAD of the DF-GITREINS-POC-70 staged check: the config-less
+    # refusal is a prerequisite, not a guard lane, and GR-GAP-051 pins its
+    # message even for a clean repo.
     _require_guard_config(workdir)
+    # DF-GITREINS-POC-70: refuse a doomed commit BEFORE the guard stage. With
+    # nothing staged the guard lanes all skip, the green "Tier 1 PASSED"
+    # banner prints, and `git commit` then fails "nothing to commit" — a
+    # fresh user reads a green gate, a red exit, and the real cause wedged
+    # in between. Same early-refusal shape as the POC-66 check above.
+    try:
+        staged = _snapshot_staged_paths(workdir)
+    except RuntimeError as exc:
+        print(
+            f"COMMIT INTEGRITY CHECK FAILED — cannot inspect the git index: {exc}",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    if not staged:
+        if _working_tree_is_clean(workdir):
+            print(
+                "Nothing to commit: the index is empty and the working tree "
+                "is clean. Stage changes with `git add <files>` first, then "
+                "retry commit.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "Nothing staged: the index is empty, but the working tree "
+                "has unstaged or untracked changes. Stage them with "
+                "`git add <files>`, then retry commit.",
+                file=sys.stderr,
+            )
+        sys.exit(1)
     config = load_config(workdir)
     gm = GuardManager(workdir, config=config)
     tier1 = gm.run_all()
