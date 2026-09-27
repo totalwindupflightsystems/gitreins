@@ -10,6 +10,10 @@ category: software-development
 
 # GitReins Usage — Task Lifecycle, Guards, Judge, MCP
 
+> **Reading the ids.** References like `DF-010`, `GR-GAP-055`, `POC-12` or `INT-CI-8` are rows on this project's own
+> internal work board. They are kept so a claim can be traced to the incident that produced it;
+> nothing in this skill requires knowing what they contain.
+
 GitReins is a git-native quality harness: tasks with completion criteria, Tier-1
 static guards (secrets/lint/tests) on every commit, and an agentic LLM evaluator
 that judges task completion per-criterion. This repo (gitreins-poc) both BUILDS
@@ -114,11 +118,11 @@ The MCP `commit` tool runs guards first and rejects the commit if they fail.
     verify a dogfood target by what's ON PYPI, not just repo HEAD — a green
     repo can ship a broken package for weeks.
 11. **The pre-commit hook calls bare `gitreins` — PATH shadowing runs a
-    DIFFERENT version.** On this machine `/home/kara/.hermes/venvs/board/bin`
-    (gitreins 0.8.1) precedes `.venv/bin` (0.11.0), so the hook silently ran
-    0.8.1 and let real `sk-`/`ghp_` secrets through. Before trusting a commit
-    gate: `which gitreins` from the hook's perspective, or prepend the target
-    venv: `PATH="$HOME/gitreins-poc/.venv/bin:$HOME/go/bin:$PATH"`.
+    DIFFERENT version.** On the machine this was found, an unrelated board venv
+    (carrying gitreins 0.8.1) preceded `.venv/bin` (0.11.0) on PATH, so the hook
+    silently ran 0.8.1 and let real `sk-`/`ghp_` secrets through. Before
+    trusting a commit gate: `which gitreins` from the hook's perspective, or
+    prepend the target venv: `PATH="$HOME/<repo>/.venv/bin:$HOME/go/bin:$PATH"`.
 12. **gitleaks (default rules AND the generated config) reports `no leaks
     found` for `sk-...` and `ghp_...` patterns** — the built-in regex scanner
     catches both, gitleaks doesn't. "gitleaks clean" is not proof of clean;
@@ -707,10 +711,10 @@ innerText contains `date · hash`). The list is newest-LAST, so "first
 matching row" for a title can be a different verdict than you assume.
 
 **Pitfall 42 — `--project` is the scheduler project name, case-sensitive,
-and the project was renamed.** Docs examples say `gitreins-poc`; the fleet
+and the project was renamed.** Docs examples say `gitreins-poc`; the scheduler
 project has been `gitreins` since 09-22, so `--project gitreins-poc` shows
-"no ticks recorded" forever. Ticks come from
-`~/.hermes/coding-hermes/scheduler.db` on the host running serve.
+"no ticks recorded" forever. Ticks come from the scheduler DB on the host
+running `serve`.
 
 **Pitfall 43 — a fresh clone carries two stale verdicts and no verdict
 branch (POC-58).** `2026-08-17/96dd2464` and `2026-08-18/9b129d91` are
