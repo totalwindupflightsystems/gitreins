@@ -75,6 +75,7 @@ changed one. Data is re-read from disk on every request, so the contract is
 | Method | Path | Success | Payload | Errors |
 |--------|------|---------|---------|--------|
 | GET | `/` | 200 HTML | the single-page viewer (no server-side data; it fetches `/api/*`) | — |
+| GET | `/health` | 200 | `status` (`ok`), `version`, `repo`, `path` — a liveness probe that reads no verdict store and aggregates nothing (REVIEW-GITREINS-022) | — |
 | GET | `/api/stats` | 200 | `total`, `passed`, `failed`, `pass_rate`, `resolution_records`, `usage` (aggregate judge tokens/cost), `board` (`configured`/`path`/`message` for the fleet board), `repo`, `path`, `generated`. `total` counts judgments only: resolution-gate records are excluded from it but still listed by `/api/verdicts`, and are reported as `resolution_records`, so `total + resolution_records` always equals the `/api/verdicts` list length | — |
 | GET | `/api/verdicts` | 200 | `{"verdicts": [row, …]}` — metadata only, newest last | — |
 | GET | `/api/verdicts/<date>/<hash>` | 200 | the full `verdict.json` (criteria, `stages.tier1`, `stages.tier2`, `evidence` manifest when one was collected) plus a joined `usage` block when judge telemetry is traceable to it | `400` malformed path (not `<date>/<hash>`), `404` unknown date/hash |

@@ -41,7 +41,13 @@ _BUILTIN_FINDING_LINE = re.compile(r"^(\S+:\d+): \[[^\]]+\]")
 # passed. Config-disabled guards are NOT degradations (they never run at all),
 # and a language-appropriate replacement (Go's vet/test/build for a Go repo)
 # is not one either.
-_SUBSTANTIVE_STEPS = frozenset({"lint", "tests", "lsp"})
+#
+# static_analysis joined this set with REVIEW-GITREINS-018: its lane
+# reported a green ✓ for a repo whose language selected no tool (a tree of
+# Python files with no packaging marker), which is exactly the "gate that never
+# ran reading as a pass" this set exists to catch. Its Go branch is unaffected —
+# that path returns no skip flag, so the replacement stays non-substantive.
+_SUBSTANTIVE_STEPS = frozenset({"lint", "tests", "lsp", "static_analysis"})
 
 # DF-GITREINS-POC-44 / POC-42: a Go repo runs the Go-native lanes INSTEAD of
 # the Python steps above (GuardManager.run_all) — the same substantive gates

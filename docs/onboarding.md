@@ -125,6 +125,28 @@ commands are preserved on reruns; the detected test runner replaces only the
 untouched `install` default. `gitreins init --reset` rewrites the smart defaults
 from scratch when a config has drifted.
 
+### The resolution gate: the flagship, one line away
+
+`gitreins resolve "<question>"` and the MCP `context.resolve` tool answer a
+question from the repository instead of a guess — they trace it to its seed
+files, assemble a measured evidence bundle and return a calibrated band
+(`RESOLVED` / `REVIEW` / `UNRESOLVED`). **It ships switched off**, and a first run
+says so rather than pretending: `gitreins resolve "<question>"` answers
+`ABSTAIN` with the reason (`surface-disabled — resolution.enabled.cli is false
+(or absent)`) and the fix, so the dead end is one line deep. That line is:
+
+```yaml
+resolution:
+  enabled:
+    cli: true
+```
+
+Add it to `.gitreins/config.yaml`, then ask it something real:
+
+```bash
+gitreins resolve "where is the guard's exit code decided?"
+```
+
 ### Resolution-gate surfaces are off until you enable them
 
 `gitreins init` also writes the `resolution:` block (JEVRES-006) — with **every surface

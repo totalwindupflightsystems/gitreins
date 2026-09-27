@@ -11,7 +11,7 @@
 
 GitReins lives inside your git repository as a quality harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ✅ **v0.15.0** — the release that closes the loop between what is merged and what actually runs. `gitreins resolve "<question>"` (and the `context.resolve` MCP tool) traces a question to its seed files through Hilo, assembles a measured evidence bundle and returns a calibrated verdict band; `gitreins preflight` checks the premises of a task *before* a worker is dispatched, and annotates instead of dispatching when they do not hold; the judge pre-screens candidates and attributes a verdict per acceptance criterion; per-surface config knobs make the resolution gate tunable without touching code. On the guard side, the `hook_timeout` early-return now carries `allow_skips` (a slow repo's docs/board commits were being blocked with exit 2 by a run whose own warning said the commit was allowed), the test lane pins its interpreter so a host whose PATH carries another virtualenv can no longer fail the lane with `unrecognized arguments: -n`, Go guard commands run through bounded execution, and the evaluator reaps the last run's process group on exit. `scripts/check_deployed_surface.py` is new: it compares the *deployed* CLI surface with this checkout and fails loudly when a merged subcommand exists only in the repo — the drift that used to be invisible because both copies reported the same version. 2497 tests pass / 71 test files, verified by collection (optional-tool skips vary).
+> ✅ **v0.15.0** — the release that closes the loop between what is merged and what actually runs. `gitreins resolve "<question>"` (and the `context.resolve` MCP tool) traces a question to its seed files through Hilo, assembles a measured evidence bundle and returns a calibrated verdict band; `gitreins preflight` checks the premises of a task *before* a worker is dispatched, and annotates instead of dispatching when they do not hold; the judge pre-screens candidates and attributes a verdict per acceptance criterion; per-surface config knobs make the resolution gate tunable without touching code. On the guard side, the `hook_timeout` early-return now carries `allow_skips` (a slow repo's docs/board commits were being blocked with exit 2 by a run whose own warning said the commit was allowed), the test lane pins its interpreter so a host whose PATH carries another virtualenv can no longer fail the lane with `unrecognized arguments: -n`, Go guard commands run through bounded execution, and the evaluator reaps the last run's process group on exit. `scripts/check_deployed_surface.py` is new: it compares the *deployed* CLI surface with this checkout and fails loudly when a merged subcommand exists only in the repo — the drift that used to be invisible because both copies reported the same version. 2523 tests pass / 72 test files, verified by collection (optional-tool skips vary).
 
 Every resolution-gate surface ships **disabled**, because resolving a question sends the assembled bundle off the host: enabling one is an explicit act, `resolution.enabled.<surface>: true` (`cli`, `mcp`, `predispatch`, `judge_prescreen`) in `.gitreins/config.yaml` — `gitreins init` writes the block with all four `false`, and only a literal `true` opens a surface. A disabled surface fails closed with `abstain_reason: surface-disabled` and prints the enabling fix. The complete block, the defaults it may omit and the calibration caveat on the judge-adjacent surfaces are in [docs/jev-resolution-gate.md §9](docs/jev-resolution-gate.md).
 
@@ -417,6 +417,10 @@ Tier 1 Guards: FAIL  (test mode: full)
   guard log: .gitreins/logs/guard-20260916T200106.123456Z.log
 ```
 
+First guard failure? The [onboarding guide's Troubleshooting
+section](docs/onboarding.md#troubleshooting) walks the common first-run
+failures step by step.
+
 `~` marks a step that was skipped, and a degraded run never prints the green
 `Tier 1 Guards: PASS` header — so grepping that string is proof the gates
 actually ran. With `guards.allow_skips: false` (code default) it exits **2**;
@@ -628,7 +632,11 @@ real CLI parser in CI, so this class of broken example cannot ship again.
 
 ## Configuration
 
-Full `.gitreins/config.yaml` reference:
+Full `.gitreins/config.yaml` reference. Every uncommented value below is the
+code default from [`engine/config.py`](engine/config.py) (`GitReinsDefaults`);
+commented lines are examples. Any key you omit — including keys not shown
+here — falls back to that same dataclass, the single source of truth for
+defaults:
 
 ```yaml
 # ── Global defaults ──────────────────────────────────
@@ -643,21 +651,24 @@ guards:
   lint: true
   tests: true
   test_mode: "full"          # "full" or "diff"
-  # uv/pipenv/poetry are OPTIONAL — if the runner prefix's binary is not on
-  # PATH, the guard falls back to `python -m pytest ...` with a warning.
-  test_command: "uv run pytest -x --tb=short"
+  # test_command: "uv run pytest -x --tb=short"
+  #   uv/pipenv/poetry are OPTIONAL — if the runner prefix's binary is not on
+  #   PATH, the guard falls back to `python -m pytest ...` with a warning.
+  #   Code default: "pytest -x --tb=short".
   # Run test_command even with an empty index (nothing staged). Default false
   # means the tests lane is a SKIP with a named reason ("no staged files") —
   # under allow_skips:false that makes the whole run a DEGRADED pass (exit 2).
   # Set true when the suite must run on clean-tree guard runs too (chained
   # suites, audits, or commits that land through another tool).
   test_on_clean: false
+  # Overall pre-commit hook timeout in seconds.
+  hook_timeout: 300
   # A run where a substantive gate (lint/tests/lsp) did NO work — nothing
   # staged, no linter on PATH, zero tests collected — is a DEGRADED PASS.
   # true  = degraded runs still exit 0 (gitreins init writes this default)
   # false = degraded runs exit 2, so CI can never read a gate that never ran
   #         as a gate that passed
-  allow_skips: true
+  # allow_skips: true   # code default: false; `gitreins init` writes true
 
   # Go projects (auto-detected via go.mod):
   go:
@@ -667,11 +678,17 @@ guards:
 
 # ── Tier 2 evaluator caps ────────────────────────────
 evaluator:
-  max_iterations: 25         # LLM reasoning turns
-  max_time: "5m"             # wall clock cap
-  max_input_tokens: "200k"
-  max_output_tokens: "50k"
+  max_iterations: 100        # LLM reasoning turns; -1 = unlimited
+  # Wall clock: UNLIMITED by default (max_seconds = -1 in engine/config.py) —
+  # no cap unless you set one. Example:
+  # max_time: "5m"
+  max_input_tokens: "10M"
+  max_output_tokens: 131072
+  max_tokens_per_call: 16384  # per-LLM-call cap (session budget is separate)
   tool_call_weight: 0.1      # tool calls cost 0.1 iterations
+  compaction_threshold: 0.90  # compact past 90% of max_input_tokens
+  code_context_budget: 0.70  # cap pre-loaded code context at 70% of the input budget
+  max_file_bytes: 131072     # cap read_file results (bytes)
 
 # ── Verdict history ──────────────────────────────────
 history:
@@ -766,11 +783,12 @@ A lane whose own TREE is dirty fails the mirror-image check
 - **MCP Transport:** stdio (13 tools)
 - **Config:** YAML in `.gitreins/` directory
 - **Evaluator Default Model:** DeepSeek V4 Flash (~$0.01/eval)
-- **Test suite:** 2497 tests across 71 test files (collection total; optional-tool skips vary)
+- **Test suite:** 2523 tests across 72 test files (collection total; optional-tool skips vary)
 
 ## Architecture & Docs
 
 - [Disposable verification](docs/disposable-verification.md) — run QA batteries, dogfood, and repro farms in throwaway worktrees without a bunker. Every QA run records its outcome in the QA ledger (`gitreins qa list`), including runs produced outside the harness (`gitreins qa record`).
+- [CONTRIBUTING.md](CONTRIBUTING.md) — development setup, how to run the repo test suite, and the commit convention.
 
 | Document | What it covers |
 |---|---|

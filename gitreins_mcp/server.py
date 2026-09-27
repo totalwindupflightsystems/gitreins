@@ -470,11 +470,19 @@ class GitReinsMCPServer:
         }
 
     def _task_manager_for(self, workdir: str | None = None) -> TaskManager:
-        """Return TaskManager for the given workdir, or the server default."""
+        """Return a TaskManager that sees the CURRENT store for *workdir*.
+
+        REVIEW-GITREINS-020: the server holds one manager for the life of the
+        process, so without a re-read every task tool served the snapshot taken
+        at startup — a task deleted with the CLI kept blocking `commit` and
+        kept appearing in `task.list`. The store is small and the reload takes
+        the shared side of the writers' lock, so reads stay honest and cheap.
+        """
         if workdir:
             wd = os.path.abspath(workdir)
             if wd != self.workdir:
-                return TaskManager(wd)
+                return TaskManager(wd)  # fresh object: already read from disk
+        self.tasks.reload()
         return self.tasks
 
     def _task_create(
@@ -535,8 +543,11 @@ class GitReinsMCPServer:
 
     def _commit(self, message: str) -> dict:
         """Commit staged changes; blocked while any task is in_progress."""
-        # Check all in-progress tasks first
-        in_progress = self.tasks.list_tasks("in_progress")
+        # Check all in-progress tasks first. REVIEW-GITREINS-020: read through
+        # the manager factory so the check sees the store as it is NOW — the
+        # startup snapshot kept refusing a commit for a task the CLI had
+        # already deleted.
+        in_progress = self._task_manager_for().list_tasks("in_progress")
         if in_progress:
             ids = ", ".join(t.id for t in in_progress)
             return {
@@ -685,7 +696,7 @@ class GitReinsMCPServer:
             if not task:
                 return {"error": f"Task not found: {id} in {wd}"}
         else:
-            task = self.tasks.get(id)
+            task = self._task_manager_for().get(id)
             if not task:
                 return {"error": f"Task not found: {id}"}
 
