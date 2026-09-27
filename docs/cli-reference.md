@@ -457,6 +457,34 @@ resolution continues to the next one.
 The audit is also skipped (exit 0) when a `gitreins.skip-tier2` trailer is
 present in the message.
 
+**Audit knobs** — read from `.gitreins/config.yaml` only: the merged
+`commit_audit` section (a merge of `defaults.commit_audit` and top-level
+`commit_audit`, top-level keys winning — the same sources as `mode` above).
+Unlike `mode`, the knobs are **not** read from the pipeline stage definition;
+a knob written on the stage is dead config:
+
+```yaml
+# .gitreins/config.yaml
+commit_audit:
+  review_mode: review
+  review_score_threshold: 8.0
+```
+
+| Key | Type | Default | Effect |
+|-----|------|---------|--------|
+| `strictness` | string | `"standard"` | Prompt-instruction set for message checking: `"lenient"`, `"standard"`, or `"strict"` (an unknown value falls back to standard wording) |
+| `max_iterations` | int | `3` | LLM exploration rounds before the audit reports exhaustion (`0` = no tools, single call) |
+| `suggest_message` | bool | `true` | On a rejected message, attach a suggested replacement |
+| `review_mode` | string | `"message"` | `"message"` audits the commit message; `"review"` runs a single-call code review of the diff; `"agent"` runs the review with tool access over multiple turns |
+| `review_checks` | map | `null` | Which review categories are active. Unset → the auditor's built-in default: `bugs: true`, `security: true`, `anti_patterns: true`, `style: false`, `performance: false` |
+| `review_severity` | string | `"standard"` | Review reporting floor: `"critical-only"`, `"standard"` (medium+), or `"all"`; an unknown value falls back to standard |
+| `review_suggest_fix` | bool | `true` | Include actionable fix suggestions for every review issue |
+| `review_score_threshold` | float | `8.0` | GR-066 scoring: an issue's effective score (`score × review_score_offset`) at or above this is marked BLOCK (at ≥ 75% of it, WARN) |
+| `review_score_offset` | float | `1.0` | GR-066 multiplier applied to each issue's raw score before comparison against the threshold |
+
+`mode: block` still decides the exit code: a review issue only blocks when its
+effective score reaches `review_score_threshold` **and** `mode` is `block`.
+
 **Exit codes**
 
 | Code | Meaning |
