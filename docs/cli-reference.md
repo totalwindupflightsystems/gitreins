@@ -738,7 +738,7 @@ Performance envelope, measured with the same hyperfine method as
 dogfood runs a single disposable tree, so it carries the same fresh-cycle
 overhead (~4.4x the raw command at toy scale) on top of its scripted steps
 (`init`, task creation, `guard`, and the Tier 2 judge). It takes no `-k`, so
-k-scaling and the `--concurrency` sweet spot are the `worktree repro`
+k-scaling and the concurrency sweet spot are the `worktree repro`
 envelope above. `--skip-judge` bounds the top end: with it, dogfood is
 roughly one fresh cycle plus a guard run; without it, the judge is an LLM
 network call whose latency varies with the model backend and is not part of
