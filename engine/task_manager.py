@@ -159,6 +159,36 @@ class TaskManager:
             print(f"Warning: failed to load tasks: {e}", file=sys.stderr)
             self._preserve_unreadable_state()
 
+    def reload(self) -> None:
+        """Re-read the task store from disk, replacing the in-memory view.
+
+        REVIEW-GITREINS-020: a long-lived reader (the MCP server keeps one
+        TaskManager for the life of the process) otherwise serves the snapshot
+        taken at construction, so a task another process created, completed or
+        deleted stays invisible — the CLI and the MCP tools are documented as
+        two doors into one store. ``_load()`` merges into ``self._tasks`` (it
+        never removes), so the view is cleared first: a deleted task must
+        actually disappear. The read holds the shared half of the same lock the
+        writers take, so it cannot observe a half-written document.
+        """
+        lock_fd = None
+        try:
+            lock_fd = os.open(self._tasks_lock_file, os.O_RDWR | os.O_CREAT, 0o644)
+            fcntl.flock(lock_fd, fcntl.LOCK_SH)
+        except OSError:
+            # A store dir that cannot be opened is the ordinary "no tasks yet"
+            # case on first run; fall through to an unlocked load.
+            if lock_fd is not None:
+                os.close(lock_fd)
+                lock_fd = None
+        try:
+            self._load_error = None  # a fixed store must stop reporting the old error
+            self._tasks = {}
+            self._load()
+        finally:
+            if lock_fd is not None:
+                os.close(lock_fd)  # releases the flock
+
     def _preserve_unreadable_state(self) -> str | None:
         """Copy the unreadable task state aside; return the sidecar path (None on failure).
 

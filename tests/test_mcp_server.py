@@ -2846,3 +2846,70 @@ class TestContextResolve:
         assert verdict["abstain_reason"] == "surface-disabled"
         assert not (Path(tmp_workdir) / ".gitreins" / "history").exists()
         assert not (Path(tmp_workdir) / ".gitreins" / "usage.jsonl").exists()
+
+
+# ── REVIEW-GITREINS-020: the task tools must read the store, not a snapshot ──
+
+
+class TestTaskReadsSeeTheLiveStore:
+    """The server keeps one TaskManager; every read must reflect the file.
+
+    The review reproduced this with a live server: a task deleted by the CLI
+    (a different process, the documented second door into the same store) kept
+    appearing in task.list and kept the `commit` tool refusing for the life of
+    the MCP process.
+    """
+
+    @staticmethod
+    def _create_started(server, task_id):
+        _mcp_call(server, "task.create", {"id": task_id, "title": "t", "criteria": ["c1"]})
+        _mcp_call(server, "task.start", {"id": task_id})
+
+    @staticmethod
+    def _other_process(workdir):
+        """A second manager on the same store — what the CLI looks like here."""
+        from engine.task_manager import TaskManager
+
+        return TaskManager(workdir)
+
+    def test_task_list_drops_a_task_deleted_out_of_process(self, mcp_server):
+        self._create_started(mcp_server, "gone-soon")
+        listed = _mcp_call(mcp_server, "task.list", {})["tasks"]
+        assert [t["id"] for t in listed] == ["gone-soon"]
+
+        self._other_process(mcp_server.workdir).delete("gone-soon")
+
+        assert _mcp_call(mcp_server, "task.list", {})["tasks"] == []
+
+    def test_task_get_stops_serving_a_deleted_task(self, mcp_server):
+        self._create_started(mcp_server, "vanished")
+        assert _mcp_call(mcp_server, "task.get", {"id": "vanished"})["id"] == "vanished"
+
+        self._other_process(mcp_server.workdir).delete("vanished")
+
+        assert "error" in _mcp_call(mcp_server, "task.get", {"id": "vanished"})
+
+    def test_a_task_deleted_out_of_process_stops_blocking_commit(self, mcp_server, tmp_path):
+        """The reported bug: the startup snapshot kept refusing the commit."""
+        self._create_started(mcp_server, "blocker")
+
+        refused = _mcp_call(mcp_server, "commit", {"message": "wip"})
+        assert "blocker" in refused["error"], refused
+        assert refused["tasks"] == ["blocker"]
+
+        self._other_process(mcp_server.workdir).delete("blocker")
+
+        after = _mcp_call(mcp_server, "commit", {"message": "wip"})
+        # The task no longer blocks. Whatever the guard does next (in this bare
+        # temp repo it may still refuse on guards or on having nothing staged),
+        # the refusal must not be about the deleted task any more.
+        assert "blocker" not in after.get("error", "")
+        assert after.get("tasks") is None
+
+    def test_a_task_created_out_of_process_becomes_visible(self, mcp_server):
+        """The other direction: a CLI-created task must show up for the agent."""
+        self._other_process(mcp_server.workdir).create("from-the-cli", "made by the CLI", ["c1"])
+
+        listed = _mcp_call(mcp_server, "task.list", {})["tasks"]
+
+        assert [t["id"] for t in listed] == ["from-the-cli"]

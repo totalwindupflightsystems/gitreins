@@ -2462,3 +2462,94 @@ class TestStaticAnalysisGuardHonesty:
 
         assert result.passed is False
         assert "main.py:2 [mypy] boom" in result.output
+
+
+# ── REVIEW-GITREINS-018: a language that selects no tool is a skip ──
+
+
+class TestStaticAnalysisNoToolSelected:
+    """The lane must not print a green ✓ for a repo it never graded.
+
+    The review found a tree of Python files with no packaging marker: `init`
+    announced "enabled (mypy, pyright)", the lane selected nothing, printed
+    "No static analysis tools configured for this language" with a ✓ and exited
+    0. Nothing was graded, so the honest verdict is a SKIP that the
+    substantive-gate net turns into a DEGRADED pass.
+    """
+
+    @staticmethod
+    def _manager(tmp_path, *, manifest: bool, tools=("mypy",)):
+        (tmp_path / "calc.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+        if manifest:
+            (tmp_path / "pyproject.toml").write_text(
+                "[project]\nname = 'consumer'\n", encoding="utf-8"
+            )
+        return GuardManager(
+            str(tmp_path),
+            {
+                "guards": {
+                    "secrets": False,
+                    "lint": False,
+                    "tests": False,
+                    "static_analysis": True,
+                    "static_analysis_tools": {"python": list(tools)},
+                }
+            },
+        )
+
+    def test_python_sources_without_a_manifest_are_a_skip_not_a_green(self, tmp_path):
+        """No packaging marker → nothing selected → skipped with the reason."""
+        manager = self._manager(tmp_path, manifest=False)
+
+        result = manager._check_static_analysis()
+
+        assert result.passed is True
+        assert result.skipped is True
+        assert result.skip_reason, "a skip must carry a machine-readable reason"
+        assert "packaging marker" in result.skip_reason
+        assert "clean" not in result.output
+
+    def test_the_skip_names_the_python_marker_gap_specifically(self, tmp_path):
+        """The reason must be the Python one, not 'no language detected'."""
+        manager = self._manager(tmp_path, manifest=False)
+
+        result = manager._check_static_analysis()
+
+        assert "python sources present" in result.skip_reason
+        assert "pyproject.toml" in result.skip_reason
+
+    def test_the_no_tool_skip_arms_the_degraded_net(self, tmp_path):
+        """REVIEW-GITREINS-018: static_analysis is substantive, so the run DEGRADES."""
+        from engine.types import Tier1Result, _is_substantive_step
+
+        manager = self._manager(tmp_path, manifest=False)
+        result = manager._check_static_analysis()
+        tier1 = Tier1Result(passed=True, results=[result])
+
+        assert _is_substantive_step("static_analysis") is True
+        assert tier1.degraded is True
+        assert tier1.degraded_steps == [{"step": "static_analysis", "reason": result.skip_reason}]
+
+    def test_a_manifest_repo_is_unaffected_and_grades_normally(self, tmp_path):
+        """The same tree with a packaging marker still grades — no new skip."""
+        manager = self._manager(tmp_path, manifest=True)
+
+        with (
+            patch("engine.static_analysis.find_tool", side_effect=lambda tool: f"/fake/{tool}"),
+            patch("engine.static_analysis.run_static_check", return_value=[]),
+        ):
+            result = manager._check_static_analysis()
+
+        assert result.passed is True
+        assert result.skipped is False
+        assert "mypy — clean" in result.output
+
+    def test_config_with_no_tools_for_the_language_is_still_a_skip(self, tmp_path):
+        """A manifest repo whose config lists no Python tool also graded nothing."""
+        manager = self._manager(tmp_path, manifest=True, tools=())
+
+        result = manager._check_static_analysis()
+
+        assert result.skipped is True
+        assert "packaging marker" in result.skip_reason or "no python" in result.skip_reason
+        assert "clean" not in result.output

@@ -3670,3 +3670,75 @@ class TestUnknownTaskIdSurface:
         result = run_cli("task", "complete", "real-task", "--skip-tier2", cwd=tmp_workdir)
         assert "Task not found" not in result.stdout
         assert "real-task" in (result.stdout + result.stderr)
+
+
+class TestStaticAnalysisAnnouncementMatchesLane:
+    """REVIEW-GITREINS-019: `init` must not promise what the lane skips.
+
+    The review's reproduction: a real repo whose only language signal is .py
+    files, no packaging manifest. `init` announced "enabled (mypy, pyright)"
+    and the guard then printed a green ✓ having graded nothing. Both halves now
+    read the same selection (`engine.static_analysis.select_tools`).
+    """
+
+    @staticmethod
+    def _bare_python_repo(tmp_path):
+        """A real git repo whose only language signal is .py files."""
+        repo = Path(_init_real_git_repo(tmp_path))  # the helper returns a str
+        (repo / "calc.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+        return repo
+
+    @staticmethod
+    def _path_with(tmp_path, name, *tools):
+        """PATH holding only git plus the named fake tools (host-independent)."""
+        bin_dir = tmp_path / name
+        bin_dir.mkdir()
+        git = shutil.which("git")
+        if git:
+            os.symlink(git, bin_dir / "git")
+        for tool in tools:
+            fake = bin_dir / tool
+            fake.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            fake.chmod(0o755)
+        return {"PATH": str(bin_dir)}
+
+    @staticmethod
+    def _enable_static_analysis(repo, tools):
+        import yaml
+
+        config_path = repo / ".gitreins" / "config.yaml"
+        config = yaml.safe_load(config_path.read_text())
+        config["guards"]["static_analysis"] = True
+        config["guards"]["static_analysis_tools"] = {"python": list(tools)}
+        config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+
+    def test_bare_python_repo_is_told_nothing_will_run(self, tmp_path):
+        """No packaging marker → the status line names the gap, not the tools."""
+        repo = self._bare_python_repo(tmp_path)
+        assert run_cli("install", cwd=str(repo)).returncode == 0
+        self._enable_static_analysis(repo, ["mypy"])
+
+        result = run_cli("init", cwd=str(repo), extra_env=self._path_with(tmp_path, "bin", "mypy"))
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "Static analysis: enabled (mypy; nothing will run — python sources present" in (
+            result.stdout
+        )
+        assert "no packaging marker" in result.stdout
+        # The advice must not be "install mypy" — installing it would not help.
+        assert "no tool is selected for this" in result.stderr
+        assert "install" not in result.stderr.replace("installed", "")
+
+    def test_manifest_repo_keeps_the_plain_announcement(self, tmp_path):
+        """The control: with a packaging marker the tools are announced as before."""
+        repo = self._bare_python_repo(tmp_path)
+        (repo / "pyproject.toml").write_text("[project]\nname = 'consumer'\n", encoding="utf-8")
+        assert run_cli("install", cwd=str(repo)).returncode == 0
+        self._enable_static_analysis(repo, ["mypy"])
+
+        result = run_cli("init", cwd=str(repo), extra_env=self._path_with(tmp_path, "bin2", "mypy"))
+
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "Static analysis: enabled (mypy)" in result.stdout
+        assert "nothing will run" not in result.stdout
+        assert "no tool is selected for this" not in result.stderr

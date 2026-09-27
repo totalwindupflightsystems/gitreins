@@ -548,9 +548,16 @@ gitreins security-scan [-d <dir>] [--output text|json] [--force-ml]
 
 | Code | Meaning |
 |------|---------|
-| 0 | Scan clean — no findings |
+| 0 | Scan clean — no findings **in the mode that ran** |
 | 1 | Findings reported (or scan failed) |
 | 2 | Required ML dependencies missing (with `--force-ml`) |
+
+The exit code does **not** distinguish the mode (REVIEW-GITREINS-021): in
+heuristic mode `0` means "no keyword matched", not "no vulnerabilities", so a
+CI gate that keys on the exit code alone is reading a weaker claim than it
+thinks. The mode is rendered on the result line (`text`) and on stderr
+(`json`, which keeps stdout a bare list). Pass `--force-ml` when the exit code
+itself has to gate.
 
 **Limitations** — ML inference runs only when the `huggingface_hub` +
 `transformers` (+ `torch`) stack is installed. Without it the scanner falls
@@ -558,10 +565,13 @@ back to a 7-keyword substring heuristic (`CVE`, `vulnerability`, `injection`,
 `exploit`, `unsafe`, `deserialization`, `hardcoded`), so a file with a real
 command injection but none of those keywords scans clean, while a comment
 merely mentioning a keyword is reported. Findings from the fallback carry the
-`CVE-SIMULATED` id with `conf=0.00`, and text output prints an explicit
-`Antares: heuristic mode (no ML stack installed) — keyword fallback, NOT a full
-scan` line instead of presenting the result as a full scan. Use `--force-ml`
-to require real ML inference (exit 2 instead of falling back).
+`CVE-SIMULATED` id with `conf=0.00`, and text output carries an explicit
+`[heuristic mode (no ML stack installed) — keyword fallback, NOT a full scan]`
+suffix on the result line itself — `Antares: clean — no findings in <target>
+[heuristic mode …]` — rather than a separate line above it, so "clean" can never
+be read without the mode next to it. In `--output json` the same line goes to
+stderr and stdout stays a bare list. Use `--force-ml` to require real ML
+inference (exit 2 instead of falling back).
 
 ## 10. `gitreins setup-tools`
 

@@ -1276,3 +1276,35 @@ def test_list_panels_keep_the_bare_join_fallback(live_server, tmp_path):
     assert "no scheduler ticks recorded" not in filled["ticklist"]
     assert "cells 1/1 passed" in filled["qalist"]
     assert "no QA runs recorded" not in filled["qalist"]
+
+
+def test_health_endpoint_answers_a_liveness_probe(live_server, repo_fixture):
+    """REVIEW-GITREINS-022: a probe must not need /api/stats to answer "up?".
+
+    The review found /health returning 404 on a running server, so a
+    supervisor, container healthcheck or smoke test had to reach for
+    /api/stats — which aggregates every verdict in the repo — just to learn the
+    process was alive.
+    """
+    import os
+
+    from engine.version import __version__
+
+    status, body = get(live_server, "/health")
+
+    assert status == 200
+    payload = json_body(body)
+    assert payload["status"] == "ok"
+    assert payload["version"] == __version__
+    assert payload["repo"] == os.path.basename(os.path.abspath(str(repo_fixture["root"])))
+    assert payload["path"] == os.path.abspath(str(repo_fixture["root"]))
+
+
+def test_health_needs_no_verdict_store_to_answer(live_server):
+    """Liveness is not a judgment: the body carries no counts and no usage."""
+    _status, body = get(live_server, "/health")
+
+    payload = json_body(body)
+
+    for verdict_key in ("total", "passed", "failed", "pass_rate", "usage"):
+        assert verdict_key not in payload

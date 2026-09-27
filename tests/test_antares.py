@@ -819,3 +819,44 @@ class TestGuardSecurityScanIntegration:
         result = gm._check_security_scan()
         assert result.passed is True
         assert "Antares" in result.output
+
+
+class TestSecurityScanModeVisibility:
+    """REVIEW-GITREINS-021: the mode must not be separable from the result.
+
+    DF-GITREINS-POC-59 made the heuristic mode disclosed. The review found the
+    remaining gap: the disclosure sat on its OWN line above the result, so a
+    reader (or a log-scraping gate) takes "clean" and "NOT a full scan" as two
+    unrelated facts — and the exit code is identical either way.
+    """
+
+    def test_the_mode_rides_on_the_result_line_itself(self, tmp_workdir, capsys):
+        from gitreins.cli import cmd_security_scan
+
+        args = _make_args()
+        with patch("gitreins.cli.get_workdir", return_value=tmp_workdir):
+            with pytest.raises(SystemExit) as exc:
+                cmd_security_scan(args)
+        assert exc.value.code == 0
+
+        out = capsys.readouterr().out
+        # The line that claims the result is clean must carry the mode with it.
+        (clean_line,) = [line for line in out.splitlines() if "clean" in line.lower()]
+        assert "Antares:" in clean_line
+        assert HEURISTIC_DISCLOSURE in clean_line, f"mode not on the result line: {clean_line!r}"
+
+    def test_json_stdout_stays_a_bare_list_and_the_mode_goes_to_stderr(self, tmp_workdir, capsys):
+        from gitreins.cli import cmd_security_scan
+
+        args = _make_args(output="json")
+        with patch("gitreins.cli.get_workdir", return_value=tmp_workdir):
+            with pytest.raises(SystemExit) as exc:
+                cmd_security_scan(args)
+        assert exc.value.code == 0
+
+        captured = capsys.readouterr()
+        # stdout must remain exactly the documented payload: a list.
+        assert json.loads(captured.out) == []
+        assert "Antares:" not in captured.out
+        # ... and the mode is still disclosed, on stderr.
+        assert HEURISTIC_DISCLOSURE in captured.err

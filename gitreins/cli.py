@@ -613,13 +613,24 @@ def cmd_init(args):
     print(
         f"  History:     {existing.get('history', {}).get('enabled', True) and 'enabled' or 'disabled'}"
     )
-    print(f"  Static analysis: {_static_analysis_status(existing['guards'], lang_info)}")
+    print(f"  Static analysis: {_static_analysis_status(existing['guards'], lang_info, workdir)}")
     if existing["guards"].get("static_analysis", False):
         # DF-019: warn loudly instead of letting "enabled (…)" imply the tools
         # run. Static analysers are an opt-in install; `pip install gitreins`
-        # does not bring them.
-        absent_static = _missing_static_analysis_tools(existing["guards"])
-        if absent_static:
+        # does not bring them. REVIEW-GITREINS-019: when the lane
+        # selects no tool for this tree, the install hint is the wrong advice —
+        # say what is actually missing instead of naming tools that would still
+        # not be selected.
+        _lane_tools, _lane_gap = _static_analysis_lane_selection(existing["guards"], workdir)
+        absent_static = _missing_static_analysis_tools(existing["guards"]) if _lane_tools else []
+        if not _lane_tools and _lane_gap:
+            print(
+                "  Warning: static analysis is enabled, but no tool is selected for this\n"
+                f"  repository — {_lane_gap}. The guard reports the step as skipped\n"
+                "  and grades nothing.",
+                file=sys.stderr,
+            )
+        elif absent_static:
             print(
                 "  Warning: static analysis is enabled, but these configured tools are not\n"
                 "  installed — the guard reports the step as skipped and grades nothing until\n"
@@ -1102,11 +1113,35 @@ def _static_analysis_install_lines(missing: list[str]) -> list[str]:
     return [f"    {tool} — install: {_install_help(tool)}" for tool in missing]
 
 
-def _static_analysis_status(guards: dict, lang: dict) -> str:
-    """Describe the persisted static-analysis toggle and configured tools."""
+def _static_analysis_lane_selection(guards: dict, workdir: str | None) -> tuple[list[str], str]:
+    """What the static-analysis LANE would select for *workdir*.
+
+    REVIEW-GITREINS-019: `engine.static_analysis.select_tools` is the
+    lane's own selection, so the status line can be checked against the thing
+    that actually runs instead of against the config alone. ``workdir=None``
+    means the caller has no tree to inspect — the lane check is skipped.
+    """
+    if workdir is None:
+        return [], ""
+    from engine.static_analysis import select_tools
+
+    return select_tools(workdir, guards.get("static_analysis_tools", {}))
+
+
+def _static_analysis_status(guards: dict, lang: dict, workdir: str | None = None) -> str:
+    """Describe the persisted static-analysis toggle and configured tools.
+
+    REVIEW-GITREINS-019: this line must describe what the lane will
+    RUN, not what the config lists. A tree of Python files with no packaging
+    marker announced "enabled (mypy, pyright)" while the lane selected no tool
+    at all and reported a green ✓ — the announcement now names the gap.
+    """
     enabled = guards.get("static_analysis", False)
     tools = _configured_static_analysis_tools(guards)
     if enabled and tools:
+        lane_tools, lane_gap = _static_analysis_lane_selection(guards, workdir)
+        if not lane_tools and lane_gap:
+            return f"enabled ({', '.join(tools)}; nothing will run — {lane_gap})"
         # DF-019: name only what can actually run. Announcing a configured but
         # absent tool as enabled is the lie this row was filed about.
         missing = set(_missing_static_analysis_tools(guards))
@@ -3126,6 +3161,11 @@ def cmd_security_scan(args):
     inference that fell back to it); such runs print an explicit mode
     line — they are a 7-keyword fallback, not a full ML scan
     (DF-GITREINS-POC-59).
+
+    REVIEW-GITREINS-021: the exit codes do NOT distinguish the mode, so exit 0
+    in heuristic mode means "no keyword matched", not "no vulnerabilities".
+    The mode is rendered on the result line (text) and on stderr (json, keeping
+    stdout a bare list); use ``--force-ml`` when the exit code itself must gate.
     """
     import json as _json
 
@@ -3204,18 +3244,27 @@ def cmd_security_scan(args):
             for f in findings
         ]
         print(_json.dumps(payload, indent=2))
+        if scanner.used_heuristic:
+            # REVIEW-GITREINS-021: stdout stays exactly the documented list, so
+            # the mode goes to stderr. A gate that consumes only the exit code
+            # (or only the JSON) otherwise cannot tell a keyword-fallback run
+            # from a real scan — and an empty list reads as "clean" either way.
+            print(f"Antares: {HEURISTIC_DISCLOSURE}", file=sys.stderr)
     else:
         target = directory or "staged files"
         # DF-GITREINS-POC-59: a keyword-heuristic run is a 7-keyword grep,
         # not a full scan — disclose the mode on both the clean and the
         # findings summary line (finding lines already carry
         # CVE-SIMULATED conf=0.00). ML-mode output stays unchanged.
-        if scanner.used_heuristic:
-            print(f"Antares: {HEURISTIC_DISCLOSURE}")
+        # REVIEW-GITREINS-021: the disclosure now rides ON the result line.
+        # As a separate line above it, the reader (or a log-scraping gate)
+        # takes "clean" and "NOT a full scan" as two unrelated facts, which is
+        # how a heuristic run gets mistaken for a graded one.
+        mode_suffix = f" [{HEURISTIC_DISCLOSURE}]" if scanner.used_heuristic else ""
         if not findings:
-            print(f"Antares: clean — no findings in {target}")
+            print(f"Antares: clean — no findings in {target}{mode_suffix}")
         else:
-            print(f"Antares: {len(findings)} potential finding(s) in {target}:")
+            print(f"Antares: {len(findings)} potential finding(s) in {target}{mode_suffix}:")
             for f in findings:
                 print(f"  • {f.file}:{f.line} [{f.cve_id} conf={f.confidence:.2f}] {f.description}")
 

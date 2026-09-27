@@ -4,6 +4,7 @@ Serves a dark, mobile-first SPA at http://127.0.0.1:<port>/ plus a JSON API
 that reads the repo's judgment stores on EVERY request (live, not a snapshot):
 
   GET /                          -> HTML viewer
+  GET /health                    -> liveness probe (status/version/repo; no scan)
   GET /api/stats                 -> verdict/pass/fail counts
   GET /api/verdicts              -> verdict list (metadata only)
   GET /api/verdicts/<d>/<hash>   -> full verdict record (criteria + evidence)
@@ -51,6 +52,7 @@ from typing import Any, TypedDict
 
 from engine import evidence, qa_ledger, usage
 from engine.persist import KIND_RESOLUTION
+from engine.version import __version__
 from engine.repo_paths import (
     WorktreeResolutionError,
     board_file_path,
@@ -647,6 +649,20 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if path == "/":
                 self._send(200, _PAGE.encode(), "text/html; charset=utf-8")
+            elif path == "/health":
+                # REVIEW-GITREINS-022: a supervisor, container healthcheck or
+                # smoke test had to guess at /api/stats — a full aggregation of
+                # every verdict in the repo — to answer "is it up?". This is the
+                # cheap probe: no verdict scan, no usage load, just liveness,
+                # the process's own version and the tree it is serving.
+                self._json(
+                    {
+                        "status": "ok",
+                        "version": __version__,
+                        "repo": os.path.basename(os.path.abspath(self.workdir)),
+                        "path": os.path.abspath(self.workdir),
+                    }
+                )
             elif path == "/api/stats":
                 vs = list_verdicts(self.workdir)
                 _index, usage_summary = load_usage(self.workdir)

@@ -131,6 +131,84 @@ def list_available_tools(language: str) -> list[str]:
     return available
 
 
+# REVIEW-GITREINS-018: the language→tool map below is the single
+# source of truth for which tools the static-analysis lane will run. Before
+# this, the gate keyed Python on a packaging marker while `init` announced
+# from the raw config, so a tree of .py files with no manifest was told
+# "enabled (mypy, pyright)" and then graded nothing with a green ✓.
+_STATIC_ANALYSIS_NO_TOOL_REASONS: dict[str, str] = {
+    "python": (
+        "python sources present but no packaging marker "
+        "(pyproject.toml / setup.py / setup.cfg) — no Python tool selected"
+    ),
+    "ruby": "no ruby static-analysis tool configured",
+    "php": "no php static-analysis tool configured",
+    "sql": "no sql static-analysis tool configured",
+    "cpp": "no cpp static-analysis tool configured",
+    "rust": "no rust static-analysis tool configured",
+}
+_STATIC_ANALYSIS_NO_LANGUAGE_REASON = (
+    "no language with configured static-analysis tools was detected"
+)
+
+
+def select_tools(
+    workdir: str,
+    configured: dict | None = None,
+    changed_files: list[str] | None = None,
+) -> tuple[list[str], str]:
+    """The static-analysis tools this lane would run on *workdir*.
+
+    Returns ``(tools, reason)``: a non-empty ``tools`` list means the lane will
+    grade something, and ``reason`` is empty. An empty list carries the honest
+    reason instead — the lane turns it into a SKIP, never a "clean" pass.
+
+    Shared by ``GuardManager._check_static_analysis`` and ``gitreins init``'s
+    status line (REVIEW-GITREINS-018) so the announcement and the gate
+    cannot disagree about what will run: Python is selected on a packaging
+    marker, not merely on the presence of ``.py`` files, matching this module's
+    own tool list and the guard's signature-only language detection.
+    """
+    from engine import lang_detect
+
+    cfg = configured or {}
+    changed = list(changed_files or [])
+    signatures = lang_detect.signature_languages(workdir)
+
+    if lang_detect.python_packaging_present(workdir):
+        tools, reason = list(cfg.get("python", [])), _STATIC_ANALYSIS_NO_TOOL_REASONS["python"]
+    elif "ruby" in signatures:
+        tools, reason = list(cfg.get("ruby", [])), _STATIC_ANALYSIS_NO_TOOL_REASONS["ruby"]
+    elif "php" in signatures:
+        tools, reason = list(cfg.get("php", [])), _STATIC_ANALYSIS_NO_TOOL_REASONS["php"]
+    elif any(f.endswith(".sql") for f in changed) or os.path.isdir(
+        os.path.join(workdir, "migrations")
+    ):
+        tools, reason = list(cfg.get("sql", [])), _STATIC_ANALYSIS_NO_TOOL_REASONS["sql"]
+    elif (
+        "cpp" in signatures
+        or "c" in signatures
+        or os.path.isfile(os.path.join(workdir, "compile_commands.json"))
+        or any(f.endswith(lang_detect.CPP_SOURCE_SUFFIXES) for f in changed)
+    ):
+        tools = list(cfg.get("cpp", ["cppcheck"]))
+        reason = _STATIC_ANALYSIS_NO_TOOL_REASONS["cpp"]
+    elif "rust" in signatures:
+        tools = list(cfg.get("rust", ["clippy"]))
+        reason = _STATIC_ANALYSIS_NO_TOOL_REASONS["rust"]
+    else:
+        # No signature-selected language. A tree of .py files with no packaging
+        # marker is the case this row was filed about — `init` detects Python by
+        # extension and writes the tools, while the lane selects on the
+        # packaging marker — so name that specifically instead of reporting
+        # "nothing detected".
+        if "python" in lang_detect.extension_languages(workdir):
+            return [], _STATIC_ANALYSIS_NO_TOOL_REASONS["python"]
+        return [], _STATIC_ANALYSIS_NO_LANGUAGE_REASON
+
+    return (tools, "") if tools else ([], reason)
+
+
 # ── Text output parsers ─────────────────────────────────────────────────
 
 # Mypy: "file.py:line: severity: message  [code]"

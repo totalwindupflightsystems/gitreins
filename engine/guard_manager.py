@@ -2523,7 +2523,9 @@ class GuardManager:
         Respects static_analysis_tools config key. Only runs tools that
         exist on PATH; a configured tool that is absent is reported as
         not-installed and (when none ran) makes the whole step a skip —
-        never a "clean" pass. Returns FAIL if any tool finds errors.
+        never a "clean" pass. A language with no tool selected is the same
+        kind of skip (REVIEW-GITREINS-018). Returns FAIL if any
+        tool finds errors.
         """
         if self._is_go:
             return GuardResult(
@@ -2531,27 +2533,30 @@ class GuardManager:
                 passed=True,
                 output="Go compiler covers static analysis — skipped",
             )
-        # Check for Python, Ruby, PHP, SQL, C/C++, Rust, Go. Marker queries
+        # REVIEW-GITREINS-018: tool selection lives in
+        # engine.static_analysis.select_tools, shared with `init`'s status line,
+        # so the announcement and the gate read the same language→tool map and
+        # cannot disagree about what will run. Marker queries underneath still
         # come from engine.lang_detect (single source of truth).
-        lang_tools: list[str] = []
-        if lang_detect.python_packaging_present(self.workdir):
-            lang_tools = self._static_tools.get("python", [])
-        elif self._is_ruby:
-            lang_tools = self._static_tools.get("ruby", [])
-        elif self._is_php:
-            lang_tools = self._static_tools.get("php", [])
-        elif self._has_sql:
-            lang_tools = self._static_tools.get("sql", [])
-        elif self._is_cpp:
-            lang_tools = self._static_tools.get("cpp", ["cppcheck"])
-        elif self._is_rust:
-            lang_tools = self._static_tools.get("rust", ["clippy"])
+        from engine.static_analysis import find_tool, run_static_check, select_tools
+
+        lang_tools, no_tool_reason = select_tools(
+            self.workdir, self._static_tools, self.changed_files
+        )
 
         if not lang_tools:
+            # DF-019 follow-up: no tool was selected for this repo's language,
+            # so there is nothing to grade — most often a tree of Python files
+            # with no packaging marker, which `init` announced as enabled. A
+            # green pass here is the vacuous green this lane kept producing:
+            # report the SKIP with its reason and let the substantive-gate net
+            # (TRUST-001) turn the run into a DEGRADED pass instead.
             return GuardResult(
                 name="static_analysis",
                 passed=True,
-                output="No static analysis tools configured for this language",
+                output="No static analysis tools selected for this language",
+                skipped=True,
+                skip_reason=no_tool_reason,
             )
 
         # DF-019: `run_static_check` returns [] when the binary is absent, and
@@ -2559,8 +2564,6 @@ class GuardManager:
         # green on a gate that never ran, while `init` announced the tool as
         # enabled. Check the binary first (same rule the LSP gate learned in
         # TRUST-001) and name the gap instead of grading nothing as clean.
-        from engine.static_analysis import find_tool, run_static_check
-
         all_diagnostics: list[str] = []
         had_errors = False
         missing: list[str] = []

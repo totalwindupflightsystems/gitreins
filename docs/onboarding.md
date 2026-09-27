@@ -125,6 +125,19 @@ commands are preserved on reruns; the detected test runner replaces only the
 untouched `install` default. `gitreins init --reset` rewrites the smart defaults
 from scratch when a config has drifted.
 
+### The resolution gate: the flagship, one line away
+
+`gitreins resolve "<question>"` and the MCP `context.resolve` tool answer a
+question from the repository instead of a guess — they trace it to its seed
+files, assemble a measured evidence bundle and return a calibrated band
+(`RESOLVED` / `REVIEW` / `UNRESOLVED`). **It ships switched off**, so a first run
+does not exercise it: see the next subsection for the one setting that turns it
+on, and try it once before you rely on the task loop alone:
+
+```bash
+gitreins resolve "where is the guard's exit code decided?"
+```
+
 ### Resolution-gate surfaces are off until you enable them
 
 `gitreins init` also writes the `resolution:` block (JEVRES-006) — with **every surface
