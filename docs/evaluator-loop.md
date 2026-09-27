@@ -333,6 +333,34 @@ The system prompt also reinforces this:
 every call, and `skylos_scan` / `scan_security` shell out, so a repeat costs
 real time. Only the three tracked tools inject a `_dedup_warning`.
 
+## Tier 2 pre-screen (optional Jev pass)
+
+Before the judge loop starts, `evaluate()` may run a **pre-screen**: one cheap
+Jev call (`engine/prescreen.py` `run_prescreen`) that resolves the task's
+criteria against the repo and returns per-criterion probability bands plus
+disclosures. The result is injected into the judge prompt as **context only**
+(`assemble_prescreen_task` — the block names the judge's authority explicitly,
+because a confident number in a prompt is exactly the shape of a signal that
+could quietly become a verdict). It can never skip the loop.
+
+- **On/off:** `evaluator.prescreen` — default **`true`**. Set `false` to skip
+  the pre-screen entirely (no Jev egress). There is no `prescreen` key in
+  `GitReinsDefaults`; the evaluator's own read (`engine/evaluator.py:1077`)
+  is the effective default.
+- **Abstain:** any ABSTAIN — no criteria, every key refused, transport error,
+  malformed answer — logs one warning line and continues with **today's
+  normal evaluation path**: no injected block, no behavior change.
+- **Forward hook:** a caller (pipeline/MCP) may pass a pre-computed
+  `PrescreenResult` on the task dict under the key `prescreen`
+  (`PRESCREEN_KEY`); it is used as-is. Nothing in the tree currently injects
+  it — it is a hook for integrators.
+- **Not the resolution gate's pre-screen:** this is the Tier 2 judge's
+  optional Jev pass (`evaluator.prescreen`, default **true**). It is a
+  different knob from `resolution.enabled.judge_prescreen` (default
+  **false**), the resolution gate's tier-1.5 pre-screen surface — see
+  `docs/jev-resolution-gate.md` and `docs/onboarding.md`. The resolution gate
+  ships disabled; only an explicit `judge_prescreen: true` opens it.
+
 ## Judge token telemetry (`.gitreins/usage.jsonl`)
 
 The pipeline appends one JSON line per evaluation step to
