@@ -1,0 +1,6 @@
+# Ship the agent-facing skill documents (skills/*/SKILL.md and skills/README.md)
+# with the source distribution, so a consumer who downloads the package — not the
+# git repo — can still hand them to an agent. These are plain markdown, not
+# importable code: MANIFEST.in affects the sdist contents only, never the wheel
+# or what lands in site-packages.
+recursive-include skills *.md
