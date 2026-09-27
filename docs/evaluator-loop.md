@@ -28,6 +28,20 @@ slightly above its cap (the final call is allowed through).
 | `tool_call_weight` | `0.1` | iterations charged per tool call |
 | `compaction_threshold` | `0.90` | compact once the **cumulative** input tokens consumed since the last compaction exceed this share of `max_input_tokens` — the same quantity the cap meters |
 
+### Scope and context keys
+
+Four more `evaluator:` keys shape what the judge may touch and how much code
+is pre-loaded. Defaults are confirmed in both `engine/config.py`
+(`GitReinsDefaults`) and the evaluator's own config reads; where wording
+differs, the evaluator's read is what runs.
+
+| Key | Default | Effect |
+|-----|---------|--------|
+| `file_scope` | `"changed"` | `"changed"` restricts the judge to changed files plus their mapped test files, always-allowed config files (`pyproject.toml`, `go.mod`, `Makefile`, …) and `.gitreins/config.yaml` — enforced per `read_file`/`search_pattern` call. Any other value (e.g. `"full"`) means full scope. An out-of-scope read returns: *"File not in scope: \<path\>. Evaluator is scoped to changed files only. Set evaluator.file_scope: full in .gitreins/config.yaml to allow all files."* — practical meaning: the judge can verify the change and its tests, but cannot trace helpers in unchanged code; setting `full` trades context protection for reach. |
+| `code_context_budget` | `0.70` | Caps the pre-loaded code-context block to this share of `max_input_tokens`; a larger block is line-trimmed to fit with a truncation notice. The judge can still read individual files afterward. |
+| `max_file_bytes` | `131072` (128 KB) | Caps what a single `read_file` result may return: content above the cap is cut at the limit with a `[capped at N bytes, M total — use offset/limit …]` notice, so one huge file cannot eat the context window (range reads let the judge reach the rest). The injected context block uses its own separate caps (500-line diff; 20 files × 200 lines; >500 KB files skipped). |
+| `fast_track` | `"auto"` | `"on"`/`"true"` → fast track on: the prompt tells the judge to verify only changed lines and immediate callers, not trace unchanged code. `"off"`/`"false"` → normal mode. `"auto"` (the default) counts top-level source packages (excluding hidden/test/venv/build dirs) and turns fast track ON at ≥ 20 packages; on detection failure it is OFF. Fast-track judgments of out-of-diff behavior stay shallow by design. |
+
 ### When a cap is hit
 
 There is no forced "deliver your verdict now" prompt. On cap exhaustion the
