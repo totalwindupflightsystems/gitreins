@@ -2779,7 +2779,13 @@ class GuardManager:
     def _check_go_tests(self) -> GuardResult:
         """Run Go tests (delegates to engine.guards)."""
         r = check_go_tests(
-            self.workdir, timeout=self._test_timeout, changed_files=self._go_scope_files_or_none()
+            self.workdir,
+            timeout=self._test_timeout,
+            changed_files=self._go_scope_files_or_none(),
+            # DF-GITREINS-POC-45: the configured command now drives this lane
+            # too — before, `guards.test_command` reached the Python lane only
+            # while `init` printed and the docs promised it everywhere.
+            test_command=self.config.get("guards", {}).get("test_command"),
         )
         return _go_guard_result(r)
 

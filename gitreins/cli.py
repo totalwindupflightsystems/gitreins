@@ -962,11 +962,21 @@ def _build_guards_section(lang: dict, test_cmd: str, static_tools: list[str] | N
 
     section: dict
     if lang["is_go"]:
+        # DF-GITREINS-POC-45: the Go tests lane honours guards.test_command
+        # (engine/guards.check_go_tests), so the detected command must be
+        # WRITTEN here — init prints it as `Test cmd:` and the config used to
+        # carry no such key, so the printed line described a command the lane
+        # never read. Written under the same "only the untouched install
+        # baseline is upgraded, an explicit setting is preserved" rule the
+        # Python branch relies on (_fill_missing_guards adds a missing key
+        # without overwriting; init's upgrade path only rewrites
+        # INSTALL_DEFAULT_TEST_COMMAND).
         return {
             "secrets": True,
             "lint": False,
             "tests": False,
             "test_mode": "full",
+            "test_command": test_cmd,
             "go": {"build": True, "lint": True, "tests": True},
         }
     elif lang["is_python"]:
