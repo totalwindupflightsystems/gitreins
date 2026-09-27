@@ -457,6 +457,34 @@ resolution continues to the next one.
 The audit is also skipped (exit 0) when a `gitreins.skip-tier2` trailer is
 present in the message.
 
+**Audit knobs** — read from `.gitreins/config.yaml` only: the merged
+`commit_audit` section (a merge of `defaults.commit_audit` and top-level
+`commit_audit`, top-level keys winning — the same sources as `mode` above).
+Unlike `mode`, the knobs are **not** read from the pipeline stage definition;
+a knob written on the stage is dead config:
+
+```yaml
+# .gitreins/config.yaml
+commit_audit:
+  review_mode: review
+  review_score_threshold: 8.0
+```
+
+| Key | Type | Default | Effect |
+|-----|------|---------|--------|
+| `strictness` | string | `"standard"` | Prompt-instruction set for message checking: `"lenient"`, `"standard"`, or `"strict"` (an unknown value falls back to standard wording) |
+| `max_iterations` | int | `3` | LLM exploration rounds before the audit reports exhaustion (`0` = no tools, single call) |
+| `suggest_message` | bool | `true` | On a rejected message, attach a suggested replacement |
+| `review_mode` | string | `"message"` | `"message"` audits the commit message; `"review"` runs a single-call code review of the diff; `"agent"` runs the review with tool access over multiple turns |
+| `review_checks` | map | `null` | Which review categories are active. Unset → the auditor's built-in default: `bugs: true`, `security: true`, `anti_patterns: true`, `style: false`, `performance: false` |
+| `review_severity` | string | `"standard"` | Review reporting floor: `"critical-only"`, `"standard"` (medium+), or `"all"`; an unknown value falls back to standard |
+| `review_suggest_fix` | bool | `true` | Include actionable fix suggestions for every review issue |
+| `review_score_threshold` | float | `8.0` | GR-066 scoring: an issue's effective score (`score × review_score_offset`) at or above this is marked BLOCK (at ≥ 75% of it, WARN) |
+| `review_score_offset` | float | `1.0` | GR-066 multiplier applied to each issue's raw score before comparison against the threshold |
+
+`mode: block` still decides the exit code: a review issue only blocks when its
+effective score reaches `review_score_threshold` **and** `mode` is `block`.
+
 **Exit codes**
 
 | Code | Meaning |
@@ -1121,6 +1149,35 @@ tracked+untracked Python files.
 Accepts a DEGRADED run as exit 0 (see the guard exit-code table). `gitreins init`
 writes `true` for new repos; CI should normally keep `false` so a gate that did
 no work can never read as a gate that passed.
+
+### `guards.lsp_tools`
+
+```yaml
+guards:
+  lsp_tools: ["pylsp"]   # default
+```
+
+Language servers the `lsp` guard lane runs. The lane itself is opt-in via
+`guards.lsp: true`, and is skipped entirely on Go repos (the compiler already
+covers static analysis). Only tools present on `PATH` actually run: a
+configured server whose binary cannot be found is recorded as not-installed
+and skipped — it is never counted as a clean scan.
+
+### `guards.lsp_timeouts`
+
+```yaml
+guards:
+  lsp_timeouts:
+    init: 60        # seconds allowed for server initialization
+    per_file: 30    # seconds allowed per analyzed file
+```
+
+Timeout map for the LSP lane, in seconds. Both keys are optional; unset keys
+select the language-aware defaults from `engine/lsp.py` — 60s init / 30s per
+file generically, 300s / 120s for `clangd` and `ccls`, 30s / 120s for
+`rust-analyzer`, and 180s / 90s when the repo sniffs as C/C++/Rust. `init`
+overrides the server-initialization cap; `per_file` overrides the per-file
+analysis cap — distinct knobs, each falling back independently.
 
 ### `evaluator.static_analysis_diagnostics`
 
