@@ -1122,6 +1122,35 @@ Accepts a DEGRADED run as exit 0 (see the guard exit-code table). `gitreins init
 writes `true` for new repos; CI should normally keep `false` so a gate that did
 no work can never read as a gate that passed.
 
+### `guards.lsp_tools`
+
+```yaml
+guards:
+  lsp_tools: ["pylsp"]   # default
+```
+
+Language servers the `lsp` guard lane runs. The lane itself is opt-in via
+`guards.lsp: true`, and is skipped entirely on Go repos (the compiler already
+covers static analysis). Only tools present on `PATH` actually run: a
+configured server whose binary cannot be found is recorded as not-installed
+and skipped — it is never counted as a clean scan.
+
+### `guards.lsp_timeouts`
+
+```yaml
+guards:
+  lsp_timeouts:
+    init: 60        # seconds allowed for server initialization
+    per_file: 30    # seconds allowed per analyzed file
+```
+
+Timeout map for the LSP lane, in seconds. Both keys are optional; unset keys
+select the language-aware defaults from `engine/lsp.py` — 60s init / 30s per
+file generically, 300s / 120s for `clangd` and `ccls`, 30s / 120s for
+`rust-analyzer`, and 180s / 90s when the repo sniffs as C/C++/Rust. `init`
+overrides the server-initialization cap; `per_file` overrides the per-file
+analysis cap — distinct knobs, each falling back independently.
+
 ### `evaluator.static_analysis_diagnostics`
 
 Advertises `read_static_analysis` to the Tier 2 judge and lets it return the
