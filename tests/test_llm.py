@@ -61,11 +61,13 @@ class TestProviderDetection:
         assert client.provider == "openai"
 
     def test_force_provider_override(self, monkeypatch):
-        """GITREINS_LLM_PROVIDER env var forces provider override in constructor."""
-        monkeypatch.setenv("GITREINS_LLM_PROVIDER", "anthropic")
-        # The provider env var must be set before LLMClient.__init__ reads it
-        # The constructor checks the constructor arg first, then env vars via os.getenv
-        client = LLMClient(base_url="https://api.openai.com/v1", provider="anthropic")
+        """Explicit provider= still selects the provider when env is absent."""
+        monkeypatch.delenv("GITREINS_LLM_PROVIDER", raising=False)
+        client = LLMClient(
+            base_url="https://api.openai.com/v1",
+            api_key="k",
+            provider="anthropic",
+        )
         assert client.provider == "anthropic"
 
     def test_is_anthropic_helper_function(self):
@@ -73,6 +75,77 @@ class TestProviderDetection:
         assert _is_anthropic("https://api.anthropic.com/v1") is True
         assert _is_anthropic("https://claude.example.com") is True
         assert _is_anthropic("https://api.openai.com/v1") is False
+
+
+class TestProviderEnvOverride:
+    """GITREINS_LLM_PROVIDER: env > explicit arg > URL auto-detect (DF-GITREINS-POC-75).
+
+    Hermetic against ambient config: every test passes an explicit base_url
+    (so GITREINS_LLM_BASE_URL never participates) and pins or clears
+    GITREINS_LLM_PROVIDER itself via monkeypatch.
+    """
+
+    def test_env_overrides_url_autodetect(self, monkeypatch):
+        """Env set + no explicit arg: env wins even though URL says openai."""
+        monkeypatch.delenv("GITREINS_LLM_PROVIDER", raising=False)
+        monkeypatch.setenv("GITREINS_LLM_PROVIDER", "anthropic")
+        client = LLMClient(base_url="https://api.openai.com/v1", api_key="k")
+        assert client.provider == "anthropic"
+
+    def test_env_overrides_explicit_provider_arg(self, monkeypatch):
+        """Precedence: GITREINS_LLM_PROVIDER > explicit provider= argument."""
+        monkeypatch.setenv("GITREINS_LLM_PROVIDER", "anthropic")
+        client = LLMClient(base_url="https://api.openai.com/v1", api_key="k", provider="openai")
+        assert client.provider == "anthropic"
+
+    def test_explicit_provider_works_without_env(self, monkeypatch):
+        """Env absent: explicit provider= is honored (explicit > auto-detect)."""
+        monkeypatch.delenv("GITREINS_LLM_PROVIDER", raising=False)
+        client = LLMClient(base_url="https://api.anthropic.com/v1", api_key="k", provider="openai")
+        assert client.provider == "openai"
+
+    def test_url_autodetect_unchanged_when_env_absent(self, monkeypatch):
+        """Default behavior unchanged when the env var is unset."""
+        monkeypatch.delenv("GITREINS_LLM_PROVIDER", raising=False)
+        client = LLMClient(base_url="https://api.openai.com/v1", api_key="k")
+        assert client.provider == "openai"
+
+    def test_invalid_env_value_rejected(self, monkeypatch):
+        """An unsupported non-empty override fails loudly (no silent fallback)."""
+        monkeypatch.setenv("GITREINS_LLM_PROVIDER", "mistral")
+        with pytest.raises(ValueError, match="GITREINS_LLM_PROVIDER"):
+            LLMClient(base_url="https://api.openai.com/v1", api_key="k")
+
+    def test_blank_env_value_falls_through_to_autodetect(self, monkeypatch):
+        """Empty/whitespace override counts as unset (documented 'if unset')."""
+        monkeypatch.setenv("GITREINS_LLM_PROVIDER", "   ")
+        client = LLMClient(base_url="https://api.anthropic.com/v1", api_key="k")
+        assert client.provider == "anthropic"
+
+    def test_env_override_builds_anthropic_endpoint(self, monkeypatch):
+        """Endpoint/protocol follow the env-selected provider, not the URL."""
+        monkeypatch.setenv("GITREINS_LLM_PROVIDER", "anthropic")
+        client = LLMClient(base_url="https://api.openai.com/v1", api_key="k")
+        assert client._chat_url == "https://api.openai.com/v1/messages"
+        assert client._api_version == "2023-06-01"
+
+    def test_env_override_builds_openai_endpoint(self, monkeypatch):
+        """Env forcing openai over an anthropic URL builds the chat URL."""
+        monkeypatch.setenv("GITREINS_LLM_PROVIDER", "openai")
+        client = LLMClient(base_url="https://api.anthropic.com/v1", api_key="k")
+        assert client._chat_url == "https://api.anthropic.com/v1/chat/completions"
+
+    def test_clamp_uses_env_selected_provider(self, monkeypatch):
+        """Downstream _clamp_max_tokens consumes the env-selected provider."""
+        monkeypatch.setenv("GITREINS_LLM_PROVIDER", "anthropic")
+        client = LLMClient(base_url="https://api.openai.com/v1", api_key="k")
+        assert client.provider == "anthropic"
+        # Anthropic safe ceiling is 1M; deepseek/openai-specific caps do not apply.
+        assert LLMClient._clamp_max_tokens(1_000_000, provider_hint=client.provider) == 1_000_000
+        monkeypatch.setenv("GITREINS_LLM_PROVIDER", "openai")
+        openai_client = LLMClient(base_url="https://api.anthropic.com/v1", api_key="k")
+        assert openai_client.provider == "openai"
+        assert LLMClient._clamp_max_tokens(500_000, provider_hint=openai_client.provider) == 500_000
 
 
 class TestAPIKeyResolution:

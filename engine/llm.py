@@ -143,8 +143,23 @@ class LLMClient:
         else:
             self.llm_reasoning = os.getenv("GITREINS_LLM_REASONING", "disabled")
 
-        # Auto-detect provider if not forced
-        if provider:
+        # DF-GITREINS-POC-75: GITREINS_LLM_PROVIDER was documented,
+        # MCP-advertised, and read by nothing — the constructor only honored
+        # the explicit provider= argument and URL auto-detection. Precedence:
+        # env > explicit argument > URL detection. Blank/whitespace counts as
+        # unset; a non-empty unsupported value fails loudly (ValueError naming
+        # the variable) instead of silently falling back to URL detection.
+        # Values are whitespace-stripped and case-folded.
+        known_providers = ("openai", "anthropic")
+        env_provider = (os.getenv("GITREINS_LLM_PROVIDER") or "").strip().lower()
+        if env_provider and env_provider not in known_providers:
+            raise ValueError(
+                f"Invalid GITREINS_LLM_PROVIDER={os.getenv('GITREINS_LLM_PROVIDER')!r}: "
+                f"supported providers are {', '.join(known_providers)}"
+            )
+        if env_provider:
+            self.provider = env_provider
+        elif provider:
             self.provider = provider
         elif _is_anthropic(base_url):
             self.provider = "anthropic"
