@@ -181,14 +181,47 @@ def check_go_lint(workdir: str, changed_files: list[str] | None = None) -> GoGua
     return GoGuardResult(name="go_lint", passed=False, output=output)
 
 
+def _resolve_go_test_argv(test_command: str | None) -> tuple[list[str] | str, str | None]:
+    """Resolve the Go tests lane's invocation (DF-GITREINS-POC-45).
+
+    Returns ``(cmd, warning)`` where *cmd* is an argv LIST for the historical
+    default and a shell STRING for a configured command
+    (``command_hygiene.run_bounded`` runs a list with ``shell=False`` and a
+    string through the shell).
+
+    ``guards.test_command`` was promised by ``gitreins init``'s printed
+    ``Test cmd:`` line and by the docs ("the configured guards.test_command")
+    but only the PYTHON tests lane ever read it: this lane hard-coded
+    ``go test -count=1 -short ./...`` whatever the config said. A knob that is
+    documented, advertised and silently ignored is worse than a missing knob —
+    it makes the documented configuration path a dead end.
+
+    Precedence: a present, non-empty configured command wins and is executed
+    through ``/bin/sh`` (so ``go test -race ./...`` and other shell-shaped
+    commands work, matching the Python lane, which runs its ``test_command``
+    as a string); otherwise the historical argv list is returned UNCHANGED, so
+    every config without the key behaves exactly as before.
+    """
+    configured = (test_command or "").strip() if isinstance(test_command, str) else ""
+    if not configured:
+        return ["go", "test", "-count=1", "-short", "./..."], None
+    return configured, f"go_tests graded by the configured guards.test_command: {configured}"
+
+
 def check_go_tests(
-    workdir: str, timeout: int | str = 180, changed_files: list[str] | None = None
+    workdir: str,
+    timeout: int | str = 180,
+    changed_files: list[str] | None = None,
+    test_command: str | None = None,
 ) -> GoGuardResult:
     """Run go test for the selected change scope.
 
     timeout is configurable so large Go projects (slow integration
     suites) can raise it via guards.test_timeout in .gitreins/config.yaml.
     ``changed_files`` carries the caller's scope (see :func:`_changed_go_files`).
+    ``test_command`` is the repo's configured ``guards.test_command``
+    (DF-GITREINS-POC-45): when present and non-empty it drives the lane,
+    otherwise the historical argv runs unchanged.
     """
     # Belt-and-braces: consumers may pass a raw string config value (e.g.
     # '300s'); subprocess.run(timeout='300s') raises TypeError instead of
@@ -199,8 +232,9 @@ def check_go_tests(
     if not go_files:
         return _no_go_files_result("go_tests", changed_files)
 
+    cmd, configured_note = _resolve_go_test_argv(test_command)
     result = command_hygiene.run_bounded(
-        ["go", "test", "-count=1", "-short", "./..."],
+        cmd,
         cwd=workdir,
         timeout=timeout,
         env=_sanitized_env(),
@@ -213,14 +247,19 @@ def check_go_tests(
             "Raise it in .gitreins/config.yaml — e.g. test_timeout: 900 for "
             "large projects with slow integration suites.",
         )
+    if result.get("refused"):
+        # A configured command that is a busy-wait is a misconfiguration, not
+        # a test failure — the reason text already names the right primitive.
+        return GoGuardResult(name="go_tests", passed=False, error=result["reason"])
     if "error" in result and "exit_code" not in result:
         return GoGuardResult(name="go_tests", passed=False, error=result["error"])
     output = result.get("output") or ""
     if len(output) > 2000:
         output = output[-2000:]
+    prefix = f"{configured_note}\n" if configured_note else ""
     if result.get("exit_code") == 0:
-        return GoGuardResult(name="go_tests", passed=True, output=output[:500])
-    return GoGuardResult(name="go_tests", passed=False, output=output)
+        return GoGuardResult(name="go_tests", passed=True, output=(prefix + output)[:500])
+    return GoGuardResult(name="go_tests", passed=False, output=prefix + output)
 
 
 def check_go_build(workdir: str, changed_files: list[str] | None = None) -> GoGuardResult:

@@ -31,6 +31,12 @@ Hermetic: real scratch git repos, every ``GIT_*`` variable stripped from the
 children (DF-008), no network, no provider/LLM call. The ``go`` toolchain is
 resolved with ``shutil.which`` and the toolchain-dependent tests are skipped
 without it (POC-46: asserting on a missing binary reds CI).
+
+DF-GITREINS-POC-45 adds section 5: the Go tests lane honours a configured
+``guards.test_command`` (a shell string, the same shape the Python lane
+already runs), the historical argv stays byte-for-byte when the key is
+absent, and ``init`` writes the ``test_command`` key it prints as
+``Test cmd:`` — without clobbering a custom command on a re-run.
 """
 
 import os
@@ -39,8 +45,10 @@ import subprocess
 import sys
 
 import pytest
+import yaml
 
 from engine.guard_manager import GuardManager
+from engine.guards import check_go_tests
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CLI_SCRIPT = os.path.join(PROJECT_ROOT, "gitreins", "cli.py")
@@ -50,6 +58,10 @@ requires_go = pytest.mark.skipif(GO_BIN is None, reason="go toolchain not instal
 
 GO_MOD = "module example.com/poc42\n\ngo 1.21\n"
 CLEAN_GO = "package quota\n\n// Clean returns a real int.\nfunc Clean() int {\n\treturn 0\n}\n"
+# A SECOND distinct Go file for the staged scope (POC-45): same package, a
+# different symbol, so the tree still compiles and a real `go test` PASSES —
+# a configured-command failure must be attributable to the command alone.
+STAGED_GO = "package quota\n\n// Extra returns a real int.\nfunc Extra() int {\n\treturn 1\n}\n"
 # The compiler error is the evidence the lane really ran: an untyped string
 # constant returned as an int.
 BROKEN_GO = (
@@ -394,3 +406,236 @@ class TestDegradedGoRunExitCode:
         assert result.returncode == 1, f"stdout={result.stdout} stderr={result.stderr}"
         assert "Tier 1 Guards: FAIL" in result.stdout
         assert BROKEN_MARKER in result.stdout, result.stdout
+
+
+# ── 5. DF-GITREINS-POC-45: guards.test_command drives the Go tests lane ──
+
+
+# A configured command that cannot be confused with `go test`: it prints its
+# own marker to stderr (run_bounded merges stderr into stdout) and exits 7.
+# A lane that ignores the config runs real `go test` — which PASSES this repo
+# — so "the lane failed with the marker in its output" is RED-proof on its own.
+CONFIGURED_GO_TEST_CMD = "sh -c 'echo CONFIGURED-COMMAND-RAN >&2; exit 7'"
+CONFIGURED_MARKER = "CONFIGURED-COMMAND-RAN"
+
+HISTORICAL_GO_TEST_ARGV = ["go", "test", "-count=1", "-short", "./..."]
+# The shim IS `go` (argv[0] never reaches "$@"), so the recorded expectation
+# drops it.
+SHIM_RECORDED_ARGV = HISTORICAL_GO_TEST_ARGV[1:]
+
+
+def _go_argv_shim(tmp_path, name: str) -> tuple[str, str]:
+    """A fake ``go`` earlier on PATH that records the argv it was handed.
+
+    The lane's argv decision (historical list vs shell string) is observed at
+    the exact boundary where ``go`` would run. Returns ``(bin_dir, argv_log)``.
+    """
+    bin_dir = str(tmp_path / name)
+    os.makedirs(bin_dir, exist_ok=True)
+    argv_log = os.path.join(bin_dir, "go-argv.txt")
+    shim = os.path.join(bin_dir, "go")
+    with open(shim, "w") as handle:
+        handle.write('#!/bin/sh\nprintf "%s\\n" "$@" > ' + repr(argv_log) + "\nexit 0\n")
+    os.chmod(shim, 0o755)
+    return bin_dir, argv_log
+
+
+def _read_config(workdir: str) -> dict:
+    with open(os.path.join(workdir, ".gitreins", "config.yaml")) as handle:
+        return yaml.safe_load(handle)
+
+
+class TestConfiguredGoTestCommand:
+    @requires_go
+    def test_configured_test_command_is_run_by_the_go_tests_lane(self, tmp_path):
+        """RED-PROOF: pre-fix the lane hard-coded the go test argv, ignored the
+        key, and PASSED this repo — the configured command never executed, so
+        neither its marker nor its exit 7 could appear."""
+        workdir = _scratch_repo(tmp_path, {"go.mod": GO_MOD, "main.go": CLEAN_GO})
+        _write(
+            workdir,
+            os.path.join(".gitreins", "config.yaml"),
+            "guards:\n"
+            "  secrets: false\n"
+            "  lint: false\n"
+            "  tests: false\n"
+            "  go: {build: false, lint: false, tests: true}\n"
+            f"  test_command: {CONFIGURED_GO_TEST_CMD}\n",
+        )
+        # A non-empty staged .go file keeps the lane off the skip path.
+        _write(workdir, "staged.go", STAGED_GO)
+        _git(workdir, "add", "staged.go")
+
+        gm = GuardManager(workdir)  # loads .gitreins/config.yaml from disk
+        result = gm._check_go_tests()
+
+        assert result.passed is False, (
+            f"a failing configured command must fail the lane: {result.output!r}"
+        )
+        assert result.skipped is False
+        assert CONFIGURED_MARKER in result.output, result.output
+
+    @requires_go
+    def test_run_all_carries_the_configured_command_failure(self, tmp_path):
+        """The full-run verdict, not just the lane: a configured command's
+        failure fails the run, with the command's own text as the evidence."""
+        workdir = _scratch_repo(tmp_path, {"go.mod": GO_MOD, "main.go": CLEAN_GO})
+        _write(
+            workdir,
+            os.path.join(".gitreins", "config.yaml"),
+            "guards:\n"
+            "  secrets: false\n"
+            "  lint: false\n"
+            "  tests: false\n"
+            "  go: {build: true, lint: true, tests: true}\n"
+            f"  test_command: {CONFIGURED_GO_TEST_CMD}\n",
+        )
+        _write(workdir, "staged.go", STAGED_GO)
+        _git(workdir, "add", "staged.go")
+
+        result = GuardManager(workdir).run_all()
+
+        assert result.passed is False
+        tests = _lane(result, "go_tests")
+        assert tests.passed is False
+        assert CONFIGURED_MARKER in tests.output, tests.output
+
+    @requires_go
+    def test_absent_key_keeps_the_historical_argv(self, tmp_path):
+        """A Go repo without test_command still gets the pinned argv list —
+        shell-quoted when the key is absent is WRONG (it would break every
+        existing config's semantics), so the exact list is asserted here."""
+        workdir = _scratch_repo(tmp_path, {"go.mod": GO_MOD, "main.go": CLEAN_GO})
+        _write(
+            workdir,
+            os.path.join(".gitreins", "config.yaml"),
+            "guards:\n"
+            "  secrets: false\n"
+            "  lint: false\n"
+            "  tests: false\n"
+            "  go: {build: false, lint: false, tests: true}\n",
+        )
+        _write(workdir, "staged.go", STAGED_GO)
+        _git(workdir, "add", "staged.go")
+
+        # A fake `go` shim that records its argv: the lane's argv decision is
+        # observed at the exact boundary where `go` would run.
+        bin_dir, argv_log = _go_argv_shim(tmp_path, "fakebin")
+        env = {k: v for k, v in _git_env().items() if not k.startswith("GITREINS_")}
+        env["PATH"] = bin_dir + os.pathsep + env["PATH"]
+        saved_env = os.environ.copy()
+        os.environ.clear()
+        os.environ.update(env)
+        try:
+            # Direct unit call: the lane consults the (absent) config key.
+            r = check_go_tests(workdir)
+        finally:
+            os.environ.clear()
+            os.environ.update(saved_env)
+
+        assert r.passed is True, r.output
+        with open(argv_log) as f:
+            recorded = [line for line in f.read().splitlines() if line]
+        assert recorded == SHIM_RECORDED_ARGV, recorded
+
+    @requires_go
+    def test_explicit_empty_test_command_falls_back_to_the_default(self, tmp_path):
+        """An explicit empty value is "not configured", not "run nothing".
+
+        Discriminating arm: an implementation that treats a PRESENT key as
+        configured even when it is empty would shell out to ``sh -c ""`` —
+        which exits 0 with no output and never invokes ``go`` at all. The shim
+        records whether the historical argv really ran.
+        """
+        workdir = _scratch_repo(tmp_path, {"go.mod": GO_MOD, "main.go": CLEAN_GO}, name="empty-key")
+        _write(
+            workdir,
+            os.path.join(".gitreins", "config.yaml"),
+            "guards:\n"
+            "  secrets: false\n"
+            "  lint: false\n"
+            "  tests: false\n"
+            "  go: {build: false, lint: false, tests: true}\n"
+            '  test_command: ""\n',
+        )
+        _write(workdir, "staged.go", STAGED_GO)
+        _git(workdir, "add", "staged.go")
+
+        bin_dir, argv_log = _go_argv_shim(tmp_path, "empty-key-shim")
+        env = {k: v for k, v in _git_env().items() if not k.startswith("GITREINS_")}
+        env["PATH"] = bin_dir + os.pathsep + env["PATH"]
+        saved_env = os.environ.copy()
+        os.environ.clear()
+        os.environ.update(env)
+        try:
+            gm = GuardManager(workdir)
+            result = gm._check_go_tests()
+        finally:
+            os.environ.clear()
+            os.environ.update(saved_env)
+
+        assert result.skipped is False
+        assert result.passed is True, result.output
+        # The historical argv ran — the empty string was NOT executed as a
+        # shell command (that path leaves no argv log at all).
+        with open(argv_log) as handle:
+            recorded = [line for line in handle.read().splitlines() if line]
+        assert recorded == SHIM_RECORDED_ARGV, recorded
+
+
+class TestInitWritesGoTestCommand:
+    """init must write the Go `test_command` it prints (POC-45): the printed
+    `Test cmd:` line and the generated config must agree."""
+
+    def _scratch_go_repo_for_init(self, tmp_path, name: str) -> str:
+        workdir = tmp_path / name
+        workdir.mkdir()
+        _write(str(workdir), "go.mod", GO_MOD)
+        _write(str(workdir), "main.go", CLEAN_GO)
+        _git(str(workdir), "init", "-q")
+        _git(str(workdir), "config", "user.email", "poc45@example.invalid")
+        _git(str(workdir), "config", "user.name", "POC-45")
+        _git(str(workdir), "add", "-A")
+        _git(str(workdir), "commit", "-qm", "init")
+        return str(workdir)
+
+    @requires_go
+    def test_init_writes_the_test_command_it_prints(self, tmp_path):
+        """RED-PROOF: pre-fix the Go branch of _build_guards_section carried no
+        test_command key at all — the config parsed WITHOUT 'test_command'
+        under guards while the printed line claimed one."""
+        workdir = self._scratch_go_repo_for_init(tmp_path, "fresh-go")
+
+        result = _run_cli("init", cwd=workdir)
+
+        assert result.returncode == 0, f"stdout={result.stdout} stderr={result.stderr}"
+        printed = next(
+            line.split("Test cmd:", 1)[1].strip()
+            for line in result.stdout.splitlines()
+            if line.lstrip().startswith("Test cmd:")
+        )
+        config = _read_config(workdir)
+        assert "test_command" in config["guards"], (
+            f"init printed {printed!r} but wrote no test_command: {config['guards']!r}"
+        )
+        assert config["guards"]["test_command"] == printed
+        assert config["guards"]["test_command"] == "go test -short -count=1 ./..."
+
+    @requires_go
+    def test_init_rerun_preserves_a_custom_go_test_command(self, tmp_path):
+        """A user-authored command survives a re-run: only the untouched
+        install baseline may be upgraded, an explicit setting is preserved."""
+        workdir = self._scratch_go_repo_for_init(tmp_path, "custom-go")
+        custom = "go test -race ./..."
+        # First run creates the baseline config, second run must preserve.
+        assert _run_cli("init", cwd=workdir).returncode == 0
+        config = _read_config(workdir)
+        config["guards"]["test_command"] = custom
+        with open(os.path.join(workdir, ".gitreins", "config.yaml"), "w") as f:
+            yaml.dump(config, f)
+
+        rerun = _run_cli("init", cwd=workdir)
+
+        assert rerun.returncode == 0, f"stdout={rerun.stdout} stderr={rerun.stderr}"
+        assert _read_config(workdir)["guards"]["test_command"] == custom
+        assert custom in rerun.stdout, rerun.stdout
