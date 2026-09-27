@@ -41,6 +41,8 @@
     }
   ],
   "plan_note": "3 worktrees, disjoint file sets (engine/* + tests/* | docs/{cli-reference,evaluator-loop}.md | README.md). Middle-out test: code rows live in the engine base band, doc rows in the top band; no shared import chain between units.",
+  "finished_at": "2026-09-27T15:00:00Z",
+  "recovery": "verified all three branches already merged into main (12e7d42, a2af178, 0ae90d4); all listed worktrees absent; affected board rows complete",
   "excluded": {
     "DF-GITREINS-POC-46": "touches engine/guards.py + engine/types.py — same file as POC-45; serial next tick",
     "DOC-8": "touches docs/evaluator-loop.md + docs/cli-reference.md — collides with the config-docs worker; serial next tick",
