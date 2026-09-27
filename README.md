@@ -417,6 +417,10 @@ Tier 1 Guards: FAIL  (test mode: full)
   guard log: .gitreins/logs/guard-20260916T200106.123456Z.log
 ```
 
+First guard failure? The [onboarding guide's Troubleshooting
+section](docs/onboarding.md#troubleshooting) walks the common first-run
+failures step by step.
+
 `~` marks a step that was skipped, and a degraded run never prints the green
 `Tier 1 Guards: PASS` header — so grepping that string is proof the gates
 actually ran. With `guards.allow_skips: false` (code default) it exits **2**;
@@ -784,6 +788,7 @@ A lane whose own TREE is dirty fails the mirror-image check
 ## Architecture & Docs
 
 - [Disposable verification](docs/disposable-verification.md) — run QA batteries, dogfood, and repro farms in throwaway worktrees without a bunker. Every QA run records its outcome in the QA ledger (`gitreins qa list`), including runs produced outside the harness (`gitreins qa record`).
+- [CONTRIBUTING.md](CONTRIBUTING.md) — development setup, how to run the repo test suite, and the commit convention.
 
 | Document | What it covers |
 |---|---|
