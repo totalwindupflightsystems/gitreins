@@ -1,0 +1,50 @@
+{
+  "tick_id": "gitreins-2026-09-27-10-15-07",
+  "started_at": "2026-09-27T10:55:00Z",
+  "mode": "wave",
+  "wave_budget": 7,
+  "base_ref": "github/main",
+  "base_sha": "f3d0757f3ce89c38694a71d09a5b89c87c78ae79",
+  "workers": [
+    {
+      "task": "DF-GITREINS-POC-45",
+      "rows": ["DF-GITREINS-POC-45"],
+      "worktree": "~/worktrees/gitreins-DF-GITREINS-POC-45",
+      "branch": "wt/DF-GITREINS-POC-45",
+      "base_sha": "f3d0757",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm",
+      "status": "dispatched",
+      "file_scope": ["engine/guards.py", "engine/guard_manager.py", "gitreins/cli.py", "tests/test_guard_go_lanes.py"]
+    },
+    {
+      "task": "DOC-6+DOC-7+DOC-5+DOC-11",
+      "rows": ["DOC-6", "DOC-7", "DOC-5", "DOC-11"],
+      "worktree": "~/worktrees/gitreins-DOC-5",
+      "branch": "wt/DOC-5",
+      "base_sha": "f3d0757",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm",
+      "status": "dispatched",
+      "file_scope": ["docs/cli-reference.md", "docs/evaluator-loop.md"]
+    },
+    {
+      "task": "README-001+README-002",
+      "rows": ["README-001", "README-002"],
+      "worktree": "~/worktrees/gitreins-README-002",
+      "branch": "wt/README-002",
+      "base_sha": "f3d0757",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm",
+      "status": "dispatched",
+      "file_scope": ["README.md"]
+    }
+  ],
+  "plan_note": "3 worktrees, disjoint file sets (engine/* + tests/* | docs/{cli-reference,evaluator-loop}.md | README.md). Middle-out test: code rows live in the engine base band, doc rows in the top band; no shared import chain between units.",
+  "excluded": {
+    "DF-GITREINS-POC-46": "touches engine/guards.py + engine/types.py — same file as POC-45; serial next tick",
+    "DOC-8": "touches docs/evaluator-loop.md + docs/cli-reference.md — collides with the config-docs worker; serial next tick",
+    "DOC-9": "touches README.md + docs/onboarding.md — collides with the README worker; serial next tick",
+    "DOC-10": "premise re-verified stale this tick: README.md Quick Start already documents `pip install gitreins`, and PyPI serves 0.15.0 == pyproject version"
+  }
+}
