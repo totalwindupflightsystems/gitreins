@@ -628,7 +628,11 @@ real CLI parser in CI, so this class of broken example cannot ship again.
 
 ## Configuration
 
-Full `.gitreins/config.yaml` reference:
+Full `.gitreins/config.yaml` reference. Every uncommented value below is the
+code default from [`engine/config.py`](engine/config.py) (`GitReinsDefaults`);
+commented lines are examples. Any key you omit — including keys not shown
+here — falls back to that same dataclass, the single source of truth for
+defaults:
 
 ```yaml
 # ── Global defaults ──────────────────────────────────
@@ -643,21 +647,24 @@ guards:
   lint: true
   tests: true
   test_mode: "full"          # "full" or "diff"
-  # uv/pipenv/poetry are OPTIONAL — if the runner prefix's binary is not on
-  # PATH, the guard falls back to `python -m pytest ...` with a warning.
-  test_command: "uv run pytest -x --tb=short"
+  # test_command: "uv run pytest -x --tb=short"
+  #   uv/pipenv/poetry are OPTIONAL — if the runner prefix's binary is not on
+  #   PATH, the guard falls back to `python -m pytest ...` with a warning.
+  #   Code default: "pytest -x --tb=short".
   # Run test_command even with an empty index (nothing staged). Default false
   # means the tests lane is a SKIP with a named reason ("no staged files") —
   # under allow_skips:false that makes the whole run a DEGRADED pass (exit 2).
   # Set true when the suite must run on clean-tree guard runs too (chained
   # suites, audits, or commits that land through another tool).
   test_on_clean: false
+  # Overall pre-commit hook timeout in seconds.
+  hook_timeout: 300
   # A run where a substantive gate (lint/tests/lsp) did NO work — nothing
   # staged, no linter on PATH, zero tests collected — is a DEGRADED PASS.
   # true  = degraded runs still exit 0 (gitreins init writes this default)
   # false = degraded runs exit 2, so CI can never read a gate that never ran
   #         as a gate that passed
-  allow_skips: true
+  # allow_skips: true   # code default: false; `gitreins init` writes true
 
   # Go projects (auto-detected via go.mod):
   go:
@@ -667,11 +674,17 @@ guards:
 
 # ── Tier 2 evaluator caps ────────────────────────────
 evaluator:
-  max_iterations: 25         # LLM reasoning turns
-  max_time: "5m"             # wall clock cap
-  max_input_tokens: "200k"
-  max_output_tokens: "50k"
+  max_iterations: 100        # LLM reasoning turns; -1 = unlimited
+  # Wall clock: UNLIMITED by default (max_seconds = -1 in engine/config.py) —
+  # no cap unless you set one. Example:
+  # max_time: "5m"
+  max_input_tokens: "10M"
+  max_output_tokens: 131072
+  max_tokens_per_call: 16384  # per-LLM-call cap (session budget is separate)
   tool_call_weight: 0.1      # tool calls cost 0.1 iterations
+  compaction_threshold: 0.90  # compact past 90% of max_input_tokens
+  code_context_budget: 0.70  # cap pre-loaded code context at 70% of the input budget
+  max_file_bytes: 131072     # cap read_file results (bytes)
 
 # ── Verdict history ──────────────────────────────────
 history:
