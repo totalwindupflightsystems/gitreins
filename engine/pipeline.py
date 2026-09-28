@@ -299,6 +299,12 @@ def _record_runtime_skips(stage: StageResult) -> None:
     record — it is the sibling case (a gate that ran OUT OF TIME, not a gate
     that found code), and ``worktree_manager._tier1_skipped_steps`` must see
     it in ``skipped_steps`` like any other gate that did not finish its work.
+    INT-FLAKE-6: a contention-degraded tier1 tests step joins them the same
+    way — its PASS carries ``data["skipped_tests"] = True`` (never an output
+    parse, always the step's own data field, so prose in the captured output
+    cannot mint a skip). ``worktree_manager._tier1_skipped_steps`` must see
+    "tests" in ``skipped_steps``, or the fail-open remains: a tier1 PASS that
+    graded nothing could merge as green.
     Idempotent: ids are deduplicated and an existing reason is preserved.
     """
     found: list[tuple[str, str]] = []
@@ -317,6 +323,19 @@ def _record_runtime_skips(stage: StageResult) -> None:
         if budget is None:
             continue
         found.append((step.id, f"timed out after {budget}s (step budget)"))
+    # INT-FLAKE-6: the contention-degraded lane — a PASSING tier1 tests step
+    # whose data carries the skipped_tests marker. Same trust rule as the
+    # timeout lane above: the step's own data field, never a parse of its
+    # captured output. Idempotent with the lanes above via the same
+    # already-found/already-recorded checks.
+    for step in stage.steps:
+        if step.id in stage.skipped_steps or step.id in [sid for sid, _ in found]:
+            continue
+        data = step.data if isinstance(step.data, dict) else {}
+        if not data.get("skipped_tests"):
+            continue
+        reason = str(data.get("skip_reason") or "") or "contention-degraded tier1 tests step"
+        found.append((step.id, reason))
     if not found:
         return
     stage.degraded = True
@@ -789,6 +808,13 @@ class Pipeline:
                 and tier1_lock_result is not None
             ):
                 data["skipped"] = True
+                # The machine-readable marker: this PASS graded no tests. It
+                # is the key `_record_runtime_skips` reads (never an output
+                # parse) to fold the step into stage.skipped_steps — the
+                # record worktree_manager._tier1_skipped_steps refuses at
+                # merge-back. Only the marker is machine-consumed; a reader
+                # keying on the human `skip_reason` prose would be fragile.
+                data["skipped_tests"] = True
                 data["skip_reason"] = (
                     "unknown-class pytest failure under concurrent tier1 runs "
                     f"(tier1_tests_lock: {tier1_lock_result}) — contention, not "

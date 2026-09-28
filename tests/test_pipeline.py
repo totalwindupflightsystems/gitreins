@@ -1524,3 +1524,118 @@ class TestPytestRunnerMissingSkip:
         assert step.data["exit_code"] != 127
         assert "skipped" not in step.data
         assert step.data["pytest_outcome"]["kind"] in ("failed", "maxfail")
+
+
+# ── INT-FLAKE-6: the contention-degraded PASS records skipped_tests ──────────
+
+
+class TestContentionDegradedSkippedTests:
+    """A contention-degraded tier1 PASS must say it graded nothing — twice.
+
+    INT-FLAKE-6 criterion 2, part B: the contention branch in
+    ``_run_script_step`` recorded only the human ``skipped``/``skip_reason``
+    fields, so ``skipped_tests`` existed nowhere but a comment. The
+    substantive half is the fail-open that marker closes:
+    ``_record_runtime_skips`` had no lane for it, so
+    ``stages.tier1.degraded`` stayed False with no ``skipped_steps`` — and
+    ``worktree_manager._tier1_skipped_steps`` (the record a merge-back
+    refuses) only ever sees PASSes that carry ``skipped_steps``. Net effect:
+    a tier1 tests gate that graded NOTHING could merge as green.
+
+    Pinned here: the branch stamps the machine-readable ``skipped_tests``
+    marker on the step data while the guard condition stays exactly as it
+    was (an ``unknown``-class pytest failure under a taken tier1 lock); a
+    full ``_record_runtime_skips`` pass folds that step into
+    ``stage.skipped_steps`` / ``degraded`` / ``degradation_reason``, the same
+    record ``worktree_manager._tier1_skipped_steps`` reads to HOLD a merge —
+    so the stage dict a verdict serializes (``StageResult.to_dict`` →
+    ``pipeline_result["stages"]``) now carries the refusal reason; and the
+    negative half: a CLASSIFIED failure (maxfail-shaped) never degrades — it
+    stays a hard FAIL with no marker.
+    """
+
+    def _pipeline(self, workdir) -> Pipeline:
+        return Pipeline({"pipeline": {"stages": []}}, str(workdir))
+
+    @staticmethod
+    def _pytest_step(run: str) -> dict:
+        return {"id": "tests", "type": "script", "run": run}
+
+    def test_unknown_class_failure_under_tier1_lock_skips_with_the_marker(
+        self, tmp_workdir, monkeypatch
+    ):
+        """The contention branch fires: PASS + skipped_tests + lock token."""
+        from engine.pipeline import _record_runtime_skips, TIER1_ENV_VAR
+
+        # Reach the branch exactly as a judge run does: the env stamp makes
+        # tier1_lock.in_tier1() true, and the repo-root env points the lock
+        # file at this test's own tmp workdir (never the real repo — the
+        # same fixture shape tests/test_tier1_lock.py uses).
+        monkeypatch.setenv(TIER1_ENV_VAR, "1")
+        monkeypatch.setenv("GITREINS_TIER1_REPO_ROOT", str(tmp_workdir))
+
+        # Deterministic unclassified failure: pytest's own exit 5 (collected
+        # nothing) is discarded with its output, and the shell's `exit 7`
+        # lands as the step's exit code — a number the classifier assigns no
+        # kind to, so kind == "unknown". The redirect is load-bearing: the
+        # classifier scans the OUTPUT too (types.py:347), and pytest's
+        # "no tests ran" line would flip the classification to
+        # no-tests-collected and bypass the branch.
+        result = self._pipeline(tmp_workdir)._run_script_step(
+            self._pytest_step(
+                f"{shlex.quote(sys.executable)} -m pytest -q >/dev/null 2>&1; exit 7"
+            ),
+            {"id": "INT-FLAKE-6", "criteria": []},
+            stage_id="tier1",
+        )
+
+        assert result.passed is True
+        assert result.data["skipped_tests"] is True
+        assert result.data["pytest_outcome"]["kind"] == "unknown"
+        assert result.data["tier1_tests_lock"] is not None
+        # The human fields survive unchanged.
+        assert result.data["skipped"] is True
+        assert "contention" in result.data["skip_reason"]
+
+        # Second half: fold the step into the stage the way the runner does
+        # (pipeline.run → _record_runtime_skips), then grade the exact dict
+        # a verdict serializes — the record _tier1_skipped_steps reads.
+        stage = StageResult(id="tier1", passed=True, steps=[result])
+        _record_runtime_skips(stage)
+        d = stage.to_dict()
+        assert "tests" in d["skipped_steps"]
+        assert d["degraded"] is True
+        assert "contention" in d["degradation_reason"]
+
+        from engine.worktree_manager import _tier1_skipped_steps
+
+        assert _tier1_skipped_steps({"stages": {"tier1": d}}) == ["tests"]
+
+    def test_maxfail_classified_failure_is_never_degraded(self, tmp_workdir):
+        """AC negative half: a real classified failure FAILS hard, no marker."""
+        from engine.pipeline import _record_runtime_skips
+
+        # maxfail shape without running a suite: a real pytest invocation
+        # (the classifier's invocation gate needs the token in the command),
+        # then exit 2 with a FAILED id in the output — exactly the
+        # classifier's real-failure arm (types.py:311). The "1 failed"
+        # summary line also satisfies the runner-missing hint's progress
+        # veto, so the only graded outcome here is the failure itself.
+        result = self._pipeline(tmp_workdir)._run_script_step(
+            self._pytest_step(
+                f"{shlex.quote(sys.executable)} -m pytest --version >/dev/null 2>&1; "
+                "echo 'FAILED test_x.py::test_boom'; echo '1 failed'; exit 2"
+            ),
+            {"id": "INT-FLAKE-6", "criteria": []},
+            stage_id="tier1",
+        )
+
+        assert result.passed is False
+        assert result.data["pytest_outcome"]["kind"] == "maxfail"
+        assert "skipped_tests" not in result.data
+        assert "skipped" not in result.data
+
+        stage = StageResult(id="tier1", passed=False, steps=[result])
+        _record_runtime_skips(stage)
+        assert stage.degraded is False
+        assert stage.skipped_steps == []
