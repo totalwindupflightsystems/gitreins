@@ -525,7 +525,12 @@ class TestVerdictSemantics:
             _secrets_step_run(str(workdir), {"guards": {"scanner_nice": level}}), workdir
         )
         assert proc.returncode == 0, proc.stdout + proc.stderr
-        assert f"scanners: nice=nice -n {level}" in proc.stdout
+        if GITLEAKS:
+            assert f"scanners: nice=nice -n {level}" in proc.stdout
+        else:
+            # No gitleaks on PATH (CI runners): the gitleaks half is skipped,
+            # so no priority was ever applied — claiming one would be a lie.
+            assert "gitleaks: not on PATH" in proc.stdout
 
     @pytest.mark.parametrize("level", [10, 19])
     def test_planted_secret_still_fails(self, tmp_path, level):
@@ -536,7 +541,10 @@ class TestVerdictSemantics:
             _secrets_step_run(str(workdir), {"guards": {"scanner_nice": level}}), workdir
         )
         assert proc.returncode != 0, proc.stdout + proc.stderr
-        assert f"scanners: nice=nice -n {level}" in proc.stdout
+        if GITLEAKS:
+            assert f"scanners: nice=nice -n {level}" in proc.stdout
+        else:
+            assert "gitleaks: not on PATH" in proc.stdout
         assert "builtin cross-check status: 1 finding" in proc.stdout
 
     def test_planted_secret_fails_at_level_zero_too(self, tmp_path):

@@ -701,7 +701,10 @@ class TestSecretsScannerAttribution:
         # was spawned with (the applied prefix, or why it could not be applied).
         summary = Tier1Result(passed=True, results=[result]).summary
         assert summary.startswith("  ✓ secrets — clean (gitleaks + builtin cross-check)")
-        assert "; scanners: nice=" in summary
+        # The note exists when gitleaks actually spawned; CI runners have no
+        # gitleaks, and a withheld prefix must not claim a priority.
+        if shutil.which("gitleaks"):
+            assert "; scanners: nice=" in summary
 
     def test_builtin_only_finding_names_the_builtin_scanner(self, tmp_workdir):
         """The gitleaks-clean / builtin-findings case (GR-GAP-005) is the one
