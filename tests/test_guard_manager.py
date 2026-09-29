@@ -278,6 +278,44 @@ class TestGuardManagerInit:
         assert gm._lsp_per_file_timeout is None
 
 
+def _local_go_version() -> tuple[int, int] | None:
+    """(major, minor) of the local Go toolchain, or None when unavailable."""
+    try:
+        out = subprocess.run(["go", "version"], capture_output=True, text=True, timeout=15).stdout
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    # 'go version go1.22.2 linux/amd64'
+    parts = out.split()
+    if len(parts) < 3 or not parts[2].startswith("go"):
+        return None
+    ver = parts[2][2:].split(".")
+    try:
+        return int(ver[0]), int(ver[1].rstrip("rc").split("rc")[0] or "0")
+    except (ValueError, IndexError):
+        return None
+
+
+def _require_go_version(minor_floor: int = 21):
+    """Skip (not fail) when no local Go toolchain or one below the floor.
+
+    GR-GAP-028/QA-GITREINS-1: the fixture previously hardcoded ``go 1.26`` in
+    go.mod, forcing an automatic toolchain download that fails on clean
+    machines with older Go (1.22 agents) — GOTOOLCHAIN auto-fetch is not
+    guaranteed. The test's subject is timeout coercion, not a specific Go
+    version, so pin go.mod to the LOCAL toolchain and skip when it's absent
+    or too old to run the stage.
+    """
+    ver = _local_go_version()
+    if ver is None:
+        pytest.skip("no Go toolchain on PATH — go_tests stage cannot run")
+    if ver[1] < minor_floor:
+        pytest.skip(
+            f"local Go toolchain too old ({ver[0]}.{ver[1]}) "
+            f"— go_tests stage needs >= 1.{minor_floor}"
+        )
+    return ver
+
+
 class TestTimeoutCoercion:
     """GR-GAP-028: guards.test_timeout / hook_timeout must be coerced to int.
 
@@ -341,8 +379,9 @@ class TestTimeoutCoercion:
         Tiny Go module + .gitreins/config.yaml loaded through the real
         config-loading path; the go_tests stage must complete and PASS.
         """
+        ver = _require_go_version()
         with open(os.path.join(tmp_workdir, "go.mod"), "w") as f:
-            f.write("module example.com/gap028\n\ngo 1.26\n")
+            f.write(f"module example.com/gap028\n\ngo 1.{ver[1]}\n")
         with open(os.path.join(tmp_workdir, "main.go"), "w") as f:
             f.write("package main\n\nfunc main() {}\n")
         with open(os.path.join(tmp_workdir, "main_test.go"), "w") as f:
