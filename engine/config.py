@@ -16,6 +16,8 @@ import json
 import time
 from dataclasses import dataclass, field
 
+from engine import scanner_nice
+
 logger = logging.getLogger("gitreins.config")
 
 
@@ -62,6 +64,13 @@ class GitReinsDefaults:
 
     # ── Guard defaults ──
     hook_timeout: int = 300  # overall pre-commit hook timeout (GR-064e, raised from 120)
+    # DF-GITREINS-POC-55: nice(1) level for every external scanner the guard and
+    # the judge's Tier 1 spawn (gitleaks, golangci-lint, go build/test, ruff,
+    # pytest, LSP servers). Scans are background verification, so they run as
+    # the least urgent CPU consumer by default; 0 disables the prefix entirely.
+    # Overridden by guards.scanner_nice in config.yaml, and by
+    # GITREINS_SCANNER_NICE in the environment (precedence env > config > this).
+    scanner_nice: int = 10
 
     # ── Parallel worktree fleet ──
     max_concurrent_worktrees: int = 2
@@ -164,6 +173,15 @@ class GitReinsDefaults:
             max_file_bytes=int(defaults.get("max_file_bytes", self.max_file_bytes)),
             pass_on_error=bool(defaults.get("pass_on_error", self.pass_on_error)),
             hook_timeout=int(defaults.get("hook_timeout", self.hook_timeout)),
+            # DF-GITREINS-POC-55: the scanner nice level is read from the
+            # `guards:` block (the block the guard itself consumes), not from
+            # `defaults:`. An unusable value is ignored with a warning — a
+            # scheduling nicety must never be able to fail a scan.
+            scanner_nice=scanner_nice.coerce_level(
+                _guards_value(config_dict, scanner_nice.CONFIG_KEY),
+                fallback=self.scanner_nice,
+                what=f"{scanner_nice.CONFIG_SECTION}.{scanner_nice.CONFIG_KEY}",
+            ),
             max_concurrent_worktrees=_coerce_positive_int(
                 _worktree_fleet_value(
                     config_dict, defaults, "max_concurrent_worktrees", self.max_concurrent_worktrees
@@ -418,6 +436,18 @@ def _resolution_tokens_max(defaults: dict, fallback: int) -> int:
     value = resolution_cfg(defaults).get("tokens_max")
     coerced = _coerce_tokens(value) if value is not None else fallback
     return coerced if coerced > 0 else fallback
+
+
+def _guards_value(config_dict: dict, key: str):
+    """One value out of the ``guards:`` block, tolerating a scalar/absent block.
+
+    Config from other users is data, not schema (QA-GITREINS-POC-6 posture):
+    ``guards: true`` must degrade to "key absent", never raise.
+    """
+    guards = config_dict.get("guards", {})
+    if not isinstance(guards, dict):
+        return None
+    return guards.get(key)
 
 
 def _worktree_fleet_value(config_dict: dict, defaults: dict, key: str, fallback):

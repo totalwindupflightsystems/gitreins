@@ -226,7 +226,13 @@ class TestTier1StepSet:
             str(tmp_path), {"guards": {"test_command": "uv run pytest -x --tb=short"}}
         )
         tests_step = next(s for s in steps if s["id"] == "tests")
-        assert tests_step["run"] == f"{sys.executable} -m pytest -x --tb=short"
+        # DF-GITREINS-POC-55: the RESOLVED command is what must be spawned, and
+        # the spawn string now carries the scanner nice wrapper around it (the
+        # wrapper is a literal here, not built by the code under test).
+        assert tests_step["analysis_cmd"] == f"{sys.executable} -m pytest -x --tb=short"
+        assert tests_step["run"].endswith(
+            f"$_gr_nice sh -c '{sys.executable} -m pytest -x --tb=short'"
+        )
 
     def test_tests_step_honors_configured_command_and_timeout(self, tmp_path):
         (tmp_path / "app.py").write_text("x = 1\n")
@@ -234,7 +240,8 @@ class TestTier1StepSet:
             str(tmp_path), {"guards": {"test_command": "my-runner check", "test_timeout": 42}}
         )
         tests_step = next(s for s in steps if s["id"] == "tests")
-        assert tests_step["run"] == "my-runner check"
+        assert tests_step["analysis_cmd"] == "my-runner check"
+        assert tests_step["run"].endswith("$_gr_nice sh -c 'my-runner check'")
         assert tests_step["timeout"] == 42
 
 

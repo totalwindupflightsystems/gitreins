@@ -57,6 +57,7 @@ import yaml
 
 from engine import lang_detect
 from engine import command_hygiene
+from engine import scanner_nice
 from engine.evidence_bounds import (
     MAX_STEP_EVIDENCE_CHARS,  # noqa: F401 — re-exported for this module's callers/tests
     _ERROR_TEST_LINE,
@@ -668,6 +669,12 @@ class Pipeline:
 
         # Template substitution
         cmd = self._template(cmd, task)
+        # DF-GITREINS-POC-55: a step may declare the command WITHOUT its spawn
+        # wrapper (`analysis_cmd`). Classifiers that parse the command text —
+        # the POC-51 runner-missing check below — read that one, so a nice
+        # wrapper can never change a verdict's classification. Absent (every
+        # hand-authored step) it is simply the command itself.
+        analysis_cmd = self._template(step_def.get("analysis_cmd") or cmd, task)
 
         logger.debug("Running script: %s", cmd)
         try:
@@ -789,7 +796,7 @@ class Pipeline:
                 # the classifier demands both the not-started evidence and an
                 # unresolvable runner.
                 elif runner_missing := _pytest_runner_missing_hint(
-                    cmd, self.workdir, exit_code, output
+                    analysis_cmd, self.workdir, exit_code, output
                 ):
                     passed = True
                     data["skipped"] = True
@@ -1381,7 +1388,7 @@ def _fix_on_key(obj):
     return obj
 
 
-def _lint_step_run(lint_cmd: str) -> str:
+def _lint_step_run(lint_cmd: str, config: dict | None = None) -> str:
     """Wrap *lint_cmd* with the guard's missing-linter semantics.
 
     ``GuardManager._check_lint`` returns PASS ("No linter found — skipped")
@@ -1389,10 +1396,19 @@ def _lint_step_run(lint_cmd: str) -> str:
     same way, or Tier 1 would FAIL on a machine that merely lacks ruff while
     ``gitreins guard`` passes on the identical tree (DF-GITREINS-POC-16).
     The binary is only checked for EXISTENCE; a lint finding still fails.
+
+    DF-GITREINS-POC-55: the linter is a spawned external scanner, so it runs
+    behind the shared nice policy (``guards.scanner_nice`` /
+    ``GITREINS_SCANNER_NICE``, default 10, 0 = off). The probe lives INSIDE
+    this script (fail-open: no ``nice`` → run unprefixed, one note line), and
+    at level 0 no prologue is emitted at all — the command is byte-identical
+    to the pre-change one.
     """
     binary = lint_cmd.split()[0]
+    level, _source = scanner_nice.resolve_level(config)
+    prologue, nice_prefix = scanner_nice.shell_prologue(level)
     return (
-        f"if command -v {binary} >/dev/null 2>&1; then {lint_cmd}; "
+        f"if command -v {binary} >/dev/null 2>&1; then {prologue}{nice_prefix}{lint_cmd}; "
         f'else echo "{SKIP_SENTINEL} lint=no linter on PATH ({binary} not found)"; '
         f"exit 0; fi"
     )
@@ -1439,7 +1455,7 @@ def harness_scan_gitleaks_config(workdir: str) -> str:
     return "\n".join(lines)
 
 
-def _secrets_step_run(workdir: str) -> str:
+def _secrets_step_run(workdir: str, config: dict | None = None) -> str:
     """Shell command for the Tier 1 ``secrets`` step.
 
     DF-012: gitleaks' default rules (and the generated config) miss sk-/ghp_
@@ -1459,8 +1475,18 @@ def _secrets_step_run(workdir: str) -> str:
     the engine package root — a bare `python3` from PATH cannot import
     `engine`, which made this step fail with ModuleNotFoundError in any env
     where the package is only importable by the venv (2026-08-15 fix).
+
+    DF-GITREINS-POC-55: gitleaks is an external scanner, so it runs behind the
+    shared nice policy (``guards.scanner_nice`` / ``GITREINS_SCANNER_NICE``,
+    default 10, 0 = off). The probe is in-band and fail-open — a host with no
+    ``nice`` runs gitleaks unprefixed and says so once — and at level 0 the
+    built command is byte-identical to the pre-change one. The prefix travels
+    in ``$_gr_nice`` and applies to the gitleaks invocation only: the built-in
+    cross-check is not an external spawn.
     """
     exclusions = ", ".join(f"{d}/**" for d in HARNESS_STATE_DIRS)
+    level, _source = scanner_nice.resolve_level(config)
+    prologue, nice_prefix = scanner_nice.shell_prologue(level)
     return (
         "if command -v gitleaks >/dev/null 2>&1; then "
         '_glcfg="$(mktemp -t gitreins-gitleaks-XXXXXX.toml)"; '
@@ -1472,12 +1498,16 @@ def _secrets_step_run(workdir: str) -> str:
         # evidence, so a judge FAIL says WHICH scanner raised it instead of
         # leaving "secrets" ambiguous (the ambiguity that cost POC-15 a cycle).
         'echo "secrets: scanners=gitleaks+builtin cross-check"; '
+        # DF-GITREINS-POC-55: the nice policy, probed in-band so it sees the
+        # PATH the scan runs with, and fail-open so a missing `nice` can never
+        # turn a scan into a failure. Level 0 emits neither line nor prefix.
+        f"{prologue}"
         # DF-GITREINS-POC-14: --no-color keeps gitleaks' logrus colour codes
         # out of the captured evidence — verdict.json recorded raw
         # `\x1b[32mINF\x1b[0m scanned ~5 MB` lines and the console summary
         # printed them when one landed first. The INFO lines themselves stay:
         # they are the scope evidence ("scanned ~5 MB") a post-mortem reads.
-        'gitleaks detect --source . --no-git --no-banner --no-color --config "$_glcfg"; '
+        f'{nice_prefix}gitleaks detect --source . --no-git --no-banner --no-color --config "$_glcfg"; '
         '_glrc=$?; rm -f "$_glcfg"; '
         'if [ "$_glrc" -eq 0 ]; then echo "secrets: gitleaks: clean"; '
         'else echo "secrets: gitleaks: findings found (exit $_glrc)"; fi; '
@@ -1517,11 +1547,15 @@ def tier1_plan(workdir: str, config: dict | None = None) -> tuple[list[dict], di
     guards_cfg = (config or {}).get("guards", {})
     configured_test_cmd = guards_cfg.get("test_command")
     test_timeout = int(guards_cfg.get("test_timeout", 120))
+    # DF-GITREINS-POC-55: one nice policy for every external scanner this Tier 1
+    # spawns — resolved once here (env > guards.scanner_nice > default 10) and
+    # handed to each step builder below.
+    nice_level, _nice_source = scanner_nice.resolve_level(config)
     steps: list[dict] = [
         {
             "id": "secrets",
             "type": "script",
-            "run": _secrets_step_run(workdir),
+            "run": _secrets_step_run(workdir, config),
             "on_fail": "continue",
         },
     ]
@@ -1551,7 +1585,7 @@ def tier1_plan(workdir: str, config: dict | None = None) -> tuple[list[dict], di
     # cache/registry, so PATH hygiene cannot suppress it). Ring-runner
     # RR-GAP-040 / off-by-one answer 1286.
     if guards_cfg.get("lint", True):
-        steps.append({"id": "lint", "type": "script", "run": _lint_step_run(lint_cmd)})
+        steps.append({"id": "lint", "type": "script", "run": _lint_step_run(lint_cmd, config)})
 
     # Same command the guard would run, resolved by the guard's own helper so
     # a missing runner prefix (`uv run` on a pip-only machine) degrades the
@@ -1571,7 +1605,17 @@ def tier1_plan(workdir: str, config: dict | None = None) -> tuple[list[dict], di
     test_step: dict = {
         "id": "tests",
         "type": "script",
-        "run": resolved_test_cmd,
+        # DF-GITREINS-POC-55: the resolved command is wrapped WHOLE (one
+        # `sh -c`) so a chain like `check_docs_drift.py && pytest` is covered
+        # end to end — prefixing only its first word would leave the actual
+        # test runner at default priority. Fail-open, and byte-identical to
+        # the pre-change command at level 0.
+        "run": scanner_nice.shell_wrap(resolved_test_cmd, nice_level),
+        # The same command WITHOUT the nice wrapper. Classifiers that PARSE the
+        # command text must read this one: the POC-51 runner-missing check looks
+        # for pytest invocations, and a `sh -c '<cmd>'` wrapper hides the whole
+        # body inside one quoted token (_run_script_step).
+        "analysis_cmd": resolved_test_cmd,
         "env": {TIER1_ENV_VAR: "1"},
     }
     if resolution_warning:

@@ -7,6 +7,7 @@ import subprocess
 from dataclasses import dataclass
 
 from engine import command_hygiene
+from engine import scanner_nice
 
 logger = logging.getLogger("gitreins.guards.go")
 
@@ -78,6 +79,11 @@ class GoGuardResult:
     # (TRUST-001) could not tell "no Go files" from "Go files, all clean".
     skipped: bool = False
     skip_reason: str = ""
+    # DF-GITREINS-POC-55: the nice(1) prefix this lane's scanner was spawned
+    # with, or why it could not be applied — the same evidence line
+    # ``GuardResult.nice_note`` carries. Empty when the knob is off or the
+    # spawn happened through a shell (whose in-band probe echoes it instead).
+    nice_note: str = ""
 
 
 def is_go_project(workdir: str) -> bool:
@@ -126,8 +132,15 @@ def _no_go_files_result(name: str, changed_files: list[str] | None) -> GoGuardRe
     return GoGuardResult(name=name, passed=True, output=message, skipped=True, skip_reason=message)
 
 
-def check_go_lint(workdir: str, changed_files: list[str] | None = None) -> GoGuardResult:
-    """Run go vet for the selected change scope. Fall back to golangci-lint if available."""
+def check_go_lint(
+    workdir: str, changed_files: list[str] | None = None, nice_level: int = 0
+) -> GoGuardResult:
+    """Run go vet for the selected change scope. Fall back to golangci-lint if available.
+
+    ``nice_level`` is the DF-GITREINS-POC-55 scanner nice level (0 = off): both
+    the linter and the ``go vet`` fallback are spawned external scanners, so both
+    run behind the shared policy.
+    """
     go_files = _changed_go_files(workdir, changed_files)
     if not go_files:
         return _no_go_files_result("go_lint", changed_files)
@@ -135,9 +148,12 @@ def check_go_lint(workdir: str, changed_files: list[str] | None = None) -> GoGua
     # Try golangci-lint first. run_bounded never raises for a missing
     # binary — it returns {"error": ...} without an exit_code — so a
     # spawn failure falls through to go vet (DF-CRIER-258: DF-008's
-    # kill-group discipline now covers this spawn too).
+    # kill-group discipline now covers this spawn too). `argv_prefix` withholds
+    # the nice prefix when the program is missing, which is what keeps that
+    # {"error": ...} shape (a prefix would turn it into exit 127 text).
+    lint_prefix, lint_note = scanner_nice.argv_prefix(nice_level, "golangci-lint")
     result = command_hygiene.run_bounded(
-        ["golangci-lint", "run", "--new-from-rev=HEAD~1", *go_files],
+        [*lint_prefix, "golangci-lint", "run", "--new-from-rev=HEAD~1", *go_files],
         cwd=workdir,
         timeout=60,
         env=_sanitized_env(),
@@ -150,8 +166,9 @@ def check_go_lint(workdir: str, changed_files: list[str] | None = None) -> GoGua
         # kill's -9) means the process ran and its verdict must be graded.
         detail = result.get("error") or result.get("reason") or "linter did not run"
         note = f"golangci-lint unavailable ({detail}); "
+        vet_prefix, vet_note = scanner_nice.argv_prefix(nice_level, "go")
         vet = command_hygiene.run_bounded(
-            ["go", "vet", "./..."],
+            [*vet_prefix, "go", "vet", "./..."],
             cwd=workdir,
             timeout=60,
             env=_sanitized_env(),
@@ -165,10 +182,16 @@ def check_go_lint(workdir: str, changed_files: list[str] | None = None) -> GoGua
             output = output[:2000] + "\n... [truncated]"
         if vet.get("exit_code") == 0:
             return GoGuardResult(
-                name="go_lint", passed=True, output=f"{note}graded by go vet: clean"
+                name="go_lint",
+                passed=True,
+                output=f"{note}graded by go vet: clean",
+                nice_note=vet_note,
             )
         return GoGuardResult(
-            name="go_lint", passed=False, output=f"{note}graded by go vet:\n{output}"
+            name="go_lint",
+            passed=False,
+            output=f"{note}graded by go vet:\n{output}",
+            nice_note=vet_note,
         )
     # The linter ran: its verdict is authoritative. A real exit 1 with
     # findings must never masquerade as "ok" via a clean go vet
@@ -177,8 +200,10 @@ def check_go_lint(workdir: str, changed_files: list[str] | None = None) -> GoGua
     if len(output) > 2000:
         output = output[:2000] + "\n... [truncated]"
     if result["exit_code"] == 0:
-        return GoGuardResult(name="go_lint", passed=True, output="golangci-lint: clean")
-    return GoGuardResult(name="go_lint", passed=False, output=output)
+        return GoGuardResult(
+            name="go_lint", passed=True, output="golangci-lint: clean", nice_note=lint_note
+        )
+    return GoGuardResult(name="go_lint", passed=False, output=output, nice_note=lint_note)
 
 
 def _resolve_go_test_argv(test_command: str | None) -> tuple[list[str] | str, str | None]:
@@ -213,6 +238,7 @@ def check_go_tests(
     timeout: int | str = 180,
     changed_files: list[str] | None = None,
     test_command: str | None = None,
+    nice_level: int = 0,
 ) -> GoGuardResult:
     """Run go test for the selected change scope.
 
@@ -222,6 +248,11 @@ def check_go_tests(
     ``test_command`` is the repo's configured ``guards.test_command``
     (DF-GITREINS-POC-45): when present and non-empty it drives the lane,
     otherwise the historical argv runs unchanged.
+
+    ``nice_level`` (DF-GITREINS-POC-55): the historical argv is spawned
+    directly and takes the nice prefix as argv words; a configured SHELL
+    command is wrapped as a whole so a chain is covered, and the in-band probe
+    echoes the note into the lane's own output.
     """
     # Belt-and-braces: consumers may pass a raw string config value (e.g.
     # '300s'); subprocess.run(timeout='300s') raises TypeError instead of
@@ -233,6 +264,12 @@ def check_go_tests(
         return _no_go_files_result("go_tests", changed_files)
 
     cmd, configured_note = _resolve_go_test_argv(test_command)
+    nice_note = ""
+    if isinstance(cmd, list):
+        prefix, nice_note = scanner_nice.argv_prefix(nice_level, cmd[0])
+        cmd = [*prefix, *cmd] if prefix else cmd
+    else:
+        cmd = scanner_nice.shell_wrap(cmd, nice_level)
     result = command_hygiene.run_bounded(
         cmd,
         cwd=workdir,
@@ -258,18 +295,26 @@ def check_go_tests(
         output = output[-2000:]
     prefix = f"{configured_note}\n" if configured_note else ""
     if result.get("exit_code") == 0:
-        return GoGuardResult(name="go_tests", passed=True, output=(prefix + output)[:500])
-    return GoGuardResult(name="go_tests", passed=False, output=prefix + output)
+        return GoGuardResult(
+            name="go_tests",
+            passed=True,
+            output=(prefix + output)[:500],
+            nice_note=nice_note,
+        )
+    return GoGuardResult(name="go_tests", passed=False, output=prefix + output, nice_note=nice_note)
 
 
-def check_go_build(workdir: str, changed_files: list[str] | None = None) -> GoGuardResult:
+def check_go_build(
+    workdir: str, changed_files: list[str] | None = None, nice_level: int = 0
+) -> GoGuardResult:
     """Run go build for the selected change scope to catch compile errors."""
     go_files = _changed_go_files(workdir, changed_files)
     if not go_files:
         return _no_go_files_result("go_build", changed_files)
 
+    prefix, nice_note = scanner_nice.argv_prefix(nice_level, "go")
     result = command_hygiene.run_bounded(
-        ["go", "build", "-buildvcs=false", "./..."],
+        [*prefix, "go", "build", "-buildvcs=false", "./..."],
         cwd=workdir,
         timeout=120,
         env=_sanitized_env(),
@@ -281,5 +326,7 @@ def check_go_build(workdir: str, changed_files: list[str] | None = None) -> GoGu
     if len(output) > 2000:
         output = output[:2000] + "\n... [truncated]"
     if result.get("exit_code") == 0:
-        return GoGuardResult(name="go_build", passed=True, output="go build: ok")
-    return GoGuardResult(name="go_build", passed=False, output=output)
+        return GoGuardResult(
+            name="go_build", passed=True, output="go build: ok", nice_note=nice_note
+        )
+    return GoGuardResult(name="go_build", passed=False, output=output, nice_note=nice_note)

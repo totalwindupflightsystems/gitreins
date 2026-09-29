@@ -16,6 +16,8 @@ import urllib.parse
 from dataclasses import dataclass, asdict
 from pathlib import Path
 
+from engine import scanner_nice
+
 logger = logging.getLogger("gitreins.lsp")
 
 _TOOL_BINARIES = {
@@ -576,6 +578,7 @@ def run_lsp_check_status(
     probe: bool = False,
     ready_timeout: float = READY_PROBE_TIMEOUT_S,
     recheck_after: float = RECHECK_AFTER_S,
+    nice_level: int = 0,
 ) -> LspCheckStatus:
     """Run one LSP check and report *why* it produced no diagnostics.
 
@@ -594,6 +597,12 @@ def run_lsp_check_status(
 
     ``run_lsp_check`` keeps the historical contract (diagnostics only);
     this entry point is for callers that must discriminate.
+
+    ``nice_level`` (DF-GITREINS-POC-55) is the scanner nice level for the
+    spawned server (0 = off): a language server indexes the repo on every file,
+    so it is exactly the long-lived CPU consumer the policy exists for. The
+    prefix is withheld when the binary is not resolvable, preserving the
+    "tool not found → skip" path above.
     """
     import time as _time
 
@@ -638,8 +647,10 @@ def run_lsp_check_status(
     proc = None
 
     try:
+        # DF-GITREINS-POC-55: the server is a spawned external scanner — the
+        # long-lived kind — so it starts behind the shared nice policy.
         proc = subprocess.Popen(
-            [tool_path],
+            [*scanner_nice.argv_prefix(nice_level, tool_path)[0], tool_path],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -791,12 +802,14 @@ def run_lsp_check(
     files: list[str] | None = None,
     timeout_per_file: float | None = None,
     init_timeout: float | None = None,
+    nice_level: int = 0,
 ) -> list[dict]:
     """Return the diagnostics for ``files`` (no readiness probe).
 
     Behaviour is unchanged from before INT-FLAKE-4: the guard and every
     existing caller keep the diagnostics-only contract, and callers that need
     to tell a stalled spawn from a clean tree use ``run_lsp_check_status``.
+    ``nice_level`` is the DF-GITREINS-POC-55 scanner nice level (0 = off).
     """
     return run_lsp_check_status(
         tool,
@@ -805,4 +818,5 @@ def run_lsp_check(
         timeout_per_file=timeout_per_file,
         init_timeout=init_timeout,
         probe=False,
+        nice_level=nice_level,
     ).diagnostics
