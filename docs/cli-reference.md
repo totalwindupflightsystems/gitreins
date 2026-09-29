@@ -460,18 +460,21 @@ present in the message.
 **Audit knobs** — read from `.gitreins/config.yaml` only: the merged
 `commit_audit` section (a merge of `defaults.commit_audit` and top-level
 `commit_audit`, top-level keys winning — the same sources as `mode` above).
-Unlike `mode`, the knobs are **not** read from the pipeline stage definition;
-a knob written on the stage is dead config:
+One knob IS also read from the pipeline stage definition: `enabled` (a
+stage-level boolean wins over the config placements). The rest are not
+read from the stage; a knob written there is dead config:
 
 ```yaml
 # .gitreins/config.yaml
 commit_audit:
+  enabled: false
   review_mode: review
   review_score_threshold: 8.0
 ```
 
 | Key | Type | Default | Effect |
 |-----|------|---------|--------|
+| `enabled` | bool | `true` | `false` = the audit step reports a named skip and calls no LLM; the commit is not failed. Placement precedence: the stage's own `enabled` → the merged `commit_audit` section → `true`. YAML string forms (`"false"`, `"no"`, `"0"`) are normalized; an unrecognized value is treated as unset (default `true`) |
 | `strictness` | string | `"standard"` | Prompt-instruction set for message checking: `"lenient"`, `"standard"`, or `"strict"` (an unknown value falls back to standard wording) |
 | `max_iterations` | int | `3` | LLM exploration rounds before the audit reports exhaustion (`0` = no tools, single call) |
 | `suggest_message` | bool | `true` | On a rejected message, attach a suggested replacement |
