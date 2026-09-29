@@ -44,6 +44,30 @@ def _stub_lane_result(returncode=0, stdout="", stderr="", timed_out=False):
     }
 
 
+def _is_gitleaks_spawn(cmd) -> bool:
+    """True when *cmd* spawns gitleaks — by argv MEMBERSHIP, not by argv[0].
+
+    DF-GITREINS-POC-55: a spawned scanner may be prefixed (`nice -n 10 gitleaks
+    protect …`), so a mock dispatch keyed on the first word would miss it and
+    the real binary would run behind the test's back.
+    """
+    if not cmd:
+        return False
+    argv = cmd if isinstance(cmd, list) else str(cmd).split()
+    return "gitleaks" in argv
+
+
+def _assert_spawns(command: str, executed: str) -> None:
+    """*command* reached the spawn verbatim, behind the scanner nice wrapper.
+
+    DF-GITREINS-POC-55: GitReins' shell steps now run `$_gr_nice sh -c
+    '<command>'`. The wrapper text here is a literal (never built by the code
+    under test), so this stays a check rather than a tautology.
+    """
+    assert executed.startswith('_gr_nice="nice -n 10"')
+    assert executed.endswith(f"$_gr_nice sh -c '{command}'")
+
+
 def _wait_gone(pid: int, timeout: float = 5.0) -> bool:
     """True once /proc/<pid> disappears (within timeout)."""
     import time as _time
@@ -581,7 +605,7 @@ class TestSecretsMergeOnGitleaksFailure:
         real_run = subprocess.run
 
         def fake_run(cmd, *args, **kwargs):
-            if cmd and cmd[0] == "gitleaks":
+            if _is_gitleaks_spawn(cmd):
                 return mock_run
             return real_run(cmd, *args, **kwargs)
 
@@ -610,7 +634,7 @@ class TestSecretsMergeOnGitleaksFailure:
         real_run = subprocess.run
 
         def fake_run(cmd, *args, **kwargs):
-            if cmd and cmd[0] == "gitleaks":
+            if _is_gitleaks_spawn(cmd):
                 return mock_run
             return real_run(cmd, *args, **kwargs)
 
@@ -673,9 +697,11 @@ class TestSecretsScannerAttribution:
 
         assert result.passed is True
         assert result.scanners == (("gitleaks", "clean"), ("builtin", "clean"))
-        assert Tier1Result(passed=True, results=[result]).summary == (
-            "  ✓ secrets — clean (gitleaks + builtin cross-check)"
-        )
+        # DF-GITREINS-POC-55: the step line also names the priority its scanner
+        # was spawned with (the applied prefix, or why it could not be applied).
+        summary = Tier1Result(passed=True, results=[result]).summary
+        assert summary.startswith("  ✓ secrets — clean (gitleaks + builtin cross-check)")
+        assert "; scanners: nice=" in summary
 
     def test_builtin_only_finding_names_the_builtin_scanner(self, tmp_workdir):
         """The gitleaks-clean / builtin-findings case (GR-GAP-005) is the one
@@ -732,7 +758,7 @@ class TestSecretsScannerAttribution:
         real_run = subprocess.run
 
         def fake_run(cmd, *args, **kwargs):
-            if cmd and cmd[0] == "gitleaks":
+            if _is_gitleaks_spawn(cmd):
                 return mock_run
             return real_run(cmd, *args, **kwargs)
 
@@ -1023,7 +1049,7 @@ class TestTestsGuard:
         assert result.passed is True
         assert "clean-tree" in result.output
         # The configured test command must actually have been executed
-        assert mock_subprocess.call_args.args[0] == "echo clean-tree-run"
+        _assert_spawns("echo clean-tree-run", mock_subprocess.call_args.args[0])
 
     def test_clean_tree_diff_mode_runs_command_with_flag(self, tmp_workdir):
         """test_on_clean: true + test_mode: diff → full command runs on clean tree.
@@ -1049,7 +1075,7 @@ class TestTestsGuard:
                 result = gm._check_tests()
         assert result.passed is True
         assert "clean-tree" in result.output
-        assert mock_subprocess.call_args.args[0] == "echo clean-tree-diff-run"
+        _assert_spawns("echo clean-tree-diff-run", mock_subprocess.call_args.args[0])
 
 
 class TestRunnerFallback:
@@ -1137,7 +1163,7 @@ class TestRunnerFallback:
             ) as mock_subprocess:
                 result = gm._run_test_command("uv run pytest -x --tb=short", "tests (full)")
         executed = mock_subprocess.call_args.args[0]
-        assert executed == f"{sys.executable} -m pytest -x --tb=short"
+        _assert_spawns(f"{sys.executable} -m pytest -x --tb=short", executed)
         assert result.passed is True
         assert result.warning and "'uv' not found on PATH" in result.warning
         # Warning is also visible in the captured output
@@ -1163,7 +1189,7 @@ class TestRunnerFallback:
             ) as mock_subprocess:
                 result = gm._run_test_command(narrowed, "tests (diff: 1 files)")
         executed = mock_subprocess.call_args.args[0]
-        assert executed == f"{sys.executable} -m pytest -x --tb=short tests/test_x.py"
+        _assert_spawns(f"{sys.executable} -m pytest -x --tb=short tests/test_x.py", executed)
         assert result.passed is True
         assert result.warning is not None
 
@@ -1282,7 +1308,7 @@ class TestBarePytestFallback:
         ):
             result = gm._run_test_command("pytest -x --tb=short", "tests (full)")
         executed = mock_subprocess.call_args.args[0]
-        assert executed == f"{sys.executable} -m pytest -x --tb=short"
+        _assert_spawns(f"{sys.executable} -m pytest -x --tb=short", executed)
         assert result.passed is True
         assert result.warning and "pytest not found on PATH" in result.warning
         assert result.warning in result.output
@@ -1851,7 +1877,7 @@ class TestExtendedGuardManager:
         # cross-check, so subprocess.run is called for git too — find the
         # gitleaks invocation specifically.)
         gitleaks_cmd = next(
-            c.args[0] for c in mock_patch.call_args_list if c.args[0] and c.args[0][0] == "gitleaks"
+            c.args[0] for c in mock_patch.call_args_list if _is_gitleaks_spawn(c.args[0])
         )
         assert "--no-banner" in gitleaks_cmd
         # Finding detail still surfaces in the guard output...

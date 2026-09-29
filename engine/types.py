@@ -99,6 +99,13 @@ class GuardResult:
     # scanner concept, and the summary then falls back to the old wording.
     scanners: tuple[tuple[str, str], ...] = ()
 
+    # DF-GITREINS-POC-55: the nice(1) prefix this lane's external scanner was
+    # spawned with — ``scanners: nice=nice -n 10`` — or why it could not be
+    # applied (``scanners: nice unavailable (not on PATH); running at default
+    # priority``). Empty when the knob is off (level 0) and for lanes that
+    # spawned nothing, so the console never claims a priority that was not set.
+    nice_note: str = ""
+
     def _pass_detail(self) -> str:
         """Short detail string for passing guards (e.g. 'clean', '3 files')."""
         if self.name == "secrets":
@@ -499,6 +506,15 @@ def _builtin_findings_detail(output: str, limit: int = 100) -> str:
     return _locations_detail(locators, limit)
 
 
+def _nice_suffix(result: GuardResult) -> str:
+    """``"; scanners: nice=nice -n 10"`` — or ``""`` when nothing was applied.
+
+    DF-GITREINS-POC-55: scanner priority is part of the step's evidence, the
+    same way TRUST-003 made per-scanner outcomes part of it.
+    """
+    return f"; {result.nice_note}" if result.nice_note else ""
+
+
 @dataclass(frozen=True)
 class Tier1Result:
     passed: bool
@@ -594,7 +610,11 @@ class Tier1Result:
                         detail = f" — {fail_count} failure(s); {tail}"
             elif r.passed:
                 detail = r._pass_detail()
-            lines.append(f"  {status} {r.name}{detail}")
+            # DF-GITREINS-POC-55: the applied scanner nice prefix (or its
+            # fail-open reason) rides on the step's own line — one line per
+            # step, the DF-GITREINS-POC-14 contract, so an operator sees the
+            # priority without opening the run log.
+            lines.append(f"  {status} {r.name}{detail}{_nice_suffix(r)}")
             lines.extend(follow_up)
             if r.warning:
                 lines.append(f"  ⚠ {r.warning}")

@@ -1160,6 +1160,57 @@ Accepts a DEGRADED run as exit 0 (see the guard exit-code table). `gitreins init
 writes `true` for new repos; CI should normally keep `false` so a gate that did
 no work can never read as a gate that passed.
 
+### `guards.scanner_nice`
+
+```yaml
+guards:
+  scanner_nice: 10   # default — 0 disables the prefix entirely
+```
+
+Priority (`nice(1)`) level for **every external scanner GitReins spawns**:
+gitleaks, `golangci-lint` / `go build` / `go test`, ruff (check, format and
+scope resolution), the configured `test_command` (pytest), and the LSP servers.
+Scans are background verification, not interactive work, so they run as the
+least urgent CPU consumer and cannot starve an editor or a sibling agent on a
+loaded box. Being nice is verdict-neutral: `nice(2)` changes scheduling
+priority only, never a result, and a planted secret still FAILs the secrets leg
+at every level.
+
+Resolution order (first usable value wins):
+
+| Layer | Value | Example |
+|---|---|---|
+| 1 | `GITREINS_SCANNER_NICE` (environment) | `GITREINS_SCANNER_NICE=19 gitreins guard` |
+| 2 | `guards.scanner_nice` (config) | `guards: {scanner_nice: 5}` |
+| 3 | built-in default | `10` |
+
+`0` turns the prefix **off**: the command is byte-identical to the unprefixed
+one, no probe runs and no note is printed.
+
+**Fail-open.** A scheduling nicety must never become a scan failure. If `nice`
+is missing from `PATH`, or present but refusing to run (a shim exiting 127), the
+scan runs **unprefixed** and one honest line says so:
+
+```
+scanners: nice unavailable (nice -n 10 did not run); running at default priority
+```
+
+The applied prefix is named in the evidence instead, following the TRUST-003
+scanner-attribution precedent — in the step's own output for shell steps, and in
+the guard's per-lane line and run log (`scanner_nice:`) for argv spawns:
+
+```
+  ✓ secrets — clean (gitleaks + builtin cross-check); scanners: nice=nice -n 10
+```
+
+Accepted values are integers `0`–`19`. Anything else (a non-numeric value, a
+negative number above the ceiling, a boolean) is **ignored** with a logged
+warning and the next layer decides — a typo in this knob can never fail a run.
+Values are resolved per invocation, so one host can keep the default while a
+specific run opts out (`GITREINS_SCANNER_NICE=0 gitreins judge …`). Out of scope
+by design: `ionice` and cgroup-level limits (host policy, not per-spawn), and
+re-nicing GitReins' own interpreter and LLM calls — only spawned scans move.
+
 ### `guards.lsp_tools`
 
 ```yaml

@@ -30,6 +30,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from engine import lang_detect
 from engine import command_hygiene
+from engine import scanner_nice
 from engine.guards import (
     GoGuardResult,
     _coerce_timeout,
@@ -377,6 +378,9 @@ def _go_guard_result(r: GoGuardResult) -> GuardResult:
     name/passed/output/error, so a Go lane that graded no file reached the
     DEGRADED-PASS machinery looking exactly like a lane that passed. The skip
     signal (TRUST-001 shape) now rides through.
+
+    DF-GITREINS-POC-55: so does the scanner nice note, for lanes that spawned
+    an argv-prefixed scanner.
     """
     return GuardResult(
         name=r.name,
@@ -385,10 +389,11 @@ def _go_guard_result(r: GoGuardResult) -> GuardResult:
         error=r.error,
         skipped=r.skipped,
         skip_reason=r.skip_reason,
+        nice_note=r.nice_note,
     )
 
 
-def _ruff_scoped_files(workdir: str, py_files: list[str]) -> list[str] | None:
+def _ruff_scoped_files(workdir: str, py_files: list[str], nice_level: int = 0) -> list[str] | None:
     """Which of *py_files* ruff actually grades once the repo's config applies.
 
     DF-GITREINS-POC-18: ruff honours ``exclude``/``extend-exclude`` only while
@@ -400,13 +405,20 @@ def _ruff_scoped_files(workdir: str, py_files: list[str]) -> list[str] | None:
     how many files were graded and can never claim a clean pass when the config
     excluded every submitted file.
 
+    ``nice_level`` (DF-GITREINS-POC-55) covers this spawn too — it is still
+    ruff reading the tree, so it gets the same scanner priority as the graded
+    run — and the prefix is withheld when ruff is not resolvable, which keeps
+    the ``None`` ("ruff cannot answer") contract below intact.
+
     Returns repo-relative paths in ruff's order, or ``None`` when ruff cannot
     answer (binary absent, flag unsupported, unexpected exit code) — callers
     then keep the submitted list instead of inventing a scope.
     """
+    argv = ["ruff", "check", "--force-exclude", "--show-files", *py_files]
+    prefix, _note = scanner_nice.argv_prefix(nice_level, "ruff")
     try:
         proc = subprocess.run(
-            ["ruff", "check", "--force-exclude", "--show-files", *py_files],
+            [*prefix, *argv],
             capture_output=True,
             text=True,
             timeout=120,
@@ -1066,11 +1078,16 @@ def _diagnostics_lines(result: Tier1Result) -> list[str]:
         ),
         (),
     )
+    # DF-GITREINS-POC-55: the scanner nice prefix an argv-spawning lane ran
+    # with (or its fail-open reason). Shell lanes echo the same line into their
+    # own output, which the log prints in full below.
+    nice = next((guard.nice_note for guard in result.results if guard.nice_note), "")
     lines = [
         "diagnostics:",
         f"  first_failing_test: {first_id or 'none detected'}"
         + (f"  (from {source})" if source else ""),
         f"  secrets_scanners: {render_secrets_scanners(scanners) if scanners else 'none ran'}",
+        f"  scanner_nice: {nice or 'not recorded (off, or reported in a step output)'}",
     ]
     return lines
 
@@ -1202,6 +1219,11 @@ class GuardManager:
         if config is None:
             config = _load_guard_config(self.workdir)
         self.config = config
+        # DF-GITREINS-POC-55: one nice policy for every external scanner this
+        # run spawns (env > guards.scanner_nice > default 10; 0 = off). Resolved
+        # once per run — the availability probe is cached per (level, PATH) —
+        # and reported per lane in GuardResult.nice_note.
+        self._nice = scanner_nice.policy(config)
         guards_cfg = self.config.get("guards", {})
         self._enabled = {
             "secrets": guards_cfg.get("secrets", True),
@@ -1599,6 +1621,29 @@ class GuardManager:
     def test_mode(self) -> str:
         return self._test_mode
 
+    def _spawn_argv(self, argv: list[str]) -> list[str]:
+        """*argv* behind this run's scanner nice prefix (DF-GITREINS-POC-55).
+
+        The single place the guard decides a spawned scanner's priority: every
+        external scanner lane (gitleaks, ruff, golangci-lint, LSP) goes through
+        here or through an equivalent call, so the policy cannot drift lane by
+        lane. The prefix is withheld when the program itself is not on PATH —
+        ``nice`` execs its argv, so a miss inside a prefix would surface as
+        exit 127 text instead of the FileNotFoundError each lane uses to report
+        a tool as *unavailable*.
+        """
+        prefix, _note = scanner_nice.argv_prefix(self._nice.level, argv[0])
+        return [*prefix, *argv] if prefix else list(argv)
+
+    def _nice_note(self, program: str) -> str:
+        """Evidence line for a scanner spawned as *program* — ``""`` otherwise.
+
+        ``""`` covers both "the knob is off" and "this tool is not on PATH"
+        (nothing was spawned, so nothing may be claimed about its priority).
+        """
+        _prefix, note = scanner_nice.argv_prefix(self._nice.level, program)
+        return note
+
     def _check_secrets(self) -> GuardResult:
         """Scan the selected change scope for secrets using gitleaks or built-in scanner."""
         if self.scope == "working-tree":
@@ -1617,7 +1662,16 @@ class GuardManager:
 
         # Try gitleaks first
         try:
+            # DF-GITREINS-POC-55: gitleaks is a spawned external scanner, so it
+            # runs behind the run's nice policy (default `nice -n 10`). The
+            # prefix is withheld when gitleaks itself is not on PATH: `nice`
+            # EXECS its argv, so a prefixed argv with a missing program exits
+            # 127 with stderr text instead of raising FileNotFoundError — the
+            # signal the GR-GAP-043 fallback below keys on. That fallback (and
+            # its install hint) therefore keeps working verbatim.
+            nice_prefix, nice_note = scanner_nice.argv_prefix(self._nice.level, "gitleaks")
             cmd = [
+                *nice_prefix,
                 "gitleaks",
                 "protect",
                 "--staged",
@@ -1647,9 +1701,13 @@ class GuardManager:
                 builtin = self._builtin_secrets_scan()
                 scanners = ((GITLEAKS_SCANNER, SCANNER_CLEAN), *builtin.scanners)
                 if not builtin.passed:
-                    return replace(builtin, scanners=scanners)
+                    return replace(builtin, scanners=scanners, nice_note=nice_note)
                 return GuardResult(
-                    name="secrets", passed=True, output="gitleaks: clean", scanners=scanners
+                    name="secrets",
+                    passed=True,
+                    output="gitleaks: clean",
+                    scanners=scanners,
+                    nice_note=nice_note,
                 )
             else:
                 # gitleaks found something — do NOT short-circuit (DF-016).
@@ -1673,6 +1731,7 @@ class GuardManager:
                     output=output,
                     exit_code=result.returncode,
                     scanners=((GITLEAKS_SCANNER, gitleaks_status), *builtin.scanners),
+                    nice_note=nice_note,
                 )
         except FileNotFoundError:
             # GR-GAP-043: the missing-gitleaks case must be VISIBLE, not a
@@ -2055,7 +2114,7 @@ class GuardManager:
                     # scope first (see _ruff_scoped_files) so the lane can
                     # name how many files it graded and never report a clean
                     # lint over a list the config excluded entirely.
-                    scoped = _ruff_scoped_files(self.workdir, py_files)
+                    scoped = _ruff_scoped_files(self.workdir, py_files, self._nice.level)
                     graded = len(scoped) if scoped is not None else len(py_files)
                     excluded = len(py_files) - graded
                     if graded == 0:
@@ -2075,7 +2134,7 @@ class GuardManager:
                     excluded = 0
                     lint_cmd = [linter, *py_files]
                 lint_result = subprocess.run(
-                    lint_cmd,
+                    self._spawn_argv(lint_cmd),
                     capture_output=True,
                     text=True,
                     timeout=120,
@@ -2118,7 +2177,7 @@ class GuardManager:
                     if linter == "ruff":
                         try:
                             fmt_result = subprocess.run(
-                                _ruff_format_command(py_files),
+                                self._spawn_argv(_ruff_format_command(py_files)),
                                 capture_output=True,
                                 text=True,
                                 timeout=120,
@@ -2135,6 +2194,7 @@ class GuardManager:
                                     passed=False,
                                     output=_format_failure_message(fmt_raw),
                                     exit_code=fmt_result.returncode,
+                                    nice_note=self._nice_note("ruff"),
                                 )
                             else:
                                 format_note = f"format: clean ({graded} files)"
@@ -2158,6 +2218,7 @@ class GuardManager:
                         passed=True,
                         output=", ".join(clean_parts),
                         exit_code=lint_result.returncode,
+                        nice_note=self._nice_note(linter),
                     )
                 else:
                     return GuardResult(
@@ -2165,6 +2226,7 @@ class GuardManager:
                         passed=False,
                         output=output,
                         exit_code=lint_result.returncode,
+                        nice_note=self._nice_note(linter),
                     )
             except FileNotFoundError:
                 continue
@@ -2268,8 +2330,15 @@ class GuardManager:
         on the full output, same GR-GAP-064 exit-127 hint shaping.
         """
         resolved_cmd, fallback_warning = _resolve_test_command(cmd)
+        # DF-GITREINS-POC-55: the SEMANTIC command stays `resolved_cmd` and the
+        # spawn string is the nice-wrapped one. The two must not be conflated:
+        # the runner-missing classifier below (POC-51) parses the command text
+        # for pytest invocations, and inside a `sh -c '<cmd>'` wrapper the whole
+        # body is a single quoted token — no invocation would be found, so a
+        # missing runner would be graded a hard FAIL instead of a named SKIP.
+        spawn_cmd = scanner_nice.shell_wrap(resolved_cmd, self._nice.level)
         result = command_hygiene.run_bounded(
-            resolved_cmd,
+            spawn_cmd,
             cwd=self.workdir,
             timeout=self._test_timeout,
             env=_sanitized_env(),
@@ -2650,6 +2719,9 @@ class GuardManager:
         all_diagnostics: list[str] = []
         had_errors = False
         missing: list[str] = []
+        # DF-GITREINS-POC-55: the nice note of the first server that actually
+        # ran; empty while none has (a lane that spawned nothing claims nothing).
+        lsp_note = ""
 
         for tool in self._lsp_tools:
             # TRUST-001: `run_lsp_check` returns [] for a server that is not
@@ -2659,6 +2731,11 @@ class GuardManager:
             if not find_lsp_tool(tool):
                 missing.append(tool)
                 continue
+            # DF-GITREINS-POC-55: an LSP server is a long-lived spawned
+            # scanner (it indexes the repo on every file), so it runs behind
+            # the same nice policy as the one-shot scanners.
+            if not lsp_note:
+                lsp_note = self._nice_note(tool)
             try:
                 # The staged scope keeps the LSP helper's own index discovery
                 # (files=None) byte for byte; the working-tree scope hands it
@@ -2673,6 +2750,7 @@ class GuardManager:
                     ),
                     timeout_per_file=self._lsp_per_file_timeout,
                     init_timeout=self._lsp_init_timeout,
+                    nice_level=self._nice.level,
                 )
             except Exception as exc:
                 logger.warning("lsp %s failed: %s", tool, exc)
@@ -2726,6 +2804,7 @@ class GuardManager:
             name="lsp",
             passed=not had_errors,
             output=output,
+            nice_note=lsp_note,
         )
 
     def _check_security_scan(self) -> GuardResult:
@@ -2776,7 +2855,7 @@ class GuardManager:
 
     def _check_go_lint(self) -> GuardResult:
         """Run Go lint checks (delegates to engine.guards)."""
-        r = check_go_lint(self.workdir, self._go_scope_files_or_none())
+        r = check_go_lint(self.workdir, self._go_scope_files_or_none(), nice_level=self._nice.level)
         return _go_guard_result(r)
 
     def _check_go_tests(self) -> GuardResult:
@@ -2789,10 +2868,13 @@ class GuardManager:
             # too — before, `guards.test_command` reached the Python lane only
             # while `init` printed and the docs promised it everywhere.
             test_command=self.config.get("guards", {}).get("test_command"),
+            nice_level=self._nice.level,
         )
         return _go_guard_result(r)
 
     def _check_go_build(self) -> GuardResult:
         """Run Go build (delegates to engine.guards)."""
-        r = check_go_build(self.workdir, self._go_scope_files_or_none())
+        r = check_go_build(
+            self.workdir, self._go_scope_files_or_none(), nice_level=self._nice.level
+        )
         return _go_guard_result(r)
