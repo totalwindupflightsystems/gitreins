@@ -387,6 +387,98 @@ def resolve_commit_audit_mode(
     return "warn"
 
 
+_COMMIT_AUDIT_ENABLED_TRUE = ("true", "yes", "1", "on")
+_COMMIT_AUDIT_ENABLED_FALSE = ("false", "no", "0", "off")
+
+
+def _normalize_commit_audit_enabled(value) -> bool | None:
+    """Normalize a YAML ``enabled`` value to True/False, or None when unset.
+
+    Booleans pass through. The string forms YAML users actually write
+    (``"true"``/``"yes"``/``"1"``/``"on"`` and the negative twins,
+    case-insensitive, whitespace-tolerated) normalize too — a quoted
+    ``"false"`` must not read as truthy. Any OTHER value (an int like ``2``,
+    a typo like ``"flase"``, ``None``) is treated as UNSET rather than
+    crashing or guessing: resolution falls through to the next source, and
+    the last fallback is the documented default (``True``).
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        token = value.strip().lower()
+        if token in _COMMIT_AUDIT_ENABLED_TRUE:
+            return True
+        if token in _COMMIT_AUDIT_ENABLED_FALSE:
+            return False
+    return None
+
+
+def resolve_commit_audit_enabled(
+    pipeline_config: dict, audit_config: dict, step_def: dict | None = None
+) -> tuple[bool, str]:
+    """Resolve the commit-audit ``enabled`` switch with an EXPLICIT precedence.
+
+    REVIEW-GITREINS-024: ``commit_audit.enabled`` existed as a config key with
+    default ``True`` (engine/config.py) and was serialized into the config
+    surface — but NOTHING in the execution path read it. A repo that wrote
+    ``enabled: false`` believing it had turned the audit off still had its
+    messages graded by the LLM. This function is the single place that
+    decides whether the audit runs, so the rule is testable without an LLM:
+
+        1. the stage's own ``enabled``          (most specific)
+        2. the merged ``commit_audit`` section  (defaults + top-level, the
+           same merge ``_load_commit_audit_config`` performs — top-level
+           keys win on conflict)
+        3. ``True``                             (the documented default)
+
+    YAML string forms (``"false"``, ``"no"``, ``"0"`` / ``"true"``,
+    ``"yes"``, ``"1"``) are normalized; an unrecognized value is treated as
+    UNSET at that level and resolution falls through to the next source
+    (see :func:`_normalize_commit_audit_enabled`) — it must not crash a
+    commit, and it must not silently read as ``false`` either: an
+    ``enabled: flase`` typo disabling nothing is the honest outcome.
+
+    Returns ``(enabled, source)`` where ``source`` names where the winning
+    value came from, so the skip line can say exactly which placement
+    disabled the audit: ``"pipeline.stages[].enabled"``,
+    ``"defaults.commit_audit.enabled"``, ``"commit_audit.enabled"``, or
+    ``"default"``.
+    """
+    stage_value = _normalize_commit_audit_enabled((step_def or {}).get("enabled"))
+    if stage_value is not None:
+        return stage_value, "pipeline.stages[].enabled"
+
+    merged_value = _normalize_commit_audit_enabled(audit_config.get("enabled"))
+    if merged_value is not None:
+        # Name the exact placement the merge carried: top-level wins on
+        # conflict (the order _load_commit_audit_config merges in), so a
+        # recognized top-level value is what the merged section holds.
+        top_value = _normalize_commit_audit_enabled(
+            (pipeline_config.get("commit_audit") or {}).get("enabled")
+        )
+        source = (
+            "commit_audit.enabled" if top_value is not None else "defaults.commit_audit.enabled"
+        )
+        return merged_value, source
+
+    # Direct callers may pass the RAW pipeline config with an empty merged
+    # section — read the placements straight from it before defaulting. A
+    # recognized value at one placement is honored; an unrecognized one
+    # (the ``enabled: flase`` typo) does not shadow a valid value beneath.
+    top_value = _normalize_commit_audit_enabled(
+        (pipeline_config.get("commit_audit") or {}).get("enabled")
+    )
+    if top_value is not None:
+        return top_value, "commit_audit.enabled"
+    defaults_value = _normalize_commit_audit_enabled(
+        ((pipeline_config.get("defaults") or {}).get("commit_audit") or {}).get("enabled")
+    )
+    if defaults_value is not None:
+        return defaults_value, "defaults.commit_audit.enabled"
+
+    return True, "default"
+
+
 def _is_commit_audit_stage(stage_def: dict) -> bool:
     """True for a stage that declares the commit-audit step type.
 
@@ -1027,6 +1119,20 @@ class Pipeline:
         ``defaults`` placements documented in ``docs/cli-reference.md`` were
         dead config — a ``mode: block`` there stayed a warning with exit 0.
 
+        ``enabled`` is resolved with the same precedence discipline
+        (REVIEW-GITREINS-024): the stage's own boolean ``enabled`` wins,
+        then the merged ``commit_audit`` section's ``enabled``, then the
+        documented default ``True``. When the resolved value is false the
+        step returns a NAMED skip (``passed=True``, exit 0) BEFORE any LLM
+        client or auditor is constructed, so disabling the audit means the
+        LLM is never called and the commit is not failed. YAML string
+        forms ("false"/"no"/"0"/"off" and "true"/"yes"/"1"/"on",
+        case-insensitive) are normalized; an UNRECOGNIZED value (``enabled:
+        flase``, an int) is treated as unset at that level and resolution
+        falls through — deliberately neither a crash nor a silent false:
+        a typo must not disable a security-relevant audit, and it must not
+        read as "off" either.
+
         Other config keys (from .gitreins/config.yaml):
           ``commit_audit.strictness`` — "lenient" | "standard" (default) | "strict"
           ``commit_audit.max_iterations`` — int, default 3
@@ -1036,6 +1142,26 @@ class Pipeline:
         """
         step_id = step_def.get("id", "commit_audit")
 
+        # Read config for commit_audit settings — BEFORE any LLM/auditor
+        # construction, so ``enabled: false`` can mean what it says: the
+        # audit does not grade, and no LLM client is ever built (a client
+        # that is never constructed cannot make a network call).
+        config = self._load_commit_audit_config()
+
+        enabled, enabled_source = resolve_commit_audit_enabled(self.config, config, step_def)
+        if not enabled:
+            # REVIEW-GITREINS-024: named skip, passed=True, exit 0 — a repo
+            # that disabled the audit must not fail its commit, and the line
+            # must say WHY nothing ran (same vocabulary as the other named
+            # skips in this file) instead of looking like a passing audit.
+            return StepResult(
+                id=step_id,
+                type="commit_audit",
+                passed=True,
+                output=(f"commit audit: disabled ({enabled_source} is false) \u2014 audit NOT run"),
+                data={"mode": "disabled", "enabled_source": enabled_source},
+            )
+
         # Lazy init LLM client
         if self._llm is None:
             from engine.llm import LLMClient
@@ -1043,9 +1169,6 @@ class Pipeline:
             self._llm = LLMClient()
 
         from engine.commit_audit import CommitAuditor
-
-        # Read config for commit_audit settings
-        config = self._load_commit_audit_config()
 
         score_threshold = float(config.get("review_score_threshold", 8.0))
         score_offset = float(config.get("review_score_offset", 1.0))

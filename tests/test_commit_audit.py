@@ -1538,3 +1538,193 @@ class TestCommitAuditSkipLine:
         out = capsys.readouterr().out
         assert "audit NOT run" in out
         assert "commit-msg" in out
+
+
+# ═══════════════════════════════════════════════════════════════
+# commit_audit.enabled wiring (REVIEW-GITREINS-024)
+# ═══════════════════════════════════════════════════════════════
+
+
+def _enabled_config(top: str = "") -> str:
+    """A config with the armed stage plus an optional extra block."""
+    return top + "pipeline:\n  stages:\n" + STAGE_ON_MSG
+
+
+class TestCommitAuditEnabledFlag:
+    """`commit_audit.enabled: false` must mean the audit never grades.
+
+    REVIEW-GITREINS-024: the flag existed as a config key with default True
+    (engine/config.py) and was serialized into the config surface, but
+    NOTHING in the execution path read it — `enabled: false` still let the
+    LLM grade the message. These arms prove the fix end-to-end through
+    Pipeline.run, with the LLM gated so "the LLM is never called" is an
+    assertion, not a hope.
+    """
+
+    def test_top_level_enabled_false_skips_without_llm(self, tmp_workdir, monkeypatch):
+        """Top-level `commit_audit: {enabled: false}` -> named skip, no LLM."""
+        from engine.pipeline import Pipeline, load_pipeline_config
+
+        _write_config(tmp_workdir, _enabled_config("commit_audit:\n  enabled: false\n"))
+
+        def _explode(*a, **k):
+            raise AssertionError("LLMClient constructed while audit is disabled")
+
+        # The pipeline imports LLMClient LOCALLY inside _run_commit_audit
+        # (from engine.llm import LLMClient), so the stub must live on the
+        # engine.llm module itself — patching engine.pipeline's name would
+        # never be read.
+        monkeypatch.setattr("engine.llm.LLMClient", _explode)
+
+        pipeline = Pipeline(load_pipeline_config(tmp_workdir), tmp_workdir, llm=None)
+        task = {"id": "_commit_msg", "title": "t", "criteria": [], "commit_message": "wip"}
+        result = pipeline.run(task, trigger="commit-msg")
+
+        assert _passed(result) is True
+        output = result["stages"]["commit_audit"]["summary"]
+        assert "commit audit: disabled" in output
+        assert "audit NOT run" in output
+        assert "commit_audit.enabled is false" in output
+
+    def test_defaults_enabled_false_skips_without_llm(self, tmp_workdir, monkeypatch):
+        """`defaults.commit_audit.enabled: false` reads the same."""
+        from engine.pipeline import Pipeline, load_pipeline_config
+
+        _write_config(
+            tmp_workdir,
+            _enabled_config("defaults:\n  commit_audit:\n    enabled: false\n"),
+        )
+
+        def _explode(*a, **k):
+            raise AssertionError("LLMClient constructed while audit is disabled")
+
+        # Same local-import rule: stub engine.llm.LLMClient, the name the
+        # pipeline's local `from engine.llm import LLMClient` resolves.
+        monkeypatch.setattr("engine.llm.LLMClient", _explode)
+
+        pipeline = Pipeline(load_pipeline_config(tmp_workdir), tmp_workdir, llm=None)
+        task = {"id": "_commit_msg", "title": "t", "criteria": [], "commit_message": "wip"}
+        result = pipeline.run(task, trigger="commit-msg")
+
+        assert _passed(result) is True
+        output = result["stages"]["commit_audit"]["summary"]
+        assert "commit audit: disabled" in output
+        assert "audit NOT run" in output
+        assert "defaults.commit_audit.enabled is false" in output
+
+    def test_disabled_auditor_never_invoked(self, tmp_workdir, monkeypatch):
+        """Even with an injected LLM, a disabled audit never reaches the auditor."""
+        from engine.commit_audit import CommitAuditor
+        from engine.pipeline import Pipeline, load_pipeline_config
+
+        _write_config(tmp_workdir, _enabled_config("commit_audit:\n  enabled: false\n"))
+
+        def _explode(*a, **k):
+            raise AssertionError("CommitAuditor constructed while audit is disabled")
+
+        # Patch __init__ (own-dict attribute -> clean monkeypatch restore),
+        # NOT __new__: object.__new__ is always reachable via the MRO, so a
+        # __new__ patch is setattr-restored onto the class at teardown and
+        # poisons later instantiations under shared-worker scheduling.
+        monkeypatch.setattr(CommitAuditor, "__init__", _explode)
+
+        pipeline = Pipeline(load_pipeline_config(tmp_workdir), tmp_workdir, llm=LLMClient())
+        task = {"id": "_commit_msg", "title": "t", "criteria": [], "commit_message": "wip"}
+        result = pipeline.run(task, trigger="commit-msg")
+
+        assert _passed(result) is True
+        assert "audit NOT run" in result["stages"]["commit_audit"]["summary"]
+
+    def test_enabled_absent_invokes_the_auditor(self, tmp_workdir):
+        """Control: with `enabled` absent the auditor IS invoked (unchanged)."""
+        from engine.commit_audit import CommitAuditor
+        from engine.pipeline import Pipeline, load_pipeline_config
+
+        _write_config(tmp_workdir, _enabled_config())
+        llm = LLMClient(api_key="sk-test", model="test/model", base_url="http://127.0.0.1:9/v1")
+        pipeline = Pipeline(load_pipeline_config(tmp_workdir), tmp_workdir, llm=llm)
+        task = {"id": "_commit_msg", "title": "t", "criteria": [], "commit_message": "wip"}
+        with patch.object(
+            CommitAuditor,
+            "audit",
+            return_value=CommitAuditResult(valid=False, issues=["placeholder"]),
+        ) as mocked:
+            result = pipeline.run(task, trigger="commit-msg")
+        assert mocked.called is True
+        # Default `warn` mode: the audit grades and reports, it does not block.
+        assert _passed(result) is True
+        assert "Commit message issues" in result["stages"]["commit_audit"]["summary"]
+
+    def test_enabled_true_invokes_the_auditor(self, tmp_workdir):
+        """Control: explicit `enabled: true` behaves exactly like absent."""
+        from engine.commit_audit import CommitAuditor
+        from engine.pipeline import Pipeline, load_pipeline_config
+
+        _write_config(tmp_workdir, _enabled_config("commit_audit:\n  enabled: true\n"))
+        llm = LLMClient(api_key="sk-test", model="test/model", base_url="http://127.0.0.1:9/v1")
+        pipeline = Pipeline(load_pipeline_config(tmp_workdir), tmp_workdir, llm=llm)
+        task = {"id": "_commit_msg", "title": "t", "criteria": [], "commit_message": "wip"}
+        with patch.object(
+            CommitAuditor,
+            "audit",
+            return_value=CommitAuditResult(valid=False, issues=["placeholder"]),
+        ) as mocked:
+            result = pipeline.run(task, trigger="commit-msg")
+        assert mocked.called is True
+        assert _passed(result) is True
+        assert "Commit message issues" in result["stages"]["commit_audit"]["summary"]
+
+    def test_stage_enabled_true_beats_config_false(self, tmp_workdir):
+        """The stage's own boolean is the most specific scope."""
+        from engine.pipeline import resolve_commit_audit_enabled
+
+        got, source = resolve_commit_audit_enabled(
+            {"commit_audit": {"enabled": False}}, {"enabled": False}, {"enabled": True}
+        )
+        assert got is True
+        assert source == "pipeline.stages[].enabled"
+
+    def test_yaml_string_forms_normalize(self):
+        """Quoted/odd-cased YAML forms must not read as truthy garbage."""
+        from engine.pipeline import _normalize_commit_audit_enabled
+
+        assert _normalize_commit_audit_enabled("false") is False
+        assert _normalize_commit_audit_enabled("No") is False
+        assert _normalize_commit_audit_enabled("0") is False
+        assert _normalize_commit_audit_enabled("off") is False
+        assert _normalize_commit_audit_enabled(" true ") is True
+        assert _normalize_commit_audit_enabled("YES") is True
+        assert _normalize_commit_audit_enabled("1") is True
+        assert _normalize_commit_audit_enabled(True) is True
+        # Unrecognized -> unset (falls through), never a crash, never False.
+        assert _normalize_commit_audit_enabled("flase") is None
+        assert _normalize_commit_audit_enabled(2) is None
+        assert _normalize_commit_audit_enabled(None) is None
+
+    def test_unrecognized_value_does_not_disable(self):
+        """`enabled: flase` must not silently turn the audit OFF."""
+        from engine.pipeline import resolve_commit_audit_enabled
+
+        got, source = resolve_commit_audit_enabled({}, {"enabled": "flase"}, {})
+        assert got is True
+        assert source == "default"
+
+    def test_top_level_beats_defaults_on_conflict(self):
+        """Top-level wins inside the merged section, same as `mode`."""
+        from engine.pipeline import resolve_commit_audit_enabled
+
+        got, source = resolve_commit_audit_enabled(
+            {"defaults": {"commit_audit": {"enabled": False}}, "commit_audit": {"enabled": True}},
+            {"enabled": True},
+            {},
+        )
+        assert got is True
+        assert source == "commit_audit.enabled"
+
+        got, source = resolve_commit_audit_enabled(
+            {"defaults": {"commit_audit": {"enabled": False}}},
+            {"enabled": False},
+            {},
+        )
+        assert got is False
+        assert source == "defaults.commit_audit.enabled"
