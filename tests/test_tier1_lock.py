@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tempfile
 
 import pytest
 
@@ -48,7 +49,7 @@ class TestLockScope:
     def test_lock_file_lives_outside_the_repo(self, _isolated_lock_path):
         """The lock file is in /tmp keyed by the repo root — never in-tree."""
         path = tier1_lock.tier1_tests_lock_path()
-        assert path.startswith("/tmp/"), path
+        assert path.startswith(tempfile.gettempdir() + "/"), path
         assert "gitreins-tier1-" in path
         assert str(_isolated_lock_path) not in path
 
