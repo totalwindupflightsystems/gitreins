@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from engine.guard_manager import (
+    GITLEAKS_SCANNER,
     GuardManager,
     GuardResult,
     Tier1Result,
@@ -24,6 +25,10 @@ from engine.guard_manager import (
     _pytest_runner_missing_hint,
     _resolve_test_command,
     _shell_not_found_names,
+)
+from engine.types import (
+    SCANNER_CLEAN,
+    scanner_config_error_status,
 )
 
 
@@ -810,6 +815,138 @@ class TestSecretsScannerAttribution:
 
         assert result.passed is False
         assert result.scanners == (("gitleaks", "reported findings (count unavailable)"),)
+
+
+class TestGitleaksConfigErrorClassification:
+    """DF-GITREINS-POC-54: a config/load failure is NOT a finding.
+
+    gitleaks exits 2 with a Go panic when a `.gitleaks.toml` `[allowlist] paths`
+    entry is not a compilable regexp (the pre-DF-001 globs). The guard used to
+    classify that non-zero exit by looking for a finding tally, find none, and
+    print "reported findings (count unavailable)" — sending the operator to hunt
+    a secret that does not exist while NO scan had happened. The leg must stay
+    FAIL (fail-closed) but be named as a CONFIG error, with the offending entry.
+    """
+
+    # The real gitleaks v8.30.1 shape (Go renders the pattern in backticks),
+    # plus the single-quote form older toolchains print.
+    PANIC_BACKTICK = (
+        "panic: regexp: Compile(`*.log`): error parsing regexp: missing argument "
+        "to repetition operator: `*`\n\ngoroutine 1 [running]:\nregexp.MustCompile(...)\n"
+    )
+    PANIC_SINGLE_QUOTE = (
+        "panic: regexp: Compile('*.egg-info/'): error parsing regexp: missing "
+        "argument to repetition operator: *\n"
+    )
+
+    @staticmethod
+    def _run(gm, mock_run):
+        real_run = subprocess.run
+
+        def fake_run(cmd, *args, **kwargs):
+            if _is_gitleaks_spawn(cmd):
+                return mock_run
+            return real_run(cmd, *args, **kwargs)
+
+        with patch.object(
+            gm,
+            "_builtin_secrets_scan",
+            return_value=GuardResult("secrets", True, scanners=(("builtin", SCANNER_CLEAN),)),
+        ):
+            with patch("subprocess.run", side_effect=fake_run):
+                return gm._check_secrets()
+
+    @pytest.mark.parametrize(
+        ("stderr", "pattern"),
+        [
+            (PANIC_BACKTICK, "*.log"),
+            (PANIC_SINGLE_QUOTE, "*.egg-info/"),
+        ],
+    )
+    def test_config_compile_panic_is_a_config_error(self, tmp_workdir, stderr, pattern):
+        gm = GuardManager(tmp_workdir)
+        mock_run = MagicMock(returncode=2, stdout="", stderr=stderr)
+
+        result = self._run(gm, mock_run)
+
+        # Fail-closed: still a FAIL, still exit code 2.
+        assert result.passed is False
+        assert result.exit_code == 2
+        assert (GITLEAKS_SCANNER, scanner_config_error_status(pattern)) in result.scanners
+
+        summary = Tier1Result(passed=False, results=[result]).summary
+        assert summary.startswith(
+            f"  ✗ secrets — CONFIG ERROR (gitleaks config failed to compile: {pattern})"
+        )
+        # The misreport this row fixes: a config failure is NOT a finding.
+        assert "reported findings" not in summary
+        assert "FAIL (" not in summary
+
+    def test_config_error_names_the_pattern_on_a_second_bad_entry(self, tmp_workdir):
+        """Only the FIRST rejected pattern is named — that is the one to fix."""
+        output = self.PANIC_BACKTICK + self.PANIC_SINGLE_QUOTE
+        assert GuardManager._gitleaks_config_error(output) == "*.log"
+
+    def test_config_error_detector_ignores_unrelated_output(self, tmp_workdir):
+        """A genuine finding, an absent binary, or prose is never a config error."""
+        assert GuardManager._gitleaks_config_error("") is None
+        assert GuardManager._gitleaks_config_error("WRN leaks found: 1\n") is None
+        assert GuardManager._gitleaks_config_error("gitleaks: not found\n") is None
+        # Marker present but no compile() wrapper: named, not guessed empty.
+        assert (
+            GuardManager._gitleaks_config_error("error parsing regexp: boom") == "unknown pattern"
+        )
+
+    def test_genuine_findings_still_read_as_findings(self, tmp_workdir):
+        """Over-classification control: a real leak is NOT a CONFIG ERROR."""
+        gm = GuardManager(tmp_workdir)
+        mock_run = MagicMock(
+            returncode=1,
+            stdout=(
+                'Finding:     "api_key": "***"\n'
+                "File:        config.example.json\n"
+                "Line:        2\n"
+                "WRN leaks found: 1\n"
+            ),
+            stderr="",
+        )
+
+        result = self._run(gm, mock_run)
+
+        assert result.passed is False
+        assert (GITLEAKS_SCANNER, "1 finding") in result.scanners
+        summary = Tier1Result(passed=False, results=[result]).summary
+        assert "CONFIG ERROR" not in summary
+        assert "FAIL (gitleaks: 1 finding" in summary
+
+    def test_config_error_still_reports_a_builtin_finding(self, tmp_workdir):
+        """The cross-check's findings survive the config-error relabel."""
+        gm = GuardManager(tmp_workdir)
+        mock_run = MagicMock(returncode=2, stdout="", stderr=self.PANIC_BACKTICK)
+        real_run = subprocess.run
+
+        def fake_run(cmd, *args, **kwargs):
+            if _is_gitleaks_spawn(cmd):
+                return mock_run
+            return real_run(cmd, *args, **kwargs)
+
+        with patch.object(
+            gm,
+            "_builtin_secrets_scan",
+            return_value=GuardResult(
+                "secrets",
+                False,
+                "app.py:3: [OpenAI/OpenRouter API key] ***",
+                scanners=(("builtin", "1 finding"),),
+            ),
+        ):
+            with patch("subprocess.run", side_effect=fake_run):
+                result = gm._check_secrets()
+
+        assert result.passed is False
+        summary = Tier1Result(passed=False, results=[result]).summary
+        assert "CONFIG ERROR (gitleaks config failed to compile: *.log)" in summary
+        assert "builtin cross-check: 1 finding" in summary
 
 
 class TestSecretsSanitization:

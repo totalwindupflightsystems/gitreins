@@ -104,10 +104,13 @@ def test_live_surface_pins_the_current_cli():
     """The truth the doc is compared against — pinned so a silent parser
     change shows up here rather than as a mysterious doc failure."""
     top_level, worktree_options, qa_options = _load_module().live_surface(REPO_ROOT)
-    assert len(top_level) == 16
+    assert len(top_level) == 17
     assert "qa" in top_level
     assert "resolve" in top_level
     assert "preflight" in top_level
+    # DF-GITREINS-POC-54: the .gitleaks.toml doctor is a TOP-LEVEL subcommand
+    # (distinct from `worktree doctor`, which is the board-resolution check).
+    assert "doctor" in top_level
     assert sorted(worktree_options) == [
         "clean",
         "doctor",
@@ -131,11 +134,12 @@ def test_live_surface_pins_the_current_cli():
 
 
 def test_synced_fixture_doc_passes(tmp_path):
-    doc = _write_synced_doc(tmp_path, _load_module())
+    module = _load_module()
+    doc = _write_synced_doc(tmp_path, module)
 
     proc = _run_script(doc)
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "16 subcommands" in proc.stdout
+    assert f"{len(module.live_surface(REPO_ROOT)[0])} subcommands" in proc.stdout
 
     code, message = _load_module().check_cli_doc_sync(REPO_ROOT, doc_path=doc)
     assert code == 0, message
@@ -150,31 +154,48 @@ def test_repository_doc_is_in_sync():
         cwd=str(REPO_ROOT),
     )
     assert proc.returncode == 0, proc.stdout + proc.stderr
-    assert "16 subcommands" in proc.stdout
+    live = len(_load_module().live_surface(REPO_ROOT)[0])
+    assert f"{live} subcommands" in proc.stdout
+
+
+def _fixture_row(top_level, name):
+    """The `## Global` row the fixture doc writes for *name* (derived, not typed).
+
+    The fixture numbers rows by ``sorted(top_level)`` order, so adding a
+    subcommand shifts every later row: a hardcoded index is stale the moment the
+    CLI grows one.
+    """
+    return f"| {sorted(top_level).index(name) + 1} | `{name}` | fixture |"
 
 
 def test_dropped_subcommand_row_fails_naming_it(tmp_path):
-    doc = _write_synced_doc(tmp_path, _load_module())
+    module = _load_module()
+    doc = _write_synced_doc(tmp_path, module)
+    top_level = module.live_surface(REPO_ROOT)[0]
     text = doc.read_text(encoding="utf-8")
-    assert "| 9 | `qa` | fixture |" in text
-    doc.write_text(text.replace("| 9 | `qa` | fixture |\n", ""), encoding="utf-8")
+    row = _fixture_row(top_level, "qa")
+    assert row in text
+    doc.write_text(text.replace(row + "\n", ""), encoding="utf-8")
 
     proc = _run_script(doc)
     assert proc.returncode == 1, proc.stdout
     assert "`qa` has no row" in proc.stdout
-    assert "numbering is not 1..15" in proc.stdout
+    assert f"numbering is not 1..{len(top_level) - 1}" in proc.stdout
 
 
 def test_stated_count_mismatch_fails(tmp_path):
-    doc = _write_synced_doc(tmp_path, _load_module())
+    module = _load_module()
+    doc = _write_synced_doc(tmp_path, module)
+    live = len(module.live_surface(REPO_ROOT)[0])
     text = doc.read_text(encoding="utf-8").replace(
-        "There are **16 top-level subcommands**", "There are **15 top-level subcommands**"
+        f"There are **{live} top-level subcommands**",
+        f"There are **{live - 1} top-level subcommands**",
     )
     doc.write_text(text, encoding="utf-8")
 
     code, message = _load_module().check_cli_doc_sync(REPO_ROOT, doc_path=doc)
     assert code == 1
-    assert "stated count 15 != live count 16" in message
+    assert f"stated count {live - 1} != live count {live}" in message
 
 
 def test_missing_worktree_option_fails_naming_it(tmp_path):

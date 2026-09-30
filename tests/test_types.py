@@ -6,6 +6,7 @@ import pytest
 
 from engine.types import (
     SCANNER_CLEAN,
+    SCANNER_CONFIG_ERROR,
     SCANNER_NOT_RUN,
     GuardResult,
     Tier1Result,
@@ -13,6 +14,7 @@ from engine.types import (
     parse_first_failing_test,
     parse_gitleaks_finding_count,
     render_secrets_scanners,
+    scanner_config_error_status,
     scanner_finding_status,
 )
 
@@ -348,6 +350,34 @@ class TestSecretsScannerAttribution:
 
         assert render_secrets_scanners(scanners) == (
             "clean (builtin cross-check; gitleaks not on PATH)"
+        )
+
+    def test_poc54_config_error_never_renders_as_a_finding(self):
+        """A scanner that failed to LOAD its config did no scanning (POC-54)."""
+        scanners = (("gitleaks", scanner_config_error_status("*.log")), ("builtin", SCANNER_CLEAN))
+
+        rendered = render_secrets_scanners(scanners)
+
+        assert rendered == "CONFIG ERROR (gitleaks config failed to compile: *.log)"
+        assert rendered.startswith(SCANNER_CONFIG_ERROR)
+        assert "FAIL (" not in rendered
+        assert "finding" not in rendered
+
+    def test_poc54_config_error_appends_a_non_clean_sibling_scanner(self):
+        """A real cross-check finding is still reported beside the config error."""
+        scanners = (
+            ("gitleaks", scanner_config_error_status("*.egg-info/")),
+            ("builtin", "2 findings"),
+        )
+
+        assert render_secrets_scanners(scanners) == (
+            "CONFIG ERROR (gitleaks config failed to compile: *.egg-info/); "
+            "builtin cross-check: 2 findings"
+        )
+
+    def test_poc54_config_error_names_the_scanner_it_builds_for(self):
+        assert scanner_config_error_status("*.md", scanner="other") == (
+            "CONFIG ERROR (other config failed to compile: *.md)"
         )
 
     def test_console_secrets_line_uses_the_attribution(self):

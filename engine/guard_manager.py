@@ -48,6 +48,7 @@ from engine.types import (
     parse_first_failing_test,
     parse_gitleaks_finding_count,
     render_secrets_scanners,
+    scanner_config_error_status,
     scanner_finding_status,
 )
 
@@ -965,6 +966,33 @@ def _merge_secret_findings(gitleaks_output: str, builtin_output: str) -> str:
 GITLEAKS_SCANNER = "gitleaks"
 BUILTIN_SCANNER = "builtin"
 
+# DF-GITREINS-POC-54: gitleaks dies BEFORE scanning when ``.gitleaks.toml``
+# carries a pattern Go's regexp package cannot compile. Pre-DF-001 configs (from
+# a `gitreins init` older than 9a54e79) hold bare globs, and gitleaks v8.30.1
+# panics with exit code 2:
+#
+#     panic: regexp: Compile('*.log'): error parsing regexp: missing argument
+#     to repetition operator: *
+#
+# The guard classified that non-zero exit by looking for a finding tally, found
+# none, and printed "reported findings (count unavailable)" — telling the
+# operator a secret existed and no scan result at all was recorded. Treat it as
+# a CONFIG/LOAD error instead: fail-closed (the leg still FAILS) but named, with
+# the offending pattern, so the entry to fix is obvious.
+_GITLEAKS_CONFIG_ERROR_MARKERS = (
+    "error parsing regexp",
+    "missing argument to repetition operator",
+)
+# Go's regexp package wraps the rejected pattern in Compile(<quoted>). Go ≥1.21
+# renders it with BACKTICKS (`  Compile(`*.log`)  `), older toolchains with
+# single/double quotes — accept both, plus a bare form, so the offending entry
+# is named on every Go version.
+_GITLEAKS_BAD_PATTERN_RE = re.compile(r"""Compile\((?P<q>['"`])(?P<pattern>.*?)(?P=q)\)""")
+_GITLEAKS_BAD_PATTERN_BARE_RE = re.compile(r"Compile\((?P<pattern>[^)\n]*)\)")
+# gitleaks keys exit 2 on a config/load failure. Kept as a named constant so the
+# classification reads as the documented code, not a magic number.
+GITLEAKS_CONFIG_ERROR_EXIT_CODE = 2
+
 GUARD_LOG_SUBDIR = os.path.join(".gitreins", "logs")
 GUARD_LOG_PREFIX = "guard-"
 GUARD_LOG_SUFFIX = ".log"
@@ -1719,9 +1747,28 @@ class GuardManager:
                 # report. The result stays failed until BOTH scanners are
                 # clean — reporting-completeness only, no weakening.
                 builtin = self._builtin_secrets_scan()
-                output = result.stdout + result.stderr
+                gitleaks_output = result.stdout + result.stderr
+                output = gitleaks_output
                 if not builtin.passed:
                     output = _merge_secret_findings(output, builtin.output)
+                # DF-GITREINS-POC-54: a config/load failure is not a finding. The
+                # leg still FAILS (fail-closed) but the message names the broken
+                # CONFIG and the offending pattern instead of implying a secret
+                # was found — 'reported findings' sent operators hunting a
+                # nonexistent secret while NO scan had run at all.
+                config_error = self._gitleaks_config_error(gitleaks_output)
+                if config_error is not None:
+                    return GuardResult(
+                        name="secrets",
+                        passed=False,
+                        output=output,
+                        exit_code=result.returncode,
+                        scanners=(
+                            (GITLEAKS_SCANNER, scanner_config_error_status(config_error)),
+                            *builtin.scanners,
+                        ),
+                        nice_note=nice_note,
+                    )
                 # TRUST-003 (AC2): name which scanner raised the finding and
                 # what the other one saw — 'fail' alone was ambiguous.
                 gitleaks_status = self._gitleaks_failure_status(output)
@@ -1771,6 +1818,24 @@ class GuardManager:
         if count is None:
             return "reported findings (count unavailable)"
         return scanner_finding_status(count)
+
+    @staticmethod
+    def _gitleaks_config_error(output: str) -> str | None:
+        """First bad pattern when gitleaks died compiling its config (POC-54).
+
+        Returns the offending ``[allowlist] paths`` entry — or
+        ``"unknown pattern"`` when the panic names none — for a config/load
+        failure, and ``None`` for every other non-zero exit (a real finding, a
+        missing binary, any unrelated error). Keyed on Go's regexp compile
+        failure text, which only a broken pattern produces.
+        """
+        if not output or not any(m in output for m in _GITLEAKS_CONFIG_ERROR_MARKERS):
+            return None
+        for pattern_re in (_GITLEAKS_BAD_PATTERN_RE, _GITLEAKS_BAD_PATTERN_BARE_RE):
+            match = pattern_re.search(output)
+            if match and match.group("pattern").strip():
+                return match.group("pattern")
+        return "unknown pattern"
 
     def _builtin_secrets_scan(
         self, staged_only: bool = True, files: list[str] | None = None

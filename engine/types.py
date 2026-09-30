@@ -380,12 +380,29 @@ def pytest_outcome(exit_code: int | None, output: str) -> dict:
 # console line AND recorded in the run log.
 SCANNER_CLEAN = "clean"
 SCANNER_NOT_RUN = "not on PATH"
+# DF-GITREINS-POC-54: a scanner that died BEFORE scanning. gitleaks exits 2 with
+# a Go panic when an ``[allowlist] paths`` entry is not a compilable regexp —
+# the pre-DF-001 globs ('*.log', '*.egg-info/') that older `gitreins init`
+# wrote. Reporting that as "reported findings" sent operators hunting a
+# nonexistent secret (or bypassing the gate) while NO scan had happened at all.
+# The status carries the FIRST bad pattern so the console line points straight
+# at the entry to fix; the leg still FAILS (fail-closed).
+SCANNER_CONFIG_ERROR = "CONFIG ERROR"
 _SCANNER_LABELS = {"gitleaks": "gitleaks", "builtin": "builtin cross-check"}
 
 
 def scanner_label(scanner_id: str) -> str:
     """Display name for a scanner id ('builtin' → 'builtin cross-check')."""
     return _SCANNER_LABELS.get(scanner_id, scanner_id)
+
+
+def scanner_config_error_status(pattern: str, scanner: str = "gitleaks") -> str:
+    """Per-scanner status for a scanner whose CONFIG failed to load (POC-54).
+
+    ``CONFIG ERROR (gitleaks config failed to compile: *.log)`` — the pattern is
+    the first entry gitleaks' Go regexp compiler rejected.
+    """
+    return f"{SCANNER_CONFIG_ERROR} ({scanner} config failed to compile: {pattern})"
 
 
 def scanner_finding_status(findings: int) -> str:
@@ -400,8 +417,26 @@ def render_secrets_scanners(scanners: tuple[tuple[str, str], ...]) -> str:
     Anything found: ``FAIL (builtin cross-check: 2 findings; gitleaks: clean)``
     — the offending scanner(s) first, with counts, then the rest. An absent
     gitleaks is named rather than silently implied.
+
+    DF-GITREINS-POC-54: a scanner whose CONFIG failed to compile did no scanning
+    at all, so it must never render as ``FAIL (... findings)``. Its status is
+    the whole clause — ``CONFIG ERROR (gitleaks config failed to compile:
+    *.log)`` — with only a non-clean sibling scanner appended (a clean
+    cross-check adds nothing to the diagnosis).
     """
     labelled = [(scanner_label(sid), status) for sid, status in scanners]
+    config_errors = [
+        status for _name, status in labelled if status.startswith(SCANNER_CONFIG_ERROR)
+    ]
+    if config_errors:
+        others = [
+            f"{name}: {status}"
+            for name, status in labelled
+            if not status.startswith(SCANNER_CONFIG_ERROR)
+            and status not in (SCANNER_CLEAN, SCANNER_NOT_RUN)
+        ]
+        head = "; ".join(config_errors)
+        return head if not others else f"{head}; " + "; ".join(others)
     failing = [pair for pair in labelled if pair[1] not in (SCANNER_CLEAN, SCANNER_NOT_RUN)]
     if failing:
         ordered = failing + [pair for pair in labelled if pair not in failing]

@@ -4,6 +4,8 @@ GitReins CLI — Human-usable command line.
 
 Usage:
     gitreins install
+    gitreins init [--reset]
+    gitreins doctor [--fix] [--config <path>]
     gitreins task create <id> <title> [criteria...]
     gitreins task start <id>
     gitreins task complete <id>
@@ -1347,6 +1349,218 @@ def _generate_gitleaks_config(workdir: str, lang: dict, target_path: str) -> Non
 
     # Use safe overwrite (creates .bak)
     _safe_overwrite(target_path, lambda f: f.write(toml_content))
+
+
+# ── DF-GITREINS-POC-54: `.gitleaks.toml` doctor (config migration) ─────────
+# `gitreins init` never overwrites an existing .gitleaks.toml (it is
+# user-editable), so a repo initialised BEFORE DF-001 (9a54e79) keeps the bare
+# glob allowlist entries that fix replaced in the generator — there was no
+# migration path at all. gitleaks compiles every `[allowlist] paths` entry as a
+# Go (RE2) regexp, so '*.log' panics it with exit code 2 and the guard then
+# reported that panic as a secret FINDING: the operator hunts a secret that does
+# not exist (or bypasses the gate) while no scan ran.
+#
+# `gitreins doctor` validates every entry with the SAME conversion the generator
+# uses (`_glob_to_regex` — reused, never duplicated) and, with `--fix`, rewrites
+# only the invalid entries in place. Exit 1 while an invalid entry remains
+# (fail-closed, CI-usable); exit 0 when the config is clean or fully repaired.
+GITLEAKS_CONFIG_NAME = ".gitleaks.toml"
+
+# A quoted TOML string in any of the shapes a .gitleaks.toml paths entry can
+# take: literal multi-line ('''...''', what the generator emits), multi-line
+# basic (\"\"\"...\"\"\"), or their single-line forms.
+_GITLEAKS_ENTRY_RE = re.compile(r"""(?P<quote>'''|\"\"\"|'|\")(?P<value>.*?)(?P=quote)""")
+# `[allowlist]` as a table header, tolerating a trailing comment.
+_GITLEAKS_ALLOWLIST_HEADER_RE = re.compile(r"(?m)^\s*\[allowlist\]\s*(?:#.*)?$")
+_GITLEAKS_PATHS_ARRAY_RE = re.compile(r"\bpaths\s*=\s*\[")
+
+
+def _gitleaks_array_close(text: str, open_idx: int) -> int:
+    """Index of the ``]`` matching ``text[open_idx] == '['`` (quote-aware).
+
+    Quote awareness matters: a ``]`` inside a quoted pattern (or a comment) must
+    not close the array early. Returns ``len(text)`` for an unterminated array.
+    """
+    depth = 0
+    i = open_idx
+    length = len(text)
+    while i < length:
+        ch = text[i]
+        if ch in "\"'":
+            quote = ch * 3 if text.startswith(ch * 3, i) else ch
+            closing = text.find(quote, i + len(quote))
+            if closing == -1:
+                return length
+            i = closing + len(quote)
+            continue
+        if ch == "[":
+            depth += 1
+        elif ch == "]":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return length
+
+
+def _gitleaks_allowlist_span(text: str) -> tuple[int, int] | None:
+    """Char span of the inner text of ``[allowlist] paths = [...]``, or None.
+
+    Scoped to the ``[allowlist]`` table so a rule's own ``regex = [...]`` (or a
+    ``[rules.allowlist]`` block) is never mistaken for an allowlist path entry,
+    and walked LINE BY LINE so a commented-out ``# paths = [...]`` is not read as
+    the real array.
+    """
+    header = _GITLEAKS_ALLOWLIST_HEADER_RE.search(text)
+    if not header:
+        return None
+    # Start the walk at the line AFTER the header, not at header.end(): the
+    # header's trailing `\s*` may have consumed its newline (and a blank line).
+    newline = text.find("\n", header.start())
+    offset = len(text) if newline == -1 else newline + 1
+    while offset < len(text):
+        line_end = text.find("\n", offset)
+        if line_end == -1:
+            line_end = len(text)
+        line = text[offset:line_end]
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            match = _GITLEAKS_PATHS_ARRAY_RE.search(line)
+            if match:
+                open_idx = offset + match.end() - 1
+                return open_idx + 1, _gitleaks_array_close(text, open_idx)
+        offset = line_end + 1
+    return None
+
+
+def _gitleaks_allowlist_entries(text: str) -> list[tuple[int, str, int, int, str]]:
+    """Entries in the ``[allowlist] paths`` array as ``(line, value, start, end, quote)``.
+
+    ``start``/``end`` are the char offsets of the quoted TOKEN (quotes included),
+    so a rewrite replaces the pattern and leaves the quoting style intact. Lines
+    whose stripped form is a comment are skipped — a quoted ``'*.log'`` inside a
+    comment is prose, not an entry.
+    """
+    span = _gitleaks_allowlist_span(text)
+    if span is None:
+        return []
+    span_start, span_end = span
+    block = text[span_start:span_end]
+    entries: list[tuple[int, str, int, int, str]] = []
+    offset = 0
+    for raw_line in block.split("\n"):
+        line_start = span_start + offset
+        stripped = raw_line.strip()
+        if stripped and not stripped.startswith("#"):
+            for match in _GITLEAKS_ENTRY_RE.finditer(raw_line):
+                entries.append(
+                    (
+                        text.count("\n", 0, line_start + match.start()) + 1,
+                        match.group("value"),
+                        line_start + match.start(),
+                        line_start + match.end(),
+                        match.group("quote"),
+                    )
+                )
+        offset += len(raw_line) + 1
+    return entries
+
+
+def _is_valid_gitleaks_path_regex(entry: str) -> bool:
+    """True when *entry* is what gitleaks (Go/RE2) accepts as a path regexp.
+
+    Two checks, both required: an entry carrying a glob star that is not part of
+    the generator's ``.*`` is exactly the pre-DF-001 shape (Go rejects it with
+    'missing argument to repetition operator'), and Python's ``re`` is the
+    compile oracle for everything else — ``_glob_to_regex`` escapes the same
+    metacharacter class, so the two agree on every shape the generator emits.
+    """
+    if not entry:
+        # An empty pattern compiles and matches everything; not this defect.
+        return True
+    if "*" in entry.replace(".*", ""):
+        return False
+    try:
+        re.compile(entry)
+    except re.error:
+        return False
+    return True
+
+
+def _rewrite_gitleaks_entries(text: str, replacements: list[tuple[int, str, int, int, str]]) -> str:
+    """Rewrite invalid path entries to their ``_glob_to_regex`` form, in place.
+
+    Applied right-to-left so an earlier replacement never shifts a later
+    offset; the surrounding quotes (and every other byte of the file) stay
+    exactly as written.
+    """
+    out = text
+    for _line, _value, start, end, quote in sorted(
+        replacements, key=lambda replacement: replacement[2], reverse=True
+    ):
+        rewritten = _glob_to_regex(_value)
+        out = out[: start + len(quote)] + rewritten + out[end - len(quote) :]
+    return out
+
+
+def cmd_doctor(args):
+    """Validate (and with --fix, migrate) the repo's `.gitleaks.toml` (POC-54)."""
+    workdir = get_workdir()
+    config_path = args.config or os.path.join(workdir, GITLEAKS_CONFIG_NAME)
+    print(f"gitleaks config doctor: {config_path}")
+    if not os.path.isfile(config_path):
+        print(f"  no {GITLEAKS_CONFIG_NAME} here — nothing to check")
+        return
+
+    try:
+        with open(config_path, encoding="utf-8") as f:
+            text = f.read()
+    except OSError as exc:
+        print(f"error: cannot read {config_path}: {exc}", file=sys.stderr)
+        raise SystemExit(2) from exc
+
+    entries = _gitleaks_allowlist_entries(text)
+    if not entries:
+        print("  no [allowlist] paths entries found — nothing to check")
+        return
+
+    invalid: list[tuple[int, str, int, int, str]] = []
+    for line, value, start, end, quote in entries:
+        raw = text[start:end]
+        if _is_valid_gitleaks_path_regex(value):
+            print(f"  ✓ line {line:>4}  {raw}")
+            continue
+        invalid.append((line, value, start, end, quote))
+        print(f"  ✗ line {line:>4}  {raw}  →  {_glob_to_regex(value)!r}")
+
+    if not invalid:
+        print(f"OK: all {len(entries)} allowlist path entries compile as Go regexps")
+        return
+
+    if not args.fix:
+        print(
+            f"Summary: {len(invalid)} of {len(entries)} entries are not valid Go "
+            f"regexps (dry run — re-run 'gitreins doctor --fix' to rewrite)"
+        )
+        raise SystemExit(1)
+
+    new_text = _rewrite_gitleaks_entries(text, invalid)
+    bak = _safe_overwrite(config_path, lambda f: f.write(new_text))
+    for line, value, _start, _end, _quote in invalid:
+        print(f"  fixed line {line}: {value!r} → {_glob_to_regex(value)!r}")
+    if bak:
+        print(f"  backup: {os.path.basename(bak)}")
+    remaining = [
+        entry
+        for entry in _gitleaks_allowlist_entries(new_text)
+        if not _is_valid_gitleaks_path_regex(entry[1])
+    ]
+    print(
+        f"Summary: rewrote {len(invalid)} of {len(entries)} entries; "
+        f"{len(remaining)} invalid remain"
+    )
+    if remaining:
+        raise SystemExit(1)
 
 
 def cmd_task_create(args):
@@ -3333,6 +3547,22 @@ def main():
     init_p = sub.add_parser("init", help="Smart init — detect language, size, optimal config")
     init_p.add_argument("--reset", action="store_true", help="Reset config to smart defaults")
 
+    # doctor — .gitleaks.toml config check/migration (DF-GITREINS-POC-54)
+    doctor_p = sub.add_parser(
+        "doctor",
+        help="Validate .gitleaks.toml (and migrate pre-DF-001 glob allowlist entries)",
+    )
+    doctor_p.add_argument(
+        "--fix",
+        action="store_true",
+        help="Rewrite invalid [allowlist] paths entries in place (default: dry-run report)",
+    )
+    doctor_p.add_argument(
+        "--config",
+        default=None,
+        help="Path to the .gitleaks.toml to check (default: <repo>/.gitleaks.toml)",
+    )
+
     # task
     task_p = sub.add_parser("task", help="Task management")
     task_sub = task_p.add_subparsers(dest="subcommand")
@@ -3870,6 +4100,8 @@ def main():
         cmd_install(args)
     elif args.command == "init":
         cmd_init(args)
+    elif args.command == "doctor":
+        cmd_doctor(args)
     elif args.command == "task":
         # QA-GITREINS-POC-6: a task write can refuse to clobber state that could
         # not be read (and could not be preserved). Surface that as one clean
