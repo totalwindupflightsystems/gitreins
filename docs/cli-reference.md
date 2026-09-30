@@ -20,7 +20,7 @@ Running `gitreins` with no command prints the top-level help and exits
 **0**. An unknown command exits **2** (argparse behavior for
 unrecognized arguments).
 
-There are **16 top-level subcommands**:
+There are **17 top-level subcommands**:
 
 | # | Command | Purpose |
 |---|---------|---------|
@@ -40,6 +40,7 @@ There are **16 top-level subcommands**:
 | 14 | `report` | Show verdict history |
 | 15 | `qa` | QA run ledger — record and read QA run outcomes |
 | 16 | `serve` | Live judgment browser (local web server) |
+| 17 | `doctor` | Validate `.gitleaks.toml` and migrate pre-DF-001 glob allowlist entries |
 
 ## 1. `gitreins install`
 
@@ -1099,6 +1100,53 @@ gitreins preflight "Is JEVRES-003 already implemented?"
 ```
 gitreins preflight "Is JEVRES-003 already implemented?" --json
 ```
+
+## 17. `gitreins doctor`
+
+Validates the repo's `.gitleaks.toml` and migrates the allowlist entries that
+break gitleaks. gitleaks compiles every `[allowlist] paths` entry as a **Go
+regexp**, so a bare glob (`'*.log'`, `'*.egg-info/'`) makes it abort with
+`panic: regexp: Compile(...): error parsing regexp: missing argument to
+repetition operator` and exit code **2** — before scanning anything.
+
+`gitreins init` never overwrites an existing `.gitleaks.toml`, and the generator
+fix for this (DF-001) only affected **newly** written configs, so a repo
+initialised earlier kept the invalid globs with no migration path. Those repos
+are exactly the ones the guard then reported as `✗ secrets — CONFIG ERROR
+(gitleaks config failed to compile: <pattern>)`.
+
+```
+gitreins doctor [--fix] [--config <path>]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--fix` | Rewrite invalid `[allowlist] paths` entries in place (default: dry-run report) |
+| `--config` | Path to the `.gitleaks.toml` to check (default: `<repo>/.gitleaks.toml`) |
+
+The report is per entry — line number, the entry as written, and (for an
+invalid one) the corrected regexp the package's own `_glob_to_regex` emits:
+
+```
+gitleaks config doctor: /repo/.gitleaks.toml
+  ✓ line    8  '''.git/'''
+  ✗ line    9  '''*.log'''  →  '.*\\.log'
+  ✗ line   10  '''*.egg-info/'''  →  '.*\\.egg-info/'
+Summary: 2 of 4 entries are not valid Go regexps (dry run — re-run 'gitreins doctor --fix' to rewrite)
+```
+
+Only invalid entries are rewritten; valid ones (including a hand-edited
+`'.venv/'`) and every other byte of the file are left as written, and a
+`.gitleaks.toml.bak` copy is created by the same safe-overwrite helper `init`
+uses.
+
+**Exit codes**
+
+| Code | Meaning |
+|------|---------|
+| 0 | every entry compiles, or `--fix` repaired them all (and no config = nothing to check) |
+| 1 | an invalid entry remains (a dry-run report, or `--fix` could not repair it) |
+| 2 | the config path exists but could not be read |
 
 ## Hooks
 

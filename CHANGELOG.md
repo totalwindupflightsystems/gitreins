@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`gitreins doctor` — validate and migrate `.gitleaks.toml` allowlist globs
+  (DF-GITREINS-POC-54)** — gitleaks compiles every `[allowlist] paths` entry as
+  a **Go regexp**, so a bare glob (`'*.log'`, `'*.egg-info/'`) aborts it with
+  `panic: regexp: Compile(...): error parsing regexp: missing argument to
+  repetition operator` and exit code 2 — before scanning anything. DF-001 fixed
+  the **generator**, but `gitreins init` never overwrites an existing
+  `.gitleaks.toml`, so repos initialised before that fix kept the invalid globs
+  with no migration path (19 of 128 host configs in the field report).
+  `gitreins doctor [--fix] [--config <path>]` locates the config, walks the
+  `[allowlist] paths` array (a commented-out `# paths = [...]` is prose, not an
+  entry; a rule's own `regex` is out of scope), and reports per entry — line
+  number, the entry as written, and for an invalid one the corrected regexp.
+  `--fix` rewrites **only** the invalid entries in place through the package's
+  own `_glob_to_regex` (reused, never duplicated), preserving each entry's
+  quoting style and every other byte of the file, via the same
+  `.bak`-creating safe-overwrite helper `init` uses. Without `--fix` it is a
+  dry-run report; exit 1 while an invalid entry remains, so the subcommand is
+  CI-usable. Regression: `tests/test_cli.py::TestGitleaksConfigDoctor` (6 tests,
+  including a real-gitleaks leg proving the legacy config aborts with exit 2 and
+  the migrated one scans clean).
 - **`gitreins judge --ephemeral` — evaluate inline criteria and persist
   nothing (EVID-003)** — the last row of the evidence-contract arc carried from
   external PR #1 (rorca-hermes). `gitreins judge [<id>] --ephemeral --title <t>
@@ -40,6 +60,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (ephemeral option table, a new usage fence the CLI-examples checker replays,
   and the exit-code/`--async` refusals) and `docs/evidence-contract-v1.md`
   (the v1 automation surface is now fenced, since all three commands parse).
+
+### Fixed
+- **A gitleaks config/load failure is no longer reported as a secret finding
+  (DF-GITREINS-POC-54)** — `engine/guard_manager.py` classified any non-zero
+  gitleaks exit by looking for a finding tally, found none for an uncompilable
+  `.gitleaks.toml`, and printed `✗ secrets — FAIL (gitleaks: reported findings
+  (count unavailable))`. An operator then hunted a secret that did not exist (or
+  bypassed the gate) while **no scan had happened**. The leg now classifies Go's
+  regexp compile failure as a CONFIG/LOAD error and names the offending pattern:
+  `✗ secrets — CONFIG ERROR (gitleaks config failed to compile: *.log)`. It
+  stays FAIL — fail-closed, never a pass — and the built-in cross-check's own
+  findings still ride along in the scanner attribution
+  (`engine/types.py:scanner_config_error_status` + `render_secrets_scanners`).
+  Regression: `tests/test_guard_manager.py::TestGitleaksConfigErrorClassification`
+  (6 tests, both Go quote shapes, plus an over-classification control that a
+  genuine leak still reads as a finding) and
+  `tests/test_types.py::TestSecretsScannerAttribution` (the CONFIG ERROR render,
+  in `engine/types.py`).
 
 ## [0.15.0] - 2026-09-22
 
