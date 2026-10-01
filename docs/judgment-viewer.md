@@ -190,9 +190,12 @@ lines do not carry a model of their own.
 | QA runs | `<repo>/.gitreins/qa-ledger.jsonl`, overridable by `GITREINS_QA_LEDGER` or the `qa_ledger.path` config key | `[]` | Written by `worktree fresh\|repro\|dogfood` and `gitreins qa record`; rows are oldest-first and malformed lines are skipped, never guessed; the panel names the ledger path and shows verdict, cells summary, exit code and commit per run. The static variant (`scripts/judgment_viewer.py`) renders the same rows in its QA Runs panel (JVIEW-007) |
 
 `gitreins serve` reads the filesystem; it does **not** fall back to the
-`refs/heads/gitreins` verdict branch the way `gitreins report` does. On a fresh
-clone with no local history the viewer is legitimately empty — run `gitreins
-report` for the branch fallback, or fetch the branch into `.gitreins/`.
+`refs/heads/gitreins` verdict branch the way `gitreins report` does. That
+branch is a host-local orphan: it has no upstream and exists on no remote,
+so the `gitreins report` branch fallback returns empty on fresh clones.
+The host-local `.gitreins/history/` directory is the authoritative surface
+for past verdicts on a given host; on a fresh clone with no local history
+the viewer is legitimately empty.
 
 ## Security model
 
