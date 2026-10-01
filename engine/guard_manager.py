@@ -382,12 +382,16 @@ def _go_guard_result(r: GoGuardResult) -> GuardResult:
 
     DF-GITREINS-POC-55: so does the scanner nice note, for lanes that spawned
     an argv-prefixed scanner.
+
+    DF-GITREINS-POC-46: so does a non-fatal ``warning`` (the fallback-tool
+    note), which ``GuardResult.summary`` renders as its own ``⚠`` line.
     """
     return GuardResult(
         name=r.name,
         passed=r.passed,
         output=r.output,
         error=r.error,
+        warning=r.warning,
         skipped=r.skipped,
         skip_reason=r.skip_reason,
         nice_note=r.nice_note,

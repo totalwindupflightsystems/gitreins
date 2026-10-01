@@ -119,7 +119,11 @@ def test_check_go_lint_uses_golangci_lint_when_it_passes():
 
 def test_check_go_lint_falls_back_to_go_vet():
     """DF-GITREINS-POC-43: only a SPAWN failure ({"error": ...}, no exit_code)
-    falls through to go vet — a real exit 1 is graded as findings instead."""
+    falls through to go vet — a real exit 1 is graded as findings instead.
+
+    DF-GITREINS-POC-46: the fallback pass carries a warning naming the absent
+    linter and its install hint — a green whose linter never ran must not read
+    as a plain `✓ go_lint — ok` on the console."""
     error = "[Errno 2] No such file or directory: 'golangci-lint'"
     with (
         patch(
@@ -137,10 +141,38 @@ def test_check_go_lint_falls_back_to_go_vet():
         name="go_lint",
         passed=True,
         output=f"golangci-lint unavailable ({error}); graded by go vet: clean",
+        warning=(
+            "'golangci-lint' is not on PATH — install it: "
+            "https://golangci-lint.run/usage/install/ "
+            "(this run was graded by go vet instead)"
+        ),
     )
     assert run.call_args_list[0].args[0][0] == "golangci-lint"
     assert run.call_args_list[-1].args[0] == ["go", "vet", "./..."]
     assert run.call_args_list[-1].kwargs["timeout"] == 60
+
+
+def test_check_go_lint_refused_busy_wait_gets_no_not_on_path_claim():
+    """A busy-wait refusal is a misconfiguration, not a missing binary: the
+    fallback still runs go vet but the warning must not say "not on PATH"."""
+    refused = "refused: busy-wait loop detected"
+    # run_bounded's refusal shape: {"cmd", "refused", "reason"} — and NO
+    # exit_code, which is what lets this fall through to go vet.
+    busy_wait = {"cmd": ["stubbed"], "refused": True, "reason": refused}
+    with (
+        patch(
+            "engine.guards.subprocess.run",
+            return_value=completed("main.go\n"),
+        ),
+        patch(
+            "engine.guards.command_hygiene.run_bounded",
+            side_effect=[busy_wait, lane(0)],
+        ),
+    ):
+        result = check_go_lint("/repo")
+
+    assert result.passed is True
+    assert result.warning == ""
 
 
 def test_check_go_lint_grades_real_golangci_findings_without_vet_fallback():

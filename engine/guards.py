@@ -11,6 +11,54 @@ from engine import scanner_nice
 
 logger = logging.getLogger("gitreins.guards.go")
 
+# ── missing-binary diagnostics (DF-GITREINS-POC-46) ────────────────────────
+# A Go lane whose toolchain binary is absent from PATH returned
+# ``GoGuardResult(passed=False, error=<raw OSError>)`` and nothing rendered
+# ``error``: the console showed a bare ``✗`` while the cause
+# (``[Errno 2] No such file or directory: 'go'``) reached only the run log.
+# The Python lane solved this class twice on purpose (``_resolve_test_command``,
+# GR-GAP-037, names the missing runner; ``_pytest_not_found_hint`` names the
+# interpreter), so the gap was lane-local: name the binary and the fix.
+_BINARY_INSTALL_HINTS: dict[str, str] = {
+    "go": "install the Go toolchain: https://go.dev/doc/install",
+    "golangci-lint": "install it: https://golangci-lint.run/usage/install/",
+}
+# ``run_bounded`` surfaces ``str(OSError)`` from a failed Popen; a missing
+# binary reads ``[Errno 2] No such file or directory: '<program>'``, where the
+# program is the argv[0] it tried to exec. ``scanner_nice.argv_prefix`` withholds
+# the nice prefix for a tool that does not resolve, so this names the tool
+# itself and never a ``nice`` wrapper.
+_ENOENT_PROGRAM_RE = re.compile(r"No such file or directory: '([^']+)'")
+
+
+def _missing_binary_message(program: str) -> str:
+    """``'go' is not on PATH — install the Go toolchain: https://...``.
+
+    The hint is per-binary: the Go toolchain and golangci-lint have different
+    install stories. An unknown program still gets a usable line (named, with
+    the configured-runner escape) rather than a bare errno string.
+    """
+    hint = _BINARY_INSTALL_HINTS.get(program)
+    if hint is None:
+        hint = (
+            "install it and put it on PATH (or point guards.test_command at a "
+            "runner this machine has)"
+        )
+    return f"'{program}' is not on PATH — {hint}"
+
+
+def _spawn_error_message(err: str) -> str:
+    """Name the missing binary in an ENOENT spawn failure; else pass *err* through.
+
+    Only the missing-binary shape is rewritten. A permission error, a bad
+    interpreter or a refused busy-wait keeps its own words — claiming "not on
+    PATH" for those would misdirect the reader to the wrong fix.
+    """
+    match = _ENOENT_PROGRAM_RE.search(err or "")
+    if not match:
+        return err
+    return _missing_binary_message(os.path.basename(match.group(1)))
+
 
 def _sanitized_env() -> dict[str, str]:
     """Return the current environment with every GIT_* variable removed.
@@ -73,6 +121,12 @@ class GoGuardResult:
     passed: bool
     output: str = ""
     error: str = ""
+    # DF-GITREINS-POC-46: a non-fatal note, rendered by ``GuardResult.summary``
+    # as its own ``⚠ <text>`` console line — the same field the Python lanes
+    # carry for their GR-GAP-037 runner fallback. Used when a lane was graded
+    # by a FALLBACK tool (golangci-lint absent → go vet): the pass is honest
+    # but the missing tool and its install hint must still be visible.
+    warning: str = ""
     # DF-GITREINS-POC-42: a Go lane that graded no file did no work. It keeps
     # ``passed=True`` (the toolchain is not at fault) but says so, mirroring
     # ``GuardResult`` — without the signal the DEGRADED-PASS machinery
@@ -166,6 +220,19 @@ def check_go_lint(
         # kill's -9) means the process ran and its verdict must be graded.
         detail = result.get("error") or result.get("reason") or "linter did not run"
         note = f"golangci-lint unavailable ({detail}); "
+        # DF-GITREINS-POC-46: the fallback keeps the lane green when go vet can
+        # grade the tree, but a green whose linter was ABSENT must still name
+        # the missing tool and its install hint on the console — otherwise the
+        # operator reads `✓ go_lint — ok` on a box that never linted with
+        # golangci-lint. A refused busy-wait (a misconfiguration) says so in
+        # its own words instead and gets no "not on PATH" claim.
+        fallback_warning = ""
+        missing = _ENOENT_PROGRAM_RE.search(detail or "")
+        if missing and os.path.basename(missing.group(1)) == "golangci-lint":
+            fallback_warning = (
+                f"{_missing_binary_message('golangci-lint')} "
+                "(this run was graded by go vet instead)"
+            )
         vet_prefix, vet_note = scanner_nice.argv_prefix(nice_level, "go")
         vet = command_hygiene.run_bounded(
             [*vet_prefix, "go", "vet", "./..."],
@@ -175,8 +242,14 @@ def check_go_lint(
         )
         if "error" in vet and "exit_code" not in vet:
             # Spawn failure (e.g. go itself missing) — surfaced in error,
-            # matching the old except-Exception contract.
-            return GoGuardResult(name="go_lint", passed=False, error=vet["error"])
+            # matching the old except-Exception contract, now naming the
+            # missing binary and its install hint (DF-GITREINS-POC-46).
+            return GoGuardResult(
+                name="go_lint",
+                passed=False,
+                error=_spawn_error_message(vet["error"]),
+                warning=fallback_warning,
+            )
         output = vet.get("output") or ""
         if len(output) > 2000:
             output = output[:2000] + "\n... [truncated]"
@@ -185,12 +258,14 @@ def check_go_lint(
                 name="go_lint",
                 passed=True,
                 output=f"{note}graded by go vet: clean",
+                warning=fallback_warning,
                 nice_note=vet_note,
             )
         return GoGuardResult(
             name="go_lint",
             passed=False,
             output=f"{note}graded by go vet:\n{output}",
+            warning=fallback_warning,
             nice_note=vet_note,
         )
     # The linter ran: its verdict is authoritative. A real exit 1 with
@@ -289,7 +364,11 @@ def check_go_tests(
         # a test failure — the reason text already names the right primitive.
         return GoGuardResult(name="go_tests", passed=False, error=result["reason"])
     if "error" in result and "exit_code" not in result:
-        return GoGuardResult(name="go_tests", passed=False, error=result["error"])
+        # DF-GITREINS-POC-46: a spawn failure is a missing binary (the runner
+        # is not on PATH) — name it and the fix instead of the raw errno.
+        return GoGuardResult(
+            name="go_tests", passed=False, error=_spawn_error_message(result["error"])
+        )
     output = result.get("output") or ""
     if len(output) > 2000:
         output = output[-2000:]
@@ -320,8 +399,11 @@ def check_go_build(
         env=_sanitized_env(),
     )
     if "error" in result and "exit_code" not in result:
-        # Spawn failure (e.g. go missing) — old except-Exception contract.
-        return GoGuardResult(name="go_build", passed=False, error=result["error"])
+        # Spawn failure (e.g. go missing) — old except-Exception contract, now
+        # naming the missing binary and its install hint (DF-GITREINS-POC-46).
+        return GoGuardResult(
+            name="go_build", passed=False, error=_spawn_error_message(result["error"])
+        )
     output = result.get("output") or ""
     if len(output) > 2000:
         output = output[:2000] + "\n... [truncated]"
