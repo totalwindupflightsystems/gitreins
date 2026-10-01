@@ -43,6 +43,25 @@ evaluator makes a best-effort recovery instead:
 2. **Otherwise INCOMPLETE** with `summary` = `Cap exceeded: <reason>`, which
    names the cap and how much was used.
 
+### Environment variables
+
+Since v0.10.2, four environment variables override the evaluated layer's
+caps without editing `.gitreins/config.yaml` (useful for CI/docker/one-off
+runs). Two of them govern the token budgets:
+
+| Env var | Overrides | Accepted values |
+|---|---|---|
+| `GITREINS_MAX_INPUT_TOKENS` | `max_input_tokens` | token count (`200k`, `1.5M`, or plain integer — same forms as the config cap) |
+| `GITREINS_MAX_OUTPUT_TOKENS` | `max_output_tokens` | token count (same forms) |
+
+When set, an env var **wins over any config-defined cap for that layer** — it
+is applied last, so it overrides both the `GitReinsDefaults` defaults and a
+per-repo `.gitreins/config.yaml` `evaluator:` setting. The cap's
+`EvalCap.source` string records the override (e.g.
+`config + GITREINS_MAX_INPUT_TOKENS`). An invalid value is silently ignored
+(the underlying cap stays in force). Use these to raise the tier-2
+input/output cap a rung for a single run, or to lower it for a smoke test.
+
 ### Context compaction
 
 Compaction is proactive: when the **cumulative input tokens consumed since the
