@@ -508,6 +508,11 @@ environment variables:
 | `GITREINS_LLM_MODEL` | Model name (default varies by provider) |
 | `GITREINS_LLM_REASONING` | Reasoning mode: `enabled` or `disabled` (default `disabled`) |
 
+Evaluator cap overrides (`GITREINS_MAX_INPUT_TOKENS`, `GITREINS_MAX_OUTPUT_TOKENS`
+and the iteration/time twins) are documented in
+[docs/evaluator-loop.md](evaluator-loop.md#environment-variables) — they beat
+config-defined caps for that layer.
+
 The MCP tool `mcp_gitreins_configure` can hot-reload the LLM config at
 runtime. Exits **0** on clean shutdown (stdin EOF); **1** on fatal errors.
 
@@ -878,7 +883,11 @@ takes no cell flag.
 A row carries the fleet QA-ledger keys — `ts`, `project`, `status`, `cells`,
 `findings`, `evidence`, `note` — plus harness extras: `kind`, `verdict`,
 `run_id`, `exit_code`, `commit`, `harness_version`, `detail` (and
-`evidence_missing: true` when the `--evidence` path was missing). A process
+`evidence_missing: true` when the `--evidence` path was missing). The
+`project` key defaults to the repository directory name AT RECORD TIME, so
+renaming the repo directory splits one ledger across two project identities
+(e.g. `gitreins-poc` rows before a rename to `gitreins`, and `gitreins` rows
+after) — an identity fork, not a functional defect. A process
 that already reads the fleet schema can therefore read a harness-written
 ledger.
 
@@ -925,7 +934,7 @@ gitreins serve [--repo <path>] [--port <port>] [--host <host>] [--project <name>
 | `--repo` | Browse another checkout's judgment history by path (default: the repository you run from). A path inside a checkout resolves to that work tree's root; a path that is not a directory exits 2 |
 | `--port` | Port to bind (default `8616`; `0` binds an ephemeral port and prints it) |
 | `--host` | Bind address (default `127.0.0.1` — local-only unless you change it; a non-loopback host warns that the data is served without authentication) |
-| `--project` | Scheduler project name for the tick ledger (e.g. `gitreins-poc`) |
+| `--project` | Scheduler project name for the tick ledger (e.g. `gitreins`) |
 | `--open` | Open the browser automatically |
 
 The server is read-only and re-reads the repository on every request, so a
