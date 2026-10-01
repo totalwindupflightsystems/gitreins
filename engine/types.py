@@ -643,8 +643,18 @@ class Tier1Result:
                         detail = f" — {tail}"
                     if fail_count:
                         detail = f" — {fail_count} failure(s); {tail}"
+            elif not r.passed and r.error:
+                # DF-GITREINS-POC-46: a spawn failure (a binary that is not on
+                # PATH) carries no tool output — the CAUSE *is* the error text,
+                # and it used to reach the run log only, leaving a bare ✗ here.
+                detail = f" — {_truncate_line(r.error)}"
             elif r.passed:
                 detail = r._pass_detail()
+            if not r.passed and r.error and _truncate_line(r.error) not in detail:
+                # The error text is evidence even when the step also produced
+                # output (a refused busy-wait, a runner that started and died):
+                # never drop the cause from the step's own console line.
+                detail += f" — {_truncate_line(r.error)}"
             # DF-GITREINS-POC-55: the applied scanner nice prefix (or its
             # fail-open reason) rides on the step's own line — one line per
             # step, the DF-GITREINS-POC-14 contract, so an operator sees the

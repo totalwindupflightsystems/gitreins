@@ -64,9 +64,41 @@ def test_tier1_summary_formats_passes_failures_and_empty_output():
             "  ✓ secrets — clean",
             "  ✓ tests — passed",
             "  ✗ lint — second line",
-            "  ✗ custom",
+            "  ✗ custom — command failed",
         ]
     )
+
+
+def test_tier1_summary_renders_a_spawn_error_with_no_output():
+    """DF-GITREINS-POC-46: the error text IS the diagnosis.
+
+    A guard that failed to spawn (binary not on PATH) returns passed=False
+    with the cause in ``error`` and no output at all. The console used to show
+    a bare ``✗`` and the reason reached only the run log; the step's own line
+    must carry it (with the install hint the guard put in the error).
+    """
+    error = "'go' is not on PATH — install the Go toolchain: https://go.dev/doc/install"
+    result = Tier1Result(passed=False, results=[GuardResult("go_build", False, error=error)])
+
+    assert result.summary == f"  ✗ go_build — {error}"
+
+
+def test_tier1_summary_keeps_the_error_when_output_is_also_present():
+    """Both surfaces survive: the output tail AND the cause (never dropped)."""
+    result = Tier1Result(
+        passed=False,
+        results=[GuardResult("tests", False, "some output", error="spawn failed")],
+    )
+
+    assert result.summary == "  ✗ tests — some output — spawn failed"
+
+
+def test_tier1_summary_passing_guard_never_renders_the_error():
+    """A pass owns no failure cause: an error text on a passing guard (the
+    Python lane sets one alongside its fallback warning) must not print."""
+    result = Tier1Result(passed=True, results=[GuardResult("tests", True, "ok", error="x")])
+
+    assert result.summary == "  ✓ tests — passed"
 
 
 def test_tier1_summary_counts_failed_lines_and_shows_tail():
