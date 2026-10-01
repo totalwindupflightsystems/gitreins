@@ -508,6 +508,11 @@ environment variables:
 | `GITREINS_LLM_MODEL` | Model name (default varies by provider) |
 | `GITREINS_LLM_REASONING` | Reasoning mode: `enabled` or `disabled` (default `disabled`) |
 
+Evaluator cap overrides (`GITREINS_MAX_INPUT_TOKENS`, `GITREINS_MAX_OUTPUT_TOKENS`
+and the iteration/time twins) are documented in
+[docs/evaluator-loop.md](evaluator-loop.md#environment-variables) — they beat
+config-defined caps for that layer.
+
 The MCP tool `mcp_gitreins_configure` can hot-reload the LLM config at
 runtime. Exits **0** on clean shutdown (stdin EOF); **1** on fatal errors.
 
