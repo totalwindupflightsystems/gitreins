@@ -281,6 +281,10 @@ class GitReinsMCPServer:
                     "type": "object",
                     "properties": {
                         "message": {"type": "string", "description": "Commit message"},
+                        "workdir": {
+                            "type": "string",
+                            "description": "Absolute path to the repo to commit in. The in-progress task gate, Tier 1 guards and the git commit all resolve against it. Defaults to the MCP server's workdir.",
+                        },
                     },
                     "required": ["message"],
                 },
@@ -541,13 +545,30 @@ class GitReinsMCPServer:
         except KeyError:
             return {"error": f"Task not found: {id}"}
 
-    def _commit(self, message: str) -> dict:
-        """Commit staged changes; blocked while any task is in_progress."""
-        # Check all in-progress tasks first. REVIEW-GITREINS-020: read through
-        # the manager factory so the check sees the store as it is NOW — the
-        # startup snapshot kept refusing a commit for a task the CLI had
-        # already deleted.
-        in_progress = self._task_manager_for().list_tasks("in_progress")
+    def _commit(self, message: str, workdir: str | None = None) -> dict:
+        """Commit staged changes; blocked while any task is in_progress.
+
+        DF-GITREINS-POC-76: the optional *workdir* mirrors the sibling task
+        tools. The in-progress gate, the Tier 1 guard and the ``git commit``
+        subprocess all resolve against it, so a caller driving another repo's
+        tasks commits in that repo and is still held to that repo's gate —
+        before this, the gate read only the server's default store and a
+        cross-repo commit skipped the block entirely.
+
+        The default workdir keeps its exact former behavior: the same store
+        manager (``_task_manager_for``) and the same guard manager built at
+        server construction (``self.judge.guard_manager``), so every existing
+        response is byte-for-byte unchanged.
+        """
+        wd = os.path.abspath(workdir) if workdir else self.workdir
+
+        # Check all in-progress tasks first, from the RESOLVED workdir.
+        # REVIEW-GITREINS-020: read through the manager factory so the check
+        # sees the store as it is NOW — the startup snapshot kept refusing a
+        # commit for a task the CLI had already deleted. A cross-repo target
+        # gets a fresh manager bound to that repo, never the default store
+        # reloaded with the wrong path.
+        in_progress = self._task_manager_for(wd).list_tasks("in_progress")
         if in_progress:
             ids = ", ".join(t.id for t in in_progress)
             return {
@@ -561,8 +582,18 @@ class GitReinsMCPServer:
                 "tasks": [t.id for t in in_progress],
             }
 
-        # Run guards after task check
-        tier1 = self.judge.guard_manager.run_all()
+        # Run guards after task check. The default workdir keeps the guard
+        # manager built at server construction (unchanged behavior); a
+        # cross-repo target gets a fresh, config-bound GuardManager built the
+        # same way guard.run builds one — including its missing-config refusal,
+        # so a config-less repo can never report a false green here either.
+        if wd == self.workdir:
+            tier1 = self.judge.guard_manager.run_all()
+        else:
+            gm = self._guard_manager_for(wd)
+            if isinstance(gm, dict):
+                return gm
+            tier1 = gm.run_all()
         if not tier1.passed:
             return {
                 "error": "Tier 1 guards failed — commit blocked",
@@ -575,7 +606,7 @@ class GitReinsMCPServer:
                 capture_output=True,
                 text=True,
                 timeout=30,
-                cwd=self.workdir,
+                cwd=wd,
             )
             return {
                 "committed": result.returncode == 0,
@@ -584,22 +615,21 @@ class GitReinsMCPServer:
         except Exception as e:
             return {"error": str(e)}
 
-    def _guard_run(self, workdir: str = None, dead_code: bool = False) -> dict:
-        """Run Tier 1 static guards. Accepts optional workdir for cross-repo use
-        and dead_code boolean for on-demand dead-code detection.
+    def _guard_manager_for(self, wd: str) -> "GuardManager | dict":
+        """Build a config-bound ``GuardManager`` for the repo at *wd*.
 
-        Refuses to run when the target repo has no .gitreins/config.yaml
-        (GR-GAP-054). Every guard falls back to its built-in defaults without
-        a config, so a config-less run reported a false green — same false
-        positive the CLI already blocks via ``_require_guard_config``. This
-        gate lives HERE, not in ``GuardManager.run_all()``: library callers
-        and unit-test fixtures construct ``GuardManager`` directly with
-        ``config=None`` and must keep working.
+        Returns the manager, or the refusal dict when *wd* has no
+        ``.gitreins/config.yaml`` (GR-GAP-054): every guard falls back to its
+        built-in defaults without a config, so a config-less run reports a
+        false green. Shared by ``guard.run`` and the cross-repo ``commit``
+        path (DF-GITREINS-POC-76) so both refuse with the same error shape.
+
+        The refusal lives HERE, not in ``GuardManager.run_all()``: library
+        callers and unit-test fixtures construct ``GuardManager`` directly
+        with ``config=None`` and must keep working.
         """
         import yaml
 
-        wd = os.path.abspath(workdir) if workdir else self.workdir
-        # Load config from .gitreins/config.yaml (same pattern as CLI)
         config_path = os.path.join(wd, ".gitreins", "config.yaml")
         if not os.path.isfile(config_path):
             return {
@@ -616,7 +646,19 @@ class GitReinsMCPServer:
                 config = yaml.safe_load(f) or {}
         except Exception:
             pass
-        gm = GuardManager(wd, config=config)
+        return GuardManager(wd, config=config)
+
+    def _guard_run(self, workdir: str = None, dead_code: bool = False) -> dict:
+        """Run Tier 1 static guards. Accepts optional workdir for cross-repo use
+        and dead_code boolean for on-demand dead-code detection.
+
+        Refuses to run when the target repo has no .gitreins/config.yaml
+        (GR-GAP-054) — see ``_guard_manager_for``.
+        """
+        wd = os.path.abspath(workdir) if workdir else self.workdir
+        gm = self._guard_manager_for(wd)
+        if isinstance(gm, dict):
+            return gm
         result = gm.run_all(force_dead_code=dead_code)
         return {
             "passed": result.passed,
