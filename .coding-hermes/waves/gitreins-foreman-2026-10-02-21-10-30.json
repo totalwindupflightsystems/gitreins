@@ -1,0 +1,46 @@
+{
+  "scheduler_tick_id": "gitreins-foreman-2026-10-02-21-10-30",
+  "created": "2026-10-02T21:20:00-05:00",
+  "wave_budget": 2,
+  "tasks": [
+    {
+      "id": "QA-GITR-003",
+      "title": "[P3] TestJudgeAsyncCLI.test_async_dispatch_poll_and_result: judge --async worker pid dies under host load (earlyoom prefers pytest) \u2014 test fails 'worker is GONE' instead of degrading",
+      "worktree": "/home/kara/worktrees/gitreins-QA-GITR-003",
+      "branch": "wt/QA-GITR-003",
+      "files": [
+        "tests/test_cli.py"
+      ],
+      "depends_on": [],
+      "base": "github/main@530fe8e",
+      "worker": {
+        "model": "deepseek-v4-flash",
+        "provider": "deepseek-foreman",
+        "session": "proc_b333b2cb3e40"
+      }
+    },
+    {
+      "id": "DF-GITREINS-POC-76",
+      "title": "[P2] commit tool ignores cross-repo workdir \u2014 lists in-progress tasks from server default workdir only",
+      "worktree": "/home/kara/worktrees/gitreins-DF-GITREINS-POC-76",
+      "branch": "wt/DF-GITREINS-POC-76",
+      "files": [
+        "gitreins_mcp/server.py",
+        "tests/test_mcp_server.py"
+      ],
+      "depends_on": [],
+      "base": "github/main@530fe8e",
+      "worker": {
+        "model": "deepseek-v4-flash",
+        "provider": "deepseek-foreman",
+        "session": "proc_7e1d72dc370d"
+      }
+    }
+  ],
+  "independence_check": "disjoint file sets; no depends_on edges between rows; merge serially after both complete",
+  "merge_order": [
+    "QA-GITR-003",
+    "DF-GITREINS-POC-76"
+  ],
+  "dispatched_at": "2026-10-02T21:35:00-05:00"
+}
