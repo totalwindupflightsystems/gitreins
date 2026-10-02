@@ -1372,3 +1372,27 @@ detached worktree under `../<repo>-wt/.disposable/run-<hash>` → `sh -c` the co
   mechanism that prevents a plaintext credential-bearing listener on a tailnet address. The gap is
   operational: nobody who owns the box config has been paged by the counter, and the skill's fallback
   chain now has two consecutive runs blocked at the same node pair.
+
+## 2026-10-02: MCP Server Surface
+
+**What we tested:** The 13-tool MCP server (gitreins_mcp/server.py) end-to-end via a custom Python client over stdio. Handshake, all tools, error paths, cross-repo workdir, async judge lifecycle.
+
+**What worked:**
+- Handshake exact: protocol 2025-11-25, serverInfo matches installed version (0.15.0)
+- Tool catalog complete: all 13 tools listed, names match docs
+- Task lifecycle complete: create → start → list → get → complete → delete, state transitions correct
+- Error taxonomy exact: -32601 for unknown tool/method, -32600 for invalid request, domain errors for missing tasks
+- Cross-repo workdir isolation: task ops respect workdir param, isolated from server default workdir
+- Server exit clean: stdin EOF triggers graceful shutdown, stderr logs exit line, exit code 0
+
+**What did not:**
+- **POC-76 (P2):** commit tool ignores cross-repo workdir — lists in-progress tasks from server default workdir only. The docs say "every tool that touches a repo accepts an optional workdir" but commit is the one tool that does not. Live repro: created task in /tmp/scratch via workdir param, but commit refused listing 7 tasks from /home/kara/gitreins (none in the scratch repo).
+- **POC-77 (P2):** guard.run refuses without config.yaml but MCP-only workflow has no init path. The error message is correct ("run `gitreins init` first") but breaks the MCP-only workflow: a client using only the MCP server (no CLI access) cannot run guard.run without first running the CLI init command. The docs promise "13-tool surface" but guard.run requires a CLI-side prerequisite.
+- **POC-78 (P3):** task.complete async path dispatches judge job even when LLM not configured — stays 'running' indefinitely. Docs say "Without LLM: task.complete returns {task: ..., note: 'LLM not configured — skipping evaluation'}" but the async path (wait=false, the default) dispatches a job that never completes. Polled 3× over 6s — job stayed running with pid, never reached terminal state.
+- **POC-79 (P3):** configure tool accepts arbitrary model names without validation — failure deferred to evaluation. configure with model='test-model' returns {configured: true, current: {model: 'test-model'}}. The tool accepts any string for model/provider/base_url without validating that the model exists, the provider is supported, or the base_url is reachable.
+
+**Install leg:** SKIPPED — bunker-las-03 cannot clone from GitHub (no credentials). Command `git clone https://github.com/wojons/gitreins.git` failed with "fatal: could not read Username for 'https://github.com': No such device or address". The bunker host has no GitHub credentials configured. Per the dogfood hard rule: do not modify repo visibility or permissions to enable clone access. Finding: the install docs assume the user has GitHub access, but a fresh bunker host does not.
+
+**Why the MCP surface matters:** This is the primary interface for AI agents using gitreins. The 13-tool surface is well-documented and the protocol is exact, but the four findings are friction points a real agent would hit. The async judge path (POC-78) is the most serious: an agent relying on task.complete to trigger evaluation would hang waiting for a terminal state that never comes. The commit tool's cross-repo gap (POC-76) breaks the documented "every tool accepts workdir" contract.
+
+**Lesson:** The MCP server's honesty is its strength — error messages are actionable, the protocol is exact, and the cross-repo semantics work (except for commit). But the async judge path has a contract inconsistency that should be fixed before a real agent relies on it. The install leg's credential gap is a docs problem: a fresh user on a fresh host cannot follow the documented install path without first configuring GitHub access.

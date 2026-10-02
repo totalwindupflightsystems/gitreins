@@ -3485,41 +3485,102 @@ def cmd_security_scan(args):
     sys.exit(1 if findings else 0)
 
 
+# ── setup-tools static tables (DF-GITREINS-POC-69) ──────────────────────
+
+# Tracked static-analysis tools per language token (engine.lang_detect
+# tokens; SQL is selected separately via has_sql_sources). The old command
+# keyed a primary-type-only map (`lang["type"]`) under a header that printed
+# `lang["name"]` (every detected language) — a Python + C + SQL repo was
+# promised C/SQL coverage the list never delivered. Keying per detected
+# token keeps the header and the list consistent by construction.
+_SETUP_TOOLS_LANG_TOOLS = {
+    "go": ["staticcheck"],
+    "python": ["mypy", "pyright"],
+    "js": ["eslint"],
+    "ruby": ["sorbet"],
+    "php": ["phpstan"],
+    "rust": ["clippy"],
+    "c": ["cppcheck"],
+    "cpp": ["cppcheck"],
+}
+
+# Install routes for the missing-tool lines. PEP 668 (externally-managed
+# environment) makes a bare `pip install <tool>` fail on stock Debian/Ubuntu
+# (filed three times as POC-64 for the product), so Python tools route
+# through pipx/uv-tool with the alternative named per tool. Kept LOCAL to
+# setup-tools: the shared engine/_TOOL_INSTALL_GUIDE also feeds `init`'s
+# stderr hints and the guard's missing-tool warnings, and this change must
+# not touch their graded output.
+_SETUP_TOOLS_INSTALL_GUIDE = {
+    "mypy": "pipx install mypy  (or: uv tool install mypy)",
+    "pyright": "npm install -g pyright  (or: pipx install pyright)",
+    "sorbet": "gem install sorbet && srb init",
+    "sqlfluff": "pipx install sqlfluff  (or: uv tool install sqlfluff)",
+    "phpstan": "composer require --dev phpstan/phpstan",
+    "cppcheck": "sudo apt install cppcheck  (or: brew install cppcheck)",
+    "staticcheck": "go install honnef.co/go/tools/cmd/staticcheck@latest  (add ~/go/bin to PATH)",
+    "clippy": "rustup component add clippy",
+    "eslint": "npm install -g eslint  (or: npx eslint --init)",
+}
+
+
 def cmd_setup_tools(args):
     """Show available static analysis tools and install instructions for missing ones."""
-    from engine.static_analysis import find_tool, _TOOL_INSTALL_GUIDE
+    from engine.lang_detect import detect_languages
+    from engine.static_analysis import find_tool
 
     workdir = get_workdir()
     lang = _detect_language(workdir)
 
-    lang_tools_map = {
-        "python": ["mypy", "pyright"],
-        "ruby": ["sorbet"],
-        "sql": ["sqlfluff"],
-        "php": ["phpstan"],
-    }
-    tools = lang_tools_map.get(lang["type"], [])
+    def _tracked_for(token: str) -> list[str]:
+        if token == "sql":
+            return ["sqlfluff"]
+        return _SETUP_TOOLS_LANG_TOOLS.get(token, [])
 
-    if not tools:
+    langs: list[str] = []
+    for token in detect_languages(workdir):
+        if token not in langs:
+            langs.append(token)
+    if lang["has_sql"] and "sql" not in langs:
+        langs.append("sql")
+
+    def _display(token: str) -> str:
+        # _LANG_INFO covers every signature language (token -> (flag, display,
+        # type_token)); SQL is selected by has_sql_sources, not the table.
+        if token == "sql":
+            return "SQL"
+        return _LANG_INFO.get(token, ("", token.title(), token))[1]
+
+    groups = [(token, _tracked_for(token)) for token in langs if _tracked_for(token)]
+    untracked = [_display(token) for token in langs if not _tracked_for(token)]
+
+    if not groups:
         print(f"No static analysis tools are tracked for {lang['name']}.")
         return
 
-    print(f"Static Analysis Tools for {lang['name']}:")
+    # The header names exactly the languages whose tools are listed below —
+    # a detected language with no tracked tool is disclosed separately
+    # instead of being folded into the header.
+    print(f"Static Analysis Tools for {' + '.join(_display(token) for token, _ in groups)}:")
     found = 0
     missing = 0
-    for tool in tools:
-        path = find_tool(tool)
-        if path:
-            found += 1
-            display = path.split("/")[-1] if "/" in path else path
-            print(f"  {tool:<12} ✓ found  ({display})")
-        else:
-            missing += 1
-            install = _TOOL_INSTALL_GUIDE.get(
-                tool,
-                f"Install {tool} from your package manager",
-            )
-            print(f"  {tool:<12} ✗ not installed — install: {install}")
+    for _, tools in groups:
+        for tool in tools:
+            path = find_tool(tool)
+            if path:
+                found += 1
+                display = path.split("/")[-1] if "/" in path else path
+                print(f"  {tool:<12} ✓ found  ({display})")
+            else:
+                missing += 1
+                install = _SETUP_TOOLS_INSTALL_GUIDE.get(
+                    tool,
+                    f"Install {tool} from your package manager",
+                )
+                print(f"  {tool:<12} ✗ not installed — install: {install}")
+    if untracked:
+        print()
+        print(f"No tracked static analysis tools for: {' + '.join(untracked)}")
 
     print()
     print(f"{found} tools available, {missing} missing.")
