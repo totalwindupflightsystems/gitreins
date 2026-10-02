@@ -534,6 +534,134 @@ class TestCommitMCP:
         assert "judge" in result["error"]
 
 
+class TestCommitWorkdirMCP:
+    """DF-GITREINS-POC-76: the commit tool honors a cross-repo workdir.
+
+    The defect: `commit` had no `workdir` parameter and drove the guard +
+    `git commit` from the server's default workdir, while reading the
+    in-progress gate from the default store — so a caller driving another
+    repo's tasks could commit in that repo with a task in progress.
+    """
+
+    @staticmethod
+    def _call(server, name, arguments):
+        """Drive one tools/call and return the parsed result payload."""
+        response = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+            }
+        )
+        assert "result" in response, response.get("error")
+        return json.loads(response["result"]["content"][0]["text"])
+
+    @staticmethod
+    def _init_repo(path) -> str:
+        """A real git repo with a guard config (secrets on, lint/tests off).
+
+        lint/tests are off so a cross-repo commit exercises the guard wiring
+        without running a foreign suite; secrets stays on so the guard is a
+        real Tier 1 run (same shape as TestGuardRunMCP's configured doubles).
+        """
+        path = Path(path)
+        path.mkdir(parents=True, exist_ok=True)
+        for argv in (
+            ["git", "init", "-q"],
+            ["git", "config", "user.email", "t@example.com"],
+            ["git", "config", "user.name", "Test"],
+        ):
+            subprocess.run(argv, cwd=str(path), check=True, capture_output=True)
+        cfg_dir = path / ".gitreins"
+        cfg_dir.mkdir(exist_ok=True)
+        (cfg_dir / "config.yaml").write_text(
+            "guards:\n  secrets: true\n  lint: false\n  tests: false\n"
+        )
+        return str(path)
+
+    @staticmethod
+    def _stage(path, name: str = "f.txt", content: str = "x\n") -> None:
+        (Path(path) / name).write_text(content)
+        subprocess.run(["git", "add", name], cwd=str(path), check=True, capture_output=True)
+
+    def test_commit_blocked_by_in_progress_task_in_target_workdir(
+        self, mcp_server, tmp_workdir, tmp_path
+    ):
+        """RED core: a task in progress in the TARGET repo blocks a commit
+        aimed at that repo — before the fix, the gate read only the default
+        store and this commit went through (or the workdir kwarg was
+        rejected outright)."""
+        target = self._init_repo(tmp_path / "other-repo")
+        self._stage(target)
+
+        # Task A lives ONLY in the target repo and is in progress there.
+        self._call(
+            mcp_server,
+            "task.create",
+            {"id": "task-a", "title": "A", "criteria": [], "workdir": target},
+        )
+        self._call(mcp_server, "task.start", {"id": "task-a", "workdir": target})
+        # The server's own store is empty — the block can only come from the
+        # resolved workdir's store.
+        assert self._call(mcp_server, "task.list", {})["tasks"] == []
+
+        result = self._call(mcp_server, "commit", {"message": "sneaky", "workdir": target})
+
+        assert "error" in result, result
+        assert "in progress" in result["error"]
+        assert result["tasks"] == ["task-a"]
+        assert "task-a" in result["error"]
+        assert "committed" not in result
+
+    def test_default_workdir_task_does_not_block_target_workdir(
+        self, mcp_server, tmp_workdir, tmp_path
+    ):
+        """An in-progress task in the DEFAULT repo must not block a commit in
+        a different repo — the gate is scoped to the resolved workdir."""
+        target = self._init_repo(tmp_path / "other-repo")
+        self._stage(target)
+
+        self._call(mcp_server, "task.create", {"id": "default-task", "title": "D", "criteria": []})
+        self._call(mcp_server, "task.start", {"id": "default-task"})
+
+        result = self._call(mcp_server, "commit", {"message": "cross-repo", "workdir": target})
+
+        assert "error" not in result, result
+        assert result["committed"] is True
+        # And the default repo's commit is still blocked (unchanged behavior).
+        blocked = self._call(mcp_server, "commit", {"message": "stays blocked"})
+        assert "error" in blocked
+        assert "default-task" in str(blocked.get("tasks", []))
+
+    def test_commit_target_workdir_without_config_refuses(self, mcp_server, tmp_workdir, tmp_path):
+        """A cross-repo commit into a repo with no .gitreins/config.yaml is
+        refused with guard.run's exact error shape (GR-GAP-054) — never a
+        false-green guard fallback."""
+        bare = tmp_path / "bare-repo"
+        bare.mkdir()
+
+        result = self._call(mcp_server, "commit", {"message": "x", "workdir": str(bare)})
+
+        assert "error" in result, result
+        assert ".gitreins/config.yaml" in result["error"]
+        assert "gitreins init" in result["error"]
+        assert result["workdir"] == os.path.abspath(str(bare))
+        assert "committed" not in result
+        assert "details" not in result
+
+    def test_commit_tool_schema_exposes_optional_workdir(self, mcp_server):
+        """tools/list advertises `workdir` on the commit tool as optional."""
+        response = mcp_server.handle_request({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        tools = {t["name"]: t for t in response["result"]["tools"]}
+        properties = tools["commit"]["inputSchema"]["properties"]
+        assert "workdir" in properties
+        assert properties["workdir"]["type"] == "string"
+        assert properties["workdir"].get("description")
+        assert "workdir" not in tools["commit"]["inputSchema"]["required"]
+        assert tools["commit"]["inputSchema"]["required"] == ["message"]
+
+
 class TestGuardRunMCP:
     """Test guard.run — step-2-3-1-2."""
 
