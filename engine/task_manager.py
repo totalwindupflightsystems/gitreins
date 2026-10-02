@@ -111,8 +111,16 @@ class TaskManager:
         finally:
             os.close(lock_fd)  # releases the flock
 
-    def _load(self) -> None:
-        """Load tasks from YAML file."""
+    def _load(self, into: dict[str, Task] | None = None) -> None:
+        """Load tasks from the YAML file into *into* (default: ``self._tasks``).
+
+        ``_locked_load_save`` calls this with no argument to MERGE the on-disk
+        state into the live view before applying a mutation (it never removes,
+        which is why a writer path can only add/overwrite entries). ``reload``
+        passes a FRESH dict so it can publish the new view with a single
+        reference swap (QA-GITR-003) instead of clearing the live view first.
+        """
+        target = self._tasks if into is None else into
         if not os.path.exists(self._tasks_file):
             return
         # DF-GITREINS-POC-22: a structurally truncated store (crash mid-write,
@@ -150,7 +158,7 @@ class TaskManager:
                     completed_at=item.get("completed_at"),
                     depends_on=item.get("depends_on", []),
                 )
-                self._tasks[task.id] = task
+                target[task.id] = task
         except Exception as e:
             # QA-GITREINS-POC-6: the file is unreadable, so the loaded task set is
             # incomplete by definition. Preserve the raw bytes NOW — the next write
@@ -166,10 +174,21 @@ class TaskManager:
         TaskManager for the life of the process) otherwise serves the snapshot
         taken at construction, so a task another process created, completed or
         deleted stays invisible — the CLI and the MCP tools are documented as
-        two doors into one store. ``_load()`` merges into ``self._tasks`` (it
-        never removes), so the view is cleared first: a deleted task must
-        actually disappear. The read holds the shared half of the same lock the
-        writers take, so it cannot observe a half-written document.
+        two doors into one store. ``_load()`` merges into a dict (it never
+        removes), so the view must be rebuilt: a deleted task has to actually
+        disappear. The read holds the shared half of the same lock the writers
+        take, so it cannot observe a half-written document.
+
+        QA-GITR-003: the rebuilt view is published with a SINGLE reference
+        assignment. Clearing ``self._tasks`` first and re-loading in place (the
+        previous shape) left an empty window that a concurrent reader observed
+        as a transient "Task not found": the MCP server calls ``reload()`` on
+        every task-touching tool call, so two concurrent ``judge.evaluate``
+        calls for one task could each clear the other's view mid-read. A
+        reader now sees either the previous complete view or this complete one
+        — never a partial or empty one. The swap happens while the shared lock
+        is still held, so a writer cannot slip a mutation into the old dict
+        between the load and the publish (which would be lost in memory).
         """
         lock_fd = None
         try:
@@ -183,8 +202,10 @@ class TaskManager:
                 lock_fd = None
         try:
             self._load_error = None  # a fixed store must stop reporting the old error
-            self._tasks = {}
-            self._load()
+            fresh: dict[str, Task] = {}
+            self._load(into=fresh)
+            # Atomic publish: one STORE_ATTR, so readers never see the gap.
+            self._tasks = fresh
         finally:
             if lock_fd is not None:
                 os.close(lock_fd)  # releases the flock

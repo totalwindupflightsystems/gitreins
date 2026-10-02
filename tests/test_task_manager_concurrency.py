@@ -14,6 +14,8 @@ table and one flock, so they cannot prove cross-process serialization.
 import os
 
 import multiprocessing
+import threading
+import types
 import yaml
 
 import pytest
@@ -144,3 +146,123 @@ class TestSerialPathUnchanged:
     def test_complete_missing_task_still_raises(self, tmp_path):
         with pytest.raises(KeyError):
             TaskManager(str(tmp_path)).complete("does-not-exist")
+
+
+class TestReloadGetWindow:
+    """QA-GITR-003: ``reload()`` must publish the rebuilt view ATOMICALLY.
+
+    The MCP server's ``_task_manager_for()`` calls ``reload()`` on EVERY
+    task-touching tool call, so two concurrent ``judge.evaluate`` calls for one
+    task used to clear each other's view: the previous ``self._tasks = {}``
+    followed by an in-place ``_load()`` left an empty window, and a reader
+    landing in it got a transient "Task not found" — an error dict with no
+    ``status`` key, which surfaced as a bare ``KeyError`` in
+    ``tests/test_mcp_server.py::TestJudgeAsyncPersistence::...single_flight``.
+
+    The hook below parks EVERY reader thread inside the store's load window —
+    deterministically, with no sleeps — and asserts that each still sees a
+    complete view. On the unfixed code the readers observe an empty dict here;
+    on the fixed code they observe the previous complete view until the single
+    reference swap publishes the new one.
+    """
+
+    def test_get_inside_load_window_never_sees_not_found(self, tmp_path, monkeypatch):
+        workdir = str(tmp_path)
+        _write_store(workdir, ["race-target", "other-task"])
+        tm = TaskManager(workdir)
+        assert tm.get("race-target") is not None, "fixture did not load"
+
+        readers = 8
+        in_window = threading.Event()
+        reads_done = threading.Event()
+        remaining = [readers]
+        counts_lock = threading.Lock()
+        seen: list[object] = [None] * readers
+        real_load = TaskManager._load
+
+        def hooked_load(self, into=None):
+            # We are now INSIDE reload()'s rebuild. Unfixed code had already
+            # cleared the live dict by this point; fixed code still holds the
+            # previous complete view (the swap has not happened yet).
+            in_window.set()
+            assert reads_done.wait(timeout=30), "reader threads never completed"
+            if into is None:
+                return real_load(self)
+            return real_load(self, into)
+
+        def reader(i):
+            assert in_window.wait(timeout=30), "reload never entered the load window"
+            seen[i] = tm.get("race-target")
+            with counts_lock:
+                remaining[0] -= 1
+                if remaining[0] == 0:
+                    reads_done.set()
+
+        threads = [threading.Thread(target=reader, args=(i,)) for i in range(readers)]
+        for t in threads:
+            t.start()
+
+        monkeypatch.setattr(tm, "_load", types.MethodType(hooked_load, tm))
+        tm.reload()
+
+        for t in threads:
+            t.join(30)
+            assert not t.is_alive(), "reader thread hung"
+
+        misses = [i for i, task in enumerate(seen) if task is None]
+        assert misses == [], (
+            f"{len(misses)}/{readers} readers observed a transient not-found while "
+            "inside reload()'s load window — the view must be swapped atomically"
+        )
+        assert all(task.id == "race-target" for task in seen)
+
+    def test_concurrent_create_with_reload_readers(self, tmp_path):
+        """Reader threads shaped like the MCP server (reload() then get()) must
+        never miss a pre-existing task while another thread creates new ones.
+
+        Bounded iteration counts on both sides: a tight reload() loop can starve
+        an EX-flock writer (readers keep re-taking LOCK_SH), so an unbounded
+        reader would hang the test rather than exercise it.
+        """
+        workdir = str(tmp_path)
+        _write_store(workdir, ["stable"])
+        tm = TaskManager(workdir)
+        assert tm.get("stable") is not None
+
+        readers = 4
+        reader_iters = 400
+        creates = 25
+        start = threading.Barrier(readers + 1)
+        misses: list[int] = []
+        lock = threading.Lock()
+
+        def reader(i):
+            start.wait()
+            for _ in range(reader_iters):
+                tm.reload()
+                if tm.get("stable") is None:
+                    with lock:
+                        misses.append(i)
+
+        def creator():
+            start.wait()
+            for n in range(creates):
+                tm.create(f"new-{n}", "t", ["c"])
+
+        threads = [threading.Thread(target=reader, args=(i,), daemon=True) for i in range(readers)]
+        for t in threads:
+            t.start()
+        writer = threading.Thread(target=creator, daemon=True)
+        writer.start()
+        writer.join(120)
+        assert not writer.is_alive(), "creator thread hung"
+        for t in threads:
+            t.join(120)
+            assert not t.is_alive(), "reader thread hung"
+
+        assert misses == [], f"readers saw a transient not-found: {misses}"
+        # Every created task landed, and the stable one is still there.
+        final = TaskManager(workdir)
+        assert final.get("stable") is not None
+        for n in range(creates):
+            assert final.get(f"new-{n}") is not None, f"lost created task new-{n}"
