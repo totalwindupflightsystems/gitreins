@@ -1244,9 +1244,25 @@ class TestJudgeAsyncPersistence:
         t2.join(10)
         assert not t1.is_alive() and not t2.is_alive()
 
-        assert results["a"]["status"] == "running"
-        assert results["b"]["status"] == "running"
-        assert results["a"]["job_id"] == results["b"]["job_id"]
+        # QA-GITR-003: a bare results[name]["status"] here hid the producer when
+        # the async-judge concurrency flake fired. The producer was a transient
+        # "Task not found" error dict from TaskManager.reload()'s non-atomic
+        # clear→load window (fixed in engine/task_manager.py) — an error payload
+        # has no "status" key. Name the payload so any future regression is
+        # diagnosable at a glance instead of a KeyError with no context.
+        for name in ("a", "b"):
+            if "error" in results[name]:
+                pytest.fail(f"caller {name} got error response: {results[name]!r}")
+            if results[name].get("status") != "running":
+                pytest.fail(f"caller {name} got non-running response: {results[name]!r}")
+
+        # Single-flight: a's stub sleeps 5s, so a's job is still running when b
+        # dispatches — b MUST reuse a's job. Two distinct job_ids here would
+        # mean a double dispatch, not a legitimate re-run.
+        assert results["a"]["job_id"] == results["b"]["job_id"], (
+            f"single-flight violated — caller a={results['a']['job_id']!r} "
+            f"caller b={results['b']['job_id']!r}"
+        )
 
         jobs = [j for j in list_jobs() if j["task_id"] == "conc-me"]
         assert len(jobs) == 1
