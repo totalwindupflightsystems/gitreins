@@ -2738,6 +2738,28 @@ def _cmd_judge_async(task_id: str) -> None:
         print(f"Task not found: {task_id}")
         sys.exit(1)
 
+    # DF-GITREINS-POC-78: refuse to dispatch when no LLM credential is
+    # resolvable — same semantics as `task complete` (cmd_task_complete). The
+    # old dispatcher spawned a worker that either hung or errored far away
+    # from the caller; a dispatch that cannot work should say so up front.
+    from engine.llm import LLMClient
+
+    _credential_probe = LLMClient()
+    if not _credential_probe.api_key:
+        print(
+            f"Cannot dispatch async evaluation for '{task_id}': no LLM credential is resolvable.",
+            file=sys.stderr,
+        )
+        print(
+            "Configure GITREINS_LLM_API_KEY (or a supported provider API key).",
+            file=sys.stderr,
+        )
+        print(
+            "You may also set GITREINS_LLM_BASE_URL and GITREINS_LLM_MODEL.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     existing = find_running_job(task_id, workdir)
     if existing is not None:
         print(f"Async job already running: {existing['id']}")

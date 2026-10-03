@@ -161,6 +161,15 @@ each config snapshot is `{model, provider, api_key_configured, api_key_prefix, b
 - Without LLM: `{"task": {...}, "note": "LLM not configured — skipping evaluation"}`
 - Task not found: `{"error": "Task not found: <id>"}`
 
+"Configured" means the credential LLMClient resolves RIGHT NOW (the main
+`GITREINS_LLM_API_KEY` or one of its provider fallback keys) — not merely that
+the env var existed at server start (DF-GITREINS-POC-78: a credential that was
+rotated away mid-session used to still dispatch jobs that never completed). A
+dispatched job whose key is REJECTED by the provider fails fast to
+`status: "error"` (poll `judge.status` for the message); it never sits in
+`running` forever, and every background job carries a 1h wall-clock ceiling so
+a hung network connect cannot stall it either.
+
 ### 5. `task.list` — list tasks, optionally filtered
 
 | Param | Type | Required | Description |

@@ -257,6 +257,34 @@ class LLMClient:
             f" ({self.describe()}) — last error: {last_error}"
         ) from last_error
 
+    def verify_probe(self) -> bool:
+        """One bounded real round trip that proves the credential is usable.
+
+        DF-GITREINS-POC-78: dispatch gates consulted only "is a key string
+        present", so a rotated/invalid credential dispatched background jobs
+        whose workers could hang or wander — the job record sat `running`
+        forever (dogfood 2026-10-02). This probe performs ONE real chat
+        request (no retries, no mock-response bypass — the point is the wire)
+        and answers ``True`` only when the provider accepted the request.
+
+        A ``False`` here is an USABLE-credential verdict: it names no key
+        material (describe() is credential-free) and is safe to surface to
+        tool callers. Never call this from a per-request hot path — it costs
+        one round trip; it exists for dispatch-time gating and preflight.
+        """
+        try:
+            self._chat_attempt(
+                [{"role": "user", "content": "ping"}],
+                tools=None,
+                temperature=0.0,
+                max_tokens=1,
+            )
+            return True
+        except Exception as e:
+            logger.warning("LLM verify probe failed (%s)", self.describe())
+            logger.debug("verify probe failure detail", exc_info=e)
+            return False
+
     def describe(self) -> str:
         """One-line, credential-free description of the resolved config.
 

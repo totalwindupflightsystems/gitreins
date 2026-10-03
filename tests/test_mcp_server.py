@@ -282,8 +282,16 @@ class TestTaskStartComplete:
         assert task["status"] == "in_progress"
 
     def test_task_complete_without_llm_key(self, mcp_server, tmp_workdir, monkeypatch):
-        """task.complete without LLM key returns note about LLM not configured."""
-        monkeypatch.delenv("GITREINS_LLM_API_KEY", raising=False)
+        """task.complete without LLM key returns note about LLM not configured.
+
+        DF-GITREINS-POC-78: the gate consults LLMClient's FULL credential
+        resolution (provider fallback chain included), so every key the chain
+        would pick up must be cleared — the old env-var-only gate let a host's
+        NEURALWATT_API_KEY (etc.) leak into "configured"."""
+        for key in TestTaskCompleteDispatchGate._PROVIDER_KEYS:
+            monkeypatch.delenv(key, raising=False)
+        mcp_server.llm.api_key = ""
+        mcp_server.llm.api_key_source = "none"
         # Create and start
         mcp_server.handle_request(
             {
@@ -1017,8 +1025,18 @@ class TestJudgeAsyncMCP:
         assert status["task_id"] == "tc-job"
 
     def test_task_complete_no_llm_key_skips_evaluation(self, mcp_server, monkeypatch):
-        """task.complete without LLM key returns task + note and no job_id."""
-        monkeypatch.delenv("GITREINS_LLM_API_KEY", raising=False)
+        """task.complete without LLM key returns task + note and no job_id.
+
+        DF-GITREINS-POC-78: the gate consults LLMClient's FULL credential
+        resolution — the provider fallback chain included — so the test clears
+        every key the chain would pick up (the old gate read only the main env
+        var, which diverged from what the client would use)."""
+        from tests.test_mcp_server import TestTaskCompleteDispatchGate
+
+        for key in TestTaskCompleteDispatchGate._PROVIDER_KEYS:
+            monkeypatch.delenv(key, raising=False)
+        mcp_server.llm.api_key = ""
+        mcp_server.llm.api_key_source = "none"
         self._create_task(mcp_server, "tc-skip")
 
         result = self._call(mcp_server, "task.complete", {"id": "tc-skip"})
@@ -3058,3 +3076,94 @@ class TestTaskReadsSeeTheLiveStore:
         listed = _mcp_call(mcp_server, "task.list", {})["tasks"]
 
         assert [t["id"] for t in listed] == ["from-the-cli"]
+
+
+# ── DF-GITREINS-POC-78: task.complete dispatch gate + terminal-error jobs ───
+
+
+class TestTaskCompleteDispatchGate(TestJudgeAsyncMCP):
+    """The dispatch gate must consult the SAME credential resolution LLMClient
+    uses, and a credential that LOOKS usable but fails on the wire must never
+    leave a forever-`running` job behind (dogfood 2026-10-02: a job with an
+    invalid key sat `running` for 38h, pid=server-pid, never terminal)."""
+
+    _PROVIDER_KEYS = (
+        "GITREINS_LLM_API_KEY",
+        "NEURALWATT_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "KIMI_API_KEY",
+        "GROQ_API_KEY",
+        "OPENROUTER_API_KEY",
+    )
+
+    def test_task_complete_no_resolvable_credential_skips_dispatch(self, mcp_server, monkeypatch):
+        """A credential that vanished AFTER server construction (rotated away,
+        or supplied only via a fallback provider var at boot) must be judged by
+        the client's OWN current resolution, not the raw GITREINS_LLM_API_KEY
+        env var the old gate read. No credential → docs note, NO job record."""
+        for key in self._PROVIDER_KEYS:
+            monkeypatch.delenv(key, raising=False)
+        mcp_server.llm.api_key = ""
+        mcp_server.llm.api_key_source = "none"
+        _stub_judge_evaluate(monkeypatch, sleep=5.0)  # would block if dispatched
+        self._create_task(mcp_server, "tc-gate-none")
+
+        result = self._call(mcp_server, "task.complete", {"id": "tc-gate-none"})
+        assert result["task"]["status"] == "complete"
+        assert "job_id" not in result
+        assert "LLM not configured" in result["note"]
+        from engine.job_store import list_jobs
+
+        assert list_jobs() == [], "no job may be dispatched without a credential"
+
+    def test_task_complete_invalid_key_reaches_error_terminal_state(self, mcp_server, monkeypatch):
+        """A present-but-unusable key must fail FAST and TERMINAL: the job
+        reaches `error` with a clear message — never an indefinite `running`."""
+        from engine.job_store import load_job
+        from gitreins_mcp.server import GITREINS_SKIP_LLM_PROBE_ENV
+
+        monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-invalid-for-test")
+        monkeypatch.setattr(mcp_server.llm, "api_key", "sk-invalid-for-test")
+        # Keep the probe hermetic: a dead port refused immediately proves the
+        # unusable branch without any real HTTP. The autouse fixture skips the
+        # worker probe for hermetic tests — this test verifies the probe
+        # itself, so it opts back IN by deleting the skip variable.
+        monkeypatch.delenv(GITREINS_SKIP_LLM_PROBE_ENV, raising=False)
+        monkeypatch.setattr(mcp_server.llm, "base_url", "http://127.0.0.1:9/v1")
+        _stub_judge_evaluate(monkeypatch, sleep=5.0)  # must NEVER run
+
+        self._create_task(mcp_server, "tc-gate-bad")
+        result = self._call(mcp_server, "task.complete", {"id": "tc-gate-bad"})
+        assert "job_id" in result, "a non-empty key still dispatches — but terminally"
+
+        status = self._poll_status(mcp_server, result["job_id"], deadline=15.0)
+        assert status["status"] == "error"
+        assert status["error"], "the error must carry a message"
+
+        disk = load_job(result["job_id"])
+        assert disk["status"] == "error"
+        assert disk["running"] is False
+
+    def test_invalid_key_job_stays_terminal_across_restart_poll(self, mcp_server, monkeypatch):
+        """The stuck dogfood job survived polls forever because pid=server-pid
+        looked alive. A terminal error record must stay terminal when a FRESH
+        server instance (restart) polls it — no resume of an error record."""
+        from gitreins_mcp.server import GITREINS_SKIP_LLM_PROBE_ENV
+
+        monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-invalid-for-test")
+        monkeypatch.setattr(mcp_server.llm, "api_key", "sk-invalid-for-test")
+        monkeypatch.delenv(GITREINS_SKIP_LLM_PROBE_ENV, raising=False)
+        monkeypatch.setattr(mcp_server.llm, "base_url", "http://127.0.0.1:9/v1")
+        _stub_judge_evaluate(monkeypatch, sleep=5.0)
+
+        self._create_task(mcp_server, "tc-gate-restart")
+        result = self._call(mcp_server, "task.complete", {"id": "tc-gate-restart"})
+        job_id = result["job_id"]
+        status = self._poll_status(mcp_server, job_id, deadline=15.0)
+        assert status["status"] == "error"
+
+        fresh = GitReinsMCPServer(mcp_server.workdir)
+        again = self._call(fresh, "judge.status", {"job_id": job_id})
+        assert again["status"] == "error", "a terminal record must never be resumed"

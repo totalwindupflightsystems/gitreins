@@ -303,7 +303,7 @@ gitreins judge rorca-run-42-US-001 --ephemeral --title "Story gate" --criterion 
 | `--title <title>` | Ephemeral task title (required with `--ephemeral`) |
 | `--criterion <text>` | Ephemeral criterion — repeatable, one flag per criterion (required with `--ephemeral`) |
 | `--persist-verdict` | With `--ephemeral`: also write the merge-gate verdict document `.gitreins/verdicts/verdict.json` in the graded tree, so a judge-gated `worktree merge` can find it. Still no history entry, task store or branch commit (DF-GITREINS-POC-48) |
-| `--async` | Dispatch evaluation as a detached background job; returns a job ID |
+| `--async` | Dispatch evaluation as a detached background job; returns a job ID. Refuses with exit 1 when no LLM credential is resolvable — no worker is spawned and no job record is created (DF-GITREINS-POC-78) |
 | `--status <job_id>` | Show status/result of a background job (id = job id, not task id) |
 | `--scope staged\|working-tree` | Change set the Tier 1 guards grade — same semantics as `gitreins guard --scope` (default `staged`) |
 | `--json` | Emit one bounded, redacted [evidence v1](evidence-contract-v1.md) JSON document on stdout: the subject (task id/title/ephemeral), one check per Tier 2 criterion plus the Tier 1 stage evidence, and `metadata.historyPersisted` |
