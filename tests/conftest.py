@@ -181,6 +181,20 @@ def isolated_job_store(tmp_path, monkeypatch):
     return d
 
 
+@pytest.fixture(autouse=True)
+def skip_worker_llm_probe(monkeypatch):
+    """Skip the MCP worker's real-wire credential probe in tests.
+
+    DF-GITREINS-POC-78: the probe in ``_run_job`` proves the credential on the
+    REAL wire; hermetic tests (stubbed evaluate_task, no key, no endpoint)
+    would all turn red against it without proving anything. Tests that verify
+    the probe itself delete this env var and supply their own dead endpoint.
+    """
+    from gitreins_mcp.server import GITREINS_SKIP_LLM_PROBE_ENV
+
+    monkeypatch.setenv(GITREINS_SKIP_LLM_PROBE_ENV, "1")
+
+
 @pytest.fixture
 def task_manager(tmp_workdir):
     """Create a TaskManager with a clean temp directory."""

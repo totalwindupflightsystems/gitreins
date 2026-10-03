@@ -2202,6 +2202,55 @@ class TestJudgeAsyncCLI:
         assert job["pid"] == 424242
         assert job["status"] == "running"
 
+    def test_async_no_credential_refuses_without_dispatch(self, tmp_workdir, capsys, monkeypatch):
+        """DF-GITREINS-POC-78: `judge --async` with NO resolvable LLM credential
+        refuses with a clear message and non-zero exit — no worker spawned, no
+        job record left `running` (the MCP task.complete docs contract applies
+        to the CLI async surface too)."""
+        import subprocess as _subprocess
+
+        from engine.job_store import list_jobs
+        from gitreins import cli as cli_mod
+
+        run_cli("task", "create", "nocred-cli", "No cred", "c1", cwd=tmp_workdir)
+        spawned: list = []
+        real_popen = _subprocess.Popen
+
+        def _no_popen(cmd, *args, **kwargs):
+            # Spy ONLY the worker spawn (--run-job); let git rev-parse
+            # inside get_workdir() run for real.
+            if "--run-job" in cmd:
+                spawned.append(cmd)
+                raise AssertionError(f"no worker may be spawned, got: {cmd}")
+            return real_popen(cmd, *args, **kwargs)
+
+        for key in (
+            "GITREINS_LLM_API_KEY",
+            "NEURALWATT_API_KEY",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "KIMI_API_KEY",
+            "GROQ_API_KEY",
+            "OPENROUTER_API_KEY",
+        ):
+            monkeypatch.delenv(key, raising=False)
+
+        monkeypatch.setattr(_subprocess, "Popen", _no_popen)
+        monkeypatch.chdir(tmp_workdir)
+
+        with pytest.raises(SystemExit) as excinfo:
+            cli_mod._cmd_judge_async("nocred-cli")
+        assert excinfo.value.code != 0
+
+        out = capsys.readouterr()
+        combined = out.out + out.err
+        assert "LLM" in combined and (
+            "credential" in combined.lower() or "not configured" in combined.lower()
+        )
+        assert spawned == [], "no worker process may be spawned"
+        assert list_jobs() == [], "no job record may be created"
+
 
 class TestRunCliParity:
     """GR-139: the in-process runner must behave like the real-exec runner.

@@ -1,0 +1,16 @@
+{
+  "wave_id": "gitreins-foreman-2026-10-03-17-16-52",
+  "task_id": "DF-GITREINS-POC-77",
+  "worker": "serial-background",
+  "worktree": "shared (main tree, MCP-only change to gitreins_mcp/server.py + tests/test_mcp_init.py)",
+  "branch": "main",
+  "WAVE_BUDGET": 1,
+  "finished_at": "2026-10-03T18:40:00-05:00",
+  "result": {
+    "task": "DF-GITREINS-POC-77",
+    "commit": "053956a",
+    "closeout_push": "e8dede3",
+    "status": "complete"
+  },
+  "created_at": "2026-10-03T17:20Z"
+}

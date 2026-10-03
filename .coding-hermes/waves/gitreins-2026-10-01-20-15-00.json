@@ -1,0 +1,9 @@
+{
+  "tick": "gitreins-2026-10-01-20-15-00",
+  "budget": 3,
+  "tasks": [
+    {"id": "REVIEW-GITREINS-025", "goal": "add `gitreins task get <id>` CLI subcommand", "worktree": "wt/rgi-025"},
+    {"id": "DOC-8", "goal": "document GITREINS_MAX_INPUT/OUTPUT_TOKENS env vars", "worktree": "wt/doc8"},
+    {"id": "DF-GITREINS-POC-60", "goal": "doc note on qa-ledger project identity rename fork", "worktree": "wt/df60"}
+  ]
+}

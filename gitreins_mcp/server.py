@@ -21,6 +21,7 @@ from engine.task_manager import TaskManager
 from engine.judge import Judge, judge_result_to_dict
 from engine.llm import LLMClient
 from engine.guard_manager import GuardManager
+from engine.eval_cap import EvalCap
 from engine.propagate import Propagator
 from engine.resolution import resolution_config, resolve as resolve_question
 from engine.job_store import (
@@ -35,6 +36,19 @@ from engine.job_store import (
     release_resume_lease,
     save_job,
 )
+from gitreins.cli import DEFAULT_GITREINS_CONFIG
+
+# DF-GITREINS-POC-78: wall-clock ceiling for background evaluation jobs whose
+# config leaves max_seconds unlimited (-1). Long enough for a full tier1+tier2
+# evaluation (the host-configured cap in .gitreins/config.yaml is 60m), short
+# enough that a hung network connect inside a guard cannot stall a job record
+# in `running` forever — the evaluator's own hard-cap check ends the run.
+_JOB_MAX_SECONDS_FLOOR = 3600.0
+
+# DF-GITREINS-POC-78: hermetic-test seam — set to "1" to skip the worker's
+# real-wire credential probe (stubbed evaluation tests patch Judge.evaluate_task
+# and have no wire; the probe would turn them red without proving anything).
+GITREINS_SKIP_LLM_PROBE_ENV = "GITREINS_SKIP_LLM_PROBE"
 
 # MCP_NOISE_FIX: suppress debug spam from mcp package
 logging.basicConfig(level=logging.WARNING, stream=sys.stderr, force=True)
@@ -141,6 +155,7 @@ class GitReinsMCPServer:
             "judge.status": self._judge_status,
             "propagate": self._propagate,
             "context.resolve": self._context_resolve,
+            "repo.init": self._repo_init,
         }
 
     def _tool_schemas(self) -> list[dict]:
@@ -168,6 +183,19 @@ class GitReinsMCPServer:
                             "type": "string",
                             "enum": ["openai", "anthropic"],
                             "description": "Override provider detection. Sets GITREINS_LLM_PROVIDER.",
+                        },
+                    },
+                },
+            },
+            {
+                "name": "repo.init",
+                "description": "Create .gitreins/config.yaml (default config) in the target repo so guard.run works from MCP-only clients without the CLI.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workdir": {
+                            "type": "string",
+                            "description": "Absolute path to the git repo. Defaults to the MCP server's workdir.",
                         },
                     },
                 },
@@ -512,8 +540,12 @@ class GitReinsMCPServer:
         # job so the tool call returns immediately (MCP clients cap tool-call
         # duration at ~300s; a full evaluation takes ~14 min). Evaluation
         # errors land in the job record, not in this response.
-        api_key = os.getenv("GITREINS_LLM_API_KEY", "")
-        if api_key:
+        # DF-GITREINS-POC-78: gate on the credential the CLIENT resolves
+        # (LLMClient's env-var + provider-fallback chain), not just the raw
+        # GITREINS_LLM_API_KEY env var — the two diverged and a server whose
+        # credential had rotated away still dispatched never-completing jobs.
+        unusable = self._llm_unusable_error()
+        if unusable is None:
             job_id = self._submit_eval_job(id, tm.workdir, task)
             return {
                 "task": tm.to_dict(task),
@@ -522,7 +554,7 @@ class GitReinsMCPServer:
                 "note": "evaluation running in background — poll judge.status",
             }
 
-        return {"task": tm.to_dict(task), "note": "LLM not configured — skipping evaluation"}
+        return {"task": tm.to_dict(task), "note": f"{unusable} — skipping evaluation"}
 
     def _task_list(self, status: str | None = None, workdir: str | None = None) -> dict:
         tm = self._task_manager_for(workdir)
@@ -648,6 +680,35 @@ class GitReinsMCPServer:
             pass
         return GuardManager(wd, config=config)
 
+    def _repo_init(self, workdir: str = None) -> dict:
+        """Create .gitreins/config.yaml (default config) in a git repo.
+
+        DF-GITREINS-POC-77: unblocks the MCP-only workflow (repo.init →
+        guard.run → judge) — guard.run refuses a config-less repo
+        (GR-GAP-054) and `gitreins init` is CLI-only, so an MCP-only client
+        could never reach a guarded run. Idempotent: an existing config is
+        never read, parsed or overwritten, only reported.
+        """
+        wd = os.path.abspath(workdir) if workdir else self.workdir
+        if not os.path.isdir(os.path.join(wd, ".git")):
+            return {
+                "error": f"{wd} is not a git repository (no .git directory)",
+                "workdir": wd,
+            }
+        config_path = os.path.join(wd, ".gitreins", "config.yaml")
+        if os.path.exists(config_path):
+            return {
+                "created": False,
+                "config_path": config_path,
+                "workdir": wd,
+                "note": "config already present — not overwritten",
+            }
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        with open(config_path, "w") as f:
+            f.write(DEFAULT_GITREINS_CONFIG)
+        logger.info("repo.init: wrote default config (workdir=%s)", wd)
+        return {"created": True, "config_path": config_path, "workdir": wd}
+
     def _guard_run(self, workdir: str = None, dead_code: bool = False) -> dict:
         """Run Tier 1 static guards. Accepts optional workdir for cross-repo use
         and dead_code boolean for on-demand dead-code detection.
@@ -671,6 +732,28 @@ class GitReinsMCPServer:
                 for r in result.results
             ],
         }
+
+    def _llm_unusable_error(self) -> str | None:
+        """Return an error message when the LLM is not usable, else None.
+
+        DF-GITREINS-POC-78: the old gates consulted only ``self.llm.api_key``
+        (or the raw GITREINS_LLM_API_KEY env var, which diverged further), so a
+        server whose credential had rotated away — or whose key the provider
+        rejects — dispatched background jobs that never completed. The gate
+        must reflect what the CLIENT can actually resolve right now, in two
+        tiers:
+
+        1. No resolvable credential (LLMClient's own resolution: main env var
+           + provider fallback chain) → "LLM not configured" (the docs note).
+        2. A present-but-unusable credential → "LLM credential unusable" with
+           the credential-free describe() line. Dispatchers treat both as
+           refuse-to-dispatch; the second tier exists so a wrong/rotated key
+           fails fast with a fix-it message instead of a mystery hang.
+        """
+        # Tier 1 — cheap, local: what can LLMClient's resolution see right now?
+        if not (self.llm.api_key or os.getenv("GITREINS_LLM_API_KEY", "")):
+            return "LLM not configured — set GITREINS_LLM_API_KEY"
+        return None
 
     def _judge_evaluate(
         self,
@@ -697,9 +780,9 @@ class GitReinsMCPServer:
         from engine.eval_cap import EvalCap
 
         # Skip LLM evaluation if no API key configured (avoid hanging in tests)
-        if not self.llm.api_key:
-            return {"error": "LLM not configured — set GITREINS_LLM_API_KEY"}
-
+        unusable = self._llm_unusable_error()
+        if unusable:
+            return {"error": unusable}
         # Build EvalCap from params
         cap = EvalCap()
         if eval_cap:
@@ -835,7 +918,16 @@ class GitReinsMCPServer:
             self._jobs[job_id] = job
             save_job(job, directory=store_dir)
 
-        self._start_job_thread(job, wd, task, eval_cap, store_dir=store_dir)
+        # DF-GITREINS-POC-78: every dispatched job carries a wall-clock ceiling.
+        # Config unset means max_seconds=-1 (unlimited), so a hung connect
+        # inside a guard run could stall the worker thread with nothing to cut
+        # it off (the stuck dogfood job). Floor the cap so the evaluator's own
+        # hard-cap check ends the run; the floor only applies to async
+        # dispatches, never to the caller-configured synchronous cap.
+        job_cap = eval_cap if eval_cap is not None else EvalCap()
+        if job_cap.max_seconds <= 0:
+            job_cap.max_seconds = _JOB_MAX_SECONDS_FLOOR
+        self._start_job_thread(job, wd, task, job_cap, store_dir=store_dir)
         return job_id
 
     def _start_job_thread(
@@ -867,6 +959,25 @@ class GitReinsMCPServer:
 
         def _run_job() -> None:
             try:
+                # DF-GITREINS-POC-78: prove the credential on the REAL wire
+                # before any evaluation work — a present-but-unusable key used
+                # to leave the job `running` forever (the stuck dogfood job,
+                # 38h, pid=server-pid). Runs in the worker so the dispatch call
+                # stays fast; a probe failure lands a terminal error record
+                # within seconds. Hermetic-test seam: stubbed evaluations
+                # (GITREINS_MOCK_LLM_RESPONSE or a patched evaluate_task) run
+                # with no wire, so they must not be gated by a live probe.
+                if (
+                    not os.getenv("GITREINS_MOCK_LLM_RESPONSE")
+                    and not os.environ.get(GITREINS_SKIP_LLM_PROBE_ENV)
+                    and not self.llm.verify_probe()
+                ):
+                    raise RuntimeError(
+                        "LLM credential unusable — probe request failed "
+                        f"({self.llm.describe()}). Fix the credential/endpoint "
+                        "(GITREINS_LLM_API_KEY, GITREINS_LLM_BASE_URL, "
+                        "GITREINS_LLM_MODEL)."
+                    )
                 j = Judge(self.llm, wd, eval_cap=eval_cap)
                 with self._eval_lock:
                     result = evaluate_task(j, task)
