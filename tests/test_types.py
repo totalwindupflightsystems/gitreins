@@ -8,6 +8,7 @@ from engine.types import (
     SCANNER_CLEAN,
     SCANNER_CONFIG_ERROR,
     SCANNER_NOT_RUN,
+    SCANNER_NOT_RUN_SCOPE,
     GuardResult,
     Tier1Result,
     first_failing_test_detail,
@@ -383,6 +384,20 @@ class TestSecretsScannerAttribution:
         assert render_secrets_scanners(scanners) == (
             "clean (builtin cross-check; gitleaks not on PATH)"
         )
+
+    def test_scope_skip_is_named_with_its_own_reason(self):
+        """REVIEW-GITREINS-026: a scope-skip is not a missing binary.
+
+        The working-tree scope skips gitleaks deliberately, so its status must
+        read differently from the absent-binary status — otherwise an operator
+        with gitleaks installed hunts a nonexistent missing install.
+        """
+        scanners = (("gitleaks", SCANNER_NOT_RUN_SCOPE), ("builtin", SCANNER_CLEAN))
+
+        rendered = render_secrets_scanners(scanners)
+
+        assert rendered == ("clean (builtin cross-check; gitleaks not run (working-tree scope))")
+        assert "not on PATH" not in rendered
 
     def test_poc54_config_error_never_renders_as_a_finding(self):
         """A scanner that failed to LOAD its config did no scanning (POC-54)."""

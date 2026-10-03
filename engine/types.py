@@ -92,11 +92,13 @@ class GuardResult:
     skip_reason: str = ""
 
     # TRUST-003: which secrets scanners ran and what each found, as
-    # ``(scanner_id, status)`` pairs — status is ``clean``, ``not on PATH`` or
-    # ``N finding(s)``. The console line and the run log name the scanners
-    # instead of printing an unattributed "clean"/"fail" (POC-15 cost a
-    # diagnosis cycle to that ambiguity). Empty for guards that have no
-    # scanner concept, and the summary then falls back to the old wording.
+    # ``(scanner_id, status)`` pairs — status is ``clean``, ``not on PATH``
+    # (not installed), ``not run (working-tree scope)`` (skipped for the scope,
+    # REVIEW-GITREINS-026) or ``N finding(s)``. The console line and the run log
+    # name the scanners instead of printing an unattributed "clean"/"fail"
+    # (POC-15 cost a diagnosis cycle to that ambiguity). Empty for guards that
+    # have no scanner concept, and the summary then falls back to the old
+    # wording.
     scanners: tuple[tuple[str, str], ...] = ()
 
     # DF-GITREINS-POC-55: the nice(1) prefix this lane's external scanner was
@@ -380,6 +382,17 @@ def pytest_outcome(exit_code: int | None, output: str) -> dict:
 # console line AND recorded in the run log.
 SCANNER_CLEAN = "clean"
 SCANNER_NOT_RUN = "not on PATH"
+# REVIEW-GITREINS-026: the working-tree scope deliberately SKIPS gitleaks —
+# `protect --staged` grades the index only, so it cannot see the
+# unstaged/untracked files that scope exists to grade. That skip used to be
+# tagged SCANNER_NOT_RUN, the SAME string as the genuine missing-binary case,
+# so an operator on a box where gitleaks IS installed read "gitleaks not on
+# PATH" and went hunting a missing install. Scope-skips get their own status.
+SCANNER_NOT_RUN_SCOPE = "not run (working-tree scope)"
+# Every per-scanner status that means "produced no verdict": not installed, or
+# skipped for the selected scope. The renderer treats them alike — never a
+# failure, always named on the console line.
+SCANNER_NOT_RUN_STATUSES = (SCANNER_NOT_RUN, SCANNER_NOT_RUN_SCOPE)
 # DF-GITREINS-POC-54: a scanner that died BEFORE scanning. gitleaks exits 2 with
 # a Go panic when an ``[allowlist] paths`` entry is not a compilable regexp —
 # the pre-DF-001 globs ('*.log', '*.egg-info/') that older `gitreins init`
@@ -415,8 +428,11 @@ def render_secrets_scanners(scanners: tuple[tuple[str, str], ...]) -> str:
 
     All clean: ``clean (gitleaks + builtin cross-check)``.
     Anything found: ``FAIL (builtin cross-check: 2 findings; gitleaks: clean)``
-    — the offending scanner(s) first, with counts, then the rest. An absent
-    gitleaks is named rather than silently implied.
+    — the offending scanner(s) first, with counts, then the rest. A scanner
+    that produced no verdict is named rather than silently implied, with its
+    own reason: ``gitleaks not on PATH`` (not installed) or
+    ``gitleaks not run (working-tree scope)`` (skipped for the scope,
+    REVIEW-GITREINS-026).
 
     DF-GITREINS-POC-54: a scanner whose CONFIG failed to compile did no scanning
     at all, so it must never render as ``FAIL (... findings)``. Its status is
@@ -433,19 +449,21 @@ def render_secrets_scanners(scanners: tuple[tuple[str, str], ...]) -> str:
             f"{name}: {status}"
             for name, status in labelled
             if not status.startswith(SCANNER_CONFIG_ERROR)
-            and status not in (SCANNER_CLEAN, SCANNER_NOT_RUN)
+            and status not in (SCANNER_CLEAN, *SCANNER_NOT_RUN_STATUSES)
         ]
         head = "; ".join(config_errors)
         return head if not others else f"{head}; " + "; ".join(others)
-    failing = [pair for pair in labelled if pair[1] not in (SCANNER_CLEAN, SCANNER_NOT_RUN)]
+    failing = [
+        pair for pair in labelled if pair[1] not in (SCANNER_CLEAN, *SCANNER_NOT_RUN_STATUSES)
+    ]
     if failing:
         ordered = failing + [pair for pair in labelled if pair not in failing]
         return "FAIL (" + "; ".join(f"{name}: {status}" for name, status in ordered) + ")"
     ran_clean = [name for name, status in labelled if status == SCANNER_CLEAN]
-    absent = [name for name, status in labelled if status == SCANNER_NOT_RUN]
+    absent = [(name, status) for name, status in labelled if status in SCANNER_NOT_RUN_STATUSES]
     detail = " + ".join(ran_clean) if ran_clean else "no scanner ran"
     if absent:
-        return f"clean ({detail}; {', '.join(absent)} {SCANNER_NOT_RUN})"
+        return f"clean ({detail}; {', '.join(f'{name} {status}' for name, status in absent)})"
     return f"clean ({detail})"
 
 
