@@ -1,7 +1,7 @@
 # GitReins MCP API Reference
 
 The GitReins MCP server (`gitreins mcp-server`, source `gitreins_mcp/server.py`) exposes a
-**13-tool** surface over JSON-RPC 2.0 on stdio. This reference documents every tool with its
+**14-tool** surface over JSON-RPC 2.0 on stdio. This reference documents every tool with its
 input schema, return shapes, the async judge-job lifecycle, and the error taxonomy.
 
 For the full wire-protocol specification (transport framing, lifecycle, security model) see
@@ -43,7 +43,7 @@ For the full wire-protocol specification (transport framing, lifecycle, security
   the newest revision it implements, not the one a given client negotiated. Shown
   indented (raw output, not an invocation):
 
-      gitreins MCP server <version> — stdio, protocol 2025-11-25 (negotiated per client request), 13 tools, workdir=/path/to/repo
+      gitreins MCP server <version> — stdio, protocol 2025-11-25 (negotiated per client request), 14 tools, workdir=/path/to/repo
       gitreins MCP server <version> — stdin closed (EOF), exiting 0
 
   `<version>` is the installed release, so a client log is self-identifying without
@@ -51,7 +51,7 @@ For the full wire-protocol specification (transport framing, lifecycle, security
   nothing back can tell "still starting" from "died before reading stdin" by reading
   its server log. Ask the version without opening the transport with
   `python -m gitreins_mcp.server --version`.
-- **Capability discovery:** `tools/list` returns the 13 schemas below. Tool names use
+- **Capability discovery:** `tools/list` returns the 14 schemas below. Tool names use
   dotted notation (`task.create`, `guard.run`, `judge.evaluate`).
 
 ## Client Quick Start (raw JSON-RPC, no MCP SDK)
@@ -205,6 +205,10 @@ Blocked by guard failure: `{"error": "Tier 1 guards failed — commit blocked", 
 
 ### 9. `guard.run` — run Tier 1 static guards
 
+**Prerequisite:** the target repo needs a `.gitreins/config.yaml`. MCP-only clients create
+one with `repo.init` (tool 10) — no CLI required; that tool removes the former
+"run `gitreins init` first" CLI prerequisite entirely.
+
 | Param | Type | Required | Description |
 |-------|------|----------|-------------|
 | `workdir` | string | no | Repo to guard (cross-repo supported) |
@@ -213,7 +217,29 @@ Blocked by guard failure: `{"error": "Tier 1 guards failed — commit blocked", 
 **Returns:** `{"passed": bool, "workdir": "...", "results": [{"name", "passed", "output"}]}`
 (output truncated to 500 chars per guard).
 
-### 10. `judge.evaluate` — run the full evaluation pipeline (Tier 1 + Tier 2)
+**Errors:** `{"error": "no .gitreins/config.yaml in <workdir> — run `gitreins init` first. ..."}` —
+never a false green: a config-less repo refuses instead of running guards on built-in
+defaults (GR-GAP-054).
+
+### 10. `repo.init` — create the default guard config (MCP-only init)
+
+Writes the same default `.gitreins/config.yaml` the CLI's `gitreins init` writes, so the
+workflow **repo.init → guard.run → judge** works entirely over MCP (DF-GITREINS-POC-77).
+Read-only elsewhere: it never touches tracked files, and an existing config is never
+parsed or overwritten.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `workdir` | string | no | Git repo to initialize. Defaults to the MCP server's workdir |
+
+**Returns:**
+- Created: `{"created": true, "config_path": "<wd>/.gitreins/config.yaml", "workdir": "..."}`
+- Idempotent: `{"created": false, "config_path": "...", "workdir": "...", "note": "config already present — not overwritten"}`
+- Error: `{"error": "<wd> is not a git repository (no .git directory)", "workdir": "..."}` —
+  the tool writes NOTHING when the target is not a git repo (no `.gitreins/` directory is
+  created).
+
+### 11. `judge.evaluate` — run the full evaluation pipeline (Tier 1 + Tier 2)
 
 **Async by default.** With `wait=false` (default) the evaluation is dispatched to a background
 job and the call returns immediately; poll `judge.status` with the returned `job_id`. Pass
@@ -246,7 +272,7 @@ producing `job_id` (`null` for the sync path) and a `source` marker (`"mcp"` for
 respects `history.enabled` (nothing is written when history is switched off) and is non-fatal: a
 persistence failure is logged, never raised, and never changes the job's terminal state.
 
-### 11. `judge.status` — poll a background evaluation job
+### 12. `judge.status` — poll a background evaluation job
 
 | Param | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -292,7 +318,7 @@ payload also carries `pid` and `started_at`).
 `GITREINS_JOB_DIR`). They survive MCP server restarts; a `running` job whose process died is
 auto-resumed on the next poll. CLI `gitreins judge <id> --async` dispatches are visible here.
 
-### 12. `propagate` — propagate guard config to sibling repos
+### 13. `propagate` — propagate guard config to sibling repos
 
 | Param | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -301,7 +327,7 @@ auto-resumed on the next poll. CLI `gitreins judge <id> --async` dispatches are 
 
 **Returns:** `{"source": "...", "results": [...]}`.
 
-### 13. `context.resolve` — resolve a question against the repo's code (Jev resolution gate)
+### 14. `context.resolve` — resolve a question against the repo's code (Jev resolution gate)
 
 Asks the Jev resolution gate (JEVRES-001, `engine/resolution.py`) whether the code
 already answers a question. The gate traces the question to seed files with Hilo,

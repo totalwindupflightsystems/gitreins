@@ -97,8 +97,8 @@ class TestInitializeHandshake:
 class TestToolsList:
     """Test tools/list — step-2-1-1-2."""
 
-    def test_tools_list_returns_thirteen_tools(self, mcp_server):
-        """tools/list returns exactly 13 tool schemas (12 + context.resolve)."""
+    def test_tools_list_returns_fourteen_tools(self, mcp_server):
+        """tools/list returns exactly 14 tool schemas (12 + context.resolve + repo.init)."""
         response = mcp_server.handle_request(
             {
                 "jsonrpc": "2.0",
@@ -108,7 +108,7 @@ class TestToolsList:
         )
         assert response is not None
         tools = response["result"]["tools"]
-        assert len(tools) == 13
+        assert len(tools) == 14
 
     def test_all_expected_tool_names_present(self, mcp_server):
         """All expected tool names: task.create, task.start, task.complete,
@@ -1929,10 +1929,11 @@ class TestMCPStdioIntegration:
             },
         )
         tools = resp["result"]["tools"]
-        assert len(tools) == 13
+        assert len(tools) == 14
         names = [t["name"] for t in tools]
         expected = [
             "configure",
+            "repo.init",
             "task.create",
             "task.start",
             "task.complete",
@@ -2074,7 +2075,7 @@ class TestMCPStdioIntegration:
         mcp_proc.stdin.flush()
         resp = self._read_response(mcp_proc)
         assert resp["id"] == 1
-        assert len(resp["result"]["tools"]) == 13
+        assert len(resp["result"]["tools"]) == 14
 
     def test_missing_jsonrpc_field(self, mcp_proc):
         """Missing jsonrpc field → invalid request error (-32600)."""

@@ -520,7 +520,7 @@ On startup the server writes one acknowledgement line to **stderr** (stdout is
 protocol-pure), naming its identity and the workdir it resolved — raw output,
 not an invocation:
 
-    gitreins MCP server <version> — stdio, protocol 2025-11-25 (negotiated per client request), 13 tools, workdir=/path/to/repo
+    gitreins MCP server <version> — stdio, protocol 2025-11-25 (negotiated per client request), 14 tools, workdir=/path/to/repo
 
 The protocol named there is the newest revision the server implements — the same
 one it answers with when a client asks for a revision it does not implement.

@@ -35,6 +35,7 @@ from engine.job_store import (
     release_resume_lease,
     save_job,
 )
+from gitreins.cli import DEFAULT_GITREINS_CONFIG
 
 # MCP_NOISE_FIX: suppress debug spam from mcp package
 logging.basicConfig(level=logging.WARNING, stream=sys.stderr, force=True)
@@ -141,6 +142,7 @@ class GitReinsMCPServer:
             "judge.status": self._judge_status,
             "propagate": self._propagate,
             "context.resolve": self._context_resolve,
+            "repo.init": self._repo_init,
         }
 
     def _tool_schemas(self) -> list[dict]:
@@ -168,6 +170,19 @@ class GitReinsMCPServer:
                             "type": "string",
                             "enum": ["openai", "anthropic"],
                             "description": "Override provider detection. Sets GITREINS_LLM_PROVIDER.",
+                        },
+                    },
+                },
+            },
+            {
+                "name": "repo.init",
+                "description": "Create .gitreins/config.yaml (default config) in the target repo so guard.run works from MCP-only clients without the CLI.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workdir": {
+                            "type": "string",
+                            "description": "Absolute path to the git repo. Defaults to the MCP server's workdir.",
                         },
                     },
                 },
@@ -647,6 +662,35 @@ class GitReinsMCPServer:
         except Exception:
             pass
         return GuardManager(wd, config=config)
+
+    def _repo_init(self, workdir: str = None) -> dict:
+        """Create .gitreins/config.yaml (default config) in a git repo.
+
+        DF-GITREINS-POC-77: unblocks the MCP-only workflow (repo.init →
+        guard.run → judge) — guard.run refuses a config-less repo
+        (GR-GAP-054) and `gitreins init` is CLI-only, so an MCP-only client
+        could never reach a guarded run. Idempotent: an existing config is
+        never read, parsed or overwritten, only reported.
+        """
+        wd = os.path.abspath(workdir) if workdir else self.workdir
+        if not os.path.isdir(os.path.join(wd, ".git")):
+            return {
+                "error": f"{wd} is not a git repository (no .git directory)",
+                "workdir": wd,
+            }
+        config_path = os.path.join(wd, ".gitreins", "config.yaml")
+        if os.path.exists(config_path):
+            return {
+                "created": False,
+                "config_path": config_path,
+                "workdir": wd,
+                "note": "config already present — not overwritten",
+            }
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        with open(config_path, "w") as f:
+            f.write(DEFAULT_GITREINS_CONFIG)
+        logger.info("repo.init: wrote default config (workdir=%s)", wd)
+        return {"created": True, "config_path": config_path, "workdir": wd}
 
     def _guard_run(self, workdir: str = None, dead_code: bool = False) -> dict:
         """Run Tier 1 static guards. Accepts optional workdir for cross-repo use
