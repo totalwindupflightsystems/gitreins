@@ -28,6 +28,8 @@ from engine.guard_manager import (
 )
 from engine.types import (
     SCANNER_CLEAN,
+    SCANNER_NOT_RUN,
+    SCANNER_NOT_RUN_SCOPE,
     scanner_config_error_status,
 )
 
@@ -815,6 +817,54 @@ class TestSecretsScannerAttribution:
 
         assert result.passed is False
         assert result.scanners == (("gitleaks", "reported findings (count unavailable)"),)
+
+    def test_working_tree_skip_label_is_not_not_on_path(self, tmp_workdir):
+        """REVIEW-GITREINS-026: the working-tree scope skips gitleaks ON PURPOSE.
+
+        gitleaks' `protect --staged` grades the index only, so it cannot see
+        the unstaged/untracked files this scope exists to grade. That
+        deliberate skip must not reuse the missing-binary label — an operator
+        on a box where gitleaks IS installed otherwise goes hunting a missing
+        install.
+        """
+        gm = GuardManager(tmp_workdir, scope="working-tree")
+        with patch("engine.guard_manager._get_working_tree_files", return_value=[]):
+            with patch.object(
+                gm,
+                "_builtin_secrets_scan",
+                return_value=GuardResult(
+                    "secrets",
+                    True,
+                    "Scanned 0 files — clean",
+                    scanners=(("builtin", SCANNER_CLEAN),),
+                ),
+            ) as builtin:
+                result = gm._check_secrets()
+
+        builtin.assert_called_once_with(files=[])
+        assert result.passed is True
+        assert result.scanners == (
+            ("gitleaks", SCANNER_NOT_RUN_SCOPE),
+            ("builtin", SCANNER_CLEAN),
+        )
+        summary = Tier1Result(passed=True, results=[result]).summary
+        assert "not on PATH" not in summary
+        assert "gitleaks not run (working-tree scope)" in summary
+
+    def test_staged_missing_gitleaks_keeps_the_not_on_path_label(self, tmp_workdir):
+        """AC2: the genuine missing-binary case is unchanged.
+
+        The two situations — a scope-skip and an absent binary — now read
+        differently on the console line and in the run log.
+        """
+        gm = GuardManager(tmp_workdir)  # scope defaults to "staged"
+        with patch("subprocess.run", side_effect=FileNotFoundError):
+            result = gm._check_secrets()
+
+        assert ("gitleaks", SCANNER_NOT_RUN) in result.scanners
+        summary = Tier1Result(passed=True, results=[result]).summary
+        assert "gitleaks not on PATH" in summary
+        assert "working-tree scope" not in summary
 
 
 class TestGitleaksConfigErrorClassification:

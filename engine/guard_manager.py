@@ -43,6 +43,7 @@ from engine.repo_paths import WorktreeResolutionError, resolve_worktree_identity
 from engine.types import (
     SCANNER_CLEAN,
     SCANNER_NOT_RUN,
+    SCANNER_NOT_RUN_SCOPE,
     GuardResult,
     Tier1Result,
     parse_first_failing_test,
@@ -1684,12 +1685,14 @@ class GuardManager:
             # `detect --no-git` would see everything (a superset, with every
             # pre-existing tree secret attached to this run). Grade exactly the
             # scope instead with the built-in provider-pattern scanner, and
-            # NAME gitleaks as not-run so "clean" is never read as "both
-            # scanners ran" (TRUST-003).
+            # NAME gitleaks as skipped-FOR-THIS-SCOPE so "clean" is never read
+            # as "both scanners ran" (TRUST-003) — and so the label is not the
+            # missing-binary one, which sent REVIEW-GITREINS-026 hunting a
+            # gitleaks install that was present all along.
             result = self._builtin_secrets_scan(files=self.changed_files)
             return replace(
                 result,
-                scanners=((GITLEAKS_SCANNER, SCANNER_NOT_RUN), *result.scanners),
+                scanners=((GITLEAKS_SCANNER, SCANNER_NOT_RUN_SCOPE), *result.scanners),
             )
 
         # Try gitleaks first
