@@ -2166,6 +2166,13 @@ class TestJudgeAsyncCLI:
         from gitreins import cli as cli_mod
 
         run_cli("task", "create", "sf-cli", "SF CLI", "c1", cwd=tmp_workdir)
+        # DF-GITREINS-POC-78 follow-up: _cmd_judge_async probes for an LLM
+        # credential BEFORE dispatching; without a key (CI runners) it
+        # sys.exit(1)s before the Popen spy is reached. Satisfy the probe
+        # so this test exercises the dispatch/single-flight path. The
+        # no-credential behavior is covered by
+        # test_async_no_credential_refuses_without_dispatch.
+        monkeypatch.setenv("GITREINS_LLM_API_KEY", "sf-test-key")
         spawned: list = []
         real_popen = _subprocess.Popen
 
