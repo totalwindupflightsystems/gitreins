@@ -4167,7 +4167,7 @@ def main():
     serve_p.add_argument(
         "--project",
         default="",
-        help="Scheduler project name for the tick ledger (e.g. gitreins-poc)",
+        help="Scheduler project name for the tick ledger (e.g. gitreins)",
     )
     serve_p.add_argument("--open", action="store_true", help="Open the browser automatically")
 

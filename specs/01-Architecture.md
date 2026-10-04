@@ -386,7 +386,7 @@ sequenceDiagram
 ## 7. Monorepo Layout
 
 ```
-gitreins-poc/
+gitreins/
 ├── engine/                     # Core evaluation engine
 │   ├── __init__.py
 │   ├── guard_manager.py        # 818 lines — Tier 1 static checks

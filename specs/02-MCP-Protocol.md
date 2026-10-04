@@ -1068,7 +1068,7 @@ $ echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"judge.ev
 ## 17. Package Structure
 
 ```
-gitreins-poc/
+gitreins/
 ├── gitreins_mcp/
 │   ├── __init__.py
 │   └── server.py              # GitReinsMCPServer class (~517 lines)

@@ -252,7 +252,7 @@ class TestCommitAuditorDiffCapture:
         diff = auditor._capture_diff()
         # Should return a string (maybe empty if no staged changes)
         assert isinstance(diff, str)
-        # In our actual repo (gitreins-poc), it should work
+        # In our actual repo (gitreins), it should work
         assert diff != "" or True  # empty diff is valid (nothing staged)
 
 

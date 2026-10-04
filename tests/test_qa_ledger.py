@@ -156,7 +156,7 @@ def test_qa_record_appends_a_fleet_row_for_an_external_run(qa_repo):
         "qa",
         "record",
         "--project",
-        "gitreins-poc",
+        "gitreins",
         "--kind",
         "bunker",
         "--exit-code",
@@ -181,10 +181,10 @@ def test_qa_record_appends_a_fleet_row_for_an_external_run(qa_repo):
         "2026-09-15T00:20:00+00:00",
     )
     assert result.returncode == 0, result.stderr
-    assert "recorded bunker gitreins-poc PASS" in result.stdout
+    assert "recorded bunker gitreins PASS" in result.stdout
 
     row = _ledger_rows(qa_repo)[0]
-    assert row["project"] == "gitreins-poc"
+    assert row["project"] == "gitreins"
     assert row["kind"] == "bunker"
     assert row["status"] == "pass"
     assert row["verdict"] == "PASS"
