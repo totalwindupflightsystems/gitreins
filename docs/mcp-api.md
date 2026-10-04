@@ -1,7 +1,7 @@
 # GitReins MCP API Reference
 
 The GitReins MCP server (`gitreins mcp-server`, source `gitreins_mcp/server.py`) exposes a
-**14-tool** surface over JSON-RPC 2.0 on stdio. This reference documents every tool with its
+**15-tool** surface over JSON-RPC 2.0 on stdio. This reference documents every tool with its
 input schema, return shapes, the async judge-job lifecycle, and the error taxonomy.
 
 For the full wire-protocol specification (transport framing, lifecycle, security model) see
@@ -43,7 +43,7 @@ For the full wire-protocol specification (transport framing, lifecycle, security
   the newest revision it implements, not the one a given client negotiated. Shown
   indented (raw output, not an invocation):
 
-      gitreins MCP server <version> — stdio, protocol 2025-11-25 (negotiated per client request), 14 tools, workdir=/path/to/repo
+      gitreins MCP server <version> — stdio, protocol 2025-11-25 (negotiated per client request), 15 tools, workdir=/path/to/repo
       gitreins MCP server <version> — stdin closed (EOF), exiting 0
 
   `<version>` is the installed release, so a client log is self-identifying without
@@ -51,7 +51,7 @@ For the full wire-protocol specification (transport framing, lifecycle, security
   nothing back can tell "still starting" from "died before reading stdin" by reading
   its server log. Ask the version without opening the transport with
   `python -m gitreins_mcp.server --version`.
-- **Capability discovery:** `tools/list` returns the 14 schemas below. Tool names use
+- **Capability discovery:** `tools/list` returns the 15 schemas below. Tool names use
   dotted notation (`task.create`, `guard.run`, `judge.evaluate`).
 
 ## Client Quick Start (raw JSON-RPC, no MCP SDK)
@@ -327,7 +327,27 @@ payload also carries `pid` and `started_at`).
 `GITREINS_JOB_DIR`). They survive MCP server restarts; a `running` job whose process died is
 auto-resumed on the next poll. CLI `gitreins judge <id> --async` dispatches are visible here.
 
-### 13. `propagate` — propagate guard config to sibling repos
+### 13. `quality.status` — read the run's quality snapshot (read-only)
+
+Reports the repo-produced quality snapshot this run has already computed — the SAME dict
+`guard.run` (response field `quality_snapshot`), `judge.evaluate` / `judge.status`
+(result field `quality_snapshot`) and `gitreins doctor` surface. One authority per run:
+the first surface runs the repository's producer once, every other surface reads that
+computed snapshot (GR-143). This tool never triggers the producer.
+
+| Param | Type | Required | Description |
+|-------|------|----------|-------------|
+| `workdir` | string | no | Repo to read (defaults to server workdir) |
+
+**Returns:**
+- `{"workdir", "status": "available", "quality_snapshot": {...}}` — the run's snapshot
+  (identical object to the guard's; see [docs/quality-metrics.md](quality-metrics.md)
+  for the metric shape)
+- `{"workdir", "status": "not-computed", "note": "...call guard.run (or judge.evaluate)
+  first"}` — quality is enabled here but no surface has computed it yet in this run
+- `{"workdir", "status": "disabled"}` — the repo has no enabled quality config
+
+### 14. `propagate` — propagate guard config to sibling repos
 
 | Param | Type | Required | Description |
 |-------|------|----------|-------------|
@@ -336,7 +356,7 @@ auto-resumed on the next poll. CLI `gitreins judge <id> --async` dispatches are 
 
 **Returns:** `{"source": "...", "results": [...]}`.
 
-### 14. `context.resolve` — resolve a question against the repo's code (Jev resolution gate)
+### 15. `context.resolve` — resolve a question against the repo's code (Jev resolution gate)
 
 Asks the Jev resolution gate (JEVRES-001, `engine/resolution.py`) whether the code
 already answers a question. The gate traces the question to seed files with Hilo,

@@ -110,6 +110,13 @@ defaults:
 # ── Disposable and fleet worktrees ───────────────────────────────
 worktree_fleet:
   disk_ceiling_mb: 4096                   # <=0 means unlimited
+quality:
+  enabled: false
+  command: ""
+  artifact_path: ""
+  targets_source: ""
+  per_metric_mode: {}
+  timeout: 300
 guards:
   secrets: true
   lint: true
@@ -1506,6 +1513,15 @@ def _rewrite_gitleaks_entries(text: str, replacements: list[tuple[int, str, int,
 def cmd_doctor(args):
     """Validate (and with --fix, migrate) the repo's `.gitleaks.toml` (POC-54)."""
     workdir = get_workdir()
+    # GR-143 one-authority: doctor prints the run's shared snapshot (the same
+    # dict guard/judge/CLI/MCP surface), so it never recomputes a number
+    # another surface of the same invocation already reported.
+    quality_snapshot = quality_snapshot_for(workdir)
+    if quality_snapshot is not None:
+        from engine.quality_metrics import format_quality_snapshot
+
+        print("Quality metrics:")
+        print(f"  {format_quality_snapshot(quality_snapshot)}")
     config_path = args.config or os.path.join(workdir, GITLEAKS_CONFIG_NAME)
     print(f"gitleaks config doctor: {config_path}")
     if not os.path.isfile(config_path):
@@ -1631,6 +1647,23 @@ def _print_tier2_recovery(llm, task_id: str) -> None:
         file=sys.stderr,
     )
     print("  see docs/onboarding.md (T5)", file=sys.stderr)
+
+
+def cmd_task_get(args):
+    from engine.task_manager import TaskManager
+
+    tm = TaskManager(get_workdir())
+    t = _require_task(tm, args.id)
+    status_icon = {"pending": "○", "in_progress": "◐", "complete": "●"}.get(t.status, "?")
+    print(f"{status_icon} {t.id} [{t.status}] — {t.title}")
+    if t.depends_on:
+        print(f"Depends on: {', '.join(t.depends_on)}")
+    if t.criteria:
+        print("Criteria:")
+        for i, c in enumerate(t.criteria, 1):
+            print(f"  {i}. {c}")
+    else:
+        print("Criteria: (none)")
 
 
 def cmd_task_complete(args):
@@ -2308,6 +2341,27 @@ def _cmd_report_tui(workdir: str, n: int = 20):
 
     app = VerdictApp()
     app.run()
+
+
+# ── Repo-produced quality snapshot (GR-143) ──────────────────────
+
+
+def quality_snapshot_for(workdir: str) -> dict | None:
+    """The configured repo's quality snapshot, or None when not enabled.
+
+    ONE computation point for the CLI surfaces (doctor here, plus any other
+    command that needs the numbers): engine.quality_metrics caches per
+    (workdir, artifact_path), so every surface of a run — guard, judge,
+    doctor, CLI, MCP — reports the same computed snapshot.
+    """
+    from engine.config import QualityConfig, load_raw_config
+
+    raw = load_raw_config(workdir).get("quality", {})
+    if not isinstance(raw, dict) or raw.get("enabled") is not True:
+        return None
+    from engine.quality_metrics import read_quality_snapshot
+
+    return read_quality_snapshot(workdir, QualityConfig.from_dict(raw))
 
 
 def cmd_guard_run(args):
@@ -3664,6 +3718,9 @@ def main():
     start_p = task_sub.add_parser("start", help="Start a task")
     start_p.add_argument("id")
 
+    get_p = task_sub.add_parser("get", help="Show one task in full (criteria, depends-on)")
+    get_p.add_argument("id")
+
     complete_p = task_sub.add_parser(
         "complete",
         help="Complete and evaluate a task",
@@ -4196,6 +4253,8 @@ def main():
                 cmd_task_create(args)
             elif args.subcommand == "start":
                 cmd_task_start(args)
+            elif args.subcommand == "get":
+                cmd_task_get(args)
             elif args.subcommand == "complete":
                 cmd_task_complete(args)
             elif args.subcommand == "list":

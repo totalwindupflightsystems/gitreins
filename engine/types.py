@@ -116,6 +116,8 @@ class GuardResult:
             return " — clean"
         elif self.name in ("lint", "go_lint", "go_build", "go_vet"):
             return " — ok"
+        elif self.name == "quality":
+            return f" — {self.output}" if self.output else " — unavailable"
         elif self.name in ("tests", "go_tests"):
             if "passed" in self.output.lower() or "ok" in self.output.lower():
                 return " — passed"

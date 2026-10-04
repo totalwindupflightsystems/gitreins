@@ -36,8 +36,15 @@ def _isolated_lock_path(tmp_path, monkeypatch):
 
 
 class TestLockScope:
-    def test_guard_and_manual_runs_never_take_the_lock(self, tmp_workdir):
-        """No TIER1_ENV_VAR → no lock, no attribution, nothing to release."""
+    def test_guard_and_manual_runs_never_take_the_lock(self, tmp_workdir, monkeypatch):
+        """No TIER1_ENV_VAR → no lock, no attribution, nothing to release.
+
+        The variable is cleared explicitly: when this suite runs under
+        ``gitreins task complete`` the tier-1 tests step executes WITH
+        TIER1_ENV_VAR set in its environment, and an inherited value would
+        make this test fail for an environment reason, not a code reason.
+        """
+        monkeypatch.delenv(TIER1_ENV_VAR, raising=False)
         pipeline = Pipeline({"pipeline": {"stages": []}}, tmp_workdir)
         result = pipeline._run_script_step(
             {"id": "tests", "type": "script", "run": "echo ok"}, {}, stage_id="tier1"
