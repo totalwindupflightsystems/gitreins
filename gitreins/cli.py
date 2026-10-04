@@ -1648,6 +1648,23 @@ def _print_tier2_recovery(llm, task_id: str) -> None:
     print("  see docs/onboarding.md (T5)", file=sys.stderr)
 
 
+def cmd_task_get(args):
+    from engine.task_manager import TaskManager
+
+    tm = TaskManager(get_workdir())
+    t = _require_task(tm, args.id)
+    status_icon = {"pending": "○", "in_progress": "◐", "complete": "●"}.get(t.status, "?")
+    print(f"{status_icon} {t.id} [{t.status}] — {t.title}")
+    if t.depends_on:
+        print(f"Depends on: {', '.join(t.depends_on)}")
+    if t.criteria:
+        print("Criteria:")
+        for i, c in enumerate(t.criteria, 1):
+            print(f"  {i}. {c}")
+    else:
+        print("Criteria: (none)")
+
+
 def cmd_task_complete(args):
     from engine.evaluator import LLM_FAILURE_SUMMARY_PREFIX
     from engine.task_manager import TaskManager
@@ -3679,6 +3696,9 @@ def main():
     start_p = task_sub.add_parser("start", help="Start a task")
     start_p.add_argument("id")
 
+    get_p = task_sub.add_parser("get", help="Show one task in full (criteria, depends-on)")
+    get_p.add_argument("id")
+
     complete_p = task_sub.add_parser(
         "complete",
         help="Complete and evaluate a task",
@@ -4211,6 +4231,8 @@ def main():
                 cmd_task_create(args)
             elif args.subcommand == "start":
                 cmd_task_start(args)
+            elif args.subcommand == "get":
+                cmd_task_get(args)
             elif args.subcommand == "complete":
                 cmd_task_complete(args)
             elif args.subcommand == "list":

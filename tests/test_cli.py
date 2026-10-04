@@ -1000,9 +1000,39 @@ class TestExtendedHelp:
         assert result.returncode == 0
         assert "create" in result.stdout
         assert "start" in result.stdout
+        assert "get" in result.stdout
         assert "complete" in result.stdout
         assert "list" in result.stdout
         assert "delete" in result.stdout
+
+    def test_task_get_shows_criteria_and_depends_on(self, tmp_workdir):
+        """task get prints a task's full detail: status, criteria, depends-on."""
+        run_cli("task", "create", "dep-a", "Dependency A", cwd=tmp_workdir)
+        run_cli(
+            "task",
+            "create",
+            "get-me",
+            "Get Me",
+            "crit one",
+            "crit two",
+            "--depends-on",
+            "dep-a",
+            cwd=tmp_workdir,
+        )
+        result = run_cli("task", "get", "get-me", cwd=tmp_workdir)
+        assert result.returncode == 0
+        assert "get-me" in result.stdout
+        assert "Get Me" in result.stdout
+        assert "crit one" in result.stdout
+        assert "crit two" in result.stdout
+        assert "dep-a" in result.stdout
+
+    def test_task_get_unknown_id_exits_nonzero(self, tmp_workdir):
+        """task get with an unknown id exits non-zero with a clean error."""
+        result = run_cli("task", "get", "no-such-id", cwd=tmp_workdir)
+        assert result.returncode != 0
+        assert "Task not found" in (result.stdout + result.stderr)
+        assert "Traceback" not in (result.stdout + result.stderr)
 
     def test_guard_help_prints_usage(self):
         """guard --help prints usage."""
