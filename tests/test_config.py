@@ -12,6 +12,8 @@ from engine.config import (
     _pypi_url,
     _version_greater,
     load_raw_config,
+    QualityConfig,
+    load_defaults,
 )
 
 
@@ -265,3 +267,23 @@ def test_load_raw_config_returns_empty_for_none_workdir():
 
 def test_load_raw_config_returns_empty_for_nonexistent(tmp_path):
     assert load_raw_config(str(tmp_path)) == {}
+
+
+def test_quality_config_round_trip(tmp_path):
+    import yaml
+
+    config_dir = tmp_path / ".gitreins"
+    config_dir.mkdir()
+    expected = QualityConfig(
+        enabled=True,
+        command="python measure.py",
+        artifact_path=".gitreins/quality.json",
+        targets_source="quality/ladder.json",
+        per_metric_mode={"type_hint_pct": "block", "coverage_pct": "warn"},
+        timeout=42,
+    )
+    path = config_dir / "config.yaml"
+    path.write_text(yaml.safe_dump({"quality": expected.to_dict()}), encoding="utf-8")
+    loaded = load_defaults(str(tmp_path)).quality
+    path.write_text(yaml.safe_dump({"quality": loaded.to_dict()}), encoding="utf-8")
+    assert load_defaults(str(tmp_path)).quality == expected

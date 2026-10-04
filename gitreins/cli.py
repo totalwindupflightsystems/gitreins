@@ -110,6 +110,13 @@ defaults:
 # ── Disposable and fleet worktrees ───────────────────────────────
 worktree_fleet:
   disk_ceiling_mb: 4096                   # <=0 means unlimited
+quality:
+  enabled: false
+  command: ""
+  artifact_path: ""
+  targets_source: ""
+  per_metric_mode: {}
+  timeout: 300
 guards:
   secrets: true
   lint: true
@@ -1506,6 +1513,14 @@ def _rewrite_gitleaks_entries(text: str, replacements: list[tuple[int, str, int,
 def cmd_doctor(args):
     """Validate (and with --fix, migrate) the repo's `.gitleaks.toml` (POC-54)."""
     workdir = get_workdir()
+    from engine.config import QualityConfig
+    from engine.quality_metrics import format_quality_snapshot, read_quality_snapshot
+
+    quality_raw = load_config(workdir).get("quality", {})
+    if isinstance(quality_raw, dict) and quality_raw.get("enabled") is True:
+        snapshot = read_quality_snapshot(workdir, QualityConfig.from_dict(quality_raw))
+        print("Quality metrics:")
+        print(f"  {format_quality_snapshot(snapshot)}")
     config_path = args.config or os.path.join(workdir, GITLEAKS_CONFIG_NAME)
     print(f"gitleaks config doctor: {config_path}")
     if not os.path.isfile(config_path):

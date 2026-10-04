@@ -76,6 +76,16 @@ class Judge:
                 return self._run_legacy_skip_tier2(task)
             return self._run_legacy(task)
 
+    def _run_quality_snapshot(self) -> dict | None:
+        """Run the repository's producer once for a configured-pipeline judge."""
+        from engine.config import QualityConfig, load_raw_config
+        from engine.quality_metrics import read_quality_snapshot
+
+        raw = load_raw_config(self.workdir).get("quality", {})
+        if not isinstance(raw, dict) or raw.get("enabled") is not True:
+            return None
+        return read_quality_snapshot(self.workdir, QualityConfig.from_dict(raw))
+
     def _read_pass_on_error(self) -> bool:
         """Read pass_on_error from .gitreins/config.yaml, defaulting to False."""
         import os
@@ -135,13 +145,36 @@ class Judge:
                     "any_failed": tier1_stage.get("any_failed", False),
                 },
             )
+            quality_snapshot = self._run_quality_snapshot()
+            if quality_snapshot is not None:
+                from engine.quality_metrics import format_quality_snapshot, quality_blocks
 
-            return JudgeResult(
+                tier1.extra["quality_snapshot"] = quality_snapshot
+                tier1_stage["quality_snapshot"] = quality_snapshot
+                line = format_quality_snapshot(quality_snapshot)
+                if line:
+                    tier1_stage["summary"] = "\n".join(
+                        part for part in (tier1_stage.get("summary", ""), line) if part
+                    )
+                if quality_blocks(quality_snapshot):
+                    tier1_stage["passed"] = False
+                    tier1_stage["any_failed"] = True
+                    tier1 = Tier1Result(
+                        passed=False,
+                        results=tier1.results,
+                        extra=tier1.extra,
+                        warnings=tier1.warnings,
+                    )
+                    result["passed"] = False
+
+            judge_result = JudgeResult(
                 task_id=task.id,
                 passed=result.get("passed", False),
                 tier1=tier1,
                 pipeline_result=result,
             )
+            judge_result.quality_snapshot = quality_snapshot
+            return judge_result
         except Exception as e:
             if self._pass_on_error:
                 logger.warning(
@@ -168,6 +201,7 @@ class Judge:
         print("  Tier 1: Running static guards...")
         tier1 = self.guard_manager.run_all()
         result.tier1 = tier1
+        result.quality_snapshot = tier1.extra.get("quality_snapshot")
 
         # Extract LSP diagnostics from Tier 1 results and pass to evaluator
         tier1_diagnostics = self._extract_lsp_diagnostics(tier1)
@@ -214,6 +248,7 @@ class Judge:
         print("  Tier 1: Running static guards...")
         tier1 = self.guard_manager.run_all()
         result.tier1 = tier1
+        result.quality_snapshot = tier1.extra.get("quality_snapshot")
         if not tier1.passed:
             print("  Tier 1 FAILED — skipping evaluator")
             result.passed = False
@@ -293,6 +328,7 @@ class JudgeResult:
         self.verdict = verdict
         self.tier1 = tier1  # Tier1Result from guard_manager.run_all()
         self.tier2 = tier2  # Verdict from AgenticEvaluator.evaluate()
+        self.quality_snapshot = tier1.extra.get("quality_snapshot") if tier1 else None
 
     @property
     def summary(self) -> str:
@@ -320,6 +356,13 @@ class JudgeResult:
                 status = "✓" if item.status == "PASS" else "✗"
                 lines.append(f"  {status} {item.criterion}: {item.detail}")
 
+        if self.quality_snapshot:
+            from engine.quality_metrics import format_quality_snapshot
+
+            quality_line = format_quality_snapshot(self.quality_snapshot)
+            if quality_line:
+                lines.append(f"\n{quality_line}")
+
         lines.append(f"\nOverall: {'PASS ✓' if self.passed else 'FAIL ✗'}")
         return "\n".join(lines)
 
@@ -338,6 +381,9 @@ def judge_result_to_dict(task_id: str, workdir: str, result) -> dict:
         "workdir": workdir,
         "tier1_passed": result.tier1.passed if result.tier1 else None,
     }
+    quality_snapshot = getattr(result, "quality_snapshot", None)
+    if quality_snapshot is not None:
+        d["quality_snapshot"] = quality_snapshot
     tier2 = result.tier2
     if tier2 is None and result.pipeline_result:
         tier2 = _find_pipeline_verdict(result.pipeline_result)

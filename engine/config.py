@@ -33,6 +33,42 @@ UPDATE_CACHE_FILE = os.path.join(UPDATE_CACHE_DIR, "update-check.json")
 
 
 @dataclass
+class QualityConfig:
+    """Repo-owned quality artifact command and per-metric policy."""
+
+    enabled: bool = False
+    command: str = ""
+    artifact_path: str = ""
+    targets_source: str = ""
+    per_metric_mode: dict[str, str] = field(default_factory=dict)
+    timeout: int = 300
+
+    @classmethod
+    def from_dict(cls, value: dict | None) -> "QualityConfig":
+        value = value if isinstance(value, dict) else {}
+        modes = value.get("per_metric_mode", {})
+        modes = modes if isinstance(modes, dict) else {}
+        return cls(
+            enabled=value.get("enabled") is True,
+            command=str(value.get("command", "")),
+            artifact_path=str(value.get("artifact_path", "")),
+            targets_source=str(value.get("targets_source", "")),
+            per_metric_mode={str(k): v for k, v in modes.items() if v in ("warn", "block")},
+            timeout=_coerce_positive_int(value.get("timeout", 300)),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "enabled": self.enabled,
+            "command": self.command,
+            "artifact_path": self.artifact_path,
+            "targets_source": self.targets_source,
+            "per_metric_mode": dict(self.per_metric_mode),
+            "timeout": self.timeout,
+        }
+
+
+@dataclass
 class GitReinsDefaults:
     """Every default GitReins needs, in one place.
 
@@ -134,6 +170,9 @@ class GitReinsDefaults:
     resolution_resolved_at: float = 0.85
     resolution_review_at: float = 0.50
     resolution_egress_exclude: tuple[str, ...] = ()
+
+    # ── Repo-produced quality snapshot (GR-142) ──
+    quality: QualityConfig = field(default_factory=QualityConfig)
 
     # Metadata
     _source: str = field(default="(built-in defaults)", repr=False)
@@ -317,6 +356,7 @@ class GitReinsDefaults:
                 resolution_bands(config_dict).get("review_at", self.resolution_review_at)
             ),
             resolution_egress_exclude=_resolution_excludes(config_dict),
+            quality=QualityConfig.from_dict(config_dict.get("quality")),
             _source=".gitreins/config.yaml" if config_dict else self._source,
         )
 
@@ -394,6 +434,7 @@ class GitReinsDefaults:
                 },
                 "egress_exclude": list(self.resolution_egress_exclude),
             },
+            "quality": self.quality.to_dict(),
         }
 
 
