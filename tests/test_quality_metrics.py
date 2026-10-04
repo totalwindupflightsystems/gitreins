@@ -3,12 +3,17 @@
 import sys
 from types import SimpleNamespace
 
+import pytest
 import yaml
 
 from engine.config import QualityConfig
 from engine.guard_manager import GuardManager
 from engine.judge import JudgeResult, judge_result_to_dict
-from engine.quality_metrics import read_quality_snapshot
+from engine.quality_metrics import (
+    format_quality_snapshot,
+    quality_snapshot_peek,
+    read_quality_snapshot,
+)
 
 
 def _config(tmp_path, **overrides):
@@ -88,7 +93,9 @@ def test_guard_surfaces_enabled_quality_and_blocks_opt_in_miss(tmp_path):
     quality = _config(tmp_path, per_metric_mode={"type_hint_pct": "block"}).to_dict()
     result = _guard(tmp_path, quality)
     assert result.passed is False
-    assert "type_hint_pct=72.3% (target 80%, block)" in result.summary
+    assert "type_hint_pct=72.3% (target 80%, block, stage stage-2, via repo-producer)" in (
+        result.summary
+    )
     assert result.extra["quality_snapshot"]["metrics"]["type_hint_pct"]["met_target"] is False
     assert (tmp_path / ".gitreins/count").read_text() == "1"
 
@@ -98,7 +105,9 @@ def test_warn_metric_does_not_fail_guard(tmp_path):
     quality = _config(tmp_path, per_metric_mode={"type_hint_pct": "warn"}).to_dict()
     result = _guard(tmp_path, quality)
     assert result.passed is True
-    assert "type_hint_pct=72.3% (target 80%, warn)" in result.summary
+    assert "type_hint_pct=72.3% (target 80%, warn, stage stage-2, via repo-producer)" in (
+        result.summary
+    )
 
 
 def test_disabled_quality_produces_no_guard_output(tmp_path):
@@ -122,7 +131,214 @@ def test_judge_result_carries_quality_snapshot(tmp_path):
     result = JudgeResult(task_id="GR-142", passed=True, tier1=tier1)
     payload = judge_result_to_dict("GR-142", str(tmp_path), result)
     assert payload["quality_snapshot"]["metrics"]["type_hint_pct"]["value"] == 82
-    assert "type_hint_pct=82% (target 80%, warn)" in result.summary
+    assert (
+        "type_hint_pct=82% (target 80%, warn, stage stage-2, via repo-producer)" in result.summary
+    )
+
+
+# ── GR-143: one snapshot, every surface ──────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _fresh_quality_cache():
+    """The snapshot cache is process-global; tests must not see each other's."""
+    from engine.quality_metrics import _snapshot_cache
+
+    _snapshot_cache.clear()
+    yield
+    _snapshot_cache.clear()
+
+
+def test_surfaces_report_identical_numbers(tmp_path, monkeypatch, capsys):
+    """THE parity cell: guard + judge + doctor + CLI + MCP, one producer run.
+
+    A producer and the same enabled-quality config drive every surface over
+    one tmp repo. Each surface's snapshot dict AND its rendered line must be
+    identical to the guard's, and the producer must have run exactly once
+    (the cache, not a second producer run, is what the later surfaces read).
+    """
+    import json as _json
+
+    from gitreins import cli
+    from gitreins_mcp.server import GitReinsMCPServer
+
+    _produce(tmp_path, metric_value=82, target=80)
+    quality_cfg = _config(tmp_path).to_dict()
+    (tmp_path / ".gitreins/config.yaml").write_text(
+        yaml.safe_dump({"quality": quality_cfg}), encoding="utf-8"
+    )
+
+    # Surface 1 — guard.
+    tier1 = _guard(tmp_path, quality_cfg)
+    guard_snapshot = tier1.extra["quality_snapshot"]
+    guard_line = format_quality_snapshot(guard_snapshot)
+
+    # Surface 2 — judge verdict dict (what MCP judge.evaluate / judge.status
+    # return and what the persisted verdict carries).
+    result = JudgeResult(task_id="GR-143", passed=True, tier1=tier1)
+    judge_payload = judge_result_to_dict("GR-143", str(tmp_path), result)
+
+    # Surface 3 — doctor (prints the block) + Surface 4 — quality_snapshot_for
+    # (the CLI's one computation point).
+    monkeypatch.setattr(cli, "get_workdir", lambda: str(tmp_path))
+    cli.cmd_doctor(SimpleNamespace(config=None, fix=False))
+    doctor_out = capsys.readouterr().out
+    cli_snapshot = cli.quality_snapshot_for(str(tmp_path))
+
+    # Surface 5 — MCP quality.status (read-only peek at the run's snapshot).
+    server = GitReinsMCPServer(str(tmp_path))
+    response = server.handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": "quality.status", "arguments": {}},
+        }
+    )
+    mcp_payload = _json.loads(response["result"]["content"][0]["text"])
+
+    # The parity assertions: same dict, same line, everywhere.
+    assert judge_payload["quality_snapshot"] == guard_snapshot
+    assert cli_snapshot == guard_snapshot
+    assert mcp_payload["quality_snapshot"] == guard_snapshot
+    assert guard_line in doctor_out
+    assert guard_line in result.summary
+    # value + target + stage + producer command on every printed line.
+    assert guard_line == (
+        "quality: type_hint_pct=82% (target 80%, warn, stage stage-2, via repo-producer)"
+    )
+    # One producer run for the whole run: count stays at 1.
+    assert (tmp_path / ".gitreins/count").read_text() == "1"
+
+
+def test_cached_snapshot_reused_across_surfaces_without_rerunning_producer(tmp_path):
+    """The cache — not the producer — serves the second surface."""
+    _produce(tmp_path)
+    cfg = _config(tmp_path)
+    first = read_quality_snapshot(str(tmp_path), cfg)
+    assert (tmp_path / ".gitreins/count").read_text() == "1"
+    # A second surface with a fresh config object gets the SAME dict...
+    second = read_quality_snapshot(str(tmp_path), _config(tmp_path))
+    assert second == first
+    # ...without the producer running again.
+    assert (tmp_path / ".gitreins/count").read_text() == "1"
+
+
+def test_cached_snapshot_regrades_modes_from_calling_config(tmp_path):
+    """Shared numbers, caller-owned policy: the guard's block grade is not
+    copied into a warn-mode reader's snapshot."""
+    _produce(tmp_path, metric_value=72.3, target=80)
+    block_cfg = _config(tmp_path, per_metric_mode={"type_hint_pct": "block"})
+    guard_view = read_quality_snapshot(str(tmp_path), block_cfg)
+    assert guard_view["metrics"]["type_hint_pct"]["met_target"] is False
+
+    warn_view = read_quality_snapshot(str(tmp_path), _config(tmp_path))
+    assert warn_view["metrics"]["type_hint_pct"]["value"] == 72.3
+    # The guard's block mode must not have leaked into the warn reader.
+    assert warn_view["metrics"]["type_hint_pct"]["mode"] == "warn"
+    assert warn_view["metrics"]["type_hint_pct"]["met_target"] is False
+
+
+def test_snapshot_peek_reads_cache_without_running_producer(tmp_path):
+    _produce(tmp_path)
+    assert quality_snapshot_peek(str(tmp_path)) is None
+    read_quality_snapshot(str(tmp_path), _config(tmp_path))
+    peeked = quality_snapshot_peek(str(tmp_path))
+    assert peeked is not None
+    assert peeked["metrics"]["type_hint_pct"]["value"] == 72.3
+    # Peek is read-only: the producer count did not move.
+    assert (tmp_path / ".gitreins/count").read_text() == "1"
+
+
+def test_mcp_quality_status_reports_not_computed_then_the_snapshot(tmp_workdir):
+    """quality.status: read-only surface — not-computed before, the run's
+    snapshot after guard.run, and never a producer run of its own."""
+    import json as _json
+    from pathlib import Path
+
+    from gitreins_mcp.server import GitReinsMCPServer
+
+    wd = Path(tmp_workdir)
+    server = GitReinsMCPServer(tmp_workdir)
+    quality_cfg = _config(wd).to_dict()
+    (wd / ".gitreins/config.yaml").write_text(
+        yaml.safe_dump({"quality": quality_cfg, "guards": {"secrets": True}}),
+        encoding="utf-8",
+    )
+    _produce(wd, metric_value=91, target=80)
+
+    def call_quality_status():
+        response = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "quality.status", "arguments": {}},
+            }
+        )
+        return _json.loads(response["result"]["content"][0]["text"])
+
+    # Before any surface computed: read-only not-computed, no producer run.
+    before = call_quality_status()
+    assert before["status"] == "not-computed"
+    assert "guard.run" in before["note"]
+    assert not (wd / ".gitreins/count").exists()
+
+    # guard.run computes and carries the snapshot in its response...
+    response = server.handle_request(
+        {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {"name": "guard.run", "arguments": {}},
+        }
+    )
+    guard_payload = _json.loads(response["result"]["content"][0]["text"])
+    guard_snapshot = guard_payload["quality_snapshot"]
+    assert guard_snapshot["metrics"]["type_hint_pct"]["value"] == 91
+    assert (wd / ".gitreins/count").read_text() == "1"
+
+    # ...and quality.status now reports the SAME snapshot, producer untouched.
+    after = call_quality_status()
+    assert after["status"] == "available"
+    assert after["quality_snapshot"] == guard_snapshot
+    assert (wd / ".gitreins/count").read_text() == "1"
+
+
+def test_guard_and_verdict_json_carry_the_same_snapshot(tmp_path, monkeypatch):
+    """Machine-readable parity: tier1.extra and the PERSISTED verdict record
+    hold the identical snapshot dict."""
+    import engine.persist as persist_mod
+    from engine.judge import Judge
+    from engine.task_manager import TaskManager
+
+    _produce(tmp_path, metric_value=83, target=80)
+    quality_cfg = _config(tmp_path).to_dict()
+    (tmp_path / ".gitreins/config.yaml").write_text(
+        yaml.safe_dump({"quality": quality_cfg}), encoding="utf-8"
+    )
+    tier1 = _guard(tmp_path, quality_cfg)
+
+    # --skip-tier2 legacy judge: the surface `gitreins judge --skip-tier2`
+    # reports, persisted through the shared verdict path. Tier 2 is skipped
+    # so no LLM is contacted; persistence is stubbed to dry-run and the
+    # record builder is what is under test.
+    monkeypatch.setattr(persist_mod.VerdictPersister, "persist", lambda *a, **k: "dry-run")
+    task = TaskManager(str(tmp_path)).create("GR-143", "t", ["c"])
+    judge = Judge(SimpleNamespace(api_key="k"), str(tmp_path))
+    judge.guard_manager = GuardManager(
+        str(tmp_path),
+        config={
+            "guards": {"secrets": False, "lint": False, "tests": False},
+            "quality": quality_cfg,
+        },
+        persist_log=False,
+    )
+    result = judge.evaluate_task(task, skip_tier2=True)
+    verdict_data = persist_mod.build_verdict_data(str(tmp_path), task, result)
+
+    assert result.quality_snapshot == tier1.extra["quality_snapshot"]
+    assert verdict_data["quality_snapshot"] == tier1.extra["quality_snapshot"]
 
 
 def test_doctor_shows_enabled_quality_metrics(tmp_path, monkeypatch, capsys):
@@ -137,4 +353,40 @@ def test_doctor_shows_enabled_quality_metrics(tmp_path, monkeypatch, capsys):
     cli.cmd_doctor(SimpleNamespace(config=None, fix=False))
     output = capsys.readouterr().out
     assert "Quality metrics:" in output
-    assert "type_hint_pct=82% (target 80%, warn)" in output
+    assert "type_hint_pct=82% (target 80%, warn, stage stage-2, via repo-producer)" in output
+
+
+def test_format_includes_target_stage_and_producer_command(tmp_path):
+    _produce(tmp_path, metric_value=66.5, target=70)
+    snapshot = read_quality_snapshot(str(tmp_path), _config(tmp_path))
+    line = format_quality_snapshot(snapshot)
+    # Value, target, stage and the exact producer command, on one line.
+    assert "type_hint_pct=66.5% (target 70%, warn, stage stage-2, via repo-producer)" in line
+
+
+def test_format_without_producer_command_still_complete(tmp_path):
+    """A bare artifact (no 'command' key) falls back to the configured
+    command — the line still carries the producer."""
+    (tmp_path / "producer.py").write_text(
+        "import json, pathlib\n"
+        "pathlib.Path('.gitreins/quality.json').write_text(json.dumps({"
+        "'metrics': {'type_hint_pct': {'value': 50, 'target': 60, 'stage': 's1'}}}))\n",
+        encoding="utf-8",
+    )
+    snapshot = read_quality_snapshot(str(tmp_path), _config(tmp_path))
+    line = format_quality_snapshot(snapshot)
+    assert "via" in line and sys.executable in line
+    assert "stage s1" in line
+
+
+def test_disabled_snapshot_formats_empty_and_surfaces_stay_none(tmp_path):
+    """Disabled quality: every surface reports the historical None/no-block
+    shape instead of a snapshot."""
+    from gitreins import cli
+
+    assert read_quality_snapshot(str(tmp_path), _config(tmp_path, enabled=False)) == {
+        "status": "disabled",
+        "metrics": {},
+    }
+    assert format_quality_snapshot({"status": "disabled", "metrics": {}}) == ""
+    assert cli.quality_snapshot_for(str(tmp_path)) is None

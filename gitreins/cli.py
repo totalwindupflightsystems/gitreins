@@ -1513,14 +1513,15 @@ def _rewrite_gitleaks_entries(text: str, replacements: list[tuple[int, str, int,
 def cmd_doctor(args):
     """Validate (and with --fix, migrate) the repo's `.gitleaks.toml` (POC-54)."""
     workdir = get_workdir()
-    from engine.config import QualityConfig
-    from engine.quality_metrics import format_quality_snapshot, read_quality_snapshot
+    # GR-143 one-authority: doctor prints the run's shared snapshot (the same
+    # dict guard/judge/CLI/MCP surface), so it never recomputes a number
+    # another surface of the same invocation already reported.
+    quality_snapshot = quality_snapshot_for(workdir)
+    if quality_snapshot is not None:
+        from engine.quality_metrics import format_quality_snapshot
 
-    quality_raw = load_config(workdir).get("quality", {})
-    if isinstance(quality_raw, dict) and quality_raw.get("enabled") is True:
-        snapshot = read_quality_snapshot(workdir, QualityConfig.from_dict(quality_raw))
         print("Quality metrics:")
-        print(f"  {format_quality_snapshot(snapshot)}")
+        print(f"  {format_quality_snapshot(quality_snapshot)}")
     config_path = args.config or os.path.join(workdir, GITLEAKS_CONFIG_NAME)
     print(f"gitleaks config doctor: {config_path}")
     if not os.path.isfile(config_path):
@@ -2340,6 +2341,27 @@ def _cmd_report_tui(workdir: str, n: int = 20):
 
     app = VerdictApp()
     app.run()
+
+
+# ── Repo-produced quality snapshot (GR-143) ──────────────────────
+
+
+def quality_snapshot_for(workdir: str) -> dict | None:
+    """The configured repo's quality snapshot, or None when not enabled.
+
+    ONE computation point for the CLI surfaces (doctor here, plus any other
+    command that needs the numbers): engine.quality_metrics caches per
+    (workdir, artifact_path), so every surface of a run — guard, judge,
+    doctor, CLI, MCP — reports the same computed snapshot.
+    """
+    from engine.config import QualityConfig, load_raw_config
+
+    raw = load_raw_config(workdir).get("quality", {})
+    if not isinstance(raw, dict) or raw.get("enabled") is not True:
+        return None
+    from engine.quality_metrics import read_quality_snapshot
+
+    return read_quality_snapshot(workdir, QualityConfig.from_dict(raw))
 
 
 def cmd_guard_run(args):

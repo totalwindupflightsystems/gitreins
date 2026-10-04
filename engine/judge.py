@@ -77,13 +77,30 @@ class Judge:
             return self._run_legacy(task)
 
     def _run_quality_snapshot(self) -> dict | None:
-        """Run the repository's producer once for a configured-pipeline judge."""
+        """Run the repository's producer once for a configured-pipeline judge.
+
+        GR-143: delegates to :meth:`_judge_quality_snapshot`, which reuses the
+        process-wide snapshot cache — the pipeline judge reads the same
+        snapshot the guard (or an earlier surface in this run) computed.
+        """
+        return self._judge_quality_snapshot()
+
+    def _judge_quality_snapshot(self) -> dict | None:
+        """The run's shared quality snapshot, or None when not configured.
+
+        GR-143 one-authority contract: enabled-quality repos get a snapshot
+        from the cache shared with guard/doctor/CLI/MCP (whoever computed
+        first), so every surface of a run reports identical numbers and the
+        producer never runs twice in one process. Disabled/misconfigured
+        repos get None — the historical shape — so no consumer changes.
+        """
         from engine.config import QualityConfig, load_raw_config
-        from engine.quality_metrics import read_quality_snapshot
 
         raw = load_raw_config(self.workdir).get("quality", {})
         if not isinstance(raw, dict) or raw.get("enabled") is not True:
             return None
+        from engine.quality_metrics import read_quality_snapshot
+
         return read_quality_snapshot(self.workdir, QualityConfig.from_dict(raw))
 
     def _read_pass_on_error(self) -> bool:
@@ -201,6 +218,13 @@ class Judge:
         print("  Tier 1: Running static guards...")
         tier1 = self.guard_manager.run_all()
         result.tier1 = tier1
+        # GR-143: the guard computed and cached the snapshot — the judge
+        # reuses it rather than re-running the repo's producer, so both
+        # surfaces report the same numbers. None (disabled/misconfigured)
+        # inserts no key, keeping the historical extra shape.
+        _quality = self._judge_quality_snapshot()
+        if _quality is not None:
+            tier1.extra.setdefault("quality_snapshot", _quality)
         result.quality_snapshot = tier1.extra.get("quality_snapshot")
 
         # Extract LSP diagnostics from Tier 1 results and pass to evaluator
@@ -248,6 +272,11 @@ class Judge:
         print("  Tier 1: Running static guards...")
         tier1 = self.guard_manager.run_all()
         result.tier1 = tier1
+        # GR-143: same reuse contract as the legacy path — one snapshot per
+        # run, computed by whichever surface ran first; None inserts no key.
+        _quality = self._judge_quality_snapshot()
+        if _quality is not None:
+            tier1.extra.setdefault("quality_snapshot", _quality)
         result.quality_snapshot = tier1.extra.get("quality_snapshot")
         if not tier1.passed:
             print("  Tier 1 FAILED — skipping evaluator")

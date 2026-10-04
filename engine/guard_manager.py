@@ -1555,6 +1555,13 @@ class GuardManager:
                 read_quality_snapshot,
             )
 
+            # GR-143, one authority per run: the guard is the run's FIRST
+            # surface, so this call runs the repo producer once and seeds the
+            # process-wide snapshot cache; judge, doctor, CLI and MCP in the
+            # same run read that cached snapshot. If a surface already
+            # computed it (MCP guard.run then judge on one server), the guard
+            # reuses those numbers and never re-runs the producer — every
+            # surface in the run reports the same snapshot.
             snapshot = read_quality_snapshot(self.workdir, QualityConfig.from_dict(quality_cfg))
             self._quality_snapshot = snapshot
             quality_text = format_quality_snapshot(snapshot)
