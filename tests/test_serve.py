@@ -451,7 +451,7 @@ def test_ticks_route_reads_the_selected_project_ledger(repo_fixture, tmp_path, m
     connection.execute(
         "INSERT INTO ticks (id, project_name, spawned_at, status, outcome, commits,"
         " files_changed, cost_usd, error) VALUES"
-        " (1, 'gitreins-poc', '2026-09-16T18:00:00Z', 'completed', 'committed', 2, 5, 0.0, NULL),"
+        " (1, 'gitreins', '2026-09-16T18:00:00Z', 'completed', 'committed', 2, 5, 0.0, NULL),"
         " (2, 'someone-else', '2026-09-16T19:00:00Z', 'completed', 'committed', 9, 9, 0.0, NULL)"
     )
     connection.commit()
@@ -460,14 +460,14 @@ def test_ticks_route_reads_the_selected_project_ledger(repo_fixture, tmp_path, m
 
     with running_server(str(repo_fixture["root"])) as address:
         unset_status, unset_body = get(address, "/api/ticks")
-    with running_server(str(repo_fixture["root"]), project="gitreins-poc") as address:
+    with running_server(str(repo_fixture["root"]), project="gitreins") as address:
         ticks_status, ticks_body = get(address, "/api/ticks")
 
     assert unset_status == 200
     assert json_body(unset_body)["ticks"] == []
     assert ticks_status == 200
     payload = json_body(ticks_body)
-    assert payload["project"] == "gitreins-poc"
+    assert payload["project"] == "gitreins"
     assert [row["id"] for row in payload["ticks"]] == [1]
 
 
@@ -500,7 +500,7 @@ def test_qa_route_serves_ledger_rows_in_file_order(repo_fixture, tmp_path, monke
     rows = [
         {
             "ts": "2026-09-16T10:00:00+00:00",
-            "project": "gitreins-poc",
+            "project": "gitreins",
             "kind": "fresh",
             "verdict": "PASS",
             "status": "ok",
@@ -511,7 +511,7 @@ def test_qa_route_serves_ledger_rows_in_file_order(repo_fixture, tmp_path, monke
         },
         {
             "ts": "2026-09-16T11:00:00+00:00",
-            "project": "gitreins-poc",
+            "project": "gitreins",
             "kind": "repro",
             "verdict": "FAIL",
             "status": "failed",

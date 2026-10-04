@@ -13,7 +13,7 @@ import sys
 
 import pytest
 
-# Add gitreins-poc to path for direct imports
+# Add the repo root to path for direct imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 

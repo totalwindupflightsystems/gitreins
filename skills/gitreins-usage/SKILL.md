@@ -16,7 +16,7 @@ category: software-development
 
 GitReins is a git-native quality harness: tasks with completion criteria, Tier-1
 static guards (secrets/lint/tests) on every commit, and an agentic LLM evaluator
-that judges task completion per-criterion. This repo (gitreins-poc) both BUILDS
+that judges task completion per-criterion. This repo (gitreins) both BUILDS
 GitReins and uses it as its own quality gate (dogfood).
 
 ## Entry points
@@ -178,7 +178,7 @@ defaults: { model: deepseek-v4-flash }
 ## Verifying a run is healthy
 
 ```bash
-PATH="$HOME/go/bin:$HOME/gitreins-poc/.venv/bin:$PATH" gitreins guard   # must PASS
+PATH="$HOME/go/bin:$HOME/gitreins/.venv/bin:$PATH" gitreins guard   # must PASS
 gitreins task list                                                      # board state
 gitreins report -n 3                                                    # recent verdicts
 ```
@@ -711,10 +711,10 @@ innerText contains `date · hash`). The list is newest-LAST, so "first
 matching row" for a title can be a different verdict than you assume.
 
 **Pitfall 42 — `--project` is the scheduler project name, case-sensitive,
-and the project was renamed.** Docs examples say `gitreins-poc`; the scheduler
-project has been `gitreins` since 09-22, so `--project gitreins-poc` shows
-"no ticks recorded" forever. Ticks come from the scheduler DB on the host
-running `serve`.
+and the project was renamed.** The scheduler project has been `gitreins` since
+09-22; ledger rows recorded before the rename still say `gitreins-poc`, so
+`--project gitreins-poc` shows "no ticks recorded" forever. Ticks come from the
+scheduler DB on the host running `serve`.
 
 **Pitfall 43 — a fresh clone carries two stale verdicts and no verdict
 branch (POC-58).** `2026-08-17/96dd2464` and `2026-08-18/9b129d91` are

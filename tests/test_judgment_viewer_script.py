@@ -40,7 +40,7 @@ def repo(tmp_path: Path) -> Path:
 
 QA_ROW = {
     "ts": "2026-09-17T00:32:16+00:00",
-    "project": "gitreins-poc",
+    "project": "gitreins",
     "kind": "dogfood",
     "verdict": "PASS",
     "status": "pass",

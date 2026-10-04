@@ -14,8 +14,10 @@ The probe compares the repo's subcommand list and version against the deployed b
 
 ### Remotes: the GitLab mirror is kept in step
 
-This repo has two remotes: `github` (github.com/totalwindupflightsystems/gitreins — live, CI and releases run here)
-and the GitLab mirror `origin` (gitlab.readydedis.com/totalwindup/gitreins-poc). Keep both at the same content.
+This repo has two active remotes: `github` (github.com/totalwindupflightsystems/gitreins — the canon; CI and
+releases run here) and the GitLab mirror `gitlab-mirror` (gitlab.readydedis.com/coding-hermes/gitreins-mirror).
+Keep both at the same content. A third remote, `origin`, is a FROZEN LEGACY remote (an old GitLab project kept
+read-only until the owner cuts the link) — do not push to it.
 
 The mirror **protects `main`** (push: no one, merge: maintainers), so you cannot just add a second push URL —
 a plain `git push` is rejected by its pre-receive hook. Sync it the way that project expects:
@@ -33,8 +35,8 @@ content-in-sync; the token is never printed.
 History: the mirror sat three months behind after the June 2026 v0.1.1 line; its `main` was force-synced on
 2026-09-22 and that old line is preserved on the remote as `archive/pre-gitreins-sync-2026-06`.
 
-Open question recorded for the owner: whether this project should move under the `coding-hermes` org/group
-instead of `totalwindupflightsystems` / `totalwindup`. Until that is decided the rule is simply that both
+Resolved (D2, 2026-09-24): the canon stays on GitHub (`totalwindupflightsystems/gitreins`) and the GitLab
+mirror now lives under the `coding-hermes` group as `gitreins-mirror`. The rule is simply that the two active
 remotes carry the same content.
 
 ## Setup

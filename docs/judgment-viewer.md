@@ -30,7 +30,7 @@ gitreins serve [--repo <path>] [--port <port>] [--host <host>] [--project <name>
 | `--repo` | the repository you run from | Browse another checkout's judgment history by path — no `cd` needed |
 | `--port` | `8616` | Port to bind; `0` binds an ephemeral port and the banner prints the real one |
 | `--host` | `127.0.0.1` | Bind address. Anything other than loopback serves judgment data over the network — see [Security model](#security-model) |
-| `--project` | none | Scheduler project name whose tick ledger is shown (e.g. `gitreins-poc`) |
+| `--project` | none | Scheduler project name whose tick ledger is shown (e.g. `gitreins`) |
 | `--open` | off | Open the browser automatically after binding |
 
 ### Browsing another project
