@@ -721,7 +721,7 @@ class GitReinsMCPServer:
         if isinstance(gm, dict):
             return gm
         result = gm.run_all(force_dead_code=dead_code)
-        return {
+        response = {
             "passed": result.passed,
             "workdir": wd,
             # DF-018: point MCP callers at the complete, untruncated guard
@@ -732,6 +732,10 @@ class GitReinsMCPServer:
                 for r in result.results
             ],
         }
+        quality_snapshot = result.extra.get("quality_snapshot")
+        if quality_snapshot is not None:
+            response["quality_snapshot"] = quality_snapshot
+        return response
 
     def _llm_unusable_error(self) -> str | None:
         """Return an error message when the LLM is not usable, else None.

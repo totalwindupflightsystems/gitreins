@@ -987,6 +987,9 @@ def build_verdict_data(workdir: str, task, result) -> dict:
         "branch": producing_branch,
         "commit": source_commit,
     }
+    quality_snapshot = getattr(result, "quality_snapshot", None)
+    if quality_snapshot is not None:
+        verdict_data["quality_snapshot"] = quality_snapshot
 
     # Extract items from verdict or pipeline result. JEVRES-004: items carry
     # the per-criterion resolution attribution when a pre-screen ran; the

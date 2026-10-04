@@ -1546,9 +1546,35 @@ class GuardManager:
                     )
                     return _finalize(self._timeout_result(results, warnings))
 
+        quality_cfg = self.config.get("quality", {})
+        if isinstance(quality_cfg, dict) and quality_cfg.get("enabled") is True:
+            from engine.config import QualityConfig
+            from engine.quality_metrics import (
+                format_quality_snapshot,
+                quality_blocks,
+                read_quality_snapshot,
+            )
+
+            snapshot = read_quality_snapshot(self.workdir, QualityConfig.from_dict(quality_cfg))
+            self._quality_snapshot = snapshot
+            quality_text = format_quality_snapshot(snapshot)
+            results.append(
+                GuardResult(
+                    name="quality",
+                    passed=not quality_blocks(snapshot),
+                    output=quality_text,
+                    warning=quality_text if snapshot.get("status") == "unavailable" else "",
+                )
+            )
+
         passed = all(r.passed for r in results)
         extra = {
             "test_mode": self._test_mode,
+            **(
+                {"quality_snapshot": self._quality_snapshot}
+                if hasattr(self, "_quality_snapshot")
+                else {}
+            ),
             # EVID-002: how many files the selected scope held, so the evidence
             # document can distinguish a clean 200-file run from a vacuous pass
             # over an empty change set.

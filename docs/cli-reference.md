@@ -1196,7 +1196,9 @@ Runtime behavior is controlled by `.gitreins/config.yaml` in the repo
 root (created by `gitreins install` / `gitreins init`). Key settings:
 `test_command`, `test_mode`, `test_on_clean`, `allow_skips`,
 `max_input_tokens`, guard enable/disable toggles, and
-history persistence. See `docs/architecture.md` for the config schema.
+history persistence. Repo-produced metrics are configured in the optional
+`quality:` block; see [quality-metrics.md](quality-metrics.md). There are no
+quality-specific environment variables. See `docs/architecture.md` for the config schema.
 
 ### `guards.test_on_clean`
 
