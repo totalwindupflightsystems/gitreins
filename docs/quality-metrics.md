@@ -55,8 +55,35 @@ quality:
 Run `gitreins guard`. The guard will show a line such as:
 
 ```text
-✓ quality — quality: type_hint_pct=72.3% (target 80%, warn)
+✓ quality — quality: type_hint_pct=72.3% (target 80%, warn, stage current, via repo-producer)
 ```
+
+## Reading the block (agents)
+
+Every quality line carries all four facts, on one line, on every surface:
+
+- `value` — what the repository measured (`72.3%`).
+- `target` — the repository's own goal for the metric (`80%`), `n/a` when the
+  artifact declares none.
+- `stage` — the descriptive pipeline stage the producer tagged (`stage
+  current`).
+- the producer command — `via <command>` names the exact repository command
+  that produced the number.
+
+The same snapshot is reported everywhere in a run: `gitreins guard` output,
+judge verdicts (summary, `tier1.extra.quality_snapshot` and the persisted
+`verdict.json`), `gitreins doctor`, the CLI, and the MCP `guard.run` /
+`judge.evaluate` / `judge.status` / `quality.status` responses. One run
+computes the snapshot once (guard normally first); every other surface reads
+that same computed snapshot, so numbers never disagree between surfaces. The
+MCP `quality.status` tool returns the run's snapshot read-only — it never
+triggers the producer.
+
+A `warn`-mode miss is NOT a failure: a metric below its target in `warn`
+mode is displayed everywhere (value, target, stage, producer) but no surface
+fails — the guard stays green and the judge is not failed by it. Blocking
+requires the metric's mode to be `block` AND the value to be below its
+declared target.
 
 Change that metric's mode to `block` to fail the guard when its artifact value
 is below its artifact target. `stage` is descriptive only; stage-specific
@@ -91,4 +118,6 @@ explicit `block` mode.
 
 `quality.timeout` is in seconds (default 300). There are no quality-specific
 environment variables. The same snapshot is shown in guard output, judge
-results, `gitreins doctor`, and the MCP `guard.run` response.
+results, `gitreins doctor`, and the MCP `guard.run`, `judge.evaluate`,
+`judge.status` and `quality.status` responses — see
+[Reading the block](#reading-the-block-agents) above.

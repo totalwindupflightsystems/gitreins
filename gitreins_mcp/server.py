@@ -153,6 +153,7 @@ class GitReinsMCPServer:
             "guard.run": self._guard_run,
             "judge.evaluate": self._judge_evaluate,
             "judge.status": self._judge_status,
+            "quality.status": self._quality_status,
             "propagate": self._propagate,
             "context.resolve": self._context_resolve,
             "repo.init": self._repo_init,
@@ -391,6 +392,19 @@ class GitReinsMCPServer:
                         },
                     },
                     "required": ["job_id"],
+                },
+            },
+            {
+                "name": "quality.status",
+                "description": "Report the repo-produced quality snapshot for this run — the SAME computed snapshot guard.run, judge.evaluate and doctor surface (one authority: whoever computed it first, never a second producer run). When nothing has computed it yet, status='not-computed' and run guard.run (or judge.evaluate) first; this tool never triggers the producer.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "workdir": {
+                            "type": "string",
+                            "description": "Optional target repo path. Defaults to the server workdir.",
+                        },
+                    },
                 },
             },
             {
@@ -736,6 +750,37 @@ class GitReinsMCPServer:
         if quality_snapshot is not None:
             response["quality_snapshot"] = quality_snapshot
         return response
+
+    def _quality_status(self, workdir: str | None = None) -> dict:
+        """Report this run's shared quality snapshot without triggering work.
+
+        GR-143 agent-facing surface: reads the SAME process-wide snapshot the
+        guard/judge/doctor computed (engine.quality_metrics cache). When no
+        surface has computed it yet the response says ``not-computed`` with
+        the pointer to the tools that will — this handler NEVER runs the
+        repo's producer, so polling an agent's numbers stays a read-only
+        operation. An enabled-but-never-computed config is reported as such
+        so a caller can tell it from a repo without quality metrics at all.
+        """
+        from engine.quality_metrics import quality_snapshot_peek
+
+        wd = os.path.abspath(workdir) if workdir else self.workdir
+        snapshot = quality_snapshot_peek(wd)
+        if snapshot is not None:
+            return {"workdir": wd, "status": snapshot.get("status"), "quality_snapshot": snapshot}
+        from engine.config import load_raw_config
+
+        raw = load_raw_config(wd).get("quality", {})
+        if isinstance(raw, dict) and raw.get("enabled") is True:
+            return {
+                "workdir": wd,
+                "status": "not-computed",
+                "note": (
+                    "quality is enabled here but no surface has computed the snapshot in this"
+                    " run — call guard.run (or judge.evaluate) first"
+                ),
+            }
+        return {"workdir": wd, "status": "disabled"}
 
     def _llm_unusable_error(self) -> str | None:
         """Return an error message when the LLM is not usable, else None.

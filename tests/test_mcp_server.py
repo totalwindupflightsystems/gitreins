@@ -97,8 +97,9 @@ class TestInitializeHandshake:
 class TestToolsList:
     """Test tools/list — step-2-1-1-2."""
 
-    def test_tools_list_returns_fourteen_tools(self, mcp_server):
-        """tools/list returns exactly 14 tool schemas (12 + context.resolve + repo.init)."""
+    def test_tools_list_returns_fifteen_tools(self, mcp_server):
+        """tools/list returns exactly 15 tool schemas (12 + context.resolve
+        + repo.init + quality.status)."""
         response = mcp_server.handle_request(
             {
                 "jsonrpc": "2.0",
@@ -108,7 +109,7 @@ class TestToolsList:
         )
         assert response is not None
         tools = response["result"]["tools"]
-        assert len(tools) == 14
+        assert len(tools) == 15
 
     def test_all_expected_tool_names_present(self, mcp_server):
         """All expected tool names: task.create, task.start, task.complete,
@@ -1937,7 +1938,7 @@ class TestMCPStdioIntegration:
         assert "tools" in resp["result"]
 
     def test_tools_list_over_stdio(self, mcp_proc):
-        """tools/list returns exactly 12 tools with correct names and schemas."""
+        """tools/list returns the full tool set with correct names and schemas."""
         resp = self._send_recv(
             mcp_proc,
             {
@@ -1947,7 +1948,7 @@ class TestMCPStdioIntegration:
             },
         )
         tools = resp["result"]["tools"]
-        assert len(tools) == 14
+        assert len(tools) == 15
         names = [t["name"] for t in tools]
         expected = [
             "configure",
@@ -1962,6 +1963,7 @@ class TestMCPStdioIntegration:
             "guard.run",
             "judge.evaluate",
             "judge.status",
+            "quality.status",
             "propagate",
             "context.resolve",
         ]
@@ -2093,7 +2095,7 @@ class TestMCPStdioIntegration:
         mcp_proc.stdin.flush()
         resp = self._read_response(mcp_proc)
         assert resp["id"] == 1
-        assert len(resp["result"]["tools"]) == 14
+        assert len(resp["result"]["tools"]) == 15
 
     def test_missing_jsonrpc_field(self, mcp_proc):
         """Missing jsonrpc field → invalid request error (-32600)."""
