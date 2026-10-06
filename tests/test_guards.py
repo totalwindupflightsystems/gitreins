@@ -104,13 +104,15 @@ def test_check_go_lint_uses_golangci_lint_when_it_passes():
     ):
         result = check_go_lint("/repo")
 
-    assert result == GoGuardResult(name="go_lint", passed=True, output="golangci-lint: clean")
-    assert run.call_args.args[0] == [
-        "golangci-lint",
-        "run",
-        "--new-from-rev=HEAD~1",
-        "main.go",
-        "pkg/lib.go",
+    # GR-LINT-001: per-file args are gone — one package-scoped invocation per
+    # distinct containing directory ('' -> repo root, no path arg).
+    assert result == GoGuardResult(
+        name="go_lint", passed=True, output="golangci-lint: clean (2 packages)"
+    )
+    invocations = [call.args[0] for call in run.call_args_list]
+    assert invocations == [
+        ["golangci-lint", "run", "--new-from-rev=HEAD~1"],
+        ["golangci-lint", "run", "--new-from-rev=HEAD~1", "pkg"],
     ]
     assert run.call_args.kwargs["timeout"] == 60
     assert run.call_args.kwargs["cwd"] == "/repo"

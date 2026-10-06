@@ -398,19 +398,33 @@ def check_go_lint(
     if not go_files:
         return _no_go_files_result("go_lint", changed_files)
 
-    # Try golangci-lint first. run_bounded never raises for a missing
-    # binary — it returns {"error": ...} without an exit_code — so a
-    # spawn failure falls through to go vet (DF-CRIER-258: DF-008's
-    # kill-group discipline now covers this spawn too). `argv_prefix` withholds
-    # the nice prefix when the program is missing, which is what keeps that
-    # {"error": ...} shape (a prefix would turn it into exit 127 text).
+    # GR-LINT-001: golangci-lint with an explicit FILE list analyses only that
+    # file-set, so package-level symbols declared in sibling files go
+    # unresolvable and every reference typechecks as ``undefined`` — false
+    # findings that block single-file Go commits (proven 3x on 2026-09-24).
+    # Scope by package DIRECTORY instead: the linter then loads the whole
+    # package and cross-file symbols resolve. One invocation per distinct
+    # package dir keeps multi-package change sets honest; all invocations must
+    # pass for the lane to pass.
+    package_dirs = sorted({os.path.dirname(f) or "." for f in go_files})
     lint_prefix, lint_note = scanner_nice.argv_prefix(nice_level, "golangci-lint")
-    result = command_hygiene.run_bounded(
-        [*lint_prefix, "golangci-lint", "run", "--new-from-rev=HEAD~1", *go_files],
-        cwd=workdir,
-        timeout=60,
-        env=_sanitized_env(),
-    )
+    lint_results: list[dict] = []
+    for pkg_dir in package_dirs:
+        result = command_hygiene.run_bounded(
+            [
+                *lint_prefix,
+                "golangci-lint",
+                "run",
+                "--new-from-rev=HEAD~1",
+                *([] if pkg_dir == "." else [pkg_dir]),
+            ],
+            cwd=workdir,
+            timeout=60,
+            env=_sanitized_env(),
+        )
+        lint_results.append(result)
+        if "exit_code" not in result:
+            break
     if "exit_code" not in result:
         # DF-GITREINS-POC-43: the linter never RAN — every shape run_bounded
         # can return without a verdict: spawn failure ({"error": ...}, no
@@ -467,17 +481,32 @@ def check_go_lint(
             warning=fallback_warning,
             nice_note=vet_note,
         )
-    # The linter ran: its verdict is authoritative. A real exit 1 with
-    # findings must never masquerade as "ok" via a clean go vet
-    # (DF-GITREINS-POC-43 false-PASS).
-    output = result.get("output") or ""
-    if len(output) > 2000:
-        output = output[:2000] + "\n... [truncated]"
-    if result["exit_code"] == 0:
+    # The linter ran for every package dir: the verdicts are authoritative. A
+    # real exit 1 with findings must never masquerade as "ok" via a clean go
+    # vet (DF-GITREINS-POC-43 false-PASS). GR-LINT-001: one invocation per
+    # package dir — the lane passes only when ALL of them pass.
+    outputs: list[str] = []
+    failed_dirs: list[str] = []
+    for pkg_dir, res in zip(package_dirs, lint_results):
+        out = res.get("output") or ""
+        if len(out) > 2000:
+            out = out[:2000] + "\n... [truncated]"
+        if res.get("exit_code") != 0:
+            failed_dirs.append(pkg_dir)
+            outputs.append(f"[{pkg_dir}] {out}" if len(package_dirs) > 1 else out)
+    if failed_dirs:
         return GoGuardResult(
-            name="go_lint", passed=True, output="golangci-lint: clean", nice_note=lint_note
+            name="go_lint",
+            passed=False,
+            output="\n".join(outputs),
+            nice_note=lint_note,
         )
-    return GoGuardResult(name="go_lint", passed=False, output=output, nice_note=lint_note)
+    label = (
+        "golangci-lint: clean"
+        if len(package_dirs) == 1
+        else f"golangci-lint: clean ({len(package_dirs)} packages)"
+    )
+    return GoGuardResult(name="go_lint", passed=True, output=label, nice_note=lint_note)
 
 
 def _resolve_go_test_argv(test_command: str | None) -> tuple[list[str] | str, str | None]:
