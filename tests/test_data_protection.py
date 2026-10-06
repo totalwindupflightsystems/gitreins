@@ -624,6 +624,52 @@ def test_guard_manager_lane_blocks_and_exposes_findings(tmp_path):
     assert canary not in json.dumps(dp_extra)
 
 
+def test_guard_manager_data_protection_uses_explicit_scan_root(tmp_path, monkeypatch):
+    workdir = _git_repo(tmp_path)
+    source_root = tmp_path / "project"
+    source_root.mkdir()
+    outside = "canary.email.outside@example.com"
+    _tracked(workdir, "outside.py", f"CONTACT = {outside!r}\\n")
+    _tracked(workdir, "project/clean.py", "VALUE = 1\\n")
+    config = {
+        "guards": {"secrets": False, "lint": False, "tests": False, "allow_skips": True},
+        "data_protection": DP_CONFIG,
+    }
+    gm = GuardManager(
+        str(workdir),
+        config=config,
+        scope="working-tree",
+        persist_log=False,
+        scan_root=str(source_root),
+    )
+
+    original_open = open
+    opened: list[str] = []
+
+    def tracking_open(file, *args, **kwargs):
+        opened.append(os.path.realpath(os.fspath(file)))
+        return original_open(file, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.open", tracking_open)
+    result = gm._check_data_protection()
+
+    assert result.passed is True
+    assert os.path.realpath(os.path.join(workdir, "outside.py")) not in opened
+
+
+def test_tier1_data_protection_step_uses_explicit_scan_root(tmp_path):
+    control_root = tmp_path / "control"
+    source_root = control_root / "project"
+    source_root.mkdir(parents=True)
+    config = {"data_protection": {"enabled": True, "categories": DP_CONFIG["categories"]}}
+
+    steps, _ = tier1_plan(str(control_root), config, str(source_root))
+
+    step = next(s for s in steps if s["id"] == "data_protection")
+    assert "GITREINS_SCAN_ROOT" in step["run"]
+    assert str(source_root) in step["run"]
+
+
 def test_guard_manager_malformed_policy_fails_loud(tmp_path):
     workdir = _git_repo(tmp_path)
     _tracked(workdir, "a.py", "x = 1\n")

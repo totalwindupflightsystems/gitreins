@@ -1240,8 +1240,12 @@ class GuardManager:
         *,
         grade_full_tree: bool = False,
         persist_log: bool = True,
+        scan_root: str | None = None,
     ):
         self.workdir = os.path.abspath(workdir)
+        self.scan_root = os.path.abspath(scan_root) if scan_root else self.workdir
+        if not os.path.isdir(self.scan_root):
+            raise ValueError(f"scan root is not a directory: {self.scan_root}")
         # Change scope (EVID-002): "staged" is the index (today's behaviour,
         # byte for byte); "working-tree" is the union of staged, unstaged and
         # non-ignored untracked files, collected read-only. Keyword-only and
@@ -2050,7 +2054,7 @@ class GuardManager:
             elif staged_only:
                 scan_files = _get_staged_files(self.workdir)
             else:
-                scan_files = self._workdir_files()
+                scan_files = self._scan_root_files()
 
             if not scan_files:
                 if explicit_scope:
@@ -2077,7 +2081,7 @@ class GuardManager:
                 # gitleaks applies (test fixtures with deliberate fake keys).
                 if any(rx.search(fpath) for rx in allowlist):
                     continue
-                full = os.path.join(self.workdir, fpath)
+                full = os.path.join(self.scan_root, fpath)
                 if not os.path.isfile(full):
                     continue
 
@@ -2162,15 +2166,24 @@ class GuardManager:
                 scanners=((BUILTIN_SCANNER, "scan error"),),
             )
 
-    def _workdir_files(self) -> list[str]:
-        """Relative paths of all non-ignored files in the workdir.
+    def _scan_root_files(self) -> list[str]:
+        """List source-root files using the established scan exclusions."""
+        if self.scan_root == self.workdir:
+            return self._workdir_files()
+        return self._workdir_files(self.scan_root)
+
+    def _workdir_files(self, root: str | None = None) -> list[str]:
+        """Relative paths of non-ignored files below *root* (default: workdir).
 
         Used by the judge/pipeline secrets cross-check (DF-012), where the
         changes under evaluation are already committed — nothing is staged.
         Mirrors the directories gitleaks' generated config allowlists.
         """
+        scan_root = os.path.abspath(root or self.workdir)
         skip_dirs = {
             ".git",
+            ".hg",
+            ".svn",
             *HARNESS_STATE_DIRS,
             "node_modules",
             "__pycache__",
@@ -2196,7 +2209,7 @@ class GuardManager:
             "demo-calc",
         }
         files: list[str] = []
-        for root, dirs, names in os.walk(self.workdir):
+        for current_root, dirs, names in os.walk(scan_root):
             # Prune ANY venv-like dir, not just exact ".venv"/"venv":
             # .venv312, venv311, venvs, etc. The judge's workdir scan
             # (DF-012) walked .venv312/lib/python3.12/site-packages vendored
@@ -2209,7 +2222,7 @@ class GuardManager:
                 if d not in skip_dirs and not (d.startswith(".venv") or d.startswith("venv"))
             ]
             for name in names:
-                files.append(os.path.relpath(os.path.join(root, name), self.workdir))
+                files.append(os.path.relpath(os.path.join(current_root, name), scan_root))
         return files
 
     def _load_gitleaks_allowlist(self) -> list:
@@ -2221,7 +2234,7 @@ class GuardManager:
         '''...''' quotes.
         """
         allowed = []
-        cfg = os.path.join(self.workdir, ".gitleaks.toml")
+        cfg = os.path.join(self.scan_root, ".gitleaks.toml")
         if not os.path.isfile(cfg):
             return allowed
         try:
@@ -3048,9 +3061,18 @@ class GuardManager:
                 passed=False,
                 error=f"invalid data_protection policy: {self._data_protection_error}",
             )
-        result = check_data_protection(
-            self.workdir, self._scope_files_or_none(), policy=self._data_protection
+        separate_scan_root = os.path.realpath(self.scan_root) != os.path.realpath(self.workdir)
+        if separate_scan_root and self.scope != "working-tree":
+            return GuardResult(
+                name="data_protection",
+                passed=False,
+                error="a separate scan_root requires working-tree scope for data_protection",
+            )
+        scan_root = self.scan_root
+        changed_files = (
+            self._scan_root_files() if separate_scan_root else self._scope_files_or_none()
         )
+        result = check_data_protection(scan_root, changed_files, policy=self._data_protection)
         self._data_protection_result = result
         # The lane's output is already scrubbed (safe_value); keep it as the
         # untruncated evidence for the run log so no raw value is reintroduced.
