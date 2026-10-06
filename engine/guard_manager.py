@@ -1234,8 +1234,12 @@ class GuardManager:
         *,
         grade_full_tree: bool = False,
         persist_log: bool = True,
+        scan_root: str | None = None,
     ):
         self.workdir = os.path.abspath(workdir)
+        self.scan_root = os.path.abspath(scan_root) if scan_root else self.workdir
+        if not os.path.isdir(self.scan_root):
+            raise ValueError(f"scan root is not a directory: {self.scan_root}")
         # Change scope (EVID-002): "staged" is the index (today's behaviour,
         # byte for byte); "working-tree" is the union of staged, unstaged and
         # non-ignored untracked files, collected read-only. Keyword-only and
@@ -1973,7 +1977,7 @@ class GuardManager:
             elif staged_only:
                 scan_files = _get_staged_files(self.workdir)
             else:
-                scan_files = self._workdir_files()
+                scan_files = self._scan_root_files()
 
             if not scan_files:
                 if explicit_scope:
@@ -2000,7 +2004,7 @@ class GuardManager:
                 # gitleaks applies (test fixtures with deliberate fake keys).
                 if any(rx.search(fpath) for rx in allowlist):
                     continue
-                full = os.path.join(self.workdir, fpath)
+                full = os.path.join(self.scan_root, fpath)
                 if not os.path.isfile(full):
                     continue
 
@@ -2085,6 +2089,19 @@ class GuardManager:
                 scanners=((BUILTIN_SCANNER, "scan error"),),
             )
 
+    def _scan_root_files(self) -> list[str]:
+        """List files under the separately resolved source-scan root."""
+        if self.scan_root == self.workdir:
+            return self._workdir_files()
+        files: list[str] = []
+        skip_dirs = {".git", ".hg", ".svn", "node_modules", ".venv", "venv", "__pycache__"}
+        for root, dirs, names in os.walk(self.scan_root):
+            dirs[:] = [d for d in dirs if d not in skip_dirs]
+            files.extend(
+                os.path.relpath(os.path.join(root, name), self.scan_root) for name in names
+            )
+        return files
+
     def _workdir_files(self) -> list[str]:
         """Relative paths of all non-ignored files in the workdir.
 
@@ -2144,7 +2161,7 @@ class GuardManager:
         '''...''' quotes.
         """
         allowed = []
-        cfg = os.path.join(self.workdir, ".gitleaks.toml")
+        cfg = os.path.join(self.scan_root, ".gitleaks.toml")
         if not os.path.isfile(cfg):
             return allowed
         try:

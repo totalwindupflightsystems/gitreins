@@ -147,7 +147,8 @@ The artifacts are listed in `verdict.json → evidence.items` and rendered by
 | Argument | Description |
 |----------|-------------|
 | `id` | Task ID (required, positional) |
-| `-f`, `--force` | Skip dependency checks |
+| `--scan-root <directory>` | Source tree to scan. Task records and GitReins configuration continue to use the control root; when the current repository differs, this option is required. |
+| `--force` | Skip dependency checks |
 | `--skip-tier2` | Grade Tier 1 only — no LLM call |
 
 **Exit codes**

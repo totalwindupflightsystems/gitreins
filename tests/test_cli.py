@@ -4046,3 +4046,47 @@ class TestStaticAnalysisAnnouncementMatchesLane:
         assert "Static analysis: enabled (mypy)" in result.stdout
         assert "nothing will run" not in result.stdout
         assert "no tool is selected for this" not in result.stderr
+
+
+class TestTaskCompleteScanScopeAndLease:
+    def test_scan_scope_refuses_ambiguous_parent_repo(self, tmp_path, monkeypatch):
+        from gitreins.cli import _task_complete_scan_root
+
+        control = tmp_path / "outer"
+        project = control / "nested"
+        project.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(control)], check=True)
+        monkeypatch.chdir(project)
+        with pytest.raises(ValueError, match="pass --scan-root"):
+            _task_complete_scan_root(str(control), None)
+        assert _task_complete_scan_root(str(control), str(project)) == str(project)
+
+    def test_scan_scope_preserves_normal_repository_root(self, tmp_path, monkeypatch):
+        from gitreins.cli import _task_complete_scan_root
+
+        repo = tmp_path / "repo"
+        nested = repo / "src"
+        nested.mkdir(parents=True)
+        subprocess.run(["git", "init", "-q", str(repo)], check=True)
+        monkeypatch.chdir(repo)
+        assert _task_complete_scan_root(str(repo), None) == str(repo)
+
+    def test_task_complete_lease_coalesces_only_identical_inputs(self, tmp_path, monkeypatch):
+        from gitreins.cli import _task_complete_lease
+
+        monkeypatch.setenv("HOME", str(tmp_path))
+        root = tmp_path / "control"
+        scan = tmp_path / "project"
+        root.mkdir()
+        scan.mkdir()
+        (root / ".gitreins").mkdir()
+        with _task_complete_lease("same", str(root), str(scan)) as acquired:
+            assert acquired
+            with _task_complete_lease("same", str(root), str(scan)) as duplicate:
+                assert not duplicate
+            with _task_complete_lease("other", str(root), str(scan)) as different_task:
+                assert different_task
+            with _task_complete_lease("same", str(root), str(scan / "sub")) as different_scope:
+                assert different_scope
+        with _task_complete_lease("same", str(root), str(scan)) as retried:
+            assert retried

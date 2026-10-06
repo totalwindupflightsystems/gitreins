@@ -1256,6 +1256,44 @@ class TestBudgetTimeoutAttribution:
 
 
 class TestSecretsScannerAttribution:
+    def test_explicit_scan_root_reaches_both_secrets_scanners(self, tmp_path):
+        import subprocess
+        import os
+
+        from engine.pipeline import _secrets_step_run
+
+        control = tmp_path / "outer"
+        project = control / "project"
+        sibling = control / "sibling"
+        project.mkdir(parents=True)
+        sibling.mkdir()
+        (control / ".gitreins").mkdir()
+        (project / "source.py").write_text('token = "ghp_' + "D" * 40 + '"\n')
+        (sibling / "outside.py").write_text('token = "ghp_' + "E" * 40 + '"\n')
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        fake_gitleaks = fake_bin / "gitleaks"
+        fake_gitleaks.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$FAKE_GITLEAKS_ARGS"\n')
+        fake_gitleaks.chmod(0o755)
+        args_file = tmp_path / "gitleaks-args.txt"
+        env = dict(
+            os.environ, PATH=f"{fake_bin}:{os.environ['PATH']}", FAKE_GITLEAKS_ARGS=str(args_file)
+        )
+        proc = subprocess.run(
+            ["bash", "-c", _secrets_step_run(str(control), {}, str(project))],
+            cwd=control,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert proc.returncode != 0  # built-in cross-check finds the in-scope canary
+        assert "source.py" in proc.stdout
+        assert "outside.py" not in proc.stdout
+        args = args_file.read_text()
+        assert "--source" in args
+        assert str(project) in args
+
     """DF-GITREINS-POC-15: the scanner that ran is machine-readable."""
 
     def test_secrets_step_disables_gitleaks_color(self, tmp_workdir):

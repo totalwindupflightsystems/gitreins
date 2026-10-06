@@ -405,6 +405,34 @@ class TestTimeoutCoercion:
 
 
 class TestBuiltinSecretsScan:
+    def test_builtin_scanner_uses_explicit_nested_scan_root(self, tmp_path):
+        from engine.guard_manager import GuardManager
+
+        outer = tmp_path / "outer"
+        project = outer / "project"
+        sibling = outer / "sibling"
+        project.mkdir(parents=True)
+        sibling.mkdir()
+        (project / "source.py").write_text('token = "ghp_' + "A" * 40 + '"\n')
+        (sibling / "outside.py").write_text('token = "ghp_' + "B" * 40 + '"\n')
+        result = GuardManager(str(outer), scan_root=str(project))._builtin_secrets_scan(
+            staged_only=False
+        )
+        assert not result.passed
+        assert "source.py" in result.output
+        assert "outside.py" not in result.output
+        outer_control = GuardManager(str(outer))._builtin_secrets_scan(staged_only=False)
+        assert "outside.py" in outer_control.output
+
+    def test_builtin_scanner_default_scope_remains_control_root(self, tmp_path):
+        from engine.guard_manager import GuardManager
+
+        root = tmp_path / "repo"
+        root.mkdir()
+        (root / "source.py").write_text('token = "ghp_' + "C" * 40 + '"\n')
+        result = GuardManager(str(root))._builtin_secrets_scan(staged_only=False)
+        assert "source.py" in result.output
+
     """Test built-in secrets scanner patterns — step-1-3-1-3."""
 
     def test_aws_key_detected(self, tmp_workdir):
