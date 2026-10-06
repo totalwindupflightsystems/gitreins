@@ -1296,6 +1296,53 @@ class TestSecretsScannerAttribution:
 
     """DF-GITREINS-POC-15: the scanner that ran is machine-readable."""
 
+    def test_explicit_scan_root_is_shell_safe(self, tmp_path):
+        import os
+        import subprocess
+
+        from engine.pipeline import _secrets_step_run
+
+        control = tmp_path / "control"
+        control.mkdir()
+        project = control / "project$(touch marker) \"double\" 'single'"
+        project.mkdir()
+        fake_bin = tmp_path / "bin"
+        fake_bin.mkdir()
+        fake_gitleaks = fake_bin / "gitleaks"
+        fake_gitleaks.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$FAKE_GITLEAKS_ARGS"\n')
+        fake_gitleaks.chmod(0o755)
+        args_file = tmp_path / "gitleaks-args.txt"
+        env = dict(
+            os.environ, PATH=f"{fake_bin}:{os.environ['PATH']}", FAKE_GITLEAKS_ARGS=str(args_file)
+        )
+
+        proc = subprocess.run(
+            ["bash", "-c", _secrets_step_run(str(control), {}, str(project))],
+            cwd=control,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        assert proc.returncode == 0, proc.stderr
+        assert not (control / "marker").exists()
+        assert str(project) in args_file.read_text()
+
+    def test_gitleaks_config_quotes_a_path_with_single_quotes(self, tmp_path):
+        import json
+
+        from engine.pipeline import harness_scan_gitleaks_config
+
+        project = tmp_path / "project 'quoted'"
+        project.mkdir()
+        repo_config = project / ".gitleaks.toml"
+        repo_config.write_text("[extend]\nuseDefault = true\n")
+
+        rendered = harness_scan_gitleaks_config(str(project))
+
+        assert f"path = {json.dumps(str(repo_config))}" in rendered
+
     def test_secrets_step_disables_gitleaks_color(self, tmp_workdir):
         """The capture cannot carry escapes: gitleaks runs with --no-color."""
         cmd = _secrets_step_run(tmp_workdir)

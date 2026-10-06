@@ -147,7 +147,7 @@ The artifacts are listed in `verdict.json → evidence.items` and rendered by
 | Argument | Description |
 |----------|-------------|
 | `id` | Task ID (required, positional) |
-| `--scan-root <directory>` | Source tree to scan. Task records and GitReins configuration continue to use the control root; when the current repository differs, this option is required. |
+| `--scan-root <directory>` | Source tree used for Tier 1 secret scans and Tier 2 source context. Task records and GitReins configuration remain at the control root. Required unless invoked from the exact control root; the filesystem root, home directory, and their ancestors are rejected. |
 | `--force` | Skip dependency checks |
 | `--skip-tier2` | Grade Tier 1 only — no LLM call |
 

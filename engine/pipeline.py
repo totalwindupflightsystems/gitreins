@@ -49,6 +49,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -1565,8 +1566,8 @@ def harness_scan_gitleaks_config(workdir: str) -> str:
         "[extend]",
     ]
     if os.path.isfile(repo_config):
-        # TOML literal string — Windows paths must not be escape-processed.
-        lines.append(f"path = '{repo_config}'")
+        # A TOML basic string handles quotes/backslashes in valid file paths.
+        lines.append(f"path = {json.dumps(repo_config)}")
     else:
         lines.append("useDefault = true")
     lines.extend(
@@ -1613,14 +1614,37 @@ def _secrets_step_run(
     in ``$_gr_nice`` and applies to the gitleaks invocation only: the built-in
     cross-check is not an external spawn.
     """
-    explicit_scan_root = scan_root is not None
-    scan_root = os.path.abspath(scan_root or workdir)
-    scan_source = f'"{scan_root}"' if explicit_scan_root else "."
-    builtin_manager = (
-        "GuardManager('.')"
-        if not explicit_scan_root
-        else "GuardManager('.', scan_root='" + scan_root.replace("'", "\\'") + "')"
+    explicit_scan_root = scan_root is not None and os.path.realpath(scan_root) != os.path.realpath(
+        workdir
     )
+    scan_root = os.path.abspath(scan_root or workdir)
+    gitleaks_config_root = scan_root if explicit_scan_root else workdir
+    scan_source = shlex.quote(scan_root) if explicit_scan_root else "."
+    if explicit_scan_root:
+        builtin_code = (
+            "from engine.guard_manager import GuardManager; import os, sys; "
+            "gm = GuardManager('.', scan_root=os.environ['GITREINS_SCAN_ROOT']); "
+            "r = gm._builtin_secrets_scan(staged_only=False); "
+            "print('secrets: builtin cross-check: ' + r.output); "
+            "print('secrets: builtin cross-check status: ' "
+            "+ (r.scanners[0][1] if r.scanners else 'clean')); "
+            "sys.exit(1 if not r.passed else 0)"
+        )
+        builtin_command = (
+            f"PYTHONPATH={shlex.quote(_engine_root())} "
+            f"GITREINS_SCAN_ROOT={shlex.quote(scan_root)} "
+            f"{shlex.quote(sys.executable)} -c {shlex.quote(builtin_code)}"
+        )
+    else:
+        builtin_command = (
+            f'PYTHONPATH="{_engine_root()}" {sys.executable} -c "from engine.guard_manager import GuardManager; '
+            "import sys; gm = GuardManager('.'); "
+            "r = gm._builtin_secrets_scan(staged_only=False); "
+            "print('secrets: builtin cross-check: ' + r.output); "
+            "print('secrets: builtin cross-check status: ' "
+            "+ (r.scanners[0][1] if r.scanners else 'clean')); "
+            'sys.exit(1 if not r.passed else 0)"'
+        )
     exclusions = ", ".join(f"{d}/**" for d in HARNESS_STATE_DIRS)
     level, _source = scanner_nice.resolve_level(config)
     prologue, nice_prefix = scanner_nice.shell_prologue(level)
@@ -1628,7 +1652,7 @@ def _secrets_step_run(
         "if command -v gitleaks >/dev/null 2>&1; then "
         '_glcfg="$(mktemp -t gitreins-gitleaks-XXXXXX.toml)"; '
         "cat > \"$_glcfg\" <<'GITREINS_GITLEAKS_CFG'\n"
-        f"{harness_scan_gitleaks_config(scan_root)}\n"
+        f"{harness_scan_gitleaks_config(gitleaks_config_root)}\n"
         "GITREINS_GITLEAKS_CFG\n"
         f'echo "secrets: harness state excluded from gitleaks scope ({exclusions})"; '
         # TRUST-003: name the scanners and each one's outcome in the step
@@ -1651,13 +1675,7 @@ def _secrets_step_run(
         "else _glrc=0; "
         'echo "secrets: scanners=builtin cross-check only (gitleaks not on PATH)"; '
         'echo "secrets: gitleaks: not on PATH"; fi; g1=$_glrc; '
-        f'PYTHONPATH="{_engine_root()}" {sys.executable} -c "from engine.guard_manager import GuardManager; '
-        "import sys; gm = " + builtin_manager + "; "
-        "r = gm._builtin_secrets_scan(staged_only=False); "
-        "print('secrets: builtin cross-check: ' + r.output); "
-        "print('secrets: builtin cross-check status: ' "
-        "+ (r.scanners[0][1] if r.scanners else 'clean')); "
-        'sys.exit(1 if not r.passed else 0)"; '
+        f"{builtin_command}; "
         'g2=$?; [ "$g1" -eq 0 ] && [ "$g2" -eq 0 ]'
     )
 

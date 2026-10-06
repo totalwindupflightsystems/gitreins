@@ -433,6 +433,32 @@ class TestBuiltinSecretsScan:
         result = GuardManager(str(root))._builtin_secrets_scan(staged_only=False)
         assert "source.py" in result.output
 
+    def test_scoped_file_walk_preserves_existing_directory_exclusions(self, tmp_path):
+        from engine.guard_manager import GuardManager
+
+        outer = tmp_path / "outer"
+        project = outer / "project"
+        project.mkdir(parents=True)
+        (project / "keep.py").write_text("print('in scope')\n")
+        for excluded in (
+            ".git",
+            ".hg",
+            ".svn",
+            ".gitreins",
+            ".venv312",
+            "vendor",
+            "build",
+            ".pytest_cache",
+            "demo-calc",
+        ):
+            ignored = project / excluded
+            ignored.mkdir()
+            (ignored / "ignored.py").write_text("print('ignored')\n")
+
+        files = GuardManager(str(outer), scan_root=str(project))._scan_root_files()
+
+        assert files == ["keep.py"]
+
     """Test built-in secrets scanner patterns — step-1-3-1-3."""
 
     def test_aws_key_detected(self, tmp_workdir):

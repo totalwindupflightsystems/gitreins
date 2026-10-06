@@ -1681,6 +1681,12 @@ def _task_complete_scan_root(control_root: str, requested: str | None) -> str:
         return candidate
     cwd = os.path.realpath(os.getcwd())
     root = os.path.realpath(control_root)
+    home = os.path.realpath(os.path.expanduser("~"))
+    if os.path.commonpath((home, root)) == root:
+        raise ValueError(
+            "default scan root may not be the home directory or one of its ancestors; "
+            "pass --scan-root <project-directory> to choose a narrower source tree"
+        )
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],

@@ -576,7 +576,9 @@ class TestGitleaksHarnessExclusionConfig:
 
         cfg = harness_scan_gitleaks_config(repo)
 
-        assert f"path = '{os.path.join(repo, '.gitleaks.toml')}'" in cfg
+        import tomli
+
+        assert tomli.loads(cfg)["extend"]["path"] == os.path.join(repo, ".gitleaks.toml")
         assert "useDefault" not in cfg
         assert r"(^|/)\.gitreins/.*" in cfg
 

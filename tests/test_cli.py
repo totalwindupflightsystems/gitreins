@@ -4061,6 +4061,22 @@ class TestTaskCompleteScanScopeAndLease:
             _task_complete_scan_root(str(control), None)
         assert _task_complete_scan_root(str(control), str(project)) == str(project)
 
+    def test_scan_scope_refuses_home_as_default_root(self, tmp_path, monkeypatch):
+        from gitreins import cli as cli_mod
+
+        home = tmp_path / "home"
+        home.mkdir()
+        original_expanduser = cli_mod.os.path.expanduser
+        monkeypatch.setattr(
+            cli_mod.os.path,
+            "expanduser",
+            lambda value: str(home) if value == "~" else original_expanduser(value),
+        )
+        monkeypatch.chdir(home)
+
+        with pytest.raises(ValueError, match="home directory"):
+            cli_mod._task_complete_scan_root(str(home), None)
+
     def test_scan_scope_preserves_normal_repository_root(self, tmp_path, monkeypatch):
         from gitreins.cli import _task_complete_scan_root
 
