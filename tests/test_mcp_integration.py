@@ -283,6 +283,12 @@ class TestMCPRealIntegration:
         """Tasks with workdir land in the target repo, not the MCP server's dir."""
         if not os.getenv("GITREINS_LLM_API_KEY"):
             pytest.skip("GITREINS_LLM_API_KEY not set — LLM-dependent test")
+        if os.getenv("GITREINS_TEST_ALLOW_LLM_EVAL", "").lower() not in ("1", "true", "yes"):
+            pytest.skip(
+                "LLM-dependent judge.evaluate leg is network- and gateway-slow "
+                "(up to ~5 min per run against a live gateway) and load-flaky "
+                "under -race; set GITREINS_TEST_ALLOW_LLM_EVAL=1 to include it"
+            )
         proc = _start_mcp_server(tmp_git_repo)
 
         # Create a second temp directory (simulating a different repo)
