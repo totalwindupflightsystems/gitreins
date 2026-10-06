@@ -1,0 +1,402 @@
+[
+  {
+    "file": "tests/reliability/dead-tests/test_arithmetic.py",
+    "class": "unit",
+    "rationale": "tests local behavior without a stronger static integration/contract signal"
+  },
+  {
+    "file": "tests/reliability/dead-tests/test_strings.py",
+    "class": "unit",
+    "rationale": "tests local behavior without a stronger static integration/contract signal"
+  },
+  {
+    "file": "tests/test_antares.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_board_ids.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client"
+  },
+  {
+    "file": "tests/test_check_unpushed.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client"
+  },
+  {
+    "file": "tests/test_ci_workflow_pins.py",
+    "class": "wiring",
+    "rationale": "checks imports, configuration, entry points, or component presence"
+  },
+  {
+    "file": "tests/test_cli.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_cli_commit_in_progress.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_cli_commit_nothing_staged.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_cli_doc_sync.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client"
+  },
+  {
+    "file": "tests/test_cli_preflight.py",
+    "class": "contract",
+    "rationale": "checks a schema or externally visible data shape; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_cli_resolve.py",
+    "class": "integration",
+    "rationale": "uses temporary real files/directories as collaborating components; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_command_hygiene.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client"
+  },
+  {
+    "file": "tests/test_commit_audit.py",
+    "class": "unit",
+    "rationale": "uses mocks/patching to isolate behavior; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_config.py",
+    "class": "integration",
+    "rationale": "uses temporary real files/directories as collaborating components"
+  },
+  {
+    "file": "tests/test_config_priority.py",
+    "class": "integration",
+    "rationale": "uses temporary real files/directories as collaborating components"
+  },
+  {
+    "file": "tests/test_config_quality.py",
+    "class": "integration",
+    "rationale": "uses temporary real files/directories as collaborating components"
+  },
+  {
+    "file": "tests/test_corrupted_state_restart.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client"
+  },
+  {
+    "file": "tests/test_dead_code.py",
+    "class": "integration",
+    "rationale": "uses temporary real files/directories as collaborating components"
+  },
+  {
+    "file": "tests/test_docs_drift.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client"
+  },
+  {
+    "file": "tests/test_docs_drift_tools.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client"
+  },
+  {
+    "file": "tests/test_eval_cap.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client"
+  },
+  {
+    "file": "tests/test_eval_static_analysis.py",
+    "class": "unit",
+    "rationale": "uses mocks/patching to isolate behavior; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_evaluator.py",
+    "class": "integration",
+    "rationale": "test/file name explicitly marks integration; also uses mocking/patching; contains subprocess use, but no stronger end-to-end signal"
+  },
+  {
+    "file": "tests/test_evidence.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_evidence_bounds.py",
+    "class": "unit",
+    "rationale": "tests local behavior without a stronger static integration/contract signal"
+  },
+  {
+    "file": "tests/test_evidence_contract.py",
+    "class": "contract",
+    "rationale": "test/file name explicitly marks contract; contains subprocess use, but no stronger end-to-end signal"
+  },
+  {
+    "file": "tests/test_go_guards_missing_binary.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_guard_degraded.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_guard_exit.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client"
+  },
+  {
+    "file": "tests/test_guard_format_check.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_guard_full_tree.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_guard_go_lanes.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_guard_log_persistence.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_guard_manager.py",
+    "class": "unit",
+    "rationale": "test/file name explicitly marks unit; also uses mocking/patching; contains subprocess use, but no stronger end-to-end signal"
+  },
+  {
+    "file": "tests/test_guard_target_scope.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client"
+  },
+  {
+    "file": "tests/test_guards.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_jevres_calibrate.py",
+    "class": "contract",
+    "rationale": "checks a schema or externally visible data shape; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_job_store.py",
+    "class": "integration",
+    "rationale": "uses temporary real files/directories as collaborating components; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_judge.py",
+    "class": "wiring",
+    "rationale": "checks imports, configuration, entry points, or component presence; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_judgment_viewer_script.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_lang_detect.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_llm.py",
+    "class": "wiring",
+    "rationale": "checks imports, configuration, entry points, or component presence; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_llm_gap074.py",
+    "class": "unit",
+    "rationale": "uses mocks/patching to isolate behavior; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_loadgen.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_lsp.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_mcp_init.py",
+    "class": "integration",
+    "rationale": "exercises MCP/client interaction across components; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_mcp_integration.py",
+    "class": "integration",
+    "rationale": "test/file name explicitly marks integration; contains subprocess use, but no stronger end-to-end signal"
+  },
+  {
+    "file": "tests/test_mcp_server.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_mcp_verdict_persistence.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_no_tracked_history.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client"
+  },
+  {
+    "file": "tests/test_persist.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_pipeline.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_poc78_llm_probe_and_cap.py",
+    "class": "wiring",
+    "rationale": "checks imports, configuration, entry points, or component presence; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_preflight.py",
+    "class": "integration",
+    "rationale": "uses temporary real files/directories as collaborating components; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_prescreen.py",
+    "class": "unit",
+    "rationale": "uses mocks/patching to isolate behavior; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_propagate.py",
+    "class": "integration",
+    "rationale": "uses temporary real files/directories as collaborating components; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_pytest_outcome.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client"
+  },
+  {
+    "file": "tests/test_qa_ledger.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client"
+  },
+  {
+    "file": "tests/test_quality_gate_regressions.py",
+    "class": "wiring",
+    "rationale": "checks imports, configuration, entry points, or component presence"
+  },
+  {
+    "file": "tests/test_quality_metrics.py",
+    "class": "integration",
+    "rationale": "exercises MCP/client interaction across components; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_resolution.py",
+    "class": "mutation",
+    "rationale": "property-based or multi-case parametrized tests; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_resolution_config.py",
+    "class": "contract",
+    "rationale": "checks a schema or externally visible data shape; also uses mocking/patching; contains subprocess use, but no stronger end-to-end signal"
+  },
+  {
+    "file": "tests/test_scanner_nice.py",
+    "class": "mutation",
+    "rationale": "property-based or multi-case parametrized tests; also uses mocking/patching; contains subprocess use, but no stronger end-to-end signal"
+  },
+  {
+    "file": "tests/test_secrets_completeness.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client"
+  },
+  {
+    "file": "tests/test_secrets_scanner.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client"
+  },
+  {
+    "file": "tests/test_serve.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_setup_tools.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client"
+  },
+  {
+    "file": "tests/test_static_analysis.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_task_manager.py",
+    "class": "contract",
+    "rationale": "checks a schema or externally visible data shape"
+  },
+  {
+    "file": "tests/test_task_manager_concurrency.py",
+    "class": "contract",
+    "rationale": "checks a schema or externally visible data shape; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_tier1_lock.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_types.py",
+    "class": "unit",
+    "rationale": "tests local behavior without a stronger static integration/contract signal"
+  },
+  {
+    "file": "tests/test_usage.py",
+    "class": "contract",
+    "rationale": "checks a schema or externally visible data shape"
+  },
+  {
+    "file": "tests/test_v07_features.py",
+    "class": "integration",
+    "rationale": "uses temporary real files/directories as collaborating components; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_v081_fixes.py",
+    "class": "unit",
+    "rationale": "tests local behavior without a stronger static integration/contract signal"
+  },
+  {
+    "file": "tests/test_version.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client"
+  },
+  {
+    "file": "tests/test_worktree.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_worktree_disposable.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  },
+  {
+    "file": "tests/test_worktree_fleet.py",
+    "class": "e2e",
+    "rationale": "invokes a CLI, subprocess, or user-facing client; also uses mocking/patching"
+  }
+]
