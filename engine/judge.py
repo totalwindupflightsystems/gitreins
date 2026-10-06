@@ -429,6 +429,14 @@ def judge_result_to_dict(task_id: str, workdir: str, result) -> dict:
     quality_snapshot = getattr(result, "quality_snapshot", None)
     if quality_snapshot is not None:
         d["quality_snapshot"] = quality_snapshot
+    # GR-146: surface the Tier-1 data-protection evidence (counts + redacted
+    # findings) in the judge status dict, so the machine-readable verdict names
+    # what the shared policy detected. Values are already scrubbed by the lane.
+    tier1 = getattr(result, "tier1", None)
+    if tier1 is not None:
+        data_protection = (getattr(tier1, "extra", None) or {}).get("data_protection")
+        if data_protection is not None:
+            d["data_protection"] = data_protection
     tier2 = result.tier2
     if tier2 is None and result.pipeline_result:
         tier2 = _find_pipeline_verdict(result.pipeline_result)

@@ -1680,6 +1680,54 @@ def _secrets_step_run(
     )
 
 
+def _data_protection_enabled(config: dict | None) -> bool:
+    """True when the operator opted into the data-protection lane (GR-146).
+
+    Only a literal ``enabled: true`` in the top-level ``data_protection:``
+    block arms the step — absent/false/wrong-typed all read as OFF, matching
+    ``GuardManager`` and the jev-resolution block's posture.
+    """
+    block = (config or {}).get("data_protection")
+    return isinstance(block, dict) and block.get("enabled") is True
+
+
+def _data_protection_step_run(
+    workdir: str, config: dict | None = None, scan_root: str | None = None
+) -> str:
+    """Build the Tier-1 data-protection step (GR-146).
+
+    Keep policy/config lookup at the control root while scanning only the
+    selected source root when the caller supplied a distinct scope.
+    """
+    explicit_scan_root = scan_root is not None and os.path.realpath(scan_root) != os.path.realpath(
+        workdir
+    )
+    if not explicit_scan_root:
+        return (
+            f'PYTHONPATH="{_engine_root()}" {sys.executable} -c "'
+            "from engine.guard_manager import GuardManager; import sys; "
+            "gm = GuardManager('.', scope='working-tree'); "
+            "r = gm._check_data_protection(); "
+            "print('data_protection: ' + (r.output or '')); "
+            'sys.exit(0 if r.passed else 1)"'
+        )
+
+    source_root = os.path.abspath(scan_root)
+    python_code = (
+        "from engine.guard_manager import GuardManager; import os, sys; "
+        "gm = GuardManager('.', scope='working-tree', "
+        "scan_root=os.environ['GITREINS_SCAN_ROOT']); "
+        "r = gm._check_data_protection(); "
+        "print('data_protection: ' + (r.output or '')); "
+        "sys.exit(0 if r.passed else 1)"
+    )
+    return (
+        f"PYTHONPATH={shlex.quote(_engine_root())} "
+        f"GITREINS_SCAN_ROOT={shlex.quote(source_root)} "
+        f"{shlex.quote(sys.executable)} -c {shlex.quote(python_code)}"
+    )
+
+
 def tier1_plan(
     workdir: str, config: dict | None = None, scan_root: str | None = None
 ) -> tuple[list[dict], dict]:
@@ -1716,6 +1764,19 @@ def tier1_plan(
             "on_fail": "continue",
         },
     ]
+    # GR-146: the data-protection step rides beside secrets when the operator
+    # enabled it. It is NOT substantive (a skip never degrades the run) and it
+    # never gates secrets — it only adds the opt-in PII/IP filter to the same
+    # Tier-1 surface the guard uses.
+    if _data_protection_enabled(config):
+        steps.append(
+            {
+                "id": "data_protection",
+                "type": "script",
+                "run": _data_protection_step_run(workdir, config, scan_root),
+                "on_fail": "continue",
+            }
+        )
 
     language = lang_detect.detect_language(workdir)
     commands = lang_detect.lint_test_commands(language)
@@ -1728,7 +1789,7 @@ def tier1_plan(
             else f"no lint/test commands declared for language '{language}'"
         )
         return steps, {
-            "coverage": "secrets-only",
+            "coverage": "+".join(s["id"] for s in steps) if len(steps) > 1 else "secrets-only",
             "degraded": True,
             "skipped_steps": ["lint", "tests"],
             "reason": reason,

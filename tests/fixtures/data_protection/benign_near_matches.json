@@ -1,0 +1,57 @@
+[
+  {
+    "id": "benign-semver-short",
+    "text": "Package version 1.2.3 is a three-component semver, not an IPv4 literal.",
+    "expected": []
+  },
+  {
+    "id": "benign-date-like",
+    "text": "Release date 2026.10.06 is out of IPv4 octet range.",
+    "expected": []
+  },
+  {
+    "id": "benign-ipv4-octet-overflow",
+    "text": "Sentinel 999.999.999.999 is regex-shaped but not a valid address.",
+    "expected": []
+  },
+  {
+    "id": "benign-clock-time",
+    "text": "The build finished at 12:30:45 local time.",
+    "expected": []
+  },
+  {
+    "id": "benign-email-no-tld",
+    "text": "The local alias user@localhost has no public TLD and is not an email.",
+    "expected": []
+  },
+  {
+    "id": "benign-short-phone",
+    "text": "Extension 555-1234 is too short to be a phone number.",
+    "expected": []
+  },
+  {
+    "id": "benign-ssn-invalid-area",
+    "text": "Placeholder 000-12-3456 has an invalid SSN area prefix.",
+    "expected": []
+  },
+  {
+    "id": "benign-card-luhn-fail",
+    "text": "Synthetic 4111 1111 1111 1112 fails the Luhn checksum.",
+    "expected": []
+  },
+  {
+    "id": "benign-unlabeled-name",
+    "text": "the name is alice synthetic but it is not label-anchored.",
+    "expected": []
+  },
+  {
+    "id": "benign-iban-bad-checksum",
+    "text": "Synthetic GB00WEST12345698765432 fails the IBAN mod-97 check.",
+    "expected": []
+  },
+  {
+    "id": "known-fp-order-code",
+    "text": "Synthetic order code AB123456 is shaped like a passport number (known false positive).",
+    "expected": []
+  }
+]

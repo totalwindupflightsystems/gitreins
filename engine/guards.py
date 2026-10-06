@@ -8,8 +8,207 @@ from dataclasses import dataclass
 
 from engine import command_hygiene
 from engine import scanner_nice
+from engine.data_protection import DataProtectionPolicy
+from engine.types import DataProtectionResult
 
 logger = logging.getLogger("gitreins.guards.go")
+
+# ── Data-protection lane (GR-146) ──────────────────────────────────────────
+# The lane scans the SAME change scope the other Tier-1 lanes grade.  It reads
+# file bodies, so it is bounded on both axes (file count and per-file bytes)
+# and skips binary files rather than ever feeding raw NUL-laden bytes into the
+# detector.  Synthetic fixtures only — nothing here reads real personal data.
+DATA_PROTECTION_MAX_FILE_BYTES = 1_000_000
+DATA_PROTECTION_MAX_FILES = 500
+# Text-ish suffixes worth scanning; extension-less files (Dockerfile, .env
+# variants) are also attempted and dropped if they look binary.
+_DATA_PROTECTION_TEXT_SUFFIXES = frozenset(
+    {
+        ".py",
+        ".pyi",
+        ".md",
+        ".rst",
+        ".txt",
+        ".json",
+        ".jsonl",
+        ".yaml",
+        ".yml",
+        ".toml",
+        ".ini",
+        ".cfg",
+        ".conf",
+        ".properties",
+        ".csv",
+        ".tsv",
+        ".xml",
+        ".html",
+        ".htm",
+        ".js",
+        ".jsx",
+        ".ts",
+        ".tsx",
+        ".go",
+        ".rs",
+        ".c",
+        ".h",
+        ".cpp",
+        ".hpp",
+        ".sh",
+        ".bash",
+        ".sql",
+        ".env",
+        ".log",
+        ".mako",
+        ".tpl",
+    }
+)
+
+
+def _data_protection_scope(workdir: str, changed_files: list[str] | None) -> list[str]:
+    """Existing, scannable files in the caller's scope (or the staged index).
+
+    ``None`` means the caller handed in no scope (staged runs): the lane does
+    its own ``git diff --cached`` discovery, mirroring the Go lanes.
+    """
+    if changed_files is None:
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=workdir,
+            env=_sanitized_env(),
+        )
+        candidates = [f for f in staged.stdout.strip().split("\n") if f]
+    else:
+        candidates = list(changed_files)
+    scope: list[str] = []
+    for path in candidates:
+        if not path:
+            continue
+        absolute = os.path.join(workdir, path)
+        if not os.path.isfile(absolute):
+            continue
+        suffix = os.path.splitext(path)[1].lower()
+        name = os.path.basename(path)
+        if suffix and suffix not in _DATA_PROTECTION_TEXT_SUFFIXES and not name.startswith(".env"):
+            continue
+        scope.append(path)
+    return scope
+
+
+def _looks_binary(path: str) -> bool:
+    try:
+        with open(path, "rb") as handle:
+            chunk = handle.read(8192)
+    except OSError:
+        return True
+    return b"\x00" in chunk
+
+
+def check_data_protection(
+    workdir: str,
+    changed_files: list[str] | None = None,
+    policy: DataProtectionPolicy | None = None,
+) -> DataProtectionResult:
+    """Scan the change scope for PII / network identifiers per *policy* (GR-146).
+
+    Returns a :class:`DataProtectionResult`.  A disabled policy (or one whose
+    categories are all ``off``) yields a SKIP — the lane did no work and says
+    so, exactly like ``_no_go_files_result``; it is not a substantive gate, so
+    the skip never degrades a run.  When a category is ``block``, any finding
+    fails the lane; ``warn`` findings pass but are reported.
+
+    Values in ``output`` are already scrubbed for the resolved handling:
+    ``redact`` emits ``[REDACTED:<category>]``, ``replace`` emits the
+    class-specific placeholder, and only an explicit ``preserve`` shows the
+    raw value (report-only by policy).
+    """
+    policy = policy or DataProtectionPolicy.default()
+    if not policy.enabled:
+        return DataProtectionResult(
+            skipped=True,
+            skip_reason="data_protection disabled (data_protection.enabled: false)",
+            output="data_protection: disabled",
+        )
+    if not policy.active:
+        return DataProtectionResult(
+            skipped=True,
+            skip_reason="all data_protection categories are off",
+            output="data_protection: all categories off",
+        )
+
+    scope = _data_protection_scope(workdir, changed_files)
+    if not scope:
+        return DataProtectionResult(
+            skipped=True,
+            skip_reason="no scannable files in scope",
+            output="data_protection: no scannable files in scope",
+        )
+
+    findings: list = []
+    scanned = 0
+    skipped_files: list[str] = []
+    for path in scope[:DATA_PROTECTION_MAX_FILES]:
+        absolute = os.path.join(workdir, path)
+        try:
+            if os.path.getsize(absolute) > DATA_PROTECTION_MAX_FILE_BYTES:
+                skipped_files.append(f"{path} (too large)")
+                continue
+        except OSError:
+            continue
+        if _looks_binary(absolute):
+            skipped_files.append(f"{path} (binary)")
+            continue
+        try:
+            with open(absolute, encoding="utf-8", errors="replace") as handle:
+                text = handle.read()
+        except OSError:
+            continue
+        scanned += 1
+        result = policy.scan(text, path=path)
+        for finding in result.findings:
+            findings.append((path, finding))
+
+    blocked = [f for _, f in findings if f.blocked]
+    warned = [f for _, f in findings if f.warned]
+    suppressed = [f for _, f in findings if f.suppressed]
+
+    lines: list[str] = []
+    for path, finding in findings[:50]:
+        if finding.suppressed:
+            continue
+        lines.append(f"  {path}:{finding.line}: {finding.render(reveal=False)}")
+    if len(findings) > 50:
+        lines.append(f"  ... and {len(findings) - 50} more finding(s)")
+
+    summary = (
+        f"data_protection: {len(blocked)} blocked, {len(warned)} warned, "
+        f"{len(suppressed)} suppressed across {scanned} file(s)"
+    )
+    if skipped_files:
+        summary += f"; skipped: {', '.join(skipped_files[:5])}"
+    output = "\n".join([summary, *lines]) if lines else summary
+    if len(output) > 2000:
+        output = output[:2000] + "\n... [truncated]"
+
+    warning = ""
+    if warned and not blocked:
+        warning = (
+            f"data_protection: {len(warned)} finding(s) detected with detection=warn "
+            "(reported, not blocked)"
+        )
+    return DataProtectionResult(
+        passed=not blocked,
+        output=output,
+        warning=warning,
+        findings=tuple(f.to_dict() for _, f in findings),
+        blocked_count=len(blocked),
+        warned_count=len(warned),
+        suppressed_count=len(suppressed),
+        scanned_files=scanned,
+    )
+
 
 # ── missing-binary diagnostics (DF-GITREINS-POC-46) ────────────────────────
 # A Go lane whose toolchain binary is absent from PATH returned

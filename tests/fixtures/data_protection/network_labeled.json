@@ -1,0 +1,38 @@
+[
+  {
+    "id": "net-ipv4-public",
+    "text": "Synthetic service endpoint 203.0.113.9 is TEST-NET-3 and never routable.",
+    "expected": ["ipv4"],
+    "canary": "203.0.113.9"
+  },
+  {
+    "id": "net-ipv4-private",
+    "text": "Synthetic internal host 10.12.13.14 is a private fixture address.",
+    "expected": ["ipv4"],
+    "canary": "10.12.13.14"
+  },
+  {
+    "id": "net-ipv6-full",
+    "text": "Synthetic v6 host 2001:0db8:0000:0000:0000:0000:0000:0001 documented in the fixture.",
+    "expected": ["ipv6"],
+    "canary": "2001:0db8:0000:0000:0000:0000:0000:0001"
+  },
+  {
+    "id": "net-ipv6-compressed",
+    "text": "Synthetic v6 host 2001:db8::1 for the fixture only.",
+    "expected": ["ipv6"],
+    "canary": "2001:db8::1"
+  },
+  {
+    "id": "net-cidr-v4",
+    "text": "Synthetic range 192.168.1.0/24 is the fixture LAN.",
+    "expected": ["cidr"],
+    "canary": "192.168.1.0/24"
+  },
+  {
+    "id": "net-cidr-v6",
+    "text": "Synthetic range 2001:db8::/32 is the fixture documentation prefix.",
+    "expected": ["cidr"],
+    "canary": "2001:db8::/32"
+  }
+]

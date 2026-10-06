@@ -11,8 +11,7 @@
 
 GitReins lives inside your git repository as a quality harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ✅ **v0.16.0** — the release that closes the loop between what is merged and what actually runs. `gitreins resolve "<question>"` (and the `context.resolve` MCP tool) traces a question to its seed files through Hilo, assembles a measured evidence bundle and returns a calibrated verdict band; `gitreins preflight` checks the premises of a task *before* a worker is dispatched, and annotates instead of dispatching when they do not hold; the judge pre-screens candidates and attributes a verdict per acceptance criterion; per-surface config knobs make the resolution gate tunable without touching code. Repo-owned quality metrics can also be surfaced by the guard, judge, doctor, and MCP `guard.run` from one JSON artifact; GitReins consumes the numbers but does not compute them. See [docs/quality-metrics.md](docs/quality-metrics.md) for the config and worked example. On the guard side, the `hook_timeout` early-return now carries `allow_skips` (a slow repo's docs/board commits were being blocked with exit 2 by a run whose own warning said the commit was allowed), the test lane pins its interpreter so a host whose PATH carries another virtualenv can no longer fail the lane with `unrecognized arguments: -n`, Go guard commands run through bounded execution, and the evaluator reaps the last run's process group on exit. `scripts/check_deployed_surface.py` is new: it compares the *deployed* CLI surface with this checkout and fails loudly when a merged subcommand exists only in the repo — the drift that used to be invisible because both copies reported the same version. 2700 tests pass / 80 test files, verified by collection (optional-tool skips vary).
-
+> ✅ **v0.16.0** — the release that closes the loop between what is merged and what actually runs. `gitreins resolve "<question>"` (and the `context.resolve` MCP tool) traces a question to its seed files through Hilo, assembles a measured evidence bundle and returns a calibrated verdict band; `gitreins preflight` checks the premises of a task *before* a worker is dispatched, and annotates instead of dispatching when they do not hold; the judge pre-screens candidates and attributes a verdict per acceptance criterion; per-surface config knobs make the resolution gate tunable without touching code. Repo-owned quality metrics can also be surfaced by the guard, judge, doctor, and MCP `guard.run` from one JSON artifact; GitReins consumes the numbers but does not compute them. See [docs/quality-metrics.md](docs/quality-metrics.md) for the config and worked example. On the guard side, the `hook_timeout` early-return now carries `allow_skips` (a slow repo's docs/board commits were being blocked with exit 2 by a run whose own warning said the commit was allowed), the test lane pins its interpreter so a host whose PATH carries another virtualenv can no longer fail the lane with `unrecognized arguments: -n`, Go guard commands run through bounded execution, and the evaluator reaps the last run's process group on exit. `scripts/check_deployed_surface.py` is new: it compares the *deployed* CLI surface with this checkout and fails loudly when a merged subcommand exists only in the repo — the drift that used to be invisible because both copies reported the same version. 2795 tests collected across 81 test files, verified by collection (optional-tool skips vary).
 Every resolution-gate surface ships **disabled**, because resolving a question sends the assembled bundle off the host: enabling one is an explicit act, `resolution.enabled.<surface>: true` (`cli`, `mcp`, `predispatch`, `judge_prescreen`) in `.gitreins/config.yaml` — `gitreins init` writes the block with all four `false`, and only a literal `true` opens a surface. A disabled surface fails closed with `abstain_reason: surface-disabled` and prints the enabling fix. The complete block, the defaults it may omit and the calibration caveat on the judge-adjacent surfaces are in [docs/jev-resolution-gate.md §9](docs/jev-resolution-gate.md).
 
 ---
@@ -696,6 +695,35 @@ guards:
     lint: true
     tests: true
 
+# ── Tier-1 data protection (optional, OFF by default) ─
+# A second, opt-in filter over PII and network identifiers, alongside the
+# fail-closed `secrets` lane (which it can never weaken). Absent or
+# `enabled: false` is a no-op. The same policy drives the guard and the
+# Tier-1 judge. See docs/data-protection.md for the full reference.
+data_protection:
+  enabled: false              # <-- opt in
+  categories:
+    pii:
+      detection: block        # off | warn | block
+      handling: redact        # preserve | redact | replace
+      confidence: 0.7         # class floor; lower to enable phone/medical/names
+      # classes:
+      #   names: { enabled: false }
+    ip_addresses:
+      detection: warn
+      handling: replace       # [IP:IPV4] / [IP:IPV6] / [IP:CIDR]
+      default_action: redact  # for ranges not in preserve_list
+      preserve_list:          # explicit shared/documented ranges
+        - 10.0.0.0/8
+        - 2001:db8::/32
+  # Narrow false positives; `reason` required, `match` and/or `rule` required.
+  # exceptions:
+  #   - category: ip_addresses
+  #     rule: ipv4
+  #     match: 198.51.100.7
+  #     scope: "docs/*"
+  #     reason: "RFC 5737 documentation address"
+
 # ── Tier 2 evaluator caps ────────────────────────────
 evaluator:
   max_iterations: 100        # LLM reasoning turns; -1 = unlimited
@@ -716,6 +744,19 @@ history:
   storage: "git"
   max_verdicts: 1000
 ```
+
+### Data protection (optional)
+
+`data_protection` is a second, opt-in Tier-1 filter for **PII** and **network
+identifiers**, complementing the fail-closed `secrets` lane. Every category
+ships `off`, so it is a no-op until you set `enabled: true`. Detection runs at
+one of `off`/`warn`/`block`; handling is `preserve` (report-only), `redact`
+(`[REDACTED:<category>]`) or `replace` (class placeholder). IPs support a
+`preserve_list` of explicitly shared CIDRs plus a `default_action` for
+unmatched ranges, and narrow `exceptions` (required `reason`, scoped to a
+category/rule/value) suppress individual false positives without weakening
+credential scanning. A malformed policy is rejected loudly.
+See [docs/data-protection.md](docs/data-protection.md).
 
 ---
 
@@ -803,7 +844,7 @@ A lane whose own TREE is dirty fails the mirror-image check
 - **MCP Transport:** stdio (14 tools)
 - **Config:** YAML in `.gitreins/` directory
 - **Evaluator Default Model:** DeepSeek V4 Flash (~$0.01/eval)
-- **Test suite:** 2700 tests across 80 test files (collection total; optional-tool skips vary)
+- **Test suite:** 2795 tests collected across 81 test files (collection total; optional-tool skips vary)
 
 ## Architecture & Docs
 
@@ -817,6 +858,7 @@ A lane whose own TREE is dirty fails the mirror-image check
 | [Component Map](docs/component-map.md) | Module inventory with paths and line counts |
 | [Agentic Evaluator Design](docs/evaluator-loop.md) | How the evaluator loop works |
 | [Judgment Viewer](docs/judgment-viewer.md) | Verdict browser: API contract, data sources, security model, `--repo` |
+| [Tier-1 Data Protection](docs/data-protection.md) | Opt-in PII/network filter: policy reference, category inventory, measured false positives and limits |
 
 ## License
 

@@ -69,3 +69,29 @@ resolution:
     mcp: true
     predispatch: false
     judge_prescreen: false
+
+# Tier-1 data protection (GR-146). DISABLED here: a repo with no PII/network
+# policy needs no change, and `enabled: false` (like an absent block) is a
+# no-op. Only a literal `enabled: true` arms the lane, and the guard and the
+# Tier-1 judge read this one block through build_policy, so they can never
+# disagree. Credentials stay owned by the `secrets` lane above and can never be
+# filtered, excepted or weakened here. Full reference: docs/data-protection.md.
+data_protection:
+  enabled: false
+  # Example (uncomment to opt in):
+  # categories:
+  #   pii:
+  #     detection: block        # off | warn | block
+  #     handling: redact        # preserve | redact | replace
+  #     confidence: 0.7         # class floor; lower to enable phone/medical/names
+  #   ip_addresses:
+  #     detection: warn
+  #     handling: replace
+  #     default_action: redact
+  #     preserve_list: ["10.0.0.0/8", "2001:db8::/32"]
+  # exceptions:
+  #   - category: ip_addresses
+  #     rule: ipv4
+  #     match: 198.51.100.7
+  #     scope: "docs/*"
+  #     reason: "RFC 5737 documentation address"
