@@ -151,6 +151,8 @@ The artifacts are listed in `verdict.json → evidence.items` and rendered by
 | `--force` | Skip dependency checks |
 | `--skip-tier2` | Grade Tier 1 only — no LLM call |
 
+`task complete` uses a cross-process lease keyed by task, control/source roots, revisions, and configuration. A matching concurrent request fails fast with a retry message instead of launching a second Tier 1 scan. The synchronous `judge` CLI and MCP `judge` retain their existing in-flight-job reuse behavior; `judge --json` has the documented exception below.
+
 **Exit codes**
 
 | Code | Meaning |
