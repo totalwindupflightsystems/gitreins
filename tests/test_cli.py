@@ -4071,6 +4071,57 @@ class TestTaskCompleteScanScopeAndLease:
         monkeypatch.chdir(repo)
         assert _task_complete_scan_root(str(repo), None) == str(repo)
 
+    def test_concurrent_task_complete_calls_run_one_evaluation(self, tmp_path, monkeypatch):
+        from types import SimpleNamespace
+
+        from gitreins import cli as cli_mod
+
+        control = tmp_path / "control"
+        scan = tmp_path / "project"
+        (control / ".gitreins").mkdir(parents=True)
+        scan.mkdir()
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setattr(cli_mod, "get_workdir", lambda: str(control))
+        monkeypatch.setattr(cli_mod, "_require_task", lambda manager, task_id: object())
+        monkeypatch.setattr(cli_mod, "_persist_result", lambda *args: None)
+
+        class FakeTaskManager:
+            def __init__(self, _workdir):
+                pass
+
+            def check_dependencies(self, _task_id):
+                return []
+
+            def complete(self, task_id, force=False):
+                return SimpleNamespace(id=task_id, status="complete")
+
+        evaluations = []
+
+        class FakeJudge:
+            def __init__(self, _llm, _workdir, scan_root=None):
+                assert scan_root == str(scan)
+
+            def evaluate_task(self, task, skip_tier2=False):
+                evaluations.append(task.id)
+                time.sleep(0.2)
+                return SimpleNamespace(passed=True, summary="PASS")
+
+        monkeypatch.setattr("engine.task_manager.TaskManager", FakeTaskManager)
+        monkeypatch.setattr("engine.judge.Judge", FakeJudge)
+        args = SimpleNamespace(id="same-task", scan_root=str(scan), force=True, skip_tier2=True)
+
+        def invoke():
+            try:
+                cli_mod.cmd_task_complete(args)
+                return 0
+            except SystemExit as exc:
+                return exc.code
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda _index: invoke(), range(2)))
+        assert sorted(results) == [0, 1]
+        assert evaluations == ["same-task"]
+
     def test_task_complete_lease_coalesces_only_identical_inputs(self, tmp_path, monkeypatch):
         from gitreins.cli import _task_complete_lease
 
