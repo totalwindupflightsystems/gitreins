@@ -1,0 +1,56 @@
+[
+  {
+    "id": "pii-email",
+    "text": "Contact the synthetic test account at canary.email.alpha@example.com for the fixture.",
+    "expected": ["email"],
+    "canary": "canary.email.alpha@example.com"
+  },
+  {
+    "id": "pii-phone-e164",
+    "text": "Fixture hotline (synthetic): +14155550132.",
+    "expected": ["phone"],
+    "canary": "+14155550132"
+  },
+  {
+    "id": "pii-phone-grouped",
+    "text": "Synthetic desk number 415 555 0132 is reserved for tests.",
+    "expected": ["phone"],
+    "canary": "415 555 0132"
+  },
+  {
+    "id": "pii-ssn",
+    "text": "Synthetic taxpayer id 123-45-6789 belongs to nobody.",
+    "expected": ["ssn"],
+    "canary": "123-45-6789"
+  },
+  {
+    "id": "pii-passport",
+    "text": "Synthetic travel document AB1234567 issued for fixture use only.",
+    "expected": ["passport"],
+    "canary": "AB1234567"
+  },
+  {
+    "id": "pii-medical",
+    "text": "Synthetic record: diagnosis: J45.909 (asthma) recorded for the fixture.",
+    "expected": ["medical"],
+    "canary": "J45.909"
+  },
+  {
+    "id": "pii-financial-card",
+    "text": "Synthetic card 4111 1111 1111 1111 passes Luhn and must never be real.",
+    "expected": ["financial"],
+    "canary": "4111 1111 1111 1111"
+  },
+  {
+    "id": "pii-financial-iban",
+    "text": "Synthetic IBAN GB82WEST12345698765432 for fixture-only use.",
+    "expected": ["financial"],
+    "canary": "GB82WEST12345698765432"
+  },
+  {
+    "id": "pii-names",
+    "text": "patient name: Alice Synthetic is a labeled fixture value.",
+    "expected": ["names"],
+    "canary": "Alice Synthetic"
+  }
+]

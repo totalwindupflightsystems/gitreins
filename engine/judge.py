@@ -28,6 +28,7 @@ class Judge:
         eval_cap: "str | EvalCap | None" = None,
         scope: str = "staged",
         *,
+        scan_root: str | None = None,
         persist_log: bool = True,
         persist_telemetry: bool = True,
     ):
@@ -45,8 +46,13 @@ class Judge:
         # appending to `.gitreins/usage.jsonl` there. Keyword-only and both
         # defaulting True so no existing caller changes.
         self.persist_telemetry = persist_telemetry
+        self.scan_root = scan_root or workdir
         self.guard_manager = GuardManager(
-            workdir, self.guard_config, scope=scope, persist_log=persist_log
+            workdir,
+            self.guard_config,
+            scope=scope,
+            persist_log=persist_log,
+            scan_root=self.scan_root,
         )
         self.eval_cap = eval_cap
 
@@ -64,7 +70,7 @@ class Judge:
         the task dict before the pipeline runs.  Pipeline stages with the
         condition ``not task.skip_tier2`` will be skipped (GR-064c).
         """
-        config = load_pipeline_config(self.workdir)
+        config = load_pipeline_config(self.workdir, scan_root=self.scan_root)
         self._pass_on_error = self._read_pass_on_error()
 
         if config.get("pipeline", {}).get("stages"):
@@ -134,7 +140,11 @@ class Judge:
                     stage["condition"] = "false"
 
         pipeline = Pipeline(
-            config, self.workdir, llm=self.llm, persist_telemetry=self.persist_telemetry
+            config,
+            self.workdir,
+            llm=self.llm,
+            persist_telemetry=self.persist_telemetry,
+            scan_root=self.scan_root,
         )
 
         task_dict: dict[str, object] = {
@@ -238,7 +248,9 @@ class Judge:
         print("  Tier 1 PASSED")
         print("  Tier 2: Running agentic evaluator...")
 
-        evaluator = AgenticEvaluator(self.llm, self.workdir, eval_cap=self.eval_cap)
+        evaluator = AgenticEvaluator(
+            self.llm, self.scan_root, eval_cap=self.eval_cap, config_root=self.workdir
+        )
         task_dict: dict[str, object] = {
             "id": task.id,
             "title": task.title,
@@ -329,9 +341,13 @@ class Judge:
 
     def run_precommit(self) -> bool:
         """Run pre-commit pipeline stages only. Returns True if commit should proceed."""
-        config = load_pipeline_config(self.workdir)
+        config = load_pipeline_config(self.workdir, scan_root=self.scan_root)
         pipeline = Pipeline(
-            config, self.workdir, llm=self.llm, persist_telemetry=self.persist_telemetry
+            config,
+            self.workdir,
+            llm=self.llm,
+            persist_telemetry=self.persist_telemetry,
+            scan_root=self.scan_root,
         )
         result = pipeline.run(
             {"id": "_precommit", "title": "pre-commit", "criteria": []}, trigger="pre-commit"
@@ -413,6 +429,14 @@ def judge_result_to_dict(task_id: str, workdir: str, result) -> dict:
     quality_snapshot = getattr(result, "quality_snapshot", None)
     if quality_snapshot is not None:
         d["quality_snapshot"] = quality_snapshot
+    # GR-146: surface the Tier-1 data-protection evidence (counts + redacted
+    # findings) in the judge status dict, so the machine-readable verdict names
+    # what the shared policy detected. Values are already scrubbed by the lane.
+    tier1 = getattr(result, "tier1", None)
+    if tier1 is not None:
+        data_protection = (getattr(tier1, "extra", None) or {}).get("data_protection")
+        if data_protection is not None:
+            d["data_protection"] = data_protection
     tier2 = result.tier2
     if tier2 is None and result.pipeline_result:
         tier2 = _find_pipeline_verdict(result.pipeline_result)

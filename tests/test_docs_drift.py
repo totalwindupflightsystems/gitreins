@@ -17,7 +17,7 @@ from pathlib import Path
 
 SCRIPT_PATH = Path(__file__).resolve().parent.parent / "scripts" / "check_docs_drift.py"
 
-BANNER = "> ✅ **v{version}** — release banner, {p} tests pass / {f} test files, verified by collection.\n"
+BANNER = "> ✅ **v{version}** — release banner, {p} tests collected / {f} test files, verified by collection.\n"
 TECH_STACK = "- **Test suite:** {p} tests across {f} test files (collection total).\n"
 CONTRIBUTING_CLAIM = "All tests must pass. Currently **{p} tests across {f}\ntest files** (canonical count in README).\n"
 
@@ -100,6 +100,23 @@ def test_matching_version_and_counts_exit_zero(tmp_path):
     assert "0.12.1" in message
 
 
+def test_collection_count_wording_is_accurate_and_supported(tmp_path):
+    readme = "> release **v0.12.1**\n\n2 tests collected across 1 test file.\n"
+    root = _write_repo(tmp_path, readme_body=readme, n_tests=2, n_files=1)
+    proc = _run_script(root)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "2 tests / 1 test files" in proc.stdout
+
+
+def test_file_s_example_is_not_a_collection_claim(tmp_path):
+    readme = tmp_path / "README.md"
+    readme.write_text("Tier 1 Guards: PASS (test mode: diff, 3 test file(s))\\n", encoding="utf-8")
+
+    claims = _load_module().collect_doc_claims(readme)
+
+    assert not any(phrase == "test files" for phrase, *_ in claims)
+
+
 def test_banner_version_mismatch_fails_naming_both(tmp_path):
     root = _write_repo(tmp_path, banner_version="9.9.9", pyproject_version="0.12.1")
     proc = _run_script(root)
@@ -167,7 +184,7 @@ def test_missing_pyproject_version_fails(tmp_path):
     assert "version" in message
 
 
-def test_tests_across_disagreeing_with_tests_pass_fails(tmp_path):
+def test_tests_across_disagreeing_with_collection_claim_fails(tmp_path):
     readme = BANNER.format(version="0.12.1", p=12, f=3) + "\n" + TECH_STACK.format(p=14, f=3)
     root = _write_repo(tmp_path, readme_body=readme)
     proc = _run_script(root)

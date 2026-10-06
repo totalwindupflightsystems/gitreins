@@ -559,6 +559,22 @@ class TestExtendedLLM:
 # ── GR-068: DeepSeek thinking mode control + cache telemetry ──
 
 
+@pytest.fixture(autouse=True)
+def _gr068_no_llm_env(monkeypatch):
+    """GR-LINT-001 lesson: an operator's GITREINS_LLM_* environment (set for
+    the judge itself) leaks into this class via the client's env fallbacks —
+    model/base-url detection tests then grade the OPERATOR's env, not the
+    constructor arguments. Strip the family for every test in this class."""
+    for var in (
+        "GITREINS_LLM_MODEL",
+        "GITREINS_LLM_BASE_URL",
+        "GITREINS_LLM_API_KEY",
+        "GITREINS_LLM_PROVIDER",
+        "GITREINS_LLM_REASONING",
+    ):
+        monkeypatch.delenv(var, raising=False)
+
+
 class TestGR068ThinkingMode:
     """Test DeepSeek thinking/reasoning mode control (GR-068)."""
 

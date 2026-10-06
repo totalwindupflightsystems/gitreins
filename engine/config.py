@@ -17,6 +17,7 @@ import time
 from dataclasses import dataclass, field
 
 from engine import scanner_nice
+from engine.data_protection import DataProtectionPolicy
 
 logger = logging.getLogger("gitreins.config")
 
@@ -66,6 +67,32 @@ class QualityConfig:
             "per_metric_mode": dict(self.per_metric_mode),
             "timeout": self.timeout,
         }
+
+
+@dataclass
+class DataProtectionConfig:
+    """The top-level ``data_protection:`` policy block (GR-146).
+
+    A typed holder so the unified config loader validates the block the same
+    way it validates every other section, and so ``to_config_dict`` can
+    round-trip it.  All detection/handling authority lives in
+    :mod:`engine.data_protection`; validation is delegated there so the guard
+    and the judge can never disagree about what a policy means (AC1/AC3).
+    """
+
+    policy: DataProtectionPolicy = field(default_factory=DataProtectionPolicy.default)
+
+    @classmethod
+    def from_dict(cls, value: dict | None) -> "DataProtectionConfig":
+        block = value if isinstance(value, dict) else {}
+        return cls(policy=DataProtectionPolicy.from_dict(block))
+
+    @property
+    def enabled(self) -> bool:
+        return self.policy.enabled
+
+    def to_dict(self) -> dict:
+        return self.policy.to_dict()
 
 
 @dataclass
@@ -173,6 +200,13 @@ class GitReinsDefaults:
 
     # ── Repo-produced quality snapshot (GR-142) ──
     quality: QualityConfig = field(default_factory=QualityConfig)
+
+    # ── Tier-1 data protection (GR-146) ──
+    # Ships DISABLED: an absent block is the backwards-compatible no-op, so an
+    # existing repository's guard/judge behaviour is byte-for-byte unchanged
+    # until an operator opts in (AC1). Validation is delegated to
+    # engine.data_protection so a malformed policy fails loudly (AC3).
+    data_protection: DataProtectionConfig = field(default_factory=DataProtectionConfig)
 
     # Metadata
     _source: str = field(default="(built-in defaults)", repr=False)
@@ -357,6 +391,7 @@ class GitReinsDefaults:
             ),
             resolution_egress_exclude=_resolution_excludes(config_dict),
             quality=QualityConfig.from_dict(config_dict.get("quality")),
+            data_protection=DataProtectionConfig.from_dict(config_dict.get("data_protection")),
             _source=".gitreins/config.yaml" if config_dict else self._source,
         )
 
@@ -435,6 +470,7 @@ class GitReinsDefaults:
                 "egress_exclude": list(self.resolution_egress_exclude),
             },
             "quality": self.quality.to_dict(),
+            "data_protection": self.data_protection.to_dict(),
         }
 
 

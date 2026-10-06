@@ -34,9 +34,15 @@ from engine import scanner_nice
 from engine.guards import (
     GoGuardResult,
     _coerce_timeout,
+    check_data_protection,
     check_go_lint,
     check_go_tests,
     check_go_build,
+)
+from engine.data_protection import (
+    DataProtectionConfigError,
+    DataProtectionPolicy,
+    build_policy as _build_data_protection_policy,
 )
 from engine.lsp import find_lsp_tool, run_lsp_check, select_lsp_files
 from engine.repo_paths import WorktreeResolutionError, resolve_worktree_identity
@@ -1234,8 +1240,12 @@ class GuardManager:
         *,
         grade_full_tree: bool = False,
         persist_log: bool = True,
+        scan_root: str | None = None,
     ):
         self.workdir = os.path.abspath(workdir)
+        self.scan_root = os.path.abspath(scan_root) if scan_root else self.workdir
+        if not os.path.isdir(self.scan_root):
+            raise ValueError(f"scan root is not a directory: {self.scan_root}")
         # Change scope (EVID-002): "staged" is the index (today's behaviour,
         # byte for byte); "working-tree" is the union of staged, unstaged and
         # non-ignored untracked files, collected read-only. Keyword-only and
@@ -1277,6 +1287,25 @@ class GuardManager:
         lsp_cfg = guards_cfg.get("lsp_timeouts", {})
         self._lsp_init_timeout: float | None = lsp_cfg.get("init")
         self._lsp_per_file_timeout: float | None = lsp_cfg.get("per_file")
+
+        # Data-protection policy (GR-146). Resolved once per run from the same
+        # top-level `data_protection:` block the Tier-1 judge pipeline reads, so
+        # the guard and the verdict can never disagree. A malformed policy is
+        # NOT swallowed: the lane reports it as a FAIL naming the offending key
+        # (AC3) instead of silently running with a broadened default.
+        dp_block = config.get("data_protection") if isinstance(config, dict) else None
+        self._data_protection_enabled = (
+            isinstance(dp_block, dict) and dp_block.get("enabled") is True
+        )
+        self._data_protection_error = ""
+        try:
+            self._data_protection = _build_data_protection_policy(
+                config if isinstance(config, dict) else {}
+            )
+        except DataProtectionConfigError as exc:
+            self._data_protection = DataProtectionPolicy.default()
+            self._data_protection_error = str(exc)
+        self._data_protection_result = None
 
         # DF-018: untruncated guard outputs for the persisted run log. The
         # guard results keep their own bounded output (what the console
@@ -1446,6 +1475,21 @@ class GuardManager:
                 )
                 return _finalize(self._timeout_result(results, warnings))
 
+        # GR-146: the data-protection lane runs immediately AFTER secrets.
+        # Credentials are the fail-closed gate; this lane is opt-in and must
+        # never run ahead of, or interfere with, the secrets scanner. It runs
+        # when the operator enabled it — and when the block is MALFORMED, so a
+        # bad policy fails loudly here instead of being silently ignored.
+        if self._data_protection_enabled or self._data_protection_error:
+            results.append(self._check_data_protection())
+            if _timed_out():
+                warnings.append(
+                    f"Guard timed out after {self._hook_timeout}s "
+                    f"(hook_timeout). Remaining checks skipped — "
+                    f"commit allowed to proceed (fail-open)."
+                )
+                return _finalize(self._timeout_result(results, warnings))
+
         if self._enabled["lint"] and not self._is_go:
             results.append(self._check_lint())
             if _timed_out():
@@ -1595,6 +1639,18 @@ class GuardManager:
             # having to re-derive skips from the per-guard results.
             "allow_skips": self._allow_skips,
         }
+        if self._data_protection_result is not None:
+            dp = self._data_protection_result
+            # Machine-readable half of the lane (AC5): counts + redacted
+            # findings ride in Tier1Result.extra so the CLI, MCP and the judge
+            # verdict can consume them without re-running detection.
+            extra["data_protection"] = {
+                "blocked": dp.blocked_count,
+                "warned": dp.warned_count,
+                "suppressed": dp.suppressed_count,
+                "scanned_files": dp.scanned_files,
+                "findings": list(dp.findings),
+            }
         if self._test_mode == "diff" and self._enabled.get("tests"):
             changed = self.changed_files
             # DF-GITREINS-POC-67: _discover_test_targets returns None for the
@@ -1676,12 +1732,37 @@ class GuardManager:
         prints in place of a path.
         """
         try:
-            path = write_guard_log(self.workdir, result, self._full_outputs)
+            logged_result, logged_outputs = self._redacted_for_artifact(result)
+            path = write_guard_log(self.workdir, logged_result, logged_outputs)
         except Exception as exc:  # noqa: BLE001 — best-effort by contract
             logger.warning("guard run log not written: %s", exc)
             result.extra["guard_log_error"] = str(exc)
             return
         result.extra["guard_log"] = path
+
+    def _redacted_for_artifact(self, result: Tier1Result) -> tuple[Tier1Result, dict[str, str]]:
+        """Scrub the run log's text with the data-protection policy (AC5).
+
+        The on-disk log is a machine-readable artifact built from EVERY lane's
+        output, so a value one lane printed (a pytest traceback echoing a
+        fixture, a lint snippet) would otherwise survive there even when the
+        data-protection lane itself is clean. ``preserve`` is a no-op by
+        contract; a disabled policy returns the run untouched.
+        """
+        policy = self._data_protection
+        if not policy.active:
+            return result, self._full_outputs
+        redacted_results = [
+            replace(
+                r,
+                output=policy.redact_text(r.output),
+                error=policy.redact_text(r.error),
+                warning=policy.redact_text(r.warning),
+            )
+            for r in result.results
+        ]
+        full_outputs = {name: policy.redact_text(body) for name, body in self._full_outputs.items()}
+        return replace(result, results=redacted_results), full_outputs
 
     @property
     def test_mode(self) -> str:
@@ -1973,7 +2054,7 @@ class GuardManager:
             elif staged_only:
                 scan_files = _get_staged_files(self.workdir)
             else:
-                scan_files = self._workdir_files()
+                scan_files = self._scan_root_files()
 
             if not scan_files:
                 if explicit_scope:
@@ -2000,7 +2081,7 @@ class GuardManager:
                 # gitleaks applies (test fixtures with deliberate fake keys).
                 if any(rx.search(fpath) for rx in allowlist):
                     continue
-                full = os.path.join(self.workdir, fpath)
+                full = os.path.join(self.scan_root, fpath)
                 if not os.path.isfile(full):
                     continue
 
@@ -2085,15 +2166,24 @@ class GuardManager:
                 scanners=((BUILTIN_SCANNER, "scan error"),),
             )
 
-    def _workdir_files(self) -> list[str]:
-        """Relative paths of all non-ignored files in the workdir.
+    def _scan_root_files(self) -> list[str]:
+        """List source-root files using the established scan exclusions."""
+        if self.scan_root == self.workdir:
+            return self._workdir_files()
+        return self._workdir_files(self.scan_root)
+
+    def _workdir_files(self, root: str | None = None) -> list[str]:
+        """Relative paths of non-ignored files below *root* (default: workdir).
 
         Used by the judge/pipeline secrets cross-check (DF-012), where the
         changes under evaluation are already committed — nothing is staged.
         Mirrors the directories gitleaks' generated config allowlists.
         """
+        scan_root = os.path.abspath(root or self.workdir)
         skip_dirs = {
             ".git",
+            ".hg",
+            ".svn",
             *HARNESS_STATE_DIRS,
             "node_modules",
             "__pycache__",
@@ -2119,7 +2209,7 @@ class GuardManager:
             "demo-calc",
         }
         files: list[str] = []
-        for root, dirs, names in os.walk(self.workdir):
+        for current_root, dirs, names in os.walk(scan_root):
             # Prune ANY venv-like dir, not just exact ".venv"/"venv":
             # .venv312, venv311, venvs, etc. The judge's workdir scan
             # (DF-012) walked .venv312/lib/python3.12/site-packages vendored
@@ -2132,7 +2222,7 @@ class GuardManager:
                 if d not in skip_dirs and not (d.startswith(".venv") or d.startswith("venv"))
             ]
             for name in names:
-                files.append(os.path.relpath(os.path.join(root, name), self.workdir))
+                files.append(os.path.relpath(os.path.join(current_root, name), scan_root))
         return files
 
     def _load_gitleaks_allowlist(self) -> list:
@@ -2144,7 +2234,7 @@ class GuardManager:
         '''...''' quotes.
         """
         allowed = []
-        cfg = os.path.join(self.workdir, ".gitleaks.toml")
+        cfg = os.path.join(self.scan_root, ".gitleaks.toml")
         if not os.path.isfile(cfg):
             return allowed
         try:
@@ -2957,6 +3047,45 @@ class GuardManager:
             output = output[:2000] + "\n... [truncated]"
 
         return GuardResult(name="security_scan", passed=False, output=output)
+
+    def _check_data_protection(self) -> GuardResult:
+        """Run the opt-in data-protection lane (GR-146).
+
+        Delegates detection to :func:`engine.guards.check_data_protection` with
+        the policy resolved for this run. A malformed policy is surfaced as a
+        FAIL naming the offending key rather than being swallowed (AC3).
+        """
+        if self._data_protection_error:
+            return GuardResult(
+                name="data_protection",
+                passed=False,
+                error=f"invalid data_protection policy: {self._data_protection_error}",
+            )
+        separate_scan_root = os.path.realpath(self.scan_root) != os.path.realpath(self.workdir)
+        if separate_scan_root and self.scope != "working-tree":
+            return GuardResult(
+                name="data_protection",
+                passed=False,
+                error="a separate scan_root requires working-tree scope for data_protection",
+            )
+        scan_root = self.scan_root
+        changed_files = (
+            self._scan_root_files() if separate_scan_root else self._scope_files_or_none()
+        )
+        result = check_data_protection(scan_root, changed_files, policy=self._data_protection)
+        self._data_protection_result = result
+        # The lane's output is already scrubbed (safe_value); keep it as the
+        # untruncated evidence for the run log so no raw value is reintroduced.
+        self._full_outputs["data_protection"] = result.output
+        return GuardResult(
+            name="data_protection",
+            passed=result.passed,
+            output=result.output,
+            error=result.error,
+            warning=result.warning,
+            skipped=result.skipped,
+            skip_reason=result.skip_reason,
+        )
 
     def _check_go_lint(self) -> GuardResult:
         """Run Go lint checks (delegates to engine.guards)."""

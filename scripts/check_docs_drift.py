@@ -9,7 +9,8 @@ declared in pyproject.toml ([project] table).
 Check B (counts): the live test collection — run here with
 ``pytest --collect-only -q --override-ini=addopts=`` (exactly the CI
 collection; pytest is invoked via subprocess, never imported) — is compared
-against EVERY ``N tests pass`` / ``N tests across`` / ``N test files`` claim in
+against EVERY ``N tests pass`` / ``N tests across`` / ``N tests collected`` /
+    ``N test files`` claim in
 README.md AND CONTRIBUTING.md. A claim that disagrees with the live collection,
 or with a sibling claim in the same document, fails with FILE:LINE and both
 numbers. Unmeasurable collection is a FAIL, never a green: a gate must never
@@ -64,9 +65,11 @@ _PYPROJECT_VERSION_RE = re.compile(r'^version\s*=\s*"([^"]+)"\s*$')
 # is exactly that shape, and a literal-space regex silently skips it.
 _CLAIM_PATTERNS = {
     "tests pass": re.compile(r"(\d+)\s+tests\s+pass"),
+    "tests collected": re.compile(r"(\d+)\s+tests?\s+collected\b"),
     "tests across": re.compile(r"(\d+)\s+tests\s+across(?:\s+(\d+)\s+(?:test\s+)?files)?"),
-    "test files": re.compile(r"(\d+)\s+test\s+files"),
+    "test files": re.compile(r"(\d+)\s+test\s+files?\b(?!\s*\(s\))"),
 }
+_TEST_COUNT_CLAIMS = ("tests collected", "tests pass", "tests across")
 # The unique-test-file paths in a `--collect-only -q` report, same regex the CI
 # bash block used so the two cannot disagree.
 _TEST_PATH_RE = re.compile(r"^tests/[a-zA-Z0-9_./-]+\.py")
@@ -384,33 +387,35 @@ def _sibling_conflict(doc_name, claims, phrase):
     )
 
 
-def _cross_doc_conflict(docs):
-    """Message when docs (or claims across docs) state numbers that disagree.
+def _missing_required_count_claim(doc_name, claims):
+    if not any(phrase in _TEST_COUNT_CLAIMS for phrase, *_ in claims):
+        return (
+            f"FAIL: {doc_name} contains no test-count claim "
+            "(expected a 'tests pass', 'tests across', or 'tests collected' count)."
+        )
+    if not any(phrase == "test files" for phrase, *_ in claims):
+        return f"FAIL: {doc_name} contains no test-file-count claim (expected 'N test files')."
+    return None
 
-    ``N tests pass`` and ``N tests across`` must state the same test count, and
-    every ``N test files`` claim must state the same file count. The offending
-    claim is named with its FILE:LINE and both values.
-    """
-    pass_claims = [
+
+def _cross_doc_conflict(docs):
+    """Message when docs (or claims across docs) state numbers that disagree."""
+    total_claims = [
         (doc, line, snippet, value)
         for doc, claims in docs
         for phrase, value, line, snippet in claims
-        if phrase == "tests pass"
+        if phrase in _TEST_COUNT_CLAIMS
     ]
-    if pass_claims:
-        reference = pass_claims[0]
-        for doc, line, snippet, value in pass_claims[1:] + [
-            (doc, line, snippet, value)
-            for doc, claims in docs
-            for phrase, value, line, snippet in claims
-            if phrase == "tests across"
-        ]:
+    if total_claims:
+        reference = total_claims[0]
+        for doc, line, snippet, value in total_claims[1:]:
             if value != reference[3]:
                 return (
-                    f"FAIL: {doc}:{line} test-count drift — documents '{snippet}' but the "
-                    f"'tests pass' / 'tests across' claims disagree: '{reference[2]}' "
-                    f"(at {reference[0]}:{reference[1]}) states {reference[3]} tests, "
-                    f"this claim states {value}. Update {doc}:{line}."
+                    f"FAIL: {doc}:{line} test-count drift — documents '{snippet}' but "
+                    f"'{reference[2]}' (at {reference[0]}:{reference[1]}) states "
+                    f"{reference[3]} tests. The 'tests pass' / 'tests across' / "
+                    f"'tests collected' claims must agree; this claim states {value}. "
+                    f"Update {doc}:{line}."
                 )
     file_claims = [
         (doc, line, snippet, value)
@@ -482,7 +487,6 @@ def check_docs_drift(repo_root, static_only=False):
     if contributing_path.exists():
         docs.append((contributing_path.name, collect_doc_claims(contributing_path)))
 
-    readme_claims = docs[0][1]
     if len(docs) > 1 and not docs[1][1]:
         return (
             1,
@@ -492,16 +496,12 @@ def check_docs_drift(repo_root, static_only=False):
 
     if static_only:
         # No measurement exists, so internal agreement is the strongest claim
-        # available. Presence of each phrase is checked per phrase, interleaved
-        # with the same-doc conflict check (GR-GAP-052 precedence: a conflicting
-        # 'tests pass' claim is reported before a missing 'tests across' claim).
-        for phrase in _CLAIM_PATTERNS:
-            if not any(cp == phrase for cp, _v, _l, _s in readme_claims):
-                return 1, f"FAIL: README.md contains no '{phrase}' claim (expected at least one)."
-            conflict = _sibling_conflict(readme_path.name, readme_claims, phrase)
-            if conflict:
-                return 1, conflict
-        for doc_name, claims in docs[1:]:
+        # available. Each document must carry a total-count and a file-count
+        # claim; same-document and cross-document conflicts still fail.
+        for doc_name, claims in docs:
+            missing = _missing_required_count_claim(doc_name, claims)
+            if missing:
+                return 1, missing
             for phrase in _CLAIM_PATTERNS:
                 conflict = _sibling_conflict(doc_name, claims, phrase)
                 if conflict:
@@ -532,7 +532,7 @@ def check_docs_drift(repo_root, static_only=False):
     measured = f"{live_count} tests in {live_files} files"
 
     for doc_name, claims in docs:
-        for phrase in ("tests pass", "tests across", "test files"):
+        for phrase in (*_TEST_COUNT_CLAIMS, "test files"):
             expected = str(live_files if phrase == "test files" else live_count)
             for claim_phrase, value, line, snippet in claims:
                 if claim_phrase == phrase and value != expected:
@@ -543,9 +543,10 @@ def check_docs_drift(repo_root, static_only=False):
                         f"but pytest collects {measured}. Update {doc_name}:{line}.",
                     )
 
-    for phrase in _CLAIM_PATTERNS:
-        if not any(cp == phrase for cp, _v, _l, _s in readme_claims):
-            return 1, f"FAIL: README.md contains no '{phrase}' claim (expected at least one)."
+    for doc_name, claims in docs:
+        missing = _missing_required_count_claim(doc_name, claims)
+        if missing:
+            return 1, missing
 
     doc_names = " + ".join(name for name, _ in docs)
     return (

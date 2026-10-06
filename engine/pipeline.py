@@ -49,6 +49,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import subprocess
 import sys
 from dataclasses import dataclass, field
@@ -538,8 +539,10 @@ class Pipeline:
         llm=None,
         *,
         persist_telemetry: bool = True,
+        scan_root: str | None = None,
     ):
         self.workdir = os.path.abspath(workdir)
+        self.scan_root = os.path.abspath(scan_root or workdir)
         self.config = config
         self.stages: list[dict] = config.get("pipeline", {}).get("stages", [])
         self._stage_results: dict[str, StageResult] = {}
@@ -1026,10 +1029,12 @@ class Pipeline:
                     explicit_caps.get("tool_call_weight", base.tool_call_weight)
                 ),
             )
-            evaluator = AgenticEvaluator(self._llm, self.workdir, eval_cap=eval_cap)
+            evaluator = AgenticEvaluator(
+                self._llm, self.scan_root, eval_cap=eval_cap, config_root=self.workdir
+            )
         else:
             # Nothing set in the step — defer to .gitreins/config.yaml
-            evaluator = AgenticEvaluator(self._llm, self.workdir)
+            evaluator = AgenticEvaluator(self._llm, self.scan_root, config_root=self.workdir)
 
         # Build prompt with template substitution — the custom prompt_template
         # (if any) is passed to the evaluator as its system-prompt override so
@@ -1561,8 +1566,8 @@ def harness_scan_gitleaks_config(workdir: str) -> str:
         "[extend]",
     ]
     if os.path.isfile(repo_config):
-        # TOML literal string — Windows paths must not be escape-processed.
-        lines.append(f"path = '{repo_config}'")
+        # A TOML basic string handles quotes/backslashes in valid file paths.
+        lines.append(f"path = {json.dumps(repo_config)}")
     else:
         lines.append("useDefault = true")
     lines.extend(
@@ -1578,7 +1583,9 @@ def harness_scan_gitleaks_config(workdir: str) -> str:
     return "\n".join(lines)
 
 
-def _secrets_step_run(workdir: str, config: dict | None = None) -> str:
+def _secrets_step_run(
+    workdir: str, config: dict | None = None, scan_root: str | None = None
+) -> str:
     """Shell command for the Tier 1 ``secrets`` step.
 
     DF-012: gitleaks' default rules (and the generated config) miss sk-/ghp_
@@ -1607,6 +1614,37 @@ def _secrets_step_run(workdir: str, config: dict | None = None) -> str:
     in ``$_gr_nice`` and applies to the gitleaks invocation only: the built-in
     cross-check is not an external spawn.
     """
+    explicit_scan_root = scan_root is not None and os.path.realpath(scan_root) != os.path.realpath(
+        workdir
+    )
+    scan_root = os.path.abspath(scan_root or workdir)
+    gitleaks_config_root = scan_root if explicit_scan_root else workdir
+    scan_source = shlex.quote(scan_root) if explicit_scan_root else "."
+    if explicit_scan_root:
+        builtin_code = (
+            "from engine.guard_manager import GuardManager; import os, sys; "
+            "gm = GuardManager('.', scan_root=os.environ['GITREINS_SCAN_ROOT']); "
+            "r = gm._builtin_secrets_scan(staged_only=False); "
+            "print('secrets: builtin cross-check: ' + r.output); "
+            "print('secrets: builtin cross-check status: ' "
+            "+ (r.scanners[0][1] if r.scanners else 'clean')); "
+            "sys.exit(1 if not r.passed else 0)"
+        )
+        builtin_command = (
+            f"PYTHONPATH={shlex.quote(_engine_root())} "
+            f"GITREINS_SCAN_ROOT={shlex.quote(scan_root)} "
+            f"{shlex.quote(sys.executable)} -c {shlex.quote(builtin_code)}"
+        )
+    else:
+        builtin_command = (
+            f'PYTHONPATH="{_engine_root()}" {sys.executable} -c "from engine.guard_manager import GuardManager; '
+            "import sys; gm = GuardManager('.'); "
+            "r = gm._builtin_secrets_scan(staged_only=False); "
+            "print('secrets: builtin cross-check: ' + r.output); "
+            "print('secrets: builtin cross-check status: ' "
+            "+ (r.scanners[0][1] if r.scanners else 'clean')); "
+            'sys.exit(1 if not r.passed else 0)"'
+        )
     exclusions = ", ".join(f"{d}/**" for d in HARNESS_STATE_DIRS)
     level, _source = scanner_nice.resolve_level(config)
     prologue, nice_prefix = scanner_nice.shell_prologue(level)
@@ -1614,7 +1652,7 @@ def _secrets_step_run(workdir: str, config: dict | None = None) -> str:
         "if command -v gitleaks >/dev/null 2>&1; then "
         '_glcfg="$(mktemp -t gitreins-gitleaks-XXXXXX.toml)"; '
         "cat > \"$_glcfg\" <<'GITREINS_GITLEAKS_CFG'\n"
-        f"{harness_scan_gitleaks_config(workdir)}\n"
+        f"{harness_scan_gitleaks_config(gitleaks_config_root)}\n"
         "GITREINS_GITLEAKS_CFG\n"
         f'echo "secrets: harness state excluded from gitleaks scope ({exclusions})"; '
         # TRUST-003: name the scanners and each one's outcome in the step
@@ -1630,25 +1668,69 @@ def _secrets_step_run(workdir: str, config: dict | None = None) -> str:
         # `\x1b[32mINF\x1b[0m scanned ~5 MB` lines and the console summary
         # printed them when one landed first. The INFO lines themselves stay:
         # they are the scope evidence ("scanned ~5 MB") a post-mortem reads.
-        f'{nice_prefix}gitleaks detect --source . --no-git --no-banner --no-color --config "$_glcfg"; '
+        f'{nice_prefix}gitleaks detect --source {scan_source} --no-git --no-banner --no-color --config "$_glcfg"; '
         '_glrc=$?; rm -f "$_glcfg"; '
         'if [ "$_glrc" -eq 0 ]; then echo "secrets: gitleaks: clean"; '
         'else echo "secrets: gitleaks: findings found (exit $_glrc)"; fi; '
         "else _glrc=0; "
         'echo "secrets: scanners=builtin cross-check only (gitleaks not on PATH)"; '
         'echo "secrets: gitleaks: not on PATH"; fi; g1=$_glrc; '
-        f'PYTHONPATH="{_engine_root()}" {sys.executable} -c "from engine.guard_manager import GuardManager; '
-        "import sys; gm = GuardManager('.'); "
-        "r = gm._builtin_secrets_scan(staged_only=False); "
-        "print('secrets: builtin cross-check: ' + r.output); "
-        "print('secrets: builtin cross-check status: ' "
-        "+ (r.scanners[0][1] if r.scanners else 'clean')); "
-        'sys.exit(1 if not r.passed else 0)"; '
+        f"{builtin_command}; "
         'g2=$?; [ "$g1" -eq 0 ] && [ "$g2" -eq 0 ]'
     )
 
 
-def tier1_plan(workdir: str, config: dict | None = None) -> tuple[list[dict], dict]:
+def _data_protection_enabled(config: dict | None) -> bool:
+    """True when the operator opted into the data-protection lane (GR-146).
+
+    Only a literal ``enabled: true`` in the top-level ``data_protection:``
+    block arms the step — absent/false/wrong-typed all read as OFF, matching
+    ``GuardManager`` and the jev-resolution block's posture.
+    """
+    block = (config or {}).get("data_protection")
+    return isinstance(block, dict) and block.get("enabled") is True
+
+
+def _data_protection_step_run(
+    workdir: str, config: dict | None = None, scan_root: str | None = None
+) -> str:
+    """Build the Tier-1 data-protection step (GR-146).
+
+    Keep policy/config lookup at the control root while scanning only the
+    selected source root when the caller supplied a distinct scope.
+    """
+    explicit_scan_root = scan_root is not None and os.path.realpath(scan_root) != os.path.realpath(
+        workdir
+    )
+    if not explicit_scan_root:
+        return (
+            f'PYTHONPATH="{_engine_root()}" {sys.executable} -c "'
+            "from engine.guard_manager import GuardManager; import sys; "
+            "gm = GuardManager('.', scope='working-tree'); "
+            "r = gm._check_data_protection(); "
+            "print('data_protection: ' + (r.output or '')); "
+            'sys.exit(0 if r.passed else 1)"'
+        )
+
+    source_root = os.path.abspath(scan_root)
+    python_code = (
+        "from engine.guard_manager import GuardManager; import os, sys; "
+        "gm = GuardManager('.', scope='working-tree', "
+        "scan_root=os.environ['GITREINS_SCAN_ROOT']); "
+        "r = gm._check_data_protection(); "
+        "print('data_protection: ' + (r.output or '')); "
+        "sys.exit(0 if r.passed else 1)"
+    )
+    return (
+        f"PYTHONPATH={shlex.quote(_engine_root())} "
+        f"GITREINS_SCAN_ROOT={shlex.quote(source_root)} "
+        f"{shlex.quote(sys.executable)} -c {shlex.quote(python_code)}"
+    )
+
+
+def tier1_plan(
+    workdir: str, config: dict | None = None, scan_root: str | None = None
+) -> tuple[list[dict], dict]:
     """Build the default Tier 1 steps plus their coverage marker.
 
     DF-GITREINS-POC-16: Tier 1 must grade the SAME set the guard would grade
@@ -1678,10 +1760,23 @@ def tier1_plan(workdir: str, config: dict | None = None) -> tuple[list[dict], di
         {
             "id": "secrets",
             "type": "script",
-            "run": _secrets_step_run(workdir, config),
+            "run": _secrets_step_run(workdir, config, scan_root),
             "on_fail": "continue",
         },
     ]
+    # GR-146: the data-protection step rides beside secrets when the operator
+    # enabled it. It is NOT substantive (a skip never degrades the run) and it
+    # never gates secrets — it only adds the opt-in PII/IP filter to the same
+    # Tier-1 surface the guard uses.
+    if _data_protection_enabled(config):
+        steps.append(
+            {
+                "id": "data_protection",
+                "type": "script",
+                "run": _data_protection_step_run(workdir, config, scan_root),
+                "on_fail": "continue",
+            }
+        )
 
     language = lang_detect.detect_language(workdir)
     commands = lang_detect.lint_test_commands(language)
@@ -1694,7 +1789,7 @@ def tier1_plan(workdir: str, config: dict | None = None) -> tuple[list[dict], di
             else f"no lint/test commands declared for language '{language}'"
         )
         return steps, {
-            "coverage": "secrets-only",
+            "coverage": "+".join(s["id"] for s in steps) if len(steps) > 1 else "secrets-only",
             "degraded": True,
             "skipped_steps": ["lint", "tests"],
             "reason": reason,
@@ -1776,13 +1871,14 @@ def _engine_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def load_pipeline_config(workdir: str = ".") -> dict:
-    """Load pipeline configuration from .gitreins/config.yaml."""
+def load_pipeline_config(workdir: str = ".", scan_root: str | None = None) -> dict:
+    """Load pipeline configuration from the control root, scanning source at scan_root."""
+    scan_root = os.path.abspath(scan_root or workdir)
     config_path = os.path.join(workdir, ".gitreins", "config.yaml")
     if not os.path.exists(config_path):
         # No config file at all — the default pipeline (marker included, so a
         # degraded tier1 stays honest on a repo that was never `init`-ed).
-        _missing_cfg_steps, missing_cfg_marker = tier1_plan(workdir, None)
+        _missing_cfg_steps, missing_cfg_marker = tier1_plan(workdir, None, scan_root)
         return {
             "pipeline": {
                 "stages": [
@@ -1821,7 +1917,7 @@ def load_pipeline_config(workdir: str = ".") -> dict:
         # are parsed as ``True:`` / ``False:`` and break key lookups.
         config = _fix_on_key(config)
         if "pipeline" not in config:
-            tier1_steps, tier1_marker = tier1_plan(workdir, config)
+            tier1_steps, tier1_marker = tier1_plan(workdir, config, scan_root)
             config["pipeline"] = {
                 "stages": [
                     {

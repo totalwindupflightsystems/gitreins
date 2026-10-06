@@ -178,6 +178,28 @@ class VerdictPersister:
         self.workdir = os.path.abspath(workdir)
         self.config = load_history_config(self.workdir)
 
+    def _scrub(self, text: str) -> str:
+        """Scrub policy-detected values from a verdict artifact (GR-146 AC5).
+
+        The verdict history is a machine-readable record of what was graded, so
+        when the repository's ``data_protection`` policy requires redaction the
+        artifact is scrubbed on the way to disk.  Any failure to read the policy
+        leaves the text untouched (the artifact must never be lost to a policy
+        bug), and a disabled/absent policy is a no-op — existing repos unchanged.
+        """
+        if not text:
+            return text
+        try:
+            from engine.config import load_raw_config
+            from engine.data_protection import build_policy
+
+            policy = build_policy(load_raw_config(self.workdir))
+        except Exception:  # noqa: BLE001 — never lose the artifact to a policy bug
+            return text
+        if not policy.active:
+            return text
+        return policy.redact_text(text)
+
     @property
     def enabled(self) -> bool:
         return bool(self.config.get("enabled", True))
@@ -261,10 +283,14 @@ class VerdictPersister:
             if manifest:
                 verdict_data["evidence"] = manifest
 
-        # Write verdict.json
+        # Write verdict.json. GR-146 (AC5): when the repo's data-protection
+        # policy calls for redaction, the artifact is scrubbed before it lands
+        # on disk, so a canary value cannot survive into the verdict history.
+        # A disabled/absent policy is a no-op, so existing repos are unchanged.
         verdict_path = os.path.join(entry_dir, "verdict.json")
+        verdict_text = json.dumps(verdict_data, indent=2, default=str)
         with open(verdict_path, "w") as f:
-            json.dump(verdict_data, f, indent=2, default=str)
+            f.write(self._scrub(verdict_text))
 
         # Label the attempt this one replaced (never delete it — the audit trail
         # of the interrupted run survives).
@@ -275,7 +301,7 @@ class VerdictPersister:
         summary_path = os.path.join(entry_dir, "summary.md")
         summary = self._build_summary(task_id, verdict_data)
         with open(summary_path, "w") as f:
-            f.write(summary)
+            f.write(self._scrub(summary))
 
         # Git commit if configured
         commit_hash = "dry-run"

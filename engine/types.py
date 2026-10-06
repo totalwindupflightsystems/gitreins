@@ -125,6 +125,31 @@ class GuardResult:
         return ""
 
 
+@dataclass(frozen=True)
+class DataProtectionResult:
+    """Outcome of the Tier-1 data-protection lane (GR-146).
+
+    A sibling of :class:`GuardResult` rather than a mutation of it, because it
+    carries structured per-finding evidence the run log and the judge verdict
+    consume (``findings``, per-state counts) and because it must be constructible
+    with no policy in play (the skipped/disabled case).
+    """
+
+    name: str = "data_protection"
+    passed: bool = True
+    output: str = ""
+    error: str = ""
+    warning: str = ""
+    skipped: bool = False
+    skip_reason: str = ""
+    #: JSON-safe finding dicts (values redacted unless the policy preserves).
+    findings: tuple[dict, ...] = ()
+    blocked_count: int = 0
+    warned_count: int = 0
+    suppressed_count: int = 0
+    scanned_files: int = 0
+
+
 def strip_ansi(text: str) -> str:
     """Remove terminal escape sequences from captured tool output.
 

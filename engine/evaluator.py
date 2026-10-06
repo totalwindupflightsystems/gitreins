@@ -442,9 +442,11 @@ class AgenticEvaluator:
         max_iterations: int | None = None,
         eval_cap: str | EvalCap | None = None,
         command_timeout: int = 30,
+        config_root: str | None = None,
     ):
         self.llm = llm
         self.workdir = os.path.abspath(workdir)
+        self.config_root = os.path.abspath(config_root or workdir)
 
         # Resolve eval cap — explicit param wins, then max_iterations, then config
         if isinstance(eval_cap, EvalCap):
@@ -854,7 +856,7 @@ class AgenticEvaluator:
         """Load .gitreins/config.yaml if present."""
         import yaml
 
-        config_path = os.path.join(self.workdir, ".gitreins", "config.yaml")
+        config_path = os.path.join(self.config_root, ".gitreins", "config.yaml")
         if os.path.isfile(config_path):
             try:
                 with open(config_path) as f:

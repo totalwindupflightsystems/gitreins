@@ -1666,6 +1666,97 @@ def cmd_task_get(args):
         print("Criteria: (none)")
 
 
+def _task_complete_scan_root(control_root: str, requested: str | None) -> str:
+    """Resolve the source tree independently from the GitReins control root."""
+    if requested:
+        candidate = os.path.realpath(os.path.expanduser(requested))
+        if not os.path.isdir(candidate):
+            raise ValueError(f"scan root is not a directory: {requested}")
+        home = os.path.realpath(os.path.expanduser("~"))
+        if os.path.commonpath((home, candidate)) == candidate:
+            raise ValueError(
+                "scan root may not be the home directory or one of its ancestors; "
+                "choose a narrower project directory with --scan-root"
+            )
+        return candidate
+    cwd = os.path.realpath(os.getcwd())
+    root = os.path.realpath(control_root)
+    home = os.path.realpath(os.path.expanduser("~"))
+    if os.path.commonpath((home, root)) == root:
+        raise ValueError(
+            "default scan root may not be the home directory or one of its ancestors; "
+            "pass --scan-root <project-directory> to choose a narrower source tree"
+        )
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except Exception as exc:
+        raise ValueError("cannot resolve source scan root; pass --scan-root <directory>") from exc
+    detected = os.path.realpath(result.stdout.strip()) if result.returncode == 0 else cwd
+    if cwd != root or detected != root:
+        raise ValueError(
+            f"ambiguous source scope (control root: {root}; current repository: {detected}); "
+            "pass --scan-root <project-directory> to choose the source tree explicitly"
+        )
+    return detected
+
+
+@contextlib.contextmanager
+def _task_complete_lease(task_id: str, control_root: str, scan_root: str):
+    """Cross-process single-flight lease keyed by task, roots, revisions and config."""
+    import hashlib
+
+    from engine.job_store import acquire_resume_lease, release_resume_lease
+
+    def revision(path):
+        result = subprocess.run(
+            ["git", "-C", path, "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return result.stdout.strip() if result.returncode == 0 else "unversioned"
+
+    cfg_path = os.path.join(control_root, ".gitreins", "config.yaml")
+    fingerprints = []
+    for path in (
+        cfg_path,
+        os.path.join(control_root, ".gitleaks.toml"),
+        os.path.join(scan_root, ".gitleaks.toml"),
+    ):
+        try:
+            with open(path, "rb") as stream:
+                fingerprints.append(hashlib.sha256(stream.read()).hexdigest())
+        except OSError:
+            fingerprints.append("missing")
+    identity = "\0".join(
+        (
+            task_id,
+            os.path.realpath(control_root),
+            scan_root,
+            revision(control_root),
+            revision(scan_root),
+            ":".join(fingerprints),
+            os.environ.get("GITREINS_LLM_MODEL", ""),
+            os.environ.get("GITREINS_LLM_BASE_URL", ""),
+            os.environ.get("GITREINS_LLM_API_KEY", ""),
+        )
+    )
+    key = hashlib.sha256(identity.encode()).hexdigest()
+    lock_dir = os.path.join(os.path.expanduser("~/.local/share/gitreins"), "task-complete-locks")
+    fd = acquire_resume_lease("task-complete-" + key, directory=lock_dir)
+    try:
+        yield fd is not None
+    finally:
+        if fd is not None:
+            release_resume_lease(fd)
+
+
 def cmd_task_complete(args):
     from engine.evaluator import LLM_FAILURE_SUMMARY_PREFIX
     from engine.task_manager import TaskManager
@@ -1674,6 +1765,11 @@ def cmd_task_complete(args):
 
     workdir = get_workdir()
     tm = TaskManager(workdir)
+    try:
+        scan_root = _task_complete_scan_root(workdir, getattr(args, "scan_root", None))
+    except ValueError as exc:
+        print(f"Cannot complete task: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     force = getattr(args, "force", False)
     skip_tier2 = getattr(args, "skip_tier2", False)
@@ -1713,23 +1809,32 @@ def cmd_task_complete(args):
             )
             sys.exit(1)
 
-    task = tm.complete(args.id, force=force)
-    print(f"Completed: {task.id} → {task.status}")
-
-    print("\nEvaluating...")
-    judge = Judge(llm, workdir)
-    result = judge.evaluate_task(task, skip_tier2=skip_tier2)
-    print(result.summary)
-
-    # Persist verdict
-    _persist_result(workdir, task, result)
-    if not result.passed:
-        # DF-GITREINS-POC-14: an INCOMPLETE verdict that never reached the
-        # provider judged nothing — print the resolved config and the way
-        # forward instead of exiting on a bare FAIL.
-        if LLM_FAILURE_SUMMARY_PREFIX in (result.summary or ""):
-            _print_tier2_recovery(llm, task.id)
+    lease = _task_complete_lease(args.id, workdir, scan_root)
+    if not lease.__enter__():
+        print(
+            f"Task completion already evaluating task '{args.id}' "
+            f"(control root: {workdir}; scan scope: {scan_root}); retry after it finishes.",
+            file=sys.stderr,
+        )
         sys.exit(1)
+    try:
+        task = tm.complete(args.id, force=force)
+        print(f"Completed: {task.id} → {task.status}")
+        print(f"Control root: {workdir}")
+        print(f"Scan scope:   {scan_root}")
+
+        print("\nEvaluating...")
+        judge = Judge(llm, workdir, scan_root=scan_root)
+        result = judge.evaluate_task(task, skip_tier2=skip_tier2)
+        print(result.summary)
+
+        _persist_result(workdir, task, result)
+        if not result.passed:
+            if LLM_FAILURE_SUMMARY_PREFIX in (result.summary or ""):
+                _print_tier2_recovery(llm, task.id)
+            sys.exit(1)
+    finally:
+        lease.__exit__(None, None, None)
 
 
 def cmd_task_list(args):
@@ -3732,6 +3837,10 @@ def main():
         ),
     )
     complete_p.add_argument("id")
+    complete_p.add_argument(
+        "--scan-root",
+        help="Source project directory to scan; task/config state remains at the Git control root",
+    )
     complete_p.add_argument("--force", "-f", action="store_true", help="Skip dependency checks")
     complete_p.add_argument(
         "--skip-tier2", action="store_true", help="Skip Tier 2 LLM evaluation; Tier 1 guards only"
