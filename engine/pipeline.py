@@ -1648,6 +1648,37 @@ def _secrets_step_run(workdir: str, config: dict | None = None) -> str:
     )
 
 
+def _data_protection_enabled(config: dict | None) -> bool:
+    """True when the operator opted into the data-protection lane (GR-146).
+
+    Only a literal ``enabled: true`` in the top-level ``data_protection:``
+    block arms the step — absent/false/wrong-typed all read as OFF, matching
+    ``GuardManager`` and the jev-resolution block's posture.
+    """
+    block = (config or {}).get("data_protection")
+    return isinstance(block, dict) and block.get("enabled") is True
+
+
+def _data_protection_step_run(workdir: str, config: dict | None = None) -> str:
+    """Build the Tier-1 data-protection step (GR-146).
+
+    Runs the SAME lane the guard runs, through the same ``GuardManager`` code
+    path, so the judge's Tier-1 verdict and a pre-commit guard can never
+    disagree about what a policy detected (AC1).  The ``working-tree`` scope
+    matches the secrets step's whole-tree posture: Tier 1 grades the checkout,
+    not the index.  Findings are printed already redacted; the step exits
+    non-zero only for ``detection: block`` findings (``warn`` reports).
+    """
+    return (
+        f'PYTHONPATH="{_engine_root()}" {sys.executable} -c "'
+        "from engine.guard_manager import GuardManager; import sys; "
+        "gm = GuardManager('.', scope='working-tree'); "
+        "r = gm._check_data_protection(); "
+        "print('data_protection: ' + (r.output or '')); "
+        'sys.exit(0 if r.passed else 1)"'
+    )
+
+
 def tier1_plan(workdir: str, config: dict | None = None) -> tuple[list[dict], dict]:
     """Build the default Tier 1 steps plus their coverage marker.
 
@@ -1682,6 +1713,19 @@ def tier1_plan(workdir: str, config: dict | None = None) -> tuple[list[dict], di
             "on_fail": "continue",
         },
     ]
+    # GR-146: the data-protection step rides beside secrets when the operator
+    # enabled it. It is NOT substantive (a skip never degrades the run) and it
+    # never gates secrets — it only adds the opt-in PII/IP filter to the same
+    # Tier-1 surface the guard uses.
+    if _data_protection_enabled(config):
+        steps.append(
+            {
+                "id": "data_protection",
+                "type": "script",
+                "run": _data_protection_step_run(workdir, config),
+                "on_fail": "continue",
+            }
+        )
 
     language = lang_detect.detect_language(workdir)
     commands = lang_detect.lint_test_commands(language)
@@ -1694,7 +1738,7 @@ def tier1_plan(workdir: str, config: dict | None = None) -> tuple[list[dict], di
             else f"no lint/test commands declared for language '{language}'"
         )
         return steps, {
-            "coverage": "secrets-only",
+            "coverage": "+".join(s["id"] for s in steps) if len(steps) > 1 else "secrets-only",
             "degraded": True,
             "skipped_steps": ["lint", "tests"],
             "reason": reason,
