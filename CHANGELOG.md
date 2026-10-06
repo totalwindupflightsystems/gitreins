@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-06
+
 ### Added
 - **`gitreins doctor` — validate and migrate `.gitleaks.toml` allowlist globs
   (DF-GITREINS-POC-54)** — gitleaks compiles every `[allowlist] paths` entry as
