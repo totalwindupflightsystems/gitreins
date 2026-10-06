@@ -576,9 +576,12 @@ class TestGitleaksHarnessExclusionConfig:
 
         cfg = harness_scan_gitleaks_config(repo)
 
-        import tomli
+        try:
+            import tomllib
+        except ModuleNotFoundError:  # Python 3.10
+            import tomli as tomllib
 
-        assert tomli.loads(cfg)["extend"]["path"] == os.path.join(repo, ".gitleaks.toml")
+        assert tomllib.loads(cfg)["extend"]["path"] == os.path.join(repo, ".gitleaks.toml")
         assert "useDefault" not in cfg
         assert r"(^|/)\.gitreins/.*" in cfg
 
