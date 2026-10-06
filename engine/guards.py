@@ -425,7 +425,12 @@ def check_go_lint(
         lint_results.append(result)
         if "exit_code" not in result:
             break
-    if "exit_code" not in result:
+    # GR-LINT-001 follow-up (judge probe, verdict edabaa0e): an invocation that
+    # COULD NOT RUN must not reach the go-vet fallback when an EARLIER package
+    # already returned exit 1 — the vet fallback would erase that real
+    # finding. Only a spawn/refusal with NO prior real verdict may fall back.
+    lint_failed = any(r.get("exit_code") not in (0, None) for r in lint_results)
+    if "exit_code" not in result and not lint_failed:
         # DF-GITREINS-POC-43: the linter never RAN — every shape run_bounded
         # can return without a verdict: spawn failure ({"error": ...}, no
         # exit_code) or a refused busy-wait ({"refused", "reason"}). Only

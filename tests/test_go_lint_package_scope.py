@@ -116,3 +116,37 @@ class TestGoLintPackageScope:
         result = check_go_lint(workdir, changed_files=["staged.go"])
 
         assert result.passed, result.output
+
+
+class TestGoLintFallbackMasking:
+    """GR-LINT-001 follow-up: a package whose lint RAN and failed (exit 1)
+    must not be erased by the go-vet fallback when a LATER package's
+    invocation could not run (spawn failure)."""
+
+    def test_real_failure_not_masked_by_later_spawn_failure(self, tmp_path, monkeypatch):
+        import engine.guards as guards_mod
+        from unittest.mock import patch
+
+        workdir = _scratch_repo(
+            tmp_path,
+            {
+                "go.mod": GO_MOD,
+                "alpha/a.go": "package alpha\\n",
+                "beta/b.go": "package beta\\n",
+            },
+        )
+        _git(workdir, "add", "alpha/a.go", "beta/b.go")
+
+        calls = {"n": 0}
+
+        def _fake_run_bounded(argv, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return {"exit_code": 1, "output": "alpha: real finding"}  # alpha ran, failed
+            return {"error": "golangci-lint vanished"}  # beta could not run
+
+        with patch.object(guards_mod.command_hygiene, "run_bounded", side_effect=_fake_run_bounded):
+            result = check_go_lint(workdir, changed_files=["alpha/a.go", "beta/b.go"])
+
+        assert not result.passed, "a real lint failure was masked by the vet fallback"
+        assert "real finding" in (result.output or "")
