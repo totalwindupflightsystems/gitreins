@@ -201,7 +201,11 @@ This job runs the full evaluation pipeline (Tier 1 + Tier 2) against a benchmark
 ```yaml
 env:
   GITREINS_LLM_API_KEY: ${{ secrets.GITREINS_LLM_API_KEY }}
-  GITREINS_EVAL_CAP: "20/5m/50k/10k"
+  # Cap overrides (individual vars, v0.10.2+ — always win over config.yaml):
+  GITREINS_MAX_ITERATIONS: "20"
+  GITREINS_MAX_TIME: "5m"
+  GITREINS_MAX_INPUT_TOKENS: "50k"
+  GITREINS_MAX_OUTPUT_TOKENS: "10k"
 ```
 
 ---

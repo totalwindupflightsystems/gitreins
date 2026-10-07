@@ -184,7 +184,7 @@ Caps resolve through a 9-level priority chain, from most specific to most genera
 
 1. MCP individual params (`judge.evaluate(id, max_iterations=50, ...)`)
 2. MCP legacy `eval_cap` string param
-3. `GITREINS_EVAL_CAP` environment variable
+3. `GITREINS_*` environment variable overrides (highest priority — always win)
 4. `.gitreins/config.yaml` `evaluator.*` individual keys
 5. `config.yaml` `evaluator.cap` legacy combined string
 6. `config.yaml` `defaults:` section
@@ -699,8 +699,16 @@ Level 1: MCP individual params
 Level 2: MCP legacy eval_cap string
   → judge.evaluate(id="task", eval_cap="50/10m/200k/50k")
 
-Level 3: GITREINS_EVAL_CAP environment variable
-  → export GITREINS_EVAL_CAP="100/30m/200k/50k"
+Level 3: GITREINS_* environment variable overrides (highest priority, v0.10.2+)
+  → export GITREINS_MAX_ITERATIONS=100
+  → export GITREINS_MAX_TIME=30m
+  → export GITREINS_MAX_INPUT_TOKENS=200k
+  → export GITREINS_MAX_OUTPUT_TOKENS=50k
+
+  These are applied at the end of eval_cap_from_config() and always win over
+  config.yaml — for CI/docker/one-off runs where editing config.yaml is
+  impractical. (The legacy single-string `GITREINS_EVAL_CAP` is NOT read by
+  the engine; use the individual variables.)
 
 Level 4: .gitreins/config.yaml evaluator.* individual keys
   → evaluator:
@@ -749,7 +757,7 @@ else:
 gd = GitReinsDefaults().overlay(config)
 cap = EvalCap(..., source=gd._source)
 
-# Check GITREINS_EVAL_CAP env var (Level 3) — handled by GitReinsDefaults
+# Check GITREINS_* env overrides (Level 3, v0.10.2) — applied last, always win
 
 # Try legacy combined string (Level 5)
 cap_str = ev.get("cap", "") or config.get("guards", {}).get("eval_cap", "")
