@@ -392,7 +392,7 @@ def _ensure_gitignore_entries(workdir: str, entries: tuple[str, ...]) -> list[st
     return changed
 
 
-def cmd_install(args: argparse.Namespace) -> None:
+def cmd_install(_args: argparse.Namespace) -> None:
     """One-command GitReins activation for the current repo.
 
     Creates:
@@ -730,7 +730,7 @@ def _detect_language(workdir: str) -> dict:
     return info
 
 
-def _detect_static_analysis_tools(workdir: str, lang: dict) -> list[str]:
+def _detect_static_analysis_tools(_workdir: str, lang: dict) -> list[str]:
     """Return list of installed static analysis tools for all detected languages."""
     from engine.static_analysis import list_available_tools
 
@@ -1239,7 +1239,7 @@ def _glob_to_regex(path: str) -> str:
     return "".join(out)
 
 
-def _generate_gitleaks_config(workdir: str, lang: dict, target_path: str) -> None:
+def _generate_gitleaks_config(_workdir: str, lang: dict, target_path: str) -> None:
     """Generate a .gitleaks.toml with sensible path exclusions.
 
     Prevents gitleaks from scanning dependency directories (node_modules,
@@ -1936,7 +1936,7 @@ def _format_age(seconds: float) -> str:
     return f"{seconds // 86400}d"
 
 
-def cmd_worktree_list(args: argparse.Namespace) -> None:
+def cmd_worktree_list(_args: argparse.Namespace) -> None:
     """List registered task worktrees with reconciled state and age."""
     import time as _time
 
@@ -2337,7 +2337,7 @@ def cmd_report(args: argparse.Namespace) -> None:
         print(qa_section)
 
 
-def cmd_worktree_doctor(args: argparse.Namespace) -> None:
+def cmd_worktree_doctor(_args: argparse.Namespace) -> None:
     """Show and validate the shared board resolution for this checkout."""
     try:
         paths = resolve_worktree_paths()
@@ -3759,7 +3759,7 @@ _SETUP_TOOLS_INSTALL_GUIDE = {
 }
 
 
-def cmd_setup_tools(args: argparse.Namespace) -> None:
+def cmd_setup_tools(_args: argparse.Namespace) -> None:
     """Show available static analysis tools and install instructions for missing ones."""
     from engine.lang_detect import detect_languages
     from engine.static_analysis import find_tool
@@ -3821,7 +3821,7 @@ def cmd_setup_tools(args: argparse.Namespace) -> None:
     print(f"{found} tools available, {missing} missing.")
 
 
-def cmd_mcp_server(args: argparse.Namespace) -> None:
+def cmd_mcp_server(_args: argparse.Namespace) -> None:
     import sys
 
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
