@@ -129,6 +129,14 @@ calls use the new config. No config file editing or server restart needed.
 **Returns:** `{"configured": true, "previous": {...}, "current": {...}, "note": "..."}` where
 each config snapshot is `{model, provider, api_key_configured, api_key_prefix, base_url, env_keys}`.
 
+**Validation behavior:** `configure` deliberately performs **no validation** of the model name,
+provider, or base URL — it accepts any string and hot-reloads it. Validation happens at
+**evaluation time**: a bad model name or unreachable `base_url` surfaces as an error when
+`judge.evaluate` / `task.complete` first uses the client, not when `configure` is called. This
+matches the tool's purpose (hot-reload, not validation) and keeps reconfiguration latency at zero.
+If an evaluation fails after a `configure`, check the model/provider/base_url values you set here
+first.
+
 ### 2. `task.create` — create a task with criteria
 
 | Param | Type | Required | Description |
