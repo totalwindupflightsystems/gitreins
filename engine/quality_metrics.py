@@ -106,11 +106,92 @@ def read_quality_snapshot(workdir: str, config) -> dict[str, Any]:
         "produced_at": artifact.get("produced_at"),
         "command": artifact.get("command", config.command),
         "targets_source": config.targets_source or None,
+        "diff_scope": _diff_scope(workdir, artifact),
     }
     # Published only after a complete read: a later surface either sees this
     # full snapshot or runs the producer itself — never a partial state.
     _snapshot_cache[cache_key] = snapshot
     return snapshot
+
+
+def _diff_scope(workdir: str, artifact: dict[str, Any]) -> dict[str, Any]:
+    """Match producer-owned surface metadata to the current git diff."""
+    changed_files: list[str] = []
+    try:
+        staged = subprocess.run(
+            ["git", "diff", "--cached", "--name-only", "-z", "HEAD"],
+            cwd=workdir,
+            capture_output=True,
+            check=False,
+        )
+        staged_files = [p.decode(errors="replace") for p in staged.stdout.split(b"\0") if p]
+        if staged.returncode == 0 and staged_files:
+            changed_files = staged_files
+        else:
+            unstaged = subprocess.run(
+                ["git", "diff", "--name-only", "-z", "HEAD"],
+                cwd=workdir,
+                capture_output=True,
+                check=False,
+            )
+            if unstaged.returncode == 0:
+                changed_files = [
+                    p.decode(errors="replace") for p in unstaged.stdout.split(b"\0") if p
+                ]
+    except OSError:
+        pass
+
+    diff_file_count = len(set(changed_files))
+    if "surfaces" not in artifact:
+        return {
+            "status": "unavailable",
+            "reason": "producer artifact has no surfaces model",
+            "base": "HEAD",
+            "diff_files": diff_file_count,
+            "surfaces": {},
+        }
+    floor_raw = artifact.get("class_floor")
+    floor = {c for c in floor_raw if isinstance(c, str)} if isinstance(floor_raw, list) else set()
+    touched: dict[str, Any] = {}
+    surfaces = artifact.get("surfaces")
+    if isinstance(surfaces, dict):
+        for surface_id, metadata in surfaces.items():
+            if not isinstance(surface_id, str) or not isinstance(metadata, dict):
+                continue
+            explicit_files = metadata.get("files")
+            if isinstance(explicit_files, list):
+                matches = any(p in changed_files for p in explicit_files if isinstance(p, str))
+            else:
+                matches = any(surface_id in path for path in changed_files)
+            if not matches:
+                continue
+            links = metadata.get("test_links")
+            if isinstance(links, bool) or links is None:
+                link_status = "unknown"
+            elif isinstance(links, int):
+                link_status = "linked" if links > 0 else "none"
+            elif isinstance(links, list):
+                link_status = "linked" if links else "none"
+            else:
+                links, link_status = None, "unknown"
+            raw_classes = metadata.get("classes")
+            classes = (
+                sorted({c for c in raw_classes if isinstance(c, str)})
+                if isinstance(raw_classes, list)
+                else None
+            )
+            touched[surface_id] = {
+                "test_links": links,
+                "link_status": link_status,
+                "classes": classes,
+                "missing_classes": sorted(floor - set(classes)) if classes is not None else [],
+            }
+    return {
+        "status": "available" if touched else "no_diff",
+        "base": "HEAD",
+        "diff_files": len(set(changed_files)),
+        "surfaces": touched,
+    }
 
 
 def quality_snapshot_peek(workdir: str, artifact_path: str = "") -> dict[str, Any] | None:
@@ -181,4 +262,28 @@ def format_quality_snapshot(snapshot: dict[str, Any]) -> str:
         parts.append(
             f"{name}={value_text} (target {target_text}, {mode}, stage {stage}, via {command})"
         )
-    return "quality: " + "; ".join(parts)
+    lines = ["quality: " + "; ".join(parts)]
+    scope = snapshot.get("diff_scope")
+    if isinstance(scope, dict):
+        status = scope.get("status")
+        if status == "available":
+            surfaces = scope.get("surfaces", {})
+            lines.append(
+                f"diff-scope: {scope.get('diff_files', 0)} changed files, "
+                f"{len(surfaces)} surfaces touched"
+            )
+            for surface_id, row in surfaces.items():
+                raw_classes = row.get("classes")
+                classes_text = "unknown" if raw_classes is None else ",".join(raw_classes) or "none"
+                lines.append(
+                    f"  surface {surface_id}: test_links={row.get('link_status', 'unknown')}, "
+                    f"classes={classes_text}, "
+                    f"missing_classes={','.join(row.get('missing_classes', [])) or 'none'}"
+                )
+                if row.get("link_status") == "none":
+                    lines.append(f"  WARNING: surface {surface_id} has no test link")
+        elif status == "unavailable":
+            lines.append(f"diff-scope: unavailable ({scope.get('reason', 'unknown reason')})")
+        else:
+            lines.append("diff-scope: no artifact surfaces touched")
+    return "\n".join(lines)

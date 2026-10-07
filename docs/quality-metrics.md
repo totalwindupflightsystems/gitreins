@@ -92,6 +92,49 @@ criteria must not independently block a run. Unlisted metrics default to
 example's value is deliberately a sample: replace it with the repo's actual
 measurement before relying on it.
 
+### Diff-scoped surface view
+
+The producer may add an optional top-level `surfaces` object. GitReins does not
+infer coverage or test relationships: it only matches changed paths to the
+producer's surface IDs and reports the supplied metadata. Each surface may
+include `test_links` (a count or list), `classes` (class names), and optionally
+`files` (explicit repository-relative paths). If `files` is present, it takes
+precedence and the surface is touched only when one of those paths changes;
+otherwise the surface ID is matched as a substring of changed paths. An
+optional top-level `class_floor` list names classes the producer expects; the
+report shows which are missing from each touched surface.
+
+GitReins chooses the diff deterministically: staged changes (index versus
+`HEAD`) take precedence when any exist; otherwise it uses unstaged changes
+versus `HEAD`; otherwise there is no diff. The shared snapshot adds
+`diff_scope` with `status`, base `HEAD`, changed-file count, and the touched
+surface records (`test_links`, `link_status`, sorted `classes`, and
+`missing_classes`). Missing link/class metadata is unknown/empty rather than
+invented. No `surfaces` model is reported as unavailable with the reason
+`producer artifact has no surfaces model`; a diff that matches no surface is
+reported as `no_diff` with an empty surface map.
+
+Guard output prints `diff-scope: N changed files, M surfaces touched` and one
+line per touched surface. A zero test-link count also emits
+`WARNING: surface <id> has no test link`. These are warnings only and never
+change guard or judge pass/fail policy. The same snapshot field is carried by
+the judge, doctor, CLI, and MCP quality surfaces.
+
+Example:
+
+```json
+{
+  "class_floor": ["unit", "integration"],
+  "surfaces": {
+    "COV-1": {
+      "files": ["src/COV-1/handler.py"],
+      "test_links": ["tests/test_handler.py"],
+      "classes": ["unit"]
+    }
+  }
+}
+```
+
 ## Artifact contract
 
 The command runs with the repository root as its working directory. The
