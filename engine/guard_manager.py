@@ -367,6 +367,30 @@ def _get_staged_files(workdir: str) -> list[str]:
         return []
 
 
+def _worktree_tracked_paths(workdir: str) -> set[str]:
+    """Paths tracked by git in *workdir* (committed content that ships).
+
+    Used by the whole-workdir judge scan (``staged_only=False``) so the
+    sensitive-path class fires for tracked credential stores (they ARE
+    published) but not for a pre-existing, untracked, gitignored ``.env``
+    that is local operator state and will never be pushed.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "ls-files", "--cached"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=workdir,
+            env=_sanitized_env(),
+        )
+        if result.returncode != 0:
+            return set()
+        return {f.strip() for f in result.stdout.split("\n") if f.strip()}
+    except Exception:
+        return set()
+
+
 def _get_working_tree_files(workdir: str) -> list[str]:
     """Staged + unstaged + non-ignored untracked paths, collected READ-ONLY.
 
@@ -2226,19 +2250,32 @@ class GuardManager:
                 # suite green — and guards.sensitive_paths.allow applies here
                 # only, never to content findings (defence in depth).
                 if not _is_sensitive_fixture_path(fpath) and is_sensitive_path(fpath):
-                    if any(
-                        fnmatch.fnmatch(fpath.replace(os.sep, "/"), glob)
-                        or fnmatch.fnmatch(os.path.basename(fpath.replace(os.sep, "/")), glob)
-                        for glob in override_globs
+                    # Whole-workdir judge path (staged_only=False): a
+                    # PRE-EXISTING, untracked, gitignored .env in the graded
+                    # tree is local operator state, not an exfiltration about
+                    # to be published — the class fires only for files that
+                    # would actually be committed (tracked or staged), or
+                    # when the caller passed an explicit change set
+                    # (working-tree/explicit scope), which is always a
+                    # change set under review.
+                    if (
+                        staged_only
+                        or explicit_scope
+                        or fpath in _worktree_tracked_paths(self.workdir)
                     ):
-                        override_notes.append(f"{_SENSITIVE_OVERRIDE_PREFIX}{fpath}")
-                    else:
-                        findings.append(
-                            f"{fpath}: {_SENSITIVE_PATH_MARK} — staging this "
-                            "file is blocked regardless of content. Remedy: "
-                            ".gitignore it, use a secret manager, or pass an "
-                            "explicit override flag with a recorded reason."
-                        )
+                        if any(
+                            fnmatch.fnmatch(fpath.replace(os.sep, "/"), glob)
+                            or fnmatch.fnmatch(os.path.basename(fpath.replace(os.sep, "/")), glob)
+                            for glob in override_globs
+                        ):
+                            override_notes.append(f"{_SENSITIVE_OVERRIDE_PREFIX}{fpath}")
+                        else:
+                            findings.append(
+                                f"{fpath}: {_SENSITIVE_PATH_MARK} — staging this "
+                                "file is blocked regardless of content. Remedy: "
+                                ".gitignore it, use a secret manager, or pass an "
+                                "explicit override flag with a recorded reason."
+                            )
                 # Respect .gitleaks.toml [allowlist] paths — same exemptions
                 # gitleaks applies (test fixtures with deliberate fake keys).
                 if any(rx.search(fpath) for rx in allowlist):
