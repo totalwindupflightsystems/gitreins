@@ -68,6 +68,33 @@ setup).
 > the lane it did not grade; with `allow_skips: false` the run exits 2 instead.
 > A pytest run that actually executes and fails still blocks the commit.
 
+### System tools the guard lanes want
+
+Two static-analysis lanes look for tools outside the Python package and skip
+cleanly when they are absent — nothing about them is required to install or
+run GitReins, but an operator who wants those lanes active needs to provision
+the tools themselves:
+
+- **`pylsp` (python-lsp-server)** — the LSP lane's default server
+  (`guards.lsp_tools: ["pylsp"]` in `.gitreins/config.yaml`). `pip install
+  gitreins` does NOT install it.
+- **`mypy`** — used when the static-analysis lane is enabled (Python repos
+  with `static_analysis` on; `gitreins setup-tools` checks for it).
+
+Both are system-level commands the guard finds on PATH, so install them
+outside any PEP-668-managed system Python — into a virtualenv or via pipx:
+
+```bash
+pipx install pylsp-mypy         # or: python3 -m venv ... && pip install python-lsp-server mypy
+```
+
+When a tool is missing the lane is graded **skipped**, not failed: the guard
+prints `no LSP tool on PATH (... not installed)` / `no linter on PATH` with
+the install hint, the run is a DEGRADED pass (exit 0 with
+`guards.allow_skips: true`, exit 2 without), and the commit is never blocked
+by an absent optional tool. `gitreins setup-tools` reports which of these it
+can see on the current machine.
+
 ## How It Works
 
 1. **Create tasks** — Define criteria via CLI or MCP tools
