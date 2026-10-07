@@ -30,6 +30,8 @@ Usage:
     gitreins serve [--repo <path>] [--port <port>] [--project <name>]
 """
 
+from __future__ import annotations
+
 import argparse
 import contextlib
 import io
@@ -41,6 +43,9 @@ import shlex
 import subprocess
 import sys
 import time
+from collections.abc import Callable, Iterator
+from typing import TYPE_CHECKING, Any
+
 import yaml
 
 from engine.version import __version__
@@ -48,6 +53,12 @@ from engine.repo_paths import (
     WorktreeResolutionError,
     resolve_worktree_paths,
 )
+
+if TYPE_CHECKING:
+    from engine.judge import JudgeResult
+    from engine.llm import LLMClient
+    from engine.resolution import ResolutionVerdict
+    from engine.task_manager import Task, TaskManager
 
 INSTALL_DEFAULT_TEST_COMMAND = "pytest -x --tb=short"
 GITREINS_GITIGNORE_ENTRIES = (
@@ -266,7 +277,7 @@ def _require_guard_config(workdir: str) -> str:
     return config_path
 
 
-def _safe_overwrite(path: str, content_func) -> str | None:
+def _safe_overwrite(path: str, content_func: Callable[[io.StringIO], object]) -> str | None:
     """Write content to path, backing up the original if it exists.
 
     Args:
@@ -322,7 +333,7 @@ def get_workdir() -> str:
         return os.getcwd()
 
 
-def _check_for_updates():
+def _check_for_updates() -> None:
     """Check PyPI for a newer version. Prints notice to stderr if available."""
     try:
         from engine.config import check_for_update
@@ -381,7 +392,7 @@ def _ensure_gitignore_entries(workdir: str, entries: tuple[str, ...]) -> list[st
     return changed
 
 
-def cmd_install(args):
+def cmd_install(args: argparse.Namespace) -> None:
     """One-command GitReins activation for the current repo.
 
     Creates:
@@ -450,7 +461,7 @@ def cmd_install(args):
     print("  - Try the hook:   make a change, git add ., git commit -m 'test'")
 
 
-def cmd_init(args):
+def cmd_init(args: argparse.Namespace) -> None:
     """Smart project initialization — detects language, size, and optimal config.
 
     Re-runnable: never overwrites existing config values, only adds missing sections.
@@ -1510,7 +1521,7 @@ def _rewrite_gitleaks_entries(text: str, replacements: list[tuple[int, str, int,
     return out
 
 
-def cmd_doctor(args):
+def cmd_doctor(args: argparse.Namespace) -> None:
     """Validate (and with --fix, migrate) the repo's `.gitleaks.toml` (POC-54)."""
     workdir = get_workdir()
     # GR-143 one-authority: doctor prints the run's shared snapshot (the same
@@ -1579,7 +1590,7 @@ def cmd_doctor(args):
         raise SystemExit(1)
 
 
-def cmd_task_create(args):
+def cmd_task_create(args: argparse.Namespace) -> None:
     from engine.task_manager import TaskManager
 
     tm = TaskManager(get_workdir())
@@ -1593,7 +1604,7 @@ def cmd_task_create(args):
         print(f"  {i}. {c}")
 
 
-def cmd_task_start(args):
+def cmd_task_start(args: argparse.Namespace) -> None:
     from engine.task_manager import TaskManager
 
     tm = TaskManager(get_workdir())
@@ -1602,7 +1613,7 @@ def cmd_task_start(args):
     print(f"Started: {task.id} → {task.status}")
 
 
-def _require_task(tm, task_id: str):
+def _require_task(tm: TaskManager, task_id: str) -> Task:
     """Return the task, or exit 1 with the clean message ``judge`` prints.
 
     DF-GITREINS-POC-14: ``task start`` / ``task complete`` / ``task delete``
@@ -1620,7 +1631,7 @@ def _require_task(tm, task_id: str):
     return task
 
 
-def _print_tier2_recovery(llm, task_id: str) -> None:
+def _print_tier2_recovery(llm: LLMClient | None, task_id: str) -> None:
     """Name the resolved LLM config and the way forward after a Tier 2 that
     judged nothing (DF-GITREINS-POC-14).
 
@@ -1649,7 +1660,7 @@ def _print_tier2_recovery(llm, task_id: str) -> None:
     print("  see docs/onboarding.md (T5)", file=sys.stderr)
 
 
-def cmd_task_get(args):
+def cmd_task_get(args: argparse.Namespace) -> None:
     from engine.task_manager import TaskManager
 
     tm = TaskManager(get_workdir())
@@ -1707,13 +1718,13 @@ def _task_complete_scan_root(control_root: str, requested: str | None) -> str:
 
 
 @contextlib.contextmanager
-def _task_complete_lease(task_id: str, control_root: str, scan_root: str):
+def _task_complete_lease(task_id: str, control_root: str, scan_root: str) -> Iterator[bool]:
     """Cross-process single-flight lease keyed by task, roots, revisions and config."""
     import hashlib
 
     from engine.job_store import acquire_resume_lease, release_resume_lease
 
-    def revision(path):
+    def revision(path: str) -> str:
         result = subprocess.run(
             ["git", "-C", path, "rev-parse", "HEAD"],
             capture_output=True,
@@ -1757,7 +1768,7 @@ def _task_complete_lease(task_id: str, control_root: str, scan_root: str):
             release_resume_lease(fd)
 
 
-def cmd_task_complete(args):
+def cmd_task_complete(args: argparse.Namespace) -> None:
     from engine.evaluator import LLM_FAILURE_SUMMARY_PREFIX
     from engine.task_manager import TaskManager
     from engine.llm import LLMClient
@@ -1837,7 +1848,7 @@ def cmd_task_complete(args):
         lease.__exit__(None, None, None)
 
 
-def cmd_task_list(args):
+def cmd_task_list(args: argparse.Namespace) -> None:
     from engine.task_manager import TaskManager
 
     tm = TaskManager(get_workdir())
@@ -1850,7 +1861,7 @@ def cmd_task_list(args):
         print(f"  {status_icon} {t.id:<20} {t.title}")
 
 
-def cmd_task_delete(args):
+def cmd_task_delete(args: argparse.Namespace) -> None:
     from engine.task_manager import TaskManager
 
     tm = TaskManager(get_workdir())
@@ -1859,7 +1870,7 @@ def cmd_task_delete(args):
     print(f"Deleted: {args.id}")
 
 
-def cmd_task_worktree(args):
+def cmd_task_worktree(args: argparse.Namespace) -> None:
     """Create (or idempotently reuse) a task's isolated git worktree."""
     from engine.worktree_manager import WorktreeError, WorktreeManager
 
@@ -1885,7 +1896,7 @@ def cmd_task_worktree(args):
     print("Merge-back armed on judge PASS (worktree merge-back lands in WORKTREE-003).")
 
 
-def cmd_worktree_merge(args):
+def cmd_worktree_merge(args: argparse.Namespace) -> None:
     """Judge-gated fast-forward merge of a task worktree into canonical main."""
     from engine.repo_paths import WorktreeResolutionError
     from engine.worktree_manager import WorktreeError, WorktreeManager
@@ -1925,7 +1936,7 @@ def _format_age(seconds: float) -> str:
     return f"{seconds // 86400}d"
 
 
-def cmd_worktree_list(args):
+def cmd_worktree_list(args: argparse.Namespace) -> None:
     """List registered task worktrees with reconciled state and age."""
     import time as _time
 
@@ -1962,7 +1973,7 @@ def cmd_worktree_list(args):
         print(f"    path: {record.path}")
 
 
-def cmd_worktree_fleet(args):
+def cmd_worktree_fleet(args: argparse.Namespace) -> None:
     """Run an explicit bounded fleet manifest and print its tick report."""
     import json as _json
 
@@ -2023,7 +2034,7 @@ def _record_qa_run(kind: str, report: dict, *, command: str | None = None) -> No
         print(f"qa ledger: {kind} run not recorded (qa_ledger.enabled is false)", file=sys.stderr)
 
 
-def cmd_worktree_fresh(args):
+def cmd_worktree_fresh(args: argparse.Namespace) -> None:
     """Run one shell command in a disposable detached worktree."""
     from engine.worktree_disposable import DisposableWorktreeManager
     from engine.worktree_manager import WorktreeError
@@ -2049,7 +2060,7 @@ def cmd_worktree_fresh(args):
         raise SystemExit(result["exit_code"])
 
 
-def cmd_worktree_repro(args):
+def cmd_worktree_repro(args: argparse.Namespace) -> None:
     """Run a command repeatedly in bounded disposable worktrees."""
     from engine.worktree_disposable import DisposableWorktreeManager
     from engine.worktree_manager import WorktreeError
@@ -2107,7 +2118,7 @@ def _format_dogfood_summary(report: dict) -> str:
     return summary
 
 
-def cmd_worktree_dogfood(args):
+def cmd_worktree_dogfood(args: argparse.Namespace) -> None:
     """Exercise init, task, guard, and judge in a disposable tree."""
     from engine.worktree_disposable import DisposableWorktreeManager
     from engine.worktree_manager import WorktreeError
@@ -2131,7 +2142,7 @@ def cmd_worktree_dogfood(args):
         raise SystemExit(report["exit_code"])
 
 
-def cmd_worktree_clean(args):
+def cmd_worktree_clean(args: argparse.Namespace) -> None:
     """Reap merged and failed task worktrees and finished disposable runs."""
     from engine.worktree_disposable import DisposableWorktreeManager
     from engine.worktree_manager import PROTECTED_STATES, WorktreeError, WorktreeManager
@@ -2170,7 +2181,7 @@ def cmd_worktree_clean(args):
             print(line)
 
 
-def _persist_result(workdir: str, task, result) -> None:
+def _persist_result(workdir: str, task: Task, result: JudgeResult) -> None:
     """Save evaluation verdict to history. Non-fatal — logs on failure.
 
     Thin wrapper over ``engine.persist.persist_evaluation`` (the single shared
@@ -2223,7 +2234,7 @@ def _persist_result(workdir: str, task, result) -> None:
         print("  ⚠ Failed to persist verdict (non-fatal)", file=sys.stderr)
 
 
-def cmd_qa_list(args):
+def cmd_qa_list(args: argparse.Namespace) -> None:
     """Show recorded QA run outcomes from the QA ledger."""
     from engine.qa_ledger import format_rows, list_rows
 
@@ -2235,7 +2246,7 @@ def cmd_qa_list(args):
     print(format_rows(workdir, n=n))
 
 
-def cmd_qa_record(args):
+def cmd_qa_record(args: argparse.Namespace) -> None:
     """Record a QA run outcome produced outside the harness.
 
     Rows carry the fleet QA-ledger keys, so pointing ``GITREINS_QA_LEDGER`` at a
@@ -2291,7 +2302,7 @@ def cmd_qa_record(args):
     )
 
 
-def cmd_report(args):
+def cmd_report(args: argparse.Namespace) -> None:
     """Show recent verdict history."""
     from engine.persist import build_report
     from engine.qa_ledger import format_report_section
@@ -2326,7 +2337,7 @@ def cmd_report(args):
         print(qa_section)
 
 
-def cmd_worktree_doctor(args):
+def cmd_worktree_doctor(args: argparse.Namespace) -> None:
     """Show and validate the shared board resolution for this checkout."""
     try:
         paths = resolve_worktree_paths()
@@ -2354,7 +2365,7 @@ def cmd_worktree_doctor(args):
         )
 
 
-def cmd_serve(args):
+def cmd_serve(args: argparse.Namespace) -> None:
     """Run the local judgment-browser web server."""
     from gitreins.serve import ServeArgumentError, resolve_workdir, serve
 
@@ -2372,7 +2383,7 @@ def cmd_serve(args):
     )
 
 
-def _cmd_report_tui(workdir: str, n: int = 20):
+def _cmd_report_tui(workdir: str, n: int = 20) -> None:
     """Interactive TUI for verdict browsing (requires textual)."""
     from engine.persist import KIND_RESOLUTION, VerdictPersister, build_report
 
@@ -2469,7 +2480,7 @@ def quality_snapshot_for(workdir: str) -> dict | None:
     return read_quality_snapshot(workdir, QualityConfig.from_dict(raw))
 
 
-def cmd_guard_run(args):
+def cmd_guard_run(args: argparse.Namespace) -> None:
     # EVID-002: --json is the automation surface — the update check prints, so
     # it is skipped there; the document must be the only thing on stdout.
     json_output = getattr(args, "json_output", False)
@@ -2611,7 +2622,7 @@ def _judge_usage_error(message: str) -> None:
     sys.exit(2)
 
 
-def cmd_judge(args):
+def cmd_judge(args: argparse.Namespace) -> None:
     """Evaluate a task — sync (default), ephemeral, or dispatch a background job.
 
     ``--async`` detaches a worker process and returns a job id; the job
@@ -2753,7 +2764,7 @@ def _ephemeral_task_id(title: str) -> str:
 
 
 def _cmd_judge_ephemeral(
-    args, *, scope: str, json_output: bool, persist_verdict: bool = False
+    args: argparse.Namespace, *, scope: str, json_output: bool, persist_verdict: bool = False
 ) -> None:
     """EVID-003: evaluate inline criteria with NOTHING persisted.
 
@@ -2843,7 +2854,7 @@ def _cmd_judge_ephemeral(
         sys.exit(1)
 
 
-def _write_merge_gate_verdict(workdir: str, task, result) -> None:
+def _write_merge_gate_verdict(workdir: str, task: Task, result: JudgeResult) -> None:
     """Write the ONE verdict document a judge-gated merge reads (POC-48).
 
     ``engine.persist.build_verdict_data`` is reused — the same payload the
@@ -3204,7 +3215,7 @@ def _display_git_path(path: bytes) -> str:
     return repr(os.fsdecode(path))
 
 
-def cmd_commit(args):
+def cmd_commit(args: argparse.Namespace) -> None:
     from engine.guard_manager import GuardManager
     from engine.task_manager import TaskManager
 
@@ -3327,7 +3338,7 @@ def cmd_commit(args):
         print(f"  {_display_git_path(path)}")
 
 
-def cmd_commit_audit(args):
+def cmd_commit_audit(args: argparse.Namespace) -> None:
     """Validate a commit message against the staged diff using LLM.
 
     Reads the message from ``args.message`` or falls back to the git
@@ -3398,7 +3409,7 @@ def cmd_commit_audit(args):
     sys.exit(0)
 
 
-def cmd_resolve(args):
+def cmd_resolve(args: argparse.Namespace) -> None:
     """Resolve a question against the repo's code (JEVRES-002).
 
     Runs the Jev resolution gate (``engine/resolution.py`` — the pipeline is
@@ -3485,7 +3496,7 @@ def cmd_resolve(args):
     sys.exit(verdict.exit_code)
 
 
-def _print_resolve_verdict(verdict) -> None:
+def _print_resolve_verdict(verdict: ResolutionVerdict) -> None:
     """Human-readable rendering of a resolution verdict."""
     print(f"Question: {verdict.question}")
     if verdict.verdict == "ABSTAIN":
@@ -3516,7 +3527,7 @@ def _print_resolve_verdict(verdict) -> None:
             )
 
 
-def cmd_preflight(args):
+def cmd_preflight(args: argparse.Namespace) -> None:
     """Pre-dispatch premise check (JEVRES-003): resolve, then decide dispatch.
 
     Spec ``docs/jev-resolution-gate.md`` §4 row 1. Runs the JEVRES-001 gate
@@ -3565,7 +3576,7 @@ def cmd_preflight(args):
     sys.exit(0)
 
 
-def _print_preflight_record(record) -> None:
+def _print_preflight_record(record: dict[str, Any]) -> None:
     """Human-readable rendering of a preflight dispatch record."""
     print(f"Question: {record['question']}")
     print(f"Decision: {record['decision']}")
@@ -3579,7 +3590,7 @@ def _print_preflight_record(record) -> None:
     print("Note:     gate signal only — a skip annotates the row, it is never a merge authority")
 
 
-def cmd_security_scan(args):
+def cmd_security_scan(args: argparse.Namespace) -> None:
     """Run the Antares CVE localization scanner (GR-117f).
 
     Default target: staged Python files (``git diff --cached``). With
@@ -3748,7 +3759,7 @@ _SETUP_TOOLS_INSTALL_GUIDE = {
 }
 
 
-def cmd_setup_tools(args):
+def cmd_setup_tools(args: argparse.Namespace) -> None:
     """Show available static analysis tools and install instructions for missing ones."""
     from engine.lang_detect import detect_languages
     from engine.static_analysis import find_tool
@@ -3810,7 +3821,7 @@ def cmd_setup_tools(args):
     print(f"{found} tools available, {missing} missing.")
 
 
-def cmd_mcp_server(args):
+def cmd_mcp_server(args: argparse.Namespace) -> None:
     import sys
 
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -3820,7 +3831,7 @@ def cmd_mcp_server(args):
     server.run_stdio()
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="GitReins — Git-Native Agent Co-Harness")
     parser.add_argument("--version", action="version", version=f"gitreins {__version__}")
     sub = parser.add_subparsers(dest="command")
