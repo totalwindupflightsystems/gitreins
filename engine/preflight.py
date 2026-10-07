@@ -109,8 +109,8 @@ def preflight(
     workdir: str = ".",
     dispatch: Callable[[], None] | None = None,
     surface: str = "predispatch",
-    defaults: Any = None,
-    **resolve_kwargs: Any,
+    defaults: dict[str, Any] | None = None,  # opaque config passthrough
+    **resolve_kwargs: object,  # forwarded verbatim to engine.resolution.resolve
 ) -> dict[str, Any]:
     """Resolve *question* and return the dispatch record for it (spec §4 row 1).
 

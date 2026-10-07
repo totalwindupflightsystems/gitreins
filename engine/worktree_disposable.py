@@ -22,7 +22,7 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from engine.config import load_defaults
 from engine.evidence_bounds import MAX_EVIDENCE_CHARS, bound_evidence
@@ -214,7 +214,7 @@ def _pid_alive(pid: int | None) -> bool:
     return True
 
 
-def _coerce_ceiling_mb(value: Any) -> int:
+def _coerce_ceiling_mb(value: object) -> int:  # config-sourced, validated below
     """Validate the disk ceiling while allowing zero/negative unlimited values."""
     if isinstance(value, bool):
         raise ValueError("disk_ceiling_mb must be an integer, not boolean")
@@ -421,7 +421,7 @@ def _remove_disposable_tree(main_root: Path, path: Path) -> None:
 class DisposableWorktreeManager:
     """Create, execute, and reap detached verification worktrees."""
 
-    def __init__(self, workdir: str | os.PathLike[str] | None = None):
+    def __init__(self, workdir: str | os.PathLike[str] | None = None) -> None:
         self.manager = WorktreeManager(workdir)
         self.main_root = self.manager.main_root
         self.registry_path = self.main_root / ".gitreins" / DISPOSABLE_FILE
@@ -432,7 +432,7 @@ class DisposableWorktreeManager:
         self.manager.worktree_disk_ceiling_mb = self.disk_ceiling_mb
 
     @contextmanager
-    def _exclusive_lock(self):
+    def _exclusive_lock(self) -> Iterator[None]:
         """Serialize disposable registry changes across processes and threads."""
         depth = getattr(self._lock_state, "depth", 0)
         if depth:

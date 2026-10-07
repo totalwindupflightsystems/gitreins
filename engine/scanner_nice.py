@@ -52,7 +52,7 @@ import os
 import shutil
 import subprocess
 from dataclasses import dataclass, replace
-from typing import Any, Mapping
+from typing import Mapping
 
 logger = logging.getLogger("gitreins.scanner_nice")
 
@@ -79,7 +79,7 @@ _availability: dict[tuple[int, str], tuple[bool, str]] = {}
 # ── level resolution ─────────────────────────────────────────────────────────
 
 
-def parse_level(value: Any) -> int | None:
+def parse_level(value: object) -> int | None:
     """``0..19`` from an int or numeric string; ``None`` when unusable.
 
     Rejects ``bool`` explicitly (``True`` is an ``int`` in Python and would
@@ -101,7 +101,7 @@ def parse_level(value: Any) -> int | None:
     return level if 0 <= level <= MAX_LEVEL else None
 
 
-def coerce_level(value: Any, *, fallback: int = DEFAULT_LEVEL, what: str = CONFIG_KEY) -> int:
+def coerce_level(value: object, *, fallback: int = DEFAULT_LEVEL, what: str = CONFIG_KEY) -> int:
     """*value* as a level, or *fallback* (with a loud warning) when unusable."""
     level = parse_level(value)
     if level is None:
@@ -113,7 +113,7 @@ def coerce_level(value: Any, *, fallback: int = DEFAULT_LEVEL, what: str = CONFI
     return level
 
 
-def _config_level(config: Any) -> Any:
+def _config_level(config: object) -> object:
     """The raw ``guards.scanner_nice`` value out of any config shape we accept.
 
     Accepts the raw config dict (the guard's ``self.config``), a
@@ -132,7 +132,7 @@ def _config_level(config: Any) -> Any:
     return getattr(config, CONFIG_KEY, None)
 
 
-def resolve_level(config: Any = None, env: Mapping[str, str] | None = None) -> tuple[int, str]:
+def resolve_level(config: object = None, env: Mapping[str, str] | None = None) -> tuple[int, str]:
     """Resolve ``(level, source)`` with precedence **env > config > default**.
 
     An unusable value at either layer is ignored (and warned about) so the next
@@ -268,7 +268,7 @@ def policy_for_level(level: int, env: Mapping[str, str] | None = None) -> NicePo
     return NicePolicy(level=level, prefix=("nice", "-n", str(level)), note=note_applied(level))
 
 
-def policy(config: Any = None, env: Mapping[str, str] | None = None) -> NicePolicy:
+def policy(config: object = None, env: Mapping[str, str] | None = None) -> NicePolicy:
     """Resolve the policy from *config* (+ the ambient env); probes availability."""
     level, source = resolve_level(config, env)
     if level <= 0:

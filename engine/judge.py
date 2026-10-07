@@ -6,8 +6,9 @@ Now delegate to the Pipeline engine for configurable multi-stage evaluation.
 
 import logging
 import re
+from typing import Any
 
-from engine.evaluator import AgenticEvaluator
+from engine.evaluator import AgenticEvaluator, Verdict
 from engine.guard_manager import GuardManager, Tier1Result
 from engine.llm import LLMClient
 from engine.eval_cap import EvalCap
@@ -31,7 +32,7 @@ class Judge:
         scan_root: str | None = None,
         persist_log: bool = True,
         persist_telemetry: bool = True,
-    ):
+    ) -> None:
         self.workdir = workdir
         self.llm = llm
         self.guard_config = guard_config or {}
@@ -362,11 +363,11 @@ class JudgeResult:
         self,
         task_id: str,
         passed: bool = False,
-        pipeline_result: dict = None,
-        verdict=None,
-        tier1=None,
-        tier2=None,
-    ):
+        pipeline_result: dict | None = None,
+        verdict: Verdict | None = None,
+        tier1: Tier1Result | None = None,
+        tier2: Verdict | None = None,
+    ) -> None:
         self.task_id = task_id
         self.passed = passed
         self.pipeline_result = pipeline_result or {}
@@ -412,7 +413,7 @@ class JudgeResult:
         return "\n".join(lines)
 
 
-def judge_result_to_dict(task_id: str, workdir: str, result) -> dict:
+def judge_result_to_dict(task_id: str, workdir: str, result: Any) -> dict:  # noqa: ANN401 - legacy and pipeline result shapes
     """Standard judge result dict shared by MCP judge.status and CLI --status.
 
     Shape: task_id / passed / workdir / tier1_passed / verdict / items /
@@ -460,7 +461,7 @@ def judge_result_to_dict(task_id: str, workdir: str, result) -> dict:
     return d
 
 
-def _find_pipeline_verdict(pipeline_result: dict):
+def _find_pipeline_verdict(pipeline_result: dict) -> Verdict | None:
     """Extract the structured ai_eval verdict from a compiled pipeline result."""
     from types import SimpleNamespace
 

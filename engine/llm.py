@@ -93,7 +93,7 @@ class LLMClient:
         provider: str | None = None,
         max_retries: int = 3,
         llm_reasoning: str | None = None,
-    ):
+    ) -> None:
         env_base_url = os.getenv("GITREINS_LLM_BASE_URL")
         if base_url:
             resolved_base_url, self.base_url_source = base_url, "explicit argument"

@@ -515,7 +515,7 @@ def _resolution_tokens_max(defaults: dict, fallback: int) -> int:
     return coerced if coerced > 0 else fallback
 
 
-def _guards_value(config_dict: dict, key: str):
+def _guards_value(config_dict: dict, key: str) -> object:
     """One value out of the ``guards:`` block, tolerating a scalar/absent block.
 
     Config from other users is data, not schema (QA-GITREINS-POC-6 posture):
@@ -527,7 +527,7 @@ def _guards_value(config_dict: dict, key: str):
     return guards.get(key)
 
 
-def _worktree_fleet_value(config_dict: dict, defaults: dict, key: str, fallback):
+def _worktree_fleet_value(config_dict: dict, defaults: dict, key: str, fallback: object) -> object:
     """Resolve a fleet option from the documented and legacy config shapes."""
     fleet = config_dict.get("worktree_fleet", {})
     if not isinstance(fleet, dict):
@@ -553,7 +553,7 @@ def _worktree_fleet_value(config_dict: dict, defaults: dict, key: str, fallback)
     return fallback
 
 
-def _coerce_positive_int(value) -> int:
+def _coerce_positive_int(value: object) -> int:
     """Accept an integer cap, rejecting booleans, zero, and fractions."""
     if isinstance(value, bool):
         raise ValueError("max_concurrent_worktrees must be a positive integer, not boolean")
@@ -568,7 +568,7 @@ def _coerce_positive_int(value) -> int:
     return result
 
 
-def _coerce_disk_ceiling(value) -> int:
+def _coerce_disk_ceiling(value: object) -> int:
     """Accept zero/negative unlimited disk ceilings, rejecting booleans."""
     if isinstance(value, bool):
         raise ValueError("disk_ceiling_mb must be an integer, not boolean")
@@ -739,7 +739,7 @@ def _pypi_url() -> str:
 # ── Type coercion helpers ─────────────────────────────────────
 
 
-def _coerce_float(val) -> float:
+def _coerce_float(val: object) -> float:
     """Coerce a config value to float, handling strings like '100'."""
     if isinstance(val, (int, float)):
         return float(val)
@@ -751,7 +751,7 @@ def _coerce_float(val) -> float:
     return float(val) if isinstance(val, (int, float)) else -1.0
 
 
-def _coerce_seconds(val) -> float:
+def _coerce_seconds(val: object) -> float:
     """Coerce a time string like '30m' or '2h' to seconds."""
     import re
 
@@ -777,7 +777,7 @@ def _coerce_seconds(val) -> float:
     return -1.0
 
 
-def _coerce_tokens(val) -> int:
+def _coerce_tokens(val: object) -> int:
     """Coerce a token string like '10M', '200k', or '500' to int."""
     import re
 

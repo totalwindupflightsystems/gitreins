@@ -290,7 +290,9 @@ class PrescreenResult:
         }
 
 
-def run_prescreen(task: dict, *, workdir: str = ".", **resolve_kwargs: Any) -> PrescreenResult:
+def run_prescreen(
+    task: dict, *, workdir: str = ".", **resolve_kwargs: object  # forwarded to resolve
+) -> PrescreenResult:
     """Resolve the task's criteria against the repo (one Jev call).
 
     Runs the JEVRES-001 pipeline (:func:`engine.resolution.resolve` — trace →
@@ -397,7 +399,9 @@ def attribute_items(items: list, prescreen: PrescreenResult) -> list:
     return out
 
 
-def attach_prescreen(verdict, prescreen: PrescreenResult | None):
+def attach_prescreen(
+    verdict: ResolutionVerdict, prescreen: PrescreenResult | None
+) -> ResolutionVerdict:
     """Return *verdict* with attribution attached, or *verdict* unchanged.
 
     No pre-screen (ABSTAIN, disabled, or never run) returns the verdict object

@@ -78,6 +78,10 @@ from engine.types import (
     pytest_outcome,
     strip_ansi,
 )
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    pass
 
 logger = logging.getLogger("gitreins.pipeline")
 
@@ -113,7 +117,7 @@ SKIP_SENTINEL = "GITREINS_SKIP:"
 TIER1_ENV_VAR = "GITREINS_TIER1"
 
 
-def _verdict_item_data(item) -> dict:
+def _verdict_item_data(item: object) -> dict:
     """One verdict item for a step's ``data`` payload — attribution optional.
 
     Same contract as ``engine.persist._verdict_item_dict``: the three
@@ -392,7 +396,7 @@ _COMMIT_AUDIT_ENABLED_TRUE = ("true", "yes", "1", "on")
 _COMMIT_AUDIT_ENABLED_FALSE = ("false", "no", "0", "off")
 
 
-def _normalize_commit_audit_enabled(value) -> bool | None:
+def _normalize_commit_audit_enabled(value: object) -> bool | None:
     """Normalize a YAML ``enabled`` value to True/False, or None when unset.
 
     Booleans pass through. The string forms YAML users actually write
@@ -536,11 +540,11 @@ class Pipeline:
         self,
         config: dict,
         workdir: str = ".",
-        llm=None,
+        llm: Any = None,  # noqa: ANN401 - LLMClient, injected lazily by Judge
         *,
         persist_telemetry: bool = True,
         scan_root: str | None = None,
-    ):
+    ) -> None:
         self.workdir = os.path.abspath(workdir)
         self.scan_root = os.path.abspath(scan_root or workdir)
         self.config = config
@@ -1469,7 +1473,7 @@ class Pipeline:
         }
 
 
-def _normalize_yaml_bool_keys(obj):
+def _normalize_yaml_bool_keys(obj: object) -> object:
     """Recursively convert boolean keys to their string equivalents.
 
     PyYAML 1.1 parses unquoted ``on``, ``off``, ``yes``, ``no``, ``true``,
@@ -1497,7 +1501,7 @@ _YAML_BOOL_KEY_MAP: dict[bool, str] = {
 }
 
 
-def _fix_on_key(obj):
+def _fix_on_key(obj: object) -> object:
     """Post-processor specifically for the ``on`` / ``off`` key pitfall.
 
     YAML 1.1 interprets ``on: [...]`` as ``True: [...]``.  This second pass

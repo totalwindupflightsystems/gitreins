@@ -443,7 +443,7 @@ class AgenticEvaluator:
         eval_cap: str | EvalCap | None = None,
         command_timeout: int = 30,
         config_root: str | None = None,
-    ):
+    ) -> None:
         self.llm = llm
         self.workdir = os.path.abspath(workdir)
         self.config_root = os.path.abspath(config_root or workdir)

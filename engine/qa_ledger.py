@@ -69,7 +69,7 @@ FAILING_CELL_STATUSES = ("fail", "failed", "error")
 # ── Configuration and path resolution ──────────────────────────
 
 
-def _coerce_max_entries(value: Any) -> int:
+def _coerce_max_entries(value: object) -> int:  # JSON-sourced, validated below
     """Positive int, or the default for anything unusable."""
     if isinstance(value, bool) or value is None:
         return DEFAULT_QA_LEDGER_MAX_ENTRIES
@@ -150,7 +150,7 @@ def _head_sha(workdir: str) -> str:
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
-def _exit_code(value: Any) -> int:
+def _exit_code(value: object) -> int:  # JSON-sourced, coerced below
     if isinstance(value, bool) or value is None:
         return 1
     try:
@@ -490,7 +490,7 @@ def list_rows(
 # ── Presentation ───────────────────────────────────────────────
 
 
-def _cell_summary(cells: Any) -> str:
+def _cell_summary(cells: object) -> str:  # JSON-sourced, validated below
     """``3/3 passed, 1 skipped`` — graded cells first, then ungraded statuses."""
     if not isinstance(cells, dict) or not cells:
         return "no cells"

@@ -22,7 +22,7 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Any
 
-from engine.llm import LLMClient, LLMResponse
+from engine.llm import LLMClient, LLMResponse, ToolCall
 
 logger = logging.getLogger("gitreins.commit_audit")
 
@@ -480,7 +480,7 @@ class CommitAuditor:
         review_suggest_fix: bool = True,
         review_score_threshold: float = 8.0,
         review_score_offset: float = 1.0,
-    ):
+    ) -> None:
         self.llm = llm
         self.workdir = os.path.abspath(workdir)
         self.strictness = strictness
@@ -851,7 +851,7 @@ class CommitAuditor:
 
     # ── Tool execution ──────────────────────────────────────────
 
-    def _execute_tool(self, tc: Any) -> str:
+    def _execute_tool(self, tc: ToolCall) -> str:
         """Execute a tool call and return the result as a string."""
         name = tc.name
         args = tc.arguments

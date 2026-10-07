@@ -95,7 +95,7 @@ class DeadCodeDetector:
     # Decorator qualifiers that mark fixture/test functions called by frameworks
     FRAMEWORK_DECORATORS = {"pytest.fixture", "fixture"}
 
-    def __init__(self, workdir: str = "."):
+    def __init__(self, workdir: str = ".") -> None:
         self.workdir = os.path.abspath(workdir)
         self._func_defs: dict[str, list[tuple[str, int]]] = {}  # func_name -> [(file, line)]
         self._func_calls: set[str] = set()

@@ -272,7 +272,7 @@ def _sanitized_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
 
 
-def _coerce_timeout(value, name: str, default: int) -> int:
+def _coerce_timeout(value: object, name: str, default: int) -> int:
     """Coerce a guard timeout config value to a positive int of seconds.
 
     YAML durations are commonly written with a unit suffix

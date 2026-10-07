@@ -488,7 +488,7 @@ class ClassPolicy:
         }
 
     @classmethod
-    def from_dict(cls, value, *, where: str) -> "ClassPolicy":
+    def from_dict(cls, value: object | None, *, where: str) -> "ClassPolicy":
         if value is None:
             return cls()
         if not isinstance(value, dict):
@@ -1041,7 +1041,7 @@ def _reject_unknown_keys(block: dict, allowed: set[str], where: str) -> None:
         )
 
 
-def _check_choice(value, choices: tuple[str, ...], where: str) -> str:
+def _check_choice(value: object, choices: tuple[str, ...], where: str) -> str:
     if not isinstance(value, str) or value not in choices:
         raise DataProtectionConfigError(
             f"{where} must be one of {', '.join(choices)}, got {value!r}"
@@ -1049,7 +1049,7 @@ def _check_choice(value, choices: tuple[str, ...], where: str) -> str:
     return value
 
 
-def _check_confidence(value, where: str) -> float:
+def _check_confidence(value: object, where: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise DataProtectionConfigError(f"{where} must be a number between 0 and 1")
     number = float(value)
@@ -1076,7 +1076,7 @@ def _check_preserve_entry(entry: str, category: str) -> None:
         )
 
 
-def _category_from_dict(name: str, block) -> CategoryPolicy:
+def _category_from_dict(name: str, block: object | None) -> CategoryPolicy:
     where = f"data_protection.categories.{name}"
     if block is None:
         block = {}
@@ -1141,7 +1141,7 @@ def _category_from_dict(name: str, block) -> CategoryPolicy:
     )
 
 
-def _exceptions_from_raw(raw) -> tuple[ExceptionPolicy, ...]:
+def _exceptions_from_raw(raw: object | None) -> tuple[ExceptionPolicy, ...]:
     if raw is None:
         return ()
     if not isinstance(raw, (list, tuple)):
