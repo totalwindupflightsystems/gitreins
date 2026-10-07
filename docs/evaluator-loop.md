@@ -61,12 +61,19 @@ evaluator makes a best-effort recovery instead:
 
 Since v0.10.2, four environment variables override the evaluated layer's
 caps without editing `.gitreins/config.yaml` (useful for CI/docker/one-off
-runs). Two of them govern the token budgets:
+runs). They govern the iteration, wall-clock and token budgets:
 
 | Env var | Overrides | Accepted values |
 |---|---|---|
+| `GITREINS_MAX_ITERATIONS` | `max_iterations` | plain number (float; `0` or negative = unlimited) |
+| `GITREINS_MAX_TIME` | `max_time` | duration (`30s`, `5m`, `2h` — same forms as the config cap) |
 | `GITREINS_MAX_INPUT_TOKENS` | `max_input_tokens` | token count (`200k`, `1.5M`, or plain integer — same forms as the config cap) |
 | `GITREINS_MAX_OUTPUT_TOKENS` | `max_output_tokens` | token count (same forms) |
+
+When a run dies with `Cap exceeded: Input token budget`, the fastest fix is to
+raise the matching env var a rung for that one run (e.g.
+`GITREINS_MAX_INPUT_TOKENS=1.5M gitreins task complete <id>`) — no config
+edit or code change needed.
 
 When set, an env var **wins over any config-defined cap for that layer** — it
 is applied last, so it overrides both the `GitReinsDefaults` defaults and a

@@ -1,6 +1,7 @@
 """Tests for consuming externally-produced quality metric artifacts."""
 
 import sys
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -30,16 +31,35 @@ def _config(tmp_path, **overrides):
     return QualityConfig.from_dict(values)
 
 
-def _produce(tmp_path, metric_value=72.3, target=80):
+def _produce(tmp_path, metric_value=72.3, target=80, surfaces=None, class_floor=None):
+    artifact = {
+        "metrics": {"type_hint_pct": {"value": metric_value, "target": target, "stage": "stage-2"}},
+        "produced_at": "test",
+        "command": "repo-producer",
+    }
+    if surfaces is not None:
+        artifact["surfaces"] = surfaces
+    if class_floor is not None:
+        artifact["class_floor"] = class_floor
     (tmp_path / "producer.py").write_text(
         "import json, pathlib\n"
         "p = pathlib.Path('.gitreins/count')\n"
         "p.write_text(str(int(p.read_text()) + 1) if p.exists() else '1')\n"
-        f"pathlib.Path('.gitreins/quality.json').write_text(json.dumps({{"
-        f"'metrics': {{'type_hint_pct': {{'value': {metric_value}, 'target': {target}, 'stage': 'stage-2'}}}},"
-        "'produced_at': 'test', 'command': 'repo-producer'}))\n",
+        f"pathlib.Path('.gitreins/quality.json').write_text(json.dumps({artifact!r}))\n",
         encoding="utf-8",
     )
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "producer.py"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "baseline"], cwd=tmp_path, check=True)
+
+
+def _stage_surface_change(tmp_path, path="src/COV-1/component.py"):
+    target = tmp_path / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("changed\n", encoding="utf-8")
+    subprocess.run(["git", "add", path], cwd=tmp_path, check=True)
 
 
 def test_reads_valid_artifact_and_runs_producer_once(tmp_path):
@@ -94,7 +114,7 @@ def test_guard_surfaces_enabled_quality_and_blocks_opt_in_miss(tmp_path):
     result = _guard(tmp_path, quality)
     assert result.passed is False
     assert "type_hint_pct=72.3% (target 80%, block, stage stage-2, via repo-producer)" in (
-        result.summary
+        result.results[-1].output
     )
     assert result.extra["quality_snapshot"]["metrics"]["type_hint_pct"]["met_target"] is False
     assert (tmp_path / ".gitreins/count").read_text() == "1"
@@ -108,6 +128,53 @@ def test_warn_metric_does_not_fail_guard(tmp_path):
     assert "type_hint_pct=72.3% (target 80%, warn, stage stage-2, via repo-producer)" in (
         result.summary
     )
+
+
+def test_diff_scope_reports_staged_surface_and_warns_without_test_link(tmp_path):
+    _produce(
+        tmp_path,
+        surfaces={"COV-1": {"test_links": 0, "classes": ["unit"]}},
+        class_floor=["unit", "integration"],
+    )
+    _stage_surface_change(tmp_path)
+    result = _guard(tmp_path, _config(tmp_path).to_dict())
+    scope = result.extra["quality_snapshot"]["diff_scope"]
+    assert scope == {
+        "status": "available",
+        "base": "HEAD",
+        "diff_files": 1,
+        "surfaces": {
+            "COV-1": {
+                "test_links": 0,
+                "link_status": "none",
+                "classes": ["unit"],
+                "missing_classes": ["integration"],
+            }
+        },
+    }
+    assert "diff-scope: 1 changed files, 1 surfaces touched" in result.summary
+    assert "WARNING: surface COV-1 has no test link" in result.summary
+    assert result.passed is True
+
+
+def test_diff_scope_without_surfaces_is_unavailable(tmp_path):
+    _produce(tmp_path)
+    _stage_surface_change(tmp_path)
+    scope = _guard(tmp_path, _config(tmp_path).to_dict()).extra["quality_snapshot"]["diff_scope"]
+    assert scope["status"] == "unavailable"
+    assert scope["reason"] == "producer artifact has no surfaces model"
+    assert scope["diff_files"] == 1
+    assert scope["surfaces"] == {}
+
+
+def test_docs_only_diff_has_no_surface_findings(tmp_path):
+    _produce(tmp_path, surfaces={"COV-1": {"test_links": ["test"], "classes": ["unit"]}})
+    _stage_surface_change(tmp_path, "docs/guide.md")
+    result = _guard(tmp_path, _config(tmp_path).to_dict())
+    scope = result.extra["quality_snapshot"]["diff_scope"]
+    assert scope["status"] == "no_diff"
+    assert scope["surfaces"] == {}
+    assert "diff-scope: no artifact surfaces touched" in result.summary
 
 
 def test_disabled_quality_produces_no_guard_output(tmp_path):
@@ -162,7 +229,16 @@ def test_surfaces_report_identical_numbers(tmp_path, monkeypatch, capsys):
     from gitreins import cli
     from gitreins_mcp.server import GitReinsMCPServer
 
-    _produce(tmp_path, metric_value=82, target=80)
+    _produce(
+        tmp_path,
+        metric_value=82,
+        target=80,
+        surfaces={
+            "COV-1": {"test_links": ["tests/test_component.py"], "classes": ["unit", "integration"]}
+        },
+        class_floor=["unit", "integration"],
+    )
+    _stage_surface_change(tmp_path)
     quality_cfg = _config(tmp_path).to_dict()
     (tmp_path / ".gitreins/config.yaml").write_text(
         yaml.safe_dump({"quality": quality_cfg}), encoding="utf-8"
@@ -205,7 +281,9 @@ def test_surfaces_report_identical_numbers(tmp_path, monkeypatch, capsys):
     assert guard_line in result.summary
     # value + target + stage + producer command on every printed line.
     assert guard_line == (
-        "quality: type_hint_pct=82% (target 80%, warn, stage stage-2, via repo-producer)"
+        "quality: type_hint_pct=82% (target 80%, warn, stage stage-2, via repo-producer)\n"
+        "diff-scope: 1 changed files, 1 surfaces touched\n"
+        "  surface COV-1: test_links=linked, classes=integration,unit, missing_classes=none"
     )
     # One producer run for the whole run: count stays at 1.
     assert (tmp_path / ".gitreins/count").read_text() == "1"

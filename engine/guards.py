@@ -428,9 +428,12 @@ def check_go_lint(
     # GR-LINT-001 follow-up (judge probe, verdict edabaa0e): an invocation that
     # COULD NOT RUN must not reach the go-vet fallback when an EARLIER package
     # already returned exit 1 — the vet fallback would erase that real
-    # finding. Only a spawn/refusal with NO prior real verdict may fall back.
+    # finding. And the fallback must never claim a lane the linter did not
+    # fully cover: if a mid-loop spawn failure left any package dir UNGRADED
+    # (fewer results than dirs), the lane fails loudly instead of passing on
+    # a partial go-vet fallback (verdict 89a79c5d probe).
     lint_failed = any(r.get("exit_code") not in (0, None) for r in lint_results)
-    if "exit_code" not in result and not lint_failed:
+    if "exit_code" not in result and not lint_failed and len(lint_results) == len(package_dirs):
         # DF-GITREINS-POC-43: the linter never RAN — every shape run_bounded
         # can return without a verdict: spawn failure ({"error": ...}, no
         # exit_code) or a refused busy-wait ({"refused", "reason"}). Only

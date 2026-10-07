@@ -150,3 +150,36 @@ class TestGoLintFallbackMasking:
 
         assert not result.passed, "a real lint failure was masked by the vet fallback"
         assert "real finding" in (result.output or "")
+
+
+class TestGoLintMidLoopSpawnFailure:
+    """GR-LINT-001 follow-up (verdict 89a79c5d): a spawn failure at package #1
+    in a multi-package set leaves the remaining dirs UNGRADED — the go-vet
+    fallback may not pass the lane on partial coverage."""
+
+    def test_first_package_spawn_failure_fails_the_lane(self, tmp_path):
+        import engine.guards as guards_mod
+        from unittest.mock import patch
+
+        workdir = _scratch_repo(
+            tmp_path,
+            {
+                "go.mod": GO_MOD,
+                "alpha/a.go": "package alpha\\n",
+                "beta/b.go": "package beta\\n",
+            },
+        )
+        _git(workdir, "add", "alpha/a.go", "beta/b.go")
+
+        calls = {"n": 0}
+
+        def _fake_run_bounded(argv, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return {"error": "golangci-lint vanished"}  # alpha could not run
+            return {"exit_code": 0, "output": ""}  # anything after — unreachable
+
+        with patch.object(guards_mod.command_hygiene, "run_bounded", side_effect=_fake_run_bounded):
+            result = check_go_lint(workdir, changed_files=["alpha/a.go", "beta/b.go"])
+
+        assert not result.passed, "partial-coverage vet fallback passed the lane"

@@ -135,6 +135,10 @@ class LLMClient:
                         self.api_key_source = f"{env_key} (fallback)"
                         break
         self.model = model or os.getenv("GITREINS_LLM_MODEL") or _default_model()
+        # GR-LINT-001: configurable request timeout — the 120s hard-code killed
+        # tier-2 judge calls against slow local gateways (read timeouts after 3
+        # attempts, no verdict). Env override keeps the default at 120s.
+        self.request_timeout = int(os.getenv("GITREINS_LLM_TIMEOUT", "120"))
         self.max_retries = max_retries
 
         # Reasoning mode (DeepSeek thinking control)
@@ -375,7 +379,9 @@ class LLMClient:
             "Authorization": f"Bearer {self.api_key}",
         }
 
-        resp = requests.post(self._chat_url, headers=headers, json=payload, timeout=120)
+        resp = requests.post(
+            self._chat_url, headers=headers, json=payload, timeout=self.request_timeout
+        )
         resp.raise_for_status()
         data = resp.json()
 
@@ -476,7 +482,9 @@ class LLMClient:
             "anthropic-version": self._api_version,
         }
 
-        resp = requests.post(self._chat_url, headers=headers, json=payload, timeout=120)
+        resp = requests.post(
+            self._chat_url, headers=headers, json=payload, timeout=self.request_timeout
+        )
         resp.raise_for_status()
         data = resp.json()
 
