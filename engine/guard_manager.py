@@ -130,6 +130,119 @@ def _is_test_file(fpath: str) -> bool:
     return False
 
 
+# ── Sensitive-path class (REVIEW-GITREINS-027) ────────────────────
+# Staging a file whose PATH is a credential store must fail the secrets
+# guard regardless of the file's content shape: a credentials.json holding
+# an OAuth client_secret and a .env holding a bare high-entropy value with
+# no key name both passed every content pattern before this class existed.
+# The class is EXACTLY this list — do not widen it here.
+SENSITIVE_PATH_PATTERNS: tuple[str, ...] = (
+    ".env",
+    ".env.*",
+    "*.pem",
+    "*.key",
+    "id_rsa*",
+    "id_ed25519*",
+    "id_ecdsa*",
+    ".ssh/**",
+    "credentials.json",
+    ".npmrc",
+    ".pypirc",
+    "*.keystore",
+    "*.jks",
+    ".netrc",
+    ".pgpass",
+    "credentials*",
+    "service-account*.json",
+    "config/database.yml",
+)
+
+# The marker every sensitive-path finding line carries. The line has no
+# ``path:line`` locator, so _merge_secret_findings passes it through
+# verbatim — the gitleaks-failure merge would otherwise drop it from the
+# report.
+_SENSITIVE_PATH_MARK = "SENSITIVE PATH (credential-store path class)"
+
+# The prefix of the override note a suppressed path-class finding leaves in
+# the output — a pass that used guards.sensitive_paths.allow is never silent.
+_SENSITIVE_OVERRIDE_PREFIX = "sensitive-path override applied: "
+
+# Test fixture directories are exempt from the path class so the suite's
+# deliberate fake-credential fixtures keep working (tests/fixtures/.env and
+# friends). The content scan keeps applying its own rules to those paths.
+_SENSITIVE_FIXTURE_DIR_RE = re.compile(r"(^|/)(tests?|fixtures)/")
+
+
+def _glob_segment_re(segment: str) -> str:
+    """One path segment of a sensitive-path glob: ``*``/``?`` stay in-segment."""
+    parts = []
+    for ch in segment:
+        if ch == "*":
+            parts.append("[^/]*")
+        elif ch == "?":
+            parts.append("[^/]")
+        else:
+            parts.append(re.escape(ch))
+    return "".join(parts)
+
+
+def _compile_sensitive_path_patterns() -> tuple[re.Pattern, ...]:
+    """Compile SENSITIVE_PATH_PATTERNS to gitignore-flavoured regexes.
+
+    A pattern with no ``/`` matches the FILENAME at any depth (``.env`` also
+    covers ``config/.env``); a pattern with ``/`` is anchored to a path tail
+    (``config/database.yml`` matches that path at root or nested). ``**`` as
+    a full segment means everything below (``.ssh/**`` covers any ``.ssh``
+    directory); ``*`` never crosses ``/``, so ``credentials*`` stays
+    same-directory and cannot swallow an unrelated tree.
+    """
+    compiled = []
+    for pattern in SENSITIVE_PATH_PATTERNS:
+        segments = [".+" if seg == "**" else _glob_segment_re(seg) for seg in pattern.split("/")]
+        compiled.append(re.compile(rf"(^|/){'/'.join(segments)}\Z"))
+    return tuple(compiled)
+
+
+_SENSITIVE_PATH_RES = _compile_sensitive_path_patterns()
+
+
+def is_sensitive_path(path: str) -> bool:
+    """True when *path* names a credential store in SENSITIVE_PATH_PATTERNS.
+
+    Matching is gitignore-flavoured over the workdir-relative path with ``/``
+    separators (see :func:`_compile_sensitive_path_patterns`). This is a PATH
+    property only — content is never inspected. Callers exempt test fixture
+    directories via :func:`_is_sensitive_fixture_path`.
+    """
+    normalized = path.replace(os.sep, "/").strip()
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    if not normalized:
+        return False
+    return any(rx.search(normalized) for rx in _SENSITIVE_PATH_RES)
+
+
+def _is_sensitive_fixture_path(fpath: str) -> bool:
+    """True when *fpath* lives in a test fixture directory (``tests/``,
+    ``test/``, ``fixtures/``) — exempt from the sensitive-path class so the
+    suite's deliberate fake-credential fixtures keep working."""
+    return bool(_SENSITIVE_FIXTURE_DIR_RE.search(fpath.replace(os.sep, "/")))
+
+
+def _sensitive_path_override_globs(config: dict) -> list[str]:
+    """guards.sensitive_paths.allow as a list of glob strings (default [])."""
+    guards = config.get("guards", {}) if isinstance(config, dict) else {}
+    if not isinstance(guards, dict):
+        return []
+    sp = guards.get("sensitive_paths", {})
+    if not isinstance(sp, dict):
+        return []
+    allow = sp.get("allow", [])
+    if not isinstance(allow, list):
+        return []
+    return [str(g) for g in allow if str(g).strip()]
+
+
 # ── Diff-based test discovery ──────────────────────────────────
 
 # Files that, when changed, force a full test run (too broad to narrow)
@@ -948,6 +1061,12 @@ def _merge_secret_findings(gitleaks_output: str, builtin_output: str) -> str:
     merged: list[str] = [gitleaks_output]
     seen = set(gitleaks_pairs)
     for ln in builtin_output.splitlines():
+        # REVIEW-GITREINS-027: a sensitive-path finding has NO path:line
+        # locator — it must survive the merge verbatim, not be dropped by a
+        # regex built for locator lines.
+        if _SENSITIVE_OVERRIDE_PREFIX in ln or _SENSITIVE_PATH_MARK in ln:
+            merged.append(ln)
+            continue
         m = re.match(r"^(?P<path>.*?):(?P<line>\d+): ", ln)
         if not m:
             continue
@@ -1851,10 +1970,22 @@ class GuardManager:
                 scanners = ((GITLEAKS_SCANNER, SCANNER_CLEAN), *builtin.scanners)
                 if not builtin.passed:
                     return replace(builtin, scanners=scanners, nice_note=nice_note)
+                # REVIEW-GITREINS-027: keep the pass auditable — a
+                # guards.sensitive_paths.allow suppression the built-in scan
+                # applied under a clean gitleaks run is echoed here, never
+                # swallowed by the one-line "gitleaks: clean" summary.
+                override_lines = [
+                    ln
+                    for ln in builtin.output.splitlines()
+                    if ln.startswith(_SENSITIVE_OVERRIDE_PREFIX)
+                ]
+                clean_output = "gitleaks: clean" + (
+                    "\n" + "\n".join(override_lines) if override_lines else ""
+                )
                 return GuardResult(
                     name="secrets",
                     passed=True,
-                    output="gitleaks: clean",
+                    output=clean_output,
                     scanners=scanners,
                     nice_note=nice_note,
                 )
@@ -2046,6 +2177,12 @@ class GuardManager:
         ]
 
         findings = []
+        override_notes: list[str] = []
+        # REVIEW-GITREINS-027: guards.sensitive_paths.allow globs — repo-owner
+        # scoped; a matching sensitive path gets an AUDITABLE override note in
+        # the output instead of a silent pass. Default: empty (nothing
+        # suppressed out of the box).
+        override_globs = _sensitive_path_override_globs(self.config)
         allowlist = self._load_gitleaks_allowlist()
         explicit_scope = files is not None
         try:
@@ -2077,6 +2214,31 @@ class GuardManager:
                 # tracked) is skipped too.
                 if _is_harness_state_path(fpath):
                     continue
+                # REVIEW-GITREINS-027: a credential-store PATH fails the scan
+                # REGARDLESS of content — the measured gap was a
+                # credentials.json with an OAuth client_secret and a .env with
+                # a bare high-entropy value passing every content pattern.
+                # Checked BEFORE the doc/test-file skips and before the
+                # .gitleaks.toml allowlist: an allowlist path may exempt
+                # content findings (fixtures), but it must NOT silence the
+                # path class (that is how GR-GAP-007 went quiet). Test fixture
+                # directories stay exempt — fake-credential fixtures keep the
+                # suite green — and guards.sensitive_paths.allow applies here
+                # only, never to content findings (defence in depth).
+                if not _is_sensitive_fixture_path(fpath) and is_sensitive_path(fpath):
+                    if any(
+                        fnmatch.fnmatch(fpath.replace(os.sep, "/"), glob)
+                        or fnmatch.fnmatch(os.path.basename(fpath.replace(os.sep, "/")), glob)
+                        for glob in override_globs
+                    ):
+                        override_notes.append(f"{_SENSITIVE_OVERRIDE_PREFIX}{fpath}")
+                    else:
+                        findings.append(
+                            f"{fpath}: {_SENSITIVE_PATH_MARK} — staging this "
+                            "file is blocked regardless of content. Remedy: "
+                            ".gitignore it, use a secret manager, or pass an "
+                            "explicit override flag with a recorded reason."
+                        )
                 # Respect .gitleaks.toml [allowlist] paths — same exemptions
                 # gitleaks applies (test fixtures with deliberate fake keys).
                 if any(rx.search(fpath) for rx in allowlist):
@@ -2147,6 +2309,20 @@ class GuardManager:
                     output="Potential secrets found:\n" + "\n".join(findings[:20]),
                     scanners=((BUILTIN_SCANNER, scanner_finding_status(len(findings))),),
                 )
+            if override_notes:
+                # REVIEW-GITREINS-027: a pass that suppressed a sensitive-path
+                # finding via guards.sensitive_paths.allow says so — an
+                # override is never silent.
+                return GuardResult(
+                    name="secrets",
+                    passed=True,
+                    output=(
+                        f"Scanned {len(scan_files)} files — clean "
+                        f"(excluded harness state: {', '.join(d + '/**' for d in HARNESS_STATE_DIRS)})\n"
+                        + "\n".join(override_notes)
+                    ),
+                    scanners=((BUILTIN_SCANNER, SCANNER_CLEAN),),
+                )
             return GuardResult(
                 name="secrets",
                 passed=True,
@@ -2163,6 +2339,7 @@ class GuardManager:
                 name="secrets",
                 passed=False,
                 error=str(e),
+                output="\n".join(override_notes),
                 scanners=((BUILTIN_SCANNER, "scan error"),),
             )
 

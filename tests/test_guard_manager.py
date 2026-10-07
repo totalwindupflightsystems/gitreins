@@ -17,14 +17,17 @@ from engine.guard_manager import (
     GITLEAKS_SCANNER,
     GuardManager,
     GuardResult,
+    SENSITIVE_PATH_PATTERNS,
     Tier1Result,
     _build_diff_test_command,
     _discover_test_targets,
+    _is_sensitive_fixture_path,
     _pytest_interpreter_has_pytest,
     _pytest_invocations,
     _pytest_runner_missing_hint,
     _resolve_test_command,
     _shell_not_found_names,
+    is_sensitive_path,
 )
 from engine.types import (
     SCANNER_CLEAN,
@@ -2862,3 +2865,234 @@ class TestStaticAnalysisNoToolSelected:
         assert result.skipped is True
         assert "packaging marker" in result.skip_reason or "no python" in result.skip_reason
         assert "clean" not in result.output
+
+
+class TestSensitivePathMatching:
+    """REVIEW-GITREINS-027 — is_sensitive_path: gitignore-flavoured matching
+    over the EXACT credential-store class in SENSITIVE_PATH_PATTERNS."""
+
+    def test_class_list_is_exact(self):
+        """The class is exactly the approved list — no renames, no widening."""
+        assert set(SENSITIVE_PATH_PATTERNS) == {
+            ".env",
+            ".env.*",
+            "*.pem",
+            "*.key",
+            "id_rsa*",
+            "id_ed25519*",
+            "id_ecdsa*",
+            ".ssh/**",
+            "credentials.json",
+            ".npmrc",
+            ".pypirc",
+            "*.keystore",
+            "*.jks",
+            ".netrc",
+            ".pgpass",
+            "credentials*",
+            "service-account*.json",
+            "config/database.yml",
+        }
+
+    def test_matches_core_class_members(self):
+        for path in (
+            ".env",
+            "config/.env",
+            ".env.local",
+            ".env.production",
+            "server.pem",
+            "certs/server.key",
+            "id_rsa",
+            "id_rsa.bak",
+            "deploy/id_ed25519",
+            ".ssh/known_hosts",
+            "deploy/.ssh/id_rsa",
+            "credentials.json",
+            ".npmrc",
+            ".pypirc",
+            "app.keystore",
+            "release.jks",
+            ".netrc",
+            ".pgpass",
+            "credentials",
+            "credentials.prod",
+            "service-account.json",
+            "sa/service-account-prod.json",
+            "config/database.yml",
+            "deep/nest/config/database.yml",
+        ):
+            assert is_sensitive_path(path), path
+
+    def test_does_not_widen_beyond_the_class(self):
+        for path in ("config.py", "config.yml", "database.yml", "xkey", "src/settings.py"):
+            assert not is_sensitive_path(path), path
+
+    def test_env_dot_star_needs_the_dot_env_prefix(self):
+        assert is_sensitive_path(".env.staging")
+        assert not is_sensitive_path("environment.txt")
+
+    def test_star_does_not_cross_directory_separators(self):
+        # `credentials*` is a FILENAME glob: same-directory renames match,
+        # an unrelated tree under a directory that merely starts with the
+        # same letters does not.
+        assert is_sensitive_path("credentials_helper.py")
+        assert not is_sensitive_path("credentials/sub/notes.txt")
+
+    def test_fixture_directory_detection(self):
+        assert _is_sensitive_fixture_path("tests/fixtures/.env")
+        assert _is_sensitive_fixture_path("tests/fixtures/credentials.json")
+        assert _is_sensitive_fixture_path("test/keys/server.pem")
+        assert _is_sensitive_fixture_path("fixtures/.env")
+        assert not _is_sensitive_fixture_path(".env")
+        assert not _is_sensitive_fixture_path("src/.env")
+        assert not _is_sensitive_fixture_path("contest/foo.pem")
+
+
+class TestSensitivePathScanBehaviour:
+    """The path class fails the scan regardless of the file's content shape."""
+
+    def test_staged_credentials_json_fails_on_path_alone(self, tmp_workdir):
+        """credentials.json with ONLY an OAuth client_secret fails — no
+        content pattern matches this file today (the measured gap)."""
+        gocspx = "GOCSPX-" + "abc123def456" * 3  # runtime-built, never literal
+        _write_staged_file(
+            tmp_workdir,
+            "credentials.json",
+            '{\n  "installed": {"client_secret": "%s"}\n}\n' % gocspx,
+        )
+        gm = GuardManager(tmp_workdir)
+        result = gm._builtin_secrets_scan()
+        assert result.passed is False
+        assert "SENSITIVE PATH" in result.output
+        assert "credentials.json" in result.output
+
+    def test_staged_dot_env_with_bare_value_fails_on_path_alone(self, tmp_workdir):
+        """A .env holding a bare high-entropy value with NO key name fails —
+        no `key=value` pattern applies, so only the path class catches it."""
+        _write_staged_file(
+            tmp_workdir,
+            ".env",
+            "e7f2a91b8c4d5f6a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a\n",
+        )
+        gm = GuardManager(tmp_workdir)
+        result = gm._builtin_secrets_scan()
+        assert result.passed is False
+        assert "SENSITIVE PATH" in result.output
+        assert ".env" in result.output
+
+    def test_normal_source_file_still_passes(self, tmp_workdir):
+        """A plain config.py with no secrets is untouched by the path class."""
+        _write_staged_file(tmp_workdir, "config.py", "DEBUG = True\nPORT = 8080\n")
+        gm = GuardManager(tmp_workdir)
+        result = gm._builtin_secrets_scan()
+        assert result.passed is True
+        assert "SENSITIVE PATH" not in result.output
+
+    def test_test_fixture_directory_exempt(self, tmp_workdir):
+        """tests/fixtures/credentials.json is exempt from the PATH class so
+        the suite's deliberate fake-credential fixtures keep working."""
+        _write_staged_file(
+            tmp_workdir,
+            "tests/fixtures/credentials.json",
+            '{"fake": "not-a-real-secret-placeholder"}\n',
+        )
+        gm = GuardManager(tmp_workdir)
+        result = gm._builtin_secrets_scan()
+        assert result.passed is True
+        assert "SENSITIVE PATH" not in result.output
+
+    def test_sensitive_path_finding_survives_gitleaks_failure_merge(self, tmp_workdir):
+        """A gitleaks failure must not mask the path-class finding — the
+        locator-less SENSITIVE PATH line survives _merge_secret_findings."""
+        sk_secret = "sk-proj-" + "aB1cD2" * 6
+        _write_staged_file(tmp_workdir, "credentials.json", '{"k": "%s"}\n' % sk_secret)
+        gm = GuardManager(tmp_workdir)
+        mock_run = MagicMock(
+            returncode=1,
+            stdout=(
+                'Finding:     "k": "***"\n'
+                f"Secret:      {sk_secret}\n"
+                "RuleID:      sk-api-key\n"
+                "File:        credentials.json\n"
+                "Line:        1\n"
+                "WRN leaks found: 1\n"
+            ),
+            stderr="",
+        )
+
+        real_run = subprocess.run
+
+        def fake_run(cmd, *args, **kwargs):
+            if _is_gitleaks_spawn(cmd):
+                return mock_run
+            return real_run(cmd, *args, **kwargs)
+
+        with patch("subprocess.run", side_effect=fake_run):
+            result = gm._check_secrets()
+        assert result.passed is False
+        assert "SENSITIVE PATH" in result.output
+        assert "credentials.json" in result.output
+
+
+class TestSensitivePathScopesAndOverride:
+    """Scope coverage and the guards.sensitive_paths.allow override."""
+
+    def test_working_tree_explicit_scope_also_fails(self, tmp_workdir):
+        """A .env graded via --scope working-tree (explicit files list) fails
+        the same way a staged one does."""
+        env_path = os.path.join(tmp_workdir, ".env")
+        with open(env_path, "w") as f:
+            f.write("e7f2a91b8c4d5f6a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a\n")
+        gm = GuardManager(tmp_workdir)
+        result = gm._builtin_secrets_scan(files=[".env"])
+        assert result.passed is False
+        assert "SENSITIVE PATH" in result.output
+        assert ".env" in result.output
+
+    def test_check_secrets_working_tree_scope_fails_on_path(self, tmp_workdir):
+        """End-to-end through the lane entry: working-tree scope + .env →
+        _check_secrets itself fails."""
+        env_path = os.path.join(tmp_workdir, ".env")
+        with open(env_path, "w") as f:
+            f.write("just-some-bare-value-no-key-name\n")
+        gm = GuardManager(tmp_workdir, scope="working-tree")
+        result = gm._check_secrets()
+        assert result.passed is False
+        assert "SENSITIVE PATH" in result.output
+
+    def test_allow_config_suppresses_with_auditable_note(self, tmp_workdir):
+        """guards.sensitive_paths.allow: ["credentials.json"] suppresses the
+        path finding for that path — and the pass carries the override line."""
+        _write_staged_file(tmp_workdir, "credentials.json", '{"placeholder": true}\n')
+        gm = GuardManager(
+            tmp_workdir,
+            {"guards": {"sensitive_paths": {"allow": ["credentials.json"]}}},
+        )
+        result = gm._builtin_secrets_scan()
+        assert result.passed is True
+        assert "sensitive-path override applied: credentials.json" in result.output
+
+    def test_allow_config_does_not_suppress_other_class_members(self, tmp_workdir):
+        """An override for credentials.json must not silence .env — the knob
+        is per-path, never a widening of the class."""
+        _write_staged_file(tmp_workdir, ".env", "PLACEHOLDER_ONLY\n")
+        gm = GuardManager(
+            tmp_workdir,
+            {"guards": {"sensitive_paths": {"allow": ["credentials.json"]}}},
+        )
+        result = gm._builtin_secrets_scan()
+        assert result.passed is False
+        assert "SENSITIVE PATH" in result.output
+
+    def test_allow_config_never_silences_content_findings(self, tmp_workdir):
+        """Defence in depth: the override applies to the PATH class only. A
+        real content pattern match in the allowed file still fails."""
+        sk_secret = "sk-proj-" + "aB1cD2" * 6
+        _write_staged_file(tmp_workdir, "credentials.json", '{"k": "%s"}\n' % sk_secret)
+        gm = GuardManager(
+            tmp_workdir,
+            {"guards": {"sensitive_paths": {"allow": ["credentials.json"]}}},
+        )
+        result = gm._builtin_secrets_scan()
+        assert result.passed is False
+        assert "OpenAI/OpenRouter API key" in result.output
