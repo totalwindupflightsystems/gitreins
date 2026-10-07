@@ -3033,9 +3033,18 @@ def _cmd_judge_worker(job_id: str) -> None:
 def _cmd_judge_status(job_id: str) -> None:
     """Print the status/result of a background job.
 
-    Exit codes: 0 complete, 2 still running, 1 error/not found.
+    Exit codes: 0 complete, 2 still running, 3 orphan (worker process died
+    while the record still said running — the record is flipped to error),
+    1 error/not found.
     """
-    from engine.job_store import job_log_path, load_job
+    from engine.job_store import (
+        acquire_resume_lease,
+        job_log_path,
+        load_job,
+        pid_alive,
+        release_resume_lease,
+        save_job,
+    )
 
     job = load_job(job_id)
     if job is None:
@@ -3056,6 +3065,40 @@ def _cmd_judge_status(job_id: str) -> None:
     print()
 
     if status == "running":
+        # Liveness-aware (QA-GITR-002): a `running` record whose worker pid
+        # is dead is an orphan — the environment killed the worker (e.g.
+        # earlyoom) and nothing will ever write a terminal status. Flip the
+        # record to error under the resume lease so concurrent polls race
+        # safely, then report the orphan with a distinct exit code. A
+        # missing/None pid (records predating pid tracking) keeps the
+        # historical still-running behavior.
+        if job.get("pid") and not pid_alive(job.get("pid")):
+            lease = acquire_resume_lease(job_id)
+            if lease is not None:
+                try:
+                    current = load_job(job_id) or job
+                    if current.get("status") == "running":
+                        current["status"] = "error"
+                        current["running"] = False
+                        current["error"] = (
+                            f"worker process died before completing (pid {current.get('pid')})"
+                        )
+                        current["finished_at"] = time.time()
+                        save_job(current)
+                        job = current
+                    else:
+                        job = current
+                finally:
+                    release_resume_lease(lease)
+            if job.get("status") != "error":
+                # Another poller holds the lease and may be flipping it; the
+                # record could still say running — report it as such.
+                print(
+                    f"Job is still running (pid {job.get('pid') or 'unknown'}). Poll again later."
+                )
+                sys.exit(2)
+            print(f"Job worker process is GONE (pid {job.get('pid')}) — job marked error (orphan)")
+            sys.exit(3)
         print(f"Job is still running (pid {job.get('pid') or 'unknown'}). Poll again later.")
         sys.exit(2)
     if status == "error":

@@ -2055,6 +2055,12 @@ class TestJudgeAsyncCLI:
                     deadline = started + budget
             if last.returncode in (0, 1):
                 return last
+            if last.returncode == 3:
+                # QA-GITR-002: the status path detected the orphan (dead
+                # worker pid) and flipped the record to error — the
+                # environment killed the worker (earlyoom prefers pytest),
+                # not a stuck job. Legitimate skip with the diagnostic.
+                pytest.skip(f"{getattr(last, 'stdout', '').strip()}")
             if time.monotonic() >= deadline:
                 state = self._job_state(job_id)
                 diagnostic = (
@@ -2136,13 +2142,15 @@ class TestJudgeAsyncCLI:
         monkeypatch.setattr(os, "getloadavg", _no_loadavg, raising=False)
         assert cls._poll_budget_seconds() == cls.POLL_BASE_DEADLINE
 
-    def test_poll_job_fails_only_when_the_worker_is_gone(self, tmp_workdir):
-        """INT-FLAKE-3: a stalled poll is a FAILURE only for a stuck job.
+    def test_poll_job_skips_when_the_status_path_reports_the_orphan(self, tmp_workdir):
+        """INT-FLAKE-3 + QA-GITR-002: a dead worker is a skip, not a failure.
 
-        A worker that exited without writing a terminal status leaves a
-        `running` record with a dead pid: that IS a defect and still fails.
+        The status path itself detects the orphan (dead pid) and exits 3, so
+        the poll loop treats it as an environment kill of the worker (earlyoom
+        prefers pytest) — a legitimate skip with the diagnostic. The stored
+        record is flipped to error by the status path.
         """
-        from engine.job_store import make_job, save_job
+        from engine.job_store import load_job, make_job, save_job
 
         exited = subprocess.Popen([sys.executable, "-c", "pass"])
         exited.wait()  # reaped: the pid is gone
@@ -2152,12 +2160,72 @@ class TestJudgeAsyncCLI:
         job["pid"] = exited.pid
         save_job(job)
 
-        with pytest.raises(pytest.fail.Exception) as excinfo:
+        with pytest.raises(pytest.skip.Exception) as excinfo:
             self._poll_job("job-stuck0001", tmp_workdir, deadline_s=1.0)
         message = str(excinfo.value)
         assert "job-stuck0001" in message
         assert "GONE" in message
-        assert "stuck job, not a slow one" in message
+
+        # The status path marked the orphaned record terminal.
+        assert load_job("job-stuck0001")["status"] == "error"
+
+    def test_status_flips_dead_pid_running_job_to_error_exit_3(self, tmp_workdir):
+        """QA-GITR-002: `judge --status` on a running record with a dead pid.
+
+        The record is flipped to status='error' (with a worker-died message
+        and finished_at) and the CLI exits 3 — a distinct code from the
+        still-running exit 2.
+        """
+        from engine.job_store import load_job, make_job, save_job
+
+        exited = subprocess.Popen([sys.executable, "-c", "pass"])
+        exited.wait()  # reaped: the pid is gone
+
+        job = make_job("orphan-task", str(tmp_workdir))
+        job["id"] = "job-orphan001"
+        job["pid"] = exited.pid
+        save_job(job)
+
+        result = run_cli("judge", "job-orphan001", "--status", cwd=tmp_workdir)
+        assert result.returncode == 3, result.stdout + result.stderr
+        assert "GONE" in result.stdout
+        assert "orphan" in result.stdout
+
+        stored = load_job("job-orphan001")
+        assert stored["status"] == "error"
+        assert stored["running"] is False
+        assert "worker process died before completing" in (stored["error"] or "")
+        assert stored["finished_at"] is not None
+
+    def test_status_live_pid_still_running_exits_2(self, tmp_workdir):
+        """QA-GITR-002: a live worker keeps the historical exit 2 semantics."""
+        from engine.job_store import make_job, save_job
+
+        job = make_job("slow-task", str(tmp_workdir))
+        job["id"] = "job-live0001"
+        job["pid"] = os.getpid()  # this very pytest process: alive
+        save_job(job)
+
+        result = run_cli("judge", "job-live0001", "--status", cwd=tmp_workdir)
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert "still running" in result.stdout
+
+        from engine.job_store import load_job
+
+        assert load_job("job-live0001")["status"] == "running"
+
+    def test_status_none_pid_predating_tracking_keeps_exit_2(self, tmp_workdir):
+        """QA-GITR-002: a None pid (pre-pid-tracking record) is not flipped."""
+        from engine.job_store import load_job, make_job, save_job
+
+        job = make_job("legacy-task", str(tmp_workdir))
+        job["id"] = "job-legacy01"
+        job["pid"] = None
+        save_job(job)
+
+        result = run_cli("judge", "job-legacy01", "--status", cwd=tmp_workdir)
+        assert result.returncode == 2, result.stdout + result.stderr
+        assert load_job("job-legacy01")["status"] == "running"
 
     def test_poll_job_reports_a_live_but_slow_worker_without_failing(self, tmp_workdir):
         """INT-FLAKE-3: a worker still running is a distinct, non-failing diagnostic."""

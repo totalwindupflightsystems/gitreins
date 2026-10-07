@@ -11,7 +11,7 @@
 
 GitReins lives inside your git repository as a quality harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ✅ **v0.16.0** — the release that closes the loop between what is merged and what actually runs. `gitreins resolve "<question>"` (and the `context.resolve` MCP tool) traces a question to its seed files through Hilo, assembles a measured evidence bundle and returns a calibrated verdict band; `gitreins preflight` checks the premises of a task *before* a worker is dispatched, and annotates instead of dispatching when they do not hold; the judge pre-screens candidates and attributes a verdict per acceptance criterion; per-surface config knobs make the resolution gate tunable without touching code. Repo-owned quality metrics can also be surfaced by the guard, judge, doctor, and MCP `guard.run` from one JSON artifact; GitReins consumes the numbers but does not compute them. See [docs/quality-metrics.md](docs/quality-metrics.md) for the config and worked example. On the guard side, the `hook_timeout` early-return now carries `allow_skips` (a slow repo's docs/board commits were being blocked with exit 2 by a run whose own warning said the commit was allowed), the test lane pins its interpreter so a host whose PATH carries another virtualenv can no longer fail the lane with `unrecognized arguments: -n`, Go guard commands run through bounded execution, and the evaluator reaps the last run's process group on exit. `scripts/check_deployed_surface.py` is new: it compares the *deployed* CLI surface with this checkout and fails loudly when a merged subcommand exists only in the repo — the drift that used to be invisible because both copies reported the same version. 2819 tests pass / 82 test files, verified by collection (optional-tool skips vary).
+> ✅ **v0.16.0** — the release that closes the loop between what is merged and what actually runs. `gitreins resolve "<question>"` (and the `context.resolve` MCP tool) traces a question to its seed files through Hilo, assembles a measured evidence bundle and returns a calibrated verdict band; `gitreins preflight` checks the premises of a task *before* a worker is dispatched, and annotates instead of dispatching when they do not hold; the judge pre-screens candidates and attributes a verdict per acceptance criterion; per-surface config knobs make the resolution gate tunable without touching code. Repo-owned quality metrics can also be surfaced by the guard, judge, doctor, and MCP `guard.run` from one JSON artifact; GitReins consumes the numbers but does not compute them. See [docs/quality-metrics.md](docs/quality-metrics.md) for the config and worked example. On the guard side, the `hook_timeout` early-return now carries `allow_skips` (a slow repo's docs/board commits were being blocked with exit 2 by a run whose own warning said the commit was allowed), the test lane pins its interpreter so a host whose PATH carries another virtualenv can no longer fail the lane with `unrecognized arguments: -n`, Go guard commands run through bounded execution, and the evaluator reaps the last run's process group on exit. `scripts/check_deployed_surface.py` is new: it compares the *deployed* CLI surface with this checkout and fails loudly when a merged subcommand exists only in the repo — the drift that used to be invisible because both copies reported the same version. 2824 tests pass / 82 test files, verified by collection (optional-tool skips vary).
 
 Every resolution-gate surface ships **disabled**, because resolving a question sends the assembled bundle off the host: enabling one is an explicit act, `resolution.enabled.<surface>: true` (`cli`, `mcp`, `predispatch`, `judge_prescreen`) in `.gitreins/config.yaml` — `gitreins init` writes the block with all four `false`, and only a literal `true` opens a surface. A disabled surface fails closed with `abstain_reason: surface-disabled` and prints the enabling fix. The complete block, the defaults it may omit and the calibration caveat on the judge-adjacent surfaces are in [docs/jev-resolution-gate.md §9](docs/jev-resolution-gate.md).
 
@@ -67,6 +67,33 @@ setup).
 > `guards.allow_skips: true`, that first commit lands as a DEGRADED pass naming
 > the lane it did not grade; with `allow_skips: false` the run exits 2 instead.
 > A pytest run that actually executes and fails still blocks the commit.
+
+### System tools the guard lanes want
+
+Two static-analysis lanes look for tools outside the Python package and skip
+cleanly when they are absent — nothing about them is required to install or
+run GitReins, but an operator who wants those lanes active needs to provision
+the tools themselves:
+
+- **`pylsp` (python-lsp-server)** — the LSP lane's default server
+  (`guards.lsp_tools: ["pylsp"]` in `.gitreins/config.yaml`). `pip install
+  gitreins` does NOT install it.
+- **`mypy`** — used when the static-analysis lane is enabled (Python repos
+  with `static_analysis` on; `gitreins setup-tools` checks for it).
+
+Both are system-level commands the guard finds on PATH, so install them
+outside any PEP-668-managed system Python — into a virtualenv or via pipx:
+
+```bash
+pipx install pylsp-mypy         # or: python3 -m venv ... && pip install python-lsp-server mypy
+```
+
+When a tool is missing the lane is graded **skipped**, not failed: the guard
+prints `no LSP tool on PATH (... not installed)` / `no linter on PATH` with
+the install hint, the run is a DEGRADED pass (exit 0 with
+`guards.allow_skips: true`, exit 2 without), and the commit is never blocked
+by an absent optional tool. `gitreins setup-tools` reports which of these it
+can see on the current machine.
 
 ## How It Works
 
@@ -845,7 +872,7 @@ A lane whose own TREE is dirty fails the mirror-image check
 - **MCP Transport:** stdio (14 tools)
 - **Config:** YAML in `.gitreins/` directory
 - **Evaluator Default Model:** DeepSeek V4 Flash (~$0.01/eval)
-- **Test suite:** 2819 tests collected across 82 test files (collection total; optional-tool skips vary)
+- **Test suite:** 2824 tests collected across 82 test files (collection total; optional-tool skips vary)
 
 ## Architecture & Docs
 

@@ -3037,6 +3037,53 @@ class TestSensitivePathScanBehaviour:
 class TestSensitivePathScopesAndOverride:
     """Scope coverage and the guards.sensitive_paths.allow override."""
 
+    def test_whole_workdir_scan_ignores_untracked_gitignored_env(self, tmp_workdir):
+        """Judge-path (staged_only=False) scan of a graded tree: a
+        PRE-EXISTING, untracked, gitignored .env is local operator state,
+        never pushed — the path class must NOT fail the run (this repo's
+        own .env hit exactly this on the first judge pass)."""
+        with open(os.path.join(tmp_workdir, ".gitignore"), "w") as f:
+            f.write(".env\n")
+        with open(os.path.join(tmp_workdir, ".env"), "w") as f:
+            f.write("e7f2a91b8c4d5f6a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a\n")
+        subprocess.run(
+            ["git", "init", "-q"],
+            cwd=tmp_workdir,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(["git", "add", ".gitignore"], cwd=tmp_workdir, check=True)
+        subprocess.run(
+            ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "init"],
+            cwd=tmp_workdir,
+            check=True,
+            capture_output=True,
+        )
+        gm = GuardManager(tmp_workdir)
+        result = gm._builtin_secrets_scan(staged_only=False)
+        assert result.passed is True
+
+    def test_whole_workdir_scan_still_flags_tracked_env(self, tmp_workdir):
+        """The whole-workdir exemption is untracked-only: a TRACKED .env IS
+        published content and the class must still fire."""
+        _write_staged_file(tmp_workdir, ".env", "PLACEHOLDER\n")
+        subprocess.run(
+            ["git", "init", "-q"],
+            cwd=tmp_workdir,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "env"],
+            cwd=tmp_workdir,
+            check=True,
+            capture_output=True,
+        )
+        gm = GuardManager(tmp_workdir)
+        result = gm._builtin_secrets_scan(staged_only=False)
+        assert result.passed is False
+        assert "SENSITIVE PATH" in result.output
+
     def test_working_tree_explicit_scope_also_fails(self, tmp_workdir):
         """A .env graded via --scope working-tree (explicit files list) fails
         the same way a staged one does."""
