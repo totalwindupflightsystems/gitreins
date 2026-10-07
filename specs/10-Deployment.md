@@ -254,22 +254,30 @@ hermes mcp add gitreins ~/.hermes/scripts/gitreins-mcp
 hermes gateway restart
 ```
 
-After restart, the `gitreins` MCP tools are available in Hermes sessions:
+After restart, the `gitreins` MCP tools are available in Hermes sessions (all 15 live tools, names as in `docs/mcp-api.md` Tool Catalog):
+
 - `task.create`, `task.start`, `task.complete`, `task.list`, `task.get`, `task.delete`
-- `guard.run`
-- `judge.evaluate`
-- `commit`
+- `commit` (the only git commit path)
+- `guard.run` (Tier 1 static guards)
+- `repo.init` (create `.gitreins/config.yaml` in a target repo)
+- `judge.evaluate`, `judge.status` (run / poll background evaluation jobs)
+- `quality.status` (read the run's quality snapshot)
+- `propagate` (push guard config to sibling repos)
+- `context.resolve` (Jev resolution gate against the repo's code)
+- `configure` (hot-reload LLM config at runtime)
 
 ### 4.3 Environment Variables
 
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `GITREINS_WORKDIR` | No | `"."` | Default working directory for the MCP server. All tool calls resolve relative paths against this directory. |
-| `GITREINS_LLM_API_KEY` | No | `""` | API key for LLM evaluation. If absent, `task.complete` skips Tier 2 evaluation and returns the task with a note. |
+The MCP server itself reads **no** working-directory environment variable: `gitreins_mcp/server.py` takes the workdir from the constructor / positional command-line argument (`python3 -m gitreins_mcp.server [workdir]`, default `"."`). `GITREINS_WORKDIR` in the wrapper script above is **wrapper-local** — it exists only to parameterize the wrapper's own positional argument and is never read by GitReins code.
+
+| Variable | Read by | Default | Description |
+|----------|---------|---------|-------------|
+| `GITREINS_WORKDIR` | wrapper script only (§4.2) | `"."` | Wrapper-local convenience: the wrapper passes its value as the server's positional workdir argument. GitReins never reads this variable. |
+| `GITREINS_LLM_API_KEY` | server (LLM client) | `""` | API key for LLM evaluation. If absent, `task.complete` skips Tier 2 evaluation and returns the task with a note. |
 
 ### 4.4 Cross-Repository Usage
 
-Every MCP tool accepts an optional `workdir` parameter, enabling a single MCP server instance to manage tasks across multiple repositories:
+11 of the 15 MCP tools accept an optional `workdir` parameter (absolute path), enabling a single MCP server instance to manage tasks across multiple repositories:
 
 ```json
 {
@@ -283,7 +291,22 @@ Every MCP tool accepts an optional `workdir` parameter, enabling a single MCP se
 }
 ```
 
-The `workdir` parameter overrides `GITREINS_WORKDIR` for that specific tool call.
+The per-call `workdir` parameter selects the repo that tool call operates on; it overrides the server's positional workdir default (`self.workdir` in `gitreins_mcp/server.py`, set from the constructor / `sys.argv[1]`). When the tool passes a `workdir` that differs from the server default, the server builds a fresh `TaskManager`/`Judge` bound to that repo (tasks live in `<workdir>/.gitreins/tasks.yaml`, guard config in `<workdir>/.gitreins/config.yaml`).
+
+The four schemas **without** a `workdir` property operate on the server process itself rather than a target repo, so there is nothing to point at another checkout:
+
+- `configure` — mutates the server's in-process LLM configuration (env vars, model, provider); it takes `env`/`model`/`base_url`/`provider`, never a repo path.
+- `judge.status` — polls a background evaluation job by `job_id`; the job's repo was fixed when `judge.evaluate` started it.
+- `propagate` — takes an explicit `targets` array of repo paths instead of a single `workdir`.
+- `context.resolve` — resolves a question against the repo's code using the repo already bound to the server (no per-call target).
+
+Workdir-capable tools: `repo.init`, `task.create`, `task.start`, `task.complete`, `task.list`, `task.get`, `task.delete`, `commit`, `guard.run`, `judge.evaluate`, `quality.status`.
+
+<!-- deployment-mcp-contract: tool_count=15; workdir_tool_count=11; no_workdir_tools=configure,judge.status,propagate,context.resolve -->
+<!-- Parity: tests/test_mcp_deployment_spec.py verifies these counts and the §4.2/§4.4 tool lists
+     against gitreins_mcp/server.py _tool_schemas() and docs/mcp-api.md on every test run, so this
+     section drifts RED when the server's tool surface changes. The counts above match a live
+     tools/list round-trip against the server (15 tools, 11 schemas with workdir). -->
 
 ---
 
