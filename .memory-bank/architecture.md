@@ -4,7 +4,7 @@
 > in the actual source. Every claim is followed by the file:line that
 > proves it. When the design doc and the code disagree, the code wins.
 
-**Repository:** `~/gitreins-poc/`
+**Repository:** `~/gitreins/`
 **Version:** v0.1.0 (PoC, all 12 work items complete)
 **Stack:** Python 3.10+, `mcp`, `pyyaml`, `requests` — 3 deps total.
 
@@ -500,7 +500,7 @@ the cwd.
 $ ./gitreins/install
 GitReins Install
 ================
-Repo: /home/kara/gitreins-poc
+Repo: /home/kara/gitreins
 
 ✓ Created .gitreins/config.yaml
 ✓ Installed .git/hooks/pre-commit
