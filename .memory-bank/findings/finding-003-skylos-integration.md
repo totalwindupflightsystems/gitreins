@@ -160,7 +160,7 @@ That's it. The next `git commit` (via the pre-commit hook) or
 
 ## What we caught in the GitReins repo itself
 
-When we ran Skylos against `~/gitreins-poc/`, the most useful
+When we ran Skylos against `~/gitreins/`, the most useful
 finding was the `.gitreins-hooks/` directory in the repo root:
 empty, never written to, never gitignored, never used. It's a
 vestige of an earlier design where hooks were shipped in a

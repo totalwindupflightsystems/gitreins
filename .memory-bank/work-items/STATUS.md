@@ -370,7 +370,7 @@ If you need to recover any of the historical artifacts:
 
 ```bash
 # Recover the original docs/adr/ directory
-cd ~/gitreins-poc
+cd ~/gitreins
 git show 72aeef0:docs/adr/adr-001-gitreins-directory-storage.md
 git show 72aeef0:docs/adr/GR-010-gitreins-storage-decision.md
 git show 72aeef0:docs/adr/GR-011-evaluation-history-survey.md
