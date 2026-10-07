@@ -399,7 +399,7 @@ def verdict_stamps(workdir: str) -> list[tuple[str, str, float]]:
     return stamps
 
 
-def _epoch(value: Any) -> float | None:
+def _epoch(value: Any) -> float | None:  # noqa: ANN401
     """Epoch seconds for an ISO-8601 stamp; naive stamps are read as UTC."""
     if not isinstance(value, str) or not value:
         return None
@@ -737,7 +737,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002, ANN401
         # Quiet by default; the name ``format`` matches http.server's own API.
         if os.environ.get("GITREINS_SERVE_VERBOSE"):
             super().log_message(format, *args)
