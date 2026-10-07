@@ -145,7 +145,10 @@ def find_running_job(task_id: str, workdir: str, directory: str | None = None) -
     is reused. ``pid`` is deliberately NOT consulted: a ``running`` record
     with a dead/None pid is an orphan that the resume path re-dispatches
     on the next poll, so dispatching a second job for the same key would
-    multiply evaluations (the exact bug this guards against).
+    multiply evaluations (the exact bug this guards against). Orphaned
+    ``running`` records (dead pid) are flipped to ``error`` by the
+    ``judge --status`` liveness path (QA-GITR-002), which un-blocks the
+    key on the next poll; the deliberate no-pid-check design here stays.
     """
     wd = os.path.abspath(workdir)
     for job in list_jobs(directory):
