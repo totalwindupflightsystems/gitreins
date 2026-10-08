@@ -1303,6 +1303,27 @@ class GitReinsMCPServer:
             elif method == "tools/call":
                 tool_name = params.get("name", "")
                 tool_args = params.get("arguments", {}) or {}
+                # Refuse credential exfiltration before invoking a tool. MCP
+                # arguments are the last harness-owned surface that still has
+                # the user's original instruction text.
+                from engine.command_hygiene import exfiltration_request_reason
+
+                def _request_text(value: object) -> str:
+                    if isinstance(value, str):
+                        return value
+                    if isinstance(value, dict):
+                        return " ".join(_request_text(v) for v in value.values())
+                    if isinstance(value, (list, tuple)):
+                        return " ".join(_request_text(v) for v in value)
+                    return ""
+
+                refusal = exfiltration_request_reason(_request_text(tool_args))
+                if refusal:
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "error": {"code": -32000, "message": refusal},
+                    }
                 handler: object = self._tools.get(tool_name)
                 if not callable(handler):
                     return {

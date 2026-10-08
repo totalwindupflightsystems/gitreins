@@ -104,7 +104,7 @@ def test_live_surface_pins_the_current_cli():
     """The truth the doc is compared against — pinned so a silent parser
     change shows up here rather than as a mysterious doc failure."""
     top_level, worktree_options, qa_options = _load_module().live_surface(REPO_ROOT)
-    assert len(top_level) == 17
+    assert len(top_level) == 18
     assert "qa" in top_level
     assert "resolve" in top_level
     assert "preflight" in top_level

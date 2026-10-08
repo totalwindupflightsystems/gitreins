@@ -219,6 +219,16 @@ def _render_pre_commit_hook() -> str:
     return PRE_COMMIT_HOOK.replace("__GITREINS_CMD__", f"{invocation} guard")
 
 
+def _render_pre_push_hook() -> str:
+    """Scan every outgoing ref update before Git sends objects to a remote."""
+    invocation = _resolve_gitreins_invocation() or "gitreins"
+    return (
+        "#!/bin/sh\nwhile read local_ref local_sha remote_ref remote_sha; do\n"
+        f'  {invocation} push-check "$local_sha" "$remote_sha" || exit $?\n'
+        "done\n"
+    )
+
+
 def load_config(workdir: str) -> dict:
     """Load .gitreins/config.yaml, returning {} if not found.
 
@@ -410,6 +420,7 @@ def cmd_install(_args: argparse.Namespace) -> None:
     gitreins_dir = os.path.join(workdir, ".gitreins")
     config_path = os.path.join(gitreins_dir, "config.yaml")
     hook_path = os.path.join(hooks_dir, "pre-commit")
+    pre_push_path = os.path.join(hooks_dir, "pre-push")
 
     if not os.path.isdir(git_dir):
         print(f"Error: {workdir} is not a git repository (no .git directory).")
@@ -435,6 +446,11 @@ def cmd_install(_args: argparse.Namespace) -> None:
         f.write(_render_pre_commit_hook())
     os.chmod(hook_path, 0o755)
     created.append(hook_path + ("" if not hook_existed else " (overwritten)"))
+
+    with open(pre_push_path, "w") as f:
+        f.write(_render_pre_push_hook())
+    os.chmod(pre_push_path, 0o755)
+    created.append(pre_push_path)
 
     # 3. .gitignore — protect GitReins state and runtime artifacts
     for gitignore_msg in _ensure_gitignore_entries(
@@ -3853,6 +3869,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     # install
     sub.add_parser("install", help="Install GitReins hooks and config in the current repo")
+    push_check = sub.add_parser("push-check", help="Scan outgoing commit content for secrets")
+    push_check.add_argument("local_sha")
+    push_check.add_argument("remote_sha")
 
     # init
     init_p = sub.add_parser("init", help="Smart init — detect language, size, optimal config")
@@ -4457,6 +4476,10 @@ def main() -> None:
 
     if args.command == "install":
         cmd_install(args)
+    elif args.command == "push-check":
+        from engine.push_secrets import check_push_range
+
+        raise SystemExit(check_push_range(get_workdir(), args.local_sha, args.remote_sha))
     elif args.command == "init":
         cmd_init(args)
     elif args.command == "doctor":
