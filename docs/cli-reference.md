@@ -20,7 +20,7 @@ Running `gitreins` with no command prints the top-level help and exits
 **0**. An unknown command exits **2** (argparse behavior for
 unrecognized arguments).
 
-There are **17 top-level subcommands**:
+There are **18 top-level subcommands**:
 
 | # | Command | Purpose |
 |---|---------|---------|
@@ -41,6 +41,7 @@ There are **17 top-level subcommands**:
 | 15 | `qa` | QA run ledger — record and read QA run outcomes |
 | 16 | `serve` | Live judgment browser (local web server) |
 | 17 | `doctor` | Validate `.gitleaks.toml` and migrate pre-DF-001 glob allowlist entries |
+| 18 | `push-check` | Refuse outgoing commit history containing credentials |
 
 ## 1. `gitreins install`
 
