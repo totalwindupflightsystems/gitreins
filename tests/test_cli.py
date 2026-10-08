@@ -26,6 +26,7 @@ import pytest
 # restating the list — the restated copy is exactly what drifted from the
 # vendor .gitignore.
 from gitreins.cli import GITREINS_GITIGNORE_ENTRIES
+from typing import NoReturn
 
 
 # Get the path to the cli module
@@ -141,7 +142,7 @@ class _InProcessResult:
     result object in a given test.
     """
 
-    def __init__(self, returncode: int, stdout: str, stderr: str):
+    def __init__(self, returncode: int, stdout: str, stderr: str) -> None:
         self.returncode = returncode
         self.stdout = stdout
         self.stderr = stderr
@@ -315,7 +316,7 @@ def run_cli(*args, **kwargs):
     return _run_cli_in_process(args, env, cwd, unset_env=unset_env)
 
 
-def write_guard_config(workdir, extra_guards=""):
+def write_guard_config(workdir, extra_guards="") -> None:
     """Write a minimal .gitreins/config.yaml into workdir.
 
     GR-GAP-051: `gitreins guard` / `gitreins commit` now refuse to run in a
@@ -348,7 +349,7 @@ def _init_real_git_repo(tmp_path):
     return str(repo)
 
 
-def _write_pre_commit_hook(repo, body):
+def _write_pre_commit_hook(repo, body) -> None:
     hook_dir = os.path.join(repo, ".git", "hooks")
     os.makedirs(hook_dir, exist_ok=True)
     hook = os.path.join(hook_dir, "pre-commit")
@@ -357,7 +358,7 @@ def _write_pre_commit_hook(repo, body):
     os.chmod(hook, 0o755)
 
 
-def test_persist_result_stamps_producing_worktree_and_branch(tmp_path):
+def test_persist_result_stamps_producing_worktree_and_branch(tmp_path) -> None:
     """Persisted verdicts identify the linked checkout that produced them."""
     from types import SimpleNamespace
 
@@ -393,24 +394,24 @@ def test_persist_result_stamps_producing_worktree_and_branch(tmp_path):
 class TestHelpOutput:
     """Test CLI help and command dispatch — step-3-1-1-1."""
 
-    def test_help_prints_usage(self):
+    def test_help_prints_usage(self) -> None:
         """--help prints usage information."""
         result = run_cli("--help")
         assert result.returncode == 0
         assert "GitReins" in result.stdout
 
-    def test_no_args_prints_help(self):
+    def test_no_args_prints_help(self) -> None:
         """No arguments prints help."""
         result = run_cli()
         assert result.returncode == 0
         assert "GitReins" in result.stdout
 
-    def test_unknown_command_prints_help(self):
+    def test_unknown_command_prints_help(self) -> None:
         """Unknown command prints help."""
         result = run_cli("unknown")
         assert "invalid choice" in result.stderr
 
-    def test_guard_help_lists_test_mode_flags(self):
+    def test_guard_help_lists_test_mode_flags(self) -> None:
         """guard --help lists --staged-only/--full test-mode flags (GR-GAP-043)."""
         result = run_cli("guard", "--help")
         assert result.returncode == 0
@@ -421,7 +422,7 @@ class TestHelpOutput:
 class TestWorkdirDetection:
     """Test get_workdir() — step-3-1-1-2."""
 
-    def test_get_workdir_in_git_repo(self):
+    def test_get_workdir_in_git_repo(self) -> None:
         """Inside git repo → returns a Git-recognized checkout root."""
         from gitreins.cli import get_workdir
 
@@ -444,7 +445,7 @@ class TestWorkdirDetection:
         assert os.path.samefile(workdir, expected_root)
         assert os.path.samefile(workdir, recognized_root)
 
-    def test_get_workdir_outside_git_repo(self, tmp_path):
+    def test_get_workdir_outside_git_repo(self, tmp_path) -> None:
         """Outside git repo, git rev-parse fails, returns os.getcwd()."""
         from gitreins.cli import get_workdir
 
@@ -461,7 +462,7 @@ class TestWorkdirDetection:
 class TestTaskCreateCLI:
     """Test task create CLI — step-3-2-1-1."""
 
-    def test_create_task_with_criteria(self, tmp_workdir):
+    def test_create_task_with_criteria(self, tmp_workdir) -> None:
         """Create task with criteria prints ID, title, numbered criteria."""
         result = run_cli(
             "task", "create", "myid", "My Title", "criterion A", "criterion B", cwd=tmp_workdir
@@ -471,7 +472,7 @@ class TestTaskCreateCLI:
         assert "My Title" in result.stdout
         assert "criterion A" in result.stdout
 
-    def test_create_task_with_empty_criteria(self, tmp_workdir):
+    def test_create_task_with_empty_criteria(self, tmp_workdir) -> None:
         """Create task with no criteria prints task without criteria list."""
         result = run_cli("task", "create", "empty", "No Criteria", cwd=tmp_workdir)
         assert result.returncode == 0
@@ -481,7 +482,7 @@ class TestTaskCreateCLI:
 class TestTaskStartCompleteCLI:
     """Test task start/complete CLI — step-3-2-1-2."""
 
-    def test_start_existing_task(self, tmp_workdir):
+    def test_start_existing_task(self, tmp_workdir) -> None:
         """Start existing task shows 'Started: ID → in_progress'."""
         run_cli("task", "create", "start-me", "Start Test", "c1", cwd=tmp_workdir)
         result = run_cli("task", "start", "start-me", cwd=tmp_workdir)
@@ -489,12 +490,12 @@ class TestTaskStartCompleteCLI:
         assert "Started:" in result.stdout
         assert "in_progress" in result.stdout
 
-    def test_start_nonexistent_task_raises(self, tmp_workdir):
+    def test_start_nonexistent_task_raises(self, tmp_workdir) -> None:
         """Start nonexistent task raises KeyError."""
         result = run_cli("task", "start", "nope", cwd=tmp_workdir)
         assert result.returncode != 0
 
-    def test_complete_nonexistent_task_raises(self, tmp_workdir):
+    def test_complete_nonexistent_task_raises(self, tmp_workdir) -> None:
         """Complete nonexistent task raises KeyError."""
         result = run_cli("task", "complete", "nope", cwd=tmp_workdir)
         assert result.returncode != 0
@@ -503,7 +504,7 @@ class TestTaskStartCompleteCLI:
 class TestTaskListCLI:
     """Test task list CLI — step-3-2-1-3."""
 
-    def test_list_shows_status_icons(self, tmp_workdir):
+    def test_list_shows_status_icons(self, tmp_workdir) -> None:
         """List shows correct status icons for each task."""
         mock_env = {
             "GITREINS_MOCK_LLM_RESPONSE": json.dumps(
@@ -527,7 +528,7 @@ class TestTaskListCLI:
         assert "○" in result.stdout  # pending icon
         assert "●" in result.stdout  # complete icon
 
-    def test_list_with_status_filter(self, tmp_workdir):
+    def test_list_with_status_filter(self, tmp_workdir) -> None:
         """List --status pending shows only pending tasks."""
         mock_env = {
             "GITREINS_MOCK_LLM_RESPONSE": json.dumps(
@@ -551,7 +552,7 @@ class TestTaskListCLI:
         assert "pend" in result.stdout
         assert "done" not in result.stdout
 
-    def test_empty_list_shows_no_tasks(self, tmp_workdir):
+    def test_empty_list_shows_no_tasks(self, tmp_workdir) -> None:
         """List with no tasks prints 'No tasks found.'."""
         result = run_cli("task", "list", cwd=tmp_workdir)
         assert result.returncode == 0
@@ -561,14 +562,14 @@ class TestTaskListCLI:
 class TestTaskDeleteCLI:
     """Test task delete CLI — step-3-2-1-4."""
 
-    def test_delete_existing_task(self, tmp_workdir):
+    def test_delete_existing_task(self, tmp_workdir) -> None:
         """Delete existing task prints 'Deleted: ID', task gone."""
         run_cli("task", "create", "del-me", "Delete", "c1", cwd=tmp_workdir)
         result = run_cli("task", "delete", "del-me", cwd=tmp_workdir)
         assert result.returncode == 0
         assert "Deleted: del-me" in result.stdout
 
-    def test_delete_nonexistent_task_raises(self, tmp_workdir):
+    def test_delete_nonexistent_task_raises(self, tmp_workdir) -> None:
         """Delete nonexistent task raises KeyError."""
         result = run_cli("task", "delete", "nope", cwd=tmp_workdir)
         assert result.returncode != 0
@@ -580,7 +581,7 @@ class TestTaskDeleteCLI:
 class TestGuardRunCLI:
     """Test guard run CLI — step-3-3-1-1."""
 
-    def test_guard_run_shows_tier1_guards(self, tmp_workdir):
+    def test_guard_run_shows_tier1_guards(self, tmp_workdir) -> None:
         """guard run prints a Tier 1 header and the per-guard summary.
 
         TRUST-001: this workdir has nothing staged, so the run is honest about
@@ -595,21 +596,21 @@ class TestGuardRunCLI:
         assert "~ lint — skipped (no staged files)" in result.stdout
         assert "Tier 1 Guards: PASS" not in result.stdout
 
-    def test_guard_staged_only_sets_diff_test_mode(self, tmp_workdir):
+    def test_guard_staged_only_sets_diff_test_mode(self, tmp_workdir) -> None:
         """--staged-only forces diff test mode (GR-GAP-043)."""
         write_guard_config(tmp_workdir)
         result = run_cli("guard", "--staged-only", cwd=tmp_workdir)
         assert result.returncode == 0
         assert "(test mode: diff" in result.stdout
 
-    def test_guard_full_flag_sets_full_test_mode(self, tmp_workdir):
+    def test_guard_full_flag_sets_full_test_mode(self, tmp_workdir) -> None:
         """--full forces full test mode (GR-GAP-043)."""
         write_guard_config(tmp_workdir)
         result = run_cli("guard", "--full", cwd=tmp_workdir)
         assert result.returncode == 0
         assert "(test mode: full" in result.stdout
 
-    def test_guard_refuses_without_config(self, tmp_workdir):
+    def test_guard_refuses_without_config(self, tmp_workdir) -> None:
         """No .gitreins/config.yaml → non-zero, actionable message, no PASS (GR-GAP-051)."""
         gitreins_dir = os.path.join(tmp_workdir, ".gitreins")
         assert not os.path.isfile(os.path.join(gitreins_dir, "config.yaml"))
@@ -623,7 +624,7 @@ class TestGuardRunCLI:
         assert "Tier 1 Guards:" not in result.stdout
         assert "PASS" not in result.stdout
 
-    def test_guard_staged_only_overrides_config_full(self, tmp_workdir):
+    def test_guard_staged_only_overrides_config_full(self, tmp_workdir) -> None:
         """--staged-only overrides guards.test_mode: full in config (GR-GAP-043)."""
         cfg_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(cfg_dir, exist_ok=True)
@@ -635,7 +636,7 @@ class TestGuardRunCLI:
         assert result.returncode == 0
         assert "(test mode: diff" in result.stdout
 
-    def test_guard_timeout_allow_skips_exits_zero(self, tmp_workdir):
+    def test_guard_timeout_allow_skips_exits_zero(self, tmp_workdir) -> None:
         """GR-140: a timeout run with allow_skips: true commits (exit 0), not 2.
 
         Clean tree with test_on_clean: lint is an honest skip (degraded) and
@@ -657,7 +658,7 @@ class TestGuardRunCLI:
         assert "timed out after 1s" in output
         assert "DEGRADED PASS (skips:" in result.stdout
 
-    def test_guard_timeout_without_allow_skips_exits_two(self, tmp_workdir):
+    def test_guard_timeout_without_allow_skips_exits_two(self, tmp_workdir) -> None:
         """GR-140: allow_skips absent + timeout → the blocking exit 2 stays.
 
         Same shape as the exit-0 test but without the allow_skips opt-in:
@@ -684,14 +685,14 @@ class TestGuardRunCLI:
 class TestJudgeCLI:
     """Test judge CLI — step-3-3-1-2."""
 
-    def test_judge_nonexistent_task_exits_1(self, tmp_workdir):
+    def test_judge_nonexistent_task_exits_1(self, tmp_workdir) -> None:
         """Judge on nonexistent task exits code 1, stderr contains Task not found."""
         result = run_cli("judge", "nope", cwd=tmp_workdir)
         assert result.returncode == 1
         output = result.stdout + result.stderr
         assert "Task not found" in output
 
-    def test_judge_existing_task_exits_0(self, tmp_workdir):
+    def test_judge_existing_task_exits_0(self, tmp_workdir) -> None:
         """Judge on existing task exits code 0, prints summary."""
         verdict_json = '{"verdict":"COMPLETE","items":[{"criterion":"c1","status":"PASS","detail":"ok"}],"summary":"all good"}'
         run_cli("task", "create", "judge-me", "Judge Test", "c1", cwd=tmp_workdir)
@@ -709,7 +710,7 @@ class TestJudgeCLI:
 class TestCommitCLI:
     """Test commit CLI — step-3-3-1-3."""
 
-    def test_commit_in_clean_repo(self, tmp_workdir):
+    def test_commit_in_clean_repo(self, tmp_workdir) -> None:
         """Commit with a staged file runs guards then attempts the commit.
 
         DF-GITREINS-POC-70: an empty index now refuses before the guard stage
@@ -727,7 +728,7 @@ class TestCommitCLI:
         output = result.stdout + result.stderr
         assert "Tier 1" in output
 
-    def test_commit_refuses_without_config(self, tmp_workdir):
+    def test_commit_refuses_without_config(self, tmp_workdir) -> None:
         """No config → commit refuses instead of committing unguarded (GR-GAP-051)."""
         result = run_cli("commit", "must not land", cwd=tmp_workdir)
 
@@ -737,7 +738,7 @@ class TestCommitCLI:
         assert "gitreins init" in output
         assert "Tier 1" not in output
 
-    def test_commit_success_confirms_complete_staged_payload(self, tmp_path):
+    def test_commit_success_confirms_complete_staged_payload(self, tmp_path) -> None:
         """A complete commit reports every path captured after Tier 1."""
         repo = _init_real_git_repo(tmp_path)
         write_guard_config(repo)
@@ -755,7 +756,7 @@ class TestCommitCLI:
         assert "payload with space.txt" in output
         assert "second.txt" in output
 
-    def test_commit_propagates_git_failure(self, tmp_path):
+    def test_commit_propagates_git_failure(self, tmp_path) -> None:
         """A non-zero git commit result remains a non-zero CLI result."""
         repo = _init_real_git_repo(tmp_path)
         write_guard_config(repo)
@@ -769,7 +770,7 @@ class TestCommitCLI:
         output = result.stdout + result.stderr
         assert "commit deliberately blocked" in output
 
-    def test_commit_detects_path_removed_by_successful_hook(self, tmp_path):
+    def test_commit_detects_path_removed_by_successful_hook(self, tmp_path) -> None:
         """A successful commit that drops a staged path fails with its name."""
         repo = _init_real_git_repo(tmp_path)
         write_guard_config(repo)
@@ -797,19 +798,19 @@ class TestCommitCLI:
 class TestMCPServerCLI:
     """Test mcp-server command — step-3-3-1-4."""
 
-    def test_cmd_mcp_server_function_exists(self):
+    def test_cmd_mcp_server_function_exists(self) -> None:
         """cmd_mcp_server function exists and calls GitReinsMCPServer constructor."""
         from gitreins.cli import cmd_mcp_server
 
         assert callable(cmd_mcp_server)
 
-    def test_mcp_server_import_path(self):
+    def test_mcp_server_import_path(self) -> None:
         """Verify that mcp-server command can be imported without error."""
         import gitreins.cli
 
         assert hasattr(gitreins.cli, "cmd_mcp_server")
 
-    def test_mcp_server_help_documents_env_config(self):
+    def test_mcp_server_help_documents_env_config(self) -> None:
         """mcp-server --help documents env-var config and the configure tool."""
         result = run_cli("mcp-server", "--help")
         assert result.returncode == 0
@@ -826,7 +827,7 @@ class TestMCPServerCLI:
 class TestExtendedCLI:
     """Extended CLI coverage."""
 
-    def test_create_task_special_chars(self, tmp_workdir):
+    def test_create_task_special_chars(self, tmp_workdir) -> None:
         """Create task with special chars in title works."""
         result = run_cli(
             "task", "create", "spec", "Task with $pecial !@#$%^& chars", cwd=tmp_workdir
@@ -834,7 +835,7 @@ class TestExtendedCLI:
         assert result.returncode == 0
         assert "Created task: spec" in result.stdout
 
-    def test_create_task_multiple_criteria(self, tmp_workdir):
+    def test_create_task_multiple_criteria(self, tmp_workdir) -> None:
         """Create task with multiple criteria shows them all."""
         result = run_cli("task", "create", "multi", "Multi", "c1", "c2", "c3", cwd=tmp_workdir)
         assert result.returncode == 0
@@ -842,7 +843,7 @@ class TestExtendedCLI:
         assert "c2" in result.stdout
         assert "c3" in result.stdout
 
-    def test_complete_existing_task(self, tmp_workdir):
+    def test_complete_existing_task(self, tmp_workdir) -> None:
         """Complete existing task after creating and starting it."""
         mock_env = {
             "GITREINS_MOCK_LLM_RESPONSE": json.dumps(
@@ -878,7 +879,7 @@ class TestTaskCompleteCredentialFlow:
         "OPENROUTER_API_KEY",
     )
 
-    def test_missing_key_refuses_before_completing_task(self, tmp_workdir):
+    def test_missing_key_refuses_before_completing_task(self, tmp_workdir) -> None:
         """Missing credentials leave an in-progress task untouched."""
         run_cli("task", "create", "needs-key", "Needs key", "c1", cwd=tmp_workdir)
         run_cli("task", "start", "needs-key", cwd=tmp_workdir)
@@ -901,7 +902,7 @@ class TestTaskCompleteCredentialFlow:
 
         assert TaskManager(tmp_workdir).get("needs-key").status == "in_progress"
 
-    def test_skip_tier2_completes_and_persists_tier1_verdict_without_key(self, tmp_workdir):
+    def test_skip_tier2_completes_and_persists_tier1_verdict_without_key(self, tmp_workdir) -> None:
         """The explicit opt-out runs Tier 1 and saves a passing verdict."""
         write_guard_config(tmp_workdir)
         run_cli("task", "create", "tier1-only", "Tier 1 only", "c1", cwd=tmp_workdir)
@@ -924,7 +925,7 @@ class TestTaskCompleteCredentialFlow:
         assert verdicts
         assert json.loads(verdicts[-1].read_text())["passed"] is True
 
-    def test_tier2_failure_returns_nonzero_after_persisting_verdict(self, tmp_workdir):
+    def test_tier2_failure_returns_nonzero_after_persisting_verdict(self, tmp_workdir) -> None:
         """A failed evaluator verdict is persisted and reaches the CLI exit code."""
         verdict_json = json.dumps(
             {
@@ -952,7 +953,7 @@ class TestTaskCompleteCredentialFlow:
         assert verdicts
         assert json.loads(verdicts[-1].read_text())["passed"] is False
 
-    def test_task_complete_help_documents_credentials_and_opt_out(self):
+    def test_task_complete_help_documents_credentials_and_opt_out(self) -> None:
         """Task completion help names configuration and the Tier 1-only path."""
         result = run_cli("task", "complete", "--help")
         output = result.stdout + result.stderr
@@ -962,7 +963,7 @@ class TestTaskCompleteCredentialFlow:
         assert "--skip-tier2" in output
         assert "Tier 1-only" in output
 
-    def test_list_with_status_multiple_filters(self, tmp_workdir):
+    def test_list_with_status_multiple_filters(self, tmp_workdir) -> None:
         """List with --status in_progress shows only in_progress tasks."""
         run_cli("task", "create", "t1", "T1", cwd=tmp_workdir)
         run_cli("task", "create", "t2", "T2", cwd=tmp_workdir)
@@ -971,14 +972,14 @@ class TestTaskCompleteCredentialFlow:
         assert result.returncode == 0
         assert "t1" in result.stdout
 
-    def test_guard_run_all_details(self, tmp_workdir):
+    def test_guard_run_all_details(self, tmp_workdir) -> None:
         """guard run prints summary, PASS, per-guard results."""
         write_guard_config(tmp_workdir)
         result = run_cli("guard", cwd=tmp_workdir)
         assert result.returncode == 0
         assert "Tier 1" in result.stdout
 
-    def test_create_task_with_criteria_and_list(self, tmp_workdir):
+    def test_create_task_with_criteria_and_list(self, tmp_workdir) -> None:
         """Create tasks with criteria and list shows them."""
         run_cli("task", "create", "ltask1", "List Task 1", "crit_a", cwd=tmp_workdir)
         run_cli("task", "create", "ltask2", "List Task 2", "crit_b", cwd=tmp_workdir)
@@ -994,7 +995,7 @@ class TestTaskCompleteCredentialFlow:
 class TestExtendedHelp:
     """Extended CLI help output tests."""
 
-    def test_task_help_shows_subcommands(self):
+    def test_task_help_shows_subcommands(self) -> None:
         """task --help lists task subcommands."""
         result = run_cli("task", "--help")
         assert result.returncode == 0
@@ -1005,7 +1006,7 @@ class TestExtendedHelp:
         assert "list" in result.stdout
         assert "delete" in result.stdout
 
-    def test_task_get_shows_criteria_and_depends_on(self, tmp_workdir):
+    def test_task_get_shows_criteria_and_depends_on(self, tmp_workdir) -> None:
         """task get prints a task's full detail: status, criteria, depends-on."""
         run_cli("task", "create", "dep-a", "Dependency A", cwd=tmp_workdir)
         run_cli(
@@ -1027,20 +1028,20 @@ class TestExtendedHelp:
         assert "crit two" in result.stdout
         assert "dep-a" in result.stdout
 
-    def test_task_get_unknown_id_exits_nonzero(self, tmp_workdir):
+    def test_task_get_unknown_id_exits_nonzero(self, tmp_workdir) -> None:
         """task get with an unknown id exits non-zero with a clean error."""
         result = run_cli("task", "get", "no-such-id", cwd=tmp_workdir)
         assert result.returncode != 0
         assert "Task not found" in (result.stdout + result.stderr)
         assert "Traceback" not in (result.stdout + result.stderr)
 
-    def test_guard_help_prints_usage(self):
+    def test_guard_help_prints_usage(self) -> None:
         """guard --help prints usage."""
         result = run_cli("guard", "--help")
         assert result.returncode == 0
         assert "usage" in result.stdout.lower()
 
-    def test_judge_help_prints_usage(self):
+    def test_judge_help_prints_usage(self) -> None:
         """judge --help prints usage."""
         result = run_cli("judge", "--help")
         assert result.returncode == 0
@@ -1053,31 +1054,31 @@ class TestExtendedHelp:
 class TestErrorCases:
     """CLI error handling tests."""
 
-    def test_create_task_no_args(self):
+    def test_create_task_no_args(self) -> None:
         """task create without args shows error."""
         result = run_cli("task", "create")
         assert result.returncode != 0
         assert "required" in result.stderr.lower()
 
-    def test_start_task_no_args(self):
+    def test_start_task_no_args(self) -> None:
         """task start without args shows error."""
         result = run_cli("task", "start")
         assert result.returncode != 0
         assert "required" in result.stderr.lower()
 
-    def test_complete_task_no_args(self):
+    def test_complete_task_no_args(self) -> None:
         """task complete without args shows error."""
         result = run_cli("task", "complete")
         assert result.returncode != 0
         assert "required" in result.stderr.lower()
 
-    def test_delete_task_no_args(self):
+    def test_delete_task_no_args(self) -> None:
         """task delete without args shows error."""
         result = run_cli("task", "delete")
         assert result.returncode != 0
         assert "required" in result.stderr.lower()
 
-    def test_nonexistent_task_command_shows_error(self):
+    def test_nonexistent_task_command_shows_error(self) -> None:
         """task nonexistent subcommand shows argparse error."""
         result = run_cli("task", "nonexistent")
         assert result.returncode == 2
@@ -1090,7 +1091,7 @@ class TestErrorCases:
 class TestConfigAndWorkdir:
     """CLI config and workdir detection tests."""
 
-    def test_create_task_creates_gitreins_dir(self, tmp_workdir):
+    def test_create_task_creates_gitreins_dir(self, tmp_workdir) -> None:
         """Creating a task creates .gitreins/ directory."""
         gitreins = os.path.join(tmp_workdir, ".gitreins")
         assert not os.path.isdir(gitreins)
@@ -1098,7 +1099,7 @@ class TestConfigAndWorkdir:
         assert os.path.isdir(gitreins)
         assert os.path.isfile(os.path.join(gitreins, "tasks.yaml"))
 
-    def test_guard_refuses_without_gitreins_dir(self, tmp_workdir):
+    def test_guard_refuses_without_gitreins_dir(self, tmp_workdir) -> None:
         """Guard refuses to run without .gitreins/config.yaml (GR-GAP-051).
 
         Before GR-GAP-051 this reported a false-green "Tier 1 Guards: PASS".
@@ -1111,7 +1112,7 @@ class TestConfigAndWorkdir:
         assert "no .gitreins/config.yaml" in output
         assert "Tier 1 Guards:" not in result.stdout
 
-    def test_guard_run_ignores_leaked_git_index_file(self, tmp_path):
+    def test_guard_run_ignores_leaked_git_index_file(self, tmp_path) -> None:
         """Nested guard must not read a GIT_INDEX_FILE leaked by a pre-commit hook.
 
         Git exports GIT_INDEX_FILE to hooks; if the guard passes it through to
@@ -1152,7 +1153,7 @@ class TestConfigAndWorkdir:
         # graded anywhere in the output (lint or otherwise).
         assert "phantom.py" not in result.stdout
 
-    def test_start_task_uses_existing_gitreins_dir(self, tmp_workdir):
+    def test_start_task_uses_existing_gitreins_dir(self, tmp_workdir) -> None:
         """Starting a task uses existing .gitreins/ directory."""
         gitreins = os.path.join(tmp_workdir, ".gitreins")
         run_cli("task", "create", "cfg2", "Config Test 2", "c1", cwd=tmp_workdir)
@@ -1168,7 +1169,7 @@ class TestConfigAndWorkdir:
 class TestGuardAndCommit:
     """Extended guard and commit tests."""
 
-    def test_guard_detects_secrets_in_staged_file(self, tmp_workdir):
+    def test_guard_detects_secrets_in_staged_file(self, tmp_workdir) -> None:
         """Guard detects staged file containing a secret pattern."""
         subprocess.run(["git", "init"], cwd=tmp_workdir, capture_output=True, timeout=15)
         write_guard_config(tmp_workdir)
@@ -1181,7 +1182,7 @@ class TestGuardAndCommit:
         result = run_cli("guard", cwd=tmp_workdir)
         assert "Tier 1 Guards:" in result.stdout
 
-    def test_guard_secrets_detected_when_fails(self, tmp_workdir):
+    def test_guard_secrets_detected_when_fails(self, tmp_workdir) -> None:
         """Guard output contains FAIL when secrets found."""
         subprocess.run(["git", "init"], cwd=tmp_workdir, capture_output=True, timeout=15)
         write_guard_config(tmp_workdir)
@@ -1192,7 +1193,7 @@ class TestGuardAndCommit:
         result = run_cli("guard", cwd=tmp_workdir)
         assert "Tier 1 Guards:" in result.stdout
 
-    def test_commit_shows_guard_output(self, tmp_workdir):
+    def test_commit_shows_guard_output(self, tmp_workdir) -> None:
         """Commit shows guard result in output."""
         # DF-GITREINS-POC-70: an empty index now refuses BEFORE the guard
         # stage, so the guarded path this test exists to exercise needs a
@@ -1208,7 +1209,7 @@ class TestGuardAndCommit:
         result = run_cli("commit", "test message", cwd=tmp_workdir)
         assert "Tier 1" in result.stdout
 
-    def test_commit_fails_when_guard_detects_secret(self, tmp_workdir):
+    def test_commit_fails_when_guard_detects_secret(self, tmp_workdir) -> None:
         """Commit exits 1 when guards detect a secret in staged files."""
         subprocess.run(["git", "init"], cwd=tmp_workdir, capture_output=True, timeout=15)
         write_guard_config(tmp_workdir)
@@ -1230,7 +1231,7 @@ class TestGuardAndCommit:
 class TestTaskLifecycleExtended:
     """Extended task lifecycle tests."""
 
-    def test_full_task_lifecycle_subprocess(self, tmp_workdir):
+    def test_full_task_lifecycle_subprocess(self, tmp_workdir) -> None:
         """Full lifecycle: create → start → list → complete → list.
 
         Tier 1 only (``--skip-tier2``) on purpose: a Tier 2 completion is a
@@ -1260,7 +1261,7 @@ class TestTaskLifecycleExtended:
         assert result.returncode == 0, _cli_failure(result)
         assert "●" in result.stdout, _cli_failure(result)
 
-    def test_list_filter_complete_status(self, tmp_workdir):
+    def test_list_filter_complete_status(self, tmp_workdir) -> None:
         """List --status complete shows only completed tasks."""
         run_cli("task", "create", "todo1", "Todo", "c1", cwd=tmp_workdir)
         run_cli("task", "create", "done1", "Done", "c1", cwd=tmp_workdir)
@@ -1271,14 +1272,14 @@ class TestTaskLifecycleExtended:
         assert "done1" in result.stdout
         assert "todo1" not in result.stdout
 
-    def test_task_list_empty_after_delete_all(self, tmp_workdir):
+    def test_task_list_empty_after_delete_all(self, tmp_workdir) -> None:
         """List shows no tasks after all are deleted."""
         run_cli("task", "create", "only1", "Only", "c1", cwd=tmp_workdir)
         run_cli("task", "delete", "only1", cwd=tmp_workdir)
         result = run_cli("task", "list", cwd=tmp_workdir)
         assert "No tasks found" in result.stdout
 
-    def test_delete_then_list_shows_remaining(self, tmp_workdir):
+    def test_delete_then_list_shows_remaining(self, tmp_workdir) -> None:
         """Delete one task, list shows the other."""
         run_cli("task", "create", "keep1", "Keep", "c1", cwd=tmp_workdir)
         run_cli("task", "create", "gone1", "Gone", "c1", cwd=tmp_workdir)
@@ -1305,7 +1306,7 @@ class TestTaskLifecycleHermeticity:
         "GITREINS_LLM_MODEL": "hermetic-canary-model",
     }
 
-    def test_tier1_lifecycle_never_dials_the_llm_endpoint(self, tmp_workdir):
+    def test_tier1_lifecycle_never_dials_the_llm_endpoint(self, tmp_workdir) -> None:
         """A credential plus a listening endpoint in the child stay unused."""
         sentinel = _llm_sentinel_socket()
         try:
@@ -1346,7 +1347,7 @@ class TestTaskLifecycleHermeticity:
         finally:
             sentinel.close()
 
-    def test_parallel_lifecycles_share_no_state(self, workdir_factory):
+    def test_parallel_lifecycles_share_no_state(self, workdir_factory) -> None:
         """Four concurrent lifecycles, four workspaces: all green, no cross-talk.
 
         Covers the shared-state half of INT-FLAKE-1's hypothesis list: a
@@ -1398,14 +1399,14 @@ class TestTaskLifecycleHermeticity:
 class TestEdgeCases:
     """Edge case tests for the CLI."""
 
-    def test_create_task_long_title(self, tmp_workdir):
+    def test_create_task_long_title(self, tmp_workdir) -> None:
         """Create task with a very long title works."""
         title = "A" * 500
         result = run_cli("task", "create", "long1", title, cwd=tmp_workdir)
         assert result.returncode == 0
         assert "Created task: long1" in result.stdout
 
-    def test_create_task_same_id_overwrites(self, tmp_workdir):
+    def test_create_task_same_id_overwrites(self, tmp_workdir) -> None:
         """Create with same ID overwrites previous title."""
         run_cli("task", "create", "dup1", "First", "c1", cwd=tmp_workdir)
         run_cli("task", "create", "dup1", "Second", "c2", cwd=tmp_workdir)
@@ -1413,13 +1414,13 @@ class TestEdgeCases:
         assert "Second" in result.stdout
         assert "First" not in result.stdout
 
-    def test_create_task_with_dashes_in_id(self, tmp_workdir):
+    def test_create_task_with_dashes_in_id(self, tmp_workdir) -> None:
         """Create task with dashes in ID works."""
         result = run_cli("task", "create", "my-task-id", "Dash ID", "c1", cwd=tmp_workdir)
         assert result.returncode == 0
         assert "my-task-id" in result.stdout
 
-    def test_list_no_filter_shows_all_tasks(self, tmp_workdir):
+    def test_list_no_filter_shows_all_tasks(self, tmp_workdir) -> None:
         """List without filter shows all tasks regardless of status."""
         mock_env = {
             "GITREINS_MOCK_LLM_RESPONSE": json.dumps(
@@ -1449,13 +1450,13 @@ class TestEdgeCases:
 class TestJudgeExtended:
     """Extended judge CLI tests."""
 
-    def test_judge_nonexistent_task_output(self, tmp_workdir):
+    def test_judge_nonexistent_task_output(self, tmp_workdir) -> None:
         """Judge nonexistent task prints 'Task not found' to stdout."""
         result = run_cli("judge", "no-such-task", cwd=tmp_workdir)
         assert result.returncode == 1
         assert "Task not found" in result.stdout
 
-    def test_judge_existing_task_runs_evaluation(self, tmp_workdir):
+    def test_judge_existing_task_runs_evaluation(self, tmp_workdir) -> None:
         """Judge on existing task runs evaluation and prints summary."""
         verdict_json = json.dumps(
             {
@@ -1474,7 +1475,7 @@ class TestJudgeExtended:
         assert "Judge Result" in result.stdout
         assert "Overall:" in result.stdout
 
-    def test_judge_requires_api_key(self, tmp_workdir):
+    def test_judge_requires_api_key(self, tmp_workdir) -> None:
         """Judge integration test that requires DEEPSEEK_API_KEY."""
         if not os.environ.get("DEEPSEEK_API_KEY"):
             pytest.skip("requires DEEPSEEK_API_KEY")
@@ -1497,7 +1498,7 @@ class TestJudgeExtended:
 # ── EVID-003: `judge --ephemeral` — inline criteria, nothing persisted ──────
 
 
-def _write_ephemeral_config(repo, body=""):
+def _write_ephemeral_config(repo, body="") -> None:
     """Minimal ``.gitreins/config.yaml`` for the ephemeral-judge tests.
 
     Three knobs, each for a hermeticity reason: ``test_command: echo ok`` keeps
@@ -1567,7 +1568,7 @@ def _repo_snapshot(repo):
     }
 
 
-def _assert_untouched(before, after):
+def _assert_untouched(before, after) -> None:
     """Fail naming the surface that moved, not with two whole mappings."""
     changed = [surface for surface, value in before.items() if after[surface] != value]
     assert not changed, f"--ephemeral mutated: {', '.join(changed)}\n{before}\n{after}"
@@ -1610,7 +1611,7 @@ class TestJudgeEphemeralCLI:
     def _mock_env(verdict):
         return {"GITREINS_MOCK_LLM_RESPONSE": json.dumps({"content": verdict})}
 
-    def test_ephemeral_pass_emits_the_document_and_persists_nothing(self, tmp_path):
+    def test_ephemeral_pass_emits_the_document_and_persists_nothing(self, tmp_path) -> None:
         """A passing ephemeral run exits 0, prints one v1 document, writes nothing."""
         repo = _init_real_git_repo(tmp_path)
         _write_ephemeral_config(repo)
@@ -1647,7 +1648,7 @@ class TestJudgeEphemeralCLI:
         _assert_untouched(before, _repo_snapshot(repo))
         assert "A  notes.md" in before["status"]  # the graded index was real
 
-    def test_ephemeral_fail_exits_1_and_persists_nothing(self, tmp_path):
+    def test_ephemeral_fail_exits_1_and_persists_nothing(self, tmp_path) -> None:
         """A failing ephemeral run exits 1 (not 0) and still writes nothing."""
         repo = _init_real_git_repo(tmp_path)
         _write_ephemeral_config(repo)
@@ -1674,7 +1675,7 @@ class TestJudgeEphemeralCLI:
 
         _assert_untouched(before, _repo_snapshot(repo))
 
-    def test_missing_id_is_a_usage_error_only_outside_ephemeral(self, tmp_workdir):
+    def test_missing_id_is_a_usage_error_only_outside_ephemeral(self, tmp_workdir) -> None:
         """Criterion 2: no id is allowed ONLY with --ephemeral, else exit 2.
 
         The exit code is pinned against argparse's own missing-argument code so
@@ -1707,7 +1708,7 @@ class TestJudgeEphemeralCLI:
             == 2
         )
 
-    def test_ephemeral_builds_the_task_from_title_and_repeatable_criteria(self, tmp_path):
+    def test_ephemeral_builds_the_task_from_title_and_repeatable_criteria(self, tmp_path) -> None:
         """Criterion 2: --title plus every repeated --criterion reach the judge."""
         repo = _init_real_git_repo(tmp_path)
         _write_ephemeral_config(repo)
@@ -1745,7 +1746,7 @@ class TestJudgeEphemeralCLI:
 
         _assert_untouched(before, _repo_snapshot(repo))
 
-    def test_ephemeral_working_tree_scope_grades_uncommitted_changes(self, tmp_path):
+    def test_ephemeral_working_tree_scope_grades_uncommitted_changes(self, tmp_path) -> None:
         """Criterion 4: --scope working-tree grades uncommitted work, uncommitted.
 
         ``pipeline: stages: []`` routes tier 1 to GuardManager, which is where
@@ -1801,7 +1802,7 @@ class TestJudgeEphemeralCLI:
         _assert_untouched(before, after)
         assert "?? notes.py" in after["status"]  # graded, never staged
 
-    def test_ephemeral_human_output_mirrors_the_sync_summary(self, tmp_path):
+    def test_ephemeral_human_output_mirrors_the_sync_summary(self, tmp_path) -> None:
         """Criterion 3: without --json the summary goes to stdout, and the run
         says out loud that it persisted nothing (stderr, so a caller parsing
         the summary is unaffected)."""
@@ -1827,7 +1828,7 @@ class TestJudgeEphemeralCLI:
 
     # ── DF-GITREINS-POC-48: the merge gate and the ephemeral verdict ────────
 
-    def test_ephemeral_persist_verdict_writes_only_the_merge_gate_document(self, tmp_path):
+    def test_ephemeral_persist_verdict_writes_only_the_merge_gate_document(self, tmp_path) -> None:
         """`--persist-verdict` is the ONE opt-in write, and it is not history.
 
         An ephemeral verdict used to be able to satisfy nothing: EVID-003
@@ -1879,7 +1880,7 @@ class TestJudgeEphemeralCLI:
         assert after["stash"] == before["stash"]
         assert set(after["harness"]) - set(before["harness"]) == {"verdicts/verdict.json"}
 
-    def test_ephemeral_without_persist_verdict_writes_no_gate_document(self, tmp_path):
+    def test_ephemeral_without_persist_verdict_writes_no_gate_document(self, tmp_path) -> None:
         """The flag is the ONLY thing that writes: without it nothing appears."""
         from engine.worktree_manager import disk_verdict_path
 
@@ -1906,7 +1907,7 @@ class TestJudgeEphemeralCLI:
         assert not (Path(repo) / ".gitreins" / "verdicts").exists()
         _assert_untouched(before, _repo_snapshot(repo))
 
-    def test_persist_verdict_without_ephemeral_is_a_usage_error(self, tmp_workdir):
+    def test_persist_verdict_without_ephemeral_is_a_usage_error(self, tmp_workdir) -> None:
         """`--persist-verdict` describes a gap only the ephemeral mode has.
 
         A sync judge already writes durable history; letting the flag through
@@ -2079,7 +2080,7 @@ class TestJudgeAsyncCLI:
                 )
             time.sleep(0.3)
 
-    def test_async_dispatch_poll_and_result(self, tmp_workdir):
+    def test_async_dispatch_poll_and_result(self, tmp_workdir) -> None:
         """--async dispatches a detached worker; --status polls to complete."""
         run_cli(
             "task",
@@ -2112,7 +2113,7 @@ class TestJudgeAsyncCLI:
         assert "PASS" in polled.stdout
         assert "all good" in polled.stdout
 
-    def test_poll_budget_scales_with_measured_workload(self, monkeypatch):
+    def test_poll_budget_scales_with_measured_workload(self, monkeypatch) -> None:
         """INT-FLAKE-3: the poll budget follows the machine's workload.
 
         Idle keeps the historical 30 s; a loaded box (load per CPU, or a slow
@@ -2136,13 +2137,13 @@ class TestJudgeAsyncCLI:
         # A fast child never shrinks the budget below the load-derived value.
         assert cls._poll_budget_seconds(child_sample_s=0.0) == loaded
 
-        def _no_loadavg():  # non-POSIX hosts must not crash the helper
+        def _no_loadavg() -> NoReturn:  # non-POSIX hosts must not crash the helper
             raise OSError("no load average here")
 
         monkeypatch.setattr(os, "getloadavg", _no_loadavg, raising=False)
         assert cls._poll_budget_seconds() == cls.POLL_BASE_DEADLINE
 
-    def test_poll_job_skips_when_the_status_path_reports_the_orphan(self, tmp_workdir):
+    def test_poll_job_skips_when_the_status_path_reports_the_orphan(self, tmp_workdir) -> None:
         """INT-FLAKE-3 + QA-GITR-002: a dead worker is a skip, not a failure.
 
         The status path itself detects the orphan (dead pid) and exits 3, so
@@ -2169,7 +2170,7 @@ class TestJudgeAsyncCLI:
         # The status path marked the orphaned record terminal.
         assert load_job("job-stuck0001")["status"] == "error"
 
-    def test_status_flips_dead_pid_running_job_to_error_exit_3(self, tmp_workdir):
+    def test_status_flips_dead_pid_running_job_to_error_exit_3(self, tmp_workdir) -> None:
         """QA-GITR-002: `judge --status` on a running record with a dead pid.
 
         The record is flipped to status='error' (with a worker-died message
@@ -2197,7 +2198,7 @@ class TestJudgeAsyncCLI:
         assert "worker process died before completing" in (stored["error"] or "")
         assert stored["finished_at"] is not None
 
-    def test_status_live_pid_still_running_exits_2(self, tmp_workdir):
+    def test_status_live_pid_still_running_exits_2(self, tmp_workdir) -> None:
         """QA-GITR-002: a live worker keeps the historical exit 2 semantics."""
         from engine.job_store import make_job, save_job
 
@@ -2214,7 +2215,7 @@ class TestJudgeAsyncCLI:
 
         assert load_job("job-live0001")["status"] == "running"
 
-    def test_status_none_pid_predating_tracking_keeps_exit_2(self, tmp_workdir):
+    def test_status_none_pid_predating_tracking_keeps_exit_2(self, tmp_workdir) -> None:
         """QA-GITR-002: a None pid (pre-pid-tracking record) is not flipped."""
         from engine.job_store import load_job, make_job, save_job
 
@@ -2227,7 +2228,7 @@ class TestJudgeAsyncCLI:
         assert result.returncode == 2, result.stdout + result.stderr
         assert load_job("job-legacy01")["status"] == "running"
 
-    def test_poll_job_reports_a_live_but_slow_worker_without_failing(self, tmp_workdir):
+    def test_poll_job_reports_a_live_but_slow_worker_without_failing(self, tmp_workdir) -> None:
         """INT-FLAKE-3: a worker still running is a distinct, non-failing diagnostic."""
         from engine.job_store import make_job, save_job
 
@@ -2243,17 +2244,17 @@ class TestJudgeAsyncCLI:
         assert "still running" in message
         assert "load-induced slowness" in message
 
-    def test_async_unknown_task_exits_1(self, tmp_workdir):
+    def test_async_unknown_task_exits_1(self, tmp_workdir) -> None:
         result = run_cli("judge", "ghost-task", "--async", cwd=tmp_workdir)
         assert result.returncode == 1
         assert "Task not found" in result.stdout
 
-    def test_status_unknown_job_exits_1(self, tmp_workdir):
+    def test_status_unknown_job_exits_1(self, tmp_workdir) -> None:
         result = run_cli("judge", "job-nonexistent", "--status", cwd=tmp_workdir)
         assert result.returncode == 1
         assert "Job not found" in result.stdout
 
-    def test_async_single_flight_and_pid_ordering(self, tmp_workdir, monkeypatch, capsys):
+    def test_async_single_flight_and_pid_ordering(self, tmp_workdir, monkeypatch, capsys) -> None:
         """GR-GAP-046: two async dispatches of the same task yield ONE running
         job — the second dispatch reuses the existing job (no duplicate
         evaluation) — and the persisted record always carries the child pid
@@ -2307,7 +2308,9 @@ class TestJudgeAsyncCLI:
         assert job["pid"] == 424242
         assert job["status"] == "running"
 
-    def test_async_no_credential_refuses_without_dispatch(self, tmp_workdir, capsys, monkeypatch):
+    def test_async_no_credential_refuses_without_dispatch(
+        self, tmp_workdir, capsys, monkeypatch
+    ) -> None:
         """DF-GITREINS-POC-78: `judge --async` with NO resolvable LLM credential
         refuses with a clear message and non-zero exit — no worker spawned, no
         job record left `running` (the MCP task.complete docs contract applies
@@ -2368,7 +2371,7 @@ class TestRunCliParity:
     code and stdout.
     """
 
-    def test_task_lifecycle_agrees_between_runners(self, workdir_factory):
+    def test_task_lifecycle_agrees_between_runners(self, workdir_factory) -> None:
         """create/start/complete/list: same exit codes and same stdout lines."""
         for runner in ("in-process", "real-exec"):
             workdir = workdir_factory()
@@ -2395,14 +2398,14 @@ class TestRunCliParity:
             assert listing.returncode == 0, _cli_failure(listing)
             assert "●" in listing.stdout, _cli_failure(listing)
 
-    def test_unknown_task_refusal_agrees_between_runners(self, tmp_workdir):
+    def test_unknown_task_refusal_agrees_between_runners(self, tmp_workdir) -> None:
         """A refusal path (task start <unknown-id>) agrees on code and text."""
         inproc = run_cli("task", "start", "no-such-task", cwd=tmp_workdir)
         child = run_cli("task", "start", "no-such-task", cwd=tmp_workdir, real_exec=True)
         assert inproc.returncode == child.returncode == 1
         assert inproc.stdout.strip() == child.stdout.strip() == "Task not found: no-such-task"
 
-    def test_result_objects_declare_which_runner_produced_them(self, tmp_workdir):
+    def test_result_objects_declare_which_runner_produced_them(self, tmp_workdir) -> None:
         """The result marker (real_exec) matches the runner that was used."""
         inproc = run_cli("task", "list", cwd=tmp_workdir)
         assert inproc.real_exec is False
@@ -2413,7 +2416,7 @@ class TestRunCliParity:
 class TestJudgeSyncSingleFlight:
     """GR-GAP-046: sync `gitreins judge` honors the single-flight key."""
 
-    def test_judge_sync_reuses_in_flight_job(self, tmp_workdir, monkeypatch, capsys):
+    def test_judge_sync_reuses_in_flight_job(self, tmp_workdir, monkeypatch, capsys) -> None:
         """While a background job for the task is genuinely in flight (live
         pid), the sync judge does not start a second evaluation — it points
         at the running job (prevents CLI+MCP double evaluation)."""
@@ -2432,7 +2435,7 @@ class TestJudgeSyncSingleFlight:
         job["pid"] = os.getpid()
         save_job(job)
 
-        def _must_not_run(self, task):
+        def _must_not_run(self, task) -> None:
             pytest.fail("evaluate_task ran while a job was in flight")
 
         monkeypatch.setattr(Judge, "evaluate_task", _must_not_run)
@@ -2451,7 +2454,7 @@ class TestJudgeSyncSingleFlight:
 
     def test_judge_sync_proceeds_when_running_job_is_orphaned(
         self, tmp_workdir, monkeypatch, capsys
-    ):
+    ) -> None:
         """A running record whose pid is DEAD is an orphan — the sync judge
         supersedes it and evaluates (no permanent single-flight block)."""
         from types import SimpleNamespace
@@ -2496,7 +2499,7 @@ class TestLoadConfigParseFailure:
     """Regression: load_config must warn on YAML parse failure, not silently
     return {} which causes cmd_init to nuke the config file."""
 
-    def test_load_config_warns_on_broken_yaml(self, tmp_workdir, caplog):
+    def test_load_config_warns_on_broken_yaml(self, tmp_workdir, caplog) -> None:
         """load_config logs a warning when config.yaml has invalid YAML."""
         import logging
 
@@ -2520,14 +2523,14 @@ class TestLoadConfigParseFailure:
             f"Expected 'Failed to parse' warning, got: {warnings}"
         )
 
-    def test_load_config_returns_empty_for_missing_file(self, tmp_workdir):
+    def test_load_config_returns_empty_for_missing_file(self, tmp_workdir) -> None:
         """load_config returns {} when no config file exists (not a warning)."""
         from gitreins.cli import load_config
 
         result = load_config(tmp_workdir)
         assert result == {}
 
-    def test_load_config_loads_valid_yaml(self, tmp_workdir):
+    def test_load_config_loads_valid_yaml(self, tmp_workdir) -> None:
         """load_config returns parsed dict for valid config."""
         import yaml as _yaml
         from gitreins.cli import load_config
@@ -2546,7 +2549,7 @@ class TestLoadConfigParseFailure:
 class TestCmdInitConfigSafety:
     """Regression: cmd_init must NOT overwrite existing config when it can't be parsed."""
 
-    def test_init_refuses_broken_config(self, tmp_workdir):
+    def test_init_refuses_broken_config(self, tmp_workdir) -> None:
         """gitreins init exits non-zero when config.yaml exists but is broken YAML."""
         config_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
@@ -2564,7 +2567,7 @@ class TestCmdInitConfigSafety:
             or "could not be parsed" in result.stdout.lower()
         )
 
-    def test_init_backs_up_existing_config(self, tmp_workdir):
+    def test_init_backs_up_existing_config(self, tmp_workdir) -> None:
         """gitreins init creates a .bak when overwriting existing config."""
         import yaml as _yaml
 
@@ -2584,7 +2587,7 @@ class TestCmdInitConfigSafety:
             bak_data = _yaml.safe_load(f)
         assert bak_data["guards"]["test_mode"] == "full"
 
-    def test_init_creates_new_config_when_none_exists(self, tmp_workdir):
+    def test_init_creates_new_config_when_none_exists(self, tmp_workdir) -> None:
         """gitreins init works normally when no config file exists."""
         config_dir = os.path.join(tmp_workdir, ".gitreins")
         config_path = os.path.join(config_dir, "config.yaml")
@@ -2603,7 +2606,7 @@ class TestInitStaticAnalysisTools:
     static_analysis: true is emitted, and must never overwrite user-set
     guard keys on re-runs."""
 
-    def test_config_update_path_writes_static_analysis_tools(self, tmp_workdir):
+    def test_config_update_path_writes_static_analysis_tools(self, tmp_workdir) -> None:
         """Install-style config with no static_analysis keys → init adds
         static_analysis: true AND a non-empty static_analysis_tools.python."""
         import yaml as _yaml
@@ -2644,7 +2647,7 @@ class TestInitStaticAnalysisTools:
             f"static_analysis_tools.python must be a non-empty list, got: {python_tools!r}"
         )
 
-    def test_init_preserves_existing_static_analysis_tools(self, tmp_workdir):
+    def test_init_preserves_existing_static_analysis_tools(self, tmp_workdir) -> None:
         """Re-running init never overwrites pre-existing static_analysis_tools
         or other user-set guard keys, and a second run is a no-op."""
         import yaml as _yaml
@@ -2701,7 +2704,7 @@ class TestInitStaticAnalysisTools:
 class TestGitleaksTomlGeneration:
     """Tests for _generate_gitleaks_config: auto-created during init."""
 
-    def test_python_project_gets_python_exclusions(self, tmp_workdir):
+    def test_python_project_gets_python_exclusions(self, tmp_workdir) -> None:
         """Python project gets .venv, __pycache__, dist, etc. exclusions."""
         import subprocess
 
@@ -2725,7 +2728,7 @@ class TestGitleaksTomlGeneration:
         assert "dist/" in content
         assert r"\.git/" in content
 
-    def test_existing_gitleaks_toml_not_overwritten(self, tmp_workdir):
+    def test_existing_gitleaks_toml_not_overwritten(self, tmp_workdir) -> None:
         """If .gitleaks.toml already exists, init does not modify it."""
         import subprocess
 
@@ -2751,7 +2754,7 @@ class TestGitleaksTomlGeneration:
 class TestInitRunnerGitignoreAndWarning:
     """Regression tests for the stand-in PM gap tasks (2026-08-11)."""
 
-    def _make_python_repo(self, tmp_workdir):
+    def _make_python_repo(self, tmp_workdir) -> None:
         """setup.py + main.py → detected as Python (no tests/ dir)."""
         with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
             f.write("print('hello')\n")
@@ -2760,7 +2763,7 @@ class TestInitRunnerGitignoreAndWarning:
 
     # ── GR-GAP-024: runner-aware test command ─────────────────────────────
 
-    def test_detect_test_command_uses_uv_run_when_uv_installed(self, monkeypatch, tmp_path):
+    def test_detect_test_command_uses_uv_run_when_uv_installed(self, monkeypatch, tmp_path) -> None:
         """Python repo + uv on PATH → `uv run pytest -x --tb=short` (not bare pytest)."""
         import shutil
 
@@ -2772,7 +2775,7 @@ class TestInitRunnerGitignoreAndWarning:
         assert lang["is_python"]
         assert _detect_test_command(str(tmp_path), lang) == "uv run pytest -x --tb=short"
 
-    def test_detect_test_command_prefers_module_pytest_over_uv(self, monkeypatch, tmp_path):
+    def test_detect_test_command_prefers_module_pytest_over_uv(self, monkeypatch, tmp_path) -> None:
         """Root-package + tests/ layout keeps `python3 -m pytest` even with uv (import correctness)."""
         import shutil
 
@@ -2788,7 +2791,7 @@ class TestInitRunnerGitignoreAndWarning:
 
     def test_detect_test_command_root_module_prefers_module_pytest_over_uv(
         self, monkeypatch, tmp_path
-    ):
+    ) -> None:
         """Root weather.py module + tests/ + uv on PATH -> `python3 -m pytest` (DF-017)."""
         from gitreins.cli import _detect_language, _detect_test_command
 
@@ -2802,7 +2805,9 @@ class TestInitRunnerGitignoreAndWarning:
         assert lang["is_python"]
         assert _detect_test_command(str(tmp_path), lang) == "python3 -m pytest -x --tb=short"
 
-    def test_fresh_init_root_module_with_uv_writes_executable_module_pytest(self, tmp_workdir):
+    def test_fresh_init_root_module_with_uv_writes_executable_module_pytest(
+        self, tmp_workdir
+    ) -> None:
         """DF-017: real fresh init on weather.py + tests/ (uv discoverable) writes
         guards.test_command = 'python3 -m pytest -x --tb=short' and that exact
         command collects the test importing the root module."""
@@ -2834,7 +2839,7 @@ class TestInitRunnerGitignoreAndWarning:
 
     def test_fresh_init_verification_pins_interpreter_not_ambient_path(
         self, tmp_workdir, monkeypatch
-    ):
+    ) -> None:
         """QA-GITREINS-POC-002 regression: the fresh-init verification must not
         depend on the ambient PATH-resolved `python3`.
 
@@ -2861,7 +2866,9 @@ class TestInitRunnerGitignoreAndWarning:
         # stub never runs and the whole flow succeeds.
         self.test_fresh_init_root_module_with_uv_writes_executable_module_pytest(tmp_workdir)
 
-    def test_detect_test_command_src_layout_setup_py_prefers_uv_run(self, monkeypatch, tmp_path):
+    def test_detect_test_command_src_layout_setup_py_prefers_uv_run(
+        self, monkeypatch, tmp_path
+    ) -> None:
         """Non-root src layout (setup.py + src/weather.py + tests/) + uv on PATH
         prefers `uv run pytest` — setup.py is a build script, not an importable root module."""
         from gitreins.cli import _detect_language, _detect_test_command
@@ -2878,13 +2885,13 @@ class TestInitRunnerGitignoreAndWarning:
         assert lang["is_python"]
         assert _detect_test_command(str(tmp_path), lang) == "uv run pytest -x --tb=short"
 
-    def test_detect_test_command_pipenv_runner(self, monkeypatch, tmp_path):
+    def test_detect_test_command_pipenv_runner(self, monkeypatch, tmp_path) -> None:
         """Pipfile + pipenv on PATH → `pipenv run pytest ...`."""
         import shutil
 
         from gitreins.cli import _detect_language, _detect_test_command
 
-        def fake_which(name):
+        def fake_which(name) -> str | None:
             return "/usr/bin/pipenv" if name == "pipenv" else None
 
         monkeypatch.setattr(shutil, "which", fake_which)
@@ -2896,7 +2903,7 @@ class TestInitRunnerGitignoreAndWarning:
 
     # ── GR-GAP-025: init ensures .gitignore entry ─────────────────────────
 
-    def test_init_creates_gitignore_with_tasks_entry(self, tmp_workdir):
+    def test_init_creates_gitignore_with_tasks_entry(self, tmp_workdir) -> None:
         """init on a repo without .gitignore creates one with .gitreins/tasks.yaml."""
         self._make_python_repo(tmp_workdir)
         result = run_cli("init", cwd=tmp_workdir)
@@ -2906,7 +2913,7 @@ class TestInitRunnerGitignoreAndWarning:
         content = open(gi_path).read()
         assert ".gitreins/tasks.yaml" in content
 
-    def test_init_appends_gitignore_entry_when_missing(self, tmp_workdir):
+    def test_init_appends_gitignore_entry_when_missing(self, tmp_workdir) -> None:
         """init appends the entry to an existing .gitignore that lacks it."""
         self._make_python_repo(tmp_workdir)
         gi_path = os.path.join(tmp_workdir, ".gitignore")
@@ -2918,7 +2925,7 @@ class TestInitRunnerGitignoreAndWarning:
         assert ".gitreins/tasks.yaml" in content
         assert content.startswith("__pycache__/\n"), "existing entries must be preserved"
 
-    def test_init_does_not_duplicate_gitignore_entry(self, tmp_workdir):
+    def test_init_does_not_duplicate_gitignore_entry(self, tmp_workdir) -> None:
         """init leaves an existing .gitreins/tasks.yaml entry untouched.
 
         Counted over whole lines: the template also carries
@@ -2939,7 +2946,7 @@ class TestInitRunnerGitignoreAndWarning:
 
     # ── GR-GAP-026: inconclusive-detection warning ────────────────────────
 
-    def test_init_warns_on_undetectable_repo(self, tmp_workdir):
+    def test_init_warns_on_undetectable_repo(self, tmp_workdir) -> None:
         """init on an empty repo prints a warning advising re-run after adding source files."""
         result = run_cli("init", cwd=tmp_workdir)
         assert result.returncode == 0
@@ -2949,7 +2956,7 @@ class TestInitRunnerGitignoreAndWarning:
             f"expected inconclusive-detection warning in output, got:\n{combined}"
         )
 
-    def test_generated_config_extends_default_ruleset(self, tmp_workdir):
+    def test_generated_config_extends_default_ruleset(self, tmp_workdir) -> None:
         """Generated config must extend gitleaks' default rules (GR-GAP-005).
 
         Without [extend] useDefault = true, the custom sk-api-key rule replaces
@@ -2971,7 +2978,7 @@ class TestInitRunnerGitignoreAndWarning:
         assert "[extend]" in content, "generated config must contain [extend]"
         assert "useDefault = true" in content, "generated config must extend default ruleset"
 
-    def test_universal_exclusions_always_present(self, tmp_workdir):
+    def test_universal_exclusions_always_present(self, tmp_workdir) -> None:
         """Every project gets .git/, .gitreins/, *.log exclusions (as regexps)."""
         import subprocess
 
@@ -2989,7 +2996,7 @@ class TestInitRunnerGitignoreAndWarning:
         assert r"\.gitreins/" in content
         assert r".*\.log" in content
 
-    def test_glob_to_regex_helper(self):
+    def test_glob_to_regex_helper(self) -> None:
         """_glob_to_regex converts glob paths to valid Go regexps (DF-001)."""
         from gitreins.cli import _glob_to_regex
 
@@ -3014,7 +3021,7 @@ class TestInitRunnerGitignoreAndWarning:
         ):
             re.compile(out)
 
-    def test_generated_allowlist_entries_are_valid_regexes(self, tmp_workdir):
+    def test_generated_allowlist_entries_are_valid_regexes(self, tmp_workdir) -> None:
         """Every allowlist path in the generated .gitleaks.toml is a valid regexp.
 
         gitleaks compiles each [allowlist] paths entry as a Go regexp; bare
@@ -3041,7 +3048,7 @@ class TestInitRunnerGitignoreAndWarning:
                 f"bare '*' (not part of '.*') in allowlist entry: {entry!r}"
             )
 
-    def test_generated_config_does_not_panic_gitleaks(self, tmp_workdir):
+    def test_generated_config_does_not_panic_gitleaks(self, tmp_workdir) -> None:
         """gitleaks detect runs cleanly against the generated config (DF-001).
 
         Pre-fix, every generated config panicked gitleaks v8.30.1 ('missing
@@ -3143,7 +3150,7 @@ class TestGitleaksConfigDoctor:
             f.write(text)
         return path
 
-    def test_poc54_doctor_fix_rewrites_legacy_globs_and_config_reparses(self, tmp_workdir):
+    def test_poc54_doctor_fix_rewrites_legacy_globs_and_config_reparses(self, tmp_workdir) -> None:
         """`doctor --fix` converts '*.log' / '*.egg-info/' in place (round-trip).
 
         Round-trip: the rewrite is the package's own `_glob_to_regex` output, and
@@ -3192,7 +3199,7 @@ class TestGitleaksConfigDoctor:
         with open(path) as f:
             assert f.read() == content
 
-    def test_poc54_doctor_dry_run_reports_and_changes_nothing(self, tmp_workdir):
+    def test_poc54_doctor_dry_run_reports_and_changes_nothing(self, tmp_workdir) -> None:
         """Without --fix the report names every bad entry and writes nothing."""
         path = self._config(tmp_workdir, LEGACY_GITLEAKS_TOML)
         before = os.stat(path).st_mtime_ns
@@ -3212,7 +3219,7 @@ class TestGitleaksConfigDoctor:
         assert os.stat(path).st_mtime_ns == before
         assert not os.path.isfile(path + ".bak")
 
-    def test_poc54_doctor_leaves_a_valid_config_untouched(self, tmp_workdir):
+    def test_poc54_doctor_leaves_a_valid_config_untouched(self, tmp_workdir) -> None:
         """A config whose entries already compile is not rewritten."""
         path = self._config(tmp_workdir, VALID_GITLEAKS_TOML)
 
@@ -3225,7 +3232,7 @@ class TestGitleaksConfigDoctor:
             assert f.read() == VALID_GITLEAKS_TOML
         assert not os.path.isfile(path + ".bak")
 
-    def test_poc54_doctor_preserves_non_literal_quoting(self, tmp_workdir):
+    def test_poc54_doctor_preserves_non_literal_quoting(self, tmp_workdir) -> None:
         """A hand-edited entry in '...' or \"...\" is rewritten without re-quoting."""
         path = self._config(
             tmp_workdir,
@@ -3240,13 +3247,13 @@ class TestGitleaksConfigDoctor:
         assert r"'.*\.log'," in content
         assert r'".*\.egg-info/",' in content
 
-    def test_poc54_doctor_on_a_repo_without_a_config_is_a_noop(self, tmp_workdir):
+    def test_poc54_doctor_on_a_repo_without_a_config_is_a_noop(self, tmp_workdir) -> None:
         result = run_cli("doctor", cwd=tmp_workdir)
 
         assert result.returncode == 0, _cli_failure(result)
         assert "nothing to check" in result.stdout
 
-    def test_poc54_fixed_config_does_not_panic_gitleaks(self, tmp_workdir):
+    def test_poc54_fixed_config_does_not_panic_gitleaks(self, tmp_workdir) -> None:
         """The migrated config scans cleanly with the real gitleaks (DF-001 shape).
 
         Skipped when gitleaks is not installed — the panic itself is Go's, so
@@ -3388,7 +3395,7 @@ class TestInstallGitignoreTemplate:
     which is what the vendor/installer split let drift in the first place.
     """
 
-    def test_qa_ledger_is_ignored_after_install(self, installed_ignore_repo):
+    def test_qa_ledger_is_ignored_after_install(self, installed_ignore_repo) -> None:
         """The leaked file: ignored by check-ignore, and absent from git status."""
         ledger = ".gitreins/qa-ledger.jsonl"
         gitignore = open(os.path.join(installed_ignore_repo, ".gitignore")).read()
@@ -3400,7 +3407,9 @@ class TestInstallGitignoreTemplate:
         assert "qa-ledger.jsonl" not in status, status
 
     @pytest.mark.parametrize("entry", GITREINS_GITIGNORE_ENTRIES)
-    def test_every_template_entry_is_ignored_after_install(self, installed_ignore_repo, entry):
+    def test_every_template_entry_is_ignored_after_install(
+        self, installed_ignore_repo, entry
+    ) -> None:
         """Every entry the installer writes must ignore its artifact — and no dirt.
 
         Catches the next runtime artifact added to the tuple but written into a
@@ -3420,7 +3429,7 @@ class TestInstallGitignoreTemplate:
         )
 
     @pytest.mark.parametrize("entry", GITREINS_GITIGNORE_ENTRIES)
-    def test_vendor_gitignore_covers_every_template_entry(self, entry):
+    def test_vendor_gitignore_covers_every_template_entry(self, entry) -> None:
         """Single source: the vendor checkout ignores what the installer ignores.
 
         The template's entries were mirrored by hand into the repo's own
@@ -3454,7 +3463,7 @@ class TestInstallSmartInitConsistency:
         env = {"PATH": str(fake_bin) + os.pathsep + os.environ["PATH"]}
         return repo, env
 
-    def test_install_then_init_persists_announced_test_command(self, tmp_path):
+    def test_install_then_init_persists_announced_test_command(self, tmp_path) -> None:
         """The command smart init announces is the command it writes."""
         import yaml
 
@@ -3473,7 +3482,7 @@ class TestInstallSmartInitConsistency:
             persisted = yaml.safe_load(f)["guards"]["test_command"]
         assert announced == persisted == "uv run pytest -x --tb=short"
 
-    def test_init_preserves_custom_test_command_after_install(self, tmp_path):
+    def test_init_preserves_custom_test_command_after_install(self, tmp_path) -> None:
         """Smart init may upgrade only the untouched install default."""
         import yaml
 
@@ -3493,7 +3502,7 @@ class TestInstallSmartInitConsistency:
         assert persisted["guards"]["test_command"] == "python -m pytest -q"
         assert "Test cmd:    python -m pytest -q" in initialized.stdout
 
-    def test_init_reports_persisted_static_analysis_setting_and_tools(self, tmp_path):
+    def test_init_reports_persisted_static_analysis_setting_and_tools(self, tmp_path) -> None:
         """Messages describe the saved toggle and tool list, not fresh detection."""
         import yaml
 
@@ -3545,7 +3554,7 @@ class TestInstallSmartInitConsistency:
             fake.chmod(0o755)
         return {"PATH": str(bin_dir)}
 
-    def test_init_names_absent_static_analysis_tools_and_warns(self, tmp_path):
+    def test_init_names_absent_static_analysis_tools_and_warns(self, tmp_path) -> None:
         """DF-019: `init` must not claim a type checker runs when none is installed.
 
         A fresh consumer with no static-analysis tool on PATH gets the truth in
@@ -3591,7 +3600,7 @@ class TestInstallSmartInitConsistency:
         assert "Static analysis: enabled (mypy, pyright)" in healthy.stdout
         assert "static analysis is enabled" not in healthy.stderr
 
-    def test_install_init_artifacts_are_ignored_and_idempotent(self, tmp_path):
+    def test_install_init_artifacts_are_ignored_and_idempotent(self, tmp_path) -> None:
         """All generated runtime files stay untracked without duplicate rules."""
         repo, env = self._python_repo(tmp_path)
         assert run_cli("install", cwd=repo, extra_env=env).returncode == 0
@@ -3637,7 +3646,7 @@ class TestPreCommitHookIntegration:
     bad commits — not just that it executes, but that it catches secrets
     and exits non-zero."""
 
-    def test_hook_blocks_commit_with_secret(self, tmp_workdir):
+    def test_hook_blocks_commit_with_secret(self, tmp_workdir) -> None:
         """Staging a file with a fake API key → hook must block commit."""
         # Initialize mock git repo properly
         git_dir = os.path.join(tmp_workdir, ".git")
@@ -3688,7 +3697,7 @@ exit $?
             f"stdout: {result.stdout[:200]}, stderr: {result.stderr[:200]}"
         )
 
-    def test_hook_allows_clean_commit(self, tmp_workdir):
+    def test_hook_allows_clean_commit(self, tmp_workdir) -> None:
         """Staging a clean file → hook passes, commit succeeds."""
         subprocess.run(["git", "init", "-q"], cwd=tmp_workdir, capture_output=True)
         subprocess.run(
@@ -3740,7 +3749,7 @@ class TestPreCommitHookPathPinning:
     gitreins binary that ran install, not a bare `gitreins` that PATH can
     resolve to a different version at commit time."""
 
-    def test_hook_pins_absolute_path_of_running_binary(self, tmp_workdir):
+    def test_hook_pins_absolute_path_of_running_binary(self, tmp_workdir) -> None:
         """With an impostor gitreins earlier on PATH, `install` still pins
         the real binary — the script that actually ran install."""
         repo = os.path.join(tmp_workdir, "repo")
@@ -3775,7 +3784,7 @@ class TestPreCommitHookPathPinning:
         stripped_lines = [ln.strip() for ln in hook.splitlines()]
         assert "gitreins guard" not in stripped_lines, "bare `gitreins guard` must not appear"
 
-    def test_hook_pins_python_m_when_no_console_script(self, tmp_workdir, monkeypatch):
+    def test_hook_pins_python_m_when_no_console_script(self, tmp_workdir, monkeypatch) -> None:
         """When install runs via `python -m gitreins` (no console-script
         argv0), the hook pins `sys.executable -m gitreins` instead."""
         from gitreins.cli import _render_pre_commit_hook
@@ -3787,7 +3796,7 @@ class TestPreCommitHookPathPinning:
         assert "gitreins guard" not in stripped_lines
         assert "__GITREINS_CMD__" not in hook
 
-    def test_pinned_python_m_invocation_is_actually_runnable(self, tmp_workdir):
+    def test_pinned_python_m_invocation_is_actually_runnable(self, tmp_workdir) -> None:
         """DF-024: the `python -m gitreins` form the hook pins must execute.
 
         The hook runs from the CONSUMER repo's root, so the pinned
@@ -3814,7 +3823,7 @@ class TestPreCommitHookPathPinning:
         )
         assert "gitreins" in result.stdout
 
-    def test_generated_python_m_hook_runs_end_to_end(self, tmp_workdir, monkeypatch):
+    def test_generated_python_m_hook_runs_end_to_end(self, tmp_workdir, monkeypatch) -> None:
         """DF-024: the hook GENERATED for a non-console-script install must execute.
 
         `test_hook_pins_python_m_when_no_console_script` only string-matches the
@@ -3874,7 +3883,7 @@ class TestPreCommitHookPathPinning:
         assert commit.returncode == 0, output
         assert "Tier 1" in output, f"the pinned hook did not run the guard: {output}"
 
-    def test_generated_hook_runs_pinned_binary_and_blocks_secret(self, tmp_workdir):
+    def test_generated_hook_runs_pinned_binary_and_blocks_secret(self, tmp_workdir) -> None:
         """End-to-end: `install` with a PATH impostor → the generated hook
         still runs the real gitreins and blocks a commit containing a
         runtime-constructed secret."""
@@ -3938,7 +3947,7 @@ class TestCLIExitCodes:
     """Verify each CLI command exits non-zero on failure. These prevent
     the 'hook always passes' class of bug."""
 
-    def test_guard_exits_nonzero_on_failure(self, tmp_workdir):
+    def test_guard_exits_nonzero_on_failure(self, tmp_workdir) -> None:
         """gitreins guard exits 1 when secrets are detected."""
         subprocess.run(["git", "init", "-q"], cwd=tmp_workdir, capture_output=True)
         subprocess.run(
@@ -3964,7 +3973,7 @@ class TestCLIExitCodes:
             f"stdout: {result.stdout[:200]}"
         )
 
-    def test_init_exits_nonzero_on_broken_config(self, tmp_workdir):
+    def test_init_exits_nonzero_on_broken_config(self, tmp_workdir) -> None:
         """gitreins init exits non-zero when config is broken YAML."""
         config_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
@@ -3976,7 +3985,7 @@ class TestCLIExitCodes:
             f"init must exit non-zero on broken config, got {result.returncode}"
         )
 
-    def test_judge_exits_nonzero_on_missing_task(self, tmp_workdir):
+    def test_judge_exits_nonzero_on_missing_task(self, tmp_workdir) -> None:
         """gitreins judge exits non-zero when task doesn't exist."""
         result = run_cli("judge", "nonexistent-task", cwd=tmp_workdir)
         assert result.returncode != 0, (
@@ -3995,7 +4004,7 @@ class TestUnknownTaskIdSurface:
     Same id, same repo, two different failure surfaces.
     """
 
-    def test_start_unknown_id_prints_one_line(self, tmp_workdir):
+    def test_start_unknown_id_prints_one_line(self, tmp_workdir) -> None:
         result = run_cli("task", "start", "no-such-task", cwd=tmp_workdir)
         assert result.returncode == 1, _cli_failure(result)
         assert result.stdout.strip() == "Task not found: no-such-task"
@@ -4003,14 +4012,14 @@ class TestUnknownTaskIdSurface:
         assert "KeyError" not in result.stderr
         assert "task list" in result.stderr
 
-    def test_delete_unknown_id_prints_one_line(self, tmp_workdir):
+    def test_delete_unknown_id_prints_one_line(self, tmp_workdir) -> None:
         result = run_cli("task", "delete", "no-such-task", cwd=tmp_workdir)
         assert result.returncode == 1, _cli_failure(result)
         assert result.stdout.strip() == "Task not found: no-such-task"
         assert "Traceback" not in result.stderr
         assert "KeyError" not in result.stderr
 
-    def test_complete_unknown_id_wins_over_the_credential_check(self, tmp_workdir):
+    def test_complete_unknown_id_wins_over_the_credential_check(self, tmp_workdir) -> None:
         """The id is resolved FIRST: no credential complaint for a missing task.
 
         The hermetic env supplies no credential, so the old order reported
@@ -4023,7 +4032,7 @@ class TestUnknownTaskIdSurface:
         assert "credential" not in (result.stdout + result.stderr).lower()
         assert "Traceback" not in result.stderr
 
-    def test_complete_unknown_id_with_a_credential_still_names_the_id(self, tmp_workdir):
+    def test_complete_unknown_id_with_a_credential_still_names_the_id(self, tmp_workdir) -> None:
         """A configured credential does not turn the missing id into a judge run."""
         result = run_cli(
             "task",
@@ -4036,7 +4045,7 @@ class TestUnknownTaskIdSurface:
         assert result.stdout.strip() == "Task not found: no-such-task"
         assert "Evaluating" not in result.stdout
 
-    def test_known_id_still_completes(self, tmp_workdir):
+    def test_known_id_still_completes(self, tmp_workdir) -> None:
         """The guard rail does not reject a real task id (regression guard)."""
         run_cli("task", "create", "real-task", "Real", "c1", cwd=tmp_workdir)
         result = run_cli("task", "complete", "real-task", "--skip-tier2", cwd=tmp_workdir)
@@ -4075,7 +4084,7 @@ class TestStaticAnalysisAnnouncementMatchesLane:
         return {"PATH": str(bin_dir)}
 
     @staticmethod
-    def _enable_static_analysis(repo, tools):
+    def _enable_static_analysis(repo, tools) -> None:
         import yaml
 
         config_path = repo / ".gitreins" / "config.yaml"
@@ -4084,7 +4093,7 @@ class TestStaticAnalysisAnnouncementMatchesLane:
         config["guards"]["static_analysis_tools"] = {"python": list(tools)}
         config_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
 
-    def test_bare_python_repo_is_told_nothing_will_run(self, tmp_path):
+    def test_bare_python_repo_is_told_nothing_will_run(self, tmp_path) -> None:
         """No packaging marker → the status line names the gap, not the tools."""
         repo = self._bare_python_repo(tmp_path)
         assert run_cli("install", cwd=str(repo)).returncode == 0
@@ -4101,7 +4110,7 @@ class TestStaticAnalysisAnnouncementMatchesLane:
         assert "no tool is selected for this" in result.stderr
         assert "install" not in result.stderr.replace("installed", "")
 
-    def test_manifest_repo_keeps_the_plain_announcement(self, tmp_path):
+    def test_manifest_repo_keeps_the_plain_announcement(self, tmp_path) -> None:
         """The control: with a packaging marker the tools are announced as before."""
         repo = self._bare_python_repo(tmp_path)
         (repo / "pyproject.toml").write_text("[project]\nname = 'consumer'\n", encoding="utf-8")
@@ -4117,7 +4126,7 @@ class TestStaticAnalysisAnnouncementMatchesLane:
 
 
 class TestTaskCompleteScanScopeAndLease:
-    def test_scan_scope_refuses_ambiguous_parent_repo(self, tmp_path, monkeypatch):
+    def test_scan_scope_refuses_ambiguous_parent_repo(self, tmp_path, monkeypatch) -> None:
         from gitreins.cli import _task_complete_scan_root
 
         control = tmp_path / "outer"
@@ -4129,7 +4138,7 @@ class TestTaskCompleteScanScopeAndLease:
             _task_complete_scan_root(str(control), None)
         assert _task_complete_scan_root(str(control), str(project)) == str(project)
 
-    def test_scan_scope_refuses_home_as_default_root(self, tmp_path, monkeypatch):
+    def test_scan_scope_refuses_home_as_default_root(self, tmp_path, monkeypatch) -> None:
         from gitreins import cli as cli_mod
 
         home = tmp_path / "home"
@@ -4145,7 +4154,7 @@ class TestTaskCompleteScanScopeAndLease:
         with pytest.raises(ValueError, match="home directory"):
             cli_mod._task_complete_scan_root(str(home), None)
 
-    def test_scan_scope_preserves_normal_repository_root(self, tmp_path, monkeypatch):
+    def test_scan_scope_preserves_normal_repository_root(self, tmp_path, monkeypatch) -> None:
         from gitreins.cli import _task_complete_scan_root
 
         repo = tmp_path / "repo"
@@ -4155,7 +4164,7 @@ class TestTaskCompleteScanScopeAndLease:
         monkeypatch.chdir(repo)
         assert _task_complete_scan_root(str(repo), None) == str(repo)
 
-    def test_concurrent_task_complete_calls_run_one_evaluation(self, tmp_path, monkeypatch):
+    def test_concurrent_task_complete_calls_run_one_evaluation(self, tmp_path, monkeypatch) -> None:
         from types import SimpleNamespace
 
         from gitreins import cli as cli_mod
@@ -4170,7 +4179,7 @@ class TestTaskCompleteScanScopeAndLease:
         monkeypatch.setattr(cli_mod, "_persist_result", lambda *args: None)
 
         class FakeTaskManager:
-            def __init__(self, _workdir):
+            def __init__(self, _workdir) -> None:
                 pass
 
             def check_dependencies(self, _task_id):
@@ -4182,7 +4191,7 @@ class TestTaskCompleteScanScopeAndLease:
         evaluations = []
 
         class FakeJudge:
-            def __init__(self, _llm, _workdir, scan_root=None):
+            def __init__(self, _llm, _workdir, scan_root=None) -> None:
                 assert scan_root == str(scan)
 
             def evaluate_task(self, task, skip_tier2=False):
@@ -4206,7 +4215,9 @@ class TestTaskCompleteScanScopeAndLease:
         assert sorted(results) == [0, 1]
         assert evaluations == ["same-task"]
 
-    def test_task_complete_lease_coalesces_only_identical_inputs(self, tmp_path, monkeypatch):
+    def test_task_complete_lease_coalesces_only_identical_inputs(
+        self, tmp_path, monkeypatch
+    ) -> None:
         from gitreins.cli import _task_complete_lease
 
         monkeypatch.setenv("HOME", str(tmp_path))

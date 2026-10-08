@@ -84,7 +84,7 @@ def _pytest_shaped_run() -> str:
     return "\n".join(lines)
 
 
-def test_both_surfaces_use_one_bounder_and_one_cap():
+def test_both_surfaces_use_one_bounder_and_one_cap() -> None:
     """No second implementation: both helpers are the shared bounder."""
     assert FLEET_CAP == DISPOSABLE_CAP == evidence_bounds.MAX_EVIDENCE_CHARS == 4000
     assert fleet_evidence("x") == disposable_evidence("x") == "x"
@@ -92,7 +92,7 @@ def test_both_surfaces_use_one_bounder_and_one_cap():
 
 
 @pytest.mark.parametrize("surface", SURFACES)
-def test_pytest_shaped_evidence_keeps_the_summary_and_whole_lines(surface):
+def test_pytest_shaped_evidence_keeps_the_summary_and_whole_lines(surface) -> None:
     payload = _pytest_shaped_run()
     assert len(payload) > FLEET_CAP  # the fixture actually exercises the bound
 
@@ -122,7 +122,7 @@ def test_pytest_shaped_evidence_keeps_the_summary_and_whole_lines(surface):
 
 
 @pytest.mark.parametrize("surface", SURFACES)
-def test_single_over_budget_line_is_the_only_mid_line_cut(surface):
+def test_single_over_budget_line_is_the_only_mid_line_cut(surface) -> None:
     payload = "BANNER " + "X" * (FLEET_CAP * 3)
 
     bounded = surface(payload)
@@ -135,7 +135,7 @@ def test_single_over_budget_line_is_the_only_mid_line_cut(surface):
 
 
 @pytest.mark.parametrize("surface", SURFACES)
-def test_under_budget_evidence_is_untouched_and_stripped(surface):
+def test_under_budget_evidence_is_untouched_and_stripped(surface) -> None:
     payload = "\n\n  tests/a.py::test_one PASSED  \n\n"
 
     assert surface(payload) == "tests/a.py::test_one PASSED"

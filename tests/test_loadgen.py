@@ -50,7 +50,7 @@ def _wait_for_started(proc, timeout=30.0):
 
 
 @pytest.mark.skipif(not LINUX, reason="PR_SET_PDEATHSIG is a Linux mechanism")
-def test_load_generator_cannot_outlive_a_killed_runner():
+def test_load_generator_cannot_outlive_a_killed_runner() -> None:
     """SIGKILL the runner: the kernel must reap every burner (INT-FLAKE-5)."""
     proc = subprocess.Popen(
         [
@@ -89,7 +89,7 @@ def test_load_generator_cannot_outlive_a_killed_runner():
                 pass
 
 
-def test_clean_run_reports_no_survivors():
+def test_clean_run_reports_no_survivors() -> None:
     """A normal bounded run returns promptly and verifies its own cleanup."""
     started = time.monotonic()
     summary = loadgen.generate(2, 0.4, allow_shared_host=True, markers=())
@@ -100,7 +100,7 @@ def test_clean_run_reports_no_survivors():
     assert elapsed < 20.0, f"a 0.4 s run took {elapsed:.1f}s"
 
 
-def test_shared_host_is_refused_unless_allowlisted(monkeypatch):
+def test_shared_host_is_refused_unless_allowlisted(monkeypatch) -> None:
     """Synthetic load is refused where the fleet's own services run."""
     monkeypatch.delenv(loadgen.ALLOW_SHARED_ENV, raising=False)
     monkeypatch.setattr(loadgen, "shared_host_processes", lambda markers=(): ["42: gateway run"])
@@ -114,7 +114,7 @@ def test_shared_host_is_refused_unless_allowlisted(monkeypatch):
     assert summary["allow_shared_host"] is True
 
 
-def test_request_is_hard_capped():
+def test_request_is_hard_capped() -> None:
     """Workers, seconds and the CPU set are validated, not trusted."""
     with pytest.raises(ValueError, match="positive integer"):
         loadgen.generate(0, 1)
@@ -128,7 +128,7 @@ def test_request_is_hard_capped():
         loadgen._parse_cpus(" , ")
 
 
-def test_cpu_set_parsing_and_restoration(monkeypatch):
+def test_cpu_set_parsing_and_restoration(monkeypatch) -> None:
     """`--cpus` narrows the run and the runner's own affinity is restored."""
     assert loadgen._parse_cpus("0-2,4", {0, 1, 2, 3, 4}) == {0, 1, 2, 4}
     assert loadgen._parse_cpus("0-3", {1, 2}) == {1, 2}

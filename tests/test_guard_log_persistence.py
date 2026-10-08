@@ -161,7 +161,7 @@ def _run_guard_cli(workdir: str) -> subprocess.CompletedProcess:
 
 
 class TestLogPersistence:
-    def test_failing_run_logs_the_full_untruncated_output(self, tmp_path):
+    def test_failing_run_logs_the_full_untruncated_output(self, tmp_path) -> None:
         """The log carries what the bounded console summary cannot.
 
         The failing output is far longer than the 2000-char tail the
@@ -196,7 +196,7 @@ class TestLogPersistence:
         assert tests_result.exit_code == 1
         assert len(tests_result.output) <= 2000
 
-    def test_log_records_per_guard_metadata_and_utc_timestamp(self, tmp_path):
+    def test_log_records_per_guard_metadata_and_utc_timestamp(self, tmp_path) -> None:
         workdir = _probe_workdir(tmp_path, _failing_script())
         result = _manager(workdir).run_all()
 
@@ -211,7 +211,7 @@ class TestLogPersistence:
         # Per-guard: name, passed, exit_code.
         assert "[FAIL] tests (full)  passed=false  exit_code=1" in content
 
-    def test_passing_run_is_logged_with_a_pass_verdict(self, tmp_path):
+    def test_passing_run_is_logged_with_a_pass_verdict(self, tmp_path) -> None:
         workdir = _probe_workdir(tmp_path, _passing_script())
         result = _manager(workdir).run_all()
 
@@ -222,7 +222,7 @@ class TestLogPersistence:
         assert "[PASS] tests (full)  passed=true  exit_code=0" in content
         assert PASS_MARKER in content
 
-    def test_failures_are_listed_before_passes(self, tmp_path, monkeypatch):
+    def test_failures_are_listed_before_passes(self, tmp_path, monkeypatch) -> None:
         workdir = _probe_workdir(tmp_path, _failing_script())
         gm = _manager(workdir, secrets=True)
         monkeypatch.setattr(
@@ -237,7 +237,7 @@ class TestLogPersistence:
         assert "guards: 2 (1 failed, 0 skipped)" in content
         assert content.index("[FAIL] tests (full)") < content.index("[PASS] secrets")
 
-    def test_skipped_steps_are_named_in_the_log(self, tmp_path):
+    def test_skipped_steps_are_named_in_the_log(self, tmp_path) -> None:
         """TRUST-001: the log keeps the skip list and a DEGRADED overall line."""
         workdir = _probe_workdir(tmp_path, _passing_script())
         gm = _manager(workdir, secrets=True)
@@ -253,13 +253,15 @@ class TestLogPersistence:
         assert "  - tests: no staged files" in content
         assert "[SKIP] tests" in content and "skip_reason=no staged files" in content
 
-    def test_newest_log_path_comes_from_the_accessor(self, tmp_path):
+    def test_newest_log_path_comes_from_the_accessor(self, tmp_path) -> None:
         workdir = _probe_workdir(tmp_path, _passing_script())
         result = _manager(workdir).run_all()
 
         assert newest_guard_log(workdir) == result.extra["guard_log"]
 
-    def test_diagnostics_block_names_the_failing_test_and_the_scanners(self, tmp_path, monkeypatch):
+    def test_diagnostics_block_names_the_failing_test_and_the_scanners(
+        self, tmp_path, monkeypatch
+    ) -> None:
         """TRUST-003 (AC3): both console facts are persisted in the run log.
 
         The console line is bounded; the log is the post-mortem artifact, so
@@ -288,7 +290,7 @@ class TestLogPersistence:
         )
         assert "  secrets_scanners: clean (gitleaks + builtin cross-check)" in content
 
-    def test_diagnostics_log_a_finding_scanner_with_its_count(self, tmp_path, monkeypatch):
+    def test_diagnostics_log_a_finding_scanner_with_its_count(self, tmp_path, monkeypatch) -> None:
         """A secrets FAIL logs WHICH scanner found what — the POC-15 ambiguity."""
         workdir = _probe_workdir(tmp_path, _passing_script())
         gm = _manager(workdir, secrets=True)
@@ -310,7 +312,7 @@ class TestLogPersistence:
             "  secrets_scanners: FAIL (builtin cross-check: 2 findings; gitleaks: clean)" in content
         )
 
-    def test_diagnostics_say_none_detected_when_there_is_nothing_to_name(self, tmp_path):
+    def test_diagnostics_say_none_detected_when_there_is_nothing_to_name(self, tmp_path) -> None:
         """A clean run is explicit, never a silently missing diagnostic."""
         workdir = _probe_workdir(tmp_path, _passing_script())
         result = _manager(workdir).run_all()
@@ -324,7 +326,7 @@ class TestLogPersistence:
 
 
 class TestRetentionAndSizeCap:
-    def test_retention_keeps_only_the_newest_n(self, tmp_path, monkeypatch):
+    def test_retention_keeps_only_the_newest_n(self, tmp_path, monkeypatch) -> None:
         monkeypatch.setattr(guard_manager, "GUARD_LOG_KEEP", 5)
         workdir = _probe_workdir(tmp_path, _passing_script())
         log_dir = guard_log_dir(workdir)
@@ -344,7 +346,7 @@ class TestRetentionAndSizeCap:
         assert new_name in remaining
         assert newest_guard_log(workdir) == result.extra["guard_log"]
 
-    def test_size_cap_markers_a_pathological_log(self, tmp_path, monkeypatch):
+    def test_size_cap_markers_a_pathological_log(self, tmp_path, monkeypatch) -> None:
         monkeypatch.setattr(guard_manager, "GUARD_LOG_MAX_BYTES", 1024)
         workdir = _probe_workdir(tmp_path, _failing_script(padding=2000))
 
@@ -362,7 +364,7 @@ class TestRetentionAndSizeCap:
 
 
 class TestPersistenceFailuresAreNonFatal:
-    def test_unwritable_target_does_not_raise_or_change_a_passing_verdict(self, tmp_path):
+    def test_unwritable_target_does_not_raise_or_change_a_passing_verdict(self, tmp_path) -> None:
         workdir = _probe_workdir(tmp_path, _passing_script())
         _block_random_log_dir(guard_log_dir(workdir))
 
@@ -373,7 +375,7 @@ class TestPersistenceFailuresAreNonFatal:
         assert result.extra["guard_log_error"], "failure reason must be surfaced"
         assert "logs" in result.extra["guard_log_error"]
 
-    def test_unwritable_target_does_not_change_a_failing_verdict(self, tmp_path):
+    def test_unwritable_target_does_not_change_a_failing_verdict(self, tmp_path) -> None:
         workdir = _probe_workdir(tmp_path, _failing_script())
         _block_random_log_dir(guard_log_dir(workdir))
 
@@ -383,7 +385,7 @@ class TestPersistenceFailuresAreNonFatal:
         assert "guard_log" not in result.extra
         assert result.extra["guard_log_error"]
 
-    def test_non_process_guards_log_exit_code_na(self, tmp_path, monkeypatch):
+    def test_non_process_guards_log_exit_code_na(self, tmp_path, monkeypatch) -> None:
         """A guard that ran no single subprocess is honest about the code."""
         workdir = _probe_workdir(tmp_path, _passing_script())
         gm = _manager(workdir, lsp=True)
@@ -399,10 +401,10 @@ class TestPersistenceFailuresAreNonFatal:
 
 
 class TestNewestGuardLogAccessor:
-    def test_none_when_no_log_has_been_written(self, tmp_path):
+    def test_none_when_no_log_has_been_written(self, tmp_path) -> None:
         assert newest_guard_log(str(tmp_path)) is None
 
-    def test_returns_the_chronologically_newest(self, tmp_path):
+    def test_returns_the_chronologically_newest(self, tmp_path) -> None:
         log_dir = guard_log_dir(str(tmp_path))
         os.makedirs(log_dir)
         names = [
@@ -421,7 +423,7 @@ class TestNewestGuardLogAccessor:
 
 
 class TestCallersCiteTheLog:
-    def test_tier1_pipeline_step_data_points_at_the_log(self, tmp_path):
+    def test_tier1_pipeline_step_data_points_at_the_log(self, tmp_path) -> None:
         from engine.pipeline import Pipeline
 
         workdir = _probe_workdir(tmp_path, _passing_script())
@@ -454,7 +456,7 @@ class TestCallersCiteTheLog:
         # Only the tier-1 stage carries the raw guard evidence.
         assert "guard_log" not in out["stages"]["tier2"]["steps"][0]["data"]
 
-    def test_tier1_step_without_a_log_carries_no_path(self, tmp_path):
+    def test_tier1_step_without_a_log_carries_no_path(self, tmp_path) -> None:
         from engine.pipeline import Pipeline
 
         workdir = _probe_workdir(tmp_path)  # no guard run → no log
@@ -474,7 +476,7 @@ class TestCallersCiteTheLog:
 
         assert "guard_log" not in out["stages"]["tier1"]["steps"][0]["data"]
 
-    def test_cli_names_the_log_on_failure(self, tmp_path):
+    def test_cli_names_the_log_on_failure(self, tmp_path) -> None:
         workdir = str(tmp_path / "repo")
         os.makedirs(workdir)
         command = f"{shlex.quote(sys.executable)} {SCRIPT_NAME}"
@@ -494,7 +496,7 @@ class TestCallersCiteTheLog:
         assert os.path.dirname(log_path) == guard_log_dir(workdir)
         assert FAILED_LINE in _read(log_path)
 
-    def test_cli_names_the_log_on_success(self, tmp_path):
+    def test_cli_names_the_log_on_success(self, tmp_path) -> None:
         workdir = str(tmp_path / "repo")
         os.makedirs(workdir)
         config = _guard_config("echo ok")
@@ -510,7 +512,7 @@ class TestCallersCiteTheLog:
         assert os.path.isfile(match.group(1))
         assert "overall: PASS" in _read(match.group(1))
 
-    def test_cli_console_names_the_failing_test_and_the_scanners(self, tmp_path):
+    def test_cli_console_names_the_failing_test_and_the_scanners(self, tmp_path) -> None:
         """TRUST-003 end-to-end: the bounded console output the user reads.
 
         Both facts must reach the CLI's own summary — naming them only in the
@@ -540,13 +542,13 @@ class TestCallersCiteTheLog:
 
 
 class TestRuntimeArtifactsAreIgnored:
-    def test_guard_log_directory_is_gitignored(self):
+    def test_guard_log_directory_is_gitignored(self) -> None:
         with open(os.path.join(PROJECT_ROOT, ".gitignore"), "r") as f:
             entries = [line.strip() for line in f.read().splitlines()]
 
         assert ".gitreins/logs/" in entries
 
-    def test_graph_cache_strays_are_gitignored(self):
+    def test_graph_cache_strays_are_gitignored(self) -> None:
         """QA-GITREINS-POC-9: the code-graph writer re-creates these every run.
 
         ``.vfs/graph/.last_reconcile`` and ``.parse_cache.json`` are rewritten
@@ -564,7 +566,7 @@ class TestRuntimeArtifactsAreIgnored:
         # reporting the refresh as uncommitted work with no way to land it.
         assert ".vfs/graph/edges.jsonl" not in entries
 
-    def test_guard_logs_do_not_block_the_worktree_merge_gate(self, tmp_path, monkeypatch):
+    def test_guard_logs_do_not_block_the_worktree_merge_gate(self, tmp_path, monkeypatch) -> None:
         """A run log is GitReins' own runtime artifact, never uncommitted work.
 
         WorktreeManager.merge() runs a guard INSIDE the task worktree and then

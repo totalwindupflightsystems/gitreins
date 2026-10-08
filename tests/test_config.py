@@ -20,28 +20,28 @@ from engine.config import (
 # ── GitReinsDefaults — built-in values ───────────────────────
 
 
-def test_defaults_model():
+def test_defaults_model() -> None:
     d = GitReinsDefaults()
     assert d.model == "deepseek-v4-flash"
 
 
-def test_defaults_max_iterations():
+def test_defaults_max_iterations() -> None:
     d = GitReinsDefaults()
     assert d.max_iterations == 100.0
 
 
-def test_defaults_review_severity():
+def test_defaults_review_severity() -> None:
     d = GitReinsDefaults()
     assert d.commit_audit_review_severity == "standard"
 
 
-def test_defaults_scoring_threshold():
+def test_defaults_scoring_threshold() -> None:
     d = GitReinsDefaults()
     assert d.commit_audit_review_score_threshold == 8.0
     assert d.commit_audit_review_score_offset == 1.0
 
 
-def test_defaults_source_is_builtin():
+def test_defaults_source_is_builtin() -> None:
     d = GitReinsDefaults()
     assert "built-in" in d._source
 
@@ -49,50 +49,50 @@ def test_defaults_source_is_builtin():
 # ── overlay ──────────────────────────────────────────────────
 
 
-def test_overlay_with_none_returns_self():
+def test_overlay_with_none_returns_self() -> None:
     d = GitReinsDefaults()
     result = d.overlay(None)
     assert result is d
 
 
-def test_overlay_with_empty_dict_returns_same_defaults():
+def test_overlay_with_empty_dict_returns_same_defaults() -> None:
     d = GitReinsDefaults()
     result = d.overlay({})
     assert result.model == d.model
     assert result.max_iterations == d.max_iterations
 
 
-def test_overlay_changes_model():
+def test_overlay_changes_model() -> None:
     d = GitReinsDefaults()
     result = d.overlay({"defaults": {"model": "kimi-for-coding"}})
     assert result.model == "kimi-for-coding"
 
 
-def test_overlay_changes_max_iterations():
+def test_overlay_changes_max_iterations() -> None:
     d = GitReinsDefaults()
     result = d.overlay({"defaults": {"max_iterations": 50}})
     assert result.max_iterations == 50.0
 
 
-def test_overlay_respects_time_string():
+def test_overlay_respects_time_string() -> None:
     d = GitReinsDefaults()
     result = d.overlay({"defaults": {"max_time": "10m"}})
     assert result.max_seconds == 600.0
 
 
-def test_overlay_respects_token_string():
+def test_overlay_respects_token_string() -> None:
     d = GitReinsDefaults()
     result = d.overlay({"defaults": {"max_input_tokens": "1M"}})
     assert result.max_input_tokens == 1_000_000
 
 
-def test_overlay_sets_source_to_config_yaml():
+def test_overlay_sets_source_to_config_yaml() -> None:
     d = GitReinsDefaults()
     result = d.overlay({"defaults": {"model": "test"}})
     assert "config.yaml" in result._source
 
 
-def test_overlay_nested_commit_audit():
+def test_overlay_nested_commit_audit() -> None:
     d = GitReinsDefaults()
     result = d.overlay(
         {
@@ -113,13 +113,13 @@ def test_overlay_nested_commit_audit():
 # ── to_config_dict ───────────────────────────────────────────
 
 
-def test_to_config_dict_includes_model():
+def test_to_config_dict_includes_model() -> None:
     d = GitReinsDefaults()
     result = d.to_config_dict()
     assert result["model"] == "deepseek-v4-flash"
 
 
-def test_to_config_dict_includes_commit_audit_nested():
+def test_to_config_dict_includes_commit_audit_nested() -> None:
     d = GitReinsDefaults()
     result = d.to_config_dict()
     assert "commit_audit" in result
@@ -127,14 +127,14 @@ def test_to_config_dict_includes_commit_audit_nested():
     assert result["commit_audit"]["review_checks"]["bugs"] is True
 
 
-def test_to_config_dict_formats_max_time_as_string():
+def test_to_config_dict_formats_max_time_as_string() -> None:
     d = GitReinsDefaults()
     d.max_seconds = 600.0
     result = d.to_config_dict()
     assert result["max_time"] == "10m"
 
 
-def test_to_config_dict_format_none_for_unlimited():
+def test_to_config_dict_format_none_for_unlimited() -> None:
     d = GitReinsDefaults()
     d.max_seconds = -1.0
     result = d.to_config_dict()
@@ -144,15 +144,15 @@ def test_to_config_dict_format_none_for_unlimited():
 # ── _coerce_float ────────────────────────────────────────────
 
 
-def test_coerce_float_from_int():
+def test_coerce_float_from_int() -> None:
     assert _coerce_float(100) == 100.0
 
 
-def test_coerce_float_from_string():
+def test_coerce_float_from_string() -> None:
     assert _coerce_float("50") == 50.0
 
 
-def test_coerce_float_from_invalid_string():
+def test_coerce_float_from_invalid_string() -> None:
     assert _coerce_float("invalid") == -1.0
 
 
@@ -170,11 +170,11 @@ def test_coerce_float_from_invalid_string():
         ("10min", 600.0),
     ],
 )
-def test_coerce_seconds_valid(val, expected):
+def test_coerce_seconds_valid(val, expected) -> None:
     assert _coerce_seconds(val) == expected
 
 
-def test_coerce_seconds_invalid_returns_negative():
+def test_coerce_seconds_invalid_returns_negative() -> None:
     assert _coerce_seconds("nope") == -1.0
 
 
@@ -191,30 +191,30 @@ def test_coerce_seconds_invalid_returns_negative():
         ("100", 100),
     ],
 )
-def test_coerce_tokens_valid(val, expected):
+def test_coerce_tokens_valid(val, expected) -> None:
     assert _coerce_tokens(val) == expected
 
 
-def test_coerce_tokens_bad_string():
+def test_coerce_tokens_bad_string() -> None:
     assert _coerce_tokens("xyz") == -1
 
 
 # ── _fmt_seconds ─────────────────────────────────────────────
 
 
-def test_fmt_seconds_under_60():
+def test_fmt_seconds_under_60() -> None:
     assert _fmt_seconds(30) == "30s"
 
 
-def test_fmt_seconds_exact_minutes():
+def test_fmt_seconds_exact_minutes() -> None:
     assert _fmt_seconds(120) == "2m"
 
 
-def test_fmt_seconds_minutes_and_seconds():
+def test_fmt_seconds_minutes_and_seconds() -> None:
     assert _fmt_seconds(150) == "2m30s"
 
 
-def test_fmt_seconds_hours():
+def test_fmt_seconds_hours() -> None:
     assert _fmt_seconds(3600) == "1h"
     assert _fmt_seconds(7200) == "2h"
 
@@ -222,37 +222,37 @@ def test_fmt_seconds_hours():
 # ── _fmt_tokens ──────────────────────────────────────────────
 
 
-def test_fmt_tokens_millions():
+def test_fmt_tokens_millions() -> None:
     assert _fmt_tokens(1_000_000) == "1.0M"
 
 
-def test_fmt_tokens_thousands():
+def test_fmt_tokens_thousands() -> None:
     assert _fmt_tokens(200_000) == "200k"
 
 
-def test_fmt_tokens_small():
+def test_fmt_tokens_small() -> None:
     assert _fmt_tokens(500) == "500"
 
 
 # ── _version_greater ─────────────────────────────────────────
 
 
-def test_version_greater_true():
+def test_version_greater_true() -> None:
     assert _version_greater("0.11.0", "0.10.2") is True
 
 
-def test_version_greater_false():
+def test_version_greater_false() -> None:
     assert _version_greater("0.8.0", "0.10.0") is False
 
 
-def test_version_greater_equal():
+def test_version_greater_equal() -> None:
     assert _version_greater("0.10.2", "0.10.2") is False
 
 
 # ── _pypi_url ────────────────────────────────────────────────
 
 
-def test_pypi_url_returns_project_link():
+def test_pypi_url_returns_project_link() -> None:
     url = _pypi_url()
     assert "pypi.org" in url
     assert "gitreins" in url
@@ -261,15 +261,15 @@ def test_pypi_url_returns_project_link():
 # ── load_raw_config ──────────────────────────────────────────
 
 
-def test_load_raw_config_returns_empty_for_none_workdir():
+def test_load_raw_config_returns_empty_for_none_workdir() -> None:
     assert load_raw_config(None) == {}
 
 
-def test_load_raw_config_returns_empty_for_nonexistent(tmp_path):
+def test_load_raw_config_returns_empty_for_nonexistent(tmp_path) -> None:
     assert load_raw_config(str(tmp_path)) == {}
 
 
-def test_quality_config_round_trip(tmp_path):
+def test_quality_config_round_trip(tmp_path) -> None:
     import yaml
 
     config_dir = tmp_path / ".gitreins"

@@ -46,7 +46,7 @@ class TestGoLintPackageScope:
     sibling file reads ``undefined`` — false findings that blocked real
     single-file Go commits three times on 2026-09-24."""
 
-    def test_single_file_scope_has_no_path_args(self, tmp_path, monkeypatch):
+    def test_single_file_scope_has_no_path_args(self, tmp_path, monkeypatch) -> None:
         """RED-PROOF: pre-fix the argv ended with the changed FILE name; the
         shim log must instead show an invocation with no path after the rev
         flag (package-dir scoping)."""
@@ -71,7 +71,9 @@ class TestGoLintPackageScope:
         assert argv.index("--new-from-rev=HEAD~1") == len(argv) - 1, argv
         assert "staged.go" not in argv
 
-    def test_multi_package_scope_yields_one_invocation_per_package(self, tmp_path, monkeypatch):
+    def test_multi_package_scope_yields_one_invocation_per_package(
+        self, tmp_path, monkeypatch
+    ) -> None:
         workdir = _scratch_repo(
             tmp_path,
             {
@@ -93,7 +95,7 @@ class TestGoLintPackageScope:
         assert sorted(pkg_args) == ["alpha", "beta"], invocations
 
     @requires_go
-    def test_real_toolchain_single_file_commit_passes(self, tmp_path):
+    def test_real_toolchain_single_file_commit_passes(self, tmp_path) -> None:
         """The live defect: a real single-file commit in a populated package
         must grade clean with the REAL golangci-lint (no undefined-symbol
         false findings)."""
@@ -123,7 +125,7 @@ class TestGoLintFallbackMasking:
     must not be erased by the go-vet fallback when a LATER package's
     invocation could not run (spawn failure)."""
 
-    def test_real_failure_not_masked_by_later_spawn_failure(self, tmp_path, monkeypatch):
+    def test_real_failure_not_masked_by_later_spawn_failure(self, tmp_path, monkeypatch) -> None:
         import engine.guards as guards_mod
         from unittest.mock import patch
 
@@ -157,7 +159,7 @@ class TestGoLintMidLoopSpawnFailure:
     in a multi-package set leaves the remaining dirs UNGRADED — the go-vet
     fallback may not pass the lane on partial coverage."""
 
-    def test_first_package_spawn_failure_fails_the_lane(self, tmp_path):
+    def test_first_package_spawn_failure_fails_the_lane(self, tmp_path) -> None:
         import engine.guards as guards_mod
         from unittest.mock import patch
 

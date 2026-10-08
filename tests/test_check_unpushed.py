@@ -31,7 +31,7 @@ def _commit_identity_env():
     return env
 
 
-def _commit(cwd, message):
+def _commit(cwd, message) -> None:
     subprocess.run(
         ["git", "commit", "-q", "-m", message],
         cwd=cwd,
@@ -49,7 +49,7 @@ def _run_guard(cwd):
     )
 
 
-def test_guard_distinguishes_content_from_identical_merge_history(tmp_path):
+def test_guard_distinguishes_content_from_identical_merge_history(tmp_path) -> None:
     """A content commit alarms, while merge-only history with equal trees passes."""
     remote = tmp_path / "remote.git"
     clone = tmp_path / "clone"

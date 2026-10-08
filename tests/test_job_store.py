@@ -28,7 +28,7 @@ def store_dir(tmp_path, monkeypatch):
     return d
 
 
-def test_save_load_roundtrip(store_dir):
+def test_save_load_roundtrip(store_dir) -> None:
     job = make_job("task-1", "/tmp/some/repo")
     job["pid"] = 1234
     save_job(job)
@@ -45,11 +45,11 @@ def test_save_load_roundtrip(store_dir):
     assert loaded["caps"] is None
 
 
-def test_load_missing_returns_none(store_dir):
+def test_load_missing_returns_none(store_dir) -> None:
     assert load_job("job-nope") is None
 
 
-def test_list_jobs_roundtrip(store_dir):
+def test_list_jobs_roundtrip(store_dir) -> None:
     a = make_job("t1", "/r")
     b = make_job("t2", "/r")
     save_job(a)
@@ -58,7 +58,7 @@ def test_list_jobs_roundtrip(store_dir):
     assert ids == {a["id"], b["id"]}
 
 
-def test_delete_job(store_dir):
+def test_delete_job(store_dir) -> None:
     job = make_job("t1", "/r")
     save_job(job)
     assert delete_job(job["id"]) is True
@@ -66,14 +66,14 @@ def test_delete_job(store_dir):
     assert delete_job(job["id"]) is False
 
 
-def test_save_is_atomic_no_tmp_leftovers(store_dir):
+def test_save_is_atomic_no_tmp_leftovers(store_dir) -> None:
     job = make_job("t1", "/r")
     save_job(job)
     leftovers = [n for n in os.listdir(job_dir()) if ".tmp" in n]
     assert leftovers == []
 
 
-def test_corrupt_job_file_returns_none(store_dir):
+def test_corrupt_job_file_returns_none(store_dir) -> None:
     job = make_job("t1", "/r")
     save_job(job)
     with open(os.path.join(job_dir(), job["id"] + ".json"), "w") as f:
@@ -81,7 +81,7 @@ def test_corrupt_job_file_returns_none(store_dir):
     assert load_job(job["id"]) is None
 
 
-def test_cap_roundtrip():
+def test_cap_roundtrip() -> None:
     cap = EvalCap(
         max_iterations=40.0,
         max_seconds=600.0,
@@ -98,13 +98,13 @@ def test_cap_roundtrip():
     assert rebuilt.tool_call_weight == 0.1
 
 
-def test_cap_none_roundtrip():
+def test_cap_none_roundtrip() -> None:
     assert cap_to_dict(None) is None
     assert cap_from_dict(None) is None
     assert cap_from_dict({}) is None
 
 
-def test_pid_alive():
+def test_pid_alive() -> None:
     assert pid_alive(None) is False
     assert pid_alive(0) is False
     assert pid_alive(-5) is False
@@ -117,7 +117,7 @@ def test_pid_alive():
 # ── GR-GAP-046: single-flight key lookup ─────────────────────────────────────
 
 
-def test_find_running_job_matches_task_and_workdir(store_dir):
+def test_find_running_job_matches_task_and_workdir(store_dir) -> None:
     """find_running_job returns a running job for the same (task, workdir)."""
     job = make_job("t1", "/r")
     job["pid"] = 4242
@@ -127,14 +127,14 @@ def test_find_running_job_matches_task_and_workdir(store_dir):
     assert found["id"] == job["id"]
 
 
-def test_find_running_job_normalizes_workdir(store_dir):
+def test_find_running_job_normalizes_workdir(store_dir) -> None:
     """Workdir comparison is abspath-normalized (trailing slash, symlinks)."""
     job = make_job("t1", "/r/sub")
     save_job(job)
     assert find_running_job("t1", "/r/sub/") is not None
 
 
-def test_find_running_job_ignores_completed_and_error(store_dir):
+def test_find_running_job_ignores_completed_and_error(store_dir) -> None:
     """A completed/error job for the same task is superseded (new run)."""
     done = make_job("t1", "/r")
     done["status"] = "complete"
@@ -147,7 +147,7 @@ def test_find_running_job_ignores_completed_and_error(store_dir):
     assert find_running_job("t1", "/r") is None
 
 
-def test_find_running_job_scoped_to_task_and_workdir(store_dir):
+def test_find_running_job_scoped_to_task_and_workdir(store_dir) -> None:
     """Different task id or different workdir does not collide."""
     a = make_job("t1", "/r")
     save_job(a)
@@ -161,7 +161,7 @@ def test_find_running_job_scoped_to_task_and_workdir(store_dir):
     assert find_running_job("t1", "/other")["id"] == c["id"]
 
 
-def test_find_running_job_returns_newest_of_duplicates(store_dir):
+def test_find_running_job_returns_newest_of_duplicates(store_dir) -> None:
     """If multiple running records exist (legacy), the newest wins."""
     old = make_job("t1", "/r")
     old["started_at"] = 1.0

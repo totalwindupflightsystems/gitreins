@@ -120,6 +120,10 @@ select = [
 "engine/config.py" = ["E501"]
 # Test files — long assertion lines, fixtures, and test data strings; unused variables often check imports
 "tests/**/*.py" = ["E501", "F841"]
+# Reliability benchmark corpus + non-secrets fixture data — intentionally flawed
+# test DATA graded by the evaluators; annotating it would change the fixture text.
+"tests/reliability/**/*.py" = ["ANN"]
+"tests/fixtures/**/*.py" = ["ANN"]
 # Secrets scanner fixtures — intentionally malformed Python (shell scripts, templates, etc.)
 "tests/fixtures/secrets/**" = ["ALL"]
 # gitreins_mcp JSON-RPC handler — long JSON schema strings

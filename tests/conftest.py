@@ -59,7 +59,7 @@ def _live_lock_path() -> str:
     return os.path.join(tempfile.gettempdir(), f"gitreins-live-{digest}.lock")
 
 
-def pytest_collection_modifyitems(config, items):
+def pytest_collection_modifyitems(config, items) -> None:
     """Skip ``live``-marked (real-egress) tests when running inside judge tier-1.
 
     The skip is applied to the collected item, so the reason lands in the run's
@@ -73,7 +73,7 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip)
 
 
-def pytest_runtest_setup(item):
+def pytest_runtest_setup(item) -> None:
     """Take the per-repo live lock, or skip if another process holds it.
 
     Outside tier 1 the live test still runs for real (manual ``pytest`` with a
@@ -101,7 +101,7 @@ def pytest_runtest_setup(item):
     _LIVE_LOCK_FD = fd
 
 
-def pytest_runtest_teardown(item, nextitem):
+def pytest_runtest_teardown(item, nextitem) -> None:
     """Release the live-run lock taken in :func:`pytest_runtest_setup`."""
     global _LIVE_LOCK_FD
     if _LIVE_LOCK_FD is None:
@@ -182,7 +182,7 @@ def isolated_job_store(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def skip_worker_llm_probe(monkeypatch):
+def skip_worker_llm_probe(monkeypatch) -> None:
     """Skip the MCP worker's real-wire credential probe in tests.
 
     DF-GITREINS-POC-78: the probe in ``_run_job`` proves the credential on the

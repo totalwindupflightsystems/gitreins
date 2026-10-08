@@ -76,14 +76,14 @@ class _StubTier1:
 class _StubGuardManager:
     """Stands in for the guard stage so tests target the task check itself."""
 
-    def __init__(self, workdir, config=None):
+    def __init__(self, workdir, config=None) -> None:
         self.workdir = workdir
 
     def run_all(self):
         return _StubTier1()
 
 
-def test_commit_refuses_while_task_in_progress(tmp_path, monkeypatch, capsys):
+def test_commit_refuses_while_task_in_progress(tmp_path, monkeypatch, capsys) -> None:
     """Case 1: refusal exits 1 BEFORE guards, naming the task, no commit made."""
     repo = _init_repo(tmp_path)
     _seed_in_progress_task(str(repo), "consumer-14")
@@ -107,7 +107,7 @@ def test_commit_refuses_while_task_in_progress(tmp_path, monkeypatch, capsys):
     assert "A  staged.txt" in status  # the staged payload is untouched
 
 
-def test_refusal_wording_parity_with_mcp_surface():
+def test_refusal_wording_parity_with_mcp_surface() -> None:
     """Cases 2+5: CLI refusal and MCP error share the exact rationale clause.
 
     Both files build the message from adjacent string-literal fragments, so
@@ -130,7 +130,7 @@ def test_refusal_wording_parity_with_mcp_surface():
     )
 
 
-def test_allow_in_progress_warns_and_proceeds(tmp_path, monkeypatch, capsys):
+def test_allow_in_progress_warns_and_proceeds(tmp_path, monkeypatch, capsys) -> None:
     """Case 3: escape hatch prints ONE warning line, then commits normally."""
     repo = _init_repo(tmp_path)
     _seed_in_progress_task(str(repo), "consumer-14")
@@ -154,7 +154,7 @@ def test_allow_in_progress_warns_and_proceeds(tmp_path, monkeypatch, capsys):
     assert "staged.txt" in _git(repo, "show", "--name-only", "--format=", "HEAD")
 
 
-def test_no_in_progress_tasks_adds_no_output(tmp_path, monkeypatch, capsys):
+def test_no_in_progress_tasks_adds_no_output(tmp_path, monkeypatch, capsys) -> None:
     """Case 4: no tasks — no refusal, no warning, unchanged commit behavior."""
     repo = _init_repo(tmp_path)
     (repo / "staged.txt").write_text("staged\n")

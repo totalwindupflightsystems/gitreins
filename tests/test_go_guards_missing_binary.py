@@ -175,7 +175,7 @@ def no_lint_path(monkeypatch, tmp_path_factory) -> str:
 
 
 class TestMissingGoBinaryIsNamed:
-    def test_go_build_error_names_go_and_the_install_hint(self, tmp_path, no_go_path):
+    def test_go_build_error_names_go_and_the_install_hint(self, tmp_path, no_go_path) -> None:
         """RED-PROOF: pre-fix the error was the raw
         ``[Errno 2] No such file or directory: 'go'`` and the console showed a
         bare ✗ — no binary named, no hint."""
@@ -190,7 +190,7 @@ class TestMissingGoBinaryIsNamed:
         assert "'go' is not on PATH" in result.error, result.error
         assert GO_HINT in result.error, result.error
 
-    def test_go_tests_error_names_go_and_the_install_hint(self, tmp_path, no_go_path):
+    def test_go_tests_error_names_go_and_the_install_hint(self, tmp_path, no_go_path) -> None:
         workdir = tmp_path / "tests"
         workdir.mkdir()
         _write(str(workdir), "main.go", CLEAN_GO)
@@ -201,7 +201,7 @@ class TestMissingGoBinaryIsNamed:
         assert "'go' is not on PATH" in result.error, result.error
         assert GO_HINT in result.error, result.error
 
-    def test_go_lint_without_the_toolchain_names_both_binaries(self, tmp_path, no_go_path):
+    def test_go_lint_without_the_toolchain_names_both_binaries(self, tmp_path, no_go_path) -> None:
         """golangci-lint absent → the lane falls back to ``go vet``; with no
         toolchain at all the vet spawn fails too, so the lane carries BOTH
         diagnostics: the missing grader (error) and the absent linter
@@ -223,7 +223,7 @@ class TestMissingGoBinaryIsNamed:
 
 
 class TestDiagnosticReachesTheConsoleSummary:
-    def test_summary_renders_the_error_and_the_warning(self, tmp_path, no_go_path):
+    def test_summary_renders_the_error_and_the_warning(self, tmp_path, no_go_path) -> None:
         """The console line, not just the result object: both hints are in
         ``Tier1Result.summary`` — the only thing `gitreins guard` prints for a
         step (the run log keeps the untruncated output)."""
@@ -240,7 +240,7 @@ class TestDiagnosticReachesTheConsoleSummary:
         assert "⚠ 'golangci-lint' is not on PATH" in summary, summary
         assert LINT_HINT in summary, summary
 
-    def test_spawn_error_message_rewrites_only_the_missing_binary_shape(self):
+    def test_spawn_error_message_rewrites_only_the_missing_binary_shape(self) -> None:
         """A non-ENOENT failure (a permission error, a refused busy-wait) keeps
         its own words — claiming "not on PATH" there would name the wrong fix."""
         assert _spawn_error_message(ENOENT_GO) == _missing_binary_message("go")
@@ -253,7 +253,7 @@ class TestDiagnosticReachesTheConsoleSummary:
             "refused: busy-wait loop detected"
         )
 
-    def test_unknown_program_still_gets_a_named_line(self):
+    def test_unknown_program_still_gets_a_named_line(self) -> None:
         """The escape hatch a configured ``guards.test_command`` runner needs:
         an unknown binary is still named, with a usable fix — never a bare
         errno string."""
@@ -267,7 +267,9 @@ class TestDiagnosticReachesTheConsoleSummary:
 
 
 class TestGolangciLintAbsentFallback:
-    def test_golangci_lint_absent_warns_naming_the_linter_and_hint(self, tmp_path, no_lint_path):
+    def test_golangci_lint_absent_warns_naming_the_linter_and_hint(
+        self, tmp_path, no_lint_path
+    ) -> None:
         """A green graded by ``go vet`` must still name the absent linter.
 
         The warning is asserted rather than the lane's verdict: whether
@@ -288,7 +290,7 @@ class TestGolangciLintAbsentFallback:
         assert "⚠" in summary, summary
         assert LINT_HINT in summary, summary
 
-    def test_clean_golangci_lint_run_carries_no_warning(self, tmp_path):
+    def test_clean_golangci_lint_run_carries_no_warning(self, tmp_path) -> None:
         """Control: when the linter RAN, there is nothing to warn about — the
         warning is a missing-tool signal, not a permanent note."""
         from unittest.mock import patch
@@ -313,7 +315,7 @@ class TestGolangciLintAbsentFallback:
 
 
 class TestCliConsoleNamesTheMissingToolchain:
-    def test_gitreins_guard_prints_the_go_and_linter_hints(self, tmp_path, no_go_path):
+    def test_gitreins_guard_prints_the_go_and_linter_hints(self, tmp_path, no_go_path) -> None:
         """Acceptance criterion: `gitreins guard` on a staged ``.go`` file with
         no Go toolchain on PATH prints console lines naming ``go`` and
         ``golangci-lint``, each with its install hint."""

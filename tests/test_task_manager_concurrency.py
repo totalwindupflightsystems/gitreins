@@ -61,7 +61,7 @@ def _complete_worker(workdir: str, task_id: str, ready, go) -> None:
 class TestConcurrentComplete:
     """Two concurrent processes completing DIFFERENT tasks — both must land."""
 
-    def test_two_processes_complete_different_tasks(self, tmp_path):
+    def test_two_processes_complete_different_tasks(self, tmp_path) -> None:
         workdir = str(tmp_path)
         _write_store(workdir, ["alpha", "beta"])
 
@@ -94,13 +94,13 @@ class TestConcurrentComplete:
         leftovers = [n for n in os.listdir(os.path.join(workdir, ".gitreins")) if ".corrupt-" in n]
         assert leftovers == [], f"corruption sidecars appeared: {leftovers}"
 
-    def test_lock_file_created_next_to_store(self, tmp_path):
+    def test_lock_file_created_next_to_store(self, tmp_path) -> None:
         workdir = str(tmp_path)
         _write_store(workdir, ["solo"])
         TaskManager(workdir).complete("solo")
         assert os.path.exists(os.path.join(workdir, ".gitreins", "tasks.yaml.lock"))
 
-    def test_many_processes_stress(self, tmp_path):
+    def test_many_processes_stress(self, tmp_path) -> None:
         """4 processes x 5 sequential completes each (20 mutations, 4 tasks)."""
         workdir = str(tmp_path)
         ids = ["t1", "t2", "t3", "t4"]
@@ -108,7 +108,7 @@ class TestConcurrentComplete:
 
         ctx = multiprocessing.get_context("fork")
 
-        def repeated_worker(tid: str):
+        def repeated_worker(tid: str) -> None:
             from engine.task_manager import TaskManager as _TM
 
             for _ in range(5):
@@ -130,7 +130,7 @@ class TestConcurrentComplete:
 class TestSerialPathUnchanged:
     """The lock must not change single-process behaviour (suite covers more)."""
 
-    def test_serial_create_start_complete_roundtrip(self, tmp_path):
+    def test_serial_create_start_complete_roundtrip(self, tmp_path) -> None:
         workdir = str(tmp_path)
         tm = TaskManager(workdir)
         tm.create("solo", "Solo Task", ["c1"])
@@ -143,7 +143,7 @@ class TestSerialPathUnchanged:
         task = reloaded.get("solo")
         assert task is not None and task.status == "complete"
 
-    def test_complete_missing_task_still_raises(self, tmp_path):
+    def test_complete_missing_task_still_raises(self, tmp_path) -> None:
         with pytest.raises(KeyError):
             TaskManager(str(tmp_path)).complete("does-not-exist")
 
@@ -166,7 +166,7 @@ class TestReloadGetWindow:
     reference swap publishes the new one.
     """
 
-    def test_get_inside_load_window_never_sees_not_found(self, tmp_path, monkeypatch):
+    def test_get_inside_load_window_never_sees_not_found(self, tmp_path, monkeypatch) -> None:
         workdir = str(tmp_path)
         _write_store(workdir, ["race-target", "other-task"])
         tm = TaskManager(workdir)
@@ -190,7 +190,7 @@ class TestReloadGetWindow:
                 return real_load(self)
             return real_load(self, into)
 
-        def reader(i):
+        def reader(i) -> None:
             assert in_window.wait(timeout=30), "reload never entered the load window"
             seen[i] = tm.get("race-target")
             with counts_lock:
@@ -216,7 +216,7 @@ class TestReloadGetWindow:
         )
         assert all(task.id == "race-target" for task in seen)
 
-    def test_concurrent_create_with_reload_readers(self, tmp_path):
+    def test_concurrent_create_with_reload_readers(self, tmp_path) -> None:
         """Reader threads shaped like the MCP server (reload() then get()) must
         never miss a pre-existing task while another thread creates new ones.
 
@@ -236,7 +236,7 @@ class TestReloadGetWindow:
         misses: list[int] = []
         lock = threading.Lock()
 
-        def reader(i):
+        def reader(i) -> None:
             start.wait()
             for _ in range(reader_iters):
                 tm.reload()
@@ -244,7 +244,7 @@ class TestReloadGetWindow:
                     with lock:
                         misses.append(i)
 
-        def creator():
+        def creator() -> None:
             start.wait()
             for n in range(creates):
                 tm.create(f"new-{n}", "t", ["c"])

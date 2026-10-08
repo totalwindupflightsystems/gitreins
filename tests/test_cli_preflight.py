@@ -66,7 +66,7 @@ def _jev_payload(noul: float, choice: str = "none") -> dict:
 class _StubResponse:
     status_code = 200
 
-    def __init__(self, noul: float, choice: str = "none"):
+    def __init__(self, noul: float, choice: str = "none") -> None:
         self._noul = noul
         self._choice = choice
 
@@ -84,7 +84,7 @@ def _enabled_resolution_defaults(surface: str):
 
 
 @pytest.fixture(autouse=True)
-def _hermetic_credentials(monkeypatch, tmp_path):
+def _hermetic_credentials(monkeypatch, tmp_path) -> None:
     """No ambient credentials, no reachable .env, no real egress."""
     for var in resolution.CREDENTIAL_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
@@ -159,7 +159,7 @@ def run_preflight(monkeypatch, workdir, *args: str):
 class TestPreflightCLI:
     """`gitreins preflight` — the foreman-facing shell of the premise check."""
 
-    def test_json_record_shape_on_skip(self, monkeypatch, tmp_path):
+    def test_json_record_shape_on_skip(self, monkeypatch, tmp_path) -> None:
         """--json prints the full machine record; RESOLVED premise, exit 0."""
         _script_assembler(monkeypatch)
         monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("cli"))
@@ -191,7 +191,9 @@ class TestPreflightCLI:
         assert verdict["probability"] == pytest.approx(0.87)
         assert err == ""
 
-    def test_json_verdict_is_a_first_class_object_with_resolves_shape(self, monkeypatch, tmp_path):
+    def test_json_verdict_is_a_first_class_object_with_resolves_shape(
+        self, monkeypatch, tmp_path
+    ) -> None:
         """DF-GITREINS-POC-37 — one shape for one gate (dogfood run 7, Finding 3).
 
         `preflight --json` nested the verdict as an ESCAPED JSON STRING under
@@ -241,7 +243,7 @@ class TestPreflightCLI:
 
     def test_human_output_names_decision_band_probability_missing(
         self, monkeypatch, tmp_path, capsys
-    ):
+    ) -> None:
         _script_assembler(monkeypatch)
         monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("cli"))
         monkeypatch.setattr(
@@ -265,7 +267,7 @@ class TestPreflightCLI:
         assert "Missing:  none" in out
         assert "Abstain:" not in out
 
-    def test_abstain_is_a_valid_dispatch_outcome_exit_zero(self, monkeypatch, tmp_path):
+    def test_abstain_is_a_valid_dispatch_outcome_exit_zero(self, monkeypatch, tmp_path) -> None:
         """No key: ABSTAIN -> decision dispatch, abstain_reason present, exit 0.
 
         DF-GITREINS-POC-37: the no-verdict case is not a second shape. An
@@ -309,7 +311,7 @@ class TestPreflightCLI:
         assert "abstain_detail" in verdict, "the ABSTAIN object keeps the gate's own detail field"
         assert "verdict_json" not in record
 
-    def test_band_boundary_085_inclusive_is_resolved(self, monkeypatch, tmp_path):
+    def test_band_boundary_085_inclusive_is_resolved(self, monkeypatch, tmp_path) -> None:
         """0.85 belongs to the better band: RESOLVED -> skip-dispatch."""
         _script_assembler(monkeypatch)
         monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("cli"))
@@ -328,7 +330,7 @@ class TestPreflightCLI:
         assert record["band"] == "RESOLVED"
         assert record["decision"] == "skip-dispatch"
 
-    def test_band_boundary_050_inclusive_is_review(self, monkeypatch, tmp_path):
+    def test_band_boundary_050_inclusive_is_review(self, monkeypatch, tmp_path) -> None:
         """0.50 belongs to REVIEW -> dispatch-with-note; 0.49 is UNRESOLVED."""
         _script_assembler(monkeypatch)
         monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("cli"))
@@ -354,7 +356,7 @@ class TestPreflightCLI:
         assert record["band"] == "UNRESOLVED"
         assert record["decision"] == "dispatch"
 
-    def test_help_parses(self, monkeypatch, capsys):
+    def test_help_parses(self, monkeypatch, capsys) -> None:
         """`gitreins preflight --help` parses (argparse) and exits 0."""
         cli_module = _fresh_cli_module()
         code = 0
@@ -370,7 +372,7 @@ class TestPreflightCLI:
                     code = exc.code or 0
         assert code == 0
 
-    def test_missing_question_is_a_hard_usage_error(self, monkeypatch, capsys):
+    def test_missing_question_is_a_hard_usage_error(self, monkeypatch, capsys) -> None:
         """No question: argparse errors non-zero — the one non-zero path."""
         cli_module = _fresh_cli_module()
         code = 0
@@ -397,7 +399,7 @@ class TestPreflightConfigGate:
 
     def test_disabled_dispatches_with_named_reason_and_skips_resolution(
         self, monkeypatch, tmp_path
-    ):
+    ) -> None:
         from engine.config import GitReinsDefaults
 
         monkeypatch.setattr(resolution, "resolution_config", lambda workdir=".": GitReinsDefaults())
@@ -414,7 +416,7 @@ class TestPreflightConfigGate:
         assert record["probability"] is None
         assert "predispatch" in record["verdict"]["abstain_detail"]
 
-    def test_disabled_record_still_rides_the_dispatch_hook(self, monkeypatch, tmp_path):
+    def test_disabled_record_still_rides_the_dispatch_hook(self, monkeypatch, tmp_path) -> None:
         from engine.config import GitReinsDefaults
 
         from engine.preflight import preflight
@@ -430,7 +432,7 @@ class TestPreflightConfigGate:
         assert record["decision"] == "dispatch"
         assert dispatched == [True], "the foreman's dispatch step still runs"
 
-    def test_enabled_in_config_runs_the_real_policy(self, monkeypatch, tmp_path):
+    def test_enabled_in_config_runs_the_real_policy(self, monkeypatch, tmp_path) -> None:
         """enabled.predispatch: true in config.yaml → the gate runs for real."""
         import yaml
 
@@ -490,7 +492,7 @@ class TestPreflightPersistence:
             type("E", (), {"post": staticmethod(lambda *a, **k: _StubResponse(noul))})(),
         )
 
-    def test_a_skip_dispatch_run_files_one_predispatch_record(self, monkeypatch, tmp_path):
+    def test_a_skip_dispatch_run_files_one_predispatch_record(self, monkeypatch, tmp_path) -> None:
         _script_assembler(monkeypatch)
         monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("cli"))
         self._script_endpoint(monkeypatch, 0.87)
@@ -518,7 +520,7 @@ class TestPreflightPersistence:
 
     def test_a_disabled_surface_records_nothing_and_never_touches_the_store(
         self, monkeypatch, tmp_path
-    ):
+    ) -> None:
         from engine.config import GitReinsDefaults
 
         monkeypatch.setattr(resolution, "resolution_config", lambda workdir=".": GitReinsDefaults())
@@ -532,7 +534,7 @@ class TestPreflightPersistence:
         assert not (workdir / ".gitreins" / "history").exists()
         assert not (workdir / ".gitreins" / "usage.jsonl").exists()
 
-    def test_an_abstain_from_the_engine_records_nothing(self, monkeypatch, tmp_path):
+    def test_an_abstain_from_the_engine_records_nothing(self, monkeypatch, tmp_path) -> None:
         """All keys dead: the dispatch still happens, and nothing is filed."""
         _script_assembler(monkeypatch)
         # A key must exist for the failure to be "rejected" rather than "absent".

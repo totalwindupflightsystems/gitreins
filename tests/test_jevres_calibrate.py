@@ -39,14 +39,14 @@ cal = _load_module()
 # ── The corpus itself ────────────────────────────────────────────────────────
 
 
-def test_corpus_has_at_least_eight_cases_across_all_four_categories():
+def test_corpus_has_at_least_eight_cases_across_all_four_categories() -> None:
     cases = cal.load_corpus()
     assert len(cases) >= 8
     by_category = {case.category for case in cases}
     assert by_category == set(cal.ALL_CATEGORIES)
 
 
-def test_corpus_resolved_and_unresolved_cases_share_one_question():
+def test_corpus_resolved_and_unresolved_cases_share_one_question() -> None:
     """The pair design: the SAME question measured in both repo states."""
     cases = cal.load_corpus()
     resolved = {case.question for case in cases if case.category == cal.CATEGORY_RESOLVED}
@@ -54,12 +54,12 @@ def test_corpus_resolved_and_unresolved_cases_share_one_question():
     assert resolved & unresolved, "the resolved/unresolved pair must ask one question"
 
 
-def test_corpus_trees_exist_and_resolved_trees_carry_checks():
+def test_corpus_trees_exist_and_resolved_trees_carry_checks() -> None:
     cases = cal.load_corpus()
     cal.validate_corpus(cases)  # must not raise
 
 
-def test_ground_truth_is_grounded_in_the_trees_not_in_the_resolver():
+def test_ground_truth_is_grounded_in_the_trees_not_in_the_resolver() -> None:
     """Independence: the labels' claims are verifiable from the fixture files."""
     trees = cal.TREES_ROOT
 
@@ -142,14 +142,16 @@ def _full_case_set(workdir: str = "tree") -> list:
     ]
 
 
-def test_validate_corpus_rejects_an_unknown_tree(tmp_path, monkeypatch):
+def test_validate_corpus_rejects_an_unknown_tree(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(cal, "TREES_ROOT", tmp_path)
     cases = cal.load_corpus()  # real corpus, real categories
     with pytest.raises(SystemExit, match="unknown tree"):
         cal.validate_corpus(cases)
 
 
-def test_validate_corpus_requires_an_acceptance_file_on_resolved_trees(tmp_path, monkeypatch):
+def test_validate_corpus_requires_an_acceptance_file_on_resolved_trees(
+    tmp_path, monkeypatch
+) -> None:
     monkeypatch.setattr(cal, "TREES_ROOT", tmp_path)
     for case in _full_case_set():
         tree = tmp_path / case.workdir
@@ -163,7 +165,7 @@ def test_validate_corpus_requires_an_acceptance_file_on_resolved_trees(tmp_path,
         cal.validate_corpus(cases)
 
 
-def test_validate_corpus_requires_the_pair_design(tmp_path, monkeypatch):
+def test_validate_corpus_requires_the_pair_design(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(cal, "TREES_ROOT", tmp_path)
     for case in _full_case_set():
         tree = tmp_path / case.workdir
@@ -178,7 +180,7 @@ def test_validate_corpus_requires_the_pair_design(tmp_path, monkeypatch):
 # ── Hermetic run over the full corpus ────────────────────────────────────────
 
 
-def test_full_hermetic_run_gate_passes_and_prints_matrix_and_sweep(capsys):
+def test_full_hermetic_run_gate_passes_and_prints_matrix_and_sweep(capsys) -> None:
     exit_code = cal.main([])
     out = capsys.readouterr().out
     assert exit_code == 0
@@ -192,7 +194,7 @@ def test_full_hermetic_run_gate_passes_and_prints_matrix_and_sweep(capsys):
     assert "model build id(s):" in out  # spec §6.4: the build is recorded with results
 
 
-def test_budget_case_surfaces_named_exhaustion_never_a_band():
+def test_budget_case_surfaces_named_exhaustion_never_a_band() -> None:
     cases = cal.load_corpus()
     budget = next(case for case in cases if case.category == cal.CATEGORY_BUDGET)
     result = cal.run_hermetic_case(budget)
@@ -204,7 +206,7 @@ def test_budget_case_surfaces_named_exhaustion_never_a_band():
         assert result.verdict.clip_disclosure or result.verdict.chars_dropped
 
 
-def test_hermetic_case_ships_the_real_fixture_files_through_the_resolver_seam():
+def test_hermetic_case_ships_the_real_fixture_files_through_the_resolver_seam() -> None:
     """The runner seam serves real files: the manifest proves what was sent."""
     cases = cal.load_corpus()
     resolved = next(case for case in cases if case.id == "resolved-payments-negative-rejection")
@@ -214,7 +216,7 @@ def test_hermetic_case_ships_the_real_fixture_files_through_the_resolver_seam():
     assert "validator_checks.py" in manifest_files
 
 
-def test_one_batched_jev_call_per_case():
+def test_one_batched_jev_call_per_case() -> None:
     """The batch property (spec §2): one decisions request per case, three answers."""
     cases = cal.load_corpus()
     case = cases[0]
@@ -241,7 +243,7 @@ def test_one_batched_jev_call_per_case():
 # ── The gate: criterion 4, red-proven ────────────────────────────────────────
 
 
-def test_gate_fails_loudly_when_near_miss_nouls_drift_above_resolved():
+def test_gate_fails_loudly_when_near_miss_nouls_drift_above_resolved() -> None:
     """Calibration drift MUST trip the gate at the production bands."""
     cases = cal.load_corpus()
     for case in cases:
@@ -255,14 +257,14 @@ def test_gate_fails_loudly_when_near_miss_nouls_drift_above_resolved():
     assert report.startswith("GATE FAIL")
 
 
-def test_gate_passes_the_production_bands_on_the_checked_in_corpus():
+def test_gate_passes_the_production_bands_on_the_checked_in_corpus() -> None:
     cases = cal.load_corpus()
     results = [cal.run_hermetic_case(case) for case in cases]
     passed, failures = cal.build_gate(results)
     assert passed, failures
 
 
-def test_budget_case_that_bands_is_a_gate_failure():
+def test_budget_case_that_bands_is_a_gate_failure() -> None:
     cases = cal.load_corpus()
     budget = next(case for case in cases if case.category == cal.CATEGORY_BUDGET)
     from engine.resolution import ResolutionVerdict
@@ -277,7 +279,7 @@ def test_budget_case_that_bands_is_a_gate_failure():
 # ── Sweep and matrix: the resolver's own band function does the bucketing ────
 
 
-def test_sweep_rebands_with_the_resolver_band_function(monkeypatch):
+def test_sweep_rebands_with_the_resolver_band_function(monkeypatch) -> None:
     calls = []
     real_band_for = cal.band_for
 
@@ -293,7 +295,7 @@ def test_sweep_rebands_with_the_resolver_band_function(monkeypatch):
     assert set(calls) == set(cal.SWEEP_STEPS)
 
 
-def test_confusion_matrix_buckets_and_excludes_the_budget_surface():
+def test_confusion_matrix_buckets_and_excludes_the_budget_surface() -> None:
     from engine.resolution import ResolutionVerdict
 
     def verdict_for(probability):
@@ -328,7 +330,7 @@ def test_confusion_matrix_buckets_and_excludes_the_budget_surface():
     assert cal.CATEGORY_BUDGET not in matrix  # no band, no bucket
 
 
-def test_band_boundary_belongs_to_the_better_band_in_the_matrix():
+def test_band_boundary_belongs_to_the_better_band_in_the_matrix() -> None:
     from engine.resolution import ResolutionVerdict
 
     verdict = ResolutionVerdict(question="q", verdict="x", probability=0.85)
@@ -349,7 +351,7 @@ def test_band_boundary_belongs_to_the_better_band_in_the_matrix():
 # ── Live mode: the production credential path, proven by seam ────────────────
 
 
-def test_live_mode_hands_the_production_credential_path_to_the_resolver(monkeypatch):
+def test_live_mode_hands_the_production_credential_path_to_the_resolver(monkeypatch) -> None:
     """keys=None + poster=None IS the production credential path: discover_keys,
     per-key failover, the real endpoint. Assembly stays on the labeled trees."""
     recorded = {}
@@ -370,7 +372,7 @@ def test_live_mode_hands_the_production_credential_path_to_the_resolver(monkeypa
     assert result.surface in (cal.SURFACE_BAND, cal.SURFACE_BUDGET)
 
 
-def test_record_rejects_nothing_and_replay_applies_only_valid_records(tmp_path):
+def test_record_rejects_nothing_and_replay_applies_only_valid_records(tmp_path) -> None:
     records = {
         "resolved-payments-negative-rejection": {
             "id": "resolved-payments-negative-rejection",

@@ -36,7 +36,7 @@ def divide(a: float, b: float) -> float:
 # ── Flaw 1: `assert True` — passes for any state of the SUT ──────────────────
 
 
-def test_add_with_assert_true():
+def test_add_with_assert_true() -> None:
     """Verify add(2, 3) returns 5.
 
     FLAW: the only assertion is `assert True`. The SUT could return
@@ -49,7 +49,7 @@ def test_add_with_assert_true():
 # ── Flaw 2: `assert 1 == 1` — also a tautology ───────────────────────────────
 
 
-def test_divide_with_trivial_equality():
+def test_divide_with_trivial_equality() -> None:
     """Verify divide(10, 2) returns 5.0.
 
     FLAW: the assertion compares two literal integers — there is no
@@ -73,7 +73,7 @@ def test_subtract_no_assertion():
 # ── Flaw 4: assertion is in a try/except that swallows AssertionError ────────
 
 
-def test_passes_when_it_should_fail():
+def test_passes_when_it_should_fail() -> None:
     """Verify the negative case raises.
 
     FLAW: the `assert` is wrapped in a try/except that catches
@@ -91,7 +91,7 @@ def test_passes_when_it_should_fail():
 # ── Flaw 5: assertion uses a literal that is not produced by the SUT ──────────
 
 
-def test_uses_hardcoded_literal():
+def test_uses_hardcoded_literal() -> None:
     """Verify add(2, 2) == 5.
 
     FLAW: the test asserts a literal that the SUT can never produce

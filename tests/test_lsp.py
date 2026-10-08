@@ -123,7 +123,7 @@ while True:
 class TestLspDiag:
     """Test LspDiag dataclass."""
 
-    def test_lsp_diag_creation(self):
+    def test_lsp_diag_creation(self) -> None:
         d = LspDiag(
             file="test.py",
             line=5,
@@ -139,12 +139,12 @@ class TestLspDiag:
         assert d.code == "E001"
         assert d.tool == "pylsp"
 
-    def test_lsp_diag_default_code(self):
+    def test_lsp_diag_default_code(self) -> None:
         d = LspDiag(file="test.py", line=1, severity="warning", message="unused import")
         assert d.code == ""
         assert d.tool == ""
 
-    def test_lsp_diag_to_dict(self):
+    def test_lsp_diag_to_dict(self) -> None:
         d = LspDiag(
             file="f.py", line=3, severity="info", message="msg", code="W001", tool="ruff-lsp"
         )
@@ -155,7 +155,7 @@ class TestLspDiag:
         assert result["code"] == "W001"
         assert result["tool"] == "ruff-lsp"
 
-    def test_lsp_diag_serialization_roundtrip(self):
+    def test_lsp_diag_serialization_roundtrip(self) -> None:
         d1 = LspDiag(
             file="a.py", line=10, severity="error", message="bad", code="F401", tool="pyright"
         )
@@ -166,19 +166,19 @@ class TestLspDiag:
 class TestNormalizeSeverity:
     """Test severity mapping."""
 
-    def test_severity_1_is_error(self):
+    def test_severity_1_is_error(self) -> None:
         assert normalize_severity(1) == "error"
 
-    def test_severity_2_is_warning(self):
+    def test_severity_2_is_warning(self) -> None:
         assert normalize_severity(2) == "warning"
 
-    def test_severity_3_is_info(self):
+    def test_severity_3_is_info(self) -> None:
         assert normalize_severity(3) == "info"
 
-    def test_severity_4_is_hint(self):
+    def test_severity_4_is_hint(self) -> None:
         assert normalize_severity(4) == "hint"
 
-    def test_unknown_severity_defaults_to_warning(self):
+    def test_unknown_severity_defaults_to_warning(self) -> None:
         assert normalize_severity(99) == "warning"
         assert normalize_severity(0) == "warning"
 
@@ -186,21 +186,21 @@ class TestNormalizeSeverity:
 class TestFindLspTool:
     """Test LSP tool discovery."""
 
-    def test_find_lsp_tool_not_found(self):
+    def test_find_lsp_tool_not_found(self) -> None:
         with patch("shutil.which", return_value=None):
             result = find_lsp_tool("pylsp")
         assert result is None
 
-    def test_find_lsp_tool_found(self):
+    def test_find_lsp_tool_found(self) -> None:
         with patch("shutil.which", return_value="/usr/bin/pylsp"):
             result = find_lsp_tool("pylsp")
         assert result == "/usr/bin/pylsp"
 
-    def test_find_lsp_tool_multiple_binaries(self):
+    def test_find_lsp_tool_multiple_binaries(self) -> None:
         """Tool with multiple binary names checks each in order."""
         call_order = []
 
-        def fake_which(name):
+        def fake_which(name) -> None:
             call_order.append(name)
             return None
 
@@ -210,10 +210,10 @@ class TestFindLspTool:
         assert "pyright-langserver" in call_order
         assert "pyright" in call_order
 
-    def test_find_lsp_tool_fallback_binary(self):
+    def test_find_lsp_tool_fallback_binary(self) -> None:
         """When first binary not found, tries fallback."""
 
-        def fake_which(name):
+        def fake_which(name) -> str | None:
             if name == "pyright-langserver":
                 return None
             if name == "pyright":
@@ -224,97 +224,97 @@ class TestFindLspTool:
             result = find_lsp_tool("pyright")
         assert result == "/usr/bin/pyright"
 
-    def test_find_lsp_tool_rust_analyzer_not_found(self):
+    def test_find_lsp_tool_rust_analyzer_not_found(self) -> None:
         """rust-analyzer not found returns None."""
         with patch("shutil.which", return_value=None):
             result = find_lsp_tool("rust-analyzer")
         assert result is None
 
-    def test_find_lsp_tool_rust_analyzer_found(self):
+    def test_find_lsp_tool_rust_analyzer_found(self) -> None:
         """rust-analyzer found returns its path."""
         with patch("shutil.which", return_value="/home/user/.cargo/bin/rust-analyzer"):
             result = find_lsp_tool("rust-analyzer")
         assert result == "/home/user/.cargo/bin/rust-analyzer"
 
-    def test_find_lsp_tool_ts_lsp_not_found(self):
+    def test_find_lsp_tool_ts_lsp_not_found(self) -> None:
         """typescript-language-server not found returns None."""
         with patch("shutil.which", return_value=None):
             result = find_lsp_tool("ts-lsp")
         assert result is None
 
-    def test_find_lsp_tool_ts_lsp_found(self):
+    def test_find_lsp_tool_ts_lsp_found(self) -> None:
         """typescript-language-server found returns its path."""
         with patch("shutil.which", return_value="/usr/bin/typescript-language-server"):
             result = find_lsp_tool("ts-lsp")
         assert result == "/usr/bin/typescript-language-server"
 
-    def test_find_lsp_tool_gopls_not_found(self):
+    def test_find_lsp_tool_gopls_not_found(self) -> None:
         """gopls not found returns None."""
         with patch("shutil.which", return_value=None):
             result = find_lsp_tool("gopls")
         assert result is None
 
-    def test_find_lsp_tool_gopls_found(self):
+    def test_find_lsp_tool_gopls_found(self) -> None:
         """gopls found returns its path."""
         with patch("shutil.which", return_value="/home/user/go/bin/gopls"):
             result = find_lsp_tool("gopls")
         assert result == "/home/user/go/bin/gopls"
 
-    def test_find_lsp_tool_jdtls_not_found(self):
+    def test_find_lsp_tool_jdtls_not_found(self) -> None:
         """jdtls not found returns None."""
         with patch("shutil.which", return_value=None):
             result = find_lsp_tool("jdtls")
         assert result is None
 
-    def test_find_lsp_tool_jdtls_found(self):
+    def test_find_lsp_tool_jdtls_found(self) -> None:
         """jdtls found returns its path."""
         with patch("shutil.which", return_value="/usr/bin/jdtls"):
             result = find_lsp_tool("jdtls")
         assert result == "/usr/bin/jdtls"
 
-    def test_find_lsp_tool_kotlin_ls_not_found(self):
+    def test_find_lsp_tool_kotlin_ls_not_found(self) -> None:
         """kotlin-language-server not found returns None."""
         with patch("shutil.which", return_value=None):
             result = find_lsp_tool("kotlin-language-server")
         assert result is None
 
-    def test_find_lsp_tool_kotlin_ls_found(self):
+    def test_find_lsp_tool_kotlin_ls_found(self) -> None:
         """kotlin-language-server found returns its path."""
         with patch("shutil.which", return_value="/usr/bin/kotlin-language-server"):
             result = find_lsp_tool("kotlin-language-server")
         assert result == "/usr/bin/kotlin-language-server"
 
-    def test_find_lsp_tool_csharp_ls_not_found(self):
+    def test_find_lsp_tool_csharp_ls_not_found(self) -> None:
         """csharp-ls not found returns None."""
         with patch("shutil.which", return_value=None):
             result = find_lsp_tool("csharp-ls")
         assert result is None
 
-    def test_find_lsp_tool_csharp_ls_found(self):
+    def test_find_lsp_tool_csharp_ls_found(self) -> None:
         """csharp-ls found returns its path."""
         with patch("shutil.which", return_value="/usr/bin/csharp-ls"):
             result = find_lsp_tool("csharp-ls")
         assert result == "/usr/bin/csharp-ls"
 
-    def test_find_lsp_tool_sourcekit_not_found(self):
+    def test_find_lsp_tool_sourcekit_not_found(self) -> None:
         """sourcekit-lsp not found returns None."""
         with patch("shutil.which", return_value=None):
             result = find_lsp_tool("sourcekit-lsp")
         assert result is None
 
-    def test_find_lsp_tool_sourcekit_found(self):
+    def test_find_lsp_tool_sourcekit_found(self) -> None:
         """sourcekit-lsp found returns its path."""
         with patch("shutil.which", return_value="/usr/bin/sourcekit-lsp"):
             result = find_lsp_tool("sourcekit-lsp")
         assert result == "/usr/bin/sourcekit-lsp"
 
-    def test_find_lsp_tool_dart_not_found(self):
+    def test_find_lsp_tool_dart_not_found(self) -> None:
         """dart not found returns None."""
         with patch("shutil.which", return_value=None):
             result = find_lsp_tool("dart")
         assert result is None
 
-    def test_find_lsp_tool_dart_found(self):
+    def test_find_lsp_tool_dart_found(self) -> None:
         """dart found returns its path."""
         with patch("shutil.which", return_value="/usr/bin/dart"):
             result = find_lsp_tool("dart")
@@ -323,49 +323,49 @@ class TestFindLspTool:
             result = find_lsp_tool("gopls")
         assert result == "/usr/local/bin/gopls"
 
-    def test_find_lsp_tool_elixir_ls_not_found(self):
+    def test_find_lsp_tool_elixir_ls_not_found(self) -> None:
         """elixir-ls not found returns None."""
         with patch("shutil.which", return_value=None):
             result = find_lsp_tool("elixir-ls")
         assert result is None
 
-    def test_find_lsp_tool_elixir_ls_found(self):
+    def test_find_lsp_tool_elixir_ls_found(self) -> None:
         """elixir-ls found returns its path."""
         with patch("shutil.which", return_value="/usr/bin/elixir-ls"):
             result = find_lsp_tool("elixir-ls")
         assert result == "/usr/bin/elixir-ls"
 
-    def test_find_lsp_tool_metals_not_found(self):
+    def test_find_lsp_tool_metals_not_found(self) -> None:
         """metals not found returns None."""
         with patch("shutil.which", return_value=None):
             result = find_lsp_tool("metals")
         assert result is None
 
-    def test_find_lsp_tool_metals_found(self):
+    def test_find_lsp_tool_metals_found(self) -> None:
         """metals found returns its path."""
         with patch("shutil.which", return_value="/usr/bin/metals"):
             result = find_lsp_tool("metals")
         assert result == "/usr/bin/metals"
 
-    def test_find_lsp_tool_ruby_lsp_not_found(self):
+    def test_find_lsp_tool_ruby_lsp_not_found(self) -> None:
         """ruby-lsp not found returns None."""
         with patch("shutil.which", return_value=None):
             result = find_lsp_tool("ruby-lsp")
         assert result is None
 
-    def test_find_lsp_tool_ruby_lsp_found(self):
+    def test_find_lsp_tool_ruby_lsp_found(self) -> None:
         """ruby-lsp found returns its path."""
         with patch("shutil.which", return_value="/usr/bin/ruby-lsp"):
             result = find_lsp_tool("ruby-lsp")
         assert result == "/usr/bin/ruby-lsp"
 
-    def test_find_lsp_tool_solargraph_not_found(self):
+    def test_find_lsp_tool_solargraph_not_found(self) -> None:
         """solargraph not found returns None."""
         with patch("shutil.which", return_value=None):
             result = find_lsp_tool("solargraph")
         assert result is None
 
-    def test_find_lsp_tool_solargraph_found(self):
+    def test_find_lsp_tool_solargraph_found(self) -> None:
         """solargraph found returns its path."""
         with patch("shutil.which", return_value="/usr/bin/solargraph"):
             result = find_lsp_tool("solargraph")
@@ -375,27 +375,27 @@ class TestFindLspTool:
 class TestRunLspCheck:
     """Test run_lsp_check entry point."""
 
-    def test_run_lsp_check_tool_not_found(self):
+    def test_run_lsp_check_tool_not_found(self) -> None:
         """Graceful degradation when tool is missing."""
         with patch("engine.lsp.find_lsp_tool", return_value=None):
             result = run_lsp_check("pylsp", "/tmp")
         assert result == []
 
-    def test_run_lsp_check_no_staged_files(self, tmp_workdir):
+    def test_run_lsp_check_no_staged_files(self, tmp_workdir) -> None:
         """Returns empty diagnostics when no staged files."""
         with patch("engine.lsp.find_lsp_tool", return_value="/usr/bin/pylsp"):
             with patch("engine.lsp._get_staged_files", return_value=[]):
                 result = run_lsp_check("pylsp", tmp_workdir)
         assert result == []
 
-    def test_run_lsp_check_no_matching_language(self, tmp_workdir):
+    def test_run_lsp_check_no_matching_language(self, tmp_workdir) -> None:
         """Returns empty when staged files don't match tool language."""
         with patch("engine.lsp.find_lsp_tool", return_value="/usr/bin/pylsp"):
             with patch("engine.lsp._get_staged_files", return_value=["file.lua"]):
                 result = run_lsp_check("pylsp", tmp_workdir)
         assert result == []
 
-    def test_run_lsp_check_timeout_handled_gracefully(self):
+    def test_run_lsp_check_timeout_handled_gracefully(self) -> None:
         """Handles TimeoutExpired without crashing."""
         with patch("engine.lsp.find_lsp_tool", return_value="/usr/bin/pylsp"):
             with patch("engine.lsp.subprocess.Popen") as mock_popen:
@@ -411,7 +411,7 @@ class TestRunLspCheck:
         mock_killpg.assert_not_called()
         mock_proc.kill.assert_called_once()
 
-    def test_run_lsp_check_startup_failure_returns_empty(self):
+    def test_run_lsp_check_startup_failure_returns_empty(self) -> None:
         """When LSP process can't start, returns empty list."""
         with patch("engine.lsp.find_lsp_tool", return_value="/usr/bin/pylsp"):
             with patch("engine.lsp.subprocess.Popen", side_effect=OSError("not found")):
@@ -420,7 +420,7 @@ class TestRunLspCheck:
                         result = run_lsp_check("pylsp", "/tmp")
         assert result == []
 
-    def test_run_lsp_check_initialize_failure(self):
+    def test_run_lsp_check_initialize_failure(self) -> None:
         """When LSP initialization fails, returns empty diagnostics."""
         mock_proc = MagicMock()
         with patch("engine.lsp.find_lsp_tool", return_value="/usr/bin/pylsp"):
@@ -433,7 +433,7 @@ class TestRunLspCheck:
         assert result == []
         mock_shutdown.assert_called_once()
 
-    def test_rust_analyzer_init_failure_uses_bounded_timeout(self):
+    def test_rust_analyzer_init_failure_uses_bounded_timeout(self) -> None:
         """rust-analyzer init failure returns fast with the 30s default cap (GR-138).
 
         Regression: the old 300s heavy-set cap made an uninitializable
@@ -454,7 +454,7 @@ class TestRunLspCheck:
 class TestToolDefaultTimeouts:
     """Test C++-aware LSP timeout defaults (GR: C++ repo timeout fix)."""
 
-    def test_clangd_gets_generous_budget(self):
+    def test_clangd_gets_generous_budget(self) -> None:
         """clangd is always treated as heavy — it builds a project index."""
         from engine.lsp import _tool_default_timeouts
 
@@ -462,21 +462,21 @@ class TestToolDefaultTimeouts:
         assert init_t >= 300
         assert per_file_t >= 120
 
-    def test_rust_analyzer_gets_generous_budget(self):
+    def test_rust_analyzer_gets_generous_budget(self) -> None:
         from engine.lsp import _tool_default_timeouts
 
         init_t, per_file_t = _tool_default_timeouts("rust-analyzer", "/tmp/empty")
         assert init_t <= 30
         assert per_file_t >= 120
 
-    def test_pylsp_gets_default_budget(self):
+    def test_pylsp_gets_default_budget(self) -> None:
         from engine.lsp import _tool_default_timeouts
 
         init_t, per_file_t = _tool_default_timeouts("pylsp", "/tmp/empty")
         assert init_t == 60.0
         assert per_file_t == 30.0
 
-    def test_cpp_staged_files_trigger_heavy_budget(self):
+    def test_cpp_staged_files_trigger_heavy_budget(self) -> None:
         """Repo with staged .cpp files gets the C++ budget even for non-clangd tools."""
         from engine.lsp import _tool_default_timeouts
 
@@ -485,7 +485,7 @@ class TestToolDefaultTimeouts:
         assert init_t >= 180
         assert per_file_t >= 90
 
-    def test_python_staged_files_stay_default(self):
+    def test_python_staged_files_stay_default(self) -> None:
         from engine.lsp import _tool_default_timeouts
 
         with patch("engine.lsp._get_staged_files", return_value=["app.py"]):
@@ -497,7 +497,7 @@ class TestToolDefaultTimeouts:
 class TestLspHeaderParsing:
     """Test Content-Length header parsing via _lsp_encode_message/_lsp_read_response."""
 
-    def test_encode_message_has_content_length(self):
+    def test_encode_message_has_content_length(self) -> None:
         from engine.lsp import _lsp_encode_message
 
         msg = {"jsonrpc": "2.0", "id": 1, "method": "shutdown"}
@@ -507,7 +507,7 @@ class TestLspHeaderParsing:
         length = int(header.split(b":")[1].strip())
         assert length == len(body)
 
-    def test_encode_decode_roundtrip(self):
+    def test_encode_decode_roundtrip(self) -> None:
         from engine.lsp import _lsp_encode_message
 
         msg = {"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {}}
@@ -523,7 +523,7 @@ class TestLspHeaderParsing:
         decoded = json.loads(body.decode("utf-8"))
         assert decoded["method"] == "textDocument/didOpen"
 
-    def test_read_response_parses_header(self):
+    def test_read_response_parses_header(self) -> None:
         import io
         from engine.lsp import _lsp_encode_message, _lsp_read_response
 
@@ -538,7 +538,7 @@ class TestLspHeaderParsing:
         assert result is not None
         assert result["method"] == "textDocument/publishDiagnostics"
 
-    def test_read_response_returns_none_quickly_when_server_dead(self):
+    def test_read_response_returns_none_quickly_when_server_dead(self) -> None:
         """A dead LSP server must not hold the read loop until the timeout (GR-138).
 
         Regression: the old loop kept select()/read() cycling on the
@@ -595,7 +595,7 @@ def lsp_workdir(tmp_path):
     return str(tmp_path)
 
 
-def require_gopls_module_context(workdir):
+def require_gopls_module_context(workdir) -> None:
     """Establish gopls' module context or SKIP with the missing piece NAMED.
 
     DF-GITREINS-POC-21: the gopls integration tests used to skip only on a
@@ -637,7 +637,7 @@ def require_gopls_module_context(workdir):
         )
 
 
-def gopls_environment_note(workdir):
+def gopls_environment_note(workdir) -> str:
     """One-line environment fingerprint for a gopls verdict (DF-GITREINS-POC-21).
 
     The fresh-system failure was filed with no way to tell an environment gap
@@ -669,7 +669,7 @@ def gopls_environment_note(workdir):
     )
 
 
-def _tmpdir_allows_exec(path):
+def _tmpdir_allows_exec(path) -> bool:
     """REVIEW-009: can a file written into ``path`` actually be EXECUTED?
 
     On a host whose pytest tmpdir sits on a ``noexec`` mount, the gopls
@@ -744,7 +744,7 @@ class TestLspIntegration:
         return run_lsp_check(tool, workdir, files=files, timeout_per_file=8.0)
 
     @PYLSP_SKIP_310
-    def test_pylsp_detects_undefined_variable(self, lsp_workdir):
+    def test_pylsp_detects_undefined_variable(self, lsp_workdir) -> None:
         """Bad code with undefined variable produces diagnostics."""
         path = self._write_py(lsp_workdir, "bad_undefined.py", self.BAD_CODE_UNDEFINED)
         diags = self._run_check(lsp_workdir, [path])
@@ -757,7 +757,7 @@ class TestLspIntegration:
         )
 
     @PYLSP_SKIP_310
-    def test_pylsp_detects_syntax_error(self, lsp_workdir):
+    def test_pylsp_detects_syntax_error(self, lsp_workdir) -> None:
         """Syntax error produces diagnostics."""
         path = self._write_py(lsp_workdir, "bad_syntax.py", self.BAD_CODE_SYNTAX)
         diags = self._run_check(lsp_workdir, [path])
@@ -768,34 +768,34 @@ class TestLspIntegration:
             f"No syntax error in diagnostics: {messages}"
         )
 
-    def test_pylsp_clean_code_no_diagnostics(self, lsp_workdir):
+    def test_pylsp_clean_code_no_diagnostics(self, lsp_workdir) -> None:
         """Clean code produces no diagnostics."""
         path = self._write_py(lsp_workdir, "clean.py", self.CLEAN_CODE)
         diags = self._run_check(lsp_workdir, [path])
         assert diags == [], f"Expected no diagnostics for clean code, got: {diags}"
 
     @PYLSP_SKIP_310
-    def test_pylsp_guard_fails_on_bad_code(self, lsp_workdir):
+    def test_pylsp_guard_fails_on_bad_code(self, lsp_workdir) -> None:
         """Guard machinery reports FAIL for bad code."""
         path = self._write_py(lsp_workdir, "failing.py", self.BAD_CODE_UNDEFINED)
         diags = self._run_check(lsp_workdir, [path])
         has_errors = any(d.get("severity") == "error" for d in diags)
         assert has_errors, "Bad code should produce error-severity diagnostics"
 
-    def test_pylsp_guard_passes_on_clean_code(self, lsp_workdir):
+    def test_pylsp_guard_passes_on_clean_code(self, lsp_workdir) -> None:
         """Guard machinery reports PASS for clean code."""
         path = self._write_py(lsp_workdir, "passing.py", self.CLEAN_CODE)
         diags = self._run_check(lsp_workdir, [path])
         assert diags == [], "Clean code should produce no diagnostics"
 
-    def test_missing_lsp_tool_skips_gracefully(self, lsp_workdir):
+    def test_missing_lsp_tool_skips_gracefully(self, lsp_workdir) -> None:
         """Non-existent tool returns empty list (skip, not crash)."""
         path = self._write_py(lsp_workdir, "dummy.py", self.CLEAN_CODE)
         diags = run_lsp_check("nonexistent-lsp-tool-xyz", lsp_workdir, files=[path])
         assert diags == [], "Missing LSP tool should return empty diagnostics"
 
     @PYLSP_SKIP_310
-    def test_pylsp_multiple_files_mixed(self, lsp_workdir):
+    def test_pylsp_multiple_files_mixed(self, lsp_workdir) -> None:
         """Mixed files — bad and clean — return only bad diagnostics."""
         bad_path = self._write_py(lsp_workdir, "mixed_bad.py", self.BAD_CODE_UNDEFINED)
         clean_path = self._write_py(lsp_workdir, "mixed_clean.py", self.CLEAN_CODE)
@@ -821,7 +821,7 @@ class TestLspJudgeIntegration:
     BAD_CODE = "x = undefined_var\n"
     GOOD_CODE = "x = 1\nprint(x)\n"
 
-    def _init_git_repo(self, workdir):
+    def _init_git_repo(self, workdir) -> None:
         """Initialize a real git repo in workdir."""
         import subprocess
 
@@ -833,7 +833,7 @@ class TestLspJudgeIntegration:
 
     @PYLSP_MISSING
     @PYLSP_SKIP_310
-    def test_lsp_roundtrip_format_parse(self, tmp_path):
+    def test_lsp_roundtrip_format_parse(self, tmp_path) -> None:
         """Real pylsp output → formatted like GuardManager → parsed back by Judge.
 
         Verifies the full roundtrip:
@@ -900,7 +900,7 @@ class TestLspJudgeIntegration:
             assert p["message"] == d["message"]
             assert p["line"] == d["line"]
 
-    def test_evaluator_receives_lsp_diagnostics(self, tmp_path, llm_client):
+    def test_evaluator_receives_lsp_diagnostics(self, tmp_path, llm_client) -> None:
         """Evaluator task prompt includes TIER 1 LSP DIAGNOSTICS when task has them."""
         from unittest.mock import patch, MagicMock
 
@@ -961,7 +961,7 @@ class TestLspJudgeIntegration:
         assert len(result["diagnostics"]) == 1
         assert result["diagnostics"][0]["severity"] == "error"
 
-    def test_evaluator_no_lsp_diagnostics_empty(self, tmp_path, llm_client):
+    def test_evaluator_no_lsp_diagnostics_empty(self, tmp_path, llm_client) -> None:
         """Evaluator handles missing tier1_diagnostics gracefully."""
         from engine.evaluator import AgenticEvaluator
 
@@ -977,7 +977,7 @@ class TestLspJudgeIntegration:
         assert result["count"] == 0
         assert result["diagnostics"] == []
 
-    def test_evaluator_read_lsp_diagnostics_tool_defined(self):
+    def test_evaluator_read_lsp_diagnostics_tool_defined(self) -> None:
         """read_lsp_diagnostics tool definition exists in EVALUATOR_TOOLS."""
         from engine.evaluator import EVALUATOR_TOOLS
 
@@ -993,21 +993,21 @@ class TestLspJudgeIntegration:
 class TestStagedFilesByLanguage:
     """Test _staged_files_by_language correctly maps files to languages."""
 
-    def test_maps_python_files(self):
+    def test_maps_python_files(self) -> None:
         """.py files map to python language."""
         with patch("engine.lsp._get_staged_files", return_value=["file.py"]):
             with patch("os.path.isfile", return_value=True):
                 result = _staged_files_by_language("/tmp")
         assert result == {"python": ["/tmp/file.py"]}
 
-    def test_maps_rust_files(self):
+    def test_maps_rust_files(self) -> None:
         """.rs files map to rust language."""
         with patch("engine.lsp._get_staged_files", return_value=["file.rs"]):
             with patch("os.path.isfile", return_value=True):
                 result = _staged_files_by_language("/tmp")
         assert result == {"rust": ["/tmp/file.rs"]}
 
-    def test_maps_ts_js_files(self):
+    def test_maps_ts_js_files(self) -> None:
         """.ts, .tsx, .js, .jsx files map to their languages."""
         with patch(
             "engine.lsp._get_staged_files",
@@ -1022,28 +1022,28 @@ class TestStagedFilesByLanguage:
             "javascriptreact": ["/tmp/file.jsx"],
         }
 
-    def test_maps_lua_files(self):
+    def test_maps_lua_files(self) -> None:
         """.lua files map to lua language."""
         with patch("engine.lsp._get_staged_files", return_value=["file.lua"]):
             with patch("os.path.isfile", return_value=True):
                 result = _staged_files_by_language("/tmp")
         assert result == {"lua": ["/tmp/file.lua"]}
 
-    def test_skips_unknown_extensions(self):
+    def test_skips_unknown_extensions(self) -> None:
         """Files with unknown extensions are skipped."""
         with patch("engine.lsp._get_staged_files", return_value=["file.xyz", "file.txt"]):
             with patch("os.path.isfile", return_value=True):
                 result = _staged_files_by_language("/tmp")
         assert result == {}
 
-    def test_skips_missing_files(self):
+    def test_skips_missing_files(self) -> None:
         """Files that don't exist on disk are skipped."""
         with patch("engine.lsp._get_staged_files", return_value=["file.py"]):
             with patch("os.path.isfile", return_value=False):
                 result = _staged_files_by_language("/tmp")
         assert result == {}
 
-    def test_maps_mixed_languages(self):
+    def test_maps_mixed_languages(self) -> None:
         """Multiple languages map correctly in a single call."""
         with patch("engine.lsp._get_staged_files", return_value=["a.py", "b.rs", "c.ts"]):
             with patch("os.path.isfile", return_value=True):
@@ -1054,21 +1054,21 @@ class TestStagedFilesByLanguage:
             "typescript": ["/tmp/c.ts"],
         }
 
-    def test_maps_go_files(self):
+    def test_maps_go_files(self) -> None:
         """.go files map to go language."""
         with patch("engine.lsp._get_staged_files", return_value=["file.go"]):
             with patch("os.path.isfile", return_value=True):
                 result = _staged_files_by_language("/tmp")
         assert result == {"go": ["/tmp/file.go"]}
 
-    def test_maps_java_files(self):
+    def test_maps_java_files(self) -> None:
         """.java files map to java language."""
         with patch("engine.lsp._get_staged_files", return_value=["File.java"]):
             with patch("os.path.isfile", return_value=True):
                 result = _staged_files_by_language("/tmp")
         assert result == {"java": ["/tmp/File.java"]}
 
-    def test_maps_kotlin_files(self):
+    def test_maps_kotlin_files(self) -> None:
         """.kt and .kts files map to kotlin language."""
         with patch(
             "engine.lsp._get_staged_files", return_value=["src/Main.kt", "build.gradle.kts"]
@@ -1077,21 +1077,21 @@ class TestStagedFilesByLanguage:
                 result = _staged_files_by_language("/tmp")
         assert result == {"kotlin": ["/tmp/src/Main.kt", "/tmp/build.gradle.kts"]}
 
-    def test_maps_csharp_files(self):
+    def test_maps_csharp_files(self) -> None:
         """.cs files map to csharp language."""
         with patch("engine.lsp._get_staged_files", return_value=["src/Program.cs"]):
             with patch("os.path.isfile", return_value=True):
                 result = _staged_files_by_language("/tmp")
         assert result == {"csharp": ["/tmp/src/Program.cs"]}
 
-    def test_maps_swift_files(self):
+    def test_maps_swift_files(self) -> None:
         """.swift files map to swift language."""
         with patch("engine.lsp._get_staged_files", return_value=["Sources/main.swift"]):
             with patch("os.path.isfile", return_value=True):
                 result = _staged_files_by_language("/tmp")
         assert result == {"swift": ["/tmp/Sources/main.swift"]}
 
-    def test_maps_dart_files(self):
+    def test_maps_dart_files(self) -> None:
         """.dart files map to dart language."""
         with patch("engine.lsp._get_staged_files", return_value=["lib/main.dart"]):
             with patch("os.path.isfile", return_value=True):
@@ -1102,7 +1102,7 @@ class TestStagedFilesByLanguage:
                 result = _staged_files_by_language("/tmp")
         assert result == {"go": ["/tmp/main.go", "/tmp/util.go"]}
 
-    def test_maps_elixir_files(self):
+    def test_maps_elixir_files(self) -> None:
         """.ex and .exs files map to elixir language."""
         with patch(
             "engine.lsp._get_staged_files", return_value=["lib/my_module.ex", "lib/helper.exs"]
@@ -1111,7 +1111,7 @@ class TestStagedFilesByLanguage:
                 result = _staged_files_by_language("/tmp")
         assert result == {"elixir": ["/tmp/lib/my_module.ex", "/tmp/lib/helper.exs"]}
 
-    def test_maps_scala_files(self):
+    def test_maps_scala_files(self) -> None:
         """.scala and .sc files map to scala language."""
         with patch(
             "engine.lsp._get_staged_files", return_value=["src/main.scala", "src/helper.sc"]
@@ -1120,7 +1120,7 @@ class TestStagedFilesByLanguage:
                 result = _staged_files_by_language("/tmp")
         assert result == {"scala": ["/tmp/src/main.scala", "/tmp/src/helper.sc"]}
 
-    def test_maps_ruby_files(self):
+    def test_maps_ruby_files(self) -> None:
         """.rb files map to ruby language."""
         with patch("engine.lsp._get_staged_files", return_value=["lib/foo.rb", "spec/foo_spec.rb"]):
             with patch("os.path.isfile", return_value=True):
@@ -1158,7 +1158,7 @@ edition = "2021"
             f.write(content)
         return path
 
-    def test_rust_analyzer_skip_if_not_installed(self, lsp_workdir):
+    def test_rust_analyzer_skip_if_not_installed(self, lsp_workdir) -> None:
         """When rust-analyzer not found, skip gracefully (no crash)."""
         path = self._write_file(lsp_workdir, "src/main.rs", self.CLEAN_RS_CODE)
         self._write_file(lsp_workdir, "Cargo.toml", self.CARGO_TOML)
@@ -1166,7 +1166,7 @@ edition = "2021"
             diags = run_lsp_check("rust-analyzer", lsp_workdir, files=[path])
         assert diags == []
 
-    def test_rust_analyzer_detects_type_error(self, lsp_workdir):
+    def test_rust_analyzer_detects_type_error(self, lsp_workdir) -> None:
         """rust-analyzer detects type mismatches when available."""
         if shutil.which("rust-analyzer") is None:
             pytest.skip("rust-analyzer not installed")
@@ -1180,7 +1180,7 @@ edition = "2021"
             "expected" in m or "type" in m or "string" in m or "i32" in m for m in messages
         ), f"No type error diagnostics from rust-analyzer: {messages}"
 
-    def test_rust_analyzer_clean_code_no_diagnostics(self, lsp_workdir):
+    def test_rust_analyzer_clean_code_no_diagnostics(self, lsp_workdir) -> None:
         """Clean Rust code produces no error diagnostics."""
         if shutil.which("rust-analyzer") is None:
             pytest.skip("rust-analyzer not installed")
@@ -1197,7 +1197,7 @@ edition = "2021"
 class TestTsLspIntegration:
     """Integration tests for TypeScript LSP. ts-lsp is not installed, so tests verify graceful skip."""
 
-    def test_ts_lsp_skip_gracefully(self, lsp_workdir):
+    def test_ts_lsp_skip_gracefully(self, lsp_workdir) -> None:
         """typescript-language-server not found returns empty diagnostics."""
         if find_lsp_tool("ts-lsp"):
             pytest.skip(
@@ -1289,7 +1289,7 @@ class TestGoplsIntegration:
             return "stall"
         return "verdict"
 
-    def test_gopls_detects_go_errors(self, lsp_workdir):
+    def test_gopls_detects_go_errors(self, lsp_workdir) -> None:
         """gopls detects type errors in Go code when installed."""
         # DF-GITREINS-POC-21: this test drives REAL gopls, which type-checks
         # nothing without a module context. Measured on one machine with the
@@ -1360,7 +1360,7 @@ class TestGoplsIntegration:
             f"{json.dumps((status.to_dict() if status else {}), default=str)[:600]}"
         )
 
-    def test_gopls_budgets_are_explicit_and_readiness_driven(self):
+    def test_gopls_budgets_are_explicit_and_readiness_driven(self) -> None:
         """Regression guard for GR-GAP-032 + INT-FLAKE-4.
 
         The gopls integration test asserts *correctness*, not latency, so its
@@ -1388,7 +1388,7 @@ class TestGoplsIntegration:
         for field in ("published", "stalled", "server_ready", "rechecks"):
             assert field in LspCheckStatus.__dataclass_fields__, field
 
-    def test_gopls_failure_gate_is_published_not_probe_responsiveness(self):
+    def test_gopls_failure_gate_is_published_not_probe_responsiveness(self) -> None:
         """INT-FLAKE-4: what fails the test, and what is a non-failing diagnostic.
 
         Measured under CPU load, a quiescent gopls answers `workspace/symbol` in
@@ -1418,7 +1418,7 @@ class TestGoplsIntegration:
 
     def test_gopls_recovers_a_didopen_that_never_checked_the_file(
         self, lsp_workdir, tmp_path, monkeypatch
-    ):
+    ) -> None:
         """INT-FLAKE-4 root cause: a `didOpen` that lands before the server has
         a snapshot never produces diagnostics. Re-sending the same content as a
         change forces the check, so the engine recovers it in one attempt."""
@@ -1471,7 +1471,7 @@ class TestGoplsIntegration:
 
     def test_gopls_probe_reports_a_quiescent_spawn_as_stalled(
         self, lsp_workdir, tmp_path, monkeypatch
-    ):
+    ) -> None:
         """INT-FLAKE-4: a spawn that answers `initialize` and then goes silent
         must be reported as STALLED, not mistaken for a clean tree."""
         quiet_bin = tmp_path / "bin"
@@ -1520,13 +1520,13 @@ class TestGoplsIntegration:
         # default: that is what makes fresh-server retries affordable.
         assert elapsed < 30.0, f"{elapsed:.1f}s"
 
-    def test_gopls_skip_gracefully_when_not_installed(self, lsp_workdir):
+    def test_gopls_skip_gracefully_when_not_installed(self, lsp_workdir) -> None:
         """gopls not found returns empty diagnostics."""
         with patch("shutil.which", return_value=None):
             diags = run_lsp_check("gopls", lsp_workdir, files=[])
         assert diags == [], "gopls should return empty diagnostics when not installed"
 
-    def test_gopls_module_context_escape_is_named(self, lsp_workdir, monkeypatch):
+    def test_gopls_module_context_escape_is_named(self, lsp_workdir, monkeypatch) -> None:
         """DF-GITREINS-POC-21: every environment gap is a NAMED skip, not a defect.
 
         Measured failure mode: with no module context gopls publishes an EMPTY
@@ -1553,7 +1553,7 @@ class TestGoplsIntegration:
         with pytest.raises(pytest.skip.Exception, match="go mod init"):
             require_gopls_module_context(lsp_workdir)
 
-    def test_gopls_environment_note_names_tools_and_module_context(self, lsp_workdir):
+    def test_gopls_environment_note_names_tools_and_module_context(self, lsp_workdir) -> None:
         """The failure fingerprint the fresh-system row asked for is real."""
         note = gopls_environment_note(lsp_workdir)
         assert "gopls=" in note
@@ -1570,7 +1570,7 @@ class TestGoplsIntegration:
 class TestJdtlsIntegration:
     """Integration tests for Java LSP with jdtls."""
 
-    def test_jdtls_skip_gracefully_when_not_installed(self, lsp_workdir):
+    def test_jdtls_skip_gracefully_when_not_installed(self, lsp_workdir) -> None:
         """jdtls not found returns empty diagnostics (skip, not crash)."""
         with patch("engine.lsp.find_lsp_tool", return_value=None):
             diags = run_lsp_check(
@@ -1578,7 +1578,7 @@ class TestJdtlsIntegration:
             )
         assert diags == [], "jdtls should return empty diagnostics when not installed"
 
-    def test_jdtls_java_file_language_mapping(self, lsp_workdir):
+    def test_jdtls_java_file_language_mapping(self, lsp_workdir) -> None:
         """.java files are mapped to 'java' language via _LANGUAGE_MAP."""
         from engine.lsp import _staged_files_by_language
 
@@ -1595,7 +1595,7 @@ class TestJdtlsIntegration:
 class TestKotlinLsIntegration:
     """Integration tests for Kotlin LSP with kotlin-language-server."""
 
-    def test_kotlin_ls_skip_gracefully_when_not_installed(self, lsp_workdir):
+    def test_kotlin_ls_skip_gracefully_when_not_installed(self, lsp_workdir) -> None:
         """kotlin-language-server not found returns empty diagnostics."""
         with patch("engine.lsp.find_lsp_tool", return_value=None):
             diags = run_lsp_check(
@@ -1605,7 +1605,7 @@ class TestKotlinLsIntegration:
             "kotlin-language-server should return empty diagnostics when not installed"
         )
 
-    def test_kotlin_ls_kts_language_mapping(self, lsp_workdir):
+    def test_kotlin_ls_kts_language_mapping(self, lsp_workdir) -> None:
         """.kts files are mapped to kotlin via _LANGUAGE_MAP."""
         from engine.lsp import _staged_files_by_language
 
@@ -1622,7 +1622,7 @@ class TestKotlinLsIntegration:
 class TestCsharpLsIntegration:
     """Integration tests for C# LSP with csharp-ls."""
 
-    def test_csharp_ls_skip_gracefully_when_not_installed(self, lsp_workdir):
+    def test_csharp_ls_skip_gracefully_when_not_installed(self, lsp_workdir) -> None:
         """csharp-ls not found returns empty diagnostics."""
         with patch("engine.lsp.find_lsp_tool", return_value=None):
             diags = run_lsp_check(
@@ -1630,7 +1630,7 @@ class TestCsharpLsIntegration:
             )
         assert diags == [], "csharp-ls should return empty diagnostics when not installed"
 
-    def test_csharp_ls_cs_language_mapping(self, lsp_workdir):
+    def test_csharp_ls_cs_language_mapping(self, lsp_workdir) -> None:
         """.cs files are mapped to csharp via _LANGUAGE_MAP."""
         from engine.lsp import _staged_files_by_language
 
@@ -1647,7 +1647,7 @@ class TestCsharpLsIntegration:
 class TestSourcekitLsIntegration:
     """Integration tests for Swift LSP with sourcekit-lsp."""
 
-    def test_sourcekit_ls_skip_gracefully_when_not_installed(self, lsp_workdir):
+    def test_sourcekit_ls_skip_gracefully_when_not_installed(self, lsp_workdir) -> None:
         """sourcekit-lsp not found returns empty diagnostics."""
         with patch("engine.lsp.find_lsp_tool", return_value=None):
             diags = run_lsp_check(
@@ -1655,7 +1655,7 @@ class TestSourcekitLsIntegration:
             )
         assert diags == [], "sourcekit-lsp should return empty diagnostics when not installed"
 
-    def test_sourcekit_ls_swift_language_mapping(self, lsp_workdir):
+    def test_sourcekit_ls_swift_language_mapping(self, lsp_workdir) -> None:
         """.swift files are mapped to swift via _LANGUAGE_MAP."""
         from engine.lsp import _staged_files_by_language
 
@@ -1672,7 +1672,7 @@ class TestSourcekitLsIntegration:
 class TestDartLsIntegration:
     """Integration tests for Dart LSP with dart."""
 
-    def test_dart_ls_skip_gracefully_when_not_installed(self, lsp_workdir):
+    def test_dart_ls_skip_gracefully_when_not_installed(self, lsp_workdir) -> None:
         """dart not found returns empty diagnostics."""
         with patch("engine.lsp.find_lsp_tool", return_value=None):
             diags = run_lsp_check(
@@ -1680,7 +1680,7 @@ class TestDartLsIntegration:
             )
         assert diags == [], "dart should return empty diagnostics when not installed"
 
-    def test_dart_ls_dart_language_mapping(self, lsp_workdir):
+    def test_dart_ls_dart_language_mapping(self, lsp_workdir) -> None:
         """.dart files are mapped to dart via _LANGUAGE_MAP."""
         from engine.lsp import _staged_files_by_language
 
@@ -1697,7 +1697,7 @@ class TestDartLsIntegration:
 class TestElixirLsIntegration:
     """Integration tests for Elixir LSP with elixir-ls."""
 
-    def test_elixir_ls_skip_gracefully_when_not_installed(self, lsp_workdir):
+    def test_elixir_ls_skip_gracefully_when_not_installed(self, lsp_workdir) -> None:
         """elixir-ls not found returns empty diagnostics."""
         with patch("engine.lsp.find_lsp_tool", return_value=None):
             diags = run_lsp_check(
@@ -1705,7 +1705,7 @@ class TestElixirLsIntegration:
             )
         assert diags == [], "elixir-ls should return empty diagnostics when not installed"
 
-    def test_elixir_ls_elixir_language_mapping(self, lsp_workdir):
+    def test_elixir_ls_elixir_language_mapping(self, lsp_workdir) -> None:
         """.ex files are mapped to elixir via _LANGUAGE_MAP."""
         from engine.lsp import _staged_files_by_language
 
@@ -1722,7 +1722,7 @@ class TestElixirLsIntegration:
 class TestMetalsIntegration:
     """Integration tests for Scala LSP with metals."""
 
-    def test_metals_skip_gracefully_when_not_installed(self, lsp_workdir):
+    def test_metals_skip_gracefully_when_not_installed(self, lsp_workdir) -> None:
         """metals not found returns empty diagnostics."""
         with patch("engine.lsp.find_lsp_tool", return_value=None):
             diags = run_lsp_check(
@@ -1730,7 +1730,7 @@ class TestMetalsIntegration:
             )
         assert diags == [], "metals should return empty diagnostics when not installed"
 
-    def test_metals_scala_language_mapping(self, lsp_workdir):
+    def test_metals_scala_language_mapping(self, lsp_workdir) -> None:
         """.scala files are mapped to scala via _LANGUAGE_MAP."""
         from engine.lsp import _staged_files_by_language
 
@@ -1747,7 +1747,7 @@ class TestMetalsIntegration:
 class TestRubyLspIntegration:
     """Integration tests for Ruby LSP with ruby-lsp and solargraph."""
 
-    def test_ruby_lsp_skip_gracefully_when_not_installed(self, lsp_workdir):
+    def test_ruby_lsp_skip_gracefully_when_not_installed(self, lsp_workdir) -> None:
         """ruby-lsp not found returns empty diagnostics."""
         with patch("engine.lsp.find_lsp_tool", return_value=None):
             diags = run_lsp_check(
@@ -1755,7 +1755,7 @@ class TestRubyLspIntegration:
             )
         assert diags == [], "ruby-lsp should return empty diagnostics when not installed"
 
-    def test_solargraph_skip_gracefully_when_not_installed(self, lsp_workdir):
+    def test_solargraph_skip_gracefully_when_not_installed(self, lsp_workdir) -> None:
         """solargraph not found returns empty diagnostics."""
         with patch("engine.lsp.find_lsp_tool", return_value=None):
             diags = run_lsp_check(
@@ -1763,7 +1763,7 @@ class TestRubyLspIntegration:
             )
         assert diags == [], "solargraph should return empty diagnostics when not installed"
 
-    def test_ruby_lsp_language_mapping(self, lsp_workdir):
+    def test_ruby_lsp_language_mapping(self, lsp_workdir) -> None:
         """.rb files are mapped to ruby via _LANGUAGE_MAP."""
         from engine.lsp import _staged_files_by_language
 
@@ -1830,7 +1830,7 @@ def pytest_configure(config):
     os.path.exists = _exists_without_pylsp
 '''
 
-    def test_roundtrip_node_skips_when_pylsp_hidden(self, tmp_path):
+    def test_roundtrip_node_skips_when_pylsp_hidden(self, tmp_path) -> None:
         """Subprocess run with pylsp hidden exits 0 and reports the node skipped."""
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         plugin_dir = tmp_path / "skip_plugin"

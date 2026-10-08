@@ -48,7 +48,7 @@ def _repo(tmp_path, name="repo"):
     return str(_init_repo(path))
 
 
-def _stage(workdir, relpath, content):
+def _stage(workdir, relpath, content) -> None:
     full = os.path.join(workdir, relpath)
     os.makedirs(os.path.dirname(full), exist_ok=True)
     with open(full, "w") as f:
@@ -56,7 +56,7 @@ def _stage(workdir, relpath, content):
     subprocess.run(["git", "add", relpath], cwd=workdir, capture_output=True, check=True)
 
 
-def _write_config(workdir, guards: dict):
+def _write_config(workdir, guards: dict) -> None:
     cfg_dir = os.path.join(workdir, ".gitreins")
     os.makedirs(cfg_dir, exist_ok=True)
     with open(os.path.join(cfg_dir, "config.yaml"), "w") as f:
@@ -73,7 +73,7 @@ def _manager(workdir, **guards):
 class TestSkippedStepReasons:
     """Criterion 1: the tier1 result carries a skipped-step list with reasons."""
 
-    def test_clean_tree_records_skip_reasons(self, tmp_path):
+    def test_clean_tree_records_skip_reasons(self, tmp_path) -> None:
         repo = _repo(tmp_path)
         result = _manager(repo).run_all()
 
@@ -89,7 +89,7 @@ class TestSkippedStepReasons:
         assert result.extra["skipped_steps"] == result.skipped_steps
         assert result.extra["allow_skips"] is False
 
-    def test_summary_marks_skips_and_never_uses_a_checkmark(self, tmp_path):
+    def test_summary_marks_skips_and_never_uses_a_checkmark(self, tmp_path) -> None:
         repo = _repo(tmp_path)
         summary = _manager(repo).run_all().summary
 
@@ -99,7 +99,7 @@ class TestSkippedStepReasons:
         assert "✓ tests" not in summary
         assert "✓ secrets" in summary, "secrets really did run on this tree"
 
-    def test_staged_tree_has_no_skip_markers(self, tmp_path):
+    def test_staged_tree_has_no_skip_markers(self, tmp_path) -> None:
         repo = _repo(tmp_path)
         _stage(repo, "clean.py", "x = 1\n")
         result = _manager(repo).run_all()
@@ -111,7 +111,7 @@ class TestSkippedStepReasons:
         assert "~" not in result.summary
         assert "skipped" not in result.summary.lower()
 
-    def test_missing_linter_is_a_skip_not_a_pass(self, tmp_path, monkeypatch):
+    def test_missing_linter_is_a_skip_not_a_pass(self, tmp_path, monkeypatch) -> None:
         repo = _repo(tmp_path)
         _stage(repo, "clean.py", "x = 1\n")
         # Keep `git` reachable (staged-file discovery) while ruff/flake8 are
@@ -126,7 +126,7 @@ class TestSkippedStepReasons:
         lint = [s for s in result.skipped_steps if s["step"] == "lint"]
         assert lint == [{"step": "lint", "reason": "no linter on PATH"}]
 
-    def test_config_disabled_guards_are_not_degradations(self, tmp_path):
+    def test_config_disabled_guards_are_not_degradations(self, tmp_path) -> None:
         """A disabled gate never runs — only a gate that RAN and skipped counts."""
         repo = _repo(tmp_path)
         result = _manager(repo, lint=False, tests=False).run_all()
@@ -134,7 +134,7 @@ class TestSkippedStepReasons:
         assert result.skipped_steps == []
         assert result.degraded is False
 
-    def test_absent_lsp_server_is_a_skip_not_a_clean_pass(self, tmp_path, monkeypatch):
+    def test_absent_lsp_server_is_a_skip_not_a_clean_pass(self, tmp_path, monkeypatch) -> None:
         """`run_lsp_check` returns [] for a missing server — that is not "clean".
 
         Pinned with a patched tool lookup: CI installs python-lsp-server (a dev
@@ -153,7 +153,7 @@ class TestSkippedStepReasons:
         ]
         assert "~ lsp — skipped (no LSP tool on PATH (pylsp not installed))" in result.summary
 
-    def test_installed_lsp_server_is_graded_not_skipped(self, tmp_path, monkeypatch):
+    def test_installed_lsp_server_is_graded_not_skipped(self, tmp_path, monkeypatch) -> None:
         """With the server present the LSP gate grades normally (no skip marker)."""
         repo = _repo(tmp_path)
         _stage(repo, "clean.py", "x = 1\n")
@@ -169,7 +169,7 @@ class TestSkippedStepReasons:
 class TestConsoleAndExitCode:
     """Criterion 2 + 4: DEGRADED PASS line, exit 0 only with allow_skips."""
 
-    def test_clean_tree_with_allow_skips_prints_degraded_and_exits_0(self, tmp_path):
+    def test_clean_tree_with_allow_skips_prints_degraded_and_exits_0(self, tmp_path) -> None:
         repo = _repo(tmp_path)
         _write_config(repo, {"test_command": "echo ok", "allow_skips": True})
 
@@ -184,7 +184,7 @@ class TestConsoleAndExitCode:
             "a degraded run must never print the green header"
         )
 
-    def test_clean_tree_without_allow_skips_exits_2(self, tmp_path):
+    def test_clean_tree_without_allow_skips_exits_2(self, tmp_path) -> None:
         repo = _repo(tmp_path)
         _write_config(repo, {"test_command": "echo ok"})
 
@@ -194,7 +194,7 @@ class TestConsoleAndExitCode:
         assert "DEGRADED PASS" in result.stdout
         assert "guards.allow_skips" in result.stderr
 
-    def test_staged_tree_still_prints_the_green_header(self, tmp_path):
+    def test_staged_tree_still_prints_the_green_header(self, tmp_path) -> None:
         repo = _repo(tmp_path)
         _write_config(repo, {"test_command": "echo ok"})
         _stage(repo, "clean.py", "x = 1\n")
@@ -209,7 +209,7 @@ class TestConsoleAndExitCode:
 class TestInitDefault:
     """Criterion 3: fresh init writes allow_skips: true."""
 
-    def test_init_writes_allow_skips_true(self, tmp_path):
+    def test_init_writes_allow_skips_true(self, tmp_path) -> None:
         repo = _repo(tmp_path)
         with open(os.path.join(repo, "app.py"), "w") as f:
             f.write("x = 1\n")
@@ -222,7 +222,7 @@ class TestInitDefault:
 
         assert config["guards"]["allow_skips"] is True
 
-    def test_init_fill_missing_keeps_existing_choice(self, tmp_path):
+    def test_init_fill_missing_keeps_existing_choice(self, tmp_path) -> None:
         """An explicit false is user-authored and must survive a re-init."""
         from gitreins.cli import _detect_language, _fill_missing_guards
 
@@ -236,7 +236,7 @@ class TestInitDefault:
 class TestJudgeRuntimeSkips:
     """Criterion 5: a runtime skip reaches the stage record / verdict.json."""
 
-    def test_runtime_skip_marks_the_stage(self, tmp_path, monkeypatch):
+    def test_runtime_skip_marks_the_stage(self, tmp_path, monkeypatch) -> None:
         from engine.pipeline import Pipeline, _lint_step_run, degradation_warning
 
         workdir = str(tmp_path / "tree")
@@ -275,7 +275,7 @@ class TestJudgeRuntimeSkips:
         assert "skipped at runtime" in tier1["degradation_reason"]
         assert "lint" in degradation_warning(tier1)
 
-    def test_no_sentinel_no_degradation(self, tmp_path):
+    def test_no_sentinel_no_degradation(self, tmp_path) -> None:
         from engine.pipeline import Pipeline
 
         workdir = str(tmp_path / "tree2")
@@ -298,7 +298,7 @@ class TestJudgeRuntimeSkips:
 
         assert "degraded" not in result["stages"]["tier1"]
 
-    def test_sentinel_parser_ignores_ordinary_output(self):
+    def test_sentinel_parser_ignores_ordinary_output(self) -> None:
         from engine.pipeline import parse_skip_sentinels
 
         assert parse_skip_sentinels("3 passed in 1.2s") == []

@@ -19,6 +19,7 @@ from engine.commit_audit import (
     COMMIT_AUDIT_TOOLS,
 )
 from engine.llm import LLMClient, LLMResponse, LLMUsage
+from typing import NoReturn
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -29,14 +30,14 @@ from engine.llm import LLMClient, LLMResponse, LLMUsage
 class TestCommitAuditResult:
     """Test the result dataclass."""
 
-    def test_valid_result_defaults(self):
+    def test_valid_result_defaults(self) -> None:
         result = CommitAuditResult(valid=True)
         assert result.valid is True
         assert result.issues == []
         assert result.suggested_message == ""
         assert result.action == "pass"
 
-    def test_invalid_result_has_issues(self):
+    def test_invalid_result_has_issues(self) -> None:
         result = CommitAuditResult(
             valid=False,
             issues=["Too vague", "Missing scope"],
@@ -47,7 +48,7 @@ class TestCommitAuditResult:
         assert "fix(auth)" in result.suggested_message
         assert result.action == "block"
 
-    def test_action_block_when_invalid(self):
+    def test_action_block_when_invalid(self) -> None:
         result = CommitAuditResult(valid=False, issues=["bad"])
         assert result.action == "block"
 
@@ -64,14 +65,14 @@ class TestCommitAuditorParseResult:
         llm = LLMClient(api_key="sk-test", model="test/model")
         return CommitAuditor(llm)
 
-    def test_parse_valid(self):
+    def test_parse_valid(self) -> None:
         auditor = self._make_auditor()
         resp = LLMResponse(content='{"valid": true}', usage=LLMUsage())
         result = auditor._parse_result(resp)
         assert result.valid is True
         assert result.issues == []
 
-    def test_parse_invalid_with_suggestion(self):
+    def test_parse_invalid_with_suggestion(self) -> None:
         auditor = self._make_auditor()
         resp = LLMResponse(
             content=json.dumps(
@@ -88,7 +89,7 @@ class TestCommitAuditorParseResult:
         assert "too vague" in result.issues[0].lower()
         assert "fix(auth)" in result.suggested_message
 
-    def test_parse_markdown_fenced_json(self):
+    def test_parse_markdown_fenced_json(self) -> None:
         auditor = self._make_auditor()
         resp = LLMResponse(
             content='```json\n{"valid": true}\n```',
@@ -97,7 +98,7 @@ class TestCommitAuditorParseResult:
         result = auditor._parse_result(resp)
         assert result.valid is True
 
-    def test_parse_invalid_json_falls_back_to_valid(self):
+    def test_parse_invalid_json_falls_back_to_valid(self) -> None:
         """Malformed JSON defaults to valid (safe — don't block on parse error)."""
         auditor = self._make_auditor()
         resp = LLMResponse(content="not json at all", usage=LLMUsage())
@@ -105,13 +106,13 @@ class TestCommitAuditorParseResult:
         assert result.valid is True  # safe default
         assert len(result.issues) > 0  # but it reports the issue
 
-    def test_empty_content(self):
+    def test_empty_content(self) -> None:
         auditor = self._make_auditor()
         resp = LLMResponse(content="", usage=LLMUsage())
         result = auditor._parse_result(resp)
         assert result.valid is True  # empty = pass
 
-    def test_iteration_tracking(self):
+    def test_iteration_tracking(self) -> None:
         auditor = self._make_auditor()
         resp = LLMResponse(content='{"valid": true}', usage=LLMUsage())
         result = auditor._parse_result(resp, iteration=3)
@@ -145,20 +146,20 @@ class TestCommitAuditorAudit:
             usage=LLMUsage(),
         )
 
-    def test_audit_with_empty_diff_returns_valid(self):
+    def test_audit_with_empty_diff_returns_valid(self) -> None:
         """No staged changes — nothing to audit."""
         auditor = self._make_auditor()
         result = auditor.audit("fix: stuff", diff="")
         assert result.valid is True
 
-    def test_audit_with_empty_message_returns_invalid(self):
+    def test_audit_with_empty_message_returns_invalid(self) -> None:
         """Empty message is always invalid."""
         auditor = self._make_auditor()
         result = auditor.audit("", diff="+some change")
         assert result.valid is False
         assert any("Empty" in i for i in result.issues)
 
-    def test_audit_empty_message_generates_fallback(self):
+    def test_audit_empty_message_generates_fallback(self) -> None:
         """Empty message triggers fallback message generation."""
         auditor = self._make_auditor()
         auditor.suggest_message = True
@@ -166,7 +167,7 @@ class TestCommitAuditorAudit:
         assert result.suggested_message != ""
 
     @patch.object(LLMClient, "chat")
-    def test_single_pass_valid(self, mock_chat):
+    def test_single_pass_valid(self, mock_chat) -> None:
         """LLM returns valid on first call."""
         mock_chat.return_value = self._valid_response()
         auditor = self._make_auditor()
@@ -175,7 +176,7 @@ class TestCommitAuditorAudit:
         assert mock_chat.call_count == 1
 
     @patch.object(LLMClient, "chat")
-    def test_single_pass_invalid_with_suggestion(self, mock_chat):
+    def test_single_pass_invalid_with_suggestion(self, mock_chat) -> None:
         """LLM returns invalid with a suggested better message."""
         mock_chat.return_value = self._invalid_response(
             issues=["Message doesn't describe the change"],
@@ -187,7 +188,7 @@ class TestCommitAuditorAudit:
         assert "feat(api)" in result.suggested_message
 
     @patch.object(LLMClient, "chat")
-    def test_llm_error_returns_valid(self, mock_chat):
+    def test_llm_error_returns_valid(self, mock_chat) -> None:
         """LLM failures should not block commits (safe default)."""
         mock_chat.side_effect = RuntimeError("API down")
         auditor = self._make_auditor()
@@ -203,7 +204,7 @@ class TestCommitAuditorAudit:
 class TestCommitAuditorStrictness:
     """Test that strictness affects prompt construction."""
 
-    def test_prompt_contains_strictness_level(self):
+    def test_prompt_contains_strictness_level(self) -> None:
         """The user prompt must include the strictness level."""
         from engine.commit_audit import COMMIT_AUDIT_USER_PROMPT, INSTRUCTIONS_BY_STRICTNESS
 
@@ -222,13 +223,13 @@ class TestCommitAuditorStrictness:
         assert "STRICT" in prompt
         assert "conventional commits" in prompt.lower()
 
-    def test_lenient_single_word_allowed(self):
+    def test_lenient_single_word_allowed(self) -> None:
         """Lenient mode instructions allow short messages."""
         from engine.commit_audit import INSTRUCTIONS_LENIENT
 
         assert "short messages" in INSTRUCTIONS_LENIENT.lower()
 
-    def test_strict_requires_conventional_commits(self):
+    def test_strict_requires_conventional_commits(self) -> None:
         """Strict mode requires conventional commits format."""
         from engine.commit_audit import INSTRUCTIONS_STRICT
 
@@ -244,7 +245,7 @@ class TestCommitAuditorStrictness:
 class TestCommitAuditorDiffCapture:
     """Test the git diff capture mechanism."""
 
-    def test_diff_capture_in_git_repo(self):
+    def test_diff_capture_in_git_repo(self) -> None:
         """_capture_diff runs successfully in a git repo."""
         auditor = CommitAuditor(
             LLMClient(api_key="sk-test", model="test/model"),
@@ -268,20 +269,20 @@ class TestCommitAuditorTools:
         llm = LLMClient(api_key="sk-test", model="test/model")
         return CommitAuditor(llm)
 
-    def test_read_file_returns_content(self):
+    def test_read_file_returns_content(self) -> None:
         """_tool_read_file reads a real file."""
         auditor = self._make_auditor()
         result = auditor._tool_read_file("README.md", limit=5)
         assert "GitReins" in result or "README" in result or result.startswith("//")
 
-    def test_read_file_not_found(self):
+    def test_read_file_not_found(self) -> None:
         """_tool_read_file returns error for missing file."""
         auditor = self._make_auditor()
         result = auditor._tool_read_file("nonexistent_file.xyz")
         parsed = json.loads(result)
         assert "error" in parsed
 
-    def test_search_pattern_finds_matches(self):
+    def test_search_pattern_finds_matches(self) -> None:
         """_tool_search_pattern finds real matches."""
         auditor = self._make_auditor()
         result = auditor._tool_search_pattern(
@@ -289,21 +290,21 @@ class TestCommitAuditorTools:
         )
         assert "CommitAuditor" in result
 
-    def test_search_pattern_no_matches(self):
+    def test_search_pattern_no_matches(self) -> None:
         """_tool_search_pattern returns hint when nothing found."""
         auditor = self._make_auditor()
         result = auditor._tool_search_pattern(r"zzz_nonexistent_pattern_xyz", path="engine")
         parsed = json.loads(result)
         assert parsed.get("matches") == 0
 
-    def test_search_pattern_invalid_regex(self):
+    def test_search_pattern_invalid_regex(self) -> None:
         """_tool_search_pattern handles invalid regex."""
         auditor = self._make_auditor()
         result = auditor._tool_search_pattern(r"[invalid")
         parsed = json.loads(result)
         assert "error" in parsed
 
-    def test_tools_list_has_expected_tools(self):
+    def test_tools_list_has_expected_tools(self) -> None:
         """COMMIT_AUDIT_TOOLS includes read_file and search_pattern."""
         names = [t["function"]["name"] for t in COMMIT_AUDIT_TOOLS]
         assert "read_file" in names
@@ -318,7 +319,7 @@ class TestCommitAuditorTools:
 class TestCommitAuditorFallbackMessage:
     """Test fallback commit message generation from diff stats."""
 
-    def test_generate_fallback_returns_string(self):
+    def test_generate_fallback_returns_string(self) -> None:
         auditor = CommitAuditor(
             LLMClient(api_key="sk-test", model="test/model"),
         )
@@ -326,7 +327,7 @@ class TestCommitAuditorFallbackMessage:
         assert isinstance(msg, str)
         assert len(msg) > 0
 
-    def test_generate_fallback_starts_with_chore(self):
+    def test_generate_fallback_starts_with_chore(self) -> None:
         auditor = CommitAuditor(
             LLMClient(api_key="sk-test", model="test/model"),
         )
@@ -342,7 +343,7 @@ class TestCommitAuditorFallbackMessage:
 class TestCommitAuditConfig:
     """Test that commit_audit config is wired into GitReinsDefaults."""
 
-    def test_defaults_have_commit_audit_fields(self):
+    def test_defaults_have_commit_audit_fields(self) -> None:
         from engine.config import GitReinsDefaults
 
         defaults = GitReinsDefaults()
@@ -352,7 +353,7 @@ class TestCommitAuditConfig:
         assert defaults.commit_audit_max_iterations == 3
         assert defaults.commit_audit_suggest_message is True
 
-    def test_overlay_reads_commit_audit_section(self):
+    def test_overlay_reads_commit_audit_section(self) -> None:
         from engine.config import GitReinsDefaults
 
         defaults = GitReinsDefaults()
@@ -371,7 +372,7 @@ class TestCommitAuditConfig:
         # Unset fields keep defaults
         assert overlaid.commit_audit_enabled is True
 
-    def test_to_config_dict_includes_commit_audit(self):
+    def test_to_config_dict_includes_commit_audit(self) -> None:
         from engine.config import GitReinsDefaults
 
         defaults = GitReinsDefaults(
@@ -393,7 +394,7 @@ class TestCommitAuditConfig:
 class TestReviewIssue:
     """Test the ReviewIssue dataclass and from_dict factory."""
 
-    def test_from_dict_full(self):
+    def test_from_dict_full(self) -> None:
         ri = ReviewIssue.from_dict(
             {
                 "file": "src/auth.py",
@@ -413,7 +414,7 @@ class TestReviewIssue:
         assert ri.description == "API key is in source code"
         assert ri.suggestion == "Use environment variable via os.getenv()"
 
-    def test_from_dict_defaults(self):
+    def test_from_dict_defaults(self) -> None:
         ri = ReviewIssue.from_dict({})
         assert ri.file == ""
         assert ri.line == 0
@@ -423,12 +424,12 @@ class TestReviewIssue:
         assert ri.description == ""
         assert ri.suggestion == ""
 
-    def test_from_dict_line_as_int_string(self):
+    def test_from_dict_line_as_int_string(self) -> None:
         ri = ReviewIssue.from_dict({"line": "99"})
         assert ri.line == 99
         assert isinstance(ri.line, int)
 
-    def test_severity_all_levels(self):
+    def test_severity_all_levels(self) -> None:
         """All severity levels accepted."""
         for sev in ["critical", "high", "medium", "low", "info"]:
             ri = ReviewIssue.from_dict({"severity": sev})
@@ -443,12 +444,12 @@ class TestReviewIssue:
 class TestCommitAuditResultReviewFields:
     """Test the new review_issues and review_summary fields on CommitAuditResult."""
 
-    def test_default_review_issues_empty(self):
+    def test_default_review_issues_empty(self) -> None:
         r = CommitAuditResult(valid=True)
         assert r.review_issues == []
         assert r.review_summary == ""
 
-    def test_review_issues_populated(self):
+    def test_review_issues_populated(self) -> None:
         r = CommitAuditResult(
             valid=False,
             review_issues=[
@@ -468,7 +469,7 @@ class TestCommitAuditResultReviewFields:
         assert r.review_issues[0]["suggestion"] == "Fix it"
         assert r.review_summary == "One issue found"
 
-    def test_review_issues_still_defaults_with_old_result(self):
+    def test_review_issues_still_defaults_with_old_result(self) -> None:
         """Backward compat: old code that doesn't set review_issues still works."""
         r = CommitAuditResult(valid=False, issues=["Too vague"])
         assert r.review_issues == []
@@ -484,7 +485,7 @@ class TestCommitAuditResultReviewFields:
 class TestCommitReviewResult:
     """Test the CommitReviewResult dataclass."""
 
-    def test_defaults(self):
+    def test_defaults(self) -> None:
         r = CommitReviewResult(valid=True)
         assert r.valid is True
         assert r.summary == ""
@@ -494,7 +495,7 @@ class TestCommitReviewResult:
         assert r.suggested_message == ""
         assert r.iterations_used == 0
 
-    def test_with_issues(self):
+    def test_with_issues(self) -> None:
         ri = ReviewIssue(
             file="src/x.py",
             line=10,
@@ -526,7 +527,7 @@ class TestCommitAuditorRunReview:
     def _make_llm(self) -> LLMClient:
         return LLMClient(api_key="sk-test", model="test/model")
 
-    def test_run_review_populates_review_issues(self):
+    def test_run_review_populates_review_issues(self) -> None:
         """_run_review should include review_issues from the CommitReviewResult."""
         auditor = CommitAuditor(
             self._make_llm(),
@@ -562,7 +563,7 @@ class TestCommitAuditorRunReview:
             assert result.review_issues[0]["suggestion"] == "Add null check"
             assert result.review_summary == "Found 1 issue"
 
-    def test_run_review_empty_issues(self):
+    def test_run_review_empty_issues(self) -> None:
         """_run_review with no issues should have empty review_issues."""
         auditor = CommitAuditor(
             self._make_llm(),
@@ -583,7 +584,7 @@ class TestCommitAuditorRunReview:
             assert result.review_summary == "No issues"
             assert result.valid is True
 
-    def test_run_review_maps_suggestion(self):
+    def test_run_review_maps_suggestion(self) -> None:
         """Suggestions should be carried through to review_issues dicts."""
         auditor = CommitAuditor(
             self._make_llm(),
@@ -614,7 +615,7 @@ class TestCommitAuditorRunReview:
             assert result.review_issues[0]["description"] == "Too many responsibilities"
             assert result.review_issues[0]["suggestion"] == "Split into smaller classes"
 
-    def test_audit_routes_to_review_when_review_mode_set(self):
+    def test_audit_routes_to_review_when_review_mode_set(self) -> None:
         """When review_mode != 'message', audit() should call _run_review()."""
         auditor = CommitAuditor(
             self._make_llm(),
@@ -656,7 +657,7 @@ class TestPipelineReviewOutput:
     def _make_llm(self) -> LLMClient:
         return LLMClient(api_key="sk-test", model="test/model")
 
-    def test_review_issues_in_step_result_data(self):
+    def test_review_issues_in_step_result_data(self) -> None:
         """StepResult data should include review_issues and review_summary."""
         from engine.pipeline import Pipeline, StepResult
 
@@ -705,7 +706,7 @@ class TestPipelineReviewOutput:
         assert sr.data["review_issues"][0]["suggestion"] == "Use env var"
         assert sr.data["review_summary"] == "1 critical issue found"
 
-    def test_output_includes_file_line_and_severity(self):
+    def test_output_includes_file_line_and_severity(self) -> None:
         """Output text should contain file:line references and severity markers."""
         from engine.pipeline import Pipeline
 
@@ -773,7 +774,7 @@ class TestPipelineReviewOutput:
         assert "Fix: Add guard" in output
         assert "Fix: Wrap" in output
 
-    def test_output_no_review_issues(self):
+    def test_output_no_review_issues(self) -> None:
         """When no review_issues, output should just show message audit."""
         result = CommitAuditResult(valid=True)
         assert result.review_issues == []
@@ -798,17 +799,17 @@ class TestPipelineReviewOutput:
 class TestReviewIssueScore:
     """Test the score field on ReviewIssue (GR-066a)."""
 
-    def test_default_score_is_zero(self):
+    def test_default_score_is_zero(self) -> None:
         ri = ReviewIssue(file="x.py", line=1, severity="high", category="bugs", title="Bug")
         assert ri.score == 0.0
 
-    def test_explicit_score(self):
+    def test_explicit_score(self) -> None:
         ri = ReviewIssue(
             file="x.py", line=1, severity="critical", category="security", title="RCE", score=9.5
         )
         assert ri.score == 9.5
 
-    def test_from_dict_parses_score(self):
+    def test_from_dict_parses_score(self) -> None:
         ri = ReviewIssue.from_dict(
             {
                 "file": "src/auth.py",
@@ -821,16 +822,16 @@ class TestReviewIssueScore:
         )
         assert ri.score == 9.0
 
-    def test_from_dict_score_defaults_to_zero(self):
+    def test_from_dict_score_defaults_to_zero(self) -> None:
         ri = ReviewIssue.from_dict({"title": "No score field"})
         assert ri.score == 0.0
 
-    def test_from_dict_score_as_int(self):
+    def test_from_dict_score_as_int(self) -> None:
         ri = ReviewIssue.from_dict({"score": 5})
         assert ri.score == 5.0
         assert isinstance(ri.score, float)
 
-    def test_score_preserved_in_from_dict_roundtrip(self):
+    def test_score_preserved_in_from_dict_roundtrip(self) -> None:
         """Score should survive serialization round-trip."""
         original = {
             "file": "a.py",
@@ -847,11 +848,11 @@ class TestReviewIssueScore:
 class TestCommitReviewResultOverallScore:
     """Test overall_score on CommitReviewResult (GR-066a)."""
 
-    def test_default_overall_score_is_zero(self):
+    def test_default_overall_score_is_zero(self) -> None:
         r = CommitReviewResult(valid=True)
         assert r.overall_score == 0.0
 
-    def test_overall_score_explicit(self):
+    def test_overall_score_explicit(self) -> None:
         r = CommitReviewResult(valid=False, overall_score=8.5)
         assert r.overall_score == 8.5
 
@@ -863,7 +864,7 @@ class TestParseReviewResultScoreExtraction:
         llm = LLMClient(api_key="sk-test", model="test/model")
         return CommitAuditor(llm)
 
-    def test_parse_issues_with_scores(self):
+    def test_parse_issues_with_scores(self) -> None:
         auditor = self._make_auditor()
         resp = LLMResponse(
             content=json.dumps(
@@ -899,7 +900,7 @@ class TestParseReviewResultScoreExtraction:
         assert result.issues[0].score == 9.0
         assert result.issues[1].score == 5.0
 
-    def test_overall_score_derived_from_issues_when_missing(self):
+    def test_overall_score_derived_from_issues_when_missing(self) -> None:
         """When overall_score not in JSON, derive from max issue score."""
         auditor = self._make_auditor()
         resp = LLMResponse(
@@ -932,7 +933,7 @@ class TestParseReviewResultScoreExtraction:
         result = auditor._parse_review_result(resp)
         assert result.overall_score == 7.5  # max of 7.5 and 2.0
 
-    def test_overall_score_zero_with_no_issues(self):
+    def test_overall_score_zero_with_no_issues(self) -> None:
         auditor = self._make_auditor()
         resp = LLMResponse(content='{"valid": true, "summary": "Clean"}', usage=LLMUsage())
         result = auditor._parse_review_result(resp)
@@ -942,19 +943,19 @@ class TestParseReviewResultScoreExtraction:
 class TestScoringConfigDefaults:
     """Test scoring fields in GitReinsDefaults (GR-066c)."""
 
-    def test_default_score_threshold(self):
+    def test_default_score_threshold(self) -> None:
         from engine.config import GitReinsDefaults
 
         d = GitReinsDefaults()
         assert d.commit_audit_review_score_threshold == 8.0
 
-    def test_default_score_offset(self):
+    def test_default_score_offset(self) -> None:
         from engine.config import GitReinsDefaults
 
         d = GitReinsDefaults()
         assert d.commit_audit_review_score_offset == 1.0
 
-    def test_overlay_score_threshold(self):
+    def test_overlay_score_threshold(self) -> None:
         from engine.config import GitReinsDefaults
 
         d = GitReinsDefaults()
@@ -969,7 +970,7 @@ class TestScoringConfigDefaults:
         )
         assert overlaid.commit_audit_review_score_threshold == 7.0
 
-    def test_overlay_score_offset(self):
+    def test_overlay_score_offset(self) -> None:
         from engine.config import GitReinsDefaults
 
         d = GitReinsDefaults()
@@ -984,7 +985,7 @@ class TestScoringConfigDefaults:
         )
         assert overlaid.commit_audit_review_score_offset == 0.5
 
-    def test_to_config_dict_includes_scoring(self):
+    def test_to_config_dict_includes_scoring(self) -> None:
         from engine.config import GitReinsDefaults
 
         d = GitReinsDefaults(
@@ -995,7 +996,7 @@ class TestScoringConfigDefaults:
         assert cfg["commit_audit"]["review_score_threshold"] == 7.5
         assert cfg["commit_audit"]["review_score_offset"] == 1.2
 
-    def test_overlay_both_scoring_fields(self):
+    def test_overlay_both_scoring_fields(self) -> None:
         from engine.config import GitReinsDefaults
 
         d = GitReinsDefaults()
@@ -1016,13 +1017,13 @@ class TestScoringConfigDefaults:
 class TestCommitAuditorScoringInit:
     """Test that CommitAuditor accepts scoring params (GR-066c)."""
 
-    def test_default_scoring_params(self):
+    def test_default_scoring_params(self) -> None:
         llm = LLMClient(api_key="sk-test", model="test/model")
         auditor = CommitAuditor(llm)
         assert auditor.review_score_threshold == 8.0
         assert auditor.review_score_offset == 1.0
 
-    def test_custom_scoring_params(self):
+    def test_custom_scoring_params(self) -> None:
         llm = LLMClient(api_key="sk-test", model="test/model")
         auditor = CommitAuditor(
             llm,
@@ -1036,7 +1037,7 @@ class TestCommitAuditorScoringInit:
 class TestScoreBasedRouting:
     """Test BLOCK/WARN/INFO routing based on effective scores (GR-066d)."""
 
-    def test_score_above_threshold_blocks(self):
+    def test_score_above_threshold_blocks(self) -> None:
         """effective_score >= threshold → BLOCK"""
         from engine.pipeline import Pipeline
 
@@ -1068,53 +1069,53 @@ class TestScoreBasedRouting:
 
         assert blocked is True
 
-    def test_score_at_threshold_blocks(self):
+    def test_score_at_threshold_blocks(self) -> None:
         """effective_score == threshold → BLOCK (boundary)"""
         score_threshold = 8.0
         effective = 8.0
         assert effective >= score_threshold  # BLOCK
 
-    def test_score_below_threshold_above_warn_warns(self):
+    def test_score_below_threshold_above_warn_warns(self) -> None:
         """threshold * 0.75 <= effective_score < threshold → WARN"""
         score_threshold = 8.0
         effective = 7.0  # 7.0 >= 6.0 (0.75*8.0) but < 8.0
         assert effective < score_threshold
         assert effective >= score_threshold * 0.75  # WARN
 
-    def test_score_below_warn_is_info(self):
+    def test_score_below_warn_is_info(self) -> None:
         """effective_score < threshold * 0.75 → INFO only"""
         score_threshold = 8.0
         effective = 4.0  # 4.0 < 6.0 (0.75*8.0)
         assert effective < score_threshold * 0.75  # INFO
 
-    def test_offset_multiplies_score(self):
+    def test_offset_multiplies_score(self) -> None:
         """Score offset acts as a multiplier."""
         raw_score = 5.0
         offset = 0.5
         effective = raw_score * offset
         assert effective == 2.5
 
-    def test_offset_doubles_score(self):
+    def test_offset_doubles_score(self) -> None:
         """Offset of 2.0 doubles scores — makes lenient models stricter."""
         raw_score = 4.0
         offset = 2.0
         effective = raw_score * offset
         assert effective == 8.0
 
-    def test_offset_halves_score(self):
+    def test_offset_halves_score(self) -> None:
         """Offset of 0.5 halves scores — dampens aggressive models."""
         raw_score = 8.0
         offset = 0.5
         effective = raw_score * offset
         assert effective == 4.0
 
-    def test_zero_score_is_info(self):
+    def test_zero_score_is_info(self) -> None:
         """Score of 0 should always be INFO regardless of offset."""
         effective = 0.0 * 2.0  # offset can't make a 0 into a block
         assert effective < 8.0 * 0.75
         assert effective == 0.0
 
-    def test_all_info_issues_no_block_no_warn(self):
+    def test_all_info_issues_no_block_no_warn(self) -> None:
         """When all issues have low scores, no block or warn."""
         score_threshold = 8.0
         issues = [
@@ -1128,7 +1129,7 @@ class TestScoreBasedRouting:
         assert blocked is False
         assert warned is False
 
-    def test_mixed_issues_highest_determines_overall(self):
+    def test_mixed_issues_highest_determines_overall(self) -> None:
         """Overall score should be the max effective score."""
         score_offset = 1.0
         issues = [
@@ -1149,7 +1150,7 @@ class TestRunReviewScoreInclusion:
     def _make_llm(self) -> LLMClient:
         return LLMClient(api_key="sk-test", model="test/model")
 
-    def test_review_issues_include_score(self):
+    def test_review_issues_include_score(self) -> None:
         auditor = CommitAuditor(
             self._make_llm(),
             review_mode="review",
@@ -1179,7 +1180,7 @@ class TestRunReviewScoreInclusion:
             assert len(result.review_issues) == 1
             assert result.review_issues[0]["score"] == 9.0
 
-    def test_run_review_issues_text_includes_score(self):
+    def test_run_review_issues_text_includes_score(self) -> None:
         """ "The issue text in CommitAuditResult.issues should include scores."""
         auditor = CommitAuditor(
             self._make_llm(),
@@ -1215,7 +1216,7 @@ class TestPipelineScoreOutput:
     def _make_llm(self) -> LLMClient:
         return LLMClient(api_key="sk-test", model="test/model")
 
-    def test_output_includes_overall_score(self):
+    def test_output_includes_overall_score(self) -> None:
         """Output header should include overall score vs threshold."""
         from engine.pipeline import Pipeline
 
@@ -1253,7 +1254,7 @@ class TestPipelineScoreOutput:
         output = "\n".join(output_lines)
         assert "(overall: 9.0/8.0)" in output
 
-    def test_output_includes_score_per_issue(self):
+    def test_output_includes_score_per_issue(self) -> None:
         """Each issue line should show its effective score."""
         from engine.pipeline import Pipeline
 
@@ -1284,14 +1285,14 @@ class TestPipelineScoreOutput:
         assert "(score: 7.5)" in line
         assert "⚠️ WARN" in line
 
-    def test_block_marker_for_high_score(self):
+    def test_block_marker_for_high_score(self) -> None:
         """Score >= threshold → 🚫 BLOCK marker."""
         score_threshold = 8.0
         effective = 9.0
         action_mark = "🚫 BLOCK" if effective >= score_threshold else "ℹ️ INFO"
         assert action_mark == "🚫 BLOCK"
 
-    def test_info_marker_for_low_score(self):
+    def test_info_marker_for_low_score(self) -> None:
         """Score < threshold * 0.75 → ℹ️ INFO marker."""
         score_threshold = 8.0
         effective = 3.0
@@ -1363,7 +1364,7 @@ def _passed(result) -> bool:
 class TestResolveCommitAuditMode:
     """The precedence rule itself, free of config files and LLMs."""
 
-    def test_stage_mode_wins_over_defaults_and_top_level(self):
+    def test_stage_mode_wins_over_defaults_and_top_level(self) -> None:
         from engine.pipeline import resolve_commit_audit_mode
 
         got = resolve_commit_audit_mode(
@@ -1373,7 +1374,7 @@ class TestResolveCommitAuditMode:
         )
         assert got == "block"
 
-    def test_defaults_wins_over_top_level(self):
+    def test_defaults_wins_over_top_level(self) -> None:
         from engine.pipeline import resolve_commit_audit_mode
 
         got = resolve_commit_audit_mode(
@@ -1381,17 +1382,17 @@ class TestResolveCommitAuditMode:
         )
         assert got == "block"
 
-    def test_top_level_is_the_legacy_fallback(self):
+    def test_top_level_is_the_legacy_fallback(self) -> None:
         from engine.pipeline import resolve_commit_audit_mode
 
         assert resolve_commit_audit_mode({}, {"mode": "block"}, {}) == "block"
 
-    def test_default_is_warn(self):
+    def test_default_is_warn(self) -> None:
         from engine.pipeline import resolve_commit_audit_mode
 
         assert resolve_commit_audit_mode({}, {}, {}) == "warn"
 
-    def test_unrecognised_values_fall_through(self):
+    def test_unrecognised_values_fall_through(self) -> None:
         """A typo on the stage must not mask a real `block` below it."""
         from engine.pipeline import resolve_commit_audit_mode
 
@@ -1400,12 +1401,12 @@ class TestResolveCommitAuditMode:
         )
         assert got == "block"
 
-    def test_case_and_whitespace_tolerated(self):
+    def test_case_and_whitespace_tolerated(self) -> None:
         from engine.pipeline import resolve_commit_audit_mode
 
         assert resolve_commit_audit_mode({}, {}, {"mode": "  BLOCK "}) == "block"
 
-    def test_none_step_def_is_allowed(self):
+    def test_none_step_def_is_allowed(self) -> None:
         from engine.pipeline import resolve_commit_audit_mode
 
         assert resolve_commit_audit_mode({}, {"mode": "block"}, None) == "block"
@@ -1414,7 +1415,7 @@ class TestResolveCommitAuditMode:
 class TestCommitAuditModePrecedence:
     """End-to-end through Pipeline.run — the four measured placements."""
 
-    def test_stage_level_block_blocks(self, tmp_workdir):
+    def test_stage_level_block_blocks(self, tmp_workdir) -> None:
         """The placement docs describe: a stage-level `mode: block` → exit 1.
 
         Before DF-GITREINS-POC-30 this stayed "(Warning only — commit will
@@ -1426,7 +1427,7 @@ class TestCommitAuditModePrecedence:
         assert _passed(result) is False
         assert "Commit BLOCKED" in result["stages"]["commit_audit"]["summary"]
 
-    def test_stage_block_overrides_top_level_warn_and_defaults(self, tmp_workdir):
+    def test_stage_block_overrides_top_level_warn_and_defaults(self, tmp_workdir) -> None:
         _write_config(
             tmp_workdir,
             _config_for(
@@ -1437,7 +1438,7 @@ class TestCommitAuditModePrecedence:
         assert _mode_of(result) == "block"
         assert _passed(result) is False
 
-    def test_stage_warn_beats_top_level_block(self, tmp_workdir):
+    def test_stage_warn_beats_top_level_block(self, tmp_workdir) -> None:
         """The stage is the most specific scope, so a stage `warn` wins."""
         _write_config(
             tmp_workdir,
@@ -1448,21 +1449,21 @@ class TestCommitAuditModePrecedence:
         assert _passed(result) is True
         assert "Warning only" in result["stages"]["commit_audit"]["summary"]
 
-    def test_top_level_block_still_blocks_when_stage_is_silent(self, tmp_workdir):
+    def test_top_level_block_still_blocks_when_stage_is_silent(self, tmp_workdir) -> None:
         """Backward compatibility: the legacy placement keeps working."""
         _write_config(tmp_workdir, _config_for(STAGE_ON_MSG, top_mode="block"))
         result = _run_audit(tmp_workdir)
         assert _mode_of(result) == "block"
         assert _passed(result) is False
 
-    def test_defaults_block_blocks(self, tmp_workdir):
+    def test_defaults_block_blocks(self, tmp_workdir) -> None:
         """`defaults.commit_audit.mode` was dead config before this fix."""
         _write_config(tmp_workdir, _config_for(STAGE_ON_MSG, defaults_mode="block"))
         result = _run_audit(tmp_workdir)
         assert _mode_of(result) == "block"
         assert _passed(result) is False
 
-    def test_no_mode_anywhere_is_warn(self, tmp_workdir):
+    def test_no_mode_anywhere_is_warn(self, tmp_workdir) -> None:
         _write_config(tmp_workdir, _config_for(STAGE_ON_MSG))
         result = _run_audit(tmp_workdir)
         assert _mode_of(result) == "warn"
@@ -1472,7 +1473,7 @@ class TestCommitAuditModePrecedence:
 class TestCommitAuditSkipLine:
     """A run where the audit did NOT happen must say so by name."""
 
-    def test_no_stage_prints_named_skip(self, tmp_workdir):
+    def test_no_stage_prints_named_skip(self, tmp_workdir) -> None:
         """The fresh `install` + `init` state — previously printed NOTHING."""
         from engine.pipeline import commit_audit_skip_message, load_pipeline_config
 
@@ -1483,7 +1484,7 @@ class TestCommitAuditSkipLine:
         assert "trigger commit-msg" in msg
         assert "audit NOT run" in msg
 
-    def test_stage_not_armed_names_the_trigger_fix(self, tmp_workdir):
+    def test_stage_not_armed_names_the_trigger_fix(self, tmp_workdir) -> None:
         from engine.pipeline import commit_audit_skip_message, load_pipeline_config
 
         stage = "    - id: commit_audit\n      type: commit_audit\n      on: [pre-eval]\n"
@@ -1493,7 +1494,7 @@ class TestCommitAuditSkipLine:
         assert "on: [commit-msg]" in msg
         assert "audit NOT run" in msg
 
-    def test_id_only_stage_counts_as_declared(self, tmp_workdir):
+    def test_id_only_stage_counts_as_declared(self, tmp_workdir) -> None:
         """`id: commit_audit` with no explicit `type:` is the docs' shape."""
         from engine.pipeline import commit_audit_skip_message, load_pipeline_config
 
@@ -1503,7 +1504,7 @@ class TestCommitAuditSkipLine:
         assert "not armed for trigger" in msg
         assert "audit NOT run" in msg
 
-    def test_skip_line_is_not_a_block(self, tmp_workdir):
+    def test_skip_line_is_not_a_block(self, tmp_workdir) -> None:
         """A skip must stay exit 0 — the three wordings all say NOT run."""
         from engine.pipeline import commit_audit_skip_message, load_pipeline_config
 
@@ -1513,7 +1514,9 @@ class TestCommitAuditSkipLine:
             assert "audit NOT run" in msg
             assert "BLOCKED" not in msg
 
-    def test_cli_prints_the_skip_line_and_exits_zero(self, tmp_workdir, monkeypatch, capsys):
+    def test_cli_prints_the_skip_line_and_exits_zero(
+        self, tmp_workdir, monkeypatch, capsys
+    ) -> None:
         """The command itself: no stage → the named line, exit 0.
 
         Drives `cmd_commit_audit` in-process (the CLI's real code path). The
@@ -1561,13 +1564,13 @@ class TestCommitAuditEnabledFlag:
     assertion, not a hope.
     """
 
-    def test_top_level_enabled_false_skips_without_llm(self, tmp_workdir, monkeypatch):
+    def test_top_level_enabled_false_skips_without_llm(self, tmp_workdir, monkeypatch) -> None:
         """Top-level `commit_audit: {enabled: false}` -> named skip, no LLM."""
         from engine.pipeline import Pipeline, load_pipeline_config
 
         _write_config(tmp_workdir, _enabled_config("commit_audit:\n  enabled: false\n"))
 
-        def _explode(*a, **k):
+        def _explode(*a, **k) -> NoReturn:
             raise AssertionError("LLMClient constructed while audit is disabled")
 
         # The pipeline imports LLMClient LOCALLY inside _run_commit_audit
@@ -1586,7 +1589,7 @@ class TestCommitAuditEnabledFlag:
         assert "audit NOT run" in output
         assert "commit_audit.enabled is false" in output
 
-    def test_defaults_enabled_false_skips_without_llm(self, tmp_workdir, monkeypatch):
+    def test_defaults_enabled_false_skips_without_llm(self, tmp_workdir, monkeypatch) -> None:
         """`defaults.commit_audit.enabled: false` reads the same."""
         from engine.pipeline import Pipeline, load_pipeline_config
 
@@ -1595,7 +1598,7 @@ class TestCommitAuditEnabledFlag:
             _enabled_config("defaults:\n  commit_audit:\n    enabled: false\n"),
         )
 
-        def _explode(*a, **k):
+        def _explode(*a, **k) -> NoReturn:
             raise AssertionError("LLMClient constructed while audit is disabled")
 
         # Same local-import rule: stub engine.llm.LLMClient, the name the
@@ -1612,14 +1615,14 @@ class TestCommitAuditEnabledFlag:
         assert "audit NOT run" in output
         assert "defaults.commit_audit.enabled is false" in output
 
-    def test_disabled_auditor_never_invoked(self, tmp_workdir, monkeypatch):
+    def test_disabled_auditor_never_invoked(self, tmp_workdir, monkeypatch) -> None:
         """Even with an injected LLM, a disabled audit never reaches the auditor."""
         from engine.commit_audit import CommitAuditor
         from engine.pipeline import Pipeline, load_pipeline_config
 
         _write_config(tmp_workdir, _enabled_config("commit_audit:\n  enabled: false\n"))
 
-        def _explode(*a, **k):
+        def _explode(*a, **k) -> NoReturn:
             raise AssertionError("CommitAuditor constructed while audit is disabled")
 
         # Patch __init__ (own-dict attribute -> clean monkeypatch restore),
@@ -1635,7 +1638,7 @@ class TestCommitAuditEnabledFlag:
         assert _passed(result) is True
         assert "audit NOT run" in result["stages"]["commit_audit"]["summary"]
 
-    def test_enabled_absent_invokes_the_auditor(self, tmp_workdir):
+    def test_enabled_absent_invokes_the_auditor(self, tmp_workdir) -> None:
         """Control: with `enabled` absent the auditor IS invoked (unchanged)."""
         from engine.commit_audit import CommitAuditor
         from engine.pipeline import Pipeline, load_pipeline_config
@@ -1655,7 +1658,7 @@ class TestCommitAuditEnabledFlag:
         assert _passed(result) is True
         assert "Commit message issues" in result["stages"]["commit_audit"]["summary"]
 
-    def test_enabled_true_invokes_the_auditor(self, tmp_workdir):
+    def test_enabled_true_invokes_the_auditor(self, tmp_workdir) -> None:
         """Control: explicit `enabled: true` behaves exactly like absent."""
         from engine.commit_audit import CommitAuditor
         from engine.pipeline import Pipeline, load_pipeline_config
@@ -1674,7 +1677,7 @@ class TestCommitAuditEnabledFlag:
         assert _passed(result) is True
         assert "Commit message issues" in result["stages"]["commit_audit"]["summary"]
 
-    def test_stage_enabled_true_beats_config_false(self, tmp_workdir):
+    def test_stage_enabled_true_beats_config_false(self, tmp_workdir) -> None:
         """The stage's own boolean is the most specific scope."""
         from engine.pipeline import resolve_commit_audit_enabled
 
@@ -1684,7 +1687,7 @@ class TestCommitAuditEnabledFlag:
         assert got is True
         assert source == "pipeline.stages[].enabled"
 
-    def test_yaml_string_forms_normalize(self):
+    def test_yaml_string_forms_normalize(self) -> None:
         """Quoted/odd-cased YAML forms must not read as truthy garbage."""
         from engine.pipeline import _normalize_commit_audit_enabled
 
@@ -1701,7 +1704,7 @@ class TestCommitAuditEnabledFlag:
         assert _normalize_commit_audit_enabled(2) is None
         assert _normalize_commit_audit_enabled(None) is None
 
-    def test_unrecognized_value_does_not_disable(self):
+    def test_unrecognized_value_does_not_disable(self) -> None:
         """`enabled: flase` must not silently turn the audit OFF."""
         from engine.pipeline import resolve_commit_audit_enabled
 
@@ -1709,7 +1712,7 @@ class TestCommitAuditEnabledFlag:
         assert got is True
         assert source == "default"
 
-    def test_top_level_beats_defaults_on_conflict(self):
+    def test_top_level_beats_defaults_on_conflict(self) -> None:
         """Top-level wins inside the merged section, same as `mode`."""
         from engine.pipeline import resolve_commit_audit_enabled
 

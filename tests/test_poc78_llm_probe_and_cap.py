@@ -13,7 +13,7 @@ from engine.eval_cap import EvalCap
 class TestVerifyProbe:
     """verify_probe(): one real round trip that proves the credential works."""
 
-    def test_verify_probe_ok(self, llm_client):
+    def test_verify_probe_ok(self, llm_client) -> None:
         """A 200-with-choices round trip proves the credential usable."""
         import json as _json
 
@@ -26,7 +26,7 @@ class TestVerifyProbe:
         with patch("requests.post", return_value=ok):
             assert llm_client.verify_probe() is True
 
-    def test_verify_probe_401_is_false(self, llm_client):
+    def test_verify_probe_401_is_false(self, llm_client) -> None:
         """A rejected credential (401) reports False — no retry, one call."""
         import json as _json
 
@@ -43,12 +43,12 @@ class TestVerifyProbe:
         assert ok is False
         assert post.call_count == 1, "probe must not retry a permanent rejection"
 
-    def test_verify_probe_transport_error_is_false(self, llm_client):
+    def test_verify_probe_transport_error_is_false(self, llm_client) -> None:
         """A dead endpoint reports False (failure, not an 'usable' credential)."""
         with patch("requests.post", side_effect=requests.ConnectionError("connection refused")):
             assert llm_client.verify_probe() is False
 
-    def test_verify_probe_ignores_mock_response_env(self, monkeypatch, llm_client):
+    def test_verify_probe_ignores_mock_response_env(self, monkeypatch, llm_client) -> None:
         """GITREINS_MOCK_LLM_RESPONSE must not fake a passing probe — the probe
         exists precisely to prove the REAL wire accepts the credential."""
         monkeypatch.setenv("GITREINS_MOCK_LLM_RESPONSE", '{"content": "hi"}')
@@ -65,7 +65,7 @@ class TestJobTimeCapMidRun:
     budget is spent — the evaluation ends and the job record goes terminal.
     """
 
-    def test_mid_run_exhausted_cap_blocks_next_llm_call(self):
+    def test_mid_run_exhausted_cap_blocks_next_llm_call(self) -> None:
         cap = EvalCap(max_iterations=50, max_seconds=120.0)
         cap.start()  # timer starts at dispatch
         # Jump past the deadline
@@ -75,12 +75,12 @@ class TestJobTimeCapMidRun:
         assert exhausted is not None
         assert "Time cap" in exhausted
 
-    def test_mid_run_cap_within_budget_allows_work(self):
+    def test_mid_run_cap_within_budget_allows_work(self) -> None:
         cap = EvalCap(max_iterations=50, max_seconds=120.0)
         cap.start()
         assert cap.check() is None
 
-    def test_start_time_is_set_when_started(self):
+    def test_start_time_is_set_when_started(self) -> None:
         cap = EvalCap(max_iterations=50, max_seconds=120.0)
         assert cap.start_time == 0
         cap.start()

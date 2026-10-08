@@ -32,7 +32,7 @@ def _run_cli(*args, cwd=None, extra_env=None):
     return subprocess.run(cmd, capture_output=True, text=True, timeout=30, cwd=cwd, env=env)
 
 
-def _init_repo(workdir):
+def _init_repo(workdir) -> None:
     """Initialize a minimal git repo with identity."""
     subprocess.run(["git", "init", "-q"], cwd=workdir, capture_output=True)
     subprocess.run(
@@ -41,7 +41,7 @@ def _init_repo(workdir):
     subprocess.run(["git", "config", "user.name", "Test"], cwd=workdir, capture_output=True)
 
 
-def _stage_file(workdir, path, content):
+def _stage_file(workdir, path, content) -> None:
     """Write and stage a file."""
     full = os.path.join(workdir, path)
     os.makedirs(os.path.dirname(full), exist_ok=True)
@@ -50,7 +50,7 @@ def _stage_file(workdir, path, content):
     subprocess.run(["git", "add", path], cwd=workdir, capture_output=True)
 
 
-def _write_config(workdir, config_dict):
+def _write_config(workdir, config_dict) -> None:
     """Write a minimal .gitreins/config.yaml."""
     config_dir = os.path.join(workdir, ".gitreins")
     os.makedirs(config_dir, exist_ok=True)
@@ -78,7 +78,7 @@ class TestGuardRefusesWithoutConfig:
     committed unguarded. Both must refuse with an actionable message.
     """
 
-    def test_guard_refuses_without_config(self, tmp_path):
+    def test_guard_refuses_without_config(self, tmp_path) -> None:
         d = str(tmp_path / "repo")
         os.makedirs(d)
         _init_repo(d)
@@ -96,7 +96,7 @@ class TestGuardRefusesWithoutConfig:
         assert "Tier 1 Guards:" not in result.stdout
         assert "PASS" not in result.stdout
 
-    def test_commit_refuses_without_config(self, tmp_path):
+    def test_commit_refuses_without_config(self, tmp_path) -> None:
         d = str(tmp_path / "repo")
         os.makedirs(d)
         _init_repo(d)
@@ -115,7 +115,7 @@ class TestGuardRefusesWithoutConfig:
         log = subprocess.run(["git", "rev-parse", "HEAD"], cwd=d, capture_output=True, text=True)
         assert log.returncode != 0, "commit must not create a commit in a config-less repo"
 
-    def test_configured_repo_still_passes(self, tmp_path):
+    def test_configured_repo_still_passes(self, tmp_path) -> None:
         """A repo WITH a config keeps today's behaviour (GR-GAP-051 AC 2/4b)."""
         d = str(tmp_path / "repo")
         os.makedirs(d)
@@ -140,7 +140,7 @@ class TestGuardExitClean:
     (`guards.allow_skips: true`, what `gitreins init` writes); otherwise 2.
     """
 
-    def test_guard_exit_0_on_clean_tree_with_allow_skips(self, tmp_path):
+    def test_guard_exit_0_on_clean_tree_with_allow_skips(self, tmp_path) -> None:
         """Empty repo, no staged files, allow_skips: true -> DEGRADED, exit 0."""
         d = str(tmp_path / "repo")
         os.makedirs(d)
@@ -158,7 +158,7 @@ class TestGuardExitClean:
         )
         assert "Tier 1 Guards: PASS" not in result.stdout
 
-    def test_guard_exit_2_on_clean_tree_without_allow_skips(self, tmp_path):
+    def test_guard_exit_2_on_clean_tree_without_allow_skips(self, tmp_path) -> None:
         """Same tree, no allow_skips -> exit 2 (a skip is not a pass)."""
         d = str(tmp_path / "repo")
         os.makedirs(d)
@@ -173,7 +173,7 @@ class TestGuardExitClean:
         )
         assert "DEGRADED PASS" in result.stdout
 
-    def test_guard_exit_0_with_clean_file(self, tmp_path):
+    def test_guard_exit_0_with_clean_file(self, tmp_path) -> None:
         """Staging a clean file with no issues -> exit 0."""
         d = str(tmp_path / "repo")
         os.makedirs(d)
@@ -192,7 +192,7 @@ class TestGuardExitClean:
 class TestGuardExitSecret:
     """gitreins guard exits 1 when secrets are staged."""
 
-    def test_guard_exit_1_on_secret(self, tmp_path):
+    def test_guard_exit_1_on_secret(self, tmp_path) -> None:
         """Staging a file with an API key -> exit 1."""
         d = str(tmp_path / "repo")
         os.makedirs(d)
@@ -209,7 +209,7 @@ class TestGuardExitSecret:
         )
         assert "FAIL" in result.stdout
 
-    def test_guard_exit_1_on_aws_key(self, tmp_path):
+    def test_guard_exit_1_on_aws_key(self, tmp_path) -> None:
         """Staging a file with an AWS key -> exit 1."""
         d = str(tmp_path / "repo")
         os.makedirs(d)
@@ -229,7 +229,7 @@ class TestGuardExitSecret:
 class TestGuardExitLint:
     """gitreins guard exits 1 when lint errors are staged."""
 
-    def test_guard_exit_1_on_lint_error(self, tmp_path):
+    def test_guard_exit_1_on_lint_error(self, tmp_path) -> None:
         """Staging a Python file with a syntax error -> exit 1."""
         d = str(tmp_path / "repo")
         os.makedirs(d)
@@ -247,7 +247,7 @@ class TestGuardExitLint:
 class TestCommitBlocksSecret:
     """gitreins commit blocks (non-zero) when secrets are staged."""
 
-    def test_commit_blocks_on_secret(self, tmp_path):
+    def test_commit_blocks_on_secret(self, tmp_path) -> None:
         """Commit command exits non-zero when guards detect a secret."""
         d = str(tmp_path / "repo")
         os.makedirs(d)
@@ -264,7 +264,7 @@ class TestCommitBlocksSecret:
         )
         assert "FAIL" in output or "cannot commit" in output.lower()
 
-    def test_commit_passes_on_clean(self, tmp_path):
+    def test_commit_passes_on_clean(self, tmp_path) -> None:
         """Commit command exits 0 when no issues detected."""
         d = str(tmp_path / "repo")
         os.makedirs(d)
@@ -327,7 +327,7 @@ class TestRunnerMissingHookParity:
         _stage_file(d, "app.py", "print('hi')\n")
         return d
 
-    def test_zero_deps_repo_first_commit_is_not_blocked(self, tmp_path):
+    def test_zero_deps_repo_first_commit_is_not_blocked(self, tmp_path) -> None:
         """The hook's own command on a bare box: a DEGRADED pass naming the fix."""
         d = self._zero_deps_repo(tmp_path)
 
@@ -342,7 +342,7 @@ class TestRunnerMissingHookParity:
         # Never a silent green: the gates that did not run are named.
         assert "Tier 1 Guards: PASS" not in result.stdout
 
-    def test_zero_deps_repo_skip_facts_match_the_library_path(self, tmp_path):
+    def test_zero_deps_repo_skip_facts_match_the_library_path(self, tmp_path) -> None:
         """Same tree, same skip facts: the CLI (hook) and the in-process guard."""
         d = self._zero_deps_repo(tmp_path)
 
@@ -355,7 +355,7 @@ class TestRunnerMissingHookParity:
         assert result.skip_reason in cli.stdout
         assert "✗ tests" not in cli.stdout
 
-    def test_provisioned_repo_grades_the_tests_lane(self, tmp_path):
+    def test_provisioned_repo_grades_the_tests_lane(self, tmp_path) -> None:
         """The other arm of the parity: with pytest provisioned the lane runs."""
         d = str(tmp_path / "provisioned")
         os.makedirs(d)

@@ -116,7 +116,7 @@ def _run_script(root, extra_args=()):
 # ---------------------------------------------------------------------------
 
 
-def test_tool_count_match_exits_zero(tmp_path):
+def test_tool_count_match_exits_zero(tmp_path) -> None:
     root = _write_repo(tmp_path, n_tools=3)
     proc = _run_script(root)
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -127,7 +127,7 @@ def test_tool_count_match_exits_zero(tmp_path):
     assert "3" in message
 
 
-def test_tool_count_mismatch_fails_with_both_numbers(tmp_path):
+def test_tool_count_mismatch_fails_with_both_numbers(tmp_path) -> None:
     """Docs claim 7 tools, the fake evaluator defines 3 -> exit 1 naming the
     doc, the line, and both numbers."""
     root = _write_repo(tmp_path, n_tools=3)
@@ -152,7 +152,7 @@ def test_tool_count_mismatch_fails_with_both_numbers(tmp_path):
     assert "docs/architecture.md:4" in message
 
 
-def test_mismatch_in_evaluator_loop_fails(tmp_path):
+def test_mismatch_in_evaluator_loop_fails(tmp_path) -> None:
     root = _write_repo(
         tmp_path,
         n_tools=3,
@@ -167,7 +167,7 @@ def test_mismatch_in_evaluator_loop_fails(tmp_path):
     assert "4 tools" in proc.stdout and "3 EVALUATOR_TOOLS" in proc.stdout
 
 
-def test_missing_tool_claim_passes(tmp_path):
+def test_missing_tool_claim_passes(tmp_path) -> None:
     """No doc claims a tool count -> nothing to check -> exit 0."""
     root = _write_repo(
         tmp_path,
@@ -179,7 +179,7 @@ def test_missing_tool_claim_passes(tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
-def test_malformed_evaluator_source_fails(tmp_path):
+def test_malformed_evaluator_source_fails(tmp_path) -> None:
     """Unparseable engine/evaluator.py -> FAIL, never green on doubt."""
     root = _write_repo(tmp_path, n_tools=3, evaluator_body="EVALUATOR_TOOLS = [\n")
     proc = _run_script(root)
@@ -192,14 +192,14 @@ def test_malformed_evaluator_source_fails(tmp_path):
     assert "could not parse" in message
 
 
-def test_missing_assignment_fails(tmp_path):
+def test_missing_assignment_fails(tmp_path) -> None:
     root = _write_repo(tmp_path, n_tools=3, evaluator_body="OTHER_TOOLS = []\n")
     proc = _run_script(root)
     assert proc.returncode == 1, proc.stdout + proc.stderr
     assert "no EVALUATOR_TOOLS assignment" in proc.stdout
 
 
-def test_empty_evaluator_tools_fails(tmp_path):
+def test_empty_evaluator_tools_fails(tmp_path) -> None:
     """Zero parsed tools means the parser or the source is wrong -> FAIL."""
     root = _write_repo(tmp_path, n_tools=0)
     proc = _run_script(root)
@@ -216,7 +216,7 @@ def test_empty_evaluator_tools_fails(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_mcp_server_tool_count_is_out_of_scope(tmp_path):
+def test_mcp_server_tool_count_is_out_of_scope(tmp_path) -> None:
     """'exposing 13 tools' sits under the MCP Server heading, not the
     evaluator's — it must be ignored even though 13 != 3."""
     root = _write_repo(
@@ -236,7 +236,7 @@ def test_mcp_server_tool_count_is_out_of_scope(tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
-def test_subsection_tallies_are_out_of_scope(tmp_path):
+def test_subsection_tallies_are_out_of_scope(tmp_path) -> None:
     """'### Repo Inspection (2 tools)' is a partition of the surface, not the
     surface size: only heading-level 'Evaluation Tools (N)' claims are checked."""
     root = _write_repo(
@@ -253,7 +253,7 @@ def test_subsection_tallies_are_out_of_scope(tmp_path):
     assert proc.returncode == 0, proc.stdout + proc.stderr
 
 
-def test_heading_form_claim_is_checked(tmp_path):
+def test_heading_form_claim_is_checked(tmp_path) -> None:
     root = _write_repo(tmp_path, n_tools=3, loop_body="## Evaluation Tools (5)\n")
     proc = _run_script(root)
     assert proc.returncode == 1, proc.stdout + proc.stderr
@@ -261,7 +261,7 @@ def test_heading_form_claim_is_checked(tmp_path):
     assert "5" in proc.stdout and "3" in proc.stdout
 
 
-def test_advertises_n_of_them_is_not_a_claim(tmp_path):
+def test_advertises_n_of_them_is_not_a_claim(tmp_path) -> None:
     root = _write_repo(
         tmp_path,
         n_tools=3,
@@ -280,7 +280,7 @@ def test_advertises_n_of_them_is_not_a_claim(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_missing_evaluator_source_without_claims_skips(tmp_path):
+def test_missing_evaluator_source_without_claims_skips(tmp_path) -> None:
     root = _write_repo(
         tmp_path,
         with_evaluator=False,
@@ -292,7 +292,7 @@ def test_missing_evaluator_source_without_claims_skips(tmp_path):
     assert "skipped" in proc.stdout
 
 
-def test_missing_evaluator_source_with_claims_fails(tmp_path):
+def test_missing_evaluator_source_with_claims_fails(tmp_path) -> None:
     """Claims exist but the authority for the count is gone -> FAIL."""
     root = _write_repo(tmp_path, with_evaluator=False)
     proc = _run_script(root)
@@ -300,7 +300,7 @@ def test_missing_evaluator_source_with_claims_fails(tmp_path):
     assert "engine/evaluator.py" in proc.stdout and "missing" in proc.stdout
 
 
-def test_check_c_runs_in_static_mode(tmp_path):
+def test_check_c_runs_in_static_mode(tmp_path) -> None:
     root = _write_repo(tmp_path, n_tools=3)
     arch = root / "docs" / "architecture.md"
     arch.write_text(
@@ -315,7 +315,7 @@ def test_check_c_runs_in_static_mode(tmp_path):
     assert "7 tools" in proc.stdout and "3 EVALUATOR_TOOLS" in proc.stdout
 
 
-def test_count_evaluator_tools_parses_fake_source(tmp_path):
+def test_count_evaluator_tools_parses_fake_source(tmp_path) -> None:
     root = _write_repo(tmp_path, n_tools=3)
     count, reason = _load_module().count_evaluator_tools(root)
     assert reason is None

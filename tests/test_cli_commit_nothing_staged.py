@@ -72,7 +72,7 @@ def _make_guard_stub():
     class _GuardManagerStub:
         constructed = False
 
-        def __init__(self, workdir, config=None):
+        def __init__(self, workdir, config=None) -> None:
             type(self).constructed = True
 
         def run_all(self):
@@ -87,7 +87,7 @@ def _assert_no_commit_created(repo: Path, head_before: str, count_before: str) -
     assert _git(repo, "rev-list", "--count", "HEAD") == count_before
 
 
-def test_commit_refuses_when_index_empty_and_tree_clean(tmp_path, monkeypatch, capsys):
+def test_commit_refuses_when_index_empty_and_tree_clean(tmp_path, monkeypatch, capsys) -> None:
     """AC 1: clean tree + empty index — guidance, exit 1, no guards, no commit."""
     repo = _init_repo(tmp_path)
     head_before = _git(repo, "rev-parse", "HEAD")
@@ -110,7 +110,7 @@ def test_commit_refuses_when_index_empty_and_tree_clean(tmp_path, monkeypatch, c
     _assert_no_commit_created(repo, head_before, count_before)
 
 
-def test_commit_refuses_when_only_unstaged_edits(tmp_path, monkeypatch, capsys):
+def test_commit_refuses_when_only_unstaged_edits(tmp_path, monkeypatch, capsys) -> None:
     """AC 2: unstaged-only edits — the hint names `git add`, guards not run."""
     repo = _init_repo(tmp_path)
     (repo / "base.txt").write_text("modified but never staged\n")
@@ -137,7 +137,7 @@ def test_commit_refuses_when_only_unstaged_edits(tmp_path, monkeypatch, capsys):
     assert (repo / "base.txt").read_text() == "modified but never staged\n"
 
 
-def test_commit_refuses_when_only_untracked_files(tmp_path, monkeypatch, capsys):
+def test_commit_refuses_when_only_untracked_files(tmp_path, monkeypatch, capsys) -> None:
     """AC 2 (untracked arm): untracked files alone must also get the git add hint."""
     repo = _init_repo(tmp_path)
     (repo / "untracked.txt").write_text("never added\n")
@@ -161,7 +161,7 @@ def test_commit_refuses_when_only_untracked_files(tmp_path, monkeypatch, capsys)
     assert "??" in _git(repo, "status", "--porcelain")
 
 
-def test_commit_with_staged_changes_unchanged_behavior(tmp_path, monkeypatch, capsys):
+def test_commit_with_staged_changes_unchanged_behavior(tmp_path, monkeypatch, capsys) -> None:
     """AC 3 control: a staged change keeps today's path — guards run, banner prints."""
     repo = _init_repo(tmp_path)
     (repo / "staged.txt").write_text("staged\n")
@@ -183,7 +183,7 @@ def test_commit_with_staged_changes_unchanged_behavior(tmp_path, monkeypatch, ca
     assert "staged.txt" in _git(repo, "show", "--name-only", "--format=", "HEAD")
 
 
-def test_partially_staged_file_commits_like_git(tmp_path, monkeypatch, capsys):
+def test_partially_staged_file_commits_like_git(tmp_path, monkeypatch, capsys) -> None:
     """Boundary: a staged file with FURTHER unstaged edits still commits.
 
     Matches `git commit` semantics (the index is committed as-is): a

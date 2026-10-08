@@ -31,7 +31,7 @@ def _config(tmp_path, **overrides):
     return QualityConfig.from_dict(values)
 
 
-def _produce(tmp_path, metric_value=72.3, target=80, surfaces=None, class_floor=None):
+def _produce(tmp_path, metric_value=72.3, target=80, surfaces=None, class_floor=None) -> None:
     artifact = {
         "metrics": {"type_hint_pct": {"value": metric_value, "target": target, "stage": "stage-2"}},
         "produced_at": "test",
@@ -55,14 +55,14 @@ def _produce(tmp_path, metric_value=72.3, target=80, surfaces=None, class_floor=
     subprocess.run(["git", "commit", "-qm", "baseline"], cwd=tmp_path, check=True)
 
 
-def _stage_surface_change(tmp_path, path="src/COV-1/component.py"):
+def _stage_surface_change(tmp_path, path="src/COV-1/component.py") -> None:
     target = tmp_path / path
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text("changed\n", encoding="utf-8")
     subprocess.run(["git", "add", path], cwd=tmp_path, check=True)
 
 
-def test_reads_valid_artifact_and_runs_producer_once(tmp_path):
+def test_reads_valid_artifact_and_runs_producer_once(tmp_path) -> None:
     _produce(tmp_path)
     snapshot = read_quality_snapshot(str(tmp_path), _config(tmp_path))
     assert snapshot["status"] == "available"
@@ -71,7 +71,7 @@ def test_reads_valid_artifact_and_runs_producer_once(tmp_path):
     assert (tmp_path / ".gitreins/count").read_text() == "1"
 
 
-def test_missing_artifact_is_unavailable_not_zero(tmp_path):
+def test_missing_artifact_is_unavailable_not_zero(tmp_path) -> None:
     (tmp_path / "producer.py").write_text("pass\n", encoding="utf-8")
     snapshot = read_quality_snapshot(str(tmp_path), _config(tmp_path))
     assert snapshot["status"] == "unavailable"
@@ -79,7 +79,7 @@ def test_missing_artifact_is_unavailable_not_zero(tmp_path):
     assert snapshot["metrics"] == {}
 
 
-def test_malformed_artifact_is_unavailable(tmp_path):
+def test_malformed_artifact_is_unavailable(tmp_path) -> None:
     (tmp_path / ".gitreins").mkdir()
     (tmp_path / ".gitreins/quality.json").write_text("{bad", encoding="utf-8")
     config = _config(tmp_path, command=f'{sys.executable} -c "pass"')
@@ -88,13 +88,13 @@ def test_malformed_artifact_is_unavailable(tmp_path):
     assert "artifact unreadable" in snapshot["reason"]
 
 
-def test_nonzero_command_is_unavailable(tmp_path):
+def test_nonzero_command_is_unavailable(tmp_path) -> None:
     snapshot = read_quality_snapshot(str(tmp_path), _config(tmp_path, command="exit 7"))
     assert snapshot["status"] == "unavailable"
     assert "command failed" in snapshot["reason"]
 
 
-def test_timeout_is_unavailable(tmp_path):
+def test_timeout_is_unavailable(tmp_path) -> None:
     config = _config(tmp_path, command="sleep 2", timeout=1)
     snapshot = read_quality_snapshot(str(tmp_path), config)
     assert snapshot["status"] == "unavailable"
@@ -108,7 +108,7 @@ def _guard(tmp_path, quality=None):
     return GuardManager(str(tmp_path), config=config, persist_log=False).run_all()
 
 
-def test_guard_surfaces_enabled_quality_and_blocks_opt_in_miss(tmp_path):
+def test_guard_surfaces_enabled_quality_and_blocks_opt_in_miss(tmp_path) -> None:
     _produce(tmp_path)
     quality = _config(tmp_path, per_metric_mode={"type_hint_pct": "block"}).to_dict()
     result = _guard(tmp_path, quality)
@@ -120,7 +120,7 @@ def test_guard_surfaces_enabled_quality_and_blocks_opt_in_miss(tmp_path):
     assert (tmp_path / ".gitreins/count").read_text() == "1"
 
 
-def test_warn_metric_does_not_fail_guard(tmp_path):
+def test_warn_metric_does_not_fail_guard(tmp_path) -> None:
     _produce(tmp_path)
     quality = _config(tmp_path, per_metric_mode={"type_hint_pct": "warn"}).to_dict()
     result = _guard(tmp_path, quality)
@@ -130,7 +130,7 @@ def test_warn_metric_does_not_fail_guard(tmp_path):
     )
 
 
-def test_diff_scope_reports_staged_surface_and_warns_without_test_link(tmp_path):
+def test_diff_scope_reports_staged_surface_and_warns_without_test_link(tmp_path) -> None:
     _produce(
         tmp_path,
         surfaces={"COV-1": {"test_links": 0, "classes": ["unit"]}},
@@ -157,7 +157,7 @@ def test_diff_scope_reports_staged_surface_and_warns_without_test_link(tmp_path)
     assert result.passed is True
 
 
-def test_diff_scope_without_surfaces_is_unavailable(tmp_path):
+def test_diff_scope_without_surfaces_is_unavailable(tmp_path) -> None:
     _produce(tmp_path)
     _stage_surface_change(tmp_path)
     scope = _guard(tmp_path, _config(tmp_path).to_dict()).extra["quality_snapshot"]["diff_scope"]
@@ -167,7 +167,7 @@ def test_diff_scope_without_surfaces_is_unavailable(tmp_path):
     assert scope["surfaces"] == {}
 
 
-def test_docs_only_diff_has_no_surface_findings(tmp_path):
+def test_docs_only_diff_has_no_surface_findings(tmp_path) -> None:
     _produce(tmp_path, surfaces={"COV-1": {"test_links": ["test"], "classes": ["unit"]}})
     _stage_surface_change(tmp_path, "docs/guide.md")
     result = _guard(tmp_path, _config(tmp_path).to_dict())
@@ -177,13 +177,13 @@ def test_docs_only_diff_has_no_surface_findings(tmp_path):
     assert "diff-scope: no artifact surfaces touched" in result.summary
 
 
-def test_disabled_quality_produces_no_guard_output(tmp_path):
+def test_disabled_quality_produces_no_guard_output(tmp_path) -> None:
     result = _guard(tmp_path, {"enabled": False})
     assert "quality" not in result.summary.lower()
     assert "quality_snapshot" not in result.extra
 
 
-def test_quality_targets_are_metric_targets_not_stage_labels(tmp_path):
+def test_quality_targets_are_metric_targets_not_stage_labels(tmp_path) -> None:
     _produce(tmp_path, metric_value=82, target=80)
     quality = _config(tmp_path, per_metric_mode={"type_hint_pct": "block"}).to_dict()
     result = _guard(tmp_path, quality)
@@ -191,7 +191,7 @@ def test_quality_targets_are_metric_targets_not_stage_labels(tmp_path):
     assert result.extra["quality_snapshot"]["metrics"]["type_hint_pct"]["stage"] == "stage-2"
 
 
-def test_judge_result_carries_quality_snapshot(tmp_path):
+def test_judge_result_carries_quality_snapshot(tmp_path) -> None:
     _produce(tmp_path, metric_value=82, target=80)
     quality = _config(tmp_path).to_dict()
     tier1 = _guard(tmp_path, quality)
@@ -216,7 +216,7 @@ def _fresh_quality_cache():
     _snapshot_cache.clear()
 
 
-def test_surfaces_report_identical_numbers(tmp_path, monkeypatch, capsys):
+def test_surfaces_report_identical_numbers(tmp_path, monkeypatch, capsys) -> None:
     """THE parity cell: guard + judge + doctor + CLI + MCP, one producer run.
 
     A producer and the same enabled-quality config drive every surface over
@@ -289,7 +289,7 @@ def test_surfaces_report_identical_numbers(tmp_path, monkeypatch, capsys):
     assert (tmp_path / ".gitreins/count").read_text() == "1"
 
 
-def test_cached_snapshot_reused_across_surfaces_without_rerunning_producer(tmp_path):
+def test_cached_snapshot_reused_across_surfaces_without_rerunning_producer(tmp_path) -> None:
     """The cache — not the producer — serves the second surface."""
     _produce(tmp_path)
     cfg = _config(tmp_path)
@@ -302,7 +302,7 @@ def test_cached_snapshot_reused_across_surfaces_without_rerunning_producer(tmp_p
     assert (tmp_path / ".gitreins/count").read_text() == "1"
 
 
-def test_cached_snapshot_regrades_modes_from_calling_config(tmp_path):
+def test_cached_snapshot_regrades_modes_from_calling_config(tmp_path) -> None:
     """Shared numbers, caller-owned policy: the guard's block grade is not
     copied into a warn-mode reader's snapshot."""
     _produce(tmp_path, metric_value=72.3, target=80)
@@ -317,7 +317,7 @@ def test_cached_snapshot_regrades_modes_from_calling_config(tmp_path):
     assert warn_view["metrics"]["type_hint_pct"]["met_target"] is False
 
 
-def test_snapshot_peek_reads_cache_without_running_producer(tmp_path):
+def test_snapshot_peek_reads_cache_without_running_producer(tmp_path) -> None:
     _produce(tmp_path)
     assert quality_snapshot_peek(str(tmp_path)) is None
     read_quality_snapshot(str(tmp_path), _config(tmp_path))
@@ -328,7 +328,7 @@ def test_snapshot_peek_reads_cache_without_running_producer(tmp_path):
     assert (tmp_path / ".gitreins/count").read_text() == "1"
 
 
-def test_mcp_quality_status_reports_not_computed_then_the_snapshot(tmp_workdir):
+def test_mcp_quality_status_reports_not_computed_then_the_snapshot(tmp_workdir) -> None:
     """quality.status: read-only surface — not-computed before, the run's
     snapshot after guard.run, and never a producer run of its own."""
     import json as _json
@@ -383,7 +383,7 @@ def test_mcp_quality_status_reports_not_computed_then_the_snapshot(tmp_workdir):
     assert (wd / ".gitreins/count").read_text() == "1"
 
 
-def test_guard_and_verdict_json_carry_the_same_snapshot(tmp_path, monkeypatch):
+def test_guard_and_verdict_json_carry_the_same_snapshot(tmp_path, monkeypatch) -> None:
     """Machine-readable parity: tier1.extra and the PERSISTED verdict record
     hold the identical snapshot dict."""
     import engine.persist as persist_mod
@@ -419,7 +419,7 @@ def test_guard_and_verdict_json_carry_the_same_snapshot(tmp_path, monkeypatch):
     assert verdict_data["quality_snapshot"] == tier1.extra["quality_snapshot"]
 
 
-def test_doctor_shows_enabled_quality_metrics(tmp_path, monkeypatch, capsys):
+def test_doctor_shows_enabled_quality_metrics(tmp_path, monkeypatch, capsys) -> None:
     from gitreins import cli
 
     producer = _config(tmp_path).to_dict()
@@ -434,7 +434,7 @@ def test_doctor_shows_enabled_quality_metrics(tmp_path, monkeypatch, capsys):
     assert "type_hint_pct=82% (target 80%, warn, stage stage-2, via repo-producer)" in output
 
 
-def test_format_includes_target_stage_and_producer_command(tmp_path):
+def test_format_includes_target_stage_and_producer_command(tmp_path) -> None:
     _produce(tmp_path, metric_value=66.5, target=70)
     snapshot = read_quality_snapshot(str(tmp_path), _config(tmp_path))
     line = format_quality_snapshot(snapshot)
@@ -442,7 +442,7 @@ def test_format_includes_target_stage_and_producer_command(tmp_path):
     assert "type_hint_pct=66.5% (target 70%, warn, stage stage-2, via repo-producer)" in line
 
 
-def test_format_without_producer_command_still_complete(tmp_path):
+def test_format_without_producer_command_still_complete(tmp_path) -> None:
     """A bare artifact (no 'command' key) falls back to the configured
     command — the line still carries the producer."""
     (tmp_path / "producer.py").write_text(
@@ -457,7 +457,7 @@ def test_format_without_producer_command_still_complete(tmp_path):
     assert "stage s1" in line
 
 
-def test_disabled_snapshot_formats_empty_and_surfaces_stay_none(tmp_path):
+def test_disabled_snapshot_formats_empty_and_surfaces_stay_none(tmp_path) -> None:
     """Disabled quality: every surface reports the historical None/no-block
     shape instead of a snapshot."""
     from gitreins import cli

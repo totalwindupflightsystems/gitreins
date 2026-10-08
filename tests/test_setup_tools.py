@@ -41,7 +41,7 @@ def _git_only_env(tmp_path):
     return {"PATH": str(bin_dir)}
 
 
-def _write(repo, rel, text):
+def _write(repo, rel, text) -> None:
     path = os.path.join(repo, rel)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
@@ -66,7 +66,7 @@ def _mixed_repo(tmp_path):
 class TestSetupToolsHeaderMatchesList:
     """Criterion 1: the header and the tool list never contradict each other."""
 
-    def test_mixed_repo_header_lists_only_languages_whose_tools_are_listed(self, tmp_path):
+    def test_mixed_repo_header_lists_only_languages_whose_tools_are_listed(self, tmp_path) -> None:
         repo = _mixed_repo(tmp_path)
         result = run_cli("setup-tools", cwd=repo, extra_env=_git_only_env(tmp_path))
         assert result.returncode == 0, result.stdout + result.stderr
@@ -81,7 +81,7 @@ class TestSetupToolsHeaderMatchesList:
         # No untracked-language disclosure when every detected language is covered.
         assert "No tracked static analysis tools" not in result.stdout
 
-    def test_tools_are_listed_in_detection_order(self, tmp_path):
+    def test_tools_are_listed_in_detection_order(self, tmp_path) -> None:
         repo = _mixed_repo(tmp_path)
         result = run_cli("setup-tools", cwd=repo, extra_env=_git_only_env(tmp_path))
         assert result.returncode == 0, result.stdout + result.stderr
@@ -89,7 +89,7 @@ class TestSetupToolsHeaderMatchesList:
         # come first, sql's tool last.
         assert result.stdout.index("pyright") < result.stdout.index("sqlfluff")
 
-    def test_pure_python_repo_output_is_unchanged(self, tmp_path):
+    def test_pure_python_repo_output_is_unchanged(self, tmp_path) -> None:
         repo = _init_real_git_repo(tmp_path)
         _write(repo, "pyproject.toml", "[project]\nname = 'pyonly'\n")
         result = run_cli("setup-tools", cwd=repo, extra_env=_git_only_env(tmp_path))
@@ -101,7 +101,7 @@ class TestSetupToolsHeaderMatchesList:
         # No untracked-language disclosure when nothing else was detected.
         assert "No tracked static analysis tools" not in result.stdout
 
-    def test_sql_only_repo_lists_sqlfluff(self, tmp_path):
+    def test_sql_only_repo_lists_sqlfluff(self, tmp_path) -> None:
         # Latent bug fixed alongside: the old primary-type keying left an
         # SQL-only repo in the zero state even though sqlfluff is tracked.
         repo = _init_real_git_repo(tmp_path)
@@ -115,7 +115,7 @@ class TestSetupToolsHeaderMatchesList:
 class TestSetupToolsInstallGuidance:
     """Criterion 2: pipx/uv-tool guidance per tool, never a bare pip line."""
 
-    def test_missing_tool_lines_name_pep668_safe_routes(self, tmp_path):
+    def test_missing_tool_lines_name_pep668_safe_routes(self, tmp_path) -> None:
         repo = _mixed_repo(tmp_path)
         result = run_cli("setup-tools", cwd=repo, extra_env=_git_only_env(tmp_path))
         assert result.returncode == 0, result.stdout + result.stderr
@@ -139,7 +139,7 @@ class TestSetupToolsInstallGuidance:
         assert "pipx install sqlfluff" in sqlfluff_line
         assert "uv tool install sqlfluff" in sqlfluff_line
 
-    def test_setup_tools_guide_has_no_bare_pip_lines(self):
+    def test_setup_tools_guide_has_no_bare_pip_lines(self) -> None:
         from gitreins.cli import _SETUP_TOOLS_INSTALL_GUIDE
 
         assert _SETUP_TOOLS_INSTALL_GUIDE, "the install guide must not be empty"
@@ -148,7 +148,7 @@ class TestSetupToolsInstallGuidance:
                 f"{tool}: bare 'pip install' violates PEP 668 guidance: {guide}"
             )
 
-    def test_setup_tools_guide_covers_every_tracked_tool(self):
+    def test_setup_tools_guide_covers_every_tracked_tool(self) -> None:
         from gitreins.cli import _SETUP_TOOLS_INSTALL_GUIDE, _SETUP_TOOLS_LANG_TOOLS
 
         tracked = {tool for tools in _SETUP_TOOLS_LANG_TOOLS.values() for tool in tools}
@@ -156,7 +156,7 @@ class TestSetupToolsInstallGuidance:
         missing = tracked - set(_SETUP_TOOLS_INSTALL_GUIDE)
         assert not missing, f"tracked tools without an install route: {sorted(missing)}"
 
-    def test_setup_tools_tools_are_tracked_in_the_engine_registry(self):
+    def test_setup_tools_tools_are_tracked_in_the_engine_registry(self) -> None:
         """The tools setup-tools offers must be findable (find_tool knows them)."""
         from engine.static_analysis import _TOOL_BINARIES
         from gitreins.cli import _SETUP_TOOLS_LANG_TOOLS
@@ -167,7 +167,7 @@ class TestSetupToolsInstallGuidance:
             f"setup-tools offers tools the engine registry cannot find: {sorted(unregistered)}"
         )
 
-    def test_setup_tools_guide_names_a_route_per_tracked_tool(self):
+    def test_setup_tools_guide_names_a_route_per_tracked_tool(self) -> None:
         """POC-64: tool-specific routes — pyright via npm/pipx, mypy via pipx/uv."""
         from gitreins.cli import _SETUP_TOOLS_INSTALL_GUIDE
 
@@ -182,7 +182,7 @@ class TestSetupToolsInstallGuidance:
 class TestSetupToolsZeroState:
     """Criterion 3: the unknown-language zero state is preserved."""
 
-    def test_unknown_language_zero_state_exit_0(self, tmp_path):
+    def test_unknown_language_zero_state_exit_0(self, tmp_path) -> None:
         # _init_real_git_repo's tree holds only base.txt: no signature file,
         # no source extension, no SQL sources → nothing tracked for "unknown".
         repo = _init_real_git_repo(tmp_path)
