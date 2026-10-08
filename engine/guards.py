@@ -6,8 +6,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 
-from engine import command_hygiene
-from engine import scanner_nice
+from engine import command_hygiene, scanner_nice
 from engine.data_protection import DataProtectionPolicy
 from engine.types import DataProtectionResult
 
@@ -72,7 +71,7 @@ def _data_protection_scope(workdir: str, changed_files: list[str] | None) -> lis
     """
     if changed_files is None:
         staged = subprocess.run(
-            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],  # noqa: S607 - git resolved via PATH by design
             capture_output=True,
             text=True,
             timeout=10,
@@ -355,7 +354,7 @@ def _changed_go_files(workdir: str, changed_files: list[str] | None) -> list[str
     """
     if changed_files is None:
         staged = subprocess.run(
-            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],  # noqa: S607 - git resolved via PATH by design
             capture_output=True,
             text=True,
             timeout=10,
@@ -495,7 +494,7 @@ def check_go_lint(
     # package dir — the lane passes only when ALL of them pass.
     outputs: list[str] = []
     failed_dirs: list[str] = []
-    for pkg_dir, res in zip(package_dirs, lint_results):
+    for pkg_dir, res in zip(package_dirs, lint_results, strict=False):
         out = res.get("output") or ""
         if len(out) > 2000:
             out = out[:2000] + "\n... [truncated]"

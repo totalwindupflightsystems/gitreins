@@ -67,6 +67,28 @@ _YES_BARE = re.compile(r"(?:^|[;&|]\s*)yes\s*(?:>\s*/dev/null|>>\s*/dev/null|$|[
 _CAT_ZERO_REDIRECT = re.compile(r"cat\s+/dev/zero\s*(?:>|>>)")
 _DD_UNBOUNDED = re.compile(r"dd\s+[^;&|]*if=/dev/zero[^;&|]*of=/dev/null")
 
+# Requests that direct the agent to move credential material to a publishable
+# location are not ordinary tasks. Keep the patterns narrow: a credential term
+# plus an exfiltration verb/path is required before refusing.
+_EXFILTRATION_PATTERNS = (
+    re.compile(
+        r"(?is)\b(?:stage|commit|push|publish|upload|print|paste|copy|backup|export|write|save)\b.{0,100}\b(?:api\s*keys?|tokens?|credentials?|passwords?|secrets?|private\s*keys?|\.env|id_rsa|id_ed25519)\b"
+    ),
+    re.compile(
+        r"(?is)\b(?:api\s*keys?|tokens?|credentials?|passwords?|secrets?|private\s*keys?|\.env|id_rsa|id_ed25519)\b.{0,100}\b(?:stage|commit|push|publish|upload|print|paste|copy|backup|export|write|save)\b"
+    ),
+)
+
+
+def exfiltration_request_reason(text: str) -> str | None:
+    """Name credential-exfiltration instructions before dispatching an MCP task."""
+    if text and any(pattern.search(text) for pattern in _EXFILTRATION_PATTERNS):
+        return (
+            "this request would publish a credential — an exfiltration pattern, "
+            "not a task; do not stage, print, back up, or push credential material"
+        )
+    return None
+
 
 def busy_wait_reason(cmd: str) -> str | None:
     """Return a human reason when ``cmd`` is a CPU busy-wait/burn, else None.

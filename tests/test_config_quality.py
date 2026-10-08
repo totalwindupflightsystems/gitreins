@@ -3,9 +3,10 @@
 import yaml
 
 from engine.config import QualityConfig, load_defaults
+from pathlib import Path
 
 
-def test_quality_config_load_save_load_round_trip(tmp_path):
+def test_quality_config_load_save_load_round_trip(tmp_path: Path) -> None:
     config_dir = tmp_path / ".gitreins"
     config_dir.mkdir()
     source = {
@@ -25,7 +26,7 @@ def test_quality_config_load_save_load_round_trip(tmp_path):
     assert second == first
 
 
-def test_quality_defaults_are_disabled_and_warn_by_default():
+def test_quality_defaults_are_disabled_and_warn_by_default() -> None:
     cfg = QualityConfig.from_dict({})
     assert cfg.enabled is False
     assert cfg.timeout == 300

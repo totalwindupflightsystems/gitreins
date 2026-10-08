@@ -21,7 +21,7 @@ import logging
 import os
 import re
 import time
-from dataclasses import dataclass, asdict, field
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 logger = logging.getLogger("gitreins.cve_feed")
@@ -149,7 +149,7 @@ class CveFeed:
 
             config_path = os.path.join(workdir, ".gitreins", "config.yaml")
             if os.path.isfile(config_path):
-                with open(config_path, "r") as f:
+                with open(config_path) as f:
                     loaded = yaml.safe_load(f) or {}
                 cfg = loaded.get("defaults", {}).get("security_scan", {}) or {}
         except Exception as exc:  # noqa: BLE001 — never block on config
@@ -258,7 +258,7 @@ class CveFeed:
         if not os.path.isfile(path):
             return None
         try:
-            with open(path, "r") as f:
+            with open(path) as f:
                 return json.load(f)
         except (OSError, json.JSONDecodeError) as exc:
             logger.debug("CVE cache unreadable (%s): %s", path, exc)

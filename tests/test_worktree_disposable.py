@@ -18,7 +18,7 @@ from engine.worktree_manager import WorktreeError
 CLI_SCRIPT = Path(__file__).parents[1] / "gitreins" / "cli.py"
 
 
-def _git(repo: Path, *args: str, check: bool = True):
+def _git(repo: Path, *args: str, check: bool = True) -> object:
     return subprocess.run(
         ["git", "-C", str(repo), *args], capture_output=True, text=True, check=check
     )
@@ -38,7 +38,7 @@ def disposable_repo(tmp_path: Path) -> Path:
     return repo
 
 
-def _run_cli(repo: Path, *args: str):
+def _run_cli(repo: Path, *args: str) -> object:
     return subprocess.run(
         [os.fspath(os.sys.executable), os.fspath(CLI_SCRIPT), *args],
         cwd=repo,
@@ -54,7 +54,9 @@ def _disposable_dir(repo: Path) -> Path:
     return repo.parent / "main-wt" / ".disposable"
 
 
-def test_fresh_pass_and_failure_reap_trees_and_write_evidence(disposable_repo, tmp_path):
+def test_fresh_pass_and_failure_reap_trees_and_write_evidence(
+    disposable_repo: str, tmp_path: Path
+) -> None:
     before = len(_git(disposable_repo, "worktree", "list").stdout.splitlines())
     evidence = tmp_path / "fresh.json"
     passed = _run_cli(
@@ -80,13 +82,13 @@ def test_fresh_pass_and_failure_reap_trees_and_write_evidence(disposable_repo, t
     )
 
 
-def test_fresh_timeout_reaps_tree(disposable_repo):
+def test_fresh_timeout_reaps_tree(disposable_repo: str) -> None:
     result = DisposableWorktreeManager(disposable_repo).run("sleep 1", timeout=0.01)
     assert result["exit_code"] == -1
     assert not Path(result["tree"]).exists()
 
 
-def test_fresh_keep_is_reaped_by_worktree_clean(disposable_repo):
+def test_fresh_keep_is_reaped_by_worktree_clean(disposable_repo: str) -> None:
     kept = _run_cli(disposable_repo, "worktree", "fresh", "--cmd", "exit 3", "--keep")
     assert kept.returncode == 3
     assert _disposable_dir(disposable_repo).is_dir()
@@ -98,7 +100,9 @@ def test_fresh_keep_is_reaped_by_worktree_clean(disposable_repo):
     assert not any(_disposable_dir(disposable_repo).iterdir())
 
 
-def test_repro_reports_deterministic_failures_and_reaps(disposable_repo, tmp_path):
+def test_repro_reports_deterministic_failures_and_reaps(
+    disposable_repo: str, tmp_path: Path
+) -> None:
     evidence = tmp_path / "repro.json"
     result = _run_cli(
         disposable_repo,
@@ -123,7 +127,7 @@ def test_repro_reports_deterministic_failures_and_reaps(disposable_repo, tmp_pat
     assert not any(_disposable_dir(disposable_repo).iterdir())
 
 
-def test_repro_all_pass_has_three_runs(disposable_repo):
+def test_repro_all_pass_has_three_runs(disposable_repo: str) -> None:
     result = _run_cli(
         disposable_repo,
         "worktree",
@@ -137,7 +141,7 @@ def test_repro_all_pass_has_three_runs(disposable_repo):
     assert "repro: 3/3 passed (pass rate 1.00)" in result.stdout
 
 
-def test_repro_keep_failures_keeps_only_failed_tree(disposable_repo):
+def test_repro_keep_failures_keeps_only_failed_tree(disposable_repo: str) -> None:
     verifier = DisposableWorktreeManager(disposable_repo)
     report = verifier.repro("test -f no-such-file", 2, keep_failures=True)
     assert report["failures"] == 2
@@ -147,7 +151,7 @@ def test_repro_keep_failures_keeps_only_failed_tree(disposable_repo):
     assert verifier._load() == []
 
 
-def test_disk_ceiling_reaps_oldest_disposable_first(disposable_repo):
+def test_disk_ceiling_reaps_oldest_disposable_first(disposable_repo: str) -> None:
     verifier = DisposableWorktreeManager(disposable_repo)
     first = verifier.create("first", run_id="run-first", keep=True)
     (Path(first.path) / "payload.bin").write_bytes(b"a" * 600_000)
@@ -163,7 +167,7 @@ def test_disk_ceiling_reaps_oldest_disposable_first(disposable_repo):
     assert verifier._load() == []
 
 
-def test_ceiling_reap_during_create_leaves_no_ghost_registry_entry(disposable_repo):
+def test_ceiling_reap_during_create_leaves_no_ghost_registry_entry(disposable_repo: str) -> None:
     """WORKTREE-007: after a ceiling-driven reap the registry lists live trees only.
 
     `create` used to capture the registry BEFORE `enforce_disk_ceiling` ran, so
@@ -193,7 +197,7 @@ def test_ceiling_reap_during_create_leaves_no_ghost_registry_entry(disposable_re
     assert all(Path(record.path).exists() for record in records)
 
 
-def test_disk_ceiling_failure_has_no_new_tree(disposable_repo):
+def test_disk_ceiling_failure_has_no_new_tree(disposable_repo: str) -> None:
     verifier = DisposableWorktreeManager(disposable_repo)
     verifier.manager.worktree_disk_ceiling_mb = 1
     (disposable_repo / "large.bin").write_bytes(b"x" * (2 * 1024 * 1024))
@@ -203,7 +207,7 @@ def test_disk_ceiling_failure_has_no_new_tree(disposable_repo):
     assert verifier._load() == []
 
 
-def test_disk_ceiling_config_is_loaded_and_validated(disposable_repo):
+def test_disk_ceiling_config_is_loaded_and_validated(disposable_repo: str) -> None:
     config = disposable_repo / ".gitreins" / "config.yaml"
     config.parent.mkdir(parents=True)
     config.write_text("worktree_fleet:\n  disk_ceiling_mb: 12\n", encoding="utf-8")
@@ -213,7 +217,7 @@ def test_disk_ceiling_config_is_loaded_and_validated(disposable_repo):
         load_defaults(str(disposable_repo))
 
 
-def test_dogfood_skip_judge_runs_four_steps_and_reaps(disposable_repo, tmp_path):
+def test_dogfood_skip_judge_runs_four_steps_and_reaps(disposable_repo: str, tmp_path: Path) -> None:
     evidence = tmp_path / "dogfood.json"
     result = _run_cli(
         disposable_repo,
@@ -239,7 +243,9 @@ def test_dogfood_skip_judge_runs_four_steps_and_reaps(disposable_repo, tmp_path)
     assert "3/4 steps passed" not in result.stdout
 
 
-def test_dogfood_human_summary_separates_skipped_from_passed(disposable_repo, tmp_path):
+def test_dogfood_human_summary_separates_skipped_from_passed(
+    disposable_repo: str, tmp_path: Path
+) -> None:
     """DF-GITREINS-POC-73 — the summary is also an API.
 
     A CI consumer keying on the old ``3/4 steps passed`` line graded a
@@ -273,7 +279,7 @@ def test_dogfood_human_summary_separates_skipped_from_passed(disposable_repo, tm
     assert passed == 3 and failed == 0
 
 
-def test_format_dogfood_summary_renders_each_status_honestly():
+def test_format_dogfood_summary_renders_each_status_honestly() -> None:
     """Unit contract for the pure renderer: passed / failed / skipped each get
     their own count, skipped steps carry their reason, and no rendering can
     re-introduce the misleading ``N/M steps passed`` shape."""
@@ -325,7 +331,9 @@ def test_format_dogfood_summary_renders_each_status_honestly():
     assert "skipped (previous dogfood step failed)" in failed_summary
 
 
-def test_dogfood_failure_keeps_failed_count_visible(disposable_repo, monkeypatch, capsys):
+def test_dogfood_failure_keeps_failed_count_visible(
+    disposable_repo: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> object:
     """DF-GITREINS-POC-73 control — a genuinely failed step stays failed.
 
     Drives the real command function in-process with only the guard CLI
@@ -341,7 +349,7 @@ def test_dogfood_failure_keeps_failed_count_visible(disposable_repo, monkeypatch
 
     real_run = disposable_mod.subprocess.run
 
-    def failing_guard_run(cmd, **kwargs):
+    def failing_guard_run(cmd: list[str], **kwargs: object) -> object:
         if cmd[-1] == "guard":
             return subprocess.CompletedProcess(cmd, 3, "", "guard exploded")
         return real_run(cmd, **kwargs)
@@ -362,7 +370,7 @@ def test_dogfood_failure_keeps_failed_count_visible(disposable_repo, monkeypatch
     assert "0 failed" not in out
 
 
-def test_dogfood_keep_retains_tree(disposable_repo):
+def test_dogfood_keep_retains_tree(disposable_repo: str) -> None:
     result = _run_cli(
         disposable_repo,
         "worktree",
@@ -392,7 +400,7 @@ def test_dogfood_keep_retains_tree(disposable_repo):
 # path — git then aborts even though the tree is already gone.
 
 
-def test_reap_tolerates_admin_metadata_dropped_by_a_concurrent_reap(disposable_repo):
+def test_reap_tolerates_admin_metadata_dropped_by_a_concurrent_reap(disposable_repo: str) -> None:
     """A tree git no longer tracks is already reaped — reap it, do not raise."""
     verifier = DisposableWorktreeManager(disposable_repo)
     record = verifier.create("race", run_id="run-c05c99c2a1b2")
@@ -412,7 +420,9 @@ def test_reap_tolerates_admin_metadata_dropped_by_a_concurrent_reap(disposable_r
     assert not (_disposable_dir(disposable_repo) / record.run_id).exists()
 
 
-def test_reap_still_fails_loudly_while_git_tracks_the_tree(disposable_repo, monkeypatch):
+def test_reap_still_fails_loudly_while_git_tracks_the_tree(
+    disposable_repo: str, monkeypatch: pytest.MonkeyPatch
+) -> object:
     """The tolerance is not a blanket ignore: a registered tree that cannot be
     reaped still raises, and nothing is silently forgotten."""
     import engine.worktree_disposable as disposable_mod
@@ -423,7 +433,7 @@ def test_reap_still_fails_loudly_while_git_tracks_the_tree(disposable_repo, monk
 
     real_git = disposable_mod._git
 
-    def failing_git(workdir, *args, check=True):
+    def failing_git(workdir: str, *args: object, check: object = True) -> object:
         if args[:2] == ("worktree", "remove"):
             return subprocess.CompletedProcess(
                 list(args),
@@ -442,14 +452,16 @@ def test_reap_still_fails_loudly_while_git_tracks_the_tree(disposable_repo, monk
     assert [item.run_id for item in verifier._load()] == [record.run_id]
 
 
-def test_parallel_repro_reaps_are_serialized(disposable_repo, monkeypatch):
+def test_parallel_repro_reaps_are_serialized(
+    disposable_repo: str, monkeypatch: pytest.MonkeyPatch
+) -> object:
     """k concurrent reaps never run git metadata mutations at the same time."""
     import engine.worktree_disposable as disposable_mod
 
     real_remove = disposable_mod._remove_disposable_tree
     live = {"now": 0, "max": 0}
 
-    def spy(main_root, path):
+    def spy(main_root: object, path: str) -> object:
         live["now"] += 1
         live["max"] = max(live["max"], live["now"])
         try:
@@ -497,7 +509,7 @@ def _qa_rows(repo: Path) -> list[dict]:
     return [json.loads(line) for line in ledger.read_text(encoding="utf-8").splitlines() if line]
 
 
-def test_fresh_runs_in_a_plain_repo_without_a_board(plain_repo: Path):
+def test_fresh_runs_in_a_plain_repo_without_a_board(plain_repo: Path) -> None:
     """`worktree fresh` exits 0 and records QA with no board to resolve."""
     result = _run_cli(plain_repo, "worktree", "fresh", "--cmd", "echo hello")
 
@@ -509,7 +521,7 @@ def test_fresh_runs_in_a_plain_repo_without_a_board(plain_repo: Path):
     assert not (plain_repo / ".coding-hermes").exists()
 
 
-def test_repro_runs_in_a_plain_repo_without_a_board(plain_repo: Path):
+def test_repro_runs_in_a_plain_repo_without_a_board(plain_repo: Path) -> None:
     result = _run_cli(plain_repo, "worktree", "repro", "--cmd", "true", "-k", "2")
 
     assert result.returncode == 0, result.stderr
@@ -518,7 +530,7 @@ def test_repro_runs_in_a_plain_repo_without_a_board(plain_repo: Path):
     assert not (plain_repo / ".coding-hermes").exists()
 
 
-def test_dogfood_runs_in_a_plain_repo_without_a_board(plain_repo: Path):
+def test_dogfood_runs_in_a_plain_repo_without_a_board(plain_repo: Path) -> None:
     result = _run_cli(plain_repo, "worktree", "dogfood", "--skip-judge", "--test-command", "true")
 
     assert result.returncode == 0, result.stderr
@@ -527,7 +539,7 @@ def test_dogfood_runs_in_a_plain_repo_without_a_board(plain_repo: Path):
     assert not (plain_repo / ".coding-hermes").exists()
 
 
-def test_disposable_manager_api_works_without_a_board(plain_repo: Path):
+def test_disposable_manager_api_works_without_a_board(plain_repo: Path) -> None:
     """The manager API itself (not just the CLI) runs with no board."""
     verifier = DisposableWorktreeManager(plain_repo)
 
@@ -555,7 +567,9 @@ def _write_tool_stub(bin_dir: Path, name: str, body: str) -> None:
     stub.chmod(0o755)
 
 
-def test_fresh_child_resolves_tree_toolchain_over_session_path(disposable_repo: Path, monkeypatch):
+def test_fresh_child_resolves_tree_toolchain_over_session_path(
+    disposable_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """DF-GITREINS-POC-71 — `worktree fresh` runs the TREE's toolchain.
 
     The disposable run's child inherits the consumer session's PATH, so a
@@ -582,8 +596,8 @@ def test_fresh_child_resolves_tree_toolchain_over_session_path(disposable_repo: 
 
 
 def test_dogfood_steps_boot_the_harness_cli_under_hostile_session_env(
-    disposable_repo: Path, monkeypatch
-):
+    disposable_repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """DF-GITREINS-POC-71 — dogfood steps boot the harness CLI deterministically.
 
     Reproduces the verified live failure: the parent interpreter is foreign
@@ -626,7 +640,7 @@ def test_dogfood_steps_boot_the_harness_cli_under_hostile_session_env(
     assert str(hostile_site) in (os.environ.get("PYTHONPATH") or "")
 
 
-def test_child_env_helpers_pin_the_tree_toolchain_and_harness_root(tmp_path: Path):
+def test_child_env_helpers_pin_the_tree_toolchain_and_harness_root(tmp_path: Path) -> None:
     """The env-pinning contract lives in named helpers, not ad-hoc literals.
 
     Both builders must point PATH at the disposable tree's linked venv bin

@@ -36,9 +36,10 @@ from engine.guard_manager import (
     newest_guard_log,
     write_guard_log,
 )
+from pathlib import Path
 
 
-def _repo(tmp_path, name="repo"):
+def _repo(tmp_path: Path, name: str = "repo") -> str:
     """A git scratch repo with one committed source file and its test."""
     import subprocess
 
@@ -63,7 +64,7 @@ def _repo(tmp_path, name="repo"):
     return str(workdir)
 
 
-def _stage(workdir, relpath, content):
+def _stage(workdir: str, relpath: str, content: str) -> None:
     import subprocess
 
     full = os.path.join(workdir, relpath)
@@ -74,13 +75,13 @@ def _stage(workdir, relpath, content):
     subprocess.run(["git", "add", relpath], cwd=workdir, capture_output=True, check=True, env=env)
 
 
-def _guards(**overrides):
+def _guards(**overrides: object) -> dict:
     guards = {"test_command": "echo ok", "lint": False, "test_mode": "diff"}
     guards.update(overrides)
     return {"guards": guards}
 
 
-def _run_cli(*args, cwd):
+def _run_cli(*args: object, cwd: str) -> object:
     """Run the real CLI (same pattern as tests/test_guard_degraded.py)."""
     import subprocess
     import sys
@@ -92,7 +93,7 @@ def _run_cli(*args, cwd):
     return subprocess.run(cmd, capture_output=True, text=True, timeout=60, cwd=cwd, env=env)
 
 
-def _read_run_log(workdir) -> str:
+def _read_run_log(workdir: str) -> str:
     log = newest_guard_log(workdir)
     assert log, "the run must persist a guard log (DF-018)"
     with open(log) as f:
@@ -102,19 +103,19 @@ def _read_run_log(workdir) -> str:
 class TestDiscoverTestTargetsStates:
     """The three discovery states the sentinel must distinguish."""
 
-    def test_no_mapping_returns_empty_list_not_none(self, tmp_path):
+    def test_no_mapping_returns_empty_list_not_none(self, tmp_path: Path) -> None:
         """Changed sources that map to no test file → [] (skip), not None."""
         workdir = _repo(tmp_path)
         _stage(workdir, "pkg.py", "x = 1\n")
         assert _discover_test_targets(workdir) == []
 
-    def test_force_full_file_returns_none(self, tmp_path):
+    def test_force_full_file_returns_none(self, tmp_path: Path) -> None:
         """A force-full glob (conftest.py) changed → None (real fallback)."""
         workdir = _repo(tmp_path)
         _stage(workdir, "conftest.py", "")
         assert _discover_test_targets(workdir) is None
 
-    def test_mapped_test_file_returned(self, tmp_path):
+    def test_mapped_test_file_returned(self, tmp_path: Path) -> None:
         workdir = _repo(tmp_path)
         _stage(workdir, "pkg.py", "x = 1\n")
         _stage(workdir, "tests/test_pkg.py", "def test_x():\n    pass\n")
@@ -122,7 +123,7 @@ class TestDiscoverTestTargetsStates:
         assert targets and targets[0].endswith("test_pkg.py")
 
 
-def _tests_result(result):
+def _tests_result(result: object) -> object:
     """The tests-lane GuardResult (names: 'tests', 'tests (full)', 'tests (diff: N files)')."""
     return next(r for r in result.results if r.name == "tests" or r.name.startswith("tests ("))
 
@@ -130,7 +131,7 @@ def _tests_result(result):
 class TestRunAllTestScopeSentinel:
     """AC 3: the two None-lookalike states get distinct extra keys."""
 
-    def test_no_match_sets_no_match_scope(self, tmp_path):
+    def test_no_match_sets_no_match_scope(self, tmp_path: Path) -> None:
         """Zero-mapped changed sources → test_scope 'no-match', tests skip."""
         workdir = _repo(tmp_path)
         _stage(workdir, "pkg.py", "x = 1\n")
@@ -141,7 +142,7 @@ class TestRunAllTestScopeSentinel:
         assert "no test files match" in (tests.skip_reason or "")
         assert result.extra["test_scope"] == "no-match"
 
-    def test_force_full_sets_full_fallback_scope(self, tmp_path):
+    def test_force_full_sets_full_fallback_scope(self, tmp_path: Path) -> None:
         """conftest.py staged → real safety-trigger fallback, distinct scope."""
         workdir = _repo(tmp_path)
         _stage(workdir, "conftest.py", "")
@@ -152,7 +153,7 @@ class TestRunAllTestScopeSentinel:
         assert result.extra["test_scope"] == "full-fallback"
         assert result.extra["test_targets"] is None
 
-    def test_clean_tree_gets_no_changes_scope(self, tmp_path):
+    def test_clean_tree_gets_no_changes_scope(self, tmp_path: Path) -> None:
         """Empty change set: the lane-level skip stands; the scope key marks
         ``no-changes`` so neither surface claims the full suite."""
         workdir = _repo(tmp_path)
@@ -164,7 +165,7 @@ class TestRunAllTestScopeSentinel:
         assert result.extra["test_scope"] == "no-changes"
         assert result.extra["test_targets"] is None
 
-    def test_narrowed_run_gets_no_scope_key(self, tmp_path):
+    def test_narrowed_run_gets_no_scope_key(self, tmp_path: Path) -> None:
         """A normal diff run reports the count, not a sentinel scope."""
         workdir = _repo(tmp_path)
         _stage(workdir, "pkg.py", "x = 1\n")
@@ -174,7 +175,7 @@ class TestRunAllTestScopeSentinel:
         assert "test_scope" not in result.extra
         assert result.extra["test_targets"] == 1
 
-    def test_full_mode_gets_no_scope_key(self, tmp_path):
+    def test_full_mode_gets_no_scope_key(self, tmp_path: Path) -> None:
         """full mode never enters the sentinel contract."""
         workdir = _repo(tmp_path)
         _stage(workdir, "pkg.py", "x = 1\n")
@@ -187,24 +188,24 @@ class TestRunAllTestScopeSentinel:
 class TestLogTestScopeRenders:
     """AC 3: _log_test_scope renders each state truthfully."""
 
-    def test_no_match_scope(self):
+    def test_no_match_scope(self) -> None:
         assert _log_test_scope({"test_mode": "diff", "test_scope": "no-match"}) == (
             "no test files matched (diff mode skipped)"
         )
 
-    def test_full_fallback_scope(self):
+    def test_full_fallback_scope(self) -> None:
         assert _log_test_scope({"test_mode": "diff", "test_scope": "full-fallback"}) == (
             "full suite (safety trigger)"
         )
 
-    def test_legacy_none_still_renders_full_suite(self):
+    def test_legacy_none_still_renders_full_suite(self) -> None:
         """Old-shape extras (count/None, no test_scope) render as before."""
         assert _log_test_scope({"test_mode": "diff", "test_targets": None}) == (
             "full suite (safety trigger)"
         )
         assert _log_test_scope({"test_mode": "diff", "test_targets": 3}) == "3 file(s)"
 
-    def test_no_targets_key_unchanged(self):
+    def test_no_targets_key_unchanged(self) -> None:
         assert _log_test_scope({"test_mode": "full"}) == "all (full mode)"
         assert _log_test_scope({"test_mode": "diff"}) == "unknown"
 
@@ -212,7 +213,7 @@ class TestLogTestScopeRenders:
 class TestBannerAndRunLogTruth:
     """AC 1 + 2: banner and run log never contradict the tests lane."""
 
-    def test_no_match_banner_names_the_skip_never_full_suite(self, tmp_path):
+    def test_no_match_banner_names_the_skip_never_full_suite(self, tmp_path: Path) -> None:
         """The F2 contradiction, pinned: staged source with no mapped tests."""
         workdir = _repo(tmp_path)
         _stage(workdir, "pkg.py", "x = 1\n")
@@ -227,7 +228,7 @@ class TestBannerAndRunLogTruth:
             result.stdout
         )
 
-    def test_no_match_run_log_never_claims_full_suite(self, tmp_path):
+    def test_no_match_run_log_never_claims_full_suite(self, tmp_path: Path) -> None:
         workdir = _repo(tmp_path)
         _stage(workdir, "pkg.py", "x = 1\n")
         _write_allow_skips(workdir)
@@ -237,7 +238,7 @@ class TestBannerAndRunLogTruth:
         assert "full suite" not in content
         assert "test_targets: no test files matched (diff mode skipped)" in content
 
-    def test_force_full_banner_and_log_still_report_safety_trigger(self, tmp_path):
+    def test_force_full_banner_and_log_still_report_safety_trigger(self, tmp_path: Path) -> None:
         """AC 2: the REAL fallback keeps its wording on both surfaces."""
         workdir = _repo(tmp_path)
         _stage(workdir, "conftest.py", "")
@@ -250,7 +251,7 @@ class TestBannerAndRunLogTruth:
         log_content = _read_run_log(workdir)
         assert "test_targets: full suite (safety trigger)" in log_content
 
-    def test_clean_tree_banner_never_claims_full_suite(self, tmp_path):
+    def test_clean_tree_banner_never_claims_full_suite(self, tmp_path: Path) -> None:
         """The empty-stage `gitreins commit` hook run: same false claim, gone."""
         workdir = _repo(tmp_path)
         _write_allow_skips(workdir)
@@ -263,7 +264,7 @@ class TestBannerAndRunLogTruth:
         assert "~ tests — skipped (no staged files)" in result.stdout
 
 
-def _write_allow_skips(workdir):
+def _write_allow_skips(workdir: str) -> None:
     """allow_skips: true so the CLI exits 0 on these skip-shaped runs."""
     import yaml
 
@@ -286,7 +287,7 @@ def _write_allow_skips(workdir):
 class TestRunLogRenderingOnResult:
     """The run-log header (write_guard_log path) carries the same truth."""
 
-    def test_write_guard_log_renders_no_match(self, tmp_path):
+    def test_write_guard_log_renders_no_match(self, tmp_path: Path) -> None:
         workdir = _repo(tmp_path)
         _stage(workdir, "pkg.py", "x = 1\n")
         result = GuardManager(workdir, config=_guards()).run_all()
@@ -297,7 +298,7 @@ class TestRunLogRenderingOnResult:
         assert "test_targets: no test files matched (diff mode skipped)" in content
         assert "full suite" not in content
 
-    def test_write_guard_log_renders_full_fallback(self, tmp_path):
+    def test_write_guard_log_renders_full_fallback(self, tmp_path: Path) -> None:
         workdir = _repo(tmp_path)
         _stage(workdir, "conftest.py", "")
         result = GuardManager(workdir, config=_guards()).run_all()

@@ -197,7 +197,7 @@ def resolve_worktree_identity(
             )
             if main_branch:
                 result = subprocess.run(
-                    ["git", "-C", str(invoking_dir), "merge-base", "HEAD", main_branch],
+                    ["git", "-C", str(invoking_dir), "merge-base", "HEAD", main_branch],  # noqa: S607 - git resolved via PATH by design
                     capture_output=True,
                     text=True,
                     timeout=5,

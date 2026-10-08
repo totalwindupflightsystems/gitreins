@@ -15,6 +15,7 @@ import pytest
 
 from engine.judge import Judge
 from engine.version import __version__
+from collections.abc import Iterator
 from gitreins_mcp.server import (
     PROTOCOL_VERSION,
     SERVER_NAME,
@@ -35,7 +36,7 @@ CI_GENEROUS_ASYNC_SECONDS = 3.0
 
 
 @pytest.fixture
-def mcp_server(tmp_workdir):
+def mcp_server(tmp_workdir: str) -> object:
     """Create an MCP server pointed at a temp git repo."""
     return GitReinsMCPServer(tmp_workdir)
 
@@ -46,7 +47,7 @@ def mcp_server(tmp_workdir):
 class TestInitializeHandshake:
     """Test MCP initialize — step-2-1-1-1."""
 
-    def test_initialize_returns_protocol_version(self, mcp_server):
+    def test_initialize_returns_protocol_version(self, mcp_server: object) -> None:
         """initialize returns jsonrpc 2.0, protocolVersion 2024-11-05, serverInfo."""
         response = mcp_server.handle_request(
             {
@@ -71,7 +72,7 @@ class TestInitializeHandshake:
         # release, not a hardcoded "0.1.0" that disagreed with CLI/README.
         assert response["result"]["serverInfo"]["version"] == __version__
 
-    def test_initialized_notification_returns_none(self, mcp_server):
+    def test_initialized_notification_returns_none(self, mcp_server: object) -> None:
         """Notifications/initialized returns None (no response)."""
         response = mcp_server.handle_request(
             {
@@ -81,7 +82,7 @@ class TestInitializeHandshake:
         )
         assert response is None
 
-    def test_unknown_method_returns_error(self, mcp_server):
+    def test_unknown_method_returns_error(self, mcp_server: object) -> None:
         """Unknown method returns error code -32601."""
         response = mcp_server.handle_request(
             {
@@ -97,7 +98,7 @@ class TestInitializeHandshake:
 class TestToolsList:
     """Test tools/list — step-2-1-1-2."""
 
-    def test_tools_list_returns_fifteen_tools(self, mcp_server):
+    def test_tools_list_returns_fifteen_tools(self, mcp_server: object) -> None:
         """tools/list returns exactly 15 tool schemas (12 + context.resolve
         + repo.init + quality.status)."""
         response = mcp_server.handle_request(
@@ -111,7 +112,7 @@ class TestToolsList:
         tools = response["result"]["tools"]
         assert len(tools) == 15
 
-    def test_all_expected_tool_names_present(self, mcp_server):
+    def test_all_expected_tool_names_present(self, mcp_server: object) -> None:
         """All expected tool names: task.create, task.start, task.complete,
         task.list, task.get, task.delete, commit, guard.run, judge.evaluate,
         judge.status."""
@@ -141,7 +142,7 @@ class TestToolsList:
         for name in expected:
             assert name in names, f"Missing tool: {name}"
 
-    def test_each_tool_has_name_description_inputschema(self, mcp_server):
+    def test_each_tool_has_name_description_inputschema(self, mcp_server: object) -> None:
         """Each tool schema has name, description, inputSchema."""
         response = mcp_server.handle_request(
             {
@@ -159,7 +160,7 @@ class TestToolsList:
 class TestToolsCall:
     """Test tools/call dispatch — step-2-1-1-3."""
 
-    def test_unknown_tool_returns_error(self, mcp_server):
+    def test_unknown_tool_returns_error(self, mcp_server: object) -> None:
         """tools/call with unknown tool name returns error code -32601."""
         response = mcp_server.handle_request(
             {
@@ -175,7 +176,7 @@ class TestToolsCall:
         assert response["error"]["code"] == -32601
         assert "Unknown tool" in response["error"]["message"]
 
-    def test_handler_exception_returns_server_error(self, mcp_server):
+    def test_handler_exception_returns_server_error(self, mcp_server: object) -> None:
         """tools/call with handler that raises exception returns error (code -32000 or KeyError)."""
         # The handler raises RuntimeError which is caught by the generic except
         # in handle_request. But if _task_create accesses 'mcp_server' fixture's
@@ -183,7 +184,7 @@ class TestToolsCall:
         # The key point: exception is caught, error response is returned.
         pass  # Tested indirectly via task.start and task.complete on nonexistent
 
-    def test_tools_call_wraps_result_in_content(self, mcp_server, tmp_workdir):
+    def test_tools_call_wraps_result_in_content(self, mcp_server: object, tmp_workdir: str) -> None:
         """tools/call response wraps result in content[0].text."""
         response = mcp_server.handle_request(
             {
@@ -209,7 +210,7 @@ class TestToolsCall:
 class TestTaskCreateMCP:
     """Test task.create tool — step-2-2-1-1."""
 
-    def test_task_create_returns_task_dict(self, mcp_server, tmp_workdir):
+    def test_task_create_returns_task_dict(self, mcp_server: object, tmp_workdir: str) -> None:
         """task.create returns correct task dict."""
         response = mcp_server.handle_request(
             {
@@ -234,7 +235,7 @@ class TestTaskCreateMCP:
         assert len(task["criteria"]) == 2
         assert task["status"] == "pending"
 
-    def test_task_create_persists_to_yaml(self, mcp_server, tmp_workdir):
+    def test_task_create_persists_to_yaml(self, mcp_server: object, tmp_workdir: str) -> None:
         """Task is persisted to .gitreins/tasks.yaml."""
         mcp_server.handle_request(
             {
@@ -256,7 +257,7 @@ class TestTaskCreateMCP:
 class TestTaskStartComplete:
     """Test task.start and task.complete — step-2-2-1-2."""
 
-    def test_task_start_sets_in_progress(self, mcp_server, tmp_workdir):
+    def test_task_start_sets_in_progress(self, mcp_server: object, tmp_workdir: str) -> None:
         """task.start transitions status to in_progress."""
         # Create first
         mcp_server.handle_request(
@@ -282,7 +283,9 @@ class TestTaskStartComplete:
         task = json.loads(text)
         assert task["status"] == "in_progress"
 
-    def test_task_complete_without_llm_key(self, mcp_server, tmp_workdir, monkeypatch):
+    def test_task_complete_without_llm_key(
+        self, mcp_server: object, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """task.complete without LLM key returns note about LLM not configured.
 
         DF-GITREINS-POC-78: the gate consults LLMClient's FULL credential
@@ -326,7 +329,7 @@ class TestTaskStartComplete:
         assert result["task"]["status"] == "complete"
         assert "LLM not configured" in result["note"]
 
-    def test_task_start_nonexistent_returns_error(self, mcp_server):
+    def test_task_start_nonexistent_returns_error(self, mcp_server: object) -> None:
         """task.start on nonexistent task returns error response."""
         response = mcp_server.handle_request(
             {
@@ -339,7 +342,7 @@ class TestTaskStartComplete:
         # Handler raises KeyError which is caught by the generic exception handler
         assert response["error"] is not None
 
-    def test_task_complete_nonexistent_returns_error(self, mcp_server):
+    def test_task_complete_nonexistent_returns_error(self, mcp_server: object) -> None:
         """task.complete on nonexistent task returns error response."""
         response = mcp_server.handle_request(
             {
@@ -355,7 +358,7 @@ class TestTaskStartComplete:
 class TestTaskCRUDMCP:
     """Test task.get, task.list, task.delete — step-2-2-1-3."""
 
-    def test_task_get_existing(self, mcp_server, tmp_workdir):
+    def test_task_get_existing(self, mcp_server: object, tmp_workdir: str) -> None:
         """task.get returns existing task."""
         mcp_server.handle_request(
             {
@@ -380,7 +383,7 @@ class TestTaskCRUDMCP:
         task = json.loads(text)
         assert task["id"] == "g1"
 
-    def test_task_get_nonexistent_returns_error(self, mcp_server):
+    def test_task_get_nonexistent_returns_error(self, mcp_server: object) -> None:
         """task.get on nonexistent returns error dict."""
         response = mcp_server.handle_request(
             {
@@ -394,7 +397,7 @@ class TestTaskCRUDMCP:
         result = json.loads(text)
         assert "error" in result
 
-    def test_task_list_with_status_filter(self, mcp_server, tmp_workdir):
+    def test_task_list_with_status_filter(self, mcp_server: object, tmp_workdir: str) -> None:
         """task.list with status filter returns filtered tasks."""
         mcp_server.handle_request(
             {
@@ -440,7 +443,7 @@ class TestTaskCRUDMCP:
         assert len(tasks) == 1
         assert tasks[0]["id"] == "l1"
 
-    def test_task_delete_existing(self, mcp_server, tmp_workdir):
+    def test_task_delete_existing(self, mcp_server: object, tmp_workdir: str) -> None:
         """task.delete returns {deleted: id}."""
         mcp_server.handle_request(
             {
@@ -465,7 +468,7 @@ class TestTaskCRUDMCP:
         result = json.loads(text)
         assert result["deleted"] == "d1"
 
-    def test_task_delete_nonexistent_returns_error(self, mcp_server):
+    def test_task_delete_nonexistent_returns_error(self, mcp_server: object) -> None:
         """task.delete on nonexistent returns error dict."""
         response = mcp_server.handle_request(
             {
@@ -486,7 +489,7 @@ class TestTaskCRUDMCP:
 class TestCommitMCP:
     """Test commit tool — step-2-3-1-1."""
 
-    def test_commit_with_clean_repo_rejected(self, mcp_server, tmp_workdir):
+    def test_commit_with_clean_repo_rejected(self, mcp_server: object, tmp_workdir: str) -> None:
         """Commit in clean repo (no staged changes) is rejected by git."""
         response = mcp_server.handle_request(
             {
@@ -502,7 +505,9 @@ class TestCommitMCP:
         # Either guard error or git error (nothing to commit)
         assert result.get("committed") is False or "error" in result
 
-    def test_commit_with_in_progress_task_rejected(self, mcp_server, tmp_workdir):
+    def test_commit_with_in_progress_task_rejected(
+        self, mcp_server: object, tmp_workdir: str
+    ) -> None:
         """Commit is rejected when tasks are in-progress."""
         mcp_server.handle_request(
             {
@@ -553,7 +558,7 @@ class TestCommitWorkdirMCP:
     """
 
     @staticmethod
-    def _call(server, name, arguments):
+    def _call(server: object, name: str, arguments: list[str]) -> object:
         """Drive one tools/call and return the parsed result payload."""
         response = server.handle_request(
             {
@@ -567,7 +572,7 @@ class TestCommitWorkdirMCP:
         return json.loads(response["result"]["content"][0]["text"])
 
     @staticmethod
-    def _init_repo(path) -> str:
+    def _init_repo(path: str) -> str:
         """A real git repo with a guard config (secrets on, lint/tests off).
 
         lint/tests are off so a cross-repo commit exercises the guard wiring
@@ -590,13 +595,13 @@ class TestCommitWorkdirMCP:
         return str(path)
 
     @staticmethod
-    def _stage(path, name: str = "f.txt", content: str = "x\n") -> None:
+    def _stage(path: str, name: str = "f.txt", content: str = "x\n") -> None:
         (Path(path) / name).write_text(content)
         subprocess.run(["git", "add", name], cwd=str(path), check=True, capture_output=True)
 
     def test_commit_blocked_by_in_progress_task_in_target_workdir(
-        self, mcp_server, tmp_workdir, tmp_path
-    ):
+        self, mcp_server: object, tmp_workdir: str, tmp_path: Path
+    ) -> None:
         """RED core: a task in progress in the TARGET repo blocks a commit
         aimed at that repo — before the fix, the gate read only the default
         store and this commit went through (or the workdir kwarg was
@@ -624,8 +629,8 @@ class TestCommitWorkdirMCP:
         assert "committed" not in result
 
     def test_default_workdir_task_does_not_block_target_workdir(
-        self, mcp_server, tmp_workdir, tmp_path
-    ):
+        self, mcp_server: object, tmp_workdir: str, tmp_path: Path
+    ) -> None:
         """An in-progress task in the DEFAULT repo must not block a commit in
         a different repo — the gate is scoped to the resolved workdir."""
         target = self._init_repo(tmp_path / "other-repo")
@@ -643,7 +648,9 @@ class TestCommitWorkdirMCP:
         assert "error" in blocked
         assert "default-task" in str(blocked.get("tasks", []))
 
-    def test_commit_target_workdir_without_config_refuses(self, mcp_server, tmp_workdir, tmp_path):
+    def test_commit_target_workdir_without_config_refuses(
+        self, mcp_server: object, tmp_workdir: str, tmp_path: Path
+    ) -> None:
         """A cross-repo commit into a repo with no .gitreins/config.yaml is
         refused with guard.run's exact error shape (GR-GAP-054) — never a
         false-green guard fallback."""
@@ -659,7 +666,7 @@ class TestCommitWorkdirMCP:
         assert "committed" not in result
         assert "details" not in result
 
-    def test_commit_tool_schema_exposes_optional_workdir(self, mcp_server):
+    def test_commit_tool_schema_exposes_optional_workdir(self, mcp_server: object) -> None:
         """tools/list advertises `workdir` on the commit tool as optional."""
         response = mcp_server.handle_request({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
         tools = {t["name"]: t for t in response["result"]["tools"]}
@@ -688,7 +695,9 @@ class TestGuardRunMCP:
             f.write("guards:\n  secrets: true\n  lint: false\n  tests: false\n")
         return cfg_path
 
-    def test_guard_run_returns_passed_and_results(self, mcp_server, tmp_workdir):
+    def test_guard_run_returns_passed_and_results(
+        self, mcp_server: object, tmp_workdir: str
+    ) -> None:
         """guard.run returns passed bool, workdir and result list with
         name/passed/output for a CONFIGURED repo (GR-GAP-054 keeps this
         contract byte-for-shape)."""
@@ -713,8 +722,8 @@ class TestGuardRunMCP:
             assert "output" in r
 
     def test_guard_run_without_config_returns_error_not_pass(
-        self, mcp_server, tmp_workdir, monkeypatch
-    ):
+        self, mcp_server: object, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """GR-GAP-054/AC1+AC2: a repo with no .gitreins/config.yaml errors out
         naming `gitreins init` — never a false green — and GuardManager.run_all
         is not invoked at all."""
@@ -722,7 +731,7 @@ class TestGuardRunMCP:
 
         calls: list[str] = []
 
-        def _forbidden_run_all(self, *args, **kwargs):  # noqa: ANN001
+        def _forbidden_run_all(self, *args: object, **kwargs: object) -> object:  # noqa: ANN001
             calls.append("run_all")
             raise AssertionError("GuardManager.run_all must not run without a config")
 
@@ -746,7 +755,9 @@ class TestGuardRunMCP:
         assert "results" not in result
         assert calls == []
 
-    def test_guard_run_target_workdir_with_config_allows(self, mcp_server, tmp_workdir, tmp_path):
+    def test_guard_run_target_workdir_with_config_allows(
+        self, mcp_server: object, tmp_workdir: str, tmp_path: Path
+    ) -> None:
         """AC4: the config gate inspects the TARGET workdir, not the MCP
         server's own workdir — an unconfigured server may still guard a
         configured repo passed via the optional workdir argument."""
@@ -771,8 +782,8 @@ class TestGuardRunMCP:
         assert [r["name"] for r in result["results"]]
 
     def test_guard_run_target_workdir_without_config_errors(
-        self, mcp_server, tmp_workdir, tmp_path
-    ):
+        self, mcp_server: object, tmp_workdir: str, tmp_path: Path
+    ) -> None:
         """AC4: a CONFIGURED server workdir does not authorize an unconfigured
         target — the gate follows the requested workdir."""
         self._write_guard_config(tmp_workdir)
@@ -797,7 +808,7 @@ class TestGuardRunMCP:
 class TestJudgeEvaluateMCP:
     """Test judge.evaluate — step-2-3-1-3."""
 
-    def test_judge_evaluate_nonexistent_task_returns_error(self, mcp_server):
+    def test_judge_evaluate_nonexistent_task_returns_error(self, mcp_server: object) -> None:
         """judge.evaluate on nonexistent task returns error response."""
         if not os.getenv("GITREINS_LLM_API_KEY"):
             pytest.skip("GITREINS_LLM_API_KEY not set — LLM-dependent test")
@@ -814,7 +825,7 @@ class TestJudgeEvaluateMCP:
         assert "error" in result
         assert "Task not found" in result["error"]
 
-    def test_judge_evaluate_existing_task(self, mcp_server, tmp_workdir):
+    def test_judge_evaluate_existing_task(self, mcp_server: object, tmp_workdir: str) -> None:
         """judge.evaluate on existing task returns response with error or result.
 
         Note: with no LLM key, the call goes through legacy path which may
@@ -856,7 +867,7 @@ class _FakeTier1:
 class _FakeItem:
     """Minimal stand-in for an evaluator verdict item."""
 
-    def __init__(self, criterion, status, detail):
+    def __init__(self, criterion: object, status: str, detail: str) -> None:
         self.criterion = criterion
         self.status = status
         self.detail = detail
@@ -865,7 +876,7 @@ class _FakeItem:
 class _FakeTier2:
     """Minimal stand-in for an AgenticEvaluator verdict."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.verdict = "COMPLETE"
         self.items = [_FakeItem("c1", "PASS", "ok")]
         self.summary = "all criteria met"
@@ -874,16 +885,18 @@ class _FakeTier2:
 class _FakeJudgeResult:
     """Minimal stand-in for engine.judge.JudgeResult."""
 
-    def __init__(self, passed=True):
+    def __init__(self, passed: object = True) -> None:
         self.passed = passed
         self.tier1 = _FakeTier1()
         self.tier2 = _FakeTier2()
 
 
-def _stub_judge_evaluate(monkeypatch, sleep=0.0, passed=True):
+def _stub_judge_evaluate(
+    monkeypatch: pytest.MonkeyPatch, sleep: float = 0.0, passed: bool = True
+) -> object:
     """Stub Judge.evaluate_task so async tests never need a real LLM or suite."""
 
-    def _fake(self, task):
+    def _fake(self: object, task: object) -> object:
         if sleep:
             time.sleep(sleep)
         return _FakeJudgeResult(passed=passed)
@@ -900,7 +913,7 @@ class TestJudgeAsyncMCP:
     host environment.
     """
 
-    def _call(self, server, name, arguments):
+    def _call(self, server: object, name: str, arguments: list[str]) -> object:
         response = server.handle_request(
             {
                 "jsonrpc": "2.0",
@@ -912,14 +925,14 @@ class TestJudgeAsyncMCP:
         assert "result" in response, f"tools/call {name} failed: {response}"
         return json.loads(response["result"]["content"][0]["text"])
 
-    def _create_task(self, server, task_id):
+    def _create_task(self, server: object, task_id: str) -> None:
         self._call(
             server,
             "task.create",
             {"id": task_id, "title": task_id, "criteria": ["c1"]},
         )
 
-    def _poll_status(self, server, job_id, deadline=5.0):
+    def _poll_status(self, server: object, job_id: str, deadline: float = 5.0) -> object:
         """Poll judge.status until the job finishes (or fail after deadline)."""
         end = time.monotonic() + deadline
         last = None
@@ -930,7 +943,9 @@ class TestJudgeAsyncMCP:
             time.sleep(0.02)
         pytest.fail(f"job {job_id} did not finish within {deadline}s — last status: {last}")
 
-    def test_judge_evaluate_async_returns_immediately(self, mcp_server, monkeypatch):
+    def test_judge_evaluate_async_returns_immediately(
+        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Default judge.evaluate (no wait) returns job_id + running without blocking."""
         monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
         monkeypatch.setattr(mcp_server.llm, "api_key", "sk-test")
@@ -953,7 +968,9 @@ class TestJudgeAsyncMCP:
             f"judge.evaluate blocked for {elapsed:.2f}s — expected async return"
         )
 
-    def test_judge_status_polls_to_complete(self, mcp_server, monkeypatch):
+    def test_judge_status_polls_to_complete(
+        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """judge.status polls a background job to 'complete' with the full result."""
         monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
         monkeypatch.setattr(mcp_server.llm, "api_key", "sk-test")
@@ -975,12 +992,14 @@ class TestJudgeAsyncMCP:
         assert status["result"]["items"][0]["criterion"] == "c1"
         assert status["result"]["summary"] == "all criteria met"
 
-    def test_judge_status_unknown_job_returns_error(self, mcp_server):
+    def test_judge_status_unknown_job_returns_error(self, mcp_server: object) -> None:
         """judge.status with an unknown job_id returns an error dict (no crash)."""
         result = self._call(mcp_server, "judge.status", {"job_id": "job-nope"})
         assert result["error"] == "Job not found: job-nope"
 
-    def test_judge_evaluate_wait_true_blocks_for_result(self, mcp_server, monkeypatch):
+    def test_judge_evaluate_wait_true_blocks_for_result(
+        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """judge.evaluate with wait=True returns the full result synchronously."""
         monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
         monkeypatch.setattr(mcp_server.llm, "api_key", "sk-test")
@@ -997,7 +1016,9 @@ class TestJudgeAsyncMCP:
         assert result["workdir"] == mcp_server.workdir
         assert "job_id" not in result
 
-    def test_task_complete_dispatches_async_job_when_llm_configured(self, mcp_server, monkeypatch):
+    def test_task_complete_dispatches_async_job_when_llm_configured(
+        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """task.complete with LLM key flips the task, then dispatches a background job."""
         monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
         # 5.0s stub (same as the judge.evaluate async test) so a synchronous
@@ -1025,7 +1046,9 @@ class TestJudgeAsyncMCP:
         assert status["result"]["passed"] is True
         assert status["task_id"] == "tc-job"
 
-    def test_task_complete_no_llm_key_skips_evaluation(self, mcp_server, monkeypatch):
+    def test_task_complete_no_llm_key_skips_evaluation(
+        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """task.complete without LLM key returns task + note and no job_id.
 
         DF-GITREINS-POC-78: the gate consults LLMClient's FULL credential
@@ -1049,7 +1072,7 @@ class TestJudgeAsyncMCP:
 # ── DF-006: disk-backed jobs — survive restarts, auto-resume ────────────────
 
 
-def _mcp_call(server, name, arguments):
+def _mcp_call(server: object, name: str, arguments: list[str]) -> object:
     """Call a tool on an MCP server and return the parsed text payload."""
     response = server.handle_request(
         {
@@ -1071,14 +1094,14 @@ class TestJudgeAsyncPersistence:
     ``isolated_job_store`` conftest fixture.
     """
 
-    def _create_task(self, server, task_id):
+    def _create_task(self, server: object, task_id: str) -> None:
         _mcp_call(
             server,
             "task.create",
             {"id": task_id, "title": task_id, "criteria": ["c1"]},
         )
 
-    def _poll_status(self, server, job_id, deadline=5.0) -> dict:
+    def _poll_status(self, server: object, job_id: str, deadline: float = 5.0) -> dict:
         end = time.monotonic() + deadline
         last: dict = {"status": "pending"}
         while time.monotonic() < end:
@@ -1089,7 +1112,9 @@ class TestJudgeAsyncPersistence:
         pytest.fail(f"job {job_id} did not finish within {deadline}s — last status: {last}")
         return last  # unreachable — pytest.fail raises
 
-    def test_completed_job_survives_server_restart(self, mcp_server, monkeypatch):
+    def test_completed_job_survives_server_restart(
+        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A job completed on server A is retrievable on a NEW server instance."""
         monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
         monkeypatch.setattr(mcp_server.llm, "api_key", "sk-test")
@@ -1115,7 +1140,9 @@ class TestJudgeAsyncPersistence:
         assert status["result"]["items"][0]["criterion"] == "c1"
         assert status["result"]["summary"] == "all criteria met"
 
-    def test_orphaned_running_job_is_resumed_on_status(self, mcp_server, monkeypatch):
+    def test_orphaned_running_job_is_resumed_on_status(
+        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A running job whose process died (dead pid on disk) is resumed."""
         monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
         monkeypatch.setattr(mcp_server.llm, "api_key", "sk-test")
@@ -1141,7 +1168,7 @@ class TestJudgeAsyncPersistence:
         assert status["result"]["task_id"] == "orphan-me"
         assert status["result"]["verdict"] == "COMPLETE"
 
-    def test_orphaned_job_with_missing_task_becomes_error(self, mcp_server):
+    def test_orphaned_job_with_missing_task_becomes_error(self, mcp_server: object) -> None:
         """Resume of a job whose task was deleted lands in a clear error."""
         from engine.job_store import make_job, save_job
 
@@ -1154,12 +1181,14 @@ class TestJudgeAsyncPersistence:
         assert status["running"] is False
         assert "no longer exists" in status["error"]
 
-    def test_unknown_job_still_errors_from_disk(self, mcp_server):
+    def test_unknown_job_still_errors_from_disk(self, mcp_server: object) -> None:
         """Unknown job ids error cleanly even when memory is empty."""
         status = _mcp_call(mcp_server, "judge.status", {"job_id": "job-unknown-xyz"})
         assert status["error"] == "Job not found: job-unknown-xyz"
 
-    def test_running_job_reports_pid_and_started_at(self, mcp_server, monkeypatch):
+    def test_running_job_reports_pid_and_started_at(
+        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Running responses carry pid/started_at for monitoring."""
         monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
         monkeypatch.setattr(mcp_server.llm, "api_key", "sk-test")
@@ -1175,7 +1204,9 @@ class TestJudgeAsyncPersistence:
 
     # ── DF-GITREINS-POC-24: additive `running` boolean ──────────────────────
 
-    def test_judge_status_running_boolean_fresh_and_terminal(self, mcp_server, monkeypatch):
+    def test_judge_status_running_boolean_fresh_and_terminal(
+        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """judge.status carries `running`: true while evaluating, false once
         terminal — every existing field and status string unchanged."""
         monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
@@ -1216,7 +1247,9 @@ class TestJudgeAsyncPersistence:
         assert terminal["status"] == "complete"
         assert terminal["running"] is False
 
-    def test_old_build_record_without_running_key_reports_not_running(self, mcp_server):
+    def test_old_build_record_without_running_key_reports_not_running(
+        self, mcp_server: object
+    ) -> None:
         """A disk record written by an OLD build (no `running` key) reports
         `running: false` instead of crashing or inventing a value."""
         from engine.job_store import new_job_id, save_job
@@ -1241,7 +1274,9 @@ class TestJudgeAsyncPersistence:
         assert status["status"] == "complete"
         assert status["running"] is False
 
-    def test_old_build_record_resumes_and_reports_running(self, mcp_server, monkeypatch):
+    def test_old_build_record_resumes_and_reports_running(
+        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """An old-build RUNNING record (no `running` key, dead pid) resumes
         and reports `running: true` — the resume claim write is a
         current-build write, so it stamps the field."""
@@ -1277,7 +1312,9 @@ class TestJudgeAsyncPersistence:
 
     # ── GR-GAP-046: judge single-flight + resume lease ─────────────────────
 
-    def test_task_complete_rerun_reuses_running_job(self, mcp_server, monkeypatch):
+    def test_task_complete_rerun_reuses_running_job(
+        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Re-running task.complete while a job is in flight reuses the running
         job — no second evaluation is dispatched (host load stays bounded)."""
         from engine.job_store import list_jobs
@@ -1296,7 +1333,9 @@ class TestJudgeAsyncPersistence:
         assert jobs[0]["id"] == r1["job_id"]
         assert jobs[0]["status"] == "running"
 
-    def test_task_complete_after_error_supersedes(self, mcp_server, monkeypatch):
+    def test_task_complete_after_error_supersedes(
+        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+    ) -> object:
         """A failed evaluation is superseded: re-running task.complete on a
         failing task starts a FRESH job (single-flight key releases on error).
 
@@ -1316,14 +1355,14 @@ class TestJudgeAsyncPersistence:
         real_thread = threading.Thread
 
         class _ControlledThread:
-            def __init__(self, *args, target=None, **kwargs):
+            def __init__(self, *args: object, target: object = None, **kwargs: object) -> None:
                 self.target = target
 
-            def start(self):
+            def start(self) -> None:
                 pending_targets.append(self.target)
                 thread_started.set()
 
-        def _run_next_job():
+        def _run_next_job() -> None:
             target = pending_targets.pop(0)
             worker = real_thread(target=target)
             worker.start()
@@ -1332,10 +1371,10 @@ class TestJudgeAsyncPersistence:
 
         monkeypatch.setattr(server_module.threading, "Thread", _ControlledThread)
 
-        def _first_evaluator(self, task):
+        def _first_evaluator(self: object, task: object) -> None:
             raise RuntimeError("boom")
 
-        def _later_evaluator(self, task):
+        def _later_evaluator(self: object, task: object) -> object:
             return _FakeJudgeResult(passed=True)
 
         monkeypatch.setattr(Judge, "evaluate_task", _first_evaluator)
@@ -1364,7 +1403,9 @@ class TestJudgeAsyncPersistence:
         jobs = [j for j in list_jobs() if j["task_id"] == "fail-rerun"]
         assert len(jobs) == 2  # one error + one complete — never two running
 
-    def test_concurrent_judge_evaluate_same_task_single_flight(self, mcp_server, monkeypatch):
+    def test_concurrent_judge_evaluate_same_task_single_flight(
+        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Two CONCURRENT judge.evaluate calls for the same task yield ONE
         running job — both callers get the same job_id."""
         import threading
@@ -1379,7 +1420,7 @@ class TestJudgeAsyncPersistence:
         barrier = threading.Barrier(2)
         results: dict[str, dict] = {}
 
-        def _dispatch(name):
+        def _dispatch(name: str) -> None:
             barrier.wait()
             results[name] = _mcp_call(mcp_server, "judge.evaluate", {"id": "conc-me"})
 
@@ -1415,7 +1456,9 @@ class TestJudgeAsyncPersistence:
         assert len(jobs) == 1
         assert jobs[0]["id"] == results["a"]["job_id"]
 
-    def test_resume_lease_only_one_winner_two_instances(self, mcp_server, monkeypatch):
+    def test_resume_lease_only_one_winner_two_instances(
+        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Two server instances polling the same orphaned running job: the
         flock lease lets exactly ONE resume win — no duplicate evaluation."""
         import threading
@@ -1443,7 +1486,7 @@ class TestJudgeAsyncPersistence:
         barrier = threading.Barrier(2)
         results: dict[str, dict] = {}
 
-        def _poll(srv, name):
+        def _poll(srv: object, name: str) -> None:
             barrier.wait()
             results[name] = srv._load_or_resume_disk_job(job_id)
 
@@ -1468,20 +1511,20 @@ class TestJudgeAsyncPersistence:
 class TestConfigureMCP:
     """Tests for the configure tool: hot-reload LLM config at runtime."""
 
-    def test_configure_sets_api_key(self, mcp_server):
+    def test_configure_sets_api_key(self, mcp_server: object) -> None:
         """configure with env dict pushes key into os.environ and LLM client."""
         result = mcp_server._configure(env={"GITREINS_LLM_API_KEY": "sk-newtestkey"})
         assert result["configured"] is True
         assert mcp_server.llm.api_key == "sk-newtestkey"
         assert os.environ.get("GITREINS_LLM_API_KEY") == "sk-newtestkey"
 
-    def test_configure_sets_model(self, mcp_server):
+    def test_configure_sets_model(self, mcp_server: object) -> None:
         """configure with model changes the LLM model."""
         result = mcp_server._configure(model="claude-sonnet-4")
         assert result["current"]["model"] == "claude-sonnet-4"
         assert mcp_server.llm.model == "claude-sonnet-4"
 
-    def test_configure_sets_base_url(self, mcp_server):
+    def test_configure_sets_base_url(self, mcp_server: object) -> None:
         """configure with base_url changes the API endpoint."""
         result = mcp_server._configure(base_url="https://api.anthropic.com/v1")
         assert (
@@ -1489,7 +1532,7 @@ class TestConfigureMCP:
             or "api.anthropic.com" in result["current"]["base_url"]
         )
 
-    def test_configure_reports_previous_and_current(self, mcp_server):
+    def test_configure_reports_previous_and_current(self, mcp_server: object) -> None:
         """configure returns old and new config snapshots."""
         result = mcp_server._configure(model="gpt-4")
         assert "previous" in result
@@ -1497,13 +1540,13 @@ class TestConfigureMCP:
         assert result["previous"]["model"] != result["current"]["model"]
         assert result["current"]["model"] == "gpt-4"
 
-    def test_configure_recreates_judge(self, mcp_server):
+    def test_configure_recreates_judge(self, mcp_server: object) -> None:
         """configure recreates the Judge with the new LLM client."""
         old_judge_id = id(mcp_server.judge)
         mcp_server._configure(model="different-model")
         assert id(mcp_server.judge) != old_judge_id
 
-    def test_configure_without_args_is_noop(self, mcp_server):
+    def test_configure_without_args_is_noop(self, mcp_server: object) -> None:
         """configure with no arguments still works (returns current state)."""
         old_model = mcp_server.llm.model
         result = mcp_server._configure()
@@ -1520,7 +1563,7 @@ class TestStdioBuffering:
     We test the buffer handling logic directly by simulating the parsing loop.
     """
 
-    def test_single_line_json_parsed(self, mcp_server):
+    def test_single_line_json_parsed(self, mcp_server: object) -> None:
         """Single-line JSON is parsed immediately."""
         # Simulate the parsing loop
         request = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
@@ -1528,13 +1571,13 @@ class TestStdioBuffering:
         parsed = json.loads(buffer)
         assert parsed["method"] == "tools/list"
 
-    def test_multi_line_json_buffered(self):
+    def test_multi_line_json_buffered(self) -> None:
         """Multi-line JSON spanning 3 lines is buffered until complete."""
         buffer = '{\n  "jsonrpc": "2.0",\n  "id": 1,\n  "method": "tools/list"\n}\n'
         parsed = json.loads(buffer)
         assert parsed["method"] == "tools/list"
 
-    def test_two_messages_in_one_buffer(self, mcp_server):
+    def test_two_messages_in_one_buffer(self, mcp_server: object) -> None:
         """Two JSON messages in one buffer are both parsed."""
         msg1 = json.dumps(
             {
@@ -1579,7 +1622,7 @@ class TestStdioBuffering:
         assert parsed1["method"] == "initialize"
         assert parsed2["method"] == "tools/list"
 
-    def test_partial_json_wait_for_more(self):
+    def test_partial_json_wait_for_more(self) -> None:
         """Partial JSON (unbalanced braces) waits for more input."""
         buffer = '{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {'
         with pytest.raises(json.JSONDecodeError):
@@ -1611,14 +1654,14 @@ class TestMCPStartupAcknowledgement:
     only version it could read (`serverInfo`) was a frozen "0.1.0".
     """
 
-    def test_initialize_reports_installed_version(self, mcp_server):
+    def test_initialize_reports_installed_version(self, mcp_server: object) -> None:
         """serverInfo is the installed release, not a frozen literal."""
         resp = mcp_server.handle_request({"jsonrpc": "2.0", "id": 1, "method": "initialize"})
         assert resp["result"]["serverInfo"]["name"] == SERVER_NAME
         assert resp["result"]["serverInfo"]["version"] == __version__
         assert resp["result"]["protocolVersion"] == PROTOCOL_VERSION
 
-    def test_startup_line_names_identity_protocol_and_tool_count(self, mcp_server):
+    def test_startup_line_names_identity_protocol_and_tool_count(self, mcp_server: object) -> None:
         """One line carries name, version, protocol, tool count and workdir."""
         line = mcp_server.startup_line()
         assert line.startswith(f"{SERVER_NAME} MCP server {__version__}")
@@ -1627,7 +1670,7 @@ class TestMCPStartupAcknowledgement:
         assert mcp_server.workdir in line
         assert "\n" not in line
 
-    def test_startup_and_eof_lines_are_stderr_only(self, tmp_path):
+    def test_startup_and_eof_lines_are_stderr_only(self, tmp_path: Path) -> None:
         """stdout stays protocol-pure; the acknowledgement lands on stderr."""
         workdir = tmp_path / "repo"
         workdir.mkdir()
@@ -1658,7 +1701,7 @@ class TestMCPStartupAcknowledgement:
         assert f"protocol {PROTOCOL_VERSION}" in err
         assert "stdin closed (EOF)" in err
 
-    def test_version_flag_answers_without_opening_the_transport(self, tmp_path):
+    def test_version_flag_answers_without_opening_the_transport(self, tmp_path: Path) -> None:
         """`server.py --version` is answerable by a client/cron pre-flight."""
         project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         env = os.environ.copy()
@@ -1688,7 +1731,7 @@ class TestProtocolVersionNegotiation:
     revisions a client may retry with) on stderr.
     """
 
-    def test_advertised_set_is_newest_first_and_excludes_2026_07_28(self):
+    def test_advertised_set_is_newest_first_and_excludes_2026_07_28(self) -> None:
         assert SUPPORTED_PROTOCOL_VERSIONS[0] == PROTOCOL_VERSION == "2025-11-25"
         assert list(SUPPORTED_PROTOCOL_VERSIONS) == sorted(
             SUPPORTED_PROTOCOL_VERSIONS, reverse=True
@@ -1700,7 +1743,9 @@ class TestProtocolVersionNegotiation:
         assert "2026-07-28" not in SUPPORTED_PROTOCOL_VERSIONS
 
     @pytest.mark.parametrize("requested", SUPPORTED_PROTOCOL_VERSIONS)
-    def test_supported_request_is_echoed(self, mcp_server, requested, capsys):
+    def test_supported_request_is_echoed(
+        self, mcp_server: object, requested: object, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         resp = mcp_server.handle_request(
             {
                 "jsonrpc": "2.0",
@@ -1712,7 +1757,9 @@ class TestProtocolVersionNegotiation:
         assert resp["result"]["protocolVersion"] == requested
         assert capsys.readouterr().err == ""  # an echo is never a mismatch
 
-    def test_unrecognized_request_answers_newest_and_notes_the_mismatch(self, mcp_server, capsys):
+    def test_unrecognized_request_answers_newest_and_notes_the_mismatch(
+        self, mcp_server: object, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         resp = mcp_server.handle_request(
             {
                 "jsonrpc": "2.0",
@@ -1731,19 +1778,25 @@ class TestProtocolVersionNegotiation:
         for revision in SUPPORTED_PROTOCOL_VERSIONS:
             assert revision in err
 
-    def test_absent_protocol_version_answers_newest_and_notes_it(self, mcp_server, capsys):
+    def test_absent_protocol_version_answers_newest_and_notes_it(
+        self, mcp_server: object, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         resp = mcp_server.handle_request(
             {"jsonrpc": "2.0", "id": 3, "method": "initialize", "params": {}}
         )
         assert resp["result"]["protocolVersion"] == PROTOCOL_VERSION
         assert "no protocolVersion" in capsys.readouterr().err
 
-    def test_initialize_without_params_still_answers(self, mcp_server, capsys):
+    def test_initialize_without_params_still_answers(
+        self, mcp_server: object, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         resp = mcp_server.handle_request({"jsonrpc": "2.0", "id": 4, "method": "initialize"})
         assert resp["result"]["protocolVersion"] == PROTOCOL_VERSION
         assert "no protocolVersion" in capsys.readouterr().err
 
-    def test_non_string_protocol_version_never_crashes(self, mcp_server, capsys):
+    def test_non_string_protocol_version_never_crashes(
+        self, mcp_server: object, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         resp = mcp_server.handle_request(
             {
                 "jsonrpc": "2.0",
@@ -1755,7 +1808,7 @@ class TestProtocolVersionNegotiation:
         assert resp["result"]["protocolVersion"] == PROTOCOL_VERSION
         assert "no protocolVersion" in capsys.readouterr().err
 
-    def test_negotiation_helper_is_total(self):
+    def test_negotiation_helper_is_total(self) -> None:
         for requested in SUPPORTED_PROTOCOL_VERSIONS:
             assert negotiate_protocol_version(requested) == (requested, None)
         assert negotiate_protocol_version("2026-07-28")[0] == PROTOCOL_VERSION
@@ -1763,7 +1816,7 @@ class TestProtocolVersionNegotiation:
         assert negotiate_protocol_version(None)[1].startswith("protocol negotiation")
         assert negotiate_protocol_version("2026-07-28")[1] is not None
 
-    def test_unknown_notification_is_never_answered(self, mcp_server):
+    def test_unknown_notification_is_never_answered(self, mcp_server: object) -> None:
         """A notification (no id) gets no response; an unknown request still does."""
         for method in (
             "notifications/cancelled",
@@ -1777,7 +1830,7 @@ class TestProtocolVersionNegotiation:
         resp = mcp_server.handle_request({"jsonrpc": "2.0", "id": 9, "method": "bogus/method"})
         assert resp["error"]["code"] == -32601
 
-    def test_startup_line_names_the_negotiated_protocol(self, mcp_server):
+    def test_startup_line_names_the_negotiated_protocol(self, mcp_server: object) -> None:
         line = mcp_server.startup_line()
         assert f"protocol {PROTOCOL_VERSION} (negotiated per client request)" in line
         assert f"{len(mcp_server._tools)} tools" in line
@@ -1793,7 +1846,7 @@ class TestMCPStdioIntegration:
     """
 
     @pytest.fixture
-    def mcp_proc(self, tmp_path):
+    def mcp_proc(self, tmp_path: Path) -> Iterator:
         """Start the MCP server as a subprocess for integration testing."""
         workdir = tmp_path / "repo"
         workdir.mkdir()
@@ -1830,13 +1883,13 @@ class TestMCPStdioIntegration:
         proc.kill()
         proc.wait(timeout=5)
 
-    def _send_recv(self, proc, request, timeout=10):
+    def _send_recv(self, proc: object, request: object, timeout: float = 10) -> object:
         """Send a JSON-RPC request and read the response."""
         proc.stdin.write((json.dumps(request) + "\n").encode())
         proc.stdin.flush()
         return self._read_response(proc, timeout)
 
-    def _read_response(self, proc, timeout=10):
+    def _read_response(self, proc: object, timeout: float = 10) -> object:
         """Read one JSON-RPC response line from stdout with timeout."""
         fd = proc.stdout.fileno()
         r, _, _ = select.select([fd], [], [], timeout)
@@ -1849,7 +1902,7 @@ class TestMCPStdioIntegration:
         lines = line.decode().strip().split("\n")
         return json.loads(lines[0])
 
-    def _send(self, proc, data):
+    def _send(self, proc: object, data: object) -> None:
         """Write raw data to the server's stdin."""
         if isinstance(data, str):
             data = data.encode()
@@ -1858,7 +1911,7 @@ class TestMCPStdioIntegration:
 
     # ── 1. Integration: initialize handshake ─────────────────────────────
 
-    def test_initialize_handshake_over_stdio(self, mcp_proc):
+    def test_initialize_handshake_over_stdio(self, mcp_proc: object) -> None:
         """Send initialize → response has protocolVersion 2024-11-05."""
         resp = self._send_recv(
             mcp_proc,
@@ -1880,7 +1933,9 @@ class TestMCPStdioIntegration:
         assert resp["result"]["serverInfo"]["name"] == "gitreins"
         assert resp["result"]["serverInfo"]["version"] == __version__
 
-    def test_unsupported_protocol_version_negotiates_down_over_stdio(self, mcp_proc):
+    def test_unsupported_protocol_version_negotiates_down_over_stdio(
+        self, mcp_proc: object
+    ) -> None:
         """DF-GITREINS-POC-20: a newer request is answered with ours + a note.
 
         The revision the client asked for is not advertised, so the server
@@ -1905,7 +1960,7 @@ class TestMCPStdioIntegration:
         assert "2026-07-28" in err
         assert f"answering with {PROTOCOL_VERSION}" in err
 
-    def test_initialized_notification_over_stdio(self, mcp_proc):
+    def test_initialized_notification_over_stdio(self, mcp_proc: object) -> None:
         """Send notifications/initialized → no response; next request works."""
         self._send_recv(
             mcp_proc,
@@ -1937,7 +1992,7 @@ class TestMCPStdioIntegration:
         assert resp["id"] == 2
         assert "tools" in resp["result"]
 
-    def test_tools_list_over_stdio(self, mcp_proc):
+    def test_tools_list_over_stdio(self, mcp_proc: object) -> None:
         """tools/list returns the full tool set with correct names and schemas."""
         resp = self._send_recv(
             mcp_proc,
@@ -1976,7 +2031,7 @@ class TestMCPStdioIntegration:
 
     # ── 2. Task lifecycle over stdio ─────────────────────────────────────
 
-    def test_task_lifecycle_over_stdio(self, mcp_proc):
+    def test_task_lifecycle_over_stdio(self, mcp_proc: object) -> None:
         """Full lifecycle: create → start → complete → get → delete."""
         # NOTE: This test may time out on the host due to stdout buffering
         # in the subprocess. Works reliably inside Docker container.
@@ -2060,7 +2115,7 @@ class TestMCPStdioIntegration:
 
     # ── 3. Error handling ────────────────────────────────────────────────
 
-    def test_unknown_method_over_stdio(self, mcp_proc):
+    def test_unknown_method_over_stdio(self, mcp_proc: object) -> None:
         """Unknown method → error code -32601."""
         resp = self._send_recv(
             mcp_proc,
@@ -2073,7 +2128,7 @@ class TestMCPStdioIntegration:
         assert resp["error"]["code"] == -32601
         assert "Unknown method" in resp["error"]["message"]
 
-    def test_unknown_tool_over_stdio(self, mcp_proc):
+    def test_unknown_tool_over_stdio(self, mcp_proc: object) -> None:
         """tools/call with unknown tool → error code -32601."""
         resp = self._send_recv(
             mcp_proc,
@@ -2087,7 +2142,7 @@ class TestMCPStdioIntegration:
         assert resp["error"]["code"] == -32601
         assert "Unknown tool" in resp["error"]["message"]
 
-    def test_invalid_json_does_not_crash(self, mcp_proc):
+    def test_invalid_json_does_not_crash(self, mcp_proc: object) -> None:
         """Invalid JSON sent to stdin does not crash the server."""
         garbage = b"this is not valid json\n"
         valid = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode() + b"\n"
@@ -2097,7 +2152,7 @@ class TestMCPStdioIntegration:
         assert resp["id"] == 1
         assert len(resp["result"]["tools"]) == 15
 
-    def test_missing_jsonrpc_field(self, mcp_proc):
+    def test_missing_jsonrpc_field(self, mcp_proc: object) -> None:
         """Missing jsonrpc field → invalid request error (-32600)."""
         resp = self._send_recv(
             mcp_proc,
@@ -2111,7 +2166,7 @@ class TestMCPStdioIntegration:
 
     # ── 4. Multi-request session ─────────────────────────────────────────
 
-    def test_multi_request_session(self, mcp_proc):
+    def test_multi_request_session(self, mcp_proc: object) -> None:
         """5 requests in sequence — server processes all without crashing."""
         requests = [{"jsonrpc": "2.0", "id": i, "method": "tools/list"} for i in range(1, 6)]
         for req in requests:
@@ -2121,7 +2176,7 @@ class TestMCPStdioIntegration:
 
     # ── 5. Edge cases ────────────────────────────────────────────────────
 
-    def test_very_long_task_title(self, mcp_proc):
+    def test_very_long_task_title(self, mcp_proc: object) -> None:
         """Task with 1000+ character title is created successfully."""
         long_title = "A" * 1000
         resp = self._send_recv(
@@ -2143,7 +2198,7 @@ class TestMCPStdioIntegration:
         task = json.loads(resp["result"]["content"][0]["text"])
         assert task["title"] == long_title
 
-    def test_unicode_in_task_criteria(self, mcp_proc):
+    def test_unicode_in_task_criteria(self, mcp_proc: object) -> None:
         """Unicode characters in task criteria are handled."""
         resp = self._send_recv(
             mcp_proc,
@@ -2165,7 +2220,7 @@ class TestMCPStdioIntegration:
         assert "Café" in task["criteria"]
         assert "😊" in task["criteria"]
 
-    def test_empty_criteria_list(self, mcp_proc):
+    def test_empty_criteria_list(self, mcp_proc: object) -> None:
         """Task with empty criteria list is created."""
         resp = self._send_recv(
             mcp_proc,
@@ -2186,7 +2241,7 @@ class TestMCPStdioIntegration:
         task = json.loads(resp["result"]["content"][0]["text"])
         assert task["criteria"] == []
 
-    def test_task_with_no_title(self, mcp_proc):
+    def test_task_with_no_title(self, mcp_proc: object) -> None:
         """Task with empty title string is created."""
         resp = self._send_recv(
             mcp_proc,
@@ -2207,7 +2262,7 @@ class TestMCPStdioIntegration:
         task = json.loads(resp["result"]["content"][0]["text"])
         assert task["title"] == ""
 
-    def test_task_get_nonexistent_over_stdio(self, mcp_proc):
+    def test_task_get_nonexistent_over_stdio(self, mcp_proc: object) -> None:
         """task.get on nonexistent task returns error."""
         resp = self._send_recv(
             mcp_proc,
@@ -2221,7 +2276,7 @@ class TestMCPStdioIntegration:
         result = json.loads(resp["result"]["content"][0]["text"])
         assert "error" in result
 
-    def test_task_delete_nonexistent_over_stdio(self, mcp_proc):
+    def test_task_delete_nonexistent_over_stdio(self, mcp_proc: object) -> None:
         """task.delete on nonexistent task returns error."""
         resp = self._send_recv(
             mcp_proc,
@@ -2235,7 +2290,7 @@ class TestMCPStdioIntegration:
         result = json.loads(resp["result"]["content"][0]["text"])
         assert "error" in result
 
-    def test_task_list_with_status_filter_over_stdio(self, mcp_proc):
+    def test_task_list_with_status_filter_over_stdio(self, mcp_proc: object) -> None:
         """task.list with status filter returns filtered results."""
         self._send_recv(
             mcp_proc,
@@ -2283,7 +2338,7 @@ class TestMCPStdioIntegration:
         assert len(result["tasks"]) == 1
         assert result["tasks"][0]["id"] == "f1"
 
-    def test_guard_run_over_stdio(self, mcp_proc, tmp_path):
+    def test_guard_run_over_stdio(self, mcp_proc: object, tmp_path: Path) -> None:
         """guard.run returns passed bool, workdir and results list for a
         configured repo (GR-GAP-054: the fixture server's own workdir has no
         .gitreins/config.yaml, so the gate must follow the requested workdir —
@@ -2314,7 +2369,7 @@ class TestMCPStdioIntegration:
             assert "passed" in r
             assert "output" in r
 
-    def test_guard_run_without_config_over_stdio(self, mcp_proc):
+    def test_guard_run_without_config_over_stdio(self, mcp_proc: object) -> None:
         """GR-GAP-054/AC1: guard.run against a repo with no
         .gitreins/config.yaml errors over real stdio naming `gitreins init` —
         never a passed=true result."""
@@ -2334,7 +2389,7 @@ class TestMCPStdioIntegration:
         assert "passed" not in result
         assert "results" not in result
 
-    def test_judge_evaluate_nonexistent_over_stdio(self, mcp_proc):
+    def test_judge_evaluate_nonexistent_over_stdio(self, mcp_proc: object) -> None:
         """judge.evaluate on nonexistent task returns error."""
         if not os.getenv("GITREINS_LLM_API_KEY"):
             pytest.skip("GITREINS_LLM_API_KEY not set — LLM-dependent test")
@@ -2359,7 +2414,7 @@ class TestPropagateMCP:
     """Tests for the propagate tool: copy guard config to sibling repos."""
 
     @pytest.fixture
-    def source_with_config(self, tmp_workdir):
+    def source_with_config(self, tmp_workdir: str) -> object:
         """Create a source repo with a .gitreins/config.yaml."""
         import yaml
 
@@ -2394,7 +2449,7 @@ class TestPropagateMCP:
 
     # ── Test 1: creates config in empty target ─────────────────
 
-    def test_propagate_creates_config_in_empty_target(self, source_with_config):
+    def test_propagate_creates_config_in_empty_target(self, source_with_config: object) -> None:
         """Target has no .gitreins/, propagation creates it with source config."""
         from engine.propagate import Propagator
 
@@ -2421,7 +2476,7 @@ class TestPropagateMCP:
 
     # ── Test 2: merge preserves target overrides ───────────────
 
-    def test_propagate_merges_preserving_overrides(self, source_with_config):
+    def test_propagate_merges_preserving_overrides(self, source_with_config: object) -> None:
         """Target has a config with different test_mode, propagation preserves it."""
         import yaml
         from engine.propagate import Propagator
@@ -2464,7 +2519,7 @@ class TestPropagateMCP:
 
     # ── Test 3: returns results list with source ───────────────
 
-    def test_propagate_returns_results_list(self, source_with_config):
+    def test_propagate_returns_results_list(self, source_with_config: object) -> None:
         """Returns ``source`` path and ``results`` array."""
         from engine.propagate import Propagator
 
@@ -2484,7 +2539,7 @@ class TestPropagateMCP:
 
     # ── Test 4: missing source returns error ───────────────────
 
-    def test_propagate_missing_source_returns_error(self, tmp_workdir):
+    def test_propagate_missing_source_returns_error(self, tmp_workdir: str) -> None:
         """Source has no config, returns error."""
         from engine.propagate import Propagator
 
@@ -2496,7 +2551,7 @@ class TestPropagateMCP:
 
     # ── Test 5: nonexistent target creates dir ─────────────────
 
-    def test_propagate_nonexistent_target_creates_dir(self, source_with_config):
+    def test_propagate_nonexistent_target_creates_dir(self, source_with_config: object) -> None:
         """Target path doesn't exist, creates it and copies config."""
         from engine.propagate import Propagator
 
@@ -2517,7 +2572,7 @@ class TestPropagateMCP:
 
     # ── Test 6: propagate via MCP tools/call ───────────────────
 
-    def test_propagate_via_mcp_tools_call(self, source_with_config, tmp_path):
+    def test_propagate_via_mcp_tools_call(self, source_with_config: object, tmp_path: Path) -> None:
         """propagate tool via MCP tools/call pattern."""
         from gitreins_mcp.server import GitReinsMCPServer
 
@@ -2544,7 +2599,7 @@ class TestPropagateMCP:
 
     # ── Test 7: propagate without targets returns error ────────
 
-    def test_propagate_without_targets_returns_error(self, source_with_config):
+    def test_propagate_without_targets_returns_error(self, source_with_config: object) -> None:
         """Calling propagate with empty targets returns error."""
         from gitreins_mcp.server import GitReinsMCPServer
 
@@ -2609,10 +2664,10 @@ class _StubResponse:
 
     status_code = 200
 
-    def __init__(self, noul: float):
+    def __init__(self, noul: float) -> None:
         self._noul = noul
 
-    def json(self):
+    def json(self) -> object:
         return _jev_payload(self._noul)
 
 
@@ -2624,11 +2679,11 @@ class _ScriptedEndpoint:
     ``_BlockedRequests``), not be a bare function.
     """
 
-    def __init__(self, calls: list, noul: float):
+    def __init__(self, calls: list, noul: float) -> None:
         self._calls = calls
         self._noul = noul
 
-    def post(self, url, **kwargs):
+    def post(self, url: object, **kwargs: object) -> object:
         self._calls.append({"url": url, "json": kwargs.get("json")})
         return _StubResponse(self._noul)
 
@@ -2637,7 +2692,7 @@ class TestContextResolve:
     """The context.resolve tool — JEVRES-002's MCP surface, hermetic."""
 
     @pytest.fixture(autouse=True)
-    def _hermetic(self, monkeypatch, tmp_path):
+    def _hermetic(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         """No ambient credentials, no real HOME, no real egress.
 
         Mirrors tests/test_resolution.py's autouse fixtures: key discovery is
@@ -2659,7 +2714,14 @@ class TestContextResolve:
         monkeypatch.setattr(resolution, "resolution_config", lambda workdir=".": defaults)
         self._resolution = resolution
 
-    def _server_with_scripted_endpoint(self, workdir, monkeypatch, *, noul=0.87, with_key=True):
+    def _server_with_scripted_endpoint(
+        self,
+        workdir: str,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        noul: bool = 0.87,
+        with_key: bool = True,
+    ) -> tuple:
         """An MCP server whose Jev endpoint and hilo assembler are both stubbed.
 
         The stubs are the engine's own seams (the module ``requests`` binding
@@ -2677,7 +2739,7 @@ class TestContextResolve:
             _ScriptedEndpoint(calls, noul),
         )
 
-        def fake_assemble_bundle(question, **kwargs):
+        def fake_assemble_bundle(question: object, **kwargs: object) -> object:
             return self._resolution.AssembledBundle(
                 text="## MAP\nengine/evidence_bounds.py →\n  - bound_evidence\n",
                 manifest=[
@@ -2717,7 +2779,7 @@ class TestContextResolve:
 
         return GitReinsMCPServer(workdir), calls
 
-    def test_context_resolve_registered_and_listed(self, tmp_workdir):
+    def test_context_resolve_registered_and_listed(self, tmp_workdir: str) -> None:
         """context.resolve is registered and advertised in tools/list."""
         from gitreins_mcp.server import GitReinsMCPServer
 
@@ -2731,7 +2793,9 @@ class TestContextResolve:
         assert schema["properties"]["question"]["type"] == "string"
         assert schema["properties"]["budget"]["type"] == "integer"
 
-    def test_context_resolve_returns_banded_verdict(self, tmp_workdir, monkeypatch):
+    def test_context_resolve_returns_banded_verdict(
+        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A scripted RESOLVED answer comes back as the full verdict object."""
         mcp, calls = self._server_with_scripted_endpoint(tmp_workdir, monkeypatch)
         verdict = mcp._context_resolve("Does engine/evidence_bounds.py truncate text?")
@@ -2750,7 +2814,9 @@ class TestContextResolve:
         assert calls[0]["url"] == self._resolution.JEV_ENDPOINT
         assert calls[0]["json"]["state"].startswith("Does engine/evidence_bounds.py truncate text?")
 
-    def test_context_resolve_unresolved_vs_abstain_distinguishable(self, tmp_workdir, monkeypatch):
+    def test_context_resolve_unresolved_vs_abstain_distinguishable(
+        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A low score is not a dead key: the two failures stay distinct."""
         mcp, _ = self._server_with_scripted_endpoint(tmp_workdir, monkeypatch, noul=0.09)
         # 0.09 is the spec's filler measurement — a real UNRESOLVED decision.
@@ -2771,11 +2837,15 @@ class TestContextResolve:
         assert abstain["abstain_action"]
         assert abstain["exit_code"] == 1
 
-    def test_context_resolve_budget_reaches_engine(self, tmp_workdir, monkeypatch):
+    def test_context_resolve_budget_reaches_engine(
+        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch
+    ) -> object:
         """budget is forwarded to the engine; None means the engine ceiling."""
         seen = {}
 
-        def fake_resolve(question, *, workdir, max_tokens, **kw):
+        def fake_resolve(
+            question: object, *, workdir: str, max_tokens: int, **kw: object
+        ) -> object:
             seen["max_tokens"] = max_tokens
             verdict = self._resolution.ResolutionVerdict(question=question, verdict="REVIEW")
             verdict.probability = 0.6
@@ -2797,8 +2867,8 @@ class TestContextResolve:
         assert seen["max_tokens"] == self._resolution.MAX_BUNDLE_TOKENS
 
     def test_context_resolve_disabled_abstains_without_touching_the_engine(
-        self, tmp_workdir, monkeypatch
-    ):
+        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """JEVRES-006: no resolution.enabled.mcp in config → named ABSTAIN.
 
         The tool must fail closed with ``surface-disabled`` and must not touch
@@ -2828,13 +2898,24 @@ class TestContextResolve:
         assert verdict["probability"] is None
         assert calls == [], "a disabled surface must not touch the network"
 
-    def test_context_resolve_config_knobs_reach_the_engine(self, tmp_workdir, monkeypatch):
+    def test_context_resolve_config_knobs_reach_the_engine(
+        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch
+    ) -> object:
         """The config block pins model, ceiling and thresholds for the tool."""
         from engine.config import GitReinsDefaults
 
         seen: dict = {}
 
-        def fake_resolve(question, *, workdir, max_tokens, model, resolved_at, review_at, **kw):
+        def fake_resolve(
+            question: object,
+            *,
+            workdir: str,
+            max_tokens: int,
+            model: str,
+            resolved_at: object,
+            review_at: object,
+            **kw: object,
+        ) -> object:
             seen.update(
                 max_tokens=max_tokens,
                 model=model,
@@ -2861,7 +2942,7 @@ class TestContextResolve:
         assert seen["resolved_at"] == pytest.approx(0.7)
         assert seen["review_at"] == pytest.approx(0.3)
 
-    def test_context_resolve_over_jsonrpc(self, tmp_path):
+    def test_context_resolve_over_jsonrpc(self, tmp_path: Path) -> None:
         """The tool answers over the real stdio JSON-RPC transport.
 
         Starts its own server subprocess (the class-level ``mcp_proc``
@@ -2934,8 +3015,8 @@ class TestContextResolve:
         assert "manifest" in result
 
     def test_context_resolve_files_one_record_through_the_shared_helper(
-        self, tmp_workdir, monkeypatch
-    ):
+        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """DF-GITREINS-POC-36: the tool's verdict lands in ``.gitreins/history``.
 
         Asserted on the parsed artifact ``gitreins report`` / ``gitreins serve``
@@ -2963,7 +3044,9 @@ class TestContextResolve:
         assert rows[0]["tokens_in"] == 520
         assert rows[0]["tokens_out"] == 96
 
-    def test_context_resolve_uses_no_second_writer(self, tmp_workdir, monkeypatch):
+    def test_context_resolve_uses_no_second_writer(
+        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch
+    ) -> str:
         """The MCP surface routes through ``engine.persist.persist_resolution``.
 
         This class of bug (a surface growing its own persistence path) bit
@@ -2975,7 +3058,7 @@ class TestContextResolve:
         mcp, _calls = self._server_with_scripted_endpoint(tmp_workdir, monkeypatch)
         seen: dict = {}
 
-        def spy(workdir, verdict, *, surface):
+        def spy(workdir: str, verdict: object, *, surface: str) -> str:
             seen.update(workdir=workdir, surface=surface, band=verdict.verdict)
             return "dry-run"
 
@@ -2986,7 +3069,9 @@ class TestContextResolve:
         assert seen == {"workdir": str(tmp_workdir), "surface": "mcp", "band": "RESOLVED"}
         assert not (Path(tmp_workdir) / ".gitreins" / "history").exists()
 
-    def test_context_resolve_abstain_files_nothing(self, tmp_workdir, monkeypatch):
+    def test_context_resolve_abstain_files_nothing(
+        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """No credential: the ABSTAIN is a non-event, so nothing is filed."""
         mcp, _calls = self._server_with_scripted_endpoint(tmp_workdir, monkeypatch, with_key=False)
 
@@ -2997,7 +3082,9 @@ class TestContextResolve:
         assert not (Path(tmp_workdir) / ".gitreins" / "history").exists()
         assert not (Path(tmp_workdir) / ".gitreins" / "usage.jsonl").exists()
 
-    def test_context_resolve_disabled_surface_files_nothing(self, tmp_workdir, monkeypatch):
+    def test_context_resolve_disabled_surface_files_nothing(
+        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """JEVRES-006 + POC-36: a disabled surface abstains and writes nothing."""
         from engine.config import GitReinsDefaults
 
@@ -3026,18 +3113,18 @@ class TestTaskReadsSeeTheLiveStore:
     """
 
     @staticmethod
-    def _create_started(server, task_id):
+    def _create_started(server: object, task_id: str) -> None:
         _mcp_call(server, "task.create", {"id": task_id, "title": "t", "criteria": ["c1"]})
         _mcp_call(server, "task.start", {"id": task_id})
 
     @staticmethod
-    def _other_process(workdir):
+    def _other_process(workdir: str) -> object:
         """A second manager on the same store — what the CLI looks like here."""
         from engine.task_manager import TaskManager
 
         return TaskManager(workdir)
 
-    def test_task_list_drops_a_task_deleted_out_of_process(self, mcp_server):
+    def test_task_list_drops_a_task_deleted_out_of_process(self, mcp_server: object) -> None:
         self._create_started(mcp_server, "gone-soon")
         listed = _mcp_call(mcp_server, "task.list", {})["tasks"]
         assert [t["id"] for t in listed] == ["gone-soon"]
@@ -3046,7 +3133,7 @@ class TestTaskReadsSeeTheLiveStore:
 
         assert _mcp_call(mcp_server, "task.list", {})["tasks"] == []
 
-    def test_task_get_stops_serving_a_deleted_task(self, mcp_server):
+    def test_task_get_stops_serving_a_deleted_task(self, mcp_server: object) -> None:
         self._create_started(mcp_server, "vanished")
         assert _mcp_call(mcp_server, "task.get", {"id": "vanished"})["id"] == "vanished"
 
@@ -3054,7 +3141,9 @@ class TestTaskReadsSeeTheLiveStore:
 
         assert "error" in _mcp_call(mcp_server, "task.get", {"id": "vanished"})
 
-    def test_a_task_deleted_out_of_process_stops_blocking_commit(self, mcp_server, tmp_path):
+    def test_a_task_deleted_out_of_process_stops_blocking_commit(
+        self, mcp_server: object, tmp_path: Path
+    ) -> None:
         """The reported bug: the startup snapshot kept refusing the commit."""
         self._create_started(mcp_server, "blocker")
 
@@ -3071,7 +3160,7 @@ class TestTaskReadsSeeTheLiveStore:
         assert "blocker" not in after.get("error", "")
         assert after.get("tasks") is None
 
-    def test_a_task_created_out_of_process_becomes_visible(self, mcp_server):
+    def test_a_task_created_out_of_process_becomes_visible(self, mcp_server: object) -> None:
         """The other direction: a CLI-created task must show up for the agent."""
         self._other_process(mcp_server.workdir).create("from-the-cli", "made by the CLI", ["c1"])
 
@@ -3100,7 +3189,9 @@ class TestTaskCompleteDispatchGate(TestJudgeAsyncMCP):
         "OPENROUTER_API_KEY",
     )
 
-    def test_task_complete_no_resolvable_credential_skips_dispatch(self, mcp_server, monkeypatch):
+    def test_task_complete_no_resolvable_credential_skips_dispatch(
+        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A credential that vanished AFTER server construction (rotated away,
         or supplied only via a fallback provider var at boot) must be judged by
         the client's OWN current resolution, not the raw GITREINS_LLM_API_KEY
@@ -3120,7 +3211,9 @@ class TestTaskCompleteDispatchGate(TestJudgeAsyncMCP):
 
         assert list_jobs() == [], "no job may be dispatched without a credential"
 
-    def test_task_complete_invalid_key_reaches_error_terminal_state(self, mcp_server, monkeypatch):
+    def test_task_complete_invalid_key_reaches_error_terminal_state(
+        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A present-but-unusable key must fail FAST and TERMINAL: the job
         reaches `error` with a clear message — never an indefinite `running`."""
         from engine.job_store import load_job
@@ -3148,7 +3241,9 @@ class TestTaskCompleteDispatchGate(TestJudgeAsyncMCP):
         assert disk["status"] == "error"
         assert disk["running"] is False
 
-    def test_invalid_key_job_stays_terminal_across_restart_poll(self, mcp_server, monkeypatch):
+    def test_invalid_key_job_stays_terminal_across_restart_poll(
+        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The stuck dogfood job survived polls forever because pid=server-pid
         looked alive. A terminal error record must stay terminal when a FRESH
         server instance (restart) polls it — no resume of an error record."""

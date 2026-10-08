@@ -29,7 +29,7 @@ CLI_SCRIPT = REPO_ROOT / "gitreins" / "cli.py"
 FLEET_KEYS = ("ts", "project", "status", "cells", "findings", "evidence", "note")
 
 
-def _git(repo: Path, *args: str, check: bool = True):
+def _git(repo: Path, *args: str, check: bool = True) -> object:
     return subprocess.run(
         ["git", "-C", str(repo), *args], capture_output=True, text=True, check=check
     )
@@ -51,7 +51,7 @@ def qa_repo(tmp_path: Path) -> Path:
     return repo
 
 
-def _run_cli(repo: Path, *args: str, extra_env: dict[str, str] | None = None):
+def _run_cli(repo: Path, *args: str, extra_env: dict[str, str] | None = None) -> object:
     env = {**os.environ, "PYTHONPATH": str(REPO_ROOT)}
     env.update(extra_env or {})
     return subprocess.run(
@@ -79,7 +79,7 @@ def _ledger_rows(repo: Path, name: str = DEFAULT_QA_LEDGER_FILE) -> list[dict]:
 # ── QA runs record themselves ──────────────────────────────────
 
 
-def test_fresh_run_records_pass_row_with_cells_commit_and_evidence(qa_repo):
+def test_fresh_run_records_pass_row_with_cells_commit_and_evidence(qa_repo: str) -> None:
     result = _run_cli(qa_repo, "worktree", "fresh", "--cmd", "printf hello")
     assert result.returncode == 0, result.stderr
 
@@ -98,7 +98,7 @@ def test_fresh_run_records_pass_row_with_cells_commit_and_evidence(qa_repo):
     assert row["harness_version"]
 
 
-def test_failed_fresh_run_records_fail_verdict_with_the_exit_code(qa_repo):
+def test_failed_fresh_run_records_fail_verdict_with_the_exit_code(qa_repo: str) -> None:
     result = _run_cli(qa_repo, "worktree", "fresh", "--cmd", "exit 7")
     assert result.returncode == 7
 
@@ -109,7 +109,7 @@ def test_failed_fresh_run_records_fail_verdict_with_the_exit_code(qa_repo):
     assert row["cells"] == {"fresh": "failed"}
 
 
-def test_repro_records_a_cell_per_run_and_fails_when_one_run_fails(qa_repo):
+def test_repro_records_a_cell_per_run_and_fails_when_one_run_fails(qa_repo: str) -> None:
     clean = _run_cli(qa_repo, "worktree", "repro", "--cmd", "true", "-k", "2")
     assert clean.returncode == 0, clean.stderr
     row = _ledger_rows(qa_repo)[-1]
@@ -126,7 +126,7 @@ def test_repro_records_a_cell_per_run_and_fails_when_one_run_fails(qa_repo):
     assert row["cells"] == {"run-1": "failed", "run-2": "failed"}
 
 
-def test_dogfood_records_a_cell_per_step_and_the_judge(qa_repo):
+def test_dogfood_records_a_cell_per_step_and_the_judge(qa_repo: str) -> None:
     result = _run_cli(qa_repo, "worktree", "dogfood", "--skip-judge", "--test-command", "true")
     assert result.returncode == 0, result.stderr
 
@@ -138,7 +138,7 @@ def test_dogfood_records_a_cell_per_step_and_the_judge(qa_repo):
     assert row["cells"]["judge"] == "skipped"
 
 
-def test_row_is_a_superset_of_the_fleet_ledger_keys(tmp_path):
+def test_row_is_a_superset_of_the_fleet_ledger_keys(tmp_path: Path) -> None:
     row = record_run(str(tmp_path), "fresh", {"exit_code": 0})
     assert row is not None
     for key in FLEET_KEYS:
@@ -150,7 +150,7 @@ def test_row_is_a_superset_of_the_fleet_ledger_keys(tmp_path):
 # ── Recording a run produced elsewhere ─────────────────────────
 
 
-def test_qa_record_appends_a_fleet_row_for_an_external_run(qa_repo):
+def test_qa_record_appends_a_fleet_row_for_an_external_run(qa_repo: str) -> None:
     result = _run_cli(
         qa_repo,
         "qa",
@@ -197,7 +197,7 @@ def test_qa_record_appends_a_fleet_row_for_an_external_run(qa_repo):
     assert row["ts"] == "2026-09-15T00:20:00+00:00"
 
 
-def test_qa_record_derives_status_from_an_explicit_fail_verdict(qa_repo):
+def test_qa_record_derives_status_from_an_explicit_fail_verdict(qa_repo: str) -> None:
     result = _run_cli(
         qa_repo, "qa", "record", "--project", "x", "--verdict", "FAIL", "--cell", "ci=FAIL"
     )
@@ -206,7 +206,7 @@ def test_qa_record_derives_status_from_an_explicit_fail_verdict(qa_repo):
     assert (row["verdict"], row["status"]) == ("FAIL", "fail")
 
 
-def test_qa_record_defaults_to_pass_when_no_verdict_or_exit_code_is_given(qa_repo):
+def test_qa_record_defaults_to_pass_when_no_verdict_or_exit_code_is_given(qa_repo: str) -> None:
     # The documented default (docs/cli-reference.md): with neither --verdict,
     # --exit-code nor --status, the row records a passing verdict — a green
     # battery and an undecided one must not be indistinguishable.
@@ -217,14 +217,16 @@ def test_qa_record_defaults_to_pass_when_no_verdict_or_exit_code_is_given(qa_rep
     assert "recorded lane x PASS" in result.stdout
 
 
-def test_qa_record_preserves_an_explicit_unknown_verdict(qa_repo):
+def test_qa_record_preserves_an_explicit_unknown_verdict(qa_repo: str) -> None:
     result = _run_cli(qa_repo, "qa", "record", "--project", "x", "--verdict", "UNKNOWN")
     assert result.returncode == 0, result.stderr
     row = _ledger_rows(qa_repo)[0]
     assert (row["verdict"], row["status"]) == ("UNKNOWN", "unknown")
 
 
-def test_qa_record_stamps_evidence_missing_when_the_evidence_path_is_absent(qa_repo, tmp_path):
+def test_qa_record_stamps_evidence_missing_when_the_evidence_path_is_absent(
+    qa_repo: str, tmp_path: Path
+) -> None:
     missing = tmp_path / "definitely-missing.json"
     result = _run_cli(qa_repo, "qa", "record", "--project", "x", "--evidence", str(missing))
     assert result.returncode == 0, result.stderr
@@ -234,7 +236,9 @@ def test_qa_record_stamps_evidence_missing_when_the_evidence_path_is_absent(qa_r
     assert f"qa record: evidence path not found: {missing}" in result.stderr
 
 
-def test_qa_record_with_an_existing_evidence_file_carries_no_marker(qa_repo, tmp_path):
+def test_qa_record_with_an_existing_evidence_file_carries_no_marker(
+    qa_repo: str, tmp_path: Path
+) -> None:
     evidence = tmp_path / "battery.jsonl"
     evidence.write_text('{"ok": true}\n', encoding="utf-8")
     result = _run_cli(qa_repo, "qa", "record", "--project", "x", "--evidence", str(evidence))
@@ -245,14 +249,14 @@ def test_qa_record_with_an_existing_evidence_file_carries_no_marker(qa_repo, tmp
     assert result.stderr == ""
 
 
-def test_qa_record_rejects_a_malformed_cell(qa_repo):
+def test_qa_record_rejects_a_malformed_cell(qa_repo: str) -> None:
     result = _run_cli(qa_repo, "qa", "record", "--project", "x", "--cell", "launch")
     assert result.returncode == 2
     assert "--cell expects NAME=STATUS" in result.stderr
     assert _ledger_rows(qa_repo) == []
 
 
-def test_record_external_reports_nothing_when_the_ledger_is_disabled(qa_repo):
+def test_record_external_reports_nothing_when_the_ledger_is_disabled(qa_repo: str) -> None:
     (qa_repo / ".gitreins").mkdir(exist_ok=True)
     (qa_repo / ".gitreins" / "config.yaml").write_text(
         "qa_ledger:\n  enabled: false\n", encoding="utf-8"
@@ -264,7 +268,7 @@ def test_record_external_reports_nothing_when_the_ledger_is_disabled(qa_repo):
 # ── Reading the ledger back ────────────────────────────────────
 
 
-def test_qa_list_names_the_newest_runs_and_the_ledger(qa_repo):
+def test_qa_list_names_the_newest_runs_and_the_ledger(qa_repo: str) -> None:
     _run_cli(qa_repo, "worktree", "fresh", "--cmd", "true")
     _run_cli(qa_repo, "worktree", "fresh", "--cmd", "exit 5")
     result = _run_cli(qa_repo, "qa", "list")
@@ -275,7 +279,7 @@ def test_qa_list_names_the_newest_runs_and_the_ledger(qa_repo):
     assert str(qa_repo / ".gitreins" / DEFAULT_QA_LEDGER_FILE) in result.stdout
 
 
-def test_qa_list_json_emits_the_rows(qa_repo):
+def test_qa_list_json_emits_the_rows(qa_repo: str) -> None:
     _run_cli(qa_repo, "worktree", "fresh", "--cmd", "true")
     result = _run_cli(qa_repo, "qa", "list", "--json")
     assert result.returncode == 0, result.stderr
@@ -283,20 +287,20 @@ def test_qa_list_json_emits_the_rows(qa_repo):
     assert len(rows) == 1 and rows[0]["kind"] == "fresh"
 
 
-def test_qa_list_says_so_when_nothing_was_recorded(qa_repo):
+def test_qa_list_says_so_when_nothing_was_recorded(qa_repo: str) -> None:
     result = _run_cli(qa_repo, "qa", "list")
     assert result.returncode == 0, result.stderr
     assert "No QA runs recorded." in result.stdout
 
 
-def test_qa_list_limits_to_the_newest_n(qa_repo):
+def test_qa_list_limits_to_the_newest_n(qa_repo: str) -> None:
     for _ in range(3):
         _run_cli(qa_repo, "worktree", "fresh", "--cmd", "true")
     result = _run_cli(qa_repo, "qa", "list", "-n", "2")
     assert "Showing newest 2 of 3 QA run(s):" in result.stdout
 
 
-def test_report_includes_qa_runs_and_stays_quiet_without_rows(qa_repo):
+def test_report_includes_qa_runs_and_stays_quiet_without_rows(qa_repo: str) -> None:
     assert format_report_section(str(qa_repo)) == ""
     _run_cli(qa_repo, "worktree", "fresh", "--cmd", "true")
     result = _run_cli(qa_repo, "report", "-n", "3")
@@ -305,7 +309,7 @@ def test_report_includes_qa_runs_and_stays_quiet_without_rows(qa_repo):
     assert "QA ledger:" in result.stdout
 
 
-def test_malformed_ledger_lines_are_skipped_not_fatal(qa_repo):
+def test_malformed_ledger_lines_are_skipped_not_fatal(qa_repo: str) -> None:
     _run_cli(qa_repo, "worktree", "fresh", "--cmd", "true")
     ledger = qa_repo / ".gitreins" / DEFAULT_QA_LEDGER_FILE
     with ledger.open("a", encoding="utf-8") as stream:
@@ -319,7 +323,7 @@ def test_malformed_ledger_lines_are_skipped_not_fatal(qa_repo):
 # ── Ledger location and retention ──────────────────────────────
 
 
-def test_env_override_writes_a_file_path(qa_repo, tmp_path):
+def test_env_override_writes_a_file_path(qa_repo: str, tmp_path: Path) -> None:
     target = tmp_path / "fleet-ledger.jsonl"
     _run_cli(
         qa_repo,
@@ -333,7 +337,7 @@ def test_env_override_writes_a_file_path(qa_repo, tmp_path):
     assert _ledger_rows(qa_repo) == []
 
 
-def test_env_override_writes_into_a_directory(qa_repo, tmp_path):
+def test_env_override_writes_into_a_directory(qa_repo: str, tmp_path: Path) -> None:
     target = tmp_path / "fleet"
     target.mkdir()
     _run_cli(
@@ -347,7 +351,7 @@ def test_env_override_writes_into_a_directory(qa_repo, tmp_path):
     assert (target / DEFAULT_QA_LEDGER_FILE).exists()
 
 
-def test_config_path_and_max_entries_keep_the_newest_rows(qa_repo):
+def test_config_path_and_max_entries_keep_the_newest_rows(qa_repo: str) -> None:
     (qa_repo / ".gitreins" / "config.yaml").write_text(
         "qa_ledger:\n  path: custom-ledger.jsonl\n  max_entries: 2\n", encoding="utf-8"
     )
@@ -362,7 +366,9 @@ def test_config_path_and_max_entries_keep_the_newest_rows(qa_repo):
 # ── Rotation announces eviction ────────────────────────────────
 
 
-def test_rotation_past_max_entries_announces_the_eviction_on_stderr(qa_repo, capsys):
+def test_rotation_past_max_entries_announces_the_eviction_on_stderr(
+    qa_repo: str, capsys: pytest.CaptureFixture[str]
+) -> None:
     # An append-only audit trail must never shrink silently: recording past
     # max_entries evicts the oldest rows, and that eviction is said on stderr
     # while stdout (which consumers parse) stays untouched.
@@ -383,7 +389,9 @@ def test_rotation_past_max_entries_announces_the_eviction_on_stderr(qa_repo, cap
     assert "qa ledger: rotation evicted 1 row(s) (max_entries=3)" in captured.err
 
 
-def test_recording_under_the_cap_prints_no_eviction_line(qa_repo, capsys):
+def test_recording_under_the_cap_prints_no_eviction_line(
+    qa_repo: str, capsys: pytest.CaptureFixture[str]
+) -> None:
     for index in range(3):
         stored = record_external(str(qa_repo), project=f"p-{index}", status="pass", kind="lane")
         assert stored is not None
@@ -394,7 +402,7 @@ def test_recording_under_the_cap_prints_no_eviction_line(qa_repo, capsys):
     assert "qa ledger" not in captured.err
 
 
-def test_a_ledger_write_failure_does_not_fail_the_run(qa_repo):
+def test_a_ledger_write_failure_does_not_fail_the_run(qa_repo: str) -> None:
     # A regular file where the ledger's parent directory should be makes the
     # append raise OSError; the QA run must still succeed and say so.
     blocker = qa_repo / "blocker"
@@ -411,7 +419,7 @@ def test_a_ledger_write_failure_does_not_fail_the_run(qa_repo):
     assert "qa ledger: fresh run not recorded" in result.stderr
 
 
-def test_disabled_ledger_is_announced_on_stderr(qa_repo):
+def test_disabled_ledger_is_announced_on_stderr(qa_repo: str) -> None:
     (qa_repo / ".gitreins").mkdir(exist_ok=True)
     (qa_repo / ".gitreins" / "config.yaml").write_text(
         "qa_ledger:\n  enabled: false\n", encoding="utf-8"
@@ -425,7 +433,7 @@ def test_disabled_ledger_is_announced_on_stderr(qa_repo):
 # ── Row shape details ──────────────────────────────────────────
 
 
-def test_cells_are_bounded_and_name_the_remainder(qa_repo):
+def test_cells_are_bounded_and_name_the_remainder(qa_repo: str) -> None:
     report = {
         "command": "true",
         "k": CELL_LIMIT + 6,
@@ -445,13 +453,13 @@ def test_cells_are_bounded_and_name_the_remainder(qa_repo):
     assert row["verdict"] == "PASS"
 
 
-def test_project_defaults_to_the_repository_directory_name(qa_repo):
+def test_project_defaults_to_the_repository_directory_name(qa_repo: str) -> None:
     row = record_run(str(qa_repo), "fresh", {"exit_code": 0})
     assert row is not None
     assert row["project"] == "qa-lab"
 
 
-def test_a_timeout_is_recorded_as_a_failure(qa_repo):
+def test_a_timeout_is_recorded_as_a_failure(qa_repo: str) -> None:
     row = record_run(str(qa_repo), "fresh", {"exit_code": -1, "output": "command timed out"})
     assert row is not None
     assert row["verdict"] == "FAIL"

@@ -1,0 +1,4 @@
+{"tick":"gitreins-foreman-2026-10-08-06-35-44","budget":6,"workers":[
+ {"task":"PYTYP-GITREINS","scope":"tests/ annotation slice 3","worktree":"wt/PYTYP-GITREINS","model":"glm-5.3-flash","provider":"xkiro"},
+ {"task":"REVIEW-GITREINS-028","scope":"injection-aware refusals + push-time secret check","worktree":"wt/REVIEW-GITREINS-028","model":"gpt-6-luna","provider":"openai-codex"}
+],"independence":"tests/ vs engine/ — disjoint file sets, no depends_on edges"}

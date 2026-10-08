@@ -11,6 +11,7 @@ from tests.test_guard_go_lanes import (
     _scratch_repo,
     _write,
 )
+from pathlib import Path
 
 requires_go = pytest.mark.skipif(GO_BIN is None, reason="go toolchain not installed (POC-46)")
 
@@ -21,7 +22,7 @@ exit 0
 """
 
 
-def _lint_argv_shim(tmp_path):
+def _lint_argv_shim(tmp_path: Path) -> tuple:
     """A fake golangci-lint earlier on PATH that records every invocation."""
     bin_dir = str(tmp_path / "lint-shim")
     os.makedirs(bin_dir, exist_ok=True)
@@ -35,7 +36,7 @@ def _lint_argv_shim(tmp_path):
     return bin_dir, argv_log
 
 
-def _read_argv(path):
+def _read_argv(path: str) -> object:
     with open(path) as handle:
         return [line.rstrip("\n").rstrip("\t").split("\t") for line in handle if line.strip("\t")]
 
@@ -46,7 +47,9 @@ class TestGoLintPackageScope:
     sibling file reads ``undefined`` — false findings that blocked real
     single-file Go commits three times on 2026-09-24."""
 
-    def test_single_file_scope_has_no_path_args(self, tmp_path, monkeypatch):
+    def test_single_file_scope_has_no_path_args(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """RED-PROOF: pre-fix the argv ended with the changed FILE name; the
         shim log must instead show an invocation with no path after the rev
         flag (package-dir scoping)."""
@@ -71,7 +74,9 @@ class TestGoLintPackageScope:
         assert argv.index("--new-from-rev=HEAD~1") == len(argv) - 1, argv
         assert "staged.go" not in argv
 
-    def test_multi_package_scope_yields_one_invocation_per_package(self, tmp_path, monkeypatch):
+    def test_multi_package_scope_yields_one_invocation_per_package(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         workdir = _scratch_repo(
             tmp_path,
             {
@@ -93,7 +98,7 @@ class TestGoLintPackageScope:
         assert sorted(pkg_args) == ["alpha", "beta"], invocations
 
     @requires_go
-    def test_real_toolchain_single_file_commit_passes(self, tmp_path):
+    def test_real_toolchain_single_file_commit_passes(self, tmp_path: Path) -> None:
         """The live defect: a real single-file commit in a populated package
         must grade clean with the REAL golangci-lint (no undefined-symbol
         false findings)."""
@@ -123,7 +128,9 @@ class TestGoLintFallbackMasking:
     must not be erased by the go-vet fallback when a LATER package's
     invocation could not run (spawn failure)."""
 
-    def test_real_failure_not_masked_by_later_spawn_failure(self, tmp_path, monkeypatch):
+    def test_real_failure_not_masked_by_later_spawn_failure(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> dict:
         import engine.guards as guards_mod
         from unittest.mock import patch
 
@@ -139,7 +146,7 @@ class TestGoLintFallbackMasking:
 
         calls = {"n": 0}
 
-        def _fake_run_bounded(argv, **kwargs):
+        def _fake_run_bounded(argv: object, **kwargs: object) -> dict:
             calls["n"] += 1
             if calls["n"] == 1:
                 return {"exit_code": 1, "output": "alpha: real finding"}  # alpha ran, failed
@@ -157,7 +164,7 @@ class TestGoLintMidLoopSpawnFailure:
     in a multi-package set leaves the remaining dirs UNGRADED — the go-vet
     fallback may not pass the lane on partial coverage."""
 
-    def test_first_package_spawn_failure_fails_the_lane(self, tmp_path):
+    def test_first_package_spawn_failure_fails_the_lane(self, tmp_path: Path) -> dict:
         import engine.guards as guards_mod
         from unittest.mock import patch
 
@@ -173,7 +180,7 @@ class TestGoLintMidLoopSpawnFailure:
 
         calls = {"n": 0}
 
-        def _fake_run_bounded(argv, **kwargs):
+        def _fake_run_bounded(argv: object, **kwargs: object) -> dict:
             calls["n"] += 1
             if calls["n"] == 1:
                 return {"error": "golangci-lint vanished"}  # alpha could not run

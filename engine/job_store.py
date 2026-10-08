@@ -104,7 +104,7 @@ def load_job(job_id: str, directory: str | None = None) -> dict | None:
     if not os.path.exists(path):
         return None
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             return json.load(f)
     except (json.JSONDecodeError, OSError) as e:
         # A torn write would only happen if the process was killed mid-

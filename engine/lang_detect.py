@@ -234,10 +234,7 @@ def _is_excluded_source(rel_path: str) -> bool:
     excluded — see the module docstring.
     """
     parts = rel_path.split("/")
-    for part in parts[:-1]:
-        if _skip_dir(part) or part in TEST_DIRS:
-            return True
-    return False
+    return any(_skip_dir(part) or part in TEST_DIRS for part in parts[:-1])
 
 
 def _git_files(workdir: str) -> list[str] | None:
@@ -256,7 +253,7 @@ def _git_files(workdir: str) -> list[str] | None:
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     try:
         top = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
+            ["git", "rev-parse", "--show-toplevel"],  # noqa: S607 - git resolved via PATH by design
             cwd=workdir,
             capture_output=True,
             text=True,
@@ -268,7 +265,7 @@ def _git_files(workdir: str) -> list[str] | None:
         if os.path.realpath(top.stdout.strip()) != os.path.realpath(workdir):
             return None
         proc = subprocess.run(
-            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],  # noqa: S607 - git resolved via PATH by design
             cwd=workdir,
             capture_output=True,
             timeout=15,
@@ -349,7 +346,7 @@ def has_sql_sources(workdir: str) -> bool:
     SQL is not a lint/test language here (there is no command pair for it) —
     it selects static-analysis tooling only.
     """
-    for root, dirs, names in os.walk(workdir):
+    for _root, dirs, names in os.walk(workdir):
         dirs[:] = [d for d in dirs if not _skip_dir(d)]
         if "migrations" in dirs:
             return True

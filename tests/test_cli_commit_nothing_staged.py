@@ -51,7 +51,7 @@ def _init_repo(tmp_path: Path) -> Path:
     return repo
 
 
-def _commit_args(**overrides) -> argparse.Namespace:
+def _commit_args(**overrides: object) -> argparse.Namespace:
     defaults = dict(message="poc-70 commit", skip_tier2=True, allow_in_progress=False)
     defaults.update(overrides)
     return argparse.Namespace(**defaults)
@@ -62,7 +62,7 @@ class _StubTier1:
     summary = "stub tier 1"
 
 
-def _make_guard_stub():
+def _make_guard_stub() -> object:
     """Fresh GuardManager stub per test; `constructed` proves guard (non-)entry.
 
     A per-test class (not a module-level singleton) keeps the construction
@@ -72,10 +72,10 @@ def _make_guard_stub():
     class _GuardManagerStub:
         constructed = False
 
-        def __init__(self, workdir, config=None):
+        def __init__(self, workdir: str, config: dict = None) -> None:
             type(self).constructed = True
 
-        def run_all(self):
+        def run_all(self) -> object:
             return _StubTier1()
 
     return _GuardManagerStub
@@ -87,7 +87,9 @@ def _assert_no_commit_created(repo: Path, head_before: str, count_before: str) -
     assert _git(repo, "rev-list", "--count", "HEAD") == count_before
 
 
-def test_commit_refuses_when_index_empty_and_tree_clean(tmp_path, monkeypatch, capsys):
+def test_commit_refuses_when_index_empty_and_tree_clean(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """AC 1: clean tree + empty index — guidance, exit 1, no guards, no commit."""
     repo = _init_repo(tmp_path)
     head_before = _git(repo, "rev-parse", "HEAD")
@@ -110,7 +112,9 @@ def test_commit_refuses_when_index_empty_and_tree_clean(tmp_path, monkeypatch, c
     _assert_no_commit_created(repo, head_before, count_before)
 
 
-def test_commit_refuses_when_only_unstaged_edits(tmp_path, monkeypatch, capsys):
+def test_commit_refuses_when_only_unstaged_edits(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """AC 2: unstaged-only edits — the hint names `git add`, guards not run."""
     repo = _init_repo(tmp_path)
     (repo / "base.txt").write_text("modified but never staged\n")
@@ -137,7 +141,9 @@ def test_commit_refuses_when_only_unstaged_edits(tmp_path, monkeypatch, capsys):
     assert (repo / "base.txt").read_text() == "modified but never staged\n"
 
 
-def test_commit_refuses_when_only_untracked_files(tmp_path, monkeypatch, capsys):
+def test_commit_refuses_when_only_untracked_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """AC 2 (untracked arm): untracked files alone must also get the git add hint."""
     repo = _init_repo(tmp_path)
     (repo / "untracked.txt").write_text("never added\n")
@@ -161,7 +167,9 @@ def test_commit_refuses_when_only_untracked_files(tmp_path, monkeypatch, capsys)
     assert "??" in _git(repo, "status", "--porcelain")
 
 
-def test_commit_with_staged_changes_unchanged_behavior(tmp_path, monkeypatch, capsys):
+def test_commit_with_staged_changes_unchanged_behavior(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """AC 3 control: a staged change keeps today's path — guards run, banner prints."""
     repo = _init_repo(tmp_path)
     (repo / "staged.txt").write_text("staged\n")
@@ -183,7 +191,9 @@ def test_commit_with_staged_changes_unchanged_behavior(tmp_path, monkeypatch, ca
     assert "staged.txt" in _git(repo, "show", "--name-only", "--format=", "HEAD")
 
 
-def test_partially_staged_file_commits_like_git(tmp_path, monkeypatch, capsys):
+def test_partially_staged_file_commits_like_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Boundary: a staged file with FURTHER unstaged edits still commits.
 
     Matches `git commit` semantics (the index is committed as-is): a

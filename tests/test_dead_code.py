@@ -21,6 +21,7 @@ from engine.dead_code import (
     DeadCodeFinding,
     DeadCodeReport,
 )
+from pathlib import Path
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -46,7 +47,7 @@ def _find_by_category(report: DeadCodeReport, category: str) -> list[DeadCodeFin
 
 
 @pytest.fixture
-def tmp_project(tmp_path):
+def tmp_project(tmp_path: Path) -> str:
     """A clean temp project directory. Tests create their own .py files here."""
     return str(tmp_path)
 
@@ -57,14 +58,14 @@ def tmp_project(tmp_path):
 
 
 class TestDeadCodeFinding:
-    def test_dataclass_fields(self):
+    def test_dataclass_fields(self) -> None:
         f = DeadCodeFinding(file="a.py", line=10, category="unreachable", message="x")
         assert f.file == "a.py"
         assert f.line == 10
         assert f.category == "unreachable"
         assert f.message == "x"
 
-    def test_equality(self):
+    def test_equality(self) -> None:
         a = DeadCodeFinding(file="a.py", line=1, category="unreachable", message="m")
         b = DeadCodeFinding(file="a.py", line=1, category="unreachable", message="m")
         assert a == b
@@ -76,16 +77,16 @@ class TestDeadCodeFinding:
 
 
 class TestDeadCodeReport:
-    def test_default_empty_report_passes(self):
+    def test_default_empty_report_passes(self) -> None:
         report = DeadCodeReport()
         assert report.findings == []
         assert report.passed is True
 
-    def test_empty_report_summary(self):
+    def test_empty_report_summary(self) -> None:
         report = DeadCodeReport()
         assert report.summary == "No dead code found"
 
-    def test_report_with_findings_does_not_pass(self):
+    def test_report_with_findings_does_not_pass(self) -> None:
         report = DeadCodeReport(
             findings=[
                 DeadCodeFinding(file="a.py", line=1, category="unreachable", message="x"),
@@ -94,7 +95,7 @@ class TestDeadCodeReport:
         assert report.passed is False
         assert len(report.findings) == 1
 
-    def test_summary_groups_by_category(self):
+    def test_summary_groups_by_category(self) -> None:
         report = DeadCodeReport(
             findings=[
                 DeadCodeFinding(file="a.py", line=1, category="unreachable", message="m1"),
@@ -108,7 +109,7 @@ class TestDeadCodeReport:
         assert "a.py:1" in s
         assert "c.py:3" in s
 
-    def test_summary_truncates_after_ten_in_category(self):
+    def test_summary_truncates_after_ten_in_category(self) -> None:
         findings = [
             DeadCodeFinding(file=f"f{i}.py", line=i, category="unreachable", message=f"m{i}")
             for i in range(15)
@@ -124,7 +125,7 @@ class TestDeadCodeReport:
 
 
 class TestUnreachableCode:
-    def test_code_after_return_is_flagged(self, tmp_project):
+    def test_code_after_return_is_flagged(self, tmp_project: str) -> None:
         _write_py(
             tmp_project,
             "mod.py",
@@ -140,7 +141,7 @@ class TestUnreachableCode:
         msgs = [f.message for f in _find_by_category(report, "unreachable")]
         assert any("return" in m for m in msgs)
 
-    def test_code_after_raise_is_flagged(self, tmp_project):
+    def test_code_after_raise_is_flagged(self, tmp_project: str) -> None:
         _write_py(
             tmp_project,
             "mod.py",
@@ -155,7 +156,9 @@ class TestUnreachableCode:
         msgs = [f.message for f in _find_by_category(report, "unreachable")]
         assert any("raise" in m for m in msgs)
 
-    def test_break_and_continue_in_nested_loops_not_detected_by_current_impl(self, tmp_project):
+    def test_break_and_continue_in_nested_loops_not_detected_by_current_impl(
+        self, tmp_project: str
+    ) -> None:
         """Document current implementation behavior: only top-level body statements are checked.
 
         The detector walks function bodies but iterates `node.body` directly, so
@@ -179,7 +182,7 @@ class TestUnreachableCode:
         # Documenting the limitation: unreachable inside nested loops is NOT detected.
         assert "unreachable" not in _categories(report)
 
-    def test_docstring_after_return_is_NOT_flagged(self, tmp_project):
+    def test_docstring_after_return_is_NOT_flagged(self, tmp_project: str) -> None:
         """Docstrings immediately after return are tolerated (common pattern)."""
         _write_py(
             tmp_project,
@@ -193,7 +196,7 @@ class TestUnreachableCode:
         report = DeadCodeDetector(tmp_project).scan()
         assert "unreachable" not in _categories(report)
 
-    def test_clean_function_with_no_unreachable(self, tmp_project):
+    def test_clean_function_with_no_unreachable(self, tmp_project: str) -> None:
         _write_py(
             tmp_project,
             "mod.py",
@@ -221,7 +224,7 @@ class TestUnusedFunctions:
         report.findings.extend(det.find_unused_functions())
         return report
 
-    def test_unused_function_flagged(self, tmp_project):
+    def test_unused_function_flagged(self, tmp_project: str) -> None:
         _write_py(
             tmp_project,
             "a.py",
@@ -241,7 +244,7 @@ class TestUnusedFunctions:
         assert any("dead_func" in m for m in names)
         assert not any("used_func" in m for m in names)
 
-    def test_function_called_in_other_file_flagged_as_used(self, tmp_project):
+    def test_function_called_in_other_file_flagged_as_used(self, tmp_project: str) -> None:
         """Function defined in one file but called in another must NOT be flagged."""
         _write_py(
             tmp_project,
@@ -263,7 +266,7 @@ class TestUnusedFunctions:
         unused = _find_by_category(report, "unused_function")
         assert not any("helper" in f.message for f in unused)
 
-    def test_whitelisted_dunder_not_flagged(self, tmp_project):
+    def test_whitelisted_dunder_not_flagged(self, tmp_project: str) -> None:
         """Dunder methods are called by Python, not by Call AST — must be whitelisted."""
         _write_py(
             tmp_project,
@@ -286,7 +289,7 @@ class TestUnusedFunctions:
         for d in ["__init__", "__repr__", "__len__", "__eq__"]:
             assert not any(d in m for m in unused_msgs), f"{d} should not be flagged"
 
-    def test_whitelisted_framework_hooks_not_flagged(self, tmp_project):
+    def test_whitelisted_framework_hooks_not_flagged(self, tmp_project: str) -> None:
         """main, run, handle, process, execute, dispatch are whitelisted."""
         _write_py(
             tmp_project,
@@ -311,7 +314,7 @@ class TestUnusedFunctions:
         for name in ["main", "run", "handle", "process", "execute", "dispatch"]:
             assert not any(f"'{name}'" in m for m in unused_msgs), f"{name} should be whitelisted"
 
-    def test_private_function_with_underscore_not_flagged(self, tmp_project):
+    def test_private_function_with_underscore_not_flagged(self, tmp_project: str) -> None:
         """Functions starting with _ are considered private — skipped."""
         _write_py(
             tmp_project,
@@ -325,7 +328,7 @@ class TestUnusedFunctions:
         unused = _find_by_category(report, "unused_function")
         assert not any("_internal_helper" in f.message for f in unused)
 
-    def test_test_prefixed_function_not_flagged(self, tmp_project):
+    def test_test_prefixed_function_not_flagged(self, tmp_project: str) -> None:
         """test_* functions are called by pytest, not by Call AST — skipped."""
         _write_py(
             tmp_project,
@@ -341,7 +344,7 @@ class TestUnusedFunctions:
         unused = _find_by_category(report, "unused_function")
         assert not any("test_" in f.message for f in unused)
 
-    def test_decorated_property_not_flagged(self, tmp_project):
+    def test_decorated_property_not_flagged(self, tmp_project: str) -> None:
         """@property-decorated funcs are called via attribute access, not Call AST."""
         _write_py(
             tmp_project,
@@ -357,7 +360,7 @@ class TestUnusedFunctions:
         unused = _find_by_category(report, "unused_function")
         assert not any("value" in f.message for f in unused)
 
-    def test_decorated_staticmethod_not_flagged(self, tmp_project):
+    def test_decorated_staticmethod_not_flagged(self, tmp_project: str) -> None:
         _write_py(
             tmp_project,
             "cls.py",
@@ -372,7 +375,7 @@ class TestUnusedFunctions:
         unused = _find_by_category(report, "unused_function")
         assert not any("helper" in f.message for f in unused)
 
-    def test_decorated_pytest_fixture_not_flagged(self, tmp_project):
+    def test_decorated_pytest_fixture_not_flagged(self, tmp_project: str) -> None:
         """@pytest.fixture funcs are called by the framework — must not be flagged."""
         _write_py(
             tmp_project,
@@ -396,7 +399,7 @@ class TestUnusedFunctions:
 
 
 class TestUnusedImports:
-    def test_unused_import_flagged(self, tmp_project):
+    def test_unused_import_flagged(self, tmp_project: str) -> None:
         _write_py(
             tmp_project,
             "mod.py",
@@ -413,7 +416,7 @@ class TestUnusedImports:
         assert any("os" in m for m in msgs)
         assert any("sys" in m for m in msgs)
 
-    def test_used_import_not_flagged(self, tmp_project):
+    def test_used_import_not_flagged(self, tmp_project: str) -> None:
         _write_py(
             tmp_project,
             "mod.py",
@@ -428,7 +431,7 @@ class TestUnusedImports:
         msgs = [f.message for f in unused]
         assert not any("os" in m for m in msgs)
 
-    def test_partial_use_of_module_not_flagged(self, tmp_project):
+    def test_partial_use_of_module_not_flagged(self, tmp_project: str) -> None:
         """If any name from the module is referenced, it's considered used."""
         _write_py(
             tmp_project,
@@ -443,7 +446,7 @@ class TestUnusedImports:
         unused = _find_by_category(report, "unused_import")
         assert not any("os" in f.message for f in unused)
 
-    def test_from_import_unused_flagged(self, tmp_project):
+    def test_from_import_unused_flagged(self, tmp_project: str) -> None:
         _write_py(
             tmp_project,
             "mod.py",
@@ -457,7 +460,7 @@ class TestUnusedImports:
         unused = _find_by_category(report, "unused_import")
         assert any("path" in f.message for f in unused)
 
-    def test_from_import_used_not_flagged(self, tmp_project):
+    def test_from_import_used_not_flagged(self, tmp_project: str) -> None:
         _write_py(
             tmp_project,
             "mod.py",
@@ -471,7 +474,7 @@ class TestUnusedImports:
         unused = _find_by_category(report, "unused_import")
         assert not any("path" in f.message for f in unused)
 
-    def test_aliased_import_used_not_flagged(self, tmp_project):
+    def test_aliased_import_used_not_flagged(self, tmp_project: str) -> None:
         _write_py(
             tmp_project,
             "mod.py",
@@ -492,7 +495,7 @@ class TestUnusedImports:
 
 
 class TestEmptyFunctions:
-    def test_pass_only_function_flagged(self, tmp_project):
+    def test_pass_only_function_flagged(self, tmp_project: str) -> None:
         _write_py(
             tmp_project,
             "mod.py",
@@ -505,7 +508,7 @@ class TestEmptyFunctions:
         empty = _find_by_category(report, "empty_function")
         assert any("nothing" in f.message for f in empty)
 
-    def test_function_with_only_docstring_flagged_as_empty(self, tmp_project):
+    def test_function_with_only_docstring_flagged_as_empty(self, tmp_project: str) -> None:
         """A function whose only body content is a docstring has no real implementation —
         the detector strips the docstring and flags the function as empty.
         """
@@ -521,7 +524,7 @@ class TestEmptyFunctions:
         empty = _find_by_category(report, "empty_function")
         assert any("documented" in f.message for f in empty)
 
-    def test_function_with_real_body_not_flagged(self, tmp_project):
+    def test_function_with_real_body_not_flagged(self, tmp_project: str) -> None:
         _write_py(
             tmp_project,
             "mod.py",
@@ -534,7 +537,7 @@ class TestEmptyFunctions:
         empty = _find_by_category(report, "empty_function")
         assert not any("real" in f.message for f in empty)
 
-    def test_ellipsis_body_flagged_as_empty(self, tmp_project):
+    def test_ellipsis_body_flagged_as_empty(self, tmp_project: str) -> None:
         """`...` is Python's Ellipsis literal and should be treated as empty."""
         _write_py(
             tmp_project,
@@ -561,7 +564,7 @@ class TestEdgeCases:
         report.findings.extend(det.find_unused_functions())
         return report
 
-    def test_clean_file_no_findings(self, tmp_project):
+    def test_clean_file_no_findings(self, tmp_project: str) -> None:
         _write_py(
             tmp_project,
             "clean.py",
@@ -589,7 +592,7 @@ class TestEdgeCases:
         assert report.findings == []
         assert report.summary == "No dead code found"
 
-    def test_file_with_all_four_categories(self, tmp_project):
+    def test_file_with_all_four_categories(self, tmp_project: str) -> None:
         """One file containing one example of each dead-code pattern."""
         _write_py(
             tmp_project,
@@ -618,7 +621,7 @@ class TestEdgeCases:
         assert "unused_import" in cats
         assert "empty_function" in cats
 
-    def test_async_function_unreachable_flagged(self, tmp_project):
+    def test_async_function_unreachable_flagged(self, tmp_project: str) -> None:
         """Async functions are also AST.FunctionDef/AsyncFunctionDef — should be checked."""
         _write_py(
             tmp_project,
@@ -632,7 +635,7 @@ class TestEdgeCases:
         report = DeadCodeDetector(tmp_project).scan()
         assert "unreachable" in _categories(report)
 
-    def test_explicit_files_list(self, tmp_project):
+    def test_explicit_files_list(self, tmp_project: str) -> None:
         """When scan(files=[...]) is used, only those files are analyzed."""
         _write_py(
             tmp_project,
@@ -660,7 +663,7 @@ class TestEdgeCases:
         unused = _find_by_category(report, "unused_import")
         assert not any("sys" in f.message for f in unused)
 
-    def test_find_unused_functions_before_scan_is_empty(self, tmp_project):
+    def test_find_unused_functions_before_scan_is_empty(self, tmp_project: str) -> None:
         """find_unused_functions() without prior scan() has no data to analyze."""
         _write_py(
             tmp_project,
@@ -675,7 +678,7 @@ class TestEdgeCases:
         result = det.find_unused_functions()
         assert result == []
 
-    def test_multiple_files_cross_reference_calls(self, tmp_project):
+    def test_multiple_files_cross_reference_calls(self, tmp_project: str) -> None:
         """Function called across multiple files is marked as used."""
         _write_py(
             tmp_project,
@@ -705,7 +708,7 @@ class TestEdgeCases:
         unused = _find_by_category(report, "unused_function")
         assert not any("shared" in f.message for f in unused)
 
-    def test_finding_has_correct_file_and_line(self, tmp_project):
+    def test_finding_has_correct_file_and_line(self, tmp_project: str) -> None:
         _write_py(
             tmp_project,
             "mod.py",

@@ -8,10 +8,10 @@ import logging
 import re
 from typing import Any
 
+from engine.eval_cap import EvalCap
 from engine.evaluator import AgenticEvaluator, Verdict
 from engine.guard_manager import GuardManager, Tier1Result
 from engine.llm import LLMClient
-from engine.eval_cap import EvalCap
 from engine.pipeline import Pipeline, degradation_warning, load_pipeline_config
 from engine.task_manager import Task
 
@@ -119,7 +119,7 @@ class Judge:
             try:
                 import yaml
 
-                with open(config_path, "r") as f:
+                with open(config_path) as f:
                     cfg = yaml.safe_load(f) or {}
                 return bool((cfg.get("defaults") or {}).get("pass_on_error", False))
             except Exception:

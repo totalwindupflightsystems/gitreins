@@ -31,7 +31,7 @@ from tensorflow.keras.models import Sequential  # noqa: F401  ← not installed
 # ── Functions (never reached because the module fails to load) ───────────────
 
 
-def load_csv(path: str):
+def load_csv(path: str) -> object:
     """Load a CSV file as a DataFrame-like object."""
     return pandas_as.read_csv(path)  # type: ignore[attr-defined]
 
@@ -53,7 +53,7 @@ def compute_irr(cashflows: list[float]) -> float:
     return float(numpy_financial.irr(cashflows))  # type: ignore[attr-defined]
 
 
-def build_keras_model(input_dim: int, output_dim: int):
+def build_keras_model(input_dim: int, output_dim: int) -> object:
     """Build a tiny Keras Sequential model."""
     from tensorflow.keras.layers import Dense  # type: ignore[import-not-found]
 

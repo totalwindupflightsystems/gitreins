@@ -131,7 +131,7 @@ def _read_tail_bytes(path: str, cap: int) -> tuple[bytes, int] | None:
 def _run_git(workdir: str, args: list[str], cap: int) -> str:
     try:
         result = subprocess.run(
-            ["git", *args],
+            ["git", *args],  # noqa: S607 - git resolved via PATH by design
             cwd=workdir,
             capture_output=True,
             text=True,
@@ -341,7 +341,7 @@ def read_evidence(entry_dir: str, verdict: dict[str, Any], name: str) -> tuple[s
             return None
         path = os.path.join(entry_dir, filename)
         try:
-            with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            with open(path, encoding="utf-8", errors="replace") as handle:
                 return filename, handle.read()
         except OSError:
             return None

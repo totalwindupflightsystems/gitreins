@@ -32,6 +32,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import contextlib
 import ctypes
 import json
 import os
@@ -214,10 +215,8 @@ def generate(
     finally:
         _terminate(children)
         if affinity_before is not None:
-            try:
+            with contextlib.suppress(OSError):  # pragma: no cover - defensive
                 os.sched_setaffinity(0, set(affinity_before))
-            except OSError:  # pragma: no cover - defensive
-                pass
         survivors = [pid for pid in summary["pids"] if pid and _alive(pid)]
         summary["survivors"] = survivors
         summary["clean"] = not survivors

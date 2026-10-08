@@ -14,7 +14,6 @@ Contract under test:
 
 from __future__ import annotations
 from pathlib import Path
-from typing import Any
 
 import os
 import subprocess
@@ -57,7 +56,7 @@ class TestLockScope:
         assert tier1_lock.LAST_ACQUIRE_RESULT is None
         assert "tier1_tests_lock" not in result.data
 
-    def test_lock_file_lives_outside_the_repo(self, _isolated_lock_path: Any) -> None:
+    def test_lock_file_lives_outside_the_repo(self, _isolated_lock_path: str) -> None:
         """The lock file is in /tmp keyed by the repo root — never in-tree."""
         path = tier1_lock.tier1_tests_lock_path()
         assert path.startswith(tempfile.gettempdir() + "/"), path
@@ -67,7 +66,7 @@ class TestLockScope:
 
 class TestSerialization:
     def test_concurrent_tier1_runs_serialize_and_the_loser_names_the_wait(
-        self, _isolated_lock_path: Any, monkeypatch: pytest.MonkeyPatch
+        self, _isolated_lock_path: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Two real tier1 tests steps at once: the loser waits, both complete.
 
@@ -126,7 +125,7 @@ class TestSerialization:
             holder.wait(timeout=30)
 
     def test_wait_expiry_still_runs_and_names_itself(
-        self, _isolated_lock_path: Any, monkeypatch: pytest.MonkeyPatch
+        self, _isolated_lock_path: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The bounded wait never wedges the gate: expiry runs the step, named."""
         repo = str(_isolated_lock_path)
@@ -154,7 +153,7 @@ class TestSerialization:
             os.close(fd)
 
     def test_winner_names_acquired_and_releases_cleanly(
-        self, _isolated_lock_path: Any, monkeypatch: pytest.MonkeyPatch
+        self, _isolated_lock_path: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """An uncontended tier1 run: acquired, attributed, lock gone after."""
         repo = str(_isolated_lock_path)

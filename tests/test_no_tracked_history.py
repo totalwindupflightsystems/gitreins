@@ -15,7 +15,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_no_gitreins_history_paths_are_tracked():
+def test_no_gitreins_history_paths_are_tracked() -> None:
     if shutil.which("git") is None:
         import pytest
 

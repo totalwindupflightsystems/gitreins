@@ -28,10 +28,10 @@ import pytest
 # restating the list — the restated copy is exactly what drifted from the
 # vendor .gitignore.
 from gitreins.cli import GITREINS_GITIGNORE_ENTRIES
-from typing import Any, NoReturn
+from typing import NoReturn
 from engine.task_manager import TaskManager
 from engine.judge import Judge
-from typing import Callable
+from collections.abc import Callable, Collection
 
 
 # Get the path to the cli module
@@ -87,7 +87,7 @@ def _hermetic_env() -> dict:
     return env
 
 
-def _cli_failure(result: Any) -> str:
+def _cli_failure(result: subprocess.CompletedProcess) -> str:
     """Assertion message for a failed CLI step: exit status plus both streams.
 
     The INT-FLAKE-1 report was an opaque ``assert '○' in ''``; a flake has to
@@ -99,7 +99,7 @@ def _cli_failure(result: Any) -> str:
     )
 
 
-def _llm_sentinel_socket() -> Any:
+def _llm_sentinel_socket() -> socket.socket:
     """A loopback listener that reveals whether a child dialled the endpoint.
 
     Nothing calls ``accept``, so a ``connect`` from a child stays queued in the
@@ -112,21 +112,21 @@ def _llm_sentinel_socket() -> Any:
     return sock
 
 
-def _sentinel_base_url(sock: Any) -> str:
+def _sentinel_base_url(sock: socket.socket) -> str:
     return f"http://127.0.0.1:{sock.getsockname()[1]}/v1"
 
 
-def _has_pending_connection(sock: Any) -> bool:
+def _has_pending_connection(sock: socket.socket) -> bool:
     readable, _, _ = select.select([sock], [], [], 0)
     return bool(readable)
 
 
-def _drain_pending(sock: Any) -> None:
+def _drain_pending(sock: socket.socket) -> None:
     while _has_pending_connection(sock):
         sock.accept()[0].close()
 
 
-def _apply_cli_env(env: dict, extra_env: dict, unset_env: Any) -> dict:
+def _apply_cli_env(env: dict, extra_env: dict, unset_env: Collection[str] | None) -> dict:
     """Apply run_cli's env contract to *env* (hermetic base + extra/unset).
 
     Shared by the in-process and real-exec runners so both halves of the
@@ -160,7 +160,7 @@ class _InProcessResult:
         self.real_exec = False
 
 
-def _get_workdir_override(workdir: str) -> Any:
+def _get_workdir_override(workdir: str) -> Callable[[str], str]:
     """Return a get_workdir() stand-in pinned to *workdir*.
 
     The real function shells out to `git rev-parse --show-toplevel`; an
@@ -206,7 +206,7 @@ def _in_process_workdir(workdir: str) -> None:
 
 
 def _run_cli_in_process(
-    args: list, env: dict, workdir: str, unset_env: Any = ()
+    args: list, env: dict, workdir: str, unset_env: Collection[str] | None = ()
 ) -> _InProcessResult:
     """Invoke gitreins.cli.main() in this interpreter and capture its streams.
 
@@ -277,7 +277,7 @@ def _run_cli_in_process(
 
 
 def _run_cli_real_exec(
-    args: list, env: dict, workdir: str, **kwargs: Any
+    args: list, env: dict, workdir: str, **kwargs: object
 ) -> subprocess.CompletedProcess:
     """The historical runner: a fresh `python gitreins/cli.py` child process.
 
@@ -296,7 +296,7 @@ def _run_cli_real_exec(
     return result
 
 
-def run_cli(*args: Any, **kwargs: Any) -> Any:
+def run_cli(*args: object, **kwargs: object) -> subprocess.CompletedProcess:
     """Run the gitreins CLI and return a CompletedProcess-like result.
 
     Default runner is IN-PROCESS (gitreins.cli.main() in this interpreter with
@@ -329,7 +329,7 @@ def run_cli(*args: Any, **kwargs: Any) -> Any:
     return _run_cli_in_process(args, env, cwd, unset_env=unset_env)
 
 
-def write_guard_config(workdir: str, extra_guards: Any = "") -> None:
+def write_guard_config(workdir: str, extra_guards: str = "") -> None:
     """Write a minimal .gitreins/config.yaml into workdir.
 
     GR-GAP-051: `gitreins guard` / `gitreins commit` now refuse to run in a
@@ -346,7 +346,7 @@ def write_guard_config(workdir: str, extra_guards: Any = "") -> None:
         f.write("guards:\n  test_command: echo ok\n  allow_skips: true\n" + extra_guards)
 
 
-def _init_real_git_repo(tmp_path: Path) -> Any:
+def _init_real_git_repo(tmp_path: Path) -> str:
     """Create a real repository with an initial commit for commit CLI tests."""
     repo = tmp_path / "real-repo"
     repo.mkdir()
@@ -362,7 +362,7 @@ def _init_real_git_repo(tmp_path: Path) -> Any:
     return str(repo)
 
 
-def _write_pre_commit_hook(repo: Any, body: Any) -> None:
+def _write_pre_commit_hook(repo: str, body: str) -> None:
     hook_dir = os.path.join(repo, ".git", "hooks")
     os.makedirs(hook_dir, exist_ok=True)
     hook = os.path.join(hook_dir, "pre-commit")
@@ -1375,7 +1375,7 @@ class TestTaskLifecycleHermeticity:
         """
         pairs = [(workdir_factory(), f"par{i}") for i in range(4)]
 
-        def _sequence(pair: Any) -> Any:
+        def _sequence(pair: object) -> object:
             workdir, task_id = pair
             results = [
                 run_cli("task", "create", task_id, "Parallel", "c1", cwd=workdir, real_exec=True),
@@ -1511,7 +1511,7 @@ class TestJudgeExtended:
 # ── EVID-003: `judge --ephemeral` — inline criteria, nothing persisted ──────
 
 
-def _write_ephemeral_config(repo: Any, body: Any = "") -> None:
+def _write_ephemeral_config(repo: str, body: str = "") -> None:
     """Minimal ``.gitreins/config.yaml`` for the ephemeral-judge tests.
 
     Three knobs, each for a hermeticity reason: ``test_command: echo ok`` keeps
@@ -1531,7 +1531,7 @@ def _write_ephemeral_config(repo: Any, body: Any = "") -> None:
         )
 
 
-def _repo_snapshot(repo: Any) -> Any:
+def _repo_snapshot(repo: str) -> dict:
     """The surfaces an ``--ephemeral`` run must leave untouched (EVID-003).
 
     Criterion 1 names five: ``git status``, the index, ``.gitreins/tasks.yaml``,
@@ -1551,12 +1551,12 @@ def _repo_snapshot(repo: Any) -> Any:
     c809f438). A byte digest would therefore report the probe's own footprint.
     """
 
-    def _git(*args: Any) -> Any:
+    def _git(*args: object) -> str:
         return subprocess.run(
             ["git", *args], cwd=repo, capture_output=True, text=True, check=True
         ).stdout
 
-    def _digest(path: Any) -> None:
+    def _digest(path: str) -> None:
         if not os.path.exists(path):
             return None
         with open(path, "rb") as handle:
@@ -1581,7 +1581,7 @@ def _repo_snapshot(repo: Any) -> Any:
     }
 
 
-def _assert_untouched(before: Any, after: Any) -> None:
+def _assert_untouched(before: object, after: object) -> None:
     """Fail naming the surface that moved, not with two whole mappings."""
     changed = [surface for surface, value in before.items() if after[surface] != value]
     assert not changed, f"--ephemeral mutated: {', '.join(changed)}\n{before}\n{after}"
@@ -1621,7 +1621,7 @@ class TestJudgeEphemeralCLI:
     )
 
     @staticmethod
-    def _mock_env(verdict: Any) -> Any:
+    def _mock_env(verdict: object) -> object:
         return {"GITREINS_MOCK_LLM_RESPONSE": json.dumps({"content": verdict})}
 
     def test_ephemeral_pass_emits_the_document_and_persists_nothing(self, tmp_path: Path) -> None:
@@ -1939,7 +1939,7 @@ class TestJudgeEphemeralCLI:
         assert "--persist-verdict" in result.stderr  # the usage block names it
 
     @staticmethod
-    def _git(repo: Any, *args: Any) -> str:
+    def _git(repo: str, *args: object) -> str:
         return subprocess.run(
             ["git", "-C", str(repo), *args], capture_output=True, text=True, check=True
         ).stdout.strip()
@@ -1999,7 +1999,7 @@ class TestJudgeAsyncCLI:
     POLL_CHILD_REFERENCE_S = 0.4
 
     @classmethod
-    def _poll_budget_seconds(cls, child_sample_s: Any = None) -> Any:
+    def _poll_budget_seconds(cls, child_sample_s: float | None = None) -> float:
         """Return the poll budget for the machine's *current* workload.
 
         Two measured signals, both of which grow with the load that makes the
@@ -2028,7 +2028,7 @@ class TestJudgeAsyncCLI:
         return min(cls.POLL_MAX_DEADLINE, max(cls.POLL_BASE_DEADLINE, scaled))
 
     @staticmethod
-    def _job_state(job_id: Any) -> Any:
+    def _job_state(job_id: str) -> object:
         """Return the job record plus its worker's liveness (isolated store)."""
         try:
             from engine.job_store import load_job
@@ -2050,7 +2050,7 @@ class TestJudgeAsyncCLI:
                 alive = False
         return {"job": job, "status": (job or {}).get("status"), "pid": pid, "pid_alive": alive}
 
-    def _poll_job(self, job_id: Any, cwd: Any, deadline_s: Any = None) -> None:
+    def _poll_job(self, job_id: str, cwd: str, deadline_s: float | None = None) -> None:
         """Poll `gitreins judge --status <job_id>` until complete or error.
 
         The budget is derived from the workload (``_poll_budget_seconds``,
@@ -2303,7 +2303,7 @@ class TestJudgeAsyncCLI:
         class _FakeProc:
             pid = 424242
 
-        def _fake_popen(cmd: Any, *args: Any, **kwargs: Any) -> Any:
+        def _fake_popen(cmd: list[str], *args: object, **kwargs: object) -> object:
             # Spy ONLY the worker spawn (--run-job); let git rev-parse
             # inside get_workdir() run for real.
             if "--run-job" in cmd:
@@ -2349,7 +2349,7 @@ class TestJudgeAsyncCLI:
         spawned: list = []
         real_popen = _subprocess.Popen
 
-        def _no_popen(cmd: Any, *args: Any, **kwargs: Any) -> Any:
+        def _no_popen(cmd: list[str], *args: object, **kwargs: object) -> object:
             # Spy ONLY the worker spawn (--run-job); let git rev-parse
             # inside get_workdir() run for real.
             if "--run-job" in cmd:
@@ -2463,7 +2463,7 @@ class TestJudgeSyncSingleFlight:
         job["pid"] = os.getpid()
         save_job(job)
 
-        def _must_not_run(task: Any) -> None:
+        def _must_not_run(task: object) -> None:
             pytest.fail("evaluate_task ran while a job was in flight")
 
         monkeypatch.setattr(Judge, "evaluate_task", _must_not_run)
@@ -2927,7 +2927,7 @@ class TestInitRunnerGitignoreAndWarning:
 
         from gitreins.cli import _detect_language, _detect_test_command
 
-        def fake_which(name: Any) -> str | None:
+        def fake_which(name: str) -> str | None:
             return "/usr/bin/pipenv" if name == "pipenv" else None
 
         monkeypatch.setattr(shutil, "which", fake_which)
@@ -3180,7 +3180,7 @@ class TestGitleaksConfigDoctor:
     """`gitreins doctor` detects/repairs pre-DF-001 allowlist globs (POC-54)."""
 
     @staticmethod
-    def _config(tmp_workdir: str, text: Any) -> Any:
+    def _config(tmp_workdir: str, text: str) -> object:
         path = os.path.join(tmp_workdir, ".gitleaks.toml")
         with open(path, "w") as f:
             f.write(text)
@@ -3349,7 +3349,7 @@ class TestGitleaksConfigDoctor:
         )
 
 
-def _materialize_ignored_artifact(repo: Any, entry: str) -> str:
+def _materialize_ignored_artifact(repo: str, entry: str) -> str:
     """Put the artifact a template *entry* describes on disk; return its path.
 
     A directory entry gets a file inside it (git lists untracked files, never
@@ -3366,7 +3366,7 @@ def _materialize_ignored_artifact(repo: Any, entry: str) -> str:
 
 
 @pytest.fixture(scope="module")
-def installed_ignore_repo(tmp_path_factory: pytest.TempPathFactory) -> Any:
+def installed_ignore_repo(tmp_path_factory: pytest.TempPathFactory) -> str:
     """A real checkout after `gitreins install`, holding every template artifact."""
     repo = _init_real_git_repo(tmp_path_factory.mktemp("gitignore-template"))
     result = run_cli("install", cwd=repo)
@@ -3394,7 +3394,7 @@ def installed_ignore_repo(tmp_path_factory: pytest.TempPathFactory) -> Any:
     return repo
 
 
-def _untracked_status(repo: Any) -> str:
+def _untracked_status(repo: str) -> str:
     return subprocess.run(
         ["git", "status", "--porcelain", "--untracked-files=all"],
         cwd=repo,
@@ -3404,7 +3404,7 @@ def _untracked_status(repo: Any) -> str:
     ).stdout
 
 
-def _check_ignore_exit(repo: Any, path: str) -> int:
+def _check_ignore_exit(repo: str, path: str) -> int:
     return subprocess.run(
         ["git", "check-ignore", "-q", path],
         cwd=repo,
@@ -3433,7 +3433,7 @@ class TestInstallGitignoreTemplate:
     which is what the vendor/installer split let drift in the first place.
     """
 
-    def test_qa_ledger_is_ignored_after_install(self, installed_ignore_repo: Any) -> None:
+    def test_qa_ledger_is_ignored_after_install(self, installed_ignore_repo: str) -> None:
         """The leaked file: ignored by check-ignore, and absent from git status."""
         ledger = ".gitreins/qa-ledger.jsonl"
         gitignore = open(os.path.join(installed_ignore_repo, ".gitignore")).read()
@@ -3446,7 +3446,7 @@ class TestInstallGitignoreTemplate:
 
     @pytest.mark.parametrize("entry", GITREINS_GITIGNORE_ENTRIES)
     def test_every_template_entry_is_ignored_after_install(
-        self, installed_ignore_repo: Any, entry: Any
+        self, installed_ignore_repo: str, entry: str
     ) -> None:
         """Every entry the installer writes must ignore its artifact — and no dirt.
 
@@ -3467,7 +3467,7 @@ class TestInstallGitignoreTemplate:
         )
 
     @pytest.mark.parametrize("entry", GITREINS_GITIGNORE_ENTRIES)
-    def test_vendor_gitignore_covers_every_template_entry(self, entry: Any) -> None:
+    def test_vendor_gitignore_covers_every_template_entry(self, entry: str) -> None:
         """Single source: the vendor checkout ignores what the installer ignores.
 
         The template's entries were mirrored by hand into the repo's own
@@ -3488,7 +3488,7 @@ class TestInstallSmartInitConsistency:
     """DF-GITREINS-POC-3: install and smart-init share one persisted contract."""
 
     @staticmethod
-    def _python_repo(tmp_path: Path) -> Any:
+    def _python_repo(tmp_path: Path) -> str:
         repo = _init_real_git_repo(tmp_path)
         (tmp_path / "real-repo" / "pyproject.toml").write_text("[project]\nname = 'consumer'\n")
         (tmp_path / "real-repo" / "tests").mkdir()
@@ -3574,7 +3574,7 @@ class TestInstallSmartInitConsistency:
         )
 
     @staticmethod
-    def _tool_path(tmp_path: Path, name: Any, *tools: Any) -> Any:
+    def _tool_path(tmp_path: Path, name: str, *tools: object) -> str:
         """PATH containing only git plus the named fake tools.
 
         DF-019 probes need a PATH where a static-analysis tool is provably
@@ -4107,14 +4107,14 @@ class TestStaticAnalysisAnnouncementMatchesLane:
     """
 
     @staticmethod
-    def _bare_python_repo(tmp_path: Path) -> Any:
+    def _bare_python_repo(tmp_path: Path) -> str:
         """A real git repo whose only language signal is .py files."""
         repo = Path(_init_real_git_repo(tmp_path))  # the helper returns a str
         (repo / "calc.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
         return repo
 
     @staticmethod
-    def _path_with(tmp_path: Path, name: Any, *tools: Any) -> Any:
+    def _path_with(tmp_path: Path, name: str, *tools: object) -> str:
         """PATH holding only git plus the named fake tools (host-independent)."""
         bin_dir = tmp_path / name
         bin_dir.mkdir()
@@ -4128,7 +4128,7 @@ class TestStaticAnalysisAnnouncementMatchesLane:
         return {"PATH": str(bin_dir)}
 
     @staticmethod
-    def _enable_static_analysis(repo: Any, tools: Any) -> None:
+    def _enable_static_analysis(repo: str, tools: object) -> None:
         import yaml
 
         config_path = repo / ".gitreins" / "config.yaml"
@@ -4231,22 +4231,22 @@ class TestTaskCompleteScanScopeAndLease:
         monkeypatch.setattr(cli_mod, "_persist_result", lambda *args: None)
 
         class FakeTaskManager:
-            def __init__(self, _workdir: Any) -> None:
+            def __init__(self, _workdir: object) -> None:
                 pass
 
-            def check_dependencies(self, _task_id: Any) -> Any:
+            def check_dependencies(self, _task_id: str) -> object:
                 return []
 
-            def complete(self, task_id: Any, force: Any = False) -> Any:
+            def complete(self, task_id: str, force: bool = False) -> object:
                 return SimpleNamespace(id=task_id, status="complete")
 
         evaluations = []
 
         class FakeJudge:
-            def __init__(self, _llm: Any, _workdir: Any, scan_root: Any = None) -> None:
+            def __init__(self, _llm: object, _workdir: object, scan_root: object = None) -> None:
                 assert scan_root == str(scan)
 
-            def evaluate_task(self, task: Any, skip_tier2: Any = False) -> Any:
+            def evaluate_task(self, task: object, skip_tier2: bool = False) -> object:
                 evaluations.append(task.id)
                 time.sleep(0.2)
                 return SimpleNamespace(passed=True, summary="PASS")

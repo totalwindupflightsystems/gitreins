@@ -27,7 +27,8 @@ foreman wiring that calls it per board row is external to this repo.
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from engine.persist import persist_resolution
 from engine.resolution import (
@@ -134,8 +135,8 @@ def preflight(
     test seams included) are forwarded to :func:`resolve` untouched.
     """
     from engine.resolution import (
-        ResolutionVerdict,
         VERDICT_ABSTAIN,
+        ResolutionVerdict,
         surface_enabled,
     )
 

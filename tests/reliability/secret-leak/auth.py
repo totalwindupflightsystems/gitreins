@@ -52,7 +52,7 @@ DATABASE_URL: str = "postgresql://app_user:S3cr3tP@ssw0rd!@db.internal.example.c
 # ── Functions that USE the leaked secrets (so search_pattern finds them) ──────
 
 
-def build_openai_client():
+def build_openai_client() -> object:
     """Build an OpenAI client using the embedded API key."""
     try:
         import openai
@@ -70,7 +70,7 @@ def sign_session_token(payload: dict) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
 
-def connect_to_database():
+def connect_to_database() -> object:
     """Open a SQLAlchemy engine using the embedded DATABASE_URL."""
     try:
         from sqlalchemy import create_engine

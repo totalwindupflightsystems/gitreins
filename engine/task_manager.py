@@ -19,9 +19,10 @@ import fcntl
 import hashlib
 import os
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable
+from typing import Any
 
 import yaml
 
@@ -146,7 +147,7 @@ class TaskManager:
             # stay silent here so one broken file produces one clean line.
             pass
         try:
-            with open(self._tasks_file, "r") as f:
+            with open(self._tasks_file) as f:
                 data = yaml.safe_load(f) or {}
             for item in data.get("tasks", []):
                 task = Task(

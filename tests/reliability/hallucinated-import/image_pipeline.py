@@ -43,13 +43,13 @@ def extract_links(html: str) -> list[str]:
     return [a.get("href") for a in soup.find_all("a") if a.get("href")]
 
 
-def train_boosted_model(X, y):
+def train_boosted_model(X: object, y: object) -> object:
     """Fit a gradient-boosted regressor and return the trained estimator."""
     model = GradientBoostedRegressor(n_estimators=100, learning_rate=0.1)  # type: ignore[call-arg]
     model.fit(X, y)
     return model
 
 
-def build_deep_classifier(input_shape: tuple, num_classes: int):
+def build_deep_classifier(input_shape: tuple, num_classes: int) -> object:
     """Construct a deep convolutional classifier."""
     return DeepConvolutionalNetwork(input_shape=input_shape, num_classes=num_classes)  # type: ignore[call-arg]

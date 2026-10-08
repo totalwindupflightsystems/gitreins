@@ -6101,6 +6101,6 @@ QUARANTINE_LEDGER = [
 ]
 
 
-def entries():
+def entries() -> object:
     """Iterate the ledger in recorded order."""
     return tuple(QUARANTINE_LEDGER)

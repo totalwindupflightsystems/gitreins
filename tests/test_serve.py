@@ -15,6 +15,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from collections.abc import Iterator
 
 from gitreins import serve
 
@@ -179,7 +180,7 @@ def repo_fixture(tmp_path: Path) -> dict:
 
 
 @contextmanager
-def running_server(workdir: str, project: str = ""):
+def running_server(workdir: str, project: str = "") -> Iterator:
     """Run the production request handler against one workdir only."""
 
     class FixtureHandler(serve.Handler):
@@ -200,7 +201,7 @@ def running_server(workdir: str, project: str = ""):
 
 
 @pytest.fixture()
-def live_server(repo_fixture: dict):
+def live_server(repo_fixture: dict) -> Iterator:
     """Run the production request handler against only the fixture repository."""
     with running_server(str(repo_fixture["root"])) as address:
         yield address
@@ -221,14 +222,14 @@ def json_body(body: bytes) -> dict:
     return json.loads(body.decode("utf-8"))
 
 
-def test_root_serves_judgment_browser_html(live_server):
+def test_root_serves_judgment_browser_html(live_server: object) -> None:
     status, body = get(live_server, "/")
 
     assert status == 200
     assert "Judgment Browser" in body.decode("utf-8")
 
 
-def test_stats_counts_fixture_verdicts(live_server):
+def test_stats_counts_fixture_verdicts(live_server: object) -> None:
     status, body = get(live_server, "/api/stats")
 
     assert status == 200
@@ -241,7 +242,9 @@ def test_stats_counts_fixture_verdicts(live_server):
     }
 
 
-def test_stderr_carries_the_non_loopback_host_warning(tmp_path, capsys):
+def test_stderr_carries_the_non_loopback_host_warning(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     """`--host` beyond loopback warns on stderr, keeping stdout for the banner."""
     (tmp_path / ".gitreins" / "history").mkdir(parents=True)
     with (
@@ -261,7 +264,7 @@ def test_stderr_carries_the_non_loopback_host_warning(tmp_path, capsys):
     assert "warning: --host 0.0.0.0" not in captured.out
 
 
-def test_verdicts_lists_fixture_metadata(live_server, repo_fixture):
+def test_verdicts_lists_fixture_metadata(live_server: object, repo_fixture: str) -> None:
     status, body = get(live_server, "/api/verdicts")
 
     assert status == 200
@@ -293,7 +296,7 @@ def test_verdicts_lists_fixture_metadata(live_server, repo_fixture):
     assert len(repo_fixture["verdicts"]) == 2
 
 
-def test_verdict_detail_returns_full_record(live_server, repo_fixture):
+def test_verdict_detail_returns_full_record(live_server: object, repo_fixture: str) -> None:
     date, verdict_hash, expected = repo_fixture["verdicts"][0]
 
     status, body = get(live_server, f"/api/verdicts/{date}/{verdict_hash}")
@@ -307,7 +310,9 @@ def test_verdict_detail_returns_full_record(live_server, repo_fixture):
     assert served["stages"]["tier2"]["items"][0]["status"] == "PASS"
 
 
-def test_verdict_detail_returns_worktree_metadata_and_viewer_renders_it(live_server, repo_fixture):
+def test_verdict_detail_returns_worktree_metadata_and_viewer_renders_it(
+    live_server: object, repo_fixture: str
+) -> None:
     """The detail API preserves origin metadata and the SPA displays it."""
     date, verdict_hash, _expected = repo_fixture["verdicts"][0]
     status, body = get(live_server, f"/api/verdicts/{date}/{verdict_hash}")
@@ -325,7 +330,9 @@ def test_verdict_detail_returns_worktree_metadata_and_viewer_renders_it(live_ser
     assert "branch: " in html
 
 
-def test_legacy_verdict_detail_without_metadata_still_renders(live_server, repo_fixture):
+def test_legacy_verdict_detail_without_metadata_still_renders(
+    live_server: object, repo_fixture: str
+) -> None:
     """Old verdict JSON without origin fields remains a valid detail record."""
     date, verdict_hash, expected = repo_fixture["verdicts"][1]
     status, body = get(live_server, f"/api/verdicts/{date}/{verdict_hash}")
@@ -336,7 +343,7 @@ def test_legacy_verdict_detail_without_metadata_still_renders(live_server, repo_
     assert "branch" not in served
 
 
-def test_verdict_detail_rejects_unknown_hash_and_malformed_date(live_server):
+def test_verdict_detail_rejects_unknown_hash_and_malformed_date(live_server: object) -> None:
     unknown_status, unknown_body = get(live_server, "/api/verdicts/2026-09-01/deadbeef")
     malformed_status, malformed_body = get(live_server, "/api/verdicts/not-a-date/a1b2c3d4")
 
@@ -353,7 +360,9 @@ def test_verdict_detail_rejects_unknown_hash_and_malformed_date(live_server):
         "/api/verdicts/%2e%2e/%2e%2e/etc/passwd",
     ],
 )
-def test_verdict_detail_rejects_direct_and_encoded_traversal(live_server, path):
+def test_verdict_detail_rejects_direct_and_encoded_traversal(
+    live_server: object, path: str
+) -> None:
     status, body = get(live_server, path)
 
     assert status in (400, 404)
@@ -361,7 +370,7 @@ def test_verdict_detail_rejects_direct_and_encoded_traversal(live_server, path):
     assert json_body(body)["error"]
 
 
-def test_board_routes_return_fixture_rows(live_server, repo_fixture):
+def test_board_routes_return_fixture_rows(live_server: object, repo_fixture: str) -> None:
     events_status, events_body = get(live_server, "/api/events")
     tasks_status, tasks_body = get(live_server, "/api/tasks")
 
@@ -374,18 +383,18 @@ def test_board_routes_return_fixture_rows(live_server, repo_fixture):
 # ── --repo: one install browses any checkout (JVIEW-004) ─────────────────────
 
 
-def test_resolve_workdir_defaults_to_the_invoked_repository():
+def test_resolve_workdir_defaults_to_the_invoked_repository() -> None:
     assert serve.resolve_workdir(None, "/tmp/invoked") == "/tmp/invoked"
     assert serve.resolve_workdir("", "/tmp/invoked") == "/tmp/invoked"
 
 
-def test_resolve_workdir_accepts_an_explicit_checkout(repo_fixture):
+def test_resolve_workdir_accepts_an_explicit_checkout(repo_fixture: str) -> None:
     resolved = serve.resolve_workdir(str(repo_fixture["root"]))
 
     assert Path(resolved) == Path(repo_fixture["root"])
 
 
-def test_resolve_workdir_normalizes_a_subdirectory_to_the_repo_root(repo_fixture):
+def test_resolve_workdir_normalizes_a_subdirectory_to_the_repo_root(repo_fixture: str) -> None:
     """A path inside the checkout must browse the checkout, not the subdirectory."""
     nested = Path(repo_fixture["root"]) / ".gitreins" / "history"
 
@@ -394,7 +403,7 @@ def test_resolve_workdir_normalizes_a_subdirectory_to_the_repo_root(repo_fixture
     assert Path(resolved) == Path(repo_fixture["root"])
 
 
-def test_resolve_workdir_accepts_a_directory_outside_git(tmp_path):
+def test_resolve_workdir_accepts_a_directory_outside_git(tmp_path: Path) -> None:
     """History-only directories (no Git) stay browsable as given."""
     plain = tmp_path / "history-only"
     verdict_dir = plain / ".gitreins" / "history" / "2026-09-03" / "beefcafe"
@@ -410,7 +419,7 @@ def test_resolve_workdir_accepts_a_directory_outside_git(tmp_path):
     assert [row["task_id"] for row in serve.list_verdicts(resolved)] == ["PLAIN"]
 
 
-def test_resolve_workdir_rejects_paths_that_are_not_directories(tmp_path):
+def test_resolve_workdir_rejects_paths_that_are_not_directories(tmp_path: Path) -> None:
     a_file = tmp_path / "not-a-directory.txt"
     a_file.write_text("plain file", encoding="utf-8")
 
@@ -420,7 +429,7 @@ def test_resolve_workdir_rejects_paths_that_are_not_directories(tmp_path):
         serve.resolve_workdir(str(a_file))
 
 
-def test_board_routes_are_empty_when_the_browsed_checkout_has_no_board(tmp_path):
+def test_board_routes_are_empty_when_the_browsed_checkout_has_no_board(tmp_path: Path) -> None:
     """A checkout without .coding-hermes/board answers with empty lists, not a 500."""
     verdict_dir = tmp_path / ".gitreins" / "history" / "2026-09-04" / "c0ffee12"
     verdict_dir.mkdir(parents=True)
@@ -439,7 +448,9 @@ def test_board_routes_are_empty_when_the_browsed_checkout_has_no_board(tmp_path)
         assert json_body(stats_body)["total"] == 1
 
 
-def test_ticks_route_reads_the_selected_project_ledger(repo_fixture, tmp_path, monkeypatch):
+def test_ticks_route_reads_the_selected_project_ledger(
+    repo_fixture: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The tick panel is opt-in per project and reads that project's rows only."""
     db_path = tmp_path / "scheduler.db"
     connection = sqlite3.connect(db_path)
@@ -474,13 +485,15 @@ def test_ticks_route_reads_the_selected_project_ledger(repo_fixture, tmp_path, m
 # ── /api/qa: the QA run ledger in the viewer (JVIEW-007) ─────────────────────
 
 
-def _pin_qa_ledger(monkeypatch, path) -> None:
+def _pin_qa_ledger(monkeypatch: pytest.MonkeyPatch, path: str) -> None:
     """Hermetic ledger location: clear any host value, then pin the fixture's."""
     monkeypatch.delenv("GITREINS_QA_LEDGER", raising=False)
     monkeypatch.setenv("GITREINS_QA_LEDGER", str(path))
 
 
-def test_qa_route_is_empty_when_the_ledger_is_absent(repo_fixture, tmp_path, monkeypatch):
+def test_qa_route_is_empty_when_the_ledger_is_absent(
+    repo_fixture: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A missing ledger answers 200 with an empty run list, never a 500."""
     ledger = tmp_path / "absent-qa-ledger.jsonl"
     _pin_qa_ledger(monkeypatch, ledger)
@@ -494,7 +507,9 @@ def test_qa_route_is_empty_when_the_ledger_is_absent(repo_fixture, tmp_path, mon
     assert payload["ledger"] == str(ledger)
 
 
-def test_qa_route_serves_ledger_rows_in_file_order(repo_fixture, tmp_path, monkeypatch):
+def test_qa_route_serves_ledger_rows_in_file_order(
+    repo_fixture: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Ledger rows round-trip verbatim, oldest first, with the resolved path."""
     ledger = tmp_path / "qa-ledger.jsonl"
     rows = [
@@ -536,7 +551,9 @@ def test_qa_route_serves_ledger_rows_in_file_order(repo_fixture, tmp_path, monke
     assert payload["runs"][1]["verdict"] == "FAIL"
 
 
-def test_qa_route_survives_an_unreadable_ledger(repo_fixture, tmp_path, monkeypatch):
+def test_qa_route_survives_an_unreadable_ledger(
+    repo_fixture: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A directory where the ledger file should be is an empty run list, still 200."""
     ledger_dir = tmp_path / "qa-ledger-dir"
     ledger_dir.mkdir()
@@ -554,7 +571,9 @@ def test_qa_route_survives_an_unreadable_ledger(repo_fixture, tmp_path, monkeypa
     assert payload["ledger"] == str(ledger_dir / "qa-ledger.jsonl")
 
 
-def test_viewer_page_advertises_the_qa_panel(repo_fixture, tmp_path, monkeypatch):
+def test_viewer_page_advertises_the_qa_panel(
+    repo_fixture: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """The SPA carries the QA Runs panel shell and fetches the ledger route."""
     _pin_qa_ledger(monkeypatch, tmp_path / "unused-qa-ledger.jsonl")
 
@@ -570,7 +589,9 @@ def test_viewer_page_advertises_the_qa_panel(repo_fixture, tmp_path, monkeypatch
 # ── worker evidence: brief + driver log + graded patch (JVIEW-005) ───────────
 
 
-def test_evidence_route_serves_a_manifest_declared_artifact(live_server, repo_fixture):
+def test_evidence_route_serves_a_manifest_declared_artifact(
+    live_server: object, repo_fixture: str
+) -> None:
     """The brief the fixture's manifest declares round-trips as text/plain."""
     date, verdict_hash, _ = repo_fixture["verdicts"][0]
 
@@ -580,7 +601,7 @@ def test_evidence_route_serves_a_manifest_declared_artifact(live_server, repo_fi
     assert body.decode("utf-8") == EVIDENCE_BRIEF_TEXT
 
 
-def test_evidence_route_serves_the_graded_patch(live_server, repo_fixture):
+def test_evidence_route_serves_the_graded_patch(live_server: object, repo_fixture: str) -> None:
     date, verdict_hash, _ = repo_fixture["verdicts"][0]
 
     status, body = get(live_server, f"/api/verdicts/{date}/{verdict_hash}/evidence/patch")
@@ -589,7 +610,9 @@ def test_evidence_route_serves_the_graded_patch(live_server, repo_fixture):
     assert body.decode("utf-8") == EVIDENCE_PATCH_TEXT
 
 
-def test_evidence_route_404s_for_undeclared_and_traversing_names(live_server, repo_fixture):
+def test_evidence_route_404s_for_undeclared_and_traversing_names(
+    live_server: object, repo_fixture: str
+) -> None:
     """Only artifacts the verdict's own manifest declares are reachable."""
     date, verdict_hash, _ = repo_fixture["verdicts"][0]
 
@@ -609,7 +632,9 @@ def test_evidence_route_404s_for_undeclared_and_traversing_names(live_server, re
     assert json_body(bare_body)["error"]
 
 
-def test_evidence_route_404s_when_the_artifact_file_is_gone(live_server, repo_fixture):
+def test_evidence_route_404s_when_the_artifact_file_is_gone(
+    live_server: object, repo_fixture: str
+) -> None:
     """A deleted artifact is a 404, never a 500."""
     date, verdict_hash, _ = repo_fixture["verdicts"][0]
     patch = repo_fixture["root"] / ".gitreins" / "history" / date / verdict_hash / "commit.patch"
@@ -624,7 +649,9 @@ def test_evidence_route_404s_when_the_artifact_file_is_gone(live_server, repo_fi
     assert json_body(body) == {"error": "not found"}
 
 
-def test_legacy_verdict_without_evidence_has_no_items_and_no_artifacts(live_server, repo_fixture):
+def test_legacy_verdict_without_evidence_has_no_items_and_no_artifacts(
+    live_server: object, repo_fixture: str
+) -> None:
     """A verdict recorded before evidence embedding stays readable and 404s."""
     date, verdict_hash, _ = repo_fixture["verdicts"][1]
 
@@ -638,7 +665,9 @@ def test_legacy_verdict_without_evidence_has_no_items_and_no_artifacts(live_serv
     assert artifact_status == 404
 
 
-def test_verdict_detail_exposes_the_evidence_manifest(live_server, repo_fixture):
+def test_verdict_detail_exposes_the_evidence_manifest(
+    live_server: object, repo_fixture: str
+) -> None:
     date, verdict_hash, _ = repo_fixture["verdicts"][0]
 
     status, body = get(live_server, f"/api/verdicts/{date}/{verdict_hash}")
@@ -649,7 +678,7 @@ def test_verdict_detail_exposes_the_evidence_manifest(live_server, repo_fixture)
     assert items[0]["source"].startswith("GITREINS_WORKER_BRIEF")
 
 
-def test_viewer_page_renders_the_evidence_section(live_server):
+def test_viewer_page_renders_the_evidence_section(live_server: object) -> None:
     """The SPA carries the Evidence section and fetches the artifact route."""
     status, body = get(live_server, "/")
 
@@ -663,7 +692,9 @@ def test_viewer_page_renders_the_evidence_section(live_server):
 # ── judge telemetry: tokens/cost per judgment (JVIEW-006) ────────────────────
 
 
-def test_verdict_detail_includes_judge_telemetry_when_traceable(live_server, repo_fixture):
+def test_verdict_detail_includes_judge_telemetry_when_traceable(
+    live_server: object, repo_fixture: str
+) -> None:
     """Usage lines before a verdict's evaluated_at are charged to that verdict."""
     date, verdict_hash, _ = repo_fixture["verdicts"][0]
 
@@ -681,7 +712,9 @@ def test_verdict_detail_includes_judge_telemetry_when_traceable(live_server, rep
     assert usage["cost_usd"] is None
 
 
-def test_verdict_detail_prices_the_judgment_when_rates_are_configured(live_server, repo_fixture):
+def test_verdict_detail_prices_the_judgment_when_rates_are_configured(
+    live_server: object, repo_fixture: str
+) -> None:
     date, verdict_hash, _ = repo_fixture["verdicts"][0]
     (repo_fixture["root"] / ".gitreins" / "config.yaml").write_text(PRICE_CONFIG, encoding="utf-8")
 
@@ -695,7 +728,9 @@ def test_verdict_detail_prices_the_judgment_when_rates_are_configured(live_serve
     assert usage["model"] == "deepseek-v4-flash"
 
 
-def test_verdict_without_traceable_rows_has_no_usage_block(live_server, repo_fixture):
+def test_verdict_without_traceable_rows_has_no_usage_block(
+    live_server: object, repo_fixture: str
+) -> None:
     """A verdict that predates every usage line reports no telemetry, not zeroes."""
     late = repo_fixture["root"] / ".gitreins" / "history" / "2026-09-03" / "ffff0000"
     late.mkdir(parents=True)
@@ -717,7 +752,7 @@ def test_verdict_without_traceable_rows_has_no_usage_block(live_server, repo_fix
     assert "usage" not in json_body(body)
 
 
-def test_stats_include_the_aggregate_judge_spend(live_server, repo_fixture):
+def test_stats_include_the_aggregate_judge_spend(live_server: object, repo_fixture: str) -> None:
     status, body = get(live_server, "/api/stats")
 
     assert status == 200
@@ -734,7 +769,9 @@ def test_stats_include_the_aggregate_judge_spend(live_server, repo_fixture):
     assert usage["model"] == ""
 
 
-def test_stats_report_a_priced_subtotal_next_to_the_unpriced_count(live_server, repo_fixture):
+def test_stats_report_a_priced_subtotal_next_to_the_unpriced_count(
+    live_server: object, repo_fixture: str
+) -> None:
     (repo_fixture["root"] / ".gitreins" / "config.yaml").write_text(PRICE_CONFIG, encoding="utf-8")
 
     status, body = get(live_server, "/api/stats")
@@ -751,7 +788,7 @@ def test_stats_report_a_priced_subtotal_next_to_the_unpriced_count(live_server, 
     assert usage["prices_configured"] is True
 
 
-def test_viewer_page_renders_the_cost_badge_and_the_spend_card(live_server):
+def test_viewer_page_renders_the_cost_badge_and_the_spend_card(live_server: object) -> None:
     """The SPA carries the detail cost badge and the aggregate spend card."""
     status, body = get(live_server, "/")
 
@@ -788,7 +825,7 @@ def _wait_for_banner(
     raise AssertionError(f"serve never announced its URL (exit={process.poll()}): {log!r}")
 
 
-def test_cli_serve_repo_flag_browses_another_checkout(repo_fixture, tmp_path):
+def test_cli_serve_repo_flag_browses_another_checkout(repo_fixture: str, tmp_path: Path) -> None:
     """`gitreins serve --repo <path>` serves that checkout from an unrelated cwd."""
     unrelated = tmp_path / "unrelated-cwd"
     unrelated.mkdir()
@@ -837,7 +874,7 @@ def test_cli_serve_repo_flag_browses_another_checkout(repo_fixture, tmp_path):
             process.wait(timeout=5)
 
 
-def test_cli_serve_rejects_a_repo_path_that_is_not_a_directory(tmp_path):
+def test_cli_serve_rejects_a_repo_path_that_is_not_a_directory(tmp_path: Path) -> None:
     result = subprocess.run(
         [sys.executable, "-m", "gitreins", "serve", "--repo", str(tmp_path / "absent")],
         cwd=str(tmp_path),
@@ -900,7 +937,7 @@ def resolution_repo(tmp_path: Path) -> Path:
 class TestResolutionRecordsInTheViewerAPI:
     """`gitreins serve` lists the gate's decisions without lying about them."""
 
-    def test_the_row_list_hands_back_the_kind_marker(self, resolution_repo: Path):
+    def test_the_row_list_hands_back_the_kind_marker(self, resolution_repo: Path) -> None:
         rows = serve.list_verdicts(str(resolution_repo))
         by_task = {row["task_id"]: row for row in rows}
 
@@ -910,7 +947,7 @@ class TestResolutionRecordsInTheViewerAPI:
         assert by_task["resolution"]["band"] == "RESOLVED"
         assert by_task["resolution"]["title"] == "Does the gate persist its verdicts?"
 
-    def test_stats_count_judgments_only(self, resolution_repo: Path):
+    def test_stats_count_judgments_only(self, resolution_repo: Path) -> None:
         rows = serve.list_verdicts(str(resolution_repo))
         stats = serve.stats(rows)
 
@@ -926,7 +963,7 @@ class TestResolutionRecordsInTheViewerAPI:
 
     def test_stats_api_carries_resolution_records_next_to_the_listed_rows(
         self, resolution_repo: Path
-    ):
+    ) -> None:
         """/api/stats exposes the count so a client can reconcile list vs header."""
         with running_server(str(resolution_repo)) as (host, port):
             _, list_body = get((host, port), "/api/verdicts")
@@ -939,7 +976,9 @@ class TestResolutionRecordsInTheViewerAPI:
         assert payload["total"] == 1
         assert payload["total"] + payload["resolution_records"] == len(rows)
 
-    def test_http_api_lists_the_record_and_keeps_the_pass_rate_honest(self, resolution_repo: Path):
+    def test_http_api_lists_the_record_and_keeps_the_pass_rate_honest(
+        self, resolution_repo: Path
+    ) -> None:
         with running_server(str(resolution_repo)) as (host, port):
             status, body = get((host, port), "/api/verdicts")
             assert status == 200
@@ -1149,7 +1188,7 @@ def _detail_verdict(items: list[dict]) -> dict:
     }
 
 
-def test_detail_pane_parenthesizes_the_criteria_fallback(live_server):
+def test_detail_pane_parenthesizes_the_criteria_fallback(live_server: object) -> None:
     """`||` binds to the criteria join alone, never to the whole header.
 
     Structural check on the served page source, independent of node: the
@@ -1171,7 +1210,9 @@ def test_detail_pane_parenthesizes_the_criteria_fallback(live_server):
     )
 
 
-def test_detail_pane_renders_the_fallback_and_every_section(live_server, tmp_path):
+def test_detail_pane_renders_the_fallback_and_every_section(
+    live_server: object, tmp_path: Path
+) -> None:
     """Empty top-level items: fallback paragraph AND all sections render."""
     panes = run_viewer_js(
         viewer_script(live_server),
@@ -1186,7 +1227,9 @@ def test_detail_pane_renders_the_fallback_and_every_section(live_server, tmp_pat
         assert section in html, f"section {section!r} never reached the pane"
 
 
-def test_detail_pane_renders_the_items_and_every_section(live_server, tmp_path):
+def test_detail_pane_renders_the_items_and_every_section(
+    live_server: object, tmp_path: Path
+) -> None:
     """Non-empty items: the graded items AND all sections render."""
     panes = run_viewer_js(
         viewer_script(live_server),
@@ -1229,7 +1272,7 @@ _EMPTY_LISTS = {
 }
 
 
-def test_list_panels_keep_the_bare_join_fallback(live_server, tmp_path):
+def test_list_panels_keep_the_bare_join_fallback(live_server: object, tmp_path: Path) -> None:
     """The other `X.join('')||'<p…>'` panels still work in both directions.
 
     Their left operand is the bare join — an empty string is falsy — so the
@@ -1278,7 +1321,7 @@ def test_list_panels_keep_the_bare_join_fallback(live_server, tmp_path):
     assert "no QA runs recorded" not in filled["qalist"]
 
 
-def test_health_endpoint_answers_a_liveness_probe(live_server, repo_fixture):
+def test_health_endpoint_answers_a_liveness_probe(live_server: object, repo_fixture: str) -> None:
     """REVIEW-GITREINS-022: a probe must not need /api/stats to answer "up?".
 
     The review found /health returning 404 on a running server, so a
@@ -1300,7 +1343,7 @@ def test_health_endpoint_answers_a_liveness_probe(live_server, repo_fixture):
     assert payload["path"] == os.path.abspath(str(repo_fixture["root"]))
 
 
-def test_health_needs_no_verdict_store_to_answer(live_server):
+def test_health_needs_no_verdict_store_to_answer(live_server: object) -> None:
     """Liveness is not a judgment: the body carries no counts and no usage."""
     _status, body = get(live_server, "/health")
 

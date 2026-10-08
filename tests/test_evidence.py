@@ -61,7 +61,7 @@ def _sources(manifest: dict) -> str:
 # ── collector ────────────────────────────────────────────────────────────────
 
 
-def test_brief_is_taken_from_the_env_var_and_recorded_with_its_source(tmp_path):
+def test_brief_is_taken_from_the_env_var_and_recorded_with_its_source(tmp_path: Path) -> None:
     brief = tmp_path / "worker-brief.md"
     brief.write_text("# Brief\nLand the fix.\n", encoding="utf-8")
     entry = tmp_path / "entry"
@@ -81,7 +81,9 @@ def test_brief_is_taken_from_the_env_var_and_recorded_with_its_source(tmp_path):
     assert items[evidence.BRIEF_NAME]["bytes"] == len("# Brief\nLand the fix.\n".encode())
 
 
-def test_brief_falls_back_to_the_worktree_brief_and_missing_sources_are_omitted(tmp_path):
+def test_brief_falls_back_to_the_worktree_brief_and_missing_sources_are_omitted(
+    tmp_path: Path,
+) -> None:
     repo = _repo(tmp_path)
     (repo / ".gitreins").mkdir()
     (repo / ".gitreins" / "worker-brief.md").write_text("worktree brief\n", encoding="utf-8")
@@ -96,7 +98,9 @@ def test_brief_falls_back_to_the_worktree_brief_and_missing_sources_are_omitted(
     assert "worktree brief" in _sources(manifest)
 
 
-def test_driver_log_keeps_the_tail_and_records_truncation(tmp_path, monkeypatch):
+def test_driver_log_keeps_the_tail_and_records_truncation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(evidence, "MAX_LOG_BYTES", 32)
     log = tmp_path / "driver.log"
     log.write_text("HEAD-" + "x" * 200 + "-TAIL\n", encoding="utf-8")
@@ -114,7 +118,9 @@ def test_driver_log_keeps_the_tail_and_records_truncation(tmp_path, monkeypatch)
     assert item["bytes"] == len(text.encode())
 
 
-def test_dirty_tree_records_the_landed_patch_and_the_graded_working_tree_diff(tmp_path):
+def test_dirty_tree_records_the_landed_patch_and_the_graded_working_tree_diff(
+    tmp_path: Path,
+) -> None:
     """Both artifacts, distinguishable: the fix as committed, and what was uncommitted."""
     repo = _repo(tmp_path)
     (repo / "mod.py").write_text("value = 1\n", encoding="utf-8")
@@ -136,7 +142,7 @@ def test_dirty_tree_records_the_landed_patch_and_the_graded_working_tree_diff(tm
     assert items[evidence.WORKTREE_NAME]["source"] == "git diff HEAD (working tree)"
 
 
-def test_clean_tree_records_only_the_landed_patch(tmp_path):
+def test_clean_tree_records_only_the_landed_patch(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     (repo / "mod.py").write_text("value = 1\n", encoding="utf-8")
     _git(repo, "add", "mod.py")
@@ -150,7 +156,7 @@ def test_clean_tree_records_only_the_landed_patch(tmp_path):
     assert "landed fix" in (entry / evidence.PATCH_FILENAME).read_text(encoding="utf-8")
 
 
-def test_repository_without_a_commit_records_no_patch_at_all(tmp_path):
+def test_repository_without_a_commit_records_no_patch_at_all(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     (repo / "mod.py").write_text("value = 1\n", encoding="utf-8")
     entry = tmp_path / "entry"
@@ -160,7 +166,7 @@ def test_repository_without_a_commit_records_no_patch_at_all(tmp_path):
     assert _items(manifest) == {}
 
 
-def test_collector_is_best_effort_when_entry_dir_cannot_be_created(tmp_path):
+def test_collector_is_best_effort_when_entry_dir_cannot_be_created(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     blocker = tmp_path / "blocker"
     blocker.write_text("not a directory\n", encoding="utf-8")
@@ -171,7 +177,7 @@ def test_collector_is_best_effort_when_entry_dir_cannot_be_created(tmp_path):
     assert manifest["detail"]
 
 
-def test_manifest_items_skips_unusable_entries():
+def test_manifest_items_skips_unusable_entries() -> None:
     verdict = {
         "evidence": {
             "items": [
@@ -189,7 +195,7 @@ def test_manifest_items_skips_unusable_entries():
     assert evidence.manifest_items({"evidence": "nope"}) == []
 
 
-def test_read_evidence_serves_only_manifest_declared_plain_files(tmp_path):
+def test_read_evidence_serves_only_manifest_declared_plain_files(tmp_path: Path) -> None:
     entry = tmp_path / "entry"
     entry.mkdir()
     (entry / "worker-brief.md").write_text("brief body\n", encoding="utf-8")
@@ -250,7 +256,7 @@ def scratch_repo(tmp_path: Path) -> Path:
 
 def test_task_complete_writes_brief_log_and_patch_next_to_verdict_json(
     scratch_repo: Path, tmp_path: Path
-):
+) -> None:
     brief = tmp_path / "brief.md"
     brief.write_text("# Worker brief\nEmbed the evidence.\n", encoding="utf-8")
     log = tmp_path / "driver.log"

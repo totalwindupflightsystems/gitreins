@@ -49,6 +49,7 @@ import yaml
 
 from engine.guard_manager import GuardManager
 from engine.guards import check_go_tests
+from pathlib import Path
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CLI_SCRIPT = os.path.join(PROJECT_ROOT, "gitreins", "cli.py")
@@ -106,7 +107,7 @@ def _write(workdir: str, relpath: str, content: str) -> None:
         handle.write(content)
 
 
-def _scratch_repo(tmp_path, files: dict[str, str], name: str = "scratch") -> str:
+def _scratch_repo(tmp_path: Path, files: dict[str, str], name: str = "scratch") -> str:
     """A real git repo with *files* committed and a clean index afterwards."""
     workdir = tmp_path / name
     workdir.mkdir()
@@ -120,7 +121,7 @@ def _scratch_repo(tmp_path, files: dict[str, str], name: str = "scratch") -> str
     return str(workdir)
 
 
-def _go_config(**overrides) -> dict:
+def _go_config(**overrides: object) -> dict:
     """Guards config for a Go repo: only the Go lanes are in play.
 
     The Python lanes are switched off so ``run_all``'s verdict and its
@@ -137,16 +138,16 @@ def _go_config(**overrides) -> dict:
     return {"guards": guards}
 
 
-def _manager(workdir: str, **overrides) -> GuardManager:
+def _manager(workdir: str, **overrides: object) -> GuardManager:
     return GuardManager(workdir, config=_go_config(**overrides))
 
 
-def _manager_full_tree(workdir: str, **overrides) -> GuardManager:
+def _manager_full_tree(workdir: str, **overrides: object) -> GuardManager:
     """The CLI's ``--full``: grade_full_tree is keyword-only by contract."""
     return GuardManager(workdir, config=_go_config(**overrides), grade_full_tree=True)
 
 
-def _lane(result, name: str):
+def _lane(result: object, name: str) -> object:
     lanes = [r for r in result.results if r.name == name]
     assert len(lanes) == 1, (
         f"expected exactly one {name} lane, got {[r.name for r in result.results]}"
@@ -154,7 +155,7 @@ def _lane(result, name: str):
     return lanes[0]
 
 
-def _run_cli(*args, cwd=None):
+def _run_cli(*args: object, cwd: str = None) -> object:
     env = _cli_env()
     cmd = [sys.executable, CLI_SCRIPT] + list(args)
     return subprocess.run(cmd, capture_output=True, text=True, timeout=180, cwd=cwd, env=env)
@@ -165,7 +166,7 @@ def _run_cli(*args, cwd=None):
 
 class TestFullTreeGoScope:
     @requires_go
-    def test_untracked_uncompilable_go_file_fails_the_build_lane(self, tmp_path):
+    def test_untracked_uncompilable_go_file_fails_the_build_lane(self, tmp_path: Path) -> None:
         """RED-PROOF: on the pre-fix tree this lane returned passed=True with
         output "No Go files staged" (the index was empty) — the whole-tree flag
         graded nothing."""
@@ -183,7 +184,7 @@ class TestFullTreeGoScope:
         assert BROKEN_MARKER in result.output, result.output
 
     @requires_go
-    def test_untracked_uncompilable_go_file_fails_the_whole_run(self, tmp_path):
+    def test_untracked_uncompilable_go_file_fails_the_whole_run(self, tmp_path: Path) -> None:
         """The run's verdict, not just the lane's: not passed, and the Go lanes
         ran instead of reporting an empty scope."""
         workdir = _scratch_repo(tmp_path, {"go.mod": GO_MOD, "internal/quota/clean.go": CLEAN_GO})
@@ -198,7 +199,7 @@ class TestFullTreeGoScope:
         assert "No Go files" not in build.output
 
     @requires_go
-    def test_committed_broken_go_file_with_clean_index_is_not_a_green(self, tmp_path):
+    def test_committed_broken_go_file_with_clean_index_is_not_a_green(self, tmp_path: Path) -> None:
         """The stale-index false green: the broken file is COMMITTED (index
         clean), the tree still does not compile, so --full must not pass."""
         workdir = _scratch_repo(tmp_path, {"go.mod": GO_MOD, "broken.go": BROKEN_GO})
@@ -212,7 +213,7 @@ class TestFullTreeGoScope:
         assert BROKEN_MARKER in _lane(result, "go_build").output
 
     @requires_go
-    def test_clean_go_tree_under_full_passes_with_real_tool_output(self, tmp_path):
+    def test_clean_go_tree_under_full_passes_with_real_tool_output(self, tmp_path: Path) -> None:
         """A clean Go repo under --full is a REAL pass: the tool ran (go build:
         ok), no lane is a skip, and the run is not degraded."""
         workdir = _scratch_repo(tmp_path, {"go.mod": GO_MOD, "internal/quota/clean.go": CLEAN_GO})
@@ -228,7 +229,7 @@ class TestFullTreeGoScope:
         assert result.skipped_steps == []
         assert result.degraded is False
 
-    def test_tree_go_files_lists_tracked_and_untracked_go_only(self, tmp_path):
+    def test_tree_go_files_lists_tracked_and_untracked_go_only(self, tmp_path: Path) -> None:
         """The Go twin of _tree_python_files: tracked + untracked-but-not-ignored,
         .go only, deduped, repo-relative."""
         from engine.guard_manager import _tree_go_files
@@ -249,7 +250,9 @@ class TestFullTreeGoScope:
 
 class TestScopePrecedence:
     @requires_go
-    def test_working_tree_scope_still_fails_on_a_broken_working_tree_file(self, tmp_path):
+    def test_working_tree_scope_still_fails_on_a_broken_working_tree_file(
+        self, tmp_path: Path
+    ) -> None:
         """Control (unchanged behaviour): --scope working-tree grades what is on
         disk, so an uncompilable untracked .go file FAILS the run."""
         workdir = _scratch_repo(tmp_path, {"go.mod": GO_MOD, "internal/quota/clean.go": CLEAN_GO})
@@ -264,7 +267,7 @@ class TestScopePrecedence:
         assert BROKEN_MARKER in build.output
 
     @requires_go
-    def test_non_empty_index_of_go_files_keeps_the_staged_scope(self, tmp_path):
+    def test_non_empty_index_of_go_files_keeps_the_staged_scope(self, tmp_path: Path) -> None:
         """A staged .go file still decides the scope (that is what the
         pre-commit hook grades): the lanes keep their own index discovery and
         run the tool."""
@@ -280,7 +283,7 @@ class TestScopePrecedence:
         assert build.skipped is False
         assert "go build: ok" in build.output
 
-    def test_no_go_files_staged_keeps_the_staged_wording(self, tmp_path):
+    def test_no_go_files_staged_keeps_the_staged_wording(self, tmp_path: Path) -> None:
         """A bare `gitreins guard` (no --full) on a Go repo with only non-Go
         files staged skips with the historical wording — and, with the skip
         signal in place, that is now a DEGRADED run rather than a silent green."""
@@ -308,13 +311,15 @@ class TestScopePrecedence:
 
 class TestNoWorkLaneIsASkip:
     @requires_go
-    def test_no_go_file_in_the_whole_tree_reports_a_named_skip(self, tmp_path, monkeypatch):
+    def test_no_go_file_in_the_whole_tree_reports_a_named_skip(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """--full over a Go repo whose tree holds no .go file: every lane is a
         SKIP with the whole-tree reason, no tool is spawned, and the run is
         degraded (never a silent PASS)."""
         workdir = _scratch_repo(tmp_path, {"go.mod": GO_MOD, "README.md": "no Go here\n"})
 
-        def _boom(*args, **kwargs):
+        def _boom(*args: object, **kwargs: object) -> None:
             raise AssertionError(f"a tool was spawned for a scope that graded nothing: {args}")
 
         monkeypatch.setattr("engine.guards.command_hygiene.run_bounded", _boom)
@@ -335,7 +340,7 @@ class TestNoWorkLaneIsASkip:
             "go_tests=No Go files in scope"
         )
 
-    def test_clean_tree_without_full_still_skips_the_index(self, tmp_path):
+    def test_clean_tree_without_full_still_skips_the_index(self, tmp_path: Path) -> None:
         """No --full, clean index: the scope really is the index, and the reason
         says so (the hook path keeps its wording). No toolchain needed — the
         lanes return before spawning anything."""
@@ -354,7 +359,7 @@ class TestNoWorkLaneIsASkip:
 
 
 class TestDegradedGoRunExitCode:
-    def _repo_with_no_go_file(self, tmp_path, name: str, allow_skips: bool) -> str:
+    def _repo_with_no_go_file(self, tmp_path: Path, name: str, allow_skips: bool) -> str:
         """A Go repo whose tree holds no .go file, with an explicit allow_skips."""
         workdir = _scratch_repo(
             tmp_path, {"go.mod": GO_MOD, "README.md": "no Go here\n"}, name=name
@@ -370,7 +375,7 @@ class TestDegradedGoRunExitCode:
         )
         return workdir
 
-    def test_allow_skips_false_makes_a_zero_work_go_run_exit_2(self, tmp_path):
+    def test_allow_skips_false_makes_a_zero_work_go_run_exit_2(self, tmp_path: Path) -> None:
         workdir = self._repo_with_no_go_file(tmp_path, "strict", allow_skips=False)
 
         result = _run_cli("guard", "--full", cwd=workdir)
@@ -381,7 +386,7 @@ class TestDegradedGoRunExitCode:
         assert "Tier 1 Guards: PASS" not in result.stdout
         assert "guards.allow_skips" in result.stderr
 
-    def test_allow_skips_true_accepts_the_zero_work_go_run(self, tmp_path):
+    def test_allow_skips_true_accepts_the_zero_work_go_run(self, tmp_path: Path) -> None:
         workdir = self._repo_with_no_go_file(tmp_path, "lenient", allow_skips=True)
 
         result = _run_cli("guard", "--full", cwd=workdir)
@@ -391,7 +396,9 @@ class TestDegradedGoRunExitCode:
         assert "Tier 1 Guards: PASS" not in result.stdout
 
     @requires_go
-    def test_full_run_on_a_broken_go_tree_exits_1_with_the_compiler_text(self, tmp_path):
+    def test_full_run_on_a_broken_go_tree_exits_1_with_the_compiler_text(
+        self, tmp_path: Path
+    ) -> None:
         """The CLI-level acceptance criterion: --full over an untracked
         uncompilable file fails with exit 1 and the real compiler error."""
         workdir = _scratch_repo(
@@ -424,7 +431,7 @@ HISTORICAL_GO_TEST_ARGV = ["go", "test", "-count=1", "-short", "./..."]
 SHIM_RECORDED_ARGV = HISTORICAL_GO_TEST_ARGV[1:]
 
 
-def _go_argv_shim(tmp_path, name: str) -> tuple[str, str]:
+def _go_argv_shim(tmp_path: Path, name: str) -> tuple[str, str]:
     """A fake ``go`` earlier on PATH that records the argv it was handed.
 
     The lane's argv decision (historical list vs shell string) is observed at
@@ -447,7 +454,7 @@ def _read_config(workdir: str) -> dict:
 
 class TestConfiguredGoTestCommand:
     @requires_go
-    def test_configured_test_command_is_run_by_the_go_tests_lane(self, tmp_path):
+    def test_configured_test_command_is_run_by_the_go_tests_lane(self, tmp_path: Path) -> None:
         """RED-PROOF: pre-fix the lane hard-coded the go test argv, ignored the
         key, and PASSED this repo — the configured command never executed, so
         neither its marker nor its exit 7 could appear."""
@@ -476,7 +483,7 @@ class TestConfiguredGoTestCommand:
         assert CONFIGURED_MARKER in result.output, result.output
 
     @requires_go
-    def test_run_all_carries_the_configured_command_failure(self, tmp_path):
+    def test_run_all_carries_the_configured_command_failure(self, tmp_path: Path) -> None:
         """The full-run verdict, not just the lane: a configured command's
         failure fails the run, with the command's own text as the evidence."""
         workdir = _scratch_repo(tmp_path, {"go.mod": GO_MOD, "main.go": CLEAN_GO})
@@ -501,7 +508,7 @@ class TestConfiguredGoTestCommand:
         assert CONFIGURED_MARKER in tests.output, tests.output
 
     @requires_go
-    def test_absent_key_keeps_the_historical_argv(self, tmp_path):
+    def test_absent_key_keeps_the_historical_argv(self, tmp_path: Path) -> None:
         """A Go repo without test_command still gets the pinned argv list —
         shell-quoted when the key is absent is WRONG (it would break every
         existing config's semantics), so the exact list is asserted here."""
@@ -539,7 +546,7 @@ class TestConfiguredGoTestCommand:
         assert recorded == SHIM_RECORDED_ARGV, recorded
 
     @requires_go
-    def test_explicit_empty_test_command_falls_back_to_the_default(self, tmp_path):
+    def test_explicit_empty_test_command_falls_back_to_the_default(self, tmp_path: Path) -> None:
         """An explicit empty value is "not configured", not "run nothing".
 
         Discriminating arm: an implementation that treats a PRESENT key as
@@ -587,7 +594,7 @@ class TestInitWritesGoTestCommand:
     """init must write the Go `test_command` it prints (POC-45): the printed
     `Test cmd:` line and the generated config must agree."""
 
-    def _scratch_go_repo_for_init(self, tmp_path, name: str) -> str:
+    def _scratch_go_repo_for_init(self, tmp_path: Path, name: str) -> str:
         workdir = tmp_path / name
         workdir.mkdir()
         _write(str(workdir), "go.mod", GO_MOD)
@@ -600,7 +607,7 @@ class TestInitWritesGoTestCommand:
         return str(workdir)
 
     @requires_go
-    def test_init_writes_the_test_command_it_prints(self, tmp_path):
+    def test_init_writes_the_test_command_it_prints(self, tmp_path: Path) -> None:
         """RED-PROOF: pre-fix the Go branch of _build_guards_section carried no
         test_command key at all — the config parsed WITHOUT 'test_command'
         under guards while the printed line claimed one."""
@@ -622,7 +629,7 @@ class TestInitWritesGoTestCommand:
         assert config["guards"]["test_command"] == "go test -short -count=1 ./..."
 
     @requires_go
-    def test_init_rerun_preserves_a_custom_go_test_command(self, tmp_path):
+    def test_init_rerun_preserves_a_custom_go_test_command(self, tmp_path: Path) -> None:
         """A user-authored command survives a re-run: only the untouched
         install baseline may be upgraded, an explicit setting is preserved."""
         workdir = self._scratch_go_repo_for_init(tmp_path, "custom-go")

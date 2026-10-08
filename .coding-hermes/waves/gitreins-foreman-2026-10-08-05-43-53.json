@@ -1,0 +1,9 @@
+{
+  "scheduler_tick": "gitreins-foreman-2026-10-08-05-43-53",
+  "budget": 8,
+  "workers": [
+    {"task": "PYSEC-GITREINS", "worktree": "wt/PYSEC-GITREINS", "brief_file": "/tmp/brief-pysec.md"},
+    {"task": "SUP-DEPS-20261008", "worktree": "wt/SUP-DEPS-20261008", "brief_file": "/tmp/brief-supdeps.md"}
+  ],
+  "merge_order": ["PYSEC-GITREINS", "SUP-DEPS-20261008"]
+}

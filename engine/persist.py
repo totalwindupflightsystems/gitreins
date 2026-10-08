@@ -111,7 +111,7 @@ def load_history_config(workdir: str) -> dict:
         try:
             import yaml
 
-            with open(config_path, "r") as f:
+            with open(config_path) as f:
                 raw = yaml.safe_load(f) or {}
             config = raw.get("history", {})
         except Exception:
@@ -431,7 +431,7 @@ class VerdictPersister:
         """
         try:
             result = subprocess.run(
-                ["git", "ls-tree", "-r", "--name-only", ref, "--", prefix],
+                ["git", "ls-tree", "-r", "--name-only", ref, "--", prefix],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -468,7 +468,7 @@ class VerdictPersister:
         """Parse one verdict.json off *ref*; None when it cannot be read."""
         try:
             show = subprocess.run(
-                ["git", "show", f"{ref}:{path}"],
+                ["git", "show", f"{ref}:{path}"],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -558,7 +558,7 @@ class VerdictPersister:
         if verdict_data.get("kind") == KIND_RESOLUTION:
             return self._build_resolution_summary(task_id, verdict_data)
         passed = verdict_data.get("passed", False)
-        verdict = verdict_data.get("verdict", None)
+        verdict = verdict_data.get("verdict")
         task_title = verdict_data.get("task_title", task_id)
         items = verdict_data.get("items", [])
         stages = verdict_data.get("stages", {})
@@ -772,16 +772,13 @@ class VerdictPersister:
             message = subject or f"verdict: {task_id} — {'PASS' if passed else 'FAIL'}"
 
             current = self._resolve_ref(HISTORY_REF)
-            if current is not None:
-                parent = current
-            else:
-                # First entry under the new ref. A repo written before
-                # DF-GITREINS-POC-52 still carries its history on the legacy
-                # branch: chain onto that tip so the entries already filed stay
-                # in the log instead of starting a second, stranded root (the
-                # same thing the documented one-liner does —
-                # ``git update-ref refs/gitreins/history refs/heads/gitreins``).
-                parent = self._resolve_ref(LEGACY_HISTORY_REF)
+            # First entry under the new ref (current is None): a repo written
+            # before DF-GITREINS-POC-52 still carries its history on the legacy
+            # branch: chain onto that tip so the entries already filed stay
+            # in the log instead of starting a second, stranded root (the
+            # same thing the documented one-liner does —
+            # ``git update-ref refs/gitreins/history refs/heads/gitreins``).
+            parent = current if current is not None else self._resolve_ref(LEGACY_HISTORY_REF)
 
             commit = self._commit_entry(rel_path, message, parent)
 
@@ -867,7 +864,7 @@ class VerdictPersister:
         parent a history entry.
         """
         result = subprocess.run(
-            ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+            ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],  # noqa: S607 - git resolved via PATH by design
             capture_output=True,
             text=True,
             timeout=10,
@@ -891,7 +888,7 @@ class VerdictPersister:
         history was not written.
         """
         result = subprocess.run(
-            ["git", *args],
+            ["git", *args],  # noqa: S607 - git resolved via PATH by design
             capture_output=True,
             text=True,
             timeout=30,
@@ -995,7 +992,7 @@ def build_verdict_data(workdir: str, task: Task, result: JudgeResult) -> dict:
     source_commit = ""
     try:
         commit_result = subprocess.run(
-            ["git", "rev-parse", "--verify", "HEAD"],
+            ["git", "rev-parse", "--verify", "HEAD"],  # noqa: S607 - git resolved via PATH by design
             capture_output=True,
             text=True,
             cwd=workdir,

@@ -263,7 +263,7 @@ class AntaresScanner:
         findings: list[AntaresFinding] = []
         rel = self._relpath(filepath)
         try:
-            with open(filepath, "r", errors="replace") as f:
+            with open(filepath, errors="replace") as f:
                 source = f.read()
         except (FileNotFoundError, PermissionError, IsADirectoryError, OSError) as exc:
             logger.debug("Antares: cannot read %s: %s", filepath, exc)
@@ -475,7 +475,7 @@ class AntaresScanner:
 
         # Read the file up front; both code paths need the contents.
         try:
-            with open(filepath, "r", errors="replace") as f:
+            with open(filepath, errors="replace") as f:
                 source = f.read()
         except (FileNotFoundError, PermissionError, IsADirectoryError, OSError) as exc:
             logger.debug("Antares: cannot read %s: %s", filepath, exc)
@@ -576,7 +576,7 @@ class AntaresScanner:
         """Return staged file paths relative to the workdir."""
         try:
             result = subprocess.run(
-                ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+                ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=10,

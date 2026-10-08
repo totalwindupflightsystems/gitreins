@@ -1,7 +1,6 @@
 """Type definitions for GitReins guard results."""
 
 import re
-
 from dataclasses import dataclass, field
 
 # pytest short test summary info lines look like
@@ -543,7 +542,7 @@ def _secrets_findings_detail(output: str, limit: int = 100) -> str:
                 lines.append(value)
     if not files:
         return ""
-    pairs = [f"{f}:{ln}" if ln else f for f, ln in zip(files, lines)]
+    pairs = [f"{f}:{ln}" if ln else f for f, ln in zip(files, lines, strict=False)]
     return _locations_detail(pairs, limit)
 
 
