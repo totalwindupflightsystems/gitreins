@@ -185,52 +185,64 @@ def _verdict_dir(workdir: str) -> str:
     return os.path.join(workdir, ".gitreins", "history")
 
 
+def _verdict_row(day: str, h: str, v: dict[str, Any]) -> VerdictRow:
+    """One metadata-only list row for a parsed verdict document."""
+    stages = v.get("stages") or {}
+    t1 = stages.get("tier1") or {}
+    t2 = stages.get("tier2") or {}
+    items = v.get("items") or t2.get("items") or []
+    row: VerdictRow = {
+        "date": day,
+        "hash": h,
+        "task_id": v.get("task_id", "?"),
+        "title": v.get("task_title", ""),
+        "passed": bool(v.get("passed")),
+        "n_criteria": len(items),
+        "tier1_passed": t1.get("passed") if t1 else None,
+    }
+    # Metadata was added after the first verdict schema; omit it from
+    # legacy list rows rather than manufacturing values for old data.
+    if "worktree" in v:
+        row["worktree"] = v["worktree"]
+    if "branch" in v:
+        row["branch"] = v["branch"]
+    # DF-GITREINS-POC-36: a resolution-gate record says what it is, so a
+    # client never has to tell it apart from a judgment by guessing from
+    # the missing criteria. Judge verdicts carry no kind => no key here.
+    if v.get("kind"):
+        row["kind"] = v["kind"]
+    if v.get("band"):
+        row["band"] = v["band"]
+    return row
+
+
+def _load_day_verdicts(hist: str, day: str) -> list[VerdictRow]:
+    """Every verdict row for one date directory (hashes sorted, malformed skipped)."""
+    ddir = os.path.join(hist, day)
+    if not _DATE_RE.match(day) or not os.path.isdir(ddir):
+        return []
+    rows: list[VerdictRow] = []
+    for h in sorted(os.listdir(ddir)):
+        vpath = os.path.join(ddir, h, "verdict.json")
+        if not _HASH_RE.match(h) or not os.path.isfile(vpath):
+            continue
+        try:
+            with open(vpath) as fh:
+                v = json.load(fh)
+        except Exception:
+            continue
+        rows.append(_verdict_row(day, h, v))
+    return rows
+
+
 def list_verdicts(workdir: str) -> list[VerdictRow]:
     """Every verdict under ``workdir`` as a metadata-only row (oldest day first)."""
     hist = _verdict_dir(workdir)
-    out: list[VerdictRow] = []
     if not os.path.isdir(hist):
-        return out
+        return []
+    out: list[VerdictRow] = []
     for day in sorted(os.listdir(hist)):
-        ddir = os.path.join(hist, day)
-        if not _DATE_RE.match(day) or not os.path.isdir(ddir):
-            continue
-        for h in sorted(os.listdir(ddir)):
-            vpath = os.path.join(ddir, h, "verdict.json")
-            if not _HASH_RE.match(h) or not os.path.isfile(vpath):
-                continue
-            try:
-                with open(vpath) as fh:
-                    v = json.load(fh)
-            except Exception:
-                continue
-            stages = v.get("stages") or {}
-            t1 = stages.get("tier1") or {}
-            t2 = stages.get("tier2") or {}
-            items = v.get("items") or t2.get("items") or []
-            row: VerdictRow = {
-                "date": day,
-                "hash": h,
-                "task_id": v.get("task_id", "?"),
-                "title": v.get("task_title", ""),
-                "passed": bool(v.get("passed")),
-                "n_criteria": len(items),
-                "tier1_passed": t1.get("passed") if t1 else None,
-            }
-            # Metadata was added after the first verdict schema; omit it from
-            # legacy list rows rather than manufacturing values for old data.
-            if "worktree" in v:
-                row["worktree"] = v["worktree"]
-            if "branch" in v:
-                row["branch"] = v["branch"]
-            # DF-GITREINS-POC-36: a resolution-gate record says what it is, so a
-            # client never has to tell it apart from a judgment by guessing from
-            # the missing criteria. Judge verdicts carry no kind => no key here.
-            if v.get("kind"):
-                row["kind"] = v["kind"]
-            if v.get("band"):
-                row["band"] = v["band"]
-            out.append(row)
+        out.extend(_load_day_verdicts(hist, day))
     return out
 
 
@@ -644,89 +656,100 @@ class Handler(BaseHTTPRequestHandler):
     def _json(self, payload: object, code: int = 200) -> None:
         self._send(code, json.dumps(payload).encode(), "application/json")
 
+    def _api_verdict_detail(self, path: str) -> None:
+        parts = [p for p in path.split("/") if p]
+        if len(parts) == 6 and parts[4] == "evidence":
+            # Worker evidence artifact (JVIEW-005). The manifest decides
+            # what exists, so a name the verdict does not declare is a
+            # 404 and no unlisted file is ever served.
+            artifact = load_verdict_evidence(self.workdir, parts[2], parts[3], parts[5])
+            if artifact is None:
+                self._json({"error": "not found"}, 404)
+                return
+            filename, text = artifact
+            self._send(
+                200,
+                text.encode(),
+                "text/plain; charset=utf-8",
+                extra_headers={"X-Gitreins-Evidence": filename},
+            )
+            return
+        if len(parts) != 4:
+            self._json({"error": "use /api/verdicts/<date>/<hash>"}, 400)
+            return
+        v = load_verdict(self.workdir, parts[2], parts[3])
+        if v is None:
+            self._json({"error": "not found"}, 404)
+            return
+        # Per-judgment telemetry is joined on the way out (JVIEW-006):
+        # the stored verdict.json is served verbatim otherwise, and a
+        # verdict with no traceable usage rows simply has no block.
+        index, _summary = load_usage(self.workdir)
+        entry = index.get(f"{parts[2]}/{parts[3]}")
+        if entry:
+            v = {**v, "usage": entry}
+        self._json(v)
+
+    def _dispatch_api(self, path: str) -> bool:
+        """Serve an /api/* route. Returns False when the path is not an API route."""
+        if path == "/health":
+            # REVIEW-GITREINS-022: a supervisor, container healthcheck or
+            # smoke test had to guess at /api/stats — a full aggregation of
+            # every verdict in the repo — to answer "is it up?". This is the
+            # cheap probe: no verdict scan, no usage load, just liveness,
+            # the process's own version and the tree it is serving.
+            self._json(
+                {
+                    "status": "ok",
+                    "version": __version__,
+                    "repo": os.path.basename(os.path.abspath(self.workdir)),
+                    "path": os.path.abspath(self.workdir),
+                }
+            )
+        elif path == "/api/stats":
+            vs = list_verdicts(self.workdir)
+            _index, usage_summary = load_usage(self.workdir)
+
+            self._json(
+                {
+                    **stats(vs),
+                    "usage": usage_summary,
+                    "board": board_status(self.workdir),
+                    "repo": os.path.basename(os.path.abspath(self.workdir)),
+                    "path": os.path.abspath(self.workdir),
+                    "generated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+                }
+            )
+        elif path == "/api/verdicts":
+            self._json({"verdicts": list_verdicts(self.workdir)})
+        elif path.startswith("/api/verdicts/"):
+            self._api_verdict_detail(path)
+        elif path == "/api/tasks":
+            self._json({"tasks": load_jsonl(self.workdir, "tasks.jsonl")})
+        elif path == "/api/events":
+            self._json({"events": load_jsonl(self.workdir, "events.jsonl")})
+        elif path == "/api/ticks":
+            # Host-coupled and opt-in: one scheduler DB per machine, and
+            # only the project named by --project has ticks to show.
+            self._json(
+                {
+                    "project": self.project or None,
+                    "ticks": load_ticks(self.project) if self.project else [],
+                }
+            )
+        elif path == "/api/qa":
+            self._json(load_qa(self.workdir))
+        else:
+            self._json({"error": "not found"}, 404)
+        return True
+
     def do_GET(self) -> None:  # noqa: N802 (http.server API)
         path = self.path.split("?")[0].rstrip("/") or "/"
         try:
             if path == "/":
                 self._send(200, _PAGE.encode(), "text/html; charset=utf-8")
-            elif path == "/health":
-                # REVIEW-GITREINS-022: a supervisor, container healthcheck or
-                # smoke test had to guess at /api/stats — a full aggregation of
-                # every verdict in the repo — to answer "is it up?". This is the
-                # cheap probe: no verdict scan, no usage load, just liveness,
-                # the process's own version and the tree it is serving.
-                self._json(
-                    {
-                        "status": "ok",
-                        "version": __version__,
-                        "repo": os.path.basename(os.path.abspath(self.workdir)),
-                        "path": os.path.abspath(self.workdir),
-                    }
-                )
-            elif path == "/api/stats":
-                vs = list_verdicts(self.workdir)
-                _index, usage_summary = load_usage(self.workdir)
-
-                self._json(
-                    {
-                        **stats(vs),
-                        "usage": usage_summary,
-                        "board": board_status(self.workdir),
-                        "repo": os.path.basename(os.path.abspath(self.workdir)),
-                        "path": os.path.abspath(self.workdir),
-                        "generated": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-                    }
-                )
-            elif path == "/api/verdicts":
-                self._json({"verdicts": list_verdicts(self.workdir)})
-            elif path.startswith("/api/verdicts/"):
-                parts = [p for p in path.split("/") if p]
-                if len(parts) == 6 and parts[4] == "evidence":
-                    # Worker evidence artifact (JVIEW-005). The manifest decides
-                    # what exists, so a name the verdict does not declare is a
-                    # 404 and no unlisted file is ever served.
-                    artifact = load_verdict_evidence(self.workdir, parts[2], parts[3], parts[5])
-                    if artifact is None:
-                        self._json({"error": "not found"}, 404)
-                        return
-                    filename, text = artifact
-                    self._send(
-                        200,
-                        text.encode(),
-                        "text/plain; charset=utf-8",
-                        extra_headers={"X-Gitreins-Evidence": filename},
-                    )
-                    return
-                if len(parts) != 4:
-                    self._json({"error": "use /api/verdicts/<date>/<hash>"}, 400)
-                    return
-                v = load_verdict(self.workdir, parts[2], parts[3])
-                if v is None:
-                    self._json({"error": "not found"}, 404)
-                    return
-                # Per-judgment telemetry is joined on the way out (JVIEW-006):
-                # the stored verdict.json is served verbatim otherwise, and a
-                # verdict with no traceable usage rows simply has no block.
-                index, _summary = load_usage(self.workdir)
-                entry = index.get(f"{parts[2]}/{parts[3]}")
-                if entry:
-                    v = {**v, "usage": entry}
-                self._json(v)
-            elif path == "/api/tasks":
-                self._json({"tasks": load_jsonl(self.workdir, "tasks.jsonl")})
-            elif path == "/api/events":
-                self._json({"events": load_jsonl(self.workdir, "events.jsonl")})
-            elif path == "/api/ticks":
-                # Host-coupled and opt-in: one scheduler DB per machine, and
-                # only the project named by --project has ticks to show.
-                self._json(
-                    {
-                        "project": self.project or None,
-                        "ticks": load_ticks(self.project) if self.project else [],
-                    }
-                )
-            elif path == "/api/qa":
-                self._json(load_qa(self.workdir))
+            elif path == "/health" or path.startswith("/api/"):
+                self._dispatch_api(path)
             else:
                 self._json({"error": "not found"}, 404)
         except BrokenPipeError:

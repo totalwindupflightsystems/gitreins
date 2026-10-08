@@ -477,26 +477,13 @@ def cmd_install(_args: argparse.Namespace) -> None:
     print("  - Try the hook:   make a change, git add ., git commit -m 'test'")
 
 
-def cmd_init(args: argparse.Namespace) -> None:
-    """Smart project initialization — detects language, size, and optimal config.
+def _load_init_config(workdir: str, config_path: str) -> dict:
+    """Load existing config for init, refusing to clobber a broken-but-present file.
 
-    Re-runnable: never overwrites existing config values, only adds missing sections.
-    Use to upgrade config when new GitReins features ship.
+    CRITICAL: load_config returns {} for BOTH "file doesn't exist" AND
+    "YAML parse error". We must NOT overwrite a broken-but-existent config
+    with auto-generated defaults — that silently nukes user settings.
     """
-    workdir = get_workdir()
-    gitreins_dir = os.path.join(workdir, ".gitreins")
-    config_path = os.path.join(gitreins_dir, "config.yaml")
-
-    # Detect project characteristics
-    lang_info = _detect_language(workdir)
-    test_cmd = _detect_test_command(workdir, lang_info)
-    size = _detect_project_size(workdir, lang_info)
-    static_tools = _detect_static_analysis_tools(workdir, lang_info)
-
-    # Load existing config or start fresh.
-    # CRITICAL: load_config returns {} for BOTH "file doesn't exist" AND
-    # "YAML parse error". We must NOT overwrite a broken-but-existent config
-    # with auto-generated defaults — that silently nukes user settings.
     config_exists = os.path.isfile(config_path) and os.path.getsize(config_path) > 0
     existing = load_config(workdir)
     if not existing:
@@ -509,11 +496,13 @@ def cmd_init(args: argparse.Namespace) -> None:
             )
             sys.exit(1)
         existing = {}
+    return existing
 
-    # Build or update sections
-    changed = []
 
-    # Guards section
+def _update_guards_section(
+    existing: dict, args: argparse.Namespace, lang_info, test_cmd, static_tools, changed: list[str]
+) -> None:
+    """Build or fill the guards section (reset replaces, else additive fill)."""
     if "guards" not in existing or args.reset:
         existing["guards"] = _build_guards_section(lang_info, test_cmd, static_tools)
         # TRUST-001: fresh repos get allow_skips: true — the first `gitreins
@@ -532,6 +521,11 @@ def cmd_init(args: argparse.Namespace) -> None:
         if updates:
             changed.append(f"guards (+{', '.join(updates)})")
 
+
+def _update_evaluator_history_sections(
+    existing: dict, args: argparse.Namespace, size: dict, changed: list[str]
+) -> None:
+    """Evaluator caps + history block (reset replaces, else additive)."""
     # Evaluator section — size-appropriate caps
     if "evaluator" not in existing or args.reset:
         existing["evaluator"] = _build_evaluator_section(size)
@@ -551,6 +545,9 @@ def cmd_init(args: argparse.Namespace) -> None:
         }
         changed.append("history")
 
+
+def _update_fleet_resolution_sections(existing: dict, changed: list[str]) -> None:
+    """worktree_fleet policy + Jev resolution gate (both additive-only)."""
     # Disposable/fleet worktree policy — additive so existing settings stay intact.
     fleet = existing.setdefault("worktree_fleet", {})
     if not isinstance(fleet, dict):
@@ -576,7 +573,11 @@ def cmd_init(args: argparse.Namespace) -> None:
         # it verbatim — the enable gate reads it as "all surfaces off".
         changed.append("resolution (kept as written: not a mapping)")
 
-    # Write config
+
+def _write_init_config(
+    gitreins_dir: str, config_path: str, existing: dict, changed: list[str]
+) -> None:
+    """Write the merged config back, recording the backup file when one was made."""
     os.makedirs(gitreins_dir, exist_ok=True)
     bak = _safe_overwrite(
         config_path,
@@ -590,9 +591,13 @@ def cmd_init(args: argparse.Namespace) -> None:
     if bak:
         changed.append(f"backup: {os.path.basename(bak)}")
 
-    # Ensure pre-commit hook exists.  ``.git`` is a file in linked and
-    # detached worktrees, so resolve Git's common hooks path instead of
-    # assuming a directory under the checkout.
+
+def _ensure_pre_commit_hook(workdir: str, reset: bool, changed: list[str]) -> None:
+    """Install the pre-commit hook when missing (or with --reset).
+
+    ``.git`` is a file in linked and detached worktrees, so resolve Git's
+    common hooks path instead of assuming a directory under the checkout.
+    """
     hooks_result = subprocess.run(
         ["git", "-C", workdir, "rev-parse", "--git-path", "hooks"],  # noqa: S607 - git resolved via PATH by design
         capture_output=True,
@@ -603,26 +608,18 @@ def cmd_init(args: argparse.Namespace) -> None:
     if not os.path.isabs(hooks_dir):
         hooks_dir = os.path.join(workdir, hooks_dir)
     hook_path = os.path.join(hooks_dir, "pre-commit")
-    if not os.path.isfile(hook_path) or args.reset:
+    if not os.path.isfile(hook_path) or reset:
         os.makedirs(hooks_dir, exist_ok=True)
         with open(hook_path, "w") as f:
             f.write(_render_pre_commit_hook())
         os.chmod(hook_path, 0o755)
         changed.append("pre-commit hook")
 
-    # Generate .gitleaks.toml if missing (prevents scanning node_modules/.venv/vendor)
-    gitleaks_path = os.path.join(workdir, ".gitleaks.toml")
-    if not os.path.isfile(gitleaks_path):
-        _generate_gitleaks_config(workdir, lang_info, gitleaks_path)
-        changed.append(".gitleaks.toml")
 
-    # Ensure GitReins state and runtime artifacts stay local. This mirrors
-    # cmd_install so either activation path is safe (GR-GAP-025).
-    changed.extend(
-        _ensure_gitignore_entries(workdir, _gitignore_entries_for_project(workdir, lang_info))
-    )
-
-    # Summary
+def _print_init_summary(
+    existing: dict, workdir: str, lang_info: dict, size: dict, test_cmd: str, changed: list[str]
+) -> None:
+    """Print the init banner, config summary, and static-analysis warnings."""
     print(f"GitReins init: {workdir}")
     print(f"  Language:    {lang_info['name']}")
     if lang_info["name"] == "unknown":
@@ -679,6 +676,47 @@ def cmd_init(args: argparse.Namespace) -> None:
         print(f"Updated: {', '.join(changed)}")
     else:
         print("No changes needed — config is up to date.")
+
+
+def cmd_init(args: argparse.Namespace) -> None:
+    """Smart project initialization — detects language, size, and optimal config.
+
+    Re-runnable: never overwrites existing config values, only adds missing sections.
+    Use to upgrade config when new GitReins features ship.
+    """
+    workdir = get_workdir()
+    gitreins_dir = os.path.join(workdir, ".gitreins")
+    config_path = os.path.join(gitreins_dir, "config.yaml")
+
+    # Detect project characteristics
+    lang_info = _detect_language(workdir)
+    test_cmd = _detect_test_command(workdir, lang_info)
+    size = _detect_project_size(workdir, lang_info)
+    static_tools = _detect_static_analysis_tools(workdir, lang_info)
+
+    existing = _load_init_config(workdir, config_path)
+
+    # Build or update sections
+    changed: list[str] = []
+    _update_guards_section(existing, args, lang_info, test_cmd, static_tools, changed)
+    _update_evaluator_history_sections(existing, args, size, changed)
+    _update_fleet_resolution_sections(existing, changed)
+    _write_init_config(gitreins_dir, config_path, existing, changed)
+    _ensure_pre_commit_hook(workdir, args.reset, changed)
+
+    # Generate .gitleaks.toml if missing (prevents scanning node_modules/.venv/vendor)
+    gitleaks_path = os.path.join(workdir, ".gitleaks.toml")
+    if not os.path.isfile(gitleaks_path):
+        _generate_gitleaks_config(workdir, lang_info, gitleaks_path)
+        changed.append(".gitleaks.toml")
+
+    # Ensure GitReins state and runtime artifacts stay local. This mirrors
+    # cmd_install so either activation path is safe (GR-GAP-025).
+    changed.extend(
+        _ensure_gitignore_entries(workdir, _gitignore_entries_for_project(workdir, lang_info))
+    )
+
+    _print_init_summary(existing, workdir, lang_info, size, test_cmd, changed)
 
 
 # Canonical language token (engine.lang_detect) -> (cli flag, display name,
@@ -876,41 +914,54 @@ def _needs_python_module_pytest(workdir: str) -> bool:
     return True
 
 
+def _detect_go_test_command(workdir: str) -> str:
+    """Go test command; the Makefile check is informational only (same command)."""
+    makefile = os.path.join(workdir, "Makefile")
+    if os.path.isfile(makefile):
+        with open(makefile) as f:
+            content = f.read()
+        if "go test" in content:
+            return "go test -short -count=1 ./..."
+    return "go test -short -count=1 ./..."
+
+
+def _detect_python_test_command(workdir: str) -> str:
+    """Python test command: module-pytest first, then an installed runner."""
+    if _needs_python_module_pytest(workdir):
+        return "python3 -m pytest -x --tb=short"
+    # GR-GAP-024: prefer a runner the user actually has installed —
+    # bare `pytest` fails on layouts where the runner isn't on PATH
+    # (uv/pipenv/poetry virtualenvs install pytest into their own env).
+    runner = _detect_python_runner(workdir)
+    if runner:
+        return f"{runner} pytest -x --tb=short"
+    return "pytest -x --tb=short"
+
+
+def _detect_ts_test_command(workdir: str) -> str:
+    """TypeScript test command: npm test when package.json defines a test script."""
+    pkg = os.path.join(workdir, "package.json")
+    if os.path.isfile(pkg):
+        try:
+            import json
+
+            with open(pkg) as f:
+                data = json.load(f)
+            if data.get("scripts", {}).get("test"):
+                return "npm test"
+        except Exception:
+            pass
+    return "npx vitest run"
+
+
 def _detect_test_command(workdir: str, lang: dict) -> str:
     """Detect the right test command for the project."""
     if lang["is_go"]:
-        # Check for Makefile first
-        makefile = os.path.join(workdir, "Makefile")
-        if os.path.isfile(makefile):
-            with open(makefile) as f:
-                content = f.read()
-            if "go test" in content:
-                return "go test -short -count=1 ./..."
-        return "go test -short -count=1 ./..."
-    elif lang["is_python"]:
-        if _needs_python_module_pytest(workdir):
-            return "python3 -m pytest -x --tb=short"
-        # GR-GAP-024: prefer a runner the user actually has installed —
-        # bare `pytest` fails on layouts where the runner isn't on PATH
-        # (uv/pipenv/poetry virtualenvs install pytest into their own env).
-        runner = _detect_python_runner(workdir)
-        if runner:
-            return f"{runner} pytest -x --tb=short"
-        return "pytest -x --tb=short"
-    elif lang["is_ts"]:
-        # Check package.json for test script
-        pkg = os.path.join(workdir, "package.json")
-        if os.path.isfile(pkg):
-            try:
-                import json
-
-                with open(pkg) as f:
-                    data = json.load(f)
-                if data.get("scripts", {}).get("test"):
-                    return "npm test"
-            except Exception:
-                pass
-        return "npx vitest run"
+        return _detect_go_test_command(workdir)
+    if lang["is_python"]:
+        return _detect_python_test_command(workdir)
+    if lang["is_ts"]:
+        return _detect_ts_test_command(workdir)
     # Languages `init` has no runner heuristics for (rust/java/c/cpp/ruby/php/
     # kotlin/csharp/scala) use the shared language default, so the config init
     # writes is the same command the judge's Tier 1 runs for that language
@@ -949,30 +1000,40 @@ def _detect_python_runner(workdir: str) -> str | None:
     return None
 
 
+def _count_go_packages(workdir: str) -> int:
+    """Count distinct directories containing Go files (vendor/.git excluded)."""
+    go_files = set()
+    for root, dirs, files in os.walk(workdir):
+        # Skip vendor, .git, node_modules
+        dirs[:] = [d for d in dirs if d not in (".git", "vendor", "node_modules", ".gitreins")]
+        for f in files:
+            if f.endswith(".go"):
+                go_files.add(os.path.relpath(os.path.dirname(os.path.join(root, f)), workdir))
+    return len(go_files)
+
+
+def _count_python_packages(workdir: str) -> int:
+    """Count distinct Python packages (dirs with __init__.py); minimum 1."""
+    py_pkgs = set()
+    for root, dirs, files in os.walk(workdir):
+        dirs[:] = [
+            d
+            for d in dirs
+            if d not in (".git", ".venv", "node_modules", ".gitreins", "__pycache__")
+        ]
+        if "__init__.py" in files:
+            py_pkgs.add(os.path.relpath(root, workdir))
+    return len(py_pkgs) or 1
+
+
 def _detect_project_size(workdir: str, lang: dict) -> dict:
     """Estimate project size for evaluator cap recommendations."""
-    packages = 0
     if lang["is_go"]:
-        # Count Go packages
-        go_files = set()
-        for root, dirs, files in os.walk(workdir):
-            # Skip vendor, .git, node_modules
-            dirs[:] = [d for d in dirs if d not in (".git", "vendor", "node_modules", ".gitreins")]
-            for f in files:
-                if f.endswith(".go"):
-                    go_files.add(os.path.relpath(os.path.dirname(os.path.join(root, f)), workdir))
-        packages = len(go_files)
+        packages = _count_go_packages(workdir)
     elif lang["is_python"]:
-        py_pkgs = set()
-        for root, dirs, files in os.walk(workdir):
-            dirs[:] = [
-                d
-                for d in dirs
-                if d not in (".git", ".venv", "node_modules", ".gitreins", "__pycache__")
-            ]
-            if "__init__.py" in files:
-                py_pkgs.add(os.path.relpath(root, workdir))
-        packages = len(py_pkgs) or 1
+        packages = _count_python_packages(workdir)
+    else:
+        packages = 0
 
     # Cap recommendations
     if packages <= 3:
@@ -1164,6 +1225,19 @@ def _static_analysis_lane_selection(guards: dict, workdir: str | None) -> tuple[
     return select_tools(workdir, guards.get("static_analysis_tools", {}))
 
 
+def _static_analysis_install_hint(lang: dict) -> str:
+    """Install hint for the detected language's static-analysis tool."""
+    if lang["is_python"]:
+        return "pip install mypy"
+    if lang["is_ruby"]:
+        return "gem install sorbet && srb init"
+    if lang["is_php"]:
+        return "composer require --dev phpstan/phpstan"
+    if lang["has_sql"]:
+        return "pip install sqlfluff"
+    return "see docs for install instructions"
+
+
 def _static_analysis_status(guards: dict, lang: dict, workdir: str | None = None) -> str:
     """Describe the persisted static-analysis toggle and configured tools.
 
@@ -1175,33 +1249,29 @@ def _static_analysis_status(guards: dict, lang: dict, workdir: str | None = None
     enabled = guards.get("static_analysis", False)
     tools = _configured_static_analysis_tools(guards)
     if enabled and tools:
-        lane_tools, lane_gap = _static_analysis_lane_selection(guards, workdir)
-        if not lane_tools and lane_gap:
-            return f"enabled ({', '.join(tools)}; nothing will run — {lane_gap})"
-        # DF-019: name only what can actually run. Announcing a configured but
-        # absent tool as enabled is the lie this row was filed about.
-        missing = set(_missing_static_analysis_tools(guards))
-        if not missing:
-            return f"enabled ({', '.join(tools)})"
-        if len(missing) == len(tools):
-            return f"enabled ({', '.join(tools)}; none installed — nothing will run)"
-        absent = [tool for tool in tools if tool in missing]
-        return f"enabled ({', '.join(tools)}; not installed: {', '.join(absent)})"
+        return _static_analysis_enabled_status(guards, tools, workdir)
     if enabled:
-        install_hints = []
-        if lang["is_python"]:
-            install_hints.append("pip install mypy")
-        elif lang["is_ruby"]:
-            install_hints.append("gem install sorbet && srb init")
-        elif lang["is_php"]:
-            install_hints.append("composer require --dev phpstan/phpstan")
-        elif lang["has_sql"]:
-            install_hints.append("pip install sqlfluff")
-        hint = "; ".join(install_hints) if install_hints else "see docs for install instructions"
+        hint = _static_analysis_install_hint(lang)
         return f"enabled (no tools configured — nothing will run; install: {hint})"
     if tools:
         return f"disabled (explicitly off; configured tools: {', '.join(tools)})"
     return "disabled (compiled language or explicitly off)"
+
+
+def _static_analysis_enabled_status(guards: dict, tools: list[str], workdir: str | None) -> str:
+    """Status text when static analysis is enabled AND tools are configured."""
+    lane_tools, lane_gap = _static_analysis_lane_selection(guards, workdir)
+    if not lane_tools and lane_gap:
+        return f"enabled ({', '.join(tools)}; nothing will run — {lane_gap})"
+    # DF-019: name only what can actually run. Announcing a configured but
+    # absent tool as enabled is the lie this row was filed about.
+    missing = set(_missing_static_analysis_tools(guards))
+    if not missing:
+        return f"enabled ({', '.join(tools)})"
+    if len(missing) == len(tools):
+        return f"enabled ({', '.join(tools)}; none installed — nothing will run)"
+    absent = [tool for tool in tools if tool in missing]
+    return f"enabled ({', '.join(tools)}; not installed: {', '.join(absent)})"
 
 
 def _fill_missing_guards(
@@ -1537,6 +1607,41 @@ def _rewrite_gitleaks_entries(text: str, replacements: list[tuple[int, str, int,
     return out
 
 
+def _gitleaks_entry_report(text: str, entries: list) -> list[tuple]:
+    """Classify allowlist entries as valid or invalid; print one line each.
+
+    Returns the invalid entries — callers print an OK summary when the list
+    is empty.
+    """
+    invalid: list[tuple[int, str, int, int, str]] = []
+    for line, value, start, end, quote in entries:
+        raw = text[start:end]
+        if _is_valid_gitleaks_path_regex(value):
+            print(f"  ✓ line {line:>4}  {raw}")
+            continue
+        invalid.append((line, value, start, end, quote))
+        print(f"  ✗ line {line:>4}  {raw}  →  {_glob_to_regex(value)!r}")
+    return invalid
+
+
+def _doctor_apply_fixes(config_path: str, text: str, invalid: list[tuple], total: int) -> None:
+    """Rewrite the invalid entries in place (with backup) and report the result."""
+    new_text = _rewrite_gitleaks_entries(text, invalid)
+    bak = _safe_overwrite(config_path, lambda f: f.write(new_text))
+    for line, value, _start, _end, _quote in invalid:
+        print(f"  fixed line {line}: {value!r} → {_glob_to_regex(value)!r}")
+    if bak:
+        print(f"  backup: {os.path.basename(bak)}")
+    remaining = [
+        entry
+        for entry in _gitleaks_allowlist_entries(new_text)
+        if not _is_valid_gitleaks_path_regex(entry[1])
+    ]
+    print(f"Summary: rewrote {len(invalid)} of {total} entries; {len(remaining)} invalid remain")
+    if remaining:
+        raise SystemExit(1)
+
+
 def cmd_doctor(args: argparse.Namespace) -> None:
     """Validate (and with --fix, migrate) the repo's `.gitleaks.toml` (POC-54)."""
     workdir = get_workdir()
@@ -1567,14 +1672,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         print("  no [allowlist] paths entries found — nothing to check")
         return
 
-    invalid: list[tuple[int, str, int, int, str]] = []
-    for line, value, start, end, quote in entries:
-        raw = text[start:end]
-        if _is_valid_gitleaks_path_regex(value):
-            print(f"  ✓ line {line:>4}  {raw}")
-            continue
-        invalid.append((line, value, start, end, quote))
-        print(f"  ✗ line {line:>4}  {raw}  →  {_glob_to_regex(value)!r}")
+    invalid = _gitleaks_entry_report(text, entries)
 
     if not invalid:
         print(f"OK: all {len(entries)} allowlist path entries compile as Go regexps")
@@ -1587,23 +1685,7 @@ def cmd_doctor(args: argparse.Namespace) -> None:
         )
         raise SystemExit(1)
 
-    new_text = _rewrite_gitleaks_entries(text, invalid)
-    bak = _safe_overwrite(config_path, lambda f: f.write(new_text))
-    for line, value, _start, _end, _quote in invalid:
-        print(f"  fixed line {line}: {value!r} → {_glob_to_regex(value)!r}")
-    if bak:
-        print(f"  backup: {os.path.basename(bak)}")
-    remaining = [
-        entry
-        for entry in _gitleaks_allowlist_entries(new_text)
-        if not _is_valid_gitleaks_path_regex(entry[1])
-    ]
-    print(
-        f"Summary: rewrote {len(invalid)} of {len(entries)} entries; "
-        f"{len(remaining)} invalid remain"
-    )
-    if remaining:
-        raise SystemExit(1)
+    _doctor_apply_fixes(config_path, text, invalid, len(entries))
 
 
 def cmd_task_create(args: argparse.Namespace) -> None:
@@ -2399,9 +2481,42 @@ def cmd_serve(args: argparse.Namespace) -> None:
     )
 
 
+def _tui_verdict_lines(entries: list[dict]) -> list[str]:
+    """Render history entries as TUI lines (icon, id, date, per-criterion marks)."""
+    from engine.persist import KIND_RESOLUTION
+
+    verdict_lines = []
+    for entry in entries:
+        # DF-GITREINS-POC-36: a resolution-gate record is not a graded verdict —
+        # it has no pass/fail — so it carries its band instead of the ✓/✗ icon,
+        # exactly as the text report lists it in its own section.
+        resolution = entry.get("kind") == KIND_RESOLUTION
+        icon = "•" if resolution else ("✓" if entry.get("passed") else "✗")
+        task_id = entry.get("task_id", "?")
+        date = entry.get("_date", "?")
+        title = entry.get("task_title", task_id)
+        items = entry.get("items", [])
+        criteria = ""
+        if resolution:
+            criteria = f" [{entry.get('band') or 'RESOLUTION'}]"
+        elif items:
+            parts = []
+            for item in items:
+                if isinstance(item, dict):
+                    s = "✓" if item.get("status") == "PASS" else "✗"
+                else:
+                    s = "✓" if getattr(item, "status", None) == "PASS" else "✗"
+                parts.append(s)
+            criteria = f" [{''.join(parts)}]"
+        verdict_lines.append(f"{icon} {task_id:<24} {date}  {criteria}")
+        if title and title != task_id:
+            verdict_lines.append(f"   {title}")
+    return verdict_lines
+
+
 def _cmd_report_tui(workdir: str, n: int = 20) -> None:
     """Interactive TUI for verdict browsing (requires textual)."""
-    from engine.persist import KIND_RESOLUTION, VerdictPersister, build_report
+    from engine.persist import VerdictPersister, build_report
 
     try:
         from importlib.util import find_spec
@@ -2431,32 +2546,7 @@ def _cmd_report_tui(workdir: str, n: int = 20) -> None:
     from textual.containers import VerticalScroll
     from textual.widgets import Header, Footer, Static
 
-    verdict_lines = []
-    for entry in entries:
-        # DF-GITREINS-POC-36: a resolution-gate record is not a graded verdict —
-        # it has no pass/fail — so it carries its band instead of the ✓/✗ icon,
-        # exactly as the text report lists it in its own section.
-        resolution = entry.get("kind") == KIND_RESOLUTION
-        icon = "•" if resolution else ("✓" if entry.get("passed") else "✗")
-        task_id = entry.get("task_id", "?")
-        date = entry.get("_date", "?")
-        title = entry.get("task_title", task_id)
-        items = entry.get("items", [])
-        criteria = ""
-        if resolution:
-            criteria = f" [{entry.get('band') or 'RESOLUTION'}]"
-        elif items:
-            parts = []
-            for item in items:
-                if isinstance(item, dict):
-                    s = "✓" if item.get("status") == "PASS" else "✗"
-                else:
-                    s = "✓" if getattr(item, "status", None) == "PASS" else "✗"
-                parts.append(s)
-            criteria = f" [{''.join(parts)}]"
-        verdict_lines.append(f"{icon} {task_id:<24} {date}  {criteria}")
-        if title and title != task_id:
-            verdict_lines.append(f"   {title}")
+    verdict_lines = _tui_verdict_lines(entries)
 
     class VerdictApp(App):
         CSS = """
@@ -2494,6 +2584,66 @@ def quality_snapshot_for(workdir: str) -> dict | None:
     from engine.quality_metrics import read_quality_snapshot
 
     return read_quality_snapshot(workdir, QualityConfig.from_dict(raw))
+
+
+def _guard_mode_note(gm, scope: str, result) -> str:
+    """The parenthesised mode note on the Tier 1 banner line."""
+    extra = result.extra
+    mode = gm.test_mode
+    mode_note = f"  (test mode: {mode}"
+    if scope != "staged":
+        # Only a non-default scope adds a note: the staged line is the string
+        # every existing consumer greps, and it stays byte for byte.
+        mode_note += f", scope: {scope}"
+    if extra.get("grade_full_tree"):
+        mode_note += ", whole tree"
+    if extra.get("test_targets"):
+        mode_note += f", {extra['test_targets']} test file(s)"
+    elif extra.get("test_scope") == "no-match":
+        # DF-GITREINS-POC-67: zero test files mapped to the changed sources —
+        # the tests lane SKIPPED; saying "full suite — safety trigger" here
+        # contradicted the "~ tests — skipped" line right below it.
+        mode_note += ", no test files matched — diff mode skipped"
+    elif extra.get("test_scope") == "no-changes":
+        # Empty change set: the lane-level skip ("no staged files") already
+        # narrates this run; the banner adds no test-scope claim.
+        pass
+    elif extra.get("test_targets") is None and mode == "diff":
+        mode_note += ", full suite — safety trigger"
+    mode_note += ")"
+    return mode_note
+
+
+def _guard_print_result(gm, scope: str, result) -> None:
+    """Print the human-readable guard result (banner, summary, log, warnings)."""
+    mode_note = _guard_mode_note(gm, scope, result)
+    extra = result.extra
+
+    # TRUST-001: a run where a substantive gate (lint/tests/lsp) did no work is
+    # a DEGRADED PASS, and it never prints the green "Tier 1 Guards: PASS"
+    # header — grepping that string is now proof the gates actually ran. The
+    # exit code is 0 only when the repo opted in via guards.allow_skips.
+    if not result.passed:
+        print(f"Tier 1 Guards: FAIL{mode_note}")
+    elif result.degraded:
+        print(f"Tier 1: DEGRADED PASS (skips: {result.skip_summary}){mode_note}")
+    else:
+        print(f"Tier 1 Guards: PASS{mode_note}")
+    print(result.summary)
+
+    # DF-018: name the persisted run log (the complete, untruncated output)
+    # on BOTH pass and fail — the bounded summary above is not enough to
+    # diagnose a failure after the fact. When persistence failed, print the
+    # reason instead of a path.
+    if extra.get("guard_log"):
+        print(f"  guard log: {extra['guard_log']}")
+    else:
+        print(f"  guard log: not written — {extra.get('guard_log_error') or 'unknown reason'}")
+
+    if result.warnings:
+        print()
+        for warning in result.warnings:
+            print(f"\033[33m⚠ {warning}\033[0m", file=sys.stderr)
 
 
 def cmd_guard_run(args: argparse.Namespace) -> None:
@@ -2541,57 +2691,7 @@ def cmd_guard_run(args: argparse.Namespace) -> None:
         sys.exit(0 if result.passed else 1)
 
     result = gm.run_all(force_dead_code=getattr(args, "dead_code", False))
-
-    # Build mode note
-    mode = gm.test_mode
-    extra = result.extra
-    mode_note = f"  (test mode: {mode}"
-    if scope != "staged":
-        # Only a non-default scope adds a note: the staged line is the string
-        # every existing consumer greps, and it stays byte for byte.
-        mode_note += f", scope: {scope}"
-    if extra.get("grade_full_tree"):
-        mode_note += ", whole tree"
-    if extra.get("test_targets"):
-        mode_note += f", {extra['test_targets']} test file(s)"
-    elif extra.get("test_scope") == "no-match":
-        # DF-GITREINS-POC-67: zero test files mapped to the changed sources —
-        # the tests lane SKIPPED; saying "full suite — safety trigger" here
-        # contradicted the "~ tests — skipped" line right below it.
-        mode_note += ", no test files matched — diff mode skipped"
-    elif extra.get("test_scope") == "no-changes":
-        # Empty change set: the lane-level skip ("no staged files") already
-        # narrates this run; the banner adds no test-scope claim.
-        pass
-    elif extra.get("test_targets") is None and mode == "diff":
-        mode_note += ", full suite — safety trigger"
-    mode_note += ")"
-
-    # TRUST-001: a run where a substantive gate (lint/tests/lsp) did no work is
-    # a DEGRADED PASS, and it never prints the green "Tier 1 Guards: PASS"
-    # header — grepping that string is now proof the gates actually ran. The
-    # exit code is 0 only when the repo opted in via guards.allow_skips.
-    if not result.passed:
-        print(f"Tier 1 Guards: FAIL{mode_note}")
-    elif result.degraded:
-        print(f"Tier 1: DEGRADED PASS (skips: {result.skip_summary}){mode_note}")
-    else:
-        print(f"Tier 1 Guards: PASS{mode_note}")
-    print(result.summary)
-
-    # DF-018: name the persisted run log (the complete, untruncated output)
-    # on BOTH pass and fail — the bounded summary above is not enough to
-    # diagnose a failure after the fact. When persistence failed, print the
-    # reason instead of a path.
-    if extra.get("guard_log"):
-        print(f"  guard log: {extra['guard_log']}")
-    else:
-        print(f"  guard log: not written — {extra.get('guard_log_error') or 'unknown reason'}")
-
-    if result.warnings:
-        print()
-        for warning in result.warnings:
-            print(f"\033[33m⚠ {warning}\033[0m", file=sys.stderr)
+    _guard_print_result(gm, scope, result)
 
     if not result.passed:
         print()
@@ -2638,20 +2738,8 @@ def _judge_usage_error(message: str) -> None:
     sys.exit(2)
 
 
-def cmd_judge(args: argparse.Namespace) -> None:
-    """Evaluate a task — sync (default), ephemeral, or dispatch a background job.
-
-    ``--async`` detaches a worker process and returns a job id; the job
-    record lives in the shared disk store, so it survives this CLI
-    exiting and can be polled with ``gitreins judge --status <job_id>``
-    (or the MCP ``judge.status`` tool). ``--run-job`` is the internal
-    worker mode executed by the detached child.
-
-    ``--ephemeral`` (EVID-003) evaluates criteria supplied inline and persists
-    nothing at all — see ``_cmd_judge_ephemeral``.
-    """
-    ephemeral = getattr(args, "ephemeral", False)
-    persist_verdict = getattr(args, "persist_verdict", False)
+def _judge_validate_flags(args: argparse.Namespace, ephemeral: bool, persist_verdict: bool) -> None:
+    """Argparse-shaped usage errors for judge flag combinations."""
     # The background modes all read a task out of the store and write a job
     # record; neither exists for an ephemeral run, so the combination is a
     # usage error rather than a flag that is silently ignored.
@@ -2668,31 +2756,61 @@ def cmd_judge(args: argparse.Namespace) -> None:
     if persist_verdict and not ephemeral:
         _judge_usage_error("argument --persist-verdict: not allowed without argument --ephemeral")
 
+
+def _judge_require_id(args: argparse.Namespace) -> str:
+    """The id argument is required for every non-ephemeral mode (EVID-003)."""
+    if getattr(args, "id", None) is None:
+        _judge_usage_error("the following arguments are required: id")
+    return args.id
+
+
+def _judge_dispatch_mode(
+    args: argparse.Namespace, ephemeral: bool, json_output: bool, scope: str, persist_verdict: bool
+) -> bool:
+    """Handle the --status/--run-job/--async/ephemeral sub-modes.
+
+    Returns True when one of those modes consumed the invocation.
+    """
     if getattr(args, "status", False):
-        if getattr(args, "id", None) is None:
-            _judge_usage_error("the following arguments are required: id")
-        _cmd_judge_status(args.id)
-        return
+        _cmd_judge_status(_judge_require_id(args))
+        return True
     if getattr(args, "run_job", False):
-        if getattr(args, "id", None) is None:
-            _judge_usage_error("the following arguments are required: id")
-        _cmd_judge_worker(args.id)
-        return
+        _cmd_judge_worker(_judge_require_id(args))
+        return True
     if getattr(args, "async_dispatch", False):
-        if getattr(args, "id", None) is None:
-            _judge_usage_error("the following arguments are required: id")
-        _cmd_judge_async(args.id)
-        return
+        _cmd_judge_async(_judge_require_id(args))
+        return True
+
+    if ephemeral:
+        _cmd_judge_ephemeral(
+            args, scope=scope, json_output=json_output, persist_verdict=persist_verdict
+        )
+        return True
+    return False
+
+
+def cmd_judge(args: argparse.Namespace) -> None:
+    """Evaluate a task — sync (default), ephemeral, or dispatch a background job.
+
+    ``--async`` detaches a worker process and returns a job id; the job
+    record lives in the shared disk store, so it survives this CLI
+    exiting and can be polled with ``gitreins judge --status <job_id>``
+    (or the MCP ``judge.status`` tool). ``--run-job`` is the internal
+    worker mode executed by the detached child.
+
+    ``--ephemeral`` (EVID-003) evaluates criteria supplied inline and persists
+    nothing at all — see ``_cmd_judge_ephemeral``.
+    """
+    ephemeral = getattr(args, "ephemeral", False)
+    persist_verdict = getattr(args, "persist_verdict", False)
+    _judge_validate_flags(args, ephemeral, persist_verdict)
 
     # EVID-002: --json is the automation surface — the update check narrates on
     # stdout, so it is skipped there.
     json_output = getattr(args, "json_output", False)
     scope = getattr(args, "scope", "staged")
 
-    if ephemeral:
-        _cmd_judge_ephemeral(
-            args, scope=scope, json_output=json_output, persist_verdict=persist_verdict
-        )
+    if _judge_dispatch_mode(args, ephemeral, json_output, scope, persist_verdict):
         return
 
     # A missing id is allowed ONLY with --ephemeral (EVID-003).
@@ -2739,6 +2857,18 @@ def cmd_judge(args: argparse.Namespace) -> None:
     config = load_config(workdir)
     judge = Judge(llm, workdir, guard_config=config, scope=scope)
 
+    result = _judge_evaluate_and_persist(judge, task, args, workdir, scope, json_output)
+
+    # DF-GITREINS-POC-16: a FAIL verdict must reach the shell. Printing
+    # "Overall: FAIL" while exiting 0 lets a caller (script, CI step, agent)
+    # treat a red gate as success — the same silent-pass class this task is
+    # about. `gitreins guard` already exits 1 on the same tree.
+    if not result.passed:
+        sys.exit(1)
+
+
+def _judge_evaluate_and_persist(judge, task, args, workdir: str, scope: str, json_output: bool):
+    """Run the sync evaluation, persist the verdict, and print in the right format."""
     if json_output:
         from engine.evidence import dumps_evidence, judge_evidence
 
@@ -2758,13 +2888,7 @@ def cmd_judge(args: argparse.Namespace) -> None:
         print(result.summary)
         # Persist verdict
         _persist_result(workdir, task, result)
-
-    # DF-GITREINS-POC-16: a FAIL verdict must reach the shell. Printing
-    # "Overall: FAIL" while exiting 0 lets a caller (script, CI step, agent)
-    # treat a red gate as success — the same silent-pass class this task is
-    # about. `gitreins guard` already exits 1 on the same tree.
-    if not result.passed:
-        sys.exit(1)
+    return result
 
 
 def _ephemeral_task_id(title: str) -> str:
@@ -3057,28 +3181,8 @@ def _cmd_judge_worker(job_id: str) -> None:
         sys.exit(1)
 
 
-def _cmd_judge_status(job_id: str) -> None:
-    """Print the status/result of a background job.
-
-    Exit codes: 0 complete, 2 still running, 3 orphan (worker process died
-    while the record still said running — the record is flipped to error),
-    1 error/not found.
-    """
-    from engine.job_store import (
-        acquire_resume_lease,
-        job_log_path,
-        load_job,
-        pid_alive,
-        release_resume_lease,
-        save_job,
-    )
-
-    job = load_job(job_id)
-    if job is None:
-        print(f"Job not found: {job_id}")
-        sys.exit(1)
-
-    status = job["status"]
+def _judge_status_print_header(job: dict, status: str) -> None:
+    """The status banner: job id, status word, task, workdir, pid, timestamps."""
     print(f"Job:      {job['id']}")
     print(f"Status:   {status}")
     print(f"Task:     {job['task_id']}")
@@ -3091,50 +3195,58 @@ def _cmd_judge_status(job_id: str) -> None:
         print("Finished: " + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(job["finished_at"])))
     print()
 
-    if status == "running":
-        # Liveness-aware (QA-GITR-002): a `running` record whose worker pid
-        # is dead is an orphan — the environment killed the worker (e.g.
-        # earlyoom) and nothing will ever write a terminal status. Flip the
-        # record to error under the resume lease so concurrent polls race
-        # safely, then report the orphan with a distinct exit code. A
-        # missing/None pid (records predating pid tracking) keeps the
-        # historical still-running behavior.
-        if job.get("pid") and not pid_alive(job.get("pid")):
-            lease = acquire_resume_lease(job_id)
-            if lease is not None:
-                try:
-                    current = load_job(job_id) or job
-                    if current.get("status") == "running":
-                        current["status"] = "error"
-                        current["running"] = False
-                        current["error"] = (
-                            f"worker process died before completing (pid {current.get('pid')})"
-                        )
-                        current["finished_at"] = time.time()
-                        save_job(current)
-                        job = current
-                    else:
-                        job = current
-                finally:
-                    release_resume_lease(lease)
-            if job.get("status") != "error":
-                # Another poller holds the lease and may be flipping it; the
-                # record could still say running — report it as such.
-                print(
-                    f"Job is still running (pid {job.get('pid') or 'unknown'}). Poll again later."
-                )
-                sys.exit(2)
-            print(f"Job worker process is GONE (pid {job.get('pid')}) — job marked error (orphan)")
-            sys.exit(3)
-        print(f"Job is still running (pid {job.get('pid') or 'unknown'}). Poll again later.")
-        sys.exit(2)
-    if status == "error":
-        print(f"Error: {job.get('error')}")
-        log = job_log_path(job_id)
-        if os.path.exists(log):
-            print(f"Log: {log}")
-        sys.exit(1)
 
+def _judge_status_running(job: dict) -> None:
+    """Handle a `running` job record, flipping dead-pid orphans to error (QA-GITR-002).
+
+    Exits: 2 still running, 3 orphan.
+    """
+    from engine.job_store import (
+        acquire_resume_lease,
+        load_job,
+        pid_alive,
+        release_resume_lease,
+        save_job,
+    )
+
+    # Liveness-aware (QA-GITR-002): a `running` record whose worker pid
+    # is dead is an orphan — the environment killed the worker (e.g.
+    # earlyoom) and nothing will ever write a terminal status. Flip the
+    # record to error under the resume lease so concurrent polls race
+    # safely, then report the orphan with a distinct exit code. A
+    # missing/None pid (records predating pid tracking) keeps the
+    # historical still-running behavior.
+    if job.get("pid") and not pid_alive(job.get("pid")):
+        lease = acquire_resume_lease(job["id"])
+        if lease is not None:
+            try:
+                current = load_job(job["id"]) or job
+                if current.get("status") == "running":
+                    current["status"] = "error"
+                    current["running"] = False
+                    current["error"] = (
+                        f"worker process died before completing (pid {current.get('pid')})"
+                    )
+                    current["finished_at"] = time.time()
+                    save_job(current)
+                    job = current
+                else:
+                    job = current
+            finally:
+                release_resume_lease(lease)
+        if job.get("status") != "error":
+            # Another poller holds the lease and may be flipping it; the
+            # record could still say running — report it as such.
+            print(f"Job is still running (pid {job.get('pid') or 'unknown'}). Poll again later.")
+            sys.exit(2)
+        print(f"Job worker process is GONE (pid {job.get('pid')}) — job marked error (orphan)")
+        sys.exit(3)
+    print(f"Job is still running (pid {job.get('pid') or 'unknown'}). Poll again later.")
+    sys.exit(2)
+
+
+def _judge_status_result(job: dict) -> None:
+    """Print a completed job's verdict details. Exits 0."""
     result = job.get("result") or {}
     print(f"Result:   {'PASS ✓' if result.get('passed') else 'FAIL ✗'}")
     if result.get("tier1_passed") is not None:
@@ -3148,6 +3260,38 @@ def _cmd_judge_status(job_id: str) -> None:
         print()
         print(result["summary"])
     sys.exit(0)
+
+
+def _cmd_judge_status(job_id: str) -> None:
+    """Print the status/result of a background job.
+
+    Exit codes: 0 complete, 2 still running, 3 orphan (worker process died
+    while the record still said running — the record is flipped to error),
+    1 error/not found.
+    """
+    from engine.job_store import (
+        job_log_path,
+        load_job,
+    )
+
+    job = load_job(job_id)
+    if job is None:
+        print(f"Job not found: {job_id}")
+        sys.exit(1)
+
+    status = job["status"]
+    _judge_status_print_header(job, status)
+
+    if status == "running":
+        _judge_status_running(job)
+    if status == "error":
+        print(f"Error: {job.get('error')}")
+        log = job_log_path(job_id)
+        if os.path.exists(log):
+            print(f"Log: {log}")
+        sys.exit(1)
+
+    _judge_status_result(job)
 
 
 def _git_nul_paths(workdir: str, *args: str) -> set[bytes]:
@@ -3231,15 +3375,10 @@ def _display_git_path(path: bytes) -> str:
     return repr(os.fsdecode(path))
 
 
-def cmd_commit(args: argparse.Namespace) -> None:
-    from engine.guard_manager import GuardManager
+def _commit_refuse_in_progress(workdir: str, args: argparse.Namespace) -> None:
+    """POC-66 MCP parity: refuse (or warn about) commits while tasks are in_progress."""
     from engine.task_manager import TaskManager
 
-    workdir = get_workdir()
-    # DF-GITREINS-POC-66: MCP parity for the in-progress door. The MCP commit
-    # tool refuses while any task is in_progress (task.complete grades the
-    # committed state — README's "MCP commit rule"); the CLI door ran guards
-    # and committed silently. Same source of truth, same rationale wording.
     in_progress = TaskManager(workdir).list_tasks("in_progress")
     if in_progress and not getattr(args, "allow_in_progress", False):
         ids = ", ".join(t.id for t in in_progress)
@@ -3259,16 +3398,16 @@ def cmd_commit(args: argparse.Namespace) -> None:
             f"{ids} (--allow-in-progress)",
             file=sys.stderr,
         )
-    # GR-GAP-051: never commit unguarded — same refusal as `gitreins guard`.
-    # Kept AHEAD of the DF-GITREINS-POC-70 staged check: the config-less
-    # refusal is a prerequisite, not a guard lane, and GR-GAP-051 pins its
-    # message even for a clean repo.
-    _require_guard_config(workdir)
-    # DF-GITREINS-POC-70: refuse a doomed commit BEFORE the guard stage. With
-    # nothing staged the guard lanes all skip, the green "Tier 1 PASSED"
-    # banner prints, and `git commit` then fails "nothing to commit" — a
-    # fresh user reads a green gate, a red exit, and the real cause wedged
-    # in between. Same early-refusal shape as the POC-66 check above.
+
+
+def _commit_refuse_empty_index(workdir: str) -> None:
+    """POC-70: refuse a doomed commit before the guard stage.
+
+    With nothing staged the guard lanes all skip, the green "Tier 1 PASSED"
+    banner prints, and `git commit` then fails "nothing to commit" — a
+    fresh user reads a green gate, a red exit, and the real cause wedged
+    in between. Same early-refusal shape as the POC-66 check above.
+    """
     try:
         staged = _snapshot_staged_paths(workdir)
     except RuntimeError as exc:
@@ -3277,31 +3416,27 @@ def cmd_commit(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
         sys.exit(1)
-    if not staged:
-        if _working_tree_is_clean(workdir):
-            print(
-                "Nothing to commit: the index is empty and the working tree "
-                "is clean. Stage changes with `git add <files>` first, then "
-                "retry commit.",
-                file=sys.stderr,
-            )
-        else:
-            print(
-                "Nothing staged: the index is empty, but the working tree "
-                "has unstaged or untracked changes. Stage them with "
-                "`git add <files>`, then retry commit.",
-                file=sys.stderr,
-            )
-        sys.exit(1)
-    config = load_config(workdir)
-    gm = GuardManager(workdir, config=config)
-    tier1 = gm.run_all()
+    if staged:
+        return
+    if _working_tree_is_clean(workdir):
+        print(
+            "Nothing to commit: the index is empty and the working tree "
+            "is clean. Stage changes with `git add <files>` first, then "
+            "retry commit.",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            "Nothing staged: the index is empty, but the working tree "
+            "has unstaged or untracked changes. Stage them with "
+            "`git add <files>`, then retry commit.",
+            file=sys.stderr,
+        )
+    sys.exit(1)
 
-    if not tier1.passed:
-        print("Tier 1 FAILED — cannot commit:")
-        print(tier1.summary)
-        sys.exit(1)
 
+def _commit_run_and_verify(workdir: str, message: str, skip_tier2: bool) -> None:
+    """Commit, then verify HEAD advanced and carries every staged path."""
     try:
         staged_paths = _snapshot_staged_paths(workdir)
         previous_head = _git_head(workdir)
@@ -3309,12 +3444,12 @@ def cmd_commit(args: argparse.Namespace) -> None:
         print(f"COMMIT INTEGRITY CHECK FAILED — cannot snapshot Git state: {exc}", file=sys.stderr)
         sys.exit(1)
 
-    if getattr(args, "skip_tier2", False):
+    if skip_tier2:
         print("Tier 1 PASSED — Tier 2 skipped (--skip-tier2 flag) — committing...")
     else:
         print("Tier 1 PASSED — committing...")
     result = subprocess.run(
-        ["git", "commit", "-m", args.message],  # noqa: S607 - git resolved via PATH by design
+        ["git", "commit", "-m", message],  # noqa: S607 - git resolved via PATH by design
         capture_output=True,
         text=True,
         cwd=workdir,
@@ -3352,6 +3487,35 @@ def cmd_commit(args: argparse.Namespace) -> None:
     )
     for path in sorted(staged_paths):
         print(f"  {_display_git_path(path)}")
+
+
+def cmd_commit(args: argparse.Namespace) -> None:
+    from engine.guard_manager import GuardManager
+
+    workdir = get_workdir()
+    # DF-GITREINS-POC-66: MCP parity for the in-progress door. The MCP commit
+    # tool refuses while any task is in_progress (task.complete grades the
+    # committed state — README's "MCP commit rule"); the CLI door ran guards
+    # and committed silently. Same source of truth, same rationale wording.
+    _commit_refuse_in_progress(workdir, args)
+    # GR-GAP-051: never commit unguarded — same refusal as `gitreins guard`.
+    # Kept AHEAD of the DF-GITREINS-POC-70 staged check: the config-less
+    # refusal is a prerequisite, not a guard lane, and GR-GAP-051 pins its
+    # message even for a clean repo.
+    _require_guard_config(workdir)
+    # DF-GITREINS-POC-70: refuse a doomed commit BEFORE the guard stage. See
+    # _commit_refuse_empty_index for the rationale.
+    _commit_refuse_empty_index(workdir)
+    config = load_config(workdir)
+    gm = GuardManager(workdir, config=config)
+    tier1 = gm.run_all()
+
+    if not tier1.passed:
+        print("Tier 1 FAILED — cannot commit:")
+        print(tier1.summary)
+        sys.exit(1)
+
+    _commit_run_and_verify(workdir, args.message, getattr(args, "skip_tier2", False))
 
 
 def cmd_commit_audit(args: argparse.Namespace) -> None:
@@ -3669,23 +3833,7 @@ def cmd_security_scan(args: argparse.Namespace) -> None:
     }
     model_id = model_map.get(security_cfg.get("model", "antares-1b"), "fdtn-ai/antares-1b")
 
-    if force_ml:
-        # When ML is required, both download and inference deps must
-        # be present. We check huggingface_hub (for the snapshot) and
-        # transformers (for inference). The scanner itself enforces
-        # this contract; here we just pre-flight a friendlier error.
-        for mod_name, install_hint in (
-            ("huggingface_hub", "pip install huggingface_hub"),
-            ("transformers", "pip install transformers"),
-        ):
-            try:
-                __import__(mod_name)
-            except ImportError as exc:
-                print(
-                    f"Antares ML mode requires {mod_name}: {exc}\nInstall with: {install_hint}",
-                    file=sys.stderr,
-                )
-                sys.exit(2)
+    _security_check_ml_deps_if_forced(force_ml)
 
     scanner = AntaresScanner(workdir, model_id=model_id, use_ml=force_ml)
 
@@ -3709,44 +3857,79 @@ def cmd_security_scan(args: argparse.Namespace) -> None:
         sys.exit(1)
 
     if output_fmt == "json":
-        payload = [
-            f.to_dict()
-            if hasattr(f, "to_dict")
-            else {
-                "file": getattr(f, "file", ""),
-                "line": getattr(f, "line", 0),
-                "cve_id": getattr(f, "cve_id", ""),
-                "confidence": getattr(f, "confidence", 0.0),
-                "description": getattr(f, "description", ""),
-            }
-            for f in findings
-        ]
-        print(_json.dumps(payload, indent=2))
-        if scanner.used_heuristic:
-            # REVIEW-GITREINS-021: stdout stays exactly the documented list, so
-            # the mode goes to stderr. A gate that consumes only the exit code
-            # (or only the JSON) otherwise cannot tell a keyword-fallback run
-            # from a real scan — and an empty list reads as "clean" either way.
-            print(f"Antares: {HEURISTIC_DISCLOSURE}", file=sys.stderr)
+        _security_render_json(_json, findings, scanner, HEURISTIC_DISCLOSURE)
     else:
-        target = directory or "staged files"
-        # DF-GITREINS-POC-59: a keyword-heuristic run is a 7-keyword grep,
-        # not a full scan — disclose the mode on both the clean and the
-        # findings summary line (finding lines already carry
-        # CVE-SIMULATED conf=0.00). ML-mode output stays unchanged.
-        # REVIEW-GITREINS-021: the disclosure now rides ON the result line.
-        # As a separate line above it, the reader (or a log-scraping gate)
-        # takes "clean" and "NOT a full scan" as two unrelated facts, which is
-        # how a heuristic run gets mistaken for a graded one.
-        mode_suffix = f" [{HEURISTIC_DISCLOSURE}]" if scanner.used_heuristic else ""
-        if not findings:
-            print(f"Antares: clean — no findings in {target}{mode_suffix}")
-        else:
-            print(f"Antares: {len(findings)} potential finding(s) in {target}{mode_suffix}:")
-            for f in findings:
-                print(f"  • {f.file}:{f.line} [{f.cve_id} conf={f.confidence:.2f}] {f.description}")
+        _security_render_text(HEURISTIC_DISCLOSURE, findings, scanner, directory)
 
     sys.exit(1 if findings else 0)
+
+
+def _security_check_ml_deps_if_forced(force_ml: bool) -> None:
+    """When ML is required, both download and inference deps must be present.
+
+    We check huggingface_hub (for the snapshot) and transformers (for
+    inference). The scanner itself enforces this contract; here we just
+    pre-flight a friendlier error.
+    """
+    if not force_ml:
+        return
+    for mod_name, install_hint in (
+        ("huggingface_hub", "pip install huggingface_hub"),
+        ("transformers", "pip install transformers"),
+    ):
+        try:
+            __import__(mod_name)
+        except ImportError as exc:
+            print(
+                f"Antares ML mode requires {mod_name}: {exc}\nInstall with: {install_hint}",
+                file=sys.stderr,
+            )
+            sys.exit(2)
+
+
+def _security_render_json(_json, findings: list, scanner, heuristic_disclosure: str) -> None:
+    """JSON output: stdout stays the bare list; the mode line goes to stderr."""
+    payload = [
+        f.to_dict()
+        if hasattr(f, "to_dict")
+        else {
+            "file": getattr(f, "file", ""),
+            "line": getattr(f, "line", 0),
+            "cve_id": getattr(f, "cve_id", ""),
+            "confidence": getattr(f, "confidence", 0.0),
+            "description": getattr(f, "description", ""),
+        }
+        for f in findings
+    ]
+    print(_json.dumps(payload, indent=2))
+    if scanner.used_heuristic:
+        # REVIEW-GITREINS-021: stdout stays exactly the documented list, so
+        # the mode goes to stderr. A gate that consumes only the exit code
+        # (or only the JSON) otherwise cannot tell a keyword-fallback run
+        # from a real scan — and an empty list reads as "clean" either way.
+        print(f"Antares: {heuristic_disclosure}", file=sys.stderr)
+
+
+def _security_render_text(
+    heuristic_disclosure: str, findings: list, scanner, directory: str | None
+) -> None:
+    """Text output with the heuristic-mode disclosure on the result line."""
+    target = directory or "staged files"
+    # DF-GITREINS-POC-59: a keyword-heuristic run is a 7-keyword grep,
+    # not a full scan — disclose the mode on both the clean and the
+    # findings summary line (finding lines already carry
+    # CVE-SIMULATED conf=0.00). ML-mode output stays unchanged.
+    # REVIEW-GITREINS-021: the disclosure now rides ON the result line.
+    # As a separate line above it, the reader (or a log-scraping gate)
+    # takes "clean" and "NOT a full scan" as two unrelated facts, which is
+    # how a heuristic run gets mistaken for a graded one.
+    mode_suffix = f" [{heuristic_disclosure}]" if scanner.used_heuristic else ""
+    if not findings:
+        print(f"Antares: clean — no findings in {target}{mode_suffix}")
+    else:
+        print(f"Antares: {len(findings)} potential finding(s) in {target}{mode_suffix}:")
+        for f in findings:
+            print(f"  • {f.file}:{f.line} [{f.cve_id} conf={f.confidence:.2f}] {f.description}")
 
 
 # ── setup-tools static tables (DF-GITREINS-POC-69) ──────────────────────
@@ -3788,9 +3971,41 @@ _SETUP_TOOLS_INSTALL_GUIDE = {
 }
 
 
+def _setup_tools_language_list(workdir: str, lang: dict) -> list[str]:
+    """Detected language tokens, deduplicated, with SQL appended when present."""
+    from engine.lang_detect import detect_languages
+
+    langs: list[str] = []
+    for token in detect_languages(workdir):
+        if token not in langs:
+            langs.append(token)
+    if lang["has_sql"] and "sql" not in langs:
+        langs.append("sql")
+    return langs
+
+
+def _setup_tools_print_group(tools: list[str], find_tool) -> tuple[int, int]:
+    """Print found/missing lines for one language's tracked tools; returns counts."""
+    found = 0
+    missing = 0
+    for tool in tools:
+        path = find_tool(tool)
+        if path:
+            found += 1
+            display = path.split("/")[-1] if "/" in path else path
+            print(f"  {tool:<12} ✓ found  ({display})")
+        else:
+            missing += 1
+            install = _SETUP_TOOLS_INSTALL_GUIDE.get(
+                tool,
+                f"Install {tool} from your package manager",
+            )
+            print(f"  {tool:<12} ✗ not installed — install: {install}")
+    return found, missing
+
+
 def cmd_setup_tools(_args: argparse.Namespace) -> None:
     """Show available static analysis tools and install instructions for missing ones."""
-    from engine.lang_detect import detect_languages
     from engine.static_analysis import find_tool
 
     workdir = get_workdir()
@@ -3801,13 +4016,6 @@ def cmd_setup_tools(_args: argparse.Namespace) -> None:
             return ["sqlfluff"]
         return _SETUP_TOOLS_LANG_TOOLS.get(token, [])
 
-    langs: list[str] = []
-    for token in detect_languages(workdir):
-        if token not in langs:
-            langs.append(token)
-    if lang["has_sql"] and "sql" not in langs:
-        langs.append("sql")
-
     def _display(token: str) -> str:
         # _LANG_INFO covers every signature language (token -> (flag, display,
         # type_token)); SQL is selected by has_sql_sources, not the table.
@@ -3815,6 +4023,7 @@ def cmd_setup_tools(_args: argparse.Namespace) -> None:
             return "SQL"
         return _LANG_INFO.get(token, ("", token.title(), token))[1]
 
+    langs = _setup_tools_language_list(workdir, lang)
     groups = [(token, _tracked_for(token)) for token in langs if _tracked_for(token)]
     untracked = [_display(token) for token in langs if not _tracked_for(token)]
 
@@ -3829,19 +4038,9 @@ def cmd_setup_tools(_args: argparse.Namespace) -> None:
     found = 0
     missing = 0
     for _, tools in groups:
-        for tool in tools:
-            path = find_tool(tool)
-            if path:
-                found += 1
-                display = path.split("/")[-1] if "/" in path else path
-                print(f"  {tool:<12} ✓ found  ({display})")
-            else:
-                missing += 1
-                install = _SETUP_TOOLS_INSTALL_GUIDE.get(
-                    tool,
-                    f"Install {tool} from your package manager",
-                )
-                print(f"  {tool:<12} ✗ not installed — install: {install}")
+        group_found, group_missing = _setup_tools_print_group(tools, find_tool)
+        found += group_found
+        missing += group_missing
     if untracked:
         print()
         print(f"No tracked static analysis tools for: {' + '.join(untracked)}")
@@ -3860,13 +4059,8 @@ def cmd_mcp_server(_args: argparse.Namespace) -> None:
     server.run_stdio()
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """Build the gitreins argument parser (split out of main for GR-148
-    testability of the review-profile/effort CLI surface)."""
-    parser = argparse.ArgumentParser(description="GitReins — Git-Native Agent Co-Harness")
-    parser.add_argument("--version", action="version", version=f"gitreins {__version__}")
-    sub = parser.add_subparsers(dest="command")
-
+def _add_basic_parsers(parser: argparse.ArgumentParser, sub) -> None:
+    """install / push-check / init / doctor subcommands."""
     # install
     sub.add_parser("install", help="Install GitReins hooks and config in the current repo")
     push_check = sub.add_parser("push-check", help="Scan outgoing commit content for secrets")
@@ -3893,7 +4087,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the .gitleaks.toml to check (default: <repo>/.gitleaks.toml)",
     )
 
-    # task
+
+def _add_task_parser(sub):
+    """`task` subcommand tree. Returns the task _SubParsersAction."""
     task_p = sub.add_parser("task", help="Task management")
     task_sub = task_p.add_subparsers(dest="subcommand")
 
@@ -3939,8 +4135,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     delete_p = task_sub.add_parser("delete", help="Delete a task")
     delete_p.add_argument("id")
+    return task_sub
 
-    # worktree diagnostics + lifecycle
+
+def _add_worktree_parser(sub) -> None:
+    """`worktree` subcommand tree (diagnostics + lifecycle)."""
     worktree_p = sub.add_parser(
         "worktree", help="Git worktree diagnostics and task worktree lifecycle"
     )
@@ -4048,6 +4247,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Reason recorded for a --force override",
     )
 
+
+def _add_task_worktree_parser(task_sub) -> None:
+    """`task worktree` — create (or reuse) a task's isolated worktree."""
     task_wt_p = task_sub.add_parser(
         "worktree",
         help="Create (or idempotently reuse) a task's isolated worktree",
@@ -4060,7 +4262,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Optional tick/job id to record in the registry entry",
     )
 
-    # guard
+
+def _add_guard_parser(sub) -> None:
+    """`guard` subcommand."""
     guard_p = sub.add_parser("guard", help="Run Tier 1 guards")
     guard_p.add_argument(
         "--dead-code",
@@ -4110,7 +4314,9 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    # judge
+
+def _add_judge_parser(sub) -> None:
+    """`judge` subcommand (all its modes and flags)."""
     judge_p = sub.add_parser(
         "judge",
         help="Evaluate a task",
@@ -4201,7 +4407,9 @@ def build_parser() -> argparse.ArgumentParser:
         help=argparse.SUPPRESS,
     )
 
-    # commit
+
+def _add_commit_parsers(sub) -> None:
+    """`commit` and `commit-audit` subcommands (incl. GR-148 review overrides)."""
     commit_p = sub.add_parser("commit", help="Commit with guard checks")
     commit_p.add_argument("message")
     commit_p.add_argument(
@@ -4235,7 +4443,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Per-invocation effort override, repeatable (e.g. --review-effort max_llm_calls=4 --review-effort time_budget_s=240). Takes precedence over repo config, which takes precedence over the profile default.",
     )
 
-    # resolve (JEVRES-002) — the Jev resolution gate's CLI surface
+
+def _add_resolve_parsers(sub) -> None:
+    """`resolve` (JEVRES-002) and `preflight` (JEVRES-003) subcommands."""
     resolve_p = sub.add_parser(
         "resolve",
         help="Resolve a question against the repo's code (Jev resolution gate)",
@@ -4302,6 +4512,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Emit the full machine record as JSON (foremen consume this)",
     )
 
+
+def _add_mcp_security_parsers(sub) -> None:
+    """`mcp-server`, `security-scan`, and `setup-tools` subcommands."""
     # mcp-server
     sub.add_parser(
         "mcp-server",
@@ -4348,7 +4561,9 @@ def build_parser() -> argparse.ArgumentParser:
         "setup-tools", help="Show available static analysis tools and install instructions"
     )
 
-    # qa — QA run ledger
+
+def _add_qa_parser(sub) -> None:
+    """`qa` subcommand tree (run ledger)."""
     qa_p = sub.add_parser(
         "qa",
         help="QA run ledger — record and read QA run outcomes",
@@ -4407,7 +4622,9 @@ def build_parser() -> argparse.ArgumentParser:
     qa_record_p.add_argument("--commit", help="Commit audited (default: this repository's HEAD)")
     qa_record_p.add_argument("--ts", help="ISO timestamp of the run (default: now, UTC)")
 
-    # report
+
+def _add_report_serve_parsers(sub) -> None:
+    """`report` and `serve` subcommands."""
     report_p = sub.add_parser("report", help="Show verdict history")
     report_p.add_argument("-n", type=int, default=10, help="Number of recent verdicts to show")
     report_p.add_argument("--interactive", "-i", action="store_true", help="Interactive TUI mode")
@@ -4439,6 +4656,26 @@ def build_parser() -> argparse.ArgumentParser:
     )
     serve_p.add_argument("--open", action="store_true", help="Open the browser automatically")
 
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the gitreins argument parser (split out of main for GR-148
+    testability of the review-profile/effort CLI surface)."""
+    parser = argparse.ArgumentParser(description="GitReins — Git-Native Agent Co-Harness")
+    parser.add_argument("--version", action="version", version=f"gitreins {__version__}")
+    sub = parser.add_subparsers(dest="command")
+
+    _add_basic_parsers(parser, sub)
+    task_sub = _add_task_parser(sub)
+    _add_task_worktree_parser(task_sub)
+    _add_worktree_parser(sub)
+    _add_guard_parser(sub)
+    _add_judge_parser(sub)
+    _add_commit_parsers(sub)
+    _add_resolve_parsers(sub)
+    _add_mcp_security_parsers(sub)
+    _add_qa_parser(sub)
+    _add_report_serve_parsers(sub)
+
     return parser
 
 
@@ -4464,6 +4701,75 @@ def _parse_review_effort_flags(flags: list[str]) -> dict:
     return override
 
 
+def _dispatch_task_command(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    """Dispatch `gitreins task <subcommand>` (QA-GITREINS-POC-6 corrupt-state handling)."""
+    # QA-GITREINS-POC-6: a task write can refuse to clobber state that could
+    # not be read (and could not be preserved). Surface that as one clean
+    # line + exit 1 instead of a traceback, like the other task paths do.
+    from engine.task_manager import TaskStateCorruptError
+
+    try:
+        if args.subcommand == "create":
+            cmd_task_create(args)
+        elif args.subcommand == "start":
+            cmd_task_start(args)
+        elif args.subcommand == "get":
+            cmd_task_get(args)
+        elif args.subcommand == "complete":
+            cmd_task_complete(args)
+        elif args.subcommand == "list":
+            cmd_task_list(args)
+        elif args.subcommand == "delete":
+            cmd_task_delete(args)
+        elif args.subcommand == "worktree":
+            cmd_task_worktree(args)
+        else:
+            parser.print_help()
+    except TaskStateCorruptError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from exc
+
+
+_WORKTREE_HANDLERS = {
+    "doctor": "cmd_worktree_doctor",
+    "list": "cmd_worktree_list",
+    "fleet": "cmd_worktree_fleet",
+    "fresh": "cmd_worktree_fresh",
+    "repro": "cmd_worktree_repro",
+    "dogfood": "cmd_worktree_dogfood",
+    "clean": "cmd_worktree_clean",
+    "merge": "cmd_worktree_merge",
+}
+
+_QA_HANDLERS = {
+    "list": "cmd_qa_list",
+    "record": "cmd_qa_record",
+}
+
+# Simple subcommands: no sub-subcommand, handled directly by their cmd_*.
+_SIMPLE_HANDLERS = {
+    "install": "cmd_install",
+    "init": "cmd_init",
+    "doctor": "cmd_doctor",
+    "guard": "cmd_guard_run",
+    "judge": "cmd_judge",
+    "commit": "cmd_commit",
+    "commit-audit": "cmd_commit_audit",
+    "resolve": "cmd_resolve",
+    "preflight": "cmd_preflight",
+    "mcp-server": "cmd_mcp_server",
+    "security-scan": "cmd_security_scan",
+    "setup-tools": "cmd_setup_tools",
+    "report": "cmd_report",
+    "serve": "cmd_serve",
+}
+
+
+def _run_subcommand_handler(name: str, args: argparse.Namespace) -> None:
+    handler = globals()[name]
+    handler(args)
+
+
 def main() -> None:
     parser = build_parser()
     args = parser.parse_args()
@@ -4474,90 +4780,28 @@ def main() -> None:
         format="%(name)s: %(levelname)s: %(message)s",
     )
 
-    if args.command == "install":
-        cmd_install(args)
-    elif args.command == "push-check":
+    command = args.command
+
+    if command == "push-check":
         from engine.push_secrets import check_push_range
 
         raise SystemExit(check_push_range(get_workdir(), args.local_sha, args.remote_sha))
-    elif args.command == "init":
-        cmd_init(args)
-    elif args.command == "doctor":
-        cmd_doctor(args)
-    elif args.command == "task":
-        # QA-GITREINS-POC-6: a task write can refuse to clobber state that could
-        # not be read (and could not be preserved). Surface that as one clean
-        # line + exit 1 instead of a traceback, like the other task paths do.
-        from engine.task_manager import TaskStateCorruptError
-
-        try:
-            if args.subcommand == "create":
-                cmd_task_create(args)
-            elif args.subcommand == "start":
-                cmd_task_start(args)
-            elif args.subcommand == "get":
-                cmd_task_get(args)
-            elif args.subcommand == "complete":
-                cmd_task_complete(args)
-            elif args.subcommand == "list":
-                cmd_task_list(args)
-            elif args.subcommand == "delete":
-                cmd_task_delete(args)
-            elif args.subcommand == "worktree":
-                cmd_task_worktree(args)
-            else:
-                parser.print_help()
-        except TaskStateCorruptError as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            raise SystemExit(1) from exc
-    elif args.command == "worktree":
-        if args.subcommand == "doctor":
-            cmd_worktree_doctor(args)
-        elif args.subcommand == "list":
-            cmd_worktree_list(args)
-        elif args.subcommand == "fleet":
-            cmd_worktree_fleet(args)
-        elif args.subcommand == "fresh":
-            cmd_worktree_fresh(args)
-        elif args.subcommand == "repro":
-            cmd_worktree_repro(args)
-        elif args.subcommand == "dogfood":
-            cmd_worktree_dogfood(args)
-        elif args.subcommand == "clean":
-            cmd_worktree_clean(args)
-        elif args.subcommand == "merge":
-            cmd_worktree_merge(args)
-        else:
+    elif command == "task":
+        _dispatch_task_command(args, parser)
+    elif command == "worktree":
+        handler = _WORKTREE_HANDLERS.get(args.subcommand)
+        if handler is None:
             parser.print_help()
-    elif args.command == "guard":
-        cmd_guard_run(args)
-    elif args.command == "judge":
-        cmd_judge(args)
-    elif args.command == "commit":
-        cmd_commit(args)
-    elif args.command == "commit-audit":
-        cmd_commit_audit(args)
-    elif args.command == "resolve":
-        cmd_resolve(args)
-    elif args.command == "preflight":
-        cmd_preflight(args)
-    elif args.command == "mcp-server":
-        cmd_mcp_server(args)
-    elif args.command == "security-scan":
-        cmd_security_scan(args)
-    elif args.command == "setup-tools":
-        cmd_setup_tools(args)
-    elif args.command == "qa":
-        if args.qa_command == "list":
-            cmd_qa_list(args)
-        elif args.qa_command == "record":
-            cmd_qa_record(args)
         else:
+            _run_subcommand_handler(handler, args)
+    elif command == "qa":
+        handler = _QA_HANDLERS.get(args.qa_command)
+        if handler is None:
             parser.print_help()
-    elif args.command == "report":
-        cmd_report(args)
-    elif args.command == "serve":
-        cmd_serve(args)
+        else:
+            _run_subcommand_handler(handler, args)
+    elif command in _SIMPLE_HANDLERS:
+        _run_subcommand_handler(_SIMPLE_HANDLERS[command], args)
     else:
         parser.print_help()
 
