@@ -169,6 +169,14 @@ class GitReinsDefaults:
     commit_audit_review_score_threshold: float = 8.0
     commit_audit_review_score_offset: float = 1.0
 
+    # ── Commit review profiles + effort (GR-148) ──
+    commit_audit_review_profile: str = "standard"  # quick | standard | deep
+    commit_audit_review_effort: dict = field(default_factory=dict)
+    """Repo-default effort budget (commit_audit.review_effort in .gitreins
+    config). Keys: max_passes, max_llm_calls, max_tokens, time_budget_s,
+    max_tool_calls. Per-invocation override (CLI) takes precedence over this;
+    the profile default is the base."""
+
     # ── Update checking ──
     check_for_updates: bool = True
     update_check_ttl_hours: float = 24.0  # re-check after this many hours
@@ -345,6 +353,17 @@ class GitReinsDefaults:
                     "review_suggest_fix", self.commit_audit_review_suggest_fix
                 )
             ),
+            commit_audit_review_profile=str(
+                defaults.get("commit_audit", {}).get(
+                    "review_profile", self.commit_audit_review_profile
+                )
+            ),
+            commit_audit_review_effort=dict(
+                defaults.get("commit_audit", {}).get(
+                    "review_effort", self.commit_audit_review_effort
+                )
+                or {}
+            ),
             commit_audit_review_max_tokens=int(
                 defaults.get("commit_audit", {}).get(
                     "review_max_tokens", self.commit_audit_review_max_tokens
@@ -448,6 +467,8 @@ class GitReinsDefaults:
                 "review_max_tokens": self.commit_audit_review_max_tokens,
                 "review_score_threshold": self.commit_audit_review_score_threshold,
                 "review_score_offset": self.commit_audit_review_score_offset,
+                "review_profile": self.commit_audit_review_profile,
+                "review_effort": self.commit_audit_review_effort,
             },
             "check_for_updates": self.check_for_updates,
             "update_check_ttl": f"{int(self.update_check_ttl_hours)}h",
