@@ -94,7 +94,10 @@ class TestSerialization:
                 **os.environ,
                 "GITREINS_TIER1_REPO_ROOT": repo,
                 "PYTHONPATH": os.pathsep.join(
-                    filter(None, [os.path.dirname(os.path.dirname(__file__)), os.environ.get("PYTHONPATH")])
+                    filter(
+                        None,
+                        [os.path.dirname(os.path.dirname(__file__)), os.environ.get("PYTHONPATH")],
+                    )
                 ),
             },
             stdout=subprocess.PIPE,
