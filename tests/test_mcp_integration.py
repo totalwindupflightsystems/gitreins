@@ -14,6 +14,8 @@ import sys
 import tempfile
 
 import pytest
+from pathlib import Path
+from collections.abc import Iterator
 
 
 MCP_SERVER_SCRIPT = os.path.join(
@@ -23,7 +25,7 @@ MCP_SERVER_SCRIPT = os.path.join(
 )
 
 
-def _send_request(proc, request: dict) -> dict:
+def _send_request(proc: object, request: dict) -> dict:
     """Send a JSON-RPC request over stdio and read the response."""
     line = json.dumps(request) + "\n"
     proc.stdin.write(line)
@@ -34,7 +36,7 @@ def _send_request(proc, request: dict) -> dict:
     return json.loads(response_line)
 
 
-def _start_mcp_server(workdir: str):
+def _start_mcp_server(workdir: str) -> object:
     """Start an MCP server subprocess in the given workdir."""
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     env = os.environ.copy()
@@ -66,7 +68,7 @@ def _start_mcp_server(workdir: str):
 
 
 @pytest.fixture
-def tmp_git_repo():
+def tmp_git_repo() -> Iterator:
     """Create a temporary git repo with a .gitreins/tasks.yaml."""
     with tempfile.TemporaryDirectory() as d:
         # Init git
@@ -117,7 +119,7 @@ def tmp_git_repo():
 class TestMCPRealIntegration:
     """Real stdio MCP server tests — no mocks."""
 
-    def test_guard_run_scans_correct_repo(self, tmp_git_repo):
+    def test_guard_run_scans_correct_repo(self, tmp_git_repo: object) -> None:
         """BUG 3 fix: guard.run scans the target repo, not the MCP server's dir."""
         proc = _start_mcp_server(tmp_git_repo)
         try:
@@ -139,7 +141,7 @@ class TestMCPRealIntegration:
             proc.terminate()
             proc.wait(timeout=5)
 
-    def test_guard_run_without_config_returns_error(self, tmp_path):
+    def test_guard_run_without_config_returns_error(self, tmp_path: Path) -> None:
         """GR-GAP-054/AC1: a fresh git repo with no .gitreins/config.yaml gets
         an error naming `gitreins init` over real stdio — never a false green."""
         d = str(tmp_path / "bare-repo")
@@ -164,7 +166,7 @@ class TestMCPRealIntegration:
             proc.terminate()
             proc.wait(timeout=5)
 
-    def test_judge_evaluate_returns_valid_dict(self, tmp_git_repo):
+    def test_judge_evaluate_returns_valid_dict(self, tmp_git_repo: object) -> None:
         """BUG 1 fix: judge.evaluate returns dict with tier1/tier2 populated."""
         # Create and start the task
         proc = _start_mcp_server(tmp_git_repo)
@@ -194,7 +196,7 @@ class TestMCPRealIntegration:
             proc.terminate()
             proc.wait(timeout=5)
 
-    def test_tools_list_returns_all_9_tools(self, tmp_git_repo):
+    def test_tools_list_returns_all_9_tools(self, tmp_git_repo: object) -> None:
         """MCP server exposes all 9 tools."""
         proc = _start_mcp_server(tmp_git_repo)
         try:
@@ -219,7 +221,7 @@ class TestMCPRealIntegration:
             proc.terminate()
             proc.wait(timeout=5)
 
-    def test_task_roundtrip_create_start_complete(self, tmp_git_repo):
+    def test_task_roundtrip_create_start_complete(self, tmp_git_repo: object) -> None:
         """End-to-end task lifecycle: create → start → complete."""
         proc = _start_mcp_server(tmp_git_repo)
         try:
@@ -279,7 +281,7 @@ class TestMCPRealIntegration:
             proc.terminate()
             proc.wait(timeout=5)
 
-    def test_cross_repo_task_workdir(self, tmp_git_repo):
+    def test_cross_repo_task_workdir(self, tmp_git_repo: object) -> None:
         """Tasks with workdir land in the target repo, not the MCP server's dir."""
         if not os.getenv("GITREINS_LLM_API_KEY"):
             pytest.skip("GITREINS_LLM_API_KEY not set — LLM-dependent test")

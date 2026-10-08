@@ -22,7 +22,6 @@ import json
 import os
 import urllib.request
 import urllib.error
-from typing import Any
 
 
 # ── Flaw 1: file open without try/except — FileNotFoundError propagates ──────
@@ -43,7 +42,7 @@ def read_text_file(path: str) -> str:
 # ── Flaw 2: JSON parse without try/except — json.JSONDecodeError propagates ──
 
 
-def parse_json(text: str) -> Any:
+def parse_json(text: str) -> object:
     """Parse `text` as JSON and return the decoded value.
 
     FLAW: `json.loads(text)` raises json.JSONDecodeError on bad

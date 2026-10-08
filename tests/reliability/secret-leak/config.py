@@ -34,7 +34,7 @@ TWILIO_AUTH_TOKEN: str = "00000000000000000000000000000000"
 # ── Flaw 5: `password = "..."` inside an integration function ─────────────────
 
 
-def connect_to_smtp():
+def connect_to_smtp() -> object:
     """Return an SMTP connection object.
 
     FLAW: the username and password are baked into the function body

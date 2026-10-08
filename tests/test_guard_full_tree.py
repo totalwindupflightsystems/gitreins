@@ -34,6 +34,7 @@ import sys
 import pytest
 
 from engine.guard_manager import GuardManager, _tree_python_files
+from pathlib import Path
 
 SCRIPT_NAME = "probe_tests.py"
 MARKER_NAME = "tests_ran.marker"
@@ -55,7 +56,7 @@ def _git(workdir: str, *args: str) -> None:
     subprocess.run(["git", *args], cwd=workdir, capture_output=True, check=True, env=_git_env())
 
 
-def _scratch_repo(tmp_path, files: dict[str, str]) -> str:
+def _scratch_repo(tmp_path: Path, files: dict[str, str]) -> str:
     """A real git repo with *files* committed and a clean index."""
     workdir = tmp_path / "scratch"
     workdir.mkdir()
@@ -94,7 +95,7 @@ def _marker_test_config() -> dict:
 
 
 @pytest.fixture
-def ruff_on_path(monkeypatch):
+def ruff_on_path(monkeypatch: pytest.MonkeyPatch) -> object:
     """Pin the linter to the repo venv's ruff by putting its directory first
     on PATH. Fails loudly (no skip) when ruff is not installed — the forced
     lint tests must grade with a real linter, never silently no-op."""
@@ -109,7 +110,7 @@ def ruff_on_path(monkeypatch):
 
 
 class TestFullTreeTestsLane:
-    def test_full_tree_runs_test_command_with_empty_index(self, tmp_path):
+    def test_full_tree_runs_test_command_with_empty_index(self, tmp_path: Path) -> None:
         """grade_full_tree + nothing staged → the configured test_command
         executes (marker file appears) and the lane is not skipped."""
         workdir = _scratch_repo(tmp_path, {"pkg.py": "x = 1\n"})
@@ -123,7 +124,7 @@ class TestFullTreeTestsLane:
             "test_command never executed — marker file missing"
         )
 
-    def test_full_tree_runs_test_command_in_diff_mode_too(self, tmp_path):
+    def test_full_tree_runs_test_command_in_diff_mode_too(self, tmp_path: Path) -> None:
         """The whole-tree opt-in is independent of test_mode: --full may
         override a diff-mode config, and the clean tree must still run the
         full command instead of landing on the diff-mode skips."""
@@ -142,7 +143,9 @@ class TestFullTreeTestsLane:
 
 
 class TestFullTreeLintLane:
-    def test_full_tree_lints_tracked_files_when_nothing_staged(self, tmp_path, ruff_on_path):
+    def test_full_tree_lints_tracked_files_when_nothing_staged(
+        self, tmp_path: Path, ruff_on_path: object
+    ) -> None:
         """grade_full_tree + clean tree → ruff grades the tracked .py files
         and the output names the graded scope."""
         workdir = _scratch_repo(tmp_path, {"a.py": "x = 1\n", "b.py": "y = 2\n"})
@@ -154,7 +157,9 @@ class TestFullTreeLintLane:
         assert result.passed is True
         assert result.output == "ruff: clean (2 tracked files), format: clean (2 files)"
 
-    def test_full_tree_lints_untracked_non_ignored_files_too(self, tmp_path, ruff_on_path):
+    def test_full_tree_lints_untracked_non_ignored_files_too(
+        self, tmp_path: Path, ruff_on_path: object
+    ) -> None:
         """--others --exclude-standard semantics: an untracked, non-ignored
         .py file with a genuine finding is part of the graded tree."""
         workdir = _scratch_repo(tmp_path, {"a.py": "x = 1\n"})
@@ -169,7 +174,9 @@ class TestFullTreeLintLane:
         assert result.passed is False
         assert "F401" in result.output
 
-    def test_full_tree_clean_lint_output_names_scope_in_full_output(self, tmp_path, ruff_on_path):
+    def test_full_tree_clean_lint_output_names_scope_in_full_output(
+        self, tmp_path: Path, ruff_on_path: object
+    ) -> None:
         """The scope line survives into the run log's full output: raw ruff
         stdout is EMPTY on a clean tree, so without the prefix the log's
         evidence lookup would render an empty lint body and a post-mortem
@@ -182,7 +189,9 @@ class TestFullTreeLintLane:
         full_output = gm._full_outputs.get("lint", "")
         assert full_output.startswith("ruff: clean (2 tracked files)")
 
-    def test_full_tree_lint_fails_on_real_ruff_finding(self, tmp_path, ruff_on_path):
+    def test_full_tree_lint_fails_on_real_ruff_finding(
+        self, tmp_path: Path, ruff_on_path: object
+    ) -> None:
         """AC 5: the forced lane GRADES — a genuine ruff finding (F401,
         unused import) in a tracked file fails the lane. passed is False,
         not merely non-empty output."""
@@ -195,7 +204,9 @@ class TestFullTreeLintLane:
         assert result.skipped is False
         assert "F401" in result.output
 
-    def test_full_tree_lint_honest_skip_with_no_python_files(self, tmp_path, ruff_on_path):
+    def test_full_tree_lint_honest_skip_with_no_python_files(
+        self, tmp_path: Path, ruff_on_path: object
+    ) -> None:
         """A tree with no Python files at all keeps the honest skip — the
         linter is never invoked with an empty file list."""
         workdir = _scratch_repo(tmp_path, {"README.md": "# nothing to lint\n"})
@@ -206,7 +217,9 @@ class TestFullTreeLintLane:
         assert result.skipped is True
         assert result.skip_reason == "no staged files"
 
-    def test_staged_files_take_precedence_over_tree(self, tmp_path, ruff_on_path):
+    def test_staged_files_take_precedence_over_tree(
+        self, tmp_path: Path, ruff_on_path: object
+    ) -> None:
         """With a non-empty index the staged set is graded — not the whole
         tree. The committed-but-unstaged dirty file must NOT be graded."""
         workdir = _scratch_repo(tmp_path, {"committed_dirty.py": "import os\n"})
@@ -222,7 +235,7 @@ class TestFullTreeLintLane:
         assert result.passed is True
         assert result.output == "ruff: clean (1 tracked files), format: clean (1 files)"
 
-    def test_tree_python_files_helper_lists_tracked_plus_untracked(self, tmp_path):
+    def test_tree_python_files_helper_lists_tracked_plus_untracked(self, tmp_path: Path) -> None:
         """_tree_python_files mirrors lang_detect's listing: tracked +
         untracked-but-not-ignored .py files, deduped, nothing else."""
         workdir = _scratch_repo(tmp_path, {"a.py": "x = 1\n", "notes.md": "hi\n"})
@@ -257,7 +270,9 @@ class TestLintRespectsRepoRuffConfig:
     an explicit file list, so the whole-tree lint graded the repo's own
     deliberately-excluded scratch tree and could never go green."""
 
-    def test_full_tree_lint_does_not_grade_config_excluded_file(self, tmp_path, ruff_on_path):
+    def test_full_tree_lint_does_not_grade_config_excluded_file(
+        self, tmp_path: Path, ruff_on_path: object
+    ) -> None:
         """The tracked, config-excluded file carries a genuine F401; the lane
         must still be clean and must say the file was excluded, not graded."""
         workdir = _scratch_repo(
@@ -280,7 +295,9 @@ class TestLintRespectsRepoRuffConfig:
         )
         assert "1 excluded by config" in gm._full_outputs["lint"]
 
-    def test_full_tree_lint_still_grades_a_file_no_config_excludes(self, tmp_path, ruff_on_path):
+    def test_full_tree_lint_still_grades_a_file_no_config_excludes(
+        self, tmp_path: Path, ruff_on_path: object
+    ) -> None:
         """Control: an explicitly passed file the config does NOT exclude is
         still graded, so the fix cannot be 'nothing is ever linted'."""
         workdir = _scratch_repo(
@@ -301,8 +318,8 @@ class TestLintRespectsRepoRuffConfig:
         assert "sandbox/scratch.py" not in result.output
 
     def test_full_tree_lint_honest_skip_when_config_excludes_every_file(
-        self, tmp_path, ruff_on_path
-    ):
+        self, tmp_path: Path, ruff_on_path: object
+    ) -> None:
         """Every submitted file excluded → zero files graded. That is the
         TRUST-001 honest skip, never a clean lint pass."""
         workdir = _scratch_repo(
@@ -321,7 +338,9 @@ class TestLintRespectsRepoRuffConfig:
         assert "0 of 1 file(s) in scope" in result.output
         assert result.skip_reason == "all 1 file(s) excluded by ruff config"
 
-    def test_staged_lint_respects_config_excludes_too(self, tmp_path, ruff_on_path):
+    def test_staged_lint_respects_config_excludes_too(
+        self, tmp_path: Path, ruff_on_path: object
+    ) -> None:
         """Staged mode goes through the same file list — a staged excluded
         file is not graded either, matching a developer's local ruff."""
         workdir = _scratch_repo(
@@ -346,7 +365,9 @@ class TestLintRespectsRepoRuffConfig:
         assert "staged_clean.py" in result.output
         assert "sandbox/scratch.py" not in result.output
 
-    def test_ruff_scope_helper_reports_none_when_ruff_is_absent(self, tmp_path, monkeypatch):
+    def test_ruff_scope_helper_reports_none_when_ruff_is_absent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """An unresolvable scope must not be invented: with the binary off
         PATH the helper returns None and the caller falls back to the
         submitted list (the pre-existing missing-linter skip still applies)."""
@@ -362,7 +383,7 @@ class TestLintRespectsRepoRuffConfig:
 
 
 class TestDefaultManagerUnchanged:
-    def test_default_tests_lane_skips_on_clean_tree(self, tmp_path):
+    def test_default_tests_lane_skips_on_clean_tree(self, tmp_path: Path) -> None:
         """Without the opt-in, the same clean tree still produces the
         TRUST-001 skip from the tests lane."""
         workdir = _scratch_repo(tmp_path, {"pkg.py": "x = 1\n"})
@@ -376,7 +397,9 @@ class TestDefaultManagerUnchanged:
             "test_command must not run under default construction"
         )
 
-    def test_default_lint_lane_skips_on_clean_tree(self, tmp_path, ruff_on_path):
+    def test_default_lint_lane_skips_on_clean_tree(
+        self, tmp_path: Path, ruff_on_path: object
+    ) -> None:
         """Without the opt-in, the same clean tree still produces the
         TRUST-001 skip from the lint lane."""
         workdir = _scratch_repo(tmp_path, {"pkg.py": "x = 1\n"})
@@ -388,7 +411,7 @@ class TestDefaultManagerUnchanged:
         assert result.skip_reason == "no staged files"
         assert result.output == "No Python files staged"
 
-    def test_grade_full_tree_is_keyword_only(self):
+    def test_grade_full_tree_is_keyword_only(self) -> None:
         """The opt-in must not become a positional argument — every existing
         caller constructs GuardManager(workdir, config) and must keep
         working (and keep skipping) unchanged."""
@@ -404,7 +427,7 @@ class TestDefaultManagerUnchanged:
 
 
 class TestRunAllExtraFlag:
-    def test_run_all_extra_carries_grade_full_tree(self, tmp_path):
+    def test_run_all_extra_carries_grade_full_tree(self, tmp_path: Path) -> None:
         """run_all() exposes the opt-in through extra so the CLI can print
         the whole-tree mode note without re-deriving it."""
         workdir = _scratch_repo(tmp_path, {"pkg.py": "x = 1\n"})
@@ -422,7 +445,7 @@ class TestRunAllExtraFlag:
         assert off.extra["grade_full_tree"] is False
         assert on.extra["grade_full_tree"] is True
 
-    def test_log_scope_line_names_whole_tree(self, tmp_path):
+    def test_log_scope_line_names_whole_tree(self, tmp_path: Path) -> None:
         """The persisted run log's test_targets line distinguishes a
         whole-tree run from an ordinary full-mode run."""
         from engine.guard_manager import _log_test_scope

@@ -104,11 +104,17 @@ REMEDIATION_JSON = json.dumps(
 class FakeLLM:
     """Scripted LLM: returns queued responses in order, records calls."""
 
-    def __init__(self, responses):
+    def __init__(self, responses: object) -> None:
         self.responses = list(responses)
         self.calls = []
 
-    def chat(self, messages=None, tools=None, temperature=0.1, max_tokens=2048):
+    def chat(
+        self,
+        messages: list = None,
+        tools: object = None,
+        temperature: float = 0.1,
+        max_tokens: int = 2048,
+    ) -> object:
         self.calls.append({"messages": messages, "max_tokens": max_tokens})
         if not self.responses:
             raise RuntimeError("no scripted responses left")
@@ -124,51 +130,51 @@ DIFF = "diff --git a/src/a.py b/src/a.py\n+def f():\n+    return None.x\n"
 
 
 class TestProfiles:
-    def test_builtin_profiles_exist(self):
+    def test_builtin_profiles_exist(self) -> None:
         assert set(PROFILES) == {"quick", "standard", "deep"}
 
-    def test_quick_is_single_pass_high_impact(self):
+    def test_quick_is_single_pass_high_impact(self) -> None:
         assert QUICK.passes == ("findings",)
         assert QUICK.effort.max_passes == 1
         assert QUICK.severity_filter == "critical-only"
         assert not QUICK.checks["style"]
 
-    def test_standard_matches_default_behavior(self):
+    def test_standard_matches_default_behavior(self) -> None:
         assert STANDARD_is_standard() if False else True
         assert "findings" in PROFILES["standard"].passes
         assert PROFILES["standard"].severity_filter == "standard"
 
-    def test_deep_is_multi_pass(self):
+    def test_deep_is_multi_pass(self) -> None:
         assert DEEP.passes == ("findings", "estimates", "remediation")
         assert DEEP.effort.max_llm_calls >= 3
         assert DEEP.effort.time_budget_s > QUICK.effort.time_budget_s
 
-    def test_every_profile_has_hard_cap(self):
+    def test_every_profile_has_hard_cap(self) -> None:
         for p in PROFILES.values():
             assert p.effort.max_llm_calls > 0
             assert p.effort.time_budget_s > 0
             assert p.effort.max_tokens > 0
 
-    def test_unknown_profile_raises(self):
+    def test_unknown_profile_raises(self) -> None:
         with pytest.raises(ValueError):
             get_profile("ultra")
 
-    def test_none_profile_is_standard(self):
+    def test_none_profile_is_standard(self) -> None:
         assert get_profile(None).name == "standard"
 
 
 class TestEffortPrecedence:
-    def test_profile_default_when_no_other_layer(self):
+    def test_profile_default_when_no_other_layer(self) -> None:
         effort = resolve_effort(QUICK)
         assert effort.max_llm_calls == QUICK.effort.max_llm_calls
 
-    def test_repo_default_beats_profile(self):
+    def test_repo_default_beats_profile(self) -> None:
         effort = resolve_effort(QUICK, repo_default={"max_llm_calls": 5})
         assert effort.max_llm_calls == 5
         # untouched keys still come from the profile
         assert effort.max_tokens == QUICK.effort.max_tokens
 
-    def test_override_beats_repo_default(self):
+    def test_override_beats_repo_default(self) -> None:
         effort = resolve_effort(
             QUICK,
             repo_default={"max_llm_calls": 5},
@@ -177,7 +183,7 @@ class TestEffortPrecedence:
         assert effort.max_llm_calls == 2
         assert effort.time_budget_s == 30.0
 
-    def test_override_does_not_mutate_profile(self):
+    def test_override_does_not_mutate_profile(self) -> None:
         before = QUICK.effort.to_dict()
         resolve_effort(QUICK, override={"max_tokens": 9999})
         assert QUICK.effort.to_dict() == before
@@ -201,20 +207,20 @@ class TestSeverityCompat:
             ("observation", "info"),
         ],
     )
-    def test_mapping(self, sev, expected):
+    def test_mapping(self, sev: object, expected: object) -> None:
         assert compat_severity(sev) == expected
 
-    def test_nothing_maps_upward(self):
+    def test_nothing_maps_upward(self) -> None:
         for sev in compat_severity.__doc__ or "":
             pass  # documentation contract asserted via parametrized test above
         mapped = {s: compat_severity(s) for s in ("trivial", "info", "observation")}
         assert set(mapped.values()) <= {"info"}
 
-    def test_review_issue_compat(self):
+    def test_review_issue_compat(self) -> None:
         issue = ReviewIssue(file="a.py", line=1, severity="trivial", category="style", title="t")
         assert issue.compat_severity() == "info"
 
-    def test_unknown_severity_maps_to_info(self):
+    def test_unknown_severity_maps_to_info(self) -> None:
         assert compat_severity("bizarre") == "info"
 
 
@@ -224,11 +230,11 @@ class TestSeverityCompat:
 
 
 class TestPassSequencing:
-    def _auditor(self, responses, profile=None):
+    def _auditor(self, responses: object, profile: object = None) -> tuple:
         llm = FakeLLM(responses)
         return CommitAuditor(llm, workdir=".", review_profile=profile), llm
 
-    def test_quick_single_call_no_estimates(self):
+    def test_quick_single_call_no_estimates(self) -> None:
         auditor, llm = self._auditor([_resp(FINDINGS_JSON)], profile="quick")
         result = auditor.review("msg", DIFF)
         assert result.passes_run == ["findings"]
@@ -236,7 +242,7 @@ class TestPassSequencing:
         assert len(llm.calls) == 1
         assert result.profile == "quick"
 
-    def test_standard_two_passes(self):
+    def test_standard_two_passes(self) -> None:
         auditor, llm = self._auditor(
             [_resp(FINDINGS_JSON), _resp(ESTIMATES_JSON)], profile="standard"
         )
@@ -245,7 +251,7 @@ class TestPassSequencing:
         assert len(llm.calls) == 2
         assert not result.partial
 
-    def test_deep_three_passes_with_remediation(self):
+    def test_deep_three_passes_with_remediation(self) -> None:
         auditor, llm = self._auditor(
             [_resp(FINDINGS_JSON), _resp(ESTIMATES_JSON), _resp(REMEDIATION_JSON)],
             profile="deep",
@@ -255,7 +261,7 @@ class TestPassSequencing:
         assert result.remediation_brief is not None
         assert result.remediation_brief.steps
 
-    def test_remediation_pass_describes_never_modifies(self):
+    def test_remediation_pass_describes_never_modifies(self) -> None:
         auditor, _ = self._auditor(
             [_resp(FINDINGS_JSON), _resp(ESTIMATES_JSON), _resp(REMEDIATION_JSON)],
             profile="deep",
@@ -264,19 +270,19 @@ class TestPassSequencing:
         # The brief is data only — the auditor has no code-write path.
         assert isinstance(result.remediation_brief, RemediationBrief)
 
-    def test_no_issues_short_circuits_remaining_passes(self):
+    def test_no_issues_short_circuits_remaining_passes(self) -> None:
         clean = json.dumps({"valid": True, "summary": "No issues found."})
         auditor, llm = self._auditor([_resp(clean)], profile="deep")
         result = auditor.review("msg", DIFF)
         assert result.passes_run == ["findings"]
         assert not result.partial  # policy satisfied, not truncated
 
-    def test_per_invocation_profile_arg_wins(self):
+    def test_per_invocation_profile_arg_wins(self) -> None:
         auditor, _ = self._auditor([_resp(FINDINGS_JSON)], profile="standard")
         result = auditor.review("msg", DIFF, profile="quick")
         assert result.profile == "quick"
 
-    def test_llm_failure_marks_partial_not_silent(self):
+    def test_llm_failure_marks_partial_not_silent(self) -> None:
         auditor, _ = self._auditor([_resp(FINDINGS_JSON), RuntimeError("boom")], profile="standard")
         result = auditor.review("msg", DIFF)
         assert result.estimates == []
@@ -290,7 +296,7 @@ class TestPassSequencing:
 
 
 class TestBudgetLimits:
-    def test_llm_call_cap_returns_partial_with_reason(self):
+    def test_llm_call_cap_returns_partial_with_reason(self) -> None:
         # deep with an override allowing only 1 LLM call: findings run,
         # estimates are refused, result is partial with a named reason.
         auditor = CommitAuditor(FakeLLM([_resp(FINDINGS_JSON)]), workdir=".", review_profile="deep")
@@ -299,31 +305,31 @@ class TestBudgetLimits:
         assert result.partial
         assert "llm-call budget" in result.partial_reason
 
-    def test_partial_result_still_carries_pass1_findings(self):
+    def test_partial_result_still_carries_pass1_findings(self) -> None:
         auditor = CommitAuditor(FakeLLM([_resp(FINDINGS_JSON)]), workdir=".", review_profile="deep")
         result = auditor.review("msg", DIFF, effort_override={"max_llm_calls": 1})
         assert len(result.issues) == 2
         assert result.summary == "Two issues found."
 
-    def test_time_budget_exhaustion(self):
+    def test_time_budget_exhaustion(self) -> None:
         budget = BudgetState(
             effort=EffortLevel(max_passes=3, max_llm_calls=5, max_tokens=100, time_budget_s=-1.0)
         )
         assert "time budget" in budget.exhausted_reason()
 
-    def test_tool_budget_exhaustion(self):
+    def test_tool_budget_exhaustion(self) -> None:
         budget = BudgetState(
             effort=EffortLevel(max_llm_calls=5, time_budget_s=60.0, max_tool_calls=2), tool_calls=2
         )
         assert "tool-call budget" in budget.exhausted_reason()
 
-    def test_zero_tool_cap_means_unused_not_exhausted(self):
+    def test_zero_tool_cap_means_unused_not_exhausted(self) -> None:
         budget = BudgetState(
             effort=EffortLevel(max_llm_calls=5, time_budget_s=60.0, max_tool_calls=0)
         )
         assert budget.exhausted_reason() is None
 
-    def test_budget_not_exhausted_initially(self):
+    def test_budget_not_exhausted_initially(self) -> None:
         budget = BudgetState(effort=EffortLevel(max_llm_calls=3, time_budget_s=60.0))
         assert budget.exhausted_reason() is None
 
@@ -334,24 +340,24 @@ class TestBudgetLimits:
 
 
 class TestEstimates:
-    def test_estimate_fields(self):
+    def test_estimate_fields(self) -> None:
         est = FixEstimate.from_dict(json.loads(ESTIMATES_JSON)["estimates"][0])
         assert est.size == "S"
         assert est.confidence == "high"
         assert est.assumptions
         assert est.likely_tests
 
-    def test_unknown_estimate_carries_reason(self):
+    def test_unknown_estimate_carries_reason(self) -> None:
         est = FixEstimate.from_dict(json.loads(ESTIMATES_JSON)["estimates"][1])
         assert not est.size
         assert est.reason
 
-    def test_size_scale_constrained(self):
+    def test_size_scale_constrained(self) -> None:
         from engine.review_profiles import FIX_ESTIMATE_SIZES
 
         assert FIX_ESTIMATE_SIZES == ("XS", "S", "M", "L", "XL")
 
-    def test_estimate_matched_to_finding(self):
+    def test_estimate_matched_to_finding(self) -> None:
         auditor = CommitAuditor(
             FakeLLM([_resp(FINDINGS_JSON), _resp(ESTIMATES_JSON)]),
             workdir=".",
@@ -361,7 +367,7 @@ class TestEstimates:
         est = result.estimate_for(result.issues[0])
         assert est is not None and est.size == "S"
 
-    def test_result_never_claims_measured_durations(self):
+    def test_result_never_claims_measured_durations(self) -> None:
         auditor = CommitAuditor(
             FakeLLM([_resp(FINDINGS_JSON), _resp(ESTIMATES_JSON)]),
             workdir=".",
@@ -377,7 +383,7 @@ class TestEstimates:
 
 
 class TestRendering:
-    def _deep_result(self):
+    def _deep_result(self) -> object:
         auditor = CommitAuditor(
             FakeLLM([_resp(FINDINGS_JSON), _resp(ESTIMATES_JSON), _resp(REMEDIATION_JSON)]),
             workdir=".",
@@ -385,37 +391,37 @@ class TestRendering:
         )
         return auditor.review("msg", DIFF)
 
-    def test_human_renders_groups_and_counts(self):
+    def test_human_renders_groups_and_counts(self) -> None:
         text = self._deep_result().render_human()
         assert "Findings by severity: high=1, trivial=1" in text
         assert "[HIGH][bugs] src/a.py:10" in text
 
-    def test_human_shows_partial_reason(self):
+    def test_human_shows_partial_reason(self) -> None:
         auditor = CommitAuditor(FakeLLM([_resp(FINDINGS_JSON)]), workdir=".", review_profile="deep")
         result = auditor.review("msg", DIFF, effort_override={"max_llm_calls": 1})
         text = result.render_human()
         assert "PARTIAL REVIEW" in text
         assert "llm-call budget" in text
 
-    def test_structured_keeps_suggestion_field(self):
+    def test_structured_keeps_suggestion_field(self) -> None:
         d = self._deep_result().to_dict()
         issue = next(i for i in d["issues"] if i["file"] == "src/a.py" and i["line"] == 10)
         assert issue["suggestion"] == "Guard the None case."
 
-    def test_structured_persists_profile_effort_passes(self):
+    def test_structured_persists_profile_effort_passes(self) -> None:
         d = self._deep_result().to_dict()
         assert d["profile"] == "deep"
         assert d["effort"]["max_llm_calls"] == DEEP.effort.max_llm_calls
         assert d["passes_run"] == ["findings", "estimates", "remediation"]
         assert d["severity_counts"] == {"high": 1, "trivial": 1}
 
-    def test_structured_exposes_remediation_and_compat(self):
+    def test_structured_exposes_remediation_and_compat(self) -> None:
         d = self._deep_result().to_dict()
         assert d["remediation_brief"]["acceptance_checks"]
         trivial = next(i for i in d["issues"] if i["severity"] == "trivial")
         assert trivial["compat_severity"] == "info"
 
-    def test_severity_filtering(self):
+    def test_severity_filtering(self) -> None:
         result = self._deep_result()
         highs = result.issues_by_severity("high")
         assert [i.severity for i in highs] == ["high"]
@@ -427,18 +433,18 @@ class TestRendering:
 
 
 class TestCliSelection:
-    def _parser(self):
+    def _parser(self) -> object:
         return build_parser()
 
-    def test_commit_audit_accepts_review_profile(self):
+    def test_commit_audit_accepts_review_profile(self) -> None:
         args = self._parser().parse_args(["commit-audit", "--review-profile", "deep", "msg"])
         assert args.review_profile == "deep"
 
-    def test_commit_audit_rejects_unknown_profile(self):
+    def test_commit_audit_rejects_unknown_profile(self) -> None:
         with pytest.raises(SystemExit):
             self._parser().parse_args(["commit-audit", "--review-profile", "ultra", "msg"])
 
-    def test_commit_audit_accepts_repeatable_effort(self):
+    def test_commit_audit_accepts_repeatable_effort(self) -> None:
         args = self._parser().parse_args(
             [
                 "commit-audit",
@@ -451,30 +457,30 @@ class TestCliSelection:
         )
         assert args.review_effort == ["max_llm_calls=4", "time_budget_s=240"]
 
-    def test_override_dict_built_and_coerced(self):
+    def test_override_dict_built_and_coerced(self) -> None:
         from gitreins.cli import _parse_review_effort_flags
 
         parsed = _parse_review_effort_flags(["max_llm_calls=4", "time_budget_s=2.5"])
         assert parsed == {"max_llm_calls": 4, "time_budget_s": 2.5}
 
-    def test_invalid_effort_flag_exits(self):
+    def test_invalid_effort_flag_exits(self) -> None:
         with pytest.raises(SystemExit):
             _parse_review_effort_flags(["nonsense"])
 
 
-def STANDARD_is_standard():  # helper kept tiny for the standard-profile test
+def STANDARD_is_standard() -> bool:  # helper kept tiny for the standard-profile test
     return PROFILES["standard"].name == "standard"
 
 
 class TestAuditorProfileConfig:
-    def test_constructor_profile_sets_severity_and_checks(self):
+    def test_constructor_profile_sets_severity_and_checks(self) -> None:
         auditor = CommitAuditor(FakeLLM([]), workdir=".", review_profile="quick")
         assert auditor.review_profile.name == "quick"
         assert auditor.review_severity == "critical-only"
         assert auditor.review_checks["bugs"] is True
         assert auditor.review_checks["style"] is False
 
-    def test_profile_policy_severity_wins_over_default(self):
+    def test_profile_policy_severity_wins_over_default(self) -> None:
         """The severity filter is part of the profile POLICY: with the
         default ``standard`` severity arg, the profile's own filter applies
         (deep -> all, quick -> critical-only)."""
@@ -483,13 +489,13 @@ class TestAuditorProfileConfig:
         quick = CommitAuditor(FakeLLM([]), workdir=".", review_profile="quick")
         assert quick.review_severity == "critical-only"
 
-    def test_explicit_nonstandard_severity_wins(self):
+    def test_explicit_nonstandard_severity_wins(self) -> None:
         auditor = CommitAuditor(
             FakeLLM([]), workdir=".", review_profile="deep", review_severity="critical-only"
         )
         assert auditor.review_severity == "critical-only"
 
-    def test_effort_override_via_constructor(self):
+    def test_effort_override_via_constructor(self) -> None:
         auditor = CommitAuditor(
             FakeLLM([]),
             workdir=".",
@@ -498,7 +504,7 @@ class TestAuditorProfileConfig:
         )
         assert auditor.review_effort.max_tokens == 777
 
-    def test_findings_pass_uses_effort_max_tokens(self):
+    def test_findings_pass_uses_effort_max_tokens(self) -> None:
         auditor = CommitAuditor(
             FakeLLM([_resp(FINDINGS_JSON)]),
             workdir=".",
@@ -510,7 +516,7 @@ class TestAuditorProfileConfig:
 
 
 class TestRunReviewBridge:
-    def test_bridge_carries_gr148_fields(self):
+    def test_bridge_carries_gr148_fields(self) -> None:
         auditor = CommitAuditor(
             FakeLLM([_resp(FINDINGS_JSON), _resp(ESTIMATES_JSON)]),
             workdir=".",
@@ -525,7 +531,7 @@ class TestRunReviewBridge:
         # compat-mapped severity in legacy issue strings
         assert any("[info][" in line for line in audit_result.issues)
 
-    def test_legacy_issue_string_format_preserved_for_old_severities(self):
+    def test_legacy_issue_string_format_preserved_for_old_severities(self) -> None:
         result = CommitReviewResult(
             valid=False,
             issues=[

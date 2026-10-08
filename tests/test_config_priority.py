@@ -12,17 +12,18 @@ import os
 import yaml
 
 from engine.config import GitReinsDefaults, load_defaults, load_raw_config
+from pathlib import Path
 
 
 class TestConfigMissingFile:
     """load_config/load_raw_config returns {} on missing file (does not crash)."""
 
-    def test_load_raw_config_missing_returns_empty(self, tmp_path):
+    def test_load_raw_config_missing_returns_empty(self, tmp_path: Path) -> None:
         """load_raw_config returns {} when no .gitreins/config.yaml exists."""
         result = load_raw_config(str(tmp_path))
         assert result == {}
 
-    def test_load_raw_config_none_workdir(self):
+    def test_load_raw_config_none_workdir(self) -> None:
         """load_raw_config with None workdir returns {}."""
         result = load_raw_config(None)
         assert result == {}
@@ -31,7 +32,7 @@ class TestConfigMissingFile:
 class TestDefaultsSectionOverlaysBuiltins:
     """defaults: section in .gitreins/config.yaml overlays built-in GitReinsDefaults."""
 
-    def test_defaults_overlay_model(self, tmp_path):
+    def test_defaults_overlay_model(self, tmp_path: Path) -> None:
         """defaults.model overrides GitReinsDefaults.model."""
         config_dir = os.path.join(str(tmp_path), ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
@@ -42,7 +43,7 @@ class TestDefaultsSectionOverlaysBuiltins:
         gd = load_defaults(str(tmp_path))
         assert gd.model == "custom-model-v2"
 
-    def test_defaults_overlay_iterations(self, tmp_path):
+    def test_defaults_overlay_iterations(self, tmp_path: Path) -> None:
         """defaults.max_iterations overrides GitReinsDefaults.max_iterations."""
         config_dir = os.path.join(str(tmp_path), ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
@@ -53,7 +54,7 @@ class TestDefaultsSectionOverlaysBuiltins:
         gd = load_defaults(str(tmp_path))
         assert gd.max_iterations == 50.0
 
-    def test_defaults_partial_overlay(self, tmp_path):
+    def test_defaults_partial_overlay(self, tmp_path: Path) -> None:
         """Only specified keys in defaults: section override; others stay built-in."""
         config_dir = os.path.join(str(tmp_path), ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
@@ -66,7 +67,7 @@ class TestDefaultsSectionOverlaysBuiltins:
         assert gd.model == "deepseek-v4-flash"
         assert gd.max_input_tokens == 10_000_000
 
-    def test_missing_defaults_section_leaves_builtins(self, tmp_path):
+    def test_missing_defaults_section_leaves_builtins(self, tmp_path: Path) -> None:
         """Config file without defaults: section leaves built-in defaults intact."""
         config_dir = os.path.join(str(tmp_path), ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
@@ -83,7 +84,7 @@ class TestDefaultsSectionOverlaysBuiltins:
 class TestEvaluatorSectionOverridesDefaults:
     """evaluator: individual keys override defaults: section values."""
 
-    def test_evaluator_overrides_defaults_iterations(self, tmp_path):
+    def test_evaluator_overrides_defaults_iterations(self, tmp_path: Path) -> None:
         """evaluator.max_iterations overrides defaults.max_iterations."""
         config_dir = os.path.join(str(tmp_path), ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
@@ -101,7 +102,7 @@ class TestEvaluatorSectionOverridesDefaults:
             f"evaluator.max_iterations should override defaults, got {cap.max_iterations}"
         )
 
-    def test_evaluator_overrides_defaults_time(self, tmp_path):
+    def test_evaluator_overrides_defaults_time(self, tmp_path: Path) -> None:
         """evaluator.max_time overrides defaults.max_time."""
         config = {
             "defaults": {"max_time": "10m"},
@@ -113,7 +114,7 @@ class TestEvaluatorSectionOverridesDefaults:
         cap = eval_cap_from_config(config)
         assert cap.max_seconds == 1800.0
 
-    def test_no_evaluator_section_falls_back_to_defaults(self, tmp_path):
+    def test_no_evaluator_section_falls_back_to_defaults(self, tmp_path: Path) -> None:
         """Without evaluator: section, defaults: values are used."""
         config = {
             "defaults": {"max_iterations": 75, "max_time": "5m"},
@@ -125,7 +126,7 @@ class TestEvaluatorSectionOverridesDefaults:
         assert cap.max_iterations == 75.0
         assert cap.max_seconds == 300.0
 
-    def test_empty_evaluator_uses_defaults_and_builtins(self, tmp_path):
+    def test_empty_evaluator_uses_defaults_and_builtins(self, tmp_path: Path) -> None:
         """Empty evaluator section falls through to defaults, then built-ins."""
         config = {"evaluator": {}}
 
@@ -136,7 +137,7 @@ class TestEvaluatorSectionOverridesDefaults:
         assert cap.max_input_tokens == 10_000_000
         assert cap.max_output_tokens == 131_072
 
-    def test_evaluator_partial_override(self, tmp_path):
+    def test_evaluator_partial_override(self, tmp_path: Path) -> None:
         """Only specified evaluator keys override; others fall through to defaults."""
         config = {
             "defaults": {"max_iterations": 100, "max_time": "10m"},
@@ -149,7 +150,7 @@ class TestEvaluatorSectionOverridesDefaults:
         assert cap.max_iterations == 30.0
         assert cap.max_seconds == 600.0
 
-    def test_gitreinsdefaults_overlay_does_not_process_evaluator(self, tmp_path):
+    def test_gitreinsdefaults_overlay_does_not_process_evaluator(self, tmp_path: Path) -> None:
         """GitReinsDefaults.overlay() ignores evaluator: keys (they are handled later)."""
         config = {
             "defaults": {"max_iterations": 50},
@@ -164,7 +165,7 @@ class TestEvaluatorSectionOverridesDefaults:
 class TestExplicitConstructorWins:
     """Explicit EvalCap constructor params override all config values."""
 
-    def test_explicit_evalcap_overrides_config(self, tmp_path):
+    def test_explicit_evalcap_overrides_config(self, tmp_path: Path) -> None:
         """EvalCap object passed to AgenticEvaluator wins over config."""
         config_dir = os.path.join(str(tmp_path), ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
@@ -185,7 +186,7 @@ class TestExplicitConstructorWins:
         # The explicit cap should remain at 10
         assert cap.max_iterations == 10.0
 
-    def test_agentic_evaluator_explicit_evalcap_wins(self, tmp_path):
+    def test_agentic_evaluator_explicit_evalcap_wins(self, tmp_path: Path) -> None:
         """AgenticEvaluator with explicit eval_cap=EvalCap uses it, not config."""
         config_dir = os.path.join(str(tmp_path), ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
@@ -207,7 +208,7 @@ class TestExplicitConstructorWins:
             f"Explicit EvalCap should override config, got {evaluator.eval_cap.max_iterations}"
         )
 
-    def test_agentic_evaluator_explicit_string_wins(self, tmp_path):
+    def test_agentic_evaluator_explicit_string_wins(self, tmp_path: Path) -> None:
         """AgenticEvaluator with explicit eval_cap string wins over config."""
         config_dir = os.path.join(str(tmp_path), ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
@@ -225,7 +226,7 @@ class TestExplicitConstructorWins:
         evaluator = AgenticEvaluator(llm, workdir=str(tmp_path), eval_cap="10")
         assert evaluator.eval_cap.max_iterations == 10.0
 
-    def test_agentic_evaluator_max_iterations_positive_wins(self, tmp_path):
+    def test_agentic_evaluator_max_iterations_positive_wins(self, tmp_path: Path) -> None:
         """AgenticEvaluator with explicit max_iterations=5 wins over config."""
         config_dir = os.path.join(str(tmp_path), ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
@@ -243,7 +244,7 @@ class TestExplicitConstructorWins:
         evaluator = AgenticEvaluator(llm, workdir=str(tmp_path), max_iterations=5)
         assert evaluator.eval_cap.max_iterations == 5.0
 
-    def test_no_explicit_params_uses_config(self, tmp_path):
+    def test_no_explicit_params_uses_config(self, tmp_path: Path) -> None:
         """AgenticEvaluator with no explicit params reads config.yaml properly."""
         config_dir = os.path.join(str(tmp_path), ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
