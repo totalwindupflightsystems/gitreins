@@ -576,7 +576,7 @@ class AgenticEvaluator:
         try:
             # Staged changes
             staged = subprocess.run(
-                ["git", "diff", "--cached", "--name-only"],
+                ["git", "diff", "--cached", "--name-only"],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -587,7 +587,7 @@ class AgenticEvaluator:
                     changed_files.add(line)
             # Unstaged changes
             unstaged = subprocess.run(
-                ["git", "diff", "--name-only"],
+                ["git", "diff", "--name-only"],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -603,7 +603,7 @@ class AgenticEvaluator:
         # dropped — a board JSONL hunk can be hundreds of KB on its own.
         try:
             diff_result = subprocess.run(
-                ["git", "diff", "HEAD"],
+                ["git", "diff", "HEAD"],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -744,7 +744,7 @@ class AgenticEvaluator:
 
         try:
             head = subprocess.run(
-                ["git", "log", "-1", "--format=%H %s"],
+                ["git", "log", "-1", "--format=%H %s"],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -753,7 +753,7 @@ class AgenticEvaluator:
             if head.returncode != 0 or not head.stdout.strip():
                 return ""
             stat = subprocess.run(
-                ["git", "show", "--stat", "--format=", "HEAD"],
+                ["git", "show", "--stat", "--format=", "HEAD"],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -1861,14 +1861,14 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         """Show git diff."""
         try:
             staged = subprocess.run(
-                ["git", "diff", "--cached", "--stat"],
+                ["git", "diff", "--cached", "--stat"],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=10,
                 cwd=self.workdir,
             )
             unstaged = subprocess.run(
-                ["git", "diff", "--stat"],
+                ["git", "diff", "--stat"],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -2093,7 +2093,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             import subprocess as _sp
 
             result = _sp.run(
-                ["skylos", self.workdir, "--format", "json", "--no-grep-verify"],
+                ["skylos", self.workdir, "--format", "json", "--no-grep-verify"],  # noqa: S607 - skylos is a user-installed tool resolved via PATH
                 capture_output=True,
                 text=True,
                 timeout=120,

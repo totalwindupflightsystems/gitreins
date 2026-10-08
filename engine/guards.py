@@ -72,7 +72,7 @@ def _data_protection_scope(workdir: str, changed_files: list[str] | None) -> lis
     """
     if changed_files is None:
         staged = subprocess.run(
-            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],  # noqa: S607 - git resolved via PATH by design
             capture_output=True,
             text=True,
             timeout=10,
@@ -355,7 +355,7 @@ def _changed_go_files(workdir: str, changed_files: list[str] | None) -> list[str
     """
     if changed_files is None:
         staged = subprocess.run(
-            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],  # noqa: S607 - git resolved via PATH by design
             capture_output=True,
             text=True,
             timeout=10,

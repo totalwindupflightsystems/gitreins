@@ -431,7 +431,7 @@ class VerdictPersister:
         """
         try:
             result = subprocess.run(
-                ["git", "ls-tree", "-r", "--name-only", ref, "--", prefix],
+                ["git", "ls-tree", "-r", "--name-only", ref, "--", prefix],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -468,7 +468,7 @@ class VerdictPersister:
         """Parse one verdict.json off *ref*; None when it cannot be read."""
         try:
             show = subprocess.run(
-                ["git", "show", f"{ref}:{path}"],
+                ["git", "show", f"{ref}:{path}"],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -867,7 +867,7 @@ class VerdictPersister:
         parent a history entry.
         """
         result = subprocess.run(
-            ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+            ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],  # noqa: S607 - git resolved via PATH by design
             capture_output=True,
             text=True,
             timeout=10,
@@ -891,7 +891,7 @@ class VerdictPersister:
         history was not written.
         """
         result = subprocess.run(
-            ["git", *args],
+            ["git", *args],  # noqa: S607 - git resolved via PATH by design
             capture_output=True,
             text=True,
             timeout=30,
@@ -995,7 +995,7 @@ def build_verdict_data(workdir: str, task: Task, result: JudgeResult) -> dict:
     source_commit = ""
     try:
         commit_result = subprocess.run(
-            ["git", "rev-parse", "--verify", "HEAD"],
+            ["git", "rev-parse", "--verify", "HEAD"],  # noqa: S607 - git resolved via PATH by design
             capture_output=True,
             text=True,
             cwd=workdir,

@@ -1395,7 +1395,7 @@ class CommitAuditor:
         """Capture the staged diff from git."""
         try:
             result = subprocess.run(
-                ["git", "diff", "--cached"],
+                ["git", "diff", "--cached"],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=60,
@@ -1405,7 +1405,7 @@ class CommitAuditor:
                 return result.stdout
             # No HEAD yet — try diff against empty tree
             result = subprocess.run(
-                ["git", "diff", "--cached", "4b825dc642cb6eb9a060e54bf899d92e65bfb3a0"],
+                ["git", "diff", "--cached", "4b825dc642cb6eb9a060e54bf899d92e65bfb3a0"],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=60,
@@ -1416,7 +1416,7 @@ class CommitAuditor:
             # Fallback: list all staged files
             try:
                 result = subprocess.run(
-                    ["git", "diff", "--cached", "--stat"],
+                    ["git", "diff", "--cached", "--stat"],  # noqa: S607 - git resolved via PATH by design
                     capture_output=True,
                     text=True,
                     timeout=60,
@@ -1471,7 +1471,7 @@ class CommitAuditor:
         """Generate a minimal commit message from diff stats (no LLM)."""
         try:
             result = subprocess.run(
-                ["git", "diff", "--cached", "--stat"],
+                ["git", "diff", "--cached", "--stat"],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=60,

@@ -256,7 +256,7 @@ def _git_files(workdir: str) -> list[str] | None:
     env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
     try:
         top = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
+            ["git", "rev-parse", "--show-toplevel"],  # noqa: S607 - git resolved via PATH by design
             cwd=workdir,
             capture_output=True,
             text=True,
@@ -268,7 +268,7 @@ def _git_files(workdir: str) -> list[str] | None:
         if os.path.realpath(top.stdout.strip()) != os.path.realpath(workdir):
             return None
         proc = subprocess.run(
-            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],  # noqa: S607 - git resolved via PATH by design
             cwd=workdir,
             capture_output=True,
             timeout=15,

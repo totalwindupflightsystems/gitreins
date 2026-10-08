@@ -131,7 +131,7 @@ def _read_tail_bytes(path: str, cap: int) -> tuple[bytes, int] | None:
 def _run_git(workdir: str, args: list[str], cap: int) -> str:
     try:
         result = subprocess.run(
-            ["git", *args],
+            ["git", *args],  # noqa: S607 - git resolved via PATH by design
             cwd=workdir,
             capture_output=True,
             text=True,

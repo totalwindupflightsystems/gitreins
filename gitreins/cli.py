@@ -323,7 +323,7 @@ def get_workdir() -> str:
 
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
+            ["git", "rev-parse", "--show-toplevel"],  # noqa: S607 - git resolved via PATH by design
             capture_output=True,
             text=True,
             timeout=5,
@@ -578,7 +578,7 @@ def cmd_init(args: argparse.Namespace) -> None:
     # detached worktrees, so resolve Git's common hooks path instead of
     # assuming a directory under the checkout.
     hooks_result = subprocess.run(
-        ["git", "-C", workdir, "rev-parse", "--git-path", "hooks"],
+        ["git", "-C", workdir, "rev-parse", "--git-path", "hooks"],  # noqa: S607 - git resolved via PATH by design
         capture_output=True,
         text=True,
         check=False,
@@ -1700,7 +1700,7 @@ def _task_complete_scan_root(control_root: str, requested: str | None) -> str:
         )
     try:
         result = subprocess.run(
-            ["git", "rev-parse", "--show-toplevel"],
+            ["git", "rev-parse", "--show-toplevel"],  # noqa: S607 - git resolved via PATH by design
             cwd=cwd,
             capture_output=True,
             text=True,
@@ -1726,7 +1726,7 @@ def _task_complete_lease(task_id: str, control_root: str, scan_root: str) -> Ite
 
     def revision(path: str) -> str:
         result = subprocess.run(
-            ["git", "-C", path, "rev-parse", "HEAD"],
+            ["git", "-C", path, "rev-parse", "HEAD"],  # noqa: S607 - git resolved via PATH by design
             capture_output=True,
             text=True,
             timeout=5,
@@ -2207,7 +2207,7 @@ def _persist_result(workdir: str, task: Task, result: JudgeResult) -> None:
             source_commit = ""
             try:
                 commit_result = subprocess.run(
-                    ["git", "rev-parse", "--verify", "HEAD"],
+                    ["git", "rev-parse", "--verify", "HEAD"],  # noqa: S607 - git resolved via PATH by design
                     capture_output=True,
                     text=True,
                     cwd=workdir,
@@ -3141,7 +3141,7 @@ def _git_nul_paths(workdir: str, *args: str) -> set[bytes]:
     spaces, newlines, and non-UTF-8 filenames cannot corrupt the path set.
     """
     result = subprocess.run(
-        ["git", *args],
+        ["git", *args],  # noqa: S607 - git resolved via PATH by design
         capture_output=True,
         cwd=workdir,
     )
@@ -3172,7 +3172,7 @@ def _working_tree_is_clean(workdir: str) -> bool:
     tree means the user forgot `git add`.
     """
     result = subprocess.run(
-        ["git", "status", "--porcelain"],
+        ["git", "status", "--porcelain"],  # noqa: S607 - git resolved via PATH by design
         capture_output=True,
         cwd=workdir,
     )
@@ -3185,7 +3185,7 @@ def _working_tree_is_clean(workdir: str) -> bool:
 def _git_head(workdir: str) -> bytes | None:
     """Return HEAD's object ID, or None for a repository with no commits."""
     result = subprocess.run(
-        ["git", "rev-parse", "--verify", "HEAD"],
+        ["git", "rev-parse", "--verify", "HEAD"],  # noqa: S607 - git resolved via PATH by design
         capture_output=True,
         cwd=workdir,
     )
@@ -3298,7 +3298,7 @@ def cmd_commit(args: argparse.Namespace) -> None:
     else:
         print("Tier 1 PASSED — committing...")
     result = subprocess.run(
-        ["git", "commit", "-m", args.message],
+        ["git", "commit", "-m", args.message],  # noqa: S607 - git resolved via PATH by design
         capture_output=True,
         text=True,
         cwd=workdir,
