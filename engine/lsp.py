@@ -13,7 +13,7 @@ import select
 import shutil
 import subprocess
 import urllib.parse
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from engine import scanner_nice
@@ -200,8 +200,8 @@ def _lsp_read_response(proc: subprocess.Popen, timeout: float = 60.0) -> dict | 
     (GR-138): a dead server must never hold the init/diagnostics
     channel for the full timeout.
     """
-    import time as _time
     import os as _os
+    import time as _time
 
     deadline = _time.monotonic() + timeout
 
@@ -400,7 +400,7 @@ def _lsp_initialize(proc: subprocess.Popen, workdir: str, timeout: float = 60.0)
 def _lsp_did_open(proc: subprocess.Popen[bytes], filepath: str, language_id: str) -> None:
     file_uri = Path(filepath).as_uri()
     try:
-        with open(filepath, "r", errors="replace") as f:
+        with open(filepath, errors="replace") as f:
             text = f.read()
     except Exception:
         text = ""
@@ -433,7 +433,7 @@ def _lsp_did_change(proc: subprocess.Popen[bytes], filepath: str, version: int =
     """
     file_uri = Path(filepath).as_uri()
     try:
-        with open(filepath, "r", errors="replace") as f:
+        with open(filepath, errors="replace") as f:
             text = f.read()
     except Exception:
         text = ""
@@ -687,26 +687,29 @@ def run_lsp_check_status(
                 status.probe_method,
                 ready_timeout,
             )
-            if not published and recheck_after < timeout_per_file:
+            if (
+                not published
+                and recheck_after < timeout_per_file
+                and _lsp_did_change(proc, filepath)
+            ):
                 # The server never reported on this file.  Re-send the same
                 # content as a change to force the check (INT-FLAKE-4: a
                 # didOpen that landed before the snapshot existed otherwise
                 # never produces diagnostics, while the same content as a
                 # didChange publishes in ~0.01 s).
-                if _lsp_did_change(proc, filepath):
-                    status.rechecks += 1
-                    more, probe_seconds_2, published_2 = _collect_diagnostics(
-                        proc,
-                        filepath,
-                        max(1.0, timeout_per_file - first_phase),
-                        tool,
-                        None,  # the readiness probe was already sent for this file
-                        ready_timeout,
-                    )
-                    diags.extend(more)
-                    published = published or published_2
-                    if probe_seconds is None:
-                        probe_seconds = probe_seconds_2
+                status.rechecks += 1
+                more, probe_seconds_2, published_2 = _collect_diagnostics(
+                    proc,
+                    filepath,
+                    max(1.0, timeout_per_file - first_phase),
+                    tool,
+                    None,  # the readiness probe was already sent for this file
+                    ready_timeout,
+                )
+                diags.extend(more)
+                published = published or published_2
+                if probe_seconds is None:
+                    probe_seconds = probe_seconds_2
             all_diagnostics.extend(diags)
             status.published = status.published and published
             if not published:

@@ -263,7 +263,7 @@ class AntaresScanner:
         findings: list[AntaresFinding] = []
         rel = self._relpath(filepath)
         try:
-            with open(filepath, "r", errors="replace") as f:
+            with open(filepath, errors="replace") as f:
                 source = f.read()
         except (FileNotFoundError, PermissionError, IsADirectoryError, OSError) as exc:
             logger.debug("Antares: cannot read %s: %s", filepath, exc)
@@ -475,7 +475,7 @@ class AntaresScanner:
 
         # Read the file up front; both code paths need the contents.
         try:
-            with open(filepath, "r", errors="replace") as f:
+            with open(filepath, errors="replace") as f:
                 source = f.read()
         except (FileNotFoundError, PermissionError, IsADirectoryError, OSError) as exc:
             logger.debug("Antares: cannot read %s: %s", filepath, exc)

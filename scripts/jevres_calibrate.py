@@ -84,8 +84,8 @@ from engine import resolution  # noqa: E402  (path set above, deliberately)
 from engine.resolution import (  # noqa: E402
     RESOLVED_AT,
     REVIEW_AT,
-    ResolutionVerdict,
     VERDICT_RESOLVED,
+    ResolutionVerdict,
     band_for,
 )
 
@@ -698,10 +698,13 @@ def apply_records(cases: list[CorpusCase], records: dict[str, dict[str, Any]]) -
     for case in cases:
         row = records.get(case.id) or {}
         probability = row.get("probability")
-        if isinstance(probability, (int, float)) and not isinstance(probability, bool):
-            if 0.0 <= float(probability) <= 1.0:
-                case.mock_noul = float(probability)
-                applied.append(case.id)
+        if (
+            isinstance(probability, (int, float))
+            and not isinstance(probability, bool)
+            and 0.0 <= float(probability) <= 1.0
+        ):
+            case.mock_noul = float(probability)
+            applied.append(case.id)
         model = row.get("model")
         if isinstance(model, str) and model:
             case.model = model

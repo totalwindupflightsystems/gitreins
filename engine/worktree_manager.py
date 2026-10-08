@@ -40,12 +40,12 @@ import re
 import subprocess
 import threading
 import time
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
-from typing import Callable, Iterator
 
 # Task IDs become path components and branch names.  Keep the shape strict:
 # letters, digits, hyphen, underscore, dot — no separators, no traversal.
@@ -145,7 +145,7 @@ class WorktreeRecord:
         return data
 
     @classmethod
-    def from_dict(cls, data: dict) -> "WorktreeRecord":
+    def from_dict(cls, data: dict) -> WorktreeRecord:
         return cls(
             task_id=str(data["task_id"]),
             path=str(data["path"]),
@@ -304,10 +304,7 @@ def _matches_exemption(path: str, names: tuple[str, ...]) -> bool:
     (``.venv``) but a regenerated real directory as one entry per file
     (``.venv/bin/python``), so both shapes have to be recognised.
     """
-    for name in names:
-        if path == name or path.startswith(f"{name}/"):
-            return True
-    return False
+    return any(path == name or path.startswith(f"{name}/") for name in names)
 
 
 def disk_verdict_path(tree: str | os.PathLike[str]) -> Path:
@@ -1223,9 +1220,12 @@ class WorktreeManager:
     def _fresh_verdict(
         self, task_id: str, record: WorktreeRecord, source_head: str, fresh: object
     ) -> dict | None:
-        if isinstance(fresh, dict) and fresh.get("passed") is True:
-            if fresh.get("commit", fresh.get("source_commit")) == source_head:
-                return fresh
+        if (
+            isinstance(fresh, dict)
+            and fresh.get("passed") is True
+            and fresh.get("commit", fresh.get("source_commit")) == source_head
+        ):
+            return fresh
         return self._find_verdict(task_id, record, source_head)
 
     @staticmethod

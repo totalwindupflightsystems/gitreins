@@ -51,8 +51,8 @@ import logging
 import os
 import shutil
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
-from typing import Mapping
 
 logger = logging.getLogger("gitreins.scanner_nice")
 

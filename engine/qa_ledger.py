@@ -46,9 +46,10 @@ import json
 import os
 import subprocess
 import sys
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any, Iterator
+from typing import Any
 
 from engine.config import load_raw_config
 from engine.version import __version__
@@ -395,15 +396,12 @@ def _ledger_lock(path: str) -> Iterator[None]:
     if fcntl is None:  # pragma: no cover - platform dependent
         yield
         return
-    handle = open(path, "a+", encoding="utf-8")
-    try:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        yield
-    finally:
+    with open(path, "a+", encoding="utf-8") as handle:
         try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            yield
         finally:
-            handle.close()
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _prune(path: str, max_entries: int) -> int:

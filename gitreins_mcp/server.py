@@ -16,14 +16,8 @@ import sys
 import threading
 import time
 
-from engine.version import __version__
-from engine.task_manager import TaskManager
-from engine.judge import Judge, judge_result_to_dict
-from engine.llm import LLMClient
-from engine.guard_manager import GuardManager
 from engine.eval_cap import EvalCap
-from engine.propagate import Propagator
-from engine.resolution import resolution_config, resolve as resolve_question
+from engine.guard_manager import GuardManager
 from engine.job_store import (
     acquire_resume_lease,
     cap_from_dict,
@@ -36,6 +30,13 @@ from engine.job_store import (
     release_resume_lease,
     save_job,
 )
+from engine.judge import Judge, judge_result_to_dict
+from engine.llm import LLMClient
+from engine.propagate import Propagator
+from engine.resolution import resolution_config
+from engine.resolution import resolve as resolve_question
+from engine.task_manager import TaskManager
+from engine.version import __version__
 from gitreins.cli import DEFAULT_GITREINS_CONFIG
 
 # DF-GITREINS-POC-78: wall-clock ceiling for background evaluation jobs whose
@@ -688,7 +689,7 @@ class GitReinsMCPServer:
             }
         config: dict[str, object] = {}
         try:
-            with open(config_path, "r") as f:
+            with open(config_path) as f:
                 config = yaml.safe_load(f) or {}
         except Exception:
             pass
@@ -1222,7 +1223,7 @@ class GitReinsMCPServer:
         the model, the token ceiling and the band thresholds — an explicit
         *budget* still overrides the ceiling for one call.
         """
-        from engine.resolution import ResolutionVerdict, VERDICT_ABSTAIN, surface_enabled
+        from engine.resolution import VERDICT_ABSTAIN, ResolutionVerdict, surface_enabled
 
         cfg = resolution_config(self.workdir)
         enabled, reason = surface_enabled("mcp", workdir=self.workdir, defaults=cfg)

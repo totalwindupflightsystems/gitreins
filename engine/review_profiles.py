@@ -75,14 +75,14 @@ class EffortLevel:
         }
 
     @classmethod
-    def from_dict(cls, d: dict | None) -> "EffortLevel":
+    def from_dict(cls, d: dict | None) -> EffortLevel:
         if not d:
             return cls()
         known = {f for f in cls.__dataclass_fields__ if f != "label"}
         kwargs = {k: v for k, v in d.items() if k in known and v is not None}
         return cls(label=str(d.get("label", "custom")), **kwargs)
 
-    def merged(self, override: dict | None) -> "EffortLevel":
+    def merged(self, override: dict | None) -> EffortLevel:
         """Return a copy with per-invocation overrides applied (highest precedence)."""
         if not override:
             return self

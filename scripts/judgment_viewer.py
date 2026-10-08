@@ -20,6 +20,7 @@ import json
 import os
 import sqlite3
 import sys
+from contextlib import suppress
 
 try:
     from engine.repo_paths import board_file_path
@@ -44,7 +45,8 @@ def load_verdicts(repo):
             if not os.path.isfile(vpath):
                 continue
             try:
-                v = json.load(open(vpath))
+                with open(vpath) as fh:
+                    v = json.load(fh)
             except Exception:
                 continue
             stages = v.get("stages") or {}
@@ -105,31 +107,30 @@ def load_events(repo):
     path = board_file_path(repo, "events.jsonl")
     evs = []
     if os.path.isfile(path):
-        for line in open(path):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                e = json.loads(line)
-            except Exception:
-                continue
-            detail = {}
-            try:
-                detail = json.loads(e.get("detail") or "{}")
-            except Exception:
-                pass
-            evs.append(
-                {
-                    "id": e.get("id"),
-                    "ts": e.get("timestamp", ""),
-                    "type": e.get("event_type", "?"),
-                    "task": e.get("task_id") or "",
-                    "actor": e.get("actor") or "",
-                    "commit": (detail.get("commit") or "")[:8],
-                    "tick": detail.get("tick"),
-                    "verdict": detail.get("verdict") or "",
-                }
-            )
+        with open(path) as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    e = json.loads(line)
+                except Exception:
+                    continue
+                detail = {}
+                with suppress(Exception):
+                    detail = json.loads(e.get("detail") or "{}")
+                evs.append(
+                    {
+                        "id": e.get("id"),
+                        "ts": e.get("timestamp", ""),
+                        "type": e.get("event_type", "?"),
+                        "task": e.get("task_id") or "",
+                        "actor": e.get("actor") or "",
+                        "commit": (detail.get("commit") or "")[:8],
+                        "tick": detail.get("tick"),
+                        "verdict": detail.get("verdict") or "",
+                    }
+                )
     return evs
 
 
@@ -137,19 +138,20 @@ def load_tasks(repo):
     path = board_file_path(repo, "tasks.jsonl")
     tasks = {}
     if os.path.isfile(path):
-        for line in open(path):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                t = json.loads(line)
-            except Exception:
-                continue
-            tasks[t.get("id")] = {
-                "title": t.get("title", ""),
-                "status": t.get("status", "?"),
-                "priority": t.get("priority", ""),
-            }
+        with open(path) as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    t = json.loads(line)
+                except Exception:
+                    continue
+                tasks[t.get("id")] = {
+                    "title": t.get("title", ""),
+                    "status": t.get("status", "?"),
+                    "priority": t.get("priority", ""),
+                }
     return tasks
 
 
@@ -168,7 +170,7 @@ def load_ticks(name="gitreins"):
     except Exception:
         return []
     keys = ["id", "spawned_at", "status", "outcome", "commits", "files", "cost", "error"]
-    return [dict(zip(keys, r)) for r in rows]
+    return [dict(zip(keys, r, strict=False)) for r in rows]
 
 
 TEMPLATE = """<!DOCTYPE html>

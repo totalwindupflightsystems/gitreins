@@ -53,15 +53,14 @@ import shlex
 import subprocess
 import sys
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from engine import lang_detect
-from engine import command_hygiene
-from engine import scanner_nice
+from engine import command_hygiene, lang_detect, scanner_nice
 from engine.evidence_bounds import (
-    MAX_STEP_EVIDENCE_CHARS,  # noqa: F401 — re-exported for this module's callers/tests
     _ERROR_TEST_LINE,
+    MAX_STEP_EVIDENCE_CHARS,  # noqa: F401 — re-exported for this module's callers/tests
     _bound_step_evidence,
 )
 from engine.guard_manager import (
@@ -78,7 +77,6 @@ from engine.types import (
     pytest_outcome,
     strip_ansi,
 )
-from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     pass
@@ -976,13 +974,13 @@ class Pipeline:
             else:
                 self._llm = LLMClient()
 
-        from engine.evaluator import AgenticEvaluator
         from engine.eval_cap import (
             EvalCap,
             _parse_time,
             _parse_tokens,
             eval_cap_from_config,
         )
+        from engine.evaluator import AgenticEvaluator
 
         # Cap resolution: config.yaml evaluator: section is the base;
         # caps EXPLICITLY set in the step config override it. A step that
@@ -1197,13 +1195,13 @@ class Pipeline:
             max_iterations=config.get("max_iterations", 3),
             suggest_message=config.get("suggest_message", True),
             review_mode=config.get("review_mode", "message"),
-            review_checks=config.get("review_checks", None),
+            review_checks=config.get("review_checks"),
             review_severity=config.get("review_severity", "standard"),
             review_suggest_fix=config.get("review_suggest_fix", True),
             review_score_threshold=score_threshold,
             review_score_offset=score_offset,
             review_profile=config.get("review_profile", "standard"),
-            review_effort_override=task_review_effort_override or config.get("review_effort", None),
+            review_effort_override=task_review_effort_override or config.get("review_effort"),
         )
 
         message = task.get("commit_message", "")
@@ -1212,7 +1210,7 @@ class Pipeline:
             msg_path = os.path.join(self.workdir, ".git", "COMMIT_EDITMSG")
             if os.path.exists(msg_path):
                 try:
-                    with open(msg_path, "r") as f:
+                    with open(msg_path) as f:
                         raw = f.read().strip()
                     # Strip comment lines
                     message = "\n".join(
@@ -1358,7 +1356,7 @@ class Pipeline:
         config_path = os.path.join(self.workdir, ".gitreins", "config.yaml")
         if os.path.exists(config_path):
             try:
-                with open(config_path, "r") as f:
+                with open(config_path) as f:
                     cfg = yaml.safe_load(f) or {}
                 merged: dict = {}
                 defaults_cfg = cfg.get("defaults", {}).get("commit_audit", {}) or {}
@@ -1925,7 +1923,7 @@ def load_pipeline_config(workdir: str = ".", scan_root: str | None = None) -> di
         }
 
     try:
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             config = yaml.safe_load(f) or {}
         # Fix YAML 1.1 boolean-key pitfall: unquoted ``on:`` / ``off:``
         # are parsed as ``True:`` / ``False:`` and break key lookups.

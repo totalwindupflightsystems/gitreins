@@ -234,10 +234,7 @@ def _is_excluded_source(rel_path: str) -> bool:
     excluded — see the module docstring.
     """
     parts = rel_path.split("/")
-    for part in parts[:-1]:
-        if _skip_dir(part) or part in TEST_DIRS:
-            return True
-    return False
+    return any(_skip_dir(part) or part in TEST_DIRS for part in parts[:-1])
 
 
 def _git_files(workdir: str) -> list[str] | None:
@@ -349,7 +346,7 @@ def has_sql_sources(workdir: str) -> bool:
     SQL is not a lint/test language here (there is no command pair for it) —
     it selects static-analysis tooling only.
     """
-    for root, dirs, names in os.walk(workdir):
+    for _root, dirs, names in os.walk(workdir):
         dirs[:] = [d for d in dirs if not _skip_dir(d)]
         if "migrations" in dirs:
             return True

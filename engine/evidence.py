@@ -341,7 +341,7 @@ def read_evidence(entry_dir: str, verdict: dict[str, Any], name: str) -> tuple[s
             return None
         path = os.path.join(entry_dir, filename)
         try:
-            with open(path, "r", encoding="utf-8", errors="replace") as handle:
+            with open(path, encoding="utf-8", errors="replace") as handle:
                 return filename, handle.read()
         except OSError:
             return None

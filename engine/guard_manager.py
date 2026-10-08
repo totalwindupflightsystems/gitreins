@@ -26,23 +26,25 @@ import re
 import shlex
 import subprocess
 import time
+from contextlib import suppress
 from dataclasses import replace
 from datetime import datetime, timezone
-from engine import lang_detect
-from engine import command_hygiene
-from engine import scanner_nice
+
+from engine import command_hygiene, lang_detect, scanner_nice
+from engine.data_protection import (
+    DataProtectionConfigError,
+    DataProtectionPolicy,
+)
+from engine.data_protection import (
+    build_policy as _build_data_protection_policy,
+)
 from engine.guards import (
     GoGuardResult,
     _coerce_timeout,
     check_data_protection,
+    check_go_build,
     check_go_lint,
     check_go_tests,
-    check_go_build,
-)
-from engine.data_protection import (
-    DataProtectionConfigError,
-    DataProtectionPolicy,
-    build_policy as _build_data_protection_policy,
 )
 from engine.lsp import find_lsp_tool, run_lsp_check, select_lsp_files
 from engine.repo_paths import WorktreeResolutionError, resolve_worktree_identity
@@ -125,9 +127,7 @@ def _is_test_file(fpath: str) -> bool:
         return True
     if base.startswith("test_") and base.endswith(".py"):
         return True
-    if re.search(r"\.(test|spec)\.(js|ts|jsx|tsx|mjs|cjs)$", base):
-        return True
-    return False
+    return bool(re.search(r"\.(test|spec)\.(js|ts|jsx|tsx|mjs|cjs)$", base))
 
 
 # ── Sensitive-path class (REVIEW-GITREINS-027) ────────────────────
@@ -583,10 +583,8 @@ def _ruff_scoped_files(workdir: str, py_files: list[str], nice_level: int = 0) -
         path = line.strip()
         if not path.endswith((".py", ".pyi")):
             continue
-        try:
+        with suppress(ValueError):  # pragma: no cover - different drive (Windows)
             path = os.path.relpath(path, workdir) if os.path.isabs(path) else path
-        except ValueError:  # pragma: no cover - different drive (Windows)
-            pass
         scoped.append(path)
     return scoped
 
@@ -1040,7 +1038,7 @@ def _load_guard_config(workdir: str) -> dict:
     try:
         import yaml as _yaml
 
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             return _yaml.safe_load(f) or {}
     except ImportError:
         logger.warning(
@@ -1079,7 +1077,7 @@ def _merge_secret_findings(gitleaks_output: str, builtin_output: str) -> str:
             value = stripped.removeprefix("Line:").strip()
             if value:
                 lines.append(value)
-    for path, line in zip(files, lines):
+    for path, line in zip(files, lines, strict=False):
         gitleaks_pairs.add((path, line))
 
     merged: list[str] = [gitleaks_output]
@@ -2249,7 +2247,9 @@ class GuardManager:
                 # directories stay exempt — fake-credential fixtures keep the
                 # suite green — and guards.sensitive_paths.allow applies here
                 # only, never to content findings (defence in depth).
-                if not _is_sensitive_fixture_path(fpath) and is_sensitive_path(fpath):
+                in_scope = (
+                    not _is_sensitive_fixture_path(fpath)
+                    and is_sensitive_path(fpath)
                     # Whole-workdir judge path (staged_only=False): a
                     # PRE-EXISTING, untracked, gitignored .env in the graded
                     # tree is local operator state, not an exfiltration about
@@ -2258,24 +2258,26 @@ class GuardManager:
                     # when the caller passed an explicit change set
                     # (working-tree/explicit scope), which is always a
                     # change set under review.
-                    if (
+                    and (
                         staged_only
                         or explicit_scope
                         or fpath in _worktree_tracked_paths(self.workdir)
-                    ):
-                        if any(
-                            fnmatch.fnmatch(fpath.replace(os.sep, "/"), glob)
-                            or fnmatch.fnmatch(os.path.basename(fpath.replace(os.sep, "/")), glob)
-                            for glob in override_globs
-                        ):
-                            override_notes.append(f"{_SENSITIVE_OVERRIDE_PREFIX}{fpath}")
-                        else:
-                            findings.append(
-                                f"{fpath}: {_SENSITIVE_PATH_MARK} — staging this "
-                                "file is blocked regardless of content. Remedy: "
-                                ".gitignore it, use a secret manager, or pass an "
-                                "explicit override flag with a recorded reason."
-                            )
+                    )
+                )
+                overridden = in_scope and any(
+                    fnmatch.fnmatch(fpath.replace(os.sep, "/"), glob)
+                    or fnmatch.fnmatch(os.path.basename(fpath.replace(os.sep, "/")), glob)
+                    for glob in override_globs
+                )
+                if overridden:
+                    override_notes.append(f"{_SENSITIVE_OVERRIDE_PREFIX}{fpath}")
+                elif in_scope:
+                    findings.append(
+                        f"{fpath}: {_SENSITIVE_PATH_MARK} — staging this "
+                        "file is blocked regardless of content. Remedy: "
+                        ".gitignore it, use a secret manager, or pass an "
+                        "explicit override flag with a recorded reason."
+                    )
                 # Respect .gitleaks.toml [allowlist] paths — same exemptions
                 # gitleaks applies (test fixtures with deliberate fake keys).
                 if any(rx.search(fpath) for rx in allowlist):
@@ -2318,7 +2320,7 @@ class GuardManager:
                     else:
                         if os.path.getsize(full) > 1_000_000:
                             continue  # Skip very large files
-                        with open(full, "r", errors="replace") as f:
+                        with open(full, errors="replace") as f:
                             text = f.read()
                 except Exception:
                     continue
@@ -2452,7 +2454,7 @@ class GuardManager:
         if not os.path.isfile(cfg):
             return allowed
         try:
-            with open(cfg, "r", errors="replace") as f:
+            with open(cfg, errors="replace") as f:
                 text = f.read()
             for m in re.finditer(r"'''(.+?)'''", text):
                 try:

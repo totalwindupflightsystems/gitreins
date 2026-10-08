@@ -454,7 +454,7 @@ class ReviewIssue:
         return compat_severity(self.severity)
 
     @classmethod
-    def from_dict(cls, d: dict) -> "ReviewIssue":
+    def from_dict(cls, d: dict) -> ReviewIssue:
         return cls(
             file=d.get("file", ""),
             line=int(d.get("line", 0)),
@@ -483,7 +483,7 @@ class FixEstimate:
     reason: str = ""  # REQUIRED when size is unknown
 
     @classmethod
-    def from_dict(cls, d: dict) -> "FixEstimate":
+    def from_dict(cls, d: dict) -> FixEstimate:
         return cls(
             file=str(d.get("file", "")),
             line=int(d.get("line", 0) or 0),
@@ -521,7 +521,7 @@ class RemediationBrief:
     notes: str = ""
 
     @classmethod
-    def from_dict(cls, d: dict) -> "RemediationBrief":
+    def from_dict(cls, d: dict) -> RemediationBrief:
         return cls(
             summary=str(d.get("summary", "") or ""),
             steps=list(d.get("steps", []) or []),
@@ -572,7 +572,7 @@ class CommitReviewResult:
         wanted = set(severities)
         return [i for i in self.issues if i.severity in wanted]
 
-    def estimate_for(self, issue: "ReviewIssue") -> FixEstimate | None:
+    def estimate_for(self, issue: ReviewIssue) -> FixEstimate | None:
         """Match a pass-2 estimate to its pass-1 finding by file+line."""
         for e in self.estimates:
             if e.file == issue.file and e.line == issue.line:
@@ -794,7 +794,7 @@ class CommitAuditor:
         *,
         profile: str | None = None,
         effort_override: dict | None = None,
-    ) -> "CommitReviewResult":
+    ) -> CommitReviewResult:
         """Run a CodeRabbit-style commit review under the selected profile.
 
         GR-148: ``profile`` selects the review policy (quick/standard/deep)
@@ -893,7 +893,7 @@ class CommitAuditor:
         message: str,
         diff: str,
         profile,  # ReviewProfile
-    ) -> "CommitReviewResult":
+    ) -> CommitReviewResult:
         """Pass 1: evidence-backed findings under the profile's rubric."""
 
         active_checks = [k for k, v in profile.checks.items() if v]
@@ -926,9 +926,7 @@ class CommitAuditor:
         # Single-call review
         return self._review_single_call(review_prompt, max_tokens=self.review_effort.max_tokens)
 
-    def _run_estimates_pass(
-        self, issues: list[ReviewIssue], diff: str
-    ) -> "list[FixEstimate] | None":
+    def _run_estimates_pass(self, issues: list[ReviewIssue], diff: str) -> list[FixEstimate] | None:
         """Pass 2: per-finding fix estimates (XS/S/M/L/XL, confidence,
         assumptions). Returns None on failure so the caller can mark partial."""
         from engine.review_profiles import FIX_ESTIMATE_PROMPT
@@ -961,7 +959,7 @@ class CommitAuditor:
 
     def _run_remediation_pass(
         self, issues: list[ReviewIssue], diff: str
-    ) -> "RemediationBrief | None":
+    ) -> RemediationBrief | None:
         """Pass 3 (optional): agent-ready remediation brief. Describes the
         fix; never modifies code."""
         from engine.review_profiles import REMEDIATION_PROMPT
@@ -1018,7 +1016,7 @@ class CommitAuditor:
 
     def _review_single_call(
         self, review_prompt: str, max_tokens: int | None = None
-    ) -> "CommitReviewResult":
+    ) -> CommitReviewResult:
         """Single LLM call for code review."""
         try:
             response = self.llm.chat(
@@ -1039,9 +1037,7 @@ class CommitAuditor:
 
         return self._parse_review_result(response, iteration=1)
 
-    def _review_tool_loop(
-        self, message: str, diff: str, review_prompt: str
-    ) -> "CommitReviewResult":
+    def _review_tool_loop(self, message: str, diff: str, review_prompt: str) -> CommitReviewResult:
         """Multi-turn review with tool access."""
         # Stub for agent mode — reuses existing tool loop pattern
         messages: list[dict] = [
@@ -1095,9 +1091,7 @@ class CommitAuditor:
             iterations_used=self.max_iterations,
         )
 
-    def _parse_review_result(
-        self, response: LLMResponse, iteration: int = 1
-    ) -> "CommitReviewResult":
+    def _parse_review_result(self, response: LLMResponse, iteration: int = 1) -> CommitReviewResult:
         """Parse the structured review JSON from the LLM."""
         content = (response.content or "").strip()
         if content.startswith("```"):
@@ -1316,7 +1310,7 @@ class CommitAuditor:
         if not os.path.isfile(full_path):
             return json.dumps({"error": f"File not found: {path}"})
         try:
-            with open(full_path, "r") as f:
+            with open(full_path) as f:
                 lines = f.readlines()
             total = len(lines)
             start = max(0, offset - 1)
@@ -1370,7 +1364,7 @@ class CommitAuditor:
                         continue
                 fpath = os.path.join(root, fname)
                 try:
-                    with open(fpath, "r") as f:
+                    with open(fpath) as f:
                         for i, line in enumerate(f, 1):
                             if compiled.search(line):
                                 rel = os.path.relpath(fpath, self.workdir)

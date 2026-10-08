@@ -18,11 +18,12 @@ import sys
 import threading
 import time
 import uuid
+from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from engine.config import load_defaults
 from engine.evidence_bounds import MAX_EVIDENCE_CHARS, bound_evidence
@@ -56,7 +57,7 @@ class DisposableRecord:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "DisposableRecord":
+    def from_dict(cls, data: dict[str, Any]) -> DisposableRecord:
         return cls(
             run_id=str(data["run_id"]),
             path=str(data["path"]),

@@ -11,10 +11,11 @@ import json
 import os
 import subprocess
 import time
+from collections.abc import Iterable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterable, Sequence
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from engine.worktree_manager import WorktreeRecord
@@ -85,7 +86,7 @@ class FleetLane:
             raise FleetValidationError(f"lane {self.task_id!r} timeout_seconds must be positive")
 
     @classmethod
-    def from_dict(cls, data: dict) -> "FleetLane":
+    def from_dict(cls, data: dict) -> FleetLane:
         if not isinstance(data, dict):
             raise FleetValidationError("each fleet lane must be an object")
         task_id = data.get("task_id", data.get("id"))

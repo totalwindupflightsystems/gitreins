@@ -242,7 +242,7 @@ class PrescreenResult:
     abstain_detail: str | None = None
 
     @classmethod
-    def from_verdict(cls, verdict: ResolutionVerdict, criteria: list[str]) -> "PrescreenResult":
+    def from_verdict(cls, verdict: ResolutionVerdict, criteria: list[str]) -> PrescreenResult:
         kinds = [verdict.missing_kind or "none"] * len(criteria)
         probabilities = _per_criterion_probabilities(verdict.probability, kinds)
         quality = _evidence_quality_label(verdict)

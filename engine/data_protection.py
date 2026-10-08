@@ -40,8 +40,8 @@ from __future__ import annotations
 import fnmatch
 import ipaddress
 import re
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
-from typing import Callable, Iterable, Iterator
 
 # ── Policy vocabulary ────────────────────────────────────────────────────────
 
@@ -488,7 +488,7 @@ class ClassPolicy:
         }
 
     @classmethod
-    def from_dict(cls, value: object | None, *, where: str) -> "ClassPolicy":
+    def from_dict(cls, value: object | None, *, where: str) -> ClassPolicy:
         if value is None:
             return cls()
         if not isinstance(value, dict):
@@ -683,7 +683,7 @@ class DataProtectionPolicy:
     # -- construction ---------------------------------------------------------
 
     @classmethod
-    def default(cls) -> "DataProtectionPolicy":
+    def default(cls) -> DataProtectionPolicy:
         return cls(
             enabled=False,
             categories={
@@ -693,7 +693,7 @@ class DataProtectionPolicy:
         )
 
     @classmethod
-    def from_dict(cls, raw: dict | None) -> "DataProtectionPolicy":
+    def from_dict(cls, raw: dict | None) -> DataProtectionPolicy:
         raw = raw if isinstance(raw, dict) else {}
         policy = cls.default()
         if not raw:
@@ -874,9 +874,7 @@ class DataProtectionPolicy:
     def _rule_scans(self, rule: str, confidence: float | None) -> bool:
         if not self.rule_enabled(rule):
             return False
-        if confidence is not None and confidence < self.confidence_threshold(rule):
-            return False
-        return True
+        return not (confidence is not None and confidence < self.confidence_threshold(rule))
 
     def _resolve(self, match: _Match, text: str, path: str | None) -> Finding:
         spec = RULE_BY_NAME[match.rule]

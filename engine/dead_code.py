@@ -156,7 +156,7 @@ class DeadCodeDetector:
     def _collect_symbols(self, fpath: str) -> None:
         """Collect function definitions and imports from a file."""
         try:
-            with open(fpath, "r") as f:
+            with open(fpath) as f:
                 source = f.read()
             tree = ast.parse(source, filename=fpath)
         except (SyntaxError, UnicodeDecodeError, FileNotFoundError, PermissionError):
@@ -206,7 +206,7 @@ class DeadCodeDetector:
     def _collect_calls(self, fpath: str) -> None:
         """Collect all function calls across the project."""
         try:
-            with open(fpath, "r") as f:
+            with open(fpath) as f:
                 source = f.read()
             tree = ast.parse(source, filename=fpath)
         except (SyntaxError, UnicodeDecodeError, FileNotFoundError, PermissionError):
@@ -223,7 +223,7 @@ class DeadCodeDetector:
         """Analyze a single file for dead code."""
         findings: list[DeadCodeFinding] = []
         try:
-            with open(fpath, "r") as f:
+            with open(fpath) as f:
                 source = f.read()
             tree = ast.parse(source, filename=fpath)
         except (SyntaxError, UnicodeDecodeError, FileNotFoundError, PermissionError):
@@ -237,24 +237,25 @@ class DeadCodeDetector:
                 continue
             body = node.body
             for i, child in enumerate(body):
-                if isinstance(child, (ast.Return, ast.Raise, ast.Break, ast.Continue)):
-                    if i + 1 < len(body):
-                        next_sib = body[i + 1]
-                        if isinstance(next_sib, ast.Expr) and isinstance(
-                            next_sib.value, ast.Constant
-                        ):
-                            continue  # Skip docstrings
-                        findings.append(
-                            DeadCodeFinding(
-                                file=rel,
-                                line=next_sib.lineno,
-                                category="unreachable",
-                                message=(
-                                    f"Code after {type(child).__name__.lower()} "
-                                    f"on line {child.lineno} is unreachable"
-                                ),
-                            )
+                next_sib = body[i + 1] if i + 1 < len(body) else None
+                if (
+                    isinstance(child, (ast.Return, ast.Raise, ast.Break, ast.Continue))
+                    and next_sib is not None
+                    and not (
+                        isinstance(next_sib, ast.Expr) and isinstance(next_sib.value, ast.Constant)
+                    )  # non-Constant next_sib is code, not a docstring
+                ):
+                    findings.append(
+                        DeadCodeFinding(
+                            file=rel,
+                            line=next_sib.lineno,
+                            category="unreachable",
+                            message=(
+                                f"Code after {type(child).__name__.lower()} "
+                                f"on line {child.lineno} is unreachable"
+                            ),
                         )
+                    )
 
         # --- EMPTY FUNCTIONS ---
         for node in ast.walk(tree):
@@ -283,9 +284,8 @@ class DeadCodeDetector:
             for node in ast.walk(tree):
                 if isinstance(node, ast.Name):
                     used_names.add(node.id)
-                elif isinstance(node, ast.Attribute):
-                    if isinstance(node.value, ast.Name):
-                        used_names.add(node.value.id)
+                elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+                    used_names.add(node.value.id)
 
             for imp_name in self._imports[rel]:
                 # Split dotted imports to check root
@@ -293,19 +293,7 @@ class DeadCodeDetector:
                 if root not in used_names and imp_name not in used_names:
                     # Find the import line
                     for node in ast.walk(tree):
-                        if isinstance(node, ast.Import):
-                            for alias in node.names:
-                                name = alias.asname or alias.name
-                                if name == imp_name:
-                                    findings.append(
-                                        DeadCodeFinding(
-                                            file=rel,
-                                            line=node.lineno,
-                                            category="unused_import",
-                                            message=f"Import '{imp_name}' is never used",
-                                        )
-                                    )
-                        elif isinstance(node, ast.ImportFrom):
+                        if isinstance(node, (ast.Import, ast.ImportFrom)):
                             for alias in node.names:
                                 name = alias.asname or alias.name
                                 if name == imp_name:

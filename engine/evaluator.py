@@ -17,6 +17,7 @@ Usage:
     verdict = evaluator.evaluate(task)
 """
 
+import contextlib
 import json
 import logging
 import os
@@ -25,8 +26,9 @@ import shutil
 import subprocess
 from dataclasses import dataclass, field
 
+from engine import command_hygiene
+from engine.eval_cap import EvalCap, _fmt_tokens, eval_cap_from_config, parse_eval_cap
 from engine.llm import LLMClient, ToolCall
-from engine.eval_cap import EvalCap, parse_eval_cap, eval_cap_from_config, _fmt_tokens
 from engine.prescreen import (
     PRESCREEN_KEY,
     WARN_TEMPLATE,
@@ -35,7 +37,6 @@ from engine.prescreen import (
     attach_prescreen,
     run_prescreen,
 )
-from engine import command_hygiene
 
 logger = logging.getLogger("gitreins.evaluator")
 
@@ -565,8 +566,8 @@ class AgenticEvaluator:
 
         Respects .gitleaks.toml exclusions from the project.
         """
-        import subprocess
         import os
+        import subprocess
 
         test_mode = config.get("guards", {}).get("test_mode") or config.get("test_mode") or "full"
 
@@ -684,7 +685,7 @@ class AgenticEvaluator:
                     continue
 
                 try:
-                    with open(fpath, "r", errors="replace") as f:
+                    with open(fpath, errors="replace") as f:
                         content = f.read()
                 except Exception:
                     continue
@@ -1230,10 +1231,13 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 # Detect HTTP 400-499 errors (context window exceeded, etc.)
                 is_context_error = False
                 try:
-                    import requests
+                    with contextlib.suppress(Exception):
+                        import requests
 
-                    if isinstance(e, requests.HTTPError):
-                        if hasattr(e, "response") and e.response is not None:
+                        if (
+                            isinstance(e, requests.HTTPError)
+                            and getattr(e, "response", None) is not None
+                        ):
                             status = e.response.status_code
                             if 400 <= status < 500 and status != 429:
                                 is_context_error = True
@@ -1355,12 +1359,11 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                     )
 
                 # Add dedup warning to result if this was a repeat
-                if was_dup:
-                    if isinstance(result, dict):
-                        result["_dedup_warning"] = (
-                            f"You already used {tc.name} with these arguments. "
-                            "See previous result above. Move on to unchecked criteria."
-                        )
+                if was_dup and isinstance(result, dict):
+                    result["_dedup_warning"] = (
+                        f"You already used {tc.name} with these arguments. "
+                        "See previous result above. Move on to unchecked criteria."
+                    )
 
                 messages.append(
                     {
@@ -1585,10 +1588,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                                 "total_bytes": total_bytes,
                             }
                         f.seek(byte_offset)
-                    if byte_limit > 0:
-                        raw = f.read(byte_limit)
-                    else:
-                        raw = f.read()
+                    raw = f.read(byte_limit) if byte_limit > 0 else f.read()
                 # Decode as UTF-8 with replacement chars for binary content
                 content = raw.decode("utf-8", errors="replace")
                 shown_bytes = len(raw)
@@ -1615,7 +1615,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 }
 
             # Line-based read (default)
-            with open(real, "r", errors="replace") as f:
+            with open(real, errors="replace") as f:
                 lines = f.readlines()
 
             total_lines = len(lines)
@@ -1843,7 +1843,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 try:
                     if os.path.getsize(fpath) > 500_000:
                         continue  # Skip large files
-                    with open(fpath, "r", errors="replace") as f:
+                    with open(fpath, errors="replace") as f:
                         for i, line in enumerate(f, 1):
                             if pattern.search(line):
                                 matches.append(f"{rel}:{i}: {line.rstrip()}")
@@ -2034,9 +2034,12 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
 
         # Strategy 3: Keyword-based fallback
         content_lower = content.lower()
-        if '"complete"' in content_lower or 'verdict":"complete"' in content_lower.replace(" ", ""):
-            verdict = "COMPLETE"
-        elif "all criteria" in content_lower and "pass" in content_lower:
+        if (
+            '"complete"' in content_lower
+            or 'verdict":"complete"' in content_lower.replace(" ", "")
+            or "all criteria" in content_lower
+            and "pass" in content_lower
+        ):
             verdict = "COMPLETE"
         else:
             verdict = "INCOMPLETE"
@@ -2142,8 +2145,8 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         which stock ast-grep rejects. Rules that fail to parse are skipped; the
         rest are aggregated. Returns findings as SARIF-derived entries."""
         try:
-            import json as _json
             import glob as _glob
+            import json as _json
             import shutil as _shutil
             import subprocess as _sp
 

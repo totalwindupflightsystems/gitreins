@@ -160,7 +160,7 @@ def main() -> int:
     import time
 
     merged = False
-    for attempt in range(12):
+    for _attempt in range(12):
         code, mr = api(tok, "GET", f"projects/{proj}/merge_requests/{iid}")
         if code == 200:
             status = mr.get("detailed_merge_status") or mr.get("merge_status")
