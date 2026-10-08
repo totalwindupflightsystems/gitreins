@@ -17,6 +17,10 @@ retention (``_run_script_step`` keeps the whole output so
 ``_bound_step_evidence`` can preserve pytest's short test summary).
 """
 
+from __future__ import annotations
+from pathlib import Path
+from typing import Any
+
 import os
 import re
 import shlex
@@ -206,7 +210,7 @@ class TestPytestOutcomeClassification:
             (None, "4 workers"),
         ],
     )
-    def test_every_kind_is_in_the_enumerated_vocabulary(self, code, output) -> None:
+    def test_every_kind_is_in_the_enumerated_vocabulary(self, code: Any, output: Any) -> None:
         assert pytest_outcome(code, output)["kind"] in PYTEST_OUTCOME_KINDS
 
 
@@ -214,7 +218,9 @@ class TestPytestOutcomeClassification:
 
 
 class TestLiveMaxfailReproduction:
-    def test_live_xdist_maxfail_run_exits_2_and_is_classified_as_a_failure(self, tmp_path) -> None:
+    def test_live_xdist_maxfail_run_exits_2_and_is_classified_as_a_failure(
+        self, tmp_path: Path
+    ) -> None:
         """Pins the mapping against the real pytest-xdist in this environment.
 
         Pre-fix, `exit_code == 2` in a verdict was read as "interrupted". This
@@ -260,11 +266,11 @@ class TestLiveMaxfailReproduction:
 
 
 class TestTier1TestsStepEvidence:
-    def _pipeline(self, workdir) -> Pipeline:
+    def _pipeline(self, workdir: str) -> Pipeline:
         return Pipeline({"pipeline": {"stages": []}}, str(workdir))
 
     def test_outcome_is_recorded_and_the_summary_tail_survives_serialization(
-        self, tmp_path
+        self, tmp_path: Path
     ) -> None:
         """Both halves of the fix, on the step that produces the verdict record.
 
@@ -317,7 +323,7 @@ class TestTier1TestsStepEvidence:
         assert "FAILED test_broken.py::test_broken" in retained
         assert "xdist.dsession.Interrupted" in retained
 
-    def test_non_pytest_steps_carry_no_pytest_outcome(self, tmp_path) -> None:
+    def test_non_pytest_steps_carry_no_pytest_outcome(self, tmp_path: Path) -> None:
         """Scope guard: the classifier is for pytest invocations, not every step."""
         workdir = tmp_path / "workdir"
         workdir.mkdir()

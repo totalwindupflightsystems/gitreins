@@ -3,6 +3,9 @@ Unit tests for engine/llm.py — multi-provider LLM client with retry logic.
 axiom:trace work_item=GR-001 spec=specs/02-LLM-Interface.md plan=.memory-bank/work-items/GR-001/plan.yaml
 """
 
+from __future__ import annotations
+from typing import Any
+
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -60,7 +63,7 @@ class TestProviderDetection:
         client = LLMClient(base_url="https://localhost:8080/v1")
         assert client.provider == "openai"
 
-    def test_force_provider_override(self, monkeypatch) -> None:
+    def test_force_provider_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Explicit provider= still selects the provider when env is absent."""
         monkeypatch.delenv("GITREINS_LLM_PROVIDER", raising=False)
         client = LLMClient(
@@ -85,57 +88,61 @@ class TestProviderEnvOverride:
     GITREINS_LLM_PROVIDER itself via monkeypatch.
     """
 
-    def test_env_overrides_url_autodetect(self, monkeypatch) -> None:
+    def test_env_overrides_url_autodetect(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Env set + no explicit arg: env wins even though URL says openai."""
         monkeypatch.delenv("GITREINS_LLM_PROVIDER", raising=False)
         monkeypatch.setenv("GITREINS_LLM_PROVIDER", "anthropic")
         client = LLMClient(base_url="https://api.openai.com/v1", api_key="k")
         assert client.provider == "anthropic"
 
-    def test_env_overrides_explicit_provider_arg(self, monkeypatch) -> None:
+    def test_env_overrides_explicit_provider_arg(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Precedence: GITREINS_LLM_PROVIDER > explicit provider= argument."""
         monkeypatch.setenv("GITREINS_LLM_PROVIDER", "anthropic")
         client = LLMClient(base_url="https://api.openai.com/v1", api_key="k", provider="openai")
         assert client.provider == "anthropic"
 
-    def test_explicit_provider_works_without_env(self, monkeypatch) -> None:
+    def test_explicit_provider_works_without_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Env absent: explicit provider= is honored (explicit > auto-detect)."""
         monkeypatch.delenv("GITREINS_LLM_PROVIDER", raising=False)
         client = LLMClient(base_url="https://api.anthropic.com/v1", api_key="k", provider="openai")
         assert client.provider == "openai"
 
-    def test_url_autodetect_unchanged_when_env_absent(self, monkeypatch) -> None:
+    def test_url_autodetect_unchanged_when_env_absent(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Default behavior unchanged when the env var is unset."""
         monkeypatch.delenv("GITREINS_LLM_PROVIDER", raising=False)
         client = LLMClient(base_url="https://api.openai.com/v1", api_key="k")
         assert client.provider == "openai"
 
-    def test_invalid_env_value_rejected(self, monkeypatch) -> None:
+    def test_invalid_env_value_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """An unsupported non-empty override fails loudly (no silent fallback)."""
         monkeypatch.setenv("GITREINS_LLM_PROVIDER", "mistral")
         with pytest.raises(ValueError, match="GITREINS_LLM_PROVIDER"):
             LLMClient(base_url="https://api.openai.com/v1", api_key="k")
 
-    def test_blank_env_value_falls_through_to_autodetect(self, monkeypatch) -> None:
+    def test_blank_env_value_falls_through_to_autodetect(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Empty/whitespace override counts as unset (documented 'if unset')."""
         monkeypatch.setenv("GITREINS_LLM_PROVIDER", "   ")
         client = LLMClient(base_url="https://api.anthropic.com/v1", api_key="k")
         assert client.provider == "anthropic"
 
-    def test_env_override_builds_anthropic_endpoint(self, monkeypatch) -> None:
+    def test_env_override_builds_anthropic_endpoint(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Endpoint/protocol follow the env-selected provider, not the URL."""
         monkeypatch.setenv("GITREINS_LLM_PROVIDER", "anthropic")
         client = LLMClient(base_url="https://api.openai.com/v1", api_key="k")
         assert client._chat_url == "https://api.openai.com/v1/messages"
         assert client._api_version == "2023-06-01"
 
-    def test_env_override_builds_openai_endpoint(self, monkeypatch) -> None:
+    def test_env_override_builds_openai_endpoint(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Env forcing openai over an anthropic URL builds the chat URL."""
         monkeypatch.setenv("GITREINS_LLM_PROVIDER", "openai")
         client = LLMClient(base_url="https://api.anthropic.com/v1", api_key="k")
         assert client._chat_url == "https://api.anthropic.com/v1/chat/completions"
 
-    def test_clamp_uses_env_selected_provider(self, monkeypatch) -> None:
+    def test_clamp_uses_env_selected_provider(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Downstream _clamp_max_tokens consumes the env-selected provider."""
         monkeypatch.setenv("GITREINS_LLM_PROVIDER", "anthropic")
         client = LLMClient(base_url="https://api.openai.com/v1", api_key="k")
@@ -156,20 +163,20 @@ class TestAPIKeyResolution:
         client = LLMClient(api_key="direct-key", base_url="https://test.local/v1")
         assert client.api_key == "direct-key"
 
-    def test_primary_env_var(self, monkeypatch) -> None:
+    def test_primary_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """GITREINS_LLM_API_KEY is checked first."""
         monkeypatch.setenv("GITREINS_LLM_API_KEY", "primary-key")
         client = LLMClient(base_url="https://test.local/v1")
         assert client.api_key == "primary-key"
 
-    def test_fallback_to_neuralwatt(self, monkeypatch) -> None:
+    def test_fallback_to_neuralwatt(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Fallback to NEURALWATT_API_KEY if primary not set."""
         monkeypatch.delenv("GITREINS_LLM_API_KEY", raising=False)
         monkeypatch.setenv("NEURALWATT_API_KEY", "nw-key")
         client = LLMClient(base_url="https://test.local/v1")
         assert client.api_key == "nw-key"
 
-    def test_fallback_to_openai_key(self, monkeypatch) -> None:
+    def test_fallback_to_openai_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Fallback to OPENAI_API_KEY."""
         monkeypatch.delenv("GITREINS_LLM_API_KEY", raising=False)
         monkeypatch.delenv("NEURALWATT_API_KEY", raising=False)
@@ -177,7 +184,7 @@ class TestAPIKeyResolution:
         client = LLMClient(base_url="https://test.local/v1")
         assert client.api_key == "openai-key"
 
-    def test_fallback_to_anthropic_key(self, monkeypatch) -> None:
+    def test_fallback_to_anthropic_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Fallback to ANTHROPIC_API_KEY."""
         monkeypatch.delenv("GITREINS_LLM_API_KEY", raising=False)
         monkeypatch.delenv("NEURALWATT_API_KEY", raising=False)
@@ -186,7 +193,7 @@ class TestAPIKeyResolution:
         client = LLMClient(base_url="https://test.local/v1")
         assert client.api_key == "anthropic-key"
 
-    def test_fallback_to_deepseek_key(self, monkeypatch) -> None:
+    def test_fallback_to_deepseek_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Fallback to DEEPSEEK_API_KEY."""
         monkeypatch.delenv("GITREINS_LLM_API_KEY", raising=False)
         monkeypatch.delenv("NEURALWATT_API_KEY", raising=False)
@@ -196,7 +203,7 @@ class TestAPIKeyResolution:
         client = LLMClient(base_url="https://test.local/v1")
         assert client.api_key == "deepseek-key"
 
-    def test_missing_all_keys_returns_empty(self, monkeypatch) -> None:
+    def test_missing_all_keys_returns_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When no API keys are set, self.api_key = ''."""
         monkeypatch.delenv("GITREINS_LLM_API_KEY", raising=False)
         monkeypatch.delenv("NEURALWATT_API_KEY", raising=False)
@@ -307,7 +314,7 @@ class TestAnthropicConversion:
 class TestRetryLogic:
     """Test retry with exponential backoff — step-1-2-1-3."""
 
-    def test_429_is_retried(self, llm_client) -> None:
+    def test_429_is_retried(self, llm_client: LLMClient) -> None:
         """HTTP 429 (rate limit) triggers retry."""
         mock_attempt = MagicMock()
         mock_attempt.side_effect = [
@@ -320,7 +327,7 @@ class TestRetryLogic:
         assert result.content == "success"
         assert mock_attempt.call_count == 2
 
-    def test_503_is_retried(self, llm_client) -> None:
+    def test_503_is_retried(self, llm_client: LLMClient) -> None:
         """HTTP 503 (server error) triggers retry."""
         mock_attempt = MagicMock()
         mock_attempt.side_effect = [
@@ -332,7 +339,7 @@ class TestRetryLogic:
                 result = llm_client.chat([{"role": "user", "content": "hi"}])
         assert result.content == "recovered"
 
-    def test_400_is_not_retried(self, llm_client) -> None:
+    def test_400_is_not_retried(self, llm_client: LLMClient) -> None:
         """HTTP 400 (client error) does NOT retry — raised immediately."""
         response_400 = MagicMock()
         response_400.status_code = 400
@@ -343,7 +350,7 @@ class TestRetryLogic:
                 with pytest.raises(requests.HTTPError):
                     llm_client.chat([{"role": "user", "content": "hi"}])
 
-    def test_network_error_is_retried(self, llm_client) -> None:
+    def test_network_error_is_retried(self, llm_client: LLMClient) -> None:
         """Network errors (RequestException) trigger retry."""
         mock_attempt = MagicMock()
         mock_attempt.side_effect = [
@@ -355,7 +362,7 @@ class TestRetryLogic:
                 result = llm_client.chat([{"role": "user", "content": "hi"}])
         assert result.content == "ok"
 
-    def test_three_consecutive_failures_raises_runtimeerror(self, llm_client) -> None:
+    def test_three_consecutive_failures_raises_runtimeerror(self, llm_client: LLMClient) -> None:
         """3 consecutive failures → RuntimeError raised."""
         with patch.object(
             llm_client, "_chat_attempt", side_effect=requests.RequestException("fail")
@@ -364,7 +371,7 @@ class TestRetryLogic:
                 with pytest.raises(RuntimeError, match="LLM request failed after 3 attempts"):
                     llm_client.chat([{"role": "user", "content": "hi"}])
 
-    def test_backoff_timing_uses_exponential(self, llm_client) -> None:
+    def test_backoff_timing_uses_exponential(self, llm_client: LLMClient) -> None:
         """Exponential backoff: sleep(1), sleep(2)."""
         mock_attempt = MagicMock()
         mock_attempt.side_effect = [
@@ -382,7 +389,7 @@ class TestRetryLogic:
 class TestLLMClientDefaults:
     """Test default values and configuration."""
 
-    def test_default_model(self, monkeypatch) -> None:
+    def test_default_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Default model is 'deepseek-v4-flash'."""
         monkeypatch.delenv("GITREINS_LLM_MODEL", raising=False)
         client = LLMClient(base_url="https://test.local/v1")
@@ -393,7 +400,7 @@ class TestLLMClientDefaults:
         client = LLMClient(base_url="https://test.local/v1", model="gpt-4-turbo")
         assert client.model == "gpt-4-turbo"
 
-    def test_env_model(self, monkeypatch) -> None:
+    def test_env_model(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """GITREINS_LLM_MODEL env var is used when no arg given."""
         monkeypatch.setenv("GITREINS_LLM_MODEL", "env-model")
         client = LLMClient(base_url="https://test.local/v1")
@@ -423,7 +430,7 @@ class TestLLMClientDefaults:
 class TestExtendedLLM:
     """Extended coverage for LLM client edge cases."""
 
-    def test_provider_auto_detect_no_provider_arg(self, monkeypatch) -> None:
+    def test_provider_auto_detect_no_provider_arg(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When no provider arg given, auto-detection runs from base_url."""
         monkeypatch.delenv("GITREINS_LLM_BASE_URL", raising=False)
         client = LLMClient(base_url="https://api.anthropic.com/v1")
@@ -434,7 +441,7 @@ class TestExtendedLLM:
         client = LLMClient(base_url="https://api.deepseek.com/v1")
         assert client.provider == "openai"
 
-    def test_chat_openai_mocked_http(self, monkeypatch) -> None:
+    def test_chat_openai_mocked_http(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """_chat_openai handles a proper mocked OpenAI response."""
         monkeypatch.delenv("GITREINS_LLM_BASE_URL", raising=False)
         client = LLMClient(base_url="https://test.openai.local/v1", api_key="test-key")
@@ -448,7 +455,7 @@ class TestExtendedLLM:
         assert result.content == "Hello!"
         assert result.tool_calls == []
 
-    def test_chat_openai_with_tool_calls_mocked(self, monkeypatch) -> None:
+    def test_chat_openai_with_tool_calls_mocked(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """_chat_openai parses tool_calls from OpenAI response."""
         monkeypatch.delenv("GITREINS_LLM_BASE_URL", raising=False)
         client = LLMClient(base_url="https://test.openai.local/v1", api_key="test-key")
@@ -477,7 +484,7 @@ class TestExtendedLLM:
         assert result.tool_calls[0].name == "read_file"
         assert result.tool_calls[0].arguments == {"path": "f.py"}
 
-    def test_chat_anthropic_mocked_http(self, monkeypatch) -> None:
+    def test_chat_anthropic_mocked_http(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """_chat_anthropic handles a proper mocked Anthropic response."""
         monkeypatch.delenv("GITREINS_LLM_BASE_URL", raising=False)
         client = LLMClient(base_url="https://api.anthropic.com/v1", api_key="test-ant-key")
@@ -490,7 +497,7 @@ class TestExtendedLLM:
             result = client.chat([{"role": "user", "content": "hi"}])
         assert result.content == "Hello from Claude!"
 
-    def test_anthropic_version_env_var(self, monkeypatch) -> None:
+    def test_anthropic_version_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """GITREINS_ANTHROPIC_VERSION env var sets _api_version."""
         monkeypatch.setenv("GITREINS_ANTHROPIC_VERSION", "2024-01-01")
         client = LLMClient(base_url="https://api.anthropic.com/v1", api_key="k")
@@ -515,7 +522,7 @@ class TestExtendedLLM:
         assert result[0]["content"][0]["type"] == "tool_result"
         assert result[0]["content"][0]["tool_use_id"] == ""
 
-    def test_retry_three_failures_backoff_timing(self, llm_client) -> None:
+    def test_retry_three_failures_backoff_timing(self, llm_client: LLMClient) -> None:
         """Backoff timing with 3 total attempts: sleep(1), sleep(2) before last."""
         mock_attempt = MagicMock()
         mock_attempt.side_effect = [
@@ -531,7 +538,7 @@ class TestExtendedLLM:
         # max_retries=3: sleeps after first 2 failures (attempts 0 and 1)
         assert sleep_times == [1, 2]
 
-    def test_mocked_429_via_requests_post(self, monkeypatch) -> None:
+    def test_mocked_429_via_requests_post(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """HTTP 429 retried when mocking requests.post directly."""
         monkeypatch.delenv("GITREINS_LLM_BASE_URL", raising=False)
         client = LLMClient(base_url="https://test.openai.local/v1", api_key="test-key")
@@ -548,7 +555,7 @@ class TestExtendedLLM:
                 result = client.chat([{"role": "user", "content": "hi"}])
         assert result.content == "ok"
 
-    def test_first_env_key_priority(self, monkeypatch) -> None:
+    def test_first_env_key_priority(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """GITREINS_LLM_API_KEY is checked before other keys."""
         monkeypatch.setenv("GITREINS_LLM_API_KEY", "primary")
         monkeypatch.setenv("OPENAI_API_KEY", "secondary")
@@ -560,7 +567,7 @@ class TestExtendedLLM:
 
 
 @pytest.fixture(autouse=True)
-def _gr068_no_llm_env(monkeypatch) -> None:
+def _gr068_no_llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """GR-LINT-001 lesson: an operator's GITREINS_LLM_* environment (set for
     the judge itself) leaks into this class via the client's env fallbacks —
     model/base-url detection tests then grade the OPERATOR's env, not the
@@ -604,13 +611,13 @@ class TestGR068ThinkingMode:
         c = LLMClient(base_url="https://api.deepseek.com/v1", api_key="k", llm_reasoning="enabled")
         assert c.llm_reasoning == "enabled"
 
-    def test_reasoning_env_var(self, monkeypatch) -> None:
+    def test_reasoning_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """GITREINS_LLM_REASONING env var controls reasoning mode."""
         monkeypatch.setenv("GITREINS_LLM_REASONING", "enabled")
         c = LLMClient(base_url="https://api.deepseek.com/v1", api_key="k")
         assert c.llm_reasoning == "enabled"
 
-    def test_thinking_disabled_in_payload(self, monkeypatch) -> None:
+    def test_thinking_disabled_in_payload(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When reasoning=disabled, payload includes thinking.type=disabled for DeepSeek."""
         monkeypatch.delenv("GITREINS_LLM_BASE_URL", raising=False)
         c = LLMClient(
@@ -621,7 +628,7 @@ class TestGR068ThinkingMode:
         mock_resp.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
         captured = {}
 
-        def _capture(url, **kwargs):
+        def _capture(url: Any, **kwargs: Any) -> Any:
             captured["json"] = kwargs.get("json", {})
             return mock_resp
 
@@ -630,7 +637,7 @@ class TestGR068ThinkingMode:
         assert "thinking" in captured["json"]
         assert captured["json"]["thinking"] == {"type": "disabled"}
 
-    def test_thinking_enabled_in_payload(self, monkeypatch) -> None:
+    def test_thinking_enabled_in_payload(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When reasoning=enabled, payload includes thinking.type=enabled for DeepSeek."""
         monkeypatch.delenv("GITREINS_LLM_BASE_URL", raising=False)
         c = LLMClient(
@@ -641,7 +648,7 @@ class TestGR068ThinkingMode:
         mock_resp.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
         captured = {}
 
-        def _capture(url, **kwargs):
+        def _capture(url: Any, **kwargs: Any) -> Any:
             captured["json"] = kwargs.get("json", {})
             return mock_resp
 
@@ -650,7 +657,7 @@ class TestGR068ThinkingMode:
         assert "thinking" in captured["json"]
         assert captured["json"]["thinking"] == {"type": "enabled"}
 
-    def test_no_thinking_for_non_deepseek(self, monkeypatch) -> None:
+    def test_no_thinking_for_non_deepseek(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """No thinking field in payload for non-DeepSeek providers."""
         monkeypatch.delenv("GITREINS_LLM_BASE_URL", raising=False)
         c = LLMClient(base_url="https://api.openai.com/v1", api_key="test-key", model="gpt-4")
@@ -659,7 +666,7 @@ class TestGR068ThinkingMode:
         mock_resp.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
         captured = {}
 
-        def _capture(url, **kwargs):
+        def _capture(url: Any, **kwargs: Any) -> Any:
             captured["json"] = kwargs.get("json", {})
             return mock_resp
 
@@ -667,7 +674,7 @@ class TestGR068ThinkingMode:
             c.chat([{"role": "user", "content": "hi"}])
         assert "thinking" not in captured["json"]
 
-    def test_cache_telemetry_in_usage(self, monkeypatch) -> None:
+    def test_cache_telemetry_in_usage(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """DeepSeek usage is normalized: prompt_tokens is the TOTAL input.
 
         DeepSeek's prompt_tokens already includes prompt_cache_hit_tokens +
@@ -700,7 +707,7 @@ class TestGR068ThinkingMode:
         # all_input_tokens is the total input exactly once — no double-count
         assert result.usage.all_input_tokens == 5200
 
-    def test_deepseek_usage_not_double_counted(self, monkeypatch) -> None:
+    def test_deepseek_usage_not_double_counted(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Regression (JUDGE-CONTEXT-001): a 140K prompt with 100K cache hits
         must account 140K input tokens, not 240K+."""
         monkeypatch.delenv("GITREINS_LLM_BASE_URL", raising=False)
@@ -724,7 +731,7 @@ class TestGR068ThinkingMode:
         assert result.usage.cache_read_tokens == 0
         assert result.usage.cache_write_tokens == 0
 
-    def test_cache_telemetry_zero_when_missing(self, monkeypatch) -> None:
+    def test_cache_telemetry_zero_when_missing(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Cache fields default to 0 when not present in response."""
         monkeypatch.delenv("GITREINS_LLM_BASE_URL", raising=False)
         c = LLMClient(base_url="https://api.deepseek.com/v1", api_key="test-key")
@@ -737,7 +744,7 @@ class TestGR068ThinkingMode:
             result = c.chat([{"role": "user", "content": "hi"}])
         assert result.usage is None  # no usage block means None
 
-    def test_anthropic_cache_telemetry(self, monkeypatch) -> None:
+    def test_anthropic_cache_telemetry(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Anthropic cache tokens parsed from usage block."""
         monkeypatch.delenv("GITREINS_LLM_BASE_URL", raising=False)
         c = LLMClient(base_url="https://api.anthropic.com/v1", api_key="test-key")
@@ -784,11 +791,11 @@ class TestFailureDiagnostics:
     )
 
     @staticmethod
-    def _clear_credentials(monkeypatch) -> None:
+    def _clear_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
         for key in TestFailureDiagnostics.CREDENTIAL_KEYS:
             monkeypatch.delenv(key, raising=False)
 
-    def test_exhausted_retries_name_the_resolved_config(self, llm_client) -> None:
+    def test_exhausted_retries_name_the_resolved_config(self, llm_client: LLMClient) -> None:
         """RuntimeError carries provider, model, endpoint, key source, cause."""
         with patch.object(
             llm_client, "_chat_attempt", side_effect=requests.RequestException("connection refused")
@@ -808,7 +815,7 @@ class TestFailureDiagnostics:
         # ...and never the credential itself.
         assert "test-key-12345" not in message
 
-    def test_describe_names_the_primary_env_var(self, monkeypatch) -> None:
+    def test_describe_names_the_primary_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """GITREINS_LLM_API_KEY is named when it is the source."""
         self._clear_credentials(monkeypatch)
         monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-primary-secret")
@@ -816,7 +823,7 @@ class TestFailureDiagnostics:
         assert "key=<GITREINS_LLM_API_KEY>" in client.describe()
         assert "sk-primary-secret" not in client.describe()
 
-    def test_describe_names_the_fallback_env_var(self, monkeypatch) -> None:
+    def test_describe_names_the_fallback_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """A key taken from the fallback chain says WHICH var it came from."""
         self._clear_credentials(monkeypatch)
         monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-secret")
@@ -824,14 +831,14 @@ class TestFailureDiagnostics:
         assert "key=<OPENROUTER_API_KEY (fallback)>" in client.describe()
         assert "sk-or-secret" not in client.describe()
 
-    def test_describe_reports_no_credential(self, monkeypatch) -> None:
+    def test_describe_reports_no_credential(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """No key anywhere → the source is named 'none', not an empty string."""
         self._clear_credentials(monkeypatch)
         client = LLMClient(base_url="https://test.local/v1")
         assert client.api_key == ""
         assert client.describe().endswith("key=<none>")
 
-    def test_base_url_source_is_recorded(self, monkeypatch) -> None:
+    def test_base_url_source_is_recorded(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Endpoint provenance: explicit argument vs env vs default."""
         self._clear_credentials(monkeypatch)
         explicit = LLMClient(base_url="https://explicit.local/v1", api_key="k")
@@ -862,7 +869,7 @@ class TestPermanentClientErrorFailsFast:
     """
 
     @staticmethod
-    def _real_response(status_code: int, body: bytes = b'{"error":{"message":"bad key"}}'):
+    def _real_response(status_code: int, body: bytes = b'{"error":{"message":"bad key"}}') -> Any:
         import requests
 
         resp = requests.Response()
@@ -872,7 +879,7 @@ class TestPermanentClientErrorFailsFast:
         resp.request = requests.Request("POST", resp.url).prepare()
         return resp
 
-    def test_401_fails_on_the_first_attempt(self, llm_client) -> None:
+    def test_401_fails_on_the_first_attempt(self, llm_client: LLMClient) -> None:
         """A rejected credential is permanent: one call, not three."""
         with patch("requests.post", return_value=self._real_response(401)) as post:
             with patch("time.sleep", return_value=None) as sleep:
@@ -887,7 +894,7 @@ class TestPermanentClientErrorFailsFast:
         assert "key=<explicit argument>" in str(exc.value)
         assert "test-key-12345" not in str(exc.value)
 
-    def test_429_is_still_retried_with_a_real_response(self, llm_client) -> None:
+    def test_429_is_still_retried_with_a_real_response(self, llm_client: LLMClient) -> None:
         """Rate limiting IS transient: a real 429 keeps the retry budget."""
         responses = [self._real_response(429), self._real_response(200, b'{"choices":[]}')]
         with patch("requests.post", side_effect=responses) as post:

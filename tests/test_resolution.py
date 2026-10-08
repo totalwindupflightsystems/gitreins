@@ -45,7 +45,7 @@ from engine.resolution import (
     verdict_json,
     worst_case_tokens,
 )
-from typing import NoReturn
+from typing import Any, NoReturn
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -89,7 +89,7 @@ FAKE_KEY_BETA = _fake_key("beta")
 
 
 @pytest.fixture(autouse=True)
-def _hermetic_credentials(request, monkeypatch, tmp_path) -> None:
+def _hermetic_credentials(request: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """No ambient credentials and no reachable .env: discovery is deterministic.
 
     ``HOME`` moves to a throwaway dir so ``~/.hermes/.env`` — which really does
@@ -105,14 +105,14 @@ class _BlockedRequests:
     """Stands in for the module's ``requests`` binding during hermetic tests."""
 
     @staticmethod
-    def post(*_args, **_kwargs) -> NoReturn:
+    def post(*_args: Any, **_kwargs: Any) -> NoReturn:
         raise AssertionError(
             "hermetic test attempted a real HTTP request — inject the endpoint stub"
         )
 
 
 @pytest.fixture(autouse=True)
-def _no_real_network(request, monkeypatch) -> None:
+def _no_real_network(request: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     """Block real egress for every test except the explicitly live smoke test."""
     if request.node.name == "test_live_smoke_jev_resolution":
         return
@@ -122,12 +122,12 @@ def _no_real_network(request, monkeypatch) -> None:
 class FakeResponse:
     """A minimal ``requests``-shaped response."""
 
-    def __init__(self, status_code: int, payload=None, text: str | None = None) -> None:
+    def __init__(self, status_code: int, payload: Any = None, text: str | None = None) -> None:
         self.status_code = status_code
         self._payload = payload
         self.text = text if text is not None else json.dumps(payload if payload is not None else {})
 
-    def json(self):
+    def json(self) -> Any:
         if isinstance(self._payload, Exception):
             raise self._payload
         return self._payload
@@ -140,7 +140,7 @@ class RecordingPoster:
     script: list = field(default_factory=list)
     calls: list = field(default_factory=list)
 
-    def __call__(self, endpoint, key, body, timeout):
+    def __call__(self, endpoint: Any, key: Any, body: Any, timeout: Any) -> Any:
         self.calls.append({"endpoint": endpoint, "key": key, "body": body, "timeout": timeout})
         item = self.script.pop(0) if self.script else FakeResponse(500, {}, "unscripted")
         if isinstance(item, Exception):
@@ -161,7 +161,7 @@ class FakeRunner:
     understand_out: str = ""
     calls: list = field(default_factory=list)
 
-    def __call__(self, args, workdir):
+    def __call__(self, args: Any, workdir: str) -> Any:
         self.calls.append(list(args))
         if len(args) >= 2 and args[0] == "graph":
             if args[1] == "search":
@@ -261,7 +261,7 @@ def _payload(
     }
 
 
-def _resolve_hermetic(**overrides) -> ResolutionVerdict:
+def _resolve_hermetic(**overrides: Any) -> ResolutionVerdict:
     """A resolve() call with both seams injected: no network, no hilo."""
     kwargs = {
         "workdir": str(REPO_ROOT),
@@ -298,12 +298,12 @@ def verdict_text_of(verdict: ResolutionVerdict, poster: RecordingPoster) -> str:
         (0.0, "UNRESOLVED"),
     ],
 )
-def test_band_boundaries(probability, expected) -> None:
+def test_band_boundaries(probability: Any, expected: Any) -> None:
     assert band_for(probability) == expected
 
 
 @pytest.mark.parametrize("bad", [None, float("nan"), float("inf"), "not-a-number", object()])
-def test_band_is_abstain_for_anything_not_a_probability(bad) -> None:
+def test_band_is_abstain_for_anything_not_a_probability(bad: Any) -> None:
     """Fail closed: an unreadable probability is never a band, let alone RESOLVED."""
     assert band_for(bad) == "ABSTAIN"
 
@@ -340,7 +340,7 @@ def test_the_score_answer_is_not_treated_as_a_probability() -> None:
 
 
 @pytest.mark.parametrize("bad", [-1.0, float("nan"), float("inf"), True, "nope", None])
-def test_an_unreadable_score_is_still_malformed(bad) -> None:
+def test_an_unreadable_score_is_still_malformed(bad: Any) -> None:
     payload = _payload()
     payload["answers"]["evidence_quality"]["score"] = bad
     typed, problem = parse_answers(payload)
@@ -367,7 +367,7 @@ def test_estimator_default_is_a_calibration_not_the_bare_floor() -> None:
 
 
 @pytest.mark.parametrize("family", sorted(MEASURED_TOKENS))
-def test_estimator_tracks_the_bundle_density_and_bounds_every_family(family) -> None:
+def test_estimator_tracks_the_bundle_density_and_bounds_every_family(family: Any) -> None:
     """The estimator's contract, family by family, against reported token counts.
 
     A single divisor cannot model every payload and this module does not pretend
@@ -404,7 +404,9 @@ def test_the_calibration_no_longer_halves_the_bundle() -> None:
     assert bare_floor > real * 1.5  # chars//2 sees >50% more tokens than exist
 
 
-def test_the_estimator_is_over_estimating_rather_than_under_on_a_real_bundle(tmp_path) -> None:
+def test_the_estimator_is_over_estimating_rather_than_under_on_a_real_bundle(
+    tmp_path: Path,
+) -> None:
     """A whole real bundle, measured end to end against the live number."""
     chars, real = MEASURED_TOKENS["repo-bundle"]
     text = "x" * chars
@@ -413,7 +415,7 @@ def test_the_estimator_is_over_estimating_rather_than_under_on_a_real_bundle(tmp
 
 
 @pytest.mark.parametrize("family", sorted(MEASURED_TOKENS))
-def test_the_banned_fixed_divisor_would_undercount_every_family(family) -> None:
+def test_the_banned_fixed_divisor_would_undercount_every_family(family: Any) -> None:
     """Why chars/3.5 is forbidden: it undercounts every family measured, and
     misses a JSONL-shaped payload by more than half."""
     chars, real = MEASURED_TOKENS[family]
@@ -423,7 +425,7 @@ def test_the_banned_fixed_divisor_would_undercount_every_family(family) -> None:
 
 
 @pytest.mark.parametrize("family", sorted(MEASURED_TOKENS))
-def test_the_worst_case_bound_never_undercounts_a_measured_family(family) -> None:
+def test_the_worst_case_bound_never_undercounts_a_measured_family(family: Any) -> None:
     """The safety bound is the number the ceiling may not be trusted past."""
     chars, real = MEASURED_TOKENS[family]
     assert worst_case_tokens("x" * chars) >= real
@@ -446,7 +448,7 @@ def test_a_supplied_tokenizer_takes_precedence_over_the_floor() -> None:
     assert calls == ["x" * 10_000]
 
 
-def test_a_real_tokenizer_is_preferred_when_importable(monkeypatch) -> None:
+def test_a_real_tokenizer_is_preferred_when_importable(monkeypatch: pytest.MonkeyPatch) -> None:
     """The seam exists for the spec's 'use a real tokenizer' branch."""
     monkeypatch.setattr(resolution, "_load_real_tokenizer", lambda: lambda text: 42)
     assert resolution._load_real_tokenizer()("anything") == 42
@@ -473,14 +475,14 @@ def test_a_real_tokenizer_is_preferred_when_importable(monkeypatch) -> None:
         "credentials.json",
     ],
 )
-def test_secret_and_cache_paths_are_excluded(path) -> None:
+def test_secret_and_cache_paths_are_excluded(path: Any) -> None:
     assert is_excluded_path(path) is True
 
 
 @pytest.mark.parametrize(
     "path", ["engine/resolution.py", "tests/test_resolution.py", "docs/jev-resolution-gate.md"]
 )
-def test_real_source_paths_are_not_excluded(path) -> None:
+def test_real_source_paths_are_not_excluded(path: Any) -> None:
     assert is_excluded_path(path) is False
 
 
@@ -553,7 +555,7 @@ def test_parse_understand_on_empty_output_is_empty() -> None:
     assert parse_understand("## MAP\nonly a map\n", bundle_rank=0) == []
 
 
-def test_assemble_uses_one_primary_bundle_then_seeds_then_reads(tmp_path) -> None:
+def test_assemble_uses_one_primary_bundle_then_seeds_then_reads(tmp_path: Path) -> None:
     (tmp_path / "extra.py").write_text("def extra():\n    return 1\n", encoding="utf-8")
     (tmp_path / ".env").write_text("PLACEHOLDER=x\n", encoding="utf-8")
     runner = FakeRunner(
@@ -578,7 +580,7 @@ def test_assemble_uses_one_primary_bundle_then_seeds_then_reads(tmp_path) -> Non
     assert any(call[:2] == ["graph", "search"] for call in runner.calls)
 
 
-def test_assemble_falls_back_to_a_bounded_line_aligned_read(tmp_path) -> None:
+def test_assemble_falls_back_to_a_bounded_line_aligned_read(tmp_path: Path) -> None:
     (tmp_path / "big.py").write_text(
         "\n".join(f"line {index}" for index in range(500)), encoding="utf-8"
     )
@@ -595,7 +597,7 @@ def test_assemble_falls_back_to_a_bounded_line_aligned_read(tmp_path) -> None:
     assert "big.py [provenance=bounded-read, score=n/a]" in bundle.text
 
 
-def test_assemble_with_no_hilo_available_is_an_empty_named_bundle(tmp_path) -> None:
+def test_assemble_with_no_hilo_available_is_an_empty_named_bundle(tmp_path: Path) -> None:
     runner = FakeRunner(search_out="", understand_out="")
     bundle = assemble_bundle("q", workdir=str(tmp_path), runner=runner)
     assert bundle.text == ""
@@ -759,7 +761,9 @@ def test_order_blocks_keeps_the_bundle_order_within_a_seed() -> None:
 # ── Credential discovery and failover ────────────────────────────────────────
 
 
-def test_discover_keys_reads_the_env_and_the_known_env_files(monkeypatch, tmp_path) -> None:
+def test_discover_keys_reads_the_env_and_the_known_env_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv("OPENROUTER_API_KEY", FAKE_KEY_ALPHA)
     env_file = tmp_path / ".hermes" / ".env"
     env_file.parent.mkdir(parents=True, exist_ok=True)
@@ -772,7 +776,9 @@ def test_discover_keys_reads_the_env_and_the_known_env_files(monkeypatch, tmp_pa
     assert len(keys) == len(set(keys))
 
 
-def test_discover_keys_ignores_non_openrouter_values(monkeypatch, tmp_path) -> None:
+def test_discover_keys_ignores_non_openrouter_values(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setenv("GITREINS_OPENROUTER_KEY", "not-a-key")
     assert discover_keys(str(tmp_path)) == []
 
@@ -794,7 +800,7 @@ def test_failover_moves_on_from_a_refused_key_to_a_live_one() -> None:
 
 
 @pytest.mark.parametrize("status", [401, 402, 403, 429])
-def test_every_refused_status_moves_to_the_next_candidate(status) -> None:
+def test_every_refused_status_moves_to_the_next_candidate(status: Any) -> None:
     poster = RecordingPoster(
         [FakeResponse(status, {}, "refused"), FakeResponse(200, _payload(noul=0.2))]
     )
@@ -824,7 +830,7 @@ def test_no_credentials_is_an_abstain_with_an_action() -> None:
     assert verdict.exit_code == 1
 
 
-def test_discovery_is_used_when_no_keys_are_passed(monkeypatch) -> None:
+def test_discovery_is_used_when_no_keys_are_passed(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("GITREINS_OPENROUTER_KEY", FAKE_KEY_ALPHA)
     poster = RecordingPoster([FakeResponse(200, _payload(noul=0.95, choice="none"))])
     verdict = _resolve_hermetic(keys=None, poster=poster)
@@ -918,7 +924,9 @@ def test_an_unexpected_status_is_a_named_http_error_abstain() -> None:
         ([], "payload is not an object"),
     ],
 )
-def test_malformed_answers_are_abstains_with_the_specific_problem(payload, problem) -> None:
+def test_malformed_answers_are_abstains_with_the_specific_problem(
+    payload: Any, problem: Any
+) -> None:
     typed, found = parse_answers(payload)
     assert typed == {}
     assert problem in (found or "")
@@ -985,7 +993,9 @@ def test_a_blank_question_never_costs_a_call() -> None:
     "noul,expected_band,expected_exit",
     [(0.95, "RESOLVED", 0), (0.85, "RESOLVED", 0), (0.60, "REVIEW", 0), (0.09, "UNRESOLVED", 1)],
 )
-def test_bands_drive_the_verdict_and_the_exit_code(noul, expected_band, expected_exit) -> None:
+def test_bands_drive_the_verdict_and_the_exit_code(
+    noul: Any, expected_band: Any, expected_exit: Any
+) -> None:
     verdict = _resolve_hermetic(
         poster=RecordingPoster([FakeResponse(200, _payload(noul=noul, choice="none", score=1.0))])
     )

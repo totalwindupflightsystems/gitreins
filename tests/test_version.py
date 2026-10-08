@@ -5,6 +5,8 @@ output both match the version declared in pyproject.toml (so the test does not
 rot on the next version bump).
 """
 
+from __future__ import annotations
+
 import os
 import re
 import subprocess
@@ -49,7 +51,7 @@ def test_cli_version_flag_matches_pyproject() -> None:
     assert result.stdout.strip() == f"gitreins {_pyproject_version()}"
 
 
-def test_mcp_server_identity_matches_package_version(tmp_path) -> None:
+def test_mcp_server_identity_matches_package_version(tmp_path: Path) -> None:
     """DF-GITREINS-POC-5 — the MCP handshake reports the installed release.
 
     The three surfaces a user reads used to disagree (CLI 0.12.1 / README

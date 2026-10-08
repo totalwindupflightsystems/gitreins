@@ -2,37 +2,43 @@
 Tests for evaluator's read_static_analysis tool (AC-160, sa-eval-tests).
 """
 
+from __future__ import annotations
+from typing import Any
+
 import os
 import yaml
 from unittest.mock import patch, MagicMock
 
 from engine.evaluator import EVALUATOR_TOOLS
+from engine.evaluator import AgenticEvaluator
 
 
 class TestReadStaticAnalysis:
     """Test _tool_read_static_analysis — config gating, diagnostics, error handling."""
 
-    def _write_config(self, workdir, config_dict) -> None:
+    def _write_config(self, workdir: str, config_dict: Any) -> None:
         gitreins_dir = os.path.join(workdir, ".gitreins")
         os.makedirs(gitreins_dir)
         with open(os.path.join(gitreins_dir, "config.yaml"), "w") as f:
             yaml.dump(config_dict, f)
 
     # Test 1: error when disabled (default)
-    def test_disabled_by_default(self, evaluator, tmp_workdir) -> None:
+    def test_disabled_by_default(self, evaluator: AgenticEvaluator, tmp_workdir: str) -> None:
         self._write_config(tmp_workdir, {"evaluator": {"static_analysis_diagnostics": False}})
         result = evaluator._tool_read_static_analysis()
         assert "error" in result
 
     # Test 2: empty diagnostics when no tools configured
-    def test_empty_tools(self, evaluator, tmp_workdir) -> None:
+    def test_empty_tools(self, evaluator: AgenticEvaluator, tmp_workdir: str) -> None:
         self._write_config(tmp_workdir, {"evaluator": {"static_analysis_diagnostics": True}})
         result = evaluator._tool_read_static_analysis()
         assert result == {"diagnostics": [], "note": "No static analysis tools configured"}
 
     # Test 3: mypy configured with diagnostics
     @patch("engine.static_analysis.run_static_check")
-    def test_mypy_configured(self, mock_run, evaluator, tmp_workdir) -> None:
+    def test_mypy_configured(
+        self, mock_run: Any, evaluator: AgenticEvaluator, tmp_workdir: str
+    ) -> None:
         self._write_config(
             tmp_workdir,
             {
@@ -59,7 +65,9 @@ class TestReadStaticAnalysis:
 
     # Test 4: path arg scopes to specific directory
     @patch("engine.static_analysis.run_static_check")
-    def test_with_path_arg(self, mock_run, evaluator, tmp_workdir) -> None:
+    def test_with_path_arg(
+        self, mock_run: Any, evaluator: AgenticEvaluator, tmp_workdir: str
+    ) -> None:
         self._write_config(
             tmp_workdir,
             {
@@ -76,7 +84,9 @@ class TestReadStaticAnalysis:
 
     # Test 5: tool failure handled gracefully
     @patch("engine.static_analysis.run_static_check")
-    def test_tool_failure(self, mock_run, evaluator, tmp_workdir) -> None:
+    def test_tool_failure(
+        self, mock_run: Any, evaluator: AgenticEvaluator, tmp_workdir: str
+    ) -> None:
         self._write_config(
             tmp_workdir,
             {
@@ -106,7 +116,9 @@ class TestReadStaticAnalysis:
         assert func["parameters"]["properties"]["path"]["type"] == "string"
 
     # Test 7: tool excluded when static_analysis_diagnostics is false
-    def test_tool_excluded_when_disabled(self, evaluator, tmp_workdir) -> None:
+    def test_tool_excluded_when_disabled(
+        self, evaluator: AgenticEvaluator, tmp_workdir: str
+    ) -> None:
         self._write_config(tmp_workdir, {"evaluator": {"static_analysis_diagnostics": False}})
 
         mock_response = MagicMock()
@@ -116,7 +128,7 @@ class TestReadStaticAnalysis:
 
         captured_tools = []
 
-        def capture_chat(messages, **kwargs):
+        def capture_chat(messages: Any, **kwargs: Any) -> Any:
             captured_tools.append(kwargs.get("tools", []))
             return mock_response
 
@@ -135,7 +147,9 @@ class TestReadStaticAnalysis:
 
     # Test 8: pyright configured via mock
     @patch("engine.static_analysis.run_static_check")
-    def test_pyright_configured(self, mock_run, evaluator, tmp_workdir) -> None:
+    def test_pyright_configured(
+        self, mock_run: Any, evaluator: AgenticEvaluator, tmp_workdir: str
+    ) -> None:
         self._write_config(
             tmp_workdir,
             {
@@ -161,7 +175,9 @@ class TestReadStaticAnalysis:
 
     # Test 9: return structure has correct keys
     @patch("engine.static_analysis.run_static_check")
-    def test_return_structure(self, mock_run, evaluator, tmp_workdir) -> None:
+    def test_return_structure(
+        self, mock_run: Any, evaluator: AgenticEvaluator, tmp_workdir: str
+    ) -> None:
         self._write_config(
             tmp_workdir,
             {
@@ -181,7 +197,9 @@ class TestReadStaticAnalysis:
 
     # Test 10: multiple tools configured
     @patch("engine.static_analysis.run_static_check")
-    def test_multiple_tools(self, mock_run, evaluator, tmp_workdir) -> None:
+    def test_multiple_tools(
+        self, mock_run: Any, evaluator: AgenticEvaluator, tmp_workdir: str
+    ) -> None:
         self._write_config(
             tmp_workdir,
             {

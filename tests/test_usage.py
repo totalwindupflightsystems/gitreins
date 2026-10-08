@@ -1,5 +1,8 @@
 """Tests for per-judgment token/cost attribution (JVIEW-006)."""
 
+from __future__ import annotations
+from typing import Any
+
 import json
 from pathlib import Path
 
@@ -19,7 +22,7 @@ def _write_usage(repo: Path, rows: list) -> None:
             handle.write("\n")
 
 
-def _row(ts: float, tokens_in: int, tokens_out: int, **extra) -> dict:
+def _row(ts: float, tokens_in: int, tokens_out: int, **extra: Any) -> dict:
     row = {"ts": ts, "tokens_in": tokens_in, "tokens_out": tokens_out, "step": "ai_eval"}
     row.update(extra)
     return row
@@ -28,11 +31,11 @@ def _row(ts: float, tokens_in: int, tokens_out: int, **extra) -> dict:
 # ── reading ──────────────────────────────────────────────────────────────────
 
 
-def test_missing_usage_file_is_an_empty_list(tmp_path) -> None:
+def test_missing_usage_file_is_an_empty_list(tmp_path: Path) -> None:
     assert usage.load_usage_rows(str(tmp_path)) == []
 
 
-def test_usage_rows_skip_malformed_lines_and_sort_by_timestamp(tmp_path) -> None:
+def test_usage_rows_skip_malformed_lines_and_sort_by_timestamp(tmp_path: Path) -> None:
     _write_usage(
         tmp_path,
         [
@@ -50,7 +53,9 @@ def test_usage_rows_skip_malformed_lines_and_sort_by_timestamp(tmp_path) -> None
     assert rows[0]["tokens_in"] == 10
 
 
-def test_price_config_defaults_to_unpriced_and_falls_back_to_the_default_model(tmp_path) -> None:
+def test_price_config_defaults_to_unpriced_and_falls_back_to_the_default_model(
+    tmp_path: Path,
+) -> None:
     _write_config(tmp_path, "defaults:\n  model: deepseek-v4-flash\n")
 
     prices = usage.load_price_config(str(tmp_path))
@@ -64,7 +69,7 @@ def test_price_config_defaults_to_unpriced_and_falls_back_to_the_default_model(t
     assert usage.cost_usd(1_000_000, 1_000_000, prices) is None
 
 
-def test_price_config_reads_the_usage_block_and_garbage_rates_become_zero(tmp_path) -> None:
+def test_price_config_reads_the_usage_block_and_garbage_rates_become_zero(tmp_path: Path) -> None:
     _write_config(
         tmp_path,
         "defaults:\n  model: other-model\n"
@@ -81,7 +86,7 @@ def test_price_config_reads_the_usage_block_and_garbage_rates_become_zero(tmp_pa
     assert usage.prices_configured(prices) is True
 
 
-def test_cost_is_charged_on_input_and_output_tokens_only(tmp_path) -> None:
+def test_cost_is_charged_on_input_and_output_tokens_only(tmp_path: Path) -> None:
     prices = {"model": "m", "price_per_1m_input": 0.28, "price_per_1m_output": 0.42}
 
     # 1M in + 1M out; cache reads are already included in tokens_in.

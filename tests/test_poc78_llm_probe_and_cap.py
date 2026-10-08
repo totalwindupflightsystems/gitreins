@@ -3,8 +3,12 @@
 # to hang in `running` forever. The probe proves the failure mode the fix
 # relies on: a bad credential surfaces as an exception, deterministically,
 # before any evaluation work is done.
+from __future__ import annotations
+from typing import Any
+from engine.llm import LLMClient
 from unittest.mock import patch
 
+import pytest
 import requests
 
 from engine.eval_cap import EvalCap
@@ -13,7 +17,7 @@ from engine.eval_cap import EvalCap
 class TestVerifyProbe:
     """verify_probe(): one real round trip that proves the credential works."""
 
-    def test_verify_probe_ok(self, llm_client) -> None:
+    def test_verify_probe_ok(self, llm_client: LLMClient) -> None:
         """A 200-with-choices round trip proves the credential usable."""
         import json as _json
 
@@ -26,11 +30,11 @@ class TestVerifyProbe:
         with patch("requests.post", return_value=ok):
             assert llm_client.verify_probe() is True
 
-    def test_verify_probe_401_is_false(self, llm_client) -> None:
+    def test_verify_probe_401_is_false(self, llm_client: LLMClient) -> None:
         """A rejected credential (401) reports False — no retry, one call."""
         import json as _json
 
-        def _real_response(status, body=b"{}"):
+        def _real_response(status: Any, body: Any = b"{}") -> Any:
             resp = requests.Response()
             resp.status_code = status
             resp._content = body
@@ -43,12 +47,14 @@ class TestVerifyProbe:
         assert ok is False
         assert post.call_count == 1, "probe must not retry a permanent rejection"
 
-    def test_verify_probe_transport_error_is_false(self, llm_client) -> None:
+    def test_verify_probe_transport_error_is_false(self, llm_client: LLMClient) -> None:
         """A dead endpoint reports False (failure, not an 'usable' credential)."""
         with patch("requests.post", side_effect=requests.ConnectionError("connection refused")):
             assert llm_client.verify_probe() is False
 
-    def test_verify_probe_ignores_mock_response_env(self, monkeypatch, llm_client) -> None:
+    def test_verify_probe_ignores_mock_response_env(
+        self, monkeypatch: pytest.MonkeyPatch, llm_client: LLMClient
+    ) -> None:
         """GITREINS_MOCK_LLM_RESPONSE must not fake a passing probe — the probe
         exists precisely to prove the REAL wire accepts the credential."""
         monkeypatch.setenv("GITREINS_MOCK_LLM_RESPONSE", '{"content": "hi"}')

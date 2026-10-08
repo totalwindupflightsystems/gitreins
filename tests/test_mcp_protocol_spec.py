@@ -6,6 +6,8 @@ catalogue, or when the spec names a tool the live server no longer exposes — s
 spec cannot silently drift again.
 """
 
+from __future__ import annotations
+
 import json
 import re
 import subprocess

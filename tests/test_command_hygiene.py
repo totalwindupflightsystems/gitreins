@@ -8,6 +8,8 @@ assert on a side effect (a file that must NOT exist).
 """
 
 from __future__ import annotations
+from pathlib import Path
+from typing import Any
 
 import os
 import pathlib
@@ -38,7 +40,7 @@ def _wait_gone(pid: int, timeout: float = 5.0) -> bool:
 
 
 @pytest.fixture()
-def pidfile(tmp_path):
+def pidfile(tmp_path: Path) -> Any:
     return tmp_path / f"child-{uuid.uuid4().hex}.pid"
 
 
@@ -57,7 +59,7 @@ def pidfile(tmp_path):
         ":(){ :|:& };:",
     ],
 )
-def test_busy_wait_commands_are_refused(cmd) -> None:
+def test_busy_wait_commands_are_refused(cmd: Any) -> None:
     assert ch.busy_wait_reason(cmd), f"must be refused: {cmd}"
 
 
@@ -72,7 +74,7 @@ def test_busy_wait_commands_are_refused(cmd) -> None:
         "python3 scripts/loadgen.py --workers 4 --seconds 5",
     ],
 )
-def test_legitimate_commands_still_run(cmd) -> None:
+def test_legitimate_commands_still_run(cmd: Any) -> None:
     assert ch.busy_wait_reason(cmd) is None, f"must NOT be refused: {cmd}"
 
 
@@ -83,7 +85,7 @@ def test_refusal_message_points_at_the_right_primitives() -> None:
     assert "2026-09-18" in out["reason"]  # carries the evidence
 
 
-def test_refused_command_never_executes(tmp_path) -> None:
+def test_refused_command_never_executes(tmp_path: Path) -> None:
     """Proof by side effect: the refused command must not have run at all."""
     canary = tmp_path / "executed.canary"
     spin = "while :; do :; done"
@@ -95,7 +97,7 @@ def test_refused_command_never_executes(tmp_path) -> None:
 # ── the leak fix: backgrounded children cannot escape ────────────────────────
 
 
-def test_backgrounded_child_is_reaped_on_normal_exit(pidfile) -> None:
+def test_backgrounded_child_is_reaped_on_normal_exit(pidfile: Any) -> None:
     """The exact incident shape: the call RETURNS while a `&` child is alive.
 
     The child records its own PID; the child is a `sleep`, which would outlive a
@@ -109,7 +111,7 @@ def test_backgrounded_child_is_reaped_on_normal_exit(pidfile) -> None:
     assert _wait_gone(child), f"backgrounded child {child} escaped the process-group reap"
 
 
-def test_timeout_kills_the_whole_group(pidfile) -> None:
+def test_timeout_kills_the_whole_group(pidfile: Any) -> None:
     cmd = f"sh -c 'echo $$ > {pidfile}; exec sleep 60'"
     out = ch.run_bounded(cmd, timeout=1)
     assert out.get("timed_out") is True
@@ -227,7 +229,7 @@ def test_argv_list_happy_path_reports_exit_code_output_and_pgid() -> None:
     assert out["pgid"] > 1
 
 
-def test_argv_list_timeout_kills_backgrounded_grandchild(pidfile) -> None:
+def test_argv_list_timeout_kills_backgrounded_grandchild(pidfile: Any) -> None:
     """The DF-CRIER-258 leak shape, list form: a command that backgrounds a
     sleep must leave NOTHING alive after the timeout kill."""
     cmd = ["bash", "-c", f"echo $$ > {pidfile}; sleep 60 & echo bg; wait"]
@@ -238,7 +240,7 @@ def test_argv_list_timeout_kills_backgrounded_grandchild(pidfile) -> None:
     assert _wait_gone(child), f"timed-out list-form grandchild {child} escaped the group kill"
 
 
-def test_argv_list_refusal_fires_and_never_executes(tmp_path) -> None:
+def test_argv_list_refusal_fires_and_never_executes(tmp_path: Path) -> None:
     """A list-form spin loop is refused (scan runs on shlex.join) and the
     command never executes."""
     canary = tmp_path / "executed.canary"

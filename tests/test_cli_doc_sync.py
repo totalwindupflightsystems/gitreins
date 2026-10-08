@@ -13,6 +13,9 @@ One case deliberately does NOT use a fixture: the repository's own
 is asserted on every test run.
 """
 
+from __future__ import annotations
+from typing import Any
+
 import importlib.util
 import subprocess
 import sys
@@ -22,7 +25,7 @@ SCRIPT_PATH = Path(__file__).resolve().parent.parent / "scripts" / "check_cli_do
 REPO_ROOT = SCRIPT_PATH.parent.parent
 
 
-def _load_module():
+def _load_module() -> Any:
     """Load the script as an importable module (importlib, by file path)."""
     spec = importlib.util.spec_from_file_location("check_cli_doc_sync", SCRIPT_PATH)
     module = importlib.util.module_from_spec(spec)
@@ -30,7 +33,7 @@ def _load_module():
     return module
 
 
-def _usage_line(command, options):
+def _usage_line(command: Any, options: Any) -> Any:
     """A fenced usage sketch naming every option the parser accepts."""
     parts = []
     for option in options:
@@ -41,7 +44,7 @@ def _usage_line(command, options):
     return f"gitreins {command} " + " ".join(parts)
 
 
-def _write_synced_doc(tmp_path, module):
+def _write_synced_doc(tmp_path: Path, module: Any) -> Any:
     """Build a minimal doc that mirrors the live surface (then cases mutate it)."""
     top_level, worktree_options, qa_options = module.live_surface(REPO_ROOT)
     lines = [
@@ -85,7 +88,7 @@ def _write_synced_doc(tmp_path, module):
     return doc
 
 
-def _run_script(doc_path):
+def _run_script(doc_path: Any) -> Any:
     return subprocess.run(
         [
             sys.executable,
@@ -133,7 +136,7 @@ def test_live_surface_pins_the_current_cli() -> None:
     assert "--cell" in qa_options["record"]
 
 
-def test_synced_fixture_doc_passes(tmp_path) -> None:
+def test_synced_fixture_doc_passes(tmp_path: Path) -> None:
     module = _load_module()
     doc = _write_synced_doc(tmp_path, module)
 
@@ -158,7 +161,7 @@ def test_repository_doc_is_in_sync() -> None:
     assert f"{live} subcommands" in proc.stdout
 
 
-def _fixture_row(top_level, name) -> str:
+def _fixture_row(top_level: Any, name: Any) -> str:
     """The `## Global` row the fixture doc writes for *name* (derived, not typed).
 
     The fixture numbers rows by ``sorted(top_level)`` order, so adding a
@@ -168,7 +171,7 @@ def _fixture_row(top_level, name) -> str:
     return f"| {sorted(top_level).index(name) + 1} | `{name}` | fixture |"
 
 
-def test_dropped_subcommand_row_fails_naming_it(tmp_path) -> None:
+def test_dropped_subcommand_row_fails_naming_it(tmp_path: Path) -> None:
     module = _load_module()
     doc = _write_synced_doc(tmp_path, module)
     top_level = module.live_surface(REPO_ROOT)[0]
@@ -183,7 +186,7 @@ def test_dropped_subcommand_row_fails_naming_it(tmp_path) -> None:
     assert f"numbering is not 1..{len(top_level) - 1}" in proc.stdout
 
 
-def test_stated_count_mismatch_fails(tmp_path) -> None:
+def test_stated_count_mismatch_fails(tmp_path: Path) -> None:
     module = _load_module()
     doc = _write_synced_doc(tmp_path, module)
     live = len(module.live_surface(REPO_ROOT)[0])
@@ -198,7 +201,7 @@ def test_stated_count_mismatch_fails(tmp_path) -> None:
     assert f"stated count {live - 1} != live count {live}" in message
 
 
-def test_missing_worktree_option_fails_naming_it(tmp_path) -> None:
+def test_missing_worktree_option_fails_naming_it(tmp_path: Path) -> None:
     doc = _write_synced_doc(tmp_path, _load_module())
     text = doc.read_text(encoding="utf-8")
     assert "[--tick <value>]" in text
@@ -209,7 +212,7 @@ def test_missing_worktree_option_fails_naming_it(tmp_path) -> None:
     assert "`worktree fleet` option `--tick` is undocumented" in proc.stdout
 
 
-def test_flag_documented_under_the_wrong_subcommand_fails(tmp_path) -> None:
+def test_flag_documented_under_the_wrong_subcommand_fails(tmp_path: Path) -> None:
     """The historical defect: the exit-2 `--cell` contract sat under `qa list`."""
     doc = _write_synced_doc(tmp_path, _load_module())
     text = doc.read_text(encoding="utf-8")
@@ -225,7 +228,7 @@ def test_flag_documented_under_the_wrong_subcommand_fails(tmp_path) -> None:
     assert "`qa list` documents `--cell`" in proc.stdout
 
 
-def test_extra_flag_in_a_usage_sketch_fails(tmp_path) -> None:
+def test_extra_flag_in_a_usage_sketch_fails(tmp_path: Path) -> None:
     """A flag claimed by a usage sketch counts too, not only a backticked one."""
     doc = _write_synced_doc(tmp_path, _load_module())
     text = doc.read_text(encoding="utf-8")
@@ -237,7 +240,7 @@ def test_extra_flag_in_a_usage_sketch_fails(tmp_path) -> None:
     assert "`qa list` documents `--cell`" in message
 
 
-def test_dropped_worktree_table_row_fails(tmp_path) -> None:
+def test_dropped_worktree_table_row_fails(tmp_path: Path) -> None:
     doc = _write_synced_doc(tmp_path, _load_module())
     text = doc.read_text(encoding="utf-8")
     assert "| `clean` | fixture |" in text
@@ -248,7 +251,7 @@ def test_dropped_worktree_table_row_fails(tmp_path) -> None:
     assert "`worktree clean` has no row" in message
 
 
-def test_missing_doc_fails_loudly(tmp_path) -> None:
+def test_missing_doc_fails_loudly(tmp_path: Path) -> None:
     code, message = _load_module().check_cli_doc_sync(REPO_ROOT, doc_path=tmp_path / "absent.md")
     assert code == 1
     assert "not found" in message

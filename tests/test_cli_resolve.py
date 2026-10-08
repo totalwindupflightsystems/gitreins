@@ -13,6 +13,7 @@ loudly instead of quietly.
 """
 
 from __future__ import annotations
+from typing import Any
 
 import argparse
 import json
@@ -67,7 +68,7 @@ class _StubResponse:
     def __init__(self, noul: float) -> None:
         self._noul = noul
 
-    def json(self):
+    def json(self) -> Any:
         return _jev_payload(self._noul)
 
 
@@ -78,12 +79,12 @@ class _ScriptedEndpoint:
         self._calls = calls
         self._noul = noul
 
-    def post(self, url, **kwargs):
+    def post(self, url: Any, **kwargs: Any) -> Any:
         self._calls.append({"url": url, "json": kwargs.get("json")})
         return _StubResponse(self._noul)
 
 
-def _enabled_resolution_defaults(surface: str):
+def _enabled_resolution_defaults(surface: str) -> Any:
     """Built-in defaults with *surface*'s enable flag flipped to True (J-GATE)."""
     from engine.config import GitReinsDefaults
 
@@ -93,7 +94,7 @@ def _enabled_resolution_defaults(surface: str):
 
 
 @pytest.fixture(autouse=True)
-def _hermetic_credentials(monkeypatch, tmp_path) -> None:
+def _hermetic_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """No ambient credentials, no reachable .env, no real egress."""
     for var in resolution.CREDENTIAL_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
@@ -110,7 +111,7 @@ def _hermetic_credentials(monkeypatch, tmp_path) -> None:
 
 
 @pytest.fixture
-def script_endpoint(monkeypatch):
+def script_endpoint(monkeypatch: pytest.MonkeyPatch) -> Any:
     """Install a scripted Jev endpoint; returns a list the test can inspect."""
     calls: list = []
 
@@ -121,11 +122,11 @@ def script_endpoint(monkeypatch):
     return _install
 
 
-def _script_assembler(monkeypatch) -> None:
+def _script_assembler(monkeypatch: pytest.MonkeyPatch) -> None:
     """Replace hilo with a fixed bundle naming the file the question targets."""
     from engine.resolution import ManifestEntry, TraceSeed
 
-    def fake_assemble_bundle(question, **kwargs):
+    def fake_assemble_bundle(question: Any, **kwargs: Any) -> Any:
         return resolution.AssembledBundle(
             text="## MAP\nengine/evidence_bounds.py →\n  - bound_evidence\n",
             manifest=[
@@ -146,7 +147,7 @@ def _script_assembler(monkeypatch) -> None:
     monkeypatch.setattr(resolution, "assemble_bundle", fake_assemble_bundle)
 
 
-def _fresh_cli_module():
+def _fresh_cli_module() -> Any:
     """Load a PRIVATE copy of gitreins/cli.py, not the shared sys.modules one.
 
     ``tests/test_cli_doc_sync.py``'s ``live_surface`` stubs every ``cmd_*``
@@ -166,7 +167,7 @@ def _fresh_cli_module():
     return module
 
 
-def run_resolve(monkeypatch, workdir, *args: str):
+def run_resolve(monkeypatch: pytest.MonkeyPatch, workdir: str, *args: str) -> Any:
     """Invoke the CLI handler in-process and capture its exit + streams."""
     import contextlib
     import io
@@ -190,7 +191,7 @@ class TestResolveCLI:
     """`gitreins resolve` — the human/CI shell of the resolution gate."""
 
     def test_json_output_is_the_full_verdict_object(
-        self, monkeypatch, tmp_path, script_endpoint
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, script_endpoint: Any
     ) -> None:
         """--json emits valid JSON carrying every verdict field."""
         _script_assembler(monkeypatch)
@@ -222,7 +223,11 @@ class TestResolveCLI:
         assert calls[0]["url"] == resolution.JEV_ENDPOINT
 
     def test_human_output_names_band_probability_missing_and_manifest(
-        self, monkeypatch, tmp_path, script_endpoint, capsys
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        script_endpoint: Any,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         """Plain output: verdict band, probability, missing_kind, bundle."""
         _script_assembler(monkeypatch)
@@ -249,7 +254,7 @@ class TestResolveCLI:
         assert "score=1.00" in out
 
     def test_unresolved_exits_nonzero_and_is_not_an_abstain(
-        self, monkeypatch, tmp_path, script_endpoint
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, script_endpoint: Any
     ) -> None:
         """A low score exits 1 and stays a decision, not an abstention."""
         _script_assembler(monkeypatch)
@@ -268,7 +273,7 @@ class TestResolveCLI:
         assert verdict["abstain_reason"] is None
 
     def test_abstain_without_credentials_exits_nonzero_with_named_reason(
-        self, monkeypatch, tmp_path, script_endpoint
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, script_endpoint: Any
     ) -> None:
         """No key: ABSTAIN, exit 1, reason + suggested fix in the JSON."""
         # A non-empty bundle must reach the credential check for the reason to
@@ -288,7 +293,9 @@ class TestResolveCLI:
         assert verdict["abstain_action"]
         assert verdict["probability"] is None
 
-    def test_budget_flag_reaches_the_engine(self, monkeypatch, tmp_path) -> None:
+    def test_budget_flag_reaches_the_engine(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         """--budget N forwards N as the engine's max_tokens."""
         import contextlib
 
@@ -296,7 +303,7 @@ class TestResolveCLI:
 
         seen: dict = {}
 
-        def fake_assemble_bundle(question, *, max_tokens, **kwargs):
+        def fake_assemble_bundle(question: Any, *, max_tokens: Any, **kwargs: Any) -> Any:
             seen["max_tokens"] = max_tokens
             return resolution.AssembledBundle(text="", notes=["nothing to assemble"])
 
@@ -327,13 +334,13 @@ class TestResolveConfigGate:
     ``resolution.enabled.cli: true``.
     """
 
-    def _install_disabled(self, monkeypatch) -> None:
+    def _install_disabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
         from engine.config import GitReinsDefaults
 
         monkeypatch.setattr(resolution, "resolution_config", lambda workdir=".": GitReinsDefaults())
 
     def test_disabled_abstains_with_named_reason_and_never_reaches_the_endpoint(
-        self, monkeypatch, tmp_path, script_endpoint
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, script_endpoint: Any
     ) -> None:
         """enabled.cli absent/false: ABSTAIN(surface-disabled), exit 1, zero calls."""
         self._install_disabled(monkeypatch)
@@ -353,7 +360,9 @@ class TestResolveConfigGate:
         assert verdict["probability"] is None
         assert calls == [], "a disabled surface must not touch the network"
 
-    def test_absent_config_file_means_disabled(self, monkeypatch, tmp_path) -> None:
+    def test_absent_config_file_means_disabled(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         """With the REAL loader and no config.yaml anywhere, the gate is shut."""
         from engine.config import load_defaults
 
@@ -369,7 +378,9 @@ class TestResolveConfigGate:
         assert verdict["abstain_reason"] == "surface-disabled"
         assert "cli" in verdict["abstain_detail"]
 
-    def test_config_block_supplies_model_budget_and_bands(self, monkeypatch, tmp_path) -> None:
+    def test_config_block_supplies_model_budget_and_bands(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         """enabled.cli: true + knobs: the block pins model, ceiling, thresholds."""
         import yaml
 
@@ -396,7 +407,16 @@ class TestResolveConfigGate:
 
         seen: dict = {}
 
-        def fake_resolve(question, *, workdir, max_tokens, model, resolved_at, review_at, **kw):
+        def fake_resolve(
+            question: Any,
+            *,
+            workdir: str,
+            max_tokens: Any,
+            model: Any,
+            resolved_at: Any,
+            review_at: Any,
+            **kw: Any,
+        ) -> Any:
             seen.update(
                 max_tokens=max_tokens,
                 model=model,
@@ -427,18 +447,18 @@ class TestResolvePersistence:
     """
 
     @staticmethod
-    def _records(workdir) -> list:
+    def _records(workdir: str) -> list:
         return sorted((workdir / ".gitreins" / "history").glob("*/*/verdict.json"))
 
     @staticmethod
-    def _usage_rows(workdir) -> list:
+    def _usage_rows(workdir: str) -> list:
         path = workdir / ".gitreins" / "usage.jsonl"
         if not path.is_file():
             return []
         return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
     def test_a_successful_run_files_one_record_and_one_usage_line(
-        self, monkeypatch, tmp_path, script_endpoint
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, script_endpoint: Any
     ) -> None:
         _script_assembler(monkeypatch)
         script_endpoint(0.87)
@@ -470,7 +490,7 @@ class TestResolvePersistence:
         assert rows[0]["tokens_out"] == 96
 
     def test_an_abstain_without_credentials_records_nothing(
-        self, monkeypatch, tmp_path, script_endpoint
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, script_endpoint: Any
     ) -> None:
         _script_assembler(monkeypatch)
         script_endpoint(0.99)  # never reached — discovery fails first
@@ -485,7 +505,7 @@ class TestResolvePersistence:
         assert self._usage_rows(workdir) == []
 
     def test_a_surface_disabled_run_records_nothing(
-        self, monkeypatch, tmp_path, script_endpoint
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, script_endpoint: Any
     ) -> None:
         from engine.config import GitReinsDefaults
 
@@ -503,7 +523,7 @@ class TestResolvePersistence:
         assert self._usage_rows(workdir) == []
 
     def test_the_cli_routes_through_the_one_shared_helper(
-        self, monkeypatch, tmp_path, script_endpoint
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, script_endpoint: Any
     ) -> None:
         """No CLI-local writer: the record is written by engine.persist."""
         import engine.persist as persist_module
@@ -513,7 +533,7 @@ class TestResolvePersistence:
         monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("cli"))
         seen: dict = {}
 
-        def spy(workdir, verdict, *, surface) -> str:
+        def spy(workdir: str, verdict: Any, *, surface: Any) -> str:
             seen.update(workdir=workdir, surface=surface, band=verdict.verdict)
             return "dry-run"
 

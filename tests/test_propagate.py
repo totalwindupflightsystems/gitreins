@@ -1,5 +1,9 @@
 """Dedicated tests for config propagation across repos."""
 
+from __future__ import annotations
+from pathlib import Path
+from typing import Any
+
 import os
 from unittest.mock import mock_open, patch
 
@@ -19,20 +23,20 @@ from engine.propagate import Propagator
         ("pipeline", {}, False),
     ],
 )
-def test_should_override(key, target, expected) -> None:
+def test_should_override(key: Any, target: Any, expected: Any) -> None:
     assert Propagator._should_override(key, target) == expected
 
 
 # ── _create_gitreins_dir ─────────────────────────────────────
 
 
-def test_create_gitreins_dir_creates_path(tmp_path) -> None:
+def test_create_gitreins_dir_creates_path(tmp_path: Path) -> None:
     target = str(tmp_path / "my-repo")
     Propagator._create_gitreins_dir(target)
     assert os.path.isdir(os.path.join(target, ".gitreins"))
 
 
-def test_create_gitreins_dir_idempotent(tmp_path) -> None:
+def test_create_gitreins_dir_idempotent(tmp_path: Path) -> None:
     path = str(tmp_path)
     Propagator._create_gitreins_dir(path)
     # Should not raise
@@ -133,7 +137,7 @@ def test_propagate_returns_error_when_source_config_missing() -> None:
 # ── propagate — copy to new target ───────────────────────────
 
 
-def test_propagate_copies_to_target_without_existing_config(tmp_path) -> None:
+def test_propagate_copies_to_target_without_existing_config(tmp_path: Path) -> None:
 
     src_dir = tmp_path / "source"
     target = tmp_path / "target"
@@ -153,7 +157,7 @@ def test_propagate_copies_to_target_without_existing_config(tmp_path) -> None:
 # ── propagate — merge to existing target ─────────────────────
 
 
-def test_propagate_merges_to_target_with_existing_config(tmp_path) -> None:
+def test_propagate_merges_to_target_with_existing_config(tmp_path: Path) -> None:
     import yaml
 
     src_dir = tmp_path / "source"

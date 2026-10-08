@@ -20,13 +20,17 @@ Contract tested here:
    tracked for <lang>.") is preserved.
 """
 
+from __future__ import annotations
+from pathlib import Path
+from typing import Any
+
 import os
 import shutil
 
 from tests.test_cli import _init_real_git_repo, run_cli
 
 
-def _git_only_env(tmp_path):
+def _git_only_env(tmp_path: Path) -> Any:
     """PATH with git and nothing else: every static-analysis tool is missing.
 
     Mirrors test_cli's _tool_path helper — the host PATH resolves real tools
@@ -41,14 +45,14 @@ def _git_only_env(tmp_path):
     return {"PATH": str(bin_dir)}
 
 
-def _write(repo, rel, text) -> None:
+def _write(repo: Any, rel: Any, text: Any) -> None:
     path = os.path.join(repo, rel)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
         f.write(text)
 
 
-def _mixed_repo(tmp_path):
+def _mixed_repo(tmp_path: Path) -> Any:
     """A Python + C + SQL repo — the DF-GITREINS-POC-69 repro shape.
 
     python and c come from signature files (pyproject.toml; Makefile maps to
@@ -66,7 +70,9 @@ def _mixed_repo(tmp_path):
 class TestSetupToolsHeaderMatchesList:
     """Criterion 1: the header and the tool list never contradict each other."""
 
-    def test_mixed_repo_header_lists_only_languages_whose_tools_are_listed(self, tmp_path) -> None:
+    def test_mixed_repo_header_lists_only_languages_whose_tools_are_listed(
+        self, tmp_path: Path
+    ) -> None:
         repo = _mixed_repo(tmp_path)
         result = run_cli("setup-tools", cwd=repo, extra_env=_git_only_env(tmp_path))
         assert result.returncode == 0, result.stdout + result.stderr
@@ -81,7 +87,7 @@ class TestSetupToolsHeaderMatchesList:
         # No untracked-language disclosure when every detected language is covered.
         assert "No tracked static analysis tools" not in result.stdout
 
-    def test_tools_are_listed_in_detection_order(self, tmp_path) -> None:
+    def test_tools_are_listed_in_detection_order(self, tmp_path: Path) -> None:
         repo = _mixed_repo(tmp_path)
         result = run_cli("setup-tools", cwd=repo, extra_env=_git_only_env(tmp_path))
         assert result.returncode == 0, result.stdout + result.stderr
@@ -89,7 +95,7 @@ class TestSetupToolsHeaderMatchesList:
         # come first, sql's tool last.
         assert result.stdout.index("pyright") < result.stdout.index("sqlfluff")
 
-    def test_pure_python_repo_output_is_unchanged(self, tmp_path) -> None:
+    def test_pure_python_repo_output_is_unchanged(self, tmp_path: Path) -> None:
         repo = _init_real_git_repo(tmp_path)
         _write(repo, "pyproject.toml", "[project]\nname = 'pyonly'\n")
         result = run_cli("setup-tools", cwd=repo, extra_env=_git_only_env(tmp_path))
@@ -101,7 +107,7 @@ class TestSetupToolsHeaderMatchesList:
         # No untracked-language disclosure when nothing else was detected.
         assert "No tracked static analysis tools" not in result.stdout
 
-    def test_sql_only_repo_lists_sqlfluff(self, tmp_path) -> None:
+    def test_sql_only_repo_lists_sqlfluff(self, tmp_path: Path) -> None:
         # Latent bug fixed alongside: the old primary-type keying left an
         # SQL-only repo in the zero state even though sqlfluff is tracked.
         repo = _init_real_git_repo(tmp_path)
@@ -115,7 +121,7 @@ class TestSetupToolsHeaderMatchesList:
 class TestSetupToolsInstallGuidance:
     """Criterion 2: pipx/uv-tool guidance per tool, never a bare pip line."""
 
-    def test_missing_tool_lines_name_pep668_safe_routes(self, tmp_path) -> None:
+    def test_missing_tool_lines_name_pep668_safe_routes(self, tmp_path: Path) -> None:
         repo = _mixed_repo(tmp_path)
         result = run_cli("setup-tools", cwd=repo, extra_env=_git_only_env(tmp_path))
         assert result.returncode == 0, result.stdout + result.stderr
@@ -123,7 +129,7 @@ class TestSetupToolsInstallGuidance:
         assert "pip install" not in result.stdout
         lines = result.stdout.splitlines()
 
-        def tool_line(prefix):
+        def tool_line(prefix: Any) -> Any:
             matches = [line for line in lines if line.strip().startswith(prefix)]
             assert matches, f"no output line for {prefix}"
             return matches[0]
@@ -182,7 +188,7 @@ class TestSetupToolsInstallGuidance:
 class TestSetupToolsZeroState:
     """Criterion 3: the unknown-language zero state is preserved."""
 
-    def test_unknown_language_zero_state_exit_0(self, tmp_path) -> None:
+    def test_unknown_language_zero_state_exit_0(self, tmp_path: Path) -> None:
         # _init_real_git_repo's tree holds only base.txt: no signature file,
         # no source extension, no SQL sources → nothing tracked for "unknown".
         repo = _init_real_git_repo(tmp_path)

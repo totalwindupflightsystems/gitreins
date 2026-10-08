@@ -2,6 +2,9 @@
 Unit tests for engine/static_analysis.py — static analysis guard runner.
 """
 
+from __future__ import annotations
+from typing import Any
+
 import json
 import os
 import subprocess
@@ -352,7 +355,7 @@ class TestListAvailableTools:
     """
 
     @staticmethod
-    def _finder(found: dict[str, str]):
+    def _finder(found: dict[str, str]) -> Any:
         """Return a find_tool stand-in: paths for listed tools, None otherwise."""
         return lambda tool: found.get(tool)
 
@@ -428,7 +431,7 @@ class TestListAvailableTools:
 class TestParseMypy:
     """Test parsing of mypy text output."""
 
-    def test_parse_mypy_errors(self, mypy_output_errors) -> None:
+    def test_parse_mypy_errors(self, mypy_output_errors: Any) -> None:
         diags = _parse_mypy(mypy_output_errors)
         assert len(diags) == 3
 
@@ -481,7 +484,7 @@ class TestParseMypy:
 class TestParsePyrightJson:
     """Test parsing of pyright JSON output."""
 
-    def test_parse_pyright_json(self, pyright_json_output) -> None:
+    def test_parse_pyright_json(self, pyright_json_output: Any) -> None:
         diags = _parse_pyright_json(pyright_json_output)
         assert len(diags) == 2
 
@@ -528,7 +531,7 @@ class TestParsePyrightJson:
 class TestParseSorbet:
     """Test parsing of sorbet text output."""
 
-    def test_parse_sorbet_errors(self, sorbet_output_errors) -> None:
+    def test_parse_sorbet_errors(self, sorbet_output_errors: Any) -> None:
         diags = _parse_sorbet(sorbet_output_errors)
         assert len(diags) == 2
 
@@ -573,7 +576,7 @@ class TestParseSorbet:
 class TestParseSqlfluffJson:
     """Test parsing of sqlfluff JSON output."""
 
-    def test_parse_sqlfluff_json(self, sqlfluff_output) -> None:
+    def test_parse_sqlfluff_json(self, sqlfluff_output: Any) -> None:
         diags = _parse_sqlfluff_json(sqlfluff_output)
         assert len(diags) == 2
 
@@ -606,7 +609,7 @@ class TestParseSqlfluffJson:
 class TestParsePhpstanJson:
     """Test parsing of phpstan JSON output."""
 
-    def test_parse_phpstan_json(self, phpstan_output) -> None:
+    def test_parse_phpstan_json(self, phpstan_output: Any) -> None:
         diags = _parse_phpstan_json(phpstan_output)
         assert len(diags) == 1
 
@@ -634,7 +637,7 @@ class TestParsePhpstanJson:
 class TestParseCppcheck:
     """Test parsing of cppcheck text output (--template format)."""
 
-    def test_parse_cppcheck_all_severities(self, cppcheck_output_errors) -> None:
+    def test_parse_cppcheck_all_severities(self, cppcheck_output_errors: Any) -> None:
         """Cppcheck output with error, warning, style, performance,
         portability, and information — six diagnostics, header lines
         (Checking…, nofile:…) are skipped."""
@@ -710,7 +713,7 @@ class TestParseCppcheck:
 class TestParseStaticcheck:
     """Test parsing of staticcheck text output."""
 
-    def test_parse_staticcheck_all_checks(self, staticcheck_output_errors) -> None:
+    def test_parse_staticcheck_all_checks(self, staticcheck_output_errors: Any) -> None:
         """staticcheck output with ST, S, U checks — four diagnostics."""
         diags = _parse_staticcheck(staticcheck_output_errors)
         assert len(diags) == 4
@@ -811,7 +814,7 @@ class TestParseStaticcheckExtended:
 class TestParseClippy:
     """Test parsing of cargo clippy --message-format=json output."""
 
-    def test_parse_clippy_two_diagnostics(self, clippy_output) -> None:
+    def test_parse_clippy_two_diagnostics(self, clippy_output: Any) -> None:
         """Two compiler messages produce two diagnostics."""
         diags = _parse_clippy_json(clippy_output)
         assert len(diags) == 2
@@ -836,7 +839,7 @@ class TestParseClippy:
         """Blank lines are skipped."""
         assert _parse_clippy_json("   \n  \n") == []
 
-    def test_parse_clippy_skips_non_compiler_messages(self, clippy_output) -> None:
+    def test_parse_clippy_skips_non_compiler_messages(self, clippy_output: Any) -> None:
         """Non-compiler-message lines (build-script-executed etc.) are skipped."""
         extra = json.dumps({"reason": "build-script-executed", "package_id": "foo 1.0.0"})
         diags = _parse_clippy_json(clippy_output + "\n" + extra)
@@ -1018,7 +1021,7 @@ class TestBuildCommand:
 class TestRunStaticCheck:
     """Test the main run_static_check orchestrator."""
 
-    def test_run_static_check_mypy(self, mypy_output_errors) -> None:
+    def test_run_static_check_mypy(self, mypy_output_errors: Any) -> None:
         """Mypy with mocked subprocess returns normalized diagnostics."""
         mock_result = MagicMock()
         mock_result.stdout = mypy_output_errors
@@ -1035,7 +1038,7 @@ class TestRunStaticCheck:
         assert result[0]["tool"] == "mypy"
         assert result[0]["code"] == "arg-type"
 
-    def test_run_static_check_pyright(self, pyright_json_output) -> None:
+    def test_run_static_check_pyright(self, pyright_json_output: Any) -> None:
         """Pyright with mocked subprocess returns normalized diagnostics
         with paths relativized to workdir."""
         mock_result = MagicMock()
@@ -1097,7 +1100,7 @@ class TestRunStaticCheck:
                 result = run_static_check("pyright", "/tmp/workdir")
         assert result == []
 
-    def test_run_static_check_sorbet_stderr(self, sorbet_output_errors) -> None:
+    def test_run_static_check_sorbet_stderr(self, sorbet_output_errors: Any) -> None:
         """Sorbet reads diagnostics from stderr."""
         mock_result = MagicMock()
         mock_result.stdout = ""
@@ -1111,7 +1114,7 @@ class TestRunStaticCheck:
         assert result[0]["file"] == "main.rb"
         assert result[0]["tool"] == "sorbet"
 
-    def test_run_static_check_cppcheck(self, cppcheck_output_errors) -> None:
+    def test_run_static_check_cppcheck(self, cppcheck_output_errors: Any) -> None:
         """Cppcheck text output parsed through the text-parser path."""
         mock_result = MagicMock()
         mock_result.stdout = cppcheck_output_errors
@@ -1127,7 +1130,7 @@ class TestRunStaticCheck:
         assert result[0]["tool"] == "cppcheck"
         assert result[0]["code"] == "uninitvar"
 
-    def test_run_static_check_staticcheck(self, staticcheck_output_errors) -> None:
+    def test_run_static_check_staticcheck(self, staticcheck_output_errors: Any) -> None:
         """staticcheck text output parsed through the text-parser path."""
         mock_result = MagicMock()
         mock_result.stdout = staticcheck_output_errors
@@ -1150,7 +1153,7 @@ class TestRunStaticCheck:
             result = run_static_check("staticcheck", "/tmp/workdir")
         assert result == []
 
-    def test_run_static_check_clippy(self, clippy_output) -> None:
+    def test_run_static_check_clippy(self, clippy_output: Any) -> None:
         """Clippy JSON output parsed through the JSON-parser path."""
         mock_result = MagicMock()
         mock_result.stdout = clippy_output

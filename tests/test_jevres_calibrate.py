@@ -10,6 +10,7 @@ trusting the gate's happy path.
 """
 
 from __future__ import annotations
+from typing import Any
 
 import ast
 import importlib.util
@@ -23,7 +24,7 @@ SCRIPT = REPO_ROOT / "scripts" / "jevres_calibrate.py"
 CORPUS = REPO_ROOT / "tests" / "fixtures" / "jevres_cases" / "corpus.jsonl"
 
 
-def _load_module():
+def _load_module() -> Any:
     spec = importlib.util.spec_from_file_location("jevres_calibrate_under_test", SCRIPT)
     module = importlib.util.module_from_spec(spec)
     # Registered BEFORE exec: the script's dataclasses resolve their string
@@ -142,7 +143,9 @@ def _full_case_set(workdir: str = "tree") -> list:
     ]
 
 
-def test_validate_corpus_rejects_an_unknown_tree(tmp_path, monkeypatch) -> None:
+def test_validate_corpus_rejects_an_unknown_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(cal, "TREES_ROOT", tmp_path)
     cases = cal.load_corpus()  # real corpus, real categories
     with pytest.raises(SystemExit, match="unknown tree"):
@@ -150,7 +153,7 @@ def test_validate_corpus_rejects_an_unknown_tree(tmp_path, monkeypatch) -> None:
 
 
 def test_validate_corpus_requires_an_acceptance_file_on_resolved_trees(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(cal, "TREES_ROOT", tmp_path)
     for case in _full_case_set():
@@ -165,7 +168,9 @@ def test_validate_corpus_requires_an_acceptance_file_on_resolved_trees(
         cal.validate_corpus(cases)
 
 
-def test_validate_corpus_requires_the_pair_design(tmp_path, monkeypatch) -> None:
+def test_validate_corpus_requires_the_pair_design(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(cal, "TREES_ROOT", tmp_path)
     for case in _full_case_set():
         tree = tmp_path / case.workdir
@@ -180,7 +185,9 @@ def test_validate_corpus_requires_the_pair_design(tmp_path, monkeypatch) -> None
 # ── Hermetic run over the full corpus ────────────────────────────────────────
 
 
-def test_full_hermetic_run_gate_passes_and_prints_matrix_and_sweep(capsys) -> None:
+def test_full_hermetic_run_gate_passes_and_prints_matrix_and_sweep(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     exit_code = cal.main([])
     out = capsys.readouterr().out
     assert exit_code == 0
@@ -279,11 +286,11 @@ def test_budget_case_that_bands_is_a_gate_failure() -> None:
 # ── Sweep and matrix: the resolver's own band function does the bucketing ────
 
 
-def test_sweep_rebands_with_the_resolver_band_function(monkeypatch) -> None:
+def test_sweep_rebands_with_the_resolver_band_function(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
     real_band_for = cal.band_for
 
-    def spy(probability, *, resolved_at, review_at):
+    def spy(probability: Any, *, resolved_at: Any, review_at: Any) -> Any:
         calls.append(resolved_at)
         return real_band_for(probability, resolved_at=resolved_at, review_at=review_at)
 
@@ -298,10 +305,10 @@ def test_sweep_rebands_with_the_resolver_band_function(monkeypatch) -> None:
 def test_confusion_matrix_buckets_and_excludes_the_budget_surface() -> None:
     from engine.resolution import ResolutionVerdict
 
-    def verdict_for(probability):
+    def verdict_for(probability: Any) -> Any:
         return ResolutionVerdict(question="q", verdict="x", probability=probability)
 
-    def case_for(case_id, category):
+    def case_for(case_id: Any, category: Any) -> Any:
         return cal.CorpusCase(
             id=case_id,
             category=category,
@@ -351,12 +358,14 @@ def test_band_boundary_belongs_to_the_better_band_in_the_matrix() -> None:
 # ── Live mode: the production credential path, proven by seam ────────────────
 
 
-def test_live_mode_hands_the_production_credential_path_to_the_resolver(monkeypatch) -> None:
+def test_live_mode_hands_the_production_credential_path_to_the_resolver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """keys=None + poster=None IS the production credential path: discover_keys,
     per-key failover, the real endpoint. Assembly stays on the labeled trees."""
     recorded = {}
 
-    def fake_resolve(question, **kwargs):
+    def fake_resolve(question: Any, **kwargs: Any) -> Any:
         recorded.update(kwargs)
         from engine.resolution import ResolutionVerdict
 
@@ -372,7 +381,7 @@ def test_live_mode_hands_the_production_credential_path_to_the_resolver(monkeypa
     assert result.surface in (cal.SURFACE_BAND, cal.SURFACE_BUDGET)
 
 
-def test_record_rejects_nothing_and_replay_applies_only_valid_records(tmp_path) -> None:
+def test_record_rejects_nothing_and_replay_applies_only_valid_records(tmp_path: Path) -> None:
     records = {
         "resolved-payments-negative-rejection": {
             "id": "resolved-payments-negative-rejection",

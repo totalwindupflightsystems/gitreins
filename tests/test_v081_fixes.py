@@ -7,6 +7,8 @@ Regression tests for v0.8.1 bug fixes.
 - Bug #4: API key fallback chain includes KIMI/GROQ/OPENROUTER
 """
 
+from __future__ import annotations
+
 import os
 import tempfile
 

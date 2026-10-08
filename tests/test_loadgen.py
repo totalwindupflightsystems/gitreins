@@ -10,6 +10,7 @@ reports zero survivors.
 """
 
 from __future__ import annotations
+from typing import Any
 
 import json
 import os
@@ -31,7 +32,7 @@ SCRIPT = Path(__file__).parents[1] / "scripts" / "loadgen.py"
 LINUX = sys.platform.startswith("linux")
 
 
-def _wait_for_started(proc, timeout=30.0):
+def _wait_for_started(proc: Any, timeout: Any = 30.0) -> None:
     """Read the runner's `started` line (the child pids) or fail."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -100,7 +101,7 @@ def test_clean_run_reports_no_survivors() -> None:
     assert elapsed < 20.0, f"a 0.4 s run took {elapsed:.1f}s"
 
 
-def test_shared_host_is_refused_unless_allowlisted(monkeypatch) -> None:
+def test_shared_host_is_refused_unless_allowlisted(monkeypatch: pytest.MonkeyPatch) -> None:
     """Synthetic load is refused where the fleet's own services run."""
     monkeypatch.delenv(loadgen.ALLOW_SHARED_ENV, raising=False)
     monkeypatch.setattr(loadgen, "shared_host_processes", lambda markers=(): ["42: gateway run"])
@@ -128,7 +129,7 @@ def test_request_is_hard_capped() -> None:
         loadgen._parse_cpus(" , ")
 
 
-def test_cpu_set_parsing_and_restoration(monkeypatch) -> None:
+def test_cpu_set_parsing_and_restoration(monkeypatch: pytest.MonkeyPatch) -> None:
     """`--cpus` narrows the run and the runner's own affinity is restored."""
     assert loadgen._parse_cpus("0-2,4", {0, 1, 2, 3, 4}) == {0, 1, 2, 4}
     assert loadgen._parse_cpus("0-3", {1, 2}) == {1, 2}

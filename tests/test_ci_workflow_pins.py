@@ -7,6 +7,8 @@ toolchain first) and it lets one upstream release change the job. These tests
 refuse to let the pin or the retry fall out again.
 """
 
+from __future__ import annotations
+
 import re
 from pathlib import Path
 

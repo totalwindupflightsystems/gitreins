@@ -1,11 +1,14 @@
 """Quality config round-trip coverage."""
 
+from __future__ import annotations
+from pathlib import Path
+
 import yaml
 
 from engine.config import QualityConfig, load_defaults
 
 
-def test_quality_config_load_save_load_round_trip(tmp_path) -> None:
+def test_quality_config_load_save_load_round_trip(tmp_path: Path) -> None:
     config_dir = tmp_path / ".gitreins"
     config_dir.mkdir()
     source = {

@@ -5,6 +5,9 @@ New in v0.7.1: SSH ED25519/PKCS#8, AWS secret keys, GCP, DigitalOcean,
 Stripe, Azure, Slack tokens.
 """
 
+from __future__ import annotations
+from pathlib import Path
+
 import os
 import re
 import shutil
@@ -294,7 +297,7 @@ class TestVenvDirExclusion:
         "-----BEGIN RSA PRIVATE KEY-----\n"
     )
 
-    def test_workdir_files_excludes_dotted_venv_dir(self, tmp_workdir) -> None:
+    def test_workdir_files_excludes_dotted_venv_dir(self, tmp_workdir: str) -> None:
         """.venv312/lib/python3.12/site-packages/<pkg>/mod.py is not enumerated."""
         _write_workdir_file(
             tmp_workdir,
@@ -309,7 +312,7 @@ class TestVenvDirExclusion:
         assert not any(f.startswith(".venv312") for f in files)
         assert "src/app.py" in files
 
-    def test_workdir_files_excludes_plain_venv_dir(self, tmp_workdir) -> None:
+    def test_workdir_files_excludes_plain_venv_dir(self, tmp_workdir: str) -> None:
         """A plain 'venv' dir (no dot prefix) is also pruned."""
         _write_workdir_file(
             tmp_workdir,
@@ -324,7 +327,7 @@ class TestVenvDirExclusion:
         assert not any(f.startswith("venv/") for f in files)
         assert "main.py" in files
 
-    def test_workdir_files_excludes_any_venv_prefix(self, tmp_workdir) -> None:
+    def test_workdir_files_excludes_any_venv_prefix(self, tmp_workdir: str) -> None:
         """venv311, .venvs, etc. all match the prefix filter."""
         for venv in ("venv311", ".venvs", "venvs", ".venv312"):
             _write_workdir_file(
@@ -339,7 +342,7 @@ class TestVenvDirExclusion:
 
         assert files == ["src/app.py"]
 
-    def test_workdir_files_excludes_site_and_dist_packages(self, tmp_workdir) -> None:
+    def test_workdir_files_excludes_site_and_dist_packages(self, tmp_workdir: str) -> None:
         """Belt-and-braces: site-packages/dist-packages are pruned even under
         an unusual venv root name."""
         _write_workdir_file(
@@ -359,7 +362,7 @@ class TestVenvDirExclusion:
 
         assert files == ["src/app.py"]
 
-    def test_workdir_scan_clean_with_vendored_venv(self, tmp_workdir) -> None:
+    def test_workdir_scan_clean_with_vendored_venv(self, tmp_workdir: str) -> None:
         """staged_only=False scan passes when findings exist only under a venv."""
         _write_workdir_file(
             tmp_workdir,
@@ -374,7 +377,7 @@ class TestVenvDirExclusion:
         assert result.passed is True
         assert "clean" in result.output
 
-    def test_workdir_scan_still_flags_finding_outside_venv(self, tmp_workdir) -> None:
+    def test_workdir_scan_still_flags_finding_outside_venv(self, tmp_workdir: str) -> None:
         """Over-skip guard: a genuine finding in normal source still trips."""
         _write_workdir_file(
             tmp_workdir,
@@ -427,7 +430,7 @@ def _tier1_secrets_command(workdir: str) -> str:
 class TestHarnessStateExcludedFromBuiltinScan:
     """Criterion 1: the builtin workdir scan skips `.gitreins/**`."""
 
-    def test_workdir_files_prunes_all_harness_state(self, tmp_workdir) -> None:
+    def test_workdir_files_prunes_all_harness_state(self, tmp_workdir: str) -> None:
         """Config, logs and history are all pruned from the enumeration."""
         _write_workdir_file(tmp_workdir, ".gitreins/config.yaml", "guards:\n  secrets: true\n")
         _write_workdir_file(tmp_workdir, ".gitreins/logs/guard-1.log", HARNESS_CANARY)
@@ -443,7 +446,7 @@ class TestHarnessStateExcludedFromBuiltinScan:
         assert not any(f.startswith(".gitreins/") for f in files)
         assert files == ["src/app.py"]
 
-    def test_workdir_scan_ignores_canary_in_harness_state(self, tmp_workdir) -> None:
+    def test_workdir_scan_ignores_canary_in_harness_state(self, tmp_workdir: str) -> None:
         """Canary in `.gitreins/logs/x.log` does NOT fail the scan, and the
         evidence names the exclusion (criterion 3)."""
         _write_workdir_file(
@@ -458,7 +461,7 @@ class TestHarnessStateExcludedFromBuiltinScan:
         assert ".gitreins/**" in result.output
         assert "excluded harness state" in result.output
 
-    def test_workdir_scan_still_flags_same_canary_in_source(self, tmp_workdir) -> None:
+    def test_workdir_scan_still_flags_same_canary_in_source(self, tmp_workdir: str) -> None:
         """Criterion 2 (MUST half): the identical canary in a source file
         still fails — the exclusion is scoped, not a blanket relaxation."""
         _write_workdir_file(
@@ -473,7 +476,7 @@ class TestHarnessStateExcludedFromBuiltinScan:
         assert "src/app.py" in result.output
         assert ".gitreins" not in result.output
 
-    def test_staged_scan_ignores_tracked_gitreins_state(self, tmp_path) -> None:
+    def test_staged_scan_ignores_tracked_gitreins_state(self, tmp_path: Path) -> None:
         """`.gitreins/config.yaml` and `history/` are TRACKED in a real repo,
         so the staged path needs the same exclusion."""
         repo = _git_repo(str(tmp_path / "repo"))
@@ -501,7 +504,7 @@ class TestTier1SecretsStepHarnessScope:
         _write_workdir_file(repo, "src/app.py", "def add(a, b):\n    return a + b\n")
         return repo
 
-    def test_step_passes_with_canary_only_in_harness_state(self, tmp_path) -> None:
+    def test_step_passes_with_canary_only_in_harness_state(self, tmp_path: Path) -> None:
         repo = self._make_repo(str(tmp_path / "repo"))
 
         proc = subprocess.run(
@@ -512,7 +515,7 @@ class TestTier1SecretsStepHarnessScope:
         # Criterion 3: the exclusion is part of the step's evidence.
         assert ".gitreins/**" in proc.stdout
 
-    def test_step_fails_when_same_canary_reaches_a_source_file(self, tmp_path) -> None:
+    def test_step_fails_when_same_canary_reaches_a_source_file(self, tmp_path: Path) -> None:
         repo = self._make_repo(str(tmp_path / "repo"))
         _write_workdir_file(repo, "src/app.py", f"token = {HARNESS_CANARY}\n")
 
@@ -532,7 +535,7 @@ class TestTier1SecretsStepNamesScanners:
     `secrets` no longer leaves "secrets" ambiguous.
     """
 
-    def test_step_output_names_the_scanner_set(self, tmp_path) -> None:
+    def test_step_output_names_the_scanner_set(self, tmp_path: Path) -> None:
         repo = _git_repo(str(tmp_path / "repo"))
         _write_workdir_file(repo, "src/app.py", "def add(a, b):\n    return a + b\n")
 
@@ -551,7 +554,7 @@ class TestTier1SecretsStepNamesScanners:
         ), proc.stdout
         assert re.search(r"secrets: gitleaks: (clean|not on PATH)", proc.stdout), proc.stdout
 
-    def test_step_output_names_the_offending_scanner_on_failure(self, tmp_path) -> None:
+    def test_step_output_names_the_offending_scanner_on_failure(self, tmp_path: Path) -> None:
         repo = _git_repo(str(tmp_path / "repo"))
         _write_workdir_file(repo, "src/app.py", f"token = {HARNESS_CANARY}\n")
 
@@ -567,7 +570,7 @@ class TestGitleaksHarnessExclusionConfig:
     """The generated gitleaks config is what keeps `--no-git` off harness
     state; gitleaks version present → also prove it live."""
 
-    def test_config_extends_repo_config_when_present(self, tmp_path) -> None:
+    def test_config_extends_repo_config_when_present(self, tmp_path: Path) -> None:
         from engine.pipeline import harness_scan_gitleaks_config
 
         repo = str(tmp_path / "repo")
@@ -585,7 +588,7 @@ class TestGitleaksHarnessExclusionConfig:
         assert "useDefault" not in cfg
         assert r"(^|/)\.gitreins/.*" in cfg
 
-    def test_config_falls_back_to_default_ruleset(self, tmp_path) -> None:
+    def test_config_falls_back_to_default_ruleset(self, tmp_path: Path) -> None:
         from engine.pipeline import harness_scan_gitleaks_config
 
         repo = str(tmp_path / "repo")
@@ -600,7 +603,7 @@ class TestGitleaksHarnessExclusionConfig:
     @pytest.mark.skipif(
         shutil.which("gitleaks") is None, reason="gitleaks not installed on this host"
     )
-    def test_gitleaks_scan_scope_excludes_harness_state(self, tmp_path) -> None:
+    def test_gitleaks_scan_scope_excludes_harness_state(self, tmp_path: Path) -> None:
         """Bare `--no-git` flags the harness canary; the generated config
         does not — and still flags the same canary in a source file."""
         from engine.pipeline import harness_scan_gitleaks_config

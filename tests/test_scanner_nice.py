@@ -29,6 +29,7 @@ scope; no network, no dependence on the outer repo's index.
 """
 
 from __future__ import annotations
+from typing import Any
 
 import os
 import shutil
@@ -61,7 +62,7 @@ _REAL_WHICH = shutil.which
 
 
 @pytest.fixture(autouse=True)
-def _no_ambient_override(monkeypatch) -> None:
+def _no_ambient_override(monkeypatch: pytest.MonkeyPatch) -> None:
     """Every test states its own level — never inherit one from the shell."""
     monkeypatch.delenv(scanner_nice.ENV_VAR, raising=False)
 
@@ -209,18 +210,20 @@ def _prechange_lint_step(lint_cmd: str) -> str:
 
 
 class TestBuiltCommandStrings:
-    def test_secrets_step_names_the_default_prefix(self, tmp_workdir) -> None:
+    def test_secrets_step_names_the_default_prefix(self, tmp_workdir: str) -> None:
         cmd = _secrets_step_run(tmp_workdir)
         assert "nice -n 10 true >/dev/null 2>&1" in cmd
         assert "$_gr_nice gitleaks detect --source . --no-git --no-banner --no-color" in cmd
         assert "scanners: nice=nice -n 10" in cmd
 
-    def test_secrets_step_honours_the_config_level(self, tmp_workdir) -> None:
+    def test_secrets_step_honours_the_config_level(self, tmp_workdir: str) -> None:
         cmd = _secrets_step_run(tmp_workdir, {"guards": {"scanner_nice": 19}})
         assert "$_gr_nice gitleaks detect" in cmd
         assert "nice -n 19" in cmd
 
-    def test_secrets_step_honours_the_env_level(self, tmp_workdir, monkeypatch) -> None:
+    def test_secrets_step_honours_the_env_level(
+        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setenv(scanner_nice.ENV_VAR, "7")
         cmd = _secrets_step_run(tmp_workdir, {"guards": {"scanner_nice": 19}})
         assert "nice -n 7" in cmd
@@ -232,7 +235,7 @@ class TestBuiltCommandStrings:
         # The missing-linter skip must survive the prefix (DF-GITREINS-POC-16).
         assert "command -v ruff >/dev/null 2>&1" in cmd
 
-    def test_tier1_plan_wraps_every_external_lane(self, tmp_path) -> None:
+    def test_tier1_plan_wraps_every_external_lane(self, tmp_path: Path) -> None:
         workdir = tmp_path / "wd"
         workdir.mkdir()
         (workdir / "module.py").write_text("x = 1\n", encoding="utf-8")
@@ -256,15 +259,17 @@ class TestBuiltCommandStrings:
     # call and the env var, both exist on the pre-change tree, so they pass
     # there too — which is what validates the transcribed reference text.
 
-    def test_level_zero_secrets_step_is_byte_identical(self, tmp_workdir, monkeypatch) -> None:
+    def test_level_zero_secrets_step_is_byte_identical(
+        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         monkeypatch.setenv(scanner_nice.ENV_VAR, "0")
         assert _secrets_step_run(tmp_workdir) == _prechange_secrets_step(tmp_workdir)
 
-    def test_level_zero_lint_step_is_byte_identical(self, monkeypatch) -> None:
+    def test_level_zero_lint_step_is_byte_identical(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(scanner_nice.ENV_VAR, "0")
         assert _lint_step_run("ruff check .") == _prechange_lint_step("ruff check .")
 
-    def test_config_zero_secrets_step_is_byte_identical(self, tmp_workdir) -> None:
+    def test_config_zero_secrets_step_is_byte_identical(self, tmp_workdir: str) -> None:
         assert _secrets_step_run(tmp_workdir, {"guards": {"scanner_nice": 0}}) == (
             _prechange_secrets_step(tmp_workdir)
         )
@@ -274,7 +279,7 @@ class TestBuiltCommandStrings:
             _prechange_lint_step("ruff check .")
         )
 
-    def test_level_zero_test_step_keeps_the_command(self, tmp_path) -> None:
+    def test_level_zero_test_step_keeps_the_command(self, tmp_path: Path) -> None:
         workdir = tmp_path / "wd"
         workdir.mkdir()
         (workdir / "module.py").write_text("x = 1\n", encoding="utf-8")
@@ -321,20 +326,20 @@ class TestLevelResolution:
         assert scanner_nice.resolve_level(gitreins_config.GitReinsDefaults(), {}) == (10, "config")
 
     @pytest.mark.parametrize("value", ["", " ", "abc", "1.5", "-1", "20", "1000"])
-    def test_unusable_env_values_fall_through_to_config(self, value) -> None:
+    def test_unusable_env_values_fall_through_to_config(self, value: Any) -> None:
         env = {scanner_nice.ENV_VAR: value}
         assert scanner_nice.resolve_level({"guards": {"scanner_nice": 6}}, env) == (6, "config")
         assert scanner_nice.resolve_level(None, env) == (10, "default")
 
     @pytest.mark.parametrize("value", [True, False, 20, -3, "x", None])
-    def test_parse_level_rejects_unusable_values(self, value) -> None:
+    def test_parse_level_rejects_unusable_values(self, value: Any) -> None:
         assert scanner_nice.parse_level(value) is None
 
     @pytest.mark.parametrize("value,expected", [(0, 0), (19, 19), ("12", 12), (10, 10)])
-    def test_parse_level_accepts_the_range(self, value, expected) -> None:
+    def test_parse_level_accepts_the_range(self, value: Any, expected: Any) -> None:
         assert scanner_nice.parse_level(value) == expected
 
-    def test_config_loader_reads_the_guards_block(self, tmp_path) -> None:
+    def test_config_loader_reads_the_guards_block(self, tmp_path: Path) -> None:
         repo = tmp_path / "repo"
         (repo / ".gitreins").mkdir(parents=True)
         (repo / ".gitreins" / "config.yaml").write_text(
@@ -342,7 +347,7 @@ class TestLevelResolution:
         )
         assert gitreins_config.load_defaults(str(repo)).scanner_nice == 19
 
-    def test_config_loader_rejects_an_out_of_range_level(self, tmp_path) -> None:
+    def test_config_loader_rejects_an_out_of_range_level(self, tmp_path: Path) -> None:
         repo = tmp_path / "repo"
         (repo / ".gitreins").mkdir(parents=True)
         (repo / ".gitreins" / "config.yaml").write_text(
@@ -352,7 +357,7 @@ class TestLevelResolution:
         # scheduling nicety can never fail a run (fail-open).
         assert gitreins_config.load_defaults(str(repo)).scanner_nice == 10
 
-    def test_config_loader_tolerates_a_scalar_guards_block(self, tmp_path) -> None:
+    def test_config_loader_tolerates_a_scalar_guards_block(self, tmp_path: Path) -> None:
         repo = tmp_path / "repo"
         (repo / ".gitreins").mkdir(parents=True)
         (repo / ".gitreins" / "config.yaml").write_text("guards: true\n", encoding="utf-8")
@@ -380,7 +385,7 @@ def scaner_defaults() -> int:
 
 
 class TestLiveSpawnedPriority:
-    def test_default_scan_runs_at_nice_10(self, tmp_path) -> None:
+    def test_default_scan_runs_at_nice_10(self, tmp_path: Path) -> None:
         workdir = tmp_path / "wd"
         workdir.mkdir()
         record = tmp_path / "nice.txt"
@@ -394,7 +399,7 @@ class TestLiveSpawnedPriority:
         assert "scanners: nice=nice -n 10" in proc.stdout
         assert proc.returncode == 0, proc.stdout + proc.stderr
 
-    def test_config_level_19_reaches_the_child(self, tmp_path) -> None:
+    def test_config_level_19_reaches_the_child(self, tmp_path: Path) -> None:
         workdir = tmp_path / "wd"
         workdir.mkdir()
         record = tmp_path / "nice.txt"
@@ -407,7 +412,7 @@ class TestLiveSpawnedPriority:
         assert _recorded_nice(record) == {str(_expected_child_nice(19))}
         assert "scanners: nice=nice -n 19" in proc.stdout
 
-    def test_level_zero_child_stays_unprefixed(self, tmp_path) -> None:
+    def test_level_zero_child_stays_unprefixed(self, tmp_path: Path) -> None:
         workdir = tmp_path / "wd"
         workdir.mkdir()
         record = tmp_path / "nice.txt"
@@ -420,7 +425,7 @@ class TestLiveSpawnedPriority:
         assert _recorded_nice(record) == {str(_base_nice())}
         assert "nice=" not in proc.stdout  # off means no note line either
 
-    def test_test_command_runs_at_the_policy_level(self, tmp_path) -> None:
+    def test_test_command_runs_at_the_policy_level(self, tmp_path: Path) -> None:
         """The pytest lane: the whole configured command is wrapped, not its head."""
         workdir = tmp_path / "wd"
         workdir.mkdir()
@@ -451,7 +456,7 @@ class TestLiveSpawnedPriority:
 
 
 class TestFailOpen:
-    def test_broken_nice_shim_still_runs_the_scan(self, tmp_path) -> None:
+    def test_broken_nice_shim_still_runs_the_scan(self, tmp_path: Path) -> None:
         """A `nice` that exits 127 must not turn a scan into a failure."""
         workdir = tmp_path / "wd"
         workdir.mkdir()
@@ -470,7 +475,7 @@ class TestFailOpen:
         assert "did not run" in proc.stdout
         assert "scanners: nice=nice -n 10" not in proc.stdout
 
-    def test_nice_absent_from_path_still_runs_the_scan(self, tmp_path) -> None:
+    def test_nice_absent_from_path_still_runs_the_scan(self, tmp_path: Path) -> None:
         workdir = tmp_path / "wd"
         workdir.mkdir()
         record = tmp_path / "nice.txt"
@@ -487,7 +492,9 @@ class TestFailOpen:
         assert _recorded_nice(record) == {str(_base_nice())}
         assert proc.stdout.count("scanners: nice unavailable") == 1
 
-    def test_guard_lane_reports_the_unavailable_reason(self, tmp_path, monkeypatch) -> None:
+    def test_guard_lane_reports_the_unavailable_reason(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The argv path's fail-open: no crash, unprefixed spawn, honest note."""
         repo = _scratch_repo(tmp_path, {"mod.py": "x = 1\n"}, {"mod.py": "y = 2\n"})
         empty = tmp_path / "no-nice-here"
@@ -502,7 +509,7 @@ class TestFailOpen:
         assert manager._nice.note.startswith("scanners: nice unavailable")
 
 
-def _which_without_nice(cmd, path=None):
+def _which_without_nice(cmd: Any, path: Any = None) -> Any:
     """``shutil.which`` with ``nice`` invisible — an absent-binary simulation."""
     if cmd == "nice":
         return None
@@ -517,7 +524,7 @@ PLANTED_SECRET = "ghp_" + "A1b2C3d4" * 5
 
 class TestVerdictSemantics:
     @pytest.mark.parametrize("level", [10, 19])
-    def test_clean_tree_passes(self, tmp_path, level) -> None:
+    def test_clean_tree_passes(self, tmp_path: Path, level: Any) -> None:
         workdir = tmp_path / "wd"
         workdir.mkdir()
         (workdir / "module.py").write_text("x = 1\n", encoding="utf-8")
@@ -533,7 +540,7 @@ class TestVerdictSemantics:
             assert "gitleaks: not on PATH" in proc.stdout
 
     @pytest.mark.parametrize("level", [10, 19])
-    def test_planted_secret_still_fails(self, tmp_path, level) -> None:
+    def test_planted_secret_still_fails(self, tmp_path: Path, level: Any) -> None:
         workdir = tmp_path / "wd"
         workdir.mkdir()
         (workdir / "settings.py").write_text(f'TOKEN = "{PLANTED_SECRET}"\n', encoding="utf-8")
@@ -547,7 +554,7 @@ class TestVerdictSemantics:
             assert "gitleaks: not on PATH" in proc.stdout
         assert "builtin cross-check status: 1 finding" in proc.stdout
 
-    def test_planted_secret_fails_at_level_zero_too(self, tmp_path) -> None:
+    def test_planted_secret_fails_at_level_zero_too(self, tmp_path: Path) -> None:
         """The control: the verdict does not depend on the knob at all."""
         workdir = tmp_path / "wd"
         workdir.mkdir()
@@ -560,7 +567,9 @@ class TestVerdictSemantics:
 
 
 class TestGuardLanes:
-    def test_lint_lane_spawns_ruff_behind_the_prefix(self, tmp_path, monkeypatch) -> None:
+    def test_lint_lane_spawns_ruff_behind_the_prefix(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         repo = _scratch_repo(tmp_path, {"mod.py": "x = 1\n"}, {"mod.py": "y = 2\n"})
         record = tmp_path / "ruff.nice"
         shim = _shim_dir(tmp_path, "ruff", record, RUFF)
@@ -571,7 +580,9 @@ class TestGuardLanes:
         assert _recorded_nice(record) == {str(_expected_child_nice(10))}
         assert result.nice_note == "scanners: nice=nice -n 10"
 
-    def test_secrets_lane_spawns_gitleaks_behind_the_prefix(self, tmp_path, monkeypatch) -> None:
+    def test_secrets_lane_spawns_gitleaks_behind_the_prefix(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         repo = _scratch_repo(tmp_path, {"mod.py": "x = 1\n"}, {"mod.py": "y = 2\n"})
         record = tmp_path / "gitleaks.nice"
         shim = _shim_dir(tmp_path, "gitleaks", record, GITLEAKS)
@@ -582,7 +593,9 @@ class TestGuardLanes:
         assert _recorded_nice(record) == {str(_expected_child_nice(10))}
         assert result.nice_note == "scanners: nice=nice -n 10"
 
-    def test_lint_lane_knob_off_means_no_prefix(self, tmp_path, monkeypatch) -> None:
+    def test_lint_lane_knob_off_means_no_prefix(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         repo = _scratch_repo(tmp_path, {"mod.py": "x = 1\n"}, {"mod.py": "y = 2\n"})
         record = tmp_path / "ruff.nice"
         shim = _shim_dir(tmp_path, "ruff", record, RUFF)
@@ -593,7 +606,9 @@ class TestGuardLanes:
         assert _recorded_nice(record) == {str(_base_nice())}
         assert result.nice_note == ""
 
-    def test_missing_linter_still_skips_instead_of_failing(self, tmp_path, monkeypatch) -> None:
+    def test_missing_linter_still_skips_instead_of_failing(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The invariant a naive prefix would break: `nice` hides a missing tool.
 
         With no linter on PATH the lane must still report TRUST-001's SKIP — a
@@ -628,7 +643,7 @@ class TestGuardLanes:
         assert "scanners: nice=nice -n 10" in summary
         assert summary.count("\n") == 0  # one line per step, still
 
-    def test_run_log_records_the_prefix(self, tmp_path) -> None:
+    def test_run_log_records_the_prefix(self, tmp_path: Path) -> None:
         from engine.types import GuardResult, Tier1Result
 
         from engine.guard_manager import _guard_log_content

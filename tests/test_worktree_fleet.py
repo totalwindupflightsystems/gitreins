@@ -1,6 +1,7 @@
 """Hermetic tests for the bounded parallel worktree fleet."""
 
 from __future__ import annotations
+from typing import Any
 
 import json
 import os
@@ -17,7 +18,7 @@ from engine.worktree_manager import WorktreeError, WorktreeManager
 CLI_SCRIPT = Path(__file__).parents[1] / "gitreins" / "cli.py"
 
 
-def _git(repo: Path, *args: str, check: bool = True):
+def _git(repo: Path, *args: str, check: bool = True) -> Any:
     return subprocess.run(
         ["git", "-C", str(repo), *args],
         capture_output=True,
@@ -40,7 +41,7 @@ def fleet_repo(tmp_path: Path) -> Path:
     return repo
 
 
-def _command(events: Path, output_name: str, delay: float = 0.15):
+def _command(events: Path, output_name: str, delay: float = 0.15) -> Any:
     code = (
         "import os,sys,time; "
         "events,out,delay=sys.argv[1],sys.argv[2],float(sys.argv[3]); "

@@ -19,6 +19,7 @@ Covers the plumbing only; the measured numbers stay in
 """
 
 from __future__ import annotations
+from typing import Any
 
 import importlib.util
 import os
@@ -106,7 +107,7 @@ class TestResolutionConfigParsing:
         assert d.resolution_review_at == pytest.approx(GitReinsDefaults().resolution_review_at)
         assert d.resolution_egress_exclude == ()
 
-    def test_load_defaults_reads_a_real_config_file(self, tmp_path) -> None:
+    def test_load_defaults_reads_a_real_config_file(self, tmp_path: Path) -> None:
         config_dir = tmp_path / ".gitreins"
         config_dir.mkdir()
         with open(config_dir / "config.yaml", "w") as f:
@@ -155,7 +156,7 @@ class TestSurfaceEnabled:
         with pytest.raises(ValueError, match="unknown resolution surface"):
             resolution.surface_enabled("carrier-pigeon", defaults=GitReinsDefaults())
 
-    def test_none_defaults_means_off(self, tmp_path) -> None:
+    def test_none_defaults_means_off(self, tmp_path: Path) -> None:
         """No `defaults` passed: the real loader runs, and absent config is OFF.
 
         Hermetic on purpose (an explicit empty workdir): with the process CWD in
@@ -173,7 +174,7 @@ class TestSurfaceEnabled:
 
 class TestEgressExclusionFilter:
     @pytest.fixture
-    def env_tree(self, tmp_path):
+    def env_tree(self, tmp_path: Path) -> Any:
         """A synthetic repo whose secrets must never reach the bundle.
 
         Exercises BOTH halves of the filter: the built-in floor (`.env`,
@@ -192,12 +193,12 @@ class TestEgressExclusionFilter:
         (repo / ".gitreins").mkdir()
         return repo
 
-    def _defaults_with_excludes(self):
+    def _defaults_with_excludes(self) -> Any:
         d = GitReinsDefaults()
         d.resolution_egress_exclude = ("internal/keys.py", "vendor/*")
         return d
 
-    def test_builtin_floor_blocks_env_key_and_caches(self, env_tree) -> None:
+    def test_builtin_floor_blocks_env_key_and_caches(self, env_tree: Any) -> None:
         for path in (
             ".env",
             "server.pem",
@@ -209,19 +210,19 @@ class TestEgressExclusionFilter:
                 path, defaults=self._defaults_with_excludes()
             ), path
 
-    def test_configured_patterns_block_internal_and_vendor(self, env_tree) -> None:
+    def test_configured_patterns_block_internal_and_vendor(self, env_tree: Any) -> None:
         d = self._defaults_with_excludes()
         assert resolution.is_excluded_path_for_surface("internal/keys.py", defaults=d)
         assert resolution.is_excluded_path_for_surface("vendor/lib/third_party.py", defaults=d)
         # The floor holds without any configured pattern, too.
         assert resolution.is_excluded_path_for_surface(".env", defaults=GitReinsDefaults())
 
-    def test_plain_source_is_never_excluded(self, env_tree) -> None:
+    def test_plain_source_is_never_excluded(self, env_tree: Any) -> None:
         assert not resolution.is_excluded_path_for_surface(
             "engine/real.py", defaults=self._defaults_with_excludes()
         )
 
-    def test_pattern_applies_through_the_whole_pipeline(self, env_tree) -> None:
+    def test_pattern_applies_through_the_whole_pipeline(self, env_tree: Any) -> None:
         """A hilo bundle ranking the excluded files ships none of them."""
         bundle = "\n".join(
             [
@@ -256,10 +257,10 @@ class TestEgressExclusionFilter:
         assert "KEY_MATERIAL" not in joined
         assert "SUPER_SECRET" not in joined
 
-    def test_trace_drops_excluded_seeds(self, env_tree) -> None:
+    def test_trace_drops_excluded_seeds(self, env_tree: Any) -> None:
         """`hilo graph search` output naming a .env yields no seed for it."""
 
-        def fake_runner(args, workdir):
+        def fake_runner(args: Any, workdir: str) -> Any:
             assert args[0] == "graph" and args[1] == "search"
             return (
                 0,
@@ -282,7 +283,7 @@ class TestEgressExclusionFilter:
         )
         assert [seed.file for seed in seeds] == ["engine/real.py"]
 
-    def test_reads_never_open_an_excluded_file(self, env_tree) -> None:
+    def test_reads_never_open_an_excluded_file(self, env_tree: Any) -> None:
         assert (
             resolution._read_block(
                 "internal/keys.py",
@@ -322,7 +323,7 @@ class _Cli:
         spec.loader.exec_module(self.module)
 
 
-def _run_cli_inprocess(monkeypatch, repo: Path, *args: str):
+def _run_cli_inprocess(monkeypatch: pytest.MonkeyPatch, repo: Path, *args: str) -> Any:
     """Drive gitreins.cli.main() in-process with *repo* as the workdir.
 
     In-process (not a child interpreter) so the WORKTREE's package is what
@@ -364,7 +365,9 @@ def _make_repo(tmp_path: Path) -> Path:
 
 
 class TestInitWritesResolutionDefaults:
-    def test_fresh_init_writes_a_disabled_resolution_block(self, tmp_path, monkeypatch) -> None:
+    def test_fresh_init_writes_a_disabled_resolution_block(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         repo = _make_repo(tmp_path)
         code, out, err = _run_cli_inprocess(monkeypatch, repo, "init")
         assert code == 0, err
@@ -385,7 +388,9 @@ class TestInitWritesResolutionDefaults:
         }
         assert block["egress_exclude"] == []
 
-    def test_init_preserves_a_user_authored_resolution_block(self, tmp_path, monkeypatch) -> None:
+    def test_init_preserves_a_user_authored_resolution_block(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         repo = _make_repo(tmp_path)
         (repo / ".gitreins").mkdir()
         with open(repo / ".gitreins" / "config.yaml", "w") as f:
@@ -405,7 +410,9 @@ class TestInitWritesResolutionDefaults:
         assert config["resolution"]["enabled"]["cli"] is True
         assert config["resolution"]["egress_exclude"] == ["internal/keys.py"]
 
-    def test_disabled_init_output_abstains_via_the_real_cli(self, tmp_path, monkeypatch) -> None:
+    def test_disabled_init_output_abstains_via_the_real_cli(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Acceptance 1, end to end: a fresh init's config disables the CLI."""
         import json as _json
 

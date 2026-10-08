@@ -1,5 +1,7 @@
 """GAP-074 regression tests: LLMResponseError on no-choices provider bodies."""
 
+from __future__ import annotations
+
 import pytest
 
 from engine.llm import LLMClient, LLMResponseError

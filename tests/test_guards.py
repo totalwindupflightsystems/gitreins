@@ -1,5 +1,9 @@
 """Dedicated tests for Go guard checks."""
 
+from __future__ import annotations
+from pathlib import Path
+from typing import Any
+
 import os
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -16,11 +20,11 @@ from engine.guards import (
 )
 
 
-def completed(stdout="", stderr="", returncode=0):
+def completed(stdout: Any = "", stderr: Any = "", returncode: Any = 0) -> Any:
     return SimpleNamespace(stdout=stdout, stderr=stderr, returncode=returncode)
 
 
-def lane(exit_code=0, output="", error=None, timed_out=False):
+def lane(exit_code: Any = 0, output: Any = "", error: Any = None, timed_out: Any = False) -> Any:
     """A command_hygiene.run_bounded-shaped result (DF-CRIER-258 seam).
 
     The Go guards execute their tools through engine.command_hygiene.run_bounded,
@@ -49,7 +53,7 @@ def test_go_guard_result_defaults() -> None:
     assert result.error == ""
 
 
-def test_is_go_project_requires_go_mod_file(tmp_path) -> None:
+def test_is_go_project_requires_go_mod_file(tmp_path: Path) -> None:
     assert is_go_project(str(tmp_path)) is False
 
     (tmp_path / "go.mod").mkdir()
@@ -68,7 +72,7 @@ def test_is_go_project_requires_go_mod_file(tmp_path) -> None:
         (check_go_build, "go_build"),
     ],
 )
-def test_checkers_skip_when_no_go_files_are_staged(checker, name) -> None:
+def test_checkers_skip_when_no_go_files_are_staged(checker: Any, name: Any) -> None:
     """DF-GITREINS-POC-42: a lane that graded no file is a SKIP, not a silent
     pass — the historical wording stays, the skip signal is now recorded."""
     with patch("engine.guards.subprocess.run", return_value=completed("README.md\n")) as run:

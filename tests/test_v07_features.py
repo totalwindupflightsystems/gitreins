@@ -7,6 +7,10 @@ Integration tests for v0.7.0 features:
   - Cleaner guard output
 """
 
+from __future__ import annotations
+from pathlib import Path
+from typing import Any
+
 import json
 import os
 import sys
@@ -34,7 +38,7 @@ class TestVerdictPersistence:
         assert DEFAULT_HISTORY_CONFIG["max_verdicts"] == 1000
         assert ".gitreins/history" in DEFAULT_HISTORY_CONFIG["path"]
 
-    def test_load_history_config_defaults(self, tmp_path) -> None:
+    def test_load_history_config_defaults(self, tmp_path: Path) -> None:
         """load_history_config returns defaults when no config file exists."""
         from engine.persist import load_history_config
 
@@ -42,7 +46,7 @@ class TestVerdictPersistence:
         assert config["enabled"] is True
         assert config["storage"] == "git"
 
-    def test_load_history_config_disabled(self, tmp_path) -> None:
+    def test_load_history_config_disabled(self, tmp_path: Path) -> None:
         """load_history_config respects disabled flag in config."""
         from engine.persist import load_history_config
         import yaml
@@ -56,7 +60,7 @@ class TestVerdictPersistence:
         assert config["enabled"] is False
         assert config["storage"] == "filesystem"
 
-    def test_persist_writes_files(self, tmp_path) -> None:
+    def test_persist_writes_files(self, tmp_path: Path) -> None:
         """persist() writes verdict.json and summary.md to the history dir."""
         from engine.persist import VerdictPersister
 
@@ -101,7 +105,7 @@ class TestVerdictPersistence:
         assert saved["task_id"] == "test-task"
         assert saved["passed"] is True
 
-    def test_persist_disabled_returns_disabled(self, tmp_path) -> None:
+    def test_persist_disabled_returns_disabled(self, tmp_path: Path) -> None:
         """When history is disabled, persist returns 'disabled'."""
         from engine.persist import VerdictPersister
 
@@ -111,7 +115,7 @@ class TestVerdictPersistence:
         result = persister.persist("test", {"passed": True})
         assert result == "disabled"
 
-    def test_list_verdicts(self, tmp_path) -> None:
+    def test_list_verdicts(self, tmp_path: Path) -> None:
         """list_verdicts returns persisted verdicts."""
         from engine.persist import VerdictPersister
 
@@ -137,7 +141,7 @@ class TestVerdictPersistence:
         assert len(a_only) == 1
         assert a_only[0]["task_id"] == "task-a"
 
-    def test_build_report(self, tmp_path) -> None:
+    def test_build_report(self, tmp_path: Path) -> None:
         """build_report returns a formatted string."""
         from engine.persist import VerdictPersister, build_report
 
@@ -169,7 +173,7 @@ class TestTaskDependencies:
         task = Task(id="test", title="Test", depends_on=["other-task"])
         assert task.depends_on == ["other-task"]
 
-    def test_task_saved_with_depends_on(self, tmp_path) -> None:
+    def test_task_saved_with_depends_on(self, tmp_path: Path) -> None:
         """Tasks with depends_on are persisted and loaded back."""
         import yaml
         from engine.task_manager import TaskManager
@@ -194,7 +198,7 @@ class TestTaskDependencies:
         loaded = tm2.get("main-task")
         assert loaded.depends_on == ["dep-a"]
 
-    def test_check_dependencies_passes_when_deps_complete(self, tmp_path) -> None:
+    def test_check_dependencies_passes_when_deps_complete(self, tmp_path: Path) -> None:
         """check_dependencies returns empty when all deps are complete."""
         from engine.task_manager import TaskManager
 
@@ -208,7 +212,7 @@ class TestTaskDependencies:
         blocked = tm.check_dependencies("main")
         assert blocked == []
 
-    def test_check_dependencies_blocks_when_deps_pending(self, tmp_path) -> None:
+    def test_check_dependencies_blocks_when_deps_pending(self, tmp_path: Path) -> None:
         """check_dependencies returns blocked list when deps not complete."""
         from engine.task_manager import TaskManager
 
@@ -222,7 +226,7 @@ class TestTaskDependencies:
         blocked = tm.check_dependencies("main")
         assert "dep-1" in blocked
 
-    def test_complete_blocks_on_dependencies(self, tmp_path) -> None:
+    def test_complete_blocks_on_dependencies(self, tmp_path: Path) -> None:
         """complete() raises DependencyError when deps not met."""
         from engine.task_manager import TaskManager, DependencyError
 
@@ -235,7 +239,7 @@ class TestTaskDependencies:
         with pytest.raises(DependencyError, match="dep-1"):
             tm.complete("main")
 
-    def test_complete_force_bypasses_dependencies(self, tmp_path) -> None:
+    def test_complete_force_bypasses_dependencies(self, tmp_path: Path) -> None:
         """complete(force=True) skips dependency checks."""
         from engine.task_manager import TaskManager
 
@@ -249,7 +253,7 @@ class TestTaskDependencies:
         task = tm.complete("main", force=True)
         assert task.status == "complete"
 
-    def test_no_depends_on_defaults_to_empty(self, tmp_path) -> None:
+    def test_no_depends_on_defaults_to_empty(self, tmp_path: Path) -> None:
         """Tasks without --depends-on default to empty list."""
         from engine.task_manager import TaskManager
 
@@ -269,7 +273,7 @@ class TestTaskDependencies:
 class TestInit:
     """Tests for gitreins init command."""
 
-    def test_detect_go_project(self, tmp_path) -> None:
+    def test_detect_go_project(self, tmp_path: Path) -> None:
         """Detects Go project from go.mod."""
         from gitreins.cli import _detect_language
 
@@ -278,7 +282,7 @@ class TestInit:
         assert info["is_go"]
         assert info["name"] == "Go"
 
-    def test_detect_python_project(self, tmp_path) -> None:
+    def test_detect_python_project(self, tmp_path: Path) -> None:
         """Detects Python project from pyproject.toml."""
         from gitreins.cli import _detect_language
 
@@ -287,7 +291,7 @@ class TestInit:
         assert info["is_python"]
         assert info["name"] == "Python"
 
-    def test_detect_ts_project(self, tmp_path) -> None:
+    def test_detect_ts_project(self, tmp_path: Path) -> None:
         """Detects TypeScript project from package.json."""
         from gitreins.cli import _detect_language
 
@@ -296,7 +300,7 @@ class TestInit:
         assert info["is_ts"]
         assert info["name"] == "TypeScript"
 
-    def test_detect_unknown_project(self, tmp_path) -> None:
+    def test_detect_unknown_project(self, tmp_path: Path) -> None:
         """Returns unknown for unrecognized project types."""
         from gitreins.cli import _detect_language
 
@@ -304,7 +308,7 @@ class TestInit:
         assert info["name"] == "unknown"
         assert not any([info["is_go"], info["is_python"], info["is_ts"]])
 
-    def test_detect_python_from_requirements(self, tmp_path) -> None:
+    def test_detect_python_from_requirements(self, tmp_path: Path) -> None:
         """Detects Python from requirements.txt as fallback."""
         from gitreins.cli import _detect_language
 
@@ -313,7 +317,7 @@ class TestInit:
         assert info["is_python"]
         assert info["name"] == "Python"
 
-    def test_detect_python_from_root_package_layout(self, tmp_path) -> None:
+    def test_detect_python_from_root_package_layout(self, tmp_path: Path) -> None:
         """Detects Python from a root package dir with __init__.py (no pyproject)."""
         from gitreins.cli import _detect_language
 
@@ -322,7 +326,7 @@ class TestInit:
         info = _detect_language(str(tmp_path))
         assert info["is_python"]
 
-    def test_detect_python_from_top_level_py_file(self, tmp_path) -> None:
+    def test_detect_python_from_top_level_py_file(self, tmp_path: Path) -> None:
         """Detects Python from a top-level *.py file (no pyproject)."""
         from gitreins.cli import _detect_language
 
@@ -330,7 +334,7 @@ class TestInit:
         info = _detect_language(str(tmp_path))
         assert info["is_python"]
 
-    def test_tests_dir_alone_is_not_python(self, tmp_path) -> None:
+    def test_tests_dir_alone_is_not_python(self, tmp_path: Path) -> None:
         """A lone tests/ dir is NOT enough for Python detection (fallback is narrow)."""
         from gitreins.cli import _detect_language
 
@@ -339,7 +343,7 @@ class TestInit:
         info = _detect_language(str(tmp_path))
         assert not info["is_python"]
 
-    def test_python_root_package_with_tests_uses_python3_m_pytest(self, tmp_path) -> None:
+    def test_python_root_package_with_tests_uses_python3_m_pytest(self, tmp_path: Path) -> None:
         """Root-package + tests/ + no pytest pythonpath config → python3 -m pytest.
 
         pytest 9 importlib mode doesn't put the repo root on sys.path, so
@@ -357,7 +361,7 @@ class TestInit:
         assert _detect_test_command(str(tmp_path), lang) == "python3 -m pytest -x --tb=short"
 
     def test_python_root_package_with_pythonpath_config_uses_bare_pytest(
-        self, monkeypatch, tmp_path
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """Root-package + tests/ but pyproject configures pytest pythonpath → bare pytest."""
         import shutil
@@ -379,7 +383,9 @@ class TestInit:
         lang = _detect_language(str(tmp_path))
         assert _detect_test_command(str(tmp_path), lang) == "pytest -x --tb=short"
 
-    def test_pythonpath_detection_falls_back_to_tomli_on_py310(self, monkeypatch, tmp_path) -> None:
+    def test_pythonpath_detection_falls_back_to_tomli_on_py310(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         """Simulate Python 3.10 (no tomllib): the tomli backport must be used.
 
         Regression for DF-009: on 3.10 the old code swallowed ImportError and
@@ -404,7 +410,7 @@ class TestInit:
 
         real_import = builtins.__import__
 
-        def fake_import(name, *args, **kwargs):
+        def fake_import(name: Any, *args: Any, **kwargs: Any) -> Any:
             if name == "tomllib":
                 raise ImportError("No module named 'tomllib' (simulated Python 3.10)")
             return real_import(name, *args, **kwargs)
@@ -419,7 +425,7 @@ class TestInit:
         assert _has_pytest_pythonpath_config(str(tmp_path)) is True
 
     def test_python_root_package_with_pytest_ini_pythonpath_uses_bare_pytest(
-        self, monkeypatch, tmp_path
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """Root-package + tests/ but pytest.ini configures pythonpath → bare pytest."""
         import shutil
@@ -438,7 +444,7 @@ class TestInit:
         assert _detect_test_command(str(tmp_path), lang) == "pytest -x --tb=short"
 
     def test_python_root_package_without_tests_uses_bare_pytest(
-        self, monkeypatch, tmp_path
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         """Root-package layout but NO tests/ dir → bare pytest (nothing to import)."""
         import shutil
@@ -453,7 +459,9 @@ class TestInit:
         lang = _detect_language(str(tmp_path))
         assert _detect_test_command(str(tmp_path), lang) == "pytest -x --tb=short"
 
-    def test_pyproject_only_no_root_package_uses_bare_pytest(self, monkeypatch, tmp_path) -> None:
+    def test_pyproject_only_no_root_package_uses_bare_pytest(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         """pyproject-based project without root package dirs → bare pytest."""
         import shutil
 
@@ -468,7 +476,7 @@ class TestInit:
         lang = _detect_language(str(tmp_path))
         assert _detect_test_command(str(tmp_path), lang) == "pytest -x --tb=short"
 
-    def test_detect_ts_from_tsconfig(self, tmp_path) -> None:
+    def test_detect_ts_from_tsconfig(self, tmp_path: Path) -> None:
         """Detects TypeScript from tsconfig.json (no package.json)."""
         from gitreins.cli import _detect_language
 
@@ -477,7 +485,7 @@ class TestInit:
         assert info["is_ts"]
         assert info["name"] == "TypeScript"
 
-    def test_detect_ruby_from_gemspec(self, tmp_path) -> None:
+    def test_detect_ruby_from_gemspec(self, tmp_path: Path) -> None:
         """Detects Ruby from .gemspec file (no Gemfile)."""
         from gitreins.cli import _detect_language
 
@@ -486,7 +494,7 @@ class TestInit:
         assert info["is_ruby"]
         assert "Ruby" in info["name"]
 
-    def test_detect_multiple_langs(self, tmp_path) -> None:
+    def test_detect_multiple_langs(self, tmp_path: Path) -> None:
         """Multi-language project: pyproject.toml + package.json → both detected."""
         from gitreins.cli import _detect_language
 
@@ -500,7 +508,7 @@ class TestInit:
         # 'type' is first detected language
         assert info["type"] == "python"
 
-    def test_detect_sql_even_with_python(self, tmp_path) -> None:
+    def test_detect_sql_even_with_python(self, tmp_path: Path) -> None:
         """SQL detection runs regardless of other languages (was gated behind not is_python)."""
         from gitreins.cli import _detect_language
 
@@ -511,7 +519,7 @@ class TestInit:
         assert info["has_sql"], "SQL should be detected even when Python is present"
         assert "SQL" in info["name"]
 
-    def test_detect_all_flags_multi_lang(self, tmp_path) -> None:
+    def test_detect_all_flags_multi_lang(self, tmp_path: Path) -> None:
         """Go + Python + Rust project — all flags set, no elif shadowing."""
         from gitreins.cli import _detect_language
 
@@ -528,7 +536,7 @@ class TestInit:
         # 'type' is first detected
         assert info["type"] == "go"
 
-    def test_detect_static_analysis_tools_multi_lang(self, tmp_path) -> None:
+    def test_detect_static_analysis_tools_multi_lang(self, tmp_path: Path) -> None:
         """Multi-language detection feeds all languages to tool discovery."""
         from gitreins.cli import _detect_language, _detect_static_analysis_tools
         from unittest.mock import patch
@@ -536,7 +544,7 @@ class TestInit:
         (tmp_path / "pyproject.toml").write_text("[project]\nname='test'")
         (tmp_path / "Gemfile").write_text("source 'https://rubygems.org'")
 
-        def fake_list_available(lang):
+        def fake_list_available(lang: Any) -> Any:
             return [f"tool-for-{lang}"]
 
         with patch("engine.static_analysis.list_available_tools", side_effect=fake_list_available):
@@ -584,7 +592,7 @@ class TestInit:
         assert "lint" in existing
         assert "go" in existing
 
-    def test_detect_project_size_small(self, tmp_path) -> None:
+    def test_detect_project_size_small(self, tmp_path: Path) -> None:
         """Small projects get low cap recommendations."""
         from gitreins.cli import _detect_project_size
 
@@ -595,7 +603,7 @@ class TestInit:
         assert size["max_iterations"] == 15
         assert size["test_mode"] == "full"
 
-    def test_detect_project_size_large(self, tmp_path) -> None:
+    def test_detect_project_size_large(self, tmp_path: Path) -> None:
         """Large projects get higher caps and diff mode recommendation."""
         from gitreins.cli import _detect_project_size
 

@@ -12,6 +12,8 @@ Requirement checklist:
   - Documentation skip: .md files, .memory-bank/, docs/ are ignored
 """
 
+from __future__ import annotations
+
 import os
 import subprocess
 import sys

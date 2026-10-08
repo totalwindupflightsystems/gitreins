@@ -23,6 +23,10 @@ Scratch repos are real `git init` trees so `_check_lint` resolves its own
 staged scope; no network, no LSP, no dependence on the outer repo's state.
 """
 
+from __future__ import annotations
+from pathlib import Path
+from typing import Any
+
 import os
 import shutil
 import subprocess
@@ -62,7 +66,7 @@ def _git(workdir: str, *args: str) -> None:
     subprocess.run(["git", *args], cwd=workdir, capture_output=True, check=True, env=_git_env())
 
 
-def _scratch_repo(tmp_path, files: dict[str, str]) -> str:
+def _scratch_repo(tmp_path: Path, files: dict[str, str]) -> str:
     """A real git repo with *files* committed and a clean index."""
     workdir = tmp_path / "scratch"
     workdir.mkdir()
@@ -98,7 +102,7 @@ def _run_ruff(workdir: str, *args: str) -> subprocess.CompletedProcess:
 
 
 @pytest.fixture
-def ruff_on_path(monkeypatch):
+def ruff_on_path(monkeypatch: pytest.MonkeyPatch) -> Any:
     """Pin the lane's `ruff` lookup to the repo venv's binary. Fails loudly
     (never a silent skip) when ruff is absent: the lane tests below grade with
     a real formatter or they prove nothing."""
@@ -114,7 +118,7 @@ def ruff_on_path(monkeypatch):
 class TestRuffFormatCheckFlagSemantics:
     """The binary-level contract the gate rests on, with a real ruff."""
 
-    def test_check_flags_a_misformatted_file(self, tmp_path, ruff_on_path) -> None:
+    def test_check_flags_a_misformatted_file(self, tmp_path: Path, ruff_on_path: Any) -> None:
         """Negative test: a misformatted file on a tmp path is flagged."""
         target = tmp_path / "drifted.py"
         target.write_text(MISFORMATTED)
@@ -124,7 +128,7 @@ class TestRuffFormatCheckFlagSemantics:
         assert proc.returncode != 0
         assert target.name in proc.stdout + proc.stderr
 
-    def test_check_passes_a_clean_file(self, tmp_path, ruff_on_path) -> None:
+    def test_check_passes_a_clean_file(self, tmp_path: Path, ruff_on_path: Any) -> None:
         """Control: the same invocation on a formatted file exits 0, so the
         negative test above is not passing because the command always fails."""
         target = tmp_path / "clean.py"
@@ -134,7 +138,7 @@ class TestRuffFormatCheckFlagSemantics:
 
         assert proc.returncode == 0
 
-    def test_bare_format_rewrites_and_exits_zero(self, tmp_path, ruff_on_path) -> None:
+    def test_bare_format_rewrites_and_exits_zero(self, tmp_path: Path, ruff_on_path: Any) -> None:
         """The false green this gate exists to replace: a bare `ruff format`
         both rewrites the file in place AND exits 0, so a step/lane that ran
         it would never fail — it would silently launder the drift it was
@@ -147,7 +151,7 @@ class TestRuffFormatCheckFlagSemantics:
         assert proc.returncode == 0
         assert target.read_text() != MISFORMATTED, "bare format rewrites in place — never a gate"
 
-    def test_diff_is_not_a_stable_exit_contract(self, tmp_path, ruff_on_path) -> None:
+    def test_diff_is_not_a_stable_exit_contract(self, tmp_path: Path, ruff_on_path: Any) -> None:
         """`--diff` is NOT the gate either. Its exit code is an implementation
         detail that has already moved (0 on differences in the ruff the
         GR-GAP-061 report described, non-zero here in 0.15.22), so a gate built
@@ -165,7 +169,7 @@ class TestRuffFormatCheckFlagSemantics:
         assert "--diff" not in _ruff_format_command([target.name])
         assert diff_rc in (0, 1, 2)  # no assertion on the value — it is unstable
 
-    def test_lint_check_passes_the_drifted_file(self, tmp_path, ruff_on_path) -> None:
+    def test_lint_check_passes_the_drifted_file(self, tmp_path: Path, ruff_on_path: Any) -> None:
         """Why a format gate was needed at all: `ruff check` accepts the
         drifted file. The failure mode was invisible to the lint lane."""
         target = tmp_path / "drifted.py"
@@ -270,7 +274,9 @@ class TestFormatCommandShape:
 
 
 class TestLintLaneGradesFormat:
-    def test_misformatted_staged_file_fails_the_lint_lane(self, tmp_path, ruff_on_path) -> None:
+    def test_misformatted_staged_file_fails_the_lint_lane(
+        self, tmp_path: Path, ruff_on_path: Any
+    ) -> None:
         """Negative test at the lane level: a staged misformatted file that
         `ruff check` accepts still fails the gate."""
         workdir = _scratch_repo(tmp_path, {"clean.py": CLEAN})
@@ -285,7 +291,7 @@ class TestLintLaneGradesFormat:
         assert "ruff format drifted.py" in result.output
 
     def test_clean_staged_file_passes_and_names_the_format_subcheck(
-        self, tmp_path, ruff_on_path
+        self, tmp_path: Path, ruff_on_path: Any
     ) -> None:
         """Control: the identical lane on a formatted file passes, and the
         clean line names the formatter so a reader can tell a lane that graded
@@ -300,7 +306,9 @@ class TestLintLaneGradesFormat:
         assert result.passed is True
         assert result.output == "ruff: clean, format: clean (2 files)"
 
-    def test_format_failure_is_still_one_lint_result(self, tmp_path, ruff_on_path) -> None:
+    def test_format_failure_is_still_one_lint_result(
+        self, tmp_path: Path, ruff_on_path: Any
+    ) -> None:
         """The GuardResult contract holds: formatting is part of lint's
         verdict, not a lane of its own."""
         workdir = _scratch_repo(tmp_path, {"clean.py": CLEAN})
@@ -313,7 +321,7 @@ class TestLintLaneGradesFormat:
         assert result.name == "lint"
         assert result.exit_code not in (0, None)
 
-    def test_format_failure_reaches_the_run_log(self, tmp_path, ruff_on_path) -> None:
+    def test_format_failure_reaches_the_run_log(self, tmp_path: Path, ruff_on_path: Any) -> None:
         """The formatter's output is the post-mortem evidence; the console
         body is capped, the run log is not (DF-018)."""
         workdir = _scratch_repo(tmp_path, {"clean.py": CLEAN})
@@ -324,7 +332,7 @@ class TestLintLaneGradesFormat:
 
         assert "would be reformatted" in gm._full_outputs["lint"]
 
-    def test_only_the_drifted_file_is_named(self, tmp_path, ruff_on_path) -> None:
+    def test_only_the_drifted_file_is_named(self, tmp_path: Path, ruff_on_path: Any) -> None:
         """A formatted sibling must not be blamed: the message points at the
         file that actually needs the reformat."""
         workdir = _scratch_repo(tmp_path, {"clean.py": CLEAN})
@@ -338,7 +346,7 @@ class TestLintLaneGradesFormat:
         assert "fine.py" not in result.output
 
     def test_no_staged_files_still_skips_before_any_format_check(
-        self, tmp_path, ruff_on_path
+        self, tmp_path: Path, ruff_on_path: Any
     ) -> None:
         """Skip semantics are unchanged: with an empty index the lane never
         invokes ruff at all, so a clean checkout stays a DEGRADED pass and not
@@ -351,7 +359,9 @@ class TestLintLaneGradesFormat:
         assert result.skipped is True
         assert result.skip_reason == "no staged files"
 
-    def test_config_excluded_misformatted_file_is_not_graded(self, tmp_path, ruff_on_path) -> None:
+    def test_config_excluded_misformatted_file_is_not_graded(
+        self, tmp_path: Path, ruff_on_path: Any
+    ) -> None:
         """--force-exclude keeps the config's authority: a file the repo's
         ruff config excludes is not a format failure merely because it was
         named — the same rule `ruff check` follows (DF-018). The in-scope file
@@ -377,7 +387,9 @@ class TestLintLaneGradesFormat:
             == "ruff: clean (1 tracked files, 1 excluded by config), format: clean (1 files)"
         )
 
-    def test_config_excluded_only_list_stays_an_honest_skip(self, tmp_path, ruff_on_path) -> None:
+    def test_config_excluded_only_list_stays_an_honest_skip(
+        self, tmp_path: Path, ruff_on_path: Any
+    ) -> None:
         """When the config excludes EVERY submitted file the lane still skips
         by name — the format sub-check never gets to invent a failure over a
         scope the repo refuses to grade."""
@@ -400,7 +412,9 @@ class TestLintLaneGradesFormat:
         assert "all excluded" in result.output
         assert "format:" not in result.output
 
-    def test_whole_tree_run_grades_format_over_the_tree(self, tmp_path, ruff_on_path) -> None:
+    def test_whole_tree_run_grades_format_over_the_tree(
+        self, tmp_path: Path, ruff_on_path: Any
+    ) -> None:
         """`gitreins guard --full` has no staged files and still fails on a
         tree-resident formatting drift — the whole-tree path keeps the gate."""
         workdir = _scratch_repo(tmp_path, {"clean.py": CLEAN, "drifted.py": MISFORMATTED})

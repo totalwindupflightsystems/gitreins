@@ -16,6 +16,7 @@ contract, so a future edit cannot quietly reintroduce a head-only slice:
 """
 
 from __future__ import annotations
+from typing import Any
 
 import pytest
 
@@ -92,7 +93,7 @@ def test_both_surfaces_use_one_bounder_and_one_cap() -> None:
 
 
 @pytest.mark.parametrize("surface", SURFACES)
-def test_pytest_shaped_evidence_keeps_the_summary_and_whole_lines(surface) -> None:
+def test_pytest_shaped_evidence_keeps_the_summary_and_whole_lines(surface: Any) -> None:
     payload = _pytest_shaped_run()
     assert len(payload) > FLEET_CAP  # the fixture actually exercises the bound
 
@@ -122,7 +123,7 @@ def test_pytest_shaped_evidence_keeps_the_summary_and_whole_lines(surface) -> No
 
 
 @pytest.mark.parametrize("surface", SURFACES)
-def test_single_over_budget_line_is_the_only_mid_line_cut(surface) -> None:
+def test_single_over_budget_line_is_the_only_mid_line_cut(surface: Any) -> None:
     payload = "BANNER " + "X" * (FLEET_CAP * 3)
 
     bounded = surface(payload)
@@ -135,7 +136,7 @@ def test_single_over_budget_line_is_the_only_mid_line_cut(surface) -> None:
 
 
 @pytest.mark.parametrize("surface", SURFACES)
-def test_under_budget_evidence_is_untouched_and_stripped(surface) -> None:
+def test_under_budget_evidence_is_untouched_and_stripped(surface: Any) -> None:
     payload = "\n\n  tests/a.py::test_one PASSED  \n\n"
 
     assert surface(payload) == "tests/a.py::test_one PASSED"

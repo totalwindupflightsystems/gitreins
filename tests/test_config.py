@@ -1,5 +1,9 @@
 """Dedicated tests for unified configuration defaults and coercion helpers."""
 
+from __future__ import annotations
+from pathlib import Path
+from typing import Any
+
 import pytest
 
 from engine.config import (
@@ -170,7 +174,7 @@ def test_coerce_float_from_invalid_string() -> None:
         ("10min", 600.0),
     ],
 )
-def test_coerce_seconds_valid(val, expected) -> None:
+def test_coerce_seconds_valid(val: Any, expected: Any) -> None:
     assert _coerce_seconds(val) == expected
 
 
@@ -191,7 +195,7 @@ def test_coerce_seconds_invalid_returns_negative() -> None:
         ("100", 100),
     ],
 )
-def test_coerce_tokens_valid(val, expected) -> None:
+def test_coerce_tokens_valid(val: Any, expected: Any) -> None:
     assert _coerce_tokens(val) == expected
 
 
@@ -265,11 +269,11 @@ def test_load_raw_config_returns_empty_for_none_workdir() -> None:
     assert load_raw_config(None) == {}
 
 
-def test_load_raw_config_returns_empty_for_nonexistent(tmp_path) -> None:
+def test_load_raw_config_returns_empty_for_nonexistent(tmp_path: Path) -> None:
     assert load_raw_config(str(tmp_path)) == {}
 
 
-def test_quality_config_round_trip(tmp_path) -> None:
+def test_quality_config_round_trip(tmp_path: Path) -> None:
     import yaml
 
     config_dir = tmp_path / ".gitreins"

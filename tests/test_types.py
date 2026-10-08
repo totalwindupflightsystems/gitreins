@@ -1,5 +1,8 @@
 """Dedicated tests for guard result types."""
 
+from __future__ import annotations
+from typing import Any
+
 from dataclasses import FrozenInstanceError
 
 import pytest
@@ -34,7 +37,7 @@ from engine.types import (
         ("custom", "ok", ""),
     ],
 )
-def test_guard_result_pass_detail(name, output, detail) -> None:
+def test_guard_result_pass_detail(name: Any, output: Any, detail: Any) -> None:
     result = GuardResult(name=name, passed=True, output=output)
 
     assert result._pass_detail() == detail

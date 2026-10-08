@@ -1,5 +1,8 @@
 """Dedicated tests for verdict persistence and history reporting."""
 
+from __future__ import annotations
+from pathlib import Path
+
 import json
 import os
 import shutil
@@ -21,7 +24,7 @@ from engine.persist import (
     persist_resolution,
 )
 from engine.worktree_manager import BRANCH_PREFIX
-from typing import NoReturn
+from typing import Any, NoReturn
 
 
 # ── _pct ─────────────────────────────────────────────────────
@@ -47,22 +50,22 @@ def test_default_history_config_has_expected_keys() -> None:
 # ── VerdictPersister init ────────────────────────────────────
 
 
-def test_persister_uses_absolute_workdir(tmp_path) -> None:
+def test_persister_uses_absolute_workdir(tmp_path: Path) -> None:
     p = VerdictPersister(str(tmp_path))
     assert os.path.isabs(p.workdir)
 
 
-def test_persister_enabled_defaults_true(tmp_path) -> None:
+def test_persister_enabled_defaults_true(tmp_path: Path) -> None:
     p = VerdictPersister(str(tmp_path))
     assert p.enabled is True
 
 
-def test_persister_history_dir_is_under_workdir_by_default(tmp_path) -> None:
+def test_persister_history_dir_is_under_workdir_by_default(tmp_path: Path) -> None:
     p = VerdictPersister(str(tmp_path))
     assert p.history_dir.startswith(str(tmp_path))
 
 
-def test_persister_storage_mode_is_git_by_default(tmp_path) -> None:
+def test_persister_storage_mode_is_git_by_default(tmp_path: Path) -> None:
     p = VerdictPersister(str(tmp_path))
     assert p.storage_mode == "git"
 
@@ -70,13 +73,13 @@ def test_persister_storage_mode_is_git_by_default(tmp_path) -> None:
 # ── persist (non-git path) ───────────────────────────────────
 
 
-def test_persist_returns_disabled_when_history_disabled(tmp_path) -> None:
+def test_persist_returns_disabled_when_history_disabled(tmp_path: Path) -> None:
     p = VerdictPersister(str(tmp_path))
     p.config["enabled"] = False
     assert p.persist("task-1", {}) == "disabled"
 
 
-def test_persist_creates_verdict_json_and_summary_md(tmp_path) -> None:
+def test_persist_creates_verdict_json_and_summary_md(tmp_path: Path) -> None:
     p = VerdictPersister(str(tmp_path))
     p.config["storage"] = "filesystem"  # skip git
     p.config["max_verdicts"] = 0  # no pruning
@@ -111,12 +114,12 @@ def test_persist_creates_verdict_json_and_summary_md(tmp_path) -> None:
 # ── list_verdicts ────────────────────────────────────────────
 
 
-def test_list_verdicts_returns_empty_when_no_history(tmp_path) -> None:
+def test_list_verdicts_returns_empty_when_no_history(tmp_path: Path) -> None:
     p = VerdictPersister(str(tmp_path))
     assert p.list_verdicts() == []
 
 
-def test_list_verdicts_returns_entries_newest_first(tmp_path) -> None:
+def test_list_verdicts_returns_entries_newest_first(tmp_path: Path) -> None:
     p = VerdictPersister(str(tmp_path))
     p.config["storage"] = "filesystem"
     p.config["max_verdicts"] = 0
@@ -131,7 +134,7 @@ def test_list_verdicts_returns_entries_newest_first(tmp_path) -> None:
     assert task_ids == {"task-1", "task-2"}
 
 
-def test_list_verdicts_filters_by_task_id(tmp_path) -> None:
+def test_list_verdicts_filters_by_task_id(tmp_path: Path) -> None:
     p = VerdictPersister(str(tmp_path))
     p.config["storage"] = "filesystem"
     p.config["max_verdicts"] = 0
@@ -144,7 +147,7 @@ def test_list_verdicts_filters_by_task_id(tmp_path) -> None:
     assert filtered[0]["task_id"] == "task-a"
 
 
-def test_list_verdicts_limits_to_n(tmp_path) -> None:
+def test_list_verdicts_limits_to_n(tmp_path: Path) -> None:
     p = VerdictPersister(str(tmp_path))
     p.config["storage"] = "filesystem"
     p.config["max_verdicts"] = 0
@@ -158,12 +161,12 @@ def test_list_verdicts_limits_to_n(tmp_path) -> None:
 # ── count_verdicts ───────────────────────────────────────────
 
 
-def test_count_verdicts_returns_zero_for_no_history(tmp_path) -> None:
+def test_count_verdicts_returns_zero_for_no_history(tmp_path: Path) -> None:
     p = VerdictPersister(str(tmp_path))
     assert p.count_verdicts() == 0
 
 
-def test_count_verdicts_counts_all_entries(tmp_path) -> None:
+def test_count_verdicts_counts_all_entries(tmp_path: Path) -> None:
     p = VerdictPersister(str(tmp_path))
     p.config["storage"] = "filesystem"
     p.config["max_verdicts"] = 0
@@ -177,7 +180,7 @@ def test_count_verdicts_counts_all_entries(tmp_path) -> None:
 # ── build_report ─────────────────────────────────────────────
 
 
-def test_build_report_returns_disabled_message_when_history_off(tmp_path) -> None:
+def test_build_report_returns_disabled_message_when_history_off(tmp_path: Path) -> None:
     p = VerdictPersister(str(tmp_path))
     with patch("engine.persist.VerdictPersister", return_value=p):
         p.config["enabled"] = False
@@ -185,14 +188,14 @@ def test_build_report_returns_disabled_message_when_history_off(tmp_path) -> Non
         assert "disabled" in result
 
 
-def test_build_report_shows_no_history_when_empty(tmp_path) -> None:
+def test_build_report_shows_no_history_when_empty(tmp_path: Path) -> None:
     p = VerdictPersister(str(tmp_path))
     with patch("engine.persist.VerdictPersister", return_value=p):
         result = build_report(str(tmp_path))
         assert "No verdict history found" in result
 
 
-def test_build_report_includes_summary_stats(tmp_path) -> None:
+def test_build_report_includes_summary_stats(tmp_path: Path) -> None:
     p = VerdictPersister(str(tmp_path))
     p.config["storage"] = "filesystem"
     p.config["max_verdicts"] = 0
@@ -209,7 +212,7 @@ def test_build_report_includes_summary_stats(tmp_path) -> None:
 # ── _build_summary edge cases ────────────────────────────────
 
 
-def test_build_summary_handles_dict_items(tmp_path) -> None:
+def test_build_summary_handles_dict_items(tmp_path: Path) -> None:
     """Summary generation works with dict-format criteria items (MCP)."""
     p = VerdictPersister(str(tmp_path))
     data = {
@@ -223,7 +226,7 @@ def test_build_summary_handles_dict_items(tmp_path) -> None:
     assert "Must pass" in summary
 
 
-def test_build_summary_handles_pipeline_stages(tmp_path) -> None:
+def test_build_summary_handles_pipeline_stages(tmp_path: Path) -> None:
     p = VerdictPersister(str(tmp_path))
     data = {
         "passed": True,
@@ -250,7 +253,7 @@ def _git_env() -> dict:
     return env
 
 
-def _make_legacy_history_repo(repo, verdicts):
+def _make_legacy_history_repo(repo: Any, verdicts: Any) -> Any:
     """Init a temp git repo carrying history on the LEGACY history branch.
 
     This is the pre-DF-GITREINS-POC-52 shape: verdicts committed on the
@@ -283,7 +286,7 @@ def _make_legacy_history_repo(repo, verdicts):
     return env
 
 
-def test_list_verdicts_falls_back_to_the_legacy_history_branch(tmp_path) -> None:
+def test_list_verdicts_falls_back_to_the_legacy_history_branch(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     _make_legacy_history_repo(
         repo,
@@ -308,7 +311,7 @@ def test_list_verdicts_falls_back_to_the_legacy_history_branch(tmp_path) -> None
     assert {e["_ref"] for e in entries} == {LEGACY_HISTORY_REF}
 
 
-def test_list_verdicts_branch_fallback_respects_n_limit(tmp_path) -> None:
+def test_list_verdicts_branch_fallback_respects_n_limit(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     _make_legacy_history_repo(
         repo, [("2026-07-01", f"h000000{i}", f"task-{i}", True) for i in range(5)]
@@ -320,7 +323,7 @@ def test_list_verdicts_branch_fallback_respects_n_limit(tmp_path) -> None:
     assert [e["task_id"] for e in entries] == ["task-4", "task-3"]
 
 
-def test_list_verdicts_branch_fallback_filters_by_task_id(tmp_path) -> None:
+def test_list_verdicts_branch_fallback_filters_by_task_id(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     _make_legacy_history_repo(
         repo,
@@ -334,7 +337,7 @@ def test_list_verdicts_branch_fallback_filters_by_task_id(tmp_path) -> None:
     assert [e["task_id"] for e in p.list_verdicts(task_id="task-b")] == ["task-b"]
 
 
-def test_list_verdicts_branch_fallback_skips_non_json(tmp_path) -> None:
+def test_list_verdicts_branch_fallback_skips_non_json(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     env = _git_env()
@@ -361,7 +364,7 @@ def test_list_verdicts_branch_fallback_skips_non_json(tmp_path) -> None:
     assert [e["task_id"] for e in p.list_verdicts()] == ["good-task"]
 
 
-def test_list_verdicts_no_gitreins_branch_returns_empty(tmp_path) -> None:
+def test_list_verdicts_no_gitreins_branch_returns_empty(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
     env = _git_env()
@@ -384,14 +387,14 @@ def test_list_verdicts_no_gitreins_branch_returns_empty(tmp_path) -> None:
     assert "No verdict history found" in build_report(str(repo))
 
 
-def test_list_verdicts_branch_fallback_graceful_without_git(tmp_path) -> None:
+def test_list_verdicts_branch_fallback_graceful_without_git(tmp_path: Path) -> None:
     p = VerdictPersister(str(tmp_path))  # no .git anywhere up the tree
     assert p.list_verdicts() == []
     assert p.count_verdicts() == 0
     assert "No verdict history found" in build_report(str(tmp_path))
 
 
-def test_list_verdicts_local_entries_take_precedence_over_branch(tmp_path) -> None:
+def test_list_verdicts_local_entries_take_precedence_over_branch(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     _make_legacy_history_repo(repo, [("2026-06-21", "aaaa1111", "branch-task", True)])
     # A later judge run wrote a local verdict with a different task.
@@ -408,7 +411,7 @@ def test_list_verdicts_local_entries_take_precedence_over_branch(tmp_path) -> No
     assert p.count_verdicts() == 1
 
 
-def test_list_verdicts_filesystem_mode_never_consults_branch(tmp_path) -> None:
+def test_list_verdicts_filesystem_mode_never_consults_branch(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     _make_legacy_history_repo(repo, [("2026-06-21", "aaaa1111", "branch-task", True)])
 
@@ -420,7 +423,7 @@ def test_list_verdicts_filesystem_mode_never_consults_branch(tmp_path) -> None:
     assert p.count_verdicts() == 0
 
 
-def test_count_verdicts_falls_back_to_branch(tmp_path) -> None:
+def test_count_verdicts_falls_back_to_branch(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     _make_legacy_history_repo(
         repo,
@@ -435,7 +438,7 @@ def test_count_verdicts_falls_back_to_branch(tmp_path) -> None:
     assert p.count_verdicts() == 3
 
 
-def test_build_report_reads_verdicts_from_the_legacy_history_branch(tmp_path) -> None:
+def test_build_report_reads_verdicts_from_the_legacy_history_branch(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     _make_legacy_history_repo(
         repo,
@@ -464,7 +467,7 @@ def test_build_report_reads_verdicts_from_the_legacy_history_branch(tmp_path) ->
 # before the move stays discoverable.
 
 
-def _make_fleet_lane_repo(repo):
+def _make_fleet_lane_repo(repo: Any) -> Any:
     """A repo shaped like a fleet lane: the task-branch family already exists.
 
     `gitreins/task/fix-add` is minted from the live BRANCH_PREFIX, so the
@@ -496,14 +499,14 @@ def _make_fleet_lane_repo(repo):
     return env
 
 
-def _git_out(repo, env, *args: str) -> str:
+def _git_out(repo: Any, env: Any, *args: str) -> str:
     """stdout of one git command in *repo* (the tests' own observation channel)."""
     return subprocess.run(
         ["git", *args], capture_output=True, text=True, cwd=str(repo), env=env
     ).stdout
 
 
-def _ref_exists(repo, env, ref: str) -> bool:
+def _ref_exists(repo: Any, env: Any, ref: str) -> bool:
     return (
         subprocess.run(
             ["git", "rev-parse", "--verify", "-q", ref],
@@ -515,7 +518,7 @@ def _ref_exists(repo, env, ref: str) -> bool:
     )
 
 
-def test_legacy_history_ref_collides_with_a_fleet_task_branch(tmp_path) -> None:
+def test_legacy_history_ref_collides_with_a_fleet_task_branch(tmp_path: Path) -> None:
     """The reported bug, against git itself — the fixture is not vacuous.
 
     `gitreins/task/fix-add` is a plain path-prefix sibling of `refs/heads/
@@ -539,7 +542,7 @@ def test_legacy_history_ref_collides_with_a_fleet_task_branch(tmp_path) -> None:
     assert f"refs/heads/{BRANCH_PREFIX}fix-add".startswith(LEGACY_HISTORY_REF + "/")
 
 
-def test_history_store_is_gitignored_so_the_writer_must_force_it(tmp_path) -> None:
+def test_history_store_is_gitignored_so_the_writer_must_force_it(tmp_path: Path) -> None:
     """Non-vacuity for the writer's `-f`: the shipped ignore rule refuses a plain add.
 
     `.gitignore` ignores `.gitreins/history/` (the ref is the versioned copy),
@@ -564,7 +567,7 @@ def test_history_store_is_gitignored_so_the_writer_must_force_it(tmp_path) -> No
     assert "ignored" in plain.stderr, plain.stderr
 
 
-def test_verdict_history_commits_alongside_a_fleet_task_branch(tmp_path) -> None:
+def test_verdict_history_commits_alongside_a_fleet_task_branch(tmp_path: Path) -> None:
     """AC1: writing history in a repo that has `gitreins/task/<id>` succeeds."""
     repo = tmp_path / "repo"
     env = _make_fleet_lane_repo(repo)
@@ -623,7 +626,7 @@ def test_history_ref_is_outside_the_branch_namespace() -> None:
     assert not HISTORY_REF.startswith(fleet_branch + "/")
 
 
-def test_first_write_after_the_move_chains_onto_the_legacy_history(tmp_path) -> None:
+def test_first_write_after_the_move_chains_onto_the_legacy_history(tmp_path: Path) -> None:
     """AC2: pre-move history stays readable AND rides into the new ref.
 
     A repo that already has verdicts on the legacy branch keeps them: the first
@@ -669,7 +672,7 @@ def test_first_write_after_the_move_chains_onto_the_legacy_history(tmp_path) -> 
 _PRESERVE_ENV = _git_env()
 
 
-def _make_payload_repo(repo) -> dict:
+def _make_payload_repo(repo: Any) -> dict:
     """Init a main-branch repo with the documented dogfood staged-set shape.
 
     Reproduces the real DF-GITREINS-POC-1 failure conditions: a staged
@@ -684,7 +687,7 @@ def _make_payload_repo(repo) -> dict:
     repo.mkdir()
     subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True, env=env)
 
-    def git(*args) -> None:
+    def git(*args: Any) -> None:
         subprocess.run(["git", *args], check=True, capture_output=True, cwd=str(repo), env=env)
 
     (repo / "harness_config.txt").write_text("history:\n  enabled: true\n")
@@ -732,7 +735,7 @@ def _make_payload_repo(repo) -> dict:
     }
 
 
-def _persist_first_verdict(repo) -> str:
+def _persist_first_verdict(repo: Any) -> str:
     """Persist one verdict on a repo whose history ref does not exist."""
     p = VerdictPersister(str(repo))
     p.config["max_verdicts"] = 0  # no pruning
@@ -746,10 +749,10 @@ def _persist_first_verdict(repo) -> str:
     return p.persist("df-task", {"passed": True, "task_title": "DF Task"})
 
 
-def _assert_index_and_worktree_preserved(repo, before: dict) -> None:
+def _assert_index_and_worktree_preserved(repo: Any, before: dict) -> None:
     env = before["env"]
 
-    def out(*args):
+    def out(*args: Any) -> Any:
         return subprocess.run(
             ["git", *args],
             capture_output=True,
@@ -764,7 +767,7 @@ def _assert_index_and_worktree_preserved(repo, before: dict) -> None:
     assert out("rev-parse", "--abbrev-ref", "HEAD").strip() == "main"
 
 
-def test_first_verdict_preserves_staged_and_unstaged_state(tmp_path) -> None:
+def test_first_verdict_preserves_staged_and_unstaged_state(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     before = _make_payload_repo(repo)
 
@@ -775,7 +778,7 @@ def test_first_verdict_preserves_staged_and_unstaged_state(tmp_path) -> None:
     _assert_index_and_worktree_preserved(repo, before)
 
 
-def test_first_verdict_lands_on_the_history_ref(tmp_path) -> None:
+def test_first_verdict_lands_on_the_history_ref(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     before = _make_payload_repo(repo)
 
@@ -822,7 +825,7 @@ def test_first_verdict_lands_on_the_history_ref(tmp_path) -> None:
     assert entries[0]["_ref"] == HISTORY_REF
 
 
-def test_second_verdict_appends_to_the_history_ref(tmp_path) -> None:
+def test_second_verdict_appends_to_the_history_ref(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     before = _make_payload_repo(repo)
     first = _persist_first_verdict(repo)
@@ -845,7 +848,7 @@ def test_second_verdict_appends_to_the_history_ref(tmp_path) -> None:
     _assert_index_and_worktree_preserved(repo, before)
 
 
-def test_next_commit_includes_evaluated_payload(tmp_path) -> None:
+def test_next_commit_includes_evaluated_payload(tmp_path: Path) -> None:
     """The commit after persist() carries the evaluated files, staged as they were."""
     repo = tmp_path / "repo"
     before = _make_payload_repo(repo)
@@ -874,13 +877,13 @@ def test_next_commit_includes_evaluated_payload(tmp_path) -> None:
 
 
 def test_verdict_persistence_failure_returns_dry_run_and_preserves_payload(
-    tmp_path, monkeypatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """If the verdict commit cannot be created, degrade honestly — never destroy state."""
     repo = tmp_path / "repo"
     before = _make_payload_repo(repo)
 
-    def boom(*args, **kwargs) -> NoReturn:
+    def boom(*args: Any, **kwargs: Any) -> NoReturn:
         raise RuntimeError("simulated plumbing failure")
 
     monkeypatch.setattr(VerdictPersister, "_git", boom)
@@ -891,7 +894,9 @@ def test_verdict_persistence_failure_returns_dry_run_and_preserves_payload(
     _assert_index_and_worktree_preserved(repo, before)
 
 
-def test_plumbing_commands_touch_neither_index_nor_worktree(tmp_path, monkeypatch) -> None:
+def test_plumbing_commands_touch_neither_index_nor_worktree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Defense in depth: the history writer never mutates the caller's state.
 
     Index verbs (read-tree / add / write-tree) are allowed only with
@@ -906,7 +911,7 @@ def test_plumbing_commands_touch_neither_index_nor_worktree(tmp_path, monkeypatc
     worktree_verbs = ("checkout", "stash", "restore", "reset", "clean", "sparse-checkout")
     index_verbs = ("read-tree", "add", "write-tree", "update-index")
 
-    def spy_run(cmd, *args, **kwargs):
+    def spy_run(cmd: Any, *args: Any, **kwargs: Any) -> Any:
         if isinstance(cmd, list) and cmd and cmd[0] == "git":
             verb = next((c for c in cmd[1:] if not c.startswith("-")), None)
             assert verb not in worktree_verbs, f"worktree-mutating git verb invoked: {verb}"
@@ -935,7 +940,7 @@ def test_plumbing_commands_touch_neither_index_nor_worktree(tmp_path, monkeypatc
 # what it deliberately does NOT write.
 
 
-def _resolution_verdict(band: str = "RESOLVED", probability: float = 0.91, **overrides):
+def _resolution_verdict(band: str = "RESOLVED", probability: float = 0.91, **overrides: Any) -> Any:
     """A real engine verdict object — the class ``resolve`` returns, unmodified."""
     from engine.resolution import ResolutionVerdict
 
@@ -954,7 +959,7 @@ def _resolution_verdict(band: str = "RESOLVED", probability: float = 0.91, **ove
     return verdict
 
 
-def _history_records(repo) -> list[tuple[str, str, dict]]:
+def _history_records(repo: Any) -> list[tuple[str, str, dict]]:
     """``[(date, hash, record)]`` — every history entry, oldest first."""
     history = repo / ".gitreins" / "history"
     if not history.is_dir():
@@ -965,7 +970,7 @@ def _history_records(repo) -> list[tuple[str, str, dict]]:
     ]
 
 
-def _usage_rows(repo) -> list[dict]:
+def _usage_rows(repo: Any) -> list[dict]:
     path = repo / ".gitreins" / "usage.jsonl"
     if not path.is_file():
         return []
@@ -977,7 +982,7 @@ def _stamp(value: str) -> float:
     return datetime.fromisoformat(value).replace(tzinfo=timezone.utc).timestamp()
 
 
-def _write_judge_record(repo, task_id: str, passed: bool) -> None:
+def _write_judge_record(repo: Any, task_id: str, passed: bool) -> None:
     """Persist one judge verdict, through the persister the judge uses."""
     persister = VerdictPersister(str(repo))
     persister.config["storage"] = "filesystem"
@@ -995,7 +1000,7 @@ def _write_judge_record(repo, task_id: str, passed: bool) -> None:
 class TestPersistResolutionRecord:
     """The record `gitreins report` / `gitreins serve` read."""
 
-    def test_successful_run_appends_one_record_marked_as_a_resolution(self, tmp_path) -> None:
+    def test_successful_run_appends_one_record_marked_as_a_resolution(self, tmp_path: Path) -> None:
         repo = tmp_path / "repo"
         repo.mkdir()
         verdict = _resolution_verdict()
@@ -1022,7 +1027,7 @@ class TestPersistResolutionRecord:
         assert record["verdict"]["model"] == "typesafe/jev-1.13-20260917"
         assert record["verdict"]["input_tokens"] == 520
 
-    def test_summary_is_the_gate_template_not_the_judge_template(self, tmp_path) -> None:
+    def test_summary_is_the_gate_template_not_the_judge_template(self, tmp_path: Path) -> None:
         repo = tmp_path / "repo"
         repo.mkdir()
         persist_resolution(str(repo), _resolution_verdict(), surface="predispatch")
@@ -1034,7 +1039,7 @@ class TestPersistResolutionRecord:
         assert "✗ FAIL" not in summary
         assert "## Criteria" not in summary
 
-    def test_history_disabled_writes_no_record_and_no_usage_line(self, tmp_path) -> None:
+    def test_history_disabled_writes_no_record_and_no_usage_line(self, tmp_path: Path) -> None:
         repo = tmp_path / "repo"
         (repo / ".gitreins").mkdir(parents=True)
         (repo / ".gitreins" / "config.yaml").write_text(
@@ -1057,7 +1062,7 @@ class TestPersistResolutionRecord:
             "budget-exhausted",
         ],
     )
-    def test_abstain_paths_write_nothing_at_all(self, tmp_path, reason) -> None:
+    def test_abstain_paths_write_nothing_at_all(self, tmp_path: Path, reason: Any) -> None:
         """An ABSTAIN is a non-event, not a verdict — even with tokens attached."""
         from engine.resolution import VERDICT_ABSTAIN, ResolutionVerdict
 
@@ -1076,12 +1081,14 @@ class TestPersistResolutionRecord:
         assert _history_records(repo) == []
         assert _usage_rows(repo) == []
 
-    def test_a_persistence_failure_is_reported_never_raised(self, tmp_path, monkeypatch) -> None:
+    def test_a_persistence_failure_is_reported_never_raised(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Non-fatal by contract: recording can never break the run that decided."""
         repo = tmp_path / "repo"
         repo.mkdir()
 
-        def boom(*_args, **_kwargs) -> NoReturn:
+        def boom(*_args: Any, **_kwargs: Any) -> NoReturn:
             raise RuntimeError("simulated history failure")
 
         monkeypatch.setattr(VerdictPersister, "persist", boom)
@@ -1092,7 +1099,9 @@ class TestPersistResolutionRecord:
 class TestResolutionUsageRow:
     """One Jev call = one `step: "resolution"` row, carrying what the API said."""
 
-    def test_one_completed_call_appends_one_row_with_the_schema_and_step(self, tmp_path) -> None:
+    def test_one_completed_call_appends_one_row_with_the_schema_and_step(
+        self, tmp_path: Path
+    ) -> None:
         repo = tmp_path / "repo"
         repo.mkdir()
 
@@ -1114,7 +1123,7 @@ class TestResolutionUsageRow:
         assert rows[0]["cache_read"] == 0 and rows[0]["cache_write"] == 0
         assert isinstance(rows[0]["ts"], float) and rows[0]["ts"] > 0
 
-    def test_a_response_that_reported_no_tokens_writes_no_row(self, tmp_path) -> None:
+    def test_a_response_that_reported_no_tokens_writes_no_row(self, tmp_path: Path) -> None:
         repo = tmp_path / "repo"
         repo.mkdir()
 
@@ -1126,7 +1135,7 @@ class TestResolutionUsageRow:
         assert len(_history_records(repo)) == 1, "the record still lands"
 
     def test_the_row_is_charged_to_the_resolution_record_not_the_next_verdict(
-        self, tmp_path
+        self, tmp_path: Path
     ) -> None:
         """The row and its record share one instant, so attribution is exact."""
         from engine import usage
@@ -1162,7 +1171,7 @@ class TestResolutionUsageRow:
 class TestResolutionRecordsCoexistWithJudgeHistory:
     """A resolution record must not disturb the judge history readers."""
 
-    def test_judge_parsing_and_supersede_bookkeeping_are_untouched(self, tmp_path) -> None:
+    def test_judge_parsing_and_supersede_bookkeeping_are_untouched(self, tmp_path: Path) -> None:
         repo = tmp_path / "repo"
         repo.mkdir()
         _write_judge_record(repo, "task-judged", True)
@@ -1180,7 +1189,7 @@ class TestResolutionRecordsCoexistWithJudgeHistory:
         assert judge["supersedes"] is None
         assert persister.count_verdicts() == 2
 
-    def test_report_lists_resolution_records_in_their_own_section(self, tmp_path) -> None:
+    def test_report_lists_resolution_records_in_their_own_section(self, tmp_path: Path) -> None:
         repo = tmp_path / "repo"
         repo.mkdir()
         _write_judge_record(repo, "task-judged", True)
@@ -1196,7 +1205,7 @@ class TestResolutionRecordsCoexistWithJudgeHistory:
         assert "[cli]" in report
         assert "Does engine/evidence_bounds.py truncate text?" in report
 
-    def test_report_is_unchanged_when_only_judge_records_exist(self, tmp_path) -> None:
+    def test_report_is_unchanged_when_only_judge_records_exist(self, tmp_path: Path) -> None:
         repo = tmp_path / "repo"
         repo.mkdir()
         _write_judge_record(repo, "task-pass", True)
@@ -1223,7 +1232,7 @@ REMOTE_CANONICAL = "refs/remotes/origin/gitreins/history"
 REMOTE_LEGACY = "refs/remotes/origin/gitreins"
 
 
-def _git_plumbing(repo, env, *args, inp=None):
+def _git_plumbing(repo: Any, env: Any, *args: Any, inp: Any = None) -> Any:
     """stdout of one plumbing git command in *repo* (fixture helper)."""
     out = subprocess.run(
         ["git", *args],
@@ -1237,7 +1246,7 @@ def _git_plumbing(repo, env, *args, inp=None):
     return out.stdout.strip()
 
 
-def _verdict_commit(repo, env, verdicts):
+def _verdict_commit(repo: Any, env: Any, verdicts: Any) -> Any:
     """Build a verdict-history commit purely with plumbing; return its oid.
 
     Layout: ``.gitreins/history/<date>/<hash>/verdict.json`` — the same paths
@@ -1278,7 +1287,7 @@ def _verdict_commit(repo, env, verdicts):
     return _git_plumbing(repo, env, "commit-tree", root, inp="verdicts\n")
 
 
-def _make_fresh_clone(tmp_path, verdicts, *, canonical_remote_tracking: bool):
+def _make_fresh_clone(tmp_path: Path, verdicts: Any, *, canonical_remote_tracking: bool) -> Any:
     """Origin repo + a fresh clone that holds ONLY remote-tracking verdict refs.
 
     Origin: a ``main`` branch checked out (so the clone's working tree is
@@ -1376,7 +1385,9 @@ def test_history_refs_rank_canonical_then_legacy_then_remote_tracking() -> None:
     assert order == [HISTORY_REF, LEGACY_HISTORY_REF, REMOTE_CANONICAL, REMOTE_LEGACY]
 
 
-def test_list_verdicts_serves_history_from_remote_tracking_refs_in_a_fresh_clone(tmp_path) -> None:
+def test_list_verdicts_serves_history_from_remote_tracking_refs_in_a_fresh_clone(
+    tmp_path: Path,
+) -> None:
     clone, _env = _make_fresh_clone(
         tmp_path,
         [
@@ -1398,7 +1409,7 @@ def test_list_verdicts_serves_history_from_remote_tracking_refs_in_a_fresh_clone
     assert "No verdict history found" not in report
 
 
-def test_list_verdicts_reads_the_plain_clone_legacy_remote_tracking_ref(tmp_path) -> None:
+def test_list_verdicts_reads_the_plain_clone_legacy_remote_tracking_ref(tmp_path: Path) -> None:
     """A default-recipe clone (no canonical tracking ref) still serves history."""
     clone, _env = _make_fresh_clone(
         tmp_path,
@@ -1416,7 +1427,7 @@ def test_list_verdicts_reads_the_plain_clone_legacy_remote_tracking_ref(tmp_path
     assert "No verdict history found" not in build_report(str(clone))
 
 
-def test_list_verdicts_prefers_local_refs_over_remote_tracking_fallback(tmp_path) -> None:
+def test_list_verdicts_prefers_local_refs_over_remote_tracking_fallback(tmp_path: Path) -> None:
     clone, env = _make_fresh_clone(
         tmp_path,
         [
@@ -1459,7 +1470,7 @@ def test_list_verdicts_prefers_local_refs_over_remote_tracking_fallback(tmp_path
     assert entries[1]["_ref"] == REMOTE_CANONICAL
 
 
-def test_readme_fetch_recipe_makes_canonical_history_visible_in_a_clone(tmp_path) -> None:
+def test_readme_fetch_recipe_makes_canonical_history_visible_in_a_clone(tmp_path: Path) -> None:
     """Exactly the refspec the README documents, applied to a plain clone."""
     clone, env = _make_fresh_clone(
         tmp_path,

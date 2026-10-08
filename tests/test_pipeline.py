@@ -3,6 +3,12 @@ Unit tests for engine/pipeline.py — configurable evaluation pipeline.
 axiom:trace work_item=GR-001 spec=specs/06-Pipeline-Engine.md plan=.memory-bank/work-items/GR-001/plan.yaml
 """
 
+from __future__ import annotations
+from pathlib import Path
+from typing import Any
+from engine.llm import LLMClient
+
+import pytest
 import os
 import shlex
 import sys
@@ -151,7 +157,7 @@ class TestStepEvidenceBound:
         assert "chars omitted" in d["output"]  # fails under [:500]
         assert len(d["output"]) > 500  # old code stored exactly 500
 
-    def test_summarize_stage_failed_step_shows_pytest_failed_line(self, tmp_workdir) -> None:
+    def test_summarize_stage_failed_step_shows_pytest_failed_line(self, tmp_workdir: str) -> None:
         """_summarize_stage surfaces the parsed failing test id, not the banner.
 
         TRUST-003: the stage summary names the FIRST failing test with the same
@@ -179,7 +185,7 @@ class TestStepEvidenceBound:
         assert line in summary
         assert "test session starts" not in summary
 
-    def test_summarize_stage_falls_back_to_head_without_failed_line(self, tmp_workdir) -> None:
+    def test_summarize_stage_falls_back_to_head_without_failed_line(self, tmp_workdir: str) -> None:
         """No FAILED/ERROR line in a failing step's output → previous [:100] head."""
         step_output = "grep: pattern not found in any file" + " detail" * 20
         stage = StageResult(
@@ -343,36 +349,46 @@ class TestStageResult:
 class TestPipelineConditions:
     """Test Pipeline._check_condition — step-1-5-1-4."""
 
-    def test_condition_none_is_true(self, pipeline_config_default, tmp_workdir) -> None:
+    def test_condition_none_is_true(
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
+    ) -> None:
         """condition=None → always True."""
         p = Pipeline(pipeline_config_default, tmp_workdir)
         assert p._check_condition(None, {}) is True
 
-    def test_condition_true_string_is_true(self, pipeline_config_default, tmp_workdir) -> None:
+    def test_condition_true_string_is_true(
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
+    ) -> None:
         """condition='true' → True."""
         p = Pipeline(pipeline_config_default, tmp_workdir)
         assert p._check_condition("true", {}) is True
 
-    def test_condition_always_is_true(self, pipeline_config_default, tmp_workdir) -> None:
+    def test_condition_always_is_true(
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
+    ) -> None:
         """condition='always' → True."""
         p = Pipeline(pipeline_config_default, tmp_workdir)
         assert p._check_condition("always", {}) is True
 
     def test_condition_task_has_criteria_with_criteria(
-        self, pipeline_config_default, tmp_workdir
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
     ) -> None:
         """condition='task.has_criteria' with task having criteria → True."""
         p = Pipeline(pipeline_config_default, tmp_workdir)
         task = {"id": "t1", "criteria": ["c1", "c2"]}
         assert p._check_condition("task.has_criteria", task) is True
 
-    def test_condition_task_has_criteria_empty(self, pipeline_config_default, tmp_workdir) -> None:
+    def test_condition_task_has_criteria_empty(
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
+    ) -> None:
         """condition='task.has_criteria' with empty criteria → False."""
         p = Pipeline(pipeline_config_default, tmp_workdir)
         task = {"id": "t1", "criteria": []}
         assert p._check_condition("task.has_criteria", task) is False
 
-    def test_condition_stage_any_failed(self, pipeline_config_default, tmp_workdir) -> None:
+    def test_condition_stage_any_failed(
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
+    ) -> None:
         """condition='stage.tier1.any_failed' with tier1 having failures → True."""
         p = Pipeline(pipeline_config_default, tmp_workdir)
         # Inject a failed stage result
@@ -384,7 +400,9 @@ class TestPipelineConditions:
         )
         assert p._check_condition("stage.tier1.any_failed", {}) is True
 
-    def test_condition_stage_passed(self, pipeline_config_default, tmp_workdir) -> None:
+    def test_condition_stage_passed(
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
+    ) -> None:
         """condition='stage.tier1.passed' with tier1 passed → True."""
         p = Pipeline(pipeline_config_default, tmp_workdir)
         p._stage_results["tier1"] = StageResult(
@@ -396,13 +414,15 @@ class TestPipelineConditions:
         assert p._check_condition("stage.tier1.passed", {}) is True
 
     def test_condition_stage_unknown_returns_false(
-        self, pipeline_config_default, tmp_workdir
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
     ) -> None:
         """condition='stage.unknown.passed' returns False."""
         p = Pipeline(pipeline_config_default, tmp_workdir)
         assert p._check_condition("stage.unknown.passed", {}) is False
 
-    def test_condition_or_logic(self, pipeline_config_default, tmp_workdir) -> None:
+    def test_condition_or_logic(
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
+    ) -> None:
         """OR logic: one true → True, both false → False."""
         p = Pipeline(pipeline_config_default, tmp_workdir)
         task = {"id": "t1", "criteria": ["c1"]}
@@ -410,7 +430,9 @@ class TestPipelineConditions:
         p._stage_results["tier1"] = StageResult(id="tier1", passed=True, any_failed=False, steps=[])
         assert p._check_condition("stage.tier1.any_failed or task.has_criteria", task) is True
 
-    def test_condition_and_logic(self, pipeline_config_default, tmp_workdir) -> None:
+    def test_condition_and_logic(
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
+    ) -> None:
         """AND logic: both must be true."""
         p = Pipeline(pipeline_config_default, tmp_workdir)
         task = {"id": "t1", "criteria": ["c1"]}
@@ -421,39 +443,51 @@ class TestPipelineConditions:
 class TestPipelineTemplate:
     """Test Pipeline._template — template substitution — step-1-5-1-5."""
 
-    def test_template_task_id(self, pipeline_config_default, tmp_workdir) -> None:
+    def test_template_task_id(
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
+    ) -> None:
         """{{ task.id }} replaced with task id."""
         p = Pipeline(pipeline_config_default, tmp_workdir)
         result = p._template("echo {{ task.id }}", {"id": "my-task"})
         assert result == "echo my-task"
 
-    def test_template_task_title(self, pipeline_config_default, tmp_workdir) -> None:
+    def test_template_task_title(
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
+    ) -> None:
         """{{ task.title }} replaced with task title."""
         p = Pipeline(pipeline_config_default, tmp_workdir)
         result = p._template("{{ task.title }}", {"id": "t1", "title": "Hello World"})
         assert "Hello World" in result
 
-    def test_template_task_criteria(self, pipeline_config_default, tmp_workdir) -> None:
+    def test_template_task_criteria(
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
+    ) -> None:
         """{{ task.criteria }} replaced with JSON array."""
         p = Pipeline(pipeline_config_default, tmp_workdir)
         result = p._template("{{ task.criteria }}", {"id": "t1", "criteria": ["c1", "c2"]})
         assert '"c1"' in result
 
-    def test_template_stage_passed(self, pipeline_config_default, tmp_workdir) -> None:
+    def test_template_stage_passed(
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
+    ) -> None:
         """{{ stage.tier1.passed }} replaced with True/False."""
         p = Pipeline(pipeline_config_default, tmp_workdir)
         p._stage_results["tier1"] = StageResult(id="tier1", passed=True, any_failed=False, steps=[])
         result = p._template("passed={{ stage.tier1.passed }}", {})
         assert "passed=True" in result
 
-    def test_template_stage_any_failed(self, pipeline_config_default, tmp_workdir) -> None:
+    def test_template_stage_any_failed(
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
+    ) -> None:
         """{{ stage.tier1.any_failed }} replaced with True/False."""
         p = Pipeline(pipeline_config_default, tmp_workdir)
         p._stage_results["tier1"] = StageResult(id="tier1", passed=False, any_failed=True, steps=[])
         result = p._template("failed={{ stage.tier1.any_failed }}", {})
         assert "failed=True" in result
 
-    def test_template_stages_full_json(self, pipeline_config_default, tmp_workdir) -> None:
+    def test_template_stages_full_json(
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
+    ) -> None:
         """{{ stages }} replaced with full JSON."""
         p = Pipeline(pipeline_config_default, tmp_workdir)
         p._stage_results["tier1"] = StageResult(
@@ -470,7 +504,7 @@ class TestPipelineTemplate:
 class TestLoadPipelineConfig:
     """Test load_pipeline_config() — step-1-5-1-6."""
 
-    def test_no_config_file_returns_default_pipeline(self, tmp_workdir) -> None:
+    def test_no_config_file_returns_default_pipeline(self, tmp_workdir: str) -> None:
         """Config file missing → returns default dict with tier1 + tier2 stages."""
         config = load_pipeline_config(tmp_workdir)
         assert "pipeline" in config
@@ -479,7 +513,7 @@ class TestLoadPipelineConfig:
         assert stages[0]["id"] == "tier1"
         assert stages[1]["id"] == "tier2"
 
-    def test_config_file_no_pipeline_key_returns_default(self, tmp_workdir) -> None:
+    def test_config_file_no_pipeline_key_returns_default(self, tmp_workdir: str) -> None:
         """Config file exists but no 'pipeline' key → returns default."""
         import os
 
@@ -490,7 +524,7 @@ class TestLoadPipelineConfig:
         config = load_pipeline_config(tmp_workdir)
         assert "pipeline" in config
 
-    def test_config_file_empty_stages_returns_default(self, tmp_workdir) -> None:
+    def test_config_file_empty_stages_returns_default(self, tmp_workdir: str) -> None:
         """Config file has pipeline but no stages → returns minimal default pipeline
         with tier1+secrets stage."""
         import os
@@ -505,7 +539,7 @@ class TestLoadPipelineConfig:
         # The pipeline dict may be empty since the file had empty stages
         assert isinstance(config["pipeline"], dict)
 
-    def test_malformed_yaml_returns_safe_minimal(self, tmp_workdir) -> None:
+    def test_malformed_yaml_returns_safe_minimal(self, tmp_workdir: str) -> None:
         """Malformed YAML returns safe minimal pipeline."""
         import os
 
@@ -521,7 +555,9 @@ class TestLoadPipelineConfig:
 class TestPipelineRun:
     """Test Pipeline.run() actual execution."""
 
-    def test_run_parallel_stage(self, pipeline_config_default, tmp_workdir) -> None:
+    def test_run_parallel_stage(
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
+    ) -> None:
         """Pipeline runs parallel stage and returns results.
 
         Note: tier2 (ai_eval) will fail without LLM key configured,
@@ -534,13 +570,17 @@ class TestPipelineRun:
         assert result["stages"]["tier1"]["passed"] is True
         # Overall passed may be False if tier2 failed (no LLM key), but tier1 should pass
 
-    def test_run_sequential_stage(self, pipeline_config_default, tmp_workdir) -> None:
+    def test_run_sequential_stage(
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
+    ) -> None:
         """Pipeline runs sequential ai_eval stage (skips with no criteria)."""
         p = Pipeline(pipeline_config_default, tmp_workdir)
         result = p.run({"id": "t1", "title": "Test", "criteria": []}, trigger="pre-eval")
         assert "stages" in result
 
-    def test_run_with_llm_injected(self, pipeline_config_default, tmp_workdir, llm_client) -> None:
+    def test_run_with_llm_injected(
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str, llm_client: LLMClient
+    ) -> None:
         """Pipeline with LLM injected runs ai_eval stage."""
         p = Pipeline(pipeline_config_default, tmp_workdir, llm=llm_client)
         task = {"id": "t1", "title": "Test", "criteria": ["c1"]}
@@ -552,7 +592,9 @@ class TestPipelineRun:
             result = p.run(task, trigger="pre-eval")
         assert "stages" in result
 
-    def test_trigger_filtering(self, pipeline_config_default, tmp_workdir) -> None:
+    def test_trigger_filtering(
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
+    ) -> None:
         """Stages not matching trigger are skipped."""
         p = Pipeline(pipeline_config_default, tmp_workdir)
         result = p.run({"id": "t1", "title": "Test", "criteria": []}, trigger="pre-commit")
@@ -561,14 +603,18 @@ class TestPipelineRun:
         # tier2 should not run since it has on: ["pre-eval"]
         assert "tier2" not in result["stages"]
 
-    def test_run_precommit_triggers(self, pipeline_config_default, tmp_workdir) -> None:
+    def test_run_precommit_triggers(
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
+    ) -> None:
         """pre-commit trigger runs tier1 but not tier2."""
         p = Pipeline(pipeline_config_default, tmp_workdir)
         result = p.run({"id": "_precommit", "title": "x", "criteria": []}, trigger="pre-commit")
         assert result["passed"] is True
         assert "tier1" in result["stages"]
 
-    def test_unknown_step_type_returns_error(self, pipeline_config_default, tmp_workdir) -> None:
+    def test_unknown_step_type_returns_error(
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
+    ) -> None:
         """Unknown step type produces error result."""
         config = {
             "pipeline": {
@@ -584,7 +630,9 @@ class TestPipelineRun:
         assert step["passed"] is False
         assert "Unknown step type" in step["error"]
 
-    def test_script_no_command_returns_error(self, pipeline_config_default, tmp_workdir) -> None:
+    def test_script_no_command_returns_error(
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
+    ) -> None:
         """Script step with no command returns error."""
         config = {
             "pipeline": {
@@ -625,7 +673,9 @@ class TestExtendedPipeline:
         assert stage.any_failed is True
         assert stage.passed is False
 
-    def test_template_unknown_var_unchanged(self, pipeline_config_default, tmp_workdir) -> None:
+    def test_template_unknown_var_unchanged(
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
+    ) -> None:
         """Template with unknown variable leaves braces unchanged."""
         from engine.pipeline import Pipeline
 
@@ -647,7 +697,9 @@ class TestExtendedPipeline:
         # The template variable is not resolved; step output will contain the literal string
         assert "{{nonexistent}}" in step["output"] or step["passed"] is True
 
-    def test_run_with_no_matching_trigger(self, pipeline_config_default, tmp_workdir) -> None:
+    def test_run_with_no_matching_trigger(
+        self, pipeline_config_default: dict[str, object], tmp_workdir: str
+    ) -> None:
         """Pipeline skips stage when trigger doesn't match."""
         from engine.pipeline import Pipeline
 
@@ -675,7 +727,9 @@ class TestExtendedPipeline:
 class TestLoadPipelineConfigFallback:
     """Regression tests for load_pipeline_config fallback behavior."""
 
-    def test_config_exists_no_pipeline_section_gets_tier1_plus_tier2(self, tmp_workdir) -> None:
+    def test_config_exists_no_pipeline_section_gets_tier1_plus_tier2(
+        self, tmp_workdir: str
+    ) -> None:
         """When .gitreins/config.yaml exists but has no 'pipeline' key,
         load_pipeline_config must inject a two-tier pipeline (tier1 + tier2),
         not the old broken single-tier default (secrets: true only)."""
@@ -723,7 +777,7 @@ class TestLoadPipelineConfigFallback:
         assert "tools" in tier2, "tier2 should have tools configured"
         assert "max_iterations" in tier2, "tier2 should have max_iterations"
 
-    def test_config_missing_file_gets_two_tier_default(self, tmp_workdir) -> None:
+    def test_config_missing_file_gets_two_tier_default(self, tmp_workdir: str) -> None:
         """When .gitreins/config.yaml does not exist at all,
         load_pipeline_config returns the full default (already correct)."""
         workdir = tmp_workdir
@@ -737,7 +791,7 @@ class TestLoadPipelineConfigFallback:
         assert tier2 is not None
         assert tier2["type"] == "ai_eval"
 
-    def test_default_tier1_secrets_step_suppresses_gitleaks_banner(self, tmp_workdir) -> None:
+    def test_default_tier1_secrets_step_suppresses_gitleaks_banner(self, tmp_workdir: str) -> None:
         """The default pipeline's tier1 secrets step runs gitleaks with
         --no-banner (DF-006): the banner must not leak into captured tier1
         output that reaches judge verdicts."""
@@ -754,7 +808,7 @@ class TestLoadPipelineConfigFallback:
             "tier1 secrets step must pass --no-banner to gitleaks"
         )
 
-    def test_tier1_secrets_step_blocks_committed_secrets(self, tmp_workdir) -> None:
+    def test_tier1_secrets_step_blocks_committed_secrets(self, tmp_workdir: str) -> None:
         """DF-012: the default tier1 secrets step FAILS on committed
         sk-/ghp_ secrets even when gitleaks reports clean — the built-in
         scanner cross-check runs unconditionally (workdir mode, since the
@@ -792,7 +846,7 @@ class TestLoadPipelineConfigFallback:
 class TestCppLanguageDetection:
     """Verify C++ pipeline detection: CMakeLists.txt → cpp, Makefile → c."""
 
-    def test_cmake_lists_txt_detected_as_cpp(self, tmp_workdir) -> None:
+    def test_cmake_lists_txt_detected_as_cpp(self, tmp_workdir: str) -> None:
         """CMakeLists.txt alone → primary language is cpp."""
         from engine.pipeline import _default_tier1_steps
 
@@ -803,7 +857,7 @@ class TestCppLanguageDetection:
         step_ids = [s["id"] for s in steps]
         assert "secrets" in step_ids, "secrets step should always be present"
 
-    def test_makefile_only_detected_as_c(self, tmp_workdir) -> None:
+    def test_makefile_only_detected_as_c(self, tmp_workdir: str) -> None:
         """Makefile alone (no CMakeLists.txt) → primary language is c."""
         from engine.pipeline import _default_tier1_steps
 
@@ -815,7 +869,7 @@ class TestCppLanguageDetection:
         assert "lint" in step_ids
         assert "tests" in step_ids
 
-    def test_cmake_takes_priority_over_makefile(self, tmp_workdir) -> None:
+    def test_cmake_takes_priority_over_makefile(self, tmp_workdir: str) -> None:
         """Both CMakeLists.txt and Makefile present → CMakeLists.txt wins (cpp)."""
         from engine.pipeline import _default_tier1_steps
 
@@ -830,7 +884,7 @@ class TestCppLanguageDetection:
         assert "lint" in step_ids
         assert "tests" in step_ids
 
-    def test_cpp_lang_commands_produces_lint_and_test(self, tmp_workdir) -> None:
+    def test_cpp_lang_commands_produces_lint_and_test(self, tmp_workdir: str) -> None:
         """C++ pipeline produces lint + test steps (via make)."""
         from engine.pipeline import _default_tier1_steps
 
@@ -845,7 +899,7 @@ class TestCppLanguageDetection:
         assert "make" in lint_step["run"], f"Expected make lint, got {lint_step['run']}"
         assert "make" in test_step["run"], f"Expected make test, got {test_step['run']}"
 
-    def test_c_and_cpp_both_produce_steps(self, tmp_workdir) -> None:
+    def test_c_and_cpp_both_produce_steps(self, tmp_workdir: str) -> None:
         """Both C (Makefile) and C++ (CMakeLists.txt) produce lint+test steps."""
         from engine.pipeline import _default_tier1_steps
 
@@ -865,7 +919,7 @@ class TestCppLanguageDetection:
         assert "lint" in cpp_ids, f"C++ project missing lint: {cpp_ids}"
         assert "tests" in cpp_ids, f"C++ project missing tests: {cpp_ids}"
 
-    def test_no_cmake_or_makefile_skips_c_and_cpp(self, tmp_workdir) -> None:
+    def test_no_cmake_or_makefile_skips_c_and_cpp(self, tmp_workdir: str) -> None:
         """No CMakeLists.txt or Makefile → falls back to secrets-only."""
         from engine.pipeline import _default_tier1_steps
 
@@ -883,7 +937,7 @@ class TestCppLanguageDetection:
 class TestCsharpLanguageDetection:
     """Verify C# pipeline detection: .csproj/.sln → csharp."""
 
-    def test_csproj_detected_as_csharp(self, tmp_workdir) -> None:
+    def test_csproj_detected_as_csharp(self, tmp_workdir: str) -> None:
         """*.csproj file → primary language is csharp."""
         from engine.pipeline import _default_tier1_steps
 
@@ -895,7 +949,7 @@ class TestCsharpLanguageDetection:
         assert "lint" in step_ids
         assert "tests" in step_ids
 
-    def test_sln_detected_as_csharp(self, tmp_workdir) -> None:
+    def test_sln_detected_as_csharp(self, tmp_workdir: str) -> None:
         """*.sln file → primary language is csharp."""
         from engine.pipeline import _default_tier1_steps
 
@@ -907,7 +961,7 @@ class TestCsharpLanguageDetection:
         assert "lint" in step_ids
         assert "tests" in step_ids
 
-    def test_csharp_lang_commands_produces_dotnet_steps(self, tmp_workdir) -> None:
+    def test_csharp_lang_commands_produces_dotnet_steps(self, tmp_workdir: str) -> None:
         """C# pipeline produces lint + test steps (via dotnet)."""
         from engine.pipeline import _default_tier1_steps
 
@@ -922,7 +976,7 @@ class TestCsharpLanguageDetection:
         assert "dotnet" in lint_step["run"], f"Expected dotnet, got {lint_step['run']}"
         assert "dotnet" in test_step["run"], f"Expected dotnet, got {test_step['run']}"
 
-    def test_csproj_takes_priority_over_sln(self, tmp_workdir) -> None:
+    def test_csproj_takes_priority_over_sln(self, tmp_workdir: str) -> None:
         """Both .csproj and .sln present → .csproj detected first (csharp)."""
         from engine.pipeline import _default_tier1_steps
 
@@ -939,7 +993,7 @@ class TestCsharpLanguageDetection:
 class TestScalaLanguageDetection:
     """Verify Scala pipeline detection: build.sbt → scala."""
 
-    def test_build_sbt_detected_as_scala(self, tmp_workdir) -> None:
+    def test_build_sbt_detected_as_scala(self, tmp_workdir: str) -> None:
         """build.sbt file → primary language is scala."""
         from engine.pipeline import _default_tier1_steps
 
@@ -951,7 +1005,7 @@ class TestScalaLanguageDetection:
         assert "lint" in step_ids
         assert "tests" in step_ids
 
-    def test_scala_lang_commands_produces_sbt_steps(self, tmp_workdir) -> None:
+    def test_scala_lang_commands_produces_sbt_steps(self, tmp_workdir: str) -> None:
         """Scala pipeline produces lint + test steps (via sbt)."""
         from engine.pipeline import _default_tier1_steps
 
@@ -976,14 +1030,14 @@ class TestAiEvalCapForwarding:
     every turn and never produced a verdict, 2026-08).
     """
 
-    def _make_verdict(self):
+    def _make_verdict(self) -> Any:
         v = MagicMock()
         v.verdict = "COMPLETE"
         v.summary = "ok"
         v.items = []
         return v
 
-    def test_no_step_caps_defers_to_config(self, tmp_workdir, llm_client) -> None:
+    def test_no_step_caps_defers_to_config(self, tmp_workdir: str, llm_client: LLMClient) -> None:
         """Step with only max_iterations: -1 defers — no explicit EvalCap."""
         from engine.pipeline import Pipeline
 
@@ -1019,7 +1073,9 @@ class TestAiEvalCapForwarding:
             "would make compaction threshold 0 (compaction loop)"
         )
 
-    def test_step_explicit_caps_override_config(self, tmp_workdir, llm_client) -> None:
+    def test_step_explicit_caps_override_config(
+        self, tmp_workdir: str, llm_client: LLMClient
+    ) -> None:
         """Step-level caps are forwarded (parsed) over the config base."""
         from engine.pipeline import Pipeline
 
@@ -1060,7 +1116,9 @@ class TestAiEvalCapForwarding:
         assert cap.tool_call_weight == 0.2
         assert not cap.is_unlimited
 
-    def test_partial_step_caps_merge_config_base(self, tmp_workdir, llm_client) -> None:
+    def test_partial_step_caps_merge_config_base(
+        self, tmp_workdir: str, llm_client: LLMClient
+    ) -> None:
         """Unset caps fall back to the config base, not to unlimited."""
         from engine.pipeline import Pipeline
 
@@ -1110,11 +1168,11 @@ class TestStageSummaryDiagnostics:
     """
 
     @staticmethod
-    def _summary(steps, workdir):
+    def _summary(steps: Any, workdir: str) -> Any:
         stage = StageResult(id="tier1", passed=all(s.passed for s in steps), steps=steps)
         return Pipeline({"pipeline": {"stages": []}}, workdir)._summarize_stage(stage)
 
-    def test_summary_is_single_line_and_ansi_free(self, tmp_workdir) -> None:
+    def test_summary_is_single_line_and_ansi_free(self, tmp_workdir: str) -> None:
         """A capture that opens with escaped gitleaks INFO renders as one line."""
         output = (
             "\x1b[90m6:51PM\x1b[0m \x1b[32mINF\x1b[0m no leaks found\nsecrets: gitleaks: clean\n"
@@ -1126,7 +1184,7 @@ class TestStageSummaryDiagnostics:
         assert "\x1b[" not in summary
         assert len(summary.split("\n")) == 1
 
-    def test_summary_names_an_empty_passing_capture(self, tmp_workdir) -> None:
+    def test_summary_names_an_empty_passing_capture(self, tmp_workdir: str) -> None:
         """No output at all → named, not a dangling '✓ lint: ' (the POC-14 line)."""
         summary = self._summary(
             [StepResult(id="lint", type="script", passed=True, output="")], tmp_workdir
@@ -1134,14 +1192,14 @@ class TestStageSummaryDiagnostics:
         assert summary == "  ✓ lint: ok (no output)"
         assert not summary.rstrip().endswith(":")
 
-    def test_summary_names_an_empty_failing_capture(self, tmp_workdir) -> None:
+    def test_summary_names_an_empty_failing_capture(self, tmp_workdir: str) -> None:
         """A failing step with no output and no error is still named."""
         summary = self._summary(
             [StepResult(id="tests", type="script", passed=False, output="", error="")], tmp_workdir
         )
         assert summary == "  ✗ tests: no output"
 
-    def test_summary_falls_back_to_the_error_text(self, tmp_workdir) -> None:
+    def test_summary_falls_back_to_the_error_text(self, tmp_workdir: str) -> None:
         """No output but an error → the error names the step."""
         summary = self._summary(
             [
@@ -1167,7 +1225,7 @@ class TestBudgetTimeoutAttribution:
     (DEGRADED) register, and a REAL failing test never picks up any of it.
     """
 
-    def test_over_budget_step_carries_budget_data_and_named_error(self, tmp_workdir) -> None:
+    def test_over_budget_step_carries_budget_data_and_named_error(self, tmp_workdir: str) -> None:
         """run_bounded's timed_out → data fields + error that names the budget."""
         pipeline = Pipeline({"pipeline": {"stages": []}}, tmp_workdir)
         result = pipeline._run_script_step(
@@ -1178,7 +1236,7 @@ class TestBudgetTimeoutAttribution:
         assert result.data["timeout_s"] == 1
         assert result.error == "Command timed out after 1s (step budget)"
 
-    def test_code_failure_is_never_classified_as_budget_timeout(self, tmp_workdir) -> None:
+    def test_code_failure_is_never_classified_as_budget_timeout(self, tmp_workdir: str) -> None:
         """The criterion-3 guard: `exit 1` is a plain failure, no timed_out flag."""
         pipeline = Pipeline({"pipeline": {"stages": []}}, tmp_workdir)
         result = pipeline._run_script_step(
@@ -1189,7 +1247,7 @@ class TestBudgetTimeoutAttribution:
         assert "timed out" not in result.error
         assert result.data["exit_code"] == 1
 
-    def test_stage_summary_renders_the_two_lanes_distinctly(self, tmp_workdir) -> None:
+    def test_stage_summary_renders_the_two_lanes_distinctly(self, tmp_workdir: str) -> None:
         """~ + budget wording for the timeout, ✗ + output for the code failure."""
         timed_out = StepResult(
             id="tests",
@@ -1207,7 +1265,7 @@ class TestBudgetTimeoutAttribution:
             "  ~ tests: Command timed out after 3s (step budget)\n  ✗ lint: E501 found"
         )
 
-    def test_stage_record_and_verdict_json_name_the_budget(self, tmp_workdir) -> None:
+    def test_stage_record_and_verdict_json_name_the_budget(self, tmp_workdir: str) -> None:
         """to_dict() carries the data fields AND the stage degradation marker."""
         from engine.pipeline import _record_runtime_skips
 
@@ -1226,7 +1284,7 @@ class TestBudgetTimeoutAttribution:
         assert d["skipped_steps"] == ["tests"]
         assert "timed out after 1s (step budget)" in d["degradation_reason"]
 
-    def test_full_run_marks_the_stage_degraded_not_just_failed(self, tmp_workdir) -> None:
+    def test_full_run_marks_the_stage_degraded_not_just_failed(self, tmp_workdir: str) -> None:
         """End-to-end: the stage summary and verdict dict tell the two apart."""
         config = {
             "pipeline": {
@@ -1260,7 +1318,7 @@ class TestBudgetTimeoutAttribution:
 
 
 class TestSecretsScannerAttribution:
-    def test_explicit_scan_root_reaches_both_secrets_scanners(self, tmp_path) -> None:
+    def test_explicit_scan_root_reaches_both_secrets_scanners(self, tmp_path: Path) -> None:
         import subprocess
         import os
 
@@ -1300,7 +1358,7 @@ class TestSecretsScannerAttribution:
 
     """DF-GITREINS-POC-15: the scanner that ran is machine-readable."""
 
-    def test_explicit_scan_root_is_shell_safe(self, tmp_path) -> None:
+    def test_explicit_scan_root_is_shell_safe(self, tmp_path: Path) -> None:
         import os
         import subprocess
 
@@ -1333,7 +1391,7 @@ class TestSecretsScannerAttribution:
         assert not (control / "marker").exists()
         assert str(project) in args_file.read_text()
 
-    def test_gitleaks_config_quotes_a_path_with_single_quotes(self, tmp_path) -> None:
+    def test_gitleaks_config_quotes_a_path_with_single_quotes(self, tmp_path: Path) -> None:
         import json
 
         from engine.pipeline import harness_scan_gitleaks_config
@@ -1347,7 +1405,7 @@ class TestSecretsScannerAttribution:
 
         assert f"path = {json.dumps(str(repo_config))}" in rendered
 
-    def test_secrets_step_disables_gitleaks_color(self, tmp_workdir) -> None:
+    def test_secrets_step_disables_gitleaks_color(self, tmp_workdir: str) -> None:
         """The capture cannot carry escapes: gitleaks runs with --no-color."""
         cmd = _secrets_step_run(tmp_workdir)
         assert "gitleaks detect --source . --no-git --no-banner --no-color" in cmd
@@ -1376,7 +1434,7 @@ class TestSecretsScannerAttribution:
         )
         assert sr.to_dict()["output"] == "INF scanned ~5 MB"
 
-    def test_script_step_stamps_the_active_scanners(self, tmp_workdir) -> None:
+    def test_script_step_stamps_the_active_scanners(self, tmp_workdir: str) -> None:
         """A real secrets step records its scanner ids in the step data."""
         pipeline = Pipeline({"pipeline": {"stages": []}}, tmp_workdir)
         step = {
@@ -1388,13 +1446,13 @@ class TestSecretsScannerAttribution:
         assert result.passed is True
         assert result.data["secrets_scanners"] == ["gitleaks", "builtin"]
 
-    def test_script_step_omits_scanners_when_unreported(self, tmp_workdir) -> None:
+    def test_script_step_omits_scanners_when_unreported(self, tmp_workdir: str) -> None:
         """A step that reported no attribution gets no key (not an empty list)."""
         pipeline = Pipeline({"pipeline": {"stages": []}}, tmp_workdir)
         result = pipeline._run_script_step({"id": "secrets", "run": "echo nothing"}, {})
         assert "secrets_scanners" not in result.data
 
-    def test_non_secrets_step_is_not_stamped(self, tmp_workdir) -> None:
+    def test_non_secrets_step_is_not_stamped(self, tmp_workdir: str) -> None:
         """The stamp is the secrets lane's, not every step's."""
         pipeline = Pipeline({"pipeline": {"stages": []}}, tmp_workdir)
         step = {"id": "lint", "run": "echo 'secrets: scanners=gitleaks'"}
@@ -1424,7 +1482,7 @@ class TestPytestExit5BenignSkip:
     the `~` register instead of a ✓ that would claim the tests ran.
     """
 
-    def _pipeline(self, workdir) -> Pipeline:
+    def _pipeline(self, workdir: str) -> Pipeline:
         return Pipeline({"pipeline": {"stages": []}}, str(workdir))
 
     @staticmethod
@@ -1432,7 +1490,7 @@ class TestPytestExit5BenignSkip:
         return {"id": "tests", "type": "script", "run": run}
 
     def test_benign_exit_5_from_a_real_pytest_run_is_a_skip_not_a_failure(
-        self, tmp_workdir
+        self, tmp_workdir: str
     ) -> None:
         """AC1: a workdir with no tests collects nothing → pass with the reason."""
         step = self._pipeline(tmp_workdir)._run_script_step(
@@ -1448,7 +1506,7 @@ class TestPytestExit5BenignSkip:
         assert step.data["skipped"] is True
         assert step.data["skip_reason"] == "no tests collected"
 
-    def test_collection_error_exit_5_still_fails(self, tmp_workdir) -> None:
+    def test_collection_error_exit_5_still_fails(self, tmp_workdir: str) -> None:
         """AC2: the benign classifier rejects an exit 5 with collection errors."""
         step = self._pipeline(tmp_workdir)._run_script_step(
             self._pytest_step(
@@ -1465,7 +1523,7 @@ class TestPytestExit5BenignSkip:
         assert "skipped" not in step.data
         assert "skip_reason" not in step.data
 
-    def test_non_pytest_exit_5_still_fails(self, tmp_workdir) -> None:
+    def test_non_pytest_exit_5_still_fails(self, tmp_workdir: str) -> None:
         """AC3: the invocation gate holds — some other tool's 5 is not a skip."""
         step = self._pipeline(tmp_workdir)._run_script_step(
             {"id": "lint", "type": "script", "run": "echo 'no tests ran in 0.01s'; exit 5"},
@@ -1477,7 +1535,7 @@ class TestPytestExit5BenignSkip:
         assert "pytest_outcome" not in step.data
         assert "skipped" not in step.data
 
-    def test_exit_127_with_a_resolvable_runner_still_fails(self, tmp_workdir) -> None:
+    def test_exit_127_with_a_resolvable_runner_still_fails(self, tmp_workdir: str) -> None:
         """A 127 whose pytest runner IS present stays a failure (no over-skip).
 
         GR-GAP-064's invocation gate still holds: the runner-missing skip needs
@@ -1496,7 +1554,7 @@ class TestPytestExit5BenignSkip:
         assert "skipped" not in step.data
         assert "skip_reason" not in step.data
 
-    def test_stage_summary_renders_the_skip_never_a_tick(self, tmp_workdir) -> None:
+    def test_stage_summary_renders_the_skip_never_a_tick(self, tmp_workdir: str) -> None:
         """A skipped pass is the ~ (DEGRADED) register the guard console uses."""
         stage = StageResult(
             id="tier1",
@@ -1519,7 +1577,7 @@ class TestPytestExit5BenignSkip:
         summary = self._pipeline(tmp_workdir)._summarize_stage(stage)
         assert summary == "  ~ tests: skipped (no tests collected)"
 
-    def test_full_tier1_run_passes_and_names_the_skip(self, tmp_workdir) -> None:
+    def test_full_tier1_run_passes_and_names_the_skip(self, tmp_workdir: str) -> None:
         """AC1 end-to-end: a full pipeline run is not failed by this step."""
         config = {
             "pipeline": {
@@ -1578,14 +1636,14 @@ class TestPytestRunnerMissingSkip:
     REAL failing pytest run still fails.
     """
 
-    def _pipeline(self, workdir) -> Pipeline:
+    def _pipeline(self, workdir: str) -> Pipeline:
         return Pipeline({"pipeline": {"stages": []}}, str(workdir))
 
     @staticmethod
     def _pytest_step(run: str) -> dict:
         return {"id": "tests", "type": "script", "run": run}
 
-    def test_missing_runner_is_a_skip_not_a_tier1_failure(self, tmp_workdir) -> None:
+    def test_missing_runner_is_a_skip_not_a_tier1_failure(self, tmp_workdir: str) -> None:
         """AC3: the pinned venv was never created → skip, exit 127 recorded."""
         step = self._pipeline(tmp_workdir)._run_script_step(
             self._pytest_step(".venv/bin/python -m pytest -x --tb=short"),
@@ -1599,7 +1657,7 @@ class TestPytestRunnerMissingSkip:
         # Evidence kept: the shell's own line is still in the step output.
         assert "not found" in step.output
 
-    def test_real_failing_pytest_run_is_still_a_failure(self, tmp_workdir) -> None:
+    def test_real_failing_pytest_run_is_still_a_failure(self, tmp_workdir: str) -> None:
         """AC2 end-to-end: the runner is present, the test fails → FAIL."""
         with open(os.path.join(tmp_workdir, "test_poc51_boom.py"), "w") as f:
             f.write("def test_boom():\n    assert 1 + 1 == 3\n")
@@ -1645,7 +1703,7 @@ class TestContentionDegradedSkippedTests:
     stays a hard FAIL with no marker.
     """
 
-    def _pipeline(self, workdir) -> Pipeline:
+    def _pipeline(self, workdir: str) -> Pipeline:
         return Pipeline({"pipeline": {"stages": []}}, str(workdir))
 
     @staticmethod
@@ -1653,7 +1711,7 @@ class TestContentionDegradedSkippedTests:
         return {"id": "tests", "type": "script", "run": run}
 
     def test_unknown_class_failure_under_tier1_lock_skips_with_the_marker(
-        self, tmp_workdir, monkeypatch
+        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The contention branch fires: PASS + skipped_tests + lock token."""
         from engine.pipeline import _record_runtime_skips, TIER1_ENV_VAR
@@ -1702,7 +1760,7 @@ class TestContentionDegradedSkippedTests:
 
         assert _tier1_skipped_steps({"stages": {"tier1": d}}) == ["tests"]
 
-    def test_maxfail_classified_failure_is_never_degraded(self, tmp_workdir) -> None:
+    def test_maxfail_classified_failure_is_never_degraded(self, tmp_workdir: str) -> None:
         """AC negative half: a real classified failure FAILS hard, no marker."""
         from engine.pipeline import _record_runtime_skips
 

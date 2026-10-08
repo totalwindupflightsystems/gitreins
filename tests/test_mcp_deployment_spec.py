@@ -16,6 +16,8 @@ phrases: that ``GITREINS_WORKDIR`` is documented as wrapper-local and that the
 "every tool accepts workdir" over-claim is not present.
 """
 
+from __future__ import annotations
+
 import re
 import sys
 from pathlib import Path

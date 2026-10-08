@@ -8,6 +8,8 @@ that promise (DF-GITREINS-POC-58); this test refuses to let them (or any
 successor) come back.
 """
 
+from __future__ import annotations
+
 import shutil
 import subprocess
 from pathlib import Path

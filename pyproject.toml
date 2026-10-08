@@ -119,7 +119,7 @@ select = [
 "engine/commit_audit.py" = ["E501"]
 "engine/config.py" = ["E501"]
 # Test files — long assertion lines, fixtures, and test data strings; unused variables often check imports
-"tests/**/*.py" = ["E501", "F841"]
+"tests/**/*.py" = ["E501", "F841", "ANN401"]
 # Reliability benchmark corpus + non-secrets fixture data — intentionally flawed
 # test DATA graded by the evaluators; annotating it would change the fixture text.
 "tests/reliability/**/*.py" = ["ANN"]

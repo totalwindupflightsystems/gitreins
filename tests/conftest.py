@@ -4,6 +4,9 @@ axiom:trace work_item=GR-001 spec=specs/05-Task-Manager.md plan=.memory-bank/wor
 """
 
 from __future__ import annotations
+from pathlib import Path
+from typing import Any
+from engine.llm import LLMClient
 
 import fcntl
 import hashlib
@@ -59,7 +62,7 @@ def _live_lock_path() -> str:
     return os.path.join(tempfile.gettempdir(), f"gitreins-live-{digest}.lock")
 
 
-def pytest_collection_modifyitems(config, items) -> None:
+def pytest_collection_modifyitems(config: Any, items: Any) -> None:
     """Skip ``live``-marked (real-egress) tests when running inside judge tier-1.
 
     The skip is applied to the collected item, so the reason lands in the run's
@@ -73,7 +76,7 @@ def pytest_collection_modifyitems(config, items) -> None:
             item.add_marker(skip)
 
 
-def pytest_runtest_setup(item) -> None:
+def pytest_runtest_setup(item: Any) -> None:
     """Take the per-repo live lock, or skip if another process holds it.
 
     Outside tier 1 the live test still runs for real (manual ``pytest`` with a
@@ -101,7 +104,7 @@ def pytest_runtest_setup(item) -> None:
     _LIVE_LOCK_FD = fd
 
 
-def pytest_runtest_teardown(item, nextitem) -> None:
+def pytest_runtest_teardown(item: Any, nextitem: Any) -> None:
     """Release the live-run lock taken in :func:`pytest_runtest_setup`."""
     global _LIVE_LOCK_FD
     if _LIVE_LOCK_FD is None:
@@ -113,7 +116,7 @@ def pytest_runtest_teardown(item, nextitem) -> None:
         os.close(fd)
 
 
-def init_fake_git_workdir(workdir) -> None:
+def init_fake_git_workdir(workdir: str) -> None:
     """Give *workdir* the minimal ``.git`` a GitReins workspace fixture needs.
 
     Not a usable repository — just enough for ``git rev-parse --show-toplevel``
@@ -131,7 +134,7 @@ def init_fake_git_workdir(workdir) -> None:
 
 
 @pytest.fixture
-def tmp_workdir(tmp_path):
+def tmp_workdir(tmp_path: Path) -> Any:
     """Create a temporary git repository with .gitreins/ directory.
 
     Returns a clean workdir path that acts as a realistic GitReins workspace.
@@ -143,7 +146,7 @@ def tmp_workdir(tmp_path):
 
 
 @pytest.fixture
-def workdir_factory(tmp_path):
+def workdir_factory(tmp_path: Path) -> Any:
     """Build several isolated fake git workdirs inside one test.
 
     ``tmp_workdir`` is function-scoped, so a test that drives concurrent CLI
@@ -169,7 +172,7 @@ def workdir_factory(tmp_path):
 
 
 @pytest.fixture(autouse=True)
-def isolated_job_store(tmp_path, monkeypatch):
+def isolated_job_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
     """Point the shared disk job store (DF-006) at a temp dir.
 
     Autouse so no test ever reads/writes real jobs under
@@ -182,7 +185,7 @@ def isolated_job_store(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def skip_worker_llm_probe(monkeypatch) -> None:
+def skip_worker_llm_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     """Skip the MCP worker's real-wire credential probe in tests.
 
     DF-GITREINS-POC-78: the probe in ``_run_job`` proves the credential on the
@@ -196,7 +199,7 @@ def skip_worker_llm_probe(monkeypatch) -> None:
 
 
 @pytest.fixture
-def task_manager(tmp_workdir):
+def task_manager(tmp_workdir: str) -> Any:
     """Create a TaskManager with a clean temp directory."""
     from engine.task_manager import TaskManager
 
@@ -205,7 +208,7 @@ def task_manager(tmp_workdir):
 
 
 @pytest.fixture
-def sample_task_dict():
+def sample_task_dict() -> Any:
     """Return a sample task dict for testing."""
     return {
         "id": "test-task-1",
@@ -219,7 +222,7 @@ def sample_task_dict():
 
 
 @pytest.fixture
-def guard_manager(tmp_workdir):
+def guard_manager(tmp_workdir: str) -> Any:
     """Create a GuardManager with a clean temp directory."""
     from engine.guard_manager import GuardManager
 
@@ -227,7 +230,7 @@ def guard_manager(tmp_workdir):
 
 
 @pytest.fixture
-def llm_client():
+def llm_client() -> Any:
     """Create an LLMClient with default (non-functioning) settings.
 
     Tests that use this must mock requests.post to avoid real HTTP calls.
@@ -238,7 +241,7 @@ def llm_client():
 
 
 @pytest.fixture
-def evaluator(llm_client, tmp_workdir):
+def evaluator(llm_client: LLMClient, tmp_workdir: str) -> Any:
     """Create an AgenticEvaluator with a real workdir and mockable LLM."""
     from engine.evaluator import AgenticEvaluator
 
@@ -246,7 +249,7 @@ def evaluator(llm_client, tmp_workdir):
 
 
 @pytest.fixture
-def judge(llm_client, tmp_workdir):
+def judge(llm_client: LLMClient, tmp_workdir: str) -> Any:
     """Create a Judge with a clean temp directory."""
     from engine.judge import Judge
 
@@ -254,7 +257,7 @@ def judge(llm_client, tmp_workdir):
 
 
 @pytest.fixture
-def pipeline_config_default():
+def pipeline_config_default() -> Any:
     """Return a default pipeline configuration dict."""
     return {
         "pipeline": {

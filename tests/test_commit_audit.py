@@ -6,6 +6,8 @@ a live LLM — uses mocking for the LLM client and real git
 operations for diff capture and message reading.
 """
 
+from __future__ import annotations
+
 import json
 from unittest.mock import patch
 
@@ -19,7 +21,7 @@ from engine.commit_audit import (
     COMMIT_AUDIT_TOOLS,
 )
 from engine.llm import LLMClient, LLMResponse, LLMUsage
-from typing import NoReturn
+from typing import Any, NoReturn
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -127,14 +129,14 @@ class TestCommitAuditorParseResult:
 class TestCommitAuditorAudit:
     """Test the full audit flow with mocked LLM."""
 
-    def _make_auditor(self, strictness="standard") -> CommitAuditor:
+    def _make_auditor(self, strictness: Any = "standard") -> CommitAuditor:
         llm = LLMClient(api_key="sk-test", model="test/model")
         return CommitAuditor(llm, strictness=strictness)
 
-    def _valid_response(self):
+    def _valid_response(self) -> Any:
         return LLMResponse(content='{"valid": true}', usage=LLMUsage())
 
-    def _invalid_response(self, issues=None, suggestion=None):
+    def _invalid_response(self, issues: Any = None, suggestion: Any = None) -> Any:
         return LLMResponse(
             content=json.dumps(
                 {
@@ -167,7 +169,7 @@ class TestCommitAuditorAudit:
         assert result.suggested_message != ""
 
     @patch.object(LLMClient, "chat")
-    def test_single_pass_valid(self, mock_chat) -> None:
+    def test_single_pass_valid(self, mock_chat: Any) -> None:
         """LLM returns valid on first call."""
         mock_chat.return_value = self._valid_response()
         auditor = self._make_auditor()
@@ -176,7 +178,7 @@ class TestCommitAuditorAudit:
         assert mock_chat.call_count == 1
 
     @patch.object(LLMClient, "chat")
-    def test_single_pass_invalid_with_suggestion(self, mock_chat) -> None:
+    def test_single_pass_invalid_with_suggestion(self, mock_chat: Any) -> None:
         """LLM returns invalid with a suggested better message."""
         mock_chat.return_value = self._invalid_response(
             issues=["Message doesn't describe the change"],
@@ -188,7 +190,7 @@ class TestCommitAuditorAudit:
         assert "feat(api)" in result.suggested_message
 
     @patch.object(LLMClient, "chat")
-    def test_llm_error_returns_valid(self, mock_chat) -> None:
+    def test_llm_error_returns_valid(self, mock_chat: Any) -> None:
         """LLM failures should not block commits (safe default)."""
         mock_chat.side_effect = RuntimeError("API down")
         auditor = self._make_auditor()
@@ -1308,7 +1310,7 @@ class TestPipelineScoreOutput:
 # ═══════════════════════════════════════════════════════════════
 
 
-def _write_config(workdir, text: str) -> None:
+def _write_config(workdir: str, text: str) -> None:
     """Write .gitreins/config.yaml into an already-initialised workdir."""
     import os
 
@@ -1317,7 +1319,7 @@ def _write_config(workdir, text: str) -> None:
         f.write(text)
 
 
-def _config_for(stage_lines: str = "", **top) -> str:
+def _config_for(stage_lines: str = "", **top: Any) -> str:
     """A config whose pipeline holds exactly the given stage lines."""
     parts = []
     if top.get("defaults_mode"):
@@ -1331,7 +1333,7 @@ def _config_for(stage_lines: str = "", **top) -> str:
 STAGE_ON_MSG = "    - id: commit_audit\n      type: commit_audit\n      on: [commit-msg]\n"
 
 
-def _run_audit(workdir, trigger: str = "commit-msg"):
+def _run_audit(workdir: str, trigger: str = "commit-msg") -> None:
     """Run the pipeline against a REJECTED message, with the LLM stubbed.
 
     The auditor itself is mocked at ``CommitAuditor.audit`` so no credential,
@@ -1352,12 +1354,12 @@ def _run_audit(workdir, trigger: str = "commit-msg"):
         return pipeline.run(task, trigger=trigger)
 
 
-def _mode_of(result) -> str:
+def _mode_of(result: Any) -> str:
     stage = result["stages"]["commit_audit"]
     return stage["steps"][0]["data"]["mode"]
 
 
-def _passed(result) -> bool:
+def _passed(result: Any) -> bool:
     return result["stages"]["commit_audit"]["passed"]
 
 
@@ -1415,7 +1417,7 @@ class TestResolveCommitAuditMode:
 class TestCommitAuditModePrecedence:
     """End-to-end through Pipeline.run — the four measured placements."""
 
-    def test_stage_level_block_blocks(self, tmp_workdir) -> None:
+    def test_stage_level_block_blocks(self, tmp_workdir: str) -> None:
         """The placement docs describe: a stage-level `mode: block` → exit 1.
 
         Before DF-GITREINS-POC-30 this stayed "(Warning only — commit will
@@ -1427,7 +1429,7 @@ class TestCommitAuditModePrecedence:
         assert _passed(result) is False
         assert "Commit BLOCKED" in result["stages"]["commit_audit"]["summary"]
 
-    def test_stage_block_overrides_top_level_warn_and_defaults(self, tmp_workdir) -> None:
+    def test_stage_block_overrides_top_level_warn_and_defaults(self, tmp_workdir: str) -> None:
         _write_config(
             tmp_workdir,
             _config_for(
@@ -1438,7 +1440,7 @@ class TestCommitAuditModePrecedence:
         assert _mode_of(result) == "block"
         assert _passed(result) is False
 
-    def test_stage_warn_beats_top_level_block(self, tmp_workdir) -> None:
+    def test_stage_warn_beats_top_level_block(self, tmp_workdir: str) -> None:
         """The stage is the most specific scope, so a stage `warn` wins."""
         _write_config(
             tmp_workdir,
@@ -1449,21 +1451,21 @@ class TestCommitAuditModePrecedence:
         assert _passed(result) is True
         assert "Warning only" in result["stages"]["commit_audit"]["summary"]
 
-    def test_top_level_block_still_blocks_when_stage_is_silent(self, tmp_workdir) -> None:
+    def test_top_level_block_still_blocks_when_stage_is_silent(self, tmp_workdir: str) -> None:
         """Backward compatibility: the legacy placement keeps working."""
         _write_config(tmp_workdir, _config_for(STAGE_ON_MSG, top_mode="block"))
         result = _run_audit(tmp_workdir)
         assert _mode_of(result) == "block"
         assert _passed(result) is False
 
-    def test_defaults_block_blocks(self, tmp_workdir) -> None:
+    def test_defaults_block_blocks(self, tmp_workdir: str) -> None:
         """`defaults.commit_audit.mode` was dead config before this fix."""
         _write_config(tmp_workdir, _config_for(STAGE_ON_MSG, defaults_mode="block"))
         result = _run_audit(tmp_workdir)
         assert _mode_of(result) == "block"
         assert _passed(result) is False
 
-    def test_no_mode_anywhere_is_warn(self, tmp_workdir) -> None:
+    def test_no_mode_anywhere_is_warn(self, tmp_workdir: str) -> None:
         _write_config(tmp_workdir, _config_for(STAGE_ON_MSG))
         result = _run_audit(tmp_workdir)
         assert _mode_of(result) == "warn"
@@ -1473,7 +1475,7 @@ class TestCommitAuditModePrecedence:
 class TestCommitAuditSkipLine:
     """A run where the audit did NOT happen must say so by name."""
 
-    def test_no_stage_prints_named_skip(self, tmp_workdir) -> None:
+    def test_no_stage_prints_named_skip(self, tmp_workdir: str) -> None:
         """The fresh `install` + `init` state — previously printed NOTHING."""
         from engine.pipeline import commit_audit_skip_message, load_pipeline_config
 
@@ -1484,7 +1486,7 @@ class TestCommitAuditSkipLine:
         assert "trigger commit-msg" in msg
         assert "audit NOT run" in msg
 
-    def test_stage_not_armed_names_the_trigger_fix(self, tmp_workdir) -> None:
+    def test_stage_not_armed_names_the_trigger_fix(self, tmp_workdir: str) -> None:
         from engine.pipeline import commit_audit_skip_message, load_pipeline_config
 
         stage = "    - id: commit_audit\n      type: commit_audit\n      on: [pre-eval]\n"
@@ -1494,7 +1496,7 @@ class TestCommitAuditSkipLine:
         assert "on: [commit-msg]" in msg
         assert "audit NOT run" in msg
 
-    def test_id_only_stage_counts_as_declared(self, tmp_workdir) -> None:
+    def test_id_only_stage_counts_as_declared(self, tmp_workdir: str) -> None:
         """`id: commit_audit` with no explicit `type:` is the docs' shape."""
         from engine.pipeline import commit_audit_skip_message, load_pipeline_config
 
@@ -1504,7 +1506,7 @@ class TestCommitAuditSkipLine:
         assert "not armed for trigger" in msg
         assert "audit NOT run" in msg
 
-    def test_skip_line_is_not_a_block(self, tmp_workdir) -> None:
+    def test_skip_line_is_not_a_block(self, tmp_workdir: str) -> None:
         """A skip must stay exit 0 — the three wordings all say NOT run."""
         from engine.pipeline import commit_audit_skip_message, load_pipeline_config
 
@@ -1515,7 +1517,7 @@ class TestCommitAuditSkipLine:
             assert "BLOCKED" not in msg
 
     def test_cli_prints_the_skip_line_and_exits_zero(
-        self, tmp_workdir, monkeypatch, capsys
+        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
     ) -> None:
         """The command itself: no stage → the named line, exit 0.
 
@@ -1564,13 +1566,15 @@ class TestCommitAuditEnabledFlag:
     assertion, not a hope.
     """
 
-    def test_top_level_enabled_false_skips_without_llm(self, tmp_workdir, monkeypatch) -> None:
+    def test_top_level_enabled_false_skips_without_llm(
+        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Top-level `commit_audit: {enabled: false}` -> named skip, no LLM."""
         from engine.pipeline import Pipeline, load_pipeline_config
 
         _write_config(tmp_workdir, _enabled_config("commit_audit:\n  enabled: false\n"))
 
-        def _explode(*a, **k) -> NoReturn:
+        def _explode(*a: Any, **k: Any) -> NoReturn:
             raise AssertionError("LLMClient constructed while audit is disabled")
 
         # The pipeline imports LLMClient LOCALLY inside _run_commit_audit
@@ -1589,7 +1593,9 @@ class TestCommitAuditEnabledFlag:
         assert "audit NOT run" in output
         assert "commit_audit.enabled is false" in output
 
-    def test_defaults_enabled_false_skips_without_llm(self, tmp_workdir, monkeypatch) -> None:
+    def test_defaults_enabled_false_skips_without_llm(
+        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """`defaults.commit_audit.enabled: false` reads the same."""
         from engine.pipeline import Pipeline, load_pipeline_config
 
@@ -1598,7 +1604,7 @@ class TestCommitAuditEnabledFlag:
             _enabled_config("defaults:\n  commit_audit:\n    enabled: false\n"),
         )
 
-        def _explode(*a, **k) -> NoReturn:
+        def _explode(*a: Any, **k: Any) -> NoReturn:
             raise AssertionError("LLMClient constructed while audit is disabled")
 
         # Same local-import rule: stub engine.llm.LLMClient, the name the
@@ -1615,14 +1621,16 @@ class TestCommitAuditEnabledFlag:
         assert "audit NOT run" in output
         assert "defaults.commit_audit.enabled is false" in output
 
-    def test_disabled_auditor_never_invoked(self, tmp_workdir, monkeypatch) -> None:
+    def test_disabled_auditor_never_invoked(
+        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Even with an injected LLM, a disabled audit never reaches the auditor."""
         from engine.commit_audit import CommitAuditor
         from engine.pipeline import Pipeline, load_pipeline_config
 
         _write_config(tmp_workdir, _enabled_config("commit_audit:\n  enabled: false\n"))
 
-        def _explode(*a, **k) -> NoReturn:
+        def _explode(*a: Any, **k: Any) -> NoReturn:
             raise AssertionError("CommitAuditor constructed while audit is disabled")
 
         # Patch __init__ (own-dict attribute -> clean monkeypatch restore),
@@ -1638,7 +1646,7 @@ class TestCommitAuditEnabledFlag:
         assert _passed(result) is True
         assert "audit NOT run" in result["stages"]["commit_audit"]["summary"]
 
-    def test_enabled_absent_invokes_the_auditor(self, tmp_workdir) -> None:
+    def test_enabled_absent_invokes_the_auditor(self, tmp_workdir: str) -> None:
         """Control: with `enabled` absent the auditor IS invoked (unchanged)."""
         from engine.commit_audit import CommitAuditor
         from engine.pipeline import Pipeline, load_pipeline_config
@@ -1658,7 +1666,7 @@ class TestCommitAuditEnabledFlag:
         assert _passed(result) is True
         assert "Commit message issues" in result["stages"]["commit_audit"]["summary"]
 
-    def test_enabled_true_invokes_the_auditor(self, tmp_workdir) -> None:
+    def test_enabled_true_invokes_the_auditor(self, tmp_workdir: str) -> None:
         """Control: explicit `enabled: true` behaves exactly like absent."""
         from engine.commit_audit import CommitAuditor
         from engine.pipeline import Pipeline, load_pipeline_config
@@ -1677,7 +1685,7 @@ class TestCommitAuditEnabledFlag:
         assert _passed(result) is True
         assert "Commit message issues" in result["stages"]["commit_audit"]["summary"]
 
-    def test_stage_enabled_true_beats_config_false(self, tmp_workdir) -> None:
+    def test_stage_enabled_true_beats_config_false(self, tmp_workdir: str) -> None:
         """The stage's own boolean is the most specific scope."""
         from engine.pipeline import resolve_commit_audit_enabled
 

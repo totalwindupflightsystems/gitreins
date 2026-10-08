@@ -3,6 +3,9 @@ Unit tests for engine/guard_manager.py — pre-commit static checks.
 axiom:trace work_item=GR-001 spec=specs/04-Guard-Manager.md plan=.memory-bank/work-items/GR-001/plan.yaml
 """
 
+from __future__ import annotations
+from typing import Any
+
 import json
 import os
 import shutil
@@ -37,7 +40,9 @@ from engine.types import (
 )
 
 
-def _stub_lane_result(returncode=0, stdout="", stderr="", timed_out=False):
+def _stub_lane_result(
+    returncode: Any = 0, stdout: Any = "", stderr: Any = "", timed_out: Any = False
+) -> Any:
     """A command_hygiene.run_bounded result for tests-lane stubs (DF-CRIER-258).
 
     _run_test_command executes the test command through run_bounded — its
@@ -54,7 +59,7 @@ def _stub_lane_result(returncode=0, stdout="", stderr="", timed_out=False):
     }
 
 
-def _is_gitleaks_spawn(cmd) -> bool:
+def _is_gitleaks_spawn(cmd: Any) -> bool:
     """True when *cmd* spawns gitleaks — by argv MEMBERSHIP, not by argv[0].
 
     DF-GITREINS-POC-55: a spawned scanner may be prefixed (`nice -n 10 gitleaks
@@ -105,7 +110,7 @@ class TestTimeoutReapsBackgroundedChildren:
     (pid 1076482) alive 2 seconds past the TimeoutExpired.
     """
 
-    def test_timeout_leaves_no_sleep_descendant_alive(self, tmp_workdir) -> None:
+    def test_timeout_leaves_no_sleep_descendant_alive(self, tmp_workdir: str) -> None:
         """A guard test command that backgrounds `sleep 300` times out (tiny
         test_timeout) and the sleep is GONE when the guard call returns."""
         pidfile = os.path.join(tmp_workdir, "bg-sleep.pid")
@@ -210,20 +215,20 @@ class TestTier1Result:
 class TestGuardManagerInit:
     """Test GuardManager initialization and config parsing — step-1-3-1-2."""
 
-    def test_empty_config_all_enabled(self, guard_manager) -> None:
+    def test_empty_config_all_enabled(self, guard_manager: GuardManager) -> None:
         """Empty config → all guards enabled (default True)."""
         assert guard_manager._enabled["secrets"] is True
         assert guard_manager._enabled["lint"] is True
         assert guard_manager._enabled["tests"] is True
 
-    def test_secrets_disabled(self, tmp_workdir) -> None:
+    def test_secrets_disabled(self, tmp_workdir: str) -> None:
         """Config with guards.secrets=false → secrets disabled."""
         gm = GuardManager(tmp_workdir, {"guards": {"secrets": False}})
         assert gm._enabled["secrets"] is False
         assert gm._enabled["lint"] is True
         assert gm._enabled["tests"] is True
 
-    def test_tests_disabled_with_custom_command(self, tmp_workdir) -> None:
+    def test_tests_disabled_with_custom_command(self, tmp_workdir: str) -> None:
         """Config with guards.tests=false + custom test_command → tests disabled, command saved."""
         gm = GuardManager(
             tmp_workdir, {"guards": {"tests": False, "test_command": "pytest custom/"}}
@@ -231,19 +236,19 @@ class TestGuardManagerInit:
         assert gm._enabled["tests"] is False
         assert gm.config.get("guards", {}).get("test_command") == "pytest custom/"
 
-    def test_no_guards_key_all_defaults(self, tmp_workdir) -> None:
+    def test_no_guards_key_all_defaults(self, tmp_workdir: str) -> None:
         """Config with no 'guards' key → all defaults True."""
         gm = GuardManager(tmp_workdir, {"other": "stuff"})
         assert gm._enabled["secrets"] is True
         assert gm._enabled["lint"] is True
         assert gm._enabled["tests"] is True
 
-    def test_config_none_all_enabled(self, tmp_workdir) -> None:
+    def test_config_none_all_enabled(self, tmp_workdir: str) -> None:
         """None config → all guards enabled."""
         gm = GuardManager(tmp_workdir, None)
         assert gm._enabled["secrets"] is True
 
-    def test_cpp_repo_detected(self, tmp_workdir) -> None:
+    def test_cpp_repo_detected(self, tmp_workdir: str) -> None:
         """CMakeLists.txt → _is_cpp True (triggers C++-aware timeouts)."""
         import os
 
@@ -253,13 +258,13 @@ class TestGuardManagerInit:
         gm = GuardManager(tmp_workdir, {})
         assert gm._is_cpp is True
 
-    def test_cpp_staged_files_detected(self, tmp_workdir) -> None:
+    def test_cpp_staged_files_detected(self, tmp_workdir: str) -> None:
         """Staged .cpp file → _is_cpp True."""
         _write_staged_file(tmp_workdir, "src/main.cpp", "int main() { return 0; }\n")
         gm = GuardManager(tmp_workdir, {})
         assert gm._is_cpp is True
 
-    def test_rust_repo_detected(self, tmp_workdir) -> None:
+    def test_rust_repo_detected(self, tmp_workdir: str) -> None:
         """Cargo.toml → _is_rust True."""
         import os
 
@@ -269,19 +274,19 @@ class TestGuardManagerInit:
         gm = GuardManager(tmp_workdir, {})
         assert gm._is_rust is True
 
-    def test_python_repo_not_cpp(self, tmp_workdir) -> None:
+    def test_python_repo_not_cpp(self, tmp_workdir: str) -> None:
         """Plain Python repo → _is_cpp False."""
         gm = GuardManager(tmp_workdir, {})
         assert gm._is_cpp is False
         assert gm._is_rust is False
 
-    def test_lsp_timeout_config_parsed(self, tmp_workdir) -> None:
+    def test_lsp_timeout_config_parsed(self, tmp_workdir: str) -> None:
         """guards.lsp_timeouts.{init,per_file} are parsed into manager."""
         gm = GuardManager(tmp_workdir, {"guards": {"lsp_timeouts": {"init": 600, "per_file": 240}}})
         assert gm._lsp_init_timeout == 600
         assert gm._lsp_per_file_timeout == 240
 
-    def test_lsp_timeout_config_defaults_none(self, tmp_workdir) -> None:
+    def test_lsp_timeout_config_defaults_none(self, tmp_workdir: str) -> None:
         """No lsp_timeouts config → None (language-aware defaults kick in)."""
         gm = GuardManager(tmp_workdir, {})
         assert gm._lsp_init_timeout is None
@@ -305,7 +310,7 @@ def _local_go_version() -> tuple[int, int] | None:
         return None
 
 
-def _require_go_version(minor_floor: int = 21):
+def _require_go_version(minor_floor: int = 21) -> Any:
     """Skip (not fail) when no local Go toolchain or one below the floor.
 
     GR-GAP-028/QA-GITREINS-1: the fixture previously hardcoded ``go 1.26`` in
@@ -335,53 +340,53 @@ class TestTimeoutCoercion:
     raises a clear ValueError naming the config key.
     """
 
-    def test_test_timeout_string_with_unit_coerced(self, tmp_workdir) -> None:
+    def test_test_timeout_string_with_unit_coerced(self, tmp_workdir: str) -> None:
         """'300s' → 300 (the GR-GAP-028 repro config)."""
         gm = GuardManager(tmp_workdir, {"guards": {"test_timeout": "300s"}})
         assert gm._test_timeout == 300
 
-    def test_test_timeout_numeric_string_coerced(self, tmp_workdir) -> None:
+    def test_test_timeout_numeric_string_coerced(self, tmp_workdir: str) -> None:
         """'300' (quoted) → 300."""
         gm = GuardManager(tmp_workdir, {"guards": {"test_timeout": "300"}})
         assert gm._test_timeout == 300
 
-    def test_test_timeout_int_passthrough(self, tmp_workdir) -> None:
+    def test_test_timeout_int_passthrough(self, tmp_workdir: str) -> None:
         """Existing int configs are unchanged."""
         gm = GuardManager(tmp_workdir, {"guards": {"test_timeout": 900}})
         assert gm._test_timeout == 900
 
-    def test_test_timeout_missing_uses_default(self, tmp_workdir) -> None:
+    def test_test_timeout_missing_uses_default(self, tmp_workdir: str) -> None:
         """No test_timeout key → default 180."""
         gm = GuardManager(tmp_workdir, {})
         assert gm._test_timeout == 180
 
-    def test_test_timeout_none_uses_default(self, tmp_workdir) -> None:
+    def test_test_timeout_none_uses_default(self, tmp_workdir: str) -> None:
         """Explicit null → default 180."""
         gm = GuardManager(tmp_workdir, {"guards": {"test_timeout": None}})
         assert gm._test_timeout == 180
 
-    def test_test_timeout_garbage_raises_value_error(self, tmp_workdir) -> None:
+    def test_test_timeout_garbage_raises_value_error(self, tmp_workdir: str) -> None:
         """Non-numeric garbage → clear ValueError, not a subprocess TypeError."""
         with pytest.raises(ValueError, match="test_timeout"):
             GuardManager(tmp_workdir, {"guards": {"test_timeout": "asap"}})
 
-    def test_test_timeout_zero_raises_value_error(self, tmp_workdir) -> None:
+    def test_test_timeout_zero_raises_value_error(self, tmp_workdir: str) -> None:
         """'0' → ValueError (a 0s timeout is never valid)."""
         with pytest.raises(ValueError, match="test_timeout"):
             GuardManager(tmp_workdir, {"guards": {"test_timeout": "0"}})
 
-    def test_hook_timeout_string_coerced(self, tmp_workdir) -> None:
+    def test_hook_timeout_string_coerced(self, tmp_workdir: str) -> None:
         """hook_timeout is the same bug class — '120s' → 120."""
         gm = GuardManager(tmp_workdir, {"guards": {"hook_timeout": "120s"}})
         assert gm._hook_timeout == 120
 
-    def test_hook_timeout_garbage_raises_value_error(self, tmp_workdir) -> None:
+    def test_hook_timeout_garbage_raises_value_error(self, tmp_workdir: str) -> None:
         """Garbage hook_timeout → clear ValueError naming hook_timeout."""
         with pytest.raises(ValueError, match="hook_timeout"):
             GuardManager(tmp_workdir, {"guards": {"hook_timeout": "fast"}})
 
     @pytest.mark.skipif(shutil.which("go") is None, reason="go toolchain not installed")
-    def test_go_tests_stage_runs_with_string_test_timeout(self, tmp_workdir) -> None:
+    def test_go_tests_stage_runs_with_string_test_timeout(self, tmp_workdir: str) -> None:
         """GR-GAP-028 live regression: a consumer repo with
         ``test_timeout: 300s`` runs the go_tests stage — coerced to 300 —
         with NO TypeError.
@@ -408,7 +413,7 @@ class TestTimeoutCoercion:
 
 
 class TestBuiltinSecretsScan:
-    def test_builtin_scanner_uses_explicit_nested_scan_root(self, tmp_path) -> None:
+    def test_builtin_scanner_uses_explicit_nested_scan_root(self, tmp_path: Path) -> None:
         from engine.guard_manager import GuardManager
 
         outer = tmp_path / "outer"
@@ -427,7 +432,7 @@ class TestBuiltinSecretsScan:
         outer_control = GuardManager(str(outer))._builtin_secrets_scan(staged_only=False)
         assert "outside.py" in outer_control.output
 
-    def test_builtin_scanner_default_scope_remains_control_root(self, tmp_path) -> None:
+    def test_builtin_scanner_default_scope_remains_control_root(self, tmp_path: Path) -> None:
         from engine.guard_manager import GuardManager
 
         root = tmp_path / "repo"
@@ -436,7 +441,7 @@ class TestBuiltinSecretsScan:
         result = GuardManager(str(root))._builtin_secrets_scan(staged_only=False)
         assert "source.py" in result.output
 
-    def test_scoped_file_walk_preserves_existing_directory_exclusions(self, tmp_path) -> None:
+    def test_scoped_file_walk_preserves_existing_directory_exclusions(self, tmp_path: Path) -> None:
         from engine.guard_manager import GuardManager
 
         outer = tmp_path / "outer"
@@ -464,7 +469,7 @@ class TestBuiltinSecretsScan:
 
     """Test built-in secrets scanner patterns — step-1-3-1-3."""
 
-    def test_aws_key_detected(self, tmp_workdir) -> None:
+    def test_aws_key_detected(self, tmp_workdir: str) -> None:
         """AWS access key (AKIA...) is detected."""
         # Stage a file with a fake AWS key
         _write_staged_file(tmp_workdir, "test.py", 'AWS_ACCESS_KEY = "AKIA1234567890ABCDEF"')
@@ -473,7 +478,7 @@ class TestBuiltinSecretsScan:
         assert result.passed is False
         assert "AWS access key" in result.output
 
-    def test_gitleaks_allowlist_respected(self, tmp_workdir) -> None:
+    def test_gitleaks_allowlist_respected(self, tmp_workdir: str) -> None:
         """Files matched by .gitleaks.toml [allowlist] paths are exempt
         (GR-GAP-005 — builtin scanner mirrors gitleaks' allowlist so test
         fixtures with deliberate fake keys don't fail the guard)."""
@@ -484,7 +489,7 @@ class TestBuiltinSecretsScan:
         result = gm._builtin_secrets_scan()
         assert result.passed is True
 
-    def test_openai_key_detected(self, tmp_workdir) -> None:
+    def test_openai_key_detected(self, tmp_workdir: str) -> None:
         """OpenAI key (sk-...) is detected as a hardcoded API key."""
         _write_staged_file(
             tmp_workdir, "config.py", 'OPENAI_API_KEY = "sk-12345678901234567890123456789012"'
@@ -495,7 +500,7 @@ class TestBuiltinSecretsScan:
         # The 'api[_-]?key' pattern catches it as "hardcoded API key"
         assert "hardcoded API key" in result.output or "OpenAI" in result.output
 
-    def test_github_token_detected(self, tmp_workdir) -> None:
+    def test_github_token_detected(self, tmp_workdir: str) -> None:
         """GitHub token (ghp_...) is detected."""
         _write_staged_file(
             tmp_workdir, "main.py", 'GITHUB_TOKEN = "ghp_123456789012345678901234567890123456"'
@@ -505,7 +510,7 @@ class TestBuiltinSecretsScan:
         assert result.passed is False
         assert "GitHub personal access token" in result.output
 
-    def test_check_secrets_blocks_sk_key(self, tmp_workdir) -> None:
+    def test_check_secrets_blocks_sk_key(self, tmp_workdir: str) -> None:
         """DF-012: _check_secrets blocks sk- keys even when gitleaks is
         installed — gitleaks-clean triggers the built-in cross-check."""
         secret = "sk-" + "A1" * 12  # runtime-constructed, never a literal
@@ -514,7 +519,7 @@ class TestBuiltinSecretsScan:
         result = gm._check_secrets()
         assert result.passed is False
 
-    def test_check_secrets_blocks_github_pat(self, tmp_workdir) -> None:
+    def test_check_secrets_blocks_github_pat(self, tmp_workdir: str) -> None:
         """DF-012: _check_secrets blocks ghp_ tokens even when gitleaks
         reports clean (the 2026-08-14 dogfood committed a ghp_ token
         through a gitleaks-clean hook)."""
@@ -524,7 +529,7 @@ class TestBuiltinSecretsScan:
         result = gm._check_secrets()
         assert result.passed is False
 
-    def test_builtin_workdir_scan_catches_committed_secrets(self, tmp_workdir) -> None:
+    def test_builtin_workdir_scan_catches_committed_secrets(self, tmp_workdir: str) -> None:
         """DF-012: _builtin_secrets_scan(staged_only=False) scans the whole
         workdir — the judge/pipeline path where changes are committed, not
         staged."""
@@ -541,7 +546,7 @@ class TestBuiltinSecretsScan:
         assert "app.py:1" in result.output
         assert "tok.txt:1" in result.output
 
-    def test_builtin_scan_skips_go_test_fixture_keys(self, tmp_workdir) -> None:
+    def test_builtin_scan_skips_go_test_fixture_keys(self, tmp_workdir: str) -> None:
         """Test files with deliberately fake keys (benchmarks/fixtures)
         are exempt from the built-in cross-check — same rationale as the
         .md/docs exemption. (musterflow GAP-012: judge tier1 flagged
@@ -555,7 +560,7 @@ class TestBuiltinSecretsScan:
         result = gm._builtin_secrets_scan(staged_only=False)
         assert result.passed is True
 
-    def test_builtin_scan_still_flags_same_key_in_source(self, tmp_workdir) -> None:
+    def test_builtin_scan_still_flags_same_key_in_source(self, tmp_workdir: str) -> None:
         """The test-file exemption is file-type based, not a pattern
         relaxation: the same fake-key literal in a source file is still
         caught."""
@@ -582,7 +587,7 @@ class TestBuiltinSecretsScan:
         assert not _is_test_file("cmd/main.go")
         assert not _is_test_file("README.md")
 
-    def test_private_key_block_detected(self, tmp_workdir) -> None:
+    def test_private_key_block_detected(self, tmp_workdir: str) -> None:
         """Private key block (BEGIN RSA PRIVATE KEY) is detected."""
         _write_staged_file(
             tmp_workdir,
@@ -594,28 +599,28 @@ class TestBuiltinSecretsScan:
         assert result.passed is False
         assert "private key block" in result.output.lower()
 
-    def test_os_getenv_whitelisted(self, tmp_workdir) -> None:
+    def test_os_getenv_whitelisted(self, tmp_workdir: str) -> None:
         """os.getenv('API_KEY') is NOT flagged."""
         _write_staged_file(tmp_workdir, "app.py", 'api_key = os.getenv("API_KEY")')
         gm = GuardManager(tmp_workdir)
         result = gm._builtin_secrets_scan()
         assert result.passed is True
 
-    def test_config_dict_whitelisted(self, tmp_workdir) -> None:
+    def test_config_dict_whitelisted(self, tmp_workdir: str) -> None:
         """config['secret'] is NOT flagged."""
         _write_staged_file(tmp_workdir, "app.py", 'my_secret = config["secret"]')
         gm = GuardManager(tmp_workdir)
         result = gm._builtin_secrets_scan()
         assert result.passed is True
 
-    def test_empty_password_whitelisted(self, tmp_workdir) -> None:
+    def test_empty_password_whitelisted(self, tmp_workdir: str) -> None:
         """Empty password (PASSWORD="") is NOT flagged."""
         _write_staged_file(tmp_workdir, "docker.py", 'PASSWORD = ""')
         gm = GuardManager(tmp_workdir)
         result = gm._builtin_secrets_scan()
         assert result.passed is True
 
-    def test_todo_placeholder_whitelisted(self, tmp_workdir) -> None:
+    def test_todo_placeholder_whitelisted(self, tmp_workdir: str) -> None:
         """TODO/PLACEHOLDER comment is NOT flagged."""
         _write_staged_file(tmp_workdir, "todo.py", "# TODO: sk-add-real-key-here (placeholder)")
         gm = GuardManager(tmp_workdir)
@@ -623,7 +628,7 @@ class TestBuiltinSecretsScan:
         # May or may not flag depending on exact match — just verify no crash
         assert result is not None
 
-    def test_jwt_encode_whitelisted(self, tmp_workdir) -> None:
+    def test_jwt_encode_whitelisted(self, tmp_workdir: str) -> None:
         """JWT in jwt.encode() call is NOT flagged."""
         _write_staged_file(
             tmp_workdir, "auth.py", 'token = jwt.encode(payload, secret, algorithm="HS256")'
@@ -632,14 +637,14 @@ class TestBuiltinSecretsScan:
         result = gm._builtin_secrets_scan()
         assert result.passed is True
 
-    def test_no_staged_files_no_findings(self, tmp_workdir) -> None:
+    def test_no_staged_files_no_findings(self, tmp_workdir: str) -> None:
         """No staged files → no findings, passed=True."""
         gm = GuardManager(tmp_workdir)
         result = gm._builtin_secrets_scan()
         assert result.passed is True
         assert "No staged files" in result.output
 
-    def test_clean_file_no_findings(self, tmp_workdir) -> None:
+    def test_clean_file_no_findings(self, tmp_workdir: str) -> None:
         """Clean file with no secrets passes."""
         _write_staged_file(tmp_workdir, "clean.py", "def hello():\n    return 'world'\n")
         gm = GuardManager(tmp_workdir)
@@ -659,7 +664,7 @@ class TestSecretsMergeOnGitleaksFailure:
     """
 
     @staticmethod
-    def _staged_multi_secret_file(tmp_workdir):
+    def _staged_multi_secret_file(tmp_workdir: str) -> Any:
         """Stage config.example.json with an sk- key on line 2 and a
         low-entropy ghp_ token on line 3. Secrets are constructed at
         runtime — never literal API-key-looking strings in test source.
@@ -678,7 +683,7 @@ class TestSecretsMergeOnGitleaksFailure:
         return sk_secret, gh_token
 
     @staticmethod
-    def _gitleaks_failure_mock(secret, file, line):
+    def _gitleaks_failure_mock(secret: Any, file: Any, line: Any) -> Any:
         """Verbose gitleaks failure output: File:/Line: block for ONE
         finding only, no human-readable description (matches real
         gitleaks output, empirically verified)."""
@@ -701,13 +706,13 @@ class TestSecretsMergeOnGitleaksFailure:
         )
 
     @staticmethod
-    def _run_with_mocked_gitleaks(gm, mock_run):
+    def _run_with_mocked_gitleaks(gm: Any, mock_run: Any) -> None:
         """Run _check_secrets with gitleaks mocked to fail; git calls
         (staged-file discovery for the builtin scan) still hit the real
         subprocess.run."""
         real_run = subprocess.run
 
-        def fake_run(cmd, *args, **kwargs):
+        def fake_run(cmd: Any, *args: Any, **kwargs: Any) -> Any:
             if _is_gitleaks_spawn(cmd):
                 return mock_run
             return real_run(cmd, *args, **kwargs)
@@ -715,7 +720,7 @@ class TestSecretsMergeOnGitleaksFailure:
         with patch("subprocess.run", side_effect=fake_run):
             return gm._check_secrets()
 
-    def test_gitleaks_failure_reports_both_findings(self, tmp_workdir) -> None:
+    def test_gitleaks_failure_reports_both_findings(self, tmp_workdir: str) -> None:
         """A staged file with an sk- key (line 2) AND a ghp_ token (line 3)
         reports BOTH findings when gitleaks exits nonzero — the low-entropy
         ghp_ token is never masked behind the decoy-first sk- finding."""
@@ -727,7 +732,7 @@ class TestSecretsMergeOnGitleaksFailure:
         assert "OpenAI/OpenRouter API key" in result.output
         assert "GitHub personal access token" in result.output
 
-    def test_builtin_scan_invoked_on_gitleaks_failure_path(self, tmp_workdir) -> None:
+    def test_builtin_scan_invoked_on_gitleaks_failure_path(self, tmp_workdir: str) -> None:
         """gitleaks-finds-something no longer short-circuits the built-in
         cross-check — the wraps-spy proves _builtin_secrets_scan runs even
         when gitleaks exits nonzero."""
@@ -736,7 +741,7 @@ class TestSecretsMergeOnGitleaksFailure:
         mock_run = self._gitleaks_failure_mock(sk_secret, "config.example.json", 2)
         real_run = subprocess.run
 
-        def fake_run(cmd, *args, **kwargs):
+        def fake_run(cmd: Any, *args: Any, **kwargs: Any) -> Any:
             if _is_gitleaks_spawn(cmd):
                 return mock_run
             return real_run(cmd, *args, **kwargs)
@@ -747,7 +752,7 @@ class TestSecretsMergeOnGitleaksFailure:
         assert spy.called
         assert result.passed is False
 
-    def test_merged_findings_deduped_by_path_line(self, tmp_workdir) -> None:
+    def test_merged_findings_deduped_by_path_line(self, tmp_workdir: str) -> None:
         """No duplicate path:line entries when gitleaks and the builtin
         scanner flag the same line — the summary counts each location
         exactly once."""
@@ -762,7 +767,7 @@ class TestSecretsMergeOnGitleaksFailure:
         assert "config.example.json:2" in detail
         assert "config.example.json:3" in detail
 
-    def test_tier1_summary_renders_merged_findings(self, tmp_workdir) -> None:
+    def test_tier1_summary_renders_merged_findings(self, tmp_workdir: str) -> None:
         """Tier1Result.summary counts the gitleaks File:/Line: pair AND the
         built-in scanner's path:line — the user sees the full finding count
         and both locations, so 'fix one finding, the next commit still fails
@@ -785,7 +790,7 @@ class TestSecretsScannerAttribution:
     finding, gitleaks-only finding, and gitleaks absent.
     """
 
-    def test_both_scanners_clean_records_both(self, tmp_workdir) -> None:
+    def test_both_scanners_clean_records_both(self, tmp_workdir: str) -> None:
         gm = GuardManager(tmp_workdir)
         mock_run = MagicMock(returncode=0, stdout="", stderr="")
         with patch("subprocess.run", return_value=mock_run):
@@ -809,7 +814,7 @@ class TestSecretsScannerAttribution:
         if shutil.which("gitleaks"):
             assert "; scanners: nice=" in summary
 
-    def test_builtin_only_finding_names_the_builtin_scanner(self, tmp_workdir) -> None:
+    def test_builtin_only_finding_names_the_builtin_scanner(self, tmp_workdir: str) -> None:
         """The gitleaks-clean / builtin-findings case (GR-GAP-005) is the one
         POC-15 could not attribute from the console."""
         gm = GuardManager(tmp_workdir)
@@ -833,7 +838,7 @@ class TestSecretsScannerAttribution:
             "  ✗ secrets — FAIL (builtin cross-check: 2 findings; gitleaks: clean)"
         )
 
-    def test_gitleaks_finding_count_comes_from_its_own_report(self, tmp_workdir) -> None:
+    def test_gitleaks_finding_count_comes_from_its_own_report(self, tmp_workdir: str) -> None:
         """gitleaks' `leaks found: N` trailer sets the per-scanner count."""
         sk_secret, _ = TestSecretsMergeOnGitleaksFailure._staged_multi_secret_file(tmp_workdir)
         gm = GuardManager(tmp_workdir)
@@ -849,7 +854,7 @@ class TestSecretsScannerAttribution:
         summary = Tier1Result(passed=False, results=[result]).summary
         assert "FAIL (gitleaks: 1 finding;" in summary
 
-    def test_gitleaks_absent_is_named(self, tmp_workdir) -> None:
+    def test_gitleaks_absent_is_named(self, tmp_workdir: str) -> None:
         gm = GuardManager(tmp_workdir)
         with patch("subprocess.run", side_effect=FileNotFoundError):
             result = gm._check_secrets()
@@ -857,13 +862,13 @@ class TestSecretsScannerAttribution:
         assert ("gitleaks", "not on PATH") in result.scanners
         assert "not on PATH" in Tier1Result(passed=True, results=[result]).summary
 
-    def test_unparseable_gitleaks_failure_is_not_reported_as_clean(self, tmp_workdir) -> None:
+    def test_unparseable_gitleaks_failure_is_not_reported_as_clean(self, tmp_workdir: str) -> None:
         """A non-zero exit whose output carries no tally must not read as zero."""
         gm = GuardManager(tmp_workdir)
         mock_run = MagicMock(returncode=1, stdout="leak detected in config.py", stderr="")
         real_run = subprocess.run
 
-        def fake_run(cmd, *args, **kwargs):
+        def fake_run(cmd: Any, *args: Any, **kwargs: Any) -> Any:
             if _is_gitleaks_spawn(cmd):
                 return mock_run
             return real_run(cmd, *args, **kwargs)
@@ -875,7 +880,7 @@ class TestSecretsScannerAttribution:
         assert result.passed is False
         assert result.scanners == (("gitleaks", "reported findings (count unavailable)"),)
 
-    def test_working_tree_skip_label_is_not_not_on_path(self, tmp_workdir) -> None:
+    def test_working_tree_skip_label_is_not_not_on_path(self, tmp_workdir: str) -> None:
         """REVIEW-GITREINS-026: the working-tree scope skips gitleaks ON PURPOSE.
 
         gitleaks' `protect --staged` grades the index only, so it cannot see
@@ -908,7 +913,7 @@ class TestSecretsScannerAttribution:
         assert "not on PATH" not in summary
         assert "gitleaks not run (working-tree scope)" in summary
 
-    def test_staged_missing_gitleaks_keeps_the_not_on_path_label(self, tmp_workdir) -> None:
+    def test_staged_missing_gitleaks_keeps_the_not_on_path_label(self, tmp_workdir: str) -> None:
         """AC2: the genuine missing-binary case is unchanged.
 
         The two situations — a scope-skip and an absent binary — now read
@@ -947,10 +952,10 @@ class TestGitleaksConfigErrorClassification:
     )
 
     @staticmethod
-    def _run(gm, mock_run):
+    def _run(gm: Any, mock_run: Any) -> None:
         real_run = subprocess.run
 
-        def fake_run(cmd, *args, **kwargs):
+        def fake_run(cmd: Any, *args: Any, **kwargs: Any) -> Any:
             if _is_gitleaks_spawn(cmd):
                 return mock_run
             return real_run(cmd, *args, **kwargs)
@@ -970,7 +975,9 @@ class TestGitleaksConfigErrorClassification:
             (PANIC_SINGLE_QUOTE, "*.egg-info/"),
         ],
     )
-    def test_config_compile_panic_is_a_config_error(self, tmp_workdir, stderr, pattern) -> None:
+    def test_config_compile_panic_is_a_config_error(
+        self, tmp_workdir: str, stderr: Any, pattern: Any
+    ) -> None:
         gm = GuardManager(tmp_workdir)
         mock_run = MagicMock(returncode=2, stdout="", stderr=stderr)
 
@@ -989,12 +996,12 @@ class TestGitleaksConfigErrorClassification:
         assert "reported findings" not in summary
         assert "FAIL (" not in summary
 
-    def test_config_error_names_the_pattern_on_a_second_bad_entry(self, tmp_workdir) -> None:
+    def test_config_error_names_the_pattern_on_a_second_bad_entry(self, tmp_workdir: str) -> None:
         """Only the FIRST rejected pattern is named — that is the one to fix."""
         output = self.PANIC_BACKTICK + self.PANIC_SINGLE_QUOTE
         assert GuardManager._gitleaks_config_error(output) == "*.log"
 
-    def test_config_error_detector_ignores_unrelated_output(self, tmp_workdir) -> None:
+    def test_config_error_detector_ignores_unrelated_output(self, tmp_workdir: str) -> None:
         """A genuine finding, an absent binary, or prose is never a config error."""
         assert GuardManager._gitleaks_config_error("") is None
         assert GuardManager._gitleaks_config_error("WRN leaks found: 1\n") is None
@@ -1004,7 +1011,7 @@ class TestGitleaksConfigErrorClassification:
             GuardManager._gitleaks_config_error("error parsing regexp: boom") == "unknown pattern"
         )
 
-    def test_genuine_findings_still_read_as_findings(self, tmp_workdir) -> None:
+    def test_genuine_findings_still_read_as_findings(self, tmp_workdir: str) -> None:
         """Over-classification control: a real leak is NOT a CONFIG ERROR."""
         gm = GuardManager(tmp_workdir)
         mock_run = MagicMock(
@@ -1026,13 +1033,13 @@ class TestGitleaksConfigErrorClassification:
         assert "CONFIG ERROR" not in summary
         assert "FAIL (gitleaks: 1 finding" in summary
 
-    def test_config_error_still_reports_a_builtin_finding(self, tmp_workdir) -> None:
+    def test_config_error_still_reports_a_builtin_finding(self, tmp_workdir: str) -> None:
         """The cross-check's findings survive the config-error relabel."""
         gm = GuardManager(tmp_workdir)
         mock_run = MagicMock(returncode=2, stdout="", stderr=self.PANIC_BACKTICK)
         real_run = subprocess.run
 
-        def fake_run(cmd, *args, **kwargs):
+        def fake_run(cmd: Any, *args: Any, **kwargs: Any) -> Any:
             if _is_gitleaks_spawn(cmd):
                 return mock_run
             return real_run(cmd, *args, **kwargs)
@@ -1059,7 +1066,7 @@ class TestGitleaksConfigErrorClassification:
 class TestSecretsSanitization:
     """Test secret value redaction in output — step-1-3-1-4."""
 
-    def test_secret_value_redacted(self, tmp_workdir) -> None:
+    def test_secret_value_redacted(self, tmp_workdir: str) -> None:
         """Secret value is replaced with *** in output."""
         _write_staged_file(
             tmp_workdir, "secrets.py", 'api_key = "sk-abc123def456789012345678901234"'
@@ -1083,10 +1090,10 @@ class TestTimeoutEarlyReturnCarriesAllowSkips:
     was "allowed to proceed (fail-open)".
     """
 
-    def _manager(self, tmp_workdir, guards=None):
+    def _manager(self, tmp_workdir: str, guards: Any = None) -> Any:
         return GuardManager(tmp_workdir, {"guards": guards or {}})
 
-    def _fake_clock(self, elapsed_at_call):
+    def _fake_clock(self, elapsed_at_call: Any) -> Any:
         """Deterministic engine.guard_manager.time replacement: per-call readings.
 
         run_all resolves the bare global ``time.monotonic`` from
@@ -1100,15 +1107,15 @@ class TestTimeoutEarlyReturnCarriesAllowSkips:
         """
 
         class _Clock:
-            def __init__(self, readings) -> None:
+            def __init__(self, readings: Any) -> None:
                 self._readings = iter(readings)
 
-            def monotonic(self):
+            def monotonic(self) -> Any:
                 return next(self._readings)
 
         return _Clock(elapsed_at_call)
 
-    def test_timeout_after_tests_check_carries_allow_skips(self, tmp_workdir) -> None:
+    def test_timeout_after_tests_check_carries_allow_skips(self, tmp_workdir: str) -> None:
         """Timeout early-return: extra['allow_skips'] matches the config value."""
         gm = self._manager(tmp_workdir, {"allow_skips": True})
         with (
@@ -1123,7 +1130,7 @@ class TestTimeoutEarlyReturnCarriesAllowSkips:
         assert any("timed out" in w for w in result.warnings)
         assert result.extra.get("allow_skips") is True
 
-    def test_timeout_extra_matches_normal_exit_extra_keys(self, tmp_workdir) -> None:
+    def test_timeout_extra_matches_normal_exit_extra_keys(self, tmp_workdir: str) -> None:
         """The timeout extra map carries the same keys the normal exit builds."""
         gm = self._manager(tmp_workdir, {"allow_skips": True, "test_mode": "diff"})
         with (
@@ -1138,7 +1145,7 @@ class TestTimeoutEarlyReturnCarriesAllowSkips:
         assert timed_out.extra.get("test_mode") == "diff"
         assert timed_out.extra.get("grade_full_tree") is False
 
-    def test_timeout_extra_false_when_allow_skips_absent(self, tmp_workdir) -> None:
+    def test_timeout_extra_false_when_allow_skips_absent(self, tmp_workdir: str) -> None:
         """No allow_skips config → the timeout extra carries False, not absence."""
         gm = self._manager(tmp_workdir)
         with (
@@ -1151,7 +1158,7 @@ class TestTimeoutEarlyReturnCarriesAllowSkips:
         assert any("timed out" in w for w in result.warnings)
         assert result.extra.get("allow_skips") is False
 
-    def test_timeout_after_first_check_also_carries_extra(self, tmp_workdir) -> None:
+    def test_timeout_after_first_check_also_carries_extra(self, tmp_workdir: str) -> None:
         """The earliest early-return (right after secrets) carries extra too."""
         gm = self._manager(tmp_workdir, {"allow_skips": True})
         with (
@@ -1163,7 +1170,7 @@ class TestTimeoutEarlyReturnCarriesAllowSkips:
         assert any("timed out" in w for w in result.warnings)
         assert result.extra.get("allow_skips") is True
 
-    def test_every_timeout_exit_path_carries_allow_skips(self, tmp_workdir) -> None:
+    def test_every_timeout_exit_path_carries_allow_skips(self, tmp_workdir: str) -> None:
         """Parametrized over all arms: whichever _timed_out fires, extra rides along."""
         gm = self._manager(tmp_workdir, {"allow_skips": True})
         arms = ["secrets", "lint", "tests"]
@@ -1185,7 +1192,7 @@ class TestTimeoutEarlyReturnCarriesAllowSkips:
                 f"timeout after {fired_after} check(s) lost allow_skips"
             )
 
-    def test_low_hook_timeout_real_clock_extra_present(self, tmp_workdir) -> None:
+    def test_low_hook_timeout_real_clock_extra_present(self, tmp_workdir: str) -> None:
         """A real (unpatched) run with hook_timeout: 1 sees the same extra map.
 
         Uses test_on_clean so the tests arm runs the full test_command
@@ -1217,7 +1224,7 @@ class TestTimeoutEarlyReturnCarriesAllowSkips:
 class TestGuardToggling:
     """Test guard toggling: run_all() only runs enabled guards — step-1-3-1-5."""
 
-    def test_run_all_three_guards(self, guard_manager) -> None:
+    def test_run_all_three_guards(self, guard_manager: GuardManager) -> None:
         """All guards enabled → run_all() returns 3 results."""
         with patch.object(
             guard_manager, "_check_secrets", return_value=GuardResult("secrets", True, "ok")
@@ -1232,14 +1239,14 @@ class TestGuardToggling:
         assert len(result.results) == 3
         assert result.passed is True
 
-    def test_only_secrets_enabled(self, tmp_workdir) -> None:
+    def test_only_secrets_enabled(self, tmp_workdir: str) -> None:
         """Only secrets enabled → run_all() returns 1 result."""
         gm = GuardManager(tmp_workdir, {"guards": {"secrets": True, "lint": False, "tests": False}})
         with patch.object(gm, "_check_secrets", return_value=GuardResult("secrets", True, "ok")):
             result = gm.run_all()
         assert len(result.results) == 1
 
-    def test_no_guards_enabled(self, tmp_workdir) -> None:
+    def test_no_guards_enabled(self, tmp_workdir: str) -> None:
         """No guards enabled → run_all() returns 0 results, passed=True."""
         gm = GuardManager(
             tmp_workdir, {"guards": {"secrets": False, "lint": False, "tests": False}}
@@ -1248,7 +1255,7 @@ class TestGuardToggling:
         assert len(result.results) == 0
         assert result.passed is True
 
-    def test_run_all_sets_passed_false_on_any_failure(self, guard_manager) -> None:
+    def test_run_all_sets_passed_false_on_any_failure(self, guard_manager: GuardManager) -> None:
         """If any guard fails, passed is False."""
         with patch.object(
             guard_manager, "_check_secrets", return_value=GuardResult("secrets", True, "ok")
@@ -1266,19 +1273,19 @@ class TestGuardToggling:
 class TestLintGuard:
     """Test _check_lint behavior."""
 
-    def test_no_py_files_staged(self, guard_manager) -> None:
+    def test_no_py_files_staged(self, guard_manager: GuardManager) -> None:
         """Lint guard passes when no Python files are staged."""
         result = guard_manager._check_lint()
         assert result.passed is True
 
-    def test_gitleaks_missing_falls_back(self, guard_manager) -> None:
+    def test_gitleaks_missing_falls_back(self, guard_manager: GuardManager) -> None:
         """When gitleaks not found, falls back to built-in scanner."""
         with patch("subprocess.run", side_effect=FileNotFoundError("gitleaks")):
             result = guard_manager._check_secrets()
         # Falls through to built-in scanner; should return a result
         assert result is not None
 
-    def test_gitleaks_missing_warns_expected_path(self, guard_manager) -> None:
+    def test_gitleaks_missing_warns_expected_path(self, guard_manager: GuardManager) -> None:
         """GR-GAP-043: missing gitleaks emits a visible warning naming the
         expected $HOME/go/bin/gitleaks path, and the built-in scanner still
         runs (hint, not a failure)."""
@@ -1294,7 +1301,7 @@ class TestLintGuard:
 class TestTestsGuard:
     """Test _check_tests behavior."""
 
-    def test_pytest_not_found_skips(self, guard_manager) -> None:
+    def test_pytest_not_found_skips(self, guard_manager: GuardManager) -> None:
         """Tests guard returns failure when test command can't run.
 
         DF-CRIER-258 seam: the lane executes through command_hygiene.run_bounded,
@@ -1309,7 +1316,7 @@ class TestTestsGuard:
         assert result.passed is False
         assert "go" in str(result.error) or "FileNotFound" in str(result.error)
 
-    def test_clean_tree_skips_without_flag(self, guard_manager) -> None:
+    def test_clean_tree_skips_without_flag(self, guard_manager: GuardManager) -> None:
         """No staged files + test_on_clean unset → PASS with explicit skip note.
 
         This is the pre-AUDIT-GAP-002 behavior: a vacuous green on clean
@@ -1320,7 +1327,7 @@ class TestTestsGuard:
         assert result.passed is True
         assert "No files staged" in result.output
 
-    def test_clean_tree_runs_command_with_flag(self, tmp_workdir) -> None:
+    def test_clean_tree_runs_command_with_flag(self, tmp_workdir: str) -> None:
         """test_on_clean: true → full test_command executes with nothing staged."""
         gm = GuardManager(
             tmp_workdir,
@@ -1337,7 +1344,7 @@ class TestTestsGuard:
         # The configured test command must actually have been executed
         _assert_spawns("echo clean-tree-run", mock_subprocess.call_args.args[0])
 
-    def test_clean_tree_diff_mode_runs_command_with_flag(self, tmp_workdir) -> None:
+    def test_clean_tree_diff_mode_runs_command_with_flag(self, tmp_workdir: str) -> None:
         """test_on_clean: true + test_mode: diff → full command runs on clean tree.
 
         _discover_test_targets returns None with no staged files (full-suite
@@ -1432,7 +1439,7 @@ class TestRunnerFallback:
         assert cmd == "uv run tox"
         assert warning is None
 
-    def test_run_test_command_executes_rewritten_command(self, tmp_workdir) -> None:
+    def test_run_test_command_executes_rewritten_command(self, tmp_workdir: str) -> None:
         """_run_test_command spawns the rewritten command and tags the warning."""
         gm = GuardManager(
             tmp_workdir,
@@ -1455,7 +1462,7 @@ class TestRunnerFallback:
         # Warning is also visible in the captured output
         assert result.warning in result.output
 
-    def test_diff_mode_command_also_falls_back(self, tmp_workdir) -> None:
+    def test_diff_mode_command_also_falls_back(self, tmp_workdir: str) -> None:
         """Diff-mode narrowed commands go through the same fallback."""
         gm = GuardManager(
             tmp_workdir,
@@ -1577,7 +1584,7 @@ class TestBarePytestFallback:
         assert "'uv' not found on PATH" in warning
         mock_spec.assert_not_called()
 
-    def test_bare_pytest_executes_rewritten_command(self, tmp_workdir) -> None:
+    def test_bare_pytest_executes_rewritten_command(self, tmp_workdir: str) -> None:
         """The fresh-venv case end-to-end: bare default runs as -m pytest."""
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x --tb=short"}})
         mock_run = MagicMock()
@@ -1599,7 +1606,9 @@ class TestBarePytestFallback:
         assert result.warning and "pytest not found on PATH" in result.warning
         assert result.warning in result.output
 
-    def test_exit127_pytest_runner_missing_skips_with_actionable_hint(self, tmp_workdir) -> None:
+    def test_exit127_pytest_runner_missing_skips_with_actionable_hint(
+        self, tmp_workdir: str
+    ) -> None:
         """Exit 127 + sh not-found on a pytest command → hint, and a SKIP.
 
         DF-GITREINS-POC-51: this case used to stay a FAIL whose output merely
@@ -1629,7 +1638,7 @@ class TestBarePytestFallback:
         # The raw shell failure stays visible below the hint line
         assert "/bin/sh: 1: pytest: not found" in result.output
 
-    def test_exit127_non_pytest_command_gets_no_hint(self, tmp_workdir) -> None:
+    def test_exit127_non_pytest_command_gets_no_hint(self, tmp_workdir: str) -> None:
         """Exit 127 on a non-pytest command keeps its raw output only."""
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": "make test"}})
         with patch(
@@ -1660,11 +1669,11 @@ class TestPytestExit5NoTests:
         "============================= no tests ran in 0.00s ==============================\n"
     )
 
-    def _stub_lane(self, returncode, stdout, stderr=""):
+    def _stub_lane(self, returncode: Any, stdout: Any, stderr: Any = "") -> Any:
         """run_bounded-shaped stub result for the lane (DF-CRIER-258 seam)."""
         return _stub_lane_result(returncode, stdout, stderr)
 
-    def test_exit5_no_tests_collected_passes_with_warning(self, tmp_workdir) -> None:
+    def test_exit5_no_tests_collected_passes_with_warning(self, tmp_workdir: str) -> None:
         """pytest exit 5 + 'no tests ran' → PASS with a warning, not a block."""
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x --tb=short"}})
         with patch(
@@ -1676,7 +1685,7 @@ class TestPytestExit5NoTests:
         assert result.warning and "no tests" in result.warning
         assert "exit 5" in result.warning
 
-    def test_exit5_warning_surfaces_in_summary(self, tmp_workdir) -> None:
+    def test_exit5_warning_surfaces_in_summary(self, tmp_workdir: str) -> None:
         """The no-tests note is visible in the guard summary as a ⚠ line.
 
         TRUST-001: pytest collecting zero tests means the gate graded nothing,
@@ -1693,7 +1702,9 @@ class TestPytestExit5NoTests:
         assert "✓ tests (full)" not in summary
         assert "⚠ pytest collected no tests (exit 5)" in summary
 
-    def test_exit5_via_check_tests_full_mode_allows_commit(self, guard_manager) -> None:
+    def test_exit5_via_check_tests_full_mode_allows_commit(
+        self, guard_manager: GuardManager
+    ) -> None:
         """End-to-end at the guard stage: staged file + full mode + exit 5 →
         the tests guard result passes, so the commit is not blocked."""
         with patch("engine.guard_manager._get_staged_files", return_value=["calc.py"]):
@@ -1706,7 +1717,7 @@ class TestPytestExit5NoTests:
         assert result.passed is True
         assert result.warning and "no tests" in result.warning
 
-    def test_exit5_with_collection_errors_still_blocks(self, tmp_workdir) -> None:
+    def test_exit5_with_collection_errors_still_blocks(self, tmp_workdir: str) -> None:
         """Exit 5 with collection ERROR lines mixed in is NOT the benign case."""
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x --tb=short"}})
         stdout = (
@@ -1721,7 +1732,7 @@ class TestPytestExit5NoTests:
             result = gm._run_test_command("pytest -x --tb=short", "tests (full)")
         assert result.passed is False
 
-    def test_exit5_without_pytest_marker_still_blocks(self, tmp_workdir) -> None:
+    def test_exit5_without_pytest_marker_still_blocks(self, tmp_workdir: str) -> None:
         """A non-pytest command exiting 5 (no 'no tests ran' line) still fails —
         exit 5 is only benign for pytest's documented no-tests-collected code."""
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": "make test"}})
@@ -1732,7 +1743,7 @@ class TestPytestExit5NoTests:
             result = gm._run_test_command("make test", "tests (full)")
         assert result.passed is False
 
-    def test_exit2_collection_error_still_blocks(self, tmp_workdir) -> None:
+    def test_exit2_collection_error_still_blocks(self, tmp_workdir: str) -> None:
         """pytest exit 2 (collection error) remains a blocking failure."""
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x --tb=short"}})
         stdout = (
@@ -1747,7 +1758,7 @@ class TestPytestExit5NoTests:
             result = gm._run_test_command("pytest -x --tb=short", "tests (full)")
         assert result.passed is False
 
-    def test_exit1_real_test_failure_still_blocks(self, tmp_workdir) -> None:
+    def test_exit1_real_test_failure_still_blocks(self, tmp_workdir: str) -> None:
         """pytest exit 1 (real test failure) remains a blocking failure."""
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x --tb=short"}})
         stdout = (
@@ -1782,11 +1793,11 @@ class TestPytestRunnerMissingSkip:
     runners).
     """
 
-    def _stub_lane(self, returncode, stdout, stderr=""):
+    def _stub_lane(self, returncode: Any, stdout: Any, stderr: Any = "") -> Any:
         """run_bounded-shaped stub result for the lane (DF-CRIER-258 seam)."""
         return _stub_lane_result(returncode, stdout, stderr)
 
-    def _no_pytest_interpreter(self, workdir) -> str:
+    def _no_pytest_interpreter(self, workdir: str) -> str:
         """A real, executable 'interpreter' that cannot import pytest.
 
         The probe is not stubbed: the file exists and is executable, so the
@@ -1802,7 +1813,7 @@ class TestPytestRunnerMissingSkip:
 
     # ── the skip side ────────────────────────────────────────────────────
 
-    def test_bare_pytest_missing_skips_with_the_fix_named(self, tmp_workdir) -> None:
+    def test_bare_pytest_missing_skips_with_the_fix_named(self, tmp_workdir: str) -> None:
         """AC1: `pytest` not on PATH and not importable → skip facts."""
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x --tb=short"}})
         with (
@@ -1823,7 +1834,7 @@ class TestPytestRunnerMissingSkip:
         assert result.output.startswith(result.skip_reason)
         assert "/bin/sh: 1: pytest: not found" in result.output
 
-    def test_pinned_interpreter_without_pytest_skips(self, tmp_workdir) -> None:
+    def test_pinned_interpreter_without_pytest_skips(self, tmp_workdir: str) -> None:
         """AC1 (the bunker shape): the interpreter exists, pytest is not in it.
 
         The pinned command is exactly what this repo's own `.gitreins/config.yaml`
@@ -1845,7 +1856,7 @@ class TestPytestRunnerMissingSkip:
         assert "pip install pytest" in result.skip_reason
         assert result.exit_code == 1
 
-    def test_interpreter_that_does_not_exist_skips_naming_the_setup(self, tmp_workdir) -> None:
+    def test_interpreter_that_does_not_exist_skips_naming_the_setup(self, tmp_workdir: str) -> None:
         """A pinned `.venv/bin/python` that was never created: shell 127, a skip."""
         cmd = ".venv/bin/python -m pytest -x"
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": cmd}})
@@ -1861,7 +1872,7 @@ class TestPytestRunnerMissingSkip:
         assert "uv sync" in result.skip_reason
         assert result.exit_code == 127
 
-    def test_missing_venv_console_script_skips(self, tmp_workdir) -> None:
+    def test_missing_venv_console_script_skips(self, tmp_workdir: str) -> None:
         """`.venv/bin/pytest` that does not exist is the same class as a bare one."""
         cmd = ".venv/bin/pytest -x --tb=short"
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": cmd}})
@@ -1877,7 +1888,7 @@ class TestPytestRunnerMissingSkip:
         assert "uv sync" in result.skip_reason
 
     def test_path_resolved_bare_interpreter_is_probed_not_assumed_missing(
-        self, tmp_workdir
+        self, tmp_workdir: str
     ) -> None:
         """`python -m pytest` with `python` on PATH but no pytest in it.
 
@@ -1902,7 +1913,7 @@ class TestPytestRunnerMissingSkip:
         assert result.skip_reason.startswith("pytest is not installed in 'python'")
         assert "python -m pip install pytest" in result.skip_reason
 
-    def test_skip_renders_in_the_tilde_register_and_reads_degraded(self, tmp_workdir) -> None:
+    def test_skip_renders_in_the_tilde_register_and_reads_degraded(self, tmp_workdir: str) -> None:
         """TRUST-001: never a green ✓, and the run is a DEGRADED pass."""
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x"}})
         with (
@@ -1923,7 +1934,7 @@ class TestPytestRunnerMissingSkip:
 
     # ── the anti-swallow side ────────────────────────────────────────────
 
-    def test_real_failure_with_the_runner_present_still_fails(self, tmp_workdir) -> None:
+    def test_real_failure_with_the_runner_present_still_fails(self, tmp_workdir: str) -> None:
         """AC2: resolvable runner + failed tests → FAIL, never a skip."""
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": "pytest -x --tb=short"}})
         stdout = (
@@ -1943,7 +1954,7 @@ class TestPytestRunnerMissingSkip:
         assert result.skipped is False
         assert result.exit_code == 1
 
-    def test_pytest_progress_output_vetoes_the_skip(self, tmp_workdir) -> None:
+    def test_pytest_progress_output_vetoes_the_skip(self, tmp_workdir: str) -> None:
         """AC2: pytest RAN → its progress output stands the skip down.
 
         A suite that shells out to a python without pytest prints the same
@@ -1971,7 +1982,7 @@ class TestPytestRunnerMissingSkip:
         assert result.skipped is False
         assert "ModuleNotFoundError" in result.output
 
-    def test_chained_command_missing_something_else_still_fails(self, tmp_workdir) -> None:
+    def test_chained_command_missing_something_else_still_fails(self, tmp_workdir: str) -> None:
         """AC2: `tools/check.sh && pytest` where the missing binary is not pytest."""
         cmd = "tools/check.sh && pytest -x"
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": cmd}})
@@ -1988,7 +1999,7 @@ class TestPytestRunnerMissingSkip:
         assert result.passed is False
         assert result.skipped is False
 
-    def test_non_pytest_runner_not_found_still_fails(self, tmp_workdir) -> None:
+    def test_non_pytest_runner_not_found_still_fails(self, tmp_workdir: str) -> None:
         """The invocation gate: `make test` missing is not a pytest runner gap."""
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": "make test"}})
         with patch(
@@ -2001,7 +2012,7 @@ class TestPytestRunnerMissingSkip:
         assert result.skipped is False
         assert result.skip_reason == ""
 
-    def test_intact_runner_exiting_127_is_not_a_runner_gap(self, tmp_workdir) -> None:
+    def test_intact_runner_exiting_127_is_not_a_runner_gap(self, tmp_workdir: str) -> None:
         """AC2: the skip needs an UNRESOLVABLE runner, not just a non-zero exit."""
         cmd = f"{sys.executable} -m pytest -x"
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": cmd}})
@@ -2042,13 +2053,13 @@ class TestPytestRunnerResolution:
         assert _shell_not_found_names("zsh: command not found: pytest\n") == {"pytest"}
         assert _shell_not_found_names("all good\n") == set()
 
-    def test_interpreter_probe_reads_the_real_interpreter(self, tmp_workdir) -> None:
+    def test_interpreter_probe_reads_the_real_interpreter(self, tmp_workdir: str) -> None:
         """True/False/None come from a real interpreter start, not a stub."""
         assert _pytest_interpreter_has_pytest(sys.executable, tmp_workdir) is True
         assert _pytest_interpreter_has_pytest("/bin/false", tmp_workdir) is False
         assert _pytest_interpreter_has_pytest("/nonexistent/python", tmp_workdir) is None
 
-    def test_hint_is_none_without_not_started_evidence(self, tmp_workdir) -> None:
+    def test_hint_is_none_without_not_started_evidence(self, tmp_workdir: str) -> None:
         """No shell/not-found line and no module error → the run is graded."""
         cmd = ".venv/bin/python -m pytest -x"
         assert _pytest_runner_missing_hint(cmd, tmp_workdir, 1, "some other failure\n") is None
@@ -2064,7 +2075,7 @@ class TestPytestRunnerResolution:
 class TestExtendedGuardManager:
     """Extended edge case coverage for GuardManager."""
 
-    def test_custom_test_command_is_used(self, tmp_workdir) -> None:
+    def test_custom_test_command_is_used(self, tmp_workdir: str) -> None:
         """_check_tests uses custom test_command from config."""
         gm = GuardManager(tmp_workdir, {"guards": {"test_command": "echo custom-test-run"}})
         # Mock subprocess.run to capture the command.
@@ -2086,7 +2097,7 @@ class TestExtendedGuardManager:
             result = gm._check_tests()
         assert result.passed is True
 
-    def test_check_tests_timeout_returns_failure(self, guard_manager) -> None:
+    def test_check_tests_timeout_returns_failure(self, guard_manager: GuardManager) -> None:
         """_check_tests handles the test-command timeout (DF-CRIER-258 seam:
         the lane runs through command_hygiene.run_bounded, whose timed_out
         flag maps to the same "Tests timed out after Ns" failure)."""
@@ -2099,7 +2110,7 @@ class TestExtendedGuardManager:
         assert result.passed is False
         assert "timed out" in result.output
 
-    def test_gitleaks_available_used_first(self, tmp_workdir) -> None:
+    def test_gitleaks_available_used_first(self, tmp_workdir: str) -> None:
         """When gitleaks is available, _check_secrets uses it first."""
         gm = GuardManager(tmp_workdir)
         mock_run = MagicMock()
@@ -2116,7 +2127,7 @@ class TestExtendedGuardManager:
         assert "gitleaks" in result.output
         assert result.passed is True
 
-    def test_gitleaks_clean_builtin_findings_fail(self, tmp_workdir) -> None:
+    def test_gitleaks_clean_builtin_findings_fail(self, tmp_workdir: str) -> None:
         """GR-GAP-005: gitleaks clean but built-in scanner finds a secret
         (low-entropy key gitleaks' entropy filter skips) → secrets guard fails."""
         gm = GuardManager(tmp_workdir)
@@ -2138,7 +2149,7 @@ class TestExtendedGuardManager:
         assert result.passed is False
         assert "Potential secrets found" in result.output
 
-    def test_gitleaks_returns_findings(self, tmp_workdir) -> None:
+    def test_gitleaks_returns_findings(self, tmp_workdir: str) -> None:
         """When gitleaks reports findings, secrets guard fails."""
         gm = GuardManager(tmp_workdir)
         mock_run = MagicMock()
@@ -2149,7 +2160,7 @@ class TestExtendedGuardManager:
             result = gm._check_secrets()
         assert result.passed is False
 
-    def test_gitleaks_findings_output_excludes_banner(self, tmp_workdir) -> None:
+    def test_gitleaks_findings_output_excludes_banner(self, tmp_workdir: str) -> None:
         """gitleaks is invoked with --no-banner so captured guard output
         (which feeds judge verdicts) stays free of the ASCII logo banner."""
         gm = GuardManager(tmp_workdir)
@@ -2175,7 +2186,7 @@ class TestExtendedGuardManager:
         assert "gitleaks v" not in result.output
         assert "○" not in result.output
 
-    def test_gitleaks_scans_staged_not_whole_tree(self, tmp_workdir) -> None:
+    def test_gitleaks_scans_staged_not_whole_tree(self, tmp_workdir: str) -> None:
         """GR-GAP-007: gitleaks runs `protect --staged` (staged blobs only),
         NOT `detect --no-git` (whole tree). Whole-tree scanning flags
         gitignored local config (e.g. .env holding a live key) on EVERY
@@ -2200,7 +2211,7 @@ class TestExtendedGuardManager:
         assert "--no-banner" in cmd
         assert result.passed is True
 
-    def test_lint_ruff_available(self, tmp_workdir) -> None:
+    def test_lint_ruff_available(self, tmp_workdir: str) -> None:
         """_check_lint uses ruff when available with Python files staged."""
         _write_staged_file(tmp_workdir, "code.py", "x = 1\n")
         gm = GuardManager(tmp_workdir)
@@ -2233,14 +2244,14 @@ class TestExtendedGuardManager:
         assert tr.passed is True
         assert tr.summary == ""
 
-    def test_secrets_scan_skips_large_files(self, tmp_workdir) -> None:
+    def test_secrets_scan_skips_large_files(self, tmp_workdir: str) -> None:
         """Secrets scanner skips files larger than 1MB."""
         _write_staged_file(tmp_workdir, "huge.bin", "x" * 2_000_000)
         gm = GuardManager(tmp_workdir)
         result = gm._builtin_secrets_scan()
         assert result.passed is True
 
-    def test_secrets_scan_binary_file_graceful(self, tmp_workdir) -> None:
+    def test_secrets_scan_binary_file_graceful(self, tmp_workdir: str) -> None:
         """Secrets scanner handles binary files without crashing."""
         _write_staged_file(tmp_workdir, "binary.bin", "\x00\x01\x02\x03\x04")
         gm = GuardManager(tmp_workdir)
@@ -2248,7 +2259,7 @@ class TestExtendedGuardManager:
         # Should not crash, may pass or fail depending on content
         assert result is not None
 
-    def test_gitlab_token_detected(self, tmp_workdir) -> None:
+    def test_gitlab_token_detected(self, tmp_workdir: str) -> None:
         """GitLab token (glpat-) is detected."""
         _write_staged_file(tmp_workdir, "gitlab.py", 'token = "glpat-ABCDEFGHIJ1234567890"')
         gm = GuardManager(tmp_workdir)
@@ -2256,7 +2267,7 @@ class TestExtendedGuardManager:
         assert result.passed is False
         assert "GitLab" in result.output
 
-    def test_gho_token_detected(self, tmp_workdir) -> None:
+    def test_gho_token_detected(self, tmp_workdir: str) -> None:
         """GitHub OAuth token (gho_) is detected."""
         _write_staged_file(
             tmp_workdir, "github.py", 'oauth = "gho_abcdef123456789012345678901234567890"'
@@ -2285,7 +2296,7 @@ class TestGuardManagerConfigAutoLoad:
     """Regression: GuardManager must auto-load .gitreins/config.yaml
     when no config dict is passed (e.g. from pre-commit hook script)."""
 
-    def test_auto_loads_test_mode_from_config(self, tmp_workdir) -> None:
+    def test_auto_loads_test_mode_from_config(self, tmp_workdir: str) -> None:
         """GuardManager() with no config dict reads test_mode from .gitreins/config.yaml."""
         import yaml
 
@@ -2303,12 +2314,12 @@ class TestGuardManagerConfigAutoLoad:
             f"GuardManager must read test_mode from config, got '{gm.test_mode}'"
         )
 
-    def test_auto_loads_defaults_when_config_missing(self, tmp_workdir) -> None:
+    def test_auto_loads_defaults_when_config_missing(self, tmp_workdir: str) -> None:
         """GuardManager() defaults to test_mode='full' when no config file exists."""
         gm = GuardManager(tmp_workdir)
         assert gm.test_mode == "full", f"Default test_mode should be 'full', got '{gm.test_mode}'"
 
-    def test_auto_load_does_not_override_explicit_config(self, tmp_workdir) -> None:
+    def test_auto_load_does_not_override_explicit_config(self, tmp_workdir: str) -> None:
         """Explicit config dict takes priority over .gitreins/config.yaml."""
         import yaml
 
@@ -2325,7 +2336,7 @@ class TestGuardManagerConfigAutoLoad:
         gm = GuardManager(workdir, config={"guards": {"test_mode": "diff"}})
         assert gm.test_mode == "diff", "Explicit config dict must take priority"
 
-    def test_auto_load_picks_up_secrets_flags(self, tmp_workdir) -> None:
+    def test_auto_load_picks_up_secrets_flags(self, tmp_workdir: str) -> None:
         """GuardManager reads enabled flags (secrets, lint, tests) from config."""
         import yaml
 
@@ -2353,7 +2364,7 @@ class TestDiscoverTestTargetsDiffMode:
     """Regression: _discover_test_targets returns [] (not None) when
     no matching test files found, and _check_tests skips with PASS."""
 
-    def test_returns_empty_list_when_no_test_file_exists(self, tmp_workdir) -> None:
+    def test_returns_empty_list_when_no_test_file_exists(self, tmp_workdir: str) -> None:
         """_discover_test_targets returns [] when staged file has no matching
         test file, NOT None (which caused fallthrough to full suite)."""
         import os
@@ -2373,7 +2384,7 @@ class TestDiscoverTestTargetsDiffMode:
             f"_discover_test_targets must return [] when no test files match, got {result!r}"
         )
 
-    def test_returns_test_file_when_match_exists(self, tmp_workdir) -> None:
+    def test_returns_test_file_when_match_exists(self, tmp_workdir: str) -> None:
         """_discover_test_targets returns the matching test file when it exists."""
         import os
 
@@ -2398,7 +2409,7 @@ class TestDiscoverTestTargetsDiffMode:
         assert len(result) == 1
         assert "test_thing.py" in result[0]
 
-    def test_force_full_trigger_returns_none_for_config_change(self, tmp_workdir) -> None:
+    def test_force_full_trigger_returns_none_for_config_change(self, tmp_workdir: str) -> None:
         """When .gitreins/config.yaml is staged, _discover_test_targets returns None
         (force-full trigger) to run the full test suite."""
         import os
@@ -2416,7 +2427,7 @@ class TestDiscoverTestTargetsDiffMode:
             f"Force-full trigger (.gitreins/config.yaml) must return None, got {result!r}"
         )
 
-    def test_check_tests_skips_when_no_matching_test_files(self, tmp_workdir) -> None:
+    def test_check_tests_skips_when_no_matching_test_files(self, tmp_workdir: str) -> None:
         """_check_tests in diff mode returns PASS when no test files match,
         instead of falling through to full suite (and timing out)."""
         import os
@@ -2452,7 +2463,7 @@ class TestDiscoverTestTargetsDiffMode:
 class TestBuildDiffTestCommand:
     """_build_diff_test_command narrows pytest invocations to specific test files."""
 
-    def test_narrows_python3_m_pytest(self, tmp_path) -> None:
+    def test_narrows_python3_m_pytest(self, tmp_path: Path) -> None:
         """`python3 -m pytest` is recognized and narrowed to the test file path.
 
         Regression for DF-002: init now generates `python3 -m pytest ...`
@@ -2467,7 +2478,7 @@ class TestBuildDiffTestCommand:
         assert cmd == "python3 -m pytest -x --tb=short tests/test_a.py"
         assert cmd.endswith("tests/test_a.py")
 
-    def test_narrows_python_m_pytest(self, tmp_path) -> None:
+    def test_narrows_python_m_pytest(self, tmp_path: Path) -> None:
         """`python -m pytest` keeps narrowing (existing behavior unchanged)."""
         import os
 
@@ -2476,7 +2487,7 @@ class TestBuildDiffTestCommand:
         cmd = _build_diff_test_command("python -m pytest -x --tb=short", [abs_test], workdir)
         assert cmd == "python -m pytest -x --tb=short tests/test_a.py"
 
-    def test_narrows_bare_pytest(self, tmp_path) -> None:
+    def test_narrows_bare_pytest(self, tmp_path: Path) -> None:
         """Bare `pytest` keeps narrowing (existing behavior unchanged)."""
         import os
 
@@ -2485,7 +2496,7 @@ class TestBuildDiffTestCommand:
         cmd = _build_diff_test_command("pytest -x --tb=short", [abs_test], workdir)
         assert cmd == "pytest -x --tb=short tests/test_a.py"
 
-    def test_leaves_non_pytest_runner_untouched(self, tmp_path) -> None:
+    def test_leaves_non_pytest_runner_untouched(self, tmp_path: Path) -> None:
         """Custom runners can't be narrowed — original command is returned."""
         import os
 
@@ -2498,7 +2509,7 @@ class TestBuildDiffTestCommand:
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def _make_skeleton_git(path) -> None:
+def _make_skeleton_git(path: Any) -> None:
     """Create a minimal .git skeleton like the tmp_workdir fixture."""
     git_dir = os.path.join(path, ".git")
     os.makedirs(os.path.join(git_dir, "objects"))
@@ -2519,7 +2530,7 @@ class TestSanitizedEnv:
     reads the OUTER repo's index instead of its own workdir's index.
     """
 
-    def test_sanitized_env_strips_all_git_vars(self, monkeypatch) -> None:
+    def test_sanitized_env_strips_all_git_vars(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """_sanitized_env() removes every GIT_* variable and keeps the rest."""
         from engine.guard_manager import _sanitized_env
 
@@ -2541,7 +2552,7 @@ class TestSanitizedEnv:
         assert env["HOME"] == "/home/tester"
 
     def test_get_staged_files_ignores_leaked_git_index_file(
-        self, tmp_workdir, tmp_path, monkeypatch
+        self, tmp_workdir: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Staged-file discovery uses the workdir's own index even when a
         pre-commit hook leaked GIT_INDEX_FILE pointing at a foreign repo."""
@@ -2561,7 +2572,7 @@ class TestSanitizedEnv:
         assert _get_staged_files(tmp_workdir) == ["app.py"]
 
 
-def _write_staged_file(workdir, filename, content) -> None:
+def _write_staged_file(workdir: str, filename: Any, content: Any) -> None:
     """Create a file and stage it in a real git repo, for secrets scan testing.
 
     Uses git init + git add to create a realistic staged file.
@@ -2643,7 +2654,7 @@ def _make_linked_guard_fixture(tmp_path: Path) -> tuple[Path, Path, str]:
 class TestLinkedWorktreeGuardSemantics:
     """Real linked-worktree coverage for WORKTREE-003 guard scope."""
 
-    def test_diff_targets_include_committed_branch_and_staged_changes(self, tmp_path) -> None:
+    def test_diff_targets_include_committed_branch_and_staged_changes(self, tmp_path: Path) -> None:
         """Diff mode uses the task branch point, not only the linked index."""
         from engine.guard_manager import GuardManager, _discover_test_targets
 
@@ -2659,14 +2670,16 @@ class TestLinkedWorktreeGuardSemantics:
         assert result.passed is True, result.output
         assert "diff: 1 files" in result.name
 
-    def test_diff_targets_ignore_unstaged_changes(self, tmp_path) -> None:
+    def test_diff_targets_ignore_unstaged_changes(self, tmp_path: Path) -> None:
         """Diff mode compares committed task changes plus staged files only."""
         _main, linked, _branch_point = _make_linked_guard_fixture(tmp_path)
         (linked / "unrelated.py").write_text("VALUE = 'unstaged task edit'\n", encoding="utf-8")
 
         assert _discover_test_targets(str(linked)) == [str(linked / "tests" / "test_feature.py")]
 
-    def test_gitleaks_and_builtin_scan_only_linked_index(self, tmp_path, monkeypatch) -> None:
+    def test_gitleaks_and_builtin_scan_only_linked_index(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """A relative foreign GIT_INDEX_FILE cannot poison either scanner."""
         from engine.guard_manager import GuardManager
 
@@ -2700,7 +2713,7 @@ class TestStaticAnalysisGuardHonesty:
     """DF-019: `init` enables static analysis; a tool that is not installed is a skip."""
 
     @staticmethod
-    def _manager(tmp_path, tools):
+    def _manager(tmp_path: Path, tools: Any) -> Any:
         (tmp_path / "main.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
         (tmp_path / "pyproject.toml").write_text("[project]\nname = 'consumer'\n", encoding="utf-8")
         return GuardManager(
@@ -2716,7 +2729,7 @@ class TestStaticAnalysisGuardHonesty:
             },
         )
 
-    def test_absent_tool_is_a_skip_not_a_clean_pass(self, tmp_path) -> None:
+    def test_absent_tool_is_a_skip_not_a_clean_pass(self, tmp_path: Path) -> None:
         """No configured analyser installed → skipped, tools named, never "clean"."""
         manager = self._manager(tmp_path, ["mypy", "pyright"])
 
@@ -2731,11 +2744,11 @@ class TestStaticAnalysisGuardHonesty:
         assert "clean" not in result.output
         assert "No static analysis tools ran" in result.output
 
-    def test_partial_availability_names_the_absent_tool(self, tmp_path) -> None:
+    def test_partial_availability_names_the_absent_tool(self, tmp_path: Path) -> None:
         """A tool that ran clean is graded; the absent one is named, not implied."""
         manager = self._manager(tmp_path, ["mypy", "pyright"])
 
-        def fake_find(tool) -> str | None:
+        def fake_find(tool: Any) -> str | None:
             return f"/fake/bin/{tool}" if tool == "mypy" else None
 
         with (
@@ -2749,7 +2762,7 @@ class TestStaticAnalysisGuardHonesty:
         assert "mypy — clean" in result.output
         assert "pyright — not installed (skipped)" in result.output
 
-    def test_installed_tools_clean_result_is_unchanged(self, tmp_path) -> None:
+    def test_installed_tools_clean_result_is_unchanged(self, tmp_path: Path) -> None:
         """Both tools present and clean → an ordinary pass with no skip noise."""
         manager = self._manager(tmp_path, ["mypy", "pyright"])
 
@@ -2763,7 +2776,7 @@ class TestStaticAnalysisGuardHonesty:
         assert result.skipped is False
         assert result.output.strip() == "mypy — clean\n  pyright — clean"
 
-    def test_findings_from_an_installed_tool_still_fail(self, tmp_path) -> None:
+    def test_findings_from_an_installed_tool_still_fail(self, tmp_path: Path) -> None:
         """The honesty check must not swallow a real diagnostic."""
         manager = self._manager(tmp_path, ["mypy"])
         diag = [{"file": "main.py", "line": 2, "severity": "error", "message": "boom"}]
@@ -2792,7 +2805,7 @@ class TestStaticAnalysisNoToolSelected:
     """
 
     @staticmethod
-    def _manager(tmp_path, *, manifest: bool, tools=("mypy",)):
+    def _manager(tmp_path: Path, *, manifest: bool, tools: Any = ("mypy",)) -> Any:
         (tmp_path / "calc.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
         if manifest:
             (tmp_path / "pyproject.toml").write_text(
@@ -2811,7 +2824,7 @@ class TestStaticAnalysisNoToolSelected:
             },
         )
 
-    def test_python_sources_without_a_manifest_are_a_skip_not_a_green(self, tmp_path) -> None:
+    def test_python_sources_without_a_manifest_are_a_skip_not_a_green(self, tmp_path: Path) -> None:
         """No packaging marker → nothing selected → skipped with the reason."""
         manager = self._manager(tmp_path, manifest=False)
 
@@ -2823,7 +2836,7 @@ class TestStaticAnalysisNoToolSelected:
         assert "packaging marker" in result.skip_reason
         assert "clean" not in result.output
 
-    def test_the_skip_names_the_python_marker_gap_specifically(self, tmp_path) -> None:
+    def test_the_skip_names_the_python_marker_gap_specifically(self, tmp_path: Path) -> None:
         """The reason must be the Python one, not 'no language detected'."""
         manager = self._manager(tmp_path, manifest=False)
 
@@ -2832,7 +2845,7 @@ class TestStaticAnalysisNoToolSelected:
         assert "python sources present" in result.skip_reason
         assert "pyproject.toml" in result.skip_reason
 
-    def test_the_no_tool_skip_arms_the_degraded_net(self, tmp_path) -> None:
+    def test_the_no_tool_skip_arms_the_degraded_net(self, tmp_path: Path) -> None:
         """REVIEW-GITREINS-018: static_analysis is substantive, so the run DEGRADES."""
         from engine.types import Tier1Result, _is_substantive_step
 
@@ -2844,7 +2857,7 @@ class TestStaticAnalysisNoToolSelected:
         assert tier1.degraded is True
         assert tier1.degraded_steps == [{"step": "static_analysis", "reason": result.skip_reason}]
 
-    def test_a_manifest_repo_is_unaffected_and_grades_normally(self, tmp_path) -> None:
+    def test_a_manifest_repo_is_unaffected_and_grades_normally(self, tmp_path: Path) -> None:
         """The same tree with a packaging marker still grades — no new skip."""
         manager = self._manager(tmp_path, manifest=True)
 
@@ -2858,7 +2871,7 @@ class TestStaticAnalysisNoToolSelected:
         assert result.skipped is False
         assert "mypy — clean" in result.output
 
-    def test_config_with_no_tools_for_the_language_is_still_a_skip(self, tmp_path) -> None:
+    def test_config_with_no_tools_for_the_language_is_still_a_skip(self, tmp_path: Path) -> None:
         """A manifest repo whose config lists no Python tool also graded nothing."""
         manager = self._manager(tmp_path, manifest=True, tools=())
 
@@ -2953,7 +2966,7 @@ class TestSensitivePathMatching:
 class TestSensitivePathScanBehaviour:
     """The path class fails the scan regardless of the file's content shape."""
 
-    def test_staged_credentials_json_fails_on_path_alone(self, tmp_workdir) -> None:
+    def test_staged_credentials_json_fails_on_path_alone(self, tmp_workdir: str) -> None:
         """credentials.json with ONLY an OAuth client_secret fails — no
         content pattern matches this file today (the measured gap)."""
         gocspx = "GOCSPX-" + "abc123def456" * 3  # runtime-built, never literal
@@ -2968,7 +2981,7 @@ class TestSensitivePathScanBehaviour:
         assert "SENSITIVE PATH" in result.output
         assert "credentials.json" in result.output
 
-    def test_staged_dot_env_with_bare_value_fails_on_path_alone(self, tmp_workdir) -> None:
+    def test_staged_dot_env_with_bare_value_fails_on_path_alone(self, tmp_workdir: str) -> None:
         """A .env holding a bare high-entropy value with NO key name fails —
         no `key=value` pattern applies, so only the path class catches it."""
         _write_staged_file(
@@ -2982,7 +2995,7 @@ class TestSensitivePathScanBehaviour:
         assert "SENSITIVE PATH" in result.output
         assert ".env" in result.output
 
-    def test_normal_source_file_still_passes(self, tmp_workdir) -> None:
+    def test_normal_source_file_still_passes(self, tmp_workdir: str) -> None:
         """A plain config.py with no secrets is untouched by the path class."""
         _write_staged_file(tmp_workdir, "config.py", "DEBUG = True\nPORT = 8080\n")
         gm = GuardManager(tmp_workdir)
@@ -2990,7 +3003,7 @@ class TestSensitivePathScanBehaviour:
         assert result.passed is True
         assert "SENSITIVE PATH" not in result.output
 
-    def test_test_fixture_directory_exempt(self, tmp_workdir) -> None:
+    def test_test_fixture_directory_exempt(self, tmp_workdir: str) -> None:
         """tests/fixtures/credentials.json is exempt from the PATH class so
         the suite's deliberate fake-credential fixtures keep working."""
         _write_staged_file(
@@ -3003,7 +3016,7 @@ class TestSensitivePathScanBehaviour:
         assert result.passed is True
         assert "SENSITIVE PATH" not in result.output
 
-    def test_sensitive_path_finding_survives_gitleaks_failure_merge(self, tmp_workdir) -> None:
+    def test_sensitive_path_finding_survives_gitleaks_failure_merge(self, tmp_workdir: str) -> None:
         """A gitleaks failure must not mask the path-class finding — the
         locator-less SENSITIVE PATH line survives _merge_secret_findings."""
         sk_secret = "sk-proj-" + "aB1cD2" * 6
@@ -3024,7 +3037,7 @@ class TestSensitivePathScanBehaviour:
 
         real_run = subprocess.run
 
-        def fake_run(cmd, *args, **kwargs):
+        def fake_run(cmd: Any, *args: Any, **kwargs: Any) -> Any:
             if _is_gitleaks_spawn(cmd):
                 return mock_run
             return real_run(cmd, *args, **kwargs)
@@ -3039,7 +3052,7 @@ class TestSensitivePathScanBehaviour:
 class TestSensitivePathScopesAndOverride:
     """Scope coverage and the guards.sensitive_paths.allow override."""
 
-    def test_whole_workdir_scan_ignores_untracked_gitignored_env(self, tmp_workdir) -> None:
+    def test_whole_workdir_scan_ignores_untracked_gitignored_env(self, tmp_workdir: str) -> None:
         """Judge-path (staged_only=False) scan of a graded tree: a
         PRE-EXISTING, untracked, gitignored .env is local operator state,
         never pushed — the path class must NOT fail the run (this repo's
@@ -3065,7 +3078,7 @@ class TestSensitivePathScopesAndOverride:
         result = gm._builtin_secrets_scan(staged_only=False)
         assert result.passed is True
 
-    def test_whole_workdir_scan_still_flags_tracked_env(self, tmp_workdir) -> None:
+    def test_whole_workdir_scan_still_flags_tracked_env(self, tmp_workdir: str) -> None:
         """The whole-workdir exemption is untracked-only: a TRACKED .env IS
         published content and the class must still fire."""
         _write_staged_file(tmp_workdir, ".env", "PLACEHOLDER\n")
@@ -3086,7 +3099,7 @@ class TestSensitivePathScopesAndOverride:
         assert result.passed is False
         assert "SENSITIVE PATH" in result.output
 
-    def test_working_tree_explicit_scope_also_fails(self, tmp_workdir) -> None:
+    def test_working_tree_explicit_scope_also_fails(self, tmp_workdir: str) -> None:
         """A .env graded via --scope working-tree (explicit files list) fails
         the same way a staged one does."""
         env_path = os.path.join(tmp_workdir, ".env")
@@ -3098,7 +3111,7 @@ class TestSensitivePathScopesAndOverride:
         assert "SENSITIVE PATH" in result.output
         assert ".env" in result.output
 
-    def test_check_secrets_working_tree_scope_fails_on_path(self, tmp_workdir) -> None:
+    def test_check_secrets_working_tree_scope_fails_on_path(self, tmp_workdir: str) -> None:
         """End-to-end through the lane entry: working-tree scope + .env →
         _check_secrets itself fails."""
         env_path = os.path.join(tmp_workdir, ".env")
@@ -3109,7 +3122,7 @@ class TestSensitivePathScopesAndOverride:
         assert result.passed is False
         assert "SENSITIVE PATH" in result.output
 
-    def test_allow_config_suppresses_with_auditable_note(self, tmp_workdir) -> None:
+    def test_allow_config_suppresses_with_auditable_note(self, tmp_workdir: str) -> None:
         """guards.sensitive_paths.allow: ["credentials.json"] suppresses the
         path finding for that path — and the pass carries the override line."""
         _write_staged_file(tmp_workdir, "credentials.json", '{"placeholder": true}\n')
@@ -3121,7 +3134,7 @@ class TestSensitivePathScopesAndOverride:
         assert result.passed is True
         assert "sensitive-path override applied: credentials.json" in result.output
 
-    def test_allow_config_does_not_suppress_other_class_members(self, tmp_workdir) -> None:
+    def test_allow_config_does_not_suppress_other_class_members(self, tmp_workdir: str) -> None:
         """An override for credentials.json must not silence .env — the knob
         is per-path, never a widening of the class."""
         _write_staged_file(tmp_workdir, ".env", "PLACEHOLDER_ONLY\n")
@@ -3133,7 +3146,7 @@ class TestSensitivePathScopesAndOverride:
         assert result.passed is False
         assert "SENSITIVE PATH" in result.output
 
-    def test_allow_config_never_silences_content_findings(self, tmp_workdir) -> None:
+    def test_allow_config_never_silences_content_findings(self, tmp_workdir: str) -> None:
         """Defence in depth: the override applies to the PATH class only. A
         real content pattern match in the allowed file still fails."""
         sk_secret = "sk-proj-" + "aB1cD2" * 6

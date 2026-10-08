@@ -4,6 +4,10 @@ Tests for EvalCap: parser, limit checking, tool-call weighting, and real LLM int
 Run fast tests only:  pytest tests/test_eval_cap.py -m "not llm"
 """
 
+from __future__ import annotations
+from pathlib import Path
+from typing import Any
+
 import os
 import time
 
@@ -412,7 +416,7 @@ class TestAgenticEvaluatorCapIntegration:
         evaluator = AgenticEvaluator(llm, max_iterations=42, eval_cap="10")
         assert evaluator.eval_cap.max_iterations == 10
 
-    def test_max_iterations_negative_defers_to_config(self, tmp_path) -> None:
+    def test_max_iterations_negative_defers_to_config(self, tmp_path: Path) -> None:
         """When max_iterations=-1 (from Pipeline default), evaluator reads config."""
         gitreins_dir = tmp_path / ".gitreins"
         gitreins_dir.mkdir()
@@ -424,7 +428,7 @@ class TestAgenticEvaluatorCapIntegration:
         assert evaluator.eval_cap.max_iterations == 30
         assert evaluator.eval_cap.max_seconds == 300
 
-    def test_evaluator_reads_config_yaml(self, tmp_path) -> None:
+    def test_evaluator_reads_config_yaml(self, tmp_path: Path) -> None:
         gitreins_dir = tmp_path / ".gitreins"
         gitreins_dir.mkdir()
         config = {"evaluator": {"max_iterations": 25, "max_time": "10m"}}
@@ -455,7 +459,7 @@ class TestEvalCapRealEvaluator:
         if not api_key:
             pytest.skip("No LLM API key configured")
 
-    def _make_repo(self, tmp_path):
+    def _make_repo(self, tmp_path: Path) -> Any:
         import subprocess
 
         d = str(tmp_path)
@@ -488,7 +492,7 @@ class TestEvalCapRealEvaluator:
         }
         return d, task
 
-    def test_iteration_cap_stops_evaluator(self, tmp_path) -> None:
+    def test_iteration_cap_stops_evaluator(self, tmp_path: Path) -> None:
         """cap=2 — evaluator MUST stop after 2 LLM calls."""
         d, task = self._make_repo(tmp_path)
         llm = LLMClient()
@@ -499,7 +503,7 @@ class TestEvalCapRealEvaluator:
         assert "LLM call failed" not in verdict.summary
         assert evaluator.eval_cap.iteration_credit >= 2.0
 
-    def test_time_cap_stops_evaluator(self, tmp_path) -> None:
+    def test_time_cap_stops_evaluator(self, tmp_path: Path) -> None:
         """cap=5s — with many criteria, evaluator MUST time out."""
         d, task = self._make_repo(tmp_path)
         # Many criteria to keep the evaluator busy
@@ -521,7 +525,7 @@ class TestEvalCapRealEvaluator:
         assert "Time cap" in verdict.summary
         assert evaluator.eval_cap.iteration_credit >= 1.0
 
-    def test_unlimited_completes_normally(self, tmp_path) -> None:
+    def test_unlimited_completes_normally(self, tmp_path: Path) -> None:
         """cap=-1 — simple task should complete."""
         d, task = self._make_repo(tmp_path)
         llm = LLMClient()
@@ -531,7 +535,7 @@ class TestEvalCapRealEvaluator:
         assert "Cap exceeded" not in verdict.summary
         assert len(verdict.items) >= 1
 
-    def test_tool_calls_discounted(self, tmp_path) -> None:
+    def test_tool_calls_discounted(self, tmp_path: Path) -> None:
         """Verify tool_call_weight works — with tiny cap, evaluator gets
         several tool calls before hitting the limit (vs 2 full LLM calls)."""
         d, task = self._make_repo(tmp_path)
@@ -598,7 +602,7 @@ class TestPipelineCapRegression:
             "_run_ai_eval must default max_iterations to -1, not 20"
         )
 
-    def test_pipeline_passes_max_iterations_negative_to_evaluator(self, tmp_path) -> None:
+    def test_pipeline_passes_max_iterations_negative_to_evaluator(self, tmp_path: Path) -> None:
         """Pipeline._run_ai_eval passes max_iterations=-1 to AgenticEvaluator
         when the step doesn't set it, and the evaluator reads config."""
         import subprocess
@@ -641,7 +645,7 @@ class TestPipelineCapRegression:
         assert evaluator.eval_cap.max_seconds == 600
         assert evaluator.eval_cap.tool_call_weight == 0.05
 
-    def test_pipeline_explicit_max_iterations_is_honored(self, tmp_path) -> None:
+    def test_pipeline_explicit_max_iterations_is_honored(self, tmp_path: Path) -> None:
         """When pipeline step explicitly sets max_iterations, it IS used
         (not overridden by config)."""
         import subprocess

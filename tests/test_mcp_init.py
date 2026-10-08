@@ -7,6 +7,10 @@ CLI (`gitreins init`). With repo.init on the tool surface the full workflow
 (init → guard.run → judge) works without ever opening a shell.
 """
 
+from __future__ import annotations
+from pathlib import Path
+from typing import Any
+
 import json
 import os
 
@@ -17,7 +21,7 @@ from gitreins_mcp.server import GitReinsMCPServer
 
 
 @pytest.fixture
-def mcp_server(tmp_workdir):
+def mcp_server(tmp_workdir: str) -> Any:
     """Create an MCP server pointed at a temp git repo (same shape as
     test_mcp_server.py's fixture — repo.init is the tool under test, the
     workdir itself is only where the server instance is anchored)."""
@@ -25,7 +29,7 @@ def mcp_server(tmp_workdir):
 
 
 @pytest.fixture
-def bare_git_repo(tmp_path):
+def bare_git_repo(tmp_path: Path) -> Any:
     """A git repo with NO .gitreins/config.yaml (unlike tmp_workdir)."""
     repo = tmp_path / "fresh-repo"
     repo.mkdir()
@@ -35,7 +39,7 @@ def bare_git_repo(tmp_path):
 
 
 @pytest.fixture
-def plain_dir(tmp_path):
+def plain_dir(tmp_path: Path) -> Any:
     """A directory that is not a git repository at all."""
     d = tmp_path / "plain-dir"
     d.mkdir()
@@ -60,7 +64,7 @@ def _tools_list(server: GitReinsMCPServer) -> dict:
 
 
 class TestRepoInitMCP:
-    def test_tools_list_advertises_repo_init(self, mcp_server) -> None:
+    def test_tools_list_advertises_repo_init(self, mcp_server: Any) -> None:
         """repo.init is on the advertised tool surface with a workdir schema."""
         tools = _tools_list(mcp_server)
         assert "repo.init" in tools
@@ -70,7 +74,7 @@ class TestRepoInitMCP:
         assert schema["properties"]["workdir"]["type"] == "string"
         assert "guard.run" in tools  # the tool it unblocks is still advertised
 
-    def test_repo_init_creates_config(self, mcp_server, bare_git_repo) -> None:
+    def test_repo_init_creates_config(self, mcp_server: Any, bare_git_repo: Any) -> None:
         """Fresh git repo → created True, file exists, carries the defaults block."""
         result = _call(mcp_server, "repo.init", {"workdir": bare_git_repo})
         assert result.get("created") is True, result
@@ -84,7 +88,7 @@ class TestRepoInitMCP:
         assert "defaults:" in content
         assert content == DEFAULT_GITREINS_CONFIG
 
-    def test_repo_init_is_idempotent(self, mcp_server, bare_git_repo) -> None:
+    def test_repo_init_is_idempotent(self, mcp_server: Any, bare_git_repo: Any) -> None:
         """Second call reports created False and leaves the file untouched."""
         first = _call(mcp_server, "repo.init", {"workdir": bare_git_repo})
         assert first.get("created") is True, first
@@ -101,7 +105,9 @@ class TestRepoInitMCP:
         assert os.stat(config_path).st_mtime_ns == before_mtime
         assert open(config_path).read() == before_content
 
-    def test_repo_init_customized_config_not_clobbered(self, mcp_server, bare_git_repo) -> None:
+    def test_repo_init_customized_config_not_clobbered(
+        self, mcp_server: Any, bare_git_repo: Any
+    ) -> None:
         """A user-edited config survives a repo.init call byte-for-byte."""
         cfg_dir = os.path.join(bare_git_repo, ".gitreins")
         os.makedirs(cfg_dir)
@@ -113,7 +119,9 @@ class TestRepoInitMCP:
         with open(custom) as f:
             assert f.read() == "guards:\n  tests: false\n"
 
-    def test_repo_init_plain_dir_errors_writes_nothing(self, mcp_server, plain_dir) -> None:
+    def test_repo_init_plain_dir_errors_writes_nothing(
+        self, mcp_server: Any, plain_dir: Any
+    ) -> None:
         """Non-git dir → error dict, and nothing at all was created."""
         result = _call(mcp_server, "repo.init", {"workdir": plain_dir})
         assert "error" in result, result
@@ -122,7 +130,7 @@ class TestRepoInitMCP:
         assert result["workdir"] == os.path.abspath(plain_dir)
         assert not os.path.exists(os.path.join(plain_dir, ".gitreins"))
 
-    def test_repo_init_defaults_to_server_workdir(self, tmp_path) -> None:
+    def test_repo_init_defaults_to_server_workdir(self, tmp_path: Path) -> None:
         """No workdir argument → the MCP server's own workdir is initialized."""
         repo = tmp_path / "server-repo"
         repo.mkdir()
@@ -132,7 +140,9 @@ class TestRepoInitMCP:
         assert result.get("created") is True, result
         assert os.path.isfile(os.path.join(str(repo), ".gitreins", "config.yaml"))
 
-    def test_guard_run_works_after_repo_init(self, mcp_server, bare_git_repo, monkeypatch) -> None:
+    def test_guard_run_works_after_repo_init(
+        self, mcp_server: Any, bare_git_repo: Any, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """The end-to-end MCP-only path: repo.init then guard.run — guard.run
         must NOT return the GR-GAP-054 'no .gitreins/config.yaml — run
         `gitreins init` first' refusal anymore (DF-GITREINS-POC-77)."""

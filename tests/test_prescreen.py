@@ -17,6 +17,9 @@ Every Jev-touching test is hermetic: the resolution engine's ``poster``/
 resolution.py does — no network, no hilo.
 """
 
+from __future__ import annotations
+from typing import Any
+
 import json
 import logging
 from unittest.mock import MagicMock, patch
@@ -43,7 +46,7 @@ from engine.resolution import ResolutionVerdict
 # ── fixtures ─────────────────────────────────────────────────────────────────
 
 
-def _jev_payload(noul=0.87, choice="none", score=2.68):
+def _jev_payload(noul: Any = 0.87, choice: Any = "none", score: Any = 2.68) -> Any:
     """The measured live answer shape (same fixture family as test_resolution)."""
     return {
         "model": "typesafe/jev-1.13-20260917",
@@ -77,11 +80,11 @@ def _jev_payload(noul=0.87, choice="none", score=2.68):
 class _Poster:
     """Scripted decisions endpoint — records the state it was handed."""
 
-    def __init__(self, payload) -> None:
+    def __init__(self, payload: Any) -> None:
         self.payload = payload
         self.states: list[str] = []
 
-    def __call__(self, endpoint, key, body, timeout):
+    def __call__(self, endpoint: Any, key: Any, body: Any, timeout: Any) -> Any:
         self.states.append(body["state"])
         resp = MagicMock()
         resp.status_code = 200
@@ -99,11 +102,11 @@ _MINI_BUNDLE = (
 )
 
 
-def _empty_bundle_runner(args, wd):
+def _empty_bundle_runner(args: Any, wd: Any) -> Any:
     return 0, _MINI_BUNDLE, ""
 
 
-def _prescreen(**kwargs) -> PrescreenResult:
+def _prescreen(**kwargs: Any) -> PrescreenResult:
     """A resolved pre-screen fixture (no Jev involved)."""
     criteria = kwargs.pop(
         "criteria", ["Wire the gate in engine/x.py:12", "Add tests/test_x.py coverage"]
@@ -134,7 +137,7 @@ def _prescreen(**kwargs) -> PrescreenResult:
 
 
 @pytest.fixture
-def no_credentials():
+def no_credentials() -> None:
     """The ABSTAIN precondition: the engine can find no key anywhere."""
     with patch("engine.resolution.discover_keys", return_value=[]):
         yield
@@ -184,7 +187,7 @@ class TestBuildPrescreenQuestion:
 
 
 class TestPrescreenFromVerdict:
-    def _verdict(self, noul=0.70, choice="test"):
+    def _verdict(self, noul: Any = 0.70, choice: Any = "test") -> Any:
         return ResolutionVerdict(
             question="q",
             verdict="REVIEW" if noul < 0.85 else "RESOLVED",
@@ -244,7 +247,7 @@ class TestRunPrescreen:
         assert not ps.abstained
         assert ps.criteria[0].criterion == "engine/a.py handles negatives"
 
-    def test_no_credentials_is_an_abstain_with_named_reason(self, no_credentials) -> None:
+    def test_no_credentials_is_an_abstain_with_named_reason(self, no_credentials: Any) -> None:
         ps = run_prescreen(
             {"criteria": ["a"]},
             workdir=".",
@@ -257,7 +260,7 @@ class TestRunPrescreen:
         assert ps.abstain_reason in {"no-credentials", "empty-bundle"}
 
     def test_all_keys_rejected_is_an_abstain(self) -> None:
-        def refuse(endpoint, key, body, timeout):
+        def refuse(endpoint: Any, key: Any, body: Any, timeout: Any) -> Any:
             resp = MagicMock()
             resp.status_code = 401
             return resp
@@ -286,7 +289,7 @@ class TestRunPrescreen:
         assert ps.abstained
         assert ps.abstain_reason in {"malformed-response", "empty-bundle"}
 
-    def test_no_criteria_never_calls_jev(self, no_credentials) -> None:
+    def test_no_criteria_never_calls_jev(self, no_credentials: Any) -> None:
         ps = run_prescreen({"criteria": []})
         assert ps.abstained
         assert ps.abstain_reason == "no-criteria"
@@ -381,7 +384,7 @@ class TestAttachPrescreen:
 # ── the evaluator wiring: input, degradation, no-skip ────────────────────────
 
 
-def _chat_response(content):
+def _chat_response(content: Any) -> Any:
     resp = MagicMock(spec=LLMResponse)
     resp.content = content
     resp.tool_calls = []
@@ -391,13 +394,16 @@ def _chat_response(content):
 
 class TestEvaluatorPrescreenIntegration:
     def _evaluate_once(
-        self, evaluator, task, content='{"verdict":"COMPLETE","items":[],"summary":"s"}'
-    ):
+        self,
+        evaluator: AgenticEvaluator,
+        task: Any,
+        content: Any = '{"verdict":"COMPLETE","items":[],"summary":"s"}',
+    ) -> Any:
         with patch.object(evaluator.llm, "chat", return_value=_chat_response(content)) as chat:
             verdict = evaluator.evaluate(task)
         return verdict, chat
 
-    def test_prompt_carries_the_prescreen_block_as_input(self, evaluator) -> None:
+    def test_prompt_carries_the_prescreen_block_as_input(self, evaluator: AgenticEvaluator) -> None:
         ps = _prescreen(criteria=["engine/x.py:12"])
         task = {"id": "t", "title": "T", "criteria": ["engine/x.py:12"], PRESCREEN_KEY: ps}
         verdict, chat = self._evaluate_once(evaluator, task)
@@ -407,7 +413,9 @@ class TestEvaluatorPrescreenIntegration:
         assert "0.91" in prompt
         assert verdict.verdict == "COMPLETE"
 
-    def test_abstain_injects_nothing_and_warns_exactly_once(self, evaluator, caplog) -> None:
+    def test_abstain_injects_nothing_and_warns_exactly_once(
+        self, evaluator: AgenticEvaluator, caplog: pytest.LogCaptureFixture
+    ) -> None:
         task = {"id": "t", "title": "T", "criteria": ["c"]}
         with patch("engine.resolution.discover_keys", return_value=[]):
             verdict, chat = self._evaluate_once(evaluator, task)
@@ -421,7 +429,9 @@ class TestEvaluatorPrescreenIntegration:
         assert len(warnings) == 1
         assert "pre-screen unavailable" in warnings[0].getMessage()
 
-    def test_resolved_prescreen_still_runs_the_judge_never_skips(self, evaluator) -> None:
+    def test_resolved_prescreen_still_runs_the_judge_never_skips(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
         """Constraint: the pre-screen can NOT skip tier 2 — even at p=0.99."""
         ps = _prescreen(probability=0.99, missing_kind="none")
         task = {"id": "t", "title": "T", "criteria": ["c"], PRESCREEN_KEY: ps}
@@ -429,7 +439,7 @@ class TestEvaluatorPrescreenIntegration:
         chat.assert_called_once()  # the loop ran
         assert verdict.verdict == "COMPLETE"
 
-    def test_prescreen_disabled_by_config_runs_today_s_path(self, tmp_workdir) -> None:
+    def test_prescreen_disabled_by_config_runs_today_s_path(self, tmp_workdir: str) -> None:
         config_dir = tmp_workdir + "/.gitreins"
         import os
 
@@ -453,7 +463,7 @@ class TestEvaluatorPrescreenIntegration:
         assert verdict.verdict == "COMPLETE"
 
     def test_abstain_with_real_prescreen_config_changes_nothing_else(
-        self, evaluator, no_credentials, caplog
+        self, evaluator: AgenticEvaluator, no_credentials: Any, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Acceptance criterion 3: degraded run == today's judge path."""
         task = {"id": "t", "title": "T", "criteria": ["c"]}
@@ -464,7 +474,9 @@ class TestEvaluatorPrescreenIntegration:
         pre_screen_warnings = [r for r in caplog.records if "pre-screen" in r.getMessage()]
         assert len(pre_screen_warnings) == 1
 
-    def test_multiple_criteria_each_get_a_row_in_the_prompt(self, evaluator) -> None:
+    def test_multiple_criteria_each_get_a_row_in_the_prompt(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
         ps = _prescreen(criteria=["c1", "c2", "c3"])
         task = {"id": "t", "title": "T", "criteria": ["c1", "c2", "c3"], PRESCREEN_KEY: ps}
         _verdict, chat = self._evaluate_once(evaluator, task)
@@ -482,7 +494,7 @@ class _Task:
 
 
 class _Result:
-    def __init__(self, verdict) -> None:
+    def __init__(self, verdict: Any) -> None:
         self.verdict = verdict
         self.passed = verdict.verdict == "COMPLETE"
         self.summary = verdict.summary
