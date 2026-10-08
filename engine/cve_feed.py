@@ -116,7 +116,7 @@ class CveFeed:
         min_confidence: float = 0.7,
         cache_dir: str | None = None,
         ttl_seconds: int = DEFAULT_TTL_SECONDS,
-    ):
+    ) -> None:
         self.workdir = os.path.abspath(workdir)
         self.source = (source or "nvd").lower()
         if self.source not in {"nvd", "github", "both"}:

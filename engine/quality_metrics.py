@@ -15,12 +15,14 @@ import os
 import subprocess
 from typing import Any
 
+from engine.config import QualityConfig
+
 #: (abs workdir, artifact_path) → snapshot for the latest successful read in
 #: this process. One entry per producer; a later surface never re-runs it.
 _snapshot_cache: dict[tuple[str, str], dict[str, Any]] = {}
 
 
-def read_quality_snapshot(workdir: str, config) -> dict[str, Any]:
+def read_quality_snapshot(workdir: str, config: QualityConfig) -> dict[str, Any]:
     """Run a configured producer once and read its JSON artifact.
 
     Values and targets are supplied by the repository. `stage` is descriptive
@@ -210,7 +212,7 @@ def quality_snapshot_peek(workdir: str, artifact_path: str = "") -> dict[str, An
     return None
 
 
-def _apply_modes(snapshot: dict[str, Any], config) -> dict[str, Any]:
+def _apply_modes(snapshot: dict[str, Any], config: QualityConfig) -> dict[str, Any]:
     """Clone a cached AVAILABLE snapshot under a caller's per-metric modes.
     The cache stores the raw computed snapshot; this re-derives each metric's
     ``mode`` and ``met_target`` from the CALLER's config so one shared set of

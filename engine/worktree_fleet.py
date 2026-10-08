@@ -14,7 +14,10 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import TYPE_CHECKING, Iterable, Sequence
+
+if TYPE_CHECKING:
+    from engine.worktree_manager import WorktreeRecord
 
 from engine.config import load_defaults
 from engine.evidence_bounds import MAX_EVIDENCE_CHARS, bound_evidence
@@ -25,7 +28,7 @@ class FleetValidationError(WorktreeError):
     """Raised when a fleet manifest or concurrency cap is invalid."""
 
 
-def _command(value, field: str, task_id: str) -> tuple[str, ...] | None:
+def _command(value: object, field: str, task_id: str) -> tuple[str, ...] | None:
     if value is None:
         return None
     if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
@@ -102,7 +105,7 @@ class FleetLane:
         )
 
 
-def _validate_cap(cap) -> int:
+def _validate_cap(cap: object) -> int:
     if isinstance(cap, bool) or not isinstance(cap, int) or cap < 1:
         raise FleetValidationError(
             f"max_concurrent_worktrees must be a positive integer, got {cap!r}"
@@ -179,7 +182,7 @@ class WorktreeFleet:
         *,
         manager: WorktreeManager | None = None,
         max_concurrent_worktrees: int | None = None,
-    ):
+    ) -> None:
         self.manager = manager or WorktreeManager(workdir)
         defaults = load_defaults(str(self.manager.main_root))
         configured_cap = defaults.max_concurrent_worktrees
@@ -188,7 +191,7 @@ class WorktreeFleet:
         )
 
     @staticmethod
-    def lanes_from_manifest(manifest) -> list[FleetLane]:
+    def lanes_from_manifest(manifest: object) -> list[FleetLane]:
         if isinstance(manifest, dict):
             manifest = manifest.get("lanes")
         if not isinstance(manifest, list) or not manifest:
@@ -352,7 +355,7 @@ class WorktreeFleet:
         )
         return True
 
-    def _run_lane(self, lane: FleetLane, record) -> dict:
+    def _run_lane(self, lane: FleetLane, record: WorktreeRecord) -> dict:
         stages = [("running", lane.command)]
         if lane.guard is not None:
             stages.append(("guarding", lane.guard))

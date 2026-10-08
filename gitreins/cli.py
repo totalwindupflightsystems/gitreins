@@ -3389,6 +3389,19 @@ def cmd_commit_audit(args: argparse.Namespace) -> None:
         "commit_message": message,
     }
 
+    # GR-148: per-invocation review profile / effort overrides. The profile
+    # name overrides repo config; effort overrides beat repo config too —
+    # the profile default sits beneath both.
+    overrides: dict = {}
+    profile_override = getattr(args, "review_profile", None)
+    effort_flags = getattr(args, "review_effort", None)
+    if profile_override:
+        overrides["review_profile"] = profile_override
+    if effort_flags:
+        overrides["review_effort"] = _parse_review_effort_flags(effort_flags)
+    if overrides:
+        task["commit_audit_overrides"] = overrides
+
     result = pipeline.run(task, trigger=trigger)
 
     # Check if audit stage blocked
@@ -3831,7 +3844,9 @@ def cmd_mcp_server(_args: argparse.Namespace) -> None:
     server.run_stdio()
 
 
-def main() -> None:
+def build_parser() -> argparse.ArgumentParser:
+    """Build the gitreins argument parser (split out of main for GR-148
+    testability of the review-profile/effort CLI surface)."""
     parser = argparse.ArgumentParser(description="GitReins — Git-Native Agent Co-Harness")
     parser.add_argument("--version", action="version", version=f"gitreins {__version__}")
     sub = parser.add_subparsers(dest="command")
@@ -4186,6 +4201,20 @@ def main() -> None:
     audit_p.add_argument(
         "message", nargs="?", help="Commit message (reads from COMMIT_EDITMSG if omitted)"
     )
+    # GR-148: selectable review profile + effort override.
+    audit_p.add_argument(
+        "--review-profile",
+        choices=["quick", "standard", "deep"],
+        default=None,
+        help="Review policy preset: quick (single-pass triage), standard (default), deep (multi-pass with estimates + remediation brief). Overrides repo config.",
+    )
+    audit_p.add_argument(
+        "--review-effort",
+        action="append",
+        default=None,
+        metavar="KEY=VALUE",
+        help="Per-invocation effort override, repeatable (e.g. --review-effort max_llm_calls=4 --review-effort time_budget_s=240). Takes precedence over repo config, which takes precedence over the profile default.",
+    )
 
     # resolve (JEVRES-002) — the Jev resolution gate's CLI surface
     resolve_p = sub.add_parser(
@@ -4391,6 +4420,33 @@ def main() -> None:
     )
     serve_p.add_argument("--open", action="store_true", help="Open the browser automatically")
 
+    return parser
+
+
+def _parse_review_effort_flags(flags: list[str]) -> dict:
+    """Parse repeatable --review-effort KEY=VALUE flags into an override dict.
+
+    Numeric values are coerced to int/float so the EffortLevel fields type
+    correctly. An invalid pair exits 2 — a silently dropped budget override
+    would widen the review's budget without the caller knowing.
+    """
+    import sys as _sys
+
+    override: dict = {}
+    for pair in flags:
+        key, _, value = pair.partition("=")
+        key, value = key.strip(), value.strip()
+        if not key or not value:
+            print(f"Invalid --review-effort override: {pair!r} (expected KEY=VALUE)")
+            _sys.exit(2)
+        if value.replace(".", "", 1).isdigit():
+            value = float(value) if "." in value else int(value)
+        override[key] = value
+    return override
+
+
+def main() -> None:
+    parser = build_parser()
     args = parser.parse_args()
 
     # Setup logging

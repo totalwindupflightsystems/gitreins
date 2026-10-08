@@ -217,7 +217,7 @@ _REASON_ACTIONS = {
 RESOLUTION_SURFACES = ("cli", "mcp", "predispatch", "judge_prescreen")
 
 
-def resolution_config(workdir: str = ".") -> Any:
+def resolution_config(workdir: str = ".") -> Any:  # noqa: ANN401
     """The effective resolution defaults for *workdir* (built-ins + config.yaml).
 
     Import is lazy and failure-tolerant on purpose: ``engine.config`` reads
@@ -236,7 +236,10 @@ def resolution_config(workdir: str = ".") -> Any:
 
 
 def surface_enabled(
-    surface: str, *, workdir: str = ".", defaults: Any = None
+    surface: str,
+    *,
+    workdir: str = ".",
+    defaults: Any = None,  # noqa: ANN401
 ) -> tuple[bool, str | None]:
     """Is *surface* enabled by config, and why not when it is not?
 
@@ -445,7 +448,7 @@ def is_excluded_path_for_surface(
     *,
     egress_exclude: tuple[str, ...] = (),
     workdir: str = ".",
-    defaults: Any = None,
+    defaults: Any = None,  # noqa: ANN401
 ) -> bool:
     """:func:`is_excluded_path` PLUS the config's egress exclusion patterns.
 
@@ -475,7 +478,7 @@ def is_excluded_path_for_surface(
     )
 
 
-def _configured_egress_exclude(*, workdir: str = ".", defaults: Any = None) -> tuple[str, ...]:
+def _configured_egress_exclude(*, workdir: str = ".", defaults: Any = None) -> tuple[str, ...]:  # noqa: ANN401
     """Read ``resolution.egress_exclude`` from config; empty tuple when absent."""
     cfg = defaults if defaults is not None else resolution_config(workdir)
     if cfg is None:
@@ -1197,7 +1200,7 @@ class JevCallResult:
         return self.payload is not None
 
 
-def _as_probability(value: Any) -> float | None:
+def _as_probability(value: Any) -> float | None:  # noqa: ANN401
     """Parse a noul probability, rejecting bools and out-of-range values."""
     if isinstance(value, bool) or not isinstance(value, (int, float, str)):
         return None
@@ -1210,7 +1213,7 @@ def _as_probability(value: Any) -> float | None:
     return number
 
 
-def _as_score(value: Any) -> float | None:
+def _as_score(value: Any) -> float | None:  # noqa: ANN401
     """Parse a ``score`` answer.
 
     A score is NOT a probability: measured live (2026-09-20), the endpoint
@@ -1233,7 +1236,7 @@ def _as_score(value: Any) -> float | None:
     return number
 
 
-def parse_answers(payload: Any) -> tuple[dict[str, TypedAnswer], str | None]:
+def parse_answers(payload: Any) -> tuple[dict[str, TypedAnswer], str | None]:  # noqa: ANN401
     """Validate and type the endpoint payload; a deviation is a named failure.
 
     Fail-closed: an answer we cannot read is an ABSTAIN, never a default
@@ -1290,7 +1293,7 @@ def parse_answers(payload: Any) -> tuple[dict[str, TypedAnswer], str | None]:
     return typed, None
 
 
-def _float_map(value: Any) -> dict[str, float] | None:
+def _float_map(value: Any) -> dict[str, float] | None:  # noqa: ANN401
     if not isinstance(value, dict):
         return None
     out: dict[str, float] = {}

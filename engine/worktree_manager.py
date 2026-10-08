@@ -45,6 +45,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
+from typing import Callable, Iterator
 
 # Task IDs become path components and branch names.  Keep the shape strict:
 # letters, digits, hyphen, underscore, dot — no separators, no traversal.
@@ -353,11 +354,11 @@ def read_disk_verdict(tree: str | os.PathLike[str]) -> dict | None:
     return data
 
 
-def _exclusive_operation(method):
+def _exclusive_operation(method: Callable[..., object]) -> Callable[..., object]:
     """Serialize registry read-modify-write operations across processes."""
 
     @wraps(method)
-    def wrapped(self, *args, **kwargs):
+    def wrapped(self: object, *args: object, **kwargs: object) -> object:
         with self._exclusive_lock():
             return method(self, *args, **kwargs)
 
@@ -375,11 +376,11 @@ class WorktreeManager:
     def __init__(
         self,
         workdir: str | os.PathLike[str] | None = None,
-        clock=time.time,
+        clock: Callable[[], float] = time.time,
         *,
         venv_source: str | os.PathLike[str] | None = None,
         venv_name: str | None = None,
-    ):
+    ) -> None:
         from engine.repo_paths import resolve_worktree_paths
 
         self._clock = clock
@@ -408,7 +409,7 @@ class WorktreeManager:
             )
 
     @contextmanager
-    def _exclusive_lock(self):
+    def _exclusive_lock(self) -> Iterator[None]:
         """Hold one advisory lock for nested registry and merge operations."""
         depth = getattr(self._lock_state, "depth", 0)
         if depth:
@@ -893,8 +894,8 @@ class WorktreeManager:
         force: bool = False,
         actor: str | None = None,
         reason: str = "explicit judge-gate override",
-        guard_runner=None,
-        judge_runner=None,
+        guard_runner: Callable[[Path], object] | None = None,
+        judge_runner: Callable[[Path, str], object] | None = None,
     ) -> dict:
         """Apply a task worktree to canonical main only after safety gates."""
         task_id = validate_task_id(task_id)
@@ -1220,7 +1221,7 @@ class WorktreeManager:
         return None
 
     def _fresh_verdict(
-        self, task_id: str, record: WorktreeRecord, source_head: str, fresh
+        self, task_id: str, record: WorktreeRecord, source_head: str, fresh: object
     ) -> dict | None:
         if isinstance(fresh, dict) and fresh.get("passed") is True:
             if fresh.get("commit", fresh.get("source_commit")) == source_head:
@@ -1228,7 +1229,7 @@ class WorktreeManager:
         return self._find_verdict(task_id, record, source_head)
 
     @staticmethod
-    def _runner_passed(result) -> bool:
+    def _runner_passed(result: object) -> bool:
         if isinstance(result, bool):
             return result
         return bool(getattr(result, "passed", False))

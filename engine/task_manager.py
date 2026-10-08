@@ -21,7 +21,7 @@ import os
 import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
@@ -65,7 +65,7 @@ class Task:
 class TaskManager:
     """Manage tasks stored in .gitreins/tasks.yaml."""
 
-    def __init__(self, workdir: str = "."):
+    def __init__(self, workdir: str = ".") -> None:
         self.workdir = os.path.abspath(workdir)
         self._config_dir = os.path.join(self.workdir, ".gitreins")
         self._tasks_file = os.path.join(self._config_dir, "tasks.yaml")
@@ -78,7 +78,7 @@ class TaskManager:
     def _tasks_lock_file(self) -> str:
         return self._tasks_file + TASKS_LOCK_SUFFIX
 
-    def _locked_load_save(self, mutate) -> None:
+    def _locked_load_save(self, mutate: Callable[[], None]) -> None:
         """Run a load-modify-save cycle against tasks.yaml under an exclusive flock.
 
         Concurrent judges (wave closure) each run `gitreins task complete` in their
@@ -333,7 +333,7 @@ class TaskManager:
         self._locked_load_save(self._apply_complete(id))
         return task
 
-    def _apply_status(self, id: str, status: str):
+    def _apply_status(self, id: str, status: str) -> Callable[[], None]:
         """Return a zero-arg mutate() that re-resolves `id` post-reload and sets status.
 
         The lock's reload replaces Task objects, so the closure must not close
@@ -341,7 +341,7 @@ class TaskManager:
         if the task vanished between the pre-check and lock acquisition.
         """
 
-        def mutate():
+        def mutate() -> None:
             task = self._tasks.get(id)
             if not task:
                 raise KeyError(f"Task not found: {id}")
@@ -349,10 +349,10 @@ class TaskManager:
 
         return mutate
 
-    def _apply_complete(self, id: str):
+    def _apply_complete(self, id: str) -> Callable[[], None]:
         """Same contract as _apply_status, plus the completed_at stamp."""
 
-        def mutate():
+        def mutate() -> None:
             task = self._tasks.get(id)
             if not task:
                 raise KeyError(f"Task not found: {id}")
@@ -395,7 +395,7 @@ class TaskManager:
         if id not in self._tasks:
             raise KeyError(f"Task not found: {id}")
 
-        def mutate():
+        def mutate() -> None:
             self._tasks.pop(id, None)
 
         self._locked_load_save(mutate)

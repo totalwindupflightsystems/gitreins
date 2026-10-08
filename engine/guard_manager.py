@@ -1384,7 +1384,7 @@ class GuardManager:
         grade_full_tree: bool = False,
         persist_log: bool = True,
         scan_root: str | None = None,
-    ):
+    ) -> None:
         self.workdir = os.path.abspath(workdir)
         self.scan_root = os.path.abspath(scan_root) if scan_root else self.workdir
         if not os.path.isdir(self.scan_root):

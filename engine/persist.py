@@ -68,7 +68,10 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 
 from engine import usage
+from engine.judge import JudgeResult
 from engine.repo_paths import WorktreeResolutionError, resolve_worktree_identity
+from engine.resolution import ResolutionVerdict
+from engine.task_manager import Task
 
 logger = logging.getLogger("gitreins.persist")
 
@@ -174,7 +177,7 @@ REMOTE_LEGACY_HISTORY_REF = "refs/remotes/origin/gitreins"
 class VerdictPersister:
     """Persist verdict results and provide history lookup for reports."""
 
-    def __init__(self, workdir: str = "."):
+    def __init__(self, workdir: str = ".") -> None:
         self.workdir = os.path.abspath(workdir)
         self.config = load_history_config(self.workdir)
 
@@ -950,7 +953,7 @@ class VerdictPersister:
 # ── Shared verdict persistence (CLI + MCP) ─────────────────────
 
 
-def _verdict_item_dict(item) -> dict:
+def _verdict_item_dict(item: object) -> dict:
     """One verdict item as persisted — attribution keys only when present.
 
     The three-key shape is today's contract; ``resolution_probability`` and
@@ -968,7 +971,7 @@ def _verdict_item_dict(item) -> dict:
     return d
 
 
-def build_verdict_data(workdir: str, task, result) -> dict:
+def build_verdict_data(workdir: str, task: Task, result: JudgeResult) -> dict:
     """Build the verdict payload persisted for an evaluation.
 
     Behaviour moved verbatim from the CLI's historical ``_persist_result``:
@@ -1047,8 +1050,8 @@ def build_verdict_data(workdir: str, task, result) -> dict:
 
 def persist_evaluation(
     workdir: str,
-    task,
-    result,
+    task: Task,
+    result: JudgeResult,
     *,
     extra: dict | None = None,
     collect_evidence: Callable[[str], dict] | None = None,
@@ -1097,7 +1100,7 @@ RESOLUTION_ENTRY_ID = "resolution"
 RESOLUTION_USAGE_STEP = "resolution"
 
 
-def _is_decision(verdict) -> bool:
+def _is_decision(verdict: ResolutionVerdict) -> bool:
     """True only for a real band — an ABSTAIN is a non-event, not a verdict.
 
     ABSTAIN is the engine's fail-closed answer for surface-disabled,
@@ -1113,7 +1116,7 @@ def _is_decision(verdict) -> bool:
     return getattr(verdict, "abstain_reason", None) is None
 
 
-def build_resolution_record(verdict, *, surface: str) -> dict:
+def build_resolution_record(verdict: ResolutionVerdict, *, surface: str) -> dict:
     """The persisted payload for one resolution-gate verdict.
 
     A resolution record is NOT a task verdict: no ``passed`` (the gate returns a
@@ -1138,7 +1141,7 @@ def build_resolution_record(verdict, *, surface: str) -> dict:
     }
 
 
-def _token_count(value) -> int | None:
+def _token_count(value: object) -> int | None:
     """A reported token count as the schema stores it, else ``None``.
 
     The engine types both counts as ``int | None`` (a non-int usage value is
@@ -1150,7 +1153,7 @@ def _token_count(value) -> int | None:
     return value
 
 
-def _append_resolution_usage(workdir: str, verdict, *, ts: float) -> bool:
+def _append_resolution_usage(workdir: str, verdict: ResolutionVerdict, *, ts: float) -> bool:
     """Append the Jev call's real usage as one ``step: "resolution"`` row.
 
     Only a parsed, completed HTTP response reaches this point (every ABSTAIN
@@ -1180,7 +1183,7 @@ def _append_resolution_usage(workdir: str, verdict, *, ts: float) -> bool:
     )
 
 
-def persist_resolution(workdir: str, verdict, *, surface: str) -> str:
+def persist_resolution(workdir: str, verdict: ResolutionVerdict, *, surface: str) -> str:
     """Persist one resolution-gate verdict — the ONE path every surface uses.
 
     ``gitreins resolve``, ``gitreins preflight`` and the MCP ``context.resolve``

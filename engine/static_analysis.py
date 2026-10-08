@@ -378,7 +378,7 @@ def _parse_pyright_json(data: dict, tool: str = "pyright") -> list[StaticDiag]:
     return diagnostics
 
 
-def _parse_sqlfluff_json(data, tool: str = "sqlfluff") -> list[StaticDiag]:
+def _parse_sqlfluff_json(data: object, tool: str = "sqlfluff") -> list[StaticDiag]:
     diagnostics: list[StaticDiag] = []
     # sqlfluff output is a list of file results
     files = data if isinstance(data, list) else [data]
@@ -463,7 +463,7 @@ def _parse_clippy_json(text: str, tool: str = "clippy") -> list[StaticDiag]:
     return diagnostics
 
 
-def _parse_eslint_json(data, tool: str = "eslint") -> list[StaticDiag]:
+def _parse_eslint_json(data: object, tool: str = "eslint") -> list[StaticDiag]:
     """Parse eslint --format=json output.
 
     ESLint JSON output is a list of file results, each with ``filePath``

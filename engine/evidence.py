@@ -522,7 +522,7 @@ def _guard_check(result: object, flags: dict[str, bool]) -> dict[str, Any]:
     }
 
 
-def _item_field(item: object, name: str) -> Any:
+def _item_field(item: object, name: str) -> Any:  # noqa: ANN401 - dict or object field, dynamic by design
     """Read a criterion field off either a dict or a verdict item object."""
     if isinstance(item, dict):
         return item.get(name)
@@ -698,7 +698,7 @@ def judge_evidence(
     return document
 
 
-def report_evidence(entries: Any, storage_mode: str = "") -> dict[str, Any]:
+def report_evidence(entries: object, storage_mode: str = "") -> dict[str, Any]:
     """Build the ``report`` evidence document from verdict-history entries.
 
     History has no single verdict, so ``passed`` stays ``null`` (``outcome:

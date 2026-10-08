@@ -56,13 +56,13 @@ def usage_path(workdir: str) -> str:
     return os.path.join(workdir, ".gitreins", USAGE_FILE)
 
 
-def _as_number(value: Any) -> float | None:
+def _as_number(value: object) -> float | None:  # JSON-sourced, checked below
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     return float(value)
 
 
-def _counter(value: Any) -> int:
+def _counter(value: object) -> int:  # JSON-sourced, checked below
     """A token count as the schema stores it: a non-negative int, never a bool."""
     number = _as_number(value)
     if number is None or number < 0:

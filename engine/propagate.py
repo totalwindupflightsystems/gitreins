@@ -19,7 +19,7 @@ class Propagator:
     are preserved (target wins on conflicts).
     """
 
-    def __init__(self, workdir: str):
+    def __init__(self, workdir: str) -> None:
         self.workdir = os.path.abspath(workdir)
 
     # ── Public API ──────────────────────────────────────────────

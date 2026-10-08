@@ -119,7 +119,7 @@ class AntaresScanner:
         workdir: str = ".",
         model_id: str = _DEFAULT_MODEL_ID,
         use_ml: bool = False,
-    ):
+    ) -> None:
         self.workdir = os.path.abspath(workdir)
         self.model_id = model_id
         self._use_ml = use_ml

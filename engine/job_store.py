@@ -31,11 +31,14 @@ Record shape::
     }
 """
 
+from __future__ import annotations
+
 import json
 import logging
 import os
 import time
 import uuid
+from typing import TYPE_CHECKING
 
 logger = logging.getLogger("gitreins.job_store")
 
@@ -196,6 +199,9 @@ def release_resume_lease(fd: int) -> None:
 
 # ── EvalCap (de)serialization ───────────────────────────────────────────────
 
+if TYPE_CHECKING:
+    from engine.eval_cap import EvalCap
+
 _CAP_FIELDS = (
     "max_iterations",
     "max_seconds",
@@ -205,14 +211,14 @@ _CAP_FIELDS = (
 )
 
 
-def cap_to_dict(cap) -> dict | None:
+def cap_to_dict(cap: EvalCap | None) -> dict | None:
     """Serialize an EvalCap to its primitive fields (None → None)."""
     if cap is None:
         return None
     return {f: getattr(cap, f) for f in _CAP_FIELDS}
 
 
-def cap_from_dict(d: dict | None):
+def cap_from_dict(d: dict | None) -> EvalCap | None:
     """Rebuild an EvalCap from a cap_to_dict payload (None → None)."""
     if not d:
         return None
@@ -227,7 +233,7 @@ def cap_from_dict(d: dict | None):
     )
 
 
-def pid_alive(pid) -> bool:
+def pid_alive(pid: int | None) -> bool:
     """True if pid looks like a live process (None/0/invalid → False)."""
     if not isinstance(pid, int) or isinstance(pid, bool) or pid <= 0:
         return False
