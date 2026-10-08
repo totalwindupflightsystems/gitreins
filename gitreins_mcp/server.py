@@ -648,7 +648,7 @@ class GitReinsMCPServer:
 
         try:
             result = subprocess.run(
-                ["git", "commit", "-m", message],
+                ["git", "commit", "-m", message],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=30,

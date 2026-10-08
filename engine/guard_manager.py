@@ -334,7 +334,7 @@ def _get_staged_files(workdir: str) -> list[str]:
     """
     try:
         head_check = subprocess.run(
-            ["git", "rev-parse", "--verify", "-q", "HEAD"],
+            ["git", "rev-parse", "--verify", "-q", "HEAD"],  # noqa: S607 - git resolved via PATH by design
             capture_output=True,
             text=True,
             timeout=5,
@@ -346,7 +346,7 @@ def _get_staged_files(workdir: str) -> list[str]:
             # In a fresh repo, every staged file is "new" but the
             # guard should still scan them for secrets/lint/etc.
             result = subprocess.run(
-                ["git", "ls-files", "--cached"],
+                ["git", "ls-files", "--cached"],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -355,7 +355,7 @@ def _get_staged_files(workdir: str) -> list[str]:
             )
         else:
             result = subprocess.run(
-                ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+                ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -377,7 +377,7 @@ def _worktree_tracked_paths(workdir: str) -> set[str]:
     """
     try:
         result = subprocess.run(
-            ["git", "ls-files", "--cached"],
+            ["git", "ls-files", "--cached"],  # noqa: S607 - git resolved via PATH by design
             capture_output=True,
             text=True,
             timeout=10,
@@ -443,7 +443,7 @@ def _get_worktree_changed_files(workdir: str) -> list[str]:
 
     try:
         result = subprocess.run(
-            [
+            [  # noqa: S607 - git resolved via PATH by design
                 "git",
                 "diff",
                 "--name-only",
@@ -479,7 +479,7 @@ def _tree_source_files(workdir: str, suffixes: tuple[str, ...]) -> list[str]:
     """
     try:
         proc = subprocess.run(
-            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],  # noqa: S607 - git resolved via PATH by design
             cwd=workdir,
             capture_output=True,
             timeout=15,
@@ -2304,7 +2304,7 @@ class GuardManager:
                 try:
                     if staged_only and not explicit_scope:
                         staged_result = subprocess.run(
-                            ["git", "show", f":{fpath}"],
+                            ["git", "show", f":{fpath}"],  # noqa: S607 - git resolved via PATH by design
                             capture_output=True,
                             text=True,
                             timeout=10,
@@ -2932,7 +2932,7 @@ class GuardManager:
         """
         try:
             result = subprocess.run(
-                ["skylos", self.workdir, "--format", "json", "--no-grep-verify"],
+                ["skylos", self.workdir, "--format", "json", "--no-grep-verify"],  # noqa: S607 - skylos is a user-installed tool resolved via PATH
                 capture_output=True,
                 text=True,
                 timeout=120,

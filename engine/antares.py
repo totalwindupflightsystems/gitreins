@@ -576,7 +576,7 @@ class AntaresScanner:
         """Return staged file paths relative to the workdir."""
         try:
             result = subprocess.run(
-                ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+                ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=10,

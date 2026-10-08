@@ -139,7 +139,7 @@ def _head_sha(workdir: str) -> str:
     """Best-effort HEAD sha; an empty string when the checkout has none."""
     try:
         result = subprocess.run(
-            ["git", "-C", workdir, "rev-parse", "HEAD"],
+            ["git", "-C", workdir, "rev-parse", "HEAD"],  # noqa: S607 - git resolved via PATH by design
             capture_output=True,
             text=True,
             timeout=10,

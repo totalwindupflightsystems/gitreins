@@ -575,7 +575,7 @@ class DisposableWorktreeManager:
         try:
             try:
                 process = subprocess.Popen(
-                    ["sh", "-c", command],
+                    ["sh", "-c", command],  # noqa: S607 - sh -c wrapper; command from disposable-worktree record
                     cwd=record.path,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,

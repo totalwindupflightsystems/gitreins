@@ -487,7 +487,7 @@ def _lsp_shutdown(proc: subprocess.Popen[bytes], timeout: float = 30.0) -> None:
 def _get_staged_files(workdir: str) -> list[str]:
     try:
         result = subprocess.run(
-            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],
+            ["git", "diff", "--cached", "--name-only", "--diff-filter=ACM"],  # noqa: S607 - git resolved via PATH by design
             capture_output=True,
             text=True,
             timeout=10,

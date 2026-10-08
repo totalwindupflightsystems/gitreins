@@ -44,7 +44,7 @@ def read_quality_snapshot(workdir: str, config: QualityConfig) -> dict[str, Any]
         return _apply_modes(cached, config)
     artifact_path = os.path.join(workdir, config.artifact_path)
     try:
-        completed = subprocess.run(
+        completed = subprocess.run(  # noqa: S602 - user-configured command from quality-metrics config (trusted operator input)
             config.command,
             cwd=workdir,
             shell=True,
@@ -121,7 +121,7 @@ def _diff_scope(workdir: str, artifact: dict[str, Any]) -> dict[str, Any]:
     changed_files: list[str] = []
     try:
         staged = subprocess.run(
-            ["git", "diff", "--cached", "--name-only", "-z", "HEAD"],
+            ["git", "diff", "--cached", "--name-only", "-z", "HEAD"],  # noqa: S607 - git resolved via PATH by design
             cwd=workdir,
             capture_output=True,
             check=False,
@@ -131,7 +131,7 @@ def _diff_scope(workdir: str, artifact: dict[str, Any]) -> dict[str, Any]:
             changed_files = staged_files
         else:
             unstaged = subprocess.run(
-                ["git", "diff", "--name-only", "-z", "HEAD"],
+                ["git", "diff", "--name-only", "-z", "HEAD"],  # noqa: S607 - git resolved via PATH by design
                 cwd=workdir,
                 capture_output=True,
                 check=False,
