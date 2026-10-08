@@ -27,7 +27,7 @@ from engine.llm import LLMResponse, ToolCall
 class TestReadFile:
     """Test _tool_read_file — path safety, error handling — step-1-4-1-1."""
 
-    def test_read_existing_file(self, evaluator, tmp_workdir):
+    def test_read_existing_file(self, evaluator: object, tmp_workdir: str) -> None:
         """read_file of existing file returns content."""
         path = os.path.join(tmp_workdir, "hello.txt")
         with open(path, "w") as f:
@@ -37,19 +37,19 @@ class TestReadFile:
         assert result["path"] == "hello.txt"
         assert result["total_lines"] == 1
 
-    def test_read_nonexistent_file(self, evaluator):
+    def test_read_nonexistent_file(self, evaluator: object) -> None:
         """read_file of nonexistent file returns error: File not found."""
         result = evaluator._tool_read_file("nonexistent.txt")
         assert "error" in result
         assert "File not found" in result["error"]
 
-    def test_read_path_traversal_outside_workdir(self, evaluator):
+    def test_read_path_traversal_outside_workdir(self, evaluator: object) -> None:
         """read_file with path containing '../' outside workdir returns error."""
         result = evaluator._tool_read_file("../etc/passwd")
         assert "error" in result
         assert "Path outside working tree" in result["error"]
 
-    def test_read_directory_returns_error(self, evaluator, tmp_workdir):
+    def test_read_directory_returns_error(self, evaluator: object, tmp_workdir: str) -> None:
         """read_file of a directory returns error: Path is a directory."""
         subdir = os.path.join(tmp_workdir, "subdir")
         os.makedirs(subdir)
@@ -57,7 +57,7 @@ class TestReadFile:
         assert "error" in result
         assert "Path is a directory" in result["error"]
 
-    def test_read_file_with_offset(self, evaluator, tmp_workdir):
+    def test_read_file_with_offset(self, evaluator: object, tmp_workdir: str) -> None:
         """read_file with offset reads from given line."""
         path = os.path.join(tmp_workdir, "multiline.txt")
         with open(path, "w") as f:
@@ -70,7 +70,7 @@ class TestReadFile:
         # line1 should not be present
         assert "line1" not in content
 
-    def test_read_file_offset_exceeds_length(self, evaluator, tmp_workdir):
+    def test_read_file_offset_exceeds_length(self, evaluator: object, tmp_workdir: str) -> None:
         """read_file with offset exceeding file length returns error."""
         path = os.path.join(tmp_workdir, "short.txt")
         with open(path, "w") as f:
@@ -78,7 +78,7 @@ class TestReadFile:
         result = evaluator._tool_read_file("short.txt", offset=10)
         assert "error" in result
 
-    def test_read_file_byte_mode(self, evaluator, tmp_workdir):
+    def test_read_file_byte_mode(self, evaluator: object, tmp_workdir: str) -> None:
         """Byte mode reads raw bytes from the file."""
         path = os.path.join(tmp_workdir, "data.txt")
         with open(path, "wb") as f:
@@ -91,7 +91,7 @@ class TestReadFile:
         assert result["total_bytes"] == 26
         assert result["has_more"] is True
 
-    def test_read_file_byte_mode_full_file(self, evaluator, tmp_workdir):
+    def test_read_file_byte_mode_full_file(self, evaluator: object, tmp_workdir: str) -> None:
         """Byte mode without byte_limit reads to end of file."""
         path = os.path.join(tmp_workdir, "data.txt")
         with open(path, "wb") as f:
@@ -103,7 +103,7 @@ class TestReadFile:
         assert result["total_bytes"] == 11
         assert result["has_more"] is False
 
-    def test_read_file_byte_offset_exceeds_size(self, evaluator, tmp_workdir):
+    def test_read_file_byte_offset_exceeds_size(self, evaluator: object, tmp_workdir: str) -> None:
         """Byte offset exceeding file size returns error."""
         path = os.path.join(tmp_workdir, "small.txt")
         with open(path, "wb") as f:
@@ -113,7 +113,7 @@ class TestReadFile:
         assert "exceeds file size" in result["error"]
         assert result["total_bytes"] == 2
 
-    def test_read_file_default_mode_is_lines(self, evaluator, tmp_workdir):
+    def test_read_file_default_mode_is_lines(self, evaluator: object, tmp_workdir: str) -> None:
         """Default mode is 'lines' — offset/limit still work as before."""
         path = os.path.join(tmp_workdir, "lines.txt")
         with open(path, "w") as f:
@@ -124,7 +124,7 @@ class TestReadFile:
         assert result["total_lines"] == 5
         assert result["shown_lines"] == 2
 
-    def test_read_file_byte_mode_binary_escaping(self, evaluator, tmp_workdir):
+    def test_read_file_byte_mode_binary_escaping(self, evaluator: object, tmp_workdir: str) -> None:
         """Byte mode with binary content uses replacement chars, doesn't crash."""
         path = os.path.join(tmp_workdir, "binary.bin")
         with open(path, "wb") as f:
@@ -140,26 +140,28 @@ class TestReadFile:
 class TestRunCommand:
     """Test _tool_run_command — execution, output, timeout — step-1-4-1-2."""
 
-    def test_run_echo_hello(self, evaluator):
+    def test_run_echo_hello(self, evaluator: object) -> None:
         """run_command('echo hello') → exit_code=0, output contains 'hello'."""
         result = evaluator._tool_run_command("echo hello")
         assert result["exit_code"] == 0
         assert "hello" in result["output"]
         assert result["cmd"] == "echo hello"
 
-    def test_run_false_command(self, evaluator):
+    def test_run_false_command(self, evaluator: object) -> None:
         """run_command('false') → exit_code=1, output captured."""
         result = evaluator._tool_run_command("false")
         assert result["exit_code"] == 1
 
-    def test_run_command_timeout(self, evaluator, llm_client, tmp_workdir):
+    def test_run_command_timeout(
+        self, evaluator: object, llm_client: object, tmp_workdir: str
+    ) -> None:
         """run_command with short timeout → timeout error in <5s."""
         fast_eval = AgenticEvaluator(llm_client, tmp_workdir, max_iterations=5, command_timeout=2)
         result = fast_eval._tool_run_command("sleep 5")
         assert "error" in result
         assert "timed out" in result["error"]
 
-    def test_output_truncated_at_4000(self, evaluator):
+    def test_output_truncated_at_4000(self, evaluator: object) -> None:
         """Output is bounded at 4000 chars and the truncation is REPORTED.
 
         QA-GITREINS-POC-11: the marker moved from the old head-only suffix
@@ -191,7 +193,7 @@ class TestLastCommandPgidReap:
     happy path the reap costs one /proc scan.
     """
 
-    def test_run_command_records_pgid(self, evaluator):
+    def test_run_command_records_pgid(self, evaluator: object) -> None:
         """A successful run_command stores the group leader's pid."""
         result = evaluator._tool_run_command("echo hello")
         assert result["exit_code"] == 0
@@ -199,13 +201,15 @@ class TestLastCommandPgidReap:
         assert not isinstance(evaluator._last_command_pgid, bool)
         assert evaluator._last_command_pgid > 1
 
-    def test_refused_command_records_no_pgid(self, evaluator):
+    def test_refused_command_records_no_pgid(self, evaluator: object) -> None:
         """A refused busy-wait never ran — no pgid is recorded."""
         result = evaluator._tool_run_command("while :; do :; done")
         assert result.get("refused") is True
         assert evaluator._last_command_pgid is None
 
-    def test_evaluate_finally_kills_a_live_group(self, evaluator, llm_client):
+    def test_evaluate_finally_kills_a_live_group(
+        self, evaluator: object, llm_client: object
+    ) -> None:
         """The hook, exercised through evaluate()'s real finally: a live
         process group recorded before the LLM 'call' is gone after
         evaluate() returns (here via an LLM exception — the cap-exceeded
@@ -228,7 +232,9 @@ class TestLastCommandPgidReap:
         # The finally clears the recorded pgid either way.
         assert evaluator._last_command_pgid is None
 
-    def test_evaluate_finally_is_noop_without_a_recorded_group(self, evaluator, llm_client):
+    def test_evaluate_finally_is_noop_without_a_recorded_group(
+        self, evaluator: object, llm_client: object
+    ) -> None:
         """No run_command this eval → the finally kills nothing and clears
         nothing (no recorded pgid)."""
         verdict_json = '{"verdict":"COMPLETE","items":[],"summary":"done"}'
@@ -241,7 +247,7 @@ class TestLastCommandPgidReap:
 class TestSearchPattern:
     """Test _tool_search_pattern — regex matching, dir skipping, result capping — step-1-4-1-3."""
 
-    def test_search_finds_todo(self, evaluator, tmp_workdir):
+    def test_search_finds_todo(self, evaluator: object, tmp_workdir: str) -> None:
         """search_pattern finds TODO comments in working files."""
         path = os.path.join(tmp_workdir, "code.py")
         with open(path, "w") as f:
@@ -249,7 +255,7 @@ class TestSearchPattern:
         result = evaluator._tool_search_pattern("TODO")
         assert result["count"] >= 2
 
-    def test_search_with_file_glob(self, evaluator, tmp_workdir):
+    def test_search_with_file_glob(self, evaluator: object, tmp_workdir: str) -> None:
         """search_pattern with file_glob='*.py' only searches Python files."""
         py_path = os.path.join(tmp_workdir, "code.py")
         txt_path = os.path.join(tmp_workdir, "notes.txt")
@@ -261,13 +267,13 @@ class TestSearchPattern:
         assert result["count"] == 1
         assert all("code.py" in m for m in result["matches"])
 
-    def test_invalid_regex_returns_error(self, evaluator):
+    def test_invalid_regex_returns_error(self, evaluator: object) -> None:
         """Invalid regex pattern returns error."""
         result = evaluator._tool_search_pattern("[invalid(regex")
         assert "error" in result
         assert "Invalid regex" in result["error"]
 
-    def test_search_skips_dot_dirs(self, evaluator, tmp_workdir):
+    def test_search_skips_dot_dirs(self, evaluator: object, tmp_workdir: str) -> None:
         """search_pattern does not descend into .git/ or __pycache__/."""
         # Create files in skipped dirs
         cache_dir = os.path.join(tmp_workdir, "__pycache__")
@@ -284,25 +290,25 @@ class TestSearchPattern:
 class TestSandbox:
     """Test sandbox_write/sandbox_read — in-memory dict — step-1-4-1-4."""
 
-    def test_sandbox_write_read(self, evaluator):
+    def test_sandbox_write_read(self, evaluator: object) -> None:
         """sandbox_write then sandbox_read returns content."""
         evaluator._tool_sandbox_write("key1", "value1")
         result = evaluator._tool_sandbox_read("key1")
         assert result["content"] == "value1"
         assert result["key"] == "key1"
 
-    def test_sandbox_write_returns_written_count(self, evaluator):
+    def test_sandbox_write_returns_written_count(self, evaluator: object) -> None:
         """sandbox_write returns written count."""
         result = evaluator._tool_sandbox_write("key2", "hello")
         assert result["written"] == 5
 
-    def test_sandbox_read_nonexistent(self, evaluator):
+    def test_sandbox_read_nonexistent(self, evaluator: object) -> None:
         """sandbox_read of nonexistent key returns error."""
         result = evaluator._tool_sandbox_read("nonexistent")
         assert "error" in result
         assert "Key not found" in result["error"]
 
-    def test_evaluate_clears_sandbox(self, evaluator, llm_client):
+    def test_evaluate_clears_sandbox(self, evaluator: object, llm_client: object) -> None:
         """evaluate() clears sandbox at start of each call."""
         evaluator._tool_sandbox_write("persist", "data")
         # Mock LLM to immediately return verdict
@@ -317,7 +323,7 @@ class TestSandbox:
 class TestDeduplication:
     """Test dedup tracking — step-1-4-1-5."""
 
-    def test_repeated_read_file_is_duplicate(self, evaluator, tmp_workdir):
+    def test_repeated_read_file_is_duplicate(self, evaluator: object, tmp_workdir: str) -> None:
         """Reading the same file twice marks second call as duplicate."""
         path = os.path.join(tmp_workdir, "dup_test.txt")
         with open(path, "w") as f:
@@ -331,7 +337,7 @@ class TestDeduplication:
         assert "path" in result2
         assert result2["path"] == "dup_test.txt"
 
-    def test_repeated_run_command_is_duplicate(self, evaluator):
+    def test_repeated_run_command_is_duplicate(self, evaluator: object) -> None:
         """Running the same command twice marks second as duplicate."""
         tc = ToolCall(id="c2", name="run_command", arguments={"cmd": "echo test"})
         _, was_dup1 = evaluator._execute_tool_with_dedup(tc)
@@ -339,7 +345,7 @@ class TestDeduplication:
         _, was_dup2 = evaluator._execute_tool_with_dedup(tc)
         assert was_dup2 is True
 
-    def test_repeated_search_pattern_is_duplicate(self, evaluator):
+    def test_repeated_search_pattern_is_duplicate(self, evaluator: object) -> None:
         """Searching the same regex twice marks second as duplicate."""
         tc = ToolCall(id="c3", name="search_pattern", arguments={"regex": r"def test_"})
         _, was_dup1 = evaluator._execute_tool_with_dedup(tc)
@@ -347,7 +353,7 @@ class TestDeduplication:
         _, was_dup2 = evaluator._execute_tool_with_dedup(tc)
         assert was_dup2 is True
 
-    def test_different_files_not_flagged(self, evaluator, tmp_workdir):
+    def test_different_files_not_flagged(self, evaluator: object, tmp_workdir: str) -> None:
         """Different files are not flagged as duplicates."""
         path1 = os.path.join(tmp_workdir, "a.txt")
         path2 = os.path.join(tmp_workdir, "b.txt")
@@ -366,7 +372,7 @@ class TestDeduplication:
 class TestVerdictParsing:
     """Test _parse_verdict — JSON parse, markdown fence, keyword fallback — step-1-4-1-6."""
 
-    def test_valid_json_verdict(self, evaluator):
+    def test_valid_json_verdict(self, evaluator: object) -> None:
         """Valid JSON verdict parses correctly."""
         content = '{"verdict":"COMPLETE","items":[{"criterion":"c1","status":"PASS","detail":"ok"}],"summary":"all good"}'
         verdict = evaluator._parse_verdict(content)
@@ -377,52 +383,52 @@ class TestVerdictParsing:
         assert verdict.items[0].detail == "ok"
         assert verdict.summary == "all good"
 
-    def test_json_in_markdown_fences(self, evaluator):
+    def test_json_in_markdown_fences(self, evaluator: object) -> None:
         """JSON wrapped in ```json``` fences is stripped and parsed."""
         content = '```json\n{"verdict":"INCOMPLETE","items":[{"criterion":"c1","status":"FAIL","detail":"missing"}],"summary":"nope"}\n```'
         verdict = evaluator._parse_verdict(content)
         assert verdict.verdict == "INCOMPLETE"
         assert len(verdict.items) == 1
 
-    def test_json_with_extra_text(self, evaluator):
+    def test_json_with_extra_text(self, evaluator: object) -> None:
         """JSON with text before/after is extracted and parsed."""
         content = 'Here is my verdict:\n{"verdict":"COMPLETE","items":[],"summary":"done"}\nHope this helps!'
         verdict = evaluator._parse_verdict(content)
         assert verdict.verdict == "COMPLETE"
 
-    def test_invalid_status_defaults_to_fail(self, evaluator):
+    def test_invalid_status_defaults_to_fail(self, evaluator: object) -> None:
         """Invalid status ('MAYBE') defaults to FAIL."""
         content = '{"verdict":"COMPLETE","items":[{"criterion":"c1","status":"MAYBE","detail":"x"}],"summary":"x"}'
         verdict = evaluator._parse_verdict(content)
         assert verdict.items[0].status == "FAIL"
 
-    def test_invalid_verdict_defaults_to_incomplete(self, evaluator):
+    def test_invalid_verdict_defaults_to_incomplete(self, evaluator: object) -> None:
         """Invalid verdict ('ALMOST') defaults to INCOMPLETE."""
         content = '{"verdict":"ALMOST","items":[],"summary":"almost done"}'
         verdict = evaluator._parse_verdict(content)
         assert verdict.verdict == "INCOMPLETE"
 
-    def test_missing_items_falls_to_keyword(self, evaluator):
+    def test_missing_items_falls_to_keyword(self, evaluator: object) -> None:
         """JSON missing 'items' key falls to keyword parse."""
         content = '{"verdict":"COMPLETE","summary":"all criteria pass"}'
         verdict = evaluator._parse_verdict(content)
         # Should fall to keyword parse (which finds 'complete' → COMPLETE)
         assert verdict.verdict == "COMPLETE"
 
-    def test_keyword_complete_detected(self, evaluator):
+    def test_keyword_complete_detected(self, evaluator: object) -> None:
         """Content with 'all criteria pass' → keyword parse yields COMPLETE."""
         content = "I have verified all criteria, everything passes and is complete."
         verdict = evaluator._parse_verdict(content)
         # Keyword fallback: "all criteria" + "pass" → COMPLETE
         assert verdict.verdict == "COMPLETE"
 
-    def test_keyword_all_criteria_pass(self, evaluator):
+    def test_keyword_all_criteria_pass(self, evaluator: object) -> None:
         """Content with 'all criteria' and 'pass' → COMPLETE."""
         content = "After reviewing, all criteria pass."
         verdict = evaluator._parse_verdict(content)
         assert verdict.verdict == "COMPLETE"
 
-    def test_empty_response_is_incomplete(self, evaluator):
+    def test_empty_response_is_incomplete(self, evaluator: object) -> None:
         """Empty response → INCOMPLETE with error summary."""
         verdict = evaluator._parse_verdict("")
         assert verdict.verdict == "INCOMPLETE"
@@ -449,7 +455,7 @@ class TestVerdictParsing:
             }
         )
 
-    def test_trailing_junk_with_brace_keeps_verdict_and_items(self, evaluator):
+    def test_trailing_junk_with_brace_keeps_verdict_and_items(self, evaluator: object) -> None:
         """AC1: trailing junk containing '}' no longer poisons the parse."""
         content = self._verdict_json("COMPLETE") + "\nNote: the } above closes the object.\n"
         verdict = evaluator._parse_verdict(content)
@@ -459,7 +465,7 @@ class TestVerdictParsing:
         assert all(i.status == "PASS" for i in verdict.items)
         assert verdict.summary == "all three pass"
 
-    def test_two_concatenated_verdict_objects_takes_first(self, evaluator):
+    def test_two_concatenated_verdict_objects_takes_first(self, evaluator: object) -> None:
         """AC2: two concatenated objects → the FIRST object's verdict and items."""
         first = self._verdict_json("COMPLETE")
         second = json.dumps(
@@ -475,28 +481,28 @@ class TestVerdictParsing:
         assert [i.criterion for i in verdict.items] == ["c1", "c2", "c3"]
         assert verdict.summary == "all three pass"
 
-    def test_trailing_prose_only_after_json(self, evaluator):
+    def test_trailing_prose_only_after_json(self, evaluator: object) -> None:
         """Trailing prose with no brace at all still parses the object."""
         content = self._verdict_json("INCOMPLETE") + "\nLet me know if that helps!"
         verdict = evaluator._parse_verdict(content)
         assert verdict.verdict == "INCOMPLETE"
         assert len(verdict.items) == 3
 
-    def test_no_json_object_records_parse_reason(self, evaluator):
+    def test_no_json_object_records_parse_reason(self, evaluator: object) -> None:
         """AC3: no JSON object at all → keyword verdict + parse reason in summary."""
         verdict = evaluator._parse_verdict("After reviewing, all criteria pass.")
         assert verdict.verdict == "COMPLETE"  # existing keyword behavior
         assert "auto-parsed" in verdict.summary
         assert "no JSON object found" in verdict.summary
 
-    def test_malformed_json_records_parse_error(self, evaluator):
+    def test_malformed_json_records_parse_error(self, evaluator: object) -> None:
         """A malformed object → keyword verdict + the JSON error in summary."""
         verdict = evaluator._parse_verdict('{"verdict": "COMPLETE", "items": [}')
         assert verdict.verdict == "COMPLETE"  # existing keyword behavior
         assert "auto-parsed" in verdict.summary
         assert "JSON parse failed" in verdict.summary
 
-    def test_missing_items_records_parse_reason(self, evaluator):
+    def test_missing_items_records_parse_reason(self, evaluator: object) -> None:
         """A valid object missing 'items' → keyword fallback names the reason."""
         verdict = evaluator._parse_verdict('{"verdict":"COMPLETE","summary":"all criteria pass"}')
         assert verdict.verdict == "COMPLETE"
@@ -506,7 +512,9 @@ class TestVerdictParsing:
 class TestMaxIterationsAndErrors:
     """Test max_iterations cap and error handling — step-1-4-1-7."""
 
-    def test_max_iterations_reached_returns_incomplete(self, evaluator, llm_client):
+    def test_max_iterations_reached_returns_incomplete(
+        self, evaluator: object, llm_client: object
+    ) -> None:
         """Evaluator stops at max_iterations and returns INCOMPLETE with actionable error."""
         # Always return tool calls (never a verdict) — exhausts the cap
         calls = []
@@ -523,7 +531,9 @@ class TestMaxIterationsAndErrors:
         assert "Cap exceeded" in verdict.summary
         assert "Increase max_iterations" in verdict.summary
 
-    def test_max_iterations_error_message_actionable(self, evaluator, llm_client):
+    def test_max_iterations_error_message_actionable(
+        self, evaluator: object, llm_client: object
+    ) -> None:
         """Error message on cap tells user exactly how to fix it."""
         calls = [
             LLMResponse(
@@ -542,19 +552,19 @@ class TestMaxIterationsAndErrors:
         assert "split criteria" in verdict.summary
         assert str(fast_eval.max_iterations) in verdict.summary
 
-    def test_default_max_iterations_is_100(self, llm_client, tmp_workdir):
+    def test_default_max_iterations_is_100(self, llm_client: object, tmp_workdir: str) -> None:
         """Default max_iterations is 100 (was 15 — too low for complex criteria)."""
         evaluator = AgenticEvaluator(llm_client, tmp_workdir)
         assert evaluator.max_iterations == 100
 
-    def test_llm_exception_returns_incomplete(self, evaluator, llm_client):
+    def test_llm_exception_returns_incomplete(self, evaluator: object, llm_client: object) -> None:
         """LLM exception → INCOMPLETE with error summary."""
         with patch.object(llm_client, "chat", side_effect=RuntimeError("LLM crashed")):
             verdict = evaluator.evaluate({"id": "err", "title": "x", "criteria": []})
         assert verdict.verdict == "INCOMPLETE"
         assert "LLM call failed" in verdict.summary or "LLM crashed" in verdict.summary
 
-    def test_custom_max_iterations(self, evaluator):
+    def test_custom_max_iterations(self, evaluator: object) -> None:
         """Evaluator respects custom max_iterations."""
         assert evaluator.max_iterations == 5
         custom = AgenticEvaluator(evaluator.llm, evaluator.workdir, max_iterations=20)
@@ -564,27 +574,27 @@ class TestMaxIterationsAndErrors:
 class TestEvaluatorTools:
     """Test additional tool implementations."""
 
-    def test_unknown_tool_returns_error(self, evaluator):
+    def test_unknown_tool_returns_error(self, evaluator: object) -> None:
         """Unknown tool name returns error."""
         tc = ToolCall(id="x", name="nonexistent_tool", arguments={})
         result = evaluator._execute_tool(tc)
         assert "error" in result
         assert "Unknown tool" in result["error"]
 
-    def test_read_diff_basic(self, evaluator):
+    def test_read_diff_basic(self, evaluator: object) -> None:
         """read_diff tool returns staged/unstaged info."""
         result = evaluator._tool_read_diff()
         assert "staged" in result
         assert "unstaged" in result
 
-    def test_get_task_item_found(self, evaluator):
+    def test_get_task_item_found(self, evaluator: object) -> None:
         """get_task_item returns the task dict when found."""
         task = {"id": "t1", "title": "Test", "criteria": ["c1"]}
         evaluator._task_index["t1"] = task
         result = evaluator._tool_get_task_item("t1")
         assert result["id"] == "t1"
 
-    def test_get_task_item_not_found(self, evaluator):
+    def test_get_task_item_not_found(self, evaluator: object) -> None:
         """get_task_item returns error when task not found."""
         result = evaluator._tool_get_task_item("nonexistent")
         assert "error" in result
@@ -594,14 +604,16 @@ class TestEvaluatorTools:
 class TestEvaluatorEvaluate:
     """Test the full evaluate loop."""
 
-    def test_evaluate_with_empty_criteria_returns_complete(self, evaluator, llm_client):
+    def test_evaluate_with_empty_criteria_returns_complete(
+        self, evaluator: object, llm_client: object
+    ) -> None:
         """Task with no criteria — LLM should return COMPLETE immediately."""
         verdict_json = '{"verdict":"COMPLETE","items":[],"summary":"no criteria to check"}'
         with patch.object(llm_client, "chat", return_value=LLMResponse(content=verdict_json)):
             verdict = evaluator.evaluate({"id": "empty", "title": "x", "criteria": []})
         assert verdict.verdict == "COMPLETE"
 
-    def test_verdict_item_dataclass(self):
+    def test_verdict_item_dataclass(self) -> None:
         """VerdictItem and Verdict dataclasses work correctly."""
         item = VerdictItem(criterion="c1", status="PASS", detail="verified")
         assert item.criterion == "c1"
@@ -614,7 +626,7 @@ class TestEvaluatorEvaluate:
 class TestExtendedEvaluator:
     """Extended edge case coverage for AgenticEvaluator."""
 
-    def test_search_truncated_at_200(self, evaluator, tmp_workdir):
+    def test_search_truncated_at_200(self, evaluator: object, tmp_workdir: str) -> None:
         """search_pattern truncates results at 200 matches."""
         path = os.path.join(tmp_workdir, "big.py")
         with open(path, "w") as f:
@@ -625,13 +637,13 @@ class TestExtendedEvaluator:
         assert len(result["matches"]) >= 200
         assert len(result["matches"]) <= 201
 
-    def test_sandbox_read_truncated_at_4000(self, evaluator):
+    def test_sandbox_read_truncated_at_4000(self, evaluator: object) -> None:
         """sandbox_read truncates content at 4000 chars."""
         evaluator._sandbox["big"] = "x" * 5000
         result = evaluator._tool_sandbox_read("big")
         assert len(result["content"]) <= 4100
 
-    def test_read_file_truncation_large_file(self, evaluator, tmp_workdir):
+    def test_read_file_truncation_large_file(self, evaluator: object, tmp_workdir: str) -> None:
         """read_file truncates very large files (>12000 chars) to first 400 lines."""
         path = os.path.join(tmp_workdir, "huge.py")
         with open(path, "w") as f:
@@ -643,13 +655,15 @@ class TestExtendedEvaluator:
         content = result["content"]
         assert "... [showing first 400" in content
 
-    def test_execute_tool_wraps_exception(self, evaluator):
+    def test_execute_tool_wraps_exception(self, evaluator: object) -> None:
         """_execute_tool wraps exceptions in error dict."""
         tc = ToolCall(id="x", name="read_file", arguments={})
         result = evaluator._execute_tool(tc)
         assert "error" in result
 
-    def test_dedup_warning_in_evaluate_loop(self, evaluator, llm_client, tmp_workdir):
+    def test_dedup_warning_in_evaluate_loop(
+        self, evaluator: object, llm_client: object, tmp_workdir: str
+    ) -> None:
         """_dedup_warning is added to tool result in evaluate() loop."""
         path = os.path.join(tmp_workdir, "dedup_loop.txt")
         with open(path, "w") as f:
@@ -670,7 +684,9 @@ class TestExtendedEvaluator:
             verdict = evaluator.evaluate({"id": "dt", "title": "x", "criteria": ["c1"]})
         assert verdict.verdict == "COMPLETE"
 
-    def test_evaluate_with_tool_calls_then_verdict(self, evaluator, llm_client, tmp_workdir):
+    def test_evaluate_with_tool_calls_then_verdict(
+        self, evaluator: object, llm_client: object, tmp_workdir: str
+    ) -> None:
         """evaluate() handles tool calls followed by a verdict."""
         path = os.path.join(tmp_workdir, "eval_me.py")
         with open(path, "w") as f:
@@ -688,19 +704,19 @@ class TestExtendedEvaluator:
         assert verdict.verdict == "COMPLETE"
         assert len(verdict.items) == 1
 
-    def test_verdict_keyword_complete_detected(self, evaluator):
+    def test_verdict_keyword_complete_detected(self, evaluator: object) -> None:
         """Content with 'complete' keyword and PASS items yields COMPLETE."""
         content = '{"verdict":"COMPLETE","items":[{"criterion":"c1","status":"PASS","detail":"ok"}],"summary":"all pass"}'
         verdict = evaluator._parse_verdict(content)
         assert verdict.verdict == "COMPLETE"
 
-    def test_verdict_missing_items_falls_to_keyword(self, evaluator):
+    def test_verdict_missing_items_falls_to_keyword(self, evaluator: object) -> None:
         """JSON with verdict but missing items falls back to keyword parse."""
         content = "The task is complete. All criteria pass."
         verdict = evaluator._parse_verdict(content)
         assert verdict.verdict == "COMPLETE"
 
-    def test_search_all_files_with_glob(self, evaluator, tmp_workdir):
+    def test_search_all_files_with_glob(self, evaluator: object, tmp_workdir: str) -> None:
         """search_pattern with file_glob='*' searches all file types."""
         py_path = os.path.join(tmp_workdir, "a.py")
         txt_path = os.path.join(tmp_workdir, "b.txt")
@@ -711,7 +727,9 @@ class TestExtendedEvaluator:
         result = evaluator._tool_search_pattern("MATCH_ME", file_glob="*")
         assert result["count"] >= 2
 
-    def test_read_file_truncation_large_file_with_offset(self, evaluator, tmp_workdir):
+    def test_read_file_truncation_large_file_with_offset(
+        self, evaluator: object, tmp_workdir: str
+    ) -> None:
         """read_file with explicit offset/limit does NOT auto-truncate."""
         path = os.path.join(tmp_workdir, "huge2.py")
         with open(path, "w") as f:
@@ -723,14 +741,18 @@ class TestExtendedEvaluator:
         assert "line 400" in content
         assert "... [showing first" not in content
 
-    def test_evaluate_empty_response_no_tool_calls(self, evaluator, llm_client):
+    def test_evaluate_empty_response_no_tool_calls(
+        self, evaluator: object, llm_client: object
+    ) -> None:
         """evaluate() returns INCOMPLETE when LLM returns empty content with no tool calls."""
         with patch.object(llm_client, "chat", return_value=LLMResponse(content=None)):
             verdict = evaluator.evaluate({"id": "empty", "title": "x", "criteria": ["c1"]})
         assert verdict.verdict == "INCOMPLETE"
         assert "empty response" in verdict.summary.lower()
 
-    def test_evaluate_tool_exception_returns_error(self, evaluator, llm_client):
+    def test_evaluate_tool_exception_returns_error(
+        self, evaluator: object, llm_client: object
+    ) -> None:
         """evaluate() returns INCOMPLETE when a tool call raises an exception."""
         tc = ToolCall(id="bad", name="read_file", arguments={"path": "/nonexistent"})
         with patch.object(
@@ -744,13 +766,13 @@ class TestExtendedEvaluator:
             verdict = evaluator.evaluate({"id": "err", "title": "x", "criteria": ["c1"]})
         assert verdict.verdict == "INCOMPLETE"
 
-    def test_verdict_status_fail_default(self, evaluator):
+    def test_verdict_status_fail_default(self, evaluator: object) -> None:
         """Missing status in verdict item defaults to FAIL."""
         content = '{"verdict":"COMPLETE","items":[{"criterion":"c1","detail":"x"}],"summary":"s"}'
         verdict = evaluator._parse_verdict(content)
         assert verdict.items[0].status == "FAIL"
 
-    def test_verdict_has_more_field_read_file(self, evaluator, tmp_workdir):
+    def test_verdict_has_more_field_read_file(self, evaluator: object, tmp_workdir: str) -> None:
         """read_file returns has_more=True when file is large."""
         path = os.path.join(tmp_workdir, "bigfile.py")
         with open(path, "w") as f:
@@ -766,7 +788,7 @@ class TestExtendedEvaluator:
 class TestCompaction:
     """Tests for context compaction: checkpoint, resume, sandbox survival."""
 
-    def test_build_compacted_prompt_extracts_verified_from_sandbox(self, evaluator):
+    def test_build_compacted_prompt_extracts_verified_from_sandbox(self, evaluator: object) -> None:
         """_build_compacted_prompt reads verified_N keys from sandbox."""
         evaluator._sandbox["verified_0"] = "PASS: tests/test_auth.py:45"
         evaluator._sandbox["verified_2"] = "FAIL: missing handler"
@@ -781,7 +803,7 @@ class TestCompaction:
         assert "Still to verify (1/3)" in prompt
         assert "c1" in prompt  # remaining
 
-    def test_build_compacted_prompt_all_verified(self, evaluator):
+    def test_build_compacted_prompt_all_verified(self, evaluator: object) -> None:
         """All criteria verified → no 'still to verify' section."""
         evaluator._sandbox["verified_0"] = "PASS"
         evaluator._sandbox["verified_1"] = "PASS"
@@ -790,14 +812,14 @@ class TestCompaction:
         assert "Already verified (2/2)" in prompt
         assert "Still to verify" not in prompt
 
-    def test_build_compacted_prompt_none_verified(self, evaluator):
+    def test_build_compacted_prompt_none_verified(self, evaluator: object) -> None:
         """No sandbox keys → all criteria listed as remaining."""
         task = {"id": "t1", "title": "Test", "criteria": ["c0", "c1", "c2"]}
         prompt = evaluator._build_compacted_prompt(task, "", 3)
         assert "Already verified" not in prompt
         assert "Still to verify (3/3)" in prompt
 
-    def test_compact_context_rebuilds_clean_messages(self, evaluator):
+    def test_compact_context_rebuilds_clean_messages(self, evaluator: object) -> None:
         """_compact_context returns fresh messages with only system + compacted prompt."""
         evaluator._sandbox["verified_0"] = "PASS"
         task = {"id": "t1", "title": "Test", "criteria": ["c0", "c1"]}
@@ -809,7 +831,7 @@ class TestCompaction:
         assert "EVALUATION PROGRESS" in new_msgs[1]["content"]
         assert "c0" in new_msgs[1]["content"]
 
-    def test_compact_context_increments_count(self, evaluator):
+    def test_compact_context_increments_count(self, evaluator: object) -> None:
         """Each compaction increments the counter."""
         task = {"id": "t1", "title": "Test", "criteria": ["c0"]}
         _, count1 = evaluator._compact_context([], task, "", 1, 0)
@@ -817,7 +839,7 @@ class TestCompaction:
         assert count1 == 1
         assert count2 == 4
 
-    def test_compaction_triggered_on_http_400(self, evaluator, llm_client):
+    def test_compaction_triggered_on_http_400(self, evaluator: object, llm_client: object) -> None:
         """HTTP 400 with 'context' keyword triggers compaction, not immediate failure."""
         import requests
 
@@ -842,14 +864,18 @@ class TestCompaction:
             verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
         assert verdict.verdict == "COMPLETE"
 
-    def test_compaction_not_triggered_on_other_error(self, evaluator, llm_client):
+    def test_compaction_not_triggered_on_other_error(
+        self, evaluator: object, llm_client: object
+    ) -> None:
         """Non-context errors (like ValueError) return INCOMPLETE immediately."""
         with patch.object(llm_client, "chat", side_effect=ValueError("some other error")):
             verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
         assert verdict.verdict == "INCOMPLETE"
         assert "other error" in verdict.summary.lower()
 
-    def test_transport_failure_does_not_trigger_compaction(self, evaluator, llm_client):
+    def test_transport_failure_does_not_trigger_compaction(
+        self, evaluator: object, llm_client: object
+    ) -> None:
         """A refused socket is not a context-window error (DF-GITREINS-POC-14).
 
         LLMClient now embeds the underlying cause in its message, and requests'
@@ -874,7 +900,9 @@ class TestCompaction:
         assert verdict.verdict == "INCOMPLETE"
         assert "Max retries exceeded" in verdict.summary  # the real cause survives
 
-    def test_context_keyword_still_compacts_without_a_transport_cause(self, evaluator, llm_client):
+    def test_context_keyword_still_compacts_without_a_transport_cause(
+        self, evaluator: object, llm_client: object
+    ) -> None:
         """The keyword path is preserved for errors that reached the provider."""
         err = RuntimeError("provider returned no choices: maximum context length exceeded")
         evaluator._sandbox["verified_0"] = "PASS"
@@ -895,45 +923,47 @@ class TestCompaction:
 class TestTransportFailureClassification:
     """_is_transport_failure distinguishes "never reached the provider" (POC-14)."""
 
-    def test_connection_error_is_transport(self):
+    def test_connection_error_is_transport(self) -> None:
         import requests
 
         assert _is_transport_failure(requests.ConnectionError("refused")) is True
 
-    def test_timeout_is_transport(self):
+    def test_timeout_is_transport(self) -> None:
         import requests
 
         assert _is_transport_failure(requests.Timeout("timed out")) is True
 
-    def test_http_error_is_not_transport(self):
+    def test_http_error_is_not_transport(self) -> None:
         """The provider answered — a 4xx body is where context errors live."""
         import requests
 
         assert _is_transport_failure(requests.HTTPError("400 context length exceeded")) is False
 
-    def test_wrapped_cause_is_walked(self):
+    def test_wrapped_cause_is_walked(self) -> None:
         import requests
 
         wrapper = RuntimeError("LLM request failed after 3 attempts")
         wrapper.__cause__ = requests.ConnectionError("refused")
         assert _is_transport_failure(wrapper) is True
 
-    def test_plain_error_is_not_transport(self):
+    def test_plain_error_is_not_transport(self) -> None:
         assert _is_transport_failure(ValueError("some other error")) is False
 
-    def test_self_referential_chain_terminates(self):
+    def test_self_referential_chain_terminates(self) -> None:
         """A cycle in __context__ must not hang the classifier."""
         err = RuntimeError("loop")
         err.__context__ = err
         assert _is_transport_failure(err) is False
 
-    def test_proactive_compaction_at_90pct_threshold(self, evaluator, llm_client):
+    def test_proactive_compaction_at_90pct_threshold(
+        self, evaluator: object, llm_client: object
+    ) -> object:
         """When cumulative prompt tokens exceed 90% of limit, compaction triggers by default."""
         evaluator.eval_cap.max_input_tokens = 1000  # 1000 token limit
 
         call_count = [0]
 
-        def fake_chat(messages, tools=None, max_tokens=None):
+        def fake_chat(messages: list, tools: object = None, max_tokens: int = None) -> object:
             call_count[0] += 1
             if call_count[0] <= 2:
                 # Build up context: 950 prompt tokens > 900 (90% of 1000)
@@ -966,7 +996,7 @@ class TestTransportFailureClassification:
                 verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
         assert verdict.verdict == "COMPLETE"
 
-    def test_max_compactions_limit(self, evaluator, llm_client):
+    def test_max_compactions_limit(self, evaluator: object, llm_client: object) -> None:
         """After MAX_COMPACTIONS (3), HTTP 400 returns INCOMPLETE."""
         import requests
 
@@ -980,7 +1010,9 @@ class TestTransportFailureClassification:
         # Should have failed after 3 compaction attempts
         assert "LLM call failed" in verdict.summary
 
-    def test_compaction_threshold_config_override(self, evaluator, llm_client, tmp_workdir):
+    def test_compaction_threshold_config_override(
+        self, evaluator: object, llm_client: object, tmp_workdir: str
+    ) -> object:
         """When config sets compaction_threshold to 0.50, compaction triggers at 50%."""
         import yaml
 
@@ -993,7 +1025,7 @@ class TestTransportFailureClassification:
 
         call_count = [0]
 
-        def fake_chat(messages, tools=None, max_tokens=None):
+        def fake_chat(messages: list, tools: object = None, max_tokens: int = None) -> object:
             call_count[0] += 1
             if call_count[0] <= 2:
                 # 600 prompt tokens > 500 (50% of 1000) — should trigger compaction
@@ -1025,7 +1057,9 @@ class TestTransportFailureClassification:
                 verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
         assert verdict.verdict == "COMPLETE"
 
-    def test_compaction_threshold_not_triggered_below(self, evaluator, llm_client, tmp_workdir):
+    def test_compaction_threshold_not_triggered_below(
+        self, evaluator: object, llm_client: object, tmp_workdir: str
+    ) -> object:
         """When prompt tokens are below the configured threshold, no compaction occurs."""
         import yaml
 
@@ -1038,7 +1072,7 @@ class TestTransportFailureClassification:
 
         call_count = [0]
 
-        def fake_chat(messages, tools=None, max_tokens=None):
+        def fake_chat(messages: list, tools: object = None, max_tokens: int = None) -> object:
             call_count[0] += 1
             if call_count[0] <= 2:
                 # 400 prompt tokens < 5000 (50% of 10000) — should NOT trigger compaction
@@ -1073,8 +1107,8 @@ class TestTransportFailureClassification:
         assert call_count[0] == 3
 
     def test_compaction_fires_on_cumulative_consumption_not_prompt_size(
-        self, evaluator, llm_client, tmp_workdir
-    ):
+        self, evaluator: object, llm_client: object, tmp_workdir: str
+    ) -> None:
         """GR-GAP-062: the proactive valve must meter the same quantity the hard
         cap enforces — cumulative input tokens consumed since the last
         compaction — NOT the largest single prompt. With a 100k budget, a 5%
@@ -1096,7 +1130,7 @@ class TestTransportFailureClassification:
         max_single_prompt = [0]
         first_firing = {}  # cumulative_input_tokens observed at the first compaction
 
-        def fake_chat(messages, tools=None, max_tokens=None):
+        def fake_chat(messages: list, tools: object = None, max_tokens: int = None) -> object:
             call_count[0] += 1
             if call_count[0] <= 20:
                 tc = ToolCall(
@@ -1122,7 +1156,7 @@ class TestTransportFailureClassification:
 
         real_compact = evaluator._compact_context
 
-        def spy_compact(*args, **kwargs):
+        def spy_compact(*args: object, **kwargs: object) -> object:
             if not first_firing:
                 first_firing["budget_used"] = evaluator.eval_cap.cumulative_input_tokens
             return real_compact(*args, **kwargs)
@@ -1144,7 +1178,9 @@ class TestTransportFailureClassification:
         assert verdict.verdict == "COMPLETE"
         assert "Cap exceeded" not in verdict.summary
 
-    def test_code_context_budget_config_override(self, evaluator, llm_client, tmp_workdir):
+    def test_code_context_budget_config_override(
+        self, evaluator: object, llm_client: object, tmp_workdir: str
+    ) -> object:
         """When config sets code_context_budget to 0.20, code context is capped at 20%."""
         import yaml
 
@@ -1161,7 +1197,12 @@ class TestTransportFailureClassification:
         with patch.object(evaluator, "_build_code_context", return_value=large_ctx):
             captured_prompt = []
 
-            def capture_chat(messages, tools=None, max_tokens=None, temperature=0.1):
+            def capture_chat(
+                messages: list,
+                tools: object = None,
+                max_tokens: int = None,
+                temperature: float = 0.1,
+            ) -> object:
                 captured_prompt.append(messages[1]["content"] if len(messages) > 1 else "")
                 return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
 
@@ -1174,7 +1215,9 @@ class TestTransportFailureClassification:
             f"but got no truncation. Prompt length: {len(captured_prompt[0])} chars"
         )
 
-    def test_code_context_budget_default_70pct(self, evaluator, llm_client):
+    def test_code_context_budget_default_70pct(
+        self, evaluator: object, llm_client: object
+    ) -> object:
         """Without config override, code context budget defaults to 70%."""
         evaluator.eval_cap.max_input_tokens = 1000  # budget = 300 tokens
 
@@ -1183,7 +1226,12 @@ class TestTransportFailureClassification:
         with patch.object(evaluator, "_build_code_context", return_value=large_ctx):
             captured_prompt = []
 
-            def capture_chat(messages, tools=None, max_tokens=None, temperature=0.1):
+            def capture_chat(
+                messages: list,
+                tools: object = None,
+                max_tokens: int = None,
+                temperature: float = 0.1,
+            ) -> object:
                 captured_prompt.append(messages[1]["content"] if len(messages) > 1 else "")
                 return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
 
@@ -1196,13 +1244,13 @@ class TestTransportFailureClassification:
             f"but got no truncation. Prompt length: {len(captured_prompt[0])} chars"
         )
 
-    def test_estimate_context_uses_llm_tokens(self, evaluator):
+    def test_estimate_context_uses_llm_tokens(self, evaluator: object) -> None:
         """_estimate_context_tokens uses cumulative_prompt_tok when provided."""
         messages = [{"role": "user", "content": "hello world" * 100}]
         est = evaluator._estimate_context_tokens(messages, cumulative_prompt_tok=5000)
         assert est == 5000
 
-    def test_estimate_context_falls_back_to_chars(self, evaluator):
+    def test_estimate_context_falls_back_to_chars(self, evaluator: object) -> None:
         """_estimate_context_tokens falls back to char/3.5 heuristic."""
         messages = [{"role": "user", "content": "hello world" * 100}]
         est = evaluator._estimate_context_tokens(messages, cumulative_prompt_tok=0)
@@ -1215,7 +1263,7 @@ class TestTransportFailureClassification:
 class TestCodeContextPreloading:
     """Tests for _build_code_context: full mode vs diff mode."""
 
-    def test_diff_mode_returns_git_diff(self, evaluator, tmp_workdir):
+    def test_diff_mode_returns_git_diff(self, evaluator: object, tmp_workdir: str) -> None:
         """In diff mode, _build_code_context returns git diff hunks."""
         import subprocess
 
@@ -1248,7 +1296,7 @@ class TestCodeContextPreloading:
         assert "CHANGED CODE (DIFF)" in ctx
         assert "main.py" in ctx  # Should reference the file
 
-    def test_full_mode_returns_file_contents(self, evaluator, tmp_workdir):
+    def test_full_mode_returns_file_contents(self, evaluator: object, tmp_workdir: str) -> None:
         """In full mode, _build_code_context returns full changed file content."""
         import subprocess
 
@@ -1282,7 +1330,7 @@ class TestCodeContextPreloading:
         assert "return 99" in ctx
         assert "main.py" in ctx
 
-    def test_no_changes_returns_empty(self, evaluator, tmp_workdir):
+    def test_no_changes_returns_empty(self, evaluator: object, tmp_workdir: str) -> None:
         """When nothing changed, _build_code_context returns empty string."""
         import subprocess
 
@@ -1292,7 +1340,9 @@ class TestCodeContextPreloading:
         ctx = evaluator._build_code_context(config)
         assert ctx == ""
 
-    def test_committed_change_visible_when_tree_clean(self, evaluator, tmp_workdir):
+    def test_committed_change_visible_when_tree_clean(
+        self, evaluator: object, tmp_workdir: str
+    ) -> None:
         """GR-GAP-046: a judge run after a COMMITTED change sees the commit.
 
         ``git diff HEAD`` is empty on a clean tree, so the context falls
@@ -1330,7 +1380,7 @@ class TestCodeContextPreloading:
         assert "(no changes detected)" not in ctx
         assert "CHANGED CODE (DIFF)" not in ctx  # no fabricated diff
 
-    def test_committed_change_visible_full_mode(self, evaluator, tmp_workdir):
+    def test_committed_change_visible_full_mode(self, evaluator: object, tmp_workdir: str) -> None:
         """GR-GAP-046: full mode also anchors on the last commit when the
         working tree is clean (no empty CHANGED FILES section)."""
         import subprocess
@@ -1358,7 +1408,7 @@ class TestCodeContextPreloading:
         assert "main.py" in ctx
         assert "CHANGED FILES (FULL)" not in ctx  # no working-tree files to show
 
-    def _init_repo_with_commit(self, tmp_workdir, files: dict[str, str]):
+    def _init_repo_with_commit(self, tmp_workdir: str, files: dict[str, str]) -> None:
         """Helper: git init + commit the given {path: content} files."""
         import subprocess
 
@@ -1385,13 +1435,13 @@ class TestCodeContextPreloading:
             env=env,
         )
 
-    def _write(self, tmp_workdir, path: str, content: str):
+    def _write(self, tmp_workdir: str, path: str, content: str) -> None:
         full = os.path.join(tmp_workdir, path)
         os.makedirs(os.path.dirname(full), exist_ok=True)
         with open(full, "w") as f:
             f.write(content)
 
-    def test_data_files_excluded_from_context(self, evaluator, tmp_workdir):
+    def test_data_files_excluded_from_context(self, evaluator: object, tmp_workdir: str) -> None:
         """Regression (JUDGE-CONTEXT-001): tracked board JSONL files must not
         appear in the judge code context — neither as full-file sections nor
         as diff hunks."""
@@ -1424,7 +1474,7 @@ class TestCodeContextPreloading:
         assert ".coding-hermes" not in ctx
         assert "tick-SECRET-marker" not in ctx
 
-    def test_data_files_excluded_in_diff_mode(self, evaluator, tmp_workdir):
+    def test_data_files_excluded_in_diff_mode(self, evaluator: object, tmp_workdir: str) -> None:
         """Diff mode also drops data-file hunks (JUDGE-CONTEXT-001)."""
         self._init_repo_with_commit(
             tmp_workdir,
@@ -1448,7 +1498,9 @@ class TestCodeContextPreloading:
         assert "tasks.jsonl" not in ctx
         assert "two-SECRET-marker" not in ctx
 
-    def test_long_line_data_file_gets_preview_only(self, evaluator, tmp_workdir):
+    def test_long_line_data_file_gets_preview_only(
+        self, evaluator: object, tmp_workdir: str
+    ) -> None:
         """Files with >500 chars/line average are capped to a 5-line preview
         in FULL mode (JUDGE-CONTEXT-001)."""
         lines = [f"line-{i}-" + "x" * 1000 for i in range(10)]
@@ -1470,7 +1522,7 @@ class TestCodeContextPreloading:
         assert "line-5-" not in section
         assert "line-9-" not in section
 
-    def test_normal_code_file_not_previewed(self, evaluator, tmp_workdir):
+    def test_normal_code_file_not_previewed(self, evaluator: object, tmp_workdir: str) -> None:
         """A normal code file (short lines) is NOT subject to the data-file
         preview cap even when it exceeds 200 lines."""
         body = "\n".join(f"# comment {i}" for i in range(250)) + "\n"
@@ -1483,7 +1535,7 @@ class TestCodeContextPreloading:
         assert "data-like" not in ctx
         assert "truncated at 200 lines" in ctx  # normal 200-line cap applies
 
-    def test_max_output_tokens_passed_to_llm(self, evaluator, llm_client):
+    def test_max_output_tokens_passed_to_llm(self, evaluator: object, llm_client: object) -> object:
         """Per-request max_tokens is always capped at 16384 — session budget is separate."""
         from engine.eval_cap import EvalCap
 
@@ -1494,7 +1546,9 @@ class TestCodeContextPreloading:
 
         captured_tokens = []
 
-        def capture_chat(messages, max_tokens=131072, tools=None, temperature=0.1):
+        def capture_chat(
+            messages: list, max_tokens: int = 131072, tools: object = None, temperature: float = 0.1
+        ) -> object:
             captured_tokens.append(max_tokens)
             return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
 
@@ -1507,7 +1561,9 @@ class TestCodeContextPreloading:
             f"Expected per-request max_tokens=16384 (session budget is 50000), got {captured_tokens[0]}"
         )
 
-    def test_max_tokens_fallback_when_nothing_configured(self, evaluator, llm_client):
+    def test_max_tokens_fallback_when_nothing_configured(
+        self, evaluator: object, llm_client: object
+    ) -> object:
         """When nothing set (unlimited), falls back to 16384 — not a stale default."""
         from engine.eval_cap import EvalCap
 
@@ -1518,7 +1574,9 @@ class TestCodeContextPreloading:
 
         captured = []
 
-        def capture_chat(messages, max_tokens, tools=None, temperature=0.1):
+        def capture_chat(
+            messages: list, max_tokens: int, tools: object = None, temperature: float = 0.1
+        ) -> object:
             captured.append(max_tokens)
             return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
 
@@ -1530,7 +1588,9 @@ class TestCodeContextPreloading:
             f"Expected fallback max_tokens=16384 when unlimited, got {captured[0]}"
         )
 
-    def test_max_tokens_value_set_not_corrupted(self, evaluator, llm_client):
+    def test_max_tokens_value_set_not_corrupted(
+        self, evaluator: object, llm_client: object
+    ) -> object:
         """Session budget tracked via EvalCap, per-request max_tokens always 16384."""
         from engine.eval_cap import EvalCap
 
@@ -1541,7 +1601,9 @@ class TestCodeContextPreloading:
 
         captured = []
 
-        def capture_chat(messages, max_tokens, tools=None, temperature=0.1):
+        def capture_chat(
+            messages: list, max_tokens: int, tools: object = None, temperature: float = 0.1
+        ) -> object:
             captured.append(max_tokens)
             return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
 
@@ -1558,7 +1620,9 @@ class TestCodeContextPreloading:
 
     # ── File scope tests ──────────────────────────────────────────
 
-    def test_file_scope_changed_rejects_outside_file(self, evaluator, tmp_workdir):
+    def test_file_scope_changed_rejects_outside_file(
+        self, evaluator: object, tmp_workdir: str
+    ) -> None:
         """In 'changed' scope, read_file on non-allowed file returns error."""
         evaluator._allowed_files = {"src/main.py", "tests/test_main.py", "pyproject.toml"}
 
@@ -1567,7 +1631,9 @@ class TestCodeContextPreloading:
         assert "File not in scope" in result["error"]
         assert "unrelated.py" in result["error"]
 
-    def test_file_scope_changed_allows_allowed_file(self, evaluator, tmp_workdir):
+    def test_file_scope_changed_allows_allowed_file(
+        self, evaluator: object, tmp_workdir: str
+    ) -> None:
         """In 'changed' scope, read_file on allowed file succeeds."""
         import os
 
@@ -1581,7 +1647,7 @@ class TestCodeContextPreloading:
         assert "content" in result
         assert "hello" in result["content"]
 
-    def test_file_scope_full_allows_any_file(self, evaluator, tmp_workdir):
+    def test_file_scope_full_allows_any_file(self, evaluator: object, tmp_workdir: str) -> None:
         """In 'full' scope (None), read_file on any file succeeds."""
         import os
 
@@ -1595,7 +1661,7 @@ class TestCodeContextPreloading:
         assert "content" in result
         assert "x=1" in result["content"]
 
-    def test_search_pattern_respects_file_scope(self, evaluator, tmp_workdir):
+    def test_search_pattern_respects_file_scope(self, evaluator: object, tmp_workdir: str) -> None:
         """In 'changed' scope, search_pattern only finds results in allowed files."""
         import os
 
@@ -1615,7 +1681,9 @@ class TestCodeContextPreloading:
         assert "src/main.py" in str(result["matches"])
         assert "vendor/lib.py" not in str(result["matches"])
 
-    def test_file_scope_integration_with_evaluate(self, evaluator, llm_client, tmp_workdir):
+    def test_file_scope_integration_with_evaluate(
+        self, evaluator: object, llm_client: object, tmp_workdir: str
+    ) -> object:
         """End-to-end: evaluator with 'changed' scope works correctly."""
         import os
         import yaml
@@ -1638,7 +1706,7 @@ class TestCodeContextPreloading:
 
         captured = []
 
-        def fake_chat(messages, tools=None, max_tokens=None):
+        def fake_chat(messages: list, tools: object = None, max_tokens: int = None) -> object:
             captured.append(len(messages))
             if len(captured) == 1:
                 return LLMResponse(
@@ -1655,7 +1723,7 @@ class TestCodeContextPreloading:
             verdict = evaluator.evaluate({"id": "t", "title": "scope test", "criteria": ["c0"]})
         assert verdict.verdict == "COMPLETE"
 
-    def test_file_scope_default_is_changed(self, evaluator, tmp_workdir):
+    def test_file_scope_default_is_changed(self, evaluator: object, tmp_workdir: str) -> None:
         """Without config override, file_scope defaults to 'changed'."""
         import os
 
@@ -1705,7 +1773,7 @@ class TestDataFileHelpers:
             ".git/index",
         ],
     )
-    def test_data_paths_match(self, path):
+    def test_data_paths_match(self, path: str) -> None:
         from engine.evaluator import _is_data_file_path
 
         assert _is_data_file_path(path) is True
@@ -1722,12 +1790,12 @@ class TestDataFileHelpers:
             "data.jsonnet",  # suffix must match exactly
         ],
     )
-    def test_code_paths_do_not_match(self, path):
+    def test_code_paths_do_not_match(self, path: str) -> None:
         from engine.evaluator import _is_data_file_path
 
         assert _is_data_file_path(path) is False
 
-    def test_filter_diff_text_drops_data_sections(self):
+    def test_filter_diff_text_drops_data_sections(self) -> None:
         from engine.evaluator import _filter_diff_text
 
         diff = (
@@ -1752,7 +1820,7 @@ class TestDataFileHelpers:
         assert "events.jsonl" not in out
         assert "SECRET" not in out
 
-    def test_filter_diff_text_empty(self):
+    def test_filter_diff_text_empty(self) -> None:
         from engine.evaluator import _filter_diff_text
 
         assert _filter_diff_text("") == ""

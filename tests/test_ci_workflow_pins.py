@@ -32,11 +32,11 @@ def _install_step() -> str:
 
 
 class TestWorkflowPins:
-    def test_workflow_parses_as_yaml(self):
+    def test_workflow_parses_as_yaml(self) -> None:
         doc = yaml.safe_load(_text())
         assert "test" in doc["jobs"]
 
-    def test_no_floating_latest_install(self):
+    def test_no_floating_latest_install(self) -> None:
         """No install line may resolve its target at run time."""
         offenders = [
             line.strip()
@@ -45,12 +45,12 @@ class TestWorkflowPins:
         ]
         assert offenders == []
 
-    def test_staticcheck_version_is_pinned(self):
+    def test_staticcheck_version_is_pinned(self) -> None:
         match = re.search(r"STATICCHECK_VERSION:\s*(\S+)", _text())
         assert match is not None, "the CI tool step must pin staticcheck explicitly"
         assert re.fullmatch(r"v\d+\.\d+\.\d+", match.group(1))
 
-    def test_install_consumes_the_pinned_version(self):
+    def test_install_consumes_the_pinned_version(self) -> None:
         install = re.search(
             r"go install\s+\"?honnef\.co/go/tools/cmd/staticcheck@([^\"\s]+)",
             _install_step(),
@@ -60,18 +60,18 @@ class TestWorkflowPins:
 
 
 class TestInstallResilience:
-    def test_install_retries(self):
+    def test_install_retries(self) -> None:
         assert "for attempt in 1 2 3" in _install_step()
 
-    def test_install_can_bypass_the_module_proxy(self):
+    def test_install_can_bypass_the_module_proxy(self) -> None:
         assert 'goproxy="direct"' in _install_step()
 
-    def test_failed_install_fails_the_step(self):
+    def test_failed_install_fails_the_step(self) -> None:
         step = _install_step()
         assert 'if [ "$installed" -ne 1 ]' in step
         assert re.search(r"^\s+exit 1$", step, re.MULTILINE) is not None
 
-    def test_installed_binary_is_verified(self):
+    def test_installed_binary_is_verified(self) -> None:
         assert '"$HOME/go/bin/staticcheck" -version' in _install_step()
 
 
@@ -100,20 +100,20 @@ class TestRuffFormatGate:
         assert len(matches) == 1, f"expected exactly one ruff format step, found {len(matches)}"
         return matches[0]
 
-    def test_workflow_has_a_ruff_format_step(self):
+    def test_workflow_has_a_ruff_format_step(self) -> None:
         assert self._format_step()["name"]
 
-    def test_step_uses_check_not_diff(self):
+    def test_step_uses_check_not_diff(self) -> None:
         run = self._format_step()["run"]
         assert "ruff format --check" in run
         assert "--diff" not in run
 
-    def test_step_is_not_a_bare_format(self):
+    def test_step_is_not_a_bare_format(self) -> None:
         """A bare `ruff format .` rewrites the runner's checkout and exits 0 —
         it would pass forever and hide exactly the drift it is meant to catch."""
         assert re.search(r"ruff format\s+\.\s*$", _text(), re.MULTILINE) is None
 
-    def test_step_covers_the_tracked_python_sources(self):
+    def test_step_covers_the_tracked_python_sources(self) -> None:
         """The step must grade the tracked `.py`/`.pyi` sources the guard
         grades — not a bare `.`.
 
@@ -130,7 +130,7 @@ class TestRuffFormatGate:
         # `--check` must still be present so the exit code carries the verdict.
         assert "--check" in run
 
-    def test_step_runs_before_the_guards(self):
+    def test_step_runs_before_the_guards(self) -> None:
         """Formatting drift reads as a clear, named failure in the workflow
         step list instead of only surfacing inside the guard's lint verdict."""
         names = [step.get("name", "") for step in _steps()]
@@ -138,7 +138,7 @@ class TestRuffFormatGate:
         guard_idx = next(i for i, n in enumerate(names) if n == "Run guards")
         assert format_idx < guard_idx
 
-    def test_ruff_is_installed_before_the_step(self):
+    def test_ruff_is_installed_before_the_step(self) -> None:
         """The step must not be the first thing to need ruff: `Install
         dependencies` (`pip install -e ".[dev]"`, which pins ruff>=0.5) has to
         come first, or the step fails on a clean runner."""
@@ -150,7 +150,7 @@ class TestRuffFormatGate:
         assert install_idx < format_idx
         assert ".[dev]" in steps[install_idx]["run"]
 
-    def test_step_runs_on_push_and_pull_request(self):
+    def test_step_runs_on_push_and_pull_request(self) -> None:
         """The gate is only a gate where it runs: the workflow's triggers must
         include both push and pull_request (the step inherits the job's
         triggers — there is no per-step `if` narrowing it)."""

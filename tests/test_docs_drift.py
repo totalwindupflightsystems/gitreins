@@ -23,17 +23,17 @@ CONTRIBUTING_CLAIM = "All tests must pass. Currently **{p} tests across {f}\ntes
 
 
 def _write_repo(
-    tmp_path,
-    banner_version="0.12.1",
-    pyproject_version="0.12.1",
-    readme_body=None,
-    pyproject_body=None,
-    n_tests=12,
-    n_files=3,
-    contributing_body=None,
-    dirname="repo",
-    with_tests=True,
-):
+    tmp_path: Path,
+    banner_version: object = "0.12.1",
+    pyproject_version: object = "0.12.1",
+    readme_body: object = None,
+    pyproject_body: object = None,
+    n_tests: object = 12,
+    n_files: object = 3,
+    contributing_body: object = None,
+    dirname: object = "repo",
+    with_tests: object = True,
+) -> object:
     """Create a throwaway repo tree: README.md + pyproject.toml + a real tests/.
 
     The tests/ directory holds exactly ``n_tests`` trivial test functions
@@ -71,7 +71,7 @@ def _write_repo(
     return root
 
 
-def _load_module():
+def _load_module() -> object:
     """Load the script as an importable module (importlib, by file path)."""
     spec = importlib.util.spec_from_file_location("check_docs_drift", SCRIPT_PATH)
     module = importlib.util.module_from_spec(spec)
@@ -79,7 +79,7 @@ def _load_module():
     return module
 
 
-def _run_script(root, extra_args=()):
+def _run_script(root: object, extra_args: list[str] = ()) -> object:
     """Run the script as a subprocess against a fixture tree."""
     return subprocess.run(
         [sys.executable, str(SCRIPT_PATH), "--repo-root", str(root), *extra_args],
@@ -88,7 +88,7 @@ def _run_script(root, extra_args=()):
     )
 
 
-def test_matching_version_and_counts_exit_zero(tmp_path):
+def test_matching_version_and_counts_exit_zero(tmp_path: Path) -> None:
     root = _write_repo(tmp_path)
     proc = _run_script(root)
     assert proc.returncode == 0, proc.stdout + proc.stderr
@@ -100,7 +100,7 @@ def test_matching_version_and_counts_exit_zero(tmp_path):
     assert "0.12.1" in message
 
 
-def test_collection_count_wording_is_accurate_and_supported(tmp_path):
+def test_collection_count_wording_is_accurate_and_supported(tmp_path: Path) -> None:
     readme = "> release **v0.12.1**\n\n2 tests collected across 1 test file.\n"
     root = _write_repo(tmp_path, readme_body=readme, n_tests=2, n_files=1)
     proc = _run_script(root)
@@ -108,7 +108,7 @@ def test_collection_count_wording_is_accurate_and_supported(tmp_path):
     assert "2 tests / 1 test files" in proc.stdout
 
 
-def test_file_s_example_is_not_a_collection_claim(tmp_path):
+def test_file_s_example_is_not_a_collection_claim(tmp_path: Path) -> None:
     readme = tmp_path / "README.md"
     readme.write_text("Tier 1 Guards: PASS (test mode: diff, 3 test file(s))\\n", encoding="utf-8")
 
@@ -117,7 +117,7 @@ def test_file_s_example_is_not_a_collection_claim(tmp_path):
     assert not any(phrase == "test files" for phrase, *_ in claims)
 
 
-def test_banner_version_mismatch_fails_naming_both(tmp_path):
+def test_banner_version_mismatch_fails_naming_both(tmp_path: Path) -> None:
     root = _write_repo(tmp_path, banner_version="9.9.9", pyproject_version="0.12.1")
     proc = _run_script(root)
     assert proc.returncode == 1, proc.stdout
@@ -130,7 +130,7 @@ def test_banner_version_mismatch_fails_naming_both(tmp_path):
     assert "9.9.9" in message and "0.12.1" in message
 
 
-def test_conflicting_tests_pass_claims_fail(tmp_path):
+def test_conflicting_tests_pass_claims_fail(tmp_path: Path) -> None:
     readme = (
         BANNER.format(version="0.12.1", p=12, f=3)
         + "\n"
@@ -147,7 +147,7 @@ def test_conflicting_tests_pass_claims_fail(tmp_path):
     assert "12" in message and "15" in message
 
 
-def test_conflicting_test_files_claims_fail(tmp_path):
+def test_conflicting_test_files_claims_fail(tmp_path: Path) -> None:
     readme = (
         BANNER.format(version="0.12.1", p=12, f=3)
         + "\n"
@@ -160,7 +160,7 @@ def test_conflicting_test_files_claims_fail(tmp_path):
     assert "test files" in proc.stdout
 
 
-def test_missing_banner_fails(tmp_path):
+def test_missing_banner_fails(tmp_path: Path) -> None:
     readme = "# Title\n\n12 tests pass / 3 test files.\n\n" + TECH_STACK.format(p=12, f=3)
     root = _write_repo(tmp_path, readme_body=readme)
     proc = _run_script(root)
@@ -172,7 +172,7 @@ def test_missing_banner_fails(tmp_path):
     assert "banner" in message
 
 
-def test_missing_pyproject_version_fails(tmp_path):
+def test_missing_pyproject_version_fails(tmp_path: Path) -> None:
     pyproject = '[project]\nname = "gitreins"\ndescription = "no version here"\n'
     root = _write_repo(tmp_path, pyproject_body=pyproject)
     proc = _run_script(root)
@@ -184,7 +184,7 @@ def test_missing_pyproject_version_fails(tmp_path):
     assert "version" in message
 
 
-def test_tests_across_disagreeing_with_collection_claim_fails(tmp_path):
+def test_tests_across_disagreeing_with_collection_claim_fails(tmp_path: Path) -> None:
     readme = BANNER.format(version="0.12.1", p=12, f=3) + "\n" + TECH_STACK.format(p=14, f=3)
     root = _write_repo(tmp_path, readme_body=readme)
     proc = _run_script(root)
@@ -200,7 +200,7 @@ def test_tests_across_disagreeing_with_collection_claim_fails(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_live_synced_fixture_exits_zero_naming_measured_numbers(tmp_path):
+def test_live_synced_fixture_exits_zero_naming_measured_numbers(tmp_path: Path) -> None:
     """2 tests / 1 file in the fixture, docs claim the same -> exit 0, message
     names the numbers the script actually measured."""
     readme = BANNER.format(version="0.12.1", p=2, f=1) + "\n" + TECH_STACK.format(p=2, f=1)
@@ -212,7 +212,7 @@ def test_live_synced_fixture_exits_zero_naming_measured_numbers(tmp_path):
     assert "live collection" in proc.stdout
 
 
-def test_live_stale_readme_count_fails_naming_line_and_both_numbers(tmp_path):
+def test_live_stale_readme_count_fails_naming_line_and_both_numbers(tmp_path: Path) -> None:
     """Docs claim 7 tests, the fixture really collects 2 -> exit 1 naming
     README.md, the line number, the stale 7 and the measured 2."""
     readme = BANNER.format(version="0.12.1", p=7, f=1) + "\n" + TECH_STACK.format(p=7, f=1)
@@ -228,7 +228,7 @@ def test_live_stale_readme_count_fails_naming_line_and_both_numbers(tmp_path):
     assert "README.md" in message and "1" in message
 
 
-def test_live_stale_contributing_count_fails_naming_contributing_line(tmp_path):
+def test_live_stale_contributing_count_fails_naming_contributing_line(tmp_path: Path) -> None:
     """README synced, only CONTRIBUTING.md stale -> exit 1 names CONTRIBUTING.md
     with its line number (CONTRIBUTING.md claims used to be unchecked)."""
     contributing = "# Contributing\n\n" + CONTRIBUTING_CLAIM.format(p=7, f=1)
@@ -246,7 +246,7 @@ def test_live_stale_contributing_count_fails_naming_contributing_line(tmp_path):
     assert "7" in out and "2" in out
 
 
-def test_newline_split_claim_is_still_compared(tmp_path):
+def test_newline_split_claim_is_still_compared(tmp_path: Path) -> None:
     """The CONTRIBUTING.md:35 shape: the claim phrase wraps across a newline.
     A literal-space regex silently skips it; the gate must not."""
     synced = "# Contributing\n\n" + CONTRIBUTING_CLAIM.format(p=2, f=1)
@@ -275,7 +275,7 @@ def test_newline_split_claim_is_still_compared(tmp_path):
     assert "CONTRIBUTING.md:3" in proc2.stdout
 
 
-def test_unmeasurable_collection_fails_never_green(tmp_path):
+def test_unmeasurable_collection_fails_never_green(tmp_path: Path) -> None:
     """No tests/ directory at all: collection cannot be measured -> exit 1 and
     the message must not certify anything (no 'consistent')."""
     root = _write_repo(
@@ -293,7 +293,7 @@ def test_unmeasurable_collection_fails_never_green(tmp_path):
     assert "consistent" not in message.lower()
 
 
-def test_static_flag_skips_live_and_says_so(tmp_path):
+def test_static_flag_skips_live_and_says_so(tmp_path: Path) -> None:
     """--static on a stale-count fixture exits 0, never says 'consistent', and
     says the live collection was NOT compared."""
     readme = BANNER.format(version="0.12.1", p=7, f=1) + "\n" + TECH_STACK.format(p=7, f=1)
@@ -310,7 +310,7 @@ def test_static_flag_skips_live_and_says_so(tmp_path):
     assert "not compared" in message.lower()
 
 
-def test_static_mode_still_catches_sibling_claim_conflict(tmp_path):
+def test_static_mode_still_catches_sibling_claim_conflict(tmp_path: Path) -> None:
     """Without a measurement, the static path keeps the internal-agreement
     check: two claims in one doc that disagree still fail."""
     readme = (
@@ -324,7 +324,7 @@ def test_static_mode_still_catches_sibling_claim_conflict(tmp_path):
     assert "12" in proc.stdout and "15" in proc.stdout
 
 
-def test_collect_live_counts_parses_fixture_tree(tmp_path):
+def test_collect_live_counts_parses_fixture_tree(tmp_path: Path) -> None:
     """The collector returns (count, files) measured from a real subprocess
     pytest run: 5 tests over 2 files."""
     root = _write_repo(tmp_path, n_tests=5, n_files=2)

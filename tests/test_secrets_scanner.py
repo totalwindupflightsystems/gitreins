@@ -13,6 +13,7 @@ import sys
 import tempfile
 
 import pytest
+from pathlib import Path
 
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -81,24 +82,24 @@ def _any_match(matches: list, *labels: str) -> bool:
 
 
 class TestExistingPatterns:
-    def test_github_token(self):
+    def test_github_token(self) -> None:
         matches = _scan_text('GITHUB_TOKEN = "ghp_abc123def456ghi789jkl012mno345pqr678stu"')
         assert _any_match(matches, "GitHub personal access token")
 
-    def test_openai_key(self):
+    def test_openai_key(self) -> None:
         """sk-proj- key may be caught by api_key pattern (generic) or sk- pattern (specific). Both are correct."""
         matches = _scan_text(
             'OPENAI_API_KEY = "sk-proj-abc123def456ghi789jkl012mno345pqr678stuvwxyz"'
         )
         assert _any_match(matches, "OpenAI/OpenRouter API key", "hardcoded API key")
 
-    def test_openrouter_key(self):
+    def test_openrouter_key(self) -> None:
         matches = _scan_text(
             'OPENROUTER_API_KEY = "sk-or-v1-abc123def456ghi789jkl012mno345pqr678stuvwxyz1234"'
         )
         assert _any_match(matches, "OpenAI/OpenRouter API key", "hardcoded API key")
 
-    def test_aws_access_key(self):
+    def test_aws_access_key(self) -> None:
         """Use a realistic-looking access key ID (no EXAMPLE in value)."""
         # Built at runtime to avoid gitleaks false positive on synthetic test key.
         p1 = "AK"
@@ -108,26 +109,26 @@ class TestExistingPatterns:
         matches = _scan_text(f'AWS_ACCESS_KEY_ID = "{fake_key}"')
         assert _any_match(matches, "AWS access key")
 
-    def test_hardcoded_jwt(self):
+    def test_hardcoded_jwt(self) -> None:
         matches = _scan_text(
             'token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"'
         )
         assert _any_match(matches, "hardcoded JWT")
 
-    def test_env_var_not_flagged(self):
+    def test_env_var_not_flagged(self) -> None:
         """os.getenv should NOT trigger secrets scanner."""
         matches = _scan_text('API_KEY = os.getenv("MY_API_KEY")')
         assert len(matches) == 0
 
-    def test_empty_password_not_flagged(self):
+    def test_empty_password_not_flagged(self) -> None:
         matches = _scan_text('PASSWORD = ""')
         assert len(matches) == 0
 
-    def test_placeholder_not_flagged(self):
+    def test_placeholder_not_flagged(self) -> None:
         matches = _scan_text('API_KEY = "sk-PLACEHOLDER-KEY-NOT-REAL-12345678901234567890"')
         assert len(matches) == 0
 
-    def test_example_comment_not_flagged(self):
+    def test_example_comment_not_flagged(self) -> None:
         """TODO/FIXME comments should not be flagged."""
         matches = _scan_text("# TODO: sk-add-real-key-here for testing")
         assert len(matches) == 0
@@ -139,32 +140,32 @@ class TestExistingPatterns:
 
 
 class TestSSHPrivateKeys:
-    def test_rsa_private_key(self):
+    def test_rsa_private_key(self) -> None:
         matches = _scan_text("""-----BEGIN RSA PRIVATE KEY-----
 MIIEpAIBAAKCAQEA0Z3Yj5K7w8N2mQpL4xVfH6tR9sA1bC3dE5fG7hI9jK0L1mN2oP
 -----END RSA PRIVATE KEY-----""")
         assert _any_match(matches, "private key block")
 
-    def test_openssh_private_key(self):
+    def test_openssh_private_key(self) -> None:
         matches = _scan_text("""-----BEGIN OPENSSH PRIVATE KEY-----
 b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAABFwAAAAdzc2gtcn
 -----END OPENSSH PRIVATE KEY-----""")
         assert _any_match(matches, "private key block")
 
-    def test_pkcs8_private_key(self):
+    def test_pkcs8_private_key(self) -> None:
         """PKCS#8 generic format (used by ED25519): -----BEGIN PRIVATE KEY-----"""
         matches = _scan_text("""-----BEGIN PRIVATE KEY-----
 MC4CAQAwBQYDK2VwBCIEIJ3tNqRx7Bm5LfHk8Ys2Dc0WvPqR4Sa6TbU9Ve0XfGhK
 -----END PRIVATE KEY-----""")
         assert _any_match(matches, "private key block")
 
-    def test_encrypted_private_key(self):
+    def test_encrypted_private_key(self) -> None:
         matches = _scan_text("""-----BEGIN ENCRYPTED PRIVATE KEY-----
 MIIFHDBOBgkqhkiG9w0BBQ0wQTApBgkqhkiG9w0BBQwwHAQIgV7nY2FxR9K0LoMCAggA
 -----END ENCRYPTED PRIVATE KEY-----""")
         assert _any_match(matches, "private key block")
 
-    def test_pgp_private_key(self):
+    def test_pgp_private_key(self) -> None:
         matches = _scan_text("""-----BEGIN PGP PRIVATE KEY BLOCK-----
 lQdGBGcX9hEBEAC8Nq3k5J7mP2sV0wX4yB6cR8tU1nA3dF5hG9iK2lM4oQ6rS7vW0xZ
 -----END PGP PRIVATE KEY BLOCK-----""")
@@ -172,19 +173,19 @@ lQdGBGcX9hEBEAC8Nq3k5J7mP2sV0wX4yB6cR8tU1nA3dF5hG9iK2lM4oQ6rS7vW0xZ
 
 
 class TestAWSSecretKeys:
-    def test_aws_secret_key(self):
+    def test_aws_secret_key(self) -> None:
         matches = _scan_text(
             'AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMIK7MDENGbPxRfiCYZ9a4pQ3sT0vK2nL5mH8rD1wF6xJ3"'
         )
         assert _any_match(matches, "AWS secret access key")
 
-    def test_aws_secret_key_underscore_variant(self):
+    def test_aws_secret_key_underscore_variant(self) -> None:
         matches = _scan_text(
             'aws_secret = "wJalrXUtnFEMIK7MDENGbPxRfiCYZ9a4pQ3sT0vK2nL5mH8rD1wF6xJ3"'
         )
         assert _any_match(matches, "AWS secret access key")
 
-    def test_aws_secret_in_yaml(self):
+    def test_aws_secret_in_yaml(self) -> None:
         matches = _scan_text(
             'secret_access_key: "wJalrXUtnFEMIK7MDENGbPxRfiCYZ9a4pQ3sT0vK2nL5mH8rD1wF6xJ3"'
         )
@@ -192,17 +193,17 @@ class TestAWSSecretKeys:
 
 
 class TestGCPKeys:
-    def test_gcp_api_key(self):
+    def test_gcp_api_key(self) -> None:
         matches = _scan_text('GCP_API_KEY = "AIzaSyD4i8HrK2mN9pQ5sT0vW1xF6jL3aB7cE9dG0fI4k"')
         assert _any_match(matches, "GCP API key")
 
-    def test_gcp_key_in_config(self):
+    def test_gcp_key_in_config(self) -> None:
         matches = _scan_text('api_key: "AIzaSyD4i8HrK2mN9pQ5sT0vW1xF6jL3aB7cE9dG0fI4k"')
         assert _any_match(matches, "GCP API key", "hardcoded API key")
 
 
 class TestDigitalOcean:
-    def test_do_token(self):
+    def test_do_token(self) -> None:
         matches = _scan_text(
             'DO_TOKEN = "dop_v1_abc123def456ghi789jkl012mno345pqr678stuvwxyz9012abcdef3456ghij7890klmn"'
         )
@@ -210,33 +211,33 @@ class TestDigitalOcean:
 
 
 class TestStripe:
-    def test_stripe_live_secret(self):
+    def test_stripe_live_secret(self) -> None:
         # Build key at runtime to avoid literal 'sk_live_' in source (GitHub push protection)
         prefix = "sk_" + "live_"
         fake_key = prefix + "NOTAREALKEY000000000000000000000000000000000000"
         matches = _scan_text(f'STRIPE_SECRET_KEY = "{fake_key}"')
         assert _any_match(matches, "Stripe live secret key")
 
-    def test_stripe_restricted_key(self):
+    def test_stripe_restricted_key(self) -> None:
         prefix = "rk_" + "live_"
         fake_key = prefix + "NOTAREALKEY000000000000000000000000000000000000"
         matches = _scan_text(f'STRIPE_KEY = "{fake_key}"')
         assert _any_match(matches, "Stripe restricted key")
 
-    def test_stripe_test_key_not_caught(self):
+    def test_stripe_test_key_not_caught(self) -> None:
         """Stripe test keys (sk_test_) are NOT secrets."""
         matches = _scan_text('STRIPE_KEY = "sk_test_51H0AbcDefGhijKlMnOpQrStUvWxYz1234567890AbCd"')
         assert not _any_match(matches, "Stripe live secret key", "Stripe restricted key")
 
 
 class TestAzure:
-    def test_azure_connection_string(self):
+    def test_azure_connection_string(self) -> None:
         matches = _scan_text(
             'CONN_STR = "DefaultEndpointsProtocol=https;AccountName=mystorage;AccountKey=abcdefghijklmnopqrstuvwxyz1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890=="'
         )
         assert _any_match(matches, "Azure storage connection string")
 
-    def test_azure_account_key(self):
+    def test_azure_account_key(self) -> None:
         matches = _scan_text(
             'AccountKey = "abcdefghijklmnopqrstuvwxyz1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890=="'
         )
@@ -244,14 +245,14 @@ class TestAzure:
 
 
 class TestSlack:
-    def test_slack_bot_token(self):
+    def test_slack_bot_token(self) -> None:
         # Build key at runtime to avoid literal 'xoxb-' in source (GitHub push protection)
         prefix = "xox" + "b-"
         fake_token = prefix + "NOTAREAL-NOTAREAL-NOTAREALsynthetic0000000000000000"
         matches = _scan_text(f'SLACK_TOKEN = "{fake_token}"')
         assert _any_match(matches, "Slack API token")
 
-    def test_slack_user_token(self):
+    def test_slack_user_token(self) -> None:
         prefix = "xox" + "p-"
         fake_token = prefix + "NOTAREAL-NOTAREAL-NOTAREALsynthetic0000000000000000"
         matches = _scan_text(f'token = "{fake_token}"')
@@ -294,7 +295,7 @@ class TestVenvDirExclusion:
         "-----BEGIN RSA PRIVATE KEY-----\n"
     )
 
-    def test_workdir_files_excludes_dotted_venv_dir(self, tmp_workdir):
+    def test_workdir_files_excludes_dotted_venv_dir(self, tmp_workdir: str) -> None:
         """.venv312/lib/python3.12/site-packages/<pkg>/mod.py is not enumerated."""
         _write_workdir_file(
             tmp_workdir,
@@ -309,7 +310,7 @@ class TestVenvDirExclusion:
         assert not any(f.startswith(".venv312") for f in files)
         assert "src/app.py" in files
 
-    def test_workdir_files_excludes_plain_venv_dir(self, tmp_workdir):
+    def test_workdir_files_excludes_plain_venv_dir(self, tmp_workdir: str) -> None:
         """A plain 'venv' dir (no dot prefix) is also pruned."""
         _write_workdir_file(
             tmp_workdir,
@@ -324,7 +325,7 @@ class TestVenvDirExclusion:
         assert not any(f.startswith("venv/") for f in files)
         assert "main.py" in files
 
-    def test_workdir_files_excludes_any_venv_prefix(self, tmp_workdir):
+    def test_workdir_files_excludes_any_venv_prefix(self, tmp_workdir: str) -> None:
         """venv311, .venvs, etc. all match the prefix filter."""
         for venv in ("venv311", ".venvs", "venvs", ".venv312"):
             _write_workdir_file(
@@ -339,7 +340,7 @@ class TestVenvDirExclusion:
 
         assert files == ["src/app.py"]
 
-    def test_workdir_files_excludes_site_and_dist_packages(self, tmp_workdir):
+    def test_workdir_files_excludes_site_and_dist_packages(self, tmp_workdir: str) -> None:
         """Belt-and-braces: site-packages/dist-packages are pruned even under
         an unusual venv root name."""
         _write_workdir_file(
@@ -359,7 +360,7 @@ class TestVenvDirExclusion:
 
         assert files == ["src/app.py"]
 
-    def test_workdir_scan_clean_with_vendored_venv(self, tmp_workdir):
+    def test_workdir_scan_clean_with_vendored_venv(self, tmp_workdir: str) -> None:
         """staged_only=False scan passes when findings exist only under a venv."""
         _write_workdir_file(
             tmp_workdir,
@@ -374,7 +375,7 @@ class TestVenvDirExclusion:
         assert result.passed is True
         assert "clean" in result.output
 
-    def test_workdir_scan_still_flags_finding_outside_venv(self, tmp_workdir):
+    def test_workdir_scan_still_flags_finding_outside_venv(self, tmp_workdir: str) -> None:
         """Over-skip guard: a genuine finding in normal source still trips."""
         _write_workdir_file(
             tmp_workdir,
@@ -427,7 +428,7 @@ def _tier1_secrets_command(workdir: str) -> str:
 class TestHarnessStateExcludedFromBuiltinScan:
     """Criterion 1: the builtin workdir scan skips `.gitreins/**`."""
 
-    def test_workdir_files_prunes_all_harness_state(self, tmp_workdir):
+    def test_workdir_files_prunes_all_harness_state(self, tmp_workdir: str) -> None:
         """Config, logs and history are all pruned from the enumeration."""
         _write_workdir_file(tmp_workdir, ".gitreins/config.yaml", "guards:\n  secrets: true\n")
         _write_workdir_file(tmp_workdir, ".gitreins/logs/guard-1.log", HARNESS_CANARY)
@@ -443,7 +444,7 @@ class TestHarnessStateExcludedFromBuiltinScan:
         assert not any(f.startswith(".gitreins/") for f in files)
         assert files == ["src/app.py"]
 
-    def test_workdir_scan_ignores_canary_in_harness_state(self, tmp_workdir):
+    def test_workdir_scan_ignores_canary_in_harness_state(self, tmp_workdir: str) -> None:
         """Canary in `.gitreins/logs/x.log` does NOT fail the scan, and the
         evidence names the exclusion (criterion 3)."""
         _write_workdir_file(
@@ -458,7 +459,7 @@ class TestHarnessStateExcludedFromBuiltinScan:
         assert ".gitreins/**" in result.output
         assert "excluded harness state" in result.output
 
-    def test_workdir_scan_still_flags_same_canary_in_source(self, tmp_workdir):
+    def test_workdir_scan_still_flags_same_canary_in_source(self, tmp_workdir: str) -> None:
         """Criterion 2 (MUST half): the identical canary in a source file
         still fails — the exclusion is scoped, not a blanket relaxation."""
         _write_workdir_file(
@@ -473,7 +474,7 @@ class TestHarnessStateExcludedFromBuiltinScan:
         assert "src/app.py" in result.output
         assert ".gitreins" not in result.output
 
-    def test_staged_scan_ignores_tracked_gitreins_state(self, tmp_path):
+    def test_staged_scan_ignores_tracked_gitreins_state(self, tmp_path: Path) -> None:
         """`.gitreins/config.yaml` and `history/` are TRACKED in a real repo,
         so the staged path needs the same exclusion."""
         repo = _git_repo(str(tmp_path / "repo"))
@@ -501,7 +502,7 @@ class TestTier1SecretsStepHarnessScope:
         _write_workdir_file(repo, "src/app.py", "def add(a, b):\n    return a + b\n")
         return repo
 
-    def test_step_passes_with_canary_only_in_harness_state(self, tmp_path):
+    def test_step_passes_with_canary_only_in_harness_state(self, tmp_path: Path) -> None:
         repo = self._make_repo(str(tmp_path / "repo"))
 
         proc = subprocess.run(
@@ -512,7 +513,7 @@ class TestTier1SecretsStepHarnessScope:
         # Criterion 3: the exclusion is part of the step's evidence.
         assert ".gitreins/**" in proc.stdout
 
-    def test_step_fails_when_same_canary_reaches_a_source_file(self, tmp_path):
+    def test_step_fails_when_same_canary_reaches_a_source_file(self, tmp_path: Path) -> None:
         repo = self._make_repo(str(tmp_path / "repo"))
         _write_workdir_file(repo, "src/app.py", f"token = {HARNESS_CANARY}\n")
 
@@ -532,7 +533,7 @@ class TestTier1SecretsStepNamesScanners:
     `secrets` no longer leaves "secrets" ambiguous.
     """
 
-    def test_step_output_names_the_scanner_set(self, tmp_path):
+    def test_step_output_names_the_scanner_set(self, tmp_path: Path) -> None:
         repo = _git_repo(str(tmp_path / "repo"))
         _write_workdir_file(repo, "src/app.py", "def add(a, b):\n    return a + b\n")
 
@@ -551,7 +552,7 @@ class TestTier1SecretsStepNamesScanners:
         ), proc.stdout
         assert re.search(r"secrets: gitleaks: (clean|not on PATH)", proc.stdout), proc.stdout
 
-    def test_step_output_names_the_offending_scanner_on_failure(self, tmp_path):
+    def test_step_output_names_the_offending_scanner_on_failure(self, tmp_path: Path) -> None:
         repo = _git_repo(str(tmp_path / "repo"))
         _write_workdir_file(repo, "src/app.py", f"token = {HARNESS_CANARY}\n")
 
@@ -567,7 +568,7 @@ class TestGitleaksHarnessExclusionConfig:
     """The generated gitleaks config is what keeps `--no-git` off harness
     state; gitleaks version present → also prove it live."""
 
-    def test_config_extends_repo_config_when_present(self, tmp_path):
+    def test_config_extends_repo_config_when_present(self, tmp_path: Path) -> None:
         from engine.pipeline import harness_scan_gitleaks_config
 
         repo = str(tmp_path / "repo")
@@ -585,7 +586,7 @@ class TestGitleaksHarnessExclusionConfig:
         assert "useDefault" not in cfg
         assert r"(^|/)\.gitreins/.*" in cfg
 
-    def test_config_falls_back_to_default_ruleset(self, tmp_path):
+    def test_config_falls_back_to_default_ruleset(self, tmp_path: Path) -> None:
         from engine.pipeline import harness_scan_gitleaks_config
 
         repo = str(tmp_path / "repo")
@@ -600,7 +601,7 @@ class TestGitleaksHarnessExclusionConfig:
     @pytest.mark.skipif(
         shutil.which("gitleaks") is None, reason="gitleaks not installed on this host"
     )
-    def test_gitleaks_scan_scope_excludes_harness_state(self, tmp_path):
+    def test_gitleaks_scan_scope_excludes_harness_state(self, tmp_path: Path) -> object:
         """Bare `--no-git` flags the harness canary; the generated config
         does not — and still flags the same canary in a source file."""
         from engine.pipeline import harness_scan_gitleaks_config

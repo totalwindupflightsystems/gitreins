@@ -68,7 +68,7 @@ def write_report(directory: str, filename: str, body: str) -> None:
 # ── Flaw 4: list index without bounds check ──────────────────────────────────
 
 
-def last_item(items: list[Any]) -> Any:
+def last_item(items: list[object]) -> object:
     """Return the last element of `items`.
 
     FLAW: `items[-1]` raises IndexError on an empty list. There is
@@ -95,7 +95,7 @@ def ensure_directory(directory: str) -> bool:
 # ── Flaw 6: nested attribute access without any guard ───────────────────────
 
 
-def config_value(config: dict, dotted_key: str) -> Any:
+def config_value(config: dict, dotted_key: str) -> object:
     """Look up `dotted_key` (e.g. 'db.host') in nested dict `config`.
 
     FLAW: the function recursively walks the dict using
