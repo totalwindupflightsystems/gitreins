@@ -1156,6 +1156,14 @@ class Pipeline:
         # audit does not grade, and no LLM client is ever built (a client
         # that is never constructed cannot make a network call).
         config = self._load_commit_audit_config()
+        # GR-148: per-invocation overrides (CLI ``--review-profile`` /
+        # ``--review-effort``) ride on the task dict and take precedence over
+        # repo config; the profile default is the base beneath both.
+        task_overrides = task.get("commit_audit_overrides") or {}
+        task_review_effort_override = None
+        if isinstance(task_overrides, dict):
+            task_review_effort_override = task_overrides.get("review_effort")
+            config = {**config, **{k: v for k, v in task_overrides.items() if v is not None}}
 
         enabled, enabled_source = resolve_commit_audit_enabled(self.config, config, step_def)
         if not enabled:
@@ -1194,6 +1202,8 @@ class Pipeline:
             review_suggest_fix=config.get("review_suggest_fix", True),
             review_score_threshold=score_threshold,
             review_score_offset=score_offset,
+            review_profile=config.get("review_profile", "standard"),
+            review_effort_override=task_review_effort_override or config.get("review_effort", None),
         )
 
         message = task.get("commit_message", "")

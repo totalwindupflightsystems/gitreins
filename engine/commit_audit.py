@@ -405,6 +405,25 @@ class CommitAuditResult:
     review_summary: str = ""
     """Summary from the review (GR-065)."""
 
+    review_profile: str = ""
+    """Selected review profile name (GR-148)."""
+
+    review_effort: dict = field(default_factory=dict)
+    """Resolved effort budget actually used (GR-148)."""
+
+    review_passes_run: list[str] = field(default_factory=list)
+    """Which passes ran (GR-148)."""
+
+    review_partial: bool = False
+    review_partial_reason: str = ""
+    """PARTIAL-review markers when a budget cap stopped the run (GR-148)."""
+
+    review_estimates: list = field(default_factory=list)
+    """Pass-2 FixEstimate dicts (GR-148)."""
+
+    review_remediation: dict | None = None
+    """Pass-3 remediation brief dict, if run (GR-148)."""
+
     @property
     def action(self) -> str:
         """The action the hook should take: 'pass', 'warn', or 'block'."""
@@ -426,6 +445,14 @@ class ReviewIssue:
     suggestion: str = ""
     score: float = 0.0  # GR-066: CVE-style 1-10 score
 
+    def compat_severity(self) -> str:
+        """Severity mapped to the pre-GR-148 consumer set (documented in
+        engine/review_profiles.py: trivial -> info, observation -> info;
+        nothing maps upward)."""
+        from engine.review_profiles import compat_severity
+
+        return compat_severity(self.severity)
+
     @classmethod
     def from_dict(cls, d: dict) -> "ReviewIssue":
         return cls(
@@ -441,8 +468,79 @@ class ReviewIssue:
 
 
 @dataclass
+class FixEstimate:
+    """Pass-2 per-finding fix estimate (GR-148). All figures are ESTIMATES,
+    never measured durations. An unknown estimate carries a ``reason``."""
+
+    file: str = ""
+    line: int = 0
+    size: str = ""  # XS|S|M|L|XL, empty when unknown
+    time_range: str = ""  # labeled estimate range, e.g. "15-30 minutes"
+    confidence: str = ""  # high|medium|low
+    assumptions: list[str] = field(default_factory=list)
+    likely_scope: list[str] = field(default_factory=list)
+    likely_tests: list[str] = field(default_factory=list)
+    reason: str = ""  # REQUIRED when size is unknown
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "FixEstimate":
+        return cls(
+            file=str(d.get("file", "")),
+            line=int(d.get("line", 0) or 0),
+            size=str(d.get("size", "") or "").upper(),
+            time_range=str(d.get("time_range", "") or ""),
+            confidence=str(d.get("confidence", "") or ""),
+            assumptions=list(d.get("assumptions", []) or []),
+            likely_scope=list(d.get("likely_scope", []) or []),
+            likely_tests=list(d.get("likely_tests", []) or []),
+            reason=str(d.get("reason", "") or ""),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "file": self.file,
+            "line": self.line,
+            "size": self.size,
+            "time_range": self.time_range,
+            "confidence": self.confidence,
+            "assumptions": self.assumptions,
+            "likely_scope": self.likely_scope,
+            "likely_tests": self.likely_tests,
+            "reason": self.reason,
+        }
+
+
+@dataclass
+class RemediationBrief:
+    """Optional pass-3 agent-ready remediation brief (GR-148). It is a
+    DESCRIPTION of the fix — it never modifies code and never claims to."""
+
+    summary: str = ""
+    steps: list[str] = field(default_factory=list)
+    acceptance_checks: list[str] = field(default_factory=list)
+    notes: str = ""
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "RemediationBrief":
+        return cls(
+            summary=str(d.get("summary", "") or ""),
+            steps=list(d.get("steps", []) or []),
+            acceptance_checks=list(d.get("acceptance_checks", []) or []),
+            notes=str(d.get("notes", "") or ""),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "summary": self.summary,
+            "steps": self.steps,
+            "acceptance_checks": self.acceptance_checks,
+            "notes": self.notes,
+        }
+
+
+@dataclass
 class CommitReviewResult:
-    """Result of a CodeRabbit-style commit review (GR-065, GR-066)."""
+    """Result of a CodeRabbit-style commit review (GR-065, GR-066, GR-148)."""
 
     valid: bool
     summary: str = ""
@@ -452,6 +550,125 @@ class CommitReviewResult:
     suggested_message: str = ""
     iterations_used: int = 0
     overall_score: float = 0.0  # GR-066: worst issue score, 0 if no issues
+    # ── GR-148: profile/effort selection and multi-pass outputs ──
+    profile: str = ""
+    effort: dict = field(default_factory=dict)  # resolved EffortLevel.to_dict()
+    passes_run: list[str] = field(default_factory=list)  # e.g. ["findings", "estimates"]
+    partial: bool = False  # True when a budget cap stopped the review early
+    partial_reason: str = ""
+    estimates: list[FixEstimate] = field(default_factory=list)  # pass 2
+    remediation_brief: RemediationBrief | None = None  # pass 3 (optional)
+
+    def severity_counts(self) -> dict[str, int]:
+        """Count findings by severity, in canonical order (GR-148 rendering)."""
+        order = ("critical", "high", "medium", "low", "trivial", "info", "observation")
+        counts: dict[str, int] = {}
+        for i in self.issues:
+            counts[i.severity] = counts.get(i.severity, 0) + 1
+        return {s: counts[s] for s in order if s in counts}
+
+    def issues_by_severity(self, *severities: str) -> list[ReviewIssue]:
+        """Filter findings by one or more severities."""
+        wanted = set(severities)
+        return [i for i in self.issues if i.severity in wanted]
+
+    def estimate_for(self, issue: "ReviewIssue") -> FixEstimate | None:
+        """Match a pass-2 estimate to its pass-1 finding by file+line."""
+        for e in self.estimates:
+            if e.file == issue.file and e.line == issue.line:
+                return e
+        return None
+
+    def to_dict(self) -> dict:
+        """Structured output: existing fields plus GR-148 additions. The
+        ``suggestion`` field is preserved on every issue; legacy consumers
+        see compat-mapped severities via ReviewIssue.compat_severity()."""
+        return {
+            "valid": self.valid,
+            "summary": self.summary,
+            "overall_score": self.overall_score,
+            "iterations_used": self.iterations_used,
+            "profile": self.profile,
+            "effort": self.effort,
+            "passes_run": self.passes_run,
+            "partial": self.partial,
+            "partial_reason": self.partial_reason,
+            "severity_counts": self.severity_counts(),
+            "issues": [
+                {
+                    "file": i.file,
+                    "line": i.line,
+                    "severity": i.severity,
+                    "compat_severity": i.compat_severity(),
+                    "category": i.category,
+                    "title": i.title,
+                    "description": i.description,
+                    "suggestion": i.suggestion,
+                    "score": i.score,
+                }
+                for i in self.issues
+            ],
+            "estimates": [e.to_dict() for e in self.estimates],
+            "remediation_brief": self.remediation_brief.to_dict()
+            if self.remediation_brief
+            else None,
+            "message_valid": self.message_valid,
+            "message_issues": self.message_issues,
+            "suggested_message": self.suggested_message,
+        }
+
+    def render_human(self) -> str:
+        """Human-readable review rendering (GR-148): severity groups with
+        counts, per-finding fix-effort estimates, optional remediation brief.
+        Estimates are explicitly labeled as estimates."""
+        lines: list[str] = [f"Review profile: {self.profile or 'default'}"]
+        if self.partial:
+            lines.append(
+                f"PARTIAL REVIEW — {self.partial_reason}"
+                if self.partial_reason
+                else "PARTIAL REVIEW — budget cap reached"
+            )
+        counts = self.severity_counts()
+        if counts:
+            lines.append(
+                "Findings by severity: " + ", ".join(f"{s}={n}" for s, n in counts.items())
+            )
+        groups: dict[str, list[ReviewIssue]] = {}
+        for i in self.issues:
+            groups.setdefault(i.severity, []).append(i)
+        for sev in ("critical", "high", "medium", "low", "trivial", "info", "observation"):
+            for i in groups.get(sev, []):
+                lines.append(
+                    f"[{sev.upper()}][{i.category}] {i.file}:{i.line} — {i.title} (score: {i.score:.1f})"
+                )
+                if i.description:
+                    lines.append(f"  {i.description}")
+                if i.suggestion:
+                    lines.append(f"  Suggestion: {i.suggestion}")
+                est = self.estimate_for(i)
+                if est:
+                    if est.size:
+                        lines.append(
+                            f"  Fix estimate (ESTIMATE, not measured): {est.size} (~{est.time_range}, confidence: {est.confidence})"
+                        )
+                    else:
+                        lines.append(f"  Fix estimate: unknown — {est.reason}")
+                if est and est.likely_tests:
+                    lines.append(f"  Tests: {'; '.join(est.likely_tests)}")
+        if self.remediation_brief:
+            rb = self.remediation_brief
+            lines.append("── Remediation brief (description only — no code modified) ──")
+            if rb.summary:
+                lines.append(rb.summary)
+            for s in rb.steps:
+                lines.append(f"  step: {s}")
+            for c in rb.acceptance_checks:
+                lines.append(f"  acceptance: {c}")
+            if rb.notes:
+                lines.append(f"  notes: {rb.notes}")
+        if not self.issues:
+            lines.append(self.summary or "No issues found.")
+        return "\n".join(lines)
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -480,6 +697,8 @@ class CommitAuditor:
         review_suggest_fix: bool = True,
         review_score_threshold: float = 8.0,
         review_score_offset: float = 1.0,
+        review_profile: str | None = None,
+        review_effort_override: dict | None = None,
     ) -> None:
         self.llm = llm
         self.workdir = os.path.abspath(workdir)
@@ -487,14 +706,37 @@ class CommitAuditor:
         self.max_iterations = max_iterations
         self.suggest_message = suggest_message
         self.review_mode = review_mode
-        self.review_checks = review_checks or {
-            "bugs": True,
-            "security": True,
-            "anti_patterns": True,
-            "style": False,
-            "performance": False,
-        }
-        self.review_severity = review_severity
+        # GR-148: profile selection. A named profile drives checks, severity
+        # filter, pass list, and default budget — policy, not just prompt text.
+        from engine.review_profiles import get_profile, resolve_effort
+
+        self.review_profile = get_profile(review_profile)
+        # Effort precedence: per-invocation override > repo default (set via
+        # review_effort_override by the caller after reading config) > profile.
+        # For direct constructor users, repo default arrives here too.
+        self.review_effort = resolve_effort(
+            self.review_profile, repo_default=None, override=review_effort_override
+        )
+        # Apply the profile's own severity/checks defaults unless the caller
+        # passed explicit ones (explicit constructor args win).
+        if review_checks is None:
+            self.review_checks = dict(self.review_profile.checks)
+        else:
+            self.review_checks = review_checks or {
+                "bugs": True,
+                "security": True,
+                "anti_patterns": True,
+                "style": False,
+                "performance": False,
+            }
+        # Explicit non-default constructor severity is an explicit choice and
+        # wins; the default "standard" defers to the selected profile's
+        # filter (the profile is a POLICY that includes its severity filter).
+        if review_severity != "standard":
+            self.review_severity = review_severity
+        else:
+            self.review_severity = self.review_profile.severity_filter
+        self.review_effort_override = review_effort_override
         self.review_suggest_fix = review_suggest_fix
         self.review_score_threshold = review_score_threshold
         self.review_score_offset = review_score_offset
@@ -549,15 +791,112 @@ class CommitAuditor:
         self,
         message: str,
         diff: str | None = None,
+        *,
+        profile: str | None = None,
+        effort_override: dict | None = None,
     ) -> "CommitReviewResult":
-        """Run a CodeRabbit-style commit review."""
+        """Run a CodeRabbit-style commit review under the selected profile.
+
+        GR-148: ``profile`` selects the review policy (quick/standard/deep)
+        and ``effort_override`` carries per-invocation budget overrides
+        (highest precedence over repo config, which itself beats the
+        profile default). Passes run in the profile's declared order and
+        stop — returning PARTIAL results with a reason — when the hard
+        budget is exhausted.
+        """
         if diff is None:
             diff = self._capture_diff()
         if not diff.strip():
             return CommitReviewResult(valid=True, summary="No changes to review.")
 
-        # Build review prompt
-        active_checks = [k for k, v in self.review_checks.items() if v]
+        from engine.review_profiles import (
+            BudgetState,
+            get_profile,
+            resolve_effort,
+        )
+
+        # Selection precedence: invocation arg > constructor config > standard.
+        profile_name = profile or (
+            self.review_profile.name if self.review_profile.name != "standard" else None
+        )
+        selected = get_profile(profile_name) if profile_name else self.review_profile
+        effort = resolve_effort(
+            selected,
+            repo_default=None,
+            override=effort_override or self.review_effort_override,
+        )
+        budget = BudgetState(effort=effort)
+
+        result = CommitReviewResult(
+            valid=False,
+            profile=selected.name,
+            effort=effort.to_dict(),
+            passes_run=[],
+        )
+
+        # ── Pass 1: findings ──
+        findings_result = self._run_findings_pass(message, diff, selected)
+        result.valid = findings_result.valid
+        result.summary = findings_result.summary
+        result.issues = findings_result.issues
+        result.message_valid = findings_result.message_valid
+        result.message_issues = findings_result.message_issues
+        result.suggested_message = findings_result.suggested_message
+        result.overall_score = findings_result.overall_score
+        result.passes_run.append("findings")
+        budget.llm_calls += max(findings_result.iterations_used, 1)
+        result.iterations_used += max(findings_result.iterations_used, 1)
+
+        if not result.issues:
+            # Nothing to estimate or remediate — profile's remaining passes
+            # are no-ops (not partial: the policy is satisfied).
+            return result
+
+        remaining = [p for p in selected.passes if p != "findings"]
+        for pass_name in remaining:
+            reason = budget.exhausted_reason()
+            if reason:
+                result.partial = True
+                result.partial_reason = f"stopped before pass '{pass_name}': {reason}"
+                break
+            if pass_name == "estimates":
+                est = self._run_estimates_pass(result.issues, diff)
+                if est is not None:
+                    result.estimates = est
+                    result.passes_run.append("estimates")
+                    budget.llm_calls += 1
+                    result.iterations_used += 1
+                else:
+                    result.partial = True
+                    result.partial_reason = "estimates pass failed (LLM unavailable or unparseable)"
+                    break
+            elif pass_name == "remediation":
+                brief = self._run_remediation_pass(result.issues, diff)
+                if brief is not None:
+                    result.remediation_brief = brief
+                    result.passes_run.append("remediation")
+                    budget.llm_calls += 1
+                    result.iterations_used += 1
+                else:
+                    result.partial = True
+                    result.partial_reason = (
+                        "remediation pass failed (LLM unavailable or unparseable)"
+                    )
+                    break
+
+        # Note: completing every declared pass is NOT partial even when the
+        # budget is exactly consumed — partial means a pass could not run.
+        return result
+
+    def _run_findings_pass(
+        self,
+        message: str,
+        diff: str,
+        profile,  # ReviewProfile
+    ) -> "CommitReviewResult":
+        """Pass 1: evidence-backed findings under the profile's rubric."""
+
+        active_checks = [k for k, v in profile.checks.items() if v]
         checks_str = ", ".join(active_checks)
 
         severity_map = {
@@ -565,7 +904,7 @@ class CommitAuditor:
             "standard": "Report critical, high, and medium severity issues. Skip low and info.",
             "all": "Report all issues regardless of severity.",
         }
-        severity_instr = severity_map.get(self.review_severity, severity_map["standard"])
+        severity_instr = severity_map.get(profile.severity_filter, severity_map["standard"])
 
         fix_instr = (
             "Include specific, actionable fix suggestions for every issue."
@@ -585,9 +924,101 @@ class CommitAuditor:
             return self._review_tool_loop(message, diff, review_prompt)
 
         # Single-call review
-        return self._review_single_call(review_prompt)
+        return self._review_single_call(review_prompt, max_tokens=self.review_effort.max_tokens)
 
-    def _review_single_call(self, review_prompt: str) -> "CommitReviewResult":
+    def _run_estimates_pass(
+        self, issues: list[ReviewIssue], diff: str
+    ) -> "list[FixEstimate] | None":
+        """Pass 2: per-finding fix estimates (XS/S/M/L/XL, confidence,
+        assumptions). Returns None on failure so the caller can mark partial."""
+        from engine.review_profiles import FIX_ESTIMATE_PROMPT
+
+        findings_json = json.dumps(
+            [
+                {
+                    "file": i.file,
+                    "line": i.line,
+                    "severity": i.severity,
+                    "category": i.category,
+                    "title": i.title,
+                }
+                for i in issues
+            ],
+            indent=2,
+        )
+        prompt = (
+            "## PASS 1 FINDINGS\n"
+            + findings_json
+            + "\n\n## DIFF (context)\n"
+            + diff[:8000]
+            + "\n\n## INSTRUCTIONS\n"
+            + FIX_ESTIMATE_PROMPT
+        )
+        data = self._llm_json_call(prompt, self.review_effort.max_tokens)
+        if data is None:
+            return None
+        return [FixEstimate.from_dict(e) for e in data.get("estimates", [])]
+
+    def _run_remediation_pass(
+        self, issues: list[ReviewIssue], diff: str
+    ) -> "RemediationBrief | None":
+        """Pass 3 (optional): agent-ready remediation brief. Describes the
+        fix; never modifies code."""
+        from engine.review_profiles import REMEDIATION_PROMPT
+
+        findings_json = json.dumps(
+            [
+                {
+                    "file": i.file,
+                    "line": i.line,
+                    "severity": i.severity,
+                    "title": i.title,
+                    "suggestion": i.suggestion,
+                }
+                for i in issues
+            ],
+            indent=2,
+        )
+        prompt = (
+            "## PASS 1 FINDINGS\n" + findings_json + "\n\n## INSTRUCTIONS\n" + REMEDIATION_PROMPT
+        )
+        data = self._llm_json_call(prompt, self.review_effort.max_tokens)
+        if data is None:
+            return None
+        brief_data = data.get("remediation_brief")
+        if not isinstance(brief_data, dict):
+            return None
+        return RemediationBrief.from_dict(brief_data)
+
+    def _llm_json_call(self, prompt: str, max_tokens: int) -> dict | None:
+        """One LLM call expected to return a JSON object; None on failure."""
+        try:
+            response = self.llm.chat(
+                messages=[
+                    {"role": "system", "content": COMMIT_REVIEW_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.1,
+                max_tokens=max_tokens,
+            )
+        except Exception as e:
+            logger.warning("Review pass LLM call failed: %s", e)
+            return None
+        content = getattr(response, "content", None)
+        content = (content or "").strip()
+        if content.startswith("```"):
+            content = re.sub(r"^```(?:json)?\s*", "", content)
+            content = re.sub(r"\s*```$", "", content)
+        try:
+            data = json.loads(content)
+            return data if isinstance(data, dict) else None
+        except json.JSONDecodeError:
+            logger.warning("Review pass returned unparseable JSON: %s", content[:200])
+            return None
+
+    def _review_single_call(
+        self, review_prompt: str, max_tokens: int | None = None
+    ) -> "CommitReviewResult":
         """Single LLM call for code review."""
         try:
             response = self.llm.chat(
@@ -596,7 +1027,7 @@ class CommitAuditor:
                     {"role": "user", "content": review_prompt},
                 ],
                 temperature=0.1,
-                max_tokens=2048,
+                max_tokens=max_tokens or self.review_effort.max_tokens,
             )
         except Exception as e:
             logger.warning("Code review LLM call failed: %s", e)
@@ -715,11 +1146,18 @@ class CommitAuditor:
         return CommitAuditResult(
             valid=rev.valid and rev.message_valid,
             issues=[
-                f"[{i.severity}][{i.category}] {i.file}:{i.line}: {i.title} (score: {i.score:.1f})"
+                f"[{i.compat_severity()}][{i.category}] {i.file}:{i.line}: {i.title} (score: {i.score:.1f})"
                 for i in rev.issues
             ],
             suggested_message=rev.suggested_message,
             iterations_used=rev.iterations_used,
+            review_profile=rev.profile,
+            review_effort=rev.effort,
+            review_passes_run=rev.passes_run,
+            review_partial=rev.partial,
+            review_partial_reason=rev.partial_reason,
+            review_estimates=[e.to_dict() for e in rev.estimates],
+            review_remediation=rev.remediation_brief.to_dict() if rev.remediation_brief else None,
             review_issues=[
                 {
                     "file": i.file,
