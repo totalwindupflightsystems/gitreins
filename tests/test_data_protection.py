@@ -6,8 +6,6 @@ when the policy says redact/replace (AC5/AC6).
 """
 
 from __future__ import annotations
-from pathlib import Path
-from typing import Any
 
 import json
 import os
@@ -54,7 +52,7 @@ BENIGN_FIXTURES = _load("benign_near_matches.json")
 ALL_FIXTURES = PII_FIXTURES + NETWORK_FIXTURES + BENIGN_FIXTURES
 
 
-def _max_sensitivity_policy(**overrides: Any) -> DataProtectionPolicy:
+def _max_sensitivity_policy(**overrides) -> DataProtectionPolicy:
     """Policy that enables every class at confidence 0 (measurement policy)."""
     block = {
         "enabled": True,
@@ -78,7 +76,7 @@ def _max_sensitivity_policy(**overrides: Any) -> DataProtectionPolicy:
 # ── AC1: defaults / backwards compatibility ──────────────────────────────────
 
 
-def test_absent_block_is_disabled_noop() -> None:
+def test_absent_block_is_disabled_noop():
     policy = build_policy({})
     assert policy.enabled is False
     assert policy.active is False
@@ -87,24 +85,24 @@ def test_absent_block_is_disabled_noop() -> None:
     assert policy.redact_text(text) == text
 
 
-def test_default_policy_disabled() -> None:
+def test_default_policy_disabled():
     assert DataProtectionPolicy.default().enabled is False
     assert DataProtectionPolicy.default().active is False
 
 
-def test_category_defaults_are_off() -> None:
+def test_category_defaults_are_off():
     policy = DataProtectionPolicy.default()
     for name in (CATEGORY_PII, CATEGORY_IP):
         assert policy.category(name).detection == DETECTION_OFF
 
 
-def test_enabled_but_all_categories_off_is_not_active() -> None:
+def test_enabled_but_all_categories_off_is_not_active():
     policy = DataProtectionPolicy.from_dict({"enabled": True})
     assert policy.enabled is True
     assert policy.active is False
 
 
-def test_config_defaults_round_trip() -> None:
+def test_config_defaults_round_trip():
     cfg = GitReinsDefaults().overlay({})
     assert cfg.data_protection.enabled is False
     dumped = cfg.to_config_dict()
@@ -112,7 +110,7 @@ def test_config_defaults_round_trip() -> None:
     assert dumped["data_protection"]["enabled"] is False
 
 
-def test_config_overlay_reads_block() -> None:
+def test_config_overlay_reads_block():
     cfg = GitReinsDefaults().overlay(
         {
             "data_protection": {
@@ -128,18 +126,18 @@ def test_config_overlay_reads_block() -> None:
 # ── AC7: category inventory + extensible model ───────────────────────────────
 
 
-def test_category_inventory_covers_credentials_pii_and_network() -> None:
+def test_category_inventory_covers_credentials_pii_and_network():
     names = {spec.name for spec in CATEGORY_INVENTORY}
     assert names == {CATEGORY_CREDENTIALS, CATEGORY_PII, CATEGORY_IP}
 
 
-def test_credentials_owned_by_secrets_and_not_configurable() -> None:
+def test_credentials_owned_by_secrets_and_not_configurable():
     credentials = next(s for s in CATEGORY_INVENTORY if s.name == CATEGORY_CREDENTIALS)
     assert credentials.configurable is False
     assert "gitleaks" in credentials.detector
 
 
-def test_inventory_classes_match_rule_registry() -> None:
+def test_inventory_classes_match_rule_registry():
     pii = next(s for s in CATEGORY_INVENTORY if s.name == CATEGORY_PII)
     ip = next(s for s in CATEGORY_INVENTORY if s.name == CATEGORY_IP)
     assert set(pii.classes) == {r.rule for r in PII_RULES}
@@ -153,7 +151,7 @@ def test_inventory_classes_match_rule_registry() -> None:
 
 
 @pytest.mark.parametrize("fixture", PII_FIXTURES + NETWORK_FIXTURES, ids=lambda f: f["id"])
-def test_labeled_fixture_detects_expected_rules(fixture: Any) -> None:
+def test_labeled_fixture_detects_expected_rules(fixture):
     policy = _max_sensitivity_policy()
     detected = {f.rule for f in policy.scan(fixture["text"]).active}
     assert set(fixture["expected"]).issubset(detected), (
@@ -162,7 +160,7 @@ def test_labeled_fixture_detects_expected_rules(fixture: Any) -> None:
 
 
 @pytest.mark.parametrize("fixture", BENIGN_FIXTURES, ids=lambda f: f["id"])
-def test_benign_near_matches_do_not_raise_other_classes(fixture: Any) -> None:
+def test_benign_near_matches_do_not_raise_other_classes(fixture):
     policy = _max_sensitivity_policy()
     detected = {f.rule for f in policy.scan(fixture["text"]).active}
     # Benign fixtures must never trip IP or the high-precision classes; the
@@ -170,7 +168,7 @@ def test_benign_near_matches_do_not_raise_other_classes(fixture: Any) -> None:
     assert not (detected & {"ipv4", "ipv6", "cidr", "email", "ssn", "financial", "medical"})
 
 
-def test_measured_false_positives_match_documented_classes() -> None:
+def test_measured_false_positives_match_documented_classes():
     policy = _max_sensitivity_policy()
     measured = measure_fixtures(ALL_FIXTURES, policy)
     assert measured["missed"] == []
@@ -182,7 +180,7 @@ def test_measured_false_positives_match_documented_classes() -> None:
     assert measured["per_rule"]["phone"]["false_positive"] == 0
 
 
-def test_labeled_corpus_true_positive_counts() -> None:
+def test_labeled_corpus_true_positive_counts():
     policy = _max_sensitivity_policy()
     measured = measure_fixtures(PII_FIXTURES + NETWORK_FIXTURES, policy)
     assert measured["missed"] == []
@@ -203,7 +201,7 @@ def test_labeled_corpus_true_positive_counts() -> None:
         assert per_rule[rule]["true_positive"] >= 1, rule
 
 
-def test_every_canary_is_the_value_detected() -> None:
+def test_every_canary_is_the_value_detected():
     policy = _max_sensitivity_policy()
     for fixture in PII_FIXTURES + NETWORK_FIXTURES:
         values = {f.value for f in policy.scan(fixture["text"]).active}
@@ -213,7 +211,7 @@ def test_every_canary_is_the_value_detected() -> None:
 # ── AC2: IP precedence and defaults ──────────────────────────────────────────
 
 
-def test_preserve_list_wins_over_default_action() -> None:
+def test_preserve_list_wins_over_default_action():
     policy = DataProtectionPolicy.from_dict(
         {
             "enabled": True,
@@ -235,7 +233,7 @@ def test_preserve_list_wins_over_default_action() -> None:
     assert v6_preserved.handling == HANDLING_PRESERVE
 
 
-def test_unmatched_default_action_falls_back_to_handling() -> None:
+def test_unmatched_default_action_falls_back_to_handling():
     policy = DataProtectionPolicy.from_dict(
         {
             "enabled": True,
@@ -246,7 +244,7 @@ def test_unmatched_default_action_falls_back_to_handling() -> None:
     assert finding.handling == HANDLING_REDACT
 
 
-def test_cidr_wins_over_inner_literal() -> None:
+def test_cidr_wins_over_inner_literal():
     policy = _max_sensitivity_policy()
     findings = policy.scan("range 192.168.1.0/24 here").active
     rules = [f.rule for f in findings]
@@ -254,14 +252,14 @@ def test_cidr_wins_over_inner_literal() -> None:
     assert "ipv4" not in rules
 
 
-def test_invalid_octets_and_prefixes_are_not_detected() -> None:
+def test_invalid_octets_and_prefixes_are_not_detected():
     policy = _max_sensitivity_policy()
     assert policy.scan("999.999.999.999").active == ()
     assert policy.scan("192.168.1.0/40").active == ()
     assert policy.scan("2001:db8::/129").active == ()
 
 
-def test_ipv6_requires_two_colon_groups() -> None:
+def test_ipv6_requires_two_colon_groups():
     policy = _max_sensitivity_policy()
     assert policy.scan("finished at 12:30:45").active == ()
     assert [f.rule for f in policy.scan("host 2001:db8::1").active] == ["ipv6"]
@@ -293,12 +291,12 @@ def test_ipv6_requires_two_colon_groups() -> None:
         },
     ],
 )
-def test_malformed_policy_is_rejected(block: Any) -> None:
+def test_malformed_policy_is_rejected(block):
     with pytest.raises(DataProtectionConfigError):
         DataProtectionPolicy.from_dict(block)
 
 
-def test_valid_policy_is_accepted() -> None:
+def test_valid_policy_is_accepted():
     policy = DataProtectionPolicy.from_dict(
         {
             "enabled": True,
@@ -332,7 +330,7 @@ def test_valid_policy_is_accepted() -> None:
     assert policy.rule_enabled("names") is False
 
 
-def test_confidence_threshold_controls_class_selection() -> None:
+def test_confidence_threshold_controls_class_selection():
     strict = DataProtectionPolicy.from_dict(
         {"enabled": True, "categories": {CATEGORY_PII: {"detection": DETECTION_WARN}}}
     )
@@ -349,7 +347,7 @@ def test_confidence_threshold_controls_class_selection() -> None:
     }
 
 
-def test_class_confidence_override_beats_category() -> None:
+def test_class_confidence_override_beats_category():
     policy = DataProtectionPolicy.from_dict(
         {
             "enabled": True,
@@ -366,7 +364,7 @@ def test_class_confidence_override_beats_category() -> None:
     assert policy.rule_enabled("phone") is True
 
 
-def test_unknown_class_in_exception_rejected() -> None:
+def test_unknown_class_in_exception_rejected():
     with pytest.raises(DataProtectionConfigError):
         DataProtectionPolicy.from_dict(
             {
@@ -382,7 +380,7 @@ def test_unknown_class_in_exception_rejected() -> None:
 # ── AC4: false-positive exceptions ───────────────────────────────────────────
 
 
-def test_exception_requires_reason() -> None:
+def test_exception_requires_reason():
     with pytest.raises(DataProtectionConfigError):
         DataProtectionPolicy.from_dict(
             {
@@ -393,7 +391,7 @@ def test_exception_requires_reason() -> None:
         )
 
 
-def test_exception_requires_narrowing_match_or_rule() -> None:
+def test_exception_requires_narrowing_match_or_rule():
     with pytest.raises(DataProtectionConfigError):
         DataProtectionPolicy.from_dict(
             {
@@ -404,7 +402,7 @@ def test_exception_requires_narrowing_match_or_rule() -> None:
         )
 
 
-def test_exception_cannot_target_credentials() -> None:
+def test_exception_cannot_target_credentials():
     with pytest.raises(DataProtectionConfigError):
         DataProtectionPolicy.from_dict(
             {
@@ -417,7 +415,7 @@ def test_exception_cannot_target_credentials() -> None:
         )
 
 
-def _exception_policy(**exception_kwargs: Any) -> DataProtectionPolicy:
+def _exception_policy(**exception_kwargs) -> DataProtectionPolicy:
     entry = {"category": CATEGORY_PII, "reason": "synthetic fixture value"}
     entry.update(exception_kwargs)
     return DataProtectionPolicy.from_dict(
@@ -431,7 +429,7 @@ def _exception_policy(**exception_kwargs: Any) -> DataProtectionPolicy:
     )
 
 
-def test_exception_suppresses_only_the_named_value_and_scope() -> None:
+def test_exception_suppresses_only_the_named_value_and_scope():
     policy = _exception_policy(rule="email", match="ok@example.com", scope="docs/*")
     in_scope = policy.scan("ok@example.com and other@example.com", path="docs/readme.md")
     assert [f.suppressed for f in in_scope.findings] == [True, False]
@@ -442,7 +440,7 @@ def test_exception_suppresses_only_the_named_value_and_scope() -> None:
     assert len(out_of_scope.blocked) == 1
 
 
-def test_exception_does_not_hide_unrelated_findings() -> None:
+def test_exception_does_not_hide_unrelated_findings():
     policy = _exception_policy(rule="email", match="ok@example.com")
     result = policy.scan("ok@example.com 123-45-6789 203.0.113.9")
     blocked_rules = {f.rule for f in result.blocked}
@@ -450,7 +448,7 @@ def test_exception_does_not_hide_unrelated_findings() -> None:
     assert "email" not in blocked_rules
 
 
-def test_exception_applies_only_to_matching_value() -> None:
+def test_exception_applies_only_to_matching_value():
     policy = _exception_policy(rule="email", match="ok@example.com")
     result = policy.scan("ok@example.com other@example.com")
     assert sum(1 for f in result.findings if f.suppressed) == 1
@@ -469,7 +467,7 @@ def _handling_policy(handling: str) -> DataProtectionPolicy:
     )
 
 
-def test_redact_replaces_with_category_placeholder() -> None:
+def test_redact_replaces_with_category_placeholder():
     policy = _handling_policy(HANDLING_REDACT)
     canary = "canary.email.alpha@example.com"
     out = policy.redact_text(f"leaked {canary} here")
@@ -477,7 +475,7 @@ def test_redact_replaces_with_category_placeholder() -> None:
     assert "[REDACTED:pii]" in out
 
 
-def test_replace_uses_class_placeholder() -> None:
+def test_replace_uses_class_placeholder():
     policy = _handling_policy(HANDLING_REPLACE)
     canary = "canary.email.alpha@example.com"
     out = policy.redact_text(f"leaked {canary} here")
@@ -485,7 +483,7 @@ def test_replace_uses_class_placeholder() -> None:
     assert "[PII:EMAIL]" in out
 
 
-def test_preserve_leaves_value_visible() -> None:
+def test_preserve_leaves_value_visible():
     policy = _handling_policy(HANDLING_PRESERVE)
     canary = "canary.email.alpha@example.com"
     assert canary in policy.redact_text(canary)
@@ -493,14 +491,14 @@ def test_preserve_leaves_value_visible() -> None:
     assert finding.safe_value == canary
 
 
-def test_finding_dict_never_leaks_when_redact() -> None:
+def test_finding_dict_never_leaks_when_redact():
     policy = _handling_policy(HANDLING_REDACT)
     canary = "canary.email.alpha@example.com"
     for finding in policy.scan(canary).active:
         assert canary not in json.dumps(finding.to_dict())
 
 
-def test_redact_text_scrubs_machine_readable_artifact() -> None:
+def test_redact_text_scrubs_machine_readable_artifact():
     policy = DataProtectionPolicy.from_dict(
         {
             "enabled": True,
@@ -530,7 +528,7 @@ def test_redact_text_scrubs_machine_readable_artifact() -> None:
 # ── Guard-lane integration ───────────────────────────────────────────────────
 
 
-def _git_repo(tmp_path: Path) -> str:
+def _git_repo(tmp_path) -> str:
     workdir = str(tmp_path)
     subprocess.run(["git", "init", "-q"], cwd=workdir, check=True)
     return workdir
@@ -561,7 +559,7 @@ DP_CONFIG = {
 }
 
 
-def test_guard_lane_skips_when_disabled(tmp_path: Path) -> None:
+def test_guard_lane_skips_when_disabled(tmp_path):
     workdir = _git_repo(tmp_path)
     _tracked(workdir, "a.py", "x = 'canary.email.alpha@example.com'\n")
     result = check_data_protection(workdir, ["a.py"], policy=DataProtectionPolicy.default())
@@ -570,7 +568,7 @@ def test_guard_lane_skips_when_disabled(tmp_path: Path) -> None:
     assert result.findings == ()
 
 
-def test_guard_lane_blocks_and_redacts(tmp_path: Path) -> None:
+def test_guard_lane_blocks_and_redacts(tmp_path):
     workdir = _git_repo(tmp_path)
     canary = "canary.email.alpha@example.com"
     _tracked(workdir, "a.py", f"CONTACT = {canary!r}\n")
@@ -582,7 +580,7 @@ def test_guard_lane_blocks_and_redacts(tmp_path: Path) -> None:
     assert "[REDACTED:pii]" in result.output
 
 
-def test_guard_lane_warn_does_not_fail(tmp_path: Path) -> None:
+def test_guard_lane_warn_does_not_fail(tmp_path):
     workdir = _git_repo(tmp_path)
     _tracked(workdir, "a.py", "HOST = '203.0.113.9'\n")
     config = json.loads(json.dumps(DP_CONFIG))
@@ -595,7 +593,7 @@ def test_guard_lane_warn_does_not_fail(tmp_path: Path) -> None:
     assert result.warning
 
 
-def test_guard_manager_runs_lane_only_when_enabled(tmp_path: Path) -> None:
+def test_guard_manager_runs_lane_only_when_enabled(tmp_path):
     workdir = _git_repo(tmp_path)
     _tracked(workdir, "a.py", "x = 1\n")
     base = {"guards": {"secrets": False, "lint": False, "tests": False, "allow_skips": True}}
@@ -607,7 +605,7 @@ def test_guard_manager_runs_lane_only_when_enabled(tmp_path: Path) -> None:
     assert "data_protection" in {r.name for r in on.run_all().results}
 
 
-def test_guard_manager_lane_blocks_and_exposes_findings(tmp_path: Path) -> None:
+def test_guard_manager_lane_blocks_and_exposes_findings(tmp_path):
     workdir = _git_repo(tmp_path)
     canary = "canary.email.alpha@example.com"
     _tracked(workdir, "src/leak.py", f"CONTACT = {canary!r}\n")
@@ -626,9 +624,7 @@ def test_guard_manager_lane_blocks_and_exposes_findings(tmp_path: Path) -> None:
     assert canary not in json.dumps(dp_extra)
 
 
-def test_guard_manager_data_protection_uses_explicit_scan_root(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_guard_manager_data_protection_uses_explicit_scan_root(tmp_path, monkeypatch):
     workdir = _git_repo(tmp_path)
     source_root = tmp_path / "project"
     source_root.mkdir()
@@ -650,7 +646,7 @@ def test_guard_manager_data_protection_uses_explicit_scan_root(
     original_open = open
     opened: list[str] = []
 
-    def tracking_open(file: Any, *args: Any, **kwargs: Any) -> Any:
+    def tracking_open(file, *args, **kwargs):
         opened.append(os.path.realpath(os.fspath(file)))
         return original_open(file, *args, **kwargs)
 
@@ -661,7 +657,7 @@ def test_guard_manager_data_protection_uses_explicit_scan_root(
     assert os.path.realpath(os.path.join(workdir, "outside.py")) not in opened
 
 
-def test_tier1_data_protection_step_uses_explicit_scan_root(tmp_path: Path) -> None:
+def test_tier1_data_protection_step_uses_explicit_scan_root(tmp_path):
     control_root = tmp_path / "control"
     source_root = control_root / "project"
     source_root.mkdir(parents=True)
@@ -674,7 +670,7 @@ def test_tier1_data_protection_step_uses_explicit_scan_root(tmp_path: Path) -> N
     assert str(source_root) in step["run"]
 
 
-def test_guard_manager_malformed_policy_fails_loud(tmp_path: Path) -> None:
+def test_guard_manager_malformed_policy_fails_loud(tmp_path):
     workdir = _git_repo(tmp_path)
     _tracked(workdir, "a.py", "x = 1\n")
     cfg = {
@@ -688,7 +684,7 @@ def test_guard_manager_malformed_policy_fails_loud(tmp_path: Path) -> None:
     assert "invalid data_protection policy" in lane.error
 
 
-def test_guard_manager_non_bool_enabled_still_fails_loud(tmp_path: Path) -> None:
+def test_guard_manager_non_bool_enabled_still_fails_loud(tmp_path):
     workdir = _git_repo(tmp_path)
     _tracked(workdir, "a.py", "x = 1\n")
     cfg = {
@@ -702,7 +698,7 @@ def test_guard_manager_non_bool_enabled_still_fails_loud(tmp_path: Path) -> None
     assert "enabled must be true or false" in lane.error
 
 
-def test_run_log_is_scrubbed(tmp_path: Path) -> None:
+def test_run_log_is_scrubbed(tmp_path):
     workdir = _git_repo(tmp_path)
     canary = "canary.email.alpha@example.com"
     _tracked(workdir, "src/leak.py", f"CONTACT = {canary!r}\n")
@@ -720,7 +716,7 @@ def test_run_log_is_scrubbed(tmp_path: Path) -> None:
     assert "[REDACTED:pii]" in content
 
 
-def test_guard_lane_never_raises_on_binary(tmp_path: Path) -> None:
+def test_guard_lane_never_raises_on_binary(tmp_path):
     workdir = _git_repo(tmp_path)
     os.makedirs(os.path.join(workdir, "src"))
     with open(os.path.join(workdir, "src", "blob.bin"), "wb") as handle:
@@ -733,7 +729,7 @@ def test_guard_lane_never_raises_on_binary(tmp_path: Path) -> None:
 # ── Secrets independence (AC4/AC7) ───────────────────────────────────────────
 
 
-def test_data_protection_cannot_disable_secrets_lane(tmp_path: Path) -> None:
+def test_data_protection_cannot_disable_secrets_lane(tmp_path):
     workdir = _git_repo(tmp_path)
     _tracked(workdir, "a.py", "x = 1\n")
     cfg = {
@@ -750,7 +746,7 @@ def test_data_protection_cannot_disable_secrets_lane(tmp_path: Path) -> None:
     assert secrets_lane.error == ""
 
 
-def test_secrets_config_is_never_read_by_data_protection() -> None:
+def test_secrets_config_is_never_read_by_data_protection():
     policy = DataProtectionPolicy.from_dict(
         {"enabled": True, "categories": DP_CONFIG["categories"]}
     )
@@ -762,7 +758,7 @@ def test_secrets_config_is_never_read_by_data_protection() -> None:
 # ── Tier-1 judge surface (AC1) ───────────────────────────────────────────────
 
 
-def test_tier1_plan_includes_data_protection_step_when_enabled() -> None:
+def test_tier1_plan_includes_data_protection_step_when_enabled():
     steps, marker = tier1_plan(
         ".", {"data_protection": {"enabled": True, "categories": DP_CONFIG["categories"]}}
     )
@@ -772,20 +768,20 @@ def test_tier1_plan_includes_data_protection_step_when_enabled() -> None:
     assert "data_protection" in marker["coverage"]
 
 
-def test_tier1_plan_omits_step_when_absent() -> None:
+def test_tier1_plan_omits_step_when_absent():
     steps, marker = tier1_plan(".", {})
     assert "data_protection" not in {s["id"] for s in steps}
     assert "data_protection" not in marker["coverage"]
 
 
-def test_tier1_data_protection_step_uses_guard_manager() -> None:
+def test_tier1_data_protection_step_uses_guard_manager():
     steps, _ = tier1_plan(".", {"data_protection": {"enabled": True}})
     step = next(s for s in steps if s["id"] == "data_protection")
     assert "GuardManager" in step["run"]
     assert "_check_data_protection" in step["run"]
 
 
-def test_data_protection_enabled_helper_requires_literal_true() -> None:
+def test_data_protection_enabled_helper_requires_literal_true():
     assert _data_protection_enabled({"data_protection": {"enabled": True}}) is True
     assert _data_protection_enabled({"data_protection": {"enabled": False}}) is False
     assert _data_protection_enabled({"data_protection": "yes"}) is False
@@ -795,7 +791,7 @@ def test_data_protection_enabled_helper_requires_literal_true() -> None:
 # ── serialization ────────────────────────────────────────────────────────────
 
 
-def test_policy_to_dict_round_trips() -> None:
+def test_policy_to_dict_round_trips():
     policy = DataProtectionPolicy.from_dict(
         {
             "enabled": True,
@@ -814,7 +810,7 @@ def test_policy_to_dict_round_trips() -> None:
     assert clone.to_dict() == policy.to_dict()
 
 
-def test_findings_are_serializable_and_line_numbered() -> None:
+def test_findings_are_serializable_and_line_numbered():
     policy = _max_sensitivity_policy()
     result = policy.scan("first line\nsecond canary.email.alpha@example.com\n")
     finding = result.active[0]
@@ -823,7 +819,7 @@ def test_findings_are_serializable_and_line_numbered() -> None:
     assert "value_redacted" in finding.to_dict()
 
 
-def test_judge_status_dict_surfaces_data_protection_evidence() -> None:
+def test_judge_status_dict_surfaces_data_protection_evidence():
     from types import SimpleNamespace
 
     from engine.judge import judge_result_to_dict

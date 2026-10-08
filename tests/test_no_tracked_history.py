@@ -8,8 +8,6 @@ that promise (DF-GITREINS-POC-58); this test refuses to let them (or any
 successor) come back.
 """
 
-from __future__ import annotations
-
 import shutil
 import subprocess
 from pathlib import Path
@@ -17,7 +15,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_no_gitreins_history_paths_are_tracked() -> None:
+def test_no_gitreins_history_paths_are_tracked():
     if shutil.which("git") is None:
         import pytest
 

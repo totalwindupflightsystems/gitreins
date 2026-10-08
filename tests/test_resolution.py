@@ -45,7 +45,6 @@ from engine.resolution import (
     verdict_json,
     worst_case_tokens,
 )
-from typing import Any, NoReturn
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -89,7 +88,7 @@ FAKE_KEY_BETA = _fake_key("beta")
 
 
 @pytest.fixture(autouse=True)
-def _hermetic_credentials(request: Any, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def _hermetic_credentials(request, monkeypatch, tmp_path):
     """No ambient credentials and no reachable .env: discovery is deterministic.
 
     ``HOME`` moves to a throwaway dir so ``~/.hermes/.env`` — which really does
@@ -105,14 +104,14 @@ class _BlockedRequests:
     """Stands in for the module's ``requests`` binding during hermetic tests."""
 
     @staticmethod
-    def post(*_args: Any, **_kwargs: Any) -> NoReturn:
+    def post(*_args, **_kwargs):
         raise AssertionError(
             "hermetic test attempted a real HTTP request — inject the endpoint stub"
         )
 
 
 @pytest.fixture(autouse=True)
-def _no_real_network(request: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+def _no_real_network(request, monkeypatch):
     """Block real egress for every test except the explicitly live smoke test."""
     if request.node.name == "test_live_smoke_jev_resolution":
         return
@@ -122,12 +121,12 @@ def _no_real_network(request: Any, monkeypatch: pytest.MonkeyPatch) -> None:
 class FakeResponse:
     """A minimal ``requests``-shaped response."""
 
-    def __init__(self, status_code: int, payload: Any = None, text: str | None = None) -> None:
+    def __init__(self, status_code: int, payload=None, text: str | None = None):
         self.status_code = status_code
         self._payload = payload
         self.text = text if text is not None else json.dumps(payload if payload is not None else {})
 
-    def json(self) -> Any:
+    def json(self):
         if isinstance(self._payload, Exception):
             raise self._payload
         return self._payload
@@ -140,7 +139,7 @@ class RecordingPoster:
     script: list = field(default_factory=list)
     calls: list = field(default_factory=list)
 
-    def __call__(self, endpoint: Any, key: Any, body: Any, timeout: Any) -> Any:
+    def __call__(self, endpoint, key, body, timeout):
         self.calls.append({"endpoint": endpoint, "key": key, "body": body, "timeout": timeout})
         item = self.script.pop(0) if self.script else FakeResponse(500, {}, "unscripted")
         if isinstance(item, Exception):
@@ -161,7 +160,7 @@ class FakeRunner:
     understand_out: str = ""
     calls: list = field(default_factory=list)
 
-    def __call__(self, args: Any, workdir: str) -> Any:
+    def __call__(self, args, workdir):
         self.calls.append(list(args))
         if len(args) >= 2 and args[0] == "graph":
             if args[1] == "search":
@@ -261,7 +260,7 @@ def _payload(
     }
 
 
-def _resolve_hermetic(**overrides: Any) -> ResolutionVerdict:
+def _resolve_hermetic(**overrides) -> ResolutionVerdict:
     """A resolve() call with both seams injected: no network, no hilo."""
     kwargs = {
         "workdir": str(REPO_ROOT),
@@ -298,22 +297,22 @@ def verdict_text_of(verdict: ResolutionVerdict, poster: RecordingPoster) -> str:
         (0.0, "UNRESOLVED"),
     ],
 )
-def test_band_boundaries(probability: Any, expected: Any) -> None:
+def test_band_boundaries(probability, expected):
     assert band_for(probability) == expected
 
 
 @pytest.mark.parametrize("bad", [None, float("nan"), float("inf"), "not-a-number", object()])
-def test_band_is_abstain_for_anything_not_a_probability(bad: Any) -> None:
+def test_band_is_abstain_for_anything_not_a_probability(bad):
     """Fail closed: an unreadable probability is never a band, let alone RESOLVED."""
     assert band_for(bad) == "ABSTAIN"
 
 
-def test_band_thresholds_are_parameters_not_constants() -> None:
+def test_band_thresholds_are_parameters_not_constants():
     assert band_for(0.7, resolved_at=0.6) == "RESOLVED"
     assert band_for(0.7, review_at=0.8) == "UNRESOLVED"
 
 
-def test_rubric_position_maps_an_expected_score_onto_its_legend_band() -> None:
+def test_rubric_position_maps_an_expected_score_onto_its_legend_band():
     legend = {"0": "mentions only", "1": "adjacent", "2": "the path", "3": "path plus test"}
     # the live filler measurement: an EXPECTED position of 0.23 on a 4-band rubric
     assert rubric_position(0.23, legend) == 1
@@ -329,7 +328,7 @@ def test_rubric_position_maps_an_expected_score_onto_its_legend_band() -> None:
     assert rubric_position(3.4, {"0": "a", "1": "b"}) is None
 
 
-def test_the_score_answer_is_not_treated_as_a_probability() -> None:
+def test_the_score_answer_is_not_treated_as_a_probability():
     """The live smoke regression: score 2.68 on a 4-band rubric must parse."""
     payload = _payload()
     payload["answers"]["evidence_quality"]["score"] = 2.68
@@ -340,7 +339,7 @@ def test_the_score_answer_is_not_treated_as_a_probability() -> None:
 
 
 @pytest.mark.parametrize("bad", [-1.0, float("nan"), float("inf"), True, "nope", None])
-def test_an_unreadable_score_is_still_malformed(bad: Any) -> None:
+def test_an_unreadable_score_is_still_malformed(bad):
     payload = _payload()
     payload["answers"]["evidence_quality"]["score"] = bad
     typed, problem = parse_answers(payload)
@@ -358,7 +357,7 @@ def test_an_unreadable_score_is_still_malformed(bad: Any) -> None:
 # dropped the answer code during this module's smoke run).
 
 
-def test_estimator_default_is_a_calibration_not_the_bare_floor() -> None:
+def test_estimator_default_is_a_calibration_not_the_bare_floor():
     assert resolution.MIN_CHARS_PER_TOKEN == 2  # the spec's floor, still available
     assert resolution.DEFAULT_CHARS_PER_TOKEN == 3.5  # this repo's measured bundle density
     assert estimate_tokens("x" * 100) == max(1, int(100 / 3.5))
@@ -367,7 +366,7 @@ def test_estimator_default_is_a_calibration_not_the_bare_floor() -> None:
 
 
 @pytest.mark.parametrize("family", sorted(MEASURED_TOKENS))
-def test_estimator_tracks_the_bundle_density_and_bounds_every_family(family: Any) -> None:
+def test_estimator_tracks_the_bundle_density_and_bounds_every_family(family):
     """The estimator's contract, family by family, against reported token counts.
 
     A single divisor cannot model every payload and this module does not pretend
@@ -394,7 +393,7 @@ def test_estimator_tracks_the_bundle_density_and_bounds_every_family(family: Any
         assert estimate < real  # possible under-count, disclosed and bounded below
 
 
-def test_the_calibration_no_longer_halves_the_bundle() -> None:
+def test_the_calibration_no_longer_halves_the_bundle():
     """The regression this module's smoke run found: a 2x over-estimate dropped
     the very file the question asked about."""
     chars, real = MEASURED_TOKENS["repo-bundle"]
@@ -404,9 +403,7 @@ def test_the_calibration_no_longer_halves_the_bundle() -> None:
     assert bare_floor > real * 1.5  # chars//2 sees >50% more tokens than exist
 
 
-def test_the_estimator_is_over_estimating_rather_than_under_on_a_real_bundle(
-    tmp_path: Path,
-) -> None:
+def test_the_estimator_is_over_estimating_rather_than_under_on_a_real_bundle(tmp_path):
     """A whole real bundle, measured end to end against the live number."""
     chars, real = MEASURED_TOKENS["repo-bundle"]
     text = "x" * chars
@@ -415,7 +412,7 @@ def test_the_estimator_is_over_estimating_rather_than_under_on_a_real_bundle(
 
 
 @pytest.mark.parametrize("family", sorted(MEASURED_TOKENS))
-def test_the_banned_fixed_divisor_would_undercount_every_family(family: Any) -> None:
+def test_the_banned_fixed_divisor_would_undercount_every_family(family):
     """Why chars/3.5 is forbidden: it undercounts every family measured, and
     misses a JSONL-shaped payload by more than half."""
     chars, real = MEASURED_TOKENS[family]
@@ -425,19 +422,19 @@ def test_the_banned_fixed_divisor_would_undercount_every_family(family: Any) -> 
 
 
 @pytest.mark.parametrize("family", sorted(MEASURED_TOKENS))
-def test_the_worst_case_bound_never_undercounts_a_measured_family(family: Any) -> None:
+def test_the_worst_case_bound_never_undercounts_a_measured_family(family):
     """The safety bound is the number the ceiling may not be trusted past."""
     chars, real = MEASURED_TOKENS[family]
     assert worst_case_tokens("x" * chars) >= real
     assert resolution.MEASURED_MIN_CHARS_PER_TOKEN == 1.39
 
 
-def test_worst_case_tokens_is_the_densest_measured_rate() -> None:
+def test_worst_case_tokens_is_the_densest_measured_rate():
     assert worst_case_tokens("x" * 139) == 100
     assert worst_case_tokens("") == 0
 
 
-def test_a_supplied_tokenizer_takes_precedence_over_the_floor() -> None:
+def test_a_supplied_tokenizer_takes_precedence_over_the_floor():
     calls = []
 
     def tokenizer(text: str) -> int:
@@ -448,7 +445,7 @@ def test_a_supplied_tokenizer_takes_precedence_over_the_floor() -> None:
     assert calls == ["x" * 10_000]
 
 
-def test_a_real_tokenizer_is_preferred_when_importable(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_a_real_tokenizer_is_preferred_when_importable(monkeypatch):
     """The seam exists for the spec's 'use a real tokenizer' branch."""
     monkeypatch.setattr(resolution, "_load_real_tokenizer", lambda: lambda text: 42)
     assert resolution._load_real_tokenizer()("anything") == 42
@@ -475,21 +472,21 @@ def test_a_real_tokenizer_is_preferred_when_importable(monkeypatch: pytest.Monke
         "credentials.json",
     ],
 )
-def test_secret_and_cache_paths_are_excluded(path: Any) -> None:
+def test_secret_and_cache_paths_are_excluded(path):
     assert is_excluded_path(path) is True
 
 
 @pytest.mark.parametrize(
     "path", ["engine/resolution.py", "tests/test_resolution.py", "docs/jev-resolution-gate.md"]
 )
-def test_real_source_paths_are_not_excluded(path: Any) -> None:
+def test_real_source_paths_are_not_excluded(path):
     assert is_excluded_path(path) is False
 
 
 # ── Trace ────────────────────────────────────────────────────────────────────
 
 
-def test_trace_parses_ranked_seeds_and_drops_packages_and_secrets() -> None:
+def test_trace_parses_ranked_seeds_and_drops_packages_and_secrets():
     seeds = trace_question("q", runner=FakeRunner(search_out=SEARCH_TRANSCRIPT))
     assert [seed.file for seed in seeds] == [
         "engine/evidence_bounds.py",
@@ -503,13 +500,13 @@ def test_trace_parses_ranked_seeds_and_drops_packages_and_secrets() -> None:
     assert all(seed.file != ".env" for seed in seeds)
 
 
-def test_trace_returns_nothing_when_hilo_fails() -> None:
+def test_trace_returns_nothing_when_hilo_fails():
     failing = FakeRunner()
     failing.__call__ = lambda args, workdir: (1, "", "boom")
     assert trace_question("q", runner=failing) == []
 
 
-def test_related_reports_the_reverse_edge_path_and_excludes_secrets() -> None:
+def test_related_reports_the_reverse_edge_path_and_excludes_secrets():
     related = related_files(
         "engine/evidence_bounds.py", runner=FakeRunner(related_out=RELATED_TRANSCRIPT)
     )
@@ -520,7 +517,7 @@ def test_related_reports_the_reverse_edge_path_and_excludes_secrets() -> None:
     ]
 
 
-def test_related_empty_transcript_is_empty() -> None:
+def test_related_empty_transcript_is_empty():
     assert (
         related_files("x.py", runner=FakeRunner(related_out="No incoming edges for 'x.py'.\n"))
         == []
@@ -530,7 +527,7 @@ def test_related_empty_transcript_is_empty() -> None:
 # ── Assemble / parse ─────────────────────────────────────────────────────────
 
 
-def test_parse_understand_reads_provenance_score_and_skips_the_env_block() -> None:
+def test_parse_understand_reads_provenance_score_and_skips_the_env_block():
     blocks = parse_understand(BUNDLE_TRANSCRIPT, bundle_rank=0)
     files = [block.file for block in blocks]
     assert files == [
@@ -550,12 +547,12 @@ def test_parse_understand_reads_provenance_score_and_skips_the_env_block() -> No
     assert all(".env" not in block.file for block in blocks)
 
 
-def test_parse_understand_on_empty_output_is_empty() -> None:
+def test_parse_understand_on_empty_output_is_empty():
     assert parse_understand("", bundle_rank=0) == []
     assert parse_understand("## MAP\nonly a map\n", bundle_rank=0) == []
 
 
-def test_assemble_uses_one_primary_bundle_then_seeds_then_reads(tmp_path: Path) -> None:
+def test_assemble_uses_one_primary_bundle_then_seeds_then_reads(tmp_path):
     (tmp_path / "extra.py").write_text("def extra():\n    return 1\n", encoding="utf-8")
     (tmp_path / ".env").write_text("PLACEHOLDER=x\n", encoding="utf-8")
     runner = FakeRunner(
@@ -580,7 +577,7 @@ def test_assemble_uses_one_primary_bundle_then_seeds_then_reads(tmp_path: Path) 
     assert any(call[:2] == ["graph", "search"] for call in runner.calls)
 
 
-def test_assemble_falls_back_to_a_bounded_line_aligned_read(tmp_path: Path) -> None:
+def test_assemble_falls_back_to_a_bounded_line_aligned_read(tmp_path):
     (tmp_path / "big.py").write_text(
         "\n".join(f"line {index}" for index in range(500)), encoding="utf-8"
     )
@@ -597,7 +594,7 @@ def test_assemble_falls_back_to_a_bounded_line_aligned_read(tmp_path: Path) -> N
     assert "big.py [provenance=bounded-read, score=n/a]" in bundle.text
 
 
-def test_assemble_with_no_hilo_available_is_an_empty_named_bundle(tmp_path: Path) -> None:
+def test_assemble_with_no_hilo_available_is_an_empty_named_bundle(tmp_path):
     runner = FakeRunner(search_out="", understand_out="")
     bundle = assemble_bundle("q", workdir=str(tmp_path), runner=runner)
     assert bundle.text == ""
@@ -630,7 +627,7 @@ def _fat_blocks(count: int = 24, chars: int = 6_000) -> list[Block]:
     return blocks
 
 
-def test_pack_clips_a_40k_token_bundle_to_the_ceiling_and_discloses_it() -> None:
+def test_pack_clips_a_40k_token_bundle_to_the_ceiling_and_discloses_it():
     blocks = _fat_blocks()
     assert estimate_tokens("\n\n".join(block.text for block in blocks)) > MAX_BUNDLE_TOKENS
 
@@ -646,7 +643,7 @@ def test_pack_clips_a_40k_token_bundle_to_the_ceiling_and_discloses_it() -> None
     assert any(entry.truncated for entry in packed.entries)
 
 
-def test_pack_keeps_every_line_whole_or_marks_the_one_it_cut() -> None:
+def test_pack_keeps_every_line_whole_or_marks_the_one_it_cut():
     """Line-aligned: no unmarked fragment of a source line reaches the bundle.
 
     ``engine.evidence_bounds`` is allowed exactly one mid-line cut — a single
@@ -667,7 +664,7 @@ def test_pack_keeps_every_line_whole_or_marks_the_one_it_cut() -> None:
     assert marker in packed.text or all(line in source_lines for line in body_lines)
 
 
-def test_pack_preserves_line_boundaries_when_a_side_is_cut_whole_lines_only() -> None:
+def test_pack_preserves_line_boundaries_when_a_side_is_cut_whole_lines_only():
     """A block whose lines all fit individually never yields a fragment."""
     long_lines = "\n".join(f"engine/x.py line {index} " + "y" * 80 for index in range(400))
     block = Block(
@@ -687,7 +684,7 @@ def test_pack_preserves_line_boundaries_when_a_side_is_cut_whole_lines_only() ->
         assert line in source_lines
 
 
-def test_pack_keeps_an_under_budget_bundle_byte_identical_with_no_disclosure() -> None:
+def test_pack_keeps_an_under_budget_bundle_byte_identical_with_no_disclosure():
     blocks = _fat_blocks(count=1, chars=600)
     packed = pack_blocks(blocks)
     assert packed is not None
@@ -700,7 +697,7 @@ def test_pack_keeps_an_under_budget_bundle_byte_identical_with_no_disclosure() -
     assert packed.entries[0].lines == len(packed.text.splitlines())
 
 
-def test_pack_drops_unfittable_candidates_by_name_rather_than_padding() -> None:
+def test_pack_drops_unfittable_candidates_by_name_rather_than_padding():
     blocks = _fat_blocks()
     packed = pack_blocks(blocks, max_tokens=900)
     assert packed is not None
@@ -711,12 +708,12 @@ def test_pack_drops_unfittable_candidates_by_name_rather_than_padding() -> None:
         assert name in packed.disclosure
 
 
-def test_pack_returns_none_when_nothing_fits() -> None:
+def test_pack_returns_none_when_nothing_fits():
     assert pack_blocks(_fat_blocks(), max_tokens=1) is None
     assert pack_blocks([], max_tokens=MAX_BUNDLE_TOKENS) is None
 
 
-def test_pack_deduplicates_a_file_reached_by_two_bundles() -> None:
+def test_pack_deduplicates_a_file_reached_by_two_bundles():
     blocks = [
         Block("engine/a.py", "ast_exact", 1.0, "first copy", "understand", 0),
         Block("engine/a.py", "targeted", 0.9, "second copy", "understand", 1),
@@ -730,7 +727,7 @@ def test_pack_deduplicates_a_file_reached_by_two_bundles() -> None:
     assert len(pack_blocks(blocks).entries) == 3
 
 
-def test_order_blocks_puts_the_traced_files_first() -> None:
+def test_order_blocks_puts_the_traced_files_first():
     """The seed the question names must never be the file dropped for room."""
     seeds = [TraceSeed("engine/wanted.py", 0.9), TraceSeed("engine/second.py", 0.5)]
     blocks = [
@@ -748,7 +745,7 @@ def test_order_blocks_puts_the_traced_files_first() -> None:
     ]
 
 
-def test_order_blocks_keeps_the_bundle_order_within_a_seed() -> None:
+def test_order_blocks_keeps_the_bundle_order_within_a_seed():
     seeds = [TraceSeed("engine/x.py", 0.9)]
     blocks = [
         Block("engine/x.py:10-20", "ast_exact", 1.0, "primary slice", "understand", 0),
@@ -761,9 +758,7 @@ def test_order_blocks_keeps_the_bundle_order_within_a_seed() -> None:
 # ── Credential discovery and failover ────────────────────────────────────────
 
 
-def test_discover_keys_reads_the_env_and_the_known_env_files(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_discover_keys_reads_the_env_and_the_known_env_files(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENROUTER_API_KEY", FAKE_KEY_ALPHA)
     env_file = tmp_path / ".hermes" / ".env"
     env_file.parent.mkdir(parents=True, exist_ok=True)
@@ -776,14 +771,12 @@ def test_discover_keys_reads_the_env_and_the_known_env_files(
     assert len(keys) == len(set(keys))
 
 
-def test_discover_keys_ignores_non_openrouter_values(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_discover_keys_ignores_non_openrouter_values(monkeypatch, tmp_path):
     monkeypatch.setenv("GITREINS_OPENROUTER_KEY", "not-a-key")
     assert discover_keys(str(tmp_path)) == []
 
 
-def test_failover_moves_on_from_a_refused_key_to_a_live_one() -> None:
+def test_failover_moves_on_from_a_refused_key_to_a_live_one():
     poster = RecordingPoster(
         [
             FakeResponse(401, {}, "unauthorized"),
@@ -800,7 +793,7 @@ def test_failover_moves_on_from_a_refused_key_to_a_live_one() -> None:
 
 
 @pytest.mark.parametrize("status", [401, 402, 403, 429])
-def test_every_refused_status_moves_to_the_next_candidate(status: Any) -> None:
+def test_every_refused_status_moves_to_the_next_candidate(status):
     poster = RecordingPoster(
         [FakeResponse(status, {}, "refused"), FakeResponse(200, _payload(noul=0.2))]
     )
@@ -809,7 +802,7 @@ def test_every_refused_status_moves_to_the_next_candidate(status: Any) -> None:
     assert poster.keys_tried == [FAKE_KEY_ALPHA, FAKE_KEY_BETA]
 
 
-def test_all_keys_refused_is_an_abstain_never_a_silent_resolved() -> None:
+def test_all_keys_refused_is_an_abstain_never_a_silent_resolved():
     poster = RecordingPoster([FakeResponse(401, {}, "no"), FakeResponse(402, {}, "no")])
     verdict = _resolve_hermetic(poster=poster, keys=[FAKE_KEY_ALPHA, FAKE_KEY_BETA])
 
@@ -821,7 +814,7 @@ def test_all_keys_refused_is_an_abstain_never_a_silent_resolved() -> None:
     assert "top up" in verdict.abstain_action
 
 
-def test_no_credentials_is_an_abstain_with_an_action() -> None:
+def test_no_credentials_is_an_abstain_with_an_action():
     verdict = _resolve_hermetic(poster=RecordingPoster([FakeResponse(200, _payload())]), keys=[])
     assert verdict.verdict == "ABSTAIN"
     assert verdict.abstain_reason == "no-credentials"
@@ -830,7 +823,7 @@ def test_no_credentials_is_an_abstain_with_an_action() -> None:
     assert verdict.exit_code == 1
 
 
-def test_discovery_is_used_when_no_keys_are_passed(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_discovery_is_used_when_no_keys_are_passed(monkeypatch):
     monkeypatch.setenv("GITREINS_OPENROUTER_KEY", FAKE_KEY_ALPHA)
     poster = RecordingPoster([FakeResponse(200, _payload(noul=0.95, choice="none"))])
     verdict = _resolve_hermetic(keys=None, poster=poster)
@@ -838,7 +831,7 @@ def test_discovery_is_used_when_no_keys_are_passed(monkeypatch: pytest.MonkeyPat
     assert verdict.verdict == "RESOLVED"
 
 
-def test_no_key_material_ever_reaches_the_verdict_or_its_notes() -> None:
+def test_no_key_material_ever_reaches_the_verdict_or_its_notes():
     poster = RecordingPoster([FakeResponse(401, {}, "no"), FakeResponse(200, _payload(noul=0.4))])
     verdict = _resolve_hermetic(poster=poster, keys=[FAKE_KEY_ALPHA, FAKE_KEY_BETA])
     serialized = verdict_json(verdict) + repr(verdict.attempts) + repr(verdict.notes)
@@ -850,7 +843,7 @@ def test_no_key_material_ever_reaches_the_verdict_or_its_notes() -> None:
 # ── Fail-closed: transport, malformed, ceiling ───────────────────────────────
 
 
-def test_a_transport_error_is_an_abstain() -> None:
+def test_a_transport_error_is_an_abstain():
     poster = RecordingPoster([ConnectionError("connection refused")])
     verdict = _resolve_hermetic(poster=poster)
     assert verdict.verdict == "ABSTAIN"
@@ -859,7 +852,7 @@ def test_a_transport_error_is_an_abstain() -> None:
     assert verdict.exit_code == 1
 
 
-def test_a_transport_error_on_every_candidate_still_lands_on_the_last_reason() -> None:
+def test_a_transport_error_on_every_candidate_still_lands_on_the_last_reason():
     poster = RecordingPoster([TimeoutError("slow"), ConnectionError("refused")])
     verdict = _resolve_hermetic(poster=poster, keys=[FAKE_KEY_ALPHA, FAKE_KEY_BETA])
     assert verdict.verdict == "ABSTAIN"
@@ -867,7 +860,7 @@ def test_a_transport_error_on_every_candidate_still_lands_on_the_last_reason() -
     assert "ConnectionError" in (verdict.abstain_detail or "")
 
 
-def test_a_server_ceiling_rejection_is_an_abstain_never_a_pass() -> None:
+def test_a_server_ceiling_rejection_is_an_abstain_never_a_pass():
     """The compensation for the estimator's dense-payload limit."""
     poster = RecordingPoster(
         [
@@ -885,7 +878,7 @@ def test_a_server_ceiling_rejection_is_an_abstain_never_a_pass() -> None:
     assert "lower max_tokens" in verdict.abstain_action
 
 
-def test_an_unexpected_status_is_a_named_http_error_abstain() -> None:
+def test_an_unexpected_status_is_a_named_http_error_abstain():
     poster = RecordingPoster([FakeResponse(503, {}, "provider down")])
     verdict = _resolve_hermetic(poster=poster)
     assert verdict.verdict == "ABSTAIN"
@@ -924,9 +917,7 @@ def test_an_unexpected_status_is_a_named_http_error_abstain() -> None:
         ([], "payload is not an object"),
     ],
 )
-def test_malformed_answers_are_abstains_with_the_specific_problem(
-    payload: Any, problem: Any
-) -> None:
+def test_malformed_answers_are_abstains_with_the_specific_problem(payload, problem):
     typed, found = parse_answers(payload)
     assert typed == {}
     assert problem in (found or "")
@@ -939,7 +930,7 @@ def test_malformed_answers_are_abstains_with_the_specific_problem(
     assert verdict.exit_code == 1
 
 
-def test_a_choice_without_a_label_is_a_malformed_abstain() -> None:
+def test_a_choice_without_a_label_is_a_malformed_abstain():
     payload = _payload()
     payload["answers"]["missing_kind"]["choice"] = ""
     verdict = _resolve_hermetic(poster=RecordingPoster([FakeResponse(200, payload)]))
@@ -948,21 +939,21 @@ def test_a_choice_without_a_label_is_a_malformed_abstain() -> None:
     assert "missing_kind.choice" in (verdict.abstain_detail or "")
 
 
-def test_a_non_json_body_is_a_malformed_abstain() -> None:
+def test_a_non_json_body_is_a_malformed_abstain():
     poster = RecordingPoster([FakeResponse(200, ValueError("bad json"), "not-json")])
     verdict = _resolve_hermetic(poster=poster)
     assert verdict.verdict == "ABSTAIN"
     assert verdict.abstain_reason == "malformed-response"
 
 
-def test_a_bool_is_never_a_probability() -> None:
+def test_a_bool_is_never_a_probability():
     payload = _payload()
     payload["answers"]["resolves"]["noul"] = True
     typed, problem = parse_answers(payload)
     assert typed == {} and "probability" in (problem or "")
 
 
-def test_an_exhausted_budget_is_named_apart_from_an_empty_bundle() -> None:
+def test_an_exhausted_budget_is_named_apart_from_an_empty_bundle():
     verdict = _resolve_hermetic(max_tokens=1)
     assert verdict.verdict == "ABSTAIN"
     assert verdict.abstain_reason == "budget-exhausted"
@@ -970,7 +961,7 @@ def test_an_exhausted_budget_is_named_apart_from_an_empty_bundle() -> None:
     assert verdict.exit_code == 1
 
 
-def test_a_question_with_no_evidence_at_all_is_an_empty_bundle_abstain() -> None:
+def test_a_question_with_no_evidence_at_all_is_an_empty_bundle_abstain():
     verdict = _resolve_hermetic(
         runner=FakeRunner(search_out="", understand_out=""), traced=False, read_files=False
     )
@@ -978,7 +969,7 @@ def test_a_question_with_no_evidence_at_all_is_an_empty_bundle_abstain() -> None
     assert verdict.abstain_reason == "empty-bundle"
 
 
-def test_a_blank_question_never_costs_a_call() -> None:
+def test_a_blank_question_never_costs_a_call():
     poster = RecordingPoster([FakeResponse(200, _payload())])
     verdict = resolve("", keys=[FAKE_KEY_ALPHA], poster=poster, runner=FakeRunner())
     assert verdict.verdict == "ABSTAIN"
@@ -993,9 +984,7 @@ def test_a_blank_question_never_costs_a_call() -> None:
     "noul,expected_band,expected_exit",
     [(0.95, "RESOLVED", 0), (0.85, "RESOLVED", 0), (0.60, "REVIEW", 0), (0.09, "UNRESOLVED", 1)],
 )
-def test_bands_drive_the_verdict_and_the_exit_code(
-    noul: Any, expected_band: Any, expected_exit: Any
-) -> None:
+def test_bands_drive_the_verdict_and_the_exit_code(noul, expected_band, expected_exit):
     verdict = _resolve_hermetic(
         poster=RecordingPoster([FakeResponse(200, _payload(noul=noul, choice="none", score=1.0))])
     )
@@ -1003,7 +992,7 @@ def test_bands_drive_the_verdict_and_the_exit_code(
     assert verdict.exit_code == expected_exit
 
 
-def test_low_band_verdicts_must_not_be_readable_as_success() -> None:
+def test_low_band_verdicts_must_not_be_readable_as_success():
     verdict = _resolve_hermetic(
         poster=RecordingPoster([FakeResponse(200, _payload(noul=0.09, choice="test"))])
     )
@@ -1013,7 +1002,7 @@ def test_low_band_verdicts_must_not_be_readable_as_success() -> None:
     assert verdict.missing_kind == "test"
 
 
-def test_the_verdict_carries_the_manifest_model_tokens_and_cost() -> None:
+def test_the_verdict_carries_the_manifest_model_tokens_and_cost():
     poster = RecordingPoster([FakeResponse(200, _payload(noul=0.6, choice="wiring", score=0.5))])
     verdict = _resolve_hermetic(poster=poster)
 
@@ -1044,7 +1033,7 @@ def test_the_verdict_carries_the_manifest_model_tokens_and_cost() -> None:
     assert any("token check" in note for note in verdict.notes)
 
 
-def test_the_request_shape_is_the_live_verified_one() -> None:
+def test_the_request_shape_is_the_live_verified_one():
     """The three typed questions, in one request, with the field names that work."""
     poster = RecordingPoster([FakeResponse(200, _payload())])
     _resolve_hermetic(poster=poster)
@@ -1066,7 +1055,7 @@ def test_the_request_shape_is_the_live_verified_one() -> None:
     assert "engine/evidence_bounds.py" in body["state"]
 
 
-def test_the_state_stays_inside_the_ceiling_and_discloses_the_clip() -> None:
+def test_the_state_stays_inside_the_ceiling_and_discloses_the_clip():
     poster = RecordingPoster([FakeResponse(200, _payload())])
     verdict = _resolve_hermetic(
         poster=poster,
@@ -1096,7 +1085,7 @@ def _huge_bundle_text() -> str:
     return "\n".join(parts) + "\n"
 
 
-def test_the_disclosure_separates_a_low_score_from_a_clipped_bundle() -> None:
+def test_the_disclosure_separates_a_low_score_from_a_clipped_bundle():
     """Spec §3.3: those are different failures with different fixes."""
     clipped = _resolve_hermetic(
         poster=RecordingPoster([FakeResponse(200, _payload(noul=0.2))]),
@@ -1111,7 +1100,7 @@ def test_the_disclosure_separates_a_low_score_from_a_clipped_bundle() -> None:
     assert clipped.clip_disclosure and not roomy.clip_disclosure
 
 
-def test_the_verdict_reports_the_state_it_actually_sent() -> None:
+def test_the_verdict_reports_the_state_it_actually_sent():
     """Both token counts describe the SENT state: measured and reported side by side."""
     poster = RecordingPoster([FakeResponse(200, _payload(input_tokens=12_054))])
     verdict = _resolve_hermetic(poster=poster)
@@ -1125,7 +1114,7 @@ def test_the_verdict_reports_the_state_it_actually_sent() -> None:
     assert safety and f"{MAX_BUNDLE_TOKENS} ceiling" in safety[0]
 
 
-def test_the_disclosure_is_reported_once_even_when_the_bundle_clipped() -> None:
+def test_the_disclosure_is_reported_once_even_when_the_bundle_clipped():
     verdict = _resolve_hermetic(
         poster=RecordingPoster([FakeResponse(200, _payload())]),
         runner=FakeRunner(understand_out=_huge_bundle_text()),
@@ -1134,7 +1123,7 @@ def test_the_disclosure_is_reported_once_even_when_the_bundle_clipped() -> None:
     assert verdict.notes.count(verdict.clip_disclosure) == 1
 
 
-def test_the_worst_case_wall_clip_reports_the_bytes_and_lines_it_dropped() -> None:
+def test_the_worst_case_wall_clip_reports_the_bytes_and_lines_it_dropped():
     """A clip the caller performs must be as auditable as one the packer did.
 
     Regression from this module's own smoke run: the pre-call wall clip set
@@ -1178,7 +1167,7 @@ def _wall_tripping_bundle() -> str:
     return "\n".join(parts) + "\n"
 
 
-def test_dropped_lines_agrees_with_the_bounders_own_marker() -> None:
+def test_dropped_lines_agrees_with_the_bounders_own_marker():
     marker = "a\n… [1234 chars omitted — 56 line(s)] …\nb\n"
     assert resolution._dropped_lines(marker, 1234) == 56
     # No marker to read (a mid-line-only cut): the byte count is divided by the
@@ -1188,13 +1177,13 @@ def test_dropped_lines_agrees_with_the_bounders_own_marker() -> None:
     assert resolution._dropped_lines("x", 1) == 1
 
 
-def test_join_disclosure_never_repeats_a_clause() -> None:
+def test_join_disclosure_never_repeats_a_clause():
     assert resolution._join_disclosure("", "x") == "x"
     assert resolution._join_disclosure("x", "x") == "x"
     assert resolution._join_disclosure("x", "y") == "x; y"
 
 
-def test_reconcile_manifest_drops_files_the_clipped_state_no_longer_carries() -> None:
+def test_reconcile_manifest_drops_files_the_clipped_state_no_longer_carries():
     """The manifest must describe what was SENT, not what was assembled."""
 
     def entry(name: str) -> ManifestEntry:
@@ -1206,14 +1195,14 @@ def test_reconcile_manifest_drops_files_the_clipped_state_no_longer_carries() ->
     assert excluded == ["engine/gone.py"]
 
 
-def test_reconcile_manifest_is_a_noop_when_the_state_carries_no_headers() -> None:
+def test_reconcile_manifest_is_a_noop_when_the_state_carries_no_headers():
     """No headers to check against means "keep", never "drop everything"."""
     entries = [ManifestEntry("engine/a.py", "ast_exact", 1.0, 10, False, "understand", 2)]
     kept, excluded = reconcile_manifest(entries, "text without headers")
     assert kept == entries and excluded == []
 
 
-def test_the_wall_clip_reconciles_the_manifest_with_what_was_sent() -> None:
+def test_the_wall_clip_reconciles_the_manifest_with_what_was_sent():
     """No manifest entry may claim evidence that the clipped state dropped."""
     poster = RecordingPoster([FakeResponse(200, _payload())])
     verdict = _resolve_hermetic(
@@ -1226,7 +1215,7 @@ def test_the_wall_clip_reconciles_the_manifest_with_what_was_sent() -> None:
         assert entry.file in sent, f"{entry.file} is claimed but was not sent"
 
 
-def test_verdict_json_is_stable_and_carries_the_audit_fields() -> None:
+def test_verdict_json_is_stable_and_carries_the_audit_fields():
     verdict = _resolve_hermetic()
     data = json.loads(verdict_json(verdict))
     for key in (
@@ -1248,7 +1237,7 @@ def test_verdict_json_is_stable_and_carries_the_audit_fields() -> None:
     assert verdict.band == verdict.verdict
 
 
-def test_abstain_verdicts_still_carry_the_evidence_they_did_assemble() -> None:
+def test_abstain_verdicts_still_carry_the_evidence_they_did_assemble():
     verdict = _resolve_hermetic(
         poster=RecordingPoster([FakeResponse(401, {}, "no")]),
     )
@@ -1265,7 +1254,7 @@ def test_abstain_verdicts_still_carry_the_evidence_they_did_assemble() -> None:
 # ── The real truncator is reused, not re-implemented (spec §3.3) ─────────────
 
 
-def test_the_bundle_clip_delegates_to_the_one_truncator_in_the_repo() -> None:
+def test_the_bundle_clip_delegates_to_the_one_truncator_in_the_repo():
     calls = []
     original = evidence_bounds.bound_evidence
 
@@ -1282,7 +1271,7 @@ def test_the_bundle_clip_delegates_to_the_one_truncator_in_the_repo() -> None:
     assert all(cap > 0 for cap in calls)
 
 
-def test_pack_blocks_never_exceeds_its_budget_across_a_sweep() -> None:
+def test_pack_blocks_never_exceeds_its_budget_across_a_sweep():
     blocks = _fat_blocks()
     for budget in (600, 1_200, 4_000, 12_000, MAX_BUNDLE_TOKENS):
         packed = pack_blocks(blocks, max_tokens=budget)
@@ -1304,7 +1293,7 @@ def test_pack_blocks_never_exceeds_its_budget_across_a_sweep() -> None:
 
 @pytest.mark.live
 @pytest.mark.skipif(not LIVE_KEY, reason="no GITREINS_OPENROUTER_KEY in env")
-def test_live_smoke_jev_resolution() -> None:
+def test_live_smoke_jev_resolution():
     """Real hilo + real endpoint, once. The verdict JSON is the evidence.
 
     Deliberately does not use ``capsys``: the printed verdict must be visible in

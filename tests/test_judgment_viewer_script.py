@@ -6,9 +6,6 @@ viewer does, and a missing or unreadable ledger degrades to "no QA runs" instead
 of crashing the generator.
 """
 
-from __future__ import annotations
-from typing import Any
-
 import importlib.util
 import json
 import subprocess
@@ -20,7 +17,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "scripts" / "judgment_viewer.py"
 
 
-def _load_module() -> Any:
+def _load_module():
     spec = importlib.util.spec_from_file_location("judgment_viewer_under_test", SCRIPT)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -53,9 +50,7 @@ QA_ROW = {
 }
 
 
-def test_load_qa_reports_no_runs_when_the_ledger_is_absent(
-    repo: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_load_qa_reports_no_runs_when_the_ledger_is_absent(repo: Path, monkeypatch, tmp_path):
     monkeypatch.setenv("GITREINS_QA_LEDGER", str(tmp_path / "absent.jsonl"))
 
     ledger, rows = viewer.load_qa(str(repo))
@@ -64,9 +59,7 @@ def test_load_qa_reports_no_runs_when_the_ledger_is_absent(
     assert ledger == str(tmp_path / "absent.jsonl")
 
 
-def test_load_qa_returns_ledger_rows_and_their_path(
-    repo: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_qa_returns_ledger_rows_and_their_path(repo: Path, monkeypatch):
     ledger_path = repo / ".gitreins" / "qa-ledger.jsonl"
     ledger_path.write_text(json.dumps(QA_ROW) + "\n", encoding="utf-8")
     monkeypatch.delenv("GITREINS_QA_LEDGER", raising=False)
@@ -78,9 +71,7 @@ def test_load_qa_returns_ledger_rows_and_their_path(
     assert rows[0]["commit"] == QA_ROW["commit"]
 
 
-def test_load_qa_survives_an_unreadable_ledger(
-    repo: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_load_qa_survives_an_unreadable_ledger(repo: Path, monkeypatch, tmp_path):
     broken = tmp_path / "qa-dir"
     broken.mkdir()
     (broken / "qa-ledger.jsonl").mkdir()  # a directory where a file is expected
@@ -92,9 +83,7 @@ def test_load_qa_survives_an_unreadable_ledger(
     assert ledger.endswith("qa-ledger.jsonl")
 
 
-def test_generated_page_carries_the_qa_section(
-    repo: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
+def test_generated_page_carries_the_qa_section(repo: Path, monkeypatch, tmp_path):
     ledger_path = repo / ".gitreins" / "qa-ledger.jsonl"
     ledger_path.write_text(json.dumps(QA_ROW) + "\n", encoding="utf-8")
     monkeypatch.delenv("GITREINS_QA_LEDGER", raising=False)

@@ -1,7 +1,6 @@
 """Hermetic tests for the bounded parallel worktree fleet."""
 
 from __future__ import annotations
-from typing import Any
 
 import json
 import os
@@ -18,7 +17,7 @@ from engine.worktree_manager import WorktreeError, WorktreeManager
 CLI_SCRIPT = Path(__file__).parents[1] / "gitreins" / "cli.py"
 
 
-def _git(repo: Path, *args: str, check: bool = True) -> Any:
+def _git(repo: Path, *args: str, check: bool = True):
     return subprocess.run(
         ["git", "-C", str(repo), *args],
         capture_output=True,
@@ -41,7 +40,7 @@ def fleet_repo(tmp_path: Path) -> Path:
     return repo
 
 
-def _command(events: Path, output_name: str, delay: float = 0.15) -> Any:
+def _command(events: Path, output_name: str, delay: float = 0.15):
     code = (
         "import os,sys,time; "
         "events,out,delay=sys.argv[1],sys.argv[2],float(sys.argv[3]); "
@@ -53,7 +52,7 @@ def _command(events: Path, output_name: str, delay: float = 0.15) -> Any:
     return (sys.executable, "-c", code, str(events), output_name, str(delay))
 
 
-def test_fleet_is_bounded_isolated_and_registry_truthful(fleet_repo: Path, tmp_path: Path) -> None:
+def test_fleet_is_bounded_isolated_and_registry_truthful(fleet_repo: Path, tmp_path: Path):
     events = tmp_path / "events.log"
     source_venv = fleet_repo / "shared-env"
     source_venv.mkdir()
@@ -103,7 +102,7 @@ def test_fleet_is_bounded_isolated_and_registry_truthful(fleet_repo: Path, tmp_p
     assert board_events.count("worktree_lane_completed") == 3
 
 
-def test_fleet_failure_retains_tree_and_evidence(fleet_repo: Path, tmp_path: Path) -> None:
+def test_fleet_failure_retains_tree_and_evidence(fleet_repo: Path, tmp_path: Path):
     code = (sys.executable, "-c", "import sys; print('known failure'); sys.exit(7)")
     report = WorktreeFleet(fleet_repo).run([FleetLane("FLEET-FAIL", code)])
 
@@ -118,7 +117,7 @@ def test_fleet_failure_retains_tree_and_evidence(fleet_repo: Path, tmp_path: Pat
     assert _git(fleet_repo, "rev-parse", "--verify", record.branch).returncode == 0
 
 
-def test_fleet_rerun_over_failed_lane_refuses_and_the_hint_resolves_it(fleet_repo: Path) -> None:
+def test_fleet_rerun_over_failed_lane_refuses_and_the_hint_resolves_it(fleet_repo: Path):
     """DF-GITREINS-POC-50 AC3: a failed lane's stale tree is never silently reused.
 
     The re-run must fail LOUD (the old behaviour reused the tree at the OLD
@@ -145,7 +144,7 @@ def test_fleet_rerun_over_failed_lane_refuses_and_the_hint_resolves_it(fleet_rep
     assert Path(rerun["lanes"][0]["worktree"]).is_dir()
 
 
-def test_fleet_runs_guard_and_judge_phases_without_shell(fleet_repo: Path) -> None:
+def test_fleet_runs_guard_and_judge_phases_without_shell(fleet_repo: Path):
     phases = (sys.executable, "-c", "print('phase')")
     report = WorktreeFleet(fleet_repo).run(
         [FleetLane("FLEET-PHASE", phases, guard=phases, judge=phases)]
@@ -163,7 +162,7 @@ def test_fleet_runs_guard_and_judge_phases_without_shell(fleet_repo: Path) -> No
     ]
 
 
-def test_fleet_merges_in_priority_order_with_serialized_mutations(fleet_repo: Path) -> None:
+def test_fleet_merges_in_priority_order_with_serialized_mutations(fleet_repo: Path):
     config = fleet_repo / ".gitreins" / "config.yaml"
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text("history:\n  storage: filesystem\n", encoding="utf-8")
@@ -202,7 +201,7 @@ def test_fleet_merges_in_priority_order_with_serialized_mutations(fleet_repo: Pa
     assert [event["task_id"] for event in merge_events] == ["MERGE-1", "MERGE-2"]
 
 
-def test_venv_collision_is_refused_without_creating_tree(fleet_repo: Path) -> None:
+def test_venv_collision_is_refused_without_creating_tree(fleet_repo: Path):
     source = fleet_repo / "shared-env"
     source.mkdir()
     destination = fleet_repo.parent / "main-wt" / "COLLIDE"
@@ -219,13 +218,13 @@ def test_venv_collision_is_refused_without_creating_tree(fleet_repo: Path) -> No
     ).stdout
 
 
-def test_missing_venv_source_is_optional(fleet_repo: Path) -> None:
+def test_missing_venv_source_is_optional(fleet_repo: Path):
     manager = WorktreeManager(fleet_repo, venv_source="does-not-exist")
     record, _ = manager.create("NO-VENV")
     assert not (Path(record.path) / ".venv").exists()
 
 
-def test_fleet_config_cap_override_and_validation(fleet_repo: Path) -> None:
+def test_fleet_config_cap_override_and_validation(fleet_repo: Path):
     config = fleet_repo / ".gitreins" / "config.yaml"
     config.parent.mkdir(parents=True, exist_ok=True)
     config.write_text("worktree_fleet:\n  max_concurrent_worktrees: 3\n", encoding="utf-8")
@@ -240,7 +239,7 @@ def test_fleet_config_cap_override_and_validation(fleet_repo: Path) -> None:
             load_defaults(str(fleet_repo))
 
 
-def test_fleet_cli_loads_manifest_and_reports_cap(fleet_repo: Path, tmp_path: Path) -> None:
+def test_fleet_cli_loads_manifest_and_reports_cap(fleet_repo: Path, tmp_path: Path):
     manifest = tmp_path / "lanes.json"
     manifest.write_text(
         json.dumps(
@@ -273,7 +272,7 @@ def test_fleet_cli_loads_manifest_and_reports_cap(fleet_repo: Path, tmp_path: Pa
     assert "CLI-FLEET" in listed.stdout and "completed" in listed.stdout
 
 
-def test_empty_fleet_is_a_loud_noop(fleet_repo: Path) -> None:
+def test_empty_fleet_is_a_loud_noop(fleet_repo: Path):
     with pytest.raises(FleetValidationError, match="at least one lane"):
         WorktreeFleet(fleet_repo).run([])
     assert not (fleet_repo / ".gitreins" / "worktrees.json").exists()
@@ -313,7 +312,7 @@ def _write_runtime_artifacts_in_main(repo: Path) -> None:
         path.write_text("", encoding="utf-8")
 
 
-def test_fleet_merge_passes_when_only_runtime_artifacts_are_present(fleet_repo: Path) -> None:
+def test_fleet_merge_passes_when_only_runtime_artifacts_are_present(fleet_repo: Path):
     """The whole fleet was unmergeable on a stock install (DF-GITREINS-POC-47).
 
     Nothing in this setup is user work: canonical main carries only the runtime
@@ -339,7 +338,7 @@ def test_fleet_merge_passes_when_only_runtime_artifacts_are_present(fleet_repo: 
     assert WorktreeManager(fleet_repo).list_records() == []
 
 
-def test_fleet_merge_still_refuses_real_dirt_beside_runtime_artifacts(fleet_repo: Path) -> None:
+def test_fleet_merge_still_refuses_real_dirt_beside_runtime_artifacts(fleet_repo: Path):
     """The exemption is narrow: one stray edit still stops the merge."""
     _write_runtime_artifacts_in_main(fleet_repo)
     code = LANE_WITH_REGENERATED_VENV + ";Path('stray.txt').write_text('uncommitted')"
@@ -413,7 +412,7 @@ print("merge-gate verdict:", path)
 
 def test_fleet_seeds_the_lane_task_for_the_judge_phase(
     fleet_repo: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+):
     """AC-1 (a): a lane's judge phase can name the lane's own task.
 
     The README's manifest pattern (`["gitreins", "judge", "API-1"]` in the same
@@ -450,7 +449,7 @@ def test_fleet_seeds_the_lane_task_for_the_judge_phase(
 
 def test_fleet_reports_why_a_failed_judge_phase_blocks_the_merge(
     fleet_repo: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+):
     """AC-1 (c): a judge-failed lane carries WHY, in the lane result itself.
 
     The row's repro 3: state=failed / passed=false with `error=None` and no
@@ -485,7 +484,7 @@ def test_fleet_reports_why_a_failed_judge_phase_blocks_the_merge(
 
 def test_fleet_judge_phase_naming_an_unknown_task_says_where_tasks_live(
     fleet_repo: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+):
     """AC-1 (c), the (a)-shaped failure: no task anywhere names the fix."""
     monkeypatch.setenv("PYTHONPATH", str(CLI_SCRIPT.parents[1]))
     judge = _lane_phase("import sys; print('Task not found: GHOST-1'); sys.exit(1)")
@@ -500,7 +499,7 @@ def test_fleet_judge_phase_naming_an_unknown_task_says_where_tasks_live(
 
 def test_merge_gate_accepts_the_verdict_a_lane_wrote_in_its_own_tree(
     fleet_repo: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+):
     """AC-2: a verdict produced in the lane tree satisfies the `--merge` gate.
 
     The end-to-end shape the row calls unreachable: the task lives in canonical
@@ -548,7 +547,7 @@ def test_merge_gate_accepts_the_verdict_a_lane_wrote_in_its_own_tree(
 
 def test_fleet_lane_can_judge_ephemerally_and_still_merge(
     fleet_repo: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+):
     """AC-2, the ephemeral route: `--persist-verdict` makes an ephemeral PASS usable.
 
     Repro 2 from the row: `judge --ephemeral` writes nothing (EVID-003) and the
@@ -625,7 +624,7 @@ def test_fleet_lane_can_judge_ephemerally_and_still_merge(
     assert WorktreeManager(fleet_repo).list_records() == []
 
 
-def test_merge_gate_reads_the_disk_verdict_for_the_commit_it_grades(fleet_repo: Path) -> None:
+def test_merge_gate_reads_the_disk_verdict_for_the_commit_it_grades(fleet_repo: Path):
     """AC-2's two-sided control: the disk document is read, and scoped.
 
     One-sided, "the gate accepted the document" could equally mean "the gate

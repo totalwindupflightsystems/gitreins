@@ -6,8 +6,6 @@ catalogue, or when the spec names a tool the live server no longer exposes — s
 spec cannot silently drift again.
 """
 
-from __future__ import annotations
-
 import json
 import re
 import subprocess
@@ -55,7 +53,7 @@ def _spec_catalog_names(spec: str) -> set[str]:
 
 
 class TestMcpSpecParity:
-    def test_spec_covers_every_live_tool(self) -> None:
+    def test_spec_covers_every_live_tool(self):
         live = _live_tool_names()
         spec = _spec_text()
         for name in live:
@@ -64,7 +62,7 @@ class TestMcpSpecParity:
                 "catalogue (§8) from the live tools/list surface"
             )
 
-    def test_spec_names_no_removed_tool(self) -> None:
+    def test_spec_names_no_removed_tool(self):
         live = set(_live_tool_names())
         spec = _spec_text()
         catalogued = _spec_catalog_names(spec)
@@ -74,7 +72,7 @@ class TestMcpSpecParity:
             "live surface changed and the spec needs regeneration"
         )
 
-    def test_catalogue_table_lists_exactly_the_live_set(self) -> None:
+    def test_catalogue_table_lists_exactly_the_live_set(self):
         live = _live_tool_names()
         spec = _spec_text()
         catalogued = _spec_catalog_names(spec)
@@ -83,14 +81,14 @@ class TestMcpSpecParity:
             f"live-only={sorted(set(live) - catalogued)}"
         )
 
-    def test_every_live_tool_has_a_catalogue_entry(self) -> None:
+    def test_every_live_tool_has_a_catalogue_entry(self):
         live = _live_tool_names()
         spec = _spec_text()
         catalogued = _spec_catalog_names(spec)
         missing = set(live) - catalogued
         assert not missing, f"live tools absent from the §8 catalogue table: {sorted(missing)}"
 
-    def test_each_live_tool_appears_in_scope_or_status_sections(self) -> None:
+    def test_each_live_tool_appears_in_scope_or_status_sections(self):
         live = _live_tool_names()
         spec = _spec_text()
         # The tool catalogue (§8) is the authority; the Implementation Status (§14)
@@ -101,7 +99,7 @@ class TestMcpSpecParity:
                 f"live tool {name!r} missing a row in §14 Implementation Status"
             )
 
-    def test_scope_count_tracks_live_surface(self) -> None:
+    def test_scope_count_tracks_live_surface(self):
         live = _live_tool_names()
         spec = _spec_text()
         scope = spec.split("## 2. Scope", 1)[1].split("## 3.", 1)[0]

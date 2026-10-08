@@ -291,7 +291,10 @@ class PrescreenResult:
 
 
 def run_prescreen(
-    task: dict, *, workdir: str = ".", **resolve_kwargs: object  # forwarded to resolve
+    task: dict,
+    *,
+    workdir: str = ".",
+    **resolve_kwargs: object,  # forwarded to resolve
 ) -> PrescreenResult:
     """Resolve the task's criteria against the repo (one Jev call).
 

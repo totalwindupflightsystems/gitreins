@@ -1,8 +1,5 @@
 """Integration coverage for scripts/check_unpushed.sh."""
 
-from __future__ import annotations
-from typing import Any
-
 import os
 import subprocess
 from pathlib import Path
@@ -11,7 +8,7 @@ from pathlib import Path
 SCRIPT_PATH = Path(__file__).resolve().parent.parent / "scripts" / "check_unpushed.sh"
 
 
-def _git(cwd: Any, *args: Any, capture_output: Any = True) -> Any:
+def _git(cwd, *args, capture_output=True):
     return subprocess.run(
         ["git", *args],
         cwd=cwd,
@@ -21,7 +18,7 @@ def _git(cwd: Any, *args: Any, capture_output: Any = True) -> Any:
     )
 
 
-def _commit_identity_env() -> Any:
+def _commit_identity_env():
     env = os.environ.copy()
     env.update(
         {
@@ -34,7 +31,7 @@ def _commit_identity_env() -> Any:
     return env
 
 
-def _commit(cwd: Any, message: Any) -> None:
+def _commit(cwd, message):
     subprocess.run(
         ["git", "commit", "-q", "-m", message],
         cwd=cwd,
@@ -43,7 +40,7 @@ def _commit(cwd: Any, message: Any) -> None:
     )
 
 
-def _run_guard(cwd: Any) -> Any:
+def _run_guard(cwd):
     return subprocess.run(
         [str(SCRIPT_PATH)],
         cwd=cwd,
@@ -52,7 +49,7 @@ def _run_guard(cwd: Any) -> Any:
     )
 
 
-def test_guard_distinguishes_content_from_identical_merge_history(tmp_path: Path) -> None:
+def test_guard_distinguishes_content_from_identical_merge_history(tmp_path):
     """A content commit alarms, while merge-only history with equal trees passes."""
     remote = tmp_path / "remote.git"
     clone = tmp_path / "clone"

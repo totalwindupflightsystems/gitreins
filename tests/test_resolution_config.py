@@ -19,7 +19,6 @@ Covers the plumbing only; the measured numbers stay in
 """
 
 from __future__ import annotations
-from typing import Any
 
 import importlib.util
 import os
@@ -44,7 +43,7 @@ def _config_with(block: dict) -> dict:
 
 
 class TestResolutionConfigParsing:
-    def test_builtin_defaults_disable_every_surface(self) -> None:
+    def test_builtin_defaults_disable_every_surface(self):
         d = GitReinsDefaults()
         assert d.resolution_enabled_cli is False
         assert d.resolution_enabled_mcp is False
@@ -56,7 +55,7 @@ class TestResolutionConfigParsing:
         assert d.resolution_review_at == pytest.approx(resolution.REVIEW_AT)
         assert d.resolution_egress_exclude == ()
 
-    def test_block_overlays_enables_model_ceiling_bands_and_excludes(self) -> None:
+    def test_block_overlays_enables_model_ceiling_bands_and_excludes(self):
         d = GitReinsDefaults().overlay(
             _config_with(
                 {
@@ -83,14 +82,14 @@ class TestResolutionConfigParsing:
         assert d.resolution_review_at == pytest.approx(0.4)
         assert d.resolution_egress_exclude == ("internal/keys.py", "vendor/*")
 
-    def test_wrong_typed_block_degrades_to_defaults_not_a_crash(self) -> None:
+    def test_wrong_typed_block_degrades_to_defaults_not_a_crash(self):
         """`resolution: true` (a scalar) must parse as 'all off', not raise."""
         d = GitReinsDefaults().overlay({"defaults": {"resolution": True}})
         assert d.resolution_enabled_cli is False
         assert d.resolution_model == GitReinsDefaults().resolution_model
         assert d.resolution_egress_exclude == ()
 
-    def test_wrong_typed_subkeys_degrade_to_defaults(self) -> None:
+    def test_wrong_typed_subkeys_degrade_to_defaults(self):
         d = GitReinsDefaults().overlay(
             _config_with(
                 {
@@ -107,7 +106,7 @@ class TestResolutionConfigParsing:
         assert d.resolution_review_at == pytest.approx(GitReinsDefaults().resolution_review_at)
         assert d.resolution_egress_exclude == ()
 
-    def test_load_defaults_reads_a_real_config_file(self, tmp_path: Path) -> None:
+    def test_load_defaults_reads_a_real_config_file(self, tmp_path):
         config_dir = tmp_path / ".gitreins"
         config_dir.mkdir()
         with open(config_dir / "config.yaml", "w") as f:
@@ -117,7 +116,7 @@ class TestResolutionConfigParsing:
         assert d.resolution_enabled_cli is False
         assert d._source == ".gitreins/config.yaml"
 
-    def test_to_config_dict_round_trips_the_block(self) -> None:
+    def test_to_config_dict_round_trips_the_block(self):
         d = GitReinsDefaults()
         d.resolution_enabled_cli = True
         d.resolution_egress_exclude = ("internal/keys.py",)
@@ -133,13 +132,13 @@ class TestResolutionConfigParsing:
 
 
 class TestSurfaceEnabled:
-    def test_every_known_surface_defaults_to_off(self) -> None:
+    def test_every_known_surface_defaults_to_off(self):
         for surface in resolution.RESOLUTION_SURFACES:
             enabled, reason = resolution.surface_enabled(surface, defaults=GitReinsDefaults())
             assert enabled is False
             assert reason == "surface-disabled"
 
-    def test_explicit_true_is_the_only_on_switch(self) -> None:
+    def test_explicit_true_is_the_only_on_switch(self):
         for surface in resolution.RESOLUTION_SURFACES:
             d = GitReinsDefaults()
             setattr(d, f"resolution_enabled_{surface}", True)
@@ -147,16 +146,16 @@ class TestSurfaceEnabled:
             assert enabled is True
             assert reason is None
 
-    def test_truthy_but_not_true_is_off(self) -> None:
+    def test_truthy_but_not_true_is_off(self):
         """`enabled.cli: 1` (or "true") is NOT an opt-in — YAML typing aside."""
         d = GitReinsDefaults().overlay(_config_with({"enabled": {"cli": "true"}}))
         assert d.resolution_enabled_cli is False
 
-    def test_unknown_surface_is_a_named_error(self) -> None:
+    def test_unknown_surface_is_a_named_error(self):
         with pytest.raises(ValueError, match="unknown resolution surface"):
             resolution.surface_enabled("carrier-pigeon", defaults=GitReinsDefaults())
 
-    def test_none_defaults_means_off(self, tmp_path: Path) -> None:
+    def test_none_defaults_means_off(self, tmp_path):
         """No `defaults` passed: the real loader runs, and absent config is OFF.
 
         Hermetic on purpose (an explicit empty workdir): with the process CWD in
@@ -174,7 +173,7 @@ class TestSurfaceEnabled:
 
 class TestEgressExclusionFilter:
     @pytest.fixture
-    def env_tree(self, tmp_path: Path) -> Any:
+    def env_tree(self, tmp_path):
         """A synthetic repo whose secrets must never reach the bundle.
 
         Exercises BOTH halves of the filter: the built-in floor (`.env`,
@@ -193,12 +192,12 @@ class TestEgressExclusionFilter:
         (repo / ".gitreins").mkdir()
         return repo
 
-    def _defaults_with_excludes(self) -> Any:
+    def _defaults_with_excludes(self):
         d = GitReinsDefaults()
         d.resolution_egress_exclude = ("internal/keys.py", "vendor/*")
         return d
 
-    def test_builtin_floor_blocks_env_key_and_caches(self, env_tree: Any) -> None:
+    def test_builtin_floor_blocks_env_key_and_caches(self, env_tree):
         for path in (
             ".env",
             "server.pem",
@@ -210,19 +209,19 @@ class TestEgressExclusionFilter:
                 path, defaults=self._defaults_with_excludes()
             ), path
 
-    def test_configured_patterns_block_internal_and_vendor(self, env_tree: Any) -> None:
+    def test_configured_patterns_block_internal_and_vendor(self, env_tree):
         d = self._defaults_with_excludes()
         assert resolution.is_excluded_path_for_surface("internal/keys.py", defaults=d)
         assert resolution.is_excluded_path_for_surface("vendor/lib/third_party.py", defaults=d)
         # The floor holds without any configured pattern, too.
         assert resolution.is_excluded_path_for_surface(".env", defaults=GitReinsDefaults())
 
-    def test_plain_source_is_never_excluded(self, env_tree: Any) -> None:
+    def test_plain_source_is_never_excluded(self, env_tree):
         assert not resolution.is_excluded_path_for_surface(
             "engine/real.py", defaults=self._defaults_with_excludes()
         )
 
-    def test_pattern_applies_through_the_whole_pipeline(self, env_tree: Any) -> None:
+    def test_pattern_applies_through_the_whole_pipeline(self, env_tree):
         """A hilo bundle ranking the excluded files ships none of them."""
         bundle = "\n".join(
             [
@@ -257,10 +256,10 @@ class TestEgressExclusionFilter:
         assert "KEY_MATERIAL" not in joined
         assert "SUPER_SECRET" not in joined
 
-    def test_trace_drops_excluded_seeds(self, env_tree: Any) -> None:
+    def test_trace_drops_excluded_seeds(self, env_tree):
         """`hilo graph search` output naming a .env yields no seed for it."""
 
-        def fake_runner(args: Any, workdir: str) -> Any:
+        def fake_runner(args, workdir):
             assert args[0] == "graph" and args[1] == "search"
             return (
                 0,
@@ -283,7 +282,7 @@ class TestEgressExclusionFilter:
         )
         assert [seed.file for seed in seeds] == ["engine/real.py"]
 
-    def test_reads_never_open_an_excluded_file(self, env_tree: Any) -> None:
+    def test_reads_never_open_an_excluded_file(self, env_tree):
         assert (
             resolution._read_block(
                 "internal/keys.py",
@@ -301,7 +300,7 @@ class TestEgressExclusionFilter:
         )
         assert block is not None and "answer" in block.text
 
-    def test_empty_and_wrong_typed_excludes_are_ignored(self) -> None:
+    def test_empty_and_wrong_typed_excludes_are_ignored(self):
         assert not resolution.is_excluded_path_for_surface(
             "engine/real.py", egress_exclude=(), defaults=self._defaults_with_excludes()
         )
@@ -315,7 +314,7 @@ class TestEgressExclusionFilter:
 class _Cli:
     """Load gitreins/cli.py under a private module name (doc-sync safety)."""
 
-    def __init__(self) -> None:
+    def __init__(self):
         spec = importlib.util.spec_from_file_location(
             "_gitreins_cli_jevres006", REPO_ROOT / "gitreins" / "cli.py"
         )
@@ -323,7 +322,7 @@ class _Cli:
         spec.loader.exec_module(self.module)
 
 
-def _run_cli_inprocess(monkeypatch: pytest.MonkeyPatch, repo: Path, *args: str) -> Any:
+def _run_cli_inprocess(monkeypatch, repo: Path, *args: str):
     """Drive gitreins.cli.main() in-process with *repo* as the workdir.
 
     In-process (not a child interpreter) so the WORKTREE's package is what
@@ -365,9 +364,7 @@ def _make_repo(tmp_path: Path) -> Path:
 
 
 class TestInitWritesResolutionDefaults:
-    def test_fresh_init_writes_a_disabled_resolution_block(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_fresh_init_writes_a_disabled_resolution_block(self, tmp_path, monkeypatch):
         repo = _make_repo(tmp_path)
         code, out, err = _run_cli_inprocess(monkeypatch, repo, "init")
         assert code == 0, err
@@ -388,9 +385,7 @@ class TestInitWritesResolutionDefaults:
         }
         assert block["egress_exclude"] == []
 
-    def test_init_preserves_a_user_authored_resolution_block(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_init_preserves_a_user_authored_resolution_block(self, tmp_path, monkeypatch):
         repo = _make_repo(tmp_path)
         (repo / ".gitreins").mkdir()
         with open(repo / ".gitreins" / "config.yaml", "w") as f:
@@ -410,9 +405,7 @@ class TestInitWritesResolutionDefaults:
         assert config["resolution"]["enabled"]["cli"] is True
         assert config["resolution"]["egress_exclude"] == ["internal/keys.py"]
 
-    def test_disabled_init_output_abstains_via_the_real_cli(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_disabled_init_output_abstains_via_the_real_cli(self, tmp_path, monkeypatch):
         """Acceptance 1, end to end: a fresh init's config disables the CLI."""
         import json as _json
 
@@ -471,7 +464,7 @@ class TestEnablingDocs:
     config honest about the posture it actually runs.
     """
 
-    def test_enabling_section_exists_and_closes_the_guide(self) -> None:
+    def test_enabling_section_exists_and_closes_the_guide(self):
         headings = [line.strip() for line in _guide_text().splitlines() if line.startswith("## ")]
         assert _ENABLING_HEADING in headings
         assert headings[-1] == _ENABLING_HEADING, "§9 must be the final section"
@@ -479,7 +472,7 @@ class TestEnablingDocs:
             _ENABLING_HEADING
         ], "exactly one '## 9' heading — the hint's section reference"
 
-    def test_enabling_block_is_real_yaml_covering_every_knob(self) -> None:
+    def test_enabling_block_is_real_yaml_covering_every_knob(self):
         block = _yaml_block_under(_ENABLING_HEADING)["resolution"]
         enabled = block["enabled"]
         assert set(enabled) == {"cli", "mcp", "predispatch", "judge_prescreen"}
@@ -492,14 +485,14 @@ class TestEnablingDocs:
         }
         assert isinstance(block["egress_exclude"], list)
 
-    def test_enabling_section_says_init_writes_the_block_disabled(self) -> None:
+    def test_enabling_section_says_init_writes_the_block_disabled(self):
         section = _section_text(_ENABLING_HEADING)
         assert "`gitreins init`" in section
         assert "explicit" in section.lower()
         assert "disabl" in section.lower()
         assert "third party" in section.lower() or "egress" in section.lower()
 
-    def test_surface_disabled_hint_reference_resolves_to_a_real_heading(self) -> None:
+    def test_surface_disabled_hint_reference_resolves_to_a_real_heading(self):
         """The hint's path AND section must exist — that was the dead end."""
         hint = resolution._REASON_ACTIONS["surface-disabled"]
         match = re.search(r"(docs/[\w./-]+\.md)\s*§(\d+)", hint)
@@ -512,7 +505,7 @@ class TestEnablingDocs:
             f"the hint cites {doc_path} §{section}; that section does not exist"
         )
 
-    def test_repo_config_enables_cli_and_mcp_only(self) -> None:
+    def test_repo_config_enables_cli_and_mcp_only(self):
         """Tracked config: cli+mcp on, judge-adjacent off (no JEVRES-005 numbers)."""
         with open(REPO_ROOT / ".gitreins" / "config.yaml", encoding="utf-8") as handle:
             config = yaml.safe_load(handle)

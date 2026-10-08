@@ -1,9 +1,5 @@
 """Dedicated tests for config propagation across repos."""
 
-from __future__ import annotations
-from pathlib import Path
-from typing import Any
-
 import os
 from unittest.mock import mock_open, patch
 
@@ -23,20 +19,20 @@ from engine.propagate import Propagator
         ("pipeline", {}, False),
     ],
 )
-def test_should_override(key: Any, target: Any, expected: Any) -> None:
+def test_should_override(key, target, expected):
     assert Propagator._should_override(key, target) == expected
 
 
 # ── _create_gitreins_dir ─────────────────────────────────────
 
 
-def test_create_gitreins_dir_creates_path(tmp_path: Path) -> None:
+def test_create_gitreins_dir_creates_path(tmp_path):
     target = str(tmp_path / "my-repo")
     Propagator._create_gitreins_dir(target)
     assert os.path.isdir(os.path.join(target, ".gitreins"))
 
 
-def test_create_gitreins_dir_idempotent(tmp_path: Path) -> None:
+def test_create_gitreins_dir_idempotent(tmp_path):
     path = str(tmp_path)
     Propagator._create_gitreins_dir(path)
     # Should not raise
@@ -46,7 +42,7 @@ def test_create_gitreins_dir_idempotent(tmp_path: Path) -> None:
 # ── _merge_dicts ─────────────────────────────────────────────
 
 
-def test_merge_dicts_adds_source_only_keys() -> None:
+def test_merge_dicts_adds_source_only_keys():
     source = {"pipeline": {"stages": []}, "version": 1}
     target = {"guards": {"secrets": True}}
 
@@ -60,7 +56,7 @@ def test_merge_dicts_adds_source_only_keys() -> None:
     assert not preserved
 
 
-def test_merge_dicts_preserves_target_on_scalar_conflict() -> None:
+def test_merge_dicts_preserves_target_on_scalar_conflict():
     source = {"version": 2}
     target = {"version": 1}
 
@@ -71,7 +67,7 @@ def test_merge_dicts_preserves_target_on_scalar_conflict() -> None:
     assert not added
 
 
-def test_merge_dicts_recursively_merges_nested_dicts() -> None:
+def test_merge_dicts_recursively_merges_nested_dicts():
     source = {
         "guards": {"secrets": True, "lint": True},
         "pipeline": {"stages": []},
@@ -90,14 +86,14 @@ def test_merge_dicts_recursively_merges_nested_dicts() -> None:
     assert merged["version"] == 1
 
 
-def test_merge_dicts_handles_empty_source() -> None:
+def test_merge_dicts_handles_empty_source():
     merged, added, preserved = Propagator._merge_dicts({}, {"a": 1})
     assert merged == {"a": 1}
     assert not added
     assert not preserved
 
 
-def test_merge_dicts_handles_empty_target() -> None:
+def test_merge_dicts_handles_empty_target():
     merged, added, preserved = Propagator._merge_dicts({"a": 1}, {})
     assert merged == {"a": 1}
     assert "a" in added
@@ -106,13 +102,13 @@ def test_merge_dicts_handles_empty_target() -> None:
 # ── _load_source_config ──────────────────────────────────────
 
 
-def test_load_source_config_returns_none_when_missing() -> None:
+def test_load_source_config_returns_none_when_missing():
     with patch("os.path.isfile", return_value=False):
         prop = Propagator("/nonexistent")
         assert prop._load_source_config() is None
 
 
-def test_load_source_config_returns_none_on_yaml_error() -> None:
+def test_load_source_config_returns_none_on_yaml_error():
     with (
         patch("os.path.isfile", return_value=True),
         patch("builtins.open", mock_open(read_data=": invalid: yaml:")),
@@ -126,7 +122,7 @@ def test_load_source_config_returns_none_on_yaml_error() -> None:
 # ── propagate — missing source config ────────────────────────
 
 
-def test_propagate_returns_error_when_source_config_missing() -> None:
+def test_propagate_returns_error_when_source_config_missing():
     with patch("os.path.isfile", return_value=False):
         prop = Propagator("/nonexistent")
         result = prop.propagate(["/target"])
@@ -137,7 +133,7 @@ def test_propagate_returns_error_when_source_config_missing() -> None:
 # ── propagate — copy to new target ───────────────────────────
 
 
-def test_propagate_copies_to_target_without_existing_config(tmp_path: Path) -> None:
+def test_propagate_copies_to_target_without_existing_config(tmp_path):
 
     src_dir = tmp_path / "source"
     target = tmp_path / "target"
@@ -157,7 +153,7 @@ def test_propagate_copies_to_target_without_existing_config(tmp_path: Path) -> N
 # ── propagate — merge to existing target ─────────────────────
 
 
-def test_propagate_merges_to_target_with_existing_config(tmp_path: Path) -> None:
+def test_propagate_merges_to_target_with_existing_config(tmp_path):
     import yaml
 
     src_dir = tmp_path / "source"

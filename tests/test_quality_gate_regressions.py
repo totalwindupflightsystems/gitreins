@@ -15,9 +15,6 @@ had actually failed:
 The tests assert the FIXED behavior, so any future regression fails loudly.
 """
 
-from __future__ import annotations
-from typing import Any
-
 import os
 import tempfile
 from unittest import mock
@@ -31,7 +28,7 @@ from engine.pipeline import Pipeline
 from engine.task_manager import TaskManager
 
 
-def _make_workdir(pipeline_stages: Any = None) -> Any:
+def _make_workdir(pipeline_stages=None):
     wd = tempfile.mkdtemp()
     os.makedirs(os.path.join(wd, ".gitreins"))
     cfg = {}
@@ -45,7 +42,7 @@ def _make_workdir(pipeline_stages: Any = None) -> Any:
 class TestPipelineExceptionNotAutoPass:
     """A pipeline crash must NOT pass the task unless pass_on_error is set."""
 
-    def test_exception_returns_fail_by_default(self, tmp_workdir: str) -> None:
+    def test_exception_returns_fail_by_default(self, tmp_workdir):
         wd = _make_workdir(pipeline_stages=[{"id": "t1", "type": "script", "run": "exit 3"}])
         task = TaskManager(wd).create("t1", "T1", ["c1"])
         judge = Judge(LLMClient(), wd)
@@ -53,7 +50,7 @@ class TestPipelineExceptionNotAutoPass:
             result = judge.evaluate_task(task)
         assert result.passed is False
 
-    def test_exception_passes_only_with_pass_on_error(self, tmp_workdir: str) -> None:
+    def test_exception_passes_only_with_pass_on_error(self, tmp_workdir):
         wd = tempfile.mkdtemp()
         os.makedirs(os.path.join(wd, ".gitreins"))
         with open(os.path.join(wd, ".gitreins", "config.yaml"), "w") as f:
@@ -74,7 +71,7 @@ class TestPipelineExceptionNotAutoPass:
 class TestOnFailContinueIsNotPass:
     """on_fail: continue controls continuation, never the pass/fail verdict."""
 
-    def test_failing_script_with_continue_reports_failed(self, tmp_workdir: str) -> None:
+    def test_failing_script_with_continue_reports_failed(self, tmp_workdir):
         stages = [
             {"id": "s", "type": "script", "run": "exit 1", "on_fail": "continue"},
         ]
@@ -84,7 +81,7 @@ class TestOnFailContinueIsNotPass:
         assert step["passed"] is False
         assert res["stages"]["s"]["passed"] is False
 
-    def test_timeout_with_continue_reports_failed(self, tmp_workdir: str) -> None:
+    def test_timeout_with_continue_reports_failed(self, tmp_workdir):
         stages = [
             {
                 "id": "s",
@@ -103,7 +100,7 @@ class TestOnFailContinueIsNotPass:
 class TestDefaultTier1CommandsPreserveExitCodes:
     """Default lint/test commands must not zero their exit codes."""
 
-    def test_no_exit_zeroing_suffixes(self) -> None:
+    def test_no_exit_zeroing_suffixes(self):
         """DF-GITREINS-POC-16: the tables live in engine.lang_detect — assert
         on the real table values (no suffix may swallow a failure)."""
         from engine.lang_detect import LANG_COMMANDS
@@ -114,7 +111,7 @@ class TestDefaultTier1CommandsPreserveExitCodes:
                 assert "|| true" not in cmd, f"{language} zeroes its exit code: {cmd}"
                 assert "2>/dev/null" not in cmd, f"{language} swallows its output: {cmd}"
 
-    def test_detection_tables_defined_once(self) -> None:
+    def test_detection_tables_defined_once(self):
         """One language-detection source of truth (DF-GITREINS-POC-16).
 
         The signature-file table and the language->command map must be DEFINED
@@ -147,14 +144,14 @@ class TestDefaultTier1CommandsPreserveExitCodes:
 class TestPartialVerdictRequiresAllPass:
     """A cap-hit partial verdict must be INCOMPLETE unless ALL criteria PASS."""
 
-    def test_partial_verdict_with_unverified_criteria_is_incomplete(self, tmp_workdir: str) -> None:
+    def test_partial_verdict_with_unverified_criteria_is_incomplete(self, tmp_workdir):
         ev = AgenticEvaluator(LLMClient(), tmp_workdir)
         ev._sandbox = {"verified_0": "PASS — pytest: 1 passed, exit 0"}
         verdict = ev._extract_partial_verdict(["c0", "c1"])
         assert verdict is not None
         assert verdict.verdict == "INCOMPLETE"
 
-    def test_partial_verdict_all_verified_pass_is_complete(self, tmp_workdir: str) -> None:
+    def test_partial_verdict_all_verified_pass_is_complete(self, tmp_workdir):
         ev = AgenticEvaluator(LLMClient(), tmp_workdir)
         ev._sandbox = {
             "verified_0": "PASS — pytest: 1 passed, exit 0",
@@ -164,7 +161,7 @@ class TestPartialVerdictRequiresAllPass:
         assert verdict is not None
         assert verdict.verdict == "COMPLETE"
 
-    def test_partial_verdict_any_fail_is_incomplete(self, tmp_workdir: str) -> None:
+    def test_partial_verdict_any_fail_is_incomplete(self, tmp_workdir):
         ev = AgenticEvaluator(LLMClient(), tmp_workdir)
         ev._sandbox = {
             "verified_0": "PASS — pytest: 1 passed, exit 0",

@@ -77,7 +77,13 @@ def _hermetic_env() -> dict:
     for key in LLM_CREDENTIAL_ENV_KEYS:
         env.pop(key, None)
     env["GITREINS_LLM_BASE_URL"] = HERMETIC_LLM_BASE_URL
-    env.setdefault("PYTHONPATH", "")
+    # Ensure the repo root is in PYTHONPATH so subprocess can import engine
+    # (when running cli.py directly, Python adds gitreins/ to sys.path, not the repo root)
+    existing_pythonpath = env.get("PYTHONPATH", "")
+    if existing_pythonpath:
+        env["PYTHONPATH"] = REPO_ROOT + os.pathsep + existing_pythonpath
+    else:
+        env["PYTHONPATH"] = REPO_ROOT
     return env
 
 

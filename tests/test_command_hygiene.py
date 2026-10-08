@@ -8,8 +8,6 @@ assert on a side effect (a file that must NOT exist).
 """
 
 from __future__ import annotations
-from pathlib import Path
-from typing import Any
 
 import os
 import pathlib
@@ -40,7 +38,7 @@ def _wait_gone(pid: int, timeout: float = 5.0) -> bool:
 
 
 @pytest.fixture()
-def pidfile(tmp_path: Path) -> Any:
+def pidfile(tmp_path):
     return tmp_path / f"child-{uuid.uuid4().hex}.pid"
 
 
@@ -59,7 +57,7 @@ def pidfile(tmp_path: Path) -> Any:
         ":(){ :|:& };:",
     ],
 )
-def test_busy_wait_commands_are_refused(cmd: Any) -> None:
+def test_busy_wait_commands_are_refused(cmd):
     assert ch.busy_wait_reason(cmd), f"must be refused: {cmd}"
 
 
@@ -74,18 +72,18 @@ def test_busy_wait_commands_are_refused(cmd: Any) -> None:
         "python3 scripts/loadgen.py --workers 4 --seconds 5",
     ],
 )
-def test_legitimate_commands_still_run(cmd: Any) -> None:
+def test_legitimate_commands_still_run(cmd):
     assert ch.busy_wait_reason(cmd) is None, f"must NOT be refused: {cmd}"
 
 
-def test_refusal_message_points_at_the_right_primitives() -> None:
+def test_refusal_message_points_at_the_right_primitives():
     out = ch.run_bounded("while :; do :; done")
     assert out.get("refused") is True
     assert "loadgen.py" in out["reason"] and "sleep" in out["reason"]
     assert "2026-09-18" in out["reason"]  # carries the evidence
 
 
-def test_refused_command_never_executes(tmp_path: Path) -> None:
+def test_refused_command_never_executes(tmp_path):
     """Proof by side effect: the refused command must not have run at all."""
     canary = tmp_path / "executed.canary"
     spin = "while :; do :; done"
@@ -97,7 +95,7 @@ def test_refused_command_never_executes(tmp_path: Path) -> None:
 # ── the leak fix: backgrounded children cannot escape ────────────────────────
 
 
-def test_backgrounded_child_is_reaped_on_normal_exit(pidfile: Any) -> None:
+def test_backgrounded_child_is_reaped_on_normal_exit(pidfile):
     """The exact incident shape: the call RETURNS while a `&` child is alive.
 
     The child records its own PID; the child is a `sleep`, which would outlive a
@@ -111,7 +109,7 @@ def test_backgrounded_child_is_reaped_on_normal_exit(pidfile: Any) -> None:
     assert _wait_gone(child), f"backgrounded child {child} escaped the process-group reap"
 
 
-def test_timeout_kills_the_whole_group(pidfile: Any) -> None:
+def test_timeout_kills_the_whole_group(pidfile):
     cmd = f"sh -c 'echo $$ > {pidfile}; exec sleep 60'"
     out = ch.run_bounded(cmd, timeout=1)
     assert out.get("timed_out") is True
@@ -120,7 +118,7 @@ def test_timeout_kills_the_whole_group(pidfile: Any) -> None:
     assert _wait_gone(child), f"timed-out child {child} survived the group kill"
 
 
-def test_group_helpers_validate_inputs() -> None:
+def test_group_helpers_validate_inputs():
     # Never signal PID 1 / invalid values (the os.killpg incident in this repo).
     assert ch.pids_in_group(1) == []
     assert ch.kill_group(1) == []
@@ -129,7 +127,7 @@ def test_group_helpers_validate_inputs() -> None:
     assert ch.kill_group(999_999_999) == []  # nonexistent group
 
 
-def test_pids_in_group_finds_a_child_group() -> None:
+def test_pids_in_group_finds_a_child_group():
     proc = subprocess.Popen(["sleep", "5"], start_new_session=True)
     try:
         time.sleep(0.2)
@@ -139,7 +137,7 @@ def test_pids_in_group_finds_a_child_group() -> None:
         proc.wait(timeout=5)
 
 
-def test_happy_path_reports_exit_code_and_output() -> None:
+def test_happy_path_reports_exit_code_and_output():
     out = ch.run_bounded("echo hello; exit 3", timeout=10)
     assert out["exit_code"] == 3
     assert "hello" in out["output"]
@@ -150,7 +148,7 @@ def test_happy_path_reports_exit_code_and_output() -> None:
 # ── output bounding: the TAIL is where a run's summary lives ─────────────────
 
 
-def test_output_bound_keeps_the_tail_and_reports_the_omission() -> None:
+def test_output_bound_keeps_the_tail_and_reports_the_omission():
     """QA-GITREINS-POC-11: the bound is head + TAIL on line boundaries.
 
     The defect pinned here: ``run_bounded`` bounded its captured output
@@ -206,7 +204,7 @@ def test_output_bound_keeps_the_tail_and_reports_the_omission() -> None:
     assert 0 < gone < len(raw["output"]), (gone, len(raw["output"]))
 
 
-def test_output_under_the_cap_is_returned_verbatim() -> None:
+def test_output_under_the_cap_is_returned_verbatim():
     """The bound must not touch output that fits — no marker, no reflow."""
     out = ch.run_bounded("printf 'a\\nb\\nc\\n'", timeout=10)
     assert out["output"] == "a\nb\nc\n"
@@ -216,7 +214,7 @@ def test_output_under_the_cap_is_returned_verbatim() -> None:
 # ── DF-CRIER-258: the argv-LIST form (shell=False) ───────────────────────────
 
 
-def test_argv_list_happy_path_reports_exit_code_output_and_pgid() -> None:
+def test_argv_list_happy_path_reports_exit_code_output_and_pgid():
     """The list form runs without a shell and reports the same result shape."""
     out = ch.run_bounded(["bash", "-c", "echo hello; exit 3"], timeout=10)
     assert out["exit_code"] == 3
@@ -229,7 +227,7 @@ def test_argv_list_happy_path_reports_exit_code_output_and_pgid() -> None:
     assert out["pgid"] > 1
 
 
-def test_argv_list_timeout_kills_backgrounded_grandchild(pidfile: Any) -> None:
+def test_argv_list_timeout_kills_backgrounded_grandchild(pidfile):
     """The DF-CRIER-258 leak shape, list form: a command that backgrounds a
     sleep must leave NOTHING alive after the timeout kill."""
     cmd = ["bash", "-c", f"echo $$ > {pidfile}; sleep 60 & echo bg; wait"]
@@ -240,7 +238,7 @@ def test_argv_list_timeout_kills_backgrounded_grandchild(pidfile: Any) -> None:
     assert _wait_gone(child), f"timed-out list-form grandchild {child} escaped the group kill"
 
 
-def test_argv_list_refusal_fires_and_never_executes(tmp_path: Path) -> None:
+def test_argv_list_refusal_fires_and_never_executes(tmp_path):
     """A list-form spin loop is refused (scan runs on shlex.join) and the
     command never executes."""
     canary = tmp_path / "executed.canary"
@@ -255,7 +253,7 @@ def test_argv_list_refusal_fires_and_never_executes(tmp_path: Path) -> None:
     assert not canary.exists(), "refused list-form command executed its side effect"
 
 
-def test_string_form_result_now_carries_pgid_too() -> None:
+def test_string_form_result_now_carries_pgid_too():
     """The pre-existing string form gains the same pgid field (no shape break)."""
     out = ch.run_bounded("echo hello", timeout=10)
     assert out["exit_code"] == 0

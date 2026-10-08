@@ -17,10 +17,6 @@ retention (``_run_script_step`` keeps the whole output so
 ``_bound_step_evidence`` can preserve pytest's short test summary).
 """
 
-from __future__ import annotations
-from pathlib import Path
-from typing import Any
-
 import os
 import re
 import shlex
@@ -121,7 +117,7 @@ def _sanitized_env() -> dict:
 
 
 class TestPytestOutcomeClassification:
-    def test_exit_2_with_xdist_maxfail_is_a_real_failure_not_an_interruption(self) -> None:
+    def test_exit_2_with_xdist_maxfail_is_a_real_failure_not_an_interruption(self):
         """INT-FLAKE-2's core defect: exit 2 + maxfail must not read as a flake."""
         outcome = pytest_outcome(2, MAXFAIL_XDIST_OUTPUT)
 
@@ -133,7 +129,7 @@ class TestPytestOutcomeClassification:
         assert "exit 2 here is xdist's Interrupted" in outcome["detail"]
         assert "test_b.py::test_broken" in outcome["detail"]
 
-    def test_exit_2_with_keyboard_interrupt_stays_an_interruption(self) -> None:
+    def test_exit_2_with_keyboard_interrupt_stays_an_interruption(self):
         """The other meaning of 2 survives — classified distinctly, not merged."""
         outcome = pytest_outcome(2, KEYBOARD_INTERRUPT_OUTPUT)
 
@@ -142,7 +138,7 @@ class TestPytestOutcomeClassification:
         assert outcome["first_failing_test"] is None
         assert "KeyboardInterrupt" in outcome["detail"]
 
-    def test_exit_2_without_evidence_is_reported_as_undetermined(self) -> None:
+    def test_exit_2_without_evidence_is_reported_as_undetermined(self):
         """Truncated capture: say so — never invent a cause in either direction."""
         outcome = pytest_outcome(2, TRUNCATED_HEAD_OUTPUT)
 
@@ -150,7 +146,7 @@ class TestPytestOutcomeClassification:
         assert outcome["interrupted"] is True
         assert "neither a FAILED line nor a KeyboardInterrupt" in outcome["detail"]
 
-    def test_exit_1_is_a_plain_failure_with_the_failing_id(self) -> None:
+    def test_exit_1_is_a_plain_failure_with_the_failing_id(self):
         outcome = pytest_outcome(1, PLAIN_FAILURE_OUTPUT)
 
         assert outcome["kind"] == "failed"
@@ -158,14 +154,14 @@ class TestPytestOutcomeClassification:
         assert outcome["first_failing_test"] == "test_b.py::test_broken"
         assert outcome["failures"] == 1
 
-    def test_exit_0_is_passed(self) -> None:
+    def test_exit_0_is_passed(self):
         outcome = pytest_outcome(0, "4 workers [3 items]\n\n=== 3 passed in 0.5s ===")
 
         assert outcome["kind"] == "passed"
         assert outcome["interrupted"] is False
         assert outcome["failures"] == 0
 
-    def test_maxfail_banner_without_xdist_is_not_read_as_an_interruption(self) -> None:
+    def test_maxfail_banner_without_xdist_is_not_read_as_an_interruption(self):
         """`-x` on a serial run exits 1 but prints the same banner."""
         output = (
             "=========================== short test summary info ============================\n"
@@ -178,18 +174,18 @@ class TestPytestOutcomeClassification:
         assert outcome["kind"] == "failed"
         assert outcome["interrupted"] is False
 
-    def test_exit_5_no_tests_collected(self) -> None:
+    def test_exit_5_no_tests_collected(self):
         assert pytest_outcome(5, "no tests ran in 0.01s")["kind"] == "no-tests-collected"
 
-    def test_exit_4_usage_error(self) -> None:
+    def test_exit_4_usage_error(self):
         assert pytest_outcome(4, "ERROR: usage: pytest [options]")["kind"] == "usage-error"
 
-    def test_exit_3_internal_error(self) -> None:
+    def test_exit_3_internal_error(self):
         outcome = pytest_outcome(3, "INTERNALERROR> Traceback (most recent call last):")
 
         assert outcome["kind"] == "internal-error"
 
-    def test_killed_by_signal_is_named(self) -> None:
+    def test_killed_by_signal_is_named(self):
         """A SIGKILLed pytest never writes a summary: name the signal instead."""
         outcome = pytest_outcome(-9, "4 workers [1358 items]\n\n.....")
 
@@ -210,7 +206,7 @@ class TestPytestOutcomeClassification:
             (None, "4 workers"),
         ],
     )
-    def test_every_kind_is_in_the_enumerated_vocabulary(self, code: Any, output: Any) -> None:
+    def test_every_kind_is_in_the_enumerated_vocabulary(self, code, output):
         assert pytest_outcome(code, output)["kind"] in PYTEST_OUTCOME_KINDS
 
 
@@ -218,9 +214,7 @@ class TestPytestOutcomeClassification:
 
 
 class TestLiveMaxfailReproduction:
-    def test_live_xdist_maxfail_run_exits_2_and_is_classified_as_a_failure(
-        self, tmp_path: Path
-    ) -> None:
+    def test_live_xdist_maxfail_run_exits_2_and_is_classified_as_a_failure(self, tmp_path):
         """Pins the mapping against the real pytest-xdist in this environment.
 
         Pre-fix, `exit_code == 2` in a verdict was read as "interrupted". This
@@ -266,12 +260,10 @@ class TestLiveMaxfailReproduction:
 
 
 class TestTier1TestsStepEvidence:
-    def _pipeline(self, workdir: str) -> Pipeline:
+    def _pipeline(self, workdir) -> Pipeline:
         return Pipeline({"pipeline": {"stages": []}}, str(workdir))
 
-    def test_outcome_is_recorded_and_the_summary_tail_survives_serialization(
-        self, tmp_path: Path
-    ) -> None:
+    def test_outcome_is_recorded_and_the_summary_tail_survives_serialization(self, tmp_path):
         """Both halves of the fix, on the step that produces the verdict record.
 
         Fails on the pre-fix code: the head-only `[:2000]` slice kept the filler
@@ -323,7 +315,7 @@ class TestTier1TestsStepEvidence:
         assert "FAILED test_broken.py::test_broken" in retained
         assert "xdist.dsession.Interrupted" in retained
 
-    def test_non_pytest_steps_carry_no_pytest_outcome(self, tmp_path: Path) -> None:
+    def test_non_pytest_steps_carry_no_pytest_outcome(self, tmp_path):
         """Scope guard: the classifier is for pytest invocations, not every step."""
         workdir = tmp_path / "workdir"
         workdir.mkdir()

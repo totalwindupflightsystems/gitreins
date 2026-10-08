@@ -12,10 +12,6 @@ GR-117g. Covers:
       integration
 """
 
-from __future__ import annotations
-from pathlib import Path
-from typing import Any
-
 import argparse
 import json
 import os
@@ -52,7 +48,7 @@ def _stage_file(workdir: str, relpath: str, content: str) -> str:
     return full
 
 
-def _isolated_feed(workdir: str, tmp_path: Path, **kwargs: Any) -> CveFeed:
+def _isolated_feed(workdir: str, tmp_path, **kwargs) -> CveFeed:
     """Build a CveFeed whose cache is under tmp_path, not ~/.cache."""
     cache_dir = os.path.join(str(tmp_path), "cve_cache")
     return CveFeed(workdir, cache_dir=cache_dir, **kwargs)
@@ -69,7 +65,7 @@ HEURISTIC_DISCLOSURE = "heuristic mode (no ML stack installed) — keyword fallb
 class TestAntaresScannerScanFile:
     """Direct unit tests for the keyword-based scaffold scanner."""
 
-    def test_scan_file_finds_known_keyword(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_scan_file_finds_known_keyword(self, tmp_workdir, tmp_path):
         """A line containing 'unsafe' produces a CVE-SIMULATED finding."""
         full = os.path.join(tmp_workdir, "src.py")
         _write_file(full, "# safe comment\nx = 1\nunsafe_thing = True\n")
@@ -82,16 +78,14 @@ class TestAntaresScannerScanFile:
         assert findings[0].confidence == 0.0
         assert "unsafe" in findings[0].description.lower()
 
-    def test_scan_file_clean_returns_empty(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_scan_file_clean_returns_empty(self, tmp_workdir, tmp_path):
         """A file with no heuristic keywords returns no findings."""
         full = os.path.join(tmp_workdir, "clean.py")
         _write_file(full, "def add(a, b):\n    return a + b\n")
         scanner = AntaresScanner(tmp_workdir)
         assert scanner.scan_file(full) == []
 
-    def test_scan_file_multiple_keywords_one_finding_per_line(
-        self, tmp_workdir: str, tmp_path: Path
-    ) -> None:
+    def test_scan_file_multiple_keywords_one_finding_per_line(self, tmp_workdir, tmp_path):
         """Each matching line yields exactly one finding (not one per keyword)."""
         full = os.path.join(tmp_workdir, "many.py")
         _write_file(
@@ -103,9 +97,7 @@ class TestAntaresScannerScanFile:
         assert len(findings) == 2
         assert [f.line for f in findings] == [2, 3]
 
-    def test_scan_file_resolves_relative_path_against_workdir(
-        self, tmp_workdir: str, tmp_path: Path
-    ) -> None:
+    def test_scan_file_resolves_relative_path_against_workdir(self, tmp_workdir, tmp_path):
         """Relative paths are joined to workdir, not the caller cwd."""
         _write_file(os.path.join(tmp_workdir, "rel.py"), "deserialization here\n")
         scanner = AntaresScanner(tmp_workdir)
@@ -113,7 +105,7 @@ class TestAntaresScannerScanFile:
         assert len(findings) == 1
         assert findings[0].file == "rel.py"
 
-    def test_scan_file_missing_file_returns_empty(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_scan_file_missing_file_returns_empty(self, tmp_workdir, tmp_path):
         """Missing files produce no findings and don't raise."""
         scanner = AntaresScanner(tmp_workdir)
         assert scanner.scan_file(os.path.join(tmp_workdir, "nope.py")) == []
@@ -128,9 +120,7 @@ class TestAntaresHeuristicDisclosure:
     explicit mode line.
     """
 
-    def test_used_heuristic_flag_true_on_clean_file_without_ml(
-        self, tmp_workdir: str, tmp_path: Path
-    ) -> None:
+    def test_used_heuristic_flag_true_on_clean_file_without_ml(self, tmp_workdir, tmp_path):
         """A clean scan_file run in keyword mode sets used_heuristic=True."""
         full = os.path.join(tmp_workdir, "clean.py")
         _write_file(full, "def add(a, b):\n    return a + b\n")
@@ -139,9 +129,7 @@ class TestAntaresHeuristicDisclosure:
         assert scanner.scan_file(full) == []
         assert scanner.used_heuristic is True
 
-    def test_used_heuristic_flag_true_when_keyword_findings(
-        self, tmp_workdir: str, tmp_path: Path
-    ) -> None:
+    def test_used_heuristic_flag_true_when_keyword_findings(self, tmp_workdir, tmp_path):
         """Keyword findings also mean the heuristic ran."""
         full = os.path.join(tmp_workdir, "kw.py")
         _write_file(full, "# this comment mentions vulnerability\nx = 1\n")
@@ -152,9 +140,7 @@ class TestAntaresHeuristicDisclosure:
         assert findings[0].confidence == 0.0
         assert scanner.used_heuristic is True
 
-    def test_used_heuristic_stays_false_when_ml_succeeds(
-        self, tmp_workdir: str, tmp_path: Path
-    ) -> None:
+    def test_used_heuristic_stays_false_when_ml_succeeds(self, tmp_workdir, tmp_path):
         """A successful ML scan must NOT raise the heuristic flag."""
         full = os.path.join(tmp_workdir, "ml.py")
         _write_file(full, "def add(a, b):\n    return a + b\n")
@@ -166,7 +152,7 @@ class TestAntaresHeuristicDisclosure:
         assert findings[0].cve_id == "CVE-2024-1234"
         assert scanner.used_heuristic is False
 
-    def test_used_heuristic_true_when_ml_falls_back(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_used_heuristic_true_when_ml_falls_back(self, tmp_workdir, tmp_path):
         """ML requested but inference unavailable → heuristic disclosure."""
         full = os.path.join(tmp_workdir, "fb.py")
         _write_file(full, "def add(a, b):\n    return a + b\n")
@@ -175,18 +161,14 @@ class TestAntaresHeuristicDisclosure:
             assert scanner.scan_file(full) == []
         assert scanner.used_heuristic is True
 
-    def test_scan_staged_files_propagates_heuristic_flag(
-        self, tmp_workdir: str, tmp_path: Path
-    ) -> None:
+    def test_scan_staged_files_propagates_heuristic_flag(self, tmp_workdir, tmp_path):
         """Multi-file scans: the flag must survive scan_staged_files."""
         _stage_file(tmp_workdir, "clean_app.py", "def add(a, b):\n    return a + b\n")
         scanner = AntaresScanner(tmp_workdir)
         assert scanner.scan_staged_files() == []
         assert scanner.used_heuristic is True
 
-    def test_scan_directory_sets_heuristic_flag_on_zero_py_dir(
-        self, tmp_workdir: str, tmp_path: Path
-    ) -> None:
+    def test_scan_directory_sets_heuristic_flag_on_zero_py_dir(self, tmp_workdir, tmp_path):
         """A directory with no .py files still ran the fallback — flag it.
 
         DF-GITREINS-POC-59 gap found by foreman probe: the CLI printed a bare
@@ -201,9 +183,7 @@ class TestAntaresHeuristicDisclosure:
         assert scanner.scan_directory(str(pyless)) == []
         assert scanner.used_heuristic is True
 
-    def test_scan_directory_sets_heuristic_flag_when_findings(
-        self, tmp_workdir: str, tmp_path: Path
-    ) -> None:
+    def test_scan_directory_sets_heuristic_flag_when_findings(self, tmp_workdir, tmp_path):
         """A directory whose .py file carries a keyword: findings + flag."""
         subdir = tmp_path / "pkg"
         subdir.mkdir()
@@ -221,7 +201,7 @@ class TestAntaresHeuristicDisclosure:
 class TestAntaresScannerStagedFiles:
     """scan_staged_files must wrap git diff and only consider .py files."""
 
-    def test_scan_staged_files_runs_git_diff(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_scan_staged_files_runs_git_diff(self, tmp_workdir, tmp_path):
         """A staged .py file with a keyword surfaces in the findings."""
         # tmp_workdir already has a fake .git dir (conftest fixture).
         _stage_file(tmp_workdir, "app.py", "vuln = 'exploit'\n")
@@ -230,7 +210,7 @@ class TestAntaresScannerStagedFiles:
         # At least one finding from app.py
         assert any("exploit" in f.description.lower() for f in findings)
 
-    def test_scan_staged_files_skips_non_python(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_scan_staged_files_skips_non_python(self, tmp_workdir, tmp_path):
         """Non-.py staged files are silently ignored."""
         _stage_file(tmp_workdir, "readme.md", "exploit mentioned here\n")
         scanner = AntaresScanner(tmp_workdir)
@@ -238,7 +218,7 @@ class TestAntaresScannerStagedFiles:
         assert findings == []
 
     @patch("subprocess.run")
-    def test_scan_staged_files_handles_git_failure(self, mock_run: Any, tmp_workdir: str) -> None:
+    def test_scan_staged_files_handles_git_failure(self, mock_run, tmp_workdir):
         """If git is unavailable, scan_staged_files returns [] silently."""
         mock_run.side_effect = FileNotFoundError("git not found")
         scanner = AntaresScanner(tmp_workdir)
@@ -251,7 +231,7 @@ class TestAntaresScannerStagedFiles:
 class TestAntaresScannerDirectory:
     """scan_directory must recurse and skip noise dirs (matches antares.py)."""
 
-    def test_scan_directory_finds_nested_match(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_scan_directory_finds_nested_match(self, tmp_workdir, tmp_path):
         _write_file(
             os.path.join(tmp_workdir, "pkg", "sub", "deep.py"),
             "x = 'injection' flagged\n",
@@ -260,7 +240,7 @@ class TestAntaresScannerDirectory:
         findings = scanner.scan_directory(os.path.join(tmp_workdir, "pkg"))
         assert any(f.file.endswith("deep.py") for f in findings)
 
-    def test_scan_directory_skips_noise_dirs(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_scan_directory_skips_noise_dirs(self, tmp_workdir, tmp_path):
         """Files under .venv/.git/__pycache__ are never scanned."""
         for noise in (".venv", ".git", "__pycache__", "node_modules", "build"):
             _write_file(
@@ -271,16 +251,12 @@ class TestAntaresScannerDirectory:
         findings = scanner.scan_directory(tmp_workdir)
         assert findings == []
 
-    def test_scan_directory_missing_dir_returns_empty(
-        self, tmp_workdir: str, tmp_path: Path
-    ) -> None:
+    def test_scan_directory_missing_dir_returns_empty(self, tmp_workdir, tmp_path):
         """A non-existent directory yields no findings, no exception."""
         scanner = AntaresScanner(tmp_workdir)
         assert scanner.scan_directory(os.path.join(tmp_workdir, "missing")) == []
 
-    def test_scan_directory_relative_path_against_workdir(
-        self, tmp_workdir: str, tmp_path: Path
-    ) -> None:
+    def test_scan_directory_relative_path_against_workdir(self, tmp_workdir, tmp_path):
         _write_file(os.path.join(tmp_workdir, "a.py"), "hardcoded literal\n")
         scanner = AntaresScanner(tmp_workdir)
         findings = scanner.scan_directory(".")
@@ -293,9 +269,7 @@ class TestAntaresScannerDirectory:
 class TestAntaresScannerModel:
     """_ensure_model behaviour — pre-flight for GR-117c ML stack."""
 
-    def test_ensure_model_raises_when_use_ml_and_no_huggingface(
-        self, tmp_workdir: str, tmp_path: Path
-    ) -> None:
+    def test_ensure_model_raises_when_use_ml_and_no_huggingface(self, tmp_workdir, tmp_path):
         """use_ml=True with huggingface_hub missing raises ImportError."""
         scanner = AntaresScanner(tmp_workdir, use_ml=True)
         with patch.dict(sys.modules, {"huggingface_hub": None}):
@@ -304,7 +278,7 @@ class TestAntaresScannerModel:
                 __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
             )
 
-            def fake_import(name: Any, *args: Any, **kwargs: Any) -> Any:
+            def fake_import(name, *args, **kwargs):
                 if name == "huggingface_hub":
                     raise ImportError("simulated missing dep")
                 return real_import(name, *args, **kwargs)
@@ -313,14 +287,12 @@ class TestAntaresScannerModel:
                 with pytest.raises(ImportError):
                     scanner._ensure_model()
 
-    def test_ensure_model_returns_none_when_not_use_ml(
-        self, tmp_workdir: str, tmp_path: Path
-    ) -> None:
+    def test_ensure_model_returns_none_when_not_use_ml(self, tmp_workdir, tmp_path):
         """use_ml=False and no HF → returns None, no exception."""
         scanner = AntaresScanner(tmp_workdir, use_ml=False)
         real_import = __builtins__.__import__ if hasattr(__builtins__, "__import__") else __import__
 
-        def fake_import(name: Any, *args: Any, **kwargs: Any) -> Any:
+        def fake_import(name, *args, **kwargs):
             if name == "huggingface_hub":
                 raise ImportError("simulated missing dep")
             return real_import(name, *args, **kwargs)
@@ -329,7 +301,7 @@ class TestAntaresScannerModel:
             with patch("os.path.isdir", return_value=False):
                 assert scanner._ensure_model() is None
 
-    def test_ensure_model_reuses_cache(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_ensure_model_reuses_cache(self, tmp_workdir, tmp_path):
         """An existing, non-empty model cache dir is reused without network."""
         cache = os.path.join(
             os.environ.get("HOME", os.path.expanduser("~")),
@@ -358,7 +330,7 @@ class TestAntaresScannerModel:
 class TestCveFeedBasic:
     """Direct unit tests for the CveFeed dataclass + factory."""
 
-    def test_cve_entry_round_trip(self) -> None:
+    def test_cve_entry_round_trip(self):
         entry = CveEntry(
             cve_id="CVE-2024-1234",
             description="Demo",
@@ -370,14 +342,14 @@ class TestCveFeedBasic:
         round_tripped = CveEntry.from_dict(entry.to_dict())
         assert round_tripped == entry
 
-    def test_cve_entry_from_dict_defaults(self) -> None:
+    def test_cve_entry_from_dict_defaults(self):
         """Missing keys fall back to safe defaults."""
         entry = CveEntry.from_dict({"cve_id": "CVE-2024-9"})
         assert entry.severity == "NONE"
         assert entry.affected_packages == []
         assert entry.published_date == ""
 
-    def test_init_uses_config_yaml(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_init_uses_config_yaml(self, tmp_workdir, tmp_path):
         """CveFeed.init() pulls cve_source + min_confidence from config."""
         os.makedirs(os.path.join(tmp_workdir, ".gitreins"), exist_ok=True)
         with open(os.path.join(tmp_workdir, ".gitreins", "config.yaml"), "w") as f:
@@ -388,18 +360,18 @@ class TestCveFeedBasic:
         assert feed.source == "github"
         assert feed.min_confidence == 0.4
 
-    def test_init_falls_back_to_constructor_args(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_init_falls_back_to_constructor_args(self, tmp_workdir, tmp_path):
         """No config file → supplied args used unchanged."""
         feed = CveFeed.init(tmp_workdir, source="both", min_confidence=0.9)
         assert feed.source == "both"
         assert feed.min_confidence == 0.9
 
-    def test_init_invalid_source_normalised(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_init_invalid_source_normalised(self, tmp_workdir, tmp_path):
         """Unknown source strings fall back to 'nvd'."""
         feed = CveFeed.init(tmp_workdir, source="bogus", min_confidence=0.7)
         assert feed.source == "nvd"
 
-    def test_severity_score_table(self) -> None:
+    def test_severity_score_table(self):
         assert _severity_to_score("CRITICAL") == 1.0
         assert _severity_to_score("HIGH") == 0.85
         assert _severity_to_score("MEDIUM") == 0.6
@@ -453,7 +425,7 @@ GITHUB_PAYLOAD = [
 class TestCveFeedNetworkAndCache:
     """Network + cache behaviour of CveFeed."""
 
-    def _make_response(self, payload: Any, status: Any = 200) -> Any:
+    def _make_response(self, payload, status=200):
         resp = MagicMock()
         resp.status_code = status
         resp.content = json.dumps(payload).encode()
@@ -461,7 +433,7 @@ class TestCveFeedNetworkAndCache:
         resp.raise_for_status = MagicMock()
         return resp
 
-    def test_get_recent_parses_nvd(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_get_recent_parses_nvd(self, tmp_workdir, tmp_path):
         feed = _isolated_feed(tmp_workdir, tmp_path, source="nvd", min_confidence=0.5)
         # Pre-populate cache so we don't hit the network.
         feed._write_cache(
@@ -484,7 +456,7 @@ class TestCveFeedNetworkAndCache:
         assert recent[0].cve_id == "CVE-2024-0001"
         assert recent[0].severity == "HIGH"
 
-    def test_get_recent_filters_by_min_confidence(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_get_recent_filters_by_min_confidence(self, tmp_workdir, tmp_path):
         feed = _isolated_feed(tmp_workdir, tmp_path, source="nvd", min_confidence=0.9)
         feed._write_cache(
             {
@@ -500,16 +472,14 @@ class TestCveFeedNetworkAndCache:
         assert [e.cve_id for e in recent] == ["CVE-2"]
 
     def test_get_recent_returns_empty_when_nothing_cached_and_no_network(
-        self, tmp_workdir: str, tmp_path: Path
-    ) -> None:
+        self, tmp_workdir, tmp_path
+    ):
         """Without cache or network, never raises — returns []. (GR-117b)"""
         feed = _isolated_feed(tmp_workdir, tmp_path, source="nvd", min_confidence=0.7)
         with patch.object(requests, "get", side_effect=Exception("offline")):
             assert feed.get_recent(limit=10) == []
 
-    def test_get_recent_falls_back_to_stale_cache_when_offline(
-        self, tmp_workdir: str, tmp_path: Path
-    ) -> None:
+    def test_get_recent_falls_back_to_stale_cache_when_offline(self, tmp_workdir, tmp_path):
         """Stale cache is served when the network is unavailable."""
         feed = _isolated_feed(tmp_workdir, tmp_path, source="nvd", min_confidence=0.0)
         feed._write_cache(
@@ -524,7 +494,7 @@ class TestCveFeedNetworkAndCache:
             recent = feed.get_recent(limit=10)
         assert [e.cve_id for e in recent] == ["CVE-stale"]
 
-    def test_search_matches_cve_id(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_search_matches_cve_id(self, tmp_workdir, tmp_path):
         feed = _isolated_feed(tmp_workdir, tmp_path, source="nvd", min_confidence=0.0)
         feed._write_cache(
             {
@@ -536,7 +506,7 @@ class TestCveFeedNetworkAndCache:
         assert len(out) == 1
         assert out[0].cve_id == "CVE-2024-1234"
 
-    def test_search_matches_description(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_search_matches_description(self, tmp_workdir, tmp_path):
         feed = _isolated_feed(tmp_workdir, tmp_path, source="nvd", min_confidence=0.0)
         feed._write_cache(
             {
@@ -547,7 +517,7 @@ class TestCveFeedNetworkAndCache:
         out = feed.search("SQL")
         assert len(out) == 1
 
-    def test_search_matches_package_regex(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_search_matches_package_regex(self, tmp_workdir, tmp_path):
         feed = _isolated_feed(tmp_workdir, tmp_path, source="nvd", min_confidence=0.0)
         feed._write_cache(
             {
@@ -562,7 +532,7 @@ class TestCveFeedNetworkAndCache:
         out = feed.search("requests")
         assert len(out) == 1
 
-    def test_search_empty_query_returns_empty(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_search_empty_query_returns_empty(self, tmp_workdir, tmp_path):
         feed = _isolated_feed(tmp_workdir, tmp_path, source="nvd", min_confidence=0.0)
         feed._write_cache(
             {"entries": [CveEntry("CVE-Z", "anything", "HIGH").to_dict()], "fetched_at": 10**12}
@@ -570,13 +540,13 @@ class TestCveFeedNetworkAndCache:
         assert feed.search("") == []
         assert feed.search("   ") == []
 
-    def test_search_network_failure_returns_empty(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_search_network_failure_returns_empty(self, tmp_workdir, tmp_path):
         """Offline + no cache → search returns [] without raising."""
         feed = _isolated_feed(tmp_workdir, tmp_path, source="nvd", min_confidence=0.7)
         with patch.object(requests, "get", side_effect=Exception("boom")):
             assert feed.search("anything") == []
 
-    def test_get_recent_nvd_parses_payload(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_get_recent_nvd_parses_payload(self, tmp_workdir, tmp_path):
         """NVD response parsing: severity, description, package regex."""
         feed = _isolated_feed(tmp_workdir, tmp_path, source="nvd", min_confidence=0.0)
         with patch.object(requests, "get", return_value=self._make_response(NVD_PAYLOAD)):
@@ -588,7 +558,7 @@ class TestCveFeedNetworkAndCache:
         # CPE is normalised to a re-escaped vendor:product form.
         assert any("requests" in p for p in entries[0].affected_packages)
 
-    def test_get_recent_github_parses_payload(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_get_recent_github_parses_payload(self, tmp_workdir, tmp_path):
         feed = _isolated_feed(tmp_workdir, tmp_path, source="github", min_confidence=0.0)
         with patch.object(requests, "get", return_value=self._make_response(GITHUB_PAYLOAD)):
             entries = feed._fetch_github()
@@ -597,9 +567,7 @@ class TestCveFeedNetworkAndCache:
         assert entries[0].severity == "CRITICAL"
         assert entries[0].affected_packages == ["django"]
 
-    def test_github_unknown_severity_normalised_to_none(
-        self, tmp_workdir: str, tmp_path: Path
-    ) -> None:
+    def test_github_unknown_severity_normalised_to_none(self, tmp_workdir, tmp_path):
         feed = _isolated_feed(tmp_workdir, tmp_path, source="github", min_confidence=0.0)
         payload = [
             {
@@ -613,21 +581,21 @@ class TestCveFeedNetworkAndCache:
             entries = feed._fetch_github()
         assert entries[0].severity == "NONE"
 
-    def test_github_handles_non_list_payload(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_github_handles_non_list_payload(self, tmp_workdir, tmp_path):
         feed = _isolated_feed(tmp_workdir, tmp_path, source="github", min_confidence=0.0)
         with patch.object(
             requests, "get", return_value=self._make_response({"oops": "wrong shape"})
         ):
             assert feed._fetch_github() == []
 
-    def test_both_sources_merge(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_both_sources_merge(self, tmp_workdir, tmp_path):
         feed = _isolated_feed(tmp_workdir, tmp_path, source="both", min_confidence=0.0)
         responses = {
             "nvd.nist": self._make_response(NVD_PAYLOAD),
             "api.github": self._make_response(GITHUB_PAYLOAD),
         }
 
-        def route(url: Any, *args: Any, **kwargs: Any) -> None:
+        def route(url, *args, **kwargs):
             for key, resp in responses.items():
                 if key in url:
                     return resp
@@ -638,7 +606,7 @@ class TestCveFeedNetworkAndCache:
         ids = {e.cve_id for e in entries}
         assert ids == {"CVE-2024-0001", "CVE-2024-0002"}
 
-    def test_never_raises_on_broken_cache_file(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_never_raises_on_broken_cache_file(self, tmp_workdir, tmp_path):
         """A malformed cache file should be treated as 'no cache'."""
         cache = os.path.join(tmp_workdir, ".cache", "gitreins", "cve_feed")
         os.makedirs(cache, exist_ok=True)
@@ -652,7 +620,7 @@ class TestCveFeedNetworkAndCache:
 # ── CLI: cmd_security_scan ──────────────────────────────────────
 
 
-def _make_args(**overrides: Any) -> Any:
+def _make_args(**overrides):
     """Build a minimal argparse.Namespace for cmd_security_scan tests."""
     defaults = {
         "directory": None,
@@ -666,7 +634,7 @@ def _make_args(**overrides: Any) -> Any:
 class TestSecurityScanCLI:
     """Argparse wiring + output behaviour for the security-scan subcommand."""
 
-    def test_help_lists_command(self) -> None:
+    def test_help_lists_command(self):
         """`gitreins security-scan --help` runs without error and shows flags."""
         from gitreins.cli import main as cli_main  # noqa: F401 — ensure importable
 
@@ -676,9 +644,7 @@ class TestSecurityScanCLI:
 
         assert callable(gitreins.cli.cmd_security_scan)
 
-    def test_directory_arg_recurses(
-        self, tmp_workdir: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_directory_arg_recurses(self, tmp_workdir, tmp_path, capsys):
         """--directory triggers scan_directory(), produces a clean report."""
         from gitreins.cli import cmd_security_scan
 
@@ -695,9 +661,7 @@ class TestSecurityScanCLI:
         assert "Antares" in out
         assert "exploit" in out
 
-    def test_text_output_clean_returns_zero(
-        self, tmp_workdir: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_text_output_clean_returns_zero(self, tmp_workdir, tmp_path, capsys):
         from gitreins.cli import cmd_security_scan
 
         # No staged files in tmp_workdir fixture, no directory → clean.
@@ -712,9 +676,7 @@ class TestSecurityScanCLI:
         # must be disclosed explicitly — never a bare "Antares: clean" line.
         assert HEURISTIC_DISCLOSURE in out
 
-    def test_json_output_format(
-        self, tmp_workdir: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_json_output_format(self, tmp_workdir, tmp_path, capsys):
         from gitreins.cli import cmd_security_scan
 
         _write_file(
@@ -732,9 +694,7 @@ class TestSecurityScanCLI:
         assert payload[0]["file"].endswith("vuln.py")
         assert payload[0]["line"] == 1
 
-    def test_clean_heuristic_run_prints_mode_line(
-        self, tmp_workdir: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_clean_heuristic_run_prints_mode_line(self, tmp_workdir, tmp_path, capsys):
         """DF-GITREINS-POC-59: a keyword-mode clean run discloses the mode.
 
         `subprocess.call(input(), shell=True)` contains none of the seven
@@ -757,9 +717,7 @@ class TestSecurityScanCLI:
         assert "clean" in out.lower()
         assert HEURISTIC_DISCLOSURE in out
 
-    def test_keyword_findings_output_names_heuristic_mode(
-        self, tmp_workdir: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_keyword_findings_output_names_heuristic_mode(self, tmp_workdir, tmp_path, capsys):
         """DF-GITREINS-POC-59: summary line for findings names heuristic mode."""
         from gitreins.cli import cmd_security_scan
 
@@ -777,9 +735,7 @@ class TestSecurityScanCLI:
         assert "conf=0.00" in out
         assert HEURISTIC_DISCLOSURE in out
 
-    def test_clean_ml_run_output_unchanged(
-        self, tmp_workdir: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_clean_ml_run_output_unchanged(self, tmp_workdir, tmp_path, capsys):
         """DF-GITREINS-POC-59: ML-mode clean output stays bare (no mode line)."""
         from gitreins.cli import cmd_security_scan
 
@@ -796,15 +752,13 @@ class TestSecurityScanCLI:
         assert "clean" in out.lower()
         assert HEURISTIC_DISCLOSURE not in out
 
-    def test_force_ml_exits_2_when_huggingface_missing(
-        self, tmp_workdir: str, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_force_ml_exits_2_when_huggingface_missing(self, tmp_workdir, tmp_path, capsys):
         """--force-ml + missing huggingface_hub → exit 2, not fallback."""
         import builtins
 
         _orig_import = builtins.__import__
 
-        def _block_hf(name: Any, *args: Any, **kwargs: Any) -> Any:
+        def _block_hf(name, *args, **kwargs):
             if name == "huggingface_hub":
                 raise ImportError("No huggingface_hub (test simulation)")
             return _orig_import(name, *args, **kwargs)
@@ -828,7 +782,7 @@ class TestSecurityScanCLI:
 class TestGuardSecurityScanIntegration:
     """GuardManager must dispatch to _check_security_scan when enabled."""
 
-    def test_security_scan_guard_runs_when_enabled(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_security_scan_guard_runs_when_enabled(self, tmp_workdir, tmp_path):
         from engine.guard_manager import GuardManager, GuardResult
 
         gm = GuardManager(tmp_workdir, {"guards": {"security_scan": {"enabled": True}}})
@@ -843,24 +797,20 @@ class TestGuardSecurityScanIntegration:
         names = [r.name for r in tier1.results]
         assert "security_scan" in names
 
-    def test_security_scan_guard_skipped_when_disabled(
-        self, tmp_workdir: str, tmp_path: Path
-    ) -> None:
+    def test_security_scan_guard_skipped_when_disabled(self, tmp_workdir, tmp_path):
         from engine.guard_manager import GuardManager
 
         gm = GuardManager(tmp_workdir, {"guards": {"security_scan": {"enabled": False}}})
         assert gm._enabled.get("security_scan") is False
 
-    def test_security_scan_guard_skipped_when_config_absent(
-        self, tmp_workdir: str, tmp_path: Path
-    ) -> None:
+    def test_security_scan_guard_skipped_when_config_absent(self, tmp_workdir, tmp_path):
         """No config key at all → guard is off by default (opt-in)."""
         from engine.guard_manager import GuardManager
 
         gm = GuardManager(tmp_workdir, {"guards": {"secrets": True}})
         assert gm._enabled.get("security_scan") is False
 
-    def test_check_security_scan_clean_run(self, tmp_workdir: str, tmp_path: Path) -> None:
+    def test_check_security_scan_clean_run(self, tmp_workdir, tmp_path):
         """Real _check_security_scan against a clean tmp repo → PASS."""
         from engine.guard_manager import GuardManager
 
@@ -880,9 +830,7 @@ class TestSecurityScanModeVisibility:
     unrelated facts — and the exit code is identical either way.
     """
 
-    def test_the_mode_rides_on_the_result_line_itself(
-        self, tmp_workdir: str, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_the_mode_rides_on_the_result_line_itself(self, tmp_workdir, capsys):
         from gitreins.cli import cmd_security_scan
 
         args = _make_args()
@@ -897,9 +845,7 @@ class TestSecurityScanModeVisibility:
         assert "Antares:" in clean_line
         assert HEURISTIC_DISCLOSURE in clean_line, f"mode not on the result line: {clean_line!r}"
 
-    def test_json_stdout_stays_a_bare_list_and_the_mode_goes_to_stderr(
-        self, tmp_workdir: str, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_json_stdout_stays_a_bare_list_and_the_mode_goes_to_stderr(self, tmp_workdir, capsys):
         from gitreins.cli import cmd_security_scan
 
         args = _make_args(output="json")

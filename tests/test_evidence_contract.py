@@ -26,10 +26,6 @@ it persists nothing — is exercised end-to-end against a real repository in
 `tests/test_cli.py::TestJudgeEphemeralCLI`.
 """
 
-from __future__ import annotations
-from pathlib import Path
-from typing import Any
-
 import hashlib
 import json
 import os
@@ -72,7 +68,7 @@ SCHEMA_URL = "https://gitreins.dev/schemas/evidence/v1.json"
 pytestmark = pytest.mark.skipif(not HAS_JSONSCHEMA, reason="jsonschema not installed")
 
 
-def _base_evidence(**overrides: Any) -> Any:
+def _base_evidence(**overrides):
     """A minimal valid v1 evidence document (guard variant), overridable."""
     doc = {
         "$schema": SCHEMA_URL,
@@ -91,10 +87,10 @@ def _base_evidence(**overrides: Any) -> Any:
     return doc
 
 
-def _validator(schema: Any) -> Any:
+def _validator(schema):
     """Compile the schema once and return a validate(document) -> [messages]."""
 
-    def _validate(document: Any) -> Any:
+    def _validate(document):
         found = Draft202012Validator(schema).iter_errors(document)
         return sorted(err.message for err in found)
 
@@ -102,13 +98,13 @@ def _validator(schema: Any) -> Any:
 
 
 @pytest.fixture(scope="module")
-def schema() -> None:
+def schema():
     with open(SCHEMA_PATH, encoding="utf-8") as handle:
         return json.load(handle)
 
 
 @pytest.fixture(scope="module")
-def validate(schema: Any) -> Any:
+def validate(schema):
     Draft202012Validator.check_schema(schema)
     return _validator(schema)
 
@@ -117,7 +113,7 @@ def validate(schema: Any) -> Any:
 # (`--json` invocation replaced by loading the published schema file): the
 # contract is only useful if the published file is a valid draft 2020-12
 # schema and pins the v1 identity.
-def test_schema_file_is_valid_json_schema_draft_2020_12(schema: Any, validate: Any) -> None:
+def test_schema_file_is_valid_json_schema_draft_2020_12(schema, validate):
     assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
     assert schema["$id"] == SCHEMA_URL
     assert schema["type"] == "object"
@@ -127,7 +123,7 @@ def test_schema_file_is_valid_json_schema_draft_2020_12(schema: Any, validate: A
 # Adapted from the PR's _parse_v1 identity assertions: every emitted document
 # must self-identify with the v1 URL, schemaVersion "1.0" and producer
 # "gitreins" — the consts are what make additive-only evolution enforceable.
-def test_schema_pins_the_v1_identity(schema: Any, validate: Any) -> None:
+def test_schema_pins_the_v1_identity(schema, validate):
     assert schema["properties"]["$schema"]["const"] == SCHEMA_URL
     assert schema["properties"]["schemaVersion"]["const"] == "1.0"
     assert schema["properties"]["producer"]["properties"]["name"]["const"] == "gitreins"
@@ -143,7 +139,7 @@ def test_schema_pins_the_v1_identity(schema: Any, validate: Any) -> None:
 # test_guard_json_contract_is_bounded_and_redacted: redaction is ALWAYS on, so
 # the schema must reject a document that claims otherwise and must not accept
 # one that omits the truncation/redaction bookkeeping.
-def test_redaction_and_truncation_metadata_are_mandatory(schema: Any, validate: Any) -> None:
+def test_redaction_and_truncation_metadata_are_mandatory(schema, validate):
     stripped = _base_evidence()
     del stripped["metadata"]
     assert validate(stripped)
@@ -161,7 +157,7 @@ def test_redaction_and_truncation_metadata_are_mandatory(schema: Any, validate: 
 # Adapted from the PR's test_guard_cli_json_is_single_v1_document body
 # (payload["command"] == "guard", payload["scope"] == "working-tree"): the
 # command/scope vocabulary is pinned here until the CLI half exists.
-def test_command_and_scope_vocabularies(schema: Any, validate: Any) -> None:
+def test_command_and_scope_vocabularies(schema, validate):
     assert schema["properties"]["command"]["enum"] == ["guard", "judge", "report"]
     assert schema["properties"]["scope"]["enum"] == ["staged", "working-tree", "history"]
     working_tree = _base_evidence(scope="working-tree")
@@ -174,7 +170,7 @@ def test_command_and_scope_vocabularies(schema: Any, validate: Any) -> None:
 # (32 KiB cap + outcome assertions): byte-budget enforcement lives in the
 # emitter (EVID-002); what the SCHEMA can pin is the outcome vocabulary, the
 # per-check shape and the check-array cap the budget fills.
-def test_checks_array_shape_and_cap(schema: Any, validate: Any) -> None:
+def test_checks_array_shape_and_cap(schema, validate):
     checks = schema["properties"]["checks"]
     assert checks["maxItems"] == 32
     item = checks["items"]
@@ -207,7 +203,7 @@ def test_checks_array_shape_and_cap(schema: Any, validate: Any) -> None:
 # Adapted from the PR's test_report_cli_json_contract_redacts_history
 # (payload["scope"] == "history", payload["command"] == "report"): report is
 # the history-scoped member of the contract.
-def test_report_document_uses_history_scope(schema: Any, validate: Any) -> None:
+def test_report_document_uses_history_scope(schema, validate):
     report = _base_evidence(command="report", scope="history", passed=None)
     assert validate(report) == []
     # outcome "unknown" pairs with passed null — the honest no-data shape.
@@ -222,7 +218,7 @@ def test_report_document_uses_history_scope(schema: Any, validate: Any) -> None:
 # shape is pinned here, and the side-effect-free behaviour it describes is
 # exercised against the real CLI by
 # tests/test_cli.py::TestJudgeEphemeralCLI (EVID-003).
-def test_judge_document_subject_shape(schema: Any, validate: Any) -> None:
+def test_judge_document_subject_shape(schema, validate):
     subject = schema["properties"]["subject"]
     assert subject["additionalProperties"] is False
     assert sorted(subject["required"]) == ["ephemeral", "taskId", "title"]
@@ -240,7 +236,7 @@ def test_judge_document_subject_shape(schema: Any, validate: Any) -> None:
 # capped at the schema level, unknown top-level fields are rejected (so an
 # incompatible shape is impossible without a new schema URL), and types are
 # strict (booleans are not ints, strings are not numbers).
-def test_length_caps_types_and_closed_top_level(schema: Any, validate: Any) -> None:
+def test_length_caps_types_and_closed_top_level(schema, validate):
     props = schema["properties"]
     assert props["summary"]["maxLength"] == 2048
     assert props["producer"]["properties"]["version"]["maxLength"] == 64
@@ -258,7 +254,7 @@ def test_length_caps_types_and_closed_top_level(schema: Any, validate: Any) -> N
 # New in this adaptation (no PR equivalent needed it): the contract document
 # is the normative statement of the automation surface, so each acceptance
 # promise must stay present — this is the doc-drift half of the contract.
-def test_contract_doc_states_the_normative_promises() -> None:
+def test_contract_doc_states_the_normative_promises():
     with open(CONTRACT_DOC_PATH, encoding="utf-8") as handle:
         doc = handle.read()
     for promise in [
@@ -293,7 +289,7 @@ def test_contract_doc_states_the_normative_promises() -> None:
 # git reports about the index and the working tree.
 
 
-def _git(repo: Any, *args: Any, check: Any = True) -> Any:
+def _git(repo, *args, check=True):
     return subprocess.run(
         ["git", *args],
         cwd=repo,
@@ -303,7 +299,7 @@ def _git(repo: Any, *args: Any, check: Any = True) -> Any:
     )
 
 
-def _init_repo(path: Any, name: Any = "scope-repo") -> Any:
+def _init_repo(path, name="scope-repo"):
     """A real repository with one commit, returned as a str path."""
     repo = os.path.join(str(path), name)
     os.makedirs(repo, exist_ok=True)
@@ -317,7 +313,7 @@ def _init_repo(path: Any, name: Any = "scope-repo") -> Any:
     return repo
 
 
-def _index_state(repo: Any) -> Any:
+def _index_state(repo):
     """Everything an index mutation would change: the file, and git's view."""
     index_path = os.path.join(repo, ".git", "index")
     digest = None
@@ -328,7 +324,7 @@ def _index_state(repo: Any) -> Any:
     return digest, cached
 
 
-def _guard_config(repo: Any, **guards: Any) -> None:
+def _guard_config(repo, **guards):
     """Write a minimal .gitreins/config.yaml for the CLI guard path."""
     cfg_dir = os.path.join(repo, ".gitreins")
     os.makedirs(cfg_dir, exist_ok=True)
@@ -339,7 +335,7 @@ def _guard_config(repo: Any, **guards: Any) -> None:
         handle.write("\n".join(lines) + "\n")
 
 
-def _guard_manager(repo: Any, scope: Any = "staged") -> Any:
+def _guard_manager(repo, scope="staged"):
     """A fast guard manager: secrets only, on the given scope."""
     return GuardManager(
         repo,
@@ -350,7 +346,7 @@ def _guard_manager(repo: Any, scope: Any = "staged") -> Any:
 
 # EVID-002 AC1/AC5: the working-tree change set is staged + unstaged +
 # non-ignored untracked, and the ignored file stays out of it.
-def test_working_tree_scope_collects_unstaged_and_untracked_but_not_ignored(tmp_path: Path) -> None:
+def test_working_tree_scope_collects_unstaged_and_untracked_but_not_ignored(tmp_path):
     repo = _init_repo(tmp_path)
     with open(os.path.join(repo, ".gitignore"), "w", encoding="utf-8") as handle:
         handle.write("ignored.py\n")
@@ -383,7 +379,7 @@ def test_working_tree_scope_collects_unstaged_and_untracked_but_not_ignored(tmp_
 # EVID-002 AC1/AC5: a working-tree-scope run mutates NOTHING in the index —
 # not the file, not git's own diff of it — and still finds an unstaged secret
 # the staged scope cannot see (which is the reason the scope exists).
-def test_working_tree_scope_grades_unstaged_content_read_only(tmp_path: Path) -> None:
+def test_working_tree_scope_grades_unstaged_content_read_only(tmp_path):
     repo = _init_repo(tmp_path)
     secret = 'api_key = "sk-abcdefghijklmnop1234XYZ"\n'
     leaky = os.path.join(repo, "leaky_module.py")
@@ -415,7 +411,7 @@ def test_working_tree_scope_grades_unstaged_content_read_only(tmp_path: Path) ->
 
 # EVID-002 AC1: a scope-specific value the GuardManager refuses outright (the
 # CLI turns this into a usage error before the manager is built).
-def test_unknown_scope_is_refused_by_the_manager(tmp_path: Path) -> None:
+def test_unknown_scope_is_refused_by_the_manager(tmp_path):
     repo = _init_repo(tmp_path)
     with pytest.raises(ValueError):
         GuardManager(repo, {"guards": {"secrets": False}}, scope="universe")
@@ -423,7 +419,7 @@ def test_unknown_scope_is_refused_by_the_manager(tmp_path: Path) -> None:
 
 # EVID-002 AC4: the guard document validates, honours the 32 KiB cap, and
 # redacts + reports truncation at both levels.
-def test_guard_evidence_validates_is_bounded_and_redacted(validate: Any) -> None:
+def test_guard_evidence_validates_is_bounded_and_redacted(validate):
     secret = "Bearer abcdefghijklmnopqrstuvwxyz.1234567890"
     result = Tier1Result(
         passed=False,
@@ -453,7 +449,7 @@ def test_guard_evidence_validates_is_bounded_and_redacted(validate: Any) -> None
 
 # EVID-002: a DEGRADED pass is passed=true with the skipped gates reported as
 # the honest no-grade shape — never as a green check.
-def test_guard_evidence_reports_a_degraded_pass_honestly(validate: Any) -> None:
+def test_guard_evidence_reports_a_degraded_pass_honestly(validate):
     result = Tier1Result(
         passed=True,
         results=[
@@ -491,7 +487,7 @@ def test_guard_evidence_reports_a_degraded_pass_honestly(validate: Any) -> None:
 
 # EVID-002: component text is capped BEFORE the document, and both levels
 # report their truncation.
-def test_evidence_caps_component_text_and_the_document(validate: Any) -> None:
+def test_evidence_caps_component_text_and_the_document(validate):
     result = Tier1Result(
         passed=True,
         results=[GuardResult("lint", True, "x" * (MAX_TEXT_CHARS * 3))],
@@ -524,7 +520,7 @@ def test_evidence_caps_component_text_and_the_document(validate: Any) -> None:
 
 # EVID-002: the redaction boundary itself — secret shapes are replaced, the
 # label is kept, and the flags say a replacement happened.
-def test_redaction_replaces_secret_shapes() -> None:
+def test_redaction_replaces_secret_shapes():
     text, redacted, truncated = redact_text(
         "token = sk-abcdefghijklmnopqrstuvwxyz and Bearer abcdefghijklmnop.12345"
     )
@@ -541,7 +537,7 @@ def test_redaction_replaces_secret_shapes() -> None:
 
 
 # EVID-002 AC3/AC4: the CLI emits exactly ONE document, exit 0 on a pass.
-def test_guard_cli_json_is_a_single_valid_document(tmp_path: Path, validate: Any) -> None:
+def test_guard_cli_json_is_a_single_valid_document(tmp_path, validate):
     repo = _init_repo(tmp_path)
     _guard_config(repo)
     before = _index_state(repo)
@@ -565,7 +561,7 @@ def test_guard_cli_json_is_a_single_valid_document(tmp_path: Path, validate: Any
 
 # EVID-002 AC4: a non-passing run exits 1 and reports the failing check, and
 # the exit code is the only signal a script needs.
-def test_guard_cli_json_exits_1_on_a_working_tree_failure(tmp_path: Path, validate: Any) -> None:
+def test_guard_cli_json_exits_1_on_a_working_tree_failure(tmp_path, validate):
     repo = _init_repo(tmp_path)
     _guard_config(repo)
     with open(os.path.join(repo, "leaky_module.py"), "w", encoding="utf-8") as handle:
@@ -590,7 +586,7 @@ def test_guard_cli_json_exits_1_on_a_working_tree_failure(tmp_path: Path, valida
 
 # EVID-002 AC2: with no --scope flag the CLI grades the INDEX, exactly as it
 # always has — the unstaged secret above is invisible to it.
-def test_guard_cli_json_defaults_to_the_staged_scope(tmp_path: Path, validate: Any) -> None:
+def test_guard_cli_json_defaults_to_the_staged_scope(tmp_path, validate):
     repo = _init_repo(tmp_path)
     _guard_config(repo)
     with open(os.path.join(repo, "leaky_module.py"), "w", encoding="utf-8") as handle:
@@ -607,7 +603,7 @@ def test_guard_cli_json_defaults_to_the_staged_scope(tmp_path: Path, validate: A
 
 # EVID-002 AC3: without --json the human output is unchanged, and the scope
 # note appears only for a non-default scope.
-def test_guard_human_output_is_unchanged_without_json(tmp_path: Path) -> None:
+def test_guard_human_output_is_unchanged_without_json(tmp_path):
     repo = _init_repo(tmp_path)
     _guard_config(repo)
 
@@ -622,7 +618,7 @@ def test_guard_human_output_is_unchanged_without_json(tmp_path: Path) -> None:
 
 # EVID-002: an invalid --scope is a CLI usage error (argparse exits 2), which
 # is the contract's third exit code.
-def test_guard_scope_rejects_an_unknown_value_at_the_cli(tmp_path: Path) -> None:
+def test_guard_scope_rejects_an_unknown_value_at_the_cli(tmp_path):
     repo = _init_repo(tmp_path)
     _guard_config(repo)
     result = run_cli("guard", "--scope", "universe", cwd=repo)
@@ -632,7 +628,7 @@ def test_guard_scope_rejects_an_unknown_value_at_the_cli(tmp_path: Path) -> None
 
 # EVID-002 AC5 + the PR's LSP half: an explicit scope is filtered to what the
 # configured server can actually grade.
-def test_select_lsp_files_filters_by_tool_language(tmp_workdir: str) -> None:
+def test_select_lsp_files_filters_by_tool_language(tmp_workdir):
     from engine.lsp import select_lsp_files
 
     module = os.path.join(tmp_workdir, "module.py")
@@ -648,7 +644,7 @@ def test_select_lsp_files_filters_by_tool_language(tmp_workdir: str) -> None:
 
 # EVID-002: the judge document carries the subject, the tier-2 criteria and the
 # tier-1 evidence, and validates.
-def test_judge_evidence_document_shape(validate: Any) -> None:
+def test_judge_evidence_document_shape(validate):
     task = SimpleNamespace(
         id="EVID-002",
         title="Adopt the v1 evidence emitters",
@@ -694,7 +690,7 @@ def test_judge_evidence_document_shape(validate: Any) -> None:
 
 # EVID-002: the pipeline path buries the tier-2 verdict in a stage step; the
 # criteria must still reach the document.
-def test_judge_evidence_reads_criteria_from_the_pipeline_path(validate: Any) -> None:
+def test_judge_evidence_reads_criteria_from_the_pipeline_path(validate):
     task = SimpleNamespace(id="EVID-003", title="Ephemeral judge", criteria=["c"])
     result = SimpleNamespace(
         passed=True,
@@ -734,7 +730,7 @@ def test_judge_evidence_reads_criteria_from_the_pipeline_path(validate: Any) -> 
 
 # EVID-002: `judge --json` emits one document on stdout — the evaluator's and
 # the persister's narration is captured — and the document names the subject.
-def test_judge_cli_json_is_a_single_document(tmp_workdir: str, validate: Any) -> None:
+def test_judge_cli_json_is_a_single_document(tmp_workdir, validate):
     verdict_json = json.dumps(
         {
             "verdict": "COMPLETE",
@@ -766,7 +762,7 @@ def test_judge_cli_json_is_a_single_document(tmp_workdir: str, validate: Any) ->
 
 # EVID-002: on the JSON surface the document channel stays clean even when no
 # document can be produced — the "Task not found" prose goes to stderr.
-def test_judge_cli_json_keeps_stdout_clean_for_an_unknown_task(tmp_workdir: str) -> None:
+def test_judge_cli_json_keeps_stdout_clean_for_an_unknown_task(tmp_workdir):
     result = run_cli("judge", "no-such-task", "--json", cwd=tmp_workdir)
     assert result.returncode == 1
     assert result.stdout.strip() == "", "nothing but a document may reach stdout"
@@ -775,7 +771,7 @@ def test_judge_cli_json_keeps_stdout_clean_for_an_unknown_task(tmp_workdir: str)
 
 # EVID-002: report is the history-scoped member — always exit 0, bounded,
 # redacted, and its storage mode is the persister's.
-def test_report_cli_json_is_a_bounded_history_document(tmp_workdir: str, validate: Any) -> None:
+def test_report_cli_json_is_a_bounded_history_document(tmp_workdir, validate):
     entry_dir = os.path.join(tmp_workdir, ".gitreins", "history", "2026-07-13", "abcdef12")
     os.makedirs(entry_dir, exist_ok=True)
     with open(os.path.join(entry_dir, "verdict.json"), "w", encoding="utf-8") as handle:
@@ -807,7 +803,7 @@ def test_report_cli_json_is_a_bounded_history_document(tmp_workdir: str, validat
 
 # EVID-002: the report document for an EMPTY history is still a valid v1
 # document (nothing to report is not an error).
-def test_report_evidence_without_entries_still_validates(validate: Any) -> None:
+def test_report_evidence_without_entries_still_validates(validate):
     payload = dumps_evidence(report_evidence([], "filesystem"))
     decoded = json.loads(payload)
     assert validate(decoded) == []

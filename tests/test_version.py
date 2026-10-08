@@ -5,8 +5,6 @@ output both match the version declared in pyproject.toml (so the test does not
 rot on the next version bump).
 """
 
-from __future__ import annotations
-
 import os
 import re
 import subprocess
@@ -25,14 +23,14 @@ def _pyproject_version() -> str:
         return tomllib.load(f)["project"]["version"]
 
 
-def test_gitreins_module_reexports_version() -> None:
+def test_gitreins_module_reexports_version():
     """gitreins.__version__ matches the pyproject.toml version."""
     import gitreins
 
     assert gitreins.__version__ == _pyproject_version()
 
 
-def test_cli_version_flag_matches_pyproject() -> None:
+def test_cli_version_flag_matches_pyproject():
     """`gitreins --version` prints the pyproject.toml version."""
     env = os.environ.copy()
     env.setdefault("PYTHONPATH", "")
@@ -51,7 +49,7 @@ def test_cli_version_flag_matches_pyproject() -> None:
     assert result.stdout.strip() == f"gitreins {_pyproject_version()}"
 
 
-def test_mcp_server_identity_matches_package_version(tmp_path: Path) -> None:
+def test_mcp_server_identity_matches_package_version(tmp_path):
     """DF-GITREINS-POC-5 — the MCP handshake reports the installed release.
 
     The three surfaces a user reads used to disagree (CLI 0.12.1 / README
@@ -67,7 +65,7 @@ def test_mcp_server_identity_matches_package_version(tmp_path: Path) -> None:
     assert __version__ == _pyproject_version()
 
 
-def test_docs_do_not_pin_a_frozen_mcp_server_version() -> None:
+def test_docs_do_not_pin_a_frozen_mcp_server_version():
     """docs/mcp-api.md names the live version (or none) — never a stale literal.
 
     A doc that hardcodes `"version": "0.1.0"` is how the surfaces drifted in

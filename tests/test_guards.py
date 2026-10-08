@@ -1,9 +1,5 @@
 """Dedicated tests for Go guard checks."""
 
-from __future__ import annotations
-from pathlib import Path
-from typing import Any
-
 import os
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -20,11 +16,11 @@ from engine.guards import (
 )
 
 
-def completed(stdout: Any = "", stderr: Any = "", returncode: Any = 0) -> Any:
+def completed(stdout="", stderr="", returncode=0):
     return SimpleNamespace(stdout=stdout, stderr=stderr, returncode=returncode)
 
 
-def lane(exit_code: Any = 0, output: Any = "", error: Any = None, timed_out: Any = False) -> Any:
+def lane(exit_code=0, output="", error=None, timed_out=False):
     """A command_hygiene.run_bounded-shaped result (DF-CRIER-258 seam).
 
     The Go guards execute their tools through engine.command_hygiene.run_bounded,
@@ -46,14 +42,14 @@ def lane(exit_code: Any = 0, output: Any = "", error: Any = None, timed_out: Any
     return result
 
 
-def test_go_guard_result_defaults() -> None:
+def test_go_guard_result_defaults():
     result = GoGuardResult(name="go_build", passed=True)
 
     assert result.output == ""
     assert result.error == ""
 
 
-def test_is_go_project_requires_go_mod_file(tmp_path: Path) -> None:
+def test_is_go_project_requires_go_mod_file(tmp_path):
     assert is_go_project(str(tmp_path)) is False
 
     (tmp_path / "go.mod").mkdir()
@@ -72,7 +68,7 @@ def test_is_go_project_requires_go_mod_file(tmp_path: Path) -> None:
         (check_go_build, "go_build"),
     ],
 )
-def test_checkers_skip_when_no_go_files_are_staged(checker: Any, name: Any) -> None:
+def test_checkers_skip_when_no_go_files_are_staged(checker, name):
     """DF-GITREINS-POC-42: a lane that graded no file is a SKIP, not a silent
     pass — the historical wording stays, the skip signal is now recorded."""
     with patch("engine.guards.subprocess.run", return_value=completed("README.md\n")) as run:
@@ -95,7 +91,7 @@ def test_checkers_skip_when_no_go_files_are_staged(checker: Any, name: Any) -> N
     )
 
 
-def test_check_go_lint_uses_golangci_lint_when_it_passes() -> None:
+def test_check_go_lint_uses_golangci_lint_when_it_passes():
     with (
         patch(
             "engine.guards.subprocess.run",
@@ -123,7 +119,7 @@ def test_check_go_lint_uses_golangci_lint_when_it_passes() -> None:
     assert "GIT_INDEX_FILE" not in run.call_args.kwargs["env"]
 
 
-def test_check_go_lint_falls_back_to_go_vet() -> None:
+def test_check_go_lint_falls_back_to_go_vet():
     """DF-GITREINS-POC-43: only a SPAWN failure ({"error": ...}, no exit_code)
     falls through to go vet — a real exit 1 is graded as findings instead.
 
@@ -158,7 +154,7 @@ def test_check_go_lint_falls_back_to_go_vet() -> None:
     assert run.call_args_list[-1].kwargs["timeout"] == 60
 
 
-def test_check_go_lint_refused_busy_wait_gets_no_not_on_path_claim() -> None:
+def test_check_go_lint_refused_busy_wait_gets_no_not_on_path_claim():
     """A busy-wait refusal is a misconfiguration, not a missing binary: the
     fallback still runs go vet but the warning must not say "not on PATH"."""
     refused = "refused: busy-wait loop detected"
@@ -181,7 +177,7 @@ def test_check_go_lint_refused_busy_wait_gets_no_not_on_path_claim() -> None:
     assert result.warning == ""
 
 
-def test_check_go_lint_grades_real_golangci_findings_without_vet_fallback() -> None:
+def test_check_go_lint_grades_real_golangci_findings_without_vet_fallback():
     """DF-GITREINS-POC-43: golangci-lint exit 1 with findings is a real failure.
 
     The old code treated any non-zero exit as "linter unusable" and fell
@@ -211,7 +207,7 @@ def test_check_go_lint_grades_real_golangci_findings_without_vet_fallback() -> N
     git_run.assert_called_once()
 
 
-def test_check_go_lint_returns_truncated_vet_failure() -> None:
+def test_check_go_lint_returns_truncated_vet_failure():
     output = "out" + "e" * 2100
     with (
         patch(
@@ -234,7 +230,7 @@ def test_check_go_lint_returns_truncated_vet_failure() -> None:
     )
 
 
-def test_check_go_lint_reports_vet_spawn_failure_as_error() -> None:
+def test_check_go_lint_reports_vet_spawn_failure_as_error():
     with (
         patch(
             "engine.guards.subprocess.run",
@@ -250,7 +246,7 @@ def test_check_go_lint_reports_vet_spawn_failure_as_error() -> None:
     assert result == GoGuardResult(name="go_lint", passed=False, error="go unavailable")
 
 
-def test_check_go_tests_returns_bounded_success_output() -> None:
+def test_check_go_tests_returns_bounded_success_output():
     output = "a" * 600
     with (
         patch(
@@ -267,7 +263,7 @@ def test_check_go_tests_returns_bounded_success_output() -> None:
     assert result == GoGuardResult(name="go_tests", passed=True, output=output[:500])
 
 
-def test_check_go_tests_keeps_tail_of_failure_output() -> None:
+def test_check_go_tests_keeps_tail_of_failure_output():
     output = "x" * 2100 + "failure"
     with (
         patch(
@@ -284,7 +280,7 @@ def test_check_go_tests_keeps_tail_of_failure_output() -> None:
     assert result == GoGuardResult(name="go_tests", passed=False, output=output[-2000:])
 
 
-def test_check_go_tests_handles_timeout_and_other_exceptions() -> None:
+def test_check_go_tests_handles_timeout_and_other_exceptions():
     with (
         patch(
             "engine.guards.subprocess.run",
@@ -316,7 +312,7 @@ def test_check_go_tests_handles_timeout_and_other_exceptions() -> None:
     assert errored == GoGuardResult(name="go_tests", passed=False, error="go unavailable")
 
 
-def test_check_go_tests_coerces_string_timeout() -> None:
+def test_check_go_tests_coerces_string_timeout():
     """GR-GAP-028: a string timeout ('300s') must be coerced to int before
     subprocess.run — the raw string raises TypeError, not TimeoutExpired
     (Kobayashi-Maru ticks 240-242 crashed fleet-wide on test_timeout: 300s)."""
@@ -337,14 +333,14 @@ def test_check_go_tests_coerces_string_timeout() -> None:
     assert run.call_args.kwargs["timeout"] == 300
 
 
-def test_check_go_tests_rejects_garbage_timeout() -> None:
+def test_check_go_tests_rejects_garbage_timeout():
     """GR-GAP-028: non-numeric timeout values raise a clear ValueError
     naming the config key instead of crashing deep inside subprocess."""
     with pytest.raises(ValueError, match="test_timeout"):
         check_go_tests("/repo", timeout="asap")
 
 
-def test_check_go_build_returns_success_and_expected_command() -> None:
+def test_check_go_build_returns_success_and_expected_command():
     with (
         patch(
             "engine.guards.subprocess.run",
@@ -362,7 +358,7 @@ def test_check_go_build_returns_success_and_expected_command() -> None:
     assert run.call_args.kwargs["timeout"] == 120
 
 
-def test_sanitized_env_strips_all_git_vars() -> None:
+def test_sanitized_env_strips_all_git_vars():
     """GIT_* leaked by the pre-commit hook must not reach go subprocesses."""
     with patch.dict(
         os.environ,
@@ -383,7 +379,7 @@ def test_sanitized_env_strips_all_git_vars() -> None:
     assert env["HOME"] == "/home/test"
 
 
-def test_go_tests_sanitizes_env_even_with_git_index_file_leak() -> None:
+def test_go_tests_sanitizes_env_even_with_git_index_file_leak():
     """DF-008 Go variant: go test subprocess must not inherit GIT_INDEX_FILE
     (breaks worktree tests: 'fatal: .git/index: index file open failed')."""
     with patch("engine.guards.subprocess.run", return_value=completed("main.go\n")) as run:
@@ -393,7 +389,7 @@ def test_go_tests_sanitizes_env_even_with_git_index_file_leak() -> None:
     assert "GIT_DIR" not in kwargs["env"]
 
 
-def test_check_go_build_returns_truncated_failure_or_exception() -> None:
+def test_check_go_build_returns_truncated_failure_or_exception():
     output = "o" * 1000 + "e" * 1100
     with (
         patch(

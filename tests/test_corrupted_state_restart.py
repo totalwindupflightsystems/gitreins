@@ -22,8 +22,6 @@ binary-corrupted config, and the first write after an unreadable tasks.yaml
 replaced it with an empty-but-valid file — the corrupted bytes were gone.
 """
 
-from __future__ import annotations
-
 import json
 import os
 import subprocess
@@ -131,9 +129,7 @@ def _assert_no_traceback(result: subprocess.CompletedProcess) -> None:
 
 
 class TestTaskStateRestart:
-    def test_unreadable_task_state_warns_instead_of_crashing(
-        self, tmp_workdir: str, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_unreadable_task_state_warns_instead_of_crashing(self, tmp_workdir, capsys):
         """The restart after a corrupted task store exits cleanly and says so."""
         path = _corrupt_tasks_yaml(tmp_workdir)
 
@@ -147,9 +143,7 @@ class TestTaskStateRestart:
         assert tm.list_tasks() == []
         assert _read_bytes(path) == GARBAGE, "a read must not mutate the corrupt store"
 
-    def test_unreadable_task_state_is_preserved_with_a_content_addressed_copy(
-        self, tmp_workdir: str
-    ) -> None:
+    def test_unreadable_task_state_is_preserved_with_a_content_addressed_copy(self, tmp_workdir):
         path = _corrupt_tasks_yaml(tmp_workdir)
 
         TaskManager(tmp_workdir)
@@ -158,7 +152,7 @@ class TestTaskStateRestart:
         assert len(sidecars) == 1, sidecars
         assert _read_bytes(sidecars[0]) == GARBAGE, "the preserved copy holds the original bytes"
 
-    def test_repeated_loads_do_not_churn_sidecars(self, tmp_workdir: str) -> None:
+    def test_repeated_loads_do_not_churn_sidecars(self, tmp_workdir):
         path = _corrupt_tasks_yaml(tmp_workdir)
 
         for _ in range(3):
@@ -166,9 +160,7 @@ class TestTaskStateRestart:
 
         assert len(_sidecars(path)) == 1
 
-    def test_next_write_keeps_the_preserved_bytes_and_writes_fresh_state(
-        self, tmp_workdir: str
-    ) -> None:
+    def test_next_write_keeps_the_preserved_bytes_and_writes_fresh_state(self, tmp_workdir):
         path = _corrupt_tasks_yaml(tmp_workdir)
         tm = TaskManager(tmp_workdir)
 
@@ -180,7 +172,7 @@ class TestTaskStateRestart:
         reloaded = TaskManager(tmp_workdir)
         assert [task.id for task in reloaded.list_tasks()] == ["after-corruption"]
 
-    def test_second_distinct_corruption_gets_its_own_copy(self, tmp_workdir: str) -> None:
+    def test_second_distinct_corruption_gets_its_own_copy(self, tmp_workdir):
         path = _corrupt_tasks_yaml(tmp_workdir)
         TaskManager(tmp_workdir).create("first", "first", [])
         second = b"\x00\x01 second corruption \xfe\xff"
@@ -192,9 +184,7 @@ class TestTaskStateRestart:
         assert len(preserved) == 2, preserved
         assert sorted(_read_bytes(p) for p in preserved) == sorted([GARBAGE, second])
 
-    def test_tasks_can_be_recovered_from_a_copy_taken_before_the_corruption(
-        self, tmp_workdir: str
-    ) -> None:
+    def test_tasks_can_be_recovered_from_a_copy_taken_before_the_corruption(self, tmp_workdir):
         """The QA cell's own contract: back up, corrupt, preserve, restore, work again."""
         path = _state_path(tmp_workdir, "tasks.yaml")
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -213,7 +203,7 @@ class TestTaskStateRestart:
         assert [task.id for task in restored.list_tasks()] == ["keep-me"]
 
     @REQUIRES_UNREADABLE_FILE
-    def test_save_refuses_to_overwrite_state_it_could_not_read(self, tmp_workdir: str) -> None:
+    def test_save_refuses_to_overwrite_state_it_could_not_read(self, tmp_workdir):
         path = _corrupt_tasks_yaml(tmp_workdir)
         os.chmod(path, 0o000)
         tm = TaskManager(tmp_workdir)
@@ -226,7 +216,7 @@ class TestTaskStateRestart:
         assert _read_bytes(path) == GARBAGE
         assert _sidecars(path) == [], "nothing could be preserved, so nothing was written"
 
-    def test_cli_restart_after_task_state_corruption_is_clean(self, tmp_workdir: str) -> None:
+    def test_cli_restart_after_task_state_corruption_is_clean(self, tmp_workdir):
         path = _corrupt_tasks_yaml(tmp_workdir)
 
         result = _run_cli(tmp_workdir, "task", "create", "cli-after-corrupt", "t", "c1")
@@ -241,7 +231,7 @@ class TestTaskStateRestart:
         assert [task.id for task in reloaded.list_tasks()] == ["cli-after-corrupt"]
 
     @REQUIRES_UNREADABLE_FILE
-    def test_cli_refuses_unpreservable_state_with_one_clean_line(self, tmp_workdir: str) -> None:
+    def test_cli_refuses_unpreservable_state_with_one_clean_line(self, tmp_workdir):
         path = _corrupt_tasks_yaml(tmp_workdir)
         os.chmod(path, 0o000)
 
@@ -266,7 +256,7 @@ class TestQaLedgerRestart:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         return path
 
-    def test_rows_around_a_garbage_line_survive(self, tmp_workdir: str) -> None:
+    def test_rows_around_a_garbage_line_survive(self, tmp_workdir):
         path = self._ledger(tmp_workdir)
         first = b'{"ts":"2026-09-01T00:00:00Z","project":"p","status":"clean"}\n'
         last = b'{"ts":"2026-09-02T00:00:00Z","project":"p","status":"clean"}\n'
@@ -276,7 +266,7 @@ class TestQaLedgerRestart:
 
         assert [row["ts"] for row in rows] == ["2026-09-01T00:00:00Z", "2026-09-02T00:00:00Z"]
 
-    def test_a_garbage_first_line_keeps_the_rest_of_the_file(self, tmp_workdir: str) -> None:
+    def test_a_garbage_first_line_keeps_the_rest_of_the_file(self, tmp_workdir):
         path = self._ledger(tmp_workdir)
         good = b'{"ts":"2026-09-02T00:00:00Z","project":"p","status":"clean"}\n'
         _write_bytes(path, GARBAGE + b"\n" + good)
@@ -285,7 +275,7 @@ class TestQaLedgerRestart:
 
         assert [row["ts"] for row in rows] == ["2026-09-02T00:00:00Z"]
 
-    def test_a_read_does_not_rewrite_the_ledger(self, tmp_workdir: str) -> None:
+    def test_a_read_does_not_rewrite_the_ledger(self, tmp_workdir):
         path = self._ledger(tmp_workdir)
         payload = GARBAGE + b"\n"
         _write_bytes(path, payload)
@@ -294,7 +284,7 @@ class TestQaLedgerRestart:
 
         assert _read_bytes(path) == payload
 
-    def test_cli_qa_list_survives_a_binary_corrupted_ledger(self, tmp_workdir: str) -> None:
+    def test_cli_qa_list_survives_a_binary_corrupted_ledger(self, tmp_workdir):
         path = self._ledger(tmp_workdir)
         _write_bytes(
             path,
@@ -327,14 +317,14 @@ class TestVerdictHistoryRestart:
         _write_bytes(os.path.join(bad_dir, "verdict.json"), GARBAGE)
         return bad_dir
 
-    def test_an_undecodable_verdict_is_skipped_not_fatal(self, tmp_workdir: str) -> None:
+    def test_an_undecodable_verdict_is_skipped_not_fatal(self, tmp_workdir):
         self._history(tmp_workdir)
 
         entries = VerdictPersister(tmp_workdir).list_verdicts(n=10)
 
         assert [entry["task_id"] for entry in entries] == ["good-task"]
 
-    def test_report_renders_the_readable_verdicts_only(self, tmp_workdir: str) -> None:
+    def test_report_renders_the_readable_verdicts_only(self, tmp_workdir):
         self._history(tmp_workdir)
 
         report = build_report(tmp_workdir, n=10)
@@ -342,7 +332,7 @@ class TestVerdictHistoryRestart:
         assert "good-task" in report
         assert "Traceback" not in report
 
-    def test_cli_report_survives_a_corrupted_verdict_record(self, tmp_workdir: str) -> None:
+    def test_cli_report_survives_a_corrupted_verdict_record(self, tmp_workdir):
         self._history(tmp_workdir)
 
         result = _run_cli(tmp_workdir, "report")
@@ -355,7 +345,7 @@ class TestVerdictHistoryRestart:
 
 
 class TestConfigRestart:
-    def test_unreadable_config_falls_back_to_the_built_in_defaults(self, tmp_workdir: str) -> None:
+    def test_unreadable_config_falls_back_to_the_built_in_defaults(self, tmp_workdir):
         path = _state_path(tmp_workdir, "config.yaml")
         os.makedirs(os.path.dirname(path), exist_ok=True)
         _write_bytes(path, GARBAGE)
@@ -365,7 +355,7 @@ class TestConfigRestart:
         assert defaults.max_concurrent_worktrees > 0
         assert load_raw_config(tmp_workdir) == {}
 
-    def test_config_validation_errors_still_raise(self, tmp_workdir: str) -> None:
+    def test_config_validation_errors_still_raise(self, tmp_workdir):
         """Corruption is tolerated; a wrong VALUE is still the operator's to fix."""
         path = _state_path(tmp_workdir, "config.yaml")
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -380,7 +370,7 @@ class TestConfigRestart:
 
 
 class TestDisposableRegistryRestart:
-    def test_garbage_reads_as_an_empty_registry_and_is_left_alone(self, tmp_workdir: str) -> None:
+    def test_garbage_reads_as_an_empty_registry_and_is_left_alone(self, tmp_workdir):
         path = _state_path(tmp_workdir, "disposable.json")
         os.makedirs(os.path.dirname(path), exist_ok=True)
         _write_bytes(path, GARBAGE)
@@ -393,7 +383,7 @@ class TestDisposableRegistryRestart:
 # ── whole-harness restart ──────────────────────────────────────
 
 
-def test_guard_restarts_with_every_state_file_corrupted(tmp_workdir: str) -> None:
+def test_guard_restarts_with_every_state_file_corrupted(tmp_workdir):
     """A guarded commit still gets a defined exit code, never a traceback."""
     _corrupt_tasks_yaml(tmp_workdir)
     _write_bytes(_state_path(tmp_workdir, "config.yaml"), GARBAGE)

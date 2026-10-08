@@ -11,10 +11,6 @@ multiprocessing (fork start method) is mandatory here: threads share one fd
 table and one flock, so they cannot prove cross-process serialization.
 """
 
-from __future__ import annotations
-from pathlib import Path
-from typing import Any
-
 import os
 
 import multiprocessing
@@ -53,7 +49,7 @@ def _read_store(workdir: str) -> list[dict]:
     return list(data.get("tasks", []))
 
 
-def _complete_worker(workdir: str, task_id: str, ready: Any, go: Any) -> None:
+def _complete_worker(workdir: str, task_id: str, ready, go) -> None:
     """Complete one task in THIS process (a real separate process under fork)."""
     from engine.task_manager import TaskManager as _TM
 
@@ -65,7 +61,7 @@ def _complete_worker(workdir: str, task_id: str, ready: Any, go: Any) -> None:
 class TestConcurrentComplete:
     """Two concurrent processes completing DIFFERENT tasks — both must land."""
 
-    def test_two_processes_complete_different_tasks(self, tmp_path: Path) -> None:
+    def test_two_processes_complete_different_tasks(self, tmp_path):
         workdir = str(tmp_path)
         _write_store(workdir, ["alpha", "beta"])
 
@@ -98,13 +94,13 @@ class TestConcurrentComplete:
         leftovers = [n for n in os.listdir(os.path.join(workdir, ".gitreins")) if ".corrupt-" in n]
         assert leftovers == [], f"corruption sidecars appeared: {leftovers}"
 
-    def test_lock_file_created_next_to_store(self, tmp_path: Path) -> None:
+    def test_lock_file_created_next_to_store(self, tmp_path):
         workdir = str(tmp_path)
         _write_store(workdir, ["solo"])
         TaskManager(workdir).complete("solo")
         assert os.path.exists(os.path.join(workdir, ".gitreins", "tasks.yaml.lock"))
 
-    def test_many_processes_stress(self, tmp_path: Path) -> None:
+    def test_many_processes_stress(self, tmp_path):
         """4 processes x 5 sequential completes each (20 mutations, 4 tasks)."""
         workdir = str(tmp_path)
         ids = ["t1", "t2", "t3", "t4"]
@@ -112,7 +108,7 @@ class TestConcurrentComplete:
 
         ctx = multiprocessing.get_context("fork")
 
-        def repeated_worker(tid: str) -> None:
+        def repeated_worker(tid: str):
             from engine.task_manager import TaskManager as _TM
 
             for _ in range(5):
@@ -134,7 +130,7 @@ class TestConcurrentComplete:
 class TestSerialPathUnchanged:
     """The lock must not change single-process behaviour (suite covers more)."""
 
-    def test_serial_create_start_complete_roundtrip(self, tmp_path: Path) -> None:
+    def test_serial_create_start_complete_roundtrip(self, tmp_path):
         workdir = str(tmp_path)
         tm = TaskManager(workdir)
         tm.create("solo", "Solo Task", ["c1"])
@@ -147,7 +143,7 @@ class TestSerialPathUnchanged:
         task = reloaded.get("solo")
         assert task is not None and task.status == "complete"
 
-    def test_complete_missing_task_still_raises(self, tmp_path: Path) -> None:
+    def test_complete_missing_task_still_raises(self, tmp_path):
         with pytest.raises(KeyError):
             TaskManager(str(tmp_path)).complete("does-not-exist")
 
@@ -170,9 +166,7 @@ class TestReloadGetWindow:
     reference swap publishes the new one.
     """
 
-    def test_get_inside_load_window_never_sees_not_found(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_get_inside_load_window_never_sees_not_found(self, tmp_path, monkeypatch):
         workdir = str(tmp_path)
         _write_store(workdir, ["race-target", "other-task"])
         tm = TaskManager(workdir)
@@ -186,7 +180,7 @@ class TestReloadGetWindow:
         seen: list[object] = [None] * readers
         real_load = TaskManager._load
 
-        def hooked_load(self: Any, into: Any = None) -> Any:
+        def hooked_load(self, into=None):
             # We are now INSIDE reload()'s rebuild. Unfixed code had already
             # cleared the live dict by this point; fixed code still holds the
             # previous complete view (the swap has not happened yet).
@@ -196,7 +190,7 @@ class TestReloadGetWindow:
                 return real_load(self)
             return real_load(self, into)
 
-        def reader(i: Any) -> None:
+        def reader(i):
             assert in_window.wait(timeout=30), "reload never entered the load window"
             seen[i] = tm.get("race-target")
             with counts_lock:
@@ -222,7 +216,7 @@ class TestReloadGetWindow:
         )
         assert all(task.id == "race-target" for task in seen)
 
-    def test_concurrent_create_with_reload_readers(self, tmp_path: Path) -> None:
+    def test_concurrent_create_with_reload_readers(self, tmp_path):
         """Reader threads shaped like the MCP server (reload() then get()) must
         never miss a pre-existing task while another thread creates new ones.
 
@@ -242,7 +236,7 @@ class TestReloadGetWindow:
         misses: list[int] = []
         lock = threading.Lock()
 
-        def reader(i: Any) -> None:
+        def reader(i):
             start.wait()
             for _ in range(reader_iters):
                 tm.reload()
@@ -250,7 +244,7 @@ class TestReloadGetWindow:
                     with lock:
                         misses.append(i)
 
-        def creator() -> None:
+        def creator():
             start.wait()
             for n in range(creates):
                 tm.create(f"new-{n}", "t", ["c"])

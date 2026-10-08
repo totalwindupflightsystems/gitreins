@@ -1,14 +1,12 @@
 """GAP-074 regression tests: LLMResponseError on no-choices provider bodies."""
 
-from __future__ import annotations
-
 import pytest
 
 from engine.llm import LLMClient, LLMResponseError
 from unittest.mock import patch
 
 
-def test_gap074_missing_choices_raises_llm_response_error() -> None:
+def test_gap074_missing_choices_raises_llm_response_error():
     """GAP-074: 200 without choices -> LLMResponseError carrying provider payload."""
     client = LLMClient(base_url="http://mock", api_key="k", model="m")
     with patch.object(client, "_chat_attempt") as attempt:
@@ -28,7 +26,7 @@ def test_gap074_missing_choices_raises_llm_response_error() -> None:
         assert "Insufficient Balance" in str(ei.value)
 
 
-def test_gap074_reasoning_starved_empty_choices_message() -> None:
+def test_gap074_reasoning_starved_empty_choices_message():
     """GAP-074: empty choices + usage -> error mentions usage (reasoning starvation)."""
     data = {"choices": [], "usage": {"completion_tokens": 8, "total_tokens": 108}}
     choices = data.get("choices")

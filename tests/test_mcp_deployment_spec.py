@@ -16,8 +16,6 @@ phrases: that ``GITREINS_WORKDIR`` is documented as wrapper-local and that the
 "every tool accepts workdir" over-claim is not present.
 """
 
-from __future__ import annotations
-
 import re
 import sys
 from pathlib import Path
@@ -75,7 +73,7 @@ def _parse_contract() -> dict[str, object]:
     return {k.strip(): v.strip() for k, v in pairs.items()}
 
 
-def test_contract_block_matches_live_surface() -> None:
+def test_contract_block_matches_live_surface():
     contract = _parse_contract()
     live = _live_names()
     wd = _live_workdir_names()
@@ -90,7 +88,7 @@ def test_contract_block_matches_live_surface() -> None:
     )
 
 
-def test_deployment_tool_list_names_every_live_tool() -> None:
+def test_deployment_tool_list_names_every_live_tool():
     """Every live tool name must appear in the deployment section's tool list."""
     section = _deployment_section()
     for name in _live_names():
@@ -100,7 +98,7 @@ def test_deployment_tool_list_names_every_live_tool() -> None:
         )
 
 
-def test_deployment_tool_list_names_match_mcp_api_doc() -> None:
+def test_deployment_tool_list_names_match_mcp_api_doc():
     """Every name the deployment list shares the canonical tool catalog's names."""
     api_text = API_DOC_PATH.read_text(encoding="utf-8")
     api_names = set(re.findall(r"^### \d+\. `([a-z.]+)`", api_text, re.M))
@@ -111,7 +109,7 @@ def test_deployment_tool_list_names_match_mcp_api_doc() -> None:
         assert f"`{name}`" in _deployment_section(), f"`{name}` missing from deployment tool list"
 
 
-def test_workdir_claim_is_exact_not_every_tool() -> None:
+def test_workdir_claim_is_exact_not_every_tool():
     section = _deployment_section()
     assert "Every MCP tool accepts an optional `workdir` parameter" not in section, (
         "the 'every MCP tool accepts workdir' over-claim is back in §4.4 — "
@@ -122,7 +120,7 @@ def test_workdir_claim_is_exact_not_every_tool() -> None:
         assert name in section, f"§4.4 must explain why `{name}` has no workdir property"
 
 
-def test_gitreins_workdir_documented_as_wrapper_local() -> None:
+def test_gitreins_workdir_documented_as_wrapper_local():
     text = _doc_text()
     assert "wrapper-local" in text, (
         "specs/10-Deployment.md must state explicitly that GITREINS_WORKDIR is "

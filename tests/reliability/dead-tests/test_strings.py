@@ -31,7 +31,7 @@ def is_palindrome(s: str) -> bool:
 # ── Flaw 1: `pass`-only body — no assertion, no test ─────────────────────────
 
 
-def test_reverse_string_empty_body() -> None:
+def test_reverse_string_empty_body():
     """Verify reverse_string('hello') == 'olleh'."""
     reverse_string("hello")  # result discarded
     pass  # ← no assertion; pytest sees an
@@ -41,7 +41,7 @@ def test_reverse_string_empty_body() -> None:
 # ── Flaw 2: assertion is `assert True, "always passes"` ──────────────────────
 
 
-def test_is_palindrome_with_message() -> None:
+def test_is_palindrome_with_message():
     """Verify is_palindrome('racecar') is True."""
     is_palindrome("racecar")  # result discarded
     assert True, "this should never fail"  # ← tautology with a message
@@ -50,7 +50,7 @@ def test_is_palindrome_with_message() -> None:
 # ── Flaw 3: `assert` on a literal that does not exercise the SUT ─────────────
 
 
-def test_concat_uses_literal() -> None:
+def test_concat_uses_literal():
     """Verify 'a' + 'b' == 'ab'."""
     assert "a" + "b" == "ab"  # ← never calls any SUT function
     # The real test would have been:
@@ -79,7 +79,7 @@ def test_reverse_against_wrong_value():
 # ── Flaw 5: `assert` is wrapped in a decorator that suppresses failures ─────
 
 
-def test_decorator_swallows_assert() -> None:
+def test_decorator_swallows_assert():
     """Verify divide-precise(10, 3) ≈ 3.333."""
 
     def ignore_failures(fn: Callable) -> Callable:
@@ -92,7 +92,7 @@ def test_decorator_swallows_assert() -> None:
         return wrapper
 
     @ignore_failures
-    def real_test() -> None:
+    def real_test():
         assert 1 / 3 == 0.5  # ← this is FALSE but the
         #   decorator catches it
 

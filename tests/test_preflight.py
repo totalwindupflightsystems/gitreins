@@ -12,7 +12,6 @@ decision (including the fail-open ABSTAIN), never for ``skip-dispatch``.
 """
 
 from __future__ import annotations
-from typing import Any
 
 from pathlib import Path
 
@@ -70,16 +69,16 @@ def _jev_payload(noul: float, choice: str = "none") -> dict:
 class _StubResponse:
     status_code = 200
 
-    def __init__(self, noul: float, choice: str = "none") -> None:
+    def __init__(self, noul: float, choice: str = "none"):
         self._noul = noul
         self._choice = choice
 
-    def json(self) -> Any:
+    def json(self):
         return _jev_payload(self._noul, self._choice)
 
 
 @pytest.fixture(autouse=True)
-def _hermetic_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def _hermetic_credentials(monkeypatch, tmp_path):
     """No ambient credentials, no reachable .env, no real egress."""
     for var in resolution.CREDENTIAL_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
@@ -95,13 +94,13 @@ def _hermetic_credentials(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> No
 
 
 @pytest.fixture
-def script_assembler(monkeypatch: pytest.MonkeyPatch) -> Any:
+def script_assembler(monkeypatch):
     """Replace hilo with a fixed bundle so the gate reaches the Jev call."""
 
     def _install() -> None:
         from engine.resolution import ManifestEntry, TraceSeed
 
-        def fake_assemble_bundle(question: Any, **kwargs: Any) -> Any:
+        def fake_assemble_bundle(question, **kwargs):
             return resolution.AssembledBundle(
                 text="## MAP\nengine/evidence_bounds.py →\n  - bound_evidence\n",
                 manifest=[
@@ -127,7 +126,7 @@ def script_assembler(monkeypatch: pytest.MonkeyPatch) -> Any:
 class _RecordingDispatch:
     """The caller's dispatch step, remembering how often it ran."""
 
-    def __init__(self) -> None:
+    def __init__(self):
         self.calls = 0
 
     def __call__(self) -> None:
@@ -137,9 +136,7 @@ class _RecordingDispatch:
 class TestDecide:
     """``decide`` — pure policy over a verdict."""
 
-    def test_resolved_maps_to_skip_dispatch(
-        self, script_assembler: Any, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_resolved_maps_to_skip_dispatch(self, script_assembler, monkeypatch):
         script_assembler()
         monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("dec"))
         verdict = resolution.resolve("q?", poster=lambda *a, **k: _StubResponse(0.87))
@@ -148,9 +145,7 @@ class TestDecide:
         assert record["band"] == "RESOLVED"
         assert record["probability"] == pytest.approx(0.87)
 
-    def test_review_maps_to_dispatch_with_note(
-        self, script_assembler: Any, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_review_maps_to_dispatch_with_note(self, script_assembler, monkeypatch):
         script_assembler()
         monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("dec"))
         verdict = resolution.resolve("q?", poster=lambda *a, **k: _StubResponse(0.50))
@@ -158,9 +153,7 @@ class TestDecide:
         assert record["decision"] == DECISION_NOTE
         assert record["band"] == "REVIEW"
 
-    def test_unresolved_maps_to_dispatch(
-        self, script_assembler: Any, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_unresolved_maps_to_dispatch(self, script_assembler, monkeypatch):
         script_assembler()
         monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("dec"))
         verdict = resolution.resolve("q?", poster=lambda *a, **k: _StubResponse(0.49))
@@ -168,7 +161,7 @@ class TestDecide:
         assert record["decision"] == DECISION_DISPATCH
         assert record["band"] == "UNRESOLVED"
 
-    def test_abstain_maps_to_dispatch_fail_open(self, script_assembler: Any) -> None:
+    def test_abstain_maps_to_dispatch_fail_open(self, script_assembler):
         script_assembler()
         # No key at all: the gate abstains (no-credentials); the policy must
         # still dispatch — this signal may skip work, never stop it.
@@ -179,8 +172,8 @@ class TestDecide:
         assert record["abstain_reason"] == "no-credentials"
 
     def test_every_record_carries_probability_and_the_verdict_object(
-        self, script_assembler: Any, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+        self, script_assembler, monkeypatch
+    ):
         """No blind skip: even the skip record carries the probability + verdict."""
         script_assembler()
         monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("dec"))
@@ -201,9 +194,7 @@ class TestDecide:
 class TestPreflightDispatchHook:
     """``preflight`` — the dispatch hook fires exactly for dispatch decisions."""
 
-    def test_skip_dispatch_never_invokes_the_hook(
-        self, script_assembler: Any, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_skip_dispatch_never_invokes_the_hook(self, script_assembler, monkeypatch):
         script_assembler()
         monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("pf"))
         dispatch = _RecordingDispatch()
@@ -213,11 +204,11 @@ class TestPreflightDispatchHook:
         assert record["decision"] == DECISION_SKIP
         assert dispatch.calls == 0, "a RESOLVED premise must not spawn a worker"
 
-    def test_abstain_invokes_the_hook_and_records_the_reason(self, script_assembler: Any) -> None:
+    def test_abstain_invokes_the_hook_and_records_the_reason(self, script_assembler):
         """All keys invalid / poster failure -> work still proceeds, fail open."""
         script_assembler()
 
-        def dead_poster(*_a: Any, **_k: Any) -> Any:
+        def dead_poster(*_a, **_k):
             response = _StubResponse(0.99)
             response.status_code = 401
             return response
@@ -235,8 +226,8 @@ class TestPreflightDispatchHook:
         assert dispatch.calls == 1, "an ABSTAIN must never be the reason work stops"
 
     def test_review_invokes_the_hook_and_carries_the_note_fields(
-        self, script_assembler: Any, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+        self, script_assembler, monkeypatch
+    ):
         script_assembler()
         monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("pf"))
         dispatch = _RecordingDispatch()
@@ -251,9 +242,7 @@ class TestPreflightDispatchHook:
         assert record["missing_kind"] == "test"
         assert record["probability"] == pytest.approx(0.60)
 
-    def test_unresolved_invokes_the_hook(
-        self, script_assembler: Any, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_unresolved_invokes_the_hook(self, script_assembler, monkeypatch):
         script_assembler()
         monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("pf"))
         dispatch = _RecordingDispatch()
@@ -267,15 +256,13 @@ class TestPreflightDispatchHook:
         assert dispatch.calls == 1
         assert record["missing_kind"] == "implementation"
 
-    def test_resolve_kwargs_are_forwarded(
-        self, script_assembler: Any, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_resolve_kwargs_are_forwarded(self, script_assembler, monkeypatch):
         """Seams flow through preflight untouched (contract the CLI relies on)."""
         script_assembler()
         monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("pf"))
         seen: dict = {}
 
-        def poster(endpoint: Any, key: Any, body: Any, timeout: Any) -> Any:
+        def poster(endpoint, key, body, timeout):
             seen["endpoint"] = endpoint
             return _StubResponse(0.87)
 
@@ -283,7 +270,7 @@ class TestPreflightDispatchHook:
         assert record["decision"] == DECISION_SKIP
         assert seen["endpoint"] == resolution.JEV_ENDPOINT
 
-    def test_module_exports_the_policy_api(self) -> None:
+    def test_module_exports_the_policy_api(self):
         """The names a foreman-side caller imports exist (smoke, keeps drift loud)."""
         for name in ("preflight", "decide", "DECISION_SKIP", "DECISION_NOTE", "DECISION_DISPATCH"):
             assert hasattr(preflight_module, name)

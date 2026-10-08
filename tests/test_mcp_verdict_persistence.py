@@ -14,8 +14,6 @@ points at a dead loopback port (``http://127.0.0.1:9/v1``), so a test that
 somehow reached a real provider would fail fast instead of billing.
 """
 
-from __future__ import annotations
-
 import json
 import logging
 import os
@@ -30,7 +28,6 @@ import engine.persist
 from engine.job_store import load_job
 from engine.judge import Judge
 from gitreins_mcp.server import GitReinsMCPServer
-from typing import Any, NoReturn
 
 # Every env var engine.llm.LLMClient will accept as a credential.
 _CREDENTIAL_ENV_VARS = (
@@ -55,7 +52,7 @@ _FAKE_KEY = "placeholder-not-a-credential"
 
 
 @pytest.fixture(autouse=True)
-def hermetic_llm_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def hermetic_llm_env(monkeypatch):
     """No ambient credential; base URL pinned at a dead loopback port."""
     for var in _CREDENTIAL_ENV_VARS:
         monkeypatch.delenv(var, raising=False)
@@ -71,14 +68,14 @@ class _FakeTier1:
 
 
 class _FakeItem:
-    def __init__(self, criterion: Any, status: Any, detail: Any) -> None:
+    def __init__(self, criterion, status, detail):
         self.criterion = criterion
         self.status = status
         self.detail = detail
 
 
 class _FakeTier2:
-    def __init__(self) -> None:
+    def __init__(self):
         self.verdict = "COMPLETE"
         self.items = [_FakeItem("c1", "PASS", "ok")]
         self.summary = "all criteria met"
@@ -93,7 +90,7 @@ class _FakeJudgeResult:
     make the items assertion vacuous.
     """
 
-    def __init__(self, passed: Any = True) -> None:
+    def __init__(self, passed=True):
         self.passed = passed
         self.tier1 = _FakeTier1()
         self.tier2 = _FakeTier2()
@@ -101,12 +98,12 @@ class _FakeJudgeResult:
         self.pipeline_result = {}
 
     @property
-    def summary(self) -> str:
+    def summary(self):
         return "Judge Result: stub\n\nTier 2 (Agentic Evaluator): COMPLETE\nOverall: PASS ✓"
 
 
-def _stub_judge_evaluate(monkeypatch: pytest.MonkeyPatch, passed: Any = True) -> None:
-    def _fake(self: Any, task: Any, **kwargs: Any) -> Any:
+def _stub_judge_evaluate(monkeypatch, passed=True):
+    def _fake(self, task, **kwargs):
         return _FakeJudgeResult(passed=passed)
 
     monkeypatch.setattr(Judge, "evaluate_task", _fake)
@@ -115,7 +112,7 @@ def _stub_judge_evaluate(monkeypatch: pytest.MonkeyPatch, passed: Any = True) ->
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
 
-def _init_real_git_repo(tmp_path: Path) -> Any:
+def _init_real_git_repo(tmp_path):
     """Init a real repo with one commit (the `storage: git` path needs it)."""
     repo = tmp_path / "real-repo"
     repo.mkdir()
@@ -131,28 +128,28 @@ def _init_real_git_repo(tmp_path: Path) -> Any:
     return str(repo)
 
 
-def _write_history_config(workdir: str, body: Any) -> None:
+def _write_history_config(workdir, body):
     cfg_dir = os.path.join(workdir, ".gitreins")
     os.makedirs(cfg_dir, exist_ok=True)
     with open(os.path.join(cfg_dir, "config.yaml"), "w") as f:
         f.write(body)
 
 
-def _verdict_files(workdir: str) -> Any:
+def _verdict_files(workdir):
     """Every verdict.json under <workdir>/.gitreins/history."""
     return sorted(_history_root(workdir).glob("*/*/verdict.json"), key=str)
 
 
-def _history_root(workdir: str) -> Any:
+def _history_root(workdir):
     return Path(workdir, ".gitreins", "history")
 
 
-def _verdict_records(workdir: str) -> Any:
+def _verdict_records(workdir):
     """Every verdict entry as ``(path, parsed verdict.json)``."""
     return [(p, json.loads(p.read_text())) for p in _verdict_files(workdir)]
 
 
-def _record_path(workdir: str, entry_path: Any) -> Any:
+def _record_path(workdir, entry_path):
     """The workdir-relative, "/"-joined path a verdict record points at.
 
     ``supersedes``/``superseded_by`` name the sibling record's ENTRY DIRECTORY
@@ -162,7 +159,7 @@ def _record_path(workdir: str, entry_path: Any) -> Any:
     return Path(entry_path).parent.relative_to(workdir).as_posix()
 
 
-def _live_records(workdir: str, job_id: Any) -> Any:
+def _live_records(workdir, job_id):
     """Records for *job_id* that no later attempt has superseded."""
     return [
         (p, d)
@@ -171,7 +168,7 @@ def _live_records(workdir: str, job_id: Any) -> Any:
     ]
 
 
-def _mcp_call(server: Any, name: Any, arguments: Any) -> Any:
+def _mcp_call(server, name, arguments):
     response = server.handle_request(
         {
             "jsonrpc": "2.0",
@@ -184,11 +181,11 @@ def _mcp_call(server: Any, name: Any, arguments: Any) -> Any:
     return json.loads(response["result"]["content"][0]["text"])
 
 
-def _create_task(server: Any, task_id: Any) -> None:
+def _create_task(server, task_id):
     _mcp_call(server, "task.create", {"id": task_id, "title": task_id, "criteria": ["c1"]})
 
 
-def _poll_status(server: Any, job_id: Any, deadline: Any = 5.0) -> None:
+def _poll_status(server, job_id, deadline=5.0):
     end = time.monotonic() + deadline
     last = None
     while time.monotonic() < end:
@@ -200,7 +197,7 @@ def _poll_status(server: Any, job_id: Any, deadline: Any = 5.0) -> None:
 
 
 @pytest.fixture
-def mcp_server(tmp_workdir: str, monkeypatch: pytest.MonkeyPatch) -> Any:
+def mcp_server(tmp_workdir, monkeypatch):
     server = GitReinsMCPServer(tmp_workdir)
     monkeypatch.setattr(server.llm, "api_key", _FAKE_KEY)
     return server
@@ -212,9 +209,7 @@ def mcp_server(tmp_workdir: str, monkeypatch: pytest.MonkeyPatch) -> Any:
 class TestMcpAsyncVerdictPersistence:
     """`task.complete` / `judge.evaluate wait=false` land a browsable verdict."""
 
-    def test_task_complete_writes_verdict_json_with_job_id(
-        self, mcp_server: Any, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_task_complete_writes_verdict_json_with_job_id(self, mcp_server, monkeypatch):
         _stub_judge_evaluate(monkeypatch)
         _create_task(mcp_server, "mcp-async-persist")
 
@@ -244,9 +239,7 @@ class TestMcpAsyncVerdictPersistence:
         assert verdict["job_id"] == job_id
         assert verdict["source"] == "mcp"
 
-    def test_verdict_lands_before_the_job_reads_complete(
-        self, mcp_server: Any, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_verdict_lands_before_the_job_reads_complete(self, mcp_server, monkeypatch):
         """Invariant: a job that reads terminal `complete` has its verdict on disk.
 
         The spy samples the job store at the exact moment persistence runs, so
@@ -258,7 +251,7 @@ class TestMcpAsyncVerdictPersistence:
         real_persist = engine.persist.persist_evaluation
         observed = {}
 
-        def _spy(workdir: str, task: Any, result: Any, **kwargs: Any) -> Any:
+        def _spy(workdir, task, result, **kwargs):
             observed["job_status_at_persist"] = load_job(job_id)["status"]
             observed["verdict_files_at_persist"] = len(_verdict_files(workdir))
             return real_persist(workdir, task, result, **kwargs)
@@ -272,9 +265,7 @@ class TestMcpAsyncVerdictPersistence:
         assert observed["verdict_files_at_persist"] == 0
         assert len(_verdict_files(mcp_server.workdir)) == 1
 
-    def test_async_persist_writes_nothing_to_stdout(
-        self, mcp_server: Any, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_async_persist_writes_nothing_to_stdout(self, mcp_server, monkeypatch, capsys):
         """The MCP stdout is the JSON-RPC channel — persistence must stay silent."""
         _stub_judge_evaluate(monkeypatch)
         _create_task(mcp_server, "mcp-quiet")
@@ -286,9 +277,7 @@ class TestMcpAsyncVerdictPersistence:
         assert captured.out == ""
         assert len(_verdict_files(mcp_server.workdir)) == 1
 
-    def test_async_persist_commits_verdict_to_the_history_ref(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_async_persist_commits_verdict_to_the_history_ref(self, tmp_path, monkeypatch):
         """`storage: git` (the shipped default) commits the verdict, MCP side.
 
         The committed path is read from the real tree (the first verdict's root
@@ -340,9 +329,7 @@ class TestMcpAsyncVerdictPersistence:
 
 
 class TestMcpSyncVerdictPersistence:
-    def test_wait_true_persists_with_sync_marker(
-        self, mcp_server: Any, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_wait_true_persists_with_sync_marker(self, mcp_server, monkeypatch):
         _stub_judge_evaluate(monkeypatch)
         _create_task(mcp_server, "mcp-sync-persist")
 
@@ -358,9 +345,7 @@ class TestMcpSyncVerdictPersistence:
         assert verdict["source"] == "mcp-sync"
         assert verdict["items"] == [{"criterion": "c1", "status": "PASS", "detail": "ok"}]
 
-    def test_response_shape_unchanged_by_persistence(
-        self, mcp_server: Any, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_response_shape_unchanged_by_persistence(self, mcp_server, monkeypatch):
         """Additive change: the sync result dict keeps its documented keys."""
         _stub_judge_evaluate(monkeypatch)
         _create_task(mcp_server, "mcp-shape")
@@ -383,15 +368,11 @@ class TestMcpSyncVerdictPersistence:
 
 
 class TestPersistenceFailureIsNonFatal:
-    def test_async_job_still_completes_when_persist_raises(
-        self, mcp_server: Any, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_async_job_still_completes_when_persist_raises(self, mcp_server, monkeypatch, caplog):
         _stub_judge_evaluate(monkeypatch)
         _create_task(mcp_server, "mcp-boom")
 
-        def _boom(
-            self: Any, task_id: Any, verdict_data: Any, collect_evidence: Any = None
-        ) -> NoReturn:
+        def _boom(self, task_id, verdict_data, collect_evidence=None):
             raise RuntimeError("disk on fire")
 
         monkeypatch.setattr(engine.persist.VerdictPersister, "persist", _boom)
@@ -408,15 +389,11 @@ class TestPersistenceFailureIsNonFatal:
             "mcp-boom" in r.getMessage() or "non-fatal" in r.getMessage() for r in caplog.records
         ), [r.getMessage() for r in caplog.records]
 
-    def test_sync_call_returns_result_when_persist_raises(
-        self, mcp_server: Any, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_sync_call_returns_result_when_persist_raises(self, mcp_server, monkeypatch, caplog):
         _stub_judge_evaluate(monkeypatch)
         _create_task(mcp_server, "mcp-boom-sync")
 
-        def _boom(
-            self: Any, task_id: Any, verdict_data: Any, collect_evidence: Any = None
-        ) -> NoReturn:
+        def _boom(self, task_id, verdict_data, collect_evidence=None):
             raise RuntimeError("disk on fire")
 
         monkeypatch.setattr(engine.persist.VerdictPersister, "persist", _boom)
@@ -430,9 +407,7 @@ class TestPersistenceFailureIsNonFatal:
 
 
 class TestHistoryDisabled:
-    def test_disabled_history_writes_no_history_dir_but_completes(
-        self, mcp_server: Any, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_disabled_history_writes_no_history_dir_but_completes(self, mcp_server, monkeypatch):
         """Both arms in one test: the MCP path DOES persist, and honours the opt-out.
 
         Order matters — the enabled arm runs first, so the absence of a verdict
@@ -466,9 +441,7 @@ class TestHistoryDisabled:
 
 
 class TestCliUsesSharedHelper:
-    def test_cli_persist_result_delegates_to_shared_helper(
-        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_cli_persist_result_delegates_to_shared_helper(self, tmp_workdir, monkeypatch, capsys):
         """The CLI persists through the SAME helper — the surfaces cannot drift."""
         from gitreins.cli import _persist_result
 
@@ -478,7 +451,7 @@ class TestCliUsesSharedHelper:
             "R", (), {"passed": True, "verdict": None, "pipeline_result": {}, "summary": "s"}
         )()
 
-        def _spy(workdir: str, seen_task: Any, seen_result: Any, **kwargs: Any) -> str:
+        def _spy(workdir, seen_task, seen_result, **kwargs):
             calls.append((os.path.abspath(workdir), seen_task, seen_result, kwargs))
             return "deadbeef"
 
@@ -495,9 +468,7 @@ class TestCliUsesSharedHelper:
         captured = capsys.readouterr()
         assert "📋 Verdict saved: deadbeef" in captured.out
 
-    def test_cli_reports_the_shared_helpers_error_result(
-        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_cli_reports_the_shared_helpers_error_result(self, tmp_workdir, monkeypatch, capsys):
         """A helper-level failure keeps today's non-fatal CLI warning."""
         from gitreins.cli import _persist_result
 
@@ -511,7 +482,7 @@ class TestCliUsesSharedHelper:
         captured = capsys.readouterr()
         assert "Failed to persist verdict (non-fatal)" in captured.err
 
-    def test_cli_skips_persistence_when_history_disabled(self, tmp_workdir: str) -> None:
+    def test_cli_skips_persistence_when_history_disabled(self, tmp_workdir):
         """Both directions: enabled → a verdict lands; disabled → it does not.
 
         Real (unstubbed) helper on both arms, asserting only the on-disk
@@ -541,9 +512,7 @@ class TestCliUsesSharedHelper:
 class TestVerdictDataBuilder:
     """Unit coverage for the shared builder moved out of the CLI."""
 
-    def test_empty_branch_and_worktree_for_non_git_workdir(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_empty_branch_and_worktree_for_non_git_workdir(self, tmp_path, monkeypatch):
         from engine.persist import build_verdict_data
 
         non_git = tmp_path / "plain"
@@ -559,14 +528,12 @@ class TestVerdictDataBuilder:
         assert data["commit"] == ""
         assert data["items"] == [{"criterion": "c1", "status": "PASS", "detail": "ok"}]
 
-    def test_extra_keys_are_stamped_by_persist_evaluation(
-        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_extra_keys_are_stamped_by_persist_evaluation(self, tmp_workdir, monkeypatch):
         from engine.persist import persist_evaluation
 
         captured = {}
 
-        def _spy(self: Any, task_id: Any, verdict_data: Any, collect_evidence: Any = None) -> str:
+        def _spy(self, task_id, verdict_data, collect_evidence=None):
             captured.update(verdict_data)
             return "deadbeef"
 
@@ -594,9 +561,7 @@ class TestResumeSupersedesInterruptedVerdict:
     earlier attempt for that job id instead of leaving both looking live.
     """
 
-    def test_resume_leaves_exactly_one_live_record_per_job_id(
-        self, mcp_server: Any, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_resume_leaves_exactly_one_live_record_per_job_id(self, mcp_server, monkeypatch):
         from engine.job_store import make_job, save_job
 
         _stub_judge_evaluate(monkeypatch)
@@ -648,7 +613,7 @@ class TestResumeSupersedesInterruptedVerdict:
         assert resumed["source"] == "mcp"
         assert resumed.get("superseded_by") is None
 
-    def test_supersede_is_keyed_on_job_id(self, tmp_workdir: str) -> None:
+    def test_supersede_is_keyed_on_job_id(self, tmp_workdir):
         """Only the SAME job id supersedes — the scan is not a blanket rewrite.
 
         A second job (and a sync record with no job id at all) must stay live,
@@ -672,7 +637,7 @@ class TestResumeSupersedesInterruptedVerdict:
         records = _verdict_records(tmp_workdir)
         assert len(records) == 4
 
-        def _live(job_id: Any) -> Any:
+        def _live(job_id):
             return [
                 (p, d)
                 for p, d in records
@@ -691,7 +656,7 @@ class TestResumeSupersedesInterruptedVerdict:
         assert superseded[0][1]["passed"] is True  # job-a's first attempt
         assert superseded[0][1]["superseded_by"] == _record_path(tmp_workdir, live_a[0][0])
 
-    def test_chain_of_resumes_leaves_one_live_record(self, tmp_workdir: str) -> None:
+    def test_chain_of_resumes_leaves_one_live_record(self, tmp_workdir):
         """Three attempts at one job id: one live record, each older one chained
         to the attempt that replaced it."""
         persister = engine.persist.VerdictPersister(tmp_workdir)

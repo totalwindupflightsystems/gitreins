@@ -90,7 +90,13 @@ class TestSerialization:
                 "tier1_lock.release()\n",
             ],
             cwd=os.path.dirname(tier1_lock.__file__),
-            env={**os.environ, "GITREINS_TIER1_REPO_ROOT": repo},
+            env={
+                **os.environ,
+                "GITREINS_TIER1_REPO_ROOT": repo,
+                "PYTHONPATH": os.pathsep.join(
+                    filter(None, [os.path.dirname(os.path.dirname(__file__)), os.environ.get("PYTHONPATH")])
+                ),
+            },
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,

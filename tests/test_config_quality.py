@@ -1,14 +1,11 @@
 """Quality config round-trip coverage."""
 
-from __future__ import annotations
-from pathlib import Path
-
 import yaml
 
 from engine.config import QualityConfig, load_defaults
 
 
-def test_quality_config_load_save_load_round_trip(tmp_path: Path) -> None:
+def test_quality_config_load_save_load_round_trip(tmp_path):
     config_dir = tmp_path / ".gitreins"
     config_dir.mkdir()
     source = {
@@ -28,7 +25,7 @@ def test_quality_config_load_save_load_round_trip(tmp_path: Path) -> None:
     assert second == first
 
 
-def test_quality_defaults_are_disabled_and_warn_by_default() -> None:
+def test_quality_defaults_are_disabled_and_warn_by_default():
     cfg = QualityConfig.from_dict({})
     assert cfg.enabled is False
     assert cfg.timeout == 300

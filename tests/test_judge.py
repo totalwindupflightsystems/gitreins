@@ -3,10 +3,6 @@ Unit tests for engine/judge.py — Judge orchestrator and pipeline dispatch.
 axiom:trace work_item=GR-001 spec=specs/07-Judge-Orchestrator.md plan=.memory-bank/work-items/GR-001/plan.yaml
 """
 
-from __future__ import annotations
-from typing import Any
-from engine.llm import LLMClient
-
 from unittest import mock
 from unittest.mock import patch
 
@@ -21,7 +17,7 @@ from engine.evaluator import Verdict, VerdictItem
 class TestJudgeResult:
     """Test JudgeResult dataclass and summary — step-1-5-1-1."""
 
-    def test_judge_result_with_pipeline_result(self) -> None:
+    def test_judge_result_with_pipeline_result(self):
         """JudgeResult with pipeline_result → summary shows stage results."""
         pipeline = {
             "passed": True,
@@ -40,7 +36,7 @@ class TestJudgeResult:
         assert "Stage tier1" in summary
         assert "PASS" in summary
 
-    def test_judge_result_with_verdict_legacy(self) -> None:
+    def test_judge_result_with_verdict_legacy(self):
         """JudgeResult with verdict (legacy) → summary shows verdict items."""
         items = [VerdictItem(criterion="c1", status="PASS", detail="ok")]
         verdict = Verdict(verdict="COMPLETE", items=items, summary="all good")
@@ -49,7 +45,7 @@ class TestJudgeResult:
         assert "Tier 2" in summary or "Agentic Evaluator" in summary
         assert "COMPLETE" in summary
 
-    def test_judge_result_both_pipeline_and_verdict(self) -> None:
+    def test_judge_result_both_pipeline_and_verdict(self):
         """JudgeResult with both pipeline and verdict shows both."""
         pipeline = {"passed": True, "stages": {}}
         items = [VerdictItem(criterion="c1", status="PASS", detail="ok")]
@@ -59,13 +55,13 @@ class TestJudgeResult:
         assert "Judge Result" in summary
         assert "Overall" in summary
 
-    def test_passed_true_shows_pass_check(self) -> None:
+    def test_passed_true_shows_pass_check(self):
         """passed=True → 'PASS ✓' in summary."""
         result = JudgeResult(task_id="t1", passed=True)
         assert "PASS" in result.summary
         assert "✓" in result.summary
 
-    def test_passed_false_shows_fail_cross(self) -> None:
+    def test_passed_false_shows_fail_cross(self):
         """passed=False → 'FAIL ✗' in summary."""
         result = JudgeResult(task_id="t1", passed=False)
         assert "FAIL" in result.summary
@@ -75,7 +71,7 @@ class TestJudgeResult:
 class TestJudgeLegacyPath:
     """Test Judge._run_legacy — Tier 1 → Tier 2 — step-1-5-1-2."""
 
-    def test_legacy_guards_pass_tier2_runs(self, judge: Judge, llm_client: LLMClient) -> None:
+    def test_legacy_guards_pass_tier2_runs(self, judge, llm_client):
         """When guards pass, Tier 2 evaluator is called."""
         from engine.task_manager import Task
 
@@ -112,7 +108,7 @@ class TestJudgeLegacyPath:
         assert result.tier2 is not None
         assert result.tier2.verdict == "COMPLETE"
 
-    def test_legacy_guards_fail_tier2_skipped(self, judge: Judge) -> None:
+    def test_legacy_guards_fail_tier2_skipped(self, judge):
         """When guards fail, Tier 2 is skipped, result.passed=False."""
         from engine.task_manager import Task
 
@@ -137,9 +133,7 @@ class TestJudgeLegacyPath:
 class TestJudgeEvaluateTask:
     """Test Judge.evaluate_task() pipeline vs legacy dispatch."""
 
-    def test_evaluate_task_uses_pipeline_when_config_has_stages(
-        self, judge: Judge, tmp_workdir: str
-    ) -> None:
+    def test_evaluate_task_uses_pipeline_when_config_has_stages(self, judge, tmp_workdir):
         """evaluate_task runs pipeline when pipeline config has stages."""
         from engine.task_manager import Task
 
@@ -177,9 +171,7 @@ class TestJudgeEvaluateTask:
         assert result.pipeline_result is not None
         assert "stages" in result.pipeline_result
 
-    def test_evaluate_task_falls_back_to_legacy_without_config(
-        self, judge: Judge, llm_client: LLMClient
-    ) -> None:
+    def test_evaluate_task_falls_back_to_legacy_without_config(self, judge, llm_client):
         """evaluate_task falls back to legacy when no pipeline config exists."""
         from engine.task_manager import Task
 
@@ -207,7 +199,7 @@ class TestJudgeEvaluateTask:
                 result = judge.evaluate_task(task)
         assert result.passed is True
 
-    def test_run_precommit_runs_pipeline(self, judge: Judge, tmp_workdir: str) -> None:
+    def test_run_precommit_runs_pipeline(self, judge, tmp_workdir):
         """run_precommit runs pipeline with trigger='pre-commit'."""
         import os
         import yaml
@@ -243,13 +235,11 @@ class TestJudgeEvaluateTask:
 class TestJudgeInit:
     """Test Judge initialization."""
 
-    def test_judge_constructor_creates_guard_manager(self, judge: Judge) -> None:
+    def test_judge_constructor_creates_guard_manager(self, judge):
         """Judge constructor creates a GuardManager."""
         assert judge.guard_manager is not None
 
-    def test_judge_constructor_accepts_guard_config(
-        self, tmp_workdir: str, llm_client: LLMClient
-    ) -> None:
+    def test_judge_constructor_accepts_guard_config(self, tmp_workdir, llm_client):
         """Judge constructor accepts guard_config dict."""
         judge = Judge(llm_client, tmp_workdir, guard_config={"guards": {"secrets": False}})
         assert judge.guard_manager._enabled["secrets"] is False
@@ -258,7 +248,7 @@ class TestJudgeInit:
 class TestExtendedJudge:
     """Extended coverage for Judge module."""
 
-    def test_judge_result_empty_pipeline(self) -> None:
+    def test_judge_result_empty_pipeline(self):
         """JudgeResult with empty pipeline_result shows Overall."""
         result = JudgeResult(task_id="t1")
         assert result.task_id == "t1"
@@ -266,16 +256,14 @@ class TestExtendedJudge:
         summary = result.summary
         assert "Overall" in summary
 
-    def test_judge_result_no_pipeline_no_verdict(self) -> None:
+    def test_judge_result_no_pipeline_no_verdict(self):
         """JudgeResult without pipeline or verdict still produces summary."""
         result = JudgeResult(task_id="t1", passed=False)
         summary = result.summary
         assert "Judge Result: t1" in summary
         assert "FAIL" in summary
 
-    def test_evaluate_task_pipeline_exception_returns_error(
-        self, judge: Judge, tmp_workdir: str, llm_client: LLMClient
-    ) -> None:
+    def test_evaluate_task_pipeline_exception_returns_error(self, judge, tmp_workdir, llm_client):
         """evaluate_task catches pipeline exception and returns error in result."""
         from engine.task_manager import Task
         import os
@@ -302,7 +290,7 @@ class TestExtendedJudge:
         result = judge.evaluate_task(task)
         assert result.pipeline_result is not None
 
-    def test_judge_result_summary_with_failed_stage(self) -> None:
+    def test_judge_result_summary_with_failed_stage(self):
         """JudgeResult summary shows FAIL for failed stages."""
         pipeline = {
             "passed": False,
@@ -319,7 +307,7 @@ class TestExtendedJudge:
         assert "FAIL" in summary
         assert "tier1" in summary
 
-    def test_judge_result_tier2_verdict_items_shown(self) -> None:
+    def test_judge_result_tier2_verdict_items_shown(self):
         """JudgeResult summary shows verdict items from Tier 2."""
         items = [
             VerdictItem(criterion="c1", status="PASS", detail="verified"),
@@ -332,7 +320,7 @@ class TestExtendedJudge:
         assert "c2" in summary
         assert "INCOMPLETE" in summary
 
-    def test_judge_result_stores_tier1_and_tier2(self) -> None:
+    def test_judge_result_stores_tier1_and_tier2(self):
         """BUGFIX: JudgeResult.tier1 and .tier2 are populated by _run_legacy."""
         from engine.judge import JudgeResult
 
@@ -351,7 +339,7 @@ class TestExtendedJudge:
         assert result.tier2 is not None
         assert result.tier2.verdict == "COMPLETE"
 
-    def test_tier1_none_safe_access(self) -> None:
+    def test_tier1_none_safe_access(self):
         """BUGFIX: tier1 is None safe (e.g. pipeline path)."""
         result = JudgeResult(task_id="t5", passed=True)
         assert result.tier1 is None
@@ -364,18 +352,18 @@ class TestExtendedJudge:
 class TestLspDiagnosticsParsing:
     """Test Judge._parse_lsp_output and _extract_lsp_diagnostics — step GR-NNN."""
 
-    def test_parse_lsp_output_empty(self, judge: Judge) -> None:
+    def test_parse_lsp_output_empty(self, judge):
         """Empty output returns empty list."""
         result = judge._parse_lsp_output("")
         assert result == []
 
-    def test_parse_lsp_output_clean(self, judge: Judge) -> None:
+    def test_parse_lsp_output_clean(self, judge):
         """Output with only clean lines returns empty list."""
         output = "  pylsp — clean"
         result = judge._parse_lsp_output(output)
         assert result == []
 
-    def test_parse_lsp_output_error_diag(self, judge: Judge) -> None:
+    def test_parse_lsp_output_error_diag(self, judge):
         """Parses '✗' prefixed line as error severity."""
         output = "  ✗ /path/to/file.py:5 [pylsp] Undefined variable 'x'"
         result = judge._parse_lsp_output(output)
@@ -387,7 +375,7 @@ class TestLspDiagnosticsParsing:
         assert d["message"] == "Undefined variable 'x'"
         assert d["tool"] == "pylsp"
 
-    def test_parse_lsp_output_warning_diag(self, judge: Judge) -> None:
+    def test_parse_lsp_output_warning_diag(self, judge):
         """Parses '⚠' prefixed line as warning severity."""
         output = "  ⚠ /path/to/file.py:10 [pylsp] unused variable 'y'"
         result = judge._parse_lsp_output(output)
@@ -396,7 +384,7 @@ class TestLspDiagnosticsParsing:
         assert result[0]["line"] == 10
         assert result[0]["message"] == "unused variable 'y'"
 
-    def test_parse_lsp_output_multiple(self, judge: Judge) -> None:
+    def test_parse_lsp_output_multiple(self, judge):
         """Multiple diagnostic lines are all parsed."""
         output = (
             "  ✗ /path/to/file.py:5 [pylsp] Undefined variable 'x'\n"
@@ -409,7 +397,7 @@ class TestLspDiagnosticsParsing:
         assert result[1]["severity"] == "warning"
         assert result[2]["severity"] == "error"
 
-    def test_parse_lsp_output_mixed_content(self, judge: Judge) -> None:
+    def test_parse_lsp_output_mixed_content(self, judge):
         """Non-diagnostic lines (status, blank) are ignored."""
         output = (
             "  pylsp — clean\n"
@@ -422,7 +410,7 @@ class TestLspDiagnosticsParsing:
         assert result[0]["line"] == 3
         assert result[0]["message"] == "undefined name 'foo'"
 
-    def test_extract_lsp_diagnostics_found(self, judge: Judge) -> None:
+    def test_extract_lsp_diagnostics_found(self, judge):
         """_extract_lsp_diagnostics finds the lsp GuardResult and parses it."""
         from engine.guard_manager import Tier1Result, GuardResult
 
@@ -442,7 +430,7 @@ class TestLspDiagnosticsParsing:
         assert diags[0]["file"] == "/path/to/file.py"
         assert diags[0]["severity"] == "error"
 
-    def test_extract_lsp_diagnostics_not_present(self, judge: Judge) -> None:
+    def test_extract_lsp_diagnostics_not_present(self, judge):
         """No lsp guard → empty list, no crash."""
         from engine.guard_manager import Tier1Result, GuardResult
 
@@ -456,7 +444,7 @@ class TestLspDiagnosticsParsing:
         diags = judge._extract_lsp_diagnostics(tier1)
         assert diags == []
 
-    def test_extract_lsp_diagnostics_empty_output(self, judge: Judge) -> None:
+    def test_extract_lsp_diagnostics_empty_output(self, judge):
         """LSP guard with empty output → empty list."""
         from engine.guard_manager import Tier1Result, GuardResult
 
@@ -477,7 +465,7 @@ class TestJudgeResultToDict:
     """judge_result_to_dict covers both result shapes (legacy tier2 and
     pipeline-path verdicts buried in pipeline_result stages)."""
 
-    def _legacy_result(self, passed: Any = True) -> Any:
+    def _legacy_result(self, passed=True):
         from engine.judge import judge_result_to_dict
 
         tier1 = Tier1Result(passed=True, results=[])
@@ -489,7 +477,7 @@ class TestJudgeResultToDict:
         result = JudgeResult(task_id="t1", passed=passed, tier1=tier1, tier2=tier2, verdict=tier2)
         return judge_result_to_dict("t1", "/wd", result)
 
-    def _pipeline_result(self, passed: Any = True) -> Any:
+    def _pipeline_result(self, passed=True):
         from engine.judge import judge_result_to_dict
 
         tier1 = Tier1Result(passed=True, results=[])
@@ -524,7 +512,7 @@ class TestJudgeResultToDict:
         )
         return judge_result_to_dict("t1", "/wd", result)
 
-    def test_legacy_shape(self) -> None:
+    def test_legacy_shape(self):
         d = self._legacy_result()
         assert d["passed"] is True
         assert d["tier1_passed"] is True
@@ -532,7 +520,7 @@ class TestJudgeResultToDict:
         assert d["items"][0]["criterion"] == "c1"
         assert d["summary"] == "all good"
 
-    def test_pipeline_shape(self) -> None:
+    def test_pipeline_shape(self):
         d = self._pipeline_result()
         assert d["passed"] is True
         assert d["tier1_passed"] is True
@@ -541,7 +529,7 @@ class TestJudgeResultToDict:
         assert d["items"][0]["status"] == "PASS"
         assert d["summary"] == "all good"
 
-    def test_pipeline_shape_no_ai_eval_data(self) -> None:
+    def test_pipeline_shape_no_ai_eval_data(self):
         from engine.judge import judge_result_to_dict
 
         tier1 = Tier1Result(passed=True, results=[])
