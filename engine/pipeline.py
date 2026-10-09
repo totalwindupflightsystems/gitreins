@@ -60,7 +60,7 @@ import yaml
 from engine import command_hygiene, lang_detect, scanner_nice
 from engine.evidence_bounds import (
     _ERROR_TEST_LINE,
-    MAX_STEP_EVIDENCE_CHARS,  # noqa: F401 — re-exported for this module's callers/tests
+    MAX_STEP_EVIDENCE_CHARS as _MAX_STEP_EVIDENCE_CHARS,
     _bound_step_evidence,
 )
 from engine.guard_manager import (
@@ -77,6 +77,13 @@ from engine.types import (
     pytest_outcome,
     strip_ansi,
 )
+
+# Re-exported for this module's callers/tests (tests/test_pipeline.py and
+# tests/test_pytest_outcome.py import it from here). The rebind is deliberate:
+# pyflakes reports a bare re-import as unused — it accepts only a module-level
+# binding or ``__all__``, and does not honour ``noqa`` comments (a
+# flake8/ruff-only concept).
+MAX_STEP_EVIDENCE_CHARS = _MAX_STEP_EVIDENCE_CHARS
 
 if TYPE_CHECKING:
     pass

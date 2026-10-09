@@ -402,7 +402,7 @@ class TestInit:
         # Provide a fake tomli so the fallback resolves even on 3.11+, where
         # the backport is not installed (marker: python_version < "3.11").
         fake_tomli = types.ModuleType("tomli")
-        setattr(fake_tomli, "load", real_tomllib.load)
+        setattr(fake_tomli, "load", real_tomllib.load)  # noqa: B010 — dynamic module attr
         monkeypatch.setitem(sys.modules, "tomli", fake_tomli)
 
         real_import = builtins.__import__

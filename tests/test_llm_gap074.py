@@ -21,7 +21,7 @@ def test_gap074_missing_choices_raises_llm_response_error() -> None:
                 finish = " (empty choices; usage=%s)" % data["usage"]
             with pytest.raises(LLMResponseError) as ei:
                 raise LLMResponseError(
-                    "provider returned no choices: %s%s" % (provider_err or data, finish)
+                    f"provider returned no choices: {provider_err or data}{finish}"
                 )
         assert "Insufficient Balance" in str(ei.value)
 
@@ -35,7 +35,5 @@ def test_gap074_reasoning_starved_empty_choices_message() -> None:
         finish = ""
         if choices == [] and data.get("usage"):
             finish = " (empty choices; usage=%s)" % data["usage"]
-        err = LLMResponseError(
-            "provider returned no choices: %s%s" % (provider_err or data, finish)
-        )
+        err = LLMResponseError(f"provider returned no choices: {provider_err or data}{finish}")
     assert "usage" in str(err) and "completion_tokens" in str(err)

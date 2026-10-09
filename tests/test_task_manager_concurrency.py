@@ -45,7 +45,7 @@ def _write_store(workdir: str, task_ids: list[str]) -> None:
 
 
 def _read_store(workdir: str) -> list[dict]:
-    with open(os.path.join(workdir, ".gitreins", "tasks.yaml"), "r") as f:
+    with open(os.path.join(workdir, ".gitreins", "tasks.yaml")) as f:
         data = yaml.safe_load(f) or {}
     return list(data.get("tasks", []))
 
@@ -75,7 +75,7 @@ class TestConcurrentComplete:
         ]
         for p in procs:
             p.start()
-        for p in procs:
+        for _p in procs:
             assert ready.wait(timeout=60), "worker never became ready"
         go.set()
         for p in procs:

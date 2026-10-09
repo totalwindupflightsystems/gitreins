@@ -265,7 +265,7 @@ class AntaresScanner:
         try:
             with open(filepath, errors="replace") as f:
                 source = f.read()
-        except (FileNotFoundError, PermissionError, IsADirectoryError, OSError) as exc:
+        except OSError as exc:
             logger.debug("Antares: cannot read %s: %s", filepath, exc)
             return findings
 
@@ -477,7 +477,7 @@ class AntaresScanner:
         try:
             with open(filepath, errors="replace") as f:
                 source = f.read()
-        except (FileNotFoundError, PermissionError, IsADirectoryError, OSError) as exc:
+        except OSError as exc:
             logger.debug("Antares: cannot read %s: %s", filepath, exc)
             return []
 

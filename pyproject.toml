@@ -135,6 +135,43 @@ select = [
 # CLI — long help strings and argument definitions
 "gitreins/cli.py" = ["E501"]
 
+# ---------------------------------------------------------------------------
+# Python style-hygiene register (PYLINT-GITREINS) — pycodestyle / pyflakes /
+# pyupgrade / flake8-bugbear.
+#
+# NEITHER pycodestyle NOR pyflakes reads pyproject.toml:
+#   * pycodestyle loads its project config from setup.cfg or tox.ini
+#     (pycodestyle.py: PROJECT_CONFIG = ('setup.cfg', 'tox.ini')), and
+#   * pyflakes has no config-file support at all — its only input is the file
+#     list it is invoked with.
+# The EFFECTIVE settings therefore live in setup.cfg ([pycodestyle] /
+# [flake8]); the blocks below are the documented register of what is exempt and
+# why, so the policy stays discoverable from the canonical project file.
+# Keep them in sync with setup.cfg.
+#
+# Documented exemptions — everything else in these trees is a fixed violation:
+#   E203            incompatible with the gated formatter: `ruff format`
+#                   (GR-GAP-063) rewrites `x[a - b:]` to `x[a - b :]`, so
+#                   "fixing" E203 would fail `ruff format --check`.
+#   E501            line length is policed by ruff at 100 with the per-file
+#                   policy in [tool.ruff.lint.per-file-ignores] above.
+#   tests/fixtures/secrets/**   deliberately non-Python scanner inputs (Jinja
+#                              templates and shell scripts with a .py suffix).
+#   tests/reliability/**        deliberately buggy reliability-benchmark
+#                              fixtures (the bare `except:` is B001 by design);
+#                              frozen benchmark inputs, excluded from mypy too.
+#   pyupgrade                   run as `pyupgrade --py310-plus`; the two frozen
+#                              fixture trees above are excluded from that run.
+[tool.pycodestyle]
+max-line-length = 100
+ignore = "E121,E123,E126,E226,E24,E704,W503,W504,E203,E501"
+exclude = "tests/fixtures/secrets,tests/reliability"
+
+[tool.pyflakes]
+# pyflakes consumes no configuration file; this lists the file sets the hygiene
+# run excludes (it is not read by pyflakes itself).
+exclude = "tests/fixtures/secrets,tests/reliability"
+
 [dependency-groups]
 dev = [
     "pycodestyle>=2.14.0",

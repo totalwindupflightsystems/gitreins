@@ -667,12 +667,13 @@ class TestSecurityScanCLI:
 
     def test_help_lists_command(self) -> None:
         """`gitreins security-scan --help` runs without error and shows flags."""
-        from gitreins.cli import main as cli_main  # noqa: F401 — ensure importable
+        from gitreins.cli import main as cli_main
 
         # Use the parser directly to avoid sys.exit side-effects.
         # Quick sanity: import-time wiring works.
         import gitreins.cli
 
+        assert callable(cli_main)
         assert callable(gitreins.cli.cmd_security_scan)
 
     def test_directory_arg_recurses(
@@ -892,7 +893,7 @@ class TestSecurityScanModeVisibility:
 
         out = capsys.readouterr().out
         # The line that claims the result is clean must carry the mode with it.
-        (clean_line,) = [line for line in out.splitlines() if "clean" in line.lower()]
+        (clean_line,) = (line for line in out.splitlines() if "clean" in line.lower())
         assert "Antares:" in clean_line
         assert HEURISTIC_DISCLOSURE in clean_line, f"mode not on the result line: {clean_line!r}"
 

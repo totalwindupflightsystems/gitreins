@@ -78,7 +78,7 @@ def test_brief_is_taken_from_the_env_var_and_recorded_with_its_source(tmp_path: 
     assert (entry / evidence.BRIEF_FILENAME).read_text(encoding="utf-8") == (
         "# Brief\nLand the fix.\n"
     )
-    assert items[evidence.BRIEF_NAME]["bytes"] == len("# Brief\nLand the fix.\n".encode())
+    assert items[evidence.BRIEF_NAME]["bytes"] == len(b"# Brief\nLand the fix.\n")
 
 
 def test_brief_falls_back_to_the_worktree_brief_and_missing_sources_are_omitted(

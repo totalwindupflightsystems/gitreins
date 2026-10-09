@@ -779,7 +779,7 @@ def test_first_verdict_lands_on_the_history_ref(tmp_path: Path) -> None:
     repo = tmp_path / "repo"
     before = _make_payload_repo(repo)
 
-    commit_hash = _persist_first_verdict(repo)
+    _persist_first_verdict(repo)
 
     env = before["env"]
     tree_paths = subprocess.run(
