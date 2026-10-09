@@ -18,7 +18,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from engine.guard_manager import GuardManager
+from engine.guard_manager import GuardManager  # noqa: E402 — sys.path set above
 
 
 def _scan_text(text: str) -> list[tuple[str, str]]:

@@ -211,7 +211,7 @@ class TestSeverityCompat:
         assert compat_severity(sev) == expected
 
     def test_nothing_maps_upward(self) -> None:
-        for sev in compat_severity.__doc__ or "":
+        for _sev in compat_severity.__doc__ or "":
             pass  # documentation contract asserted via parametrized test above
         mapped = {s: compat_severity(s) for s in ("trivial", "info", "observation")}
         assert set(mapped.values()) <= {"info"}

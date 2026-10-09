@@ -658,9 +658,7 @@ class TestPipelineReviewOutput:
 
     def test_review_issues_in_step_result_data(self) -> None:
         """StepResult data should include review_issues and review_summary."""
-        from engine.pipeline import Pipeline, StepResult
-
-        pipeline = Pipeline({}, "/tmp", llm=self._make_llm())
+        from engine.pipeline import StepResult
 
         # Simulate what _run_commit_audit would produce
         result = CommitAuditResult(
@@ -707,10 +705,6 @@ class TestPipelineReviewOutput:
 
     def test_output_includes_file_line_and_severity(self) -> None:
         """Output text should contain file:line references and severity markers."""
-        from engine.pipeline import Pipeline
-
-        pipeline = Pipeline({}, "/tmp", llm=self._make_llm())
-
         result = CommitAuditResult(
             valid=False,
             review_issues=[
@@ -1038,10 +1032,6 @@ class TestScoreBasedRouting:
 
     def test_score_above_threshold_blocks(self) -> None:
         """effective_score >= threshold → BLOCK"""
-        from engine.pipeline import Pipeline
-
-        pipeline = Pipeline({}, "/tmp")
-
         # Simulate issues with effective scores
         score_threshold = 8.0
         score_offset = 1.0
@@ -1217,10 +1207,6 @@ class TestPipelineScoreOutput:
 
     def test_output_includes_overall_score(self) -> None:
         """Output header should include overall score vs threshold."""
-        from engine.pipeline import Pipeline
-
-        pipeline = Pipeline({}, "/tmp", llm=self._make_llm())
-
         result = CommitAuditResult(
             valid=False,
             review_issues=[
@@ -1255,10 +1241,6 @@ class TestPipelineScoreOutput:
 
     def test_output_includes_score_per_issue(self) -> None:
         """Each issue line should show its effective score."""
-        from engine.pipeline import Pipeline
-
-        pipeline = Pipeline({}, "/tmp", llm=self._make_llm())
-
         score_threshold = 8.0
         score_offset = 1.0
 
@@ -1295,7 +1277,6 @@ class TestPipelineScoreOutput:
         """Score < threshold * 0.75 → ℹ️ INFO marker."""
         score_threshold = 8.0
         effective = 3.0
-        action_mark = "ℹ️ INFO"
         assert effective < score_threshold * 0.75
         # Verify it wouldn't be WARN or BLOCK
         assert not (effective >= score_threshold)

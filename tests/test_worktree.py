@@ -395,7 +395,6 @@ def test_create_refuses_reuse_when_registry_and_git_disagree_on_branch(wt_repo: 
 
 
 def test_reconcile_states_running_merged_orphan(wt_repo: str) -> None:
-    clock = FakeClock()
     manager = WorktreeManager(wt_repo)
 
     manager.create("WT-RUN")
@@ -464,7 +463,6 @@ def test_reconcile_survives_torn_registry_entries(wt_repo: str) -> None:
 
 
 def test_clean_reaps_merged_immediately_but_keeps_live_work(wt_repo: str) -> None:
-    clock = FakeClock()
     manager = WorktreeManager(wt_repo)
     manager.create("WT-LIVE")
     manager.create("WT-DONE")

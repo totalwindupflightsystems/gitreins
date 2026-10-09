@@ -46,7 +46,7 @@ def test_guard_result_defaults_and_frozen_contract() -> None:
     assert result.output == ""
     assert result.error == ""
     with pytest.raises(FrozenInstanceError):
-        setattr(result, "passed", False)
+        setattr(result, "passed", False)  # noqa: B010 — frozen dataclass: setattr is the assertion
 
 
 def test_tier1_summary_formats_passes_failures_and_empty_output() -> None:
@@ -276,7 +276,7 @@ def test_tier1_mutable_defaults_are_isolated_and_instance_is_frozen() -> None:
     assert second.extra == {}
     assert second.warnings == []
     with pytest.raises(FrozenInstanceError):
-        setattr(first, "passed", False)
+        setattr(first, "passed", False)  # noqa: B010 — frozen dataclass: setattr is the assertion
 
 
 # ── TRUST-003: named failures + named secrets scanners ────────────

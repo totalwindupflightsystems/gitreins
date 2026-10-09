@@ -7,7 +7,7 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 import requests
-from engine.llm import LLMClient, LLMResponse, ToolCall, _is_anthropic
+from engine.llm import LLMClient, LLMResponse, LLMResponseError, ToolCall, _is_anthropic
 
 
 # ── Phase 1-2-1: LLMClient initialization, provider detection, error handling ──
@@ -898,7 +898,7 @@ class TestPermanentClientErrorFailsFast:
         responses = [self._real_response(429), self._real_response(200, b'{"choices":[]}')]
         with patch("requests.post", side_effect=responses) as post:
             with patch("time.sleep", return_value=None):
-                with pytest.raises(Exception):
+                with pytest.raises(LLMResponseError):
                     llm_client.chat([{"role": "user", "content": "hi"}])
         assert post.call_count == 2, "a 429 must be retried"
 

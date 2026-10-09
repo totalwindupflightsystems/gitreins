@@ -244,7 +244,7 @@ def load_config(workdir: str) -> dict:
     if not os.path.isfile(config_path):
         return {}
     try:
-        with open(config_path, "r") as f:
+        with open(config_path) as f:
             data = yaml.safe_load(f)
             if data is None:
                 return {}
@@ -365,7 +365,7 @@ def _ensure_gitignore_entry(workdir: str, entry: str) -> tuple[bool, str]:
     gitignore_path = os.path.join(workdir, ".gitignore")
     existing = ""
     if os.path.isfile(gitignore_path):
-        with open(gitignore_path, "r") as f:
+        with open(gitignore_path) as f:
             existing = f.read()
     already_present = any(line.strip() == entry for line in existing.splitlines())
     if already_present:
@@ -3536,7 +3536,7 @@ def cmd_commit_audit(args: argparse.Namespace) -> None:
     if not message:
         msg_path = os.path.join(workdir, ".git", "COMMIT_EDITMSG")
         if os.path.exists(msg_path):
-            with open(msg_path, "r") as f:
+            with open(msg_path) as f:
                 raw = f.read().strip()
             message = "\n".join(
                 line for line in raw.split("\n") if not line.startswith("#")

@@ -101,7 +101,7 @@ def _manager(workdir: str, **overrides: object) -> GuardManager:
 
 
 def _read(path: str) -> str:
-    with open(path, "r", encoding="utf-8", errors="replace") as f:
+    with open(path, encoding="utf-8", errors="replace") as f:
         return f.read()
 
 
@@ -559,7 +559,7 @@ class TestCallersCiteTheLog:
 
 class TestRuntimeArtifactsAreIgnored:
     def test_guard_log_directory_is_gitignored(self) -> None:
-        with open(os.path.join(PROJECT_ROOT, ".gitignore"), "r") as f:
+        with open(os.path.join(PROJECT_ROOT, ".gitignore")) as f:
             entries = [line.strip() for line in f.read().splitlines()]
 
         assert ".gitreins/logs/" in entries
@@ -573,7 +573,7 @@ class TestRuntimeArtifactsAreIgnored:
         battery kept re-filing). ``edges.jsonl`` stays tracked on purpose —
         its refresh is a separate chore commit.
         """
-        with open(os.path.join(PROJECT_ROOT, ".gitignore"), "r") as f:
+        with open(os.path.join(PROJECT_ROOT, ".gitignore")) as f:
             entries = [line.strip() for line in f.read().splitlines()]
 
         assert ".vfs/graph/.last_reconcile" in entries

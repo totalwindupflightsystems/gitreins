@@ -841,3 +841,30 @@ cause in the middle. Run `git status` first.
   Never "normalize" a nonzero `--cmd` exit into 2, and never read exit 1 as harness breakage.
 - **After a repo rename, `uv venv --recreate`**: stale `.venv/bin/*` shebangs pointing at the old path
   make guard-graded lanes unrunnable by hand (`bad interpreter`) — guard passes, hand-run fails.
+
+## Resolution gate (`resolve` / `preflight`) — pitfalls 52-54 (2026-10-09 dogfood run 18)
+
+- **Never trust a preflight skip-dispatch without a false-premise control probe.** The
+  gate's calibration inverts on premise-shaped lexical overlap: "Does the repo implement
+  its guard engine in Go/Rust?" scored RESOLVED 0.87/0.89 → skip-dispatch on a Python
+  repo, while a true control ("does the secrets lane block API keys") scored only 0.63.
+  Before acting on a skip-dispatch, run one obviously-false premise with the same
+  keywords; if it comes back RESOLVED, the signal is inverted for that vocabulary and
+  the row must be dispatched (POC-84).
+- **`gitreins resolve` needs the external `hilo` binary — it is NOT a pip dependency.**
+  On a fresh install the first resolve ABSTAINs `empty-bundle` with a hint naming hilo;
+  install hilo (Rust binary; engine/resolution.py:498 searches PATH then
+  ~/.cargo/bin/hilo) before expecting any verdict. This is POC-86 pending a docs fix.
+- **`gitreins commit-audit` in block mode is best-effort, not a guarantee (POC-85).**
+  A demonstrably mismatched message passed ("looks good", exit 0) over a docs-only diff
+  while the identical class was blocked over a planted diff — the audit is LLM-driven
+  and nondeterministic. Scripted consumers must not treat exit 0 as proof the message
+  is honest; the deterministic secret-scan still applies at push (push-check, ~90 ms).
+- **Config for the probes (what a user must type):** enable `resolution.enabled.cli`
+  and, for preflight, `predispatch: true` in `.gitreins/config.yaml`; commit-audit needs
+  an explicit `pipeline.stages` entry `type: commit_audit, on: [commit-msg], mode: block`
+  (install/init write none — the named-skip exit 0 is the un-armed contract). All three
+  documented placements were verified live.
+- **Fresh-box install numbers for this repo:** https clone ~6 s, `python3 -m venv +
+  pip install -e .` 13 s (bunker-mvp agent, 2026-10-09). SSH clone of the github origin
+  fails on a fresh box (Host key verification) — use https (POC-87).
