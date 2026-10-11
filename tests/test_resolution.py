@@ -30,6 +30,7 @@ from engine.resolution import (
     TraceSeed,
     assemble_bundle,
     band_for,
+    effective_band_for,
     discover_keys,
     estimate_tokens,
     is_excluded_path,
@@ -310,6 +311,48 @@ def test_band_is_abstain_for_anything_not_a_probability(bad: object) -> None:
 def test_band_thresholds_are_parameters_not_constants() -> None:
     assert band_for(0.7, resolved_at=0.6) == "RESOLVED"
     assert band_for(0.7, review_at=0.8) == "UNRESOLVED"
+
+
+def _strong_manifest() -> list[ManifestEntry]:
+    return [
+        ManifestEntry(
+            file="engine/guards.py",
+            provenance="ast_exact",
+            score=0.99,
+            bytes=100,
+            truncated=False,
+            source="understand",
+            lines=10,
+        )
+    ]
+
+
+def test_effective_band_demotes_high_probability_weak_evidence() -> None:
+    assert (
+        effective_band_for(
+            0.91,
+            evidence_quality=1,
+            manifest=_strong_manifest(),
+        )
+        == "REVIEW"
+    )
+
+
+def test_effective_band_preserves_genuinely_resolved_evidence() -> None:
+    assert (
+        effective_band_for(
+            0.85,
+            evidence_quality=3,
+            manifest=_strong_manifest(),
+        )
+        == "RESOLVED"
+    )
+
+
+def test_effective_band_demotes_missing_or_weak_provenance() -> None:
+    manifest = _strong_manifest()
+    manifest[0].provenance = "lexical"
+    assert effective_band_for(0.99, evidence_quality=3, manifest=manifest) == "REVIEW"
 
 
 def test_rubric_position_maps_an_expected_score_onto_its_legend_band() -> None:

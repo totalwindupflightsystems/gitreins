@@ -102,13 +102,20 @@ question ──► TRACE (hilo)  ──► ASSEMBLE (hilo) ──► BUDGET (mea
 
 | `resolves_question` | Verdict | Action |
 |---|---|---|
-| ≥ 0.85 | `RESOLVED` | skip the expensive path (pre-dispatch) / confirmatory judge |
-| 0.50 – 0.85 | `REVIEW` | a human or the full judge looks; never auto-passed |
+| ≥ 0.85 **and the evidence floor is met** | `RESOLVED` | skip the expensive path (pre-dispatch) / confirmatory judge |
+| 0.50 – 0.85, or ≥ 0.85 with weak/incomplete evidence | `REVIEW` | dispatch with a note; a human or the full judge looks |
 | < 0.50 | `UNRESOLVED` | dispatch/continue; `missing_kind` names what to build |
 | transport error, 401/402/429 on **every** key, malformed answer | **`ABSTAIN`** | **fail closed** — never silently "resolved" |
 
 Thresholds are config, tunable without touching Jev. Fail-closed is doctrine, not preference: a
 silent PASS here would let unresolved work through the cheapest gate in the system.
+
+A production `RESOLVED` also requires the strongest evidence-rubric position, a non-empty
+manifest with at least one entry carrying recognized provenance and a strong source score, and no clipping or
+budget exhaustion. This is an evidence floor, not a replacement for the probability thresholds:
+lexical overlap can produce a high probability while the bundle only mentions a premise. Such a
+verdict is demoted to `REVIEW`, which preserves the dispatch-with-note path. The calibration corpus
+includes independent false-premise fixtures for the exact Go and Rust guard-engine questions.
 
 ## 4. Where it plugs into gitreins
 

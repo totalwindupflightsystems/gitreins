@@ -5,7 +5,8 @@ core pipeline only; the CLI (``gitreins resolve``) and the MCP ``context.resolve
 surface belong to JEVRES-002 and are deliberately absent here.
 
     question -> TRACE (hilo) -> ASSEMBLE (hilo) -> BUDGET -> JEV (1 call) -> BANDS (code)
-                graph search    graph understand    measured    noul + choice   >=.85 RESOLVED
+                graph search    graph understand    measured    noul + choice
+                                                                   >=.85 + evidence floor RESOLVED
                 graph related   per seed            + clip      + score         >=.50 REVIEW,
                                                                                 error -> ABSTAIN
 
@@ -79,6 +80,7 @@ __all__ = [
     "TraceSeed",
     "assemble_bundle",
     "band_for",
+    "effective_band_for",
     "estimate_tokens",
     "discover_keys",
     "is_excluded_path",
@@ -170,6 +172,14 @@ _KEY_PREFIX = "sk-or-v1-"
 # ── Bands live in code, never in the model (spec §3.5) ───────────────────────
 RESOLVED_AT = 0.85
 REVIEW_AT = 0.50
+
+# A high noul is not enough to suppress pre-dispatch work.  The evidence rubric
+# is deliberately independent of the resolution probability: lexical overlap
+# can make a question look answerable while the bundle only mentions the topic.
+# Only the top rubric position, with an intact traceable bundle, is sufficient
+# evidence for the RESOLVED band used by the pre-dispatch surface.
+MIN_RESOLVED_EVIDENCE_QUALITY = 3
+_STRONG_PROVENANCE = frozenset({"ast_exact", "bounded-read"})
 
 VERDICT_RESOLVED = "RESOLVED"
 VERDICT_REVIEW = "REVIEW"
@@ -1458,6 +1468,46 @@ def band_for(
     if number >= review_at:
         return VERDICT_REVIEW
     return VERDICT_UNRESOLVED
+
+
+def effective_band_for(
+    probability: float | None,
+    *,
+    evidence_quality: int | None,
+    manifest: list[ManifestEntry],
+    clipped: bool = False,
+    budget_exhausted: bool = False,
+    resolved_at: float = RESOLVED_AT,
+    review_at: float = REVIEW_AT,
+) -> str:
+    """Apply the production evidence floor to :func:`band_for`.
+
+    ``band_for`` remains the pure probability threshold function used by the
+    calibration sweep and its boundary contract. The production pre-dispatch
+    policy adds a fail-open guard before a RESOLVED answer can suppress
+    dispatch: the Jev evidence rubric must reach its strongest position and at
+    least one shipped block must have recognized provenance. Clipped or
+    budget-exhausted evidence is never sufficient. Weak evidence is REVIEW, so
+    callers dispatch with the normal note path instead of silently treating
+    lexical overlap as proof.
+    """
+    band = band_for(probability, resolved_at=resolved_at, review_at=review_at)
+    if band != VERDICT_RESOLVED:
+        return band
+    sufficient = (
+        evidence_quality is not None
+        and evidence_quality >= MIN_RESOLVED_EVIDENCE_QUALITY
+        and bool(manifest)
+        and not clipped
+        and not budget_exhausted
+        and any(
+            entry.provenance in _STRONG_PROVENANCE
+            and entry.score is not None
+            and entry.score >= 0.80
+            for entry in manifest
+        )
+    )
+    return VERDICT_RESOLVED if sufficient else VERDICT_REVIEW
 
 
 @dataclass

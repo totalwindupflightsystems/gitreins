@@ -4,8 +4,9 @@ Spec: ``docs/jev-resolution-gate.md`` §4 row 1. The engine (``engine/resolution
 JEVRES-001) answers "is the code we can point at enough to resolve this question?" —
 this module turns that answer into a DISPATCH DECISION:
 
-    RESOLVED   (>= 0.85)  ->  skip-dispatch       the row is annotated, NO worker spawned
-    REVIEW     (>= 0.50)  ->  dispatch-with-note  dispatch, carrying missing_kind + probability
+    RESOLVED   (>= 0.85 + sufficient evidence) -> skip-dispatch
+    REVIEW     (>= 0.50, or weak evidence)     -> dispatch-with-note
+                                               dispatch, carrying missing_kind + probability
     UNRESOLVED (< 0.50)   ->  dispatch            nothing changes
     ABSTAIN    (any reason) -> dispatch          fail OPEN, by design — with the reason recorded
 
@@ -35,6 +36,7 @@ from engine.resolution import (
     VERDICT_ABSTAIN,
     VERDICT_RESOLVED,
     ResolutionVerdict,
+    effective_band_for,
     resolve,
 )
 
@@ -83,23 +85,34 @@ def decide(verdict: ResolutionVerdict) -> dict[str, Any]:
 
     Pure policy over the verdict — no resolution runs here. The returned record
     carries the band, the probability, ``missing_kind``, the decision, the
-    reason, the abstain reason when the verdict abstained, and the full verdict
-    as a first-class OBJECT (``verdict`` — ``ResolutionVerdict.to_dict()``, the
-    exact dict ``gitreins resolve --json`` prints; DF-GITREINS-POC-37 removed
-    the old escaped ``verdict_json`` STRING that forced a second parse): a skip
+    reason, the abstain reason when the verdict abstained, and the verdict as a
+    first-class OBJECT (``verdict`` — the same shape ``gitreins resolve --json``
+    prints, with the effective pre-dispatch band): a skip
     must never be blind, and an annotation must be able to show what the gate
     actually saw.
     """
-    decision = DECISIONS[verdict.verdict]
+    effective_band = effective_band_for(
+        verdict.probability,
+        evidence_quality=verdict.evidence_quality,
+        manifest=verdict.manifest,
+        clipped=verdict.clipped,
+        budget_exhausted=verdict.budget_exhausted,
+    )
+    decision = DECISIONS[effective_band]
+    verdict_record = verdict.to_dict()
+    # Keep the preflight record honest about the policy band. The resolver's
+    # raw probability band remains available to callers that invoke resolve()
+    # directly, but a weak RESOLVED answer is REVIEW here and must dispatch.
+    verdict_record["verdict"] = effective_band
     record: dict[str, Any] = {
         "question": verdict.question,
-        "band": verdict.verdict,
+        "band": effective_band,
         "probability": verdict.probability,
         "missing_kind": verdict.missing_kind,
         "decision": decision,
         "reason": _REASONS[decision],
         "abstain_reason": verdict.abstain_reason,
-        "verdict": verdict.to_dict(),
+        "verdict": verdict_record,
     }
     return record
 
