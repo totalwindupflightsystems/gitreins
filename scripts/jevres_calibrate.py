@@ -27,6 +27,8 @@ category                honest surface
 ``unresolved``          UNRESOLVED at production bands; REVIEW tolerable,
                         RESOLVED is a false positive (counted as one)
 ``near_miss_negative``  same as unresolved: it must never read as RESOLVED
+``false_premise``       lexical-overlap false premises; independent fixture
+                        ground truth must never read as RESOLVED
 ``budget_starved``      named exhaustion: ABSTAIN reason ``budget-exhausted``
                         OR a verdict with ``budget_exhausted=true`` — never
                         an UNRESOLVED band
@@ -96,14 +98,21 @@ RECORD_PATH = REPO_ROOT / ".gitreins" / "jevres-recorded-numbers.json"
 CATEGORY_RESOLVED = "resolved"
 CATEGORY_UNRESOLVED = "unresolved"
 CATEGORY_NEAR_MISS = "near_miss_negative"
+CATEGORY_FALSE_PREMISE = "false_premise"
 CATEGORY_BUDGET = "budget_starved"
 ALL_CATEGORIES = (
     CATEGORY_RESOLVED,
     CATEGORY_UNRESOLVED,
     CATEGORY_NEAR_MISS,
+    CATEGORY_FALSE_PREMISE,
     CATEGORY_BUDGET,
 )
-BAND_CATEGORIES = (CATEGORY_RESOLVED, CATEGORY_UNRESOLVED, CATEGORY_NEAR_MISS)
+BAND_CATEGORIES = (
+    CATEGORY_RESOLVED,
+    CATEGORY_UNRESOLVED,
+    CATEGORY_NEAR_MISS,
+    CATEGORY_FALSE_PREMISE,
+)
 
 #: The sweep the acceptance criteria name: 0.50 to 0.95 inclusive, step 0.05.
 SWEEP_STEPS = [0.50, 0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
@@ -230,6 +239,18 @@ def validate_corpus(cases: list[CorpusCase]) -> None:
             "measured in both states (corpus design, not a preference)"
         )
 
+    false_questions = {case.question for case in cases if case.category == CATEGORY_FALSE_PREMISE}
+    required_false_questions = {
+        "Does the repo implement its guard engine in Go?",
+        "Does the repo contain a Rust implementation of the guard engine?",
+    }
+    missing_false = required_false_questions - false_questions
+    if missing_false:
+        raise SystemExit(
+            "corpus error: false_premise is missing required question(s): "
+            + "; ".join(sorted(missing_false))
+        )
+
 
 # ── The two seams ────────────────────────────────────────────────────────────
 
@@ -325,7 +346,7 @@ class MockEndpoint:
                 },
                 "evidence_quality": {
                     "type": "score",
-                    "score": 1.5,
+                    "score": 3.0 if case.category == CATEGORY_RESOLVED else 1.5,
                     "legend": {
                         "0": "the bundle only mentions the topic",
                         "1": "adjacent code",
@@ -611,7 +632,7 @@ def build_gate(results: list[CaseResult]) -> tuple[bool, list[str]]:
     failures: list[str] = []
     for result in results:
         category = result.case.category
-        if category in (CATEGORY_NEAR_MISS, CATEGORY_UNRESOLVED):
+        if category in (CATEGORY_NEAR_MISS, CATEGORY_UNRESOLVED, CATEGORY_FALSE_PREMISE):
             if result.surface == SURFACE_BAND:
                 band = band_for(
                     result.probability,
@@ -640,7 +661,8 @@ def gate_report(results: list[CaseResult]) -> str:
     passed, failures = build_gate(results)
     if passed:
         return (
-            "GATE PASS: no near-miss/unresolved false positives and no budget misreads "
+            "GATE PASS: no near-miss/unresolved/false-premise false positives "
+            "and no budget misreads "
             f"at the production bands (RESOLVED>={PRODUCTION_RESOLVED_AT}, "
             f"REVIEW>={PRODUCTION_REVIEW_AT})"
         )

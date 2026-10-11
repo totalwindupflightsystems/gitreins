@@ -5,8 +5,7 @@ The script is not a package module, so it is loaded by path (the
 construction: the harness's hermetic mode injects both resolver seams, and
 the corpus trees are checked-in fixtures — no key, no network, no hilo
 binary. The one RED-proof test re-runs the gate over a drifted corpus to
-prove criterion 4 (non-zero on near-miss false positives) rather than
-trusting the gate's happy path.
+prove the negative-category false-positive checks rather than trusting the gate's happy path.
 """
 
 from __future__ import annotations
@@ -39,9 +38,9 @@ cal = _load_module()
 # ── The corpus itself ────────────────────────────────────────────────────────
 
 
-def test_corpus_has_at_least_eight_cases_across_all_four_categories() -> None:
+def test_corpus_has_at_least_ten_cases_across_all_five_categories() -> None:
     cases = cal.load_corpus()
-    assert len(cases) >= 8
+    assert len(cases) >= 10
     by_category = {case.category for case in cases}
     assert by_category == set(cal.ALL_CATEGORIES)
 
@@ -115,6 +114,15 @@ def test_ground_truth_is_grounded_in_the_trees_not_in_the_resolver() -> None:
     assert len(ledger) > 100_000
     compile(ledger, "incident_ledger.py", "exec")  # real code, not filler
 
+    # false premises: lexical overlap is present, but independent file facts
+    # prove that neither language implementation exists.
+    go_tree = trees / "go_guard_absent"
+    rust_tree = trees / "rust_guard_absent"
+    assert not list(go_tree.glob("*.go"))
+    assert not list(rust_tree.glob("*.rs"))
+    assert "Go source" in (go_tree / "README.md").read_text(encoding="utf-8")
+    assert "Rust source" in (rust_tree / "README.md").read_text(encoding="utf-8")
+
 
 # ── Corpus validation fails loudly ───────────────────────────────────────────
 
@@ -125,7 +133,8 @@ def _full_case_set(workdir: str = "tree") -> list:
         (cal.CATEGORY_RESOLVED, "q", "none"),
         (cal.CATEGORY_UNRESOLVED, "other", "implementation"),
         (cal.CATEGORY_NEAR_MISS, "third", "test"),
-        (cal.CATEGORY_BUDGET, "fourth", None),
+        (cal.CATEGORY_FALSE_PREMISE, "fourth", "implementation"),
+        (cal.CATEGORY_BUDGET, "fifth", None),
     ]
     return [
         cal.CorpusCase(
@@ -191,13 +200,28 @@ def test_full_hermetic_run_gate_passes_and_prints_matrix_and_sweep(
     out = capsys.readouterr().out
     assert exit_code == 0
     assert "GATE PASS" in out
-    assert out.count("surface=") == 8
+    assert out.count("surface=") == 10
     assert "Confusion matrix at production bands" in out
     assert "Threshold sweep" in out
     # every sweep row is one of the requested threshold pairs
     steps = cal.SWEEP_STEPS
     assert steps[0] == 0.50 and steps[-1] == 0.95 and len(steps) == 10
     assert "model build id(s):" in out  # spec §6.4: the build is recorded with results
+
+
+def test_calibration_production_bands_demote_false_premises_and_keep_true_control() -> None:
+    cases = cal.load_corpus()
+    results = [cal.run_hermetic_case(case) for case in cases]
+    false_results = [
+        result for result in results if result.case.category == cal.CATEGORY_FALSE_PREMISE
+    ]
+    assert {result.case.question for result in false_results} == {
+        "Does the repo implement its guard engine in Go?",
+        "Does the repo contain a Rust implementation of the guard engine?",
+    }
+    assert all(result.verdict.verdict != "RESOLVED" for result in false_results)
+    true_results = [result for result in results if result.case.category == cal.CATEGORY_RESOLVED]
+    assert true_results and all(result.verdict.verdict == "RESOLVED" for result in true_results)
 
 
 def test_budget_case_surfaces_named_exhaustion_never_a_band() -> None:
@@ -253,7 +277,7 @@ def test_gate_fails_loudly_when_near_miss_nouls_drift_above_resolved() -> None:
     """Calibration drift MUST trip the gate at the production bands."""
     cases = cal.load_corpus()
     for case in cases:
-        if case.category == cal.CATEGORY_NEAR_MISS:
+        if case.category in (cal.CATEGORY_NEAR_MISS, cal.CATEGORY_FALSE_PREMISE):
             case.mock_noul = 0.93
     results = [cal.run_hermetic_case(case) for case in cases]
     passed, failures = cal.build_gate(results)

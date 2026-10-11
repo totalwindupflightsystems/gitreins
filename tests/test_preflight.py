@@ -35,7 +35,7 @@ def _fake_key(tag: str) -> str:
     return "sk-or-" + "v1-" + tag + "-" + "0" * 16
 
 
-def _jev_payload(noul: float, choice: str = "none") -> dict:
+def _jev_payload(noul: float, choice: str = "none", evidence_quality_score: float = 2.6) -> dict:
     """The live decisions-endpoint answer shape, exactly as measured."""
     return {
         "model": "typesafe/jev-1.13-20260917",
@@ -49,7 +49,7 @@ def _jev_payload(noul: float, choice: str = "none") -> dict:
             },
             "evidence_quality": {
                 "type": "score",
-                "score": 2.6,
+                "score": evidence_quality_score,
                 "legend": {
                     "0": "mentions only",
                     "1": "adjacent code",
@@ -69,12 +69,15 @@ def _jev_payload(noul: float, choice: str = "none") -> dict:
 class _StubResponse:
     status_code = 200
 
-    def __init__(self, noul: float, choice: str = "none") -> None:
+    def __init__(
+        self, noul: float, choice: str = "none", evidence_quality_score: float = 2.6
+    ) -> None:
         self._noul = noul
         self._choice = choice
+        self._evidence_quality_score = evidence_quality_score
 
     def json(self) -> object:
-        return _jev_payload(self._noul, self._choice)
+        return _jev_payload(self._noul, self._choice, self._evidence_quality_score)
 
 
 @pytest.fixture(autouse=True)
@@ -146,6 +149,31 @@ class TestDecide:
         assert record["decision"] == DECISION_SKIP
         assert record["band"] == "RESOLVED"
         assert record["probability"] == pytest.approx(0.87)
+
+    def test_weak_evidence_cannot_skip_a_false_premise(
+        self, script_assembler: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Lexical overlap with a high noul must stay on the dispatch path."""
+        script_assembler()
+        monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("false-premise"))
+        questions = (
+            "Does the repo implement its guard engine in Go?",
+            "Does the repo contain a Rust implementation of the guard engine?",
+        )
+        for question in questions:
+            dispatch = _RecordingDispatch()
+            record = preflight(
+                question,
+                workdir=".",
+                dispatch=dispatch,
+                poster=lambda *a, **k: _StubResponse(
+                    0.91, choice="implementation", evidence_quality_score=1.2
+                ),
+            )
+            assert record["band"] == "REVIEW"
+            assert record["decision"] == DECISION_NOTE
+            assert record["verdict"]["verdict"] == "REVIEW"
+            assert dispatch.calls == 1
 
     def test_review_maps_to_dispatch_with_note(
         self, script_assembler: object, monkeypatch: pytest.MonkeyPatch
