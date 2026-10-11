@@ -44,6 +44,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Iterator
+from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 import yaml
@@ -55,10 +56,18 @@ from engine.repo_paths import (
 )
 
 if TYPE_CHECKING:
-    from engine.judge import JudgeResult
+    from engine.antares import AntaresFinding, AntaresScanner
+    from engine.guard_manager import GuardManager
+    from engine.judge import Judge, JudgeResult
     from engine.llm import LLMClient
     from engine.resolution import ResolutionVerdict
     from engine.task_manager import Task, TaskManager
+    from engine.types import Tier1Result
+
+    # Registry type shared by the ``_add_*_parser`` CLI builders (annotation
+    # only — TYPE_CHECKING keeps the subscript unevaluated at runtime, where
+    # ``argparse._SubParsersAction`` is not subscriptable before Python 3.12).
+    _SubParsers = argparse._SubParsersAction[argparse.ArgumentParser]
 
 INSTALL_DEFAULT_TEST_COMMAND = "pytest -x --tb=short"
 GITREINS_GITIGNORE_ENTRIES = (
@@ -500,7 +509,12 @@ def _load_init_config(workdir: str, config_path: str) -> dict:
 
 
 def _update_guards_section(
-    existing: dict, args: argparse.Namespace, lang_info, test_cmd, static_tools, changed: list[str]
+    existing: dict,
+    args: argparse.Namespace,
+    lang_info: dict,
+    test_cmd: str,
+    static_tools: list[str],
+    changed: list[str],
 ) -> None:
     """Build or fill the guards section (reset replaces, else additive fill)."""
     if "guards" not in existing or args.reset:
@@ -2586,7 +2600,7 @@ def quality_snapshot_for(workdir: str) -> dict | None:
     return read_quality_snapshot(workdir, QualityConfig.from_dict(raw))
 
 
-def _guard_mode_note(gm, scope: str, result) -> str:
+def _guard_mode_note(gm: GuardManager, scope: str, result: Tier1Result) -> str:
     """The parenthesised mode note on the Tier 1 banner line."""
     extra = result.extra
     mode = gm.test_mode
@@ -2614,7 +2628,7 @@ def _guard_mode_note(gm, scope: str, result) -> str:
     return mode_note
 
 
-def _guard_print_result(gm, scope: str, result) -> None:
+def _guard_print_result(gm: GuardManager, scope: str, result: Tier1Result) -> None:
     """Print the human-readable guard result (banner, summary, log, warnings)."""
     mode_note = _guard_mode_note(gm, scope, result)
     extra = result.extra
@@ -2867,7 +2881,14 @@ def cmd_judge(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
-def _judge_evaluate_and_persist(judge, task, args, workdir: str, scope: str, json_output: bool):
+def _judge_evaluate_and_persist(
+    judge: Judge,
+    task: Task,
+    args: argparse.Namespace,
+    workdir: str,
+    scope: str,
+    json_output: bool,
+) -> JudgeResult:
     """Run the sync evaluation, persist the verdict, and print in the right format."""
     if json_output:
         from engine.evidence import dumps_evidence, judge_evidence
@@ -3887,7 +3908,12 @@ def _security_check_ml_deps_if_forced(force_ml: bool) -> None:
             sys.exit(2)
 
 
-def _security_render_json(_json, findings: list, scanner, heuristic_disclosure: str) -> None:
+def _security_render_json(
+    _json: ModuleType,
+    findings: list[AntaresFinding],
+    scanner: AntaresScanner,
+    heuristic_disclosure: str,
+) -> None:
     """JSON output: stdout stays the bare list; the mode line goes to stderr."""
     payload = [
         f.to_dict()
@@ -3911,7 +3937,10 @@ def _security_render_json(_json, findings: list, scanner, heuristic_disclosure: 
 
 
 def _security_render_text(
-    heuristic_disclosure: str, findings: list, scanner, directory: str | None
+    heuristic_disclosure: str,
+    findings: list[AntaresFinding],
+    scanner: AntaresScanner,
+    directory: str | None,
 ) -> None:
     """Text output with the heuristic-mode disclosure on the result line."""
     target = directory or "staged files"
@@ -3984,7 +4013,9 @@ def _setup_tools_language_list(workdir: str, lang: dict) -> list[str]:
     return langs
 
 
-def _setup_tools_print_group(tools: list[str], find_tool) -> tuple[int, int]:
+def _setup_tools_print_group(
+    tools: list[str], find_tool: Callable[[str], str | None]
+) -> tuple[int, int]:
     """Print found/missing lines for one language's tracked tools; returns counts."""
     found = 0
     missing = 0
@@ -4059,7 +4090,7 @@ def cmd_mcp_server(_args: argparse.Namespace) -> None:
     server.run_stdio()
 
 
-def _add_basic_parsers(parser: argparse.ArgumentParser, sub) -> None:
+def _add_basic_parsers(parser: argparse.ArgumentParser, sub: _SubParsers) -> None:
     """install / push-check / init / doctor subcommands."""
     # install
     sub.add_parser("install", help="Install GitReins hooks and config in the current repo")
@@ -4088,7 +4119,7 @@ def _add_basic_parsers(parser: argparse.ArgumentParser, sub) -> None:
     )
 
 
-def _add_task_parser(sub):
+def _add_task_parser(sub: _SubParsers) -> _SubParsers:
     """`task` subcommand tree. Returns the task _SubParsersAction."""
     task_p = sub.add_parser("task", help="Task management")
     task_sub = task_p.add_subparsers(dest="subcommand")
@@ -4138,7 +4169,7 @@ def _add_task_parser(sub):
     return task_sub
 
 
-def _add_worktree_parser(sub) -> None:
+def _add_worktree_parser(sub: _SubParsers) -> None:
     """`worktree` subcommand tree (diagnostics + lifecycle)."""
     worktree_p = sub.add_parser(
         "worktree", help="Git worktree diagnostics and task worktree lifecycle"
@@ -4248,7 +4279,7 @@ def _add_worktree_parser(sub) -> None:
     )
 
 
-def _add_task_worktree_parser(task_sub) -> None:
+def _add_task_worktree_parser(task_sub: _SubParsers) -> None:
     """`task worktree` — create (or reuse) a task's isolated worktree."""
     task_wt_p = task_sub.add_parser(
         "worktree",
@@ -4263,7 +4294,7 @@ def _add_task_worktree_parser(task_sub) -> None:
     )
 
 
-def _add_guard_parser(sub) -> None:
+def _add_guard_parser(sub: _SubParsers) -> None:
     """`guard` subcommand."""
     guard_p = sub.add_parser("guard", help="Run Tier 1 guards")
     guard_p.add_argument(
@@ -4315,7 +4346,7 @@ def _add_guard_parser(sub) -> None:
     )
 
 
-def _add_judge_parser(sub) -> None:
+def _add_judge_parser(sub: _SubParsers) -> None:
     """`judge` subcommand (all its modes and flags)."""
     judge_p = sub.add_parser(
         "judge",
@@ -4408,7 +4439,7 @@ def _add_judge_parser(sub) -> None:
     )
 
 
-def _add_commit_parsers(sub) -> None:
+def _add_commit_parsers(sub: _SubParsers) -> None:
     """`commit` and `commit-audit` subcommands (incl. GR-148 review overrides)."""
     commit_p = sub.add_parser("commit", help="Commit with guard checks")
     commit_p.add_argument("message")
@@ -4444,7 +4475,7 @@ def _add_commit_parsers(sub) -> None:
     )
 
 
-def _add_resolve_parsers(sub) -> None:
+def _add_resolve_parsers(sub: _SubParsers) -> None:
     """`resolve` (JEVRES-002) and `preflight` (JEVRES-003) subcommands."""
     resolve_p = sub.add_parser(
         "resolve",
@@ -4513,7 +4544,7 @@ def _add_resolve_parsers(sub) -> None:
     )
 
 
-def _add_mcp_security_parsers(sub) -> None:
+def _add_mcp_security_parsers(sub: _SubParsers) -> None:
     """`mcp-server`, `security-scan`, and `setup-tools` subcommands."""
     # mcp-server
     sub.add_parser(
@@ -4562,7 +4593,7 @@ def _add_mcp_security_parsers(sub) -> None:
     )
 
 
-def _add_qa_parser(sub) -> None:
+def _add_qa_parser(sub: _SubParsers) -> None:
     """`qa` subcommand tree (run ledger)."""
     qa_p = sub.add_parser(
         "qa",
@@ -4623,7 +4654,7 @@ def _add_qa_parser(sub) -> None:
     qa_record_p.add_argument("--ts", help="ISO timestamp of the run (default: now, UTC)")
 
 
-def _add_report_serve_parsers(sub) -> None:
+def _add_report_serve_parsers(sub: _SubParsers) -> None:
     """`report` and `serve` subcommands."""
     report_p = sub.add_parser("report", help="Show verdict history")
     report_p.add_argument("-n", type=int, default=10, help="Number of recent verdicts to show")
