@@ -119,6 +119,8 @@ gitreins doctor [--fix]               # Validate .gitleaks.toml (--fix migrates 
 gitreins guard [--dead-code]          # Run Tier 1 static checks (--dead-code: opt-in Python dead-code detection)
 gitreins security-scan [-d DIR] [--output text|json] [--force-ml]
                                        # Run the Antares CVE localization scanner
+gitreins push-check "$local_sha" "$remote_sha" || exit $?
+                                       # Refuse a push whose commit range carries secrets (pre-push hook)
 gitreins report [-n N] [--interactive]  # Browse verdict history
 gitreins task create <id> <title> [criteria...] [--depends-on ...]
 gitreins task start <id>
@@ -138,6 +140,13 @@ gitreins qa list [--json]             # QA run ledger (fresh/repro/dogfood verdi
 gitreins qa record --project <name> [--verdict PASS|FAIL --cell <name>=<status>]
                                       # Record a QA run produced outside the harness
 ```
+
+Full option lists, exit codes and worked examples for every subcommand are in the
+[CLI reference](docs/cli-reference.md) — `push-check` is command 18 there. It takes
+exactly the two refs git hands a pre-push hook (`$local_sha` and `$remote_sha`),
+scans the commit content the push would introduce for credentials already present in
+history, and exits non-zero so the push is refused; `gitreins install` writes it as
+the repo's `pre-push` hook.
 
 ### Parallel worktree fleet
 
