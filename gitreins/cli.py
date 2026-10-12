@@ -1899,7 +1899,9 @@ def cmd_task_complete(args: argparse.Namespace) -> None:
 
     # DF-GITREINS-POC-14: resolve the id BEFORE the credential check, so an
     # unknown id reports "Task not found" instead of a credential complaint.
-    _require_task(tm, args.id)
+    # The resolved task is kept: the refusal below states the status it left
+    # the task in (DF-GITREINS-POC-82).
+    resolved = _require_task(tm, args.id)
 
     # Check dependencies (unless forced)
     if not force:
@@ -1928,6 +1930,23 @@ def cmd_task_complete(args: argparse.Namespace) -> None:
             print("You may also set GITREINS_LLM_BASE_URL and GITREINS_LLM_MODEL.", file=sys.stderr)
             print(
                 "For Tier 1-only evaluation, run: gitreins task complete --skip-tier2 <id>",
+                file=sys.stderr,
+            )
+            # DF-GITREINS-POC-82: the refusal is the whole UX for a fresh
+            # install, so it states BOTH halves of the contract the caller has
+            # to reason about: the exit code (non-zero, the evaluation never
+            # ran) and the state the task was left in (unchanged — no verdict
+            # exists). The generic `<id>` placeholder above is kept because the
+            # docs quote it, and the concrete command is printed beside it so
+            # the user does not have to substitute anything to move on.
+            print(
+                f"Task '{args.id}' is still {resolved.status} — the evaluation did not "
+                "run and no verdict was produced (exit code 1).",
+                file=sys.stderr,
+            )
+            print(
+                "Finish the lifecycle with a Tier 1-only verdict:\n"
+                f"  gitreins task complete --skip-tier2 {args.id}",
                 file=sys.stderr,
             )
             sys.exit(1)
