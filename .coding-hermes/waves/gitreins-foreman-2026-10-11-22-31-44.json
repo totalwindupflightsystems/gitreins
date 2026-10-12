@@ -1,0 +1,26 @@
+{
+  "tick": "gitreins-foreman-2026-10-11-22-31-44",
+  "project": "gitreins",
+  "base": "github/main",
+  "base_sha": "1e65720ae48a6b76522e07e76ac1206df036cd8e",
+  "wave_budget": 9,
+  "workers": [
+    {
+      "task_id": "REVIEW-GITREINS-011",
+      "worktree": "/home/kara/worktrees/gitreins-REVIEW-GITREINS-011",
+      "branch": "wt/REVIEW-GITREINS-011",
+      "base_sha": "1e65720ae48a6b76522e07e76ac1206df036cd8e",
+      "scope": ["scripts/", "docs/", "README.md"],
+      "status": "prepared"
+    },
+    {
+      "task_id": "PYTYP-2603",
+      "worktree": "/home/kara/worktrees/gitreins-PYTYP-2603",
+      "branch": "wt/PYTYP-2603",
+      "base_sha": "1e65720ae48a6b76522e07e76ac1206df036cd8e",
+      "scope": ["engine/", "gitreins/", "gitreins_mcp/", "tests/"],
+      "status": "prepared"
+    }
+  ],
+  "merge_order": ["REVIEW-GITREINS-011", "PYTYP-2603"]
+}
