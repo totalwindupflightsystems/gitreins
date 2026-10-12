@@ -4,6 +4,29 @@ Disposable trees are detached from a named branch and live under a separate
 ``.disposable`` directory, so a verification run cannot collide with a task
 worktree or alter the canonical checkout.  Registry writes are atomic and
 locked because a repro farm may create and reap several trees concurrently.
+
+Every registry entry carries a **status** so a kept tree is never
+indistinguishable from a run that is still in flight (DF-GITREINS-POC-80):
+
+``running``
+    The entry was created and the run is believed to be in flight.  A
+    ``running`` entry whose process is gone (or which never recorded a pid
+    inside :data:`RUN_REGISTRATION_GRACE_SECONDS`) was killed before it could
+    finalize itself — an *interrupted* run, reaped by the next reap pass and
+    reported as such.
+``kept``
+    The run finished with exit code 0 and its tree was retained because the
+    caller asked for it (``--keep``, or a ``--keep-failures`` pass that keeps
+    every tree and reaps the passing ones afterwards).
+``kept-failure``
+    The run finished non-zero and its tree was retained for inspection
+    (``--keep`` on a failing command, or ``--keep-failures``).  This is the
+    status a failure artifact carries; :attr:`DisposableRecord.exit_code`
+    holds the command's exit code.
+
+``gitreins worktree clean`` reaps kept and kept-failure trees and *reports*
+every entry it could not reap (a live run, a tree that cannot be removed)
+instead of silently skipping it.
 """
 
 from __future__ import annotations
@@ -21,7 +44,7 @@ import uuid
 from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -32,7 +55,28 @@ from engine.worktree_manager import WorktreeError, WorktreeManager, _git
 DISPOSABLE_FILE = "disposable.json"
 DISPOSABLE_LOCK = "disposable.lock"
 
+#: Registry status values (DF-GITREINS-POC-80).  ``STATUS_RUNNING`` means the
+#: run has not finalized itself yet; the two ``kept`` values are terminal and
+#: say whether the retained tree holds a success or a failure artifact.
+STATUS_RUNNING = "running"
+STATUS_KEPT = "kept"
+STATUS_KEPT_FAILURE = "kept-failure"
+STATUSES = frozenset({STATUS_RUNNING, STATUS_KEPT, STATUS_KEPT_FAILURE})
+
+#: How long a ``running`` entry may stay without a recorded pid before the
+#: reap pass treats it as interrupted.  ``create`` registers the entry and
+#: only then starts the child, so a fresh entry legitimately has no pid for a
+#: few milliseconds; a window this wide covers the handoff on a loaded host
+#: while still guaranteeing that a killed run's entry is reaped by a later
+#: ``worktree clean`` rather than pinning the tree forever.
+RUN_REGISTRATION_GRACE_SECONDS = 300.0
+
 logger = logging.getLogger("gitreins.worktree_disposable")
+
+
+def _finished_status(exit_code: int) -> str:
+    """Terminal status for a retained run that ended with ``exit_code``."""
+    return STATUS_KEPT if exit_code == 0 else STATUS_KEPT_FAILURE
 
 
 @dataclass
@@ -45,6 +89,8 @@ class DisposableRecord:
     command: str
     pid: int | None = None
     keep: bool = False
+    status: str = STATUS_RUNNING
+    exit_code: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -54,6 +100,8 @@ class DisposableRecord:
             "command": self.command,
             "pid": self.pid,
             "keep": self.keep,
+            "status": self.status,
+            "exit_code": self.exit_code,
         }
 
     @classmethod
@@ -65,7 +113,98 @@ class DisposableRecord:
             command=str(data.get("command", "")),
             pid=data.get("pid"),
             keep=bool(data.get("keep", False)),
+            # Entries written before the status field existed (or by a foreign
+            # writer) infer one: a retained entry is a kept tree, anything else
+            # is still believed to be in flight.
+            status=_coerced_status(data.get("status"), keep=bool(data.get("keep", False))),
+            exit_code=_coerced_exit_code(data.get("exit_code")),
         )
+
+
+def _coerced_status(value: Any, *, keep: bool) -> str:
+    """Normalize a stored status, inferring one for legacy entries."""
+    if isinstance(value, str) and value in STATUSES:
+        return value
+    return STATUS_KEPT if keep else STATUS_RUNNING
+
+
+def _coerced_exit_code(value: Any) -> int | None:
+    """Normalize a stored exit code; anything unexpected reads as unknown."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return None
+    return value
+
+
+@dataclass(frozen=True)
+class DisposableReapReport:
+    """Per-entry outcome of one reap pass (DF-GITREINS-POC-80).
+
+    A reap pass used to return only the ids it removed, so an entry it
+    *skipped* (a live run, a tree that could not be removed) vanished from
+    every view — the user saw "Nothing to reap." while a kept tree sat on
+    disk.  Every entry now lands in exactly one bucket:
+
+    ``reaped``
+        Trees removed by this pass; ``abandoned`` names the subset that were
+        interrupted runs (a ``running`` entry whose process is gone).
+    ``forgotten``
+        Entries dropped from the registry because their tree directory no
+        longer exists (git metadata pruned).
+    ``kept``
+        ``(run_id, status, reason)`` for entries left registered on purpose.
+    """
+
+    reaped: list[str] = field(default_factory=list)
+    forgotten: list[str] = field(default_factory=list)
+    abandoned: list[str] = field(default_factory=list)
+    kept: list[tuple[str, str, str]] = field(default_factory=list)
+
+    def removed(self) -> list[str]:
+        """Run ids dropped from the registry (reaped trees + forgotten entries)."""
+        return [*self.reaped, *self.forgotten]
+
+
+@dataclass(frozen=True)
+class _ReapDecision:
+    """What one reap pass should do with one registry entry."""
+
+    action: str  # "reap" | "forget" | "keep"
+    reason: str = ""
+    interrupted: bool = False
+
+
+def _decide_reap(
+    record: DisposableRecord,
+    *,
+    now: float,
+    tree_exists: bool,
+    run_live: bool,
+) -> _ReapDecision:
+    """Classify one registry entry for a reap pass (pure: all facts passed in).
+
+    Order matters.  A missing tree is forgotten whatever the entry says — the
+    tree can never come back and a permanent registry ghost is the defect this
+    pass exists to prevent.  A live run is protected.  A ``running`` entry
+    whose process is gone (or whose stale pid now belongs to another process)
+    is an *interrupted* run: it is reaped like any other unfinished artifact
+    and reported as abandoned, instead of keeping its tree — and its registry
+    entry — alive forever.
+    """
+    if not tree_exists:
+        return _ReapDecision("forget", "registered tree directory no longer exists")
+    if run_live:
+        return _ReapDecision("keep", f"run is still active (pid {record.pid})")
+    if record.status == STATUS_RUNNING:
+        if record.pid is None and now - record.created_at <= RUN_REGISTRATION_GRACE_SECONDS:
+            return _ReapDecision(
+                "keep",
+                "run started less than "
+                f"{int(RUN_REGISTRATION_GRACE_SECONDS)}s ago and has not recorded its pid yet",
+            )
+        return _ReapDecision(
+            "reap", "interrupted run: the recorded process is gone", interrupted=True
+        )
+    return _ReapDecision("reap", f"{record.status} tree")
 
 
 def _evidence(output: str) -> str:
@@ -215,6 +354,40 @@ def _pid_alive(pid: int | None) -> bool:
     return True
 
 
+def _is_run_leader(pid: int | None) -> bool:
+    """True when ``pid`` is alive AND is its own process-group leader.
+
+    Every disposable child is started with ``start_new_session=True``, so its
+    process-group id equals its pid.  Requiring that identity turns a bare
+    liveness probe into a weak *ownership* probe: a recycled pid (the killed
+    run's number, now belonging to an unrelated process) is normally not a
+    session leader, so its entry is correctly treated as interrupted instead
+    of staying registered — and unreapable — forever.  A pid we cannot
+    inspect (``PermissionError``) is not ours either.
+    """
+    if not _pid_alive(pid):
+        return False
+    try:
+        return os.getpgid(pid) == pid
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return False
+    except OSError:
+        return False
+
+
+def _run_is_live(record: DisposableRecord) -> bool:
+    """True when the record's own run process still exists.
+
+    Deliberately status-blind: a live session-leader pid means the tree may be
+    in use, and protecting it costs only a reported "kept" line, while ripping
+    a tree out from under a running command is unrecoverable.  A finished entry
+    always finalizes with ``pid = None``, so this cannot pin a completed run.
+    """
+    return _is_run_leader(record.pid)
+
+
 def _coerce_ceiling_mb(value: object) -> int:  # config-sourced, validated below
     """Validate the disk ceiling while allowing zero/negative unlimited values."""
     if isinstance(value, bool):
@@ -267,7 +440,7 @@ def enforce_disk_ceiling(
     # by the feature: a retained failure is inspectable until the next cap hit.
     candidates: list[tuple[float, str, str, Any]] = []
     for record in disposable_records:
-        if _pid_alive(record.pid):
+        if _run_is_live(record):
             continue
         candidates.append((record.created_at, "disposable", record.run_id, record))
     for task_id, record in task_records.items():
@@ -367,6 +540,23 @@ def _discard_leftover_directory(path: Path) -> bool:
     except OSError:
         return not path.exists()
     return not path.exists()
+
+
+def _prune_missing_tree_metadata(main_root: Path) -> None:
+    """Drop Git metadata for worktrees whose directory is already gone.
+
+    A registry entry can outlive its tree (a manual ``rm -rf``, a host
+    cleanup).  Git keeps the admin metadata for a missing worktree until
+    ``prune`` runs, and ``git worktree remove`` then fails — so the reap pass
+    prunes first and forgets the entry instead of reporting an infrastructure
+    failure for a tree that no longer exists.  Best-effort: the entry is
+    dropped either way, and a failing prune is logged rather than raised (the
+    metadata it would have removed is invisible to users).
+    """
+    prune = _git(main_root, "worktree", "prune", check=False)
+    if prune.returncode != 0:
+        detail = prune.stderr.strip() or prune.stdout.strip() or "no diagnostic output"
+        logger.warning("disposable worktree prune failed for a missing tree: %s", detail)
 
 
 def _remove_disposable_tree(main_root: Path, path: Path) -> None:
@@ -495,6 +685,9 @@ class DisposableWorktreeManager:
                 created_at=time.time(),
                 command=command,
                 keep=keep,
+                # Registered before the child exists: `running` is what the
+                # reap pass must see until the run finalizes itself.
+                status=STATUS_RUNNING,
             )
             # WORKTREE-007: `enforce_disk_ceiling` above REWRITES the registry
             # when it reaps an older run to make room, so the list read at the
@@ -533,25 +726,72 @@ class DisposableWorktreeManager:
             self._save([item for item in self._load() if item.run_id != record.run_id])
 
     def reap(self, *, run_id: str | None = None) -> list[str]:
-        """Reap disposable records, optionally selecting one run id."""
+        """Reap disposable records, optionally selecting one run id.
+
+        Returns the run ids dropped from the registry (trees removed now, plus
+        entries whose tree was already gone).  The strict contract is
+        preserved: a registered tree that git still tracks and that cannot be
+        removed raises :class:`WorktreeError` rather than being silently
+        forgotten.  Use :meth:`reap_report` when a single unreapable tree must
+        not abort the whole pass.
+        """
         with self._exclusive_lock():
-            records = self._load()
-            selected = [record for record in records if run_id is None or record.run_id == run_id]
-            if run_id is not None and not selected:
-                return []
-            removed: list[str] = []
-            remaining: list[DisposableRecord] = []
-            for record in records:
-                if record not in selected:
-                    remaining.append(record)
-                    continue
-                if _pid_alive(record.pid):
-                    remaining.append(record)
-                    continue
+            return self._reap_locked(run_id=run_id, tolerate_failures=False).removed()
+
+    def reap_report(self, *, run_id: str | None = None) -> DisposableReapReport:
+        """Reap disposable records and report EVERY outcome (DF-GITREINS-POC-80).
+
+        Same decisions as :meth:`reap`, but nothing is silent and nothing is
+        fatal: a tree that cannot be removed is reported and left registered,
+        a live run is reported as kept, an interrupted run is reaped and
+        reported as abandoned.  This is what ``worktree clean`` uses — a kept
+        tree can no longer sit in the registry while clean prints only
+        "Nothing to reap."
+        """
+        with self._exclusive_lock():
+            return self._reap_locked(run_id=run_id, tolerate_failures=True)
+
+    def _reap_locked(self, *, run_id: str | None, tolerate_failures: bool) -> DisposableReapReport:
+        """Shared reap pass; the caller holds the disposable registry lock."""
+        records = self._load()
+        if run_id is not None and not any(record.run_id == run_id for record in records):
+            return DisposableReapReport()
+        now = time.time()
+        report = DisposableReapReport()
+        remaining: list[DisposableRecord] = []
+        for record in records:
+            if run_id is not None and record.run_id != run_id:
+                remaining.append(record)
+                continue
+            decision = _decide_reap(
+                record,
+                now=now,
+                tree_exists=Path(record.path).is_dir(),
+                run_live=_run_is_live(record),
+            )
+            if decision.action == "keep":
+                remaining.append(record)
+                report.kept.append((record.run_id, record.status, decision.reason))
+                continue
+            if decision.action == "forget":
+                _prune_missing_tree_metadata(self.main_root)
+                report.forgotten.append(record.run_id)
+                continue
+            try:
                 _remove_disposable_tree(self.main_root, Path(record.path))
-                removed.append(record.run_id)
-            self._save(remaining)
-            return removed
+            except WorktreeError as exc:
+                if not tolerate_failures:
+                    # Strict mode: leave the registry untouched on disk (as it
+                    # was before this pass) and fail loudly.
+                    raise
+                remaining.append(record)
+                report.kept.append((record.run_id, record.status, str(exc)))
+                continue
+            report.reaped.append(record.run_id)
+            if decision.interrupted:
+                report.abandoned.append(record.run_id)
+        self._save(remaining)
+        return report
 
     def run(
         self,
@@ -611,6 +851,15 @@ class DisposableWorktreeManager:
                     process.communicate()
                     raise
         finally:
+            if keep:
+                # Finalize the entry with its outcome.  A kept tree that a
+                # later `worktree clean` reads is now distinguishable from a
+                # run that is still in flight, and the failure it preserves
+                # carries its own exit code (DF-GITREINS-POC-80).  `exit_code`
+                # stays -1 for a run that never started or timed out: an
+                # unfinished artifact, recorded as a kept failure.
+                record.status = _finished_status(exit_code)
+                record.exit_code = exit_code
             record.pid = None
             if not keep:
                 self._reap_and_forget(record)
@@ -789,6 +1038,11 @@ class DisposableWorktreeManager:
             if not any(step.get("name") == "judge" for step in steps):
                 steps.append({"name": "judge", **judge})
         finally:
+            if keep:
+                # Same finalization contract as `run` (DF-GITREINS-POC-80): a
+                # retained dogfood tree records its outcome and status.
+                record.status = _finished_status(1 if failed else 0)
+                record.exit_code = 1 if failed else 0
             record.pid = None
             if not keep:
                 self._reap_and_forget(record)

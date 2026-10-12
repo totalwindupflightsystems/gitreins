@@ -8,24 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
-- **`gitreins preflight` can run on a resolution surface the repo actually
-  enabled (`--surface`, DF-GITREINS-POC-81)** — the enable flags are per surface
-  and independent, but the command hard-coded `predispatch`, so a repo whose
-  config enables only `cli` (and therefore answers fine on `gitreins resolve`)
-  got `ABSTAIN` / `abstain_reason: surface-disabled` for every question: nothing
-  in the resolver was wrong, that surface was simply never turned on. `gitreins
-  preflight --surface <name>` (`cli`, `mcp`, `predispatch` — the default,
-  `judge_prescreen`) names the flag that gates the run; naming a surface that is
-  also off abstains exactly as before — there is no implicit fall-through to an
-  enabled surface, since an unenabled surface must not egress and a dispatch
-  decision must not depend on which surface happened to be on. The disabled
-  record's `verdict.abstain_detail` (and the text output, and the
-  `surface-disabled` hint) now name the surface that did not run AND the ones
-  that ARE enabled — `engine.resolution.enabled_surfaces` is the one authority
-  for that set — so "the gate is disabled here" is no longer the only reading.
-  Regression: `tests/test_cli_preflight.py::TestPreflightSurfaceSelection`,
-  `tests/test_preflight.py::TestSurfaceDisabledDetail`,
-  `tests/test_resolution_config.py::TestSurfaceEnabled`.
+- **`gitreins worktree clean` reaps and reports every disposable registry entry
+  (DF-GITREINS-POC-80)** — a `--keep-failures` tree that `worktree clean` could
+  not reap *silently* disappeared from every view: the reap pass returned only
+  the ids it removed, so a live run (or a tree whose removal failed) was
+  skipped without a word while `clean` printed `Nothing to reap.`. Disposable
+  entries now carry a `status` (`running`, `kept`, `kept-failure`) plus the
+  exit code of a retained run, a `running` entry whose process is gone is
+  reaped as an *interrupted* run (a repro killed mid-flight no longer pins its
+  tree and registry entry forever), an entry whose tree directory is gone is
+  pruned and forgotten instead of failing the pass, and `clean` reports each
+  entry — reaped, forgotten, or kept with its status and reason
+  (`gitreins worktree clean` now uses a reporting reap pass; the library
+  `reap()` keeps its loud fail-on-stuck-tree contract). Only a session-leader
+  pid counts as the entry's own process, so a recycled pid cannot make a
+  killed run's tree permanently unreapable. Liveness identity, the 300 s
+  registration window, and all three terminal paths are covered by 8 new tests
+  in `tests/test_worktree_disposable.py`.
 
 ## [0.16.0] - 2026-10-06
 

@@ -11,9 +11,9 @@
 
 GitReins lives inside your git repository as a quality harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ✅ **v0.16.0** — the release that closes the loop between what is merged and what actually runs. `gitreins resolve "<question>"` (and the `context.resolve` MCP tool) traces a question to its seed files through Hilo, assembles a measured evidence bundle and returns a calibrated verdict band; `gitreins preflight` checks the premises of a task *before* a worker is dispatched, and annotates instead of dispatching when they do not hold; the judge pre-screens candidates and attributes a verdict per acceptance criterion; per-surface config knobs make the resolution gate tunable without touching code. Repo-owned quality metrics can also be surfaced by the guard, judge, doctor, and MCP `guard.run` from one JSON artifact; GitReins consumes the numbers but does not compute them. See [docs/quality-metrics.md](docs/quality-metrics.md) for the config and worked example. On the guard side, the `hook_timeout` early-return now carries `allow_skips` (a slow repo's docs/board commits were being blocked with exit 2 by a run whose own warning said the commit was allowed), the test lane pins its interpreter so a host whose PATH carries another virtualenv can no longer fail the lane with `unrecognized arguments: -n`, Go guard commands run through bounded execution, and the evaluator reaps the last run's process group on exit. `scripts/check_deployed_surface.py` is new: it compares the *deployed* CLI surface with this checkout and fails loudly when a merged subcommand exists only in the repo — the drift that used to be invisible because both copies reported the same version. 2919 tests pass / 87 test files, verified by collection (optional-tool skips vary).
+> ✅ **v0.16.0** — the release that closes the loop between what is merged and what actually runs. `gitreins resolve "<question>"` (and the `context.resolve` MCP tool) traces a question to its seed files through Hilo, assembles a measured evidence bundle and returns a calibrated verdict band; `gitreins preflight` checks the premises of a task *before* a worker is dispatched, and annotates instead of dispatching when they do not hold; the judge pre-screens candidates and attributes a verdict per acceptance criterion; per-surface config knobs make the resolution gate tunable without touching code. Repo-owned quality metrics can also be surfaced by the guard, judge, doctor, and MCP `guard.run` from one JSON artifact; GitReins consumes the numbers but does not compute them. See [docs/quality-metrics.md](docs/quality-metrics.md) for the config and worked example. On the guard side, the `hook_timeout` early-return now carries `allow_skips` (a slow repo's docs/board commits were being blocked with exit 2 by a run whose own warning said the commit was allowed), the test lane pins its interpreter so a host whose PATH carries another virtualenv can no longer fail the lane with `unrecognized arguments: -n`, Go guard commands run through bounded execution, and the evaluator reaps the last run's process group on exit. `scripts/check_deployed_surface.py` is new: it compares the *deployed* CLI surface with this checkout and fails loudly when a merged subcommand exists only in the repo — the drift that used to be invisible because both copies reported the same version. 2927 tests pass / 87 test files, verified by collection (optional-tool skips vary).
 
-Every resolution-gate surface ships **disabled**, because resolving a question sends the assembled bundle off the host: enabling one is an explicit act, `resolution.enabled.<surface>: true` (`cli`, `mcp`, `predispatch`, `judge_prescreen`) in `.gitreins/config.yaml` — `gitreins init` writes the block with all four `false`, and only a literal `true` opens a surface. A disabled surface fails closed with `abstain_reason: surface-disabled` and prints the enabling fix. The four switches are independent, so `gitreins preflight --surface cli "<row>"` runs the pre-dispatch check on the `cli` surface a repo already enabled rather than abstaining on a surface it deliberately keeps off. The complete block, the defaults it may omit and the calibration caveat on the judge-adjacent surfaces are in [docs/jev-resolution-gate.md §9](docs/jev-resolution-gate.md).
+Every resolution-gate surface ships **disabled**, because resolving a question sends the assembled bundle off the host: enabling one is an explicit act, `resolution.enabled.<surface>: true` (`cli`, `mcp`, `predispatch`, `judge_prescreen`) in `.gitreins/config.yaml` — `gitreins init` writes the block with all four `false`, and only a literal `true` opens a surface. A disabled surface fails closed with `abstain_reason: surface-disabled` and prints the enabling fix. The complete block, the defaults it may omit and the calibration caveat on the judge-adjacent surfaces are in [docs/jev-resolution-gate.md §9](docs/jev-resolution-gate.md).
 
 ---
 
@@ -119,8 +119,6 @@ gitreins doctor [--fix]               # Validate .gitleaks.toml (--fix migrates 
 gitreins guard [--dead-code]          # Run Tier 1 static checks (--dead-code: opt-in Python dead-code detection)
 gitreins security-scan [-d DIR] [--output text|json] [--force-ml]
                                        # Run the Antares CVE localization scanner
-gitreins push-check "$local_sha" "$remote_sha" || exit $?
-                                       # Refuse a push whose commit range carries secrets (pre-push hook)
 gitreins report [-n N] [--interactive]  # Browse verdict history
 gitreins task create <id> <title> [criteria...] [--depends-on ...]
 gitreins task start <id>
@@ -140,13 +138,6 @@ gitreins qa list [--json]             # QA run ledger (fresh/repro/dogfood verdi
 gitreins qa record --project <name> [--verdict PASS|FAIL --cell <name>=<status>]
                                       # Record a QA run produced outside the harness
 ```
-
-Full option lists, exit codes and worked examples for every subcommand are in the
-[CLI reference](docs/cli-reference.md) — `push-check` is command 18 there. It takes
-exactly the two refs git hands a pre-push hook (`$local_sha` and `$remote_sha`),
-scans the commit content the push would introduce for credentials already present in
-history, and exits non-zero so the push is refused; `gitreins install` writes it as
-the repo's `pre-push` hook.
 
 ### Parallel worktree fleet
 
@@ -881,7 +872,7 @@ A lane whose own TREE is dirty fails the mirror-image check
 - **MCP Transport:** stdio (15 tools)
 - **Config:** YAML in `.gitreins/` directory
 - **Evaluator Default Model:** DeepSeek V4 Flash (~$0.01/eval)
-- **Test suite:** 2919 tests collected across 87 test files (collection total; optional-tool skips vary)
+- **Test suite:** 2927 tests collected across 87 test files (collection total; optional-tool skips vary)
 
 ## Architecture & Docs
 

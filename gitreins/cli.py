@@ -2263,22 +2263,36 @@ def cmd_worktree_clean(args: argparse.Namespace) -> None:
     try:
         manager = WorktreeManager(get_workdir())
         report = manager.clean(confirm_stale_orphan=confirm)
-        disposable_removed = DisposableWorktreeManager(manager.main_root).reap()
+        # DF-GITREINS-POC-80: the disposable pass reports EVERY registry entry —
+        # reaped trees *and* the ones it kept (a live run, a tree that could not
+        # be removed).  Reading only the removed ids let a kept tree sit in
+        # disposable.json while clean printed "Nothing to reap."
+        disposable = DisposableWorktreeManager(manager.main_root).reap_report()
     except WorktreeError as exc:
         print(f"worktree clean: failed\nError: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
 
     removed = report["removed"]
+    disposable_removed = disposable.removed()
     if removed:
         print(f"Reaped {len(removed)} worktree(s): {', '.join(removed)}")
         for branch in report["branches_deleted"]:
             print(f"  branch deleted (merged): {branch}")
-    if disposable_removed:
+    if disposable.reaped:
+        print(f"Reaped {len(disposable.reaped)} disposable run(s): {', '.join(disposable.reaped)}")
+        if disposable.abandoned:
+            print(f"  interrupted run(s) reaped: {', '.join(disposable.abandoned)}")
+    if disposable.forgotten:
         print(
-            f"Reaped {len(disposable_removed)} disposable run(s): {', '.join(disposable_removed)}"
+            f"Forgot {len(disposable.forgotten)} disposable run(s) whose tree was "
+            f"already gone: {', '.join(disposable.forgotten)}"
         )
     if not removed and not disposable_removed:
         print("Nothing to reap.")
+    if disposable.kept:
+        print(f"Kept {len(disposable.kept)} disposable run(s):")
+        for run_id, status, reason in disposable.kept:
+            print(f"  {run_id} [{status}] — {reason}")
 
     kept = report["kept"]
     if kept:

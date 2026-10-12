@@ -818,6 +818,23 @@ heartbeat) and orphan trees are **reported and kept** unless you pass
 anything was reaped (it prints `Nothing to reap.`); exit **1** means the reap
 itself failed (`worktree clean: failed`).
 
+Every disposable registry entry is then reported per entry — reaped, forgotten
+(its tree directory no longer exists), or **kept** with its status and the
+reason it survived:
+
+```text
+Reaped 3 disposable run(s): run-a, run-b, run-c
+  interrupted run(s) reaped: run-c
+Forgot 1 disposable run(s) whose tree was already gone: run-d
+Kept 1 disposable run(s):
+  run-e [running] — run is still active (pid 4242)
+```
+
+Statuses are `running`, `kept`, and `kept-failure` (a retained failure tree,
+with `exit_code`); a `running` entry whose process is gone is an interrupted
+run and is reaped. See [disposable-verification.md](disposable-verification.md)
+for the registry contract.
+
 ### `worktree merge`
 
 ```bash

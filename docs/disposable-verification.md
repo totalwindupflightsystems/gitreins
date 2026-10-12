@@ -148,3 +148,40 @@ Retained runs can be collected with:
 ```bash
 gitreins worktree clean
 ```
+
+That pass reports **every** registry entry, not only the ones it reaped:
+
+```text
+Reaped 3 disposable run(s): run-a, run-b, run-c
+  interrupted run(s) reaped: run-c
+Forgot 1 disposable run(s) whose tree was already gone: run-d
+Kept 1 disposable run(s):
+  run-e [running] — run is still active (pid 4242)
+```
+
+- `Reaped` — kept and kept-failure trees removed now. A subset is named as
+  `interrupted run(s) reaped`: a run that was killed before it could finalize
+  itself, whose recorded process is gone.
+- `Forgot` — the entry's tree directory no longer exists (a manual `rm -rf`, a
+  host cleanup). Git metadata is pruned and the entry is dropped; an
+  unreapable ghost is never left registered, and a missing directory is no
+  longer reported as an infrastructure failure.
+- `Kept` — left registered on purpose, one line per entry as
+  `<run_id> [<status>] — <reason>`. A live run is protected because its tree
+  may be in use, but it is always named, so an entry can no longer sit in the
+  registry while clean prints only `Nothing to reap.`
+
+Every entry carries a status:
+
+| Status | Meaning |
+|--------|---------|
+| `running` | Registered, not finalized yet. |
+| `kept` | Finished with exit code 0; the tree was retained. |
+| `kept-failure` | Finished non-zero; the tree was retained for inspection. `exit_code` holds the command's exit status. |
+
+A `running` entry whose process is gone is reaped as an interrupted run. One
+that has not recorded a pid yet is protected for 300 s — the window between
+registering the entry and starting its child — so a `worktree clean` racing a
+`worktree repro` can never rip the tree out from under the run about to use
+it. Entries written before the status field existed infer one: `keep: true`
+reads as `kept`, anything else as `running`.
