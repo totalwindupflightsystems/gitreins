@@ -49,6 +49,7 @@ import signal
 import subprocess
 import time
 from pathlib import Path
+from typing import Any
 
 # The shared head+tail, line-bounded evidence bounder. Importing it here is
 # safe — engine.evidence_bounds imports only engine.types (no cycle back into
@@ -191,8 +192,8 @@ def run_bounded(
     cwd: str | None = None,
     timeout: float = 30.0,
     max_output: int = MAX_EVIDENCE_CHARS,
-    env: dict | None = None,
-) -> dict:
+    env: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Run ``cmd`` in its own session; always reap leftover group members.
 
     ``cmd`` is a shell string (``shell=True``) or an argv LIST (``shell=False``,

@@ -42,6 +42,7 @@ import ipaddress
 import re
 from collections.abc import Callable, Iterable, Iterator
 from dataclasses import dataclass, field
+from typing import Any
 
 # ── Policy vocabulary ────────────────────────────────────────────────────────
 
@@ -479,7 +480,7 @@ class ClassPolicy:
     handling: str | None = None
     confidence: float | None = None
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "enabled": self.enabled,
             "detection": self.detection,
@@ -524,8 +525,8 @@ class CategoryPolicy:
     def class_policy(self, rule: str) -> ClassPolicy:
         return self.classes.get(rule, ClassPolicy())
 
-    def to_dict(self) -> dict:
-        out: dict = {"detection": self.detection, "handling": self.handling}
+    def to_dict(self) -> dict[str, Any]:
+        out: dict[str, Any] = {"detection": self.detection, "handling": self.handling}
         if self.confidence is not None:
             out["confidence"] = self.confidence
         if self.classes:
@@ -556,7 +557,7 @@ class ExceptionPolicy:
             return False
         return _scope_matches(self.scope, path)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         out = {"category": self.category, "reason": self.reason, "scope": self.scope}
         if self.rule is not None:
             out["rule"] = self.rule
@@ -618,8 +619,8 @@ class Finding:
             f"line={self.line} action={state}/{self.handling} value={shown}"
         )
 
-    def to_dict(self, *, reveal: bool = False) -> dict:
-        data: dict = {
+    def to_dict(self, *, reveal: bool = False) -> dict[str, Any]:
+        data: dict[str, Any] = {
             "category": self.category,
             "rule": self.rule,
             "line": self.line,
@@ -693,7 +694,7 @@ class DataProtectionPolicy:
         )
 
     @classmethod
-    def from_dict(cls, raw: dict | None) -> DataProtectionPolicy:
+    def from_dict(cls, raw: dict[str, Any] | None) -> DataProtectionPolicy:
         raw = raw if isinstance(raw, dict) else {}
         policy = cls.default()
         if not raw:
@@ -941,7 +942,7 @@ class DataProtectionPolicy:
 
     # -- serialization --------------------------------------------------------
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "enabled": self.enabled,
             "categories": {name: cat.to_dict() for name, cat in self.categories.items()},
@@ -952,7 +953,7 @@ class DataProtectionPolicy:
 # ── Config plumbing ───────────────────────────────────────────────────────────
 
 
-def build_policy(config: dict | None) -> DataProtectionPolicy:
+def build_policy(config: dict[str, Any] | None) -> DataProtectionPolicy:
     """Build a policy from a raw ``.gitreins`` config dict.
 
     Reads the top-level ``data_protection:`` block; an absent block yields the
@@ -969,7 +970,7 @@ def build_policy(config: dict | None) -> DataProtectionPolicy:
     return DataProtectionPolicy.from_dict(block)
 
 
-def policy_from_config(config: dict | None) -> DataProtectionPolicy:
+def policy_from_config(config: dict[str, Any] | None) -> DataProtectionPolicy:
     """Alias kept for callers that prefer the `policy_` prefix."""
     return build_policy(config)
 
@@ -977,7 +978,10 @@ def policy_from_config(config: dict | None) -> DataProtectionPolicy:
 # ── Measurement helpers (AC6) ─────────────────────────────────────────────────
 
 
-def measure_fixtures(fixtures: Iterable[dict], policy: DataProtectionPolicy | None = None) -> dict:
+def measure_fixtures(
+    fixtures: Iterable[dict[str, Any]],
+    policy: DataProtectionPolicy | None = None,
+) -> dict[str, Any]:
     """Per-rule TP/FP/FN measurement over labeled synthetic fixtures.
 
     Each fixture is a mapping::
@@ -1017,7 +1021,7 @@ def measure_fixtures(fixtures: Iterable[dict], policy: DataProtectionPolicy | No
     }
 
 
-def load_fixtures(path: str) -> list[dict]:
+def load_fixtures(path: str) -> list[dict[str, Any]]:
     """Load a JSON fixture corpus (used by tests and the docs generator)."""
     import json
 
@@ -1031,7 +1035,7 @@ def load_fixtures(path: str) -> list[dict]:
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 
-def _reject_unknown_keys(block: dict, allowed: set[str], where: str) -> None:
+def _reject_unknown_keys(block: dict[str, Any], allowed: set[str], where: str) -> None:
     unknown = sorted(set(block) - allowed)
     if unknown:
         raise DataProtectionConfigError(
@@ -1207,7 +1211,7 @@ def _address_in_preserve_list(value: str, preserve_list: tuple[str, ...]) -> boo
         return False
 
 
-def _parse_networks(entries: tuple[str, ...], version: int) -> list:
+def _parse_networks(entries: tuple[str, ...], version: int) -> list[Any]:
     networks = []
     for entry in entries:
         try:

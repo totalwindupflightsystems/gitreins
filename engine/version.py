@@ -14,7 +14,7 @@ from pathlib import Path
 if sys.version_info >= (3, 11):
     import tomllib
 else:
-    import tomli as tomllib  # type: ignore[no-redef]
+    import tomli as tomllib
 
 try:
     __version__ = metadata.version("gitreins")
