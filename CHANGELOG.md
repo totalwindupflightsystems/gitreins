@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`gitreins worktree clean` reaps and reports every disposable registry entry
+  (DF-GITREINS-POC-80)** — a `--keep-failures` tree that `worktree clean` could
+  not reap *silently* disappeared from every view: the reap pass returned only
+  the ids it removed, so a live run (or a tree whose removal failed) was
+  skipped without a word while `clean` printed `Nothing to reap.`. Disposable
+  entries now carry a `status` (`running`, `kept`, `kept-failure`) plus the
+  exit code of a retained run, a `running` entry whose process is gone is
+  reaped as an *interrupted* run (a repro killed mid-flight no longer pins its
+  tree and registry entry forever), an entry whose tree directory is gone is
+  pruned and forgotten instead of failing the pass, and `clean` reports each
+  entry — reaped, forgotten, or kept with its status and reason
+  (`gitreins worktree clean` now uses a reporting reap pass; the library
+  `reap()` keeps its loud fail-on-stuck-tree contract). Only a session-leader
+  pid counts as the entry's own process, so a recycled pid cannot make a
+  killed run's tree permanently unreapable. Liveness identity, the 300 s
+  registration window, and all three terminal paths are covered by 8 new tests
+  in `tests/test_worktree_disposable.py`.
+
 ## [0.16.0] - 2026-10-06
 
 ### Added

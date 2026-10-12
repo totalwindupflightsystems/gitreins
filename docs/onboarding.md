@@ -1,9 +1,10 @@
 # GitReins Onboarding Guide
 
-**Version-stamped: verified against `gitreins 0.15.0` (2026-09-25).** The guide
-started as the 2026-08-03 dogfood report (`docs/dogfood/2026-08-03-integration.md`)
-and has been refreshed so every command matches the current CLI: `init`, `task`,
-`guard`, `judge`, `serve` and `worktree` are all exercised as written.
+**Version-stamped: verified against `gitreins 0.16.0` (`python3 -m gitreins --version`,
+2026-10-12).** The guide started as the 2026-08-03 dogfood report
+(`docs/dogfood/2026-08-03-integration.md`) and has been refreshed so every command
+matches the current CLI: `init`, `task`, `guard`, `judge`, `serve` and `worktree`
+are all exercised as written.
 `scripts/check_cli_examples.py` replays every `gitreins` example in this file and
 README through the real argparse in CI, so a command line here cannot silently
 rot again.
@@ -339,7 +340,7 @@ run an explicit manifest of independent tasks concurrently — see README's
 
 - `gitreins commit <message>` / `gitreins commit-audit` — commit through the
   harness, and validate a commit message against the staged diff.
-- `gitreins mcp-server` — the MCP stdio server (14 tools) for AI agents, with
+- `gitreins mcp-server` — the MCP stdio server (15 tools) for AI agents, with
   `configure` for runtime LLM hot-reload and `propagate` to fan guard config out
   to sibling repos.
 - `gitreins security-scan` — the opt-in Antares CVE-localization scanner.

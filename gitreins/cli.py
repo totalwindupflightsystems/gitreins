@@ -44,6 +44,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Iterator
+from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
 import yaml
@@ -55,10 +56,18 @@ from engine.repo_paths import (
 )
 
 if TYPE_CHECKING:
-    from engine.judge import JudgeResult
+    from engine.antares import AntaresFinding, AntaresScanner
+    from engine.guard_manager import GuardManager
+    from engine.judge import Judge, JudgeResult
     from engine.llm import LLMClient
     from engine.resolution import ResolutionVerdict
     from engine.task_manager import Task, TaskManager
+    from engine.types import Tier1Result
+
+    # Registry type shared by the ``_add_*_parser`` CLI builders (annotation
+    # only — TYPE_CHECKING keeps the subscript unevaluated at runtime, where
+    # ``argparse._SubParsersAction`` is not subscriptable before Python 3.12).
+    _SubParsers = argparse._SubParsersAction[argparse.ArgumentParser]
 
 INSTALL_DEFAULT_TEST_COMMAND = "pytest -x --tb=short"
 GITREINS_GITIGNORE_ENTRIES = (
@@ -500,7 +509,12 @@ def _load_init_config(workdir: str, config_path: str) -> dict:
 
 
 def _update_guards_section(
-    existing: dict, args: argparse.Namespace, lang_info, test_cmd, static_tools, changed: list[str]
+    existing: dict,
+    args: argparse.Namespace,
+    lang_info: dict,
+    test_cmd: str,
+    static_tools: list[str],
+    changed: list[str],
 ) -> None:
     """Build or fill the guards section (reset replaces, else additive fill)."""
     if "guards" not in existing or args.reset:
@@ -1885,7 +1899,9 @@ def cmd_task_complete(args: argparse.Namespace) -> None:
 
     # DF-GITREINS-POC-14: resolve the id BEFORE the credential check, so an
     # unknown id reports "Task not found" instead of a credential complaint.
-    _require_task(tm, args.id)
+    # The resolved task is kept: the refusal below states the status it left
+    # the task in (DF-GITREINS-POC-82).
+    resolved = _require_task(tm, args.id)
 
     # Check dependencies (unless forced)
     if not force:
@@ -1914,6 +1930,23 @@ def cmd_task_complete(args: argparse.Namespace) -> None:
             print("You may also set GITREINS_LLM_BASE_URL and GITREINS_LLM_MODEL.", file=sys.stderr)
             print(
                 "For Tier 1-only evaluation, run: gitreins task complete --skip-tier2 <id>",
+                file=sys.stderr,
+            )
+            # DF-GITREINS-POC-82: the refusal is the whole UX for a fresh
+            # install, so it states BOTH halves of the contract the caller has
+            # to reason about: the exit code (non-zero, the evaluation never
+            # ran) and the state the task was left in (unchanged — no verdict
+            # exists). The generic `<id>` placeholder above is kept because the
+            # docs quote it, and the concrete command is printed beside it so
+            # the user does not have to substitute anything to move on.
+            print(
+                f"Task '{args.id}' is still {resolved.status} — the evaluation did not "
+                "run and no verdict was produced (exit code 1).",
+                file=sys.stderr,
+            )
+            print(
+                "Finish the lifecycle with a Tier 1-only verdict:\n"
+                f"  gitreins task complete --skip-tier2 {args.id}",
                 file=sys.stderr,
             )
             sys.exit(1)
@@ -2249,22 +2282,36 @@ def cmd_worktree_clean(args: argparse.Namespace) -> None:
     try:
         manager = WorktreeManager(get_workdir())
         report = manager.clean(confirm_stale_orphan=confirm)
-        disposable_removed = DisposableWorktreeManager(manager.main_root).reap()
+        # DF-GITREINS-POC-80: the disposable pass reports EVERY registry entry —
+        # reaped trees *and* the ones it kept (a live run, a tree that could not
+        # be removed).  Reading only the removed ids let a kept tree sit in
+        # disposable.json while clean printed "Nothing to reap."
+        disposable = DisposableWorktreeManager(manager.main_root).reap_report()
     except WorktreeError as exc:
         print(f"worktree clean: failed\nError: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
 
     removed = report["removed"]
+    disposable_removed = disposable.removed()
     if removed:
         print(f"Reaped {len(removed)} worktree(s): {', '.join(removed)}")
         for branch in report["branches_deleted"]:
             print(f"  branch deleted (merged): {branch}")
-    if disposable_removed:
+    if disposable.reaped:
+        print(f"Reaped {len(disposable.reaped)} disposable run(s): {', '.join(disposable.reaped)}")
+        if disposable.abandoned:
+            print(f"  interrupted run(s) reaped: {', '.join(disposable.abandoned)}")
+    if disposable.forgotten:
         print(
-            f"Reaped {len(disposable_removed)} disposable run(s): {', '.join(disposable_removed)}"
+            f"Forgot {len(disposable.forgotten)} disposable run(s) whose tree was "
+            f"already gone: {', '.join(disposable.forgotten)}"
         )
     if not removed and not disposable_removed:
         print("Nothing to reap.")
+    if disposable.kept:
+        print(f"Kept {len(disposable.kept)} disposable run(s):")
+        for run_id, status, reason in disposable.kept:
+            print(f"  {run_id} [{status}] — {reason}")
 
     kept = report["kept"]
     if kept:
@@ -2586,7 +2633,7 @@ def quality_snapshot_for(workdir: str) -> dict | None:
     return read_quality_snapshot(workdir, QualityConfig.from_dict(raw))
 
 
-def _guard_mode_note(gm, scope: str, result) -> str:
+def _guard_mode_note(gm: GuardManager, scope: str, result: Tier1Result) -> str:
     """The parenthesised mode note on the Tier 1 banner line."""
     extra = result.extra
     mode = gm.test_mode
@@ -2614,7 +2661,7 @@ def _guard_mode_note(gm, scope: str, result) -> str:
     return mode_note
 
 
-def _guard_print_result(gm, scope: str, result) -> None:
+def _guard_print_result(gm: GuardManager, scope: str, result: Tier1Result) -> None:
     """Print the human-readable guard result (banner, summary, log, warnings)."""
     mode_note = _guard_mode_note(gm, scope, result)
     extra = result.extra
@@ -2867,7 +2914,14 @@ def cmd_judge(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
-def _judge_evaluate_and_persist(judge, task, args, workdir: str, scope: str, json_output: bool):
+def _judge_evaluate_and_persist(
+    judge: Judge,
+    task: Task,
+    args: argparse.Namespace,
+    workdir: str,
+    scope: str,
+    json_output: bool,
+) -> JudgeResult:
     """Run the sync evaluation, persist the verdict, and print in the right format."""
     if json_output:
         from engine.evidence import dumps_evidence, judge_evidence
@@ -3739,21 +3793,29 @@ def cmd_preflight(args: argparse.Namespace) -> None:
     this command exits 0 for every verdict and non-zero only on hard
     usage errors.
 
-    Config (JEVRES-006): gated on ``resolution.enabled.predispatch`` (default
-    false — JEVRES-005 must produce its calibration numbers first). Disabled,
-    the command returns the fail-open dispatch record with the named
-    ``surface-disabled`` abstain reason and exits 0, exactly like any other
-    ABSTAIN on this fail-open surface.
+    Config (JEVRES-006): gated on ``resolution.enabled.<surface>``, where
+    *surface* defaults to ``predispatch`` (which ships false — JEVRES-005 must
+    produce its calibration numbers first). The surfaces are switched on
+    INDEPENDENTLY, so the enable flag is NOT implied by any other: a repo whose
+    config sets only ``enabled.cli: true`` (and therefore answers normally on
+    ``gitreins resolve``) still abstains here. ``--surface <name>`` selects the
+    flag that gates this run, so such a repo can run the same check on the
+    surface it already enabled: ``gitreins preflight --surface cli "<row>"``.
+    Disabled, the command returns the fail-open dispatch record with the named
+    ``surface-disabled`` abstain reason — whose detail names the surfaces that
+    ARE enabled — and exits 0, exactly like any other ABSTAIN on this
+    fail-open surface.
     """
     from engine.preflight import preflight
     from engine.resolution import resolution_config
 
     workdir = get_workdir()
     cfg = resolution_config(workdir)
+    surface = args.surface
     record = preflight(
         args.question,
         workdir=workdir,
-        surface="predispatch",
+        surface=surface,
         defaults=cfg,
         model=cfg.resolution_model,
         max_tokens=cfg.resolution_tokens_max,
@@ -3764,14 +3826,23 @@ def cmd_preflight(args: argparse.Namespace) -> None:
     if args.json:
         print(json.dumps(record, indent=2))
     else:
-        _print_preflight_record(record)
+        _print_preflight_record(record, surface=surface)
 
     sys.exit(0)
 
 
-def _print_preflight_record(record: dict[str, Any]) -> None:
-    """Human-readable rendering of a preflight dispatch record."""
+def _print_preflight_record(record: dict[str, Any], *, surface: str | None = None) -> None:
+    """Human-readable rendering of a preflight dispatch record.
+
+    *surface* is the enable flag that gated the run (``args.surface``); it is
+    optional so the renderer keeps working for a bare record. An ABSTAIN also
+    prints the gate's own ``abstain_detail`` and the ``abstain_action`` hint —
+    the surfaces are switched on independently, so a ``surface-disabled`` record
+    has to say WHICH surface never ran and how to reach a working one.
+    """
     print(f"Question: {record['question']}")
+    if surface:
+        print(f"Surface:  {surface}")
     print(f"Decision: {record['decision']}")
     probability = f"{record['probability']:.2f}" if record["probability"] is not None else "n/a"
     print(f"Band:     {record['band']}  (probability {probability})")
@@ -3779,6 +3850,13 @@ def _print_preflight_record(record: dict[str, Any]) -> None:
     print(f"Missing:  {missing}")
     if record["abstain_reason"]:
         print(f"Abstain:  {record['abstain_reason']}")
+        verdict = record.get("verdict")
+        detail = verdict.get("abstain_detail") if isinstance(verdict, dict) else None
+        if detail:
+            print(f"Detail:   {detail}")
+        action = verdict.get("abstain_action") if isinstance(verdict, dict) else None
+        if action:
+            print(f"Fix:      {action}")
     print(f"Reason:   {record['reason']}")
     print("Note:     gate signal only — a skip annotates the row, it is never a merge authority")
 
@@ -3887,7 +3965,12 @@ def _security_check_ml_deps_if_forced(force_ml: bool) -> None:
             sys.exit(2)
 
 
-def _security_render_json(_json, findings: list, scanner, heuristic_disclosure: str) -> None:
+def _security_render_json(
+    _json: ModuleType,
+    findings: list[AntaresFinding],
+    scanner: AntaresScanner,
+    heuristic_disclosure: str,
+) -> None:
     """JSON output: stdout stays the bare list; the mode line goes to stderr."""
     payload = [
         f.to_dict()
@@ -3911,7 +3994,10 @@ def _security_render_json(_json, findings: list, scanner, heuristic_disclosure: 
 
 
 def _security_render_text(
-    heuristic_disclosure: str, findings: list, scanner, directory: str | None
+    heuristic_disclosure: str,
+    findings: list[AntaresFinding],
+    scanner: AntaresScanner,
+    directory: str | None,
 ) -> None:
     """Text output with the heuristic-mode disclosure on the result line."""
     target = directory or "staged files"
@@ -3984,7 +4070,9 @@ def _setup_tools_language_list(workdir: str, lang: dict) -> list[str]:
     return langs
 
 
-def _setup_tools_print_group(tools: list[str], find_tool) -> tuple[int, int]:
+def _setup_tools_print_group(
+    tools: list[str], find_tool: Callable[[str], str | None]
+) -> tuple[int, int]:
     """Print found/missing lines for one language's tracked tools; returns counts."""
     found = 0
     missing = 0
@@ -4059,7 +4147,7 @@ def cmd_mcp_server(_args: argparse.Namespace) -> None:
     server.run_stdio()
 
 
-def _add_basic_parsers(parser: argparse.ArgumentParser, sub) -> None:
+def _add_basic_parsers(parser: argparse.ArgumentParser, sub: _SubParsers) -> None:
     """install / push-check / init / doctor subcommands."""
     # install
     sub.add_parser("install", help="Install GitReins hooks and config in the current repo")
@@ -4088,7 +4176,7 @@ def _add_basic_parsers(parser: argparse.ArgumentParser, sub) -> None:
     )
 
 
-def _add_task_parser(sub):
+def _add_task_parser(sub: _SubParsers) -> _SubParsers:
     """`task` subcommand tree. Returns the task _SubParsersAction."""
     task_p = sub.add_parser("task", help="Task management")
     task_sub = task_p.add_subparsers(dest="subcommand")
@@ -4138,7 +4226,7 @@ def _add_task_parser(sub):
     return task_sub
 
 
-def _add_worktree_parser(sub) -> None:
+def _add_worktree_parser(sub: _SubParsers) -> None:
     """`worktree` subcommand tree (diagnostics + lifecycle)."""
     worktree_p = sub.add_parser(
         "worktree", help="Git worktree diagnostics and task worktree lifecycle"
@@ -4248,7 +4336,7 @@ def _add_worktree_parser(sub) -> None:
     )
 
 
-def _add_task_worktree_parser(task_sub) -> None:
+def _add_task_worktree_parser(task_sub: _SubParsers) -> None:
     """`task worktree` — create (or reuse) a task's isolated worktree."""
     task_wt_p = task_sub.add_parser(
         "worktree",
@@ -4263,7 +4351,7 @@ def _add_task_worktree_parser(task_sub) -> None:
     )
 
 
-def _add_guard_parser(sub) -> None:
+def _add_guard_parser(sub: _SubParsers) -> None:
     """`guard` subcommand."""
     guard_p = sub.add_parser("guard", help="Run Tier 1 guards")
     guard_p.add_argument(
@@ -4315,7 +4403,7 @@ def _add_guard_parser(sub) -> None:
     )
 
 
-def _add_judge_parser(sub) -> None:
+def _add_judge_parser(sub: _SubParsers) -> None:
     """`judge` subcommand (all its modes and flags)."""
     judge_p = sub.add_parser(
         "judge",
@@ -4408,7 +4496,7 @@ def _add_judge_parser(sub) -> None:
     )
 
 
-def _add_commit_parsers(sub) -> None:
+def _add_commit_parsers(sub: _SubParsers) -> None:
     """`commit` and `commit-audit` subcommands (incl. GR-148 review overrides)."""
     commit_p = sub.add_parser("commit", help="Commit with guard checks")
     commit_p.add_argument("message")
@@ -4444,7 +4532,7 @@ def _add_commit_parsers(sub) -> None:
     )
 
 
-def _add_resolve_parsers(sub) -> None:
+def _add_resolve_parsers(sub: _SubParsers) -> None:
     """`resolve` (JEVRES-002) and `preflight` (JEVRES-003) subcommands."""
     resolve_p = sub.add_parser(
         "resolve",
@@ -4479,6 +4567,10 @@ def _add_resolve_parsers(sub) -> None:
     )
 
     # preflight (JEVRES-003) — the pre-dispatch premise check's CLI surface
+    # DF-GITREINS-POC-81: the enable flags are PER SURFACE and independent, so
+    # this command must be able to name which one gates it (see --surface).
+    from engine.resolution import RESOLUTION_SURFACES
+
     preflight_p = sub.add_parser(
         "preflight",
         help="Pre-dispatch premise check: resolve a row, get a dispatch decision",
@@ -4491,6 +4583,11 @@ def _add_resolve_parsers(sub) -> None:
             " Any failure is an ABSTAIN and FAILS OPEN — it dispatches with the"
             " abstain_reason recorded, because this signal may skip a dispatch"
             " and must never be the reason work silently stops."
+            " This check runs only on an ENABLED resolution surface, and the"
+            " surfaces are enabled one by one in .gitreins/config.yaml:"
+            " setting resolution.enabled.cli (so `gitreins resolve` works) does"
+            " NOT enable resolution.enabled.predispatch, the default here — use"
+            " --surface to run the check on a surface this repo has enabled."
         ),
         epilog=(
             "Exit codes: 0 for every verdict including an ABSTAIN (a valid"
@@ -4499,11 +4596,28 @@ def _add_resolve_parsers(sub) -> None:
             " (band, probability, missing_kind, decision, reason,"
             " abstain_reason, verdict) for a foreman to consume — `verdict`"
             " is the OBJECT `resolve --json` prints, not an escaped string."
+            " A surface-disabled run is an ABSTAIN whose verdict.abstain_detail"
+            " names the surface that never ran and which surfaces ARE enabled;"
+            ' `gitreins preflight --surface cli "<row>"` re-runs the same check'
+            " on the cli surface's enable flag."
         ),
     )
     preflight_p.add_argument(
         "question",
         help="The row's premise to resolve against the repo (quoted)",
+    )
+    preflight_p.add_argument(
+        "--surface",
+        choices=list(RESOLUTION_SURFACES),
+        default="predispatch",
+        help=(
+            "The resolution surface whose enable flag"
+            " (resolution.enabled.<surface>) gates this run — default:"
+            " predispatch. Every surface is enabled independently, so a repo"
+            " that enables only `cli` for `gitreins resolve` still abstains on"
+            " the default: pass --surface cli to run the check on the surface"
+            " that repo already enabled."
+        ),
     )
     preflight_p.add_argument(
         "--json",
@@ -4513,7 +4627,7 @@ def _add_resolve_parsers(sub) -> None:
     )
 
 
-def _add_mcp_security_parsers(sub) -> None:
+def _add_mcp_security_parsers(sub: _SubParsers) -> None:
     """`mcp-server`, `security-scan`, and `setup-tools` subcommands."""
     # mcp-server
     sub.add_parser(
@@ -4562,7 +4676,7 @@ def _add_mcp_security_parsers(sub) -> None:
     )
 
 
-def _add_qa_parser(sub) -> None:
+def _add_qa_parser(sub: _SubParsers) -> None:
     """`qa` subcommand tree (run ledger)."""
     qa_p = sub.add_parser(
         "qa",
@@ -4623,7 +4737,7 @@ def _add_qa_parser(sub) -> None:
     qa_record_p.add_argument("--ts", help="ISO timestamp of the run (default: now, UTC)")
 
 
-def _add_report_serve_parsers(sub) -> None:
+def _add_report_serve_parsers(sub: _SubParsers) -> None:
     """`report` and `serve` subcommands."""
     report_p = sub.add_parser("report", help="Show verdict history")
     report_p.add_argument("-n", type=int, default=10, help="Number of recent verdicts to show")

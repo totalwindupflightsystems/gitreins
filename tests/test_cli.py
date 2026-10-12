@@ -1002,6 +1002,120 @@ class TestTaskCompleteCredentialFlow:
         assert "ltask2" in result.stdout
 
 
+class TestTaskCompleteNoCredentialContract:
+    """DF-GITREINS-POC-82: a no-credential `task complete` is a refusal, not a
+    half-finished lifecycle.
+
+    The fresh-install dogfood run reported `task complete` "exiting 0 while
+    leaving the task in_progress" and the flag named only as a placeholder.
+    The exit-code half was already correct (`sys.exit(1)`), so these tests pin
+    the WHOLE contract in one place — non-zero exit, the runnable command, an
+    untouched task store, no verdict, and the `task list` marker — so a future
+    reading cannot be misled by a pipeline's exit status again, and so the
+    discoverability half (the concrete `--skip-tier2 <real id>` command) stays
+    printed. The last test proves the printed command actually finishes the
+    lifecycle: that is what makes the refusal a path instead of a dead end.
+    """
+
+    _LLM_ENV_KEYS = (
+        "GITREINS_LLM_API_KEY",
+        "NEURALWATT_API_KEY",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "KIMI_API_KEY",
+        "GROQ_API_KEY",
+        "OPENROUTER_API_KEY",
+    )
+
+    def _start(self, workdir: str, task_id: str = "df-smoke") -> None:
+        run_cli("task", "create", task_id, "Fresh install smoke", "c1", cwd=workdir)
+        run_cli("task", "start", task_id, cwd=workdir)
+
+    def _refuse(self, workdir: str, task_id: str = "df-smoke") -> subprocess.CompletedProcess:
+        return run_cli(
+            "task",
+            "complete",
+            task_id,
+            cwd=workdir,
+            unset_env=(*self._LLM_ENV_KEYS, "GITREINS_MOCK_LLM_RESPONSE"),
+        )
+
+    def test_refusal_contract_is_complete_and_costs_nothing(self, tmp_workdir: str) -> None:
+        self._start(tmp_workdir)
+        result = self._refuse(tmp_workdir)
+
+        assert result.returncode != 0, _cli_failure(result)
+        output = result.stdout + result.stderr
+        # The generic hint stays (docs quote it) and the concrete command is
+        # printed beside it — no substitution left for the user to guess.
+        assert "gitreins task complete --skip-tier2 <id>" in output
+        assert "gitreins task complete --skip-tier2 df-smoke" in output
+        assert "no verdict was produced" in output
+        assert "exit code 1" in output
+
+        # Nothing was evaluated and nothing was written: the refusal happens
+        # before the judge and before the task store is touched.
+        assert "Evaluating..." not in result.stdout
+        assert list((Path(tmp_workdir) / ".gitreins" / "history").rglob("verdict.json")) == []
+        assert TaskManager(tmp_workdir).get("df-smoke").status == "in_progress"
+
+        # The row's own symptom: `task list` must never read complete here.
+        listing = run_cli("task", "list", cwd=tmp_workdir)
+        assert listing.returncode == 0, _cli_failure(listing)
+        assert "◐" in listing.stdout
+        assert "●" not in listing.stdout
+
+    def test_refusal_names_the_state_it_left_for_a_pending_task(self, tmp_workdir: str) -> None:
+        """The status line reports the REAL status, not a hard-coded one."""
+        run_cli("task", "create", "never-started", "Never started", "c1", cwd=tmp_workdir)
+        result = self._refuse(tmp_workdir, "never-started")
+
+        assert result.returncode != 0, _cli_failure(result)
+        assert "Task 'never-started' is still pending" in result.stderr
+        assert TaskManager(tmp_workdir).get("never-started").status == "pending"
+
+    def test_the_refusal_is_visible_to_a_script_not_just_a_human(self, tmp_workdir: str) -> None:
+        """stdout stays clean so a scripted read is not mistaken for success."""
+        self._start(tmp_workdir)
+        result = self._refuse(tmp_workdir)
+
+        assert result.returncode != 0, _cli_failure(result)
+        assert "no verdict was produced" in result.stderr
+        assert "no verdict was produced" not in result.stdout
+        assert "sk-" not in (result.stdout + result.stderr)
+
+    def test_the_runnable_command_finishes_the_lifecycle(self, tmp_workdir: str) -> None:
+        """The printed `--skip-tier2 <id>` command completes with a verdict."""
+        write_guard_config(tmp_workdir)
+        self._start(tmp_workdir)
+
+        refused = self._refuse(tmp_workdir)
+        assert refused.returncode != 0, _cli_failure(refused)
+        printed = "gitreins task complete --skip-tier2 df-smoke"
+        assert printed in refused.stdout + refused.stderr
+
+        finished = run_cli(
+            "task",
+            "complete",
+            "--skip-tier2",
+            "df-smoke",
+            cwd=tmp_workdir,
+            unset_env=(*self._LLM_ENV_KEYS, "GITREINS_MOCK_LLM_RESPONSE"),
+        )
+        assert finished.returncode == 0, _cli_failure(finished)
+        assert "Overall: PASS" in finished.stdout
+        assert TaskManager(tmp_workdir).get("df-smoke").status == "complete"
+        verdicts = list((Path(tmp_workdir) / ".gitreins" / "history").rglob("verdict.json"))
+        assert verdicts, (
+            "the Tier 1-only path must produce the verdict the refusal said was missing"
+        )
+        assert json.loads(verdicts[-1].read_text())["passed"] is True
+
+        listing = run_cli("task", "list", cwd=tmp_workdir)
+        assert "●" in listing.stdout
+
+
 # ── Extended: Help output ────────────────────────────────────────────
 
 

@@ -505,12 +505,18 @@ effective score reaches `review_score_threshold` **and** `mode` is `block`.
 Run the MCP stdio server. No flags required; configuration is via
 environment variables:
 
-| Env var | Description |
-|---------|-------------|
-| `GITREINS_LLM_API_KEY` | API key for the LLM provider |
-| `GITREINS_LLM_BASE_URL` | Base URL of the LLM API (default `https://api.openai.com/v1`) |
-| `GITREINS_LLM_MODEL` | Model name (default varies by provider) |
-| `GITREINS_LLM_REASONING` | Reasoning mode: `enabled` or `disabled` (default `disabled`) |
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `GITREINS_LLM_API_KEY` | none | API key for the LLM provider |
+| `GITREINS_LLM_BASE_URL` | `https://api.openai.com/v1` | Base URL of the LLM API |
+| `GITREINS_LLM_MODEL` | `deepseek-v4-flash` | Model name |
+| `GITREINS_LLM_PROVIDER` | auto-detect | Force the wire protocol: `openai` or `anthropic` |
+| `GITREINS_LLM_REASONING` | `disabled` | DeepSeek thinking mode: `enabled` or `disabled` |
+| `GITREINS_LLM_TIMEOUT` | `120` | Per-attempt request timeout, in seconds |
+| `GITREINS_ANTHROPIC_VERSION` | `2023-06-01` | `anthropic-version` header (Anthropic path only) |
+
+Accepted values, precedence, and how the MCP `configure` tool interacts with
+these controls: [LLM Runtime Environment](#llm-runtime-environment).
 
 Evaluator cap overrides (`GITREINS_MAX_INPUT_TOKENS`, `GITREINS_MAX_OUTPUT_TOKENS`
 and the iteration/time twins) are documented in
@@ -524,7 +530,7 @@ On startup the server writes one acknowledgement line to **stderr** (stdout is
 protocol-pure), naming its identity and the workdir it resolved — raw output,
 not an invocation:
 
-    gitreins MCP server <version> — stdio, protocol 2025-11-25 (negotiated per client request), 14 tools, workdir=/path/to/repo
+    gitreins MCP server <version> — stdio, protocol 2025-11-25 (negotiated per client request), 15 tools, workdir=/path/to/repo
 
 The protocol named there is the newest revision the server implements — the same
 one it answers with when a client asks for a revision it does not implement.
@@ -812,6 +818,23 @@ heartbeat) and orphan trees are **reported and kept** unless you pass
 anything was reaped (it prints `Nothing to reap.`); exit **1** means the reap
 itself failed (`worktree clean: failed`).
 
+Every disposable registry entry is then reported per entry — reaped, forgotten
+(its tree directory no longer exists), or **kept** with its status and the
+reason it survived:
+
+```text
+Reaped 3 disposable run(s): run-a, run-b, run-c
+  interrupted run(s) reaped: run-c
+Forgot 1 disposable run(s) whose tree was already gone: run-d
+Kept 1 disposable run(s):
+  run-e [running] — run is still active (pid 4242)
+```
+
+Statuses are `running`, `kept`, and `kept-failure` (a retained failure tree,
+with `exit_code`); a `running` entry whose process is gone is an interrupted
+run and is reaped. See [disposable-verification.md](disposable-verification.md)
+for the registry contract.
+
 ### `worktree merge`
 
 ```bash
@@ -1029,12 +1052,13 @@ verdict onto a DISPATCH DECISION with `engine/preflight.py` — so a foreman can
 annotate work that is already done instead of spawning a worker for it.
 
 ```
-gitreins preflight "<question>" [--json]
+gitreins preflight "<question>" [--surface <name>] [--json]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `<question>` | The row's premise to resolve, quoted (e.g. "Is JEVRES-003 already implemented?") |
+| `--surface <name>` | The resolution surface whose enable flag (`resolution.enabled.<surface>`) gates this run — one of `cli`, `mcp`, `predispatch` (default), `judge_prescreen` |
 | `--json` | Emit the full machine record as JSON (foremen consume this) |
 
 | Verdict band | Decision | Meaning |
@@ -1073,6 +1097,26 @@ the `surface-disabled` gate all return the same eight fields, with `probability`
 `null` and the reason spelled out inside `verdict.abstain_detail`, so a consumer
 keying on `.verdict` needs no ABSTAIN branch of its own.
 
+**`--surface`: the enable flags are per surface, and independent.** The four
+surfaces (`cli`, `mcp`, `predispatch`, `judge_prescreen`) are switched on one by
+one in `.gitreins/config.yaml`, and this command defaults to `predispatch`. A
+repo that enables only `cli` — enough for `gitreins resolve` to answer — therefore
+gets `ABSTAIN` / `abstain_reason: surface-disabled` from every `preflight` call:
+nothing in the resolver is wrong, that surface was simply never turned on.
+`--surface <name>` names the flag that gates this run, so such a repo can run the
+same check on the surface it already enabled:
+
+```bash
+# resolution.enabled.cli: true, predispatch left off (this repo's own config):
+gitreins preflight --surface cli "Is JEVRES-003 already implemented?"
+```
+
+`--surface` selects a gate, it never enables one: naming a surface that is also
+false (or a name outside the four) is a usage error or another `surface-disabled`
+ABSTAIN — never a silent fall-through to an enabled surface. The disabled record
+says which: `verdict.abstain_detail` names the surface that did not run AND the
+ones that ARE enabled, so "resolution is off" is never the only reading.
+
 **Upgrading from 0.15.0.** Before DF-GITREINS-POC-37 this record nested the
 verdict as an ESCAPED JSON STRING under `verdict_json`, so a script had to parse
 it twice (`jq -r '.verdict_json | fromjson'`) while `resolve --json` printed the
@@ -1087,16 +1131,21 @@ authority for a merge or a commit (spec §6.5).
 resolution record with `source: "predispatch"` — the band, probability, question and
 the full verdict object — through the same shared helper `gitreins resolve` uses, so a
 skip-dispatch (no worker spawned) always leaves the audit trail that decision needs
-(`gitreins report`, `gitreins serve`). An ABSTAIN — including the `surface-disabled`
-one described below — writes nothing: a disabled surface does not even touch the store.
+(`gitreins report`, `gitreins serve`). The `source` is the surface that gated the run, so
+`--surface cli` files `source: "cli"` — the enable flag that permitted the egress, named
+honestly rather than hidden behind the command name. An ABSTAIN — including the
+`surface-disabled` one described below — writes nothing: a disabled surface does not even
+touch the store.
 
 **Enabling.** `predispatch` ships disabled too — and its failure mode is the opposite one:
 with `resolution.enabled.predispatch` absent or `false` the gate never runs and the record
 is an ABSTAIN mapped to plain `dispatch` (fail open, above). Set
 `resolution.enabled.predispatch: true` in `.gitreins/config.yaml` to run the real policy;
-the complete block is in [docs/jev-resolution-gate.md](jev-resolution-gate.md) §9. Do not
-enable it to "fix" a dispatch that is blocked for another reason — the ABSTAIN record
-already says the gate did not run.
+the complete block is in [docs/jev-resolution-gate.md](jev-resolution-gate.md) §9. If the
+repo deliberately keeps this surface off, run the check on one it has enabled instead
+(`--surface cli`, above) rather than enabling a surface whose calibration numbers are not
+in yet. Do not enable it to "fix" a dispatch that is blocked for another reason — the
+ABSTAIN record already says the gate did not run.
 
 ```bash
 # with resolution.enabled.predispatch: true in .gitreins/config.yaml:
@@ -1194,6 +1243,127 @@ uses.
   A skip still exits 0; only `mode: block` exits 1. The command also exits 0
   with "No commit message to audit." when there is nothing to read.
 
+## LLM Runtime Environment
+
+Every LLM call GitReins makes — the Tier 2 judge (`gitreins judge`,
+`task complete`), `commit-audit`, `resolve` / `preflight` (the Jev gate), and
+the MCP server's evaluation tools — goes through one client (`engine/llm.py`)
+that resolves its configuration from environment variables when it is
+constructed. Four of them are operator controls: they change provider
+selection, request timeout, reasoning mode, and Anthropic compatibility
+without editing code or `.gitreins/config.yaml`.
+
+| Variable | Purpose | Accepted values | Default |
+|----------|---------|-----------------|---------|
+| `GITREINS_LLM_TIMEOUT` | Per-attempt HTTP timeout for each provider request | integer seconds | `120` |
+| `GITREINS_LLM_REASONING` | DeepSeek thinking mode | `enabled` = on; any other value = off | `disabled` |
+| `GITREINS_LLM_PROVIDER` | Force the wire protocol instead of auto-detecting it | `openai` or `anthropic` (whitespace-stripped, case-folded) | unset → auto-detect |
+| `GITREINS_ANTHROPIC_VERSION` | Value of the `anthropic-version` request header | Anthropic API version date, e.g. `2023-06-01` | `2023-06-01` |
+
+### `GITREINS_LLM_TIMEOUT`
+
+Per-attempt read timeout, in **seconds**, for the single HTTP request each
+provider call makes — the OpenAI-compatible `/chat/completions` path and the
+Anthropic `/messages` path alike. It exists because the former hard-coded 120 s
+killed Tier 2 judge calls against slow local gateways: three read timeouts, no
+verdict.
+
+- **Values:** any integer `int()` accepts (`45`, `120`, `300`). A non-numeric
+  value raises `ValueError` when the client is constructed, so a typo fails
+  loudly instead of silently reverting to the default.
+- **Default:** `120`.
+- **Scope:** per *attempt*, not per call. A call retries at most 3 times (4xx
+  other than 429 fails fast; 429, 5xx and network errors retry after 1 s then
+  2 s), so the worst-case wall time for one call is roughly
+  `3 × GITREINS_LLM_TIMEOUT + 3 s`. This is not the evaluator's own time budget
+  — those caps live in
+  [evaluator-loop.md](evaluator-loop.md#environment-variables).
+
+### `GITREINS_LLM_REASONING`
+
+Controls DeepSeek thinking mode. When the client detects DeepSeek, the request
+carries an explicit `thinking` field — `{"type": "enabled"}` for `enabled`,
+`{"type": "disabled"}` for anything else.
+
+- **Values:** `enabled` turns reasoning on. Any other value, including the
+  default `disabled`, sends `disabled`; the comparison is exact.
+- **Default:** `disabled`.
+- **Applies only to DeepSeek.** Detection is the model name or the provider
+  string containing `deepseek` (e.g. `GITREINS_LLM_MODEL=deepseek-v4-flash`).
+  On any other model the `thinking` field is omitted from the request entirely.
+- **Precedence:** an explicit `llm_reasoning=` constructor argument beats the
+  environment variable; the variable is read only when the argument is unset.
+
+### `GITREINS_LLM_PROVIDER`
+
+Forces which wire protocol and endpoint the client speaks, instead of inferring
+it from the base URL.
+
+| Setting | Endpoint | Authentication |
+|---------|----------|----------------|
+| `openai` | `POST <base>/chat/completions` | `Authorization: Bearer <key>` |
+| `anthropic` | `POST <base>/messages` | `x-api-key` + `anthropic-version` |
+
+- **Values:** `openai` or `anthropic`. The value is whitespace-stripped and
+  case-folded, so `" ANTHROPIC "` works; a blank or whitespace-only value
+  counts as unset.
+- **Default:** unset → auto-detect.
+- **Precedence:** `GITREINS_LLM_PROVIDER` → explicit `provider=` constructor
+  argument → base-URL detection (Anthropic when the base URL contains
+  `anthropic.com` or `claude`, otherwise OpenAI). The environment variable wins
+  over the argument.
+- **An invalid value fails loudly:** a non-empty unsupported value raises
+  `ValueError: Invalid GITREINS_LLM_PROVIDER='…': supported providers are
+  openai, anthropic` rather than silently falling back to detection.
+
+**Interaction with the MCP `configure` tool.** `configure(provider=…)` sets
+`GITREINS_LLM_PROVIDER` in the server process and recreates the LLM client and
+Judge, so every later `judge.evaluate` / `task.complete` uses the chosen
+protocol with no restart. Two behaviours are worth knowing before using it:
+
+- The value **is** validated, indirectly: `configure` rebuilds the client, so an
+  unsupported provider raises the `ValueError` above **inside the `configure`
+  call** — not later, at evaluation time.
+- That invalid value is **left set** in the process environment, so every
+  subsequent client construction keeps raising (the server cannot evaluate)
+  until `GITREINS_LLM_PROVIDER` is set to a supported value — `configure` with
+  a valid provider does this, because the variable is rewritten before the
+  client is rebuilt — or the server is restarted.
+
+The other three controls have no dedicated parameter on `configure`; set them
+through its `env` dict (e.g. `{"GITREINS_LLM_TIMEOUT": "300"}`), which writes
+them into the process environment before the rebuild.
+
+### `GITREINS_ANTHROPIC_VERSION`
+
+Value of the `anthropic-version` header on the Anthropic path, which Anthropic
+requires on every request.
+
+- **Values:** an Anthropic API version date, e.g. `2023-06-01` (default) or
+  `2024-01-01`.
+- **Default:** `2023-06-01`.
+- **Read only when the resolved provider is `anthropic`.** On the
+  OpenAI-compatible path no `anthropic-version` header is sent, and setting the
+  variable there has no effect.
+
+### API keys
+
+**Never paste a key into docs, commit messages, logs, tickets, prompts, or
+screenshots.** Key material that reaches a repo, log or transcript is burned —
+the secrets guard blocks the commit, and anything already exposed must be
+rotated, not deleted.
+
+GitReins reads credentials only from the environment — `GITREINS_LLM_API_KEY`,
+falling back in order to the first non-empty of `NEURALWATT_API_KEY`,
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `KIMI_API_KEY`,
+`GROQ_API_KEY`, `OPENROUTER_API_KEY` — and never prints their value. What it
+does record is the **name** of the variable that supplied the key, so a
+rejected credential can be traced to its source; the MCP config snapshot
+reports only `api_key_configured` (a boolean) plus a short `api_key_prefix`.
+Set `GITREINS_LLM_API_KEY` explicitly when a provider SDK shares the
+environment: the fallback chain takes the first non-empty match, not the one
+that belongs to the configured base URL.
+
 ## Configuration
 
 Runtime behavior is controlled by `.gitreins/config.yaml` in the repo
@@ -1202,7 +1372,11 @@ root (created by `gitreins install` / `gitreins init`). Key settings:
 `max_input_tokens`, guard enable/disable toggles, and
 history persistence. Repo-produced metrics are configured in the optional
 `quality:` block; see [quality-metrics.md](quality-metrics.md). There are no
-quality-specific environment variables. See `docs/architecture.md` for the config schema.
+quality-specific environment variables, and the LLM runtime controls — provider,
+request timeout, reasoning mode and the Anthropic API version — are environment
+variables rather than config keys, documented in
+[LLM Runtime Environment](#llm-runtime-environment). See
+`docs/architecture.md` for the config schema.
 
 ### `guards.test_on_clean`
 

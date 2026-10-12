@@ -481,6 +481,181 @@ class TestPreflightConfigGate:
         assert record["probability"] == pytest.approx(0.87)
 
 
+class TestPreflightSurfaceSelection:
+    """DF-GITREINS-POC-81 — `--surface` names the enable flag that gates the run.
+
+    The reported repo is this repo's own shape: `.gitreins/config.yaml` enables
+    `cli` (so `gitreins resolve` answers) and leaves the judge-adjacent
+    `predispatch` surface off, so `gitreins preflight` returned ABSTAIN /
+    `abstain_reason: surface-disabled` for every question. Nothing in the
+    resolver was wrong — the surface was never enabled — and `--surface cli`
+    runs the same check on the surface the repo HAS turned on.
+
+    These tests drive the gate from the real config FILE (not the module's
+    stubbed defaults) so the enable flags, the abstain detail and the recorded
+    `source` are all exercised through one loader.
+    """
+
+    @staticmethod
+    def _write_config(workdir: Path, enabled: dict[str, bool]) -> None:
+        import yaml
+
+        config_dir = workdir / ".gitreins"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        with open(config_dir / "config.yaml", "w") as handle:
+            yaml.safe_dump({"resolution": {"enabled": enabled}}, handle)
+
+    @staticmethod
+    def _use_real_loader(monkeypatch: pytest.MonkeyPatch, workdir: Path) -> None:
+        from engine.config import load_defaults
+
+        monkeypatch.setattr(
+            resolution, "resolution_config", lambda wd=".": load_defaults(str(workdir))
+        )
+
+    @staticmethod
+    def _records(workdir: Path) -> list:
+        return sorted((workdir / ".gitreins" / "history").glob("*/*/verdict.json"))
+
+    def test_surface_cli_runs_the_check_in_a_cli_only_repo(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """cli on / predispatch off → --surface cli answers for real."""
+        _script_assembler(monkeypatch)
+        monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("poc81"))
+        monkeypatch.setattr(
+            resolution,
+            "requests",
+            type("E", (), {"post": staticmethod(lambda *a, **k: _StubResponse(0.87))})(),
+        )
+
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        self._write_config(workdir, {"cli": True, "mcp": True, "predispatch": False})
+        self._use_real_loader(monkeypatch, workdir)
+
+        code, out, err = run_preflight(
+            monkeypatch, str(workdir), "Is the premise already met?", "--surface", "cli", "--json"
+        )
+
+        assert code == 0
+        assert err == ""
+        record = json.loads(out)
+        assert record["band"] == "RESOLVED"
+        assert record["decision"] == "skip-dispatch"
+        assert record["abstain_reason"] is None
+        assert record["probability"] == pytest.approx(0.87)
+        # The decision was filed by the surface whose enable flag permitted the
+        # run — the record says which flag that was (docs/cli-reference.md §16).
+        records = self._records(workdir)
+        assert len(records) == 1
+        persisted = json.loads(records[0].read_text())
+        assert persisted["source"] == "cli"
+        assert persisted["band"] == "RESOLVED"
+
+    def test_default_surface_is_still_predispatch_and_abstains_fail_open(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """No --surface → unchanged predispatch behavior: abstain, dispatch, no egress."""
+        posted: list = []
+        monkeypatch.setattr(
+            resolution,
+            "requests",
+            type("E", (), {"post": staticmethod(lambda *a, **k: posted.append(1))})(),
+        )
+        monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("poc81"))
+
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        self._write_config(workdir, {"cli": True, "predispatch": False})
+        self._use_real_loader(monkeypatch, workdir)
+
+        code, out, err = run_preflight(
+            monkeypatch, str(workdir), "Is the premise already met?", "--json"
+        )
+
+        assert code == 0, "a disabled surface is a fail-open dispatch outcome"
+        assert err == ""
+        record = json.loads(out)
+        assert record["band"] == "ABSTAIN"
+        assert record["abstain_reason"] == "surface-disabled"
+        assert record["decision"] == "dispatch"
+        detail = record["verdict"]["abstain_detail"]
+        assert "resolution.enabled.predispatch is false" in detail
+        assert "now enabled: cli" in detail, "the enabled surface is named in the record"
+        assert posted == [], "a disabled surface must not reach the provider"
+        assert self._records(workdir) == [], "an ABSTAIN writes nothing"
+
+    def test_a_disabled_named_surface_names_that_surface(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """--surface cli in a repo with nothing enabled abstains on 'cli', not predispatch."""
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        self._write_config(workdir, {"cli": False, "predispatch": False})
+        self._use_real_loader(monkeypatch, workdir)
+
+        code, out, _ = run_preflight(
+            monkeypatch, str(workdir), "Is the premise already met?", "--surface", "cli", "--json"
+        )
+
+        assert code == 0
+        record = json.loads(out)
+        assert record["abstain_reason"] == "surface-disabled"
+        assert record["decision"] == "dispatch"
+        detail = record["verdict"]["abstain_detail"]
+        assert "resolution.enabled.cli is false" in detail
+        assert "no surface is enabled" in detail
+
+    def test_human_output_names_the_surface_the_abstain_and_the_fix(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The text surface must not leave the operator with a bare 'ABSTAIN'."""
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        self._write_config(workdir, {"cli": True, "predispatch": False})
+        self._use_real_loader(monkeypatch, workdir)
+
+        code, out, _ = run_preflight(monkeypatch, str(workdir), "Is the premise already met?")
+
+        assert code == 0
+        assert "Surface:  predispatch" in out
+        assert "Abstain:  surface-disabled" in out
+        assert "Detail:   resolution.enabled.predispatch is false" in out
+        assert "Fix:      " in out
+        assert "--surface cli" in out, "the hint names the way out without a config change"
+
+    def test_unknown_surface_is_a_hard_usage_error(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        code, _, err = run_preflight(
+            monkeypatch, str(workdir), "anything?", "--surface", "carrier-pigeon"
+        )
+        assert code != 0, "an unknown surface is a usage error, not an abstain"
+        assert "carrier-pigeon" in err
+
+    def test_help_names_the_surface_distinction(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """`--surface` and the independence rule are in the command's own help."""
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        code, out, _ = run_preflight(monkeypatch, str(workdir), "--help")
+
+        assert code == 0
+        # argparse wraps its help text, so compare on normalized whitespace.
+        help_text = " ".join(out.split())
+        assert "--surface" in help_text
+        assert "{cli,mcp,predispatch,judge_prescreen}" in help_text
+        assert "default: predispatch" in help_text
+        assert "Every surface is enabled independently" in help_text
+        assert "does NOT enable resolution.enabled.predispatch" in help_text
+        lowered = help_text.lower()
+        assert "resolved" in lowered and "abstain" in lowered
+
+
 class TestPreflightPersistence:
     """DF-GITREINS-POC-36 — the predispatch surface records its decision.
 

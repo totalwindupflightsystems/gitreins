@@ -23,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from engine.llm import LLMClient, LLMResponse, ToolCall
+from engine.review_profiles import ReviewProfile
 
 logger = logging.getLogger("gitreins.commit_audit")
 
@@ -892,7 +893,7 @@ class CommitAuditor:
         self,
         message: str,
         diff: str,
-        profile,  # ReviewProfile
+        profile: ReviewProfile,
     ) -> CommitReviewResult:
         """Pass 1: evidence-backed findings under the profile's rubric."""
 
