@@ -38,11 +38,12 @@ import logging
 import os
 import time
 import uuid
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 logger = logging.getLogger("gitreins.job_store")
 
 DEFAULT_JOB_DIR = os.path.expanduser("~/.local/share/gitreins/jobs")
+JobRecord = dict[str, Any]
 
 
 def job_dir(directory: str | None = None) -> str:
@@ -70,7 +71,7 @@ def new_job_id() -> str:
     return f"job-{uuid.uuid4().hex}"
 
 
-def make_job(task_id: str, workdir: str, caps: dict | None = None) -> dict:
+def make_job(task_id: str, workdir: str, caps: JobRecord | None = None) -> JobRecord:
     """Create a fresh running job record (not yet persisted)."""
     return {
         "id": new_job_id(),
@@ -87,7 +88,7 @@ def make_job(task_id: str, workdir: str, caps: dict | None = None) -> dict:
     }
 
 
-def save_job(job: dict, directory: str | None = None) -> None:
+def save_job(job: JobRecord, directory: str | None = None) -> None:
     """Persist a job record atomically (tmp file + os.replace)."""
     path = job_path(job["id"], directory)
     tmp = f"{path}.tmp-{os.getpid()}"
@@ -98,14 +99,14 @@ def save_job(job: dict, directory: str | None = None) -> None:
     os.replace(tmp, path)
 
 
-def load_job(job_id: str, directory: str | None = None) -> dict | None:
+def load_job(job_id: str, directory: str | None = None) -> JobRecord | None:
     """Load a job record from disk, or None if it doesn't exist."""
     path = job_path(job_id, directory)
     if not os.path.exists(path):
         return None
     try:
         with open(path, encoding="utf-8") as f:
-            return json.load(f)
+            return cast(JobRecord, json.load(f))
     except (json.JSONDecodeError, OSError) as e:
         # A torn write would only happen if the process was killed mid-
         # replace — treat as missing rather than crashing status polls.
@@ -113,9 +114,9 @@ def load_job(job_id: str, directory: str | None = None) -> dict | None:
         return None
 
 
-def list_jobs(directory: str | None = None) -> list[dict]:
+def list_jobs(directory: str | None = None) -> list[JobRecord]:
     """Return all job records on disk (newest first)."""
-    jobs = []
+    jobs: list[JobRecord] = []
     d = job_dir(directory)
     if not os.path.isdir(d):
         return jobs
@@ -138,7 +139,7 @@ def delete_job(job_id: str, directory: str | None = None) -> bool:
     return False
 
 
-def find_running_job(task_id: str, workdir: str, directory: str | None = None) -> dict | None:
+def find_running_job(task_id: str, workdir: str, directory: str | None = None) -> JobRecord | None:
     """Return the newest running job record for (task_id, workdir), if any.
 
     Single-flight key (GR-GAP-046): at most ONE in-flight evaluation per
@@ -211,14 +212,14 @@ _CAP_FIELDS = (
 )
 
 
-def cap_to_dict(cap: EvalCap | None) -> dict | None:
+def cap_to_dict(cap: EvalCap | None) -> JobRecord | None:
     """Serialize an EvalCap to its primitive fields (None → None)."""
     if cap is None:
         return None
     return {f: getattr(cap, f) for f in _CAP_FIELDS}
 
 
-def cap_from_dict(d: dict | None) -> EvalCap | None:
+def cap_from_dict(d: JobRecord | None) -> EvalCap | None:
     """Rebuild an EvalCap from a cap_to_dict payload (None → None)."""
     if not d:
         return None

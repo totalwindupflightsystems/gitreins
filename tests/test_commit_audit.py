@@ -194,6 +194,86 @@ class TestCommitAuditorAudit:
         result = auditor.audit("fix: something", diff="+some change")
         assert result.valid is True  # safe default
 
+    @patch.object(LLMClient, "chat")
+    def test_clear_docs_contradiction_blocks_before_llm(self, mock_chat: object) -> None:
+        """A clear code-prefix/docs-only mismatch never reaches the model."""
+        mock_chat.side_effect = AssertionError("deterministic floor must run first")
+        diff = """diff --git a/README.md b/README.md
+index 1111111..2222222 100644
+--- a/README.md
++++ b/README.md
+@@ -1 +1 @@
+-old
++new
+"""
+
+        result = self._make_auditor().audit(
+            "feat: rewrite guard engine in Rust with new parser", diff=diff
+        )
+
+        assert result.valid is False
+        assert result.iterations_used == 0
+        assert "documentation-only" in result.issues[0]
+        mock_chat.assert_not_called()
+
+    @patch.object(LLMClient, "chat")
+    def test_docs_subject_is_still_llm_driven(self, mock_chat: object) -> None:
+        """A legitimate docs subject is not rejected by the deterministic floor."""
+        mock_chat.return_value = self._valid_response()
+        diff = """diff --git a/docs/guide.md b/docs/guide.md
+index 1111111..2222222 100644
+--- a/docs/guide.md
++++ b/docs/guide.md
+@@ -1 +1 @@
+-old
++new
+"""
+
+        result = self._make_auditor().audit("docs: clarify the setup guide", diff=diff)
+
+        assert result.valid is True
+        mock_chat.assert_called_once()
+
+    @pytest.mark.parametrize(
+        "diff",
+        [
+            """diff --git a/README.md b/README.md
+index 1111111..2222222 100644
+--- a/README.md
++++ b/README.md
+@@ -1 +1 @@
+-old
++new
+"""
+            + """diff --git a/src/main.py b/src/main.py
+index 1111111..2222222 100644
+--- a/src/main.py
++++ b/src/main.py
+@@ -1 +1 @@
+-old
++new
+""",
+            """diff --git a/config.yaml b/config.yaml
+index 1111111..2222222 100644
+--- a/config.yaml
++++ b/config.yaml
+@@ -1 +1 @@
+-old
++new
+""",
+        ],
+        ids=["mixed-scope", "unknown-scope"],
+    )
+    @patch.object(LLMClient, "chat")
+    def test_mixed_or_unknown_scope_remains_llm_driven(self, mock_chat: object, diff: str) -> None:
+        """The floor fails closed to the existing LLM behavior."""
+        mock_chat.return_value = self._valid_response()
+
+        result = self._make_auditor().audit("feat: describe the change", diff=diff)
+
+        assert result.valid is True
+        mock_chat.assert_called_once()
+
 
 # ═══════════════════════════════════════════════════════════════
 # CommitAuditor — strictness levels

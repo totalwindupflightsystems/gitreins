@@ -5,9 +5,10 @@ import os
 import re
 import subprocess
 from dataclasses import dataclass
+from typing import Any, SupportsInt
 
 from engine import command_hygiene, scanner_nice
-from engine.data_protection import DataProtectionPolicy
+from engine.data_protection import DataProtectionPolicy, Finding
 from engine.types import DataProtectionResult
 
 logger = logging.getLogger("gitreins.guards.go")
@@ -145,7 +146,7 @@ def check_data_protection(
             output="data_protection: no scannable files in scope",
         )
 
-    findings: list = []
+    findings: list[tuple[str, Finding]] = []
     scanned = 0
     skipped_files: list[str] = []
     for path in scope[:DATA_PROTECTION_MAX_FILES]:
@@ -297,20 +298,36 @@ def _coerce_timeout(value: object, name: str, default: int) -> int:
                 f"guards.{name} must be a positive number of seconds "
                 f"(e.g. {name}: 300), got {value!r}"
             )
-        value = int(match.group(1))
-    else:
+        digits = int(match.group(1))
+        if digits <= 0:
+            raise ValueError(
+                f"guards.{name} must be a positive number of seconds "
+                f"(e.g. {name}: 300), got {value!r}"
+            )
+        return digits
+    # GR-GAP-028: YAML puts booleans here too (``test_timeout: true``) — the
+    # bool arm above already rejected them — and numeric values may arrive as
+    # int or float. Narrow to the runtime truth before coercing so mypy can
+    # see the int that survives; non-numeric objects keep the ValueError.
+    if isinstance(value, SupportsInt) and not isinstance(value, bool):
         try:
-            value = int(value)
+            coerced = int(value)
         except (TypeError, ValueError, OverflowError):
+            # e.g. float('nan')/float('inf') support int() but reject it at
+            # runtime — keep the same named-config-key ValueError as garbage.
             raise ValueError(
                 f"guards.{name} must be a positive number of seconds "
                 f"(e.g. {name}: 300), got {value!r}"
             ) from None
-    if value <= 0:
-        raise ValueError(
-            f"guards.{name} must be a positive number of seconds (e.g. {name}: 300), got {value!r}"
-        )
-    return value
+        if coerced <= 0:
+            raise ValueError(
+                f"guards.{name} must be a positive number of seconds "
+                f"(e.g. {name}: 300), got {value!r}"
+            )
+        return coerced
+    raise ValueError(
+        f"guards.{name} must be a positive number of seconds (e.g. {name}: 300), got {value!r}"
+    )
 
 
 @dataclass
@@ -407,7 +424,7 @@ def check_go_lint(
     # pass for the lane to pass.
     package_dirs = sorted({os.path.dirname(f) or "." for f in go_files})
     lint_prefix, lint_note = scanner_nice.argv_prefix(nice_level, "golangci-lint")
-    lint_results: list[dict] = []
+    lint_results: list[dict[str, Any]] = []
     for pkg_dir in package_dirs:
         result = command_hygiene.run_bounded(
             [
@@ -605,17 +622,23 @@ def check_go_tests(
             name="go_tests", passed=False, error=_spawn_error_message(result["error"])
         )
     output = result.get("output") or ""
-    if len(output) > 2000:
-        output = output[-2000:]
-    prefix = f"{configured_note}\n" if configured_note else ""
+    # Narrow the Any from run_bounded's dict before slicing/concatenation.
+    output_str: str = output if isinstance(output, str) else ""
+    if len(output_str) > 2000:
+        output_str = output_str[-2000:]
+    # ``prefix`` above already names the nice-argv tuple; the note prefix that
+    # prepends the configured-command warning to the lane output is separate.
+    note_prefix = f"{configured_note}\n" if configured_note else ""
     if result.get("exit_code") == 0:
         return GoGuardResult(
             name="go_tests",
             passed=True,
-            output=(prefix + output)[:500],
+            output=(note_prefix + output_str)[:500],
             nice_note=nice_note,
         )
-    return GoGuardResult(name="go_tests", passed=False, output=prefix + output, nice_note=nice_note)
+    return GoGuardResult(
+        name="go_tests", passed=False, output=note_prefix + output_str, nice_note=nice_note
+    )
 
 
 def check_go_build(

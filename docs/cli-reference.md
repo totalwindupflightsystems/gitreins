@@ -493,6 +493,69 @@ commit_audit:
 `mode: block` still decides the exit code: a review issue only blocks when its
 effective score reaches `review_score_threshold` **and** `mode` is `block`.
 
+### Deterministic floor and limits
+
+Before the LLM is called, message mode applies a conservative deterministic
+floor to conventional-commit prefixes and file paths. An unambiguous mismatch
+such as `feat:` (or another code-change prefix) over a docs-only staged diff is
+rejected immediately; `docs:` over docs-only changes is allowed to continue to
+LLM review. Mixed or unknown paths are intentionally not classified by this
+floor and retain the existing LLM behavior.
+
+This is best-effort even with `mode: block`: it guarantees rejection only for
+contradictions recognized by the deterministic floor. Residual LLM review is
+nondeterministic, so a message outside that floor can still be accepted or
+rejected differently across runs. `mode: block` is not a guarantee that every
+misleading message will be caught.
+
+For a repeatable five-run smoke check, use a scratch repository and stage either
+an edited README or a newly planted documentation file. Both commands must
+return exit 1 and report `documentation-only` every time; no LLM credential is
+needed because the deterministic floor runs first:
+
+```bash
+scratch=$(mktemp -d)
+trap 'rm -rf "$scratch"' EXIT
+setup_case() {
+  git -C "$scratch" init -q
+  git -C "$scratch" config user.email test@example.invalid
+  git -C "$scratch" config user.name test
+  mkdir -p "$scratch/.gitreins" "$scratch/docs"
+  cat > "$scratch/.gitreins/config.yaml" <<'YAML'
+pipeline:
+  stages:
+    - {id: commit_audit, type: commit_audit, on: [commit-msg], mode: block}
+YAML
+}
+
+setup_case
+printf 'baseline\n' > "$scratch/README.md"
+git -C "$scratch" add README.md && git -C "$scratch" commit -qm baseline
+printf 'changed\n' > "$scratch/README.md"
+git -C "$scratch" add README.md
+for run in 1 2 3 4 5; do
+  output=$(cd "$scratch" && gitreins commit-audit 'feat: rewrite guard engine in Rust with new parser' 2>&1)
+  status=$?
+  if [ "$status" -ne 1 ] || ! grep -q 'documentation-only' <<<"$output"; then
+    echo "README case failed on run $run" >&2
+    exit 1
+  fi
+done
+
+# Planted-file case: a new docs file is also unambiguously documentation-only.
+git -C "$scratch" reset -q
+printf 'new documentation\n' > "$scratch/docs/planted.md"
+git -C "$scratch" add docs/planted.md
+for run in 1 2 3 4 5; do
+  output=$(cd "$scratch" && gitreins commit-audit 'feat: rewrite guard engine in Rust with new parser' 2>&1)
+  status=$?
+  if [ "$status" -ne 1 ] || ! grep -q 'documentation-only' <<<"$output"; then
+    echo "planted-file case failed on run $run" >&2
+    exit 1
+  fi
+done
+```
+
 **Exit codes**
 
 | Code | Meaning |

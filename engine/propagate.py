@@ -7,6 +7,7 @@ Target overrides are always preserved during merge.
 import logging
 import os
 from copy import deepcopy
+from typing import Any
 
 logger = logging.getLogger("gitreins.propagate")
 
@@ -24,7 +25,7 @@ class Propagator:
 
     # ── Public API ──────────────────────────────────────────────
 
-    def propagate(self, target_repos: list[str]) -> dict:
+    def propagate(self, target_repos: list[str]) -> dict[str, Any]:
         """Propagate guard config to sibling repos.
 
         Args:
@@ -58,7 +59,7 @@ class Propagator:
 
     # ── Config loading ──────────────────────────────────────────
 
-    def _load_source_config(self) -> dict | None:
+    def _load_source_config(self) -> dict[str, Any] | None:
         """Read the source repo's .gitreins/config.yaml.
 
         Returns:
@@ -87,7 +88,7 @@ class Propagator:
     # ── Override detection ─────────────────────────────────────
 
     @staticmethod
-    def _should_override(key: str, target_config: dict) -> bool:
+    def _should_override(key: str, target_config: dict[str, Any]) -> bool:
         """Return ``True`` if *key* should come from *target_config*.
 
         ``False`` means the key is absent in the target, so the source
@@ -97,7 +98,11 @@ class Propagator:
 
     # ── Merge / copy helpers ────────────────────────────────────
 
-    def _merge_to_target(self, source_config: dict, target_config_path: str) -> dict:
+    def _merge_to_target(
+        self,
+        source_config: dict[str, Any],
+        target_config_path: str,
+    ) -> dict[str, Any]:
         """Merge *source_config* into the existing config at *target_config_path*.
 
         Target values always win on key conflicts. Nested dicts are
@@ -120,7 +125,11 @@ class Propagator:
             "keys_preserved": sorted(keys_preserved),
         }
 
-    def _copy_to_target(self, source_config: dict, target_config_path: str) -> dict:
+    def _copy_to_target(
+        self,
+        source_config: dict[str, Any],
+        target_config_path: str,
+    ) -> dict[str, Any]:
         """Write *source_config* wholesale to *target_config_path*."""
         import yaml
 
@@ -138,8 +147,8 @@ class Propagator:
 
     @staticmethod
     def _merge_dicts(
-        source: dict, target: dict, prefix: str = ""
-    ) -> tuple[dict, list[str], list[str]]:
+        source: dict[str, Any], target: dict[str, Any], prefix: str = ""
+    ) -> tuple[dict[str, Any], list[str], list[str]]:
         """Recursively merge *source* into *target*.
 
         Returns (merged_dict, keys_added, keys_preserved).

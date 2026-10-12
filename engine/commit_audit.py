@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import subprocess
 from dataclasses import dataclass, field
 from typing import Any
@@ -378,6 +379,111 @@ COMMIT_AUDIT_TOOLS: list[dict[str, Any]] = [
         },
     },
 ]
+
+
+# ── Deterministic pre-LLM floor ──────────────────────────────────
+
+# Only prefixes whose meaning is unambiguous are used here.  Ambiguous
+# prefixes (for example ``chore``) deliberately stay with the LLM.
+_CODE_CHANGE_PREFIXES = frozenset({"build", "ci", "feat", "fix", "perf", "refactor", "test"})
+_DOC_PATH_SUFFIXES = frozenset({".adoc", ".markdown", ".md", ".mdown", ".mdx", ".rst", ".txt"})
+_SOURCE_PATH_SUFFIXES = frozenset(
+    {
+        ".c",
+        ".cc",
+        ".cpp",
+        ".cs",
+        ".go",
+        ".h",
+        ".hpp",
+        ".java",
+        ".js",
+        ".jsx",
+        ".kt",
+        ".php",
+        ".py",
+        ".rb",
+        ".rs",
+        ".scala",
+        ".sh",
+        ".swift",
+        ".ts",
+        ".tsx",
+    }
+)
+_SUBJECT_PREFIX = re.compile(r"^(?P<type>[a-z][a-z0-9-]*)(?:\([^)]*\))?!?:")
+
+
+def _commit_subject_prefix(message: str) -> str | None:
+    """Return a conventional-commit subject prefix, if it is explicit."""
+    subject = next((line.strip() for line in message.splitlines() if line.strip()), "")
+    match = _SUBJECT_PREFIX.match(subject.lower())
+    return match.group("type") if match else None
+
+
+def _diff_paths(diff: str) -> list[str]:
+    """Extract changed paths from a unified diff without guessing unknown ones."""
+    paths: list[str] = []
+    for line in diff.splitlines():
+        if not line.startswith("diff --git "):
+            continue
+        try:
+            fields = shlex.split(line)
+        except ValueError:
+            return []
+        if len(fields) != 4 or not fields[2].startswith("a/") or not fields[3].startswith("b/"):
+            return []
+        paths.extend((fields[2][2:], fields[3][2:]))
+    # A rename has two headers for one logical change.  De-duplicate while
+    # preserving order so the diagnostic remains stable across runs.
+    return list(dict.fromkeys(paths))
+
+
+def _path_kind(path: str) -> str:
+    """Classify only clearly documentation or source paths."""
+    normalized = path.replace("\\", "/").lower()
+    name = normalized.rsplit("/", 1)[-1]
+    if normalized.startswith("docs/") or name.startswith("readme") or name.startswith("changelog"):
+        return "docs"
+    if any(normalized.endswith(suffix) for suffix in _DOC_PATH_SUFFIXES):
+        return "docs"
+    if any(normalized.endswith(suffix) for suffix in _SOURCE_PATH_SUFFIXES):
+        return "source"
+    return "unknown"
+
+
+def _deterministic_commit_audit(message: str, diff: str) -> "CommitAuditResult | None":
+    """Return a deterministic contradiction result, or ``None`` for LLM review.
+
+    The floor acts only when every changed path is unambiguously documentation
+    or source code.  Mixed and unknown diffs deliberately retain the existing
+    LLM path so this conservative check cannot turn a classification guess into
+    a hard rejection.
+    """
+    prefix = _commit_subject_prefix(message)
+    if not prefix:
+        return None
+    paths = _diff_paths(diff)
+    if not paths:
+        return None
+    kinds = {_path_kind(path) for path in paths}
+    if kinds == {"docs"} and prefix in _CODE_CHANGE_PREFIXES:
+        return CommitAuditResult(
+            valid=False,
+            issues=[
+                f"Subject prefix '{prefix}' describes a code change, but the staged diff is documentation-only: "
+                + ", ".join(paths)
+            ],
+        )
+    if kinds == {"source"} and prefix == "docs":
+        return CommitAuditResult(
+            valid=False,
+            issues=[
+                "Subject prefix 'docs' describes documentation, but the staged diff contains only source files: "
+                + ", ".join(paths)
+            ],
+        )
+    return None
 
 
 # ── Result dataclasses ───────────────────────────────────────────
@@ -776,6 +882,13 @@ class CommitAuditor:
                 if self.suggest_message
                 else "",
             )
+
+        # Deterministic floor: reject only an unambiguous subject/diff
+        # contradiction.  Returning before _single_pass is the important
+        # guarantee: clear contradictions do not consume an LLM call.
+        deterministic_result = _deterministic_commit_audit(message, diff)
+        if deterministic_result is not None:
+            return deterministic_result
 
         # Fast path: single LLM call (no tools needed for simple diffs)
         result = self._single_pass(message, diff)

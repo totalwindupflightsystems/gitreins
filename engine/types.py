@@ -2,6 +2,7 @@
 
 import re
 from dataclasses import dataclass, field
+from typing import Any
 
 # pytest short test summary info lines look like
 # "FAILED tests/test_x.py::test_y - AssertionError: boom". Failure counting is
@@ -142,7 +143,7 @@ class DataProtectionResult:
     skipped: bool = False
     skip_reason: str = ""
     #: JSON-safe finding dicts (values redacted unless the policy preserves).
-    findings: tuple[dict, ...] = ()
+    findings: tuple[dict[str, Any], ...] = ()
     blocked_count: int = 0
     warned_count: int = 0
     suppressed_count: int = 0
@@ -300,7 +301,7 @@ def _pytest_reported_failures(output: str) -> int | None:
     return None
 
 
-def pytest_outcome(exit_code: int | None, output: str) -> dict:
+def pytest_outcome(exit_code: int | None, output: str) -> dict[str, Any]:
     """Classify why a pytest run ended, for a verdict record.
 
     INT-FLAKE-2: ``StepResult.data['exit_code']`` alone made a real failing
