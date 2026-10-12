@@ -4,7 +4,7 @@ description: >-
   How to use the GitReins quality harness in this repo (and any repo it's
   installed in): task lifecycle, guards, LLM judge, MCP tools, and the known
   pitfalls that will bite you. Load this before committing or creating tasks.
-version: 1.13.0
+version: 1.14.0
 category: software-development
 ---
 
@@ -868,3 +868,19 @@ cause in the middle. Run `git status` first.
 - **Fresh-box install numbers for this repo:** https clone ~6 s, `python3 -m venv +
   pip install -e .` 13 s (bunker-mvp agent, 2026-10-09). SSH clone of the github origin
   fails on a fresh box (Host key verification) — use https (POC-87).
+
+## Commit-audit floor — pitfalls 55-56 (2026-10-12 dogfood run 20)
+
+- **Keep the commit_audit stage id literal `commit_audit` (POC-55/88).** cli.py reads the
+  Pipeline result by that hardcoded key; a custom id (`{id: ca, ...}`) runs and blocks in
+  the engine but the CLI prints "skipped (condition not met) — audit NOT run" and exits 0.
+  Your block gate is decorative until the id matches. (Board row DF-GITREINS-POC-88.)
+- **mode: block fails OPEN when the LLM credential is absent or 401 (POC-56/89).** The
+  floor (feat:/docs: vs docs-only/source-only) needs no credential and blocks reliably;
+  every other message degrades to "✓ Commit message looks good." rc=0 with only a WARNING
+  line. If your gate must hold, check the credential first or grep output for the 401
+  warning. (Board row DF-GITREINS-POC-89.)
+- **The deterministic floor re-proves green (run 20):** docs' five-run smoke 10/10 on a
+  fresh box; inverse docs:-over-source also blocks; median 164 ms, no LLM call. The
+  surface itself is trustworthy — the two pitfalls above are in the CLI wrapper and the
+  credential-failure path.
