@@ -129,13 +129,23 @@ calls use the new config. No config file editing or server restart needed.
 **Returns:** `{"configured": true, "previous": {...}, "current": {...}, "note": "..."}` where
 each config snapshot is `{model, provider, api_key_configured, api_key_prefix, base_url, env_keys}`.
 
-**Validation behavior:** `configure` deliberately performs **no validation** of the model name,
-provider, or base URL — it accepts any string and hot-reloads it. Validation happens at
-**evaluation time**: a bad model name or unreachable `base_url` surfaces as an error when
-`judge.evaluate` / `task.complete` first uses the client, not when `configure` is called. This
-matches the tool's purpose (hot-reload, not validation) and keeps reconfiguration latency at zero.
-If an evaluation fails after a `configure`, check the model/provider/base_url values you set here
-first.
+**Validation behavior:** `configure` performs **no validation** of the model name or the
+base URL — it accepts any string and hot-reloads it; a bad model name or unreachable
+`base_url` surfaces as an error when `judge.evaluate` / `task.complete` first uses the
+client, not when `configure` is called. `provider` is the exception: the client it builds
+validates `GITREINS_LLM_PROVIDER`, so an unsupported value (anything but `openai` /
+`anthropic`, whitespace-stripped and case-insensitive) raises `ValueError` **inside the
+`configure` call** and that invalid value stays set in the process environment — every
+later client construction keeps failing until it is replaced by a supported value
+(`configure` with a valid `provider` does that, since the variable is rewritten before the
+rebuild) or the server is restarted.
+
+The other three LLM runtime controls — `GITREINS_LLM_TIMEOUT`,
+`GITREINS_LLM_REASONING` and `GITREINS_ANTHROPIC_VERSION` — have no dedicated parameter
+here; set them through the `env` dict. Each control's accepted values and defaults are in
+[cli-reference.md](cli-reference.md#llm-runtime-environment), together with the rule that
+API keys never belong in docs, logs or prompts. If an evaluation fails after a
+`configure`, check the model/base_url values you set here first.
 
 ### 2. `task.create` — create a task with criteria
 

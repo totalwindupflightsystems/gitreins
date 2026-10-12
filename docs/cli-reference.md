@@ -505,12 +505,18 @@ effective score reaches `review_score_threshold` **and** `mode` is `block`.
 Run the MCP stdio server. No flags required; configuration is via
 environment variables:
 
-| Env var | Description |
-|---------|-------------|
-| `GITREINS_LLM_API_KEY` | API key for the LLM provider |
-| `GITREINS_LLM_BASE_URL` | Base URL of the LLM API (default `https://api.openai.com/v1`) |
-| `GITREINS_LLM_MODEL` | Model name (default varies by provider) |
-| `GITREINS_LLM_REASONING` | Reasoning mode: `enabled` or `disabled` (default `disabled`) |
+| Env var | Default | Description |
+|---------|---------|-------------|
+| `GITREINS_LLM_API_KEY` | none | API key for the LLM provider |
+| `GITREINS_LLM_BASE_URL` | `https://api.openai.com/v1` | Base URL of the LLM API |
+| `GITREINS_LLM_MODEL` | `deepseek-v4-flash` | Model name |
+| `GITREINS_LLM_PROVIDER` | auto-detect | Force the wire protocol: `openai` or `anthropic` |
+| `GITREINS_LLM_REASONING` | `disabled` | DeepSeek thinking mode: `enabled` or `disabled` |
+| `GITREINS_LLM_TIMEOUT` | `120` | Per-attempt request timeout, in seconds |
+| `GITREINS_ANTHROPIC_VERSION` | `2023-06-01` | `anthropic-version` header (Anthropic path only) |
+
+Accepted values, precedence, and how the MCP `configure` tool interacts with
+these controls: [LLM Runtime Environment](#llm-runtime-environment).
 
 Evaluator cap overrides (`GITREINS_MAX_INPUT_TOKENS`, `GITREINS_MAX_OUTPUT_TOKENS`
 and the iteration/time twins) are documented in
@@ -1220,6 +1226,127 @@ uses.
   A skip still exits 0; only `mode: block` exits 1. The command also exits 0
   with "No commit message to audit." when there is nothing to read.
 
+## LLM Runtime Environment
+
+Every LLM call GitReins makes — the Tier 2 judge (`gitreins judge`,
+`task complete`), `commit-audit`, `resolve` / `preflight` (the Jev gate), and
+the MCP server's evaluation tools — goes through one client (`engine/llm.py`)
+that resolves its configuration from environment variables when it is
+constructed. Four of them are operator controls: they change provider
+selection, request timeout, reasoning mode, and Anthropic compatibility
+without editing code or `.gitreins/config.yaml`.
+
+| Variable | Purpose | Accepted values | Default |
+|----------|---------|-----------------|---------|
+| `GITREINS_LLM_TIMEOUT` | Per-attempt HTTP timeout for each provider request | integer seconds | `120` |
+| `GITREINS_LLM_REASONING` | DeepSeek thinking mode | `enabled` = on; any other value = off | `disabled` |
+| `GITREINS_LLM_PROVIDER` | Force the wire protocol instead of auto-detecting it | `openai` or `anthropic` (whitespace-stripped, case-folded) | unset → auto-detect |
+| `GITREINS_ANTHROPIC_VERSION` | Value of the `anthropic-version` request header | Anthropic API version date, e.g. `2023-06-01` | `2023-06-01` |
+
+### `GITREINS_LLM_TIMEOUT`
+
+Per-attempt read timeout, in **seconds**, for the single HTTP request each
+provider call makes — the OpenAI-compatible `/chat/completions` path and the
+Anthropic `/messages` path alike. It exists because the former hard-coded 120 s
+killed Tier 2 judge calls against slow local gateways: three read timeouts, no
+verdict.
+
+- **Values:** any integer `int()` accepts (`45`, `120`, `300`). A non-numeric
+  value raises `ValueError` when the client is constructed, so a typo fails
+  loudly instead of silently reverting to the default.
+- **Default:** `120`.
+- **Scope:** per *attempt*, not per call. A call retries at most 3 times (4xx
+  other than 429 fails fast; 429, 5xx and network errors retry after 1 s then
+  2 s), so the worst-case wall time for one call is roughly
+  `3 × GITREINS_LLM_TIMEOUT + 3 s`. This is not the evaluator's own time budget
+  — those caps live in
+  [evaluator-loop.md](evaluator-loop.md#environment-variables).
+
+### `GITREINS_LLM_REASONING`
+
+Controls DeepSeek thinking mode. When the client detects DeepSeek, the request
+carries an explicit `thinking` field — `{"type": "enabled"}` for `enabled`,
+`{"type": "disabled"}` for anything else.
+
+- **Values:** `enabled` turns reasoning on. Any other value, including the
+  default `disabled`, sends `disabled`; the comparison is exact.
+- **Default:** `disabled`.
+- **Applies only to DeepSeek.** Detection is the model name or the provider
+  string containing `deepseek` (e.g. `GITREINS_LLM_MODEL=deepseek-v4-flash`).
+  On any other model the `thinking` field is omitted from the request entirely.
+- **Precedence:** an explicit `llm_reasoning=` constructor argument beats the
+  environment variable; the variable is read only when the argument is unset.
+
+### `GITREINS_LLM_PROVIDER`
+
+Forces which wire protocol and endpoint the client speaks, instead of inferring
+it from the base URL.
+
+| Setting | Endpoint | Authentication |
+|---------|----------|----------------|
+| `openai` | `POST <base>/chat/completions` | `Authorization: Bearer <key>` |
+| `anthropic` | `POST <base>/messages` | `x-api-key` + `anthropic-version` |
+
+- **Values:** `openai` or `anthropic`. The value is whitespace-stripped and
+  case-folded, so `" ANTHROPIC "` works; a blank or whitespace-only value
+  counts as unset.
+- **Default:** unset → auto-detect.
+- **Precedence:** `GITREINS_LLM_PROVIDER` → explicit `provider=` constructor
+  argument → base-URL detection (Anthropic when the base URL contains
+  `anthropic.com` or `claude`, otherwise OpenAI). The environment variable wins
+  over the argument.
+- **An invalid value fails loudly:** a non-empty unsupported value raises
+  `ValueError: Invalid GITREINS_LLM_PROVIDER='…': supported providers are
+  openai, anthropic` rather than silently falling back to detection.
+
+**Interaction with the MCP `configure` tool.** `configure(provider=…)` sets
+`GITREINS_LLM_PROVIDER` in the server process and recreates the LLM client and
+Judge, so every later `judge.evaluate` / `task.complete` uses the chosen
+protocol with no restart. Two behaviours are worth knowing before using it:
+
+- The value **is** validated, indirectly: `configure` rebuilds the client, so an
+  unsupported provider raises the `ValueError` above **inside the `configure`
+  call** — not later, at evaluation time.
+- That invalid value is **left set** in the process environment, so every
+  subsequent client construction keeps raising (the server cannot evaluate)
+  until `GITREINS_LLM_PROVIDER` is set to a supported value — `configure` with
+  a valid provider does this, because the variable is rewritten before the
+  client is rebuilt — or the server is restarted.
+
+The other three controls have no dedicated parameter on `configure`; set them
+through its `env` dict (e.g. `{"GITREINS_LLM_TIMEOUT": "300"}`), which writes
+them into the process environment before the rebuild.
+
+### `GITREINS_ANTHROPIC_VERSION`
+
+Value of the `anthropic-version` header on the Anthropic path, which Anthropic
+requires on every request.
+
+- **Values:** an Anthropic API version date, e.g. `2023-06-01` (default) or
+  `2024-01-01`.
+- **Default:** `2023-06-01`.
+- **Read only when the resolved provider is `anthropic`.** On the
+  OpenAI-compatible path no `anthropic-version` header is sent, and setting the
+  variable there has no effect.
+
+### API keys
+
+**Never paste a key into docs, commit messages, logs, tickets, prompts, or
+screenshots.** Key material that reaches a repo, log or transcript is burned —
+the secrets guard blocks the commit, and anything already exposed must be
+rotated, not deleted.
+
+GitReins reads credentials only from the environment — `GITREINS_LLM_API_KEY`,
+falling back in order to the first non-empty of `NEURALWATT_API_KEY`,
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `KIMI_API_KEY`,
+`GROQ_API_KEY`, `OPENROUTER_API_KEY` — and never prints their value. What it
+does record is the **name** of the variable that supplied the key, so a
+rejected credential can be traced to its source; the MCP config snapshot
+reports only `api_key_configured` (a boolean) plus a short `api_key_prefix`.
+Set `GITREINS_LLM_API_KEY` explicitly when a provider SDK shares the
+environment: the fallback chain takes the first non-empty match, not the one
+that belongs to the configured base URL.
+
 ## Configuration
 
 Runtime behavior is controlled by `.gitreins/config.yaml` in the repo
@@ -1228,7 +1355,11 @@ root (created by `gitreins install` / `gitreins init`). Key settings:
 `max_input_tokens`, guard enable/disable toggles, and
 history persistence. Repo-produced metrics are configured in the optional
 `quality:` block; see [quality-metrics.md](quality-metrics.md). There are no
-quality-specific environment variables. See `docs/architecture.md` for the config schema.
+quality-specific environment variables, and the LLM runtime controls — provider,
+request timeout, reasoning mode and the Anthropic API version — are environment
+variables rather than config keys, documented in
+[LLM Runtime Environment](#llm-runtime-environment). See
+`docs/architecture.md` for the config schema.
 
 ### `guards.test_on_clean`
 
