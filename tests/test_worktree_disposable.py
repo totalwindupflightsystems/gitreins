@@ -7,12 +7,13 @@ import json
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
 
 from engine.config import load_defaults
-from engine.worktree_disposable import DisposableWorktreeManager
+from engine.worktree_disposable import DisposableRecord, DisposableWorktreeManager
 from engine.worktree_manager import WorktreeError
 
 CLI_SCRIPT = Path(__file__).parents[1] / "gitreins" / "cli.py"
@@ -52,6 +53,28 @@ def _run_cli(repo: Path, *args: str) -> object:
 
 def _disposable_dir(repo: Path) -> Path:
     return repo.parent / "main-wt" / ".disposable"
+
+
+def _finish_record(
+    verifier: DisposableWorktreeManager, record: DisposableRecord, *, exit_code: int = 1
+) -> DisposableRecord:
+    """Leave a created record the way a FINISHED run leaves it.
+
+    ``create`` registers an entry with ``status="running"`` and no pid,
+    because at that instant the run may still be in flight — the reap pass
+    protects such an entry (DF-GITREINS-POC-80).  Tests that use ``create``
+    as a shortcut for "the tree of a completed run exists" must therefore
+    finalize the entry, exactly as ``run``/``dogfood`` do in their
+    ``finally`` block.
+    """
+    from engine.worktree_disposable import _finished_status
+
+    record.keep = True
+    record.status = _finished_status(exit_code)
+    record.exit_code = exit_code
+    record.pid = None
+    verifier._update(record)
+    return record
 
 
 def test_fresh_pass_and_failure_reap_trees_and_write_evidence(
@@ -153,13 +176,13 @@ def test_repro_keep_failures_keeps_only_failed_tree(disposable_repo: str) -> Non
 
 def test_disk_ceiling_reaps_oldest_disposable_first(disposable_repo: str) -> None:
     verifier = DisposableWorktreeManager(disposable_repo)
-    first = verifier.create("first", run_id="run-first", keep=True)
+    first = _finish_record(verifier, verifier.create("first", run_id="run-first", keep=True))
     (Path(first.path) / "payload.bin").write_bytes(b"a" * 600_000)
-    second = verifier.create("second", run_id="run-second", keep=True)
+    second = _finish_record(verifier, verifier.create("second", run_id="run-second", keep=True))
     (Path(second.path) / "payload.bin").write_bytes(b"b" * 600_000)
 
     verifier.manager.worktree_disk_ceiling_mb = 1
-    third = verifier.create("third", run_id="run-third", keep=True)
+    third = _finish_record(verifier, verifier.create("third", run_id="run-third", keep=True))
     assert not Path(first.path).exists()
     assert Path(second.path).exists()
     assert Path(third.path).exists()
@@ -403,7 +426,7 @@ def test_dogfood_keep_retains_tree(disposable_repo: str) -> None:
 def test_reap_tolerates_admin_metadata_dropped_by_a_concurrent_reap(disposable_repo: str) -> None:
     """A tree git no longer tracks is already reaped — reap it, do not raise."""
     verifier = DisposableWorktreeManager(disposable_repo)
-    record = verifier.create("race", run_id="run-c05c99c2a1b2")
+    record = _finish_record(verifier, verifier.create("race", run_id="run-c05c99c2a1b2"))
     tree = Path(record.path)
     admin = disposable_repo / ".git" / "worktrees" / record.run_id
     assert admin.is_dir()
@@ -428,7 +451,7 @@ def test_reap_still_fails_loudly_while_git_tracks_the_tree(
     import engine.worktree_disposable as disposable_mod
 
     verifier = DisposableWorktreeManager(disposable_repo)
-    record = verifier.create("stuck", run_id="run-stillregistered")
+    record = _finish_record(verifier, verifier.create("stuck", run_id="run-stillregistered"))
     tree = Path(record.path)
 
     real_git = disposable_mod._git
@@ -664,3 +687,283 @@ def test_child_env_helpers_pin_the_tree_toolchain_and_harness_root(tmp_path: Pat
     cli_env = disposable_mod._child_cli_env(tree, manager)
     assert cli_env["PYTHONPATH"] == str(Path(disposable_mod.__file__).resolve().parents[1])
     assert cli_env["PATH"].split(os.pathsep)[0] == str(venv_bin)
+
+
+# ── DF-GITREINS-POC-80: disposed runs are never invisible ────────────────────
+#
+# Dogfood 2026-10-09: a `worktree repro --keep-failures` run kept three failure
+# trees, they stayed registered in .gitreins/disposable.json and appeared in
+# `git worktree list`, and a later `worktree clean` said nothing about them.
+# The registry entry carried only `keep`, so a kept failure, a passing run
+# retained by a keep-everything pass, and a run killed before it could
+# finalize itself were all the same record.  These tests pin the three
+# contracts that come out of that: every entry carries a status, a clean pass
+# reaps kept-failure trees, and every entry a pass does NOT reap is reported.
+
+
+def _seed_live_record(
+    verifier: DisposableWorktreeManager, *, run_id: str, pid: int, status: str
+) -> DisposableRecord:
+    """Write a `running` registry entry whose pid is the given live process."""
+    record = verifier.create(f"run {run_id}", run_id=run_id, keep=True)
+    record.pid = pid
+    record.status = status
+    verifier._update(record)
+    return record
+
+
+def test_repro_keep_failures_records_status_and_clean_reaps_and_reports(
+    disposable_repo: str,
+) -> None:
+    """A kept failure is a distinguishable artifact a clean pass reaps + names."""
+    from engine.worktree_disposable import STATUS_KEPT_FAILURE, STATUS_KEPT
+
+    verifier = DisposableWorktreeManager(disposable_repo)
+    report = verifier.repro("exit 7", 2, keep_failures=True)
+
+    assert report["failures"] == 2
+    records = verifier._load()
+    assert len(records) == 2
+    assert {record.status for record in records} == {STATUS_KEPT_FAILURE}
+    assert {record.exit_code for record in records} == {7}
+    trees = sorted(record.path for record in records)
+    assert all(Path(tree).is_dir() for tree in trees)
+
+    # A passing run retained by the same pass is a different status, and was
+    # already reaped: the registry holds the failures only.
+    passed = DisposableWorktreeManager(disposable_repo).run("true", keep=True, run_id="run-pass")
+    assert passed["exit_code"] == 0
+    by_id = {record.run_id: record for record in verifier._load()}
+    assert by_id["run-pass"].status == STATUS_KEPT
+    assert by_id["run-pass"].exit_code == 0
+
+    cleaned = _run_cli(disposable_repo, "worktree", "clean")
+    assert cleaned.returncode == 0, cleaned.stderr
+    assert "Reaped 3 disposable run(s):" in cleaned.stdout
+    for record in [*records, by_id["run-pass"]]:
+        assert record.run_id in cleaned.stdout
+    assert verifier._load() == []
+    assert not any(_disposable_dir(disposable_repo).iterdir())
+    assert _git(disposable_repo, "worktree", "list").stdout.count("disposable") == 0
+
+
+def test_clean_reports_a_live_run_instead_of_silently_skipping_it(
+    disposable_repo: str,
+) -> None:
+    """A live run is protected — and named, never silently skipped."""
+    from engine.worktree_disposable import STATUS_RUNNING
+
+    verifier = DisposableWorktreeManager(disposable_repo)
+    child = subprocess.Popen(["sleep", "30"], start_new_session=True)
+    try:
+        record = _seed_live_record(
+            verifier, run_id="run-inflight", pid=child.pid, status=STATUS_RUNNING
+        )
+
+        report = verifier.reap_report()
+
+        assert report.reaped == []
+        assert report.forgotten == []
+        assert [entry[0] for entry in report.kept] == ["run-inflight"]
+        assert report.kept[0][1] == STATUS_RUNNING
+        assert f"pid {child.pid}" in report.kept[0][2]
+        assert Path(record.path).is_dir()
+        assert [item.run_id for item in verifier._load()] == ["run-inflight"]
+
+        # ... and the CLI names it instead of leaving the entry invisible.
+        cleaned = _run_cli(disposable_repo, "worktree", "clean")
+        assert cleaned.returncode == 0, cleaned.stderr
+        assert "Kept 1 disposable run(s):" in cleaned.stdout
+        assert "run-inflight [running]" in cleaned.stdout
+        assert f"pid {child.pid}" in cleaned.stdout
+        assert Path(record.path).is_dir()
+    finally:
+        child.kill()
+        child.wait()
+
+
+def test_clean_reaps_an_interrupted_run_left_registered_by_a_killed_run(
+    disposable_repo: str,
+) -> None:
+    """A run killed before it finalized itself is reaped, as an interrupted run.
+
+    This is the pre-keep path of the finding: the entry is registered (with the
+    tree and, once the child starts, its pid) before the run can record an
+    outcome, so a kill leaves a `running` entry behind.  It must not pin the
+    tree forever, and the pass that clears it must say so.
+    """
+    from engine.worktree_disposable import STATUS_RUNNING, _pid_alive
+
+    verifier = DisposableWorktreeManager(disposable_repo)
+    record = _finish_record(verifier, verifier.create("killed", run_id="run-killed"))
+    # A child started exactly like `run` starts one, already exited: the
+    # recorded pid is the killed run's, and the process behind it is gone.
+    child = subprocess.Popen(["sh", "-c", "exit 0"], start_new_session=True)
+    child.wait()
+    if _pid_alive(child.pid):
+        pytest.skip(f"pid {child.pid} was recycled before the assertion could run")
+    record.pid = child.pid
+    record.status = STATUS_RUNNING
+    record.exit_code = None
+    verifier._update(record)
+
+    cleaned = _run_cli(disposable_repo, "worktree", "clean")
+
+    assert cleaned.returncode == 0, cleaned.stderr
+    assert "Reaped 1 disposable run(s): run-killed" in cleaned.stdout
+    assert "interrupted run(s) reaped: run-killed" in cleaned.stdout
+    assert not Path(record.path).exists()
+    assert verifier._load() == []
+
+
+def test_clean_forgets_a_registry_entry_whose_tree_is_already_gone(
+    disposable_repo: str,
+) -> None:
+    """A registry entry can outlive its tree; the pass forgets it, loudly.
+
+    The old pass handed this to `git worktree remove`, which fails for a
+    directory that is gone while git still tracks it — so `worktree clean`
+    reported an infrastructure failure (`could not reap disposable worktree`)
+    for a tree nobody could reap.  Pruning the metadata and dropping the entry
+    is the honest outcome, and it is reported.
+    """
+    verifier = DisposableWorktreeManager(disposable_repo)
+    record = _finish_record(verifier, verifier.create("ghost", run_id="run-ghost"))
+    shutil.rmtree(record.path)
+    assert record.run_id in _git(disposable_repo, "worktree", "list").stdout
+
+    cleaned = _run_cli(disposable_repo, "worktree", "clean")
+
+    assert cleaned.returncode == 0, cleaned.stderr
+    assert "Forgot 1 disposable run(s) whose tree was already gone: run-ghost" in cleaned.stdout
+    assert verifier._load() == []
+    assert record.run_id not in _git(disposable_repo, "worktree", "list").stdout
+
+
+def test_reap_report_protects_a_fresh_entry_then_reaps_it_as_interrupted(
+    disposable_repo: str,
+) -> None:
+    """The create→child handoff is honoured, and it expires.
+
+    `create` registers an entry before the child exists, so a pass running in
+    that window must not rip the tree out from under the run about to use it.
+    Once the grace window has passed with no pid recorded, the same entry is an
+    interrupted run and is reaped.
+    """
+    from engine.worktree_disposable import RUN_REGISTRATION_GRACE_SECONDS, STATUS_RUNNING
+
+    verifier = DisposableWorktreeManager(disposable_repo)
+    record = verifier.create("handoff", run_id="run-handoff")
+    assert record.status == STATUS_RUNNING and record.pid is None
+
+    fresh = verifier.reap_report()
+    assert fresh.reaped == []
+    assert [entry[0] for entry in fresh.kept] == ["run-handoff"]
+    assert "has not recorded its pid yet" in fresh.kept[0][2]
+    assert Path(record.path).is_dir()
+
+    record.created_at = time.time() - 2 * RUN_REGISTRATION_GRACE_SECONDS
+    verifier._update(record)
+
+    expired = verifier.reap_report()
+    assert expired.abandoned == ["run-handoff"]
+    assert expired.reaped == ["run-handoff"]
+    assert expired.kept == []
+    assert not Path(record.path).exists()
+    assert verifier._load() == []
+
+
+def test_a_recycled_pid_does_not_pin_a_registry_entry(disposable_repo: str) -> None:
+    """A stale pid now owned by an unrelated process must not protect the entry.
+
+    Only a session leader (the shape `run` creates with
+    ``start_new_session=True``) counts as this entry's own process, so a
+    recycled pid cannot make a killed run's tree permanently unreapable.
+    """
+    from engine.worktree_disposable import STATUS_RUNNING
+
+    verifier = DisposableWorktreeManager(disposable_repo)
+    bystander = subprocess.Popen(["sleep", "30"])
+    try:
+        assert os.getpgid(bystander.pid) != bystander.pid, "premise: not a session leader"
+        record = _seed_live_record(
+            verifier, run_id="run-recycled", pid=bystander.pid, status=STATUS_RUNNING
+        )
+
+        report = verifier.reap_report()
+
+        assert report.kept == []
+        assert report.reaped == ["run-recycled"]
+        assert report.abandoned == ["run-recycled"]
+        assert not Path(record.path).exists()
+        assert verifier._load() == []
+    finally:
+        bystander.kill()
+        bystander.wait()
+
+
+def test_reap_report_keeps_a_tree_git_still_tracks_and_reports_the_reason(
+    disposable_repo: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The tolerant pass reports an unreapable tree instead of aborting.
+
+    `reap` stays loud (see the test above it); the pass `worktree clean` uses
+    must not lose the rest of the registry because one tree is stuck — and it
+    must not forget the entry it could not reap.
+    """
+    import engine.worktree_disposable as disposable_mod
+
+    verifier = DisposableWorktreeManager(disposable_repo)
+    stuck = _finish_record(verifier, verifier.create("stuck", run_id="run-stuck"))
+    healthy = _finish_record(verifier, verifier.create("healthy", run_id="run-healthy"))
+
+    real_git = disposable_mod._git
+
+    def failing_git(workdir: str, *args: object, check: object = True) -> object:
+        if args[:2] == ("worktree", "remove") and str(stuck.path) in args:
+            return subprocess.CompletedProcess(list(args), 1, "", "fatal: stuck worktree")
+        return real_git(workdir, *args, check=check)
+
+    monkeypatch.setattr(disposable_mod, "_git", failing_git)
+    report = verifier.reap_report()
+
+    assert report.reaped == ["run-healthy"]
+    assert [entry[0] for entry in report.kept] == ["run-stuck"]
+    assert "could not reap disposable worktree" in report.kept[0][2]
+    assert Path(stuck.path).is_dir() and not Path(healthy.path).exists()
+    assert [item.run_id for item in verifier._load()] == ["run-stuck"]
+
+
+def test_record_status_and_exit_code_roundtrip_and_legacy_inference() -> None:
+    """The status field is durable, and an entry written without one is inferred."""
+    from engine.worktree_disposable import STATUS_KEPT, STATUS_KEPT_FAILURE, STATUS_RUNNING
+
+    base = {"run_id": "run-legacy", "path": "/tmp/tree", "created_at": 1.0, "command": "true"}
+
+    # Legacy `keep: true` (every retained entry the old writer produced).
+    legacy_kept = DisposableRecord.from_dict({**base, "pid": None, "keep": True})
+    assert legacy_kept.status == STATUS_KEPT
+    assert legacy_kept.exit_code is None
+
+    # Legacy `keep: false` is an in-flight entry, never a kept tree.
+    legacy_running = DisposableRecord.from_dict({**base, "pid": None, "keep": False})
+    assert legacy_running.status == STATUS_RUNNING
+
+    # An unknown/foreign status falls back to the same inference, and a
+    # non-integer exit code reads as unknown rather than as a failure.
+    unknown = DisposableRecord.from_dict(
+        {**base, "keep": True, "status": "bogus", "exit_code": True}
+    )
+    assert unknown.status == STATUS_KEPT
+    assert unknown.exit_code is None
+
+    finished = DisposableRecord(
+        run_id="run-x",
+        path="/tmp/tree",
+        created_at=2.0,
+        command="exit 3",
+        keep=True,
+        status=STATUS_KEPT_FAILURE,
+        exit_code=3,
+    )
+    assert DisposableRecord.from_dict(finished.to_dict()) == finished
