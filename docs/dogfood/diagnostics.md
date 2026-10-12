@@ -626,6 +626,22 @@ The audit itself, once reachable, is good — it cited the actual diff (`the dif
 f.md … the message does not mention adding documentation`) instead of generic style advice.
 That is why the finding was about activation, not quality.
 
+### The deterministic floor is useful, but not a complete guarantee
+
+The message-mode audit now has a conservative pre-LLM floor. It blocks a clear
+subject/diff contradiction such as a `feat:` subject over a staged README-only
+or newly planted documentation file, without invoking the model. A legitimate
+`docs:` subject over docs-only changes continues to the normal audit. Mixed or
+unknown paths deliberately remain LLM-driven because classifying them would
+turn a guess into a hard block.
+
+This floor is deterministic; the rest of the audit is not. `mode: block` is
+best-effort, not a guarantee that every misleading message is rejected. A
+message that falls outside the recognized floor still receives residual LLM
+review, whose accept/reject decision is nondeterministic across runs. The CLI
+reference's five-run README and planted-file smoke check exercises the part that
+can be made repeatable; it does not make the residual model review repeatable.
+
 ### 3. The disposable battery — gated on the fleet scheduler's board layout
 
 > **Fixed (DF-GITREINS-POC-27).** The board is now optional:
