@@ -37,6 +37,7 @@ from engine.resolution import (
     VERDICT_RESOLVED,
     ResolutionVerdict,
     effective_band_for,
+    enabled_surfaces,
     resolve,
 )
 
@@ -144,6 +145,13 @@ def preflight(
     named ``surface-disabled`` reason, which — like every ABSTAIN on this
     surface — maps to plain ``dispatch`` (fail open) with the reason recorded.
 
+    The surfaces are switched on INDEPENDENTLY (``enabled.<surface>: true`` each,
+    see :func:`engine.resolution.enabled_surfaces`), so a repo that enables only
+    ``cli`` — and therefore answers fine on ``gitreins resolve`` — still abstains
+    here. The ``abstain_detail`` names that distinction instead of leaving a
+    reader to conclude the gate is broken: it states which surfaces ARE enabled
+    and that they do not enable *this* one.
+
     All other keyword arguments (``keys``, ``poster``, ``runner``, ... — the
     test seams included) are forwarded to :func:`resolve` untouched.
     """
@@ -155,14 +163,29 @@ def preflight(
 
     enabled, reason = surface_enabled(surface, workdir=workdir, defaults=defaults)
     if not enabled:
+        # DF-GITREINS-POC-81: `surface` names ONE enable flag. Report the whole
+        # set config turns on, so "resolution must be disabled" (the wrong
+        # conclusion a lone `surface-disabled` invites) is impossible to reach —
+        # the named surfaces below are the ones this check COULD run on.
+        others = tuple(
+            name for name in enabled_surfaces(workdir=workdir, defaults=defaults) if name != surface
+        )
+        detail = (
+            f"resolution.enabled.{surface} is false (or absent) in"
+            f" {workdir}/.gitreins/config.yaml — {surface!r} is one of the"
+            " independently-switched surfaces"
+        )
+        detail += f"; enabling another one does not enable {surface!r}" + (
+            f" (now enabled: {', '.join(others)} — run this check on one of"
+            " those, or enable this one)"
+            if others
+            else " (no surface is enabled in this config)"
+        )
         verdict = ResolutionVerdict(
             question=question,
             verdict=VERDICT_ABSTAIN,
             abstain_reason=reason,
-            abstain_detail=(
-                f"resolution.enabled.{surface} is false (or absent) in"
-                f" {workdir}/.gitreins/config.yaml"
-            ),
+            abstain_detail=detail,
         )
         record = decide(verdict)
         if dispatch is not None:

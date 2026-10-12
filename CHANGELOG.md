@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`gitreins preflight` can run on a resolution surface the repo actually
+  enabled (`--surface`, DF-GITREINS-POC-81)** — the enable flags are per surface
+  and independent, but the command hard-coded `predispatch`, so a repo whose
+  config enables only `cli` (and therefore answers fine on `gitreins resolve`)
+  got `ABSTAIN` / `abstain_reason: surface-disabled` for every question: nothing
+  in the resolver was wrong, that surface was simply never turned on. `gitreins
+  preflight --surface <name>` (`cli`, `mcp`, `predispatch` — the default,
+  `judge_prescreen`) names the flag that gates the run; naming a surface that is
+  also off abstains exactly as before — there is no implicit fall-through to an
+  enabled surface, since an unenabled surface must not egress and a dispatch
+  decision must not depend on which surface happened to be on. The disabled
+  record's `verdict.abstain_detail` (and the text output, and the
+  `surface-disabled` hint) now name the surface that did not run AND the ones
+  that ARE enabled — `engine.resolution.enabled_surfaces` is the one authority
+  for that set — so "the gate is disabled here" is no longer the only reading.
+  Regression: `tests/test_cli_preflight.py::TestPreflightSurfaceSelection`,
+  `tests/test_preflight.py::TestSurfaceDisabledDetail`,
+  `tests/test_resolution_config.py::TestSurfaceEnabled`.
+
 ## [0.16.0] - 2026-10-06
 
 ### Added

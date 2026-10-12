@@ -96,6 +96,7 @@ __all__ = [
     "surface_enabled",
     "trace_question",
     "verdict_json",
+    "enabled_surfaces",
 ]
 
 # ── The measured ceiling ─────────────────────────────────────────────────────
@@ -207,7 +208,11 @@ ABSTAIN_REASONS = {
 _REASON_ACTIONS = {
     "surface-disabled": (
         "set resolution.enabled.<surface>: true in .gitreins/config.yaml to"
-        " enable it (see docs/jev-resolution-gate.md §9)"
+        " enable it — the surfaces are switched on independently, so a repo"
+        " whose config enables only `cli` (for `gitreins resolve`) still"
+        " abstains on `predispatch`; `gitreins preflight --surface cli` runs"
+        " the check on a surface the repo already enabled"
+        " (see docs/jev-resolution-gate.md §9)"
     ),
     "no-credentials": "export GITREINS_OPENROUTER_KEY (or add it to ~/.hermes/.env)",
     "all-credentials-rejected": "replace or top up the OpenRouter key(s)",
@@ -272,6 +277,32 @@ def surface_enabled(
         return False, "surface-disabled"
     enabled = bool(getattr(cfg, f"resolution_enabled_{surface}", False))
     return (True, None) if enabled else (False, "surface-disabled")
+
+
+def enabled_surfaces(
+    *,
+    workdir: str = ".",
+    defaults: Any = None,  # noqa: ANN401
+) -> tuple[str, ...]:
+    """Every surface config turns ON for *workdir*, in :data:`RESOLUTION_SURFACES` order.
+
+    The counterpart to :func:`surface_enabled`: that one answers for ONE named
+    surface, this one names the whole set. The surfaces are switched on
+    INDEPENDENTLY — one ``enabled.<surface>: true`` each — so "the gate is
+    disabled" is never a global fact about a repo: a checkout whose config sets
+    only ``enabled.cli: true`` (so ``gitreins resolve`` works) still answers
+    ``surface-disabled`` (ABSTAIN) on ``predispatch``. Naming which surfaces ARE
+    on is what turns that dead end into an actionable message — the fix is to
+    enable the missing surface, or to run the check on one of these.
+    """
+    cfg = defaults if defaults is not None else resolution_config(workdir)
+    if cfg is None:
+        return ()
+    return tuple(
+        surface
+        for surface in RESOLUTION_SURFACES
+        if bool(getattr(cfg, f"resolution_enabled_{surface}", False))
+    )
 
 
 # ── Token measurement ────────────────────────────────────────────────────────

@@ -190,6 +190,16 @@ wrong-typed value all read as OFF (`engine/resolution.py` `surface_enabled`). Th
 surface nobody enabled answers `ABSTAIN` with `abstain_reason: surface-disabled` and exit 1
 instead of guessing.
 
+The four switches are **independent**, so "the gate is disabled here" is never a fact about
+a repo — only about one surface. A checkout that enables just `cli` (enough for
+`gitreins resolve`) still abstains on `predispatch`, the default surface for
+`gitreins preflight`; there is no implicit fall-through from one surface to another (an
+unenabled surface must not egress, and a dispatch decision must not depend on which surface
+happened to be on). `enabled_surfaces` answers the whole set, and the disabled record's
+`abstain_detail` names it, so the two ways out are always visible: enable this surface, or
+run the check on one that is already on — `gitreins preflight --surface cli "<row>"`
+(DF-GITREINS-POC-81; `docs/cli-reference.md` §16).
+
 One block in `.gitreins/config.yaml` drives all four surfaces (`engine/config.py`,
 JEVRES-006). This is the complete block — the comments are the contract, not decoration:
 

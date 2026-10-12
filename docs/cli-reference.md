@@ -1029,12 +1029,13 @@ verdict onto a DISPATCH DECISION with `engine/preflight.py` — so a foreman can
 annotate work that is already done instead of spawning a worker for it.
 
 ```
-gitreins preflight "<question>" [--json]
+gitreins preflight "<question>" [--surface <name>] [--json]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `<question>` | The row's premise to resolve, quoted (e.g. "Is JEVRES-003 already implemented?") |
+| `--surface <name>` | The resolution surface whose enable flag (`resolution.enabled.<surface>`) gates this run — one of `cli`, `mcp`, `predispatch` (default), `judge_prescreen` |
 | `--json` | Emit the full machine record as JSON (foremen consume this) |
 
 | Verdict band | Decision | Meaning |
@@ -1073,6 +1074,26 @@ the `surface-disabled` gate all return the same eight fields, with `probability`
 `null` and the reason spelled out inside `verdict.abstain_detail`, so a consumer
 keying on `.verdict` needs no ABSTAIN branch of its own.
 
+**`--surface`: the enable flags are per surface, and independent.** The four
+surfaces (`cli`, `mcp`, `predispatch`, `judge_prescreen`) are switched on one by
+one in `.gitreins/config.yaml`, and this command defaults to `predispatch`. A
+repo that enables only `cli` — enough for `gitreins resolve` to answer — therefore
+gets `ABSTAIN` / `abstain_reason: surface-disabled` from every `preflight` call:
+nothing in the resolver is wrong, that surface was simply never turned on.
+`--surface <name>` names the flag that gates this run, so such a repo can run the
+same check on the surface it already enabled:
+
+```bash
+# resolution.enabled.cli: true, predispatch left off (this repo's own config):
+gitreins preflight --surface cli "Is JEVRES-003 already implemented?"
+```
+
+`--surface` selects a gate, it never enables one: naming a surface that is also
+false (or a name outside the four) is a usage error or another `surface-disabled`
+ABSTAIN — never a silent fall-through to an enabled surface. The disabled record
+says which: `verdict.abstain_detail` names the surface that did not run AND the
+ones that ARE enabled, so "resolution is off" is never the only reading.
+
 **Upgrading from 0.15.0.** Before DF-GITREINS-POC-37 this record nested the
 verdict as an ESCAPED JSON STRING under `verdict_json`, so a script had to parse
 it twice (`jq -r '.verdict_json | fromjson'`) while `resolve --json` printed the
@@ -1087,16 +1108,21 @@ authority for a merge or a commit (spec §6.5).
 resolution record with `source: "predispatch"` — the band, probability, question and
 the full verdict object — through the same shared helper `gitreins resolve` uses, so a
 skip-dispatch (no worker spawned) always leaves the audit trail that decision needs
-(`gitreins report`, `gitreins serve`). An ABSTAIN — including the `surface-disabled`
-one described below — writes nothing: a disabled surface does not even touch the store.
+(`gitreins report`, `gitreins serve`). The `source` is the surface that gated the run, so
+`--surface cli` files `source: "cli"` — the enable flag that permitted the egress, named
+honestly rather than hidden behind the command name. An ABSTAIN — including the
+`surface-disabled` one described below — writes nothing: a disabled surface does not even
+touch the store.
 
 **Enabling.** `predispatch` ships disabled too — and its failure mode is the opposite one:
 with `resolution.enabled.predispatch` absent or `false` the gate never runs and the record
 is an ABSTAIN mapped to plain `dispatch` (fail open, above). Set
 `resolution.enabled.predispatch: true` in `.gitreins/config.yaml` to run the real policy;
-the complete block is in [docs/jev-resolution-gate.md](jev-resolution-gate.md) §9. Do not
-enable it to "fix" a dispatch that is blocked for another reason — the ABSTAIN record
-already says the gate did not run.
+the complete block is in [docs/jev-resolution-gate.md](jev-resolution-gate.md) §9. If the
+repo deliberately keeps this surface off, run the check on one it has enabled instead
+(`--surface cli`, above) rather than enabling a surface whose calibration numbers are not
+in yet. Do not enable it to "fix" a dispatch that is blocked for another reason — the
+ABSTAIN record already says the gate did not run.
 
 ```bash
 # with resolution.enabled.predispatch: true in .gitreins/config.yaml:

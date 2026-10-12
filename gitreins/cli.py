@@ -3760,21 +3760,29 @@ def cmd_preflight(args: argparse.Namespace) -> None:
     this command exits 0 for every verdict and non-zero only on hard
     usage errors.
 
-    Config (JEVRES-006): gated on ``resolution.enabled.predispatch`` (default
-    false — JEVRES-005 must produce its calibration numbers first). Disabled,
-    the command returns the fail-open dispatch record with the named
-    ``surface-disabled`` abstain reason and exits 0, exactly like any other
-    ABSTAIN on this fail-open surface.
+    Config (JEVRES-006): gated on ``resolution.enabled.<surface>``, where
+    *surface* defaults to ``predispatch`` (which ships false — JEVRES-005 must
+    produce its calibration numbers first). The surfaces are switched on
+    INDEPENDENTLY, so the enable flag is NOT implied by any other: a repo whose
+    config sets only ``enabled.cli: true`` (and therefore answers normally on
+    ``gitreins resolve``) still abstains here. ``--surface <name>`` selects the
+    flag that gates this run, so such a repo can run the same check on the
+    surface it already enabled: ``gitreins preflight --surface cli "<row>"``.
+    Disabled, the command returns the fail-open dispatch record with the named
+    ``surface-disabled`` abstain reason — whose detail names the surfaces that
+    ARE enabled — and exits 0, exactly like any other ABSTAIN on this
+    fail-open surface.
     """
     from engine.preflight import preflight
     from engine.resolution import resolution_config
 
     workdir = get_workdir()
     cfg = resolution_config(workdir)
+    surface = args.surface
     record = preflight(
         args.question,
         workdir=workdir,
-        surface="predispatch",
+        surface=surface,
         defaults=cfg,
         model=cfg.resolution_model,
         max_tokens=cfg.resolution_tokens_max,
@@ -3785,14 +3793,23 @@ def cmd_preflight(args: argparse.Namespace) -> None:
     if args.json:
         print(json.dumps(record, indent=2))
     else:
-        _print_preflight_record(record)
+        _print_preflight_record(record, surface=surface)
 
     sys.exit(0)
 
 
-def _print_preflight_record(record: dict[str, Any]) -> None:
-    """Human-readable rendering of a preflight dispatch record."""
+def _print_preflight_record(record: dict[str, Any], *, surface: str | None = None) -> None:
+    """Human-readable rendering of a preflight dispatch record.
+
+    *surface* is the enable flag that gated the run (``args.surface``); it is
+    optional so the renderer keeps working for a bare record. An ABSTAIN also
+    prints the gate's own ``abstain_detail`` and the ``abstain_action`` hint —
+    the surfaces are switched on independently, so a ``surface-disabled`` record
+    has to say WHICH surface never ran and how to reach a working one.
+    """
     print(f"Question: {record['question']}")
+    if surface:
+        print(f"Surface:  {surface}")
     print(f"Decision: {record['decision']}")
     probability = f"{record['probability']:.2f}" if record["probability"] is not None else "n/a"
     print(f"Band:     {record['band']}  (probability {probability})")
@@ -3800,6 +3817,13 @@ def _print_preflight_record(record: dict[str, Any]) -> None:
     print(f"Missing:  {missing}")
     if record["abstain_reason"]:
         print(f"Abstain:  {record['abstain_reason']}")
+        verdict = record.get("verdict")
+        detail = verdict.get("abstain_detail") if isinstance(verdict, dict) else None
+        if detail:
+            print(f"Detail:   {detail}")
+        action = verdict.get("abstain_action") if isinstance(verdict, dict) else None
+        if action:
+            print(f"Fix:      {action}")
     print(f"Reason:   {record['reason']}")
     print("Note:     gate signal only — a skip annotates the row, it is never a merge authority")
 
@@ -4510,6 +4534,10 @@ def _add_resolve_parsers(sub: _SubParsers) -> None:
     )
 
     # preflight (JEVRES-003) — the pre-dispatch premise check's CLI surface
+    # DF-GITREINS-POC-81: the enable flags are PER SURFACE and independent, so
+    # this command must be able to name which one gates it (see --surface).
+    from engine.resolution import RESOLUTION_SURFACES
+
     preflight_p = sub.add_parser(
         "preflight",
         help="Pre-dispatch premise check: resolve a row, get a dispatch decision",
@@ -4522,6 +4550,11 @@ def _add_resolve_parsers(sub: _SubParsers) -> None:
             " Any failure is an ABSTAIN and FAILS OPEN — it dispatches with the"
             " abstain_reason recorded, because this signal may skip a dispatch"
             " and must never be the reason work silently stops."
+            " This check runs only on an ENABLED resolution surface, and the"
+            " surfaces are enabled one by one in .gitreins/config.yaml:"
+            " setting resolution.enabled.cli (so `gitreins resolve` works) does"
+            " NOT enable resolution.enabled.predispatch, the default here — use"
+            " --surface to run the check on a surface this repo has enabled."
         ),
         epilog=(
             "Exit codes: 0 for every verdict including an ABSTAIN (a valid"
@@ -4530,11 +4563,28 @@ def _add_resolve_parsers(sub: _SubParsers) -> None:
             " (band, probability, missing_kind, decision, reason,"
             " abstain_reason, verdict) for a foreman to consume — `verdict`"
             " is the OBJECT `resolve --json` prints, not an escaped string."
+            " A surface-disabled run is an ABSTAIN whose verdict.abstain_detail"
+            " names the surface that never ran and which surfaces ARE enabled;"
+            ' `gitreins preflight --surface cli "<row>"` re-runs the same check'
+            " on the cli surface's enable flag."
         ),
     )
     preflight_p.add_argument(
         "question",
         help="The row's premise to resolve against the repo (quoted)",
+    )
+    preflight_p.add_argument(
+        "--surface",
+        choices=list(RESOLUTION_SURFACES),
+        default="predispatch",
+        help=(
+            "The resolution surface whose enable flag"
+            " (resolution.enabled.<surface>) gates this run — default:"
+            " predispatch. Every surface is enabled independently, so a repo"
+            " that enables only `cli` for `gitreins resolve` still abstains on"
+            " the default: pass --surface cli to run the check on the surface"
+            " that repo already enabled."
+        ),
     )
     preflight_p.add_argument(
         "--json",

@@ -316,3 +316,92 @@ class TestPreflightDispatchHook:
         """The names a foreman-side caller imports exist (smoke, keeps drift loud)."""
         for name in ("preflight", "decide", "DECISION_SKIP", "DECISION_NOTE", "DECISION_DISPATCH"):
             assert hasattr(preflight_module, name)
+
+
+class TestSurfaceDisabledDetail:
+    """DF-GITREINS-POC-81 — the disabled-surface record names the surface model.
+
+    The enable flags are PER SURFACE and independent: a repo that runs
+    ``gitreins resolve`` for real (``resolution.enabled.cli: true``) still
+    abstains here, because ``predispatch`` is its own switch. The record used to
+    carry only ``resolution.enabled.predispatch is false (or absent)``, which
+    reads as "the gate is disabled in this repo" — the wrong conclusion, and the
+    one that sent the reporter looking for a bug in the resolver. The detail now
+    names the independence AND the surfaces that ARE enabled, so the way out
+    (enable this one, or run the check on one that is already on) is in the
+    record itself. `surface` remains the ONLY enable flag consulted: nothing
+    falls back to another surface implicitly.
+    """
+
+    @staticmethod
+    def _defaults(**enabled: bool) -> object:
+        """Built-in defaults with exactly *enabled*'s surfaces flipped on."""
+        from engine.config import GitReinsDefaults
+
+        defaults = GitReinsDefaults()
+        for surface, value in enabled.items():
+            setattr(defaults, f"resolution_enabled_{surface}", value)
+        return defaults
+
+    def test_detail_names_the_surface_that_did_not_run_and_the_enabled_ones(self) -> None:
+        record = preflight("row premise?", workdir=".", defaults=self._defaults(cli=True, mcp=True))
+        assert record["band"] == "ABSTAIN"
+        assert record["decision"] == DECISION_DISPATCH, "an ABSTAIN still fails open"
+        detail = record["verdict"]["abstain_detail"]
+        assert "resolution.enabled.predispatch is false" in detail
+        assert "independently-switched" in detail
+        assert "does not enable" in detail
+        assert "now enabled: cli, mcp" in detail
+
+    def test_detail_says_no_surface_is_enabled_when_none_is(self) -> None:
+        """All four off: no sibling surface to point at, and the record says so."""
+        record = preflight("row premise?", workdir=".", defaults=self._defaults())
+        detail = record["verdict"]["abstain_detail"]
+        assert "resolution.enabled.predispatch is false" in detail
+        assert "no surface is enabled" in detail
+
+    def test_the_cli_surface_runs_the_gate_in_a_cli_only_repo(
+        self, script_assembler: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The reporter's repo shape: cli on, predispatch off.
+
+        The resolver was never broken — the surface was. Naming the surface the
+        repo does enable runs the same question through the real policy.
+        """
+        script_assembler()
+        monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("poc81"))
+        record = preflight(
+            "row premise?",
+            workdir=".",
+            surface="cli",
+            defaults=self._defaults(cli=True),
+            poster=lambda *a, **k: _StubResponse(0.87),
+        )
+        assert record["band"] == "RESOLVED"
+        assert record["decision"] == DECISION_SKIP
+        assert record["abstain_reason"] is None
+        assert record["probability"] == pytest.approx(0.87)
+
+    def test_a_disabled_named_surface_does_not_fall_back_to_an_enabled_one(
+        self, script_assembler: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`surface` is the ONLY switch consulted — no implicit fallback.
+
+        A `preflight(surface="predispatch")` in a cli-only repo must abstain
+        (fail open → dispatch), never quietly run the gate on `cli`: an
+        unenabled surface must not egress, and a dispatch decision must not
+        depend on which surface happened to be on.
+        """
+        script_assembler()
+        monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("poc81"))
+        calls: list = []
+        record = preflight(
+            "row premise?",
+            workdir=".",
+            surface="predispatch",
+            defaults=self._defaults(cli=True),
+            poster=lambda *a, **k: calls.append(1) or _StubResponse(0.87),
+        )
+        assert record["band"] == "ABSTAIN"
+        assert record["abstain_reason"] == "surface-disabled"
+        assert calls == [], "a disabled surface must not reach the provider"

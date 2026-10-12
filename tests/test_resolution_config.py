@@ -167,6 +167,30 @@ class TestSurfaceEnabled:
         assert enabled is False
         assert reason == "surface-disabled"
 
+    def test_enabled_surfaces_names_every_on_switch_in_surface_order(self) -> None:
+        """The whole set, not a yes/no about one surface (DF-GITREINS-POC-81).
+
+        `surface_enabled` answers for one name; this is the counterpart that
+        says which surfaces a config actually turns on, in
+        ``RESOLUTION_SURFACES`` order (not dict order) — the fact a
+        `surface-disabled` message needs to be actionable.
+        """
+        defaults = GitReinsDefaults()
+        defaults.resolution_enabled_predispatch = True
+        defaults.resolution_enabled_cli = True
+        assert resolution.enabled_surfaces(defaults=defaults) == ("cli", "predispatch")
+
+    def test_enabled_surfaces_is_empty_when_every_surface_is_off(self) -> None:
+        assert resolution.enabled_surfaces(defaults=GitReinsDefaults()) == ()
+
+    def test_enabled_surfaces_with_no_defaults_reads_the_real_config(self, tmp_path: Path) -> None:
+        """Same loader contract as `surface_enabled`: absent config turns nothing on."""
+        assert resolution.enabled_surfaces(workdir=str(tmp_path), defaults=None) == ()
+        # And this repo's own tracked config — cli+mcp on, judge-adjacent off —
+        # is exactly what the helper reports for it.
+        repo_defaults = load_defaults(str(REPO_ROOT))
+        assert resolution.enabled_surfaces(defaults=repo_defaults) == ("cli", "mcp")
+
 
 # ── The egress exclusion filter ──────────────────────────────
 
@@ -510,6 +534,19 @@ class TestEnablingDocs:
         assert re.search(rf"^## {section}\.", text, re.MULTILINE), (
             f"the hint cites {doc_path} §{section}; that section does not exist"
         )
+
+    def test_surface_disabled_hint_names_the_independent_switches_and_the_flag(self) -> None:
+        """DF-GITREINS-POC-81 — the dead end was a wrong model, not a missing knob.
+
+        A repo that enables only `cli` (so `gitreins resolve` answers) got a bare
+        `surface-disabled`, which reads as "the gate is off everywhere". The hint
+        must say the switches are independent and name the way out that does not
+        require changing config: `gitreins preflight --surface <enabled-surface>`.
+        """
+        hint = resolution._REASON_ACTIONS["surface-disabled"]
+        assert "--surface" in hint
+        assert "predispatch" in hint
+        assert "independently" in hint
 
     def test_repo_config_enables_cli_and_mcp_only(self) -> None:
         """Tracked config: cli+mcp on, judge-adjacent off (no JEVRES-005 numbers)."""
