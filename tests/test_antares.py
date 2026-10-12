@@ -647,6 +647,24 @@ class TestCveFeedNetworkAndCache:
         with patch.object(requests, "get", side_effect=Exception("offline")):
             assert feed.get_recent() == []
 
+    def test_never_raises_on_non_object_cache_payload(
+        self, tmp_workdir: str, tmp_path: Path
+    ) -> None:
+        """Valid JSON with a non-object top level is 'no cache', not a crash.
+
+        A truthy payload (e.g. a bare list) previously flowed into
+        ``_load_entries``' ``cached.get(...)`` and raised AttributeError,
+        violating the module rule: never raise out of this module.
+        """
+        feed = _isolated_feed(tmp_workdir, tmp_path, source="nvd", min_confidence=0.0)
+        os.makedirs(feed.cache_dir, exist_ok=True)
+        with open(feed._cache_path(), "w") as f:
+            json.dump(["foreign", "shape"], f)
+        assert feed._read_cache() is None
+        with patch.object(requests, "get", side_effect=Exception("offline")):
+            assert feed.get_recent() == []
+            assert feed.search("anything") == []
+
 
 # ── CLI: cmd_security_scan ──────────────────────────────────────
 

@@ -259,10 +259,18 @@ class CveFeed:
             return None
         try:
             with open(path) as f:
-                return json.load(f)
+                loaded: object = json.load(f)
         except (OSError, json.JSONDecodeError) as exc:
             logger.debug("CVE cache unreadable (%s): %s", path, exc)
             return None
+        # The cache contract is a JSON *object* at the top level. A
+        # truthy non-object payload (e.g. a bare list from a foreign or
+        # hand-edited file) would crash _load_entries' ``.get()`` and
+        # violate the module rule: never raise out of this module.
+        if not isinstance(loaded, dict):
+            logger.debug("CVE cache top level is not an object (%s); ignoring", path)
+            return None
+        return loaded
 
     def _coerce_entries(self, raw: list[Any]) -> list[CveEntry]:
         """Best-effort conversion of cache entries to CveEntry objects.
@@ -428,7 +436,7 @@ def _severity_to_score(severity: str) -> float:
     }.get(str(severity or "NONE").upper(), 0.0)
 
 
-def _extract_nvd_description(cve: dict) -> str:
+def _extract_nvd_description(cve: dict[str, Any]) -> str:
     """NVD stores descriptions in a per-locale array — pick English."""
     for desc in cve.get("descriptions", []) or []:
         if isinstance(desc, dict) and desc.get("lang") == "en":
@@ -436,7 +444,7 @@ def _extract_nvd_description(cve: dict) -> str:
     return ""
 
 
-def _extract_nvd_severity(cve: dict) -> str:
+def _extract_nvd_severity(cve: dict[str, Any]) -> str:
     """NVD nests severity under metrics.cvssMetricV3[].cvssData.baseSeverity."""
     for metric in cve.get("metrics", {}).get("cvssMetricV31", []) or []:
         data = metric.get("cvssData", {}) or {}
@@ -456,7 +464,7 @@ def _extract_nvd_severity(cve: dict) -> str:
     return "NONE"
 
 
-def _extract_nvd_packages(cve: dict) -> list[str]:
+def _extract_nvd_packages(cve: dict[str, Any]) -> list[str]:
     """Convert CPE URNs to coarse package regex strings.
 
     NVD uses CPE 2.3 formatted URNs like
@@ -482,7 +490,7 @@ def _extract_nvd_packages(cve: dict) -> list[str]:
     return patterns
 
 
-def _extract_github_packages(item: dict) -> list[str]:
+def _extract_github_packages(item: dict[str, Any]) -> list[str]:
     """GitHub advisories list packages as ``{name, ecosystem}`` dicts."""
     out: list[str] = []
     for vuln in item.get("vulnerabilities", []) or []:
