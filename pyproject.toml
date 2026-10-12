@@ -44,6 +44,12 @@ dev = [
     "pytest-xdist>=3.0",
     "ruff>=0.5",
     "types-PyYAML>=6.0",
+    # TYPE-001 tranche 2. jsonschema is not a declared dependency: it arrives
+    # transitively via python-lsp-server in this extra, and tests/
+    # test_evidence_contract.py imports Draft202012Validator under that
+    # assumption. mypy reports `Library stubs not installed for "jsonschema"`
+    # without it, so the stub package is declared here where mypy itself lives.
+    "types-jsonschema>=4.20",
 ]
 antares = [
     "huggingface_hub>=0.28",
@@ -95,6 +101,29 @@ warn_return_any = false
 no_implicit_optional = false
 [[tool.mypy.overrides]]
 module = "textual.*"
+ignore_missing_imports = true
+
+# TYPE-001 tranche 2 — named per-module relaxations for the import errors that no
+# `types-*` package can clear, because the library itself is legitimately absent
+# from every default dev bundle (both ship py.typed upstream, so no stub package
+# exists). Each block names the bundle that would otherwise be required:
+#   * tomli        — a declared runtime dependency behind `python_version < "3.11"`
+#                    (see [project] dependencies); gitreins/cli.py and tests
+#                    select it over the stdlib tomllib on that marker, which mypy
+#                    cannot evaluate. The alternative is a code change, which this
+#                    tranche does not make.
+#   * antares      — the opt-in `antares` extra (huggingface_hub, torch,
+#                    transformers) for engine/antares.py; installing it into the
+#                    default dev bundle would add ~2.5GB of torch to every
+#                    developer environment.
+# Widening either relaxation to other modules would hide real defects, so both
+# stay module-scoped.
+[[tool.mypy.overrides]]
+module = "tomli"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["huggingface_hub", "torch", "transformers"]
 ignore_missing_imports = true
 
 [tool.ruff]
