@@ -505,8 +505,11 @@ floor and retain the existing LLM behavior.
 This is best-effort even with `mode: block`: it guarantees rejection only for
 contradictions recognized by the deterministic floor. Residual LLM review is
 nondeterministic, so a message outside that floor can still be accepted or
-rejected differently across runs. `mode: block` is not a guarantee that every
-misleading message will be caught.
+rejected differently across runs. However, if the LLM audit is unavailable (for
+example, credentials are missing or rejected), `mode: block` fails closed with
+exit 1 and reports `BLOCK-UNVERIFIED`; `warn` and `suggest` retain fail-open
+behavior. The deterministic floor runs before the LLM and remains credential-free.
+`mode: block` is not a guarantee that every misleading message will be caught.
 
 For a repeatable five-run smoke check, use a scratch repository and stage either
 an edited README or a newly planted documentation file. Both commands must

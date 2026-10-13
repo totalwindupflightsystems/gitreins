@@ -502,7 +502,7 @@ def _is_commit_audit_stage(stage_def: dict) -> bool:
     return stage_def.get("type") == "commit_audit" or stage_def.get("id") == "commit_audit"
 
 
-def commit_audit_skip_message(config: dict, trigger: str) -> str:
+def commit_audit_skip_message(config: dict, trigger: str, result: dict | None = None) -> str:
     """The named skip line for a run where the commit audit did NOT happen.
 
     DF-GITREINS-POC-30: the command used to print NOTHING (exit 0, stdout and
@@ -514,12 +514,17 @@ def commit_audit_skip_message(config: dict, trigger: str) -> str:
       * no stage of that type at all — the fresh ``install`` + ``init`` state;
       * a stage exists but does not list this trigger in ``on:``;
       * a stage is armed for this trigger yet produced no result (its
-        ``condition`` excluded it).
+        ``condition`` excluded it.
 
+    If ``result`` is supplied, a configured audit stage present in its stage
+    results is known to have run; never label that run as condition-skipped.
     Exit codes stay 0: a skip is not a failure.
     """
     stages = config.get("pipeline", {}).get("stages", []) or []
     audit_stages = [s for s in stages if _is_commit_audit_stage(s)]
+    stage_results = (result or {}).get("stages", {})
+    if any(stage.get("id") in stage_results for stage in audit_stages):
+        return f"commit audit: pipeline stage ran for trigger {trigger}"
     if not audit_stages:
         return (
             f"commit audit: no pipeline stage with type commit_audit for trigger {trigger} "
@@ -1184,6 +1189,8 @@ class Pipeline:
                 data={"mode": "disabled", "enabled_source": enabled_source},
             )
 
+        mode = resolve_commit_audit_mode(self.config, config, step_def)
+
         # Lazy init LLM client
         if self._llm is None:
             from engine.llm import LLMClient
@@ -1209,6 +1216,7 @@ class Pipeline:
             review_score_offset=score_offset,
             review_profile=config.get("review_profile", "standard"),
             review_effort_override=task_review_effort_override or config.get("review_effort"),
+            mode=mode,
         )
 
         message = task.get("commit_message", "")
@@ -1241,14 +1249,27 @@ class Pipeline:
             return StepResult(
                 id=step_id,
                 type="commit_audit",
-                passed=True,
-                output=f"Audit error (passing): {e}",
+                passed=mode != "block",
+                output=(
+                    f"BLOCK-UNVERIFIED: commit audit could not obtain an LLM verdict: {e}"
+                    if mode == "block"
+                    else f"Audit error (passing): {e}"
+                ),
             )
 
-        mode = resolve_commit_audit_mode(self.config, config, step_def)
         passed = result.valid or mode != "block"
 
         output_lines: list[str] = []
+        if (
+            mode == "block"
+            and not result.valid
+            and any(
+                issue.startswith(("LLM unavailable:", "LLM error on iteration"))
+                for issue in result.issues
+            )
+        ):
+            output_lines.append("BLOCK-UNVERIFIED: LLM audit unavailable; commit blocked.")
+
         # ── CVE-style scoring (GR-066) ──
         all_review_issues = getattr(result, "review_issues", [])
         if all_review_issues:

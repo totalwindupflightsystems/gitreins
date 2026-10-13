@@ -3638,8 +3638,19 @@ def cmd_commit_audit(args: argparse.Namespace) -> None:
 
     result = pipeline.run(task, trigger=trigger)
 
-    # Check if audit stage blocked
-    audit_stage = result.get("stages", {}).get("commit_audit", {})
+    # Check if audit stage blocked. Stage results are keyed by the configured
+    # stage id, so resolve that id from its commit_audit type instead of
+    # assuming the conventional id is used.
+    audit_stage_id = next(
+        (
+            stage.get("id", "commit_audit")
+            for stage in config.get("pipeline", {}).get("stages", []) or []
+            if isinstance(stage, dict)
+            and (stage.get("type") == "commit_audit" or stage.get("id") == "commit_audit")
+        ),
+        "commit_audit",
+    )
+    audit_stage = result.get("stages", {}).get(audit_stage_id, {})
     if audit_stage and not audit_stage.get("passed", True):
         print("\n" + audit_stage.get("summary", "Commit message rejected."))
         sys.exit(1)
@@ -3652,7 +3663,7 @@ def cmd_commit_audit(args: argparse.Namespace) -> None:
     # exit 0 — a skip, not a failure. Silence here is what made a hook that
     # audits nothing indistinguishable from a hook that passed: on a fresh
     # `install` + `init` repo this command printed NOTHING at all.
-    print(commit_audit_skip_message(config, trigger))
+    print(commit_audit_skip_message(config, trigger, result))
     sys.exit(0)
 
 

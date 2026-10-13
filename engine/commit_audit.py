@@ -806,12 +806,14 @@ class CommitAuditor:
         review_score_offset: float = 1.0,
         review_profile: str | None = None,
         review_effort_override: dict | None = None,
+        mode: str = "warn",
     ) -> None:
         self.llm = llm
         self.workdir = os.path.abspath(workdir)
         self.strictness = strictness
         self.max_iterations = max_iterations
         self.suggest_message = suggest_message
+        self.mode = mode.strip().lower()
         self.review_mode = review_mode
         # GR-148: profile selection. A named profile drives checks, severity
         # filter, pass list, and default budget — policy, not just prompt text.
@@ -1308,7 +1310,10 @@ class CommitAuditor:
             )
         except Exception as e:
             logger.warning("Commit audit LLM call failed: %s", e)
-            return CommitAuditResult(valid=True, issues=[f"LLM unavailable: {e}"])
+            return CommitAuditResult(
+                valid=self.mode != "block",
+                issues=[f"LLM unavailable: {e}"],
+            )
 
         if response.tool_calls:
             return None  # LLM wants tools — escalate to tool loop
@@ -1348,7 +1353,7 @@ class CommitAuditor:
             except Exception as e:
                 logger.warning("Commit audit LLM call failed on iteration %d: %s", iteration, e)
                 return CommitAuditResult(
-                    valid=True,
+                    valid=self.mode != "block",
                     issues=[f"LLM error on iteration {iteration}: {e}"],
                     iterations_used=iteration,
                 )

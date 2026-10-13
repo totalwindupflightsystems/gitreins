@@ -351,6 +351,7 @@ def _init_real_git_repo(tmp_path: Path) -> str:
     repo = tmp_path / "real-repo"
     repo.mkdir()
     subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "core.hooksPath", ".git/hooks"], check=True)
     subprocess.run(["git", "-C", str(repo), "config", "user.name", "GitReins Tests"], check=True)
     subprocess.run(
         ["git", "-C", str(repo), "config", "user.email", "gitreins-tests@example.invalid"],
