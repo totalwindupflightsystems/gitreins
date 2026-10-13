@@ -1602,6 +1602,50 @@ class TestCommitAuditSkipLine:
         assert "audit NOT run" in out
         assert "commit-msg" in out
 
+    @pytest.mark.parametrize("stage_id", ["commit_audit", "ca"])
+    def test_cli_blocks_for_standard_and_custom_stage_ids(
+        self,
+        stage_id: str,
+        tmp_workdir: str,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """The CLI must consume results keyed by the configured stage id."""
+        from types import SimpleNamespace
+
+        from engine.commit_audit import CommitAuditResult, CommitAuditor
+        from gitreins import cli as cli_mod
+
+        stage = STAGE_ON_MSG.replace("id: commit_audit", f"id: {stage_id}") + "      mode: block\n"
+        _write_config(tmp_workdir, _config_for(stage))
+        monkeypatch.chdir(tmp_workdir)
+        monkeypatch.setattr(cli_mod, "get_workdir", lambda: tmp_workdir)
+        monkeypatch.setattr("engine.llm.LLMClient", lambda *a, **k: SimpleNamespace())
+        monkeypatch.setattr(
+            CommitAuditor,
+            "audit",
+            lambda self, task: CommitAuditResult(valid=False, issues=["Rejected by test"]),
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            cli_mod.cmd_commit_audit(SimpleNamespace(message="feat: rewrite guard engine"))
+
+        assert exc.value.code == 1
+        output = capsys.readouterr().out
+        assert "Rejected by test" in output
+        assert "condition not met" not in output
+        assert "audit NOT run" not in output
+
+    def test_skip_helper_does_not_call_a_ran_stage_skipped(self) -> None:
+        from engine.pipeline import commit_audit_skip_message
+
+        config = {
+            "pipeline": {"stages": [{"id": "ca", "type": "commit_audit", "on": ["commit-msg"]}]}
+        }
+        result = {"stages": {"ca": {"passed": False}}}
+        assert "ran" in commit_audit_skip_message(config, "commit-msg", result)
+        assert "condition not met" not in commit_audit_skip_message(config, "commit-msg", result)
+
 
 # ═══════════════════════════════════════════════════════════════
 # commit_audit.enabled wiring (REVIEW-GITREINS-024)
