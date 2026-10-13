@@ -1,0 +1,19 @@
+{
+  "tick_id": "gitreins-foreman-2026-10-13-05-16-30",
+  "project": "gitreins",
+  "tasks": [
+    {
+      "id": "DF-GITREINS-POC-88",
+      "worktree": "wt/DF-GITREINS-POC-88",
+      "branch": "wt/DF-GITREINS-POC-88"
+    },
+    {
+      "id": "DF-GITREINS-POC-89",
+      "worktree": "wt/DF-GITREINS-POC-89",
+      "branch": "wt/DF-GITREINS-POC-89"
+    }
+  ],
+  "status": "finished",
+  "created_at": "2026-10-13T05:16:30-05:00",
+  "finished_at": "2026-10-13T14:58:24Z"
+}
