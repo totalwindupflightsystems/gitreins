@@ -18,7 +18,7 @@ from engine.commit_audit import (
     ReviewIssue,
     COMMIT_AUDIT_TOOLS,
 )
-from engine.llm import LLMClient, LLMResponse, LLMUsage
+from engine.llm import LLMClient, LLMResponse, LLMUsage, ToolCall
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -126,9 +126,9 @@ class TestCommitAuditorParseResult:
 class TestCommitAuditorAudit:
     """Test the full audit flow with mocked LLM."""
 
-    def _make_auditor(self, strictness: object = "standard") -> CommitAuditor:
+    def _make_auditor(self, strictness: object = "standard", mode: str = "warn") -> CommitAuditor:
         llm = LLMClient(api_key="sk-test", model="test/model")
-        return CommitAuditor(llm, strictness=strictness)
+        return CommitAuditor(llm, strictness=strictness, mode=mode)
 
     def _valid_response(self) -> object:
         return LLMResponse(content='{"valid": true}', usage=LLMUsage())
@@ -188,11 +188,39 @@ class TestCommitAuditorAudit:
 
     @patch.object(LLMClient, "chat")
     def test_llm_error_returns_valid(self, mock_chat: object) -> None:
-        """LLM failures should not block commits (safe default)."""
-        mock_chat.side_effect = RuntimeError("API down")
-        auditor = self._make_auditor()
+        """LLM failures remain fail-open in warn mode."""
+        mock_chat.side_effect = RuntimeError("401 Unauthorized")
+        auditor = self._make_auditor(mode="warn")
         result = auditor.audit("fix: something", diff="+some change")
-        assert result.valid is True  # safe default
+        assert result.valid is True
+        assert any("LLM unavailable" in issue for issue in result.issues)
+
+    @patch.object(LLMClient, "chat")
+    def test_llm_error_fails_closed_in_block_mode(self, mock_chat: object) -> None:
+        """An unavailable LLM cannot silently pass a blocking audit."""
+        mock_chat.side_effect = RuntimeError("401 Unauthorized")
+        auditor = self._make_auditor(mode="block")
+        result = auditor.audit("fix: something", diff="+some change")
+        assert result.valid is False
+        assert any("LLM unavailable" in issue for issue in result.issues)
+
+    @patch.object(LLMClient, "chat")
+    def test_tool_loop_llm_error_fails_closed_in_block_mode(self, mock_chat: object) -> None:
+        """Credential failure after tool escalation remains fail-closed."""
+        mock_chat.side_effect = [
+            LLMResponse(
+                content="",
+                tool_calls=[
+                    ToolCall(id="call-1", name="read_file", arguments={"path": "README.md"})
+                ],
+                usage=LLMUsage(),
+            ),
+            RuntimeError("403 Forbidden"),
+        ]
+        auditor = self._make_auditor(mode="block")
+        result = auditor.audit("fix: something", diff="+some change")
+        assert result.valid is False
+        assert any("LLM error on iteration" in issue for issue in result.issues)
 
     @patch.object(LLMClient, "chat")
     def test_clear_docs_contradiction_blocks_before_llm(self, mock_chat: object) -> None:
@@ -1841,3 +1869,42 @@ class TestCommitAuditEnabledFlag:
         )
         assert got is False
         assert source == "defaults.commit_audit.enabled"
+
+
+@pytest.mark.parametrize(("mode", "expected_passed"), [("block", False), ("warn", True)])
+def test_pipeline_credential_failure_obeys_mode(
+    tmp_workdir: str,
+    monkeypatch: pytest.MonkeyPatch,
+    mode: str,
+    expected_passed: bool,
+) -> None:
+    """A failed provider call blocks only when the armed stage is in block mode."""
+    from engine.commit_audit import CommitAuditor
+    from engine.pipeline import Pipeline, load_pipeline_config
+
+    _write_config(tmp_workdir, _config_for(STAGE_ON_MSG + f"      mode: {mode}\n"))
+    llm = LLMClient(api_key="sk-test", model="test/model")
+
+    def fail_chat(*args: object, **kwargs: object) -> None:
+        raise RuntimeError("401 Unauthorized")
+
+    monkeypatch.setattr(LLMClient, "chat", fail_chat)
+    monkeypatch.setattr(CommitAuditor, "_capture_diff", lambda self: "+source change")
+    pipeline = Pipeline(load_pipeline_config(tmp_workdir), tmp_workdir, llm=llm)
+    task = {
+        "id": "_commit_msg",
+        "title": "t",
+        "criteria": [],
+        "commit_message": "docs: update readme",
+    }
+
+    result = pipeline.run(task, trigger="commit-msg")
+    passed = result["stages"]["commit_audit"]["passed"]
+    summary = result["stages"]["commit_audit"]["summary"]
+
+    assert passed is expected_passed
+    if mode == "block":
+        assert "LLM unavailable" in summary
+        assert "BLOCK-UNVERIFIED" in summary
+    else:
+        assert "looks good" in summary

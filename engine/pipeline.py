@@ -1189,6 +1189,8 @@ class Pipeline:
                 data={"mode": "disabled", "enabled_source": enabled_source},
             )
 
+        mode = resolve_commit_audit_mode(self.config, config, step_def)
+
         # Lazy init LLM client
         if self._llm is None:
             from engine.llm import LLMClient
@@ -1214,6 +1216,7 @@ class Pipeline:
             review_score_offset=score_offset,
             review_profile=config.get("review_profile", "standard"),
             review_effort_override=task_review_effort_override or config.get("review_effort"),
+            mode=mode,
         )
 
         message = task.get("commit_message", "")
@@ -1246,14 +1249,27 @@ class Pipeline:
             return StepResult(
                 id=step_id,
                 type="commit_audit",
-                passed=True,
-                output=f"Audit error (passing): {e}",
+                passed=mode != "block",
+                output=(
+                    f"BLOCK-UNVERIFIED: commit audit could not obtain an LLM verdict: {e}"
+                    if mode == "block"
+                    else f"Audit error (passing): {e}"
+                ),
             )
 
-        mode = resolve_commit_audit_mode(self.config, config, step_def)
         passed = result.valid or mode != "block"
 
         output_lines: list[str] = []
+        if (
+            mode == "block"
+            and not result.valid
+            and any(
+                issue.startswith(("LLM unavailable:", "LLM error on iteration"))
+                for issue in result.issues
+            )
+        ):
+            output_lines.append("BLOCK-UNVERIFIED: LLM audit unavailable; commit blocked.")
+
         # ── CVE-style scoring (GR-066) ──
         all_review_issues = getattr(result, "review_issues", [])
         if all_review_issues:
