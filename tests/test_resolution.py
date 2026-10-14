@@ -34,6 +34,7 @@ from engine.resolution import (
     discover_keys,
     estimate_tokens,
     is_excluded_path,
+    _hilo_search_path,
     order_blocks,
     pack_blocks,
     parse_answers,
@@ -551,6 +552,27 @@ def test_trace_returns_nothing_when_hilo_fails() -> None:
     assert trace_question("q", runner=failing) == []
 
 
+def _fake_hilo_on_path(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Path:
+    """Put a fake ``hilo`` on PATH; returns its directory."""
+    fake_dir = tmp_path / "bin"
+    fake_dir.mkdir()
+    fake = fake_dir / "hilo"
+    fake.write_text("#!/bin/sh\nexit 0\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", str(fake_dir))
+    return fake_dir
+
+
+def test_hilo_search_path_prefers_path_then_cargo_bin(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """PATH first, then the cargo fallback — the exact locations the abstain names."""
+    monkeypatch.setenv("PATH", "")
+    assert _hilo_search_path() == str(Path.home() / ".cargo" / "bin" / "hilo")
+    fake_dir = _fake_hilo_on_path(monkeypatch, tmp_path)
+    assert _hilo_search_path() == str(fake_dir / "hilo")
+
+
 def test_related_reports_the_reverse_edge_path_and_excludes_secrets() -> None:
     related = related_files(
         "engine/evidence_bounds.py", runner=FakeRunner(related_out=RELATED_TRANSCRIPT)
@@ -1018,6 +1040,33 @@ def test_a_question_with_no_evidence_at_all_is_an_empty_bundle_abstain() -> None
     )
     assert verdict.verdict == "ABSTAIN"
     assert verdict.abstain_reason == "empty-bundle"
+
+
+def test_missing_hilo_names_the_searched_path_in_the_empty_bundle_detail() -> None:
+    """DF-GITREINS-POC-86: the abstain detail must name the exact hilo path searched.
+
+    Hermetic — the runner stub replays the real default runner's 127 shape
+    (``hilo not found (searched PATH, then <cargo bin path>)``) so the test
+    never needs hilo or a cargo install to pass.
+    """
+    cargo_bin = Path.home() / ".cargo" / "bin" / "hilo"
+
+    def missing(args: list[str], workdir: str) -> tuple[int, str, str]:
+        return 127, "", f"hilo not found (searched PATH, then {cargo_bin})"
+
+    verdict = _resolve_hermetic(runner=missing, traced=False, read_files=False)
+    assert verdict.verdict == "ABSTAIN"
+    assert verdict.abstain_reason == "empty-bundle"
+    # notes[-1] is the runner's searched-path message itself — the detail the
+    # human Reason line renders (acceptance: the path searched is named).
+    assert verdict.abstain_detail == f"hilo not found (searched PATH, then {cargo_bin})"
+    assert "hilo not found" in verdict.abstain_detail
+    assert str(Path.home() / ".cargo" / "bin") in verdict.abstain_detail
+    assert "check that hilo is installed" in verdict.abstain_action
+    # at the bundle level the full wrapped note is still on record
+    bundle = assemble_bundle("does the gate fail closed?", runner=missing, traced=False)
+    assert any("primary understand bundle failed (exit 127)" in note for note in bundle.notes)
+    assert bundle.notes[-1].startswith("hilo not found (searched PATH, then ")
 
 
 def test_a_blank_question_never_costs_a_call() -> None:
