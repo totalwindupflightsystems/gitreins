@@ -110,6 +110,39 @@ and exits 0. `mode` resolves stage level → `defaults.commit_audit` → top-lev
 `commit_audit` → `warn`; only `block` makes the hook fail the commit. See
 `docs/cli-reference.md` §7 for the full table.
 
+### Prerequisite for the resolution gate: the hilo binary
+
+The resolution gate's evidence assembler is an **external binary** —
+[Hilo](https://github.com/gethilo/hilo), the agent-first metadata filesystem whose
+`hilo graph` commands trace a question to its seed files and assemble the evidence
+bundle. It is a separate Rust project, **not** a pip dependency: `pip install
+gitreins` does not bring it, and nothing else in this guide needs it. Install it
+from the Hilo project (no prebuilt binaries are published yet, so every path is a
+cargo source build that ends with the binary in `~/.cargo/bin`):
+
+```bash
+git clone https://github.com/gethilo/hilo.git
+cd hilo && make release                    # cargo build --release + strip
+cp target/release/hilo ~/.cargo/bin/hilo   # put hilo on PATH
+hilo --help
+```
+
+**Without hilo, `gitreins resolve` degrades to an ABSTAIN — that is expected
+behavior, not a bug.** The gate refuses to answer without candidate evidence, and
+the evidence comes from hilo, so a missing binary produces:
+
+```
+Verdict:  ABSTAIN
+Reason:   empty-bundle — hilo not found (searched PATH, then /home/you/.cargo/bin/hilo)
+Fix:      check that hilo is installed and the question names real code —
+          hilo comes from https://github.com/gethilo/hilo …
+```
+
+The Reason line names the exact locations that were searched (your `PATH`, then
+`~/.cargo/bin/hilo`), so "not found" is one `cp` away from fixed. The same
+assembler backs `gitreins preflight` and the MCP `context.resolve` tool — the
+binary is a prerequisite for all three, and for nothing else in this guide.
+
 ## 2. Smart init
 
 ```bash

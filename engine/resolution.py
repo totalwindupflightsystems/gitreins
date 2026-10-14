@@ -221,7 +221,11 @@ _REASON_ACTIONS = {
     "malformed-response": "the Jev answer shape changed — re-verify the model build",
     "bundle-over-server-ceiling": "lower max_tokens (the estimator undercounted this payload)",
     "budget-exhausted": "raise max_tokens or ask a narrower question",
-    "empty-bundle": "check that hilo is installed and the question names real code",
+    "empty-bundle": (
+        "check that hilo is installed and the question names real code — hilo comes from"
+        " https://github.com/gethilo/hilo (cargo source build), and the abstain detail"
+        " names the exact path that was searched"
+    ),
     "empty-question": "pass a question for the repo to resolve",
 }
 
@@ -529,16 +533,27 @@ def _configured_egress_exclude(*, workdir: str = ".", defaults: Any = None) -> t
     return tuple(str(p) for p in patterns) if patterns else ()
 
 
+def _hilo_search_path() -> str:
+    """Where the default runner looks for the hilo binary: ``PATH``, then cargo's bin.
+
+    Surfaced verbatim in the missing-binary failure so the abstain detail names
+    the exact location searched instead of sending the reader hunting
+    (DF-GITREINS-POC-86).
+    """
+    return shutil.which("hilo") or str(Path.home() / ".cargo" / "bin" / "hilo")
+
+
 def _default_hilo_runner(args: list[str], workdir: str) -> tuple[int, str, str]:
     """Run ``hilo <args>`` in *workdir*; returns (exit_code, stdout, stderr).
 
     Missing hilo is a named failure (127), never a traceback: the pipeline's
     honest answer to "no assembler" is an empty bundle, which the verdict
-    reports as ABSTAIN with the reason visible.
+    reports as ABSTAIN with the reason visible — and the searched path in the
+    detail (DF-GITREINS-POC-86).
     """
-    exe = shutil.which("hilo") or str(Path.home() / ".cargo" / "bin" / "hilo")
+    exe = _hilo_search_path()
     if not Path(exe).exists():
-        return 127, "", f"hilo not found (looked for {exe})"
+        return 127, "", f"hilo not found (searched PATH, then {exe})"
     try:
         proc = subprocess.run(
             [exe, *args],
@@ -1055,17 +1070,28 @@ def assemble_bundle(
         # "We had evidence and could not fit it" and "there was no evidence at
         # all" are different failures with different fixes (spec §3.3), so the
         # verdict must be able to name which one happened.
+        #
+        # DF-GITREINS-POC-86: when hilo itself is missing, the last note must
+        # be the searched-path failure, not the generic "no candidate
+        # evidence" line — resolve() surfaces notes[-1] as the abstain detail,
+        # and "hilo not found (searched PATH, then …)" names the fix. The
+        # runner's message arrives wrapped in the primary-bundle failure note,
+        # so the searched-path message is extracted for the detail; the full
+        # wrapped note stays in the record.
+        hilo_absent_match = re.search(r"hilo not found \([^)]*\)", notes[-1]) if notes else None
+        empty_notes = (
+            ["budget exhausted before any candidate evidence fit the bundle"]
+            if blocks
+            else ["no candidate evidence was assembled for this question"]
+        )
+        if hilo_absent_match:
+            empty_notes.append(hilo_absent_match.group(0))
         return AssembledBundle(
             text="",
             seeds=trace_seeds,
             dependency_paths=dependency_paths,
             budget_exhausted=bool(blocks),
-            notes=notes
-            + (
-                ["budget exhausted before any candidate evidence fit the bundle"]
-                if blocks
-                else ["no candidate evidence was assembled for this question"]
-            ),
+            notes=notes + empty_notes,
         )
 
     consumed = estimate_tokens(packed.text) + reserve
