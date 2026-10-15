@@ -196,6 +196,22 @@ def skip_worker_llm_probe(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv(GITREINS_SKIP_LLM_PROBE_ENV, "1")
 
 
+@pytest.fixture(autouse=True)
+def isolate_git_fixtures_from_host_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Neutralize the host's global git config for test subprocesses.
+
+    INT-ENV-HOOKSPATH-001: the host's ``core.hooksPath`` (e.g.
+    ``~/.hermes/hooks``) shadows repo-local hooks in tmp fixture repos,
+    causing ~12 test failures locally while GitHub CI is green. Setting
+    ``GIT_CONFIG_GLOBAL`` to an empty file makes git ignore the host's
+    ``~/.gitconfig`` for every subprocess spawned by the test suite, so
+    fixtures are host-independent without touching the real host config.
+    """
+    empty_config = tmp_path / "empty-git-config"
+    empty_config.write_text("")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(empty_config))
+
+
 @pytest.fixture
 def task_manager(tmp_workdir: str) -> object:
     """Create a TaskManager with a clean temp directory."""
