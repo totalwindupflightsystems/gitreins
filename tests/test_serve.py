@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shutil
+import socket
 import sqlite3
 import subprocess
 import sys
@@ -262,6 +263,33 @@ def test_stderr_carries_the_non_loopback_host_warning(
     assert "warning: --host 0.0.0.0" in captured.err
     assert "NO authentication" in captured.err
     assert "warning: --host 0.0.0.0" not in captured.out
+
+
+def test_taken_port_reports_the_conflict_instead_of_a_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A port already in use is an operator error: exit 1 naming the remedy.
+
+    Binding to port 0 first makes the port genuinely occupied (an active
+    listener, so ``allow_reuse_address`` does not rescue the second bind) and
+    keeps the test independent of whatever else runs on the host: the conflict
+    is one this test created.
+    """
+    (tmp_path / ".gitreins" / "history").mkdir(parents=True)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as occupied:
+        occupied.bind(("127.0.0.1", 0))
+        occupied.listen(1)
+        taken_port = occupied.getsockname()[1]
+
+        with pytest.raises(SystemExit) as excinfo:
+            serve.serve(str(tmp_path), host="127.0.0.1", port=taken_port, open_browser=False)
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 1
+    assert f"error: port {taken_port} in use — pick another with --port" in captured.err
+    assert "Traceback" not in captured.err
+    # The banner is only printed after a successful bind: no half-started server.
+    assert "Judgment browser" not in captured.out
 
 
 def test_verdicts_lists_fixture_metadata(live_server: object, repo_fixture: str) -> None:

@@ -41,6 +41,7 @@ the contract table, the data sources and the exposure decision.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
@@ -780,7 +781,16 @@ def serve(
     """
     Handler.workdir = workdir
     Handler.project = project
-    httpd = ThreadingHTTPServer((host, port), Handler)
+    try:
+        httpd = ThreadingHTTPServer((host, port), Handler)
+    except OSError as exc:
+        if exc.errno == errno.EADDRINUSE:
+            # A taken port is an operator mistake, not a crash: name the port and
+            # the remedy instead of spilling a socketserver traceback. Only the
+            # bind is guarded -- serve_forever() below must keep propagating.
+            print(f"error: port {port} in use — pick another with --port", file=sys.stderr)
+            raise SystemExit(1) from None
+        raise
     # Report the port actually bound (pass --port 0 to let the OS choose one).
     url = f"http://{host}:{httpd.server_address[1]}/"
     print(f"GitReins judgment browser: {url}")
