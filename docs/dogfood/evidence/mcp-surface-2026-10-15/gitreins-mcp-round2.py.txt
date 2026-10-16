@@ -1,0 +1,91 @@
+#!/usr/bin/env python3
+"""Round 2: gates, fail-closed paths, validation, persistence."""
+import json, subprocess, sys, time, selectors
+
+REPO = "/home/kara/gitreins"
+PY = f"{REPO}/.venv/bin/python"
+READ_TIMEOUT = 90.0
+
+def readline_timeout(proc, timeout=READ_TIMEOUT):
+    sel = selectors.DefaultSelector()
+    sel.register(proc.stdout, selectors.EVENT_READ)
+    ready = sel.select(timeout)
+    sel.close()
+    return proc.stdout.readline() if ready else ""
+
+counter = iter(range(1, 300))
+
+class MCPClient:
+    def __init__(self, workdir):
+        self.proc = subprocess.Popen(
+            [PY, "-m", "gitreins_mcp.server", workdir],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, cwd=workdir)
+    def call(self, method, **params):
+        t0 = time.monotonic()
+        req = {"jsonrpc": "2.0", "id": next(counter), "method": method}
+        if params: req["params"] = params
+        self.proc.stdin.write(json.dumps(req) + "\n"); self.proc.stdin.flush()
+        line = readline_timeout(self.proc)
+        if not line: return {"_wire": "EOF/timeout", "_ms": round((time.monotonic()-t0)*1000)}
+        return json.loads(line) | {"_ms": round((time.monotonic()-t0)*1000)}
+    def tool(self, name, **args):
+        return self.call("tools/call", name=name, arguments=args)
+    def tool_text(self, name, **args):
+        r = self.tool(name, **args)
+        res = r.get("result")
+        if isinstance(res, dict) and isinstance(res.get("content"), list):
+            try: return json.loads(res["content"][0]["text"]), r
+            except Exception: return res["content"][0]["text"], r
+        return None, r
+
+S = sys.argv[1]
+cli = MCPClient(S)
+cli.call("initialize", protocolVersion="2025-11-25", capabilities={}, clientInfo={"name":"d","version":"1"})
+cli.call("notifications/initialized")
+
+# warm guard.run timing (server already initialized)
+out, raw = cli.tool_text("guard.run")
+print("== guard.run warm ==", "ms:", raw.get("_ms"), "passed:", out.get("passed") if isinstance(out, dict) else out)
+
+# A. commit gate: task in_progress -> commit must be blocked
+cli.tool_text("task.create", id="df-mcp-gate", title="gate test", criteria=["c1"])
+cli.tool_text("task.start", id="df-mcp-gate")
+out, raw = cli.tool_text("commit", message="demo commit while task in_progress")
+print("== commit while in_progress ==", "ms:", raw.get("_ms"), "->", json.dumps(out) if out is not None else json.dumps(raw.get("result") or raw)[:300])
+
+# B. validation: missing required args
+r = cli.tool("task.create", id="df-bad")
+print("== task.create missing title/criteria ==", json.dumps(r.get("error") or r.get("result"))[:250])
+
+# C. judge.status for unknown job
+out, raw = cli.tool_text("judge.status", job_id="no-such-job")
+print("== judge.status unknown ==", json.dumps(out) if out is not None else json.dumps(raw)[:200])
+
+# D. workdir override to nonexistent dir
+out, raw = cli.tool_text("task.list", workdir="/tmp/gitreins-nonexistent-xyz")
+print("== task.list bad workdir ==", json.dumps(out) if out is not None else json.dumps(raw.get("result") or raw)[:250])
+
+# E. fail-closed: stage a file with a fake secret -> guard.run must FAIL
+with open(f"{S}/leak.py", "w") as f:
+    f.write('TOKEN = "sk-" + "X"*32  # fake test token, redacted for evidence archive\n')
+subprocess.run(["git", "-C", S, "add", "leak.py"], check=True)
+out, raw = cli.tool_text("guard.run")
+print("== guard.run with staged fake secret ==", "ms:", raw.get("_ms"))
+if isinstance(out, dict):
+    print("   passed:", out.get("passed"),
+          "| lanes:", [(x["name"], x["passed"]) for x in out.get("results", [])])
+    for x in out.get("results", []):
+        if not x["passed"]:
+            print("   failure output (shape only):", x["output"][:120])
+subprocess.run(["git", "-C", S, "rm", "--cached", "-q", "leak.py"])
+import os; os.remove(f"{S}/leak.py")
+
+# F. task.complete without LLM configured -> what happens to task state?
+out, raw = cli.tool_text("task.complete", id="df-mcp-gate")
+print("== task.complete (no LLM) ==", json.dumps(out)[:300] if out is not None else json.dumps(raw.get("result") or raw)[:300])
+out, _ = cli.tool_text("task.get", id="df-mcp-gate")
+print("== task state after complete ==", json.dumps(out)[:200] if out else "n/a")
+cli.tool_text("task.delete", id="df-mcp-gate")
+
+cli.proc.stdin.close(); print("== exit rc ==", cli.proc.wait(timeout=15))

@@ -1,0 +1,19 @@
+== initialize ==
+{"protocolVersion": "2025-11-25", "capabilities": {"tools": {}}, "serverInfo": {"name": "gitreins", "version": "0.16.0"}}
+ms: 258
+== tools/list == 15 tools: configure, repo.init, task.create, task.start, task.complete, task.list, task.get, task.delete, commit, guard.run, judge.evaluate, judge.status, quality.status, propagate, context.resolve
+== repo.init == {"created": true, "config_path": "/tmp/gitreins-df-demo-3868991/.gitreins/config.yaml", "workdir": "/tmp/gitreins-df-demo-3868991"}
+== task.create == {"id": "df-mcp-001", "title": "Dogfood MCP demo", "criteria": ["guard.run passes on the scratch repo", "quality_status reports the computed snapshot"], "status": "pending", "created_at": "2026-10-15T23:54:55.706065+00:00", "completed_at": null}
+== task.start == {"id": "df-mcp-001", "title": "Dogfood MCP demo", "criteria": ["guard.run passes on the scratch repo", "quality_status reports the computed snapshot"], "status": "in_progress", "created_at": "2026-10-
+== task.list pending == {"tasks": []}
+== guard.run == {"passed": true, "workdir": "/tmp/gitreins-df-demo-3868991", "guard_log": "/tmp/gitreins-df-demo-3868991/.gitreins/logs/guard-20261015T235456.070840Z.log", "results": [{"name": "secrets", "passed": true, "output": "gitleaks: clean"}, {"name": "lint", "passed": true, "output": "No Python files staged"}, {"name": "tests", "passed": true, "output": "No files staged \u2014 skipped"}]}
+== quality_status == {'jsonrpc': '2.0', 'id': 8, 'result': {'content': [{'type': 'text', 'text': '{\n  "passed": true,\n  "workdir": "/tmp/gitreins-df-demo-3868991",\n  "guard_log": "/tmp/gitreins-df-demo-3868991/.gitreins/logs/guard-20261015T235456.070840Z.log",\n  "results": [\n    {\n      "name": "secrets",\n      "passed": true,\n      "output": "gitleaks: clean"\n    },\n    {\n      "name": "lint",\n      "passed": true,\n      "output": "No Python files staged"\n    },\n    {\n      "name": "tests",\n      "passed": true,\n      "output": "No files staged \\u2014 skipped"\n    }\n  ]\n}'}]}, '_ms': 361}
+== unknown tool ==
+{"code": -32601, "message": "Unknown tool: no.such.tool"}
+== task.get missing == {"error": "Task not found: missing-task"}
+== server/discover == {"code": -32601, "message": "Unknown method: server/discover"}
+== bogus/method == {"code": -32601, "message": "Unknown method: bogus/method"}
+== task.delete == {"deleted": "df-mcp-001"}
+== EOF exit rc == 0
+== stderr == gitreins MCP server 0.16.0 — stdio, protocol 2025-11-25 (negotiated per client request), 15 tools, workdir=/tmp/gitreins-df-demo-3868991
+gitreins MCP server 0.16.0 — stdin closed (EOF), exiting 0
