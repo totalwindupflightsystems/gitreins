@@ -197,7 +197,7 @@ class GitReinsMCPServer:
                     "properties": {
                         "workdir": {
                             "type": "string",
-                            "description": "Absolute path to the git repo. Defaults to the MCP server's workdir.",
+                            "description": "Absolute path to the git repo. Defaults to the MCP server's workdir. The path must exist and be a directory — a missing path is refused with an error, never read as an empty store.",
                         },
                     },
                 },
@@ -220,7 +220,7 @@ class GitReinsMCPServer:
                         },
                         "workdir": {
                             "type": "string",
-                            "description": "Absolute path to the repo. Tasks are stored in <workdir>/.gitreins/tasks.yaml. Defaults to the MCP server's workdir.",
+                            "description": "Absolute path to the repo. Tasks are stored in <workdir>/.gitreins/tasks.yaml. Defaults to the MCP server's workdir. The path must exist and be a directory — a missing path is refused with an error, never read as an empty store.",
                         },
                     },
                     "required": ["id", "title", "criteria"],
@@ -235,7 +235,7 @@ class GitReinsMCPServer:
                         "id": {"type": "string", "description": "Task ID to start"},
                         "workdir": {
                             "type": "string",
-                            "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir.",
+                            "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir. The path must exist and be a directory — a missing path is refused with an error, never read as an empty store.",
                         },
                     },
                     "required": ["id"],
@@ -250,7 +250,7 @@ class GitReinsMCPServer:
                         "id": {"type": "string", "description": "Task ID to complete"},
                         "workdir": {
                             "type": "string",
-                            "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir.",
+                            "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir. The path must exist and be a directory — a missing path is refused with an error, never read as an empty store.",
                         },
                     },
                     "required": ["id"],
@@ -269,7 +269,7 @@ class GitReinsMCPServer:
                         },
                         "workdir": {
                             "type": "string",
-                            "description": "Absolute path to the repo. Defaults to the MCP server's workdir.",
+                            "description": "Absolute path to the repo. Defaults to the MCP server's workdir. The path must exist and be a directory — a missing path is refused with an error, never read as an empty store.",
                         },
                     },
                 },
@@ -283,7 +283,7 @@ class GitReinsMCPServer:
                         "id": {"type": "string", "description": "Task ID"},
                         "workdir": {
                             "type": "string",
-                            "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir.",
+                            "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir. The path must exist and be a directory — a missing path is refused with an error, never read as an empty store.",
                         },
                     },
                     "required": ["id"],
@@ -298,7 +298,7 @@ class GitReinsMCPServer:
                         "id": {"type": "string", "description": "Task ID to delete"},
                         "workdir": {
                             "type": "string",
-                            "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir.",
+                            "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir. The path must exist and be a directory — a missing path is refused with an error, never read as an empty store.",
                         },
                     },
                     "required": ["id"],
@@ -313,7 +313,7 @@ class GitReinsMCPServer:
                         "message": {"type": "string", "description": "Commit message"},
                         "workdir": {
                             "type": "string",
-                            "description": "Absolute path to the repo to commit in. The in-progress task gate, Tier 1 guards and the git commit all resolve against it. Defaults to the MCP server's workdir.",
+                            "description": "Absolute path to the repo to commit in. The in-progress task gate, Tier 1 guards and the git commit all resolve against it. Defaults to the MCP server's workdir. The path must exist and be a directory — a missing path is refused with an error, never read as an empty store.",
                         },
                     },
                     "required": ["message"],
@@ -327,7 +327,7 @@ class GitReinsMCPServer:
                     "properties": {
                         "workdir": {
                             "type": "string",
-                            "description": "Absolute path to the repo to guard. Defaults to the MCP server's workdir.",
+                            "description": "Absolute path to the repo to guard. Defaults to the MCP server's workdir. The path must exist and be a directory — a missing path is refused with an error, never read as an empty store.",
                         },
                         "dead_code": {
                             "type": "boolean",
@@ -346,7 +346,7 @@ class GitReinsMCPServer:
                         "id": {"type": "string", "description": "Task ID to evaluate"},
                         "workdir": {
                             "type": "string",
-                            "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir.",
+                            "description": "Absolute path to the repo containing the task. Defaults to the MCP server's workdir. The path must exist and be a directory — a missing path is refused with an error, never read as an empty store.",
                         },
                         "wait": {
                             "type": "boolean",
@@ -403,7 +403,7 @@ class GitReinsMCPServer:
                     "properties": {
                         "workdir": {
                             "type": "string",
-                            "description": "Optional target repo path. Defaults to the server workdir.",
+                            "description": "Optional target repo path. Defaults to the server workdir. The path must exist and be a directory — a missing path is refused with an error, never read as an empty store.",
                         },
                     },
                 },
@@ -516,6 +516,33 @@ class GitReinsMCPServer:
             "env_keys": sorted(k for k in os.environ if "API_KEY" in k or "LLM" in k),
         }
 
+    def _workdir_error(self, workdir: str | None) -> dict | None:
+        """Refuse an unusable *workdir* before a tool touches any store.
+
+        DF-GITREINS-POC-93: every workdir-taking tool handed its raw argument
+        straight to ``TaskManager``/``GuardManager``, and ``TaskManager``
+        treats a missing store as an EMPTY one — so a typo'd path answered
+        ``task.list`` with ``{"tasks": []}`` (indistinguishable from "this repo
+        has no tasks") while ``task.create``/``task.start`` minted
+        ``<workdir>/.gitreins/tasks.yaml`` under the typo: a phantom store the
+        caller can never find again. That is a silent data-loss trap, so the
+        path is checked here, before any tool logic runs.
+
+        Returns None when the target is usable, else the error dict the
+        calling tool returns verbatim. The message names the RESOLVED path, so
+        a relative argument is reported where it actually pointed. No argument
+        keeps the server's own workdir — validated the same way, so a server
+        started in a since-deleted directory fails loud instead of answering
+        from nothing.
+        """
+        if workdir is not None and not isinstance(workdir, str):
+            return {"error": f"workdir must be a string, got {type(workdir).__name__}"}
+        wd = os.path.abspath(workdir) if workdir else self.workdir
+        if os.path.isdir(wd):
+            return None
+        reason = "does not exist" if not os.path.exists(wd) else "is not a directory"
+        return {"error": f"workdir '{wd}' {reason}", "workdir": wd}
+
     def _task_manager_for(self, workdir: str | None = None) -> TaskManager:
         """Return a TaskManager that sees the CURRENT store for *workdir*.
 
@@ -535,18 +562,27 @@ class GitReinsMCPServer:
     def _task_create(
         self, id: str, title: str, criteria: list[str], workdir: str | None = None
     ) -> dict:
+        refusal = self._workdir_error(workdir)
+        if refusal is not None:
+            return refusal
         tm = self._task_manager_for(workdir)
         task = tm.create(id, title, criteria)
         logger.info("Task created: %s (workdir=%s)", id, tm.workdir)
         return tm.to_dict(task)
 
     def _task_start(self, id: str, workdir: str | None = None) -> dict:
+        refusal = self._workdir_error(workdir)
+        if refusal is not None:
+            return refusal
         tm = self._task_manager_for(workdir)
         task = tm.start(id)
         logger.info("Task started: %s (workdir=%s)", id, tm.workdir)
         return tm.to_dict(task)
 
     def _task_complete(self, id: str, workdir: str | None = None) -> dict:
+        refusal = self._workdir_error(workdir)
+        if refusal is not None:
+            return refusal
         tm = self._task_manager_for(workdir)
         task = tm.complete(id)
         logger.info("Task completed: %s (workdir=%s)", id, tm.workdir)
@@ -572,11 +608,17 @@ class GitReinsMCPServer:
         return {"task": tm.to_dict(task), "note": f"{unusable} — skipping evaluation"}
 
     def _task_list(self, status: str | None = None, workdir: str | None = None) -> dict:
+        refusal = self._workdir_error(workdir)
+        if refusal is not None:
+            return refusal
         tm = self._task_manager_for(workdir)
         tasks = tm.list_tasks(status)
         return {"tasks": [tm.to_dict(t) for t in tasks]}
 
     def _task_get(self, id: str, workdir: str | None = None) -> dict:
+        refusal = self._workdir_error(workdir)
+        if refusal is not None:
+            return refusal
         tm = self._task_manager_for(workdir)
         task = tm.get(id)
         if not task:
@@ -584,6 +626,9 @@ class GitReinsMCPServer:
         return tm.to_dict(task)
 
     def _task_delete(self, id: str, workdir: str | None = None) -> dict:
+        refusal = self._workdir_error(workdir)
+        if refusal is not None:
+            return refusal
         tm = self._task_manager_for(workdir)
         try:
             tm.delete(id)
@@ -607,6 +652,9 @@ class GitReinsMCPServer:
         server construction (``self.judge.guard_manager``), so every existing
         response is byte-for-byte unchanged.
         """
+        refusal = self._workdir_error(workdir)
+        if refusal is not None:
+            return refusal
         wd = os.path.abspath(workdir) if workdir else self.workdir
 
         # Check all in-progress tasks first, from the RESOLVED workdir.
@@ -704,6 +752,9 @@ class GitReinsMCPServer:
         could never reach a guarded run. Idempotent: an existing config is
         never read, parsed or overwritten, only reported.
         """
+        refusal = self._workdir_error(workdir)
+        if refusal is not None:
+            return refusal
         wd = os.path.abspath(workdir) if workdir else self.workdir
         if not os.path.isdir(os.path.join(wd, ".git")):
             return {
@@ -731,6 +782,9 @@ class GitReinsMCPServer:
         Refuses to run when the target repo has no .gitreins/config.yaml
         (GR-GAP-054) — see ``_guard_manager_for``.
         """
+        refusal = self._workdir_error(workdir)
+        if refusal is not None:
+            return refusal
         wd = os.path.abspath(workdir) if workdir else self.workdir
         gm = self._guard_manager_for(wd)
         if isinstance(gm, dict):
@@ -763,6 +817,9 @@ class GitReinsMCPServer:
         operation. An enabled-but-never-computed config is reported as such
         so a caller can tell it from a repo without quality metrics at all.
         """
+        refusal = self._workdir_error(workdir)
+        if refusal is not None:
+            return refusal
         from engine.quality_metrics import quality_snapshot_peek
 
         wd = os.path.abspath(workdir) if workdir else self.workdir
@@ -827,6 +884,9 @@ class GitReinsMCPServer:
         dict (legacy synchronous behavior, unchanged shape). Accepts
         individual cap params or the legacy eval_cap string.
         """
+        refusal = self._workdir_error(workdir)
+        if refusal is not None:
+            return refusal
         from engine.eval_cap import EvalCap
 
         # Skip LLM evaluation if no API key configured (avoid hanging in tests)
