@@ -1,5 +1,6 @@
 """HTTP-layer tests for the live judgment viewer server."""
 
+import errno
 import http.client
 import json
 import os
@@ -289,7 +290,81 @@ def test_taken_port_reports_the_conflict_instead_of_a_traceback(
     assert f"error: port {taken_port} in use — pick another with --port" in captured.err
     assert "Traceback" not in captured.err
     # The banner is only printed after a successful bind: no half-started server.
-    assert "Judgment browser" not in captured.out
+    # (The banner text is "GitReins judgment browser: ..." — lowercase "judgment",
+    # so the capitalised form would have asserted nothing.)
+    assert "judgment browser" not in captured.out
+
+
+def _privileged_bind_verdict(port: int) -> str:
+    """Classify whether this host can be used to provoke EACCES on ``port``.
+
+    ``"denied"`` means the bind is refused (a non-root host without
+    CAP_NET_BIND_SERVICE) and the port can be used for a live probe;
+    ``"permitted"`` means root / a setcap'd interpreter; ``"occupied"`` means
+    another process already owns the port, which would mask EACCES with
+    EADDRINUSE.
+    """
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.bind(("127.0.0.1", port))
+    except PermissionError:
+        return "denied"
+    except OSError:
+        return "occupied"
+    else:
+        return "permitted"
+    finally:
+        probe.close()
+
+
+def test_cli_serve_on_a_privileged_port_reports_the_remedy(tmp_path: Path) -> None:
+    """`gitreins serve --port 22` as non-root: rc=1, remedy on stderr, no traceback.
+
+    A privileged port needs root or CAP_NET_BIND_SERVICE; the EACCES refusal must
+    read like the taken-port case instead of spilling a PermissionError traceback.
+    The live probe is skipped on a host that may bind port 22 anyway (root or a
+    setcap'd interpreter) -- the hermetic companion below covers the mapping there.
+    """
+    verdict = _privileged_bind_verdict(22)
+    if verdict != "denied":
+        pytest.skip(f"port 22 is {verdict} on this host; EACCES cannot be provoked")
+
+    result = subprocess.run(
+        [sys.executable, "-m", "gitreins", "serve", "--port", "22"],
+        cwd=str(tmp_path),
+        capture_output=True,
+        text=True,
+        timeout=60,
+        env=_cli_env(),
+    )
+
+    combined = result.stdout + result.stderr
+    assert result.returncode == 1
+    assert "error: port 22 requires root - pick an unprivileged port with --port" in result.stderr
+    assert "Traceback" not in combined
+    assert "judgment browser" not in combined
+
+
+def test_privileged_port_bind_failure_maps_to_the_root_remedy(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The EACCES -> remedy mapping holds even where privileged binds succeed.
+
+    The live CLI test above skips on root / CAP_NET_BIND_SERVICE hosts, so this
+    one forces the bind refusal at the seam: PermissionError with errno.EACCES,
+    exactly what the kernel raises for a port below 1024 without privileges.
+    """
+    (tmp_path / ".gitreins" / "history").mkdir(parents=True)
+    denied = PermissionError(errno.EACCES, "Permission denied")
+    with mock.patch.object(serve, "ThreadingHTTPServer", side_effect=denied):
+        with pytest.raises(SystemExit) as excinfo:
+            serve.serve(str(tmp_path), host="127.0.0.1", port=22, open_browser=False)
+
+    captured = capsys.readouterr()
+    assert excinfo.value.code == 1
+    assert "error: port 22 requires root - pick an unprivileged port with --port" in captured.err
+    assert "Traceback" not in captured.err
+    assert "judgment browser" not in captured.out
 
 
 def test_verdicts_lists_fixture_metadata(live_server: object, repo_fixture: str) -> None:
