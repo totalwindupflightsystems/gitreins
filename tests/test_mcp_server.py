@@ -3264,3 +3264,257 @@ class TestTaskCompleteDispatchGate(TestJudgeAsyncMCP):
         fresh = GitReinsMCPServer(mcp_server.workdir)
         again = self._call(fresh, "judge.status", {"job_id": job_id})
         assert again["status"] == "error", "a terminal record must never be resumed"
+
+
+# ── DF-GITREINS-POC-93: an unusable `workdir` is refused, never silent ───────
+
+
+class TestWorkdirValidationMCP:
+    """DF-GITREINS-POC-93: a bad `workdir` is refused and NAMED, never silently empty.
+
+    ``TaskManager`` treats a missing store as an EMPTY one, so before the fix
+    ``task.list`` answered ``{"tasks": []}`` for a path that does not exist —
+    indistinguishable from "this repo has no tasks, carry on" — while
+    ``task.get`` reported "Task not found" and ``task.create``/``task.start``
+    even minted ``<workdir>/.gitreins/tasks.yaml`` under the typo: a phantom
+    store the caller can never find again. Every workdir-taking tool now
+    validates the path (exists AND is a directory) before any other logic.
+    """
+
+    #: Required args per `workdir`-declaring tool, so the exhaustive cell below
+    #: can drive each one. The tool list itself is DERIVED from the live
+    #: schemas — a tool that starts declaring `workdir` without appearing here
+    #: fails `test_every_workdir_tool_validates_the_path` instead of escaping
+    #: the regression net.
+    REQUIRED_ARGS = {
+        "task.create": {"id": "wd-c", "title": "C", "criteria": ["c"]},
+        "task.start": {"id": "wd-c"},
+        "task.complete": {"id": "wd-c"},
+        "task.list": {},
+        "task.get": {"id": "wd-c"},
+        "task.delete": {"id": "wd-c"},
+        "commit": {"message": "m"},
+        "guard.run": {},
+        "judge.evaluate": {"id": "wd-c"},
+        "quality.status": {},
+        "repo.init": {},
+    }
+
+    @staticmethod
+    def _call(server: object, name: str, arguments: dict) -> object:
+        """Drive one tools/call and return the parsed result payload."""
+        response = server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+            }
+        )
+        assert "result" in response, response.get("error")
+        return json.loads(response["result"]["content"][0]["text"])
+
+    @staticmethod
+    def _missing(tmp_path: Path, name: str = "gone") -> str:
+        """Return an absolute path under tmp_path that does not exist."""
+        path = tmp_path / name
+        assert not path.exists(), f"fixture precondition: {path} must not exist"
+        return str(path)
+
+    @staticmethod
+    def _workdir_tools(server: object) -> list[str]:
+        """Tool names whose live schema declares a `workdir` parameter."""
+        response = server.handle_request({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        return [
+            t["name"]
+            for t in response["result"]["tools"]
+            if "workdir" in t.get("inputSchema", {}).get("properties", {})
+        ]
+
+    # 1. task.list ─────────────────────────────────────────────────────────────
+    def test_task_list_refuses_nonexistent_workdir(
+        self, mcp_server: object, tmp_path: Path
+    ) -> None:
+        """A missing path must not answer `{"tasks": []}` — the silent trap."""
+        bogus = self._missing(tmp_path)
+
+        result = self._call(mcp_server, "task.list", {"workdir": bogus})
+
+        assert "tasks" not in result, f"empty store reported for a bad path: {result}"
+        assert result["error"] == f"workdir '{bogus}' does not exist"
+        assert result["workdir"] == bogus
+
+    # 2. task.get ──────────────────────────────────────────────────────────────
+    def test_task_get_refuses_nonexistent_workdir(self, mcp_server: object, tmp_path: Path) -> None:
+        """`task.get` must name the bad path, not answer "Task not found"."""
+        bogus = self._missing(tmp_path)
+
+        result = self._call(mcp_server, "task.get", {"id": "anything", "workdir": bogus})
+
+        assert result["error"] == f"workdir '{bogus}' does not exist"
+        assert "not found" not in result["error"].lower()
+
+    # 3. task.create ───────────────────────────────────────────────────────────
+    def test_task_create_refuses_nonexistent_workdir(
+        self, mcp_server: object, tmp_path: Path
+    ) -> None:
+        """A refused create writes NOTHING — no `<workdir>/.gitreins/tasks.yaml`."""
+        bogus = self._missing(tmp_path)
+
+        result = self._call(
+            mcp_server,
+            "task.create",
+            {"id": "wd-x", "title": "X", "criteria": ["c"], "workdir": bogus},
+        )
+
+        assert result["error"] == f"workdir '{bogus}' does not exist"
+        assert "id" not in result
+        assert not os.path.exists(bogus), "a refused create must not mint a phantom store"
+
+    # 4. guard.run ─────────────────────────────────────────────────────────────
+    def test_guard_run_refuses_nonexistent_workdir(
+        self, mcp_server: object, tmp_path: Path
+    ) -> None:
+        """`guard.run` names the missing path, not the config it also lacks."""
+        bogus = self._missing(tmp_path)
+
+        result = self._call(mcp_server, "guard.run", {"workdir": bogus})
+
+        assert result["error"] == f"workdir '{bogus}' does not exist"
+        assert "config.yaml" not in result["error"]
+
+    # 5. judge.evaluate ────────────────────────────────────────────────────────
+    def test_judge_evaluate_refuses_nonexistent_workdir(
+        self, mcp_server: object, tmp_path: Path
+    ) -> None:
+        """Validate FIRST: the path error outranks the LLM-config gate."""
+        bogus = self._missing(tmp_path)
+
+        result = self._call(mcp_server, "judge.evaluate", {"id": "wd-x", "workdir": bogus})
+
+        assert result["error"] == f"workdir '{bogus}' does not exist"
+        assert "LLM not configured" not in result["error"]
+        assert "job_id" not in result, "no evaluation may be dispatched for a bad path"
+
+    # the same seam, the sibling tools ─────────────────────────────────────────
+    @pytest.mark.parametrize(
+        ("tool", "args"),
+        [
+            ("task.start", {"id": "wd-x"}),
+            ("task.complete", {"id": "wd-x"}),
+            ("task.delete", {"id": "wd-x"}),
+            ("commit", {"message": "m"}),
+            ("repo.init", {}),
+            ("quality.status", {}),
+        ],
+    )
+    def test_sibling_tools_refuse_nonexistent_workdir(
+        self, mcp_server: object, tmp_path: Path, tool: str, args: dict
+    ) -> None:
+        """Every other workdir-taking tool refuses the same way (same seam)."""
+        bogus = self._missing(tmp_path)
+
+        result = self._call(mcp_server, tool, dict(args, workdir=bogus))
+
+        assert result["error"] == f"workdir '{bogus}' does not exist", f"{tool}: {result}"
+        assert not os.path.exists(bogus)
+
+    def test_every_workdir_tool_validates_the_path(
+        self, mcp_server: object, tmp_path: Path
+    ) -> None:
+        """Driven from the LIVE schemas — no tool declaring `workdir` may skip the check.
+
+        The tool list comes from `tools/list`, not from a hand-written list, so
+        a future workdir-taking tool cannot quietly escape the regression net:
+        it fails here until its required args are added to REQUIRED_ARGS.
+        """
+        bogus = self._missing(tmp_path)
+        tools = self._workdir_tools(mcp_server)
+
+        assert sorted(tools) == sorted(self.REQUIRED_ARGS), (
+            "the set of `workdir`-declaring tools changed — add each new tool and its "
+            "required args to REQUIRED_ARGS so this cell keeps exercising it"
+        )
+        for name in tools:
+            result = self._call(mcp_server, name, dict(self.REQUIRED_ARGS[name], workdir=bogus))
+            assert result.get("error") == f"workdir '{bogus}' does not exist", (
+                f"{name} did not refuse the missing workdir: {result}"
+            )
+
+    def test_workdir_pointing_at_a_file_is_refused(
+        self, mcp_server: object, tmp_path: Path
+    ) -> None:
+        """Existing but NOT a directory is refused too, and says which it is."""
+        a_file = tmp_path / "a-file.txt"
+        a_file.write_text("not a directory\n")
+
+        result = self._call(mcp_server, "task.list", {"workdir": str(a_file)})
+
+        assert result["error"] == f"workdir '{a_file}' is not a directory"
+        assert result["workdir"] == str(a_file)
+
+    def test_missing_nested_workdir_is_refused(self, mcp_server: object, tmp_path: Path) -> None:
+        """A missing path whose PARENT exists is refused (isdir, not just ismount)."""
+        parent = tmp_path / "parent"
+        parent.mkdir()
+        bogus = parent / "child"
+
+        result = self._call(
+            mcp_server,
+            "task.list",
+            {"workdir": str(bogus)},
+        )
+
+        assert result["error"] == f"workdir '{bogus}' does not exist"
+        assert not bogus.exists()
+
+    def test_relative_workdir_is_reported_at_its_resolved_path(
+        self, mcp_server: object, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A relative argument is named where it actually pointed."""
+        monkeypatch.chdir(tmp_path)
+        resolved = os.path.abspath("gone")
+
+        result = self._call(mcp_server, "task.list", {"workdir": "gone"})
+
+        assert result["error"] == f"workdir '{resolved}' does not exist"
+        assert result["workdir"] == resolved
+
+    def test_non_string_workdir_is_refused(self, mcp_server: object) -> None:
+        """The schema declares `workdir` as a string; a wrong type fails loud."""
+        result = self._call(mcp_server, "task.list", {"workdir": 17})
+
+        assert result["error"] == "workdir must be a string, got int"
+
+    # positive controls — validation must not block a usable path ─────────────
+    def test_existing_workdir_still_reads_the_real_store(
+        self, mcp_server: object, tmp_workdir: str
+    ) -> None:
+        """A usable path behaves exactly as before (no false refusals)."""
+        assert "error" not in self._call(mcp_server, "task.list", {"workdir": tmp_workdir})
+
+        created = self._call(
+            mcp_server,
+            "task.create",
+            {"id": "wd-ok", "title": "T", "criteria": ["c"], "workdir": tmp_workdir},
+        )
+        assert created["id"] == "wd-ok"
+
+        listed = self._call(mcp_server, "task.list", {"workdir": tmp_workdir})
+        assert [t["id"] for t in listed["tasks"]] == ["wd-ok"]
+        got = self._call(mcp_server, "task.get", {"id": "wd-ok", "workdir": tmp_workdir})
+        assert got["id"] == "wd-ok"
+
+    def test_no_workdir_argument_keeps_the_server_default(self, mcp_server: object) -> None:
+        """Omitted `workdir` still resolves to the server's own path, unchanged."""
+        assert self._call(mcp_server, "task.list", {}) == {"tasks": []}
+
+    def test_guard_config_refusal_is_not_shadowed(self, mcp_server: object, tmp_path: Path) -> None:
+        """An existing repo without a config keeps GR-GAP-054's own message."""
+        repo = tmp_path / "no-config"
+        repo.mkdir()
+
+        result = self._call(mcp_server, "guard.run", {"workdir": str(repo)})
+
+        assert ".gitreins/config.yaml" in result["error"]
+        assert "does not exist" not in result["error"]

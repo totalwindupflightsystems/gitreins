@@ -114,6 +114,32 @@ Notes that save a debugging session:
 
 ## Tool Catalog
 
+### The `workdir` contract (every tool that takes one)
+
+Eleven tools accept an optional `workdir`: `repo.init`, `task.create`, `task.start`,
+`task.complete`, `task.list`, `task.get`, `task.delete`, `commit`, `guard.run`,
+`judge.evaluate` and `quality.status`. Omitted, it defaults to the MCP server's own
+workdir — the `workdir=<path>` in its startup line on stderr.
+
+The path must exist and be a directory. Anything else is refused **before any other logic
+runs**: the task store is never read, nothing is written, no guard or evaluation runs.
+
+```json
+{"error": "workdir '/tmp/gitreins-typo' does not exist", "workdir": "/tmp/gitreins-typo"}
+```
+
+A path that exists but is not a directory says so instead
+(`"workdir '<path>' is not a directory"`), and a non-string argument is refused as
+`"workdir must be a string, got int"`. The message names the RESOLVED absolute path, so a
+relative argument is reported where it actually pointed.
+
+**Why it fails loud (DF-GITREINS-POC-93).** The task store used to be resolved by simply
+reading `<workdir>/.gitreins/tasks.yaml`, and a missing file reads as an EMPTY store. So a
+typo'd path answered `task.list` with `{"tasks": []}` — indistinguishable from a repo with
+no tasks — `task.get` replied `Task not found`, and `task.create`/`task.start` **created**
+`<workdir>/.gitreins/tasks.yaml` under the typo: a phantom store whose tasks the caller can
+never find again. A typo must never read as an empty repo, and must never write.
+
 ### 1. `configure` — hot-reload LLM config at runtime
 
 Sets environment variables and recreates the LLM client + Judge so all subsequent tool
@@ -158,6 +184,8 @@ API keys never belong in docs, logs or prompts. If an evaluation fails after a
 
 **Returns:** the task dict (`id`, `title`, `status`, `criteria`, timestamps).
 
+**Errors:** `{"error": "workdir '<path>' does not exist", "workdir": "<path>"}` when `workdir` is missing or is not a directory — nothing is read or written (see the `workdir` contract above).
+
 ### 3. `task.start` — mark a task in-progress
 
 | Param | Type | Required | Description |
@@ -166,6 +194,8 @@ API keys never belong in docs, logs or prompts. If an evaluation fails after a
 | `workdir` | string | no | Repo containing the task |
 
 **Returns:** the updated task dict.
+
+**Errors:** `{"error": "workdir '<path>' does not exist", "workdir": "<path>"}` when `workdir` is missing or is not a directory — nothing is read or written (see the `workdir` contract above).
 
 ### 4. `task.complete` — complete a task, trigger evaluation
 
@@ -178,6 +208,8 @@ API keys never belong in docs, logs or prompts. If an evaluation fails after a
 - With LLM configured: `{"task": {...}, "job_id": "<id>", "status": "running", "note": "evaluation running in background — poll judge.status"}`
 - Without LLM: `{"task": {...}, "note": "LLM not configured — skipping evaluation"}`
 - Task not found: `{"error": "Task not found: <id>"}`
+
+**Errors:** `{"error": "workdir '<path>' does not exist", "workdir": "<path>"}` when `workdir` is missing or is not a directory — nothing is read or written (see the `workdir` contract above).
 
 "Configured" means the credential LLMClient resolves RIGHT NOW (the main
 `GITREINS_LLM_API_KEY` or one of its provider fallback keys) — not merely that
@@ -197,6 +229,8 @@ a hung network connect cannot stall it either.
 
 **Returns:** `{"tasks": [...]}`.
 
+**Errors:** `{"error": "workdir '<path>' does not exist", "workdir": "<path>"}` when `workdir` is missing or is not a directory — nothing is read or written (see the `workdir` contract above).
+
 ### 6. `task.get` — fetch one task
 
 | Param | Type | Required | Description |
@@ -209,6 +243,8 @@ a hung network connect cannot stall it either.
 envelope is the wire shape for **every** tool, not just this one. Task not found → the same
 envelope with `{"error": "Task not found: <id>"}` as the payload.
 
+**Errors:** `{"error": "workdir '<path>' does not exist", "workdir": "<path>"}` when `workdir` is missing or is not a directory — nothing is read or written (see the `workdir` contract above).
+
 ### 7. `task.delete` — delete a task
 
 | Param | Type | Required | Description |
@@ -218,6 +254,8 @@ envelope with `{"error": "Task not found: <id>"}` as the payload.
 
 **Returns:** `{"deleted": "<id>"}`, or `{"error": "Task not found: <id>"}`.
 
+**Errors:** `{"error": "workdir '<path>' does not exist", "workdir": "<path>"}` when `workdir` is missing or is not a directory — nothing is read or written (see the `workdir` contract above).
+
 ### 8. `commit` — the only git commit path
 
 Runs Tier 1 guards first; rejects the commit if guards fail or any task is in-progress.
@@ -225,10 +263,13 @@ Runs Tier 1 guards first; rejects the commit if guards fail or any task is in-pr
 | Param | Type | Required | Description |
 |-------|------|----------|-------------|
 | `message` | string | yes | Commit message |
+| `workdir` | string | no | Repo to commit in; the in-progress gate, the Tier 1 guard and the `git commit` all resolve against it (defaults to server workdir) |
 
 **Returns:** `{"committed": true, "output": "..."}` on success.
 Blocked by in-progress tasks: `{"error": "Tasks still in progress: <ids> — ...", "tasks": [...]}`.
 Blocked by guard failure: `{"error": "Tier 1 guards failed — commit blocked", "details": "..."}`.
+
+**Errors:** `{"error": "workdir '<path>' does not exist", "workdir": "<path>"}` when `workdir` is missing or is not a directory — nothing is read or written (see the `workdir` contract above).
 
 ### 9. `guard.run` — run Tier 1 static guards
 
@@ -248,6 +289,8 @@ one with `repo.init` (tool 10) — no CLI required; that tool removes the former
 never a false green: a config-less repo refuses instead of running guards on built-in
 defaults (GR-GAP-054).
 
+**Errors:** `{"error": "workdir '<path>' does not exist", "workdir": "<path>"}` when `workdir` is missing or is not a directory — nothing is read or written (see the `workdir` contract above).
+
 ### 10. `repo.init` — create the default guard config (MCP-only init)
 
 Writes the same default `.gitreins/config.yaml` the CLI's `gitreins init` writes, so the
@@ -265,6 +308,7 @@ parsed or overwritten.
 - Error: `{"error": "<wd> is not a git repository (no .git directory)", "workdir": "..."}` —
   the tool writes NOTHING when the target is not a git repo (no `.gitreins/` directory is
   created).
+- Workdir missing/not a directory: `{"error": "workdir '<path>' does not exist", "workdir": "<path>"}` — checked before the git check above (see the `workdir` contract above).
 
 ### 11. `judge.evaluate` — run the full evaluation pipeline (Tier 1 + Tier 2)
 
@@ -289,6 +333,7 @@ tool-call timeouts on slow suites).
 **Sync returns:** full result dict (see `judge.status` below).
 **Errors:** `{"error": "LLM not configured — set GITREINS_LLM_API_KEY"}`, or
 `{"error": "Task not found: <id>"}` / `{"error": "Task not found: <id> in <workdir>"}`.
+A missing/not-a-directory `workdir` is refused FIRST — before this LLM-config gate, before the task lookup, and before any job is dispatched: `{"error": "workdir '<path>' does not exist", "workdir": "<path>"}` (see the `workdir` contract above).
 
 **Verdict persistence.** An MCP-dispatched evaluation persists its verdict into the workdir's
 `.gitreins/history` exactly like a CLI run — the async job (and `task.complete`, which dispatches
@@ -364,6 +409,8 @@ computed snapshot (GR-143). This tool never triggers the producer.
 - `{"workdir", "status": "not-computed", "note": "...call guard.run (or judge.evaluate)
   first"}` — quality is enabled here but no surface has computed it yet in this run
 - `{"workdir", "status": "disabled"}` — the repo has no enabled quality config
+
+**Errors:** `{"error": "workdir '<path>' does not exist", "workdir": "<path>"}` when `workdir` is missing or is not a directory — nothing is read or written (see the `workdir` contract above).
 
 ### 14. `propagate` — propagate guard config to sibling repos
 

@@ -790,6 +790,16 @@ def serve(
             # bind is guarded -- serve_forever() below must keep propagating.
             print(f"error: port {port} in use — pick another with --port", file=sys.stderr)
             raise SystemExit(1) from None
+        if exc.errno == errno.EACCES:
+            # A privileged port (<1024) is also an operator mistake: without root
+            # or CAP_NET_BIND_SERVICE the bind is refused with EACCES (surfaced by
+            # Python as PermissionError, an OSError subclass). Same treatment --
+            # name the remedy on stderr and exit 1 instead of a raw traceback.
+            print(
+                f"error: port {port} requires root - pick an unprivileged port with --port",
+                file=sys.stderr,
+            )
+            raise SystemExit(1) from None
         raise
     # Report the port actually bound (pass --port 0 to let the OS choose one).
     url = f"http://{host}:{httpd.server_address[1]}/"
