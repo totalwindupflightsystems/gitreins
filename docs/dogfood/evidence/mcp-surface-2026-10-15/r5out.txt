@@ -1,0 +1,10 @@
+Tier 1: DEGRADED PASS (skips: lint=no staged files, tests=no tests collected)  (test mode: full)
+  ✓ secrets — clean (gitleaks + builtin cross-check); scanners: nice=nice -n 10
+  ~ lint — skipped (no staged files)
+  ~ tests (full) — skipped (no tests collected)
+  ⚠ pytest collected no tests (exit 5) — not blocking. Add tests to enable real test gating.
+  guard log: /tmp/gitreins-df-demo-3868991/.gitreins/logs/guard-20261016T000505.708278Z.log
+== commit happy path == ms: 4169 {"committed": true, "output": "[master a048d71] feat: add add() helper (df-mcp)\n 1 file changed, 2 insertions(+)\n create mode 100644 feature.py\nTier 1: DEGRADED PASS (skips: tests=no tests collected)  (test mode: full)\n  \u2713 secrets \u2014 clean (gitleaks + builtin cross-check); scanners: nice=nice -n 10\n  \u2713 lint \u2014 ok; scanners: nice=nice -n 10\n  ~ tests (full) \u2014 skipped (n
+   git log: a048d71 feat: add add() helper (df-mcp) | 16c0756 pre
+== propagate == {"source": "/tmp/gitreins-df-demo-3868991", "results": [{"target": "/tmp/gitreins-df-target-4138747", "action": "created", "keys_added": ["defaults", "evaluator", "guards", "history", "quality", "worktree_fleet"], "keys_preserved": []}]}
+   target .gitreins: config.yaml

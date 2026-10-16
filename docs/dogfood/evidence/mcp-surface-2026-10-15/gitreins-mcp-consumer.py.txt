@@ -1,0 +1,111 @@
+#!/usr/bin/env python3
+"""Real consumer of the gitreins MCP server — drives the documented workflow
+from docs/mcp-api.md against a scratch demo repo. Not a test: it prints what
+actually happened, including raw wire lines, for a dogfood run to record."""
+import json, subprocess, sys, time, selectors
+
+REPO = "/home/kara/gitreins"
+PY = f"{REPO}/.venv/bin/python"
+GITREINS = f"{REPO}/.venv/bin/gitreins"
+
+READ_TIMEOUT = 90.0
+
+def readline_timeout(proc, timeout=READ_TIMEOUT):
+    sel = selectors.DefaultSelector()
+    sel.register(proc.stdout, selectors.EVENT_READ)
+    ready = sel.select(timeout)
+    sel.close()
+    if not ready:
+        return ""
+    return proc.stdout.readline()
+
+counter = iter(range(1, 200))
+
+class MCPClient:
+    def __init__(self, workdir):
+        self.proc = subprocess.Popen(
+            [PY, "-m", "gitreins_mcp.server", workdir],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, cwd=workdir,
+        )
+    def call(self, method, **params):
+        t0 = time.monotonic()
+        req = {"jsonrpc": "2.0", "id": next(counter), "method": method}
+        if params:
+            req["params"] = params
+        self.proc.stdin.write(json.dumps(req) + "\n")
+        self.proc.stdin.flush()
+        line = readline_timeout(self.proc)
+        dt = (time.monotonic() - t0) * 1000
+        if not line:
+            return {"_wire": "EOF/timeout", "_ms": dt}
+        return json.loads(line) | {"_ms": round(dt)}
+    def tool(self, name, **args):
+        return self.call("tools/call", name=name, arguments=args)
+    def tool_text(self, name, **args):
+        r = self.tool(name, **args)
+        if "result" in r and isinstance(r["result"].get("content"), list):
+            txt = r["result"]["content"][0].get("text", "")
+            try:
+                return json.loads(txt), r
+            except Exception:
+                return txt, r
+        return None, r
+
+def main(scratch):
+    cli = MCPClient(scratch)
+    # 1. initialize + initialized + tools/list (documented quick start)
+    init = cli.call("initialize", protocolVersion="2025-11-25", capabilities={},
+                    clientInfo={"name": "dogfood-consumer", "version": "1.0"})
+    print("== initialize ==")
+    print(json.dumps({k: v for k, v in init.get("result", init).items() if k != "_ms"})[:400])
+    print("ms:", init.get("_ms"))
+    cli.call("notifications/initialized")
+    tl = cli.call("tools/list")
+    names = [t["name"] for t in tl["result"]["tools"]]
+    print("== tools/list ==", len(names), "tools:", ", ".join(names))
+
+    # 2. repo.init — set up the demo repo as a gitreins-managed repo
+    out, raw = cli.tool_text("repo.init")
+    print("== repo.init ==", json.dumps(out)[:300] if out else raw)
+
+    # 3. task lifecycle: create -> start -> list -> get
+    out, raw = cli.tool_text("task.create", id="df-mcp-001", title="Dogfood MCP demo",
+                             criteria=["guard.run passes on the scratch repo",
+                                       "quality_status reports the computed snapshot"])
+    print("== task.create ==", json.dumps(out)[:250] if out else raw)
+    out, _ = cli.tool_text("task.start", id="df-mcp-001")
+    print("== task.start ==", json.dumps(out)[:200] if out else raw)
+    out, _ = cli.tool_text("task.list", status="pending")
+    print("== task.list pending ==", json.dumps(out)[:250] if out else raw)
+
+    # 4. guard.run on the scratch repo (Tier 1)
+    out, raw = cli.tool_text("guard.run")
+    print("== guard.run ==", json.dumps(out)[:600] if out else raw)
+
+    # 5. quality_status (must NOT trigger the producer)
+    out, _ = cli.tool_text("quality_status")
+    print("== quality_status ==", json.dumps(out)[:300] if out else raw)
+
+    # 6. error paths per docs taxonomy: unknown tool, task.get missing, unknown method
+    print("== unknown tool ==")
+    r = cli.tool("no.such.tool")
+    print(json.dumps(r.get("error", r))[:200])
+    out, raw = cli.tool_text("task.get", id="missing-task")
+    print("== task.get missing ==", json.dumps(out) if out else raw)
+    r = cli.call("server/discover")
+    print("== server/discover ==", json.dumps(r.get("error", r))[:150])
+    r = cli.call("bogus/method")
+    print("== bogus/method ==", json.dumps(r.get("error", r))[:150])
+
+    # 7. task.delete cleanup, then EOF exit per docs
+    out, _ = cli.tool_text("task.delete", id="df-mcp-001")
+    print("== task.delete ==", json.dumps(out)[:150] if out else raw)
+    cli.proc.stdin.close()
+    rc = cli.proc.wait(timeout=15)
+    err = cli.proc.stderr.read()
+    print("== EOF exit rc ==", rc)
+    print("== stderr ==", err.strip()[:500])
+
+if __name__ == "__main__":
+    main(sys.argv[1])

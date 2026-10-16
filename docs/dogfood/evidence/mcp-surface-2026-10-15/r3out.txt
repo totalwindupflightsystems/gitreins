@@ -1,0 +1,4 @@
+== judge.status poll 1 == ms: None -> {"job_id": "job-744d0dbafd904f83ac477c7ad1bcbf89", "status": "error", "running": false, "task_id": "df-mcp-gate", "workdir": "/tmp/gitreins-df-demo-3868991", "result": null, "error": "task df-mcp-gate no longer exists in /tmp/gitreins-df-demo-3868991 \u2014 job could not be resumed"}
+== task.list after restart == {"tasks": []}
+== task.get after restart == {"error": "Task not found: df-mcp-gate"}
+== judge.status from fresh server == {"job_id": "job-744d0dbafd904f83ac477c7ad1bcbf89", "status": "error", "running": false, "task_id": "df-mcp-gate", "workdir": "/tmp/gitreins-df-demo-3868991", "result": null, "error": "task df-mcp-gate no longer exists in /tmp/gitreins-df-demo-3868991 \u2014 job could not be resumed"}
