@@ -5,7 +5,16 @@ All notable changes to GitReins will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.17.0] - 2026-10-16
+
+### Added
+- **Selectable review profiles, effort levels, and multi-pass fix guidance
+  (GR-148)** — `gitreins review` accepts review profiles and effort levels, and
+  emits multi-pass fix guidance instead of a single undifferentiated finding
+  list (merged in 0f521b1).
+- **Deterministic commit audit floor (DF-GITREINS-POC-85)** — commit audits now
+  have a deterministic floor so an unavailable or empty audit result can no
+  longer pass silently as a successful check (a4567a5).
 
 ### Fixed
 - **`gitreins worktree clean` reaps and reports every disposable registry entry
@@ -25,6 +34,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   killed run's tree permanently unreapable. Liveness identity, the 300 s
   registration window, and all three terminal paths are covered by 8 new tests
   in `tests/test_worktree_disposable.py`.
+- **Refuse credential exfiltration and scan pushes (REVIEW-GITREINS-028)** —
+  the guard layer now refuses commands that exfiltrate credentials (env/token
+  smuggling to remote sinks) and secret-scans push content, not only commits
+  (6ccf339).
+- **`gitreins serve` exit message on a taken port** — EADDRINUSE on the MCP
+  serve port now prints a human-friendly diagnosis naming the port and
+  suggesting `--port`, instead of a raw traceback (RVR-GITREINS-103, 0e1cd16).
+- **MCP `workdir` argument validation (DF-GITREINS-POC-93)** — the MCP server
+  validates the `workdir` tool argument instead of crashing or mis-scoping the
+  session on a bogus path (5f561be).
+- **Pin `pydantic-core>=2.47.0` (GR-099)** — stops fabricated version drift
+  between pydantic and pydantic-core in fresh installs (a92eec1).
+- **Secrets guard skips sibling venv/site-packages trees (GR-GAP-039)** — the
+  workdir scan no longer trips on vendored third-party fixture keys inside
+  `.venv*/lib/python*/site-packages`, which FP-blocked every judge tier-1 on
+  repos with a sibling virtualenv.
+- **`gitreins preflight --surface <name>`** — runs the preflight check on a
+  specific enabled surface instead of resolving only the default surface
+  (DF-GITREINS-POC-81, 8ada8a0).
 
 ## [0.16.0] - 2026-10-06
 
