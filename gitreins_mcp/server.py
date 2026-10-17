@@ -8,6 +8,7 @@ Implements proper JSON-RPC 2.0 framing over line-delimited stdio.
 Messages can span multiple lines — we buffer until we have complete JSON.
 """
 
+import inspect
 import json
 import logging
 import os
@@ -115,6 +116,61 @@ def negotiate_protocol_version(requested: object) -> tuple[str, str | None]:
         f"client probes with `server/discover` (-32601 here) and should then "
         f"fall back to `initialize`."
     )
+
+
+def tool_argument_error(handler: object, tool_args: object) -> str | None:
+    """Return a client-safe reason the arguments cannot bind, or ``None``.
+
+    DF-GITREINS-POC-92: ``tools/call`` used to call ``handler(**arguments)``
+    bare, so an argument mismatch escaped into the generic ``-32000`` handler
+    as a raw Python ``TypeError`` string —
+    ``"GitReinsMCPServer._task_complete() missing 1 required positional
+    argument: 'id'"`` — leaking the internal class, method and parameter list
+    to any MCP client that sent an incomplete ``arguments`` object.
+
+    Resolving the binding against the handler's signature *before* the call
+    both classifies the mismatch as JSON-RPC ``-32602`` (invalid params, which
+    is what a caller-side argument error is) and lets this function name the
+    offending arguments itself, so the client-facing message never echoes the
+    Python signature. A ``TypeError`` raised *inside* a handler body is left
+    to the generic server-error path, where it belongs.
+
+    ``None`` means "let the call proceed": callables with no introspectable
+    signature (C builtins, some callable objects) cannot be checked here.
+    """
+    if not isinstance(tool_args, dict):
+        return "arguments must be a JSON object"
+    try:
+        signature = inspect.signature(handler)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    parameters = signature.parameters
+    accepts_extra = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters.values()
+    )
+    unexpected = sorted(name for name in tool_args if name not in parameters and not accepts_extra)
+    missing = sorted(
+        name
+        for name, parameter in parameters.items()
+        if name not in tool_args
+        and parameter.default is inspect.Parameter.empty
+        and parameter.kind
+        in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    )
+    if not missing and not unexpected:
+        try:
+            signature.bind(**tool_args)
+        except TypeError:
+            # e.g. a positional-only parameter supplied by keyword: bindable
+            # neither as a field nor as a keyword. Name it, nothing else.
+            return "arguments do not match the tool's parameters"
+        return None
+    reasons = []
+    if missing:
+        reasons.append(f"missing required argument(s): {', '.join(missing)}")
+    if unexpected:
+        reasons.append(f"unexpected argument(s): {', '.join(unexpected)}")
+    return "; ".join(reasons)
 
 
 class GitReinsMCPServer:
@@ -1392,7 +1448,45 @@ class GitReinsMCPServer:
                         "id": req_id,
                         "error": {"code": -32601, "message": f"Unknown tool: {tool_name}"},
                     }
-                result = handler(**tool_args)
+                # DF-GITREINS-POC-92: an argument mismatch is a CALLER error, so
+                # it must answer JSON-RPC -32602 naming the tool and the
+                # offending arguments — never the raw Python signature inside a
+                # -32000 server error (which leaked the internal handler name,
+                # class and parameter list). The check runs before the call so
+                # the name-bearing message is derived here, not from Python's
+                # TypeError text.
+                argument_error = tool_argument_error(handler, tool_args)
+                if argument_error:
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "error": {
+                            "code": -32602,
+                            "message": f"tool '{tool_name}' validation failed: {argument_error}",
+                            "data": {"tool": tool_name},
+                        },
+                    }
+                try:
+                    result = handler(**tool_args)
+                except TypeError as e:
+                    # Belt and braces for callables whose signature could not be
+                    # introspected above: still classify as invalid params, but
+                    # keep the Python text out of the response (it can carry the
+                    # handler's qualified name). The detail goes to the server
+                    # log for the operator instead.
+                    logger.warning("tool %s rejected its arguments: %s", tool_name, e)
+                    return {
+                        "jsonrpc": "2.0",
+                        "id": req_id,
+                        "error": {
+                            "code": -32602,
+                            "message": (
+                                f"tool '{tool_name}' validation failed: "
+                                "arguments do not match the tool's parameters"
+                            ),
+                            "data": {"tool": tool_name},
+                        },
+                    }
                 return {
                     "jsonrpc": "2.0",
                     "id": req_id,
