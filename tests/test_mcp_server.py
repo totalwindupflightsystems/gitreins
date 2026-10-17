@@ -22,6 +22,7 @@ from gitreins_mcp.server import (
     SUPPORTED_PROTOCOL_VERSIONS,
     GitReinsMCPServer,
     negotiate_protocol_version,
+    tool_argument_error,
 )
 
 # Wall-clock ceiling for asserting that async judge dispatch returns without
@@ -202,6 +203,181 @@ class TestToolsCall:
         assert response["result"]["content"][0]["type"] == "text"
         parsed = json.loads(response["result"]["content"][0]["text"])
         assert parsed["id"] == "test-ct"
+
+
+class TestToolsCallArgumentValidation:
+    """DF-GITREINS-POC-92 — argument mismatches are -32602, never a leaked signature.
+
+    The pre-fix behaviour called ``handler(**arguments)`` bare, so a missing or
+    unknown argument surfaced as the generic ``-32000`` server error whose
+    message WAS the Python exception text::
+
+        -32000: GitReinsMCPServer._task_complete() missing 1 required
+                positional argument: 'id'
+
+    That leaks the internal class, handler and parameter list to any MCP
+    client. A caller-side argument error is JSON-RPC ``-32602`` (invalid
+    params), and its message must name the tool and the offending arguments
+    without echoing the Python signature.
+    """
+
+    #: Substrings that only appear when a raw Python error text is leaked.
+    SIGNATURE_LEAK_MARKERS = (
+        "positional argument",
+        "GitReinsMCPServer",
+        "_task_complete",
+        "Traceback (most recent call last)",
+        "unexpected keyword argument",
+    )
+
+    @staticmethod
+    def _call(server: object, name: str, arguments: object) -> dict:
+        return server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "tools/call",
+                "params": {"name": name, "arguments": arguments},
+            }
+        )
+
+    def test_missing_required_argument_returns_invalid_params(self, mcp_server: object) -> None:
+        """task.complete with no arguments → -32602 naming the tool and `id`."""
+        response = self._call(mcp_server, "task.complete", {})
+
+        assert "result" not in response
+        assert response["error"]["code"] == -32602
+        assert response["error"]["code"] != -32000
+        message = response["error"]["message"]
+        assert "task.complete" in message
+        assert "id" in message
+        assert response["error"]["data"] == {"tool": "task.complete"}
+        assert response["jsonrpc"] == "2.0"
+        assert response["id"] == 7
+
+    def test_missing_argument_message_does_not_leak_python_signature(
+        self, mcp_server: object
+    ) -> None:
+        """The repro's leak string is gone: no class/handler/parameter text."""
+        message = self._call(mcp_server, "task.complete", {})["error"]["message"]
+
+        for marker in self.SIGNATURE_LEAK_MARKERS:
+            assert marker not in message, f"leaked {marker!r} in {message!r}"
+        # Deterministic, human-readable, names the missing field.
+        assert message == "tool 'task.complete' validation failed: missing required argument(s): id"
+
+    def test_all_missing_required_arguments_are_named(self, mcp_server: object) -> None:
+        """task.create with no arguments names every required field, sorted."""
+        message = self._call(mcp_server, "task.create", {})["error"]["message"]
+
+        assert message == (
+            "tool 'task.create' validation failed: "
+            "missing required argument(s): criteria, id, title"
+        )
+
+    def test_unexpected_argument_returns_invalid_params(self, mcp_server: object) -> None:
+        """An unknown keyword is the same -32602, naming the offending key."""
+        response = self._call(mcp_server, "task.complete", {"id": "x", "bogus": 1})
+
+        assert "result" not in response
+        assert response["error"]["code"] == -32602
+        message = response["error"]["message"]
+        assert "task.complete" in message
+        assert "bogus" in message
+        for marker in self.SIGNATURE_LEAK_MARKERS:
+            assert marker not in message, f"leaked {marker!r} in {message!r}"
+
+    def test_missing_and_unexpected_together_are_both_reported(self, mcp_server: object) -> None:
+        """One response names both classes of mistake."""
+        message = self._call(mcp_server, "task.complete", {"bogus": 1})["error"]["message"]
+
+        assert "missing required argument(s): id" in message
+        assert "unexpected argument(s): bogus" in message
+
+    def test_non_object_arguments_are_refused(self, mcp_server: object) -> None:
+        """`arguments` that is not a JSON object cannot bind `**kwargs`."""
+        response = self._call(mcp_server, "task.list", ["not", "an", "object"])
+
+        assert "result" not in response
+        assert response["error"]["code"] == -32602
+        assert "JSON object" in response["error"]["message"]
+
+    def test_correct_arguments_still_dispatch(self, mcp_server: object) -> None:
+        """Happy path unchanged: valid arguments reach the handler (no regression)."""
+        created = self._call(
+            mcp_server,
+            "task.create",
+            {"id": "poc92-ok", "title": "Argument Validation", "criteria": ["c1"]},
+        )
+        assert "error" not in created
+        payload = json.loads(created["result"]["content"][0]["text"])
+        assert payload["id"] == "poc92-ok"
+        assert payload["status"] == "pending"
+
+        listed = self._call(mcp_server, "task.list", {})
+        assert "error" not in listed
+        ids = [task["id"] for task in json.loads(listed["result"]["content"][0]["text"])["tasks"]]
+        assert "poc92-ok" in ids
+
+    def test_handler_internal_error_still_returns_server_error(
+        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A non-argument failure inside a handler keeps the -32000 server error.
+
+        The -32602 reclassification is for CALLER argument mistakes only; a
+        handler that raises on its own must not be reported as bad params.
+        """
+
+        def boom() -> dict:
+            raise RuntimeError("handler exploded")
+
+        monkeypatch.setitem(mcp_server._tools, "task.list", boom)
+        response = self._call(mcp_server, "task.list", {})
+
+        assert response["error"]["code"] == -32000
+        assert "handler exploded" in response["error"]["message"]
+
+
+class TestToolArgumentErrorHelper:
+    """Unit coverage for the argument-binding classifier used by tools/call."""
+
+    def test_bindable_arguments_return_none(self) -> None:
+        def handler(id: str, workdir: str | None = None) -> dict:
+            return {}
+
+        assert tool_argument_error(handler, {"id": "x"}) is None
+        assert tool_argument_error(handler, {"id": "x", "workdir": "/tmp"}) is None
+
+    def test_missing_and_unexpected_are_reported(self) -> None:
+        def handler(id: str) -> dict:
+            return {}
+
+        assert tool_argument_error(handler, {}) == "missing required argument(s): id"
+        assert tool_argument_error(handler, {"id": "x", "nope": 1}) == (
+            "unexpected argument(s): nope"
+        )
+
+    def test_var_keyword_handler_accepts_extra_arguments(self) -> None:
+        def handler(id: str, **extra: object) -> dict:
+            return {}
+
+        assert tool_argument_error(handler, {"id": "x", "anything": 1}) is None
+
+    def test_keyword_only_requirement_is_enforced(self) -> None:
+        def handler(id: str, *, strict: bool) -> dict:
+            return {}
+
+        assert tool_argument_error(handler, {"id": "x"}) == "missing required argument(s): strict"
+
+    def test_uninspectable_callable_defers_to_the_call(self) -> None:
+        """A callable with no signature is not rejected here (fallback path)."""
+        assert tool_argument_error(object(), {}) is None
+
+    def test_non_mapping_arguments_are_refused(self) -> None:
+        def handler(id: str) -> dict:
+            return {}
+
+        assert tool_argument_error(handler, ["id"]) == "arguments must be a JSON object"
 
 
 # ── Phase 2-2: Task lifecycle tools ──────────────────────────────────────────
