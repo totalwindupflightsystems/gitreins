@@ -20,8 +20,12 @@ from gitreins_mcp.server import (
     PROTOCOL_VERSION,
     SERVER_NAME,
     SUPPORTED_PROTOCOL_VERSIONS,
+    USAGE,
+    CliUsageError,
     GitReinsMCPServer,
+    main,
     negotiate_protocol_version,
+    parse_argv,
     tool_argument_error,
 )
 
@@ -3694,3 +3698,135 @@ class TestWorkdirValidationMCP:
 
         assert ".gitreins/config.yaml" in result["error"]
         assert "does not exist" not in result["error"]
+
+
+# ── Command line: --workdir flag (DF-GITREINS-POC-91) ───────────────────────
+#
+# The module entry point used to read sys.argv[1] as a bare path, so
+# `python -m gitreins_mcp.server --workdir /path` died with a raw ValueError
+# before any JSON-RPC traffic. These tests pin both halves of the fix: the
+# parser's contract (in-process) and the real subprocess behaviour a client
+# sees (exit code, stderr usage line, stdout still protocol-pure).
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _initialize_line() -> str:
+    return (
+        json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "initialize",
+                "params": {"protocolVersion": PROTOCOL_VERSION, "capabilities": {}},
+            }
+        )
+        + "\n"
+    )
+
+
+def _run_module(*args: str, stdin: str = "") -> subprocess.CompletedProcess:
+    """Run the real module entry point exactly as a user would."""
+    return subprocess.run(
+        [sys.executable, "-m", "gitreins_mcp.server", *args],
+        input=stdin,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        cwd=str(REPO_ROOT),
+    )
+
+
+class TestCliArgumentParsing:
+    """`parse_argv` unit contract — no process spawn, no transport."""
+
+    def test_defaults_to_cwd(self) -> None:
+        assert parse_argv([]) == (".", False, False)
+
+    def test_workdir_flag_long_and_short(self) -> None:
+        assert parse_argv(["--workdir", "/tmp"])[0] == "/tmp"
+        assert parse_argv(["-w", "/tmp"])[0] == "/tmp"
+
+    def test_workdir_flag_equals_form(self) -> None:
+        assert parse_argv(["--workdir=/tmp"])[0] == "/tmp"
+        assert parse_argv(["-w=/tmp"])[0] == "/tmp"
+
+    def test_positional_path_is_still_accepted(self) -> None:
+        """Backward compatibility: argv[1] as a plain path keeps working."""
+        assert parse_argv(["/tmp"])[0] == "/tmp"
+
+    def test_legacy_stdio_token_means_no_override(self) -> None:
+        """Hermes MCP passes the literal word "stdio" — it is not a path."""
+        assert parse_argv(["stdio"])[0] == "."
+        assert parse_argv(["--workdir", "stdio"])[0] == "."
+
+    def test_version_and_help_flags(self) -> None:
+        assert parse_argv(["--version"]) == (".", True, False)
+        assert parse_argv(["-V"]) == (".", True, False)
+        assert parse_argv(["--help"]) == (".", False, True)
+        assert parse_argv(["-h"]) == (".", False, True)
+
+    @pytest.mark.parametrize("argv", [["--bogus"], ["-x"], ["--workdir=/tmp", "--bogus"]])
+    def test_unknown_option_is_a_usage_error(self, argv: list[str]) -> None:
+        with pytest.raises(CliUsageError) as exc:
+            parse_argv(argv)
+        assert "unknown option" in str(exc.value)
+
+    def test_missing_flag_value_is_a_usage_error(self) -> None:
+        with pytest.raises(CliUsageError) as exc:
+            parse_argv(["--workdir"])
+        assert "requires a PATH" in str(exc.value)
+
+    def test_second_positional_is_refused(self) -> None:
+        """A silently ignored second path would be a silent wrong-repo."""
+        with pytest.raises(CliUsageError) as exc:
+            parse_argv(["/tmp", "/var"])
+        assert "unexpected argument" in str(exc.value)
+
+    def test_double_dash_ends_option_parsing(self) -> None:
+        assert parse_argv(["--", "--weird-dir"])[0] == "--weird-dir"
+
+
+class TestCliEntryPoint:
+    """The real `python -m gitreins_mcp.server` behaviour a client sees."""
+
+    def test_workdir_flag_starts_and_serves_jsonrpc(self, tmp_path: Path) -> None:
+        """`--workdir PATH` starts, acknowledges the workdir, and answers RPC."""
+        target = os.path.abspath(str(tmp_path))
+
+        proc = _run_module("--workdir", target, stdin=_initialize_line())
+
+        assert proc.returncode == 0, proc.stderr[-1000:]
+        assert f"workdir={target}" in proc.stderr
+        lines = [line for line in proc.stdout.splitlines() if line.strip()]
+        assert len(lines) == 1, f"expected exactly one JSON-RPC line, got {lines!r}"
+        response = json.loads(lines[0])
+        assert response["id"] == 1
+        assert response["result"]["serverInfo"]["name"] == SERVER_NAME
+
+    def test_unknown_flag_prints_usage_and_exits_1(self) -> None:
+        proc = _run_module("--bogus")
+
+        assert proc.returncode == 1
+        assert "error: unknown option --bogus" in proc.stderr
+        assert USAGE in proc.stderr
+        # stdout is the JSON-RPC channel: a usage line there would corrupt it.
+        assert proc.stdout == ""
+
+    def test_positional_workdir_still_works(self, tmp_path: Path) -> None:
+        """Backward compatibility, proven end to end."""
+        target = os.path.abspath(str(tmp_path))
+
+        proc = _run_module(target, stdin=_initialize_line())
+
+        assert proc.returncode == 0, proc.stderr[-1000:]
+        assert f"workdir={target}" in proc.stderr
+        assert json.loads(proc.stdout.splitlines()[0])["id"] == 1
+
+    def test_main_returns_1_and_writes_usage_to_stderr(self, capsys: pytest.CaptureFixture) -> None:
+        """`main` itself fails closed with a usage line — no traceback."""
+        assert main(["--nope"]) == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "error: unknown option --nope" in captured.err
+        assert USAGE in captured.err
