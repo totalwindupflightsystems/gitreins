@@ -122,13 +122,49 @@ def test_a_missing_board_is_a_distinct_exit_code(tmp_path: Path) -> None:
     assert "error: no board at" in result.stderr
 
 
-def test_unparsable_lines_are_skipped_and_counted(tmp_path: Path) -> None:
+def test_unparsable_lines_fail_the_check(tmp_path: Path) -> None:
     board = _board(tmp_path, [_row("A-1"), "{not json", _row("A-2")])
 
     result = _run(board)
 
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "unparsable line(s) skipped" in result.stdout
+    assert result.returncode == 1
+    assert "unparsable line(s) in tasks.jsonl" in result.stdout
+    assert "every non-empty line must be a complete JSON object" in result.stdout
+
+
+def test_pretty_printed_record_fails_the_check(tmp_path: Path) -> None:
+    """A pretty-printed JSON record spans many physical lines (BOARD-1).
+
+    boardctl refuses to read such a board while this gate used to pass it:
+    no line of the record is a complete JSON object, so every line counts
+    as unparsable and the check must fail instead of skipping them.
+    """
+    pretty = json.dumps(_row("X-1", "one object, 22 physical lines"), indent=2)
+    board = _board(tmp_path, [_row("A-1"), pretty])
+
+    result = _run(board)
+
+    assert result.returncode == 1
+    assert "unparsable line(s) in tasks.jsonl" in result.stdout
+    assert "every non-empty line must be a complete JSON object" in result.stdout
+    # extract count from "      N unparsable line(s) in tasks.jsonl ..."
+    for line in result.stdout.splitlines():
+        if "unparsable line(s)" in line:
+            unparsable = int(line.strip().split()[0])
+            break
+    else:
+        raise AssertionError("no unparsable line found in output")
+    assert unparsable == len(pretty.strip().splitlines())
+
+
+def test_load_rows_counts_unparsable_and_keeps_valid_rows(tmp_path: Path) -> None:
+    module = _load_module()
+    board = _board(tmp_path, [_row("A-1"), "{not json", "123"])
+
+    rows, bad = module.load_rows(str(board / "tasks.jsonl"))
+
+    assert [row.get("id") for row in rows] == ["A-1"]
+    assert bad == 2
 
 
 def test_audit_reports_every_duplicate_in_one_run(tmp_path: Path) -> None:
