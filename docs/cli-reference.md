@@ -1281,6 +1281,110 @@ uses.
 | 1 | an invalid entry remains (a dry-run report, or `--fix` could not repair it) |
 | 2 | the config path exists but could not be read |
 
+## 18. `gitreins push-check`
+
+Credential gate for outgoing pushes: it scans the commits a push would publish
+and refuses the push when an added line in that range carries a credential.
+`gitreins install` writes a `pre-push` hook that calls it once per ref update,
+so nothing leaves the repo unless this check passes. The hook is the same
+command a human can run — `install` substitutes the resolved
+binary/interpreter path for `<gitreins>`:
+
+```sh
+#!/bin/sh
+while read local_ref local_sha remote_ref remote_sha; do
+  <gitreins> push-check "$local_sha" "$remote_sha" || exit $?
+done
+```
+
+The invocation is `gitreins push-check <local_sha> <remote_sha>` — two required
+positionals and no options beyond `-h` / `--help`, which prints
+`usage: gitreins push-check [-h] local_sha remote_sha`. Git fills both
+positionals from the ref-update line it writes to the hook's stdin; from a
+terminal, resolve them yourself:
+
+```sh
+gitreins push-check "$(git rev-parse HEAD)" "$(git rev-parse origin/main)"
+```
+
+### The ref pair
+
+| Argument | Meaning |
+|----------|---------|
+| `local_sha` | Tip of the range being pushed — the commit the remote's ref would end up at |
+| `remote_sha` | The sha that ref has on the remote **now** — the base the push is compared against |
+
+The check builds the range `<remote_sha>..<local_sha>` and reads the patch of
+every commit inside it (`git log --no-ext-diff --diff-merges=first-parent -p`),
+inspecting only **added** lines (`+`, excluding `+++` headers). Three
+consequences follow from that pair:
+
+- It reports credentials **introduced by this push**. A secret already
+  published on the remote sits outside the range and does not trip it.
+- `remote_sha` all zeros is git's spelling for "this ref does not exist on the
+  remote yet" (a new branch); the range then becomes the whole history
+  reachable from `local_sha`.
+- Order matters: the first positional is the newer end. Swapping them scans an
+  empty range and prints `PUSH SECRET CHECK: clean`.
+
+Scanned classes (one finding line per class): private keys
+(`BEGIN … PRIVATE KEY`), GitHub personal access and OAuth tokens, GitLab
+personal access tokens, `sk-…` API keys, Slack tokens, and credential
+assignments (`*PASSWORD*=` / `*TOKEN*=` / `*SECRET*=` / `*API_KEY*=` with a
+12+ character value).
+
+### Success and refusal
+
+A clean range prints exactly one line and exits 0:
+
+```
+PUSH SECRET CHECK: clean
+```
+
+A range that introduces a credential prints one `PUSH REFUSED:` line per
+finding class plus the remediation line, and exits 1 — the push is refused:
+
+```
+PUSH REFUSED: GitHub personal access token found in outgoing commit history.
+Rotate the exposed credential and have a human rewrite the affected history before retrying.
+```
+
+An unreadable range is refused as well — fail-closed, because an unverifiable
+push is not a clean push. The underlying `git` error is quoted so the cause is
+named:
+
+```
+PUSH REFUSED: secret scan could not verify the outgoing history: fatal: ambiguous argument 'nosuchref..HEAD': unknown revision or path not in the working tree.
+```
+
+**Exit codes** — measured by running the command against this build, not copied
+from a run report:
+
+| Code | Meaning |
+|------|---------|
+| 0 | range inspected, no credential in any added line |
+| 1 | a credential was found, or the range could not be inspected (fail-closed) |
+| 2 | argument error — a required positional missing, or extra arguments (argparse) |
+
+Measured on the 0.17.0 build (`./.venv/bin/gitreins`), clean ranges in this
+repo plus a scratch repo with one planted token:
+
+| Invocation | Observed |
+|------------|----------|
+| `gitreins push-check HEAD HEAD` | empty `<sha>..<sha>` range → `PUSH SECRET CHECK: clean`, rc **0** |
+| `gitreins push-check HEAD HEAD~1` | clean follow-up commit → `PUSH SECRET CHECK: clean`, rc **0** |
+| `gitreins push-check <sha-with-planted-token> <base-sha>` | one `PUSH REFUSED: GitHub personal access token …` line → rc **1** |
+| `gitreins push-check <newest-sha> <older-sha>` (order swapped) | nothing outgoing → `PUSH SECRET CHECK: clean`, rc **0** |
+| `gitreins push-check HEAD nosuchref` | `PUSH REFUSED: secret scan could not verify the outgoing history: fatal: …` → rc **1** |
+| `gitreins push-check` | `error: the following arguments are required: local_sha, remote_sha` → rc **2** |
+| `gitreins push-check HEAD HEAD HEAD` | `error: unrecognized arguments: HEAD` → rc **2** |
+
+One shape worth knowing about: a ref **deletion** passes `local_sha` as all
+zeros. There are no outgoing commits to scan, but `<remote_sha>..<zeros>` is not
+a resolvable revision, so the command refuses with
+`PUSH REFUSED: secret scan could not verify the outgoing history: fatal: Invalid revision range …`
+and exits 1 (measured).
+
 ## Hooks
 
 - **pre-commit**: installed by `gitreins install`; runs `gitreins guard` on
