@@ -6,14 +6,20 @@ Now delegate to the Pipeline engine for configurable multi-stage evaluation.
 
 import logging
 import re
-from typing import Any
+from typing import Any, cast
 
 from engine.eval_cap import EvalCap
-from engine.evaluator import AgenticEvaluator, Verdict
-from engine.guard_manager import GuardManager, Tier1Result
+from engine.evaluator import AgenticEvaluator, Verdict, VerdictItem
+from engine.guard_manager import GuardManager
+
+# Tier1Result is imported from its DEFINING module: --strict mypy's
+# no_implicit_reexport rejects the guard_manager re-export path, and
+# engine.types is where the class actually lives. Runtime identity is
+# unchanged — guard_manager itself imports this same object from engine.types.
 from engine.llm import LLMClient
 from engine.pipeline import Pipeline, degradation_warning, load_pipeline_config
 from engine.task_manager import Task
+from engine.types import Tier1Result
 
 logger = logging.getLogger("gitreins.judge")
 
@@ -25,7 +31,7 @@ class Judge:
         self,
         llm: LLMClient,
         workdir: str = ".",
-        guard_config: dict | None = None,
+        guard_config: dict[str, Any] | None = None,
         eval_cap: "str | EvalCap | None" = None,
         scope: str = "staged",
         *,
@@ -83,7 +89,7 @@ class Judge:
                 return self._run_legacy_skip_tier2(task)
             return self._run_legacy(task)
 
-    def _run_quality_snapshot(self) -> dict | None:
+    def _run_quality_snapshot(self) -> dict[str, Any] | None:
         """Run the repository's producer once for a configured-pipeline judge.
 
         GR-143: delegates to :meth:`_judge_quality_snapshot`, which reuses the
@@ -92,7 +98,7 @@ class Judge:
         """
         return self._judge_quality_snapshot()
 
-    def _judge_quality_snapshot(self) -> dict | None:
+    def _judge_quality_snapshot(self) -> dict[str, Any] | None:
         """The run's shared quality snapshot, or None when not configured.
 
         GR-143 one-authority contract: enabled-quality repos get a snapshot
@@ -120,13 +126,15 @@ class Judge:
                 import yaml
 
                 with open(config_path) as f:
-                    cfg = yaml.safe_load(f) or {}
+                    cfg: dict[str, Any] = yaml.safe_load(f) or {}
                 return bool((cfg.get("defaults") or {}).get("pass_on_error", False))
             except Exception:
                 pass
         return False
 
-    def _run_pipeline(self, task: Task, config: dict, skip_tier2: bool = False) -> "JudgeResult":
+    def _run_pipeline(
+        self, task: Task, config: dict[str, Any], skip_tier2: bool = False
+    ) -> "JudgeResult":
         """Run the configurable pipeline."""
         from engine.pipeline import Pipeline
 
@@ -135,7 +143,7 @@ class Judge:
         # This works regardless of how the user's config defines the
         # tier2 stage (condition: "true" or condition: "stage.tier1.any_failed").
         if skip_tier2:
-            stages = config.get("pipeline", {}).get("stages", [])
+            stages: list[dict[str, Any]] = config.get("pipeline", {}).get("stages", [])
             for stage in stages:
                 if stage.get("type") == "ai_eval":
                     stage["condition"] = "false"
@@ -160,10 +168,10 @@ class Judge:
             task_dict["skip_tier2"] = True
 
         try:
-            result = pipeline.run(task_dict, trigger="pre-eval")
+            result: dict[str, Any] = pipeline.run(task_dict, trigger="pre-eval")
 
             # Extract tier1 guard results from pipeline stages
-            tier1_stage = result.get("stages", {}).get("tier1", {})
+            tier1_stage: dict[str, Any] = result.get("stages", {}).get("tier1", {})
             tier1 = Tier1Result(
                 passed=tier1_stage.get("passed", True),
                 results=[],
@@ -301,7 +309,7 @@ class Judge:
         result.pipeline_result = {"skipped_tier2": True, "tier1_passed": True}
         return result
 
-    def _extract_lsp_diagnostics(self, tier1: Tier1Result) -> list[dict]:
+    def _extract_lsp_diagnostics(self, tier1: Tier1Result) -> list[dict[str, Any]]:
         """Extract structured LSP diagnostics from Tier 1 guard results.
 
         Parses the GuardResult output for the 'lsp' guard back into
@@ -315,7 +323,7 @@ class Judge:
         return []
 
     @staticmethod
-    def _parse_lsp_output(output: str) -> list[dict]:
+    def _parse_lsp_output(output: str) -> list[dict[str, Any]]:
         """Parse GuardResult output text back into structured diagnostics.
 
         The GuardResult._check_lsp output format is:
@@ -323,7 +331,7 @@ class Judge:
           ⚠ file:line [tool] message
           tool — clean
         """
-        diags: list[dict] = []
+        diags: list[dict[str, Any]] = []
         pattern = re.compile(r"^  [✗⚠] (.+?):(\d+) \[(.+?)\] (.+)")
         for line in output.split("\n"):
             m = pattern.match(line)
@@ -353,7 +361,7 @@ class Judge:
         result = pipeline.run(
             {"id": "_precommit", "title": "pre-commit", "criteria": []}, trigger="pre-commit"
         )
-        return result.get("passed", True)
+        return bool(result.get("passed", True))
 
 
 class JudgeResult:
@@ -363,7 +371,7 @@ class JudgeResult:
         self,
         task_id: str,
         passed: bool = False,
-        pipeline_result: dict | None = None,
+        pipeline_result: dict[str, Any] | None = None,
         verdict: Verdict | None = None,
         tier1: Tier1Result | None = None,
         tier2: Verdict | None = None,
@@ -405,7 +413,11 @@ class JudgeResult:
         if self.quality_snapshot:
             from engine.quality_metrics import format_quality_snapshot
 
-            quality_line = format_quality_snapshot(self.quality_snapshot)
+            # quality_snapshot is stored through Tier1Result.extra (dict[str, object]),
+            # so its static type here is `object`; the snapshot is a dict by
+            # construction (read_quality_snapshot -> dict[str, Any]).
+            snapshot = cast("dict[str, Any]", self.quality_snapshot)
+            quality_line = format_quality_snapshot(snapshot)
             if quality_line:
                 lines.append(f"\n{quality_line}")
 
@@ -413,7 +425,7 @@ class JudgeResult:
         return "\n".join(lines)
 
 
-def judge_result_to_dict(task_id: str, workdir: str, result: Any) -> dict:  # noqa: ANN401 - legacy and pipeline result shapes
+def judge_result_to_dict(task_id: str, workdir: str, result: Any) -> dict[str, Any]:  # noqa: ANN401 - legacy and pipeline result shapes
     """Standard judge result dict shared by MCP judge.status and CLI --status.
 
     Shape: task_id / passed / workdir / tier1_passed / verdict / items /
@@ -421,7 +433,7 @@ def judge_result_to_dict(task_id: str, workdir: str, result: Any) -> dict:  # no
     both result shapes: the legacy path (``result.tier2``) and the
     pipeline path (verdict buried in ``pipeline_result.stages[].steps[].data``).
     """
-    d = {
+    d: dict[str, Any] = {
         "task_id": task_id,
         "passed": result.passed,
         "workdir": workdir,
@@ -461,25 +473,23 @@ def judge_result_to_dict(task_id: str, workdir: str, result: Any) -> dict:  # no
     return d
 
 
-def _find_pipeline_verdict(pipeline_result: dict) -> Verdict | None:
+def _find_pipeline_verdict(pipeline_result: dict[str, Any]) -> Verdict | None:
     """Extract the structured ai_eval verdict from a compiled pipeline result."""
-    from types import SimpleNamespace
-
     for stage in (pipeline_result.get("stages") or {}).values():
         for step in stage.get("steps") or []:
             data = step.get("data") or {}
             if data.get("verdict"):
                 items = [
-                    SimpleNamespace(
+                    VerdictItem(
                         criterion=i.get("criterion"),
                         status=i.get("status"),
                         detail=i.get("detail"),
                     )
                     for i in (data.get("items") or [])
                 ]
-                return SimpleNamespace(
-                    verdict=data.get("verdict"),
+                return Verdict(
+                    verdict=str(data.get("verdict")),
                     items=items,
-                    summary=data.get("summary", ""),
+                    summary=str(data.get("summary", "")),
                 )
     return None
