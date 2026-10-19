@@ -54,6 +54,51 @@ For the full wire-protocol specification (transport framing, lifecycle, security
 - **Capability discovery:** `tools/list` returns the 15 schemas below. Tool names use
   dotted notation (`task.create`, `guard.run`, `judge.evaluate`).
 
+## Invocation
+
+Two entry points serve the same server:
+
+```bash
+gitreins mcp-server           # from a repo checkout — no flags, workdir = the CLI's workdir
+python -m gitreins_mcp.server [--workdir PATH]
+```
+
+The module form is what an MCP client's config usually names (it needs no
+`gitreins` on `PATH`):
+
+| Invocation | Workdir used |
+|------------|--------------|
+| `python -m gitreins_mcp.server` | the current directory |
+| `python -m gitreins_mcp.server --workdir /path/to/repo` | `/path/to/repo` |
+| `python -m gitreins_mcp.server -w /path/to/repo` | `/path/to/repo` (`-w=PATH` / `--workdir=PATH` also work) |
+| `python -m gitreins_mcp.server /path/to/repo` | `/path/to/repo` — **positional form, kept for backward compatibility** |
+| `python -m gitreins_mcp.server stdio` | the current directory (the legacy `stdio` transport token means "no override") |
+
+The workdir is echoed back in the startup line on stderr
+(`… workdir=/path/to/repo`), so a client log proves which repo a server is
+serving before any tool call.
+
+**Unknown options fail closed, never silently.** An unrecognised flag, a
+`--workdir` with no value, or a second positional argument writes a usage line
+to **stderr** (stdout stays protocol-pure) and exits **1** — the process never
+reaches the transport, so a client's first request gets a dead pipe rather than
+a server bound to the wrong repo:
+
+```
+$ python -m gitreins_mcp.server --bogus
+error: unknown option --bogus — usage: python -m gitreins_mcp.server [--workdir PATH]
+$ echo $?
+1
+```
+
+A second positional path is refused for the same reason (`error: unexpected
+argument '/var' — usage: …`): silently ignoring it would serve one repo while
+the command line named another. `--` ends option parsing, for a workdir whose
+name begins with `-` (`python -m gitreins_mcp.server -- --weird-dir`).
+
+`--version` (`-V`) prints the installed release to stdout and exits 0 without
+opening the transport; `--help` (`-h`) prints the usage line and exits 0.
+
 ## Client Quick Start (raw JSON-RPC, no MCP SDK)
 
 The transport is plain line-delimited JSON, so any shell or script can drive it. Three

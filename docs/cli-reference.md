@@ -571,6 +571,11 @@ done
 Run the MCP stdio server. No flags required; configuration is via
 environment variables:
 
+> The module form `python -m gitreins_mcp.server` accepts `--workdir PATH`
+> (`-w PATH`), and keeps the older positional form `… /path/to/repo`; an
+> unknown option prints a usage line to stderr and exits 1. See
+> [docs/mcp-api.md](mcp-api.md#invocation).
+
 | Env var | Default | Description |
 |---------|---------|-------------|
 | `GITREINS_LLM_API_KEY` | none | API key for the LLM provider |

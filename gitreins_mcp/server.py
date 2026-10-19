@@ -1618,6 +1618,136 @@ class GitReinsMCPServer:
         sys.stdout.flush()
 
 
+# ── Command line ─────────────────────────────────────────────────────────────
+#
+# DF-GITREINS-POC-91: the module entry point used to read ``sys.argv[1]`` as a
+# bare path — no flag parsing at all. So the documented-looking invocation
+# ``python -m gitreins_mcp.server --workdir /path`` handed the literal string
+# ``--workdir`` to ``GitReinsMCPServer``, which abspath'd it and crashed with a
+# raw ``ValueError``/``TypeError`` before a single byte of JSON-RPC traffic:
+# the client sees a dead server with no usage line and no clue. Parsing lives
+# here (not in ``__init__``) because ``GitReinsMCPServer`` is also constructed
+# programmatically — by ``gitreins mcp-server`` and by every test fixture —
+# where ``sys.argv`` belongs to the caller, not to the server.
+USAGE = "usage: python -m gitreins_mcp.server [--workdir PATH]"
+
+# Hermes MCP passes the literal word "stdio" as the transport argument; it has
+# always meant "no workdir override" and keeps meaning that.
+_LEGACY_STDIO_ARG = "stdio"
+
+
+class CliUsageError(Exception):
+    """An unusable command line; the entry point reports it and exits 1."""
+
+
+def parse_argv(argv: list[str]) -> tuple[str, bool, bool]:
+    """Parse the module's command line into ``(workdir, show_version, show_help)``.
+
+    Accepted forms::
+
+        python -m gitreins_mcp.server                  # workdir = cwd
+        python -m gitreins_mcp.server /path/to/repo    # positional (backward compat)
+        python -m gitreins_mcp.server --workdir /path  # flag
+        python -m gitreins_mcp.server -w /path         # short flag, also -w=/path
+        python -m gitreins_mcp.server --version        # or -V
+        python -m gitreins_mcp.server --help           # or -h
+
+    Raises :class:`CliUsageError` for an unknown option, a flag missing its
+    value, or a second positional argument — a silently ignored argument is a
+    silent wrong-repo, which is exactly the trap DF-GITREINS-POC-93 closed for
+    tool ``workdir`` arguments. ``--`` ends option parsing.
+    """
+    workdir = "."
+    show_version = False
+    show_help = False
+    positionals: list[str] = []
+    index = 0
+    options_done = False
+    while index < len(argv):
+        arg = argv[index]
+        index += 1
+        if options_done:
+            positionals.append(arg)
+            continue
+        if arg == "--":
+            options_done = True
+            continue
+        if arg in ("--version", "-V"):
+            show_version = True
+            continue
+        if arg in ("--help", "-h"):
+            show_help = True
+            continue
+        if arg in ("--workdir", "-w"):
+            if index >= len(argv):
+                raise CliUsageError(f"option {arg} requires a PATH argument")
+            workdir = argv[index]
+            index += 1
+            continue
+        if arg.startswith("--workdir="):
+            workdir = arg.split("=", 1)[1]
+            if not workdir:
+                raise CliUsageError("option --workdir requires a PATH argument")
+            continue
+        if arg.startswith("-w="):
+            workdir = arg.split("=", 1)[1]
+            if not workdir:
+                raise CliUsageError("option -w requires a PATH argument")
+            continue
+        if arg.startswith("-") and arg != "-":
+            raise CliUsageError(f"unknown option {arg}")
+        positionals.append(arg)
+
+    if len(positionals) > 1:
+        raise CliUsageError(f"unexpected argument {positionals[1]!r}")
+    if positionals and positionals[0] != _LEGACY_STDIO_ARG:
+        workdir = positionals[0]
+
+    # Backward compatibility: the legacy positional "stdio" token means "no
+    # override", and --workdir stdio is read the same way rather than creating
+    # a directory literally named "stdio".
+    if workdir == _LEGACY_STDIO_ARG:
+        workdir = "."
+    return workdir, show_version, show_help
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Entry point: parse the command line, then serve stdio.
+
+    Every failure path writes a usage line to **stderr** (stdout stays
+    protocol-pure) and returns 1 — never a raw traceback.
+    """
+    args = list(sys.argv[1:] if argv is None else argv)
+    try:
+        workdir, show_version, show_help = parse_argv(args)
+    except CliUsageError as exc:
+        _write_stderr(f"error: {exc} — {USAGE}")
+        return 1
+    if show_help:
+        _write_stdout(USAGE)
+        return 0
+    if show_version:
+        # Ask the server its version without opening the stdio transport.
+        _write_stdout(f"{SERVER_NAME} MCP server {__version__}")
+        return 0
+    server = GitReinsMCPServer(workdir)
+    # The startup acknowledgement (name/version/protocol/tool count/workdir) is
+    # emitted once by run_stdio() so BOTH entry points — `gitreins mcp-server`
+    # and `python -m gitreins_mcp.server` — report the same identity line.
+    server.run_stdio()
+    return 0
+
+
+def _write_stderr(text: str) -> None:
+    sys.stderr.write(text + "\n")
+    sys.stderr.flush()
+
+
+def _write_stdout(text: str) -> None:
+    sys.stdout.write(text + "\n")
+    sys.stdout.flush()
+
+
 # Standalone entry point
 if __name__ == "__main__":
     logging.basicConfig(
@@ -1625,16 +1755,4 @@ if __name__ == "__main__":
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
         stream=sys.stderr,
     )
-    # Accept optional workdir from command line (defaults to CWD)
-    workdir = sys.argv[1] if len(sys.argv) > 1 else "."
-    if workdir == "stdio":
-        workdir = "."  # Hermes MCP passes "stdio" — ignore it
-    if workdir in ("--version", "-V"):
-        # Ask the server its version without opening the stdio transport.
-        print(f"{SERVER_NAME} MCP server {__version__}")
-        raise SystemExit(0)
-    server = GitReinsMCPServer(workdir)
-    # The startup acknowledgement (name/version/protocol/tool count/workdir) is
-    # emitted once by run_stdio() so BOTH entry points — `gitreins mcp-server`
-    # and `python -m gitreins_mcp.server` — report the same identity line.
-    server.run_stdio()
+    raise SystemExit(main())
