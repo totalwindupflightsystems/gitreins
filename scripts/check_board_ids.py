@@ -124,6 +124,12 @@ def main(argv: list[str] | None = None) -> int:
     baseline = load_baseline(baseline_path)
     failures = audit(rows, baseline)
 
+    if unparsable:
+        failures.append(
+            f"{unparsable} unparsable line(s) in tasks.jsonl — every non-empty "
+            f"line must be a complete JSON object"
+        )
+
     if failures:
         print(f"✗ board ids — FAIL ({len(failures)} finding(s) in {tasks_path})")
         for failure in failures:
@@ -134,8 +140,6 @@ def main(argv: list[str] | None = None) -> int:
     scope = f"{len(rows)} row(s)"
     if grandfathered:
         scope += f"; grandfathered legacy duplicates: {grandfathered}"
-    if unparsable:
-        scope += f"; {unparsable} unparsable line(s) skipped"
     print(f"✓ board ids — unique ({scope})")
     return 0
 
