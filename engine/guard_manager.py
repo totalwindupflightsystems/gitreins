@@ -29,6 +29,7 @@ import time
 from contextlib import suppress
 from dataclasses import replace
 from datetime import datetime, timezone
+from typing import Any, cast
 
 from engine import command_hygiene, lang_detect, scanner_nice
 from engine.data_protection import (
@@ -52,6 +53,7 @@ from engine.types import (
     SCANNER_CLEAN,
     SCANNER_NOT_RUN,
     SCANNER_NOT_RUN_SCOPE,
+    DataProtectionResult,
     GuardResult,
     Tier1Result,
     parse_first_failing_test,
@@ -186,7 +188,7 @@ def _glob_segment_re(segment: str) -> str:
     return "".join(parts)
 
 
-def _compile_sensitive_path_patterns() -> tuple[re.Pattern, ...]:
+def _compile_sensitive_path_patterns() -> tuple[re.Pattern[str], ...]:
     """Compile SENSITIVE_PATH_PATTERNS to gitignore-flavoured regexes.
 
     A pattern with no ``/`` matches the FILENAME at any depth (``.env`` also
@@ -229,7 +231,7 @@ def _is_sensitive_fixture_path(fpath: str) -> bool:
     return bool(_SENSITIVE_FIXTURE_DIR_RE.search(fpath.replace(os.sep, "/")))
 
 
-def _sensitive_path_override_globs(config: dict) -> list[str]:
+def _sensitive_path_override_globs(config: dict[str, Any]) -> list[str]:
     """guards.sensitive_paths.allow as a list of glob strings (default [])."""
     guards = config.get("guards", {}) if isinstance(config, dict) else {}
     if not isinstance(guards, dict):
@@ -921,6 +923,7 @@ def _pytest_runner_missing_reason(kind: str, token: str, workdir: str) -> str | 
     # `env python -m pytest`) goes through PATH. A bare name that resolves must
     # then be probed, or the hint would blame a missing venv for an interpreter
     # that exists without pytest in it.
+    exe: str | None
     if "/" in token:
         exe = token if os.path.isabs(token) else os.path.join(workdir, token)
     else:
@@ -1024,7 +1027,7 @@ def _pytest_no_tests_benign(output: str) -> bool:
     return _PYTEST_ERRORS_RE.search(output) is None
 
 
-def _load_guard_config(workdir: str) -> dict:
+def _load_guard_config(workdir: str) -> dict[str, Any]:
     """Load .gitreins/config.yaml and extract the guards section.
 
     Returns the full config dict, or {} if the file doesn't exist
@@ -1039,7 +1042,8 @@ def _load_guard_config(workdir: str) -> dict:
         import yaml as _yaml
 
         with open(config_path) as f:
-            return _yaml.safe_load(f) or {}
+            loaded: dict[str, Any] = _yaml.safe_load(f) or {}
+            return loaded
     except ImportError:
         logger.warning(
             "PyYAML not available in this Python environment — "
@@ -1208,7 +1212,7 @@ def _bound_guard_log(content: str, max_bytes: int | None = None) -> str:
     return raw[:keep].decode("utf-8", errors="ignore") + marker
 
 
-def _log_test_scope(extra: dict) -> str:
+def _log_test_scope(extra: dict[str, Any]) -> str:
     """Human-readable test scope for the log header.
 
     DF-GITREINS-POC-67: diff-mode runs carry ``extra["test_scope"]`` —
@@ -1376,7 +1380,7 @@ class GuardManager:
     def __init__(
         self,
         workdir: str = ".",
-        config: dict | None = None,
+        config: dict[str, Any] | None = None,
         scope: str = "staged",
         *,
         grade_full_tree: bool = False,
@@ -1446,7 +1450,9 @@ class GuardManager:
         except DataProtectionConfigError as exc:
             self._data_protection = DataProtectionPolicy.default()
             self._data_protection_error = str(exc)
-        self._data_protection_result = None
+        # None until the data-protection lane runs; holds the lane's
+        # DataProtectionResult afterwards (redaction re-reads it).
+        self._data_protection_result: DataProtectionResult | None = None
 
         # DF-018: untruncated guard outputs for the persisted run log. The
         # guard results keep their own bounded output (what the console
@@ -1456,7 +1462,7 @@ class GuardManager:
         self._full_outputs: dict[str, str] = {}
 
         # Test mode: "full" (default) or "diff"
-        self._test_mode = guards_cfg.get("test_mode", "full")
+        self._test_mode = str(guards_cfg.get("test_mode", "full"))
 
         # Whole-tree grading opt-in (DF-GITREINS-POC-11). Keyword-only in
         # __init__, default False so every existing caller — judge, worktree
@@ -1973,7 +1979,10 @@ class GuardManager:
             config_path = os.path.join(self.workdir, ".gitleaks.toml")
             if os.path.isfile(config_path):
                 cmd.extend(["--config", config_path])
-            result = subprocess.run(
+            # A separate variable: this local shadows the method's GuardResult
+            # return shape on purpose, and mypy otherwise reads the reuse as a
+            # CompletedProcess-assigned-to-GuardResult conflict.
+            gitleaks_result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
@@ -1982,7 +1991,7 @@ class GuardManager:
                 errors="replace",
                 env=_sanitized_env(),
             )
-            if result.returncode == 0:
+            if gitleaks_result.returncode == 0:
                 # gitleaks clean — ALSO run the built-in scanner. gitleaks'
                 # default rules carry entropy thresholds that skip low-entropy
                 # keys (e.g. an AKIA-prefixed key in test fixtures), and the
@@ -2021,7 +2030,7 @@ class GuardManager:
                 # report. The result stays failed until BOTH scanners are
                 # clean — reporting-completeness only, no weakening.
                 builtin = self._builtin_secrets_scan()
-                gitleaks_output = result.stdout + result.stderr
+                gitleaks_output = gitleaks_result.stdout + gitleaks_result.stderr
                 output = gitleaks_output
                 if not builtin.passed:
                     output = _merge_secret_findings(output, builtin.output)
@@ -2036,7 +2045,7 @@ class GuardManager:
                         name="secrets",
                         passed=False,
                         output=output,
-                        exit_code=result.returncode,
+                        exit_code=gitleaks_result.returncode,
                         scanners=(
                             (GITLEAKS_SCANNER, scanner_config_error_status(config_error)),
                             *builtin.scanners,
@@ -2050,7 +2059,7 @@ class GuardManager:
                     name="secrets",
                     passed=False,
                     output=output,
-                    exit_code=result.returncode,
+                    exit_code=gitleaks_result.returncode,
                     scanners=((GITLEAKS_SCANNER, gitleaks_status), *builtin.scanners),
                     nice_note=nice_note,
                 )
@@ -2441,7 +2450,7 @@ class GuardManager:
                 files.append(os.path.relpath(os.path.join(current_root, name), scan_root))
         return files
 
-    def _load_gitleaks_allowlist(self) -> list:
+    def _load_gitleaks_allowlist(self) -> list[re.Pattern[str]]:
         """Load path allowlist regexes from .gitleaks.toml, if present.
 
         The built-in scanner applies the same path exemptions gitleaks gets
@@ -2449,7 +2458,7 @@ class GuardManager:
         docs, generated dirs). Entries are emitted as Go-style regexps inside
         '''...''' quotes.
         """
-        allowed = []
+        allowed: list[re.Pattern[str]] = []
         cfg = os.path.join(self.scan_root, ".gitleaks.toml")
         if not os.path.isfile(cfg):
             return allowed
@@ -2871,7 +2880,11 @@ class GuardManager:
             # the hint line is prepended to the displayed output for a
             # FAILED pytest lane; the value of exit_code decides
             # pass/fail and is never reclassified or swallowed.
-            not_found_hint = _pytest_not_found_hint(return_code, cmd)
+            # return_code is int here: the timed-out and spawn-error branches
+            # above already returned on their own keys, and run_bounded always
+            # records exit_code for a completed run.
+            exit_code = cast(int, return_code)
+            not_found_hint = _pytest_not_found_hint(exit_code, cmd)
             if not_found_hint:
                 # DF-018 contract: the run log keeps the untruncated
                 # output (already captured above); the GuardResult stays
@@ -3288,7 +3301,9 @@ class GuardManager:
         changed_files = (
             self._scan_root_files() if separate_scan_root else self._scope_files_or_none()
         )
-        result = check_data_protection(scan_root, changed_files, policy=self._data_protection)
+        result: DataProtectionResult = check_data_protection(
+            scan_root, changed_files, policy=self._data_protection
+        )
         self._data_protection_result = result
         # The lane's output is already scrubbed (safe_value); keep it as the
         # untruncated evidence for the run log so no raw value is reintroduced.

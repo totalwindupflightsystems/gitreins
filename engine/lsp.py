@@ -15,6 +15,7 @@ import subprocess
 import urllib.parse
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import Any
 
 from engine import scanner_nice
 
@@ -91,7 +92,7 @@ class LspDiag:
     code: str = ""
     tool: str = ""
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -106,7 +107,7 @@ class LspDiag:
 # requests.  A quiescent gopls under load answers nothing.
 READY_PROBE_METHOD = "workspace/symbol"
 READY_PROBE_ID = 9001
-PROBE_PARAMS: dict = {"query": ""}
+PROBE_PARAMS: dict[str, Any] = {"query": ""}
 READY_PROBE_TIMEOUT_S = 15.0
 
 # How long to wait for the server's first `publishDiagnostics` for a file
@@ -121,7 +122,7 @@ class LspCheckStatus:
     """Outcome of one LSP check, including whether the server was responsive."""
 
     tool: str
-    diagnostics: list[dict]
+    diagnostics: list[dict[str, Any]]
     files: list[str]
     server_ready: bool | None = None  # None = not probed
     ready_seconds: float | None = None
@@ -135,7 +136,7 @@ class LspCheckStatus:
     rechecks: int = 0
     duration_s: float = 0.0
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
 
@@ -161,7 +162,7 @@ def find_lsp_tool(tool_name: str) -> str | None:
     return None
 
 
-def _lsp_encode_message(msg: dict) -> bytes:
+def _lsp_encode_message(msg: dict[str, Any]) -> bytes:
     payload = json.dumps(msg)
     body = payload.encode("utf-8")
     header = f"Content-Length: {len(body)}\r\n\r\n"
@@ -169,7 +170,10 @@ def _lsp_encode_message(msg: dict) -> bytes:
 
 
 def _lsp_send_request(
-    proc: subprocess.Popen, request_id: int, method: str, params: dict | None = None
+    proc: subprocess.Popen[bytes],
+    request_id: int,
+    method: str,
+    params: dict[str, Any] | None = None,
 ) -> bool:
     """Send a JSON-RPC request; False when the server's stdin is gone."""
     message = {
@@ -188,7 +192,9 @@ def _lsp_send_request(
         return False
 
 
-def _lsp_read_response(proc: subprocess.Popen, timeout: float = 60.0) -> dict | None:
+def _lsp_read_response(
+    proc: subprocess.Popen[bytes], timeout: float = 60.0
+) -> dict[str, Any] | None:
     """Read one JSON-RPC response from an LSP server process.
 
     Uses os.read on the raw file descriptor to bypass Python's
@@ -287,19 +293,20 @@ def _lsp_read_response(proc: subprocess.Popen, timeout: float = 60.0) -> dict | 
     buffer = buffer[content_length:]
 
     try:
-        return json.loads(body.decode("utf-8"))
+        result: dict[str, Any] = json.loads(body.decode("utf-8"))
+        return result
     except (json.JSONDecodeError, UnicodeDecodeError):
         return None
 
 
 def _collect_diagnostics(
-    proc: subprocess.Popen,
+    proc: subprocess.Popen[bytes],
     filepath: str,
     timeout: float,
     tool: str,
     probe_method: str | None = None,
     ready_timeout: float = READY_PROBE_TIMEOUT_S,
-) -> tuple[list[dict], float | None, bool]:
+) -> tuple[list[dict[str, Any]], float | None, bool]:
     """Collect diagnostics for ``filepath``; optionally probe server liveness.
 
     Returns ``(diagnostics, probe_seconds, published)``.  ``published`` says
@@ -312,7 +319,7 @@ def _collect_diagnostics(
     """
     import time as _time
 
-    diags: list[dict] = []
+    diags: list[dict[str, Any]] = []
     published = False
     started = _time.monotonic()
     deadline = started + timeout
@@ -366,7 +373,7 @@ def _collect_diagnostics(
     return diags, probe_seconds, published
 
 
-def _lsp_initialize(proc: subprocess.Popen, workdir: str, timeout: float = 60.0) -> bool:
+def _lsp_initialize(proc: subprocess.Popen[bytes], workdir: str, timeout: float = 60.0) -> bool:
     root_uri = Path(workdir).as_uri()
     init_msg = {
         "jsonrpc": "2.0",
@@ -614,7 +621,7 @@ def run_lsp_check_status(
         probe_method=READY_PROBE_METHOD if probe else None,
     )
 
-    def finish(diagnostics: list[dict]) -> LspCheckStatus:
+    def finish(diagnostics: list[dict[str, Any]]) -> LspCheckStatus:
         status.diagnostics = diagnostics
         status.duration_s = round(_time.monotonic() - started, 6)
         return status
@@ -643,8 +650,8 @@ def run_lsp_check_status(
         logger.debug("No staged files for LSP tool '%s'", tool)
         return finish([])
 
-    all_diagnostics: list[dict] = []
-    proc = None
+    all_diagnostics: list[dict[str, Any]] = []
+    proc: subprocess.Popen[bytes] | None = None
 
     try:
         # DF-GITREINS-POC-55: the server is a spawned external scanner — the
@@ -806,7 +813,7 @@ def run_lsp_check(
     timeout_per_file: float | None = None,
     init_timeout: float | None = None,
     nice_level: int = 0,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Return the diagnostics for ``files`` (no readiness probe).
 
     Behaviour is unchanged from before INT-FLAKE-4: the guard and every
