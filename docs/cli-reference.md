@@ -395,20 +395,31 @@ Run Tier 1 guards, then commit with the given message. If the guards
 fail, the commit is aborted.
 
 ```
-gitreins commit <message> [--skip-tier2]
+gitreins commit <message> [--skip-tier2] [--allow-in-progress]
 ```
 
 | Argument/Option | Description |
 |-----------------|-------------|
 | `message` | Commit message (required, positional) |
 | `--skip-tier2` | Skip any Tier 2 processing; Tier 1 guards only |
+| `--allow-in-progress` | Allow committing while tasks are in_progress (prints a warning) |
+
+**In-progress block.** `commit` refuses to run while any task is
+`in_progress`: it names the offending task ids and exits 1, because
+`task.complete` runs the quality judge against the committed state — a
+commit made in the middle of a task would be judged as its result.
+Complete the tasks (`gitreins task complete <id>`) or delete them
+(`gitreins task delete <id>`) and retry. `--allow-in-progress` overrides
+the block: the commit proceeds and a `WARNING` naming the still
+`in_progress` task ids is printed to stderr. Use it only for commits that
+are deliberately not a task's deliverable.
 
 **Exit codes**
 
 | Code | Meaning |
 |------|---------|
 | 0 | Guards passed and commit created |
-| 1 | Tier 1 guards FAILED — nothing committed |
+| 1 | Tier 1 guards FAILED, or tasks are `in_progress` without `--allow-in-progress` — nothing committed |
 
 ## 7. `gitreins commit-audit`
 
