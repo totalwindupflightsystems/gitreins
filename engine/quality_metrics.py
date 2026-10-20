@@ -16,6 +16,7 @@ import subprocess
 from typing import Any
 
 from engine.config import QualityConfig
+from engine.guard_manager import _is_harness_state_path
 
 #: (abs workdir, artifact_path) → snapshot for the latest successful read in
 #: this process. One entry per producer; a later surface never re-runs it.
@@ -108,7 +109,7 @@ def read_quality_snapshot(workdir: str, config: QualityConfig) -> dict[str, Any]
         "produced_at": artifact.get("produced_at"),
         "command": artifact.get("command", config.command),
         "targets_source": config.targets_source or None,
-        "diff_scope": _diff_scope(workdir, artifact),
+        "diff_scope": _diff_scope(workdir, artifact, artifact_path=config.artifact_path),
     }
     # Published only after a complete read: a later surface either sees this
     # full snapshot or runs the producer itself — never a partial state.
@@ -116,8 +117,13 @@ def read_quality_snapshot(workdir: str, config: QualityConfig) -> dict[str, Any]
     return snapshot
 
 
-def _diff_scope(workdir: str, artifact: dict[str, Any]) -> dict[str, Any]:
-    """Match producer-owned surface metadata to the current git diff."""
+def _diff_scope(workdir: str, artifact: dict[str, Any], artifact_path: str = "") -> dict[str, Any]:
+    """Match producer-owned surface metadata to the current git diff.
+
+    ``artifact_path`` (workdir-relative) and everything under harness state
+    (``.gitreins/**``) are excluded from the change set: the producer owns
+    those files, so their per-run rewrites are never the user's change.
+    """
     changed_files: list[str] = []
     try:
         staged = subprocess.run(
@@ -142,6 +148,11 @@ def _diff_scope(workdir: str, artifact: dict[str, Any]) -> dict[str, Any]:
                 ]
     except OSError:
         pass
+
+    artifact_rel = os.path.normpath(artifact_path) if artifact_path else ""
+    changed_files = [
+        p for p in changed_files if p != artifact_rel and not _is_harness_state_path(p)
+    ]
 
     diff_file_count = len(set(changed_files))
     if "surfaces" not in artifact:

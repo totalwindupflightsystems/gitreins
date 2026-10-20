@@ -185,6 +185,135 @@ def test_docs_only_diff_has_no_surface_findings(tmp_path: Path) -> None:
     assert "diff-scope: no artifact surfaces touched" in result.summary
 
 
+def test_diff_scope_excludes_harness_state_from_change_set(tmp_path: Path) -> None:
+    """DF-GITREINS-POC-97: harness state never counts as a user change.
+
+    The change set behind ``diff_files`` is filtered directly: everything
+    under ``.gitreins/**`` plus the producer's own artifact path is excluded,
+    whatever the producer rewrites on a given run.
+    """
+    from engine.quality_metrics import _diff_scope
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "keep.txt").write_text("baseline\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "baseline"], cwd=tmp_path, check=True)
+    for path in (
+        ".gitreins/quality.json",
+        ".gitreins/logs/guard.log",
+        "src/COV-1/app.py",
+    ):
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    artifact = {
+        "metrics": {"type_hint_pct": {"value": 82, "target": 80}},
+        "surfaces": {"COV-1": {"test_links": ["tests/test_cov.py"], "classes": ["unit"]}},
+    }
+    scope = _diff_scope(str(tmp_path), artifact, artifact_path=".gitreins/quality.json")
+    # Three dirty paths, two of them harness state (.gitreins/quality.json —
+    # which is ALSO the artifact path — and .gitreins/logs/guard.log): the
+    # change set must count only the one real source file.
+    assert scope["diff_files"] == 1
+    assert scope["status"] == "available"
+    assert "COV-1" in scope["surfaces"]
+
+
+def test_diff_scope_ignores_dirty_quality_artifact(tmp_path: Path) -> None:
+    """Only the quality artifact is dirty (no user changes) → ``no_diff`` / 0."""
+    from engine.quality_metrics import _snapshot_cache
+
+    def fresh_guard(quality: object) -> object:
+        # Each gitreins invocation is a fresh process; the snapshot cache is
+        # process-local, so a new simulated invocation must not reuse the
+        # previous one's diff-scope numbers.
+        _snapshot_cache.clear()
+        return _guard(tmp_path, quality)
+
+    _produce(
+        tmp_path,
+        surfaces={"COV-1": {"test_links": ["tests/test_cov.py"], "classes": ["unit"]}},
+    )
+    # First run: the producer writes .gitreins/quality.json + count files.
+    result = fresh_guard(_config(tmp_path).to_dict())
+    assert result.extra["quality_snapshot"]["diff_scope"]["diff_files"] == 0
+    # The user stages the artifact (committing everything) — still not a
+    # user change: the producer owns that file.
+    subprocess.run(
+        ["git", "add", ".gitreins/quality.json", ".gitreins/count"],
+        cwd=tmp_path,
+        check=True,
+    )
+    result = fresh_guard(_config(tmp_path).to_dict())
+    scope = result.extra["quality_snapshot"]["diff_scope"]
+    assert scope == {"status": "no_diff", "base": "HEAD", "diff_files": 0, "surfaces": {}}
+    assert "diff-scope: no artifact surfaces touched" in result.summary
+
+
+def test_diff_scope_counts_real_change_besides_rewritten_artifact(
+    tmp_path: Path,
+) -> None:
+    """A timestamped producer rewriting the artifact must not inflate the count.
+
+    One real staged change + a producer that stamps ``produced_at`` (so
+    .gitreins/quality.json is rewritten on every run) reports exactly
+    ``1 changed files`` — not 2.
+    """
+    from engine.quality_metrics import _snapshot_cache
+
+    def fresh_guard(quality: object) -> object:
+        # Fresh-process semantics: clear the run-local snapshot cache so this
+        # invocation re-runs the producer instead of reusing cached numbers.
+        _snapshot_cache.clear()
+        return _guard(tmp_path, quality)
+
+    _produce(
+        tmp_path,
+        surfaces={"COV-1": {"test_links": ["tests/test_cov.py"], "classes": ["unit"]}},
+        class_floor=["unit"],
+    )
+    (tmp_path / "producer.py").write_text(
+        "import json, pathlib, datetime\n"
+        "artifact = {\n"
+        "    'metrics': {\n"
+        "        'type_hint_pct': {'value': 82, 'target': 80, 'stage': 'stage-2'}\n"
+        "    },\n"
+        "    'produced_at': datetime.datetime.now().isoformat(),\n"
+        "    'command': 'repo-producer',\n"
+        "    'surfaces': {'COV-1': {'test_links': ['tests/test_cov.py'],"
+        " 'classes': ['unit']}},\n"
+        "    'class_floor': ['unit'],\n"
+        "}\n"
+        "pathlib.Path('.gitreins').mkdir(exist_ok=True)\n"
+        "pathlib.Path('.gitreins/quality.json').write_text(json.dumps(artifact))\n",
+        encoding="utf-8",
+    )
+    # Run 1: the timestamped producer rewrites the artifact; commit everything
+    # (artifact included) so the tree starts clean.
+    fresh_guard(_config(tmp_path).to_dict())
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "commit artifact"], cwd=tmp_path, check=True)
+    # Run 2 proves the tree-dirty premise: the producer just rewrote the
+    # tracked artifact again, so git status shows it as modified.
+    fresh_guard(_config(tmp_path).to_dict())
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=tmp_path, check=True, capture_output=True
+    )
+    assert b".gitreins/quality.json" in status.stdout
+    # One real staged change: the diff-scope count must stay at 1.
+    _stage_surface_change(tmp_path)
+    result = fresh_guard(_config(tmp_path).to_dict())
+    scope = result.extra["quality_snapshot"]["diff_scope"]
+    assert scope["status"] == "available"
+    assert scope["diff_files"] == 1
+    assert "COV-1" in scope["surfaces"]
+    assert "diff-scope: 1 changed files, 1 surfaces touched" in result.summary
+
+
 def test_disabled_quality_produces_no_guard_output(tmp_path: Path) -> None:
     result = _guard(tmp_path, {"enabled": False})
     assert "quality" not in result.summary.lower()
