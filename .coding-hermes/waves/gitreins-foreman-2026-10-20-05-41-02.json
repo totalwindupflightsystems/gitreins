@@ -1,0 +1,47 @@
+{
+  "tick_id": "gitreins-foreman-2026-10-20-05-41-02",
+  "created_at": "2026-10-20T06:08:00Z",
+  "project": "gitreins",
+  "budget": 9,
+  "dispatched": 2,
+  "base_sha": "d32f15a",
+  "base_ref": "github/main",
+  "note": "Wave of 2 mutually independent dogfood run-23 rows: disjoint file scopes (POC-95 = engine/quality_metrics.py + engine/config.py + docs/quality-metrics.md + tests/test_quality_metrics.py; POC-96 = gitreins/cli.py + tests/test_cli.py + optional engine/worktree_manager.py). Both add tests, so both touch the README.md/CONTRIBUTING.md count sites -- expect ONE doc-count conflict at merge time, resolved by re-deriving the merged tree's collection total (documented wave-merge lesson). Workers are instructed to resolve their OWN worktree cwd explicitly (the 2026-10-20-04-53 tick's POC-94 worker lost 10 min by resolving to the shared checkout).",
+  "workers": [
+    {
+      "task_id": "DF-GITREINS-POC-95",
+      "branch": "wt/DF-GITREINS-POC-95",
+      "worktree": "~/worktrees/gitreins-DF-GITREINS-POC-95",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "brief": "/tmp/brief-poc95.txt",
+      "log": "/tmp/gitreins-poc95-worker.log",
+      "scope": [
+        "engine/quality_metrics.py",
+        "engine/config.py",
+        "docs/quality-metrics.md",
+        "tests/test_quality_metrics.py",
+        "README.md",
+        "CONTRIBUTING.md"
+      ],
+      "status": "dispatched"
+    },
+    {
+      "task_id": "DF-GITREINS-POC-96",
+      "branch": "wt/DF-GITREINS-POC-96",
+      "worktree": "~/worktrees/gitreins-DF-GITREINS-POC-96",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "brief": "/tmp/brief-poc96.txt",
+      "log": "/tmp/gitreins-poc96-worker.log",
+      "scope": [
+        "gitreins/cli.py",
+        "engine/worktree_manager.py",
+        "tests/test_cli.py",
+        "README.md",
+        "CONTRIBUTING.md"
+      ],
+      "status": "dispatched"
+    }
+  ]
+}
