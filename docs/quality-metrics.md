@@ -63,8 +63,10 @@ Run `gitreins guard`. The guard will show a line such as:
 Every quality line carries all four facts, on one line, on every surface:
 
 - `value` — what the repository measured (`72.3%`).
-- `target` — the repository's own goal for the metric (`80%`), `n/a` when the
-  artifact declares none.
+- `target` — the EFFECTIVE goal the metric is graded against: the stricter
+  of the repository's ladder target (`targets_source`) and the artifact's
+  declared target, so `80%` in the example; `n/a` only when neither source
+  declares one. A disagreement is named on the line.
 - `stage` — the descriptive pipeline stage the producer tagged (`stage
   current`).
 - the producer command — `via <command>` names the exact repository command
@@ -83,13 +85,27 @@ A `warn`-mode miss is NOT a failure: a metric below its target in `warn`
 mode is displayed everywhere (value, target, stage, producer) but no surface
 fails — the guard stays green and the judge is not failed by it. Blocking
 requires the metric's mode to be `block` AND the value to be below its
-declared target.
+effective target.
 
-Change that metric's mode to `block` to fail the guard when its artifact value
-is below its artifact target. `stage` is descriptive only; stage-specific
+Change that metric's mode to `block` to fail the guard when its value is
+below its EFFECTIVE target. `stage` is descriptive only; stage-specific
 criteria must not independently block a run. Unlisted metrics default to
-`warn`. Targets must be numeric values from the repository's ladder. The
-example's value is deliberately a sample: replace it with the repo's actual
+`warn`.
+
+Targets: when `targets_source` names an existing file that declares the
+metric, the stricter of the ladder target and the artifact target wins —
+a repository cannot pass a block gate by lowering (or dropping) the target
+inside the artifact it itself produces. The effective target is shown, and
+a disagreement is named on the line, e.g.
+`target 80% (ladder beats artifact target 10%)`. An artifact entry with no
+target is graded against the ladder's. Each snapshot row carries its
+provenance (`target_source`: `ladder+artifact`, `ladder`, `artifact`, or
+`ladder unavailable: <reason>`, plus `ladder_target`/`artifact_target`) so
+a reader can see which number won. A configured ladder that is missing,
+unreadable, or not a flat object of numbers does not fail the run: the
+artifact's own targets apply and the reason is surfaced in the snapshot —
+a broken ladder is never indistinguishable from no ladder. The example's
+value is deliberately a sample: replace it with the repo's actual
 measurement before relying on it.
 
 ### Diff-scoped surface view
@@ -153,11 +169,16 @@ optional provenance fields:
 }
 ```
 
+The artifact's `target` is a declaration, not the authority: when
+`targets_source` is configured and declares the metric, the stricter of the
+two targets grades the metric (see [Reading the
+block](#reading-the-block-agents) above).
+
 If the command fails, times out, writes malformed JSON, or does not produce the
 artifact, GitReins reports `quality: unavailable` with a reason. It never
 substitutes zero. Unavailable metrics are visible but do not fail a guard;
-blocking applies only to a present numeric metric with an unmet target and
-explicit `block` mode.
+blocking applies only to a present numeric metric with an unmet effective
+target and explicit `block` mode.
 
 `quality.timeout` is in seconds (default 300). There are no quality-specific
 environment variables. The same snapshot is shown in guard output, judge

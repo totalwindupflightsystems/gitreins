@@ -44,6 +44,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Iterator
+from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Any
 
@@ -103,6 +104,18 @@ GITREINS_GITIGNORE_ENTRIES = (
     # .gitreins/history/) — without this entry every lane that used the flag
     # would show an untracked `.gitreins/verdicts/` in `git status`.
     ".gitreins/verdicts/",
+    # DF-GITREINS-POC-96: the repo-produced quality artifact.  The artifact
+    # contract (docs/quality-metrics.md) stamps `produced_at` provenance with a
+    # fresh timestamp on every invocation that reads the snapshot, so a
+    # CONFORMING producer rewrites the file after every guard/judge/doctor run;
+    # measured: `git check-ignore -v .gitreins/quality.json` -> rc 1 and one
+    # `git add -A` tracked it, leaving ` M .gitreins/quality.json` in every
+    # `git status` afterwards.  Ignored by default (like its 11 siblings):
+    # versioning it is an opt-IN — git keeps versioning an already-tracked
+    # path, so a repo that committed it before this entry loses nothing.  The
+    # configured `quality.artifact_path` is protected too (see
+    # _gitignore_entries_for_project).
+    ".gitreins/quality.json",
 )
 
 # EVID-003: the id an ephemeral judge run carries when none was given on the
@@ -392,13 +405,52 @@ def _gitignore_entries_for_project(workdir: str, lang: dict | None = None) -> tu
     The universal entries cover GitReins state and telemetry. Python projects
     also get the standard interpreter cache exclusion; other languages should
     not receive a language-specific rule just because ``install`` was run.
+
+    DF-GITREINS-POC-96: the repo's configured ``quality.artifact_path`` is
+    appended when it is set and repo-relative (``install`` runs before a user
+    may ever invoke the guard, so the artifact is protected from the first
+    ``git add -A`` rather than from the first quality run).  A repo whose
+    config cannot be read still gets every static entry.
     """
     if lang is None:
         lang = _detect_language(workdir)
     entries = list(GITREINS_GITIGNORE_ENTRIES)
     if lang.get("is_python"):
         entries.append("__pycache__/")
+    configured = _configured_quality_artifact_entry(workdir)
+    if configured and configured not in entries:
+        entries.append(configured)
     return tuple(entries)
+
+
+def _configured_quality_artifact_entry(workdir: str) -> str | None:
+    """The configured ``quality.artifact_path`` as a .gitignore entry, or None.
+
+    DF-GITREINS-POC-96: the canonical artifact has its own static entry in
+    ``GITREINS_GITIGNORE_ENTRIES``; this protects the CONFIGURED path when the
+    repo repointed it (e.g. ``reports/qm.json``).  A malformed config, a
+    non-string path, or a path that escapes the repo (absolute or ``..``) —
+    never a valid .gitignore entry — yields None instead of an exception.
+    """
+    try:
+        from engine.config import load_raw_config
+
+        raw = load_raw_config(workdir).get("quality")
+    except Exception:
+        return None
+    if not isinstance(raw, dict):
+        return None
+    path = raw.get("artifact_path")
+    if not isinstance(path, str):
+        return None
+    path = path.strip()
+    if not path:
+        return None
+    if os.path.isabs(path) or path.startswith("~"):
+        return None
+    if Path(path).parts and ".." in Path(path).parts:
+        return None
+    return path.rstrip("/")
 
 
 def _ensure_gitignore_entries(workdir: str, entries: tuple[str, ...]) -> list[str]:

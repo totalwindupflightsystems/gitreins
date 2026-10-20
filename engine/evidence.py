@@ -684,6 +684,24 @@ def judge_evidence(
         checks.extend(_judge_gate_checks(result, flags, remaining))
 
     document["summary"] = _safe_text(getattr(result, "summary", ""), flags)
+    # DF-GITREINS-POC-98: include quality_snapshot in the JSON evidence so
+    # scripted consumers can read the metric without parsing prose.
+    quality_snapshot = getattr(result, "quality_snapshot", None)
+    if quality_snapshot is not None:
+        document["quality_snapshot"] = quality_snapshot
+        # Also add a quality check entry so it appears alongside the other
+        # gate checks, consistent with how guard --json structures it.
+        from engine.quality_metrics import quality_blocks, format_quality_snapshot
+
+        qs_line = format_quality_snapshot(quality_snapshot)
+        document["checks"].append(
+            {
+                "id": "quality",
+                "outcome": "fail" if quality_blocks(quality_snapshot) else "pass",
+                "passed": not quality_blocks(quality_snapshot),
+                "summary": qs_line or "quality: no snapshot available",
+            }
+        )
     document["checks"] = checks
     document["metadata"].update(
         {

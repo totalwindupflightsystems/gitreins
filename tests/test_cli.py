@@ -3599,6 +3599,166 @@ class TestInstallGitignoreTemplate:
         )
 
 
+class TestQualityArtifactGitignore:
+    """DF-GITREINS-POC-96 — the repo-produced quality artifact never dirties the tree.
+
+    The artifact contract (docs/quality-metrics.md "Artifact contract") stamps
+    ``produced_at`` provenance with a fresh timestamp on every invocation that
+    reads the snapshot, so a CONFORMING producer rewrites the file after every
+    guard/judge/doctor run.  The installer template ignored 11 ``.gitreins/``
+    entries and NOT the artifact: measured at HEAD 672bcfc,
+    ``git check-ignore -v .gitreins/quality.json`` exited 1 and one plain
+    ``git add -A`` tracked it — afterwards every ``git status`` carried
+    `` M .gitreins/quality.json`` forever.
+
+    The static tuple covers the canonical path; the configured
+    ``quality.artifact_path`` is appended by ``_gitignore_entries_for_project``
+    so a repo that repointed the artifact is protected too.
+    """
+
+    @staticmethod
+    def _write_config(repo: str, artifact_path: str) -> None:
+        """Write a .gitreins/config.yaml naming the given artifact path."""
+        config_dir = os.path.join(repo, ".gitreins")
+        os.makedirs(config_dir, exist_ok=True)
+        with open(os.path.join(config_dir, "config.yaml"), "w") as f:
+            f.write('quality:\n  enabled: true\n  command: "echo x"\n')
+            f.write(f'  artifact_path: "{artifact_path}"\n')
+
+    @staticmethod
+    def _ignore_path(repo: str) -> str:
+        return os.path.join(repo, ".gitignore")
+
+    @staticmethod
+    def _check_ignore_verbose(repo: str, path: str) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", "check-ignore", "-v", path],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+
+    def test_canonical_artifact_is_ignored_after_install(self) -> None:
+        """AC: check-ignore exits 0 for the canonical configured path."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = _init_real_git_repo(Path(tmp))
+            self._write_config(repo, ".gitreins/quality.json")
+            result = run_cli("install", cwd=repo)
+            assert result.returncode == 0, result.stdout + result.stderr
+
+            checked = self._check_ignore_verbose(repo, ".gitreins/quality.json")
+            assert checked.returncode == 0, checked.stdout + checked.stderr
+            assert ".gitreins/quality.json" in checked.stdout
+            assert ".gitreins/quality.json" in open(self._ignore_path(repo)).read()
+
+    def test_configured_custom_artifact_path_is_ignored_after_install(self) -> None:
+        """AC: a repo that repointed artifact_path gets THAT path ignored too."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = _init_real_git_repo(Path(tmp))
+            self._write_config(repo, "reports/qm.json")
+            result = run_cli("install", cwd=repo)
+            assert result.returncode == 0, result.stdout + result.stderr
+
+            checked = self._check_ignore_verbose(repo, "reports/qm.json")
+            assert checked.returncode == 0, checked.stdout + checked.stderr
+            assert "reports/qm.json" in checked.stdout
+            assert "reports/qm.json" in open(self._ignore_path(repo)).read()
+
+    def test_rerunning_install_appends_no_duplicate_entry(self) -> None:
+        """AC: the gitignore path is idempotent — no duplicate lines."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = _init_real_git_repo(Path(tmp))
+            self._write_config(repo, ".gitreins/quality.json")
+            assert run_cli("install", cwd=repo).returncode == 0
+            assert run_cli("install", cwd=repo).returncode == 0
+
+            lines = open(self._ignore_path(repo)).read().splitlines()
+            assert lines.count(".gitreins/quality.json") == 1, lines
+            assert len(lines) == len(set(lines)), f"duplicate entries in .gitignore: {lines}"
+
+    def test_add_all_after_producer_run_leaves_no_tracked_artifact(self) -> None:
+        """AC (hygiene, the defect itself): a written artifact is not staged.
+
+        Before the fix the artifact reached the index via a plain
+        ``git add -A`` and every later status read `` M .gitreins/quality.json``.
+        """
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = _init_real_git_repo(Path(tmp))
+            self._write_config(repo, ".gitreins/quality.json")
+            assert run_cli("install", cwd=repo).returncode == 0
+            artifact = os.path.join(repo, ".gitreins", "quality.json")
+            with open(artifact, "w") as f:
+                f.write(json.dumps({"metrics": {}, "produced_at": "2026-10-20T00:00:00Z"}) + "\n")
+
+            subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+            status = subprocess.run(
+                ["git", "status", "--porcelain"],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+            tracked = subprocess.run(
+                ["git", "ls-files"],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+                check=True,
+            ).stdout
+            assert "quality.json" not in status, status
+            assert "quality.json" not in tracked, tracked
+
+    def test_unreadable_config_still_writes_every_static_entry(self) -> None:
+        """A malformed config must not break the gitignore path (defensive arm)."""
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = _init_real_git_repo(Path(tmp))
+            config_dir = os.path.join(repo, ".gitreins")
+            os.makedirs(config_dir, exist_ok=True)
+            with open(os.path.join(config_dir, "config.yaml"), "wb") as f:
+                f.write(b"quality: [\x00\xff\xfe broken")
+            result = run_cli("install", cwd=repo)
+            assert result.returncode == 0, result.stdout + result.stderr
+
+            lines = open(self._ignore_path(repo)).read().splitlines()
+            for entry in GITREINS_GITIGNORE_ENTRIES:
+                assert entry in lines, f"static entry {entry!r} missing: {lines}"
+
+    def test_configured_path_is_deduplicated_against_static_entry(self) -> None:
+        """The configured canonical path must not append a second entry."""
+        import tempfile
+
+        from gitreins.cli import _gitignore_entries_for_project
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = _init_real_git_repo(Path(tmp))
+            self._write_config(repo, ".gitreins/quality.json")
+            entries = _gitignore_entries_for_project(repo, {"is_python": False})
+            assert entries.count(".gitreins/quality.json") == 1, entries
+
+    def test_absolute_or_escaping_configured_path_is_never_an_entry(self) -> None:
+        """A path that could not be a repo-relative entry is dropped, not written."""
+        import tempfile
+
+        from gitreins.cli import _gitignore_entries_for_project
+
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = _init_real_git_repo(Path(tmp))
+            for bad in ("/etc/quality.json", "../outside.json", "~/quality.json"):
+                self._write_config(repo, bad)
+                entries = _gitignore_entries_for_project(repo, {"is_python": False})
+                assert not any(bad in entry for entry in entries), (bad, entries)
+
+
 class TestInstallSmartInitConsistency:
     """DF-GITREINS-POC-3: install and smart-init share one persisted contract."""
 

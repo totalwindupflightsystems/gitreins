@@ -1296,6 +1296,48 @@ def test_is_clean_exempts_the_stores_a_judge_phase_writes_while_untracked(wt_rep
     assert manager._is_clean(wt_repo) is True
 
 
+def test_is_clean_exempts_the_quality_artifact_while_untracked(wt_repo: Path) -> None:
+    """DF-GITREINS-POC-96: the rewritten quality artifact is not user work.
+
+    A conforming producer stamps ``produced_at`` provenance (the artifact
+    contract's own example is a timestamp) on every invocation that reads the
+    snapshot, so ``.gitreins/quality.json`` is rewritten in place by every
+    guard/judge/doctor run.  A consumer whose .gitignore predates the
+    installer entry otherwise has `worktree fleet --merge` refuse every lane
+    over the harness's own rewrite.
+    """
+    manager = WorktreeManager(wt_repo)
+    artifact = wt_repo / ".gitreins" / "quality.json"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text(
+        '{"metrics": {}, "produced_at": "2026-10-20T00:00:00Z"}\n', encoding="utf-8"
+    )
+
+    assert ".gitreins/quality.json" in _porcelain_status(wt_repo), (
+        "premise: the artifact must reach `git status` as dirt before the exemption"
+    )
+    assert manager._is_clean(wt_repo) is True
+
+
+def test_is_clean_still_counts_a_tracked_quality_artifact_that_differs(wt_repo: Path) -> None:
+    """The artifact exemption is untracked-only, like the stores above it.
+
+    A repo that opts into versioning its quality snapshot keeps the merge gate
+    over a tracked artifact that differs from HEAD — the same rule the task
+    store and the venv lockfiles already follow.
+    """
+    manager = WorktreeManager(wt_repo)
+    artifact = wt_repo / ".gitreins" / "quality.json"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text('{"metrics": {}, "produced_at": "committed"}\n', encoding="utf-8")
+    _git(wt_repo, "add", ".gitreins/quality.json")
+    _git(wt_repo, "commit", "-qm", "version the quality artifact")
+    artifact.write_text('{"metrics": {}, "produced_at": "rewritten"}\n', encoding="utf-8")
+
+    assert " M .gitreins/quality.json" in _porcelain_status(wt_repo)
+    assert manager._is_clean(wt_repo) is False
+
+
 def test_is_clean_still_counts_a_tracked_store_that_differs(wt_repo: Path) -> None:
     """The store exemption is untracked-only — a versioned store is real state.
 

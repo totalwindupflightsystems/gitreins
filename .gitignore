@@ -75,6 +75,11 @@ hivemind-audit.md
 # writes when asked (`judge --ephemeral --persist-verdict`). Runtime artifact,
 # not history — `.gitreins/history/` above stays the durable record.
 .gitreins/verdicts/
+# DF-GITREINS-POC-96: the repo-produced quality artifact. The artifact contract
+# (docs/quality-metrics.md) stamps `produced_at` provenance on every run that
+# reads the snapshot, so a conforming producer rewrites it every guard/judge/
+# doctor run. Ignored by default; git keeps versioning an already-tracked copy.
+.gitreins/quality.json
 
 # Hilo — local cache files (rebuildable)
 .vfs/graph/graph.db

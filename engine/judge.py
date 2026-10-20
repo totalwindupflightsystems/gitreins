@@ -187,14 +187,18 @@ class Judge:
 
                 tier1.extra["quality_snapshot"] = quality_snapshot
                 tier1_stage["quality_snapshot"] = quality_snapshot
-                line = format_quality_snapshot(quality_snapshot)
-                if line:
-                    tier1_stage["summary"] = "\n".join(
-                        part for part in (tier1_stage.get("summary", ""), line) if part
-                    )
                 if quality_blocks(quality_snapshot):
                     tier1_stage["passed"] = False
                     tier1_stage["any_failed"] = True
+                    # Name the quality gate as the failing gate so the summary
+                    # does not show all lanes green while the run fails.
+                    quality_line = format_quality_snapshot(quality_snapshot)
+                    if quality_line:
+                        quality_prefix = f"\n  ✗ quality - {quality_line}"
+                        if tier1_stage.get("summary"):
+                            tier1_stage["summary"] = quality_prefix + "\n" + tier1_stage["summary"]
+                        else:
+                            tier1_stage["summary"] = quality_prefix
                     tier1 = Tier1Result(
                         passed=False,
                         results=tier1.results,
@@ -410,7 +414,7 @@ class JudgeResult:
                 status = "✓" if item.status == "PASS" else "✗"
                 lines.append(f"  {status} {item.criterion}: {item.detail}")
 
-        if self.quality_snapshot:
+        if self.quality_snapshot and not self.pipeline_result.get("stages"):
             from engine.quality_metrics import format_quality_snapshot
 
             # quality_snapshot is stored through Tier1Result.extra (dict[str, object]),

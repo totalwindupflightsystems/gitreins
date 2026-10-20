@@ -1,5 +1,6 @@
 """Tests for consuming externally-produced quality metric artifacts."""
 
+import json
 import sys
 import subprocess
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ import yaml
 from engine.judge import JudgeResult, judge_result_to_dict
 from engine.quality_metrics import (
     format_quality_snapshot,
+    quality_blocks,
     quality_snapshot_peek,
     read_quality_snapshot,
 )
@@ -183,6 +185,135 @@ def test_docs_only_diff_has_no_surface_findings(tmp_path: Path) -> None:
     assert scope["status"] == "no_diff"
     assert scope["surfaces"] == {}
     assert "diff-scope: no artifact surfaces touched" in result.summary
+
+
+def test_diff_scope_excludes_harness_state_from_change_set(tmp_path: Path) -> None:
+    """DF-GITREINS-POC-97: harness state never counts as a user change.
+
+    The change set behind ``diff_files`` is filtered directly: everything
+    under ``.gitreins/**`` plus the producer's own artifact path is excluded,
+    whatever the producer rewrites on a given run.
+    """
+    from engine.quality_metrics import _diff_scope
+
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_path, check=True)
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "keep.txt").write_text("baseline\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "baseline"], cwd=tmp_path, check=True)
+    for path in (
+        ".gitreins/quality.json",
+        ".gitreins/logs/guard.log",
+        "src/COV-1/app.py",
+    ):
+        target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("x\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    artifact = {
+        "metrics": {"type_hint_pct": {"value": 82, "target": 80}},
+        "surfaces": {"COV-1": {"test_links": ["tests/test_cov.py"], "classes": ["unit"]}},
+    }
+    scope = _diff_scope(str(tmp_path), artifact, artifact_path=".gitreins/quality.json")
+    # Three dirty paths, two of them harness state (.gitreins/quality.json —
+    # which is ALSO the artifact path — and .gitreins/logs/guard.log): the
+    # change set must count only the one real source file.
+    assert scope["diff_files"] == 1
+    assert scope["status"] == "available"
+    assert "COV-1" in scope["surfaces"]
+
+
+def test_diff_scope_ignores_dirty_quality_artifact(tmp_path: Path) -> None:
+    """Only the quality artifact is dirty (no user changes) → ``no_diff`` / 0."""
+    from engine.quality_metrics import _snapshot_cache
+
+    def fresh_guard(quality: object) -> object:
+        # Each gitreins invocation is a fresh process; the snapshot cache is
+        # process-local, so a new simulated invocation must not reuse the
+        # previous one's diff-scope numbers.
+        _snapshot_cache.clear()
+        return _guard(tmp_path, quality)
+
+    _produce(
+        tmp_path,
+        surfaces={"COV-1": {"test_links": ["tests/test_cov.py"], "classes": ["unit"]}},
+    )
+    # First run: the producer writes .gitreins/quality.json + count files.
+    result = fresh_guard(_config(tmp_path).to_dict())
+    assert result.extra["quality_snapshot"]["diff_scope"]["diff_files"] == 0
+    # The user stages the artifact (committing everything) — still not a
+    # user change: the producer owns that file.
+    subprocess.run(
+        ["git", "add", ".gitreins/quality.json", ".gitreins/count"],
+        cwd=tmp_path,
+        check=True,
+    )
+    result = fresh_guard(_config(tmp_path).to_dict())
+    scope = result.extra["quality_snapshot"]["diff_scope"]
+    assert scope == {"status": "no_diff", "base": "HEAD", "diff_files": 0, "surfaces": {}}
+    assert "diff-scope: no artifact surfaces touched" in result.summary
+
+
+def test_diff_scope_counts_real_change_besides_rewritten_artifact(
+    tmp_path: Path,
+) -> None:
+    """A timestamped producer rewriting the artifact must not inflate the count.
+
+    One real staged change + a producer that stamps ``produced_at`` (so
+    .gitreins/quality.json is rewritten on every run) reports exactly
+    ``1 changed files`` — not 2.
+    """
+    from engine.quality_metrics import _snapshot_cache
+
+    def fresh_guard(quality: object) -> object:
+        # Fresh-process semantics: clear the run-local snapshot cache so this
+        # invocation re-runs the producer instead of reusing cached numbers.
+        _snapshot_cache.clear()
+        return _guard(tmp_path, quality)
+
+    _produce(
+        tmp_path,
+        surfaces={"COV-1": {"test_links": ["tests/test_cov.py"], "classes": ["unit"]}},
+        class_floor=["unit"],
+    )
+    (tmp_path / "producer.py").write_text(
+        "import json, pathlib, datetime\n"
+        "artifact = {\n"
+        "    'metrics': {\n"
+        "        'type_hint_pct': {'value': 82, 'target': 80, 'stage': 'stage-2'}\n"
+        "    },\n"
+        "    'produced_at': datetime.datetime.now().isoformat(),\n"
+        "    'command': 'repo-producer',\n"
+        "    'surfaces': {'COV-1': {'test_links': ['tests/test_cov.py'],"
+        " 'classes': ['unit']}},\n"
+        "    'class_floor': ['unit'],\n"
+        "}\n"
+        "pathlib.Path('.gitreins').mkdir(exist_ok=True)\n"
+        "pathlib.Path('.gitreins/quality.json').write_text(json.dumps(artifact))\n",
+        encoding="utf-8",
+    )
+    # Run 1: the timestamped producer rewrites the artifact; commit everything
+    # (artifact included) so the tree starts clean.
+    fresh_guard(_config(tmp_path).to_dict())
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "commit artifact"], cwd=tmp_path, check=True)
+    # Run 2 proves the tree-dirty premise: the producer just rewrote the
+    # tracked artifact again, so git status shows it as modified.
+    fresh_guard(_config(tmp_path).to_dict())
+    status = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=tmp_path, check=True, capture_output=True
+    )
+    assert b".gitreins/quality.json" in status.stdout
+    # One real staged change: the diff-scope count must stay at 1.
+    _stage_surface_change(tmp_path)
+    result = fresh_guard(_config(tmp_path).to_dict())
+    scope = result.extra["quality_snapshot"]["diff_scope"]
+    assert scope["status"] == "available"
+    assert scope["diff_files"] == 1
+    assert "COV-1" in scope["surfaces"]
+    assert "diff-scope: 1 changed files, 1 surfaces touched" in result.summary
 
 
 def test_disabled_quality_produces_no_guard_output(tmp_path: Path) -> None:
@@ -482,3 +613,190 @@ def test_disabled_snapshot_formats_empty_and_surfaces_stay_none(tmp_path: Path) 
     }
     assert format_quality_snapshot({"status": "disabled", "metrics": {}}) == ""
     assert cli.quality_snapshot_for(str(tmp_path)) is None
+
+
+# ── DF-GITREINS-POC-95: the declared ladder target is authoritative ────
+
+
+def _write_ladder(tmp_path: Path, ladder: dict | str | None) -> None:
+    """Write quality/ladder.json (dict, raw string, or None to skip)."""
+    (tmp_path / "quality").mkdir(exist_ok=True)
+    if isinstance(ladder, str):
+        (tmp_path / "quality" / "ladder.json").write_text(ladder, encoding="utf-8")
+    elif ladder is not None:
+        (tmp_path / "quality" / "ladder.json").write_text(json.dumps(ladder), encoding="utf-8")
+
+
+def _write_artifact_direct(tmp_path: Path, value: float, target: float | None) -> None:
+    """Write the artifact without a producer round-trip and commit a clean tree."""
+    (tmp_path / ".gitreins").mkdir(exist_ok=True)
+    metric: dict[str, object] = {"value": value, "stage": "current"}
+    if target is not None:
+        metric["target"] = target
+    artifact = {
+        "metrics": {"type_hint_pct": metric},
+        "produced_at": "local",
+        "command": "repo-producer",
+    }
+    (tmp_path / ".gitreins" / "quality.json").write_text(json.dumps(artifact), encoding="utf-8")
+    (tmp_path / "producer.py").write_text("pass\n", encoding="utf-8")
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@e.com"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "T"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "baseline"], cwd=tmp_path, check=True)
+
+
+def _block_config(tmp_path: Path, **overrides: object) -> object:
+    return _config(tmp_path, per_metric_mode={"type_hint_pct": "block"}, **overrides)
+
+
+def test_lowered_artifact_target_cannot_pass_block_gate(tmp_path: Path) -> None:
+    """AC-1: ladder 80 + artifact target 10 + block mode must BLOCK.
+
+    Pre-fix the artifact's own target was the only grade input, so the
+    repository could pass its block gate by lowering it (ladder 80, artifact
+    target 10 → 'target 10%', guard exit 0)."""
+    _write_ladder(tmp_path, {"type_hint_pct": 80})
+    _write_artifact_direct(tmp_path, 72.3, target=10)
+    snapshot = read_quality_snapshot(str(tmp_path), _block_config(tmp_path))
+    row = snapshot["metrics"]["type_hint_pct"]
+    assert row["target"] == 80
+    assert row["ladder_target"] == 80
+    assert row["artifact_target"] == 10
+    assert row["target_source"] == "ladder+artifact"
+    assert row["met_target"] is False
+    assert quality_blocks(snapshot) is True
+
+
+def test_missing_artifact_target_blocks_from_ladder(tmp_path: Path) -> None:
+    """AC-2: no artifact target + ladder 80 + block mode must BLOCK.
+
+    Pre-fix the row rendered 'target n/a' and a block gate could never
+    fire."""
+    _write_ladder(tmp_path, {"type_hint_pct": 80})
+    _write_artifact_direct(tmp_path, 72.3, target=None)
+    snapshot = read_quality_snapshot(str(tmp_path), _block_config(tmp_path))
+    row = snapshot["metrics"]["type_hint_pct"]
+    assert row["target"] == 80
+    assert row["target_source"] == "ladder"
+    assert row["met_target"] is False
+    assert quality_blocks(snapshot) is True
+
+
+def test_agreeing_ladder_and_artifact_render_byte_identically(tmp_path: Path) -> None:
+    """AC-3: agreement (both 80, warn) renders exactly the pre-fix line.
+
+    The pre-fix string for this fixture shape was captured before the change:
+    'quality: type_hint_pct=72.3% (target 80%, warn, stage current, via
+    repo-producer)' + the diff-scope unavailable line."""
+    _write_ladder(tmp_path, {"type_hint_pct": 80})
+    _write_artifact_direct(tmp_path, 72.3, target=80)
+    cfg = _config(tmp_path, per_metric_mode={"type_hint_pct": "warn"})
+    line = format_quality_snapshot(read_quality_snapshot(str(tmp_path), cfg))
+    assert line == (
+        "quality: type_hint_pct=72.3% (target 80%, warn, stage current, via repo-producer)\n"
+        "diff-scope: unavailable (producer artifact has no surfaces model)"
+    )
+
+
+def test_target_disagreement_names_the_stricter_number(tmp_path: Path) -> None:
+    """Ladder vs artifact disagreement: effective target wins and the line
+    names which number beat which — in both directions."""
+    _write_ladder(tmp_path, {"type_hint_pct": 80})
+    _write_artifact_direct(tmp_path, 72.3, target=10)
+    line = format_quality_snapshot(read_quality_snapshot(str(tmp_path), _block_config(tmp_path)))
+    assert (
+        "type_hint_pct=72.3% "
+        "(target 80% (ladder beats artifact target 10%), block, stage current, "
+        "via repo-producer)"
+    ) in line
+
+    from engine.quality_metrics import _snapshot_cache
+
+    _snapshot_cache.clear()
+    _write_artifact_direct(tmp_path, 72.3, target=90)
+    line = format_quality_snapshot(read_quality_snapshot(str(tmp_path), _block_config(tmp_path)))
+    assert (
+        "type_hint_pct=72.3% "
+        "(target 90% (artifact beats ladder target 80%), block, stage current, "
+        "via repo-producer)"
+    ) in line
+
+
+def test_missing_ladder_file_degrades_with_reason(tmp_path: Path) -> None:
+    """AC-4: a configured ladder that cannot be read is fail-soft, never
+    silent — the artifact target stays authoritative and the snapshot carries
+    the reason instead of looking identical to 'no ladder'."""
+    _write_ladder(tmp_path, None)
+    _write_artifact_direct(tmp_path, 72.3, target=10)
+    snapshot = read_quality_snapshot(str(tmp_path), _block_config(tmp_path))
+    row = snapshot["metrics"]["type_hint_pct"]
+    assert row["target"] == 10  # artifact target still used
+    assert row["target_source"] == "ladder unavailable: file not found"
+    assert "ladder_target" not in row
+    assert "artifact_target" not in row
+    assert quality_blocks(snapshot) is False  # 72.3 >= 10 under the only target left
+
+
+def test_non_mapping_ladder_degrades_with_reason(tmp_path: Path) -> None:
+    """A ladder that is not a JSON object must not raise and must be named."""
+    _write_ladder(tmp_path, "[80]")
+    _write_artifact_direct(tmp_path, 72.3, target=10)
+    snapshot = read_quality_snapshot(str(tmp_path), _block_config(tmp_path))
+    row = snapshot["metrics"]["type_hint_pct"]
+    assert row["target"] == 10
+    assert row["target_source"].startswith("ladder unavailable: expected a JSON object")
+
+
+def test_no_targets_source_keeps_artifact_only_row(tmp_path: Path) -> None:
+    """No ladder configured: rows stay artifact-only, no provenance noise —
+    the historical behaviour byte-for-byte at the dict level too."""
+    _write_ladder(tmp_path, None)
+    _write_artifact_direct(tmp_path, 72.3, target=10)
+    snapshot = read_quality_snapshot(str(tmp_path), _block_config(tmp_path, targets_source=""))
+    row = snapshot["metrics"]["type_hint_pct"]
+    assert row == {
+        "value": 72.3,
+        "target": 10,
+        "target_source": "artifact",
+        "stage": "current",
+        "mode": "block",
+        "met_target": True,
+    }
+    assert snapshot["targets_source"] is None
+
+
+def test_ladder_not_naming_metric_leaves_artifact_target(tmp_path: Path) -> None:
+    """A ladder that omits the metric must not invent a target."""
+    _write_ladder(tmp_path, {"other_pct": 80})
+    _write_artifact_direct(tmp_path, 72.3, target=10)
+    snapshot = read_quality_snapshot(str(tmp_path), _block_config(tmp_path))
+    row = snapshot["metrics"]["type_hint_pct"]
+    assert row["target"] == 10
+    assert row["target_source"] == "artifact"
+    assert quality_blocks(snapshot) is False
+
+
+def test_cached_reread_keeps_effective_target_provenance(tmp_path: Path) -> None:
+    """Semantics 3: _apply_modes re-grades the CACHED effective target — the
+    ladder keeps its authority for every later surface's re-read."""
+
+    _write_ladder(tmp_path, {"type_hint_pct": 80})
+    _write_artifact_direct(tmp_path, 72.3, target=10)
+    first = read_quality_snapshot(str(tmp_path), _block_config(tmp_path))
+    assert first["metrics"]["type_hint_pct"]["met_target"] is False
+
+    # A later surface with no per-metric config reads the cache and still
+    # grades against the EFFECTIVE (stricter) 80, with provenance intact.
+    second = read_quality_snapshot(str(tmp_path), _config(tmp_path))
+    row = second["metrics"]["type_hint_pct"]
+    assert row["target"] == 80
+    assert row["target_source"] == "ladder+artifact"
+    assert row["ladder_target"] == 80
+    assert row["artifact_target"] == 10
+    assert row["met_target"] is False
+    assert row["mode"] == "warn"
+    assert quality_blocks(second) is False  # warn mode never blocks
+    # And the producer/reader did not conflate the two views.
+    assert first["metrics"]["type_hint_pct"]["mode"] == "block"
