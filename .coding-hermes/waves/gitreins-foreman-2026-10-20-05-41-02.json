@@ -6,14 +6,14 @@
   "dispatched": 2,
   "base_sha": "d32f15a",
   "base_ref": "github/main",
-  "note": "Wave of 2 mutually independent dogfood run-23 rows: disjoint file scopes (POC-95 = engine/quality_metrics.py + engine/config.py + docs/quality-metrics.md + tests/test_quality_metrics.py; POC-96 = gitreins/cli.py + tests/test_cli.py + optional engine/worktree_manager.py). Both add tests, so both touch the README.md/CONTRIBUTING.md count sites -- expect ONE doc-count conflict at merge time, resolved by re-deriving the merged tree's collection total (documented wave-merge lesson). Workers are instructed to resolve their OWN worktree cwd explicitly (the 2026-10-20-04-53 tick's POC-94 worker lost 10 min by resolving to the shared checkout).",
+  "note": "Wave of 2 mutually independent dogfood run-23 rows with disjoint file scopes (POC-95 = engine/quality_metrics.py + docs/quality-metrics.md + tests/test_quality_metrics.py; POC-96 = gitreins/cli.py + engine/worktree_manager.py + .gitignore + tests/test_cli.py + tests/test_worktree.py). Both workers resolved to their OWN worktree (the 04:53 tick's POC-94 cwd trap was closed by putting an absolute WORKDIR + `pwd` assertion at the top of each brief; the probe printed the worktree's engine/__init__.py before any edit). Both added tests, so both touched the README.md/CONTRIBUTING.md count sites: exactly ONE doc-count conflict at the second merge, resolved by re-deriving the merged tree's live collection total (3062 tests / 88 files).",
   "workers": [
     {
       "task_id": "DF-GITREINS-POC-95",
       "branch": "wt/DF-GITREINS-POC-95",
       "worktree": "~/worktrees/gitreins-DF-GITREINS-POC-95",
       "model": "glm-5.3-flash",
-      "provider": "zai-glm-default",
+      "provider": "zai-glm-default (served as provider=custom; model=glm-5.3-flash in agent.log)",
       "brief": "/tmp/brief-poc95.txt",
       "log": "/tmp/gitreins-poc95-worker.log",
       "scope": [
@@ -24,24 +24,38 @@
         "README.md",
         "CONTRIBUTING.md"
       ],
-      "status": "dispatched"
+      "status": "merged",
+      "sha": "1f17781",
+      "merge": "498ba32 (--no-ff)",
+      "judge": "PASS tier1+tier2 — verdict 1a645dd3, evaluated commit 498ba3201a411de3d8587d403cec029a4c2a603",
+      "foreman_verification": "A/B on a scratch consumer repo (post-fix engine vs pre-fix canonical): ladder 80 + artifact target 10 + block -> pre rc=0 'target 10%' / post rc=1 'target 80% (ladder beats artifact target 10%)'; no artifact target -> pre rc=0 'target n/a' / post rc=1 'target 80%'; agreement case byte-identical line and identical rc on both engines. 37 targeted tests, full suite 3034 passed/17 skipped, docs drift exit 0.",
+      "residual": "The blocked-gate console LINE is still masked by the open DF-GITREINS-POC-94 renderer defect (it prints the last line of the quality block); the metric text is correct on the machine surface (guard --json, doctor, verdict.json), which is what the A/B probe read. POC-94 stays pending."
     },
     {
       "task_id": "DF-GITREINS-POC-96",
       "branch": "wt/DF-GITREINS-POC-96",
       "worktree": "~/worktrees/gitreins-DF-GITREINS-POC-96",
       "model": "glm-5.3-flash",
-      "provider": "zai-glm-default",
+      "provider": "zai-glm-default (served as provider=custom)",
       "brief": "/tmp/brief-poc96.txt",
       "log": "/tmp/gitreins-poc96-worker.log",
       "scope": [
         "gitreins/cli.py",
         "engine/worktree_manager.py",
+        ".gitignore",
         "tests/test_cli.py",
+        "tests/test_worktree.py",
         "README.md",
         "CONTRIBUTING.md"
       ],
-      "status": "dispatched"
+      "status": "merged",
+      "sha": "e39420d",
+      "merge": "ce55560 (--no-ff, one doc-count conflict resolved to the merged total 3062/88)",
+      "judge": "PASS tier1+tier2 — verdict 6efc86c8, evaluated commit ce55560a39c351339021dec6fc5ff8c32097cbc4",
+      "foreman_verification": "Real `gitreins init` path driven from scratch consumer repos with the repository venv (py3.10): default path check-ignore rc=1 pre-fix / rc=0 post-fix; canonical entry present with no quality block; configured custom path (reports/qm.json) ignored; second init appends no duplicate; `git add -A` after a producer rewrite leaves the artifact untracked. 260 passed / 1 skipped (test_cli.py + test_worktree.py), full suite 3045 passed/17 skipped, docs drift exit 0.",
+      "residual": "The merge-gate exemption set knows only the canonical artifact name, so a repo that repoints quality.artifact_path to a custom path still needs a pre-entry .gitignore for `worktree fleet --merge` to accept the rewritten artifact. Static-by-design; a separate row's scope. engine/worktree_manager.py was changed deliberately (the tuple and the gate list are one list split across two files)."
     }
-  ]
+  ],
+  "finished_at": "2026-10-20T07:05:00Z",
+  "closeout_note": "Both workers merged --no-ff; targeted gates + the repository test_command (scripts/check_docs_drift.py && pytest -x) green on each merged tree; both Tier 2 judges PASS with verdicts bound to the merge commits; github/main at 0 unpushed after each push."
 }
