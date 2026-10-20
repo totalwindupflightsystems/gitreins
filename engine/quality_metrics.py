@@ -23,11 +23,86 @@ from engine.guard_manager import _is_harness_state_path
 _snapshot_cache: dict[tuple[str, str], dict[str, Any]] = {}
 
 
+def _load_target_ladder(
+    workdir: str, targets_source: str
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Read ``targets_source`` as a flat metric-name → number mapping (DF-GITREINS-POC-95).
+
+    Returns (ladder, None) on success, or (None, reason) when the configured
+    path cannot serve as a ladder (missing, unreadable, wrong shape,
+    non-numeric entries). Fail-soft by design: a broken ladder must degrade
+    to the artifact's own targets, never raise out of a snapshot read — but
+    the reason is returned so the snapshot can surface it instead of
+    silently ignoring the configuration.
+    """
+    path = os.path.normpath(os.path.join(workdir, targets_source))
+    try:
+        with open(path, encoding="utf-8") as ladder_file:
+            ladder = json.load(ladder_file)
+    except FileNotFoundError:
+        return None, "file not found"
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return None, f"unreadable: {exc}"
+    if not isinstance(ladder, dict):
+        return None, f"expected a JSON object of metric-name -> number, got {type(ladder).__name__}"
+    clean: dict[str, Any] = {}
+    for name, target in ladder.items():
+        if not isinstance(name, str):
+            continue
+        if isinstance(target, bool) or not isinstance(target, (int, float)):
+            continue
+        clean[name] = target
+    if not clean:
+        return None, "no numeric metric targets in the mapping"
+    return clean, None
+
+
+def _effective_target(
+    artifact_target: float | None,
+    ladder: dict[str, Any] | None,
+    ladder_error: str | None,
+    name: str,
+) -> dict[str, Any]:
+    """Effective target + provenance for one metric (DF-GITREINS-POC-95).
+
+    The declared ladder is authoritative when it names the metric: the
+    STRICTER of ladder and artifact wins, so a graded repository cannot pass
+    a block gate by lowering (or dropping) the target inside the artifact it
+    itself produces. ``target_source`` says which number won:
+    ``ladder+artifact`` / ``ladder`` / ``artifact``, or
+    ``ladder unavailable: <reason>`` when the configured ladder could not be
+    read (fail-soft, never silent). Both raw numbers ride along as
+    ``ladder_target`` / ``artifact_target`` so a reader can see WHICH won.
+    """
+    row: dict[str, Any] = {"target": artifact_target, "target_source": "artifact"}
+    ladder_target: float | None = None
+    if ladder is not None:
+        candidate = ladder.get(name)
+        if isinstance(candidate, (int, float)) and not isinstance(candidate, bool):
+            ladder_target = candidate
+    if ladder_target is not None and artifact_target is not None:
+        row["ladder_target"] = ladder_target
+        row["artifact_target"] = artifact_target
+        row["target"] = max(ladder_target, artifact_target)
+        row["target_source"] = "ladder+artifact"
+    elif ladder_target is not None:
+        row["ladder_target"] = ladder_target
+        row["target"] = ladder_target
+        row["target_source"] = "ladder"
+    elif ladder_error is not None:
+        row["target_source"] = f"ladder unavailable: {ladder_error}"
+    return row
+
+
 def read_quality_snapshot(workdir: str, config: QualityConfig) -> dict[str, Any]:
     """Run a configured producer once and read its JSON artifact.
 
-    Values and targets are supplied by the repository. `stage` is descriptive
-    only; only the metric target can cause an opt-in blocking failure.
+    Values are supplied by the repository; the metric target is the stricter
+    of the artifact's declared target and the configured ladder's
+    (``targets_source``, DF-GITREINS-POC-95), so a graded repository cannot
+    pass a block gate by lowering the target inside its own artifact.
+    ``stage`` is descriptive only; only the metric target can cause an
+    opt-in blocking failure.
     """
     if not config.enabled:
         return {"status": "disabled", "metrics": {}}
@@ -79,6 +154,14 @@ def read_quality_snapshot(workdir: str, config: QualityConfig) -> dict[str, Any]
     raw_metrics = artifact.get("metrics") if isinstance(artifact, dict) else None
     if not isinstance(raw_metrics, dict):
         return {"status": "unavailable", "reason": "artifact has no metrics object", "metrics": {}}
+    # DF-GITREINS-POC-95: the declared ladder, when configured and readable,
+    # supplies/overrides each metric's target (stricter of the two wins).
+    # A configured ladder that cannot be read degrades to the artifact's
+    # targets with the reason surfaced per metric — fail-soft, never silent.
+    ladder: dict[str, Any] | None = None
+    ladder_error: str | None = None
+    if config.targets_source.strip():
+        ladder, ladder_error = _load_target_ladder(workdir, config.targets_source.strip())
     metrics = {}
     for name, raw in raw_metrics.items():
         if not isinstance(name, str) or not isinstance(raw, dict):
@@ -91,9 +174,11 @@ def read_quality_snapshot(workdir: str, config: QualityConfig) -> dict[str, Any]
         mode = config.per_metric_mode.get(name, "warn")
         if mode not in ("warn", "block"):
             mode = "warn"
-        row = {"value": value, "target": target, "stage": raw.get("stage"), "mode": mode}
-        if isinstance(target, (int, float)) and not isinstance(target, bool):
-            row["met_target"] = value >= target
+        row = {"value": value, **_effective_target(target, ladder, ladder_error, name)}
+        row["stage"] = raw.get("stage")
+        row["mode"] = mode
+        if isinstance(row["target"], (int, float)) and not isinstance(row["target"], bool):
+            row["met_target"] = value >= row["target"]
         else:
             row["met_target"] = None
         metrics[name] = row
@@ -229,6 +314,10 @@ def _apply_modes(snapshot: dict[str, Any], config: QualityConfig) -> dict[str, A
     ``mode`` and ``met_target`` from the CALLER's config so one shared set of
     numbers can be graded with different policies without re-running the
     producer. Metrics the caller does not name fall back to ``warn``.
+    DF-GITREINS-POC-95: re-derivation grades against the EFFECTIVE target
+    (the cached row's already-resolved target, provenance included), never
+    the artifact's raw number — the ladder would otherwise lose its
+    authority on every cached re-read.
     """
 
     metrics: dict[str, Any] = {}
@@ -269,6 +358,24 @@ def format_quality_snapshot(snapshot: dict[str, Any]) -> str:
         stage = metric.get("stage")
         value_text = f"{value:g}%"
         target_text = "n/a" if target is None else f"{target:g}%"
+        # DF-GITREINS-POC-95: when the declared ladder and the artifact
+        # disagree on the target, name the disagreement on the line so the
+        # effective (stricter) number is never mistaken for the producer's
+        # own claim. Agreement — or no ladder participation — renders
+        # byte-identically to the pre-fix output.
+        ladder_target = metric.get("ladder_target")
+        artifact_target = metric.get("artifact_target")
+        if (
+            isinstance(ladder_target, (int, float))
+            and not isinstance(ladder_target, bool)
+            and isinstance(artifact_target, (int, float))
+            and not isinstance(artifact_target, bool)
+            and ladder_target != artifact_target
+        ):
+            if ladder_target > artifact_target:
+                target_text += f" (ladder beats artifact target {artifact_target:g}%)"
+            else:
+                target_text += f" (artifact beats ladder target {ladder_target:g}%)"
         # Value + target + stage + the producer command, on every line, so an
         # agent reading any single surface knows where the number came from
         # (GR-143) without opening the artifact.
