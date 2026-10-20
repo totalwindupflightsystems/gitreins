@@ -1,0 +1,23 @@
+==============================================================================
+MCP-1 — quality ENABLED, nothing computed yet: does quality.status answer not-computed
+        and does it leave the producer UNRUN (counter stays 0)?
+  initialize protocolVersion: 2025-11-25
+  tools/list count: 15
+  quality.status BEFORE any guard run: {'status': 'not-computed', 'workdir': '/home/kara/.hermes/stand-in/dogfood/gitreins/qm-scratch-20261020', 'note': 'quality is enabled here but no surface has computed the snapshot in this run — call guard.run (or judge.evaluate) first'}
+  producer counter after quality.status: 0
+  guard.run status: {'passed': True, 'quality_snapshot': {'status': 'available', 'metrics': {'type_hint_pct': {'value': 72.3, 'target': 80, 'stage': 'current', 'mode': 'warn', 'met_target': False}}, 'produced_at': None, 'command': 'python3 scripts/counting_producer.py', 'targets_source': 'quality/ladder.json', 'diff_scope': {'status': 'unavailable', 'reason': 'producer artifact has no surfaces model', 'base': 'HEAD', 'diff_files': 3, 'surfaces': {}}}}
+  producer counter after guard.run: 1
+  quality.status AFTER guard.run: {'status': 'available', 'workdir': '/home/kara/.hermes/stand-in/dogfood/gitreins/qm-scratch-20261020', 'quality_snapshot': {'status': 'available', 'metrics': {'type_hint_pct': {'value': 72.3, 'target': 80, 'stage': 'current', 'mode': 'warn', 'met_target': False}}, 'produced_at': None, 'command': 'python3 scripts/counting_producer.py', 'targets_source': 'quality/ladder.json', 'diff_scope': {'status': 'unavailable', 'reason': 'producer artifact has no surfaces model', 'base': 'HEAD', 'diff_files': 3, 'surfaces': {}}}}
+  producer counter after 2nd quality.status: 1
+  snapshot identical to guard.run's?  True
+  server exit: 0
+  stderr tail: ['gitreins MCP server 0.17.0 — stdio, protocol 2025-11-25 (negotiated per client request), 15 tools, workdir=/home/kara/.hermes/stand-in/dogfood/gitreins/qm-scratch-20261020', 'gitreins MCP server 0.17.0 — stdin closed (EOF), exiting 0']
+==============================================================================
+MCP-2 — quality DISABLED: doc says {'status': 'disabled'}
+  quality.status (disabled): {'status': 'disabled', 'workdir': '/home/kara/.hermes/stand-in/dogfood/gitreins/qm-scratch-20261020'}
+  producer counter: 0
+  server exit: 0
+==============================================================================
+MCP-3 — quality.status with a workdir that does not exist (documented refusal)
+  -> {'error': "workdir '/tmp/gitreins-typo' does not exist", 'workdir': '/tmp/gitreins-typo'}
+  server exit: 0

@@ -1,0 +1,54 @@
+==============================================================================
+R1 — A/B the diff-scope CHANGED-FILE COUNT with the artifact clean vs the artifact
+     rewritten by a producer that stamps produced_at (both with one real staged change)
+  A) deterministic producer, 1 real staged file  (exit 0, 0.619s)
+     > diff-scope: 1 changed files, 1 surfaces touched
+     >   surface COV-1: test_links=linked, classes=unit, missing_classes=none
+
+  B) timestamped producer, 1 real staged file  (exit 0, 0.703s)
+     > diff-scope: unavailable (producer artifact has no surfaces model)
+     git status --porcelain: [' M .gitreins/quality.json', 'M  src/calc.py']
+     JSON quality summary: 'quality: type_hint_pct=72.3% (target 80%, warn, stage current, via python3 scripts/quality_metrics_ts.py)\ndiff-scope: unavailable (producer artifact has no surfaces model)'
+==============================================================================
+R2 — judge leg, lint-clean scratch: block mode below target
+### judge block  exit=1 wall=0.754s
+   > Tier 2 skipped (--skip-tier2 flag)
+   > Judge Result: QM-1
+   > 
+   > Stage tier1: FAIL
+   >     ✗ lint: scanners: nice=nice -n 10
+   >   ✓ secrets: secrets: scanners=builtin cross-check only (gitleaks not on PATH)
+   >   ✓ tests: scanners: nice=nice -n 10
+   > quality: type_hint_pct=72.3% (target 80%, block, stage current, via cp quality/artifact.json .gitreins/quality.json)
+   > diff-scope: no artifact surfaces touched
+   > 
+   > quality: type_hint_pct=72.3% (target 80%, block, stage current, via cp quality/artifact.json .gitreins/quality.json)
+   > diff-scope: no artifact surfaces touched
+   > 
+   > Overall: FAIL ✗
+   >   📋 Verdict saved: 940ad7ea
+==============================================================================
+R3 — judge leg, warn mode below target: the doc says quality cannot fail the judge
+### judge warn   exit=1 wall=0.747s
+   > Tier 2 skipped (--skip-tier2 flag)
+   > Judge Result: QM-1
+   > 
+   > Stage tier1: FAIL
+   >     ✗ lint: scanners: nice=nice -n 10
+   >   ✓ secrets: secrets: scanners=builtin cross-check only (gitleaks not on PATH)
+   >   ✓ tests: scanners: nice=nice -n 10
+   > quality: type_hint_pct=72.3% (target 80%, warn, stage current, via cp quality/artifact.json .gitreins/quality.json)
+   > diff-scope: no artifact surfaces touched
+   > 
+   > quality: type_hint_pct=72.3% (target 80%, warn, stage current, via cp quality/artifact.json .gitreins/quality.json)
+   > diff-scope: no artifact surfaces touched
+   > 
+   > Overall: FAIL ✗
+   >   📋 Verdict saved: 4f204e65
+==============================================================================
+R4 — judge --json: where does a machine client find the quality snapshot?
+### judge --json exit=1
+    keys: ['$schema', 'checks', 'command', 'generatedAt', 'metadata', 'outcome', 'passed', 'producer', 'schemaVersion', 'scope', 'subject', 'summary']
+    summary contains 'type_hint_pct'? True
+    checks ids: ['stage-tier1']
+    'quality' anywhere in the JSON text? True

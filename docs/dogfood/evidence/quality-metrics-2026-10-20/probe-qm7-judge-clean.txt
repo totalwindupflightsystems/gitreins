@@ -1,0 +1,40 @@
+==============================================================================
+A/B — lint is clean now (my probe producers are gone). Which lane fails the judge?
+  WARN mode: exit 0 outcome: pass passed: True
+     check stage-tier1 pass | data keys: []
+
+  BLOCK mode human output (exit 1, 0.847s):
+   > Tier 2 skipped (--skip-tier2 flag)
+   > Judge Result: QM-1
+   > 
+   > Stage tier1: FAIL
+   >     ✓ lint: scanners: nice=nice -n 10
+   >   ✓ secrets: secrets: scanners=builtin cross-check only (gitleaks not on PATH)
+   >   ✓ tests: scanners: nice=nice -n 10
+   > quality: type_hint_pct=72.3% (target 80%, block, stage current, via cp quality/artifact.json .gitreins/quality.json)
+   > diff-scope: no artifact surfaces touched
+   > 
+   > quality: type_hint_pct=72.3% (target 80%, block, stage current, via cp quality/artifact.json .gitreins/quality.json)
+   > diff-scope: no artifact surfaces touched
+   > 
+   > Overall: FAIL ✗
+   >   📋 Verdict saved: 10a91f98
+
+  BLOCK mode --json: exit 1 outcome: fail passed: False
+  'quality_snapshot' as a JSON key anywhere in the envelope? False
+     check stage-tier1 fail | data keys: []
+     stage-tier1 data: null
+  summary text:
+     | Judge Result: QM-1
+     | 
+     | Stage tier1: FAIL
+     |     ✓ lint: scanners: nice=nice -n 10
+     |   ✓ secrets: secrets: scanners=builtin cross-check only (gitleaks not on PATH)
+     |   ✓ tests: scanners: nice=nice -n 10
+     | quality: type_hint_pct=72.3% (target 80%, block, stage current, via cp quality/artifact.json .gitreins/quality.json)
+     | diff-scope: no artifact surfaces touched
+     | 
+     | quality: type_hint_pct=72.3% (target 80%, block, stage current, via cp quality/artifact.json .gitreins/quality.json)
+     | diff-scope: no artifact surfaces touched
+     | 
+     | Overall: FAIL ✗

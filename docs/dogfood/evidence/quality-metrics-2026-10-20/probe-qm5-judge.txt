@@ -1,0 +1,70 @@
+==============================================================================
+J1 — judge (tier1 only, no LLM) with mode=block and 72.3 < 80: does the judge FAIL,
+     and does the failure text name the metric?
+### judge human  exit=1 wall=0.798s
+   > Tier 2 skipped (--skip-tier2 flag)
+   > Judge Result: QM-1
+   > 
+   > Stage tier1: FAIL
+   >     ✗ lint: scanners: nice=nice -n 10
+   >   ✓ secrets: secrets: scanners=builtin cross-check only (gitleaks not on PATH)
+   >   ✓ tests: scanners: nice=nice -n 10
+   > quality: type_hint_pct=72.3% (target 80%, block, stage current, via cp quality/artifact.json .gitreins/quality.json)
+   > diff-scope: unavailable (producer artifact has no surfaces model)
+   > 
+   > quality: type_hint_pct=72.3% (target 80%, block, stage current, via cp quality/artifact.json .gitreins/quality.json)
+   > diff-scope: unavailable (producer artifact has no surfaces model)
+   > 
+   > Overall: FAIL ✗
+   >   📋 Verdict saved: b3335fd4
+==============================================================================
+J2 — same run as --json: is tier1.extra.quality_snapshot present?
+### judge --json exit=1
+    top keys: ['$schema', 'checks', 'command', 'generatedAt', 'metadata', 'outcome', 'passed', 'producer', 'schemaVersion', 'scope', 'subject', 'summary']
+    passed = False
+    outcome = 'fail'
+    tier1.extra keys: []
+    tier1.extra.quality_snapshot: None
+==============================================================================
+J3 — persisted verdict document: does verdict.json carry quality_snapshot?
+    .gitreins/history/2026-10-20/8aea275b/verdict.json
+      top keys: ['branch', 'commit', 'evaluated_at', 'evidence', 'items', 'passed', 'quality_snapshot', 'stages', 'summary', 'superseded_by', 'supersedes', 'task_criteria', 'task_id', 'task_title']
+      quality_snapshot: {"status": "available", "metrics": {"type_hint_pct": {"value": 72.3, "target": 80, "stage": "current", "mode": "block", "met_target": false}}, "produced_at": null, "command": "cp quality/artifact.json .gitreins/quality.json", "targets_source": "quality/ladder.json", "diff_scope": {"status": "unavail
+    .gitreins/history/2026-10-20/f2678647/verdict.json
+      top keys: ['branch', 'commit', 'evaluated_at', 'evidence', 'items', 'passed', 'quality_snapshot', 'stages', 'summary', 'superseded_by', 'supersedes', 'task_criteria', 'task_id', 'task_title']
+      quality_snapshot: {"status": "available", "metrics": {"type_hint_pct": {"value": 72.3, "target": 80, "stage": "current", "mode": "block", "met_target": false}}, "produced_at": null, "command": "cp quality/artifact.json .gitreins/quality.json", "targets_source": "quality/ladder.json", "diff_scope": {"status": "unavail
+==============================================================================
+J4 — judge with mode=warn and the SAME below-target value: PASS expected
+### judge warn  exit=1 wall=0.593s
+   > Stage tier1: FAIL
+   > quality: type_hint_pct=72.3% (target 80%, warn, stage current, via cp quality/artifact.json .gitreins/quality.json)
+   > quality: type_hint_pct=72.3% (target 80%, warn, stage current, via cp quality/artifact.json .gitreins/quality.json)
+   > Overall: FAIL ✗
+==============================================================================
+J5 — genuine NO-DIFF state (worktree == HEAD, committed artifact, deterministic producer):
+     doc says a diff that matches no surface is reported as 'no_diff'
+    status before guard: (clean)
+    status now: (clean)
+### guard no-diff  exit=0 wall=0.412s
+   >   ✓ quality — quality: type_hint_pct=72.3% (target 80%, warn, stage current, via cp quality/artifact.json .gitreins/quality.json)
+   > diff-scope: no artifact surfaces touched
+    status after guard: [' M .gitreins/quality.json']
+==============================================================================
+J6 — ARTIFACT HYGIENE: the doc's producer stamps produced_at; is the artifact ignored,
+     and does the tree stay clean after a run?
+    after committing the artifact, run guard again and look at the tree:
+    git status --porcelain: [' M .gitreins/quality.json']
+    check-ignore rc: 1 (not ignored)
+    install's .gitignore entries mentioning .gitreins:
+       .gitreins/tasks.yaml
+       .gitreins/config.yaml.bak
+       .gitreins/usage.jsonl
+       .gitreins/logs/
+       .gitreins/qa-ledger.jsonl
+       .gitreins/worktrees.json
+       .gitreins/worktrees.lock
+       .gitreins/disposable.json
+       .gitreins/disposable.lock
+       .gitreins/tasks.yaml.lock
+       .gitreins/verdicts/
+    tracked? .gitreins/quality.json

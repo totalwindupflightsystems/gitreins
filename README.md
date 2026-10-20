@@ -34,11 +34,13 @@ explicit `static_analysis` setting is preserved on reruns, as is a custom
 the detected test runner.
 
 **Running from a source checkout** (no pip install): the `gitreins` console
-script is not on your PATH — it lives in the repo's virtualenv. Activate it
-first in each shell, then the commands above work as written:
+script is not on your PATH — it lives in the repo's virtualenv. Create the
+venv and install the package first (see [CONTRIBUTING.md](CONTRIBUTING.md) for
+full details), then activate it in each shell:
 
 ```bash
-source .venv/bin/activate        # or call .venv/bin/gitreins directly
+uv venv && uv pip install -e ".[dev]"   # or: python3 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
+source .venv/bin/activate               # or call .venv/bin/gitreins directly
 gitreins --help
 ```
 

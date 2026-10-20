@@ -1,0 +1,58 @@
+==============================================================================
+G1 — surfaces model + a STAGED change to src/calc.py (warn mode, value below target)
+
+### G1 surfaces + staged change  exit=0 wall=1.535s
+   > Tier 1 Guards: PASS  (test mode: full)
+   >   ✓ secrets — clean (builtin cross-check; gitleaks not on PATH)
+   >   ⚠ gitleaks not found at expected path /home/kara/go/bin/gitleaks — using the built-in secrets scanner instead. Install gitleaks (e.g. 'go install github.com/gitleaks/gitleaks/v8@latest') for full secret coverage.
+   >   ✓ lint — ok; scanners: nice=nice -n 10
+   >   ✓ tests (full)
+   >   ✓ quality — quality: type_hint_pct=72.3% (target 80%, warn, stage current, via cp quality/artifact.json .gitreins/quality.json)
+   > diff-scope: 1 changed files, 1 surfaces touched
+   >   surface COV-1: test_links=linked, classes=unit, missing_classes=integration
+   >   guard log: /home/kara/.hermes/stand-in/dogfood/gitreins/qm-scratch-20261020/.gitreins/logs/guard-20261020T043537.393249Z.log
+==============================================================================
+G2 — SAME staged diff, but mode=block and 72.3 < 80: what does the ✗ line say?
+
+### G2 block fail WITH surfaces  exit=1 wall=1.081s
+   > Tier 1 Guards: FAIL  (test mode: full)
+   >   ✓ secrets — clean (builtin cross-check; gitleaks not on PATH)
+   >   ⚠ gitleaks not found at expected path /home/kara/go/bin/gitleaks — using the built-in secrets scanner instead. Install gitleaks (e.g. 'go install github.com/gitleaks/gitleaks/v8@latest') for full secret coverage.
+   >   ✓ lint — ok; scanners: nice=nice -n 10
+   >   ✓ tests (full)
+   >   ✗ quality — surface COV-1: test_links=linked, classes=unit, missing_classes=integration
+   >   guard log: /home/kara/.hermes/stand-in/dogfood/gitreins/qm-scratch-20261020/.gitreins/logs/guard-20261020T043538.492962Z.log
+   > 
+   > Fix the issues above and re-run: gitreins guard
+==============================================================================
+G2b — the same failing run as machine JSON (guard --json): is the metric there?
+### G2b guard --json  exit=1
+    check id=secrets outcome=pass passed=True
+      summary='Scanned 1 files — clean (excluded harness state: .gitreins/**)'
+    check id=lint outcome=pass passed=True
+      summary='ruff: clean, format: clean (1 files)'
+    check id=tests outcome=pass passed=True
+      summary='scanners: nice=nice -n 10\n============================= test session starts ==============================\nplatform linux -- Python 3.10.20, pytest-9.1.1, pluggy-1.6.0\nrootdir: /home/kara/.hermes/stand-in/dogfood/gitreins/qm-scratch-20261020\nplugins: xdist-3.8.0, timeout-2.4.0, anyio-4.15.1\ncollected 1 item\n\ntests/test_calc.py .                                                     [100%]\n\n============================== 1 passed in 0.01s ===============================\n'
+    check id=quality outcome=fail passed=False
+      summary='quality: type_hint_pct=72.3% (target 80%, block, stage current, via cp quality/artifact.json .gitreins/quality.json)\ndiff-scope: 1 changed files, 1 surfaces touched\n  surface COV-1: test_links=linked, classes=unit, missing_classes=integration'
+    outcome: fail passed: False
+==============================================================================
+G3 — clean tree (nothing staged/unstaged): doc says 'a diff that matches no surface is no_diff'
+    git status --porcelain: [' M .gitreins/config.yaml', ' M .gitreins/quality.json', ' M src/calc.py', '?? quality/artifact.json', '?? scripts/quality_metrics_ts.py']
+
+### G3 no diff  exit=0 wall=0.52s
+   > Tier 1: DEGRADED PASS (skips: lint=no staged files, tests=no staged files)  (test mode: full)
+   >   ✓ secrets — clean (builtin cross-check; gitleaks not on PATH)
+   >   ⚠ gitleaks not found at expected path /home/kara/go/bin/gitleaks — using the built-in secrets scanner instead. Install gitleaks (e.g. 'go install github.com/gitleaks/gitleaks/v8@latest') for full secret coverage.
+   >   ~ lint — skipped (no staged files)
+   >   ~ tests — skipped (no staged files)
+   >   ✓ quality — quality: type_hint_pct=72.3% (target 80%, warn, stage current, via cp quality/artifact.json .gitreins/quality.json)
+   > diff-scope: 3 changed files, 1 surfaces touched
+   >   surface COV-1: test_links=linked, classes=unit, missing_classes=integration
+   >   guard log: /home/kara/.hermes/stand-in/dogfood/gitreins/qm-scratch-20261020/.gitreins/logs/guard-20261020T043539.614778Z.log
+==============================================================================
+G4 — producer counter: how many times is the producer invoked by one guard run, and
+     does a second surface (doctor) reuse or re-run it?
+    after guard:    counter = 1  (guard exit 0)
+    after doctor:   counter = 2  (doctor exit 0)
+    after 2nd guard: counter = 3

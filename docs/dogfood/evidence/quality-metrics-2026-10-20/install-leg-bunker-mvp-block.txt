@@ -1,0 +1,23 @@
+Warning: Permanently added '100.115.67.116' (ED25519) to the list of known hosts.
+mode -> block
+--- gitreins guard (block mode, 72.3 < 80) ---
+Tier 1 Guards: FAIL  (test mode: full)
+  ✓ secrets — clean (builtin cross-check; gitleaks not on PATH)
+  ⚠ gitleaks not found at expected path /home/bunker-8fbf67db/go/bin/gitleaks — using the built-in secrets scanner instead. Install gitleaks (e.g. 'go install github.com/gitleaks/gitleaks/v8@latest') for full secret coverage.
+  ~ lint — skipped (no staged files)
+  ~ tests — skipped (no staged files)
+  ✗ quality — diff-scope: unavailable (producer artifact has no surfaces model)
+  guard log: /home/bunker-8fbf67db/app/.gitreins/logs/guard-20261020T044332.013699Z.log
+
+Fix the issues above and re-run: gitreins guard
+guard_rc=1
+--- gitreins guard --json (same state) ---
+{"$schema":"https://gitreins.dev/schemas/evidence/v1.json","checks":[{"id":"secrets","outcome":"pass","passed":true,"summary":"No staged files to scan"},{"id":"lint","outcome":"unknown","passed":null,"summary":"skipped — no staged files"},{"id":"tests","outcome":"unknown","passed":null,"summary":"skipped — no staged files"},{"id":"quality","outcome":"fail","passed":false,"summary":"quality: type_hint_pct=72.3% (target 80%, block, stage current, via python3 scripts/quality_metrics.py)\ndiff-scope: unavailable (producer artifact has no surfaces model)"}],"command":"guard","generatedAt":"2026-10-20T04:43:32.526932+00:00","metadata":{"changedFileCount":0,"checkCount":4,"degraded":true,"redacted":true,"redactionsApplied":false,"skippedSteps":["lint","tests"],"truncated":false},"outcome":"fail","passed":false,"producer":{"name":"gitreins","version":"0.17.0"},"schemaVersion":"1.0","scope":"staged","summary":"  ✓ secrets — clean (builtin cross-check; gitleaks not on PATH)\n  ⚠ gitleaks not found at expected path /home/bunker-8fbf67db/go/bin/gitleaks — using the built-in secrets scanner instead. Install gitleaks (e.g. 'go install github.com/gitleaks/gitleaks/v8@latest') for full secret coverage.\n  ~ lint — skipped (no staged files)\n  ~ tests — skipped (no staged files)\n  ✗ quality — diff-scope: unavailable (producer artifact has no surfaces model)\nDEGRADED PASS (skips: lint=no staged files, tests=no staged files)"}
+--- gitreins doctor ---
+Quality metrics:
+  quality: type_hint_pct=72.3% (target 80%, block, stage current, via python3 scripts/quality_metrics.py)
+diff-scope: unavailable (producer artifact has no surfaces model)
+gitleaks config doctor: /home/bunker-8fbf67db/app/.gitleaks.toml
+  no .gitleaks.toml here — nothing to check
+--- version ---
+gitreins 0.17.0

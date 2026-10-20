@@ -1,0 +1,48 @@
+Warning: Permanently added '100.115.67.116' (ED25519) to the list of known hosts.
+== host ==
+Linux bunker-mvp 6.8.0-142-generic #142-Ubuntu SMP PREEMPT_DYNAMIC Wed Sep  2 14:24:27 UTC 2026 x86_64 x86_64 x86_64 GNU/Linux
+Python 3.12.3
+== PEP 668 check: the README's literal install line ==
+
+note: If you believe this is a mistake, please contact your Python installation or OS distribution provider. You can override this, at the risk of breaking your Python installation or OS, by passing --break-system-packages.
+hint: See PEP 668 for the detailed specification.
+rc=0
+== documented venv route ==
+Installing collected packages: urllib3, typing-extensions, truststore, rpds-py, pyyaml, python-multipart, pyjwt, pycparser, packaging, idna, h11, click, charset_normalizer, certifi, attrs, annotated-types, uvicorn, typing-inspection, requests, referencing, pydantic-core, opentelemetry-api, httpcore2, cffi, anyio, starlette, pydantic, jsonschema-specifications, httpx2, cryptography, sse-starlette, mcp-types, jsonschema, mcp, gitreins
+
+Successfully installed annotated-types-0.8.0 anyio-4.15.1 attrs-26.1.0 certifi-2026.10.19 cffi-2.1.1 charset_normalizer-3.5.2 click-8.5.0 cryptography-50.0.2 gitreins-0.17.0 h11-0.16.0 httpcore2-2.15.1 httpx2-2.15.1 idna-3.20 jsonschema-4.26.0 jsonschema-specifications-2025.9.1 mcp-2.3.0 mcp-types-2.3.0 opentelemetry-api-1.45.1 packaging-26.3 pycparser-3.11 pydantic-2.14.1 pydantic-core-2.50.1 pyjwt-2.15.1 python-multipart-0.0.32 pyyaml-6.0.3 referencing-0.37.0 requests-2.34.2 rpds-py-2026.9.1 sse-starlette-3.5.0 starlette-1.9.0 truststore-0.10.5 typing-extensions-4.16.0 typing-inspection-0.4.4 urllib3-2.8.0 uvicorn-0.54.0
+INSTALL_SECONDS=16
+gitreins 0.17.0
+== scratch consumer repo ==
+== documented step 1: gitreins install ==
+  - Run smart init:  gitreins init
+  - Create a task:  gitreins task create <id> <title> [criteria...]
+  - Run guards:     gitreins guard
+  - Try the hook:   make a change, git add ., git commit -m 'test'
+== documented step 2: run the producer ==
+{
+  "metrics": {
+    "type_hint_pct": {
+      "value": 72.3,
+      "target": 80,
+      "stage": "current"
+    }
+  },
+  "produced_at": "local",
+  "command": "python3 scripts/quality_metrics.py"
+}
+== documented step 3: add the config block ==
+quality block applied
+== documented step 4: gitreins guard ==
+Tier 1: DEGRADED PASS (skips: lint=no staged files, tests=no staged files)  (test mode: full)
+  ✓ secrets — clean (builtin cross-check; gitleaks not on PATH)
+  ⚠ gitleaks not found at expected path /home/bunker-8fbf67db/go/bin/gitleaks — using the built-in secrets scanner instead. Install gitleaks (e.g. 'go install github.com/gitleaks/gitleaks/v8@latest') for full secret coverage.
+  ~ lint — skipped (no staged files)
+  ~ tests — skipped (no staged files)
+  ✓ quality — quality: type_hint_pct=72.3% (target 80%, warn, stage current, via python3 scripts/quality_metrics.py)
+diff-scope: unavailable (producer artifact has no surfaces model)
+  guard log: /home/bunker-8fbf67db/app/.gitreins/logs/guard-20261020T044251.522208Z.log
+guard_rc=0
+== pytest available remotely? ==
+/home/bunker-8fbf67db/.venv/bin/python3: No module named pytest
+== done ==
