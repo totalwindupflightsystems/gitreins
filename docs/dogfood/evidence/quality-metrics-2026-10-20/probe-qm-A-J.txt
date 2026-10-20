@@ -1,0 +1,69 @@
+==============================================================================
+PROBE A — block mode, value BELOW target (72.3 < 80): doc says guard FAILS
+
+### A block+below  (exit 1, wall 0.394s)
+      ✗ quality — diff-scope: unavailable (producer artifact has no surfaces model)
+==============================================================================
+PROBE B — block mode, value ABOVE target (95 >= 80)
+
+### B block+above  (exit 1, wall 0.412s)
+      ✗ quality — diff-scope: unavailable (producer artifact has no surfaces model)
+==============================================================================
+PROBE C — trust: artifact self-declares target 10, repo ladder says 80, mode=block
+           (targets_source: quality/ladder.json contains {'type_hint_pct': 80})
+
+### C artifact target overrides ladder  (exit 1, wall 0.416s)
+      ✗ quality — diff-scope: unavailable (producer artifact has no surfaces model)
+==============================================================================
+PROBE C2 — same, but artifact target 90 (also disagrees with ladder 80)
+
+### C2 artifact target 90 vs ladder 80  (exit 1, wall 0.361s)
+      ✗ quality — diff-scope: unavailable (producer artifact has no surfaces model)
+==============================================================================
+PROBE D — producer exits 1 and writes nothing: doc says 'quality: unavailable' with a reason
+
+### D producer fails  (exit 0, wall 0.407s)
+      ✓ quality — quality: unavailable (command failed: boom)
+      ⚠ quality: unavailable (command failed: boom)
+==============================================================================
+PROBE E — producer writes MALFORMED JSON
+
+### E malformed json  (exit 0, wall 0.464s)
+      ✓ quality — quality: unavailable (artifact unreadable: Expecting property name enclosed in double quotes: line 1 column 2 (char 1))
+      ⚠ quality: unavailable (artifact unreadable: Expecting property name enclosed in double quotes: line 1 column 2 (char 1))
+==============================================================================
+PROBE F — producer succeeds but writes NO artifact
+
+### F no artifact  (exit 0, wall 0.202s)
+      ✓ quality — quality: unavailable (artifact not found: .gitreins/quality.json)
+      ⚠ quality: unavailable (artifact not found: .gitreins/quality.json)
+==============================================================================
+PROBE G — producer hangs 5s, quality.timeout = 1: does the guard bound it?
+
+### G timeout=1 vs producer sleep 5  (exit 0, wall 1.365s)
+      ✓ quality — quality: unavailable (command timed out after 1s)
+      ⚠ quality: unavailable (command timed out after 1s)
+    guard wall = 1.365s  (expect ~1s if the timeout is honoured, ~5s if not)
+==============================================================================
+PROBE H — artifact numeric contract: value is the STRING 'n/a'
+
+### H string value  (exit 1, wall 0.23s)
+      ✗ quality — diff-scope: unavailable (producer artifact has no surfaces model)
+==============================================================================
+PROBE I — artifact metric NOT listed in per_metric_mode (doc: unlisted defaults to warn)
+
+### I unlisted metric  (exit 0, wall 0.518s)
+      ✓ quality — quality: type_hint_pct=72.3% (target 80%, warn, stage current, via python3 scripts/quality_metrics.py)
+    diff-scope: unavailable (producer artifact has no surfaces model)
+==============================================================================
+PROBE J — freshness/dirty-tree: the doc's own producer writes 'produced_at';
+           does a timestamped artifact leave the tree dirty after a run?
+
+### J1 guard with timestamped producer  (exit 0, wall 0.359s)
+      ✓ quality — quality: type_hint_pct=72.3% (target 80%, warn, stage current, via python3 scripts/quality_metrics_ts.py)
+    diff-scope: unavailable (producer artifact has no surfaces model)
+    git status --porcelain after a guard run:
+        M .gitreins/config.yaml
+        M .gitreins/quality.json
+       ?? scripts/quality_metrics_ts.py
+    is .gitreins/quality.json ignored? rc=1 (not ignored)

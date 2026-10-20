@@ -4,7 +4,7 @@ description: >-
   How to use the GitReins quality harness in this repo (and any repo it's
   installed in): task lifecycle, guards, LLM judge, MCP tools, and the known
   pitfalls that will bite you. Load this before committing or creating tasks.
-version: 1.14.0
+version: 1.15.0
 category: software-development
 ---
 
@@ -884,3 +884,68 @@ cause in the middle. Run `git status` first.
   fresh box; inverse docs:-over-source also blocks; median 164 ms, no LLM call. The
   surface itself is trustworthy — the two pitfalls above are in the CLI wrapper and the
   credential-failure path.
+
+## Repo-produced quality metrics (`quality:`) — pitfalls 57–61 (2026-10-20 dogfood run 23)
+
+`docs/quality-metrics.md` lets the repository own one measurement command; GitReins runs it
+and shows the artifact's snapshot on the guard, judge, `doctor`, CLI and MCP surfaces.
+Verified end to end (scratch consumer repo, doc's own example producer + config, HEAD
+`672bcfc` **and** the released 0.17.0 wheel on a fresh box). What works exactly as
+documented: the snapshot line on `guard`/`doctor`, `warn` never failing anything, `block`
+failing only a present numeric metric below target, every `unavailable` reason
+(non-zero exit, timeout, malformed JSON, missing artifact, non-numeric metrics), the
+diff-scope `surfaces`/`class_floor` report, and the whole MCP `quality.status` contract
+(`not-computed` before any run, identical dict after `guard.run`, producer never
+re-triggered, `disabled`, workdir refusal). Five facts that are not.
+
+- **57 — a `block` miss prints the WRONG LINE on the console (POC-94).** The guard's ✗
+  line is built from the *last* line of the check output (`engine/types.py:646-662`, a
+  pytest-tail heuristic), but quality output puts the metric first and diff-scope after
+  (`engine/quality_metrics.py:249-291`). So a blocked commit reads
+  `✗ quality — diff-scope: unavailable (producer artifact has no surfaces model)` — or,
+  with a `surfaces` model, a per-surface row or a `WARNING:` line. **Read the metric from
+  `gitreins guard --json`** (`checks[].summary`, `id: quality`), the guard log, or
+  `gitreins doctor`; the console line will not tell you which metric missed its target.
+- **58 — `quality.targets_source` is never read: the artifact's own target governs
+  blocking (POC-95).** The key is parsed and echoed into the snapshot and nothing opens
+  the ladder file. Setting the ladder to 80 while the artifact says `"target": 10` with
+  `per_metric_mode: {type_hint_pct: block}` produces `target 10%` and **PASS**; omitting
+  `target` yields `target n/a` → `met_target: null` → it never blocks. The doc's "Targets
+  must be numeric values from the repository's ladder" is a convention, not an invariant.
+  Keep the ladder as the producer's *input* and treat the committed artifact as the
+  reviewable authority; if the gate must be tamper-evident, verify the artifact yourself.
+- **59 — `install` does not ignore the quality artifact (POC-96).** Eleven `.gitreins/…`
+  entries are ignored, `quality.json` is not (`git check-ignore` rc=1), and the artifact
+  contract's `produced_at` is a timestamp — so a conforming producer leaves a tracked
+  `.gitreins/quality.json` modified after **every** guard/judge/doctor run and
+  `git add -A` commits build output. Either add the path to `.gitignore` yourself or make
+  `produced_at` deterministic (the doc's sample producer uses `"local"`, which is why its
+  own example stays clean).
+- **60 — the diff-scope "N changed files" counts the harness's own state (POC-97).**
+  `_diff_scope` (`engine/quality_metrics.py:119-146`) diffs `HEAD` with no harness-state
+  exclusion, so the rewritten artifact is counted: one real staged change + a timestamped
+  producer reads `2 changed files, 1 surfaces touched`, and a `verdict.json` recorded
+  `diff_files: 2` with no user change at all. The secrets lane in the same run prints
+  `(excluded harness state: .gitreins/**)` — subtract the artifact yourself before
+  trusting the number.
+- **61 — the judge surface reads differently (POC-98).** A quality-blocked stage prints
+  the quality block **twice**, all three lanes still show `✓`, and nothing marks the
+  quality gate (only `mode=block` + a below-target value imply it). `judge --json` carries
+  no `quality_snapshot` field anywhere in the envelope (`checks: [{id: stage-tier1}]`,
+  `data: null`) — the structured snapshot exists only in the persisted
+  `.gitreins/history/<date>/<short-id>/verdict.json`. Scripted consumers must read that
+  file, not the CLI JSON. Control: the same artifact under `warn` makes the judge PASS,
+  so a `--skip-tier2` FAIL with all lanes ✓ is attributable to the quality gate.
+- **Cost on the commit path (PERF-1):** the producer runs synchronously on every guard
+  invocation, and the pre-commit hook runs the same command, so `gitreins guard && git
+  commit` runs it twice. Measured (16-core box, load 8.25): quality disabled
+  `480.5 ms ± 116.0` (n=20); the doc's example producer `500.3 ms ± 114.5` (**inside the
+  noise — nothing a user feels**); a 2 s repo-owned producer `2.586 s ± 0.239` (n=5, user
+  time 0.26 s — the wait is the child). A wedged producer occupies the commit path for its
+  whole `quality.timeout` (measured 2.28 s at `timeout: 2`; the **default 300 s** means up
+  to 5 minutes per commit). Keep the producer cheap or cache the heavy measurement.
+- **Doc corrections:** `install` already writes a `quality:` block (`enabled: false`) — if
+  you *append* the doc's block you end up with a duplicate YAML key and edit-order
+  dependent behaviour, so **edit** the block instead; and the sample line's
+  `via repo-producer` is not what any build prints (it prints `via <command>`, as line 70
+  of the doc says).

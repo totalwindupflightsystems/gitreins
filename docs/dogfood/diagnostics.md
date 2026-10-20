@@ -1472,3 +1472,107 @@ end-to-end on an ephemeral bunker agent (las-02, after las-03 was down).
 **Install leg:** RUN on sibling host bunker-las-02 (las-03 offline, bunker4
 offline). 17s install, full lifecycle green, agents destroyed. Provenance row:
 SKIPPED-install-bunker-2026-10-09-las-03.
+## Run 23 (2026-10-20) — the repo-produced quality-metrics surface: how the snapshot flows, and why the failing line loses its facts
+
+Context: `docs/quality-metrics.md` is the v0.17.0 surface that lets a repository own its
+own measurement (`quality.command` → JSON artifact → snapshot shown on guard, judge,
+`doctor`, CLI and MCP). Run 23 used it as a user would (scratch consumer repo, the doc's
+own example producer and config). Integration report:
+`docs/dogfood/2026-10-20-quality-metrics-integration.md`.
+
+### How the thing is built (the pipeline, read from source after using it)
+
+1. `install` writes a `quality:` block into `.gitreins/config.yaml` with `enabled: false`
+   and empty strings (`gitreins/cli.py:137` carries the template). Nothing runs until a
+   user fills it in.
+2. Any surface that wants the numbers calls `quality_snapshot_for(workdir)`
+   (`gitreins/cli.py:2618`) → `read_quality_snapshot(workdir, QualityConfig)`
+   (`engine/quality_metrics.py:25`). That function:
+   - returns `{"status": "disabled"}` when the block is off, and `unavailable` with a
+     named reason for an empty command/artifact path, a non-zero producer exit, a
+     timeout, a missing/unreadable artifact, or an artifact with no numeric metric. It
+     never substitutes zero (`:31-104`);
+   - otherwise runs `config.command` with `shell=True` in the repo root and
+     `timeout=config.timeout` (`:47-55`), reads the artifact and builds the snapshot
+     `{status, metrics{value,target,stage,mode,met_target}, produced_at, command,
+     targets_source, diff_scope}` (`:105-116`);
+   - caches it per (workdir, artifact_path) in a module-level dict (`:41-44`, `:115`) —
+     **per process**, so `guard`, `doctor` and `judge` invoked separately each run the
+     producer once (measured: counter 1 → 2 → 3), while surfaces inside one invocation
+     share it. `_apply_modes` (`:215`) re-derives `mode`/`met_target` from the *caller's*
+     `per_metric_mode`, which is how one shared snapshot grades differently per surface.
+3. `diff_scope` (`:119-146`) runs `git diff --cached --name-only HEAD`, falling back to
+   `git diff --name-only HEAD`, and matches changed paths against the artifact's optional
+   `surfaces` map (explicit `files` win, otherwise the surface id is a substring of the
+   path). `status` is `available` when something matched, `no_diff` when the artifact has
+   a surfaces model but nothing matched, `unavailable` when the model is absent.
+4. `quality_blocks()` (`:241`) is the only blocking authority: a metric blocks when
+   `mode == "block"` **and** `met_target is False`, and `met_target` is computed from the
+   **artifact's** `target` (`:94-97`, `:230-234`).
+5. Surfaces: `guard` (`engine/guard_manager.py:1740-1773`, registers a `quality` check
+   and warns when unavailable), `judge` (`engine/judge.py:184-204`, appends the block to
+   the tier-1 stage summary and fails the stage when it blocks), `doctor`
+   (`gitreins/cli.py:1665-1670`), the MCP `quality.status` (`gitreins_mcp/server.py:865`
+   — reads only, never triggers the producer) and `judge --json`/`verdict.json`
+   (`engine/persist.py:1016`).
+
+### Why the blocking line prints the wrong half (POC-94)
+
+`engine/types.py:636-662` renders the console summary. For a **skipped** check it prints
+`~ name — skipped (reason)`. For a check that ran, a failed check's detail is taken from
+the *last non-empty line* of its output (`out_lines[-1]`, `:657-661`) — a heuristic built
+for pytest, whose summary lives at the bottom (DF-021). Quality is the opposite shape:
+`format_quality_snapshot` (`engine/quality_metrics.py:249-291`) puts the metric line
+first and the diff-scope lines *after* it, so the failing console line becomes
+`✗ quality — diff-scope: unavailable (… )` — or, with a surfaces model, the last
+*per-surface* row or a `WARNING:` line. The secrets lane already has a dedicated renderer
+for exactly this reason (`types.py:664-668`); quality needs the same.
+The facts survive everywhere else in the same run (`guard --json` check summary,
+`doctor`, the guard log, `verdict.json`), so this is a reading-surface defect, not data
+loss — and the reading surface is the one GR-143 exists to fill ("a score that requires a
+separate command is a score nobody reads mid-task").
+
+### Why `targets_source` does not do what its name says (POC-95)
+
+The key is parsed (`engine/config.py:43,56,66`) and echoed into the snapshot
+(`engine/quality_metrics.py:110`); nothing opens the file. Confirmed by grep over
+`engine/`, `gitreins/`, `gitreins_mcp/`: four occurrences, none a reader. So the ladder
+path in the config is documentation-shaped state, while the blocking comparison uses the
+artifact's own number — which the same repository produces. The doc's sentence "Targets
+must be numeric values from the repository's ladder" is therefore an assertion about the
+producer's good behaviour, not an enforced invariant, and a `block` gate can be satisfied
+by lowering the declared target (measured: 72.3 vs `target 10` → PASS) or omitting it
+(`target n/a` → `met_target: null` → never blocks).
+
+### Why the artifact dirties the tree (POC-96) and pollutes the change count (POC-97)
+
+`install` writes 11 ignore entries under `.gitreins/` (`gitreins/cli.py` template) but not
+the quality artifact; `git check-ignore` returns 1 for it. The artifact contract in the
+doc shows `produced_at` as a timestamp, so a conforming producer rewrites a tracked file
+on every invocation → permanently dirty tree, and `git add -A` commits build output. The
+same rewrite lands in `_diff_scope`'s `git diff --name-only HEAD`, which has no
+harness-state exclusion (the secrets lane excludes `.gitreins/**` explicitly and says so
+in its line), so the new GR-145 change count includes the harness's own file.
+
+### Why the judge reads differently (POC-98)
+
+`engine/judge.py:190-194` appends the formatted block to the tier-1 stage summary, and the
+same block is rendered again by the judge's own output path, so a user sees it twice; the
+stage's `passed` flips to false (`:195-204`) but no per-gate marker is emitted, so the
+failing gate is invisible among three ✓ lanes. The `judge --json` envelope
+(`engine/persist.py` builds the evidence document) has `checks: [{id: stage-tier1}]` with
+no `quality_snapshot` key; the snapshot is persisted only in `verdict.json`
+(`persist.py:1016`), which no CLI JSON consumer reads.
+
+### The right way to use it (what this run would tell the next user)
+
+- Point the producer at a **cheap, deterministic** command and make `produced_at`
+  deterministic (or accept a dirty tree and ignore the file yourself) — the producer runs
+  on the commit-blocking path on every guard invocation (PERF-1).
+- Treat the artifact's `target` as the authority that it is: keep the ladder file as the
+  producer's input, and don't expect GitReins to validate one against the other.
+- When a `block` metric fires, read `gitreins guard --json` (or the guard log) rather than
+  the console ✗ line — the console line names the diff-scope, not the metric.
+- MCP clients can rely on `quality.status` being genuinely read-only: `not-computed`
+  before any run (producer counter unchanged), the identical dict after `guard.run`, and
+  the documented `disabled` and workdir-refusal contracts.

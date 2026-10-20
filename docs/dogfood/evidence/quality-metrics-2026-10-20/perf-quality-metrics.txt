@@ -1,0 +1,34 @@
+### host context
+ 23:38:53 up  7:57,  0 users,  load average: 8.25, 10.57, 16.26
+### nproc: 16
+
+=== P1  guard, quality DISABLED (baseline) — warm, hyperfine ===
+Benchmark 1: gitreins guard
+  Time (mean ± σ):     480.5 ms ± 116.0 ms    [User: 196.9 ms, System: 73.3 ms]
+  Range (min … max):   267.7 ms … 722.9 ms    20 runs
+ 
+
+=== P2  guard, quality ENABLED with the doc's example producer — warm, hyperfine ===
+Benchmark 1: gitreins guard
+  Time (mean ± σ):     500.3 ms ± 114.5 ms    [User: 247.6 ms, System: 90.9 ms]
+  Range (min … max):   329.3 ms … 727.5 ms    20 runs
+ 
+
+=== P3  guard, quality ENABLED with a 2s repo-owned producer (realistic type-check/coverage) ===
+Benchmark 1: gitreins guard
+  Time (mean ± σ):      2.586 s ±  0.239 s    [User: 0.264 s, System: 0.128 s]
+  Range (min … max):    2.408 s …  2.992 s    5 runs
+ 
+
+=== P4  cold (page cache dropped once before the run), n=1 each, same command ===
+Tier 1: DEGRADED PASS (skips: lint=no staged files, tests=no staged files)  (test mode: full)
+cold[disabled] wall=0.59s user=0.19s sys=0.09s
+Tier 1: DEGRADED PASS (skips: lint=no staged files, tests=no staged files)  (test mode: full)
+cold[docproducer] wall=0.47s user=0.24s sys=0.10s
+
+=== P5  a WEDGED producer: quality.timeout=2 while the producer sleeps 30 ===
+    (the guard must not wait past the budget; default budget is 300s)
+  ✓ quality — quality: unavailable (command timed out after 2s)
+  ⚠ quality: unavailable (command timed out after 2s)
+guard[timeout=2] wall=2.28s user=0.19s sys=0.07s
+--- the same with the DEFAULT budget (300s) would occupy the commit path for that long ---
