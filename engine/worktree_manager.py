@@ -272,6 +272,15 @@ RUNTIME_ARTIFACT_UNTRACKED_FILES = frozenset(
         ".gitreins/tasks.yaml",
         ".gitreins/usage.jsonl",
         ".gitreins/qa-ledger.jsonl",
+        # DF-GITREINS-POC-96: the quality artifact a conforming producer
+        # (the artifact contract's `produced_at` provenance) rewrites on every
+        # guard/judge/doctor run.  The installer's template now ignores the
+        # canonical path by default — this is that list's other half catching
+        # up, so a consumer whose .gitignore predates the entry does not have
+        # `worktree fleet --merge` refuse every lane over the rewritten file.
+        # Untracked ONLY, like the stores above: a tracked artifact that
+        # differs from HEAD is the repo's own versioned snapshot.
+        ".gitreins/quality.json",
     }
 )
 # Runtime artifact DIRECTORIES written by GitReins itself: a guard run inside a
