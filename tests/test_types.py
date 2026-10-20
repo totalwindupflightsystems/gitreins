@@ -484,3 +484,27 @@ class TestGitleaksFindingCountParser:
         # "clean" must never be inferred from output that carries no tally.
         assert parse_gitleaks_finding_count("") is None
         assert parse_gitleaks_finding_count("leak detected in config.py") is None
+
+    def test_quality_failure_shows_metric_line_not_diff_scope(self) -> None:
+        # DF-GITREINS-POC-94: quality output puts the metric line FIRST, then
+        # diff-scope lines AFTER.  The summary must pick the metric line so a
+        # blocked commit names the metric (not the diff-scope tail).
+        result = Tier1Result(
+            passed=False,
+            results=[
+                GuardResult(
+                    "quality",
+                    False,
+                    "quality: type_hint_pct=72.3% (target 80%, block, stage current, via python3 scripts/quality_metrics.py)\n"
+                    "diff-scope: 1 changed files, 1 surfaces touched\n"
+                    "  surface COV-1: test_links=linked, classes=integration, missing_classes=unit\n",
+                )
+            ],
+        )
+        # Must contain the metric, NOT the diff-scope line
+        assert "type_hint_pct=72.3%" in result.summary
+        assert "diff-scope" not in result.summary
+        # The metric details should be on the console line (truncated to 100 chars)
+        # The line is 103 chars so _truncate_line(100) gives "..." at end
+        assert result.summary.startswith("  ✗ quality — quality: type_hint_pct")
+        assert "scripts/quality_metri..." in result.summary

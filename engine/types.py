@@ -679,6 +679,23 @@ class Tier1Result:
                     # TRUST-003 (AC1): name the FIRST failing test id parsed
                     # from the pytest output, not just the tail banner.
                     detail = f" — {first_failing_detail}"
+                elif r.name == "quality":
+                    # DF-GITREINS-POC-94: quality output puts the metric line
+                    # FIRST (e.g. "quality: type_hint_pct=72.3% (target 80%...)")
+                    # and diff-scope/verification lines AFTER.  out_lines[-1]
+                    # incorrectly picks the diff-scope line, so the console
+                    # never shows the metric that blocked the commit.  Extract
+                    # the first quality-prefixed line instead (the metric line).
+                    quality_lines = [
+                        ln.strip()
+                        for ln in r.output.split("\n")
+                        if ln.strip().startswith("quality:")
+                    ]
+                    quality_line = quality_lines[0] if quality_lines else ""
+                    if quality_line:
+                        detail = f" — {_truncate_line(quality_line)}"
+                    else:
+                        detail = f" — {tail}" if tail else ""
                 else:
                     if r.name == "secrets":
                         findings = _secrets_findings_detail(r.output)
