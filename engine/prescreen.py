@@ -37,7 +37,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from engine.resolution import (
     VERDICT_ABSTAIN,
@@ -45,6 +45,9 @@ from engine.resolution import (
     resolve,
     rubric_position,
 )
+
+if TYPE_CHECKING:
+    from engine.evaluator import Verdict, VerdictItem
 
 __all__ = [
     "PRESCREEN_KEY",
@@ -291,10 +294,10 @@ class PrescreenResult:
 
 
 def run_prescreen(
-    task: dict,
+    task: dict[str, Any],
     *,
     workdir: str = ".",
-    **resolve_kwargs: object,  # forwarded to resolve
+    **resolve_kwargs: Any,  # forwarded to resolve
 ) -> PrescreenResult:
     """Resolve the task's criteria against the repo (one Jev call).
 
@@ -369,7 +372,7 @@ def assemble_prescreen_task(prescreen: PrescreenResult) -> str:
     return "\n".join(lines)
 
 
-def attribute_items(items: list, prescreen: PrescreenResult) -> list:
+def attribute_items(items: list[VerdictItem], prescreen: PrescreenResult) -> list[VerdictItem]:
     """GOAL B: copy each verdict item with its probability and cited path.
 
     1:1 by position (both lists are criteria-ordered by construction). Items
@@ -379,7 +382,7 @@ def attribute_items(items: list, prescreen: PrescreenResult) -> list:
     "PASS … [resolution 0.91; engine/x.py:12]"; FAIL details are left exactly
     as the judge wrote them.
     """
-    from engine.evaluator import VerdictItem
+    from engine.evaluator import VerdictItem  # noqa: F401 - runtime default
 
     out: list[VerdictItem] = []
     for index, item in enumerate(items):
@@ -402,9 +405,7 @@ def attribute_items(items: list, prescreen: PrescreenResult) -> list:
     return out
 
 
-def attach_prescreen(
-    verdict: ResolutionVerdict, prescreen: PrescreenResult | None
-) -> ResolutionVerdict:
+def attach_prescreen(verdict: "Verdict", prescreen: PrescreenResult | None) -> "Verdict":
     """Return *verdict* with attribution attached, or *verdict* unchanged.
 
     No pre-screen (ABSTAIN, disabled, or never run) returns the verdict object

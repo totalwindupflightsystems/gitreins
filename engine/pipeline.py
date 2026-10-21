@@ -86,7 +86,7 @@ from engine.types import (
 MAX_STEP_EVIDENCE_CHARS = _MAX_STEP_EVIDENCE_CHARS
 
 if TYPE_CHECKING:
-    pass
+    from engine.evaluator import VerdictItem
 
 logger = logging.getLogger("gitreins.pipeline")
 
@@ -122,7 +122,7 @@ SKIP_SENTINEL = "GITREINS_SKIP:"
 TIER1_ENV_VAR = "GITREINS_TIER1"
 
 
-def _verdict_item_data(item: object) -> dict:
+def _verdict_item_data(item: "VerdictItem") -> dict[str, Any]:
     """One verdict item for a step's ``data`` payload — attribution optional.
 
     Same contract as ``engine.persist._verdict_item_dict``: the three
@@ -197,9 +197,9 @@ class StepResult:
     passed: bool = True
     output: str = ""
     error: str = ""
-    data: dict = field(default_factory=dict)
+    data: dict[str, Any] = field(default_factory=dict)
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "type": self.type,
@@ -229,7 +229,7 @@ class StageResult:
     skipped_steps: list[str] = field(default_factory=list)
     degradation_reason: str = ""
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         d = {
             "id": self.id,
             "passed": self.passed,
@@ -246,7 +246,7 @@ class StageResult:
         return d
 
 
-def degradation_warning(stage: dict) -> str | None:
+def degradation_warning(stage: dict[str, Any]) -> str | None:
     """One-line CLI warning for a stage narrower than the guard gate.
 
     Returns None for a stage with no degradation marker, so callers can call
@@ -362,7 +362,9 @@ _COMMIT_AUDIT_MODES = ("warn", "block", "suggest")
 
 
 def resolve_commit_audit_mode(
-    pipeline_config: dict, audit_config: dict, step_def: dict | None = None
+    pipeline_config: dict[str, Any],
+    audit_config: dict[str, Any],
+    step_def: dict[str, Any] | None = None,
 ) -> str:
     """Resolve the commit-audit ``mode`` with an EXPLICIT precedence.
 
@@ -424,7 +426,9 @@ def _normalize_commit_audit_enabled(value: object) -> bool | None:
 
 
 def resolve_commit_audit_enabled(
-    pipeline_config: dict, audit_config: dict, step_def: dict | None = None
+    pipeline_config: dict[str, Any],
+    audit_config: dict[str, Any],
+    step_def: dict[str, Any] | None = None,
 ) -> tuple[bool, str]:
     """Resolve the commit-audit ``enabled`` switch with an EXPLICIT precedence.
 
@@ -489,7 +493,7 @@ def resolve_commit_audit_enabled(
     return True, "default"
 
 
-def _is_commit_audit_stage(stage_def: dict) -> bool:
+def _is_commit_audit_stage(stage_def: dict[str, Any]) -> bool:
     """True for a stage that declares the commit-audit step type.
 
     The step type is ``type:``; the id is conventionally ``commit_audit`` and
@@ -502,7 +506,9 @@ def _is_commit_audit_stage(stage_def: dict) -> bool:
     return stage_def.get("type") == "commit_audit" or stage_def.get("id") == "commit_audit"
 
 
-def commit_audit_skip_message(config: dict, trigger: str, result: dict | None = None) -> str:
+def commit_audit_skip_message(
+    config: dict[str, Any], trigger: str, result: dict[str, Any] | None = None
+) -> str:
     """The named skip line for a run where the commit audit did NOT happen.
 
     DF-GITREINS-POC-30: the command used to print NOTHING (exit 0, stdout and
@@ -548,7 +554,7 @@ class Pipeline:
 
     def __init__(
         self,
-        config: dict,
+        config: dict[str, Any],
         workdir: str = ".",
         llm: Any = None,  # noqa: ANN401 - LLMClient, injected lazily by Judge
         *,
@@ -558,7 +564,7 @@ class Pipeline:
         self.workdir = os.path.abspath(workdir)
         self.scan_root = os.path.abspath(scan_root or workdir)
         self.config = config
-        self.stages: list[dict] = config.get("pipeline", {}).get("stages", [])
+        self.stages: list[dict[str, Any]] = config.get("pipeline", {}).get("stages", [])
         self._stage_results: dict[str, StageResult] = {}
         self._llm = llm  # Can be injected by Judge
         # EVID-003: the judge's token telemetry is appended to
@@ -569,7 +575,7 @@ class Pipeline:
         # and defaulting True so every existing caller writes it as before.
         self.persist_telemetry = persist_telemetry
 
-    def run(self, task: dict, trigger: str = "pre-eval") -> dict:
+    def run(self, task: dict[str, Any], trigger: str = "pre-eval") -> dict[str, Any]:
         """Run all stages that match the trigger.
 
         Args:
@@ -620,7 +626,7 @@ class Pipeline:
 
         return self._compile_results()
 
-    def _check_condition(self, condition: str | None, task: dict) -> bool:
+    def _check_condition(self, condition: str | None, task: dict[str, Any]) -> bool:
         """Evaluate a condition expression.
 
         Supported:
@@ -677,7 +683,9 @@ class Pipeline:
 
         return True
 
-    def _run_parallel_stage(self, stage_id: str, stage_def: dict, task: dict) -> StageResult:
+    def _run_parallel_stage(
+        self, stage_id: str, stage_def: dict[str, Any], task: dict[str, Any]
+    ) -> StageResult:
         """Run all steps in parallel."""
         steps = stage_def.get("steps", [])
         result = StageResult(id=stage_id)
@@ -696,7 +704,9 @@ class Pipeline:
         result.summary = self._summarize_stage(result)
         return result
 
-    def _run_sequential_stage(self, stage_id: str, stage_def: dict, task: dict) -> StageResult:
+    def _run_sequential_stage(
+        self, stage_id: str, stage_def: dict[str, Any], task: dict[str, Any]
+    ) -> StageResult:
         """Run steps sequentially — in order, no concurrency."""
         result = StageResult(id=stage_id)
 
@@ -730,7 +740,9 @@ class Pipeline:
         result.summary = step_result.output or step_result.error
         return result
 
-    def _run_step(self, step_def: dict, task: dict, stage_id: str | None = None) -> StepResult:
+    def _run_step(
+        self, step_def: dict[str, Any], task: dict[str, Any], stage_id: str | None = None
+    ) -> StepResult:
         """Run a single step (used by parallel stages)."""
         step_type = step_def.get("type", "script")
         step_id = step_def.get("id", "unnamed")
@@ -767,7 +779,7 @@ class Pipeline:
             return None
 
     def _run_script_step(
-        self, step_def: dict, task: dict, stage_id: str | None = None
+        self, step_def: dict[str, Any], task: dict[str, Any], stage_id: str | None = None
     ) -> StepResult:
         """Execute a shell command."""
         step_id = step_def.get("id", "unnamed")
@@ -857,7 +869,7 @@ class Pipeline:
             # generated `cmd || true` both zeroed the failure). 2026-08-08.
             passed = exit_code == 0
 
-            data: dict = {"exit_code": exit_code}
+            data: dict[str, Any] = {"exit_code": exit_code}
             if tier1_lock_result is not None:
                 # INT-FLAKE-6 attribution: the verdict shows the run took the
                 # per-repo tier1 tests lock (acquired / waited / wait-expired).
@@ -971,7 +983,7 @@ class Pipeline:
         except Exception as e:
             return StepResult(id=step_id, type="script", passed=False, error=str(e))
 
-    def _run_ai_eval(self, step_def: dict, task: dict) -> StepResult:
+    def _run_ai_eval(self, step_def: dict[str, Any], task: dict[str, Any]) -> StepResult:
         """Run the AI evaluator as a pipeline step."""
         step_id = step_def.get("id", "ai_eval")
         model = step_def.get("model")
@@ -1024,7 +1036,7 @@ class Pipeline:
                     continue
                 explicit_caps[key] = parsed
             else:
-                explicit_caps[key] = int(raw)
+                explicit_caps[key] = int(raw)  # type: ignore[arg-type]
         if step_def.get("tool_call_weight") is not None:
             explicit_caps["tool_call_weight"] = float(step_def["tool_call_weight"])
 
@@ -1124,7 +1136,7 @@ class Pipeline:
             logger.exception("AI eval failed")
             return StepResult(id=step_id, type="ai_eval", passed=False, error=str(e))
 
-    def _run_commit_audit(self, step_def: dict, task: dict) -> StepResult:
+    def _run_commit_audit(self, step_def: dict[str, Any], task: dict[str, Any]) -> StepResult:
         """Run the commit message auditor as a pipeline step.
 
         Reads the commit message from ``task["commit_message"]`` and the
@@ -1368,7 +1380,7 @@ class Pipeline:
             },
         )
 
-    def _load_commit_audit_config(self) -> dict:
+    def _load_commit_audit_config(self) -> dict[str, Any]:
         """Read the commit_audit section from .gitreins/config.yaml.
 
         The section is the MERGE of top-level ``commit_audit`` (legacy, where
@@ -1387,7 +1399,7 @@ class Pipeline:
             try:
                 with open(config_path) as f:
                     cfg = yaml.safe_load(f) or {}
-                merged: dict = {}
+                merged: dict[str, Any] = {}
                 defaults_cfg = cfg.get("defaults", {}).get("commit_audit", {}) or {}
                 if isinstance(defaults_cfg, dict):
                     merged.update(defaults_cfg)
@@ -1399,7 +1411,7 @@ class Pipeline:
                 pass
         return {}
 
-    def _run_output(self, step_def: dict, task: dict) -> StepResult:
+    def _run_output(self, step_def: dict[str, Any], task: dict[str, Any]) -> StepResult:
         """Compile output from all stages."""
         step_id = step_def.get("id", "output")
         fmt = step_def.get("format", "{{ stages }}")
@@ -1407,7 +1419,7 @@ class Pipeline:
         output = self._template(fmt, task)
         return StepResult(id=step_id, type="output", passed=True, output=output)
 
-    def _template(self, text: str, task: dict) -> str:
+    def _template(self, text: str, task: dict[str, Any]) -> str:
         """Simple template substitution with {{ var }} syntax.
 
         Available vars:
@@ -1438,7 +1450,7 @@ class Pipeline:
 
         return text
 
-    def _get_pipeline_context(self) -> dict:
+    def _get_pipeline_context(self) -> dict[str, Any]:
         """Get context from previous stages to inject into AI evaluation."""
         return {
             "stages": {sid: s.to_dict() for sid, s in self._stage_results.items()},
@@ -1501,7 +1513,7 @@ class Pipeline:
             lines.append(f"  {status} {step.id}: {detail}")
         return "\n".join(lines)
 
-    def _compile_results(self) -> dict:
+    def _compile_results(self) -> dict[str, Any]:
         """Compile final results from all stages."""
         all_passed = all(s.passed for s in self._stage_results.values())
         return {
@@ -1546,7 +1558,7 @@ def _fix_on_key(obj: object) -> object:
     (True→"on", False→"off") rather than the generic True→"true".
     """
     if isinstance(obj, dict):
-        fixed = {}
+        fixed: dict[Any, Any] = {}
         for k, v in obj.items():
             if isinstance(k, bool):
                 k = _YAML_BOOL_KEY_MAP.get(k, str(k).lower())
@@ -1557,7 +1569,7 @@ def _fix_on_key(obj: object) -> object:
     return obj
 
 
-def _lint_step_run(lint_cmd: str, config: dict | None = None) -> str:
+def _lint_step_run(lint_cmd: str, config: dict[str, Any] | None = None) -> str:
     """Wrap *lint_cmd* with the guard's missing-linter semantics.
 
     ``GuardManager._check_lint`` returns PASS ("No linter found — skipped")
@@ -1625,7 +1637,7 @@ def harness_scan_gitleaks_config(workdir: str) -> str:
 
 
 def _secrets_step_run(
-    workdir: str, config: dict | None = None, scan_root: str | None = None
+    workdir: str, config: dict[str, Any] | None = None, scan_root: str | None = None
 ) -> str:
     """Shell command for the Tier 1 ``secrets`` step.
 
@@ -1721,7 +1733,7 @@ def _secrets_step_run(
     )
 
 
-def _data_protection_enabled(config: dict | None) -> bool:
+def _data_protection_enabled(config: dict[str, Any] | None) -> bool:
     """True when the operator opted into the data-protection lane (GR-146).
 
     Only a literal ``enabled: true`` in the top-level ``data_protection:``
@@ -1733,7 +1745,7 @@ def _data_protection_enabled(config: dict | None) -> bool:
 
 
 def _data_protection_step_run(
-    workdir: str, config: dict | None = None, scan_root: str | None = None
+    workdir: str, config: dict[str, Any] | None = None, scan_root: str | None = None
 ) -> str:
     """Build the Tier-1 data-protection step (GR-146).
 
@@ -1753,7 +1765,7 @@ def _data_protection_step_run(
             'sys.exit(0 if r.passed else 1)"'
         )
 
-    source_root = os.path.abspath(scan_root)
+    source_root = os.path.abspath(scan_root or "")
     python_code = (
         "from engine.guard_manager import GuardManager; import os, sys; "
         "gm = GuardManager('.', scope='working-tree', "
@@ -1770,8 +1782,8 @@ def _data_protection_step_run(
 
 
 def tier1_plan(
-    workdir: str, config: dict | None = None, scan_root: str | None = None
-) -> tuple[list[dict], dict]:
+    workdir: str, config: dict[str, Any] | None = None, scan_root: str | None = None
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Build the default Tier 1 steps plus their coverage marker.
 
     DF-GITREINS-POC-16: Tier 1 must grade the SAME set the guard would grade
@@ -1797,7 +1809,7 @@ def tier1_plan(
     # spawns — resolved once here (env > guards.scanner_nice > default 10) and
     # handed to each step builder below.
     nice_level, _nice_source = scanner_nice.resolve_level(config)
-    steps: list[dict] = [
+    steps: list[dict[str, Any]] = [
         {
             "id": "secrets",
             "type": "script",
@@ -1861,7 +1873,7 @@ def tier1_plan(
     # skips `live`-marked tests when it sees TIER1_ENV_VAR=1. Manual `pytest`
     # runs and `gitreins guard` do not set it, so the live test still runs there
     # (flock-serialized against a concurrent run).
-    test_step: dict = {
+    test_step: dict[str, Any] = {
         "id": "tests",
         "type": "script",
         # DF-GITREINS-POC-55: the resolved command is wrapped WHOLE (one
@@ -1891,7 +1903,9 @@ def tier1_plan(
     }
 
 
-def _default_tier1_steps(workdir: str, config: dict | None = None) -> list[dict]:
+def _default_tier1_steps(
+    workdir: str, config: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
     """Return language-appropriate default Tier 1 pipeline steps.
 
     Thin wrapper over :func:`tier1_plan` (kept for the existing callers and
@@ -1912,7 +1926,7 @@ def _engine_root() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def load_pipeline_config(workdir: str = ".", scan_root: str | None = None) -> dict:
+def load_pipeline_config(workdir: str = ".", scan_root: str | None = None) -> dict[str, Any]:
     """Load pipeline configuration from the control root, scanning source at scan_root."""
     scan_root = os.path.abspath(scan_root or workdir)
     config_path = os.path.join(workdir, ".gitreins", "config.yaml")
@@ -1953,10 +1967,12 @@ def load_pipeline_config(workdir: str = ".", scan_root: str | None = None) -> di
 
     try:
         with open(config_path) as f:
-            config = yaml.safe_load(f) or {}
+            config: dict[str, Any] = yaml.safe_load(f) or {}
         # Fix YAML 1.1 boolean-key pitfall: unquoted ``on:`` / ``off:``
         # are parsed as ``True:`` / ``False:`` and break key lookups.
-        config = _fix_on_key(config)
+        fixed_config = _fix_on_key(config)
+        assert isinstance(fixed_config, dict)
+        config = fixed_config
         if "pipeline" not in config:
             tier1_steps, tier1_marker = tier1_plan(workdir, config, scan_root)
             config["pipeline"] = {
