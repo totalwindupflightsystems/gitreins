@@ -9,12 +9,13 @@ import requests
 
 from engine.eval_cap import EvalCap
 import pytest
+from engine.llm import LLMClient
 
 
 class TestVerifyProbe:
     """verify_probe(): one real round trip that proves the credential works."""
 
-    def test_verify_probe_ok(self, llm_client: object) -> None:
+    def test_verify_probe_ok(self, llm_client: LLMClient) -> None:
         """A 200-with-choices round trip proves the credential usable."""
         import json as _json
 
@@ -27,7 +28,7 @@ class TestVerifyProbe:
         with patch("requests.post", return_value=ok):
             assert llm_client.verify_probe() is True
 
-    def test_verify_probe_401_is_false(self, llm_client: object) -> object:
+    def test_verify_probe_401_is_false(self, llm_client: LLMClient) -> object:
         """A rejected credential (401) reports False — no retry, one call."""
         import json as _json
 
@@ -44,13 +45,13 @@ class TestVerifyProbe:
         assert ok is False
         assert post.call_count == 1, "probe must not retry a permanent rejection"
 
-    def test_verify_probe_transport_error_is_false(self, llm_client: object) -> None:
+    def test_verify_probe_transport_error_is_false(self, llm_client: LLMClient) -> None:
         """A dead endpoint reports False (failure, not an 'usable' credential)."""
         with patch("requests.post", side_effect=requests.ConnectionError("connection refused")):
             assert llm_client.verify_probe() is False
 
     def test_verify_probe_ignores_mock_response_env(
-        self, monkeypatch: pytest.MonkeyPatch, llm_client: object
+        self, monkeypatch: pytest.MonkeyPatch, llm_client: LLMClient
     ) -> None:
         """GITREINS_MOCK_LLM_RESPONSE must not fake a passing probe — the probe
         exists precisely to prove the REAL wire accepts the credential."""

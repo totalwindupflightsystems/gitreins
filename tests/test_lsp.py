@@ -12,6 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from engine.llm import LLMClient
 from engine.lsp import (
     LspDiag,
     find_lsp_tool,
@@ -901,7 +902,9 @@ class TestLspJudgeIntegration:
             assert p["message"] == d["message"]
             assert p["line"] == d["line"]
 
-    def test_evaluator_receives_lsp_diagnostics(self, tmp_path: Path, llm_client: object) -> None:
+    def test_evaluator_receives_lsp_diagnostics(
+        self, tmp_path: Path, llm_client: LLMClient
+    ) -> None:
         """Evaluator task prompt includes TIER 1 LSP DIAGNOSTICS when task has them."""
         from unittest.mock import patch, MagicMock
 
@@ -962,7 +965,9 @@ class TestLspJudgeIntegration:
         assert len(result["diagnostics"]) == 1
         assert result["diagnostics"][0]["severity"] == "error"
 
-    def test_evaluator_no_lsp_diagnostics_empty(self, tmp_path: Path, llm_client: object) -> None:
+    def test_evaluator_no_lsp_diagnostics_empty(
+        self, tmp_path: Path, llm_client: LLMClient
+    ) -> None:
         """Evaluator handles missing tier1_diagnostics gracefully."""
         from engine.evaluator import AgenticEvaluator
 
@@ -1793,6 +1798,7 @@ class TestPylspSkipContract:
 import os
 import shutil
 import sys
+from engine.llm import LLMClient
 
 _original_which = shutil.which
 _original_exists = os.path.exists

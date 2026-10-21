@@ -18,7 +18,7 @@ from pathlib import Path
 
 
 @pytest.fixture
-def mcp_server(tmp_workdir: str) -> object:
+def mcp_server(tmp_workdir: str) -> GitReinsMCPServer:
     """Create an MCP server pointed at a temp git repo (same shape as
     test_mcp_server.py's fixture — repo.init is the tool under test, the
     workdir itself is only where the server instance is anchored)."""
@@ -61,7 +61,7 @@ def _tools_list(server: GitReinsMCPServer) -> dict:
 
 
 class TestRepoInitMCP:
-    def test_tools_list_advertises_repo_init(self, mcp_server: object) -> None:
+    def test_tools_list_advertises_repo_init(self, mcp_server: GitReinsMCPServer) -> None:
         """repo.init is on the advertised tool surface with a workdir schema."""
         tools = _tools_list(mcp_server)
         assert "repo.init" in tools
@@ -71,7 +71,9 @@ class TestRepoInitMCP:
         assert schema["properties"]["workdir"]["type"] == "string"
         assert "guard.run" in tools  # the tool it unblocks is still advertised
 
-    def test_repo_init_creates_config(self, mcp_server: object, bare_git_repo: object) -> None:
+    def test_repo_init_creates_config(
+        self, mcp_server: GitReinsMCPServer, bare_git_repo: object
+    ) -> None:
         """Fresh git repo → created True, file exists, carries the defaults block."""
         result = _call(mcp_server, "repo.init", {"workdir": bare_git_repo})
         assert result.get("created") is True, result
@@ -85,7 +87,9 @@ class TestRepoInitMCP:
         assert "defaults:" in content
         assert content == DEFAULT_GITREINS_CONFIG
 
-    def test_repo_init_is_idempotent(self, mcp_server: object, bare_git_repo: object) -> None:
+    def test_repo_init_is_idempotent(
+        self, mcp_server: GitReinsMCPServer, bare_git_repo: object
+    ) -> None:
         """Second call reports created False and leaves the file untouched."""
         first = _call(mcp_server, "repo.init", {"workdir": bare_git_repo})
         assert first.get("created") is True, first
@@ -103,7 +107,7 @@ class TestRepoInitMCP:
         assert open(config_path).read() == before_content
 
     def test_repo_init_customized_config_not_clobbered(
-        self, mcp_server: object, bare_git_repo: object
+        self, mcp_server: GitReinsMCPServer, bare_git_repo: object
     ) -> None:
         """A user-edited config survives a repo.init call byte-for-byte."""
         cfg_dir = os.path.join(bare_git_repo, ".gitreins")
@@ -117,7 +121,7 @@ class TestRepoInitMCP:
             assert f.read() == "guards:\n  tests: false\n"
 
     def test_repo_init_plain_dir_errors_writes_nothing(
-        self, mcp_server: object, plain_dir: str
+        self, mcp_server: GitReinsMCPServer, plain_dir: str
     ) -> None:
         """Non-git dir → error dict, and nothing at all was created."""
         result = _call(mcp_server, "repo.init", {"workdir": plain_dir})
@@ -138,7 +142,7 @@ class TestRepoInitMCP:
         assert os.path.isfile(os.path.join(str(repo), ".gitreins", "config.yaml"))
 
     def test_guard_run_works_after_repo_init(
-        self, mcp_server: object, bare_git_repo: object, monkeypatch: pytest.MonkeyPatch
+        self, mcp_server: GitReinsMCPServer, bare_git_repo: object, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """The end-to-end MCP-only path: repo.init then guard.run — guard.run
         must NOT return the GR-GAP-054 'no .gitreins/config.yaml — run

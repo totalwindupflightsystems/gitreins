@@ -197,7 +197,7 @@ def _poll_status(server: object, job_id: str, deadline: float = 5.0) -> object:
 
 
 @pytest.fixture
-def mcp_server(tmp_workdir: str, monkeypatch: pytest.MonkeyPatch) -> object:
+def mcp_server(tmp_workdir: str, monkeypatch: pytest.MonkeyPatch) -> GitReinsMCPServer:
     server = GitReinsMCPServer(tmp_workdir)
     monkeypatch.setattr(server.llm, "api_key", _FAKE_KEY)
     return server
@@ -210,7 +210,7 @@ class TestMcpAsyncVerdictPersistence:
     """`task.complete` / `judge.evaluate wait=false` land a browsable verdict."""
 
     def test_task_complete_writes_verdict_json_with_job_id(
-        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+        self, mcp_server: GitReinsMCPServer, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _stub_judge_evaluate(monkeypatch)
         _create_task(mcp_server, "mcp-async-persist")
@@ -242,7 +242,7 @@ class TestMcpAsyncVerdictPersistence:
         assert verdict["source"] == "mcp"
 
     def test_verdict_lands_before_the_job_reads_complete(
-        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+        self, mcp_server: GitReinsMCPServer, monkeypatch: pytest.MonkeyPatch
     ) -> object:
         """Invariant: a job that reads terminal `complete` has its verdict on disk.
 
@@ -271,7 +271,7 @@ class TestMcpAsyncVerdictPersistence:
 
     def test_async_persist_writes_nothing_to_stdout(
         self,
-        mcp_server: object,
+        mcp_server: GitReinsMCPServer,
         monkeypatch: pytest.MonkeyPatch,
         capsys: pytest.CaptureFixture[str],
     ) -> None:
@@ -341,7 +341,7 @@ class TestMcpAsyncVerdictPersistence:
 
 class TestMcpSyncVerdictPersistence:
     def test_wait_true_persists_with_sync_marker(
-        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+        self, mcp_server: GitReinsMCPServer, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _stub_judge_evaluate(monkeypatch)
         _create_task(mcp_server, "mcp-sync-persist")
@@ -359,7 +359,7 @@ class TestMcpSyncVerdictPersistence:
         assert verdict["items"] == [{"criterion": "c1", "status": "PASS", "detail": "ok"}]
 
     def test_response_shape_unchanged_by_persistence(
-        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+        self, mcp_server: GitReinsMCPServer, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Additive change: the sync result dict keeps its documented keys."""
         _stub_judge_evaluate(monkeypatch)
@@ -384,7 +384,10 @@ class TestMcpSyncVerdictPersistence:
 
 class TestPersistenceFailureIsNonFatal:
     def test_async_job_still_completes_when_persist_raises(
-        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+        self,
+        mcp_server: GitReinsMCPServer,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         _stub_judge_evaluate(monkeypatch)
         _create_task(mcp_server, "mcp-boom")
@@ -409,7 +412,10 @@ class TestPersistenceFailureIsNonFatal:
         ), [r.getMessage() for r in caplog.records]
 
     def test_sync_call_returns_result_when_persist_raises(
-        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+        self,
+        mcp_server: GitReinsMCPServer,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
     ) -> None:
         _stub_judge_evaluate(monkeypatch)
         _create_task(mcp_server, "mcp-boom-sync")
@@ -431,7 +437,7 @@ class TestPersistenceFailureIsNonFatal:
 
 class TestHistoryDisabled:
     def test_disabled_history_writes_no_history_dir_but_completes(
-        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+        self, mcp_server: GitReinsMCPServer, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Both arms in one test: the MCP path DOES persist, and honours the opt-out.
 
@@ -597,7 +603,7 @@ class TestResumeSupersedesInterruptedVerdict:
     """
 
     def test_resume_leaves_exactly_one_live_record_per_job_id(
-        self, mcp_server: object, monkeypatch: pytest.MonkeyPatch
+        self, mcp_server: GitReinsMCPServer, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from engine.job_store import make_job, save_job
 

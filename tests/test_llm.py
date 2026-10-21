@@ -311,7 +311,7 @@ class TestAnthropicConversion:
 class TestRetryLogic:
     """Test retry with exponential backoff — step-1-2-1-3."""
 
-    def test_429_is_retried(self, llm_client: object) -> None:
+    def test_429_is_retried(self, llm_client: LLMClient) -> None:
         """HTTP 429 (rate limit) triggers retry."""
         mock_attempt = MagicMock()
         mock_attempt.side_effect = [
@@ -324,7 +324,7 @@ class TestRetryLogic:
         assert result.content == "success"
         assert mock_attempt.call_count == 2
 
-    def test_503_is_retried(self, llm_client: object) -> None:
+    def test_503_is_retried(self, llm_client: LLMClient) -> None:
         """HTTP 503 (server error) triggers retry."""
         mock_attempt = MagicMock()
         mock_attempt.side_effect = [
@@ -336,7 +336,7 @@ class TestRetryLogic:
                 result = llm_client.chat([{"role": "user", "content": "hi"}])
         assert result.content == "recovered"
 
-    def test_400_is_not_retried(self, llm_client: object) -> None:
+    def test_400_is_not_retried(self, llm_client: LLMClient) -> None:
         """HTTP 400 (client error) does NOT retry — raised immediately."""
         response_400 = MagicMock()
         response_400.status_code = 400
@@ -347,7 +347,7 @@ class TestRetryLogic:
                 with pytest.raises(requests.HTTPError):
                     llm_client.chat([{"role": "user", "content": "hi"}])
 
-    def test_network_error_is_retried(self, llm_client: object) -> None:
+    def test_network_error_is_retried(self, llm_client: LLMClient) -> None:
         """Network errors (RequestException) trigger retry."""
         mock_attempt = MagicMock()
         mock_attempt.side_effect = [
@@ -359,7 +359,7 @@ class TestRetryLogic:
                 result = llm_client.chat([{"role": "user", "content": "hi"}])
         assert result.content == "ok"
 
-    def test_three_consecutive_failures_raises_runtimeerror(self, llm_client: object) -> None:
+    def test_three_consecutive_failures_raises_runtimeerror(self, llm_client: LLMClient) -> None:
         """3 consecutive failures → RuntimeError raised."""
         with patch.object(
             llm_client, "_chat_attempt", side_effect=requests.RequestException("fail")
@@ -368,7 +368,7 @@ class TestRetryLogic:
                 with pytest.raises(RuntimeError, match="LLM request failed after 3 attempts"):
                     llm_client.chat([{"role": "user", "content": "hi"}])
 
-    def test_backoff_timing_uses_exponential(self, llm_client: object) -> None:
+    def test_backoff_timing_uses_exponential(self, llm_client: LLMClient) -> None:
         """Exponential backoff: sleep(1), sleep(2)."""
         mock_attempt = MagicMock()
         mock_attempt.side_effect = [
@@ -519,7 +519,7 @@ class TestExtendedLLM:
         assert result[0]["content"][0]["type"] == "tool_result"
         assert result[0]["content"][0]["tool_use_id"] == ""
 
-    def test_retry_three_failures_backoff_timing(self, llm_client: object) -> None:
+    def test_retry_three_failures_backoff_timing(self, llm_client: LLMClient) -> None:
         """Backoff timing with 3 total attempts: sleep(1), sleep(2) before last."""
         mock_attempt = MagicMock()
         mock_attempt.side_effect = [
@@ -792,7 +792,7 @@ class TestFailureDiagnostics:
         for key in TestFailureDiagnostics.CREDENTIAL_KEYS:
             monkeypatch.delenv(key, raising=False)
 
-    def test_exhausted_retries_name_the_resolved_config(self, llm_client: object) -> None:
+    def test_exhausted_retries_name_the_resolved_config(self, llm_client: LLMClient) -> None:
         """RuntimeError carries provider, model, endpoint, key source, cause."""
         with patch.object(
             llm_client, "_chat_attempt", side_effect=requests.RequestException("connection refused")
@@ -878,7 +878,7 @@ class TestPermanentClientErrorFailsFast:
         resp.request = requests.Request("POST", resp.url).prepare()
         return resp
 
-    def test_401_fails_on_the_first_attempt(self, llm_client: object) -> None:
+    def test_401_fails_on_the_first_attempt(self, llm_client: LLMClient) -> None:
         """A rejected credential is permanent: one call, not three."""
         with patch("requests.post", return_value=self._real_response(401)) as post:
             with patch("time.sleep", return_value=None) as sleep:
@@ -893,7 +893,7 @@ class TestPermanentClientErrorFailsFast:
         assert "key=<explicit argument>" in str(exc.value)
         assert "test-key-12345" not in str(exc.value)
 
-    def test_429_is_still_retried_with_a_real_response(self, llm_client: object) -> None:
+    def test_429_is_still_retried_with_a_real_response(self, llm_client: LLMClient) -> None:
         """Rate limiting IS transient: a real 429 keeps the retry budget."""
         responses = [self._real_response(429), self._real_response(200, b'{"choices":[]}')]
         with patch("requests.post", side_effect=responses) as post:

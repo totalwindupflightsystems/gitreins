@@ -212,7 +212,7 @@ class TestTier1Result:
 class TestGuardManagerInit:
     """Test GuardManager initialization and config parsing — step-1-3-1-2."""
 
-    def test_empty_config_all_enabled(self, guard_manager: object) -> None:
+    def test_empty_config_all_enabled(self, guard_manager: GuardManager) -> None:
         """Empty config → all guards enabled (default True)."""
         assert guard_manager._enabled["secrets"] is True
         assert guard_manager._enabled["lint"] is True
@@ -1223,7 +1223,7 @@ class TestTimeoutEarlyReturnCarriesAllowSkips:
 class TestGuardToggling:
     """Test guard toggling: run_all() only runs enabled guards — step-1-3-1-5."""
 
-    def test_run_all_three_guards(self, guard_manager: object) -> None:
+    def test_run_all_three_guards(self, guard_manager: GuardManager) -> None:
         """All guards enabled → run_all() returns 3 results."""
         with patch.object(
             guard_manager, "_check_secrets", return_value=GuardResult("secrets", True, "ok")
@@ -1254,7 +1254,7 @@ class TestGuardToggling:
         assert len(result.results) == 0
         assert result.passed is True
 
-    def test_run_all_sets_passed_false_on_any_failure(self, guard_manager: object) -> None:
+    def test_run_all_sets_passed_false_on_any_failure(self, guard_manager: GuardManager) -> None:
         """If any guard fails, passed is False."""
         with patch.object(
             guard_manager, "_check_secrets", return_value=GuardResult("secrets", True, "ok")
@@ -1272,19 +1272,19 @@ class TestGuardToggling:
 class TestLintGuard:
     """Test _check_lint behavior."""
 
-    def test_no_py_files_staged(self, guard_manager: object) -> None:
+    def test_no_py_files_staged(self, guard_manager: GuardManager) -> None:
         """Lint guard passes when no Python files are staged."""
         result = guard_manager._check_lint()
         assert result.passed is True
 
-    def test_gitleaks_missing_falls_back(self, guard_manager: object) -> None:
+    def test_gitleaks_missing_falls_back(self, guard_manager: GuardManager) -> None:
         """When gitleaks not found, falls back to built-in scanner."""
         with patch("subprocess.run", side_effect=FileNotFoundError("gitleaks")):
             result = guard_manager._check_secrets()
         # Falls through to built-in scanner; should return a result
         assert result is not None
 
-    def test_gitleaks_missing_warns_expected_path(self, guard_manager: object) -> None:
+    def test_gitleaks_missing_warns_expected_path(self, guard_manager: GuardManager) -> None:
         """GR-GAP-043: missing gitleaks emits a visible warning naming the
         expected $HOME/go/bin/gitleaks path, and the built-in scanner still
         runs (hint, not a failure)."""
@@ -1300,7 +1300,7 @@ class TestLintGuard:
 class TestTestsGuard:
     """Test _check_tests behavior."""
 
-    def test_pytest_not_found_skips(self, guard_manager: object) -> None:
+    def test_pytest_not_found_skips(self, guard_manager: GuardManager) -> None:
         """Tests guard returns failure when test command can't run.
 
         DF-CRIER-258 seam: the lane executes through command_hygiene.run_bounded,
@@ -1315,7 +1315,7 @@ class TestTestsGuard:
         assert result.passed is False
         assert "go" in str(result.error) or "FileNotFound" in str(result.error)
 
-    def test_clean_tree_skips_without_flag(self, guard_manager: object) -> None:
+    def test_clean_tree_skips_without_flag(self, guard_manager: GuardManager) -> None:
         """No staged files + test_on_clean unset → PASS with explicit skip note.
 
         This is the pre-AUDIT-GAP-002 behavior: a vacuous green on clean
@@ -1701,7 +1701,9 @@ class TestPytestExit5NoTests:
         assert "✓ tests (full)" not in summary
         assert "⚠ pytest collected no tests (exit 5)" in summary
 
-    def test_exit5_via_check_tests_full_mode_allows_commit(self, guard_manager: object) -> None:
+    def test_exit5_via_check_tests_full_mode_allows_commit(
+        self, guard_manager: GuardManager
+    ) -> None:
         """End-to-end at the guard stage: staged file + full mode + exit 5 →
         the tests guard result passes, so the commit is not blocked."""
         with patch("engine.guard_manager._get_staged_files", return_value=["calc.py"]):
@@ -2094,7 +2096,7 @@ class TestExtendedGuardManager:
             result = gm._check_tests()
         assert result.passed is True
 
-    def test_check_tests_timeout_returns_failure(self, guard_manager: object) -> None:
+    def test_check_tests_timeout_returns_failure(self, guard_manager: GuardManager) -> None:
         """_check_tests handles the test-command timeout (DF-CRIER-258 seam:
         the lane runs through command_hygiene.run_bounded, whose timed_out
         flag maps to the same "Tests timed out after Ns" failure)."""
