@@ -52,12 +52,13 @@ import re
 import shlex
 import subprocess
 import sys
+import time as _time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from engine import command_hygiene, lang_detect, scanner_nice
+from engine import command_hygiene, lang_detect, scanner_nice, usage
 from engine.evidence_bounds import (
     _ERROR_TEST_LINE,
     MAX_STEP_EVIDENCE_CHARS as _MAX_STEP_EVIDENCE_CHARS,
@@ -1099,10 +1100,16 @@ class Pipeline:
             # EVID-003: ``persist_telemetry=False`` (the ephemeral judge) skips
             # it — the line lands inside the graded tree, and an ephemeral run
             # has no persisted verdict to attribute it to anyway.
+            # REVIEW-GITREINS-030: credential-free judge provenance, taken from
+            # the SAME client the evaluator ran (self._llm) — the resolved model
+            # plus WHERE the base URL and API key came from, the exact fields
+            # LLMClient.describe() renders. Never the URL or key values. Duck-
+            # typed fakes without the attributes contribute no fields.
+            provenance = usage.provenance_fields(self._llm) if self._llm is not None else {}
+
             try:
                 import json as _uj
                 import os as _uos
-                import time as _time
 
                 _cap = getattr(evaluator, "eval_cap", None)
                 if _cap is not None and self.persist_telemetry:
@@ -1114,6 +1121,7 @@ class Pipeline:
                         "cache_write": getattr(_cap, "cumulative_cache_write", 0),
                         "step": step_id,
                     }
+                    usage_line.update(provenance)
                     usage_path = _uos.path.join(self.workdir, ".gitreins", "usage.jsonl")
                     _uos.makedirs(_uos.path.dirname(usage_path), exist_ok=True)
                     with open(usage_path, "a") as _f:
@@ -1130,6 +1138,10 @@ class Pipeline:
                     "verdict": verdict.verdict,
                     "items": [_verdict_item_data(i) for i in verdict.items],
                     "summary": verdict.summary,
+                    # REVIEW-GITREINS-030: persisted with the verdict so judge
+                    # provenance is attributable in verdict.json; absent (not
+                    # null) when the client carries no identity fields.
+                    **({"provenance": dict(provenance)} if provenance else {}),
                 },
             )
         except Exception as e:

@@ -209,3 +209,29 @@ def test_summarize_aggregate_cost_is_a_float_once_anything_is_priced() -> None:
     assert summary["priced"] == 1
     assert isinstance(summary["cost_usd"], float)
     assert summary["cost_usd"] == round((500 * 0.28 + 25 * 0.42) / 1_000_000, 6)
+
+
+def test_provenance_fields_and_usage_row_never_persist_secret(tmp_path: Path) -> None:
+    class Client:
+        model = "deepseek-v4-flash"
+        base_url_source = "GITREINS_LLM_BASE_URL"
+        api_key_source = "DEEPSEEK_API_KEY (fallback)"
+        api_key = "SECRET-MUST-NOT-LAND"
+
+    assert usage.provenance_fields(Client()) == {
+        "model": "deepseek-v4-flash",
+        "base_url_source": "GITREINS_LLM_BASE_URL",
+        "api_key_source": "DEEPSEEK_API_KEY (fallback)",
+    }
+    assert usage.append_usage_row(
+        str(tmp_path),
+        step="tier2",
+        tokens_in=10,
+        model="deepseek-v4-flash",
+        base_url_source="GITREINS_LLM_BASE_URL",
+        api_key_source="DEEPSEEK_API_KEY (fallback)",
+    )
+    raw = (tmp_path / ".gitreins" / "usage.jsonl").read_text(encoding="utf-8")
+    assert "deepseek-v4-flash" in raw
+    assert "DEEPSEEK_API_KEY (fallback)" in raw
+    assert "SECRET-MUST-NOT-LAND" not in raw
