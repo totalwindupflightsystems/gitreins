@@ -1386,6 +1386,7 @@ class GuardManager:
         grade_full_tree: bool = False,
         persist_log: bool = True,
         scan_root: str | None = None,
+        quality_async: bool = False,
     ) -> None:
         self.workdir = os.path.abspath(workdir)
         self.scan_root = os.path.abspath(scan_root) if scan_root else self.workdir
@@ -1404,6 +1405,11 @@ class GuardManager:
         # graded" (the ephemeral judge) turns it off here. Keyword-only and
         # defaulting True so every existing caller keeps writing the log.
         self.persist_log = persist_log
+        # PERF-1: when True (the pre-commit hook), the repo-owned quality
+        # producer is launched detached instead of run to completion, so a slow
+        # measurement never delays the commit. Fresh numbers are still produced
+        # before push by `gitreins quality-ensure` (the pre-push hook).
+        self._quality_async = bool(quality_async)
         if config is None:
             config = _load_guard_config(self.workdir)
         self.config = config
@@ -1753,7 +1759,9 @@ class GuardManager:
             # computed it (MCP guard.run then judge on one server), the guard
             # reuses those numbers and never re-runs the producer — every
             # surface in the run reports the same snapshot.
-            snapshot = read_quality_snapshot(self.workdir, QualityConfig.from_dict(quality_cfg))
+            snapshot = read_quality_snapshot(
+                self.workdir, QualityConfig.from_dict(quality_cfg), async_run=self._quality_async
+            )
             self._quality_snapshot = snapshot
             quality_text = format_quality_snapshot(snapshot)
             results.append(

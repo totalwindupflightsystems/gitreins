@@ -800,3 +800,117 @@ def test_cached_reread_keeps_effective_target_provenance(tmp_path: Path) -> None
     assert quality_blocks(second) is False  # warn mode never blocks
     # And the producer/reader did not conflate the two views.
     assert first["metrics"]["type_hint_pct"]["mode"] == "block"
+
+
+# ── PERF-1: the quality producer is off the commit-blocking path ──
+
+
+def test_async_run_launches_producer_without_waiting(tmp_path: Path) -> None:
+    """async_run starts the producer detached and returns immediately.
+
+    A 2s producer must not delay the read: the call returns in well under 2s
+    with the honest "not yet written" unavailable reason, while the producer
+    keeps running in the background.
+    """
+    import time
+
+    (tmp_path / ".gitreins").mkdir(exist_ok=True)
+    (tmp_path / "producer.py").write_text(
+        "import json, pathlib, time\n"
+        "time.sleep(2)\n"
+        "pathlib.Path('.gitreins/quality.json').write_text(json.dumps({"
+        "'metrics': {'type_hint_pct': {'value': 72.3, 'target': 80, 'stage': 's'}}}))\n",
+        encoding="utf-8",
+    )
+    config = _config(tmp_path)
+    start = time.monotonic()
+    snapshot = read_quality_snapshot(str(tmp_path), config, async_run=True)
+    elapsed = time.monotonic() - start
+    assert elapsed < 2.0
+    assert snapshot["status"] == "unavailable"
+    assert "producer started in background" in snapshot["reason"]
+
+
+def test_async_run_reads_last_completed_artifact(tmp_path: Path) -> None:
+    """With a prior artifact on disk, async_run returns those numbers while a
+    fresh producer runs in the background — no re-wait, but real numbers."""
+    from engine.quality_metrics import _snapshot_cache
+
+    _produce(tmp_path, metric_value=82, target=80)
+    config = _config(tmp_path)
+    # Produce once synchronously so a completed artifact exists on disk.
+    first = read_quality_snapshot(str(tmp_path), config)
+    assert first["metrics"]["type_hint_pct"]["value"] == 82
+    # Simulate a fresh invocation (cache is process-local), then read async:
+    # the completed artifact is served, the new producer runs in background.
+    _snapshot_cache.clear()
+    snapshot = read_quality_snapshot(str(tmp_path), config, async_run=True)
+    assert snapshot["status"] == "available"
+    assert snapshot["metrics"]["type_hint_pct"]["value"] == 82
+
+
+def test_guard_quality_async_does_not_wait_on_slow_producer(tmp_path: Path) -> None:
+    """GuardManager(quality_async=True) launches the producer in the background:
+    a 2s producer must not delay the guard run (the commit path)."""
+    import time
+
+    (tmp_path / ".gitreins").mkdir(exist_ok=True)
+    (tmp_path / "producer.py").write_text(
+        "import json, pathlib, time\n"
+        "time.sleep(2)\n"
+        "pathlib.Path('.gitreins/quality.json').write_text(json.dumps({"
+        "'metrics': {'type_hint_pct': {'value': 90, 'target': 80, 'stage': 's'}}}))\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    quality = _config(tmp_path).to_dict()
+    gm = GuardManager(
+        str(tmp_path),
+        config={"guards": {"secrets": False, "lint": False, "tests": False}, "quality": quality},
+        persist_log=False,
+        quality_async=True,
+    )
+    start = time.monotonic()
+    result = gm.run_all()
+    elapsed = time.monotonic() - start
+    assert elapsed < 2.0
+    # The producer launched in the background: no artifact yet → unavailable,
+    # which never blocks the commit.
+    assert result.extra["quality_snapshot"]["status"] == "unavailable"
+
+
+def test_quality_ensure_blocks_on_block_mode_miss(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The pre-push surface runs the producer to completion and exits 1 on an
+    opt-in block-mode miss — the enforcement that moved off the commit path."""
+    from gitreins import cli
+
+    _produce(tmp_path, metric_value=72.3, target=80)
+    quality = _config(tmp_path, per_metric_mode={"type_hint_pct": "block"}).to_dict()
+    (tmp_path / ".gitreins/config.yaml").write_text(
+        yaml.safe_dump({"quality": quality}), encoding="utf-8"
+    )
+    monkeypatch.setattr(cli, "get_workdir", lambda: str(tmp_path))
+    with pytest.raises(SystemExit) as exc_info:
+        cli.cmd_quality_ensure(SimpleNamespace())
+    assert exc_info.value.code == 1
+    out = capsys.readouterr().out
+    assert "type_hint_pct=72.3%" in out
+
+
+def test_quality_ensure_passes_without_block_mode_miss(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """No block-mode miss: quality-ensure reports the numbers and exits 0."""
+    from gitreins import cli
+
+    _produce(tmp_path, metric_value=82, target=80)
+    quality = _config(tmp_path, per_metric_mode={"type_hint_pct": "warn"}).to_dict()
+    (tmp_path / ".gitreins/config.yaml").write_text(
+        yaml.safe_dump({"quality": quality}), encoding="utf-8"
+    )
+    monkeypatch.setattr(cli, "get_workdir", lambda: str(tmp_path))
+    cli.cmd_quality_ensure(SimpleNamespace())  # must not raise
+    out = capsys.readouterr().out
+    assert "type_hint_pct=82%" in out

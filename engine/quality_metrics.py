@@ -94,7 +94,36 @@ def _effective_target(
     return row
 
 
-def read_quality_snapshot(workdir: str, config: QualityConfig) -> dict[str, Any]:
+def _launch_producer_background(workdir: str, config: QualityConfig) -> None:
+    """Start the configured producer detached so it outlives the guard process.
+
+    PERF-1: the commit path must never wait on the measurement. stdout/stderr
+    are appended to ``.gitreins/logs/quality-producer.log`` (never interleaved
+    with guard output), and ``start_new_session=True`` detaches the child from
+    the guard's process group so the guard returns immediately while the
+    producer keeps writing its artifact in the background. A launch failure is
+    swallowed here — the read-back reports ``artifact not yet written`` (or the
+    last completed artifact) and never raises out of a snapshot read.
+    """
+    logs_dir = os.path.join(workdir, ".gitreins", "logs")
+    try:
+        os.makedirs(logs_dir, exist_ok=True)
+        with open(os.path.join(logs_dir, "quality-producer.log"), "ab") as log_file:
+            subprocess.Popen(  # noqa: S602 - user-configured producer command (trusted operator input)
+                config.command,
+                cwd=workdir,
+                shell=True,
+                stdout=log_file,
+                stderr=log_file,
+                start_new_session=True,
+            )
+    except OSError:
+        pass
+
+
+def read_quality_snapshot(
+    workdir: str, config: QualityConfig, async_run: bool = False
+) -> dict[str, Any]:
     """Run a configured producer once and read its JSON artifact.
 
     Values are supplied by the repository; the metric target is the stricter
@@ -103,6 +132,12 @@ def read_quality_snapshot(workdir: str, config: QualityConfig) -> dict[str, Any]
     pass a block gate by lowering the target inside its own artifact.
     ``stage`` is descriptive only; only the metric target can cause an
     opt-in blocking failure.
+
+    ``async_run`` (PERF-1) launches the producer detached and reads the LAST
+    COMPLETED artifact instead of waiting for this run's — the commit path
+    (pre-commit hook) never blocks on the measurement. The pre-push
+    ``quality-ensure`` surface runs the producer to completion (sync) so fresh
+    numbers exist before the refs leave the machine.
     """
     if not config.enabled:
         return {"status": "disabled", "metrics": {}}
@@ -119,36 +154,50 @@ def read_quality_snapshot(workdir: str, config: QualityConfig) -> dict[str, Any]
     if cached is not None:
         return _apply_modes(cached, config)
     artifact_path = os.path.join(workdir, config.artifact_path)
-    try:
-        completed = subprocess.run(  # noqa: S602 - user-configured command from quality-metrics config (trusted operator input)
-            config.command,
-            cwd=workdir,
-            shell=True,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=config.timeout,
-        )
-    except subprocess.TimeoutExpired:
-        return {
-            "status": "unavailable",
-            "reason": f"command timed out after {config.timeout}s",
-            "metrics": {},
-        }
-    except OSError as exc:
-        return {"status": "unavailable", "reason": f"command could not run: {exc}", "metrics": {}}
-    if completed.returncode:
-        detail = completed.stderr.strip() or f"exit status {completed.returncode}"
-        return {"status": "unavailable", "reason": f"command failed: {detail[:300]}", "metrics": {}}
+    if async_run:
+        # PERF-1: fire-and-forget — start the producer detached, then read the
+        # last completed artifact (the previous run's numbers) below. No wait.
+        _launch_producer_background(workdir, config)
+    else:
+        try:
+            completed = subprocess.run(  # noqa: S602 - user-configured command from quality-metrics config (trusted operator input)
+                config.command,
+                cwd=workdir,
+                shell=True,
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=config.timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return {
+                "status": "unavailable",
+                "reason": f"command timed out after {config.timeout}s",
+                "metrics": {},
+            }
+        except OSError as exc:
+            return {
+                "status": "unavailable",
+                "reason": f"command could not run: {exc}",
+                "metrics": {},
+            }
+        if completed.returncode:
+            detail = completed.stderr.strip() or f"exit status {completed.returncode}"
+            return {
+                "status": "unavailable",
+                "reason": f"command failed: {detail[:300]}",
+                "metrics": {},
+            }
     try:
         with open(artifact_path, encoding="utf-8") as artifact_file:
             artifact = json.load(artifact_file)
     except FileNotFoundError:
-        return {
-            "status": "unavailable",
-            "reason": f"artifact not found: {config.artifact_path}",
-            "metrics": {},
-        }
+        reason = (
+            "producer started in background — artifact not yet written"
+            if async_run
+            else f"artifact not found: {config.artifact_path}"
+        )
+        return {"status": "unavailable", "reason": reason, "metrics": {}}
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         return {"status": "unavailable", "reason": f"artifact unreadable: {exc}", "metrics": {}}
     raw_metrics = artifact.get("metrics") if isinstance(artifact, dict) else None

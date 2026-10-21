@@ -185,3 +185,22 @@ environment variables. The same snapshot is shown in guard output, judge
 results, `gitreins doctor`, and the MCP `guard.run`, `judge.evaluate`,
 `judge.status` and `quality.status` responses — see
 [Reading the block](#reading-the-block-agents) above.
+
+## Commit path vs. push path
+
+The producer does **not** block the commit. The `pre-commit` hook runs
+`gitreins guard --quality-async`: the guard launches the producer detached (its
+output goes to `.gitreins/logs/quality-producer.log`) and reads the last
+completed artifact instead of waiting, so a slow or wedged measurement never
+delays a commit. A first run with no artifact yet reports `quality:
+unavailable (producer started in background — artifact not yet written)`.
+
+Fresh numbers are still produced **before push**: the `pre-push` hook runs
+`gitreins quality-ensure`, which executes the producer to completion and then
+enforces block mode — an opt-in `block` metric below its effective target
+fails the push (exit 1) the way it used to fail the commit. Disabled or
+unavailable quality exits 0 and never blocks a push.
+
+Manual `gitreins guard` (no flag), `gitreins judge`, and `gitreins doctor`
+still run the producer synchronously, so a human or an agent inspecting the
+tree sees the measurement the run just produced.

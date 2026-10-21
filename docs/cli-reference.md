@@ -20,7 +20,7 @@ Running `gitreins` with no command prints the top-level help and exits
 **0**. An unknown command exits **2** (argparse behavior for
 unrecognized arguments).
 
-There are **18 top-level subcommands**:
+There are **19 top-level subcommands**:
 
 | # | Command | Purpose |
 |---|---------|---------|
@@ -42,6 +42,7 @@ There are **18 top-level subcommands**:
 | 16 | `serve` | Live judgment browser (local web server) |
 | 17 | `doctor` | Validate `.gitleaks.toml` and migrate pre-DF-001 glob allowlist entries |
 | 18 | `push-check` | Refuse outgoing commit history containing credentials |
+| 19 | `quality-ensure` | Run the repo's quality producer to completion and enforce block-mode (pre-push) |
 
 ## 1. `gitreins install`
 
@@ -1303,6 +1304,7 @@ binary/interpreter path for `<gitreins>`:
 
 ```sh
 #!/bin/sh
+<gitreins> quality-ensure || exit $?
 while read local_ref local_sha remote_ref remote_sha; do
   <gitreins> push-check "$local_sha" "$remote_sha" || exit $?
 done
@@ -1396,10 +1398,29 @@ a resolvable revision, so the command refuses with
 `PUSH REFUSED: secret scan could not verify the outgoing history: fatal: Invalid revision range …`
 and exits 1 (measured).
 
+## 19. `gitreins quality-ensure`
+
+The pre-push surface for the repo-owned quality producer (PERF-1). The commit
+path (`pre-commit` hook) launches the producer in the background via
+`gitreins guard --quality-async` so a slow measurement never delays a commit;
+this command runs the same producer to completion so fresh numbers exist before
+the refs leave the machine, and enforces an opt-in block-mode miss the way the
+commit used to. Disabled or unavailable quality exits 0 — the pre-push hook's
+blocking authority stays with `push-check` (secrets).
+
+The invocation is `gitreins quality-ensure` — no options beyond `-h` / `--help`.
+Exit codes:
+
+| Code | Meaning |
+|------|---------|
+| 0 | quality disabled, unavailable, or present with no block-mode miss |
+| 1 | a block-mode metric is below its effective target |
+
 ## Hooks
 
-- **pre-commit**: installed by `gitreins install`; runs `gitreins guard` on
-  staged changes. A guard failure blocks the commit (exit 1); a DEGRADED pass
+- **pre-commit**: installed by `gitreins install`; runs `gitreins guard
+  --quality-async` on staged changes. A guard failure blocks the commit (exit
+  1); a DEGRADED pass
   (exit 2) also blocks unless `guards.allow_skips: true` — stage a gradable file
   or accept skips in config.
 - **commit-msg**: **not installed by `gitreins install`.** The CLI ships

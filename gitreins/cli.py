@@ -229,23 +229,36 @@ def _resolve_gitreins_invocation() -> str | None:
 
 
 def _render_pre_commit_hook() -> str:
-    """Render the pre-commit hook with the gitreins invocation pinned."""
+    """Render the pre-commit hook with the gitreins invocation pinned.
+
+    PERF-1: the hook passes ``--quality-async`` so the repo-owned quality
+    producer runs in the background and never delays the commit; fresh numbers
+    are still produced before push by the pre-push hook (quality-ensure).
+    """
     invocation = _resolve_gitreins_invocation()
     if invocation is None:
         return PRE_COMMIT_HOOK.replace(
             "__GITREINS_CMD__",
             "# WARNING: no gitreins binary or interpreter resolvable at install\n"
             "# time — falling back to PATH lookup (a different version may run).\n"
-            "gitreins guard",
+            "gitreins guard --quality-async",
         )
-    return PRE_COMMIT_HOOK.replace("__GITREINS_CMD__", f"{invocation} guard")
+    return PRE_COMMIT_HOOK.replace("__GITREINS_CMD__", f"{invocation} guard --quality-async")
 
 
 def _render_pre_push_hook() -> str:
-    """Scan every outgoing ref update before Git sends objects to a remote."""
+    """Scan every outgoing ref update before Git sends objects to a remote.
+
+    PERF-1: quality-ensure runs the repo-owned producer to completion first
+    (and enforces an opt-in block-mode miss), then push-check scans the
+    outgoing range for secrets. A producer that is disabled or unavailable
+    exits 0 and never blocks the push.
+    """
     invocation = _resolve_gitreins_invocation() or "gitreins"
     return (
-        "#!/bin/sh\nwhile read local_ref local_sha remote_ref remote_sha; do\n"
+        "#!/bin/sh\n"
+        f"{invocation} quality-ensure || exit $?\n"
+        "while read local_ref local_sha remote_ref remote_sha; do\n"
         f'  {invocation} push-check "$local_sha" "$remote_sha" || exit $?\n'
         "done\n"
     )
@@ -2685,6 +2698,30 @@ def quality_snapshot_for(workdir: str) -> dict | None:
     return read_quality_snapshot(workdir, QualityConfig.from_dict(raw))
 
 
+def cmd_quality_ensure(_args: argparse.Namespace) -> None:
+    """Run the quality producer to completion and enforce block-mode before push.
+
+    PERF-1: the commit path (pre-commit hook) launches the producer in the
+    background so a slow measurement never delays a commit. This pre-push
+    surface runs it synchronously so (a) fresh numbers exist before the refs
+    leave the machine and (b) an opt-in block-mode miss still fails the push
+    the way it used to fail the commit. Disabled or unavailable quality exits
+    0 — the pre-push hook's blocking authority stays with push-check (secrets).
+    """
+    from engine.quality_metrics import format_quality_snapshot, quality_blocks
+
+    workdir = get_workdir()
+    snapshot = quality_snapshot_for(workdir)
+    if snapshot is None:
+        return  # quality disabled — nothing to produce or enforce
+    if quality_blocks(snapshot):
+        print(format_quality_snapshot(snapshot))
+        sys.exit(1)
+    line = format_quality_snapshot(snapshot)
+    if line:
+        print(line)
+
+
 def _guard_mode_note(gm: GuardManager, scope: str, result: Tier1Result) -> str:
     """The parenthesised mode note on the Tier 1 banner line."""
     extra = result.extra
@@ -2771,7 +2808,13 @@ def cmd_guard_run(args: argparse.Namespace) -> None:
     # --scope selects the CHANGE SET (index vs index+worktree+untracked);
     # --full/--staged-only select WHICH tests run over it. They compose.
     scope = getattr(args, "scope", "staged")
-    gm = GuardManager(workdir, config=config, scope=scope, grade_full_tree=grade_full_tree)
+    gm = GuardManager(
+        workdir,
+        config=config,
+        scope=scope,
+        grade_full_tree=grade_full_tree,
+        quality_async=getattr(args, "quality_async", False),
+    )
 
     if json_output:
         from engine.evidence import dumps_evidence, guard_evidence
@@ -4218,6 +4261,12 @@ def _add_basic_parsers(parser: argparse.ArgumentParser, sub: _SubParsers) -> Non
     push_check.add_argument("local_sha")
     push_check.add_argument("remote_sha")
 
+    # quality-ensure — the pre-push surface for the repo-owned quality producer (PERF-1)
+    sub.add_parser(
+        "quality-ensure",
+        help="Run the repo's quality producer to completion and enforce block-mode (pre-push)",
+    )
+
     # init
     init_p = sub.add_parser("init", help="Smart init — detect language, size, optimal config")
     init_p.add_argument("--reset", action="store_true", help="Reset config to smart defaults")
@@ -4462,6 +4511,17 @@ def _add_guard_parser(sub: _SubParsers) -> None:
             "Emit one bounded, redacted GitReins evidence v1 JSON document on "
             "stdout (schemas/evidence-v1.schema.json) instead of the human "
             "summary. Exit 0 pass, 1 non-pass."
+        ),
+    )
+    guard_p.add_argument(
+        "--quality-async",
+        dest="quality_async",
+        action="store_true",
+        help=(
+            "Run the repo-owned quality producer in the background instead of "
+            "waiting for it (the pre-commit hook passes this so a slow "
+            "measurement never delays a commit; fresh numbers are produced "
+            "before push by `gitreins quality-ensure`)."
         ),
     )
 
@@ -4934,6 +4994,7 @@ _SIMPLE_HANDLERS = {
     "commit-audit": "cmd_commit_audit",
     "resolve": "cmd_resolve",
     "preflight": "cmd_preflight",
+    "quality-ensure": "cmd_quality_ensure",
     "mcp-server": "cmd_mcp_server",
     "security-scan": "cmd_security_scan",
     "setup-tools": "cmd_setup_tools",
