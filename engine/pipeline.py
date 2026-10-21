@@ -1071,9 +1071,10 @@ class Pipeline:
             verdict = evaluator.evaluate(task)
             passed = verdict.verdict == "COMPLETE"
 
+            from engine.evaluator import item_glyph
+
             items_output = "\n".join(
-                f"  {'✓' if i.status == 'PASS' else '✗'} {i.criterion}: {i.detail}"
-                for i in verdict.items
+                f"  {item_glyph(i.status)} {i.criterion}: {i.detail}" for i in verdict.items
             )
 
             # Persist the judge's real token usage so external tools (e.g. the

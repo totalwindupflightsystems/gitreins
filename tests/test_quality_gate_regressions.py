@@ -17,11 +17,12 @@ The tests assert the FIXED behavior, so any future regression fails loudly.
 
 import os
 import tempfile
+from pathlib import Path
 from unittest import mock
 
 import yaml
 
-from engine.evaluator import AgenticEvaluator
+from engine.evaluator import AgenticEvaluator, item_glyph
 from engine.judge import Judge
 from engine.llm import LLMClient
 from engine.pipeline import Pipeline
@@ -170,3 +171,55 @@ class TestPartialVerdictRequiresAllPass:
         verdict = ev._extract_partial_verdict(["c0", "c1"])
         assert verdict is not None
         assert verdict.verdict == "INCOMPLETE"
+
+
+class TestUnreachedCriterionIsNotAFailure:
+    """A criterion the run never reached is UNVERIFIED, never FAIL.
+
+    Measured defect (DF-CRIER-461, run 68649f1e): the 75m cap fired after one
+    criterion passed, the unreached one was written status="FAIL" with detail
+    "Not verified", and every renderer printed ✗ —
+    indistinguishable from a criterion that was examined and found false.
+    """
+
+    def test_unreached_criterion_status_is_unverified(self, tmp_workdir: str) -> None:
+        ev = AgenticEvaluator(LLMClient(), tmp_workdir)
+        ev._sandbox = {"verified_0": "PASS — pytest: 1 passed, exit 0"}
+        verdict = ev._extract_partial_verdict(["c0", "c1"])
+        assert verdict is not None
+        unreached = verdict.items[1]
+        assert unreached.status == "UNVERIFIED", unreached.status
+        assert "Not examined" in unreached.detail
+        assert "Not verified" not in unreached.detail
+
+    def test_unverified_criterion_still_fails_closed(self, tmp_workdir: str) -> None:
+        ev = AgenticEvaluator(LLMClient(), tmp_workdir)
+        ev._sandbox = {"verified_0": "PASS — pytest: 1 passed, exit 0"}
+        verdict = ev._extract_partial_verdict(["c0", "c1"])
+        assert verdict is not None
+        assert verdict.verdict == "INCOMPLETE"
+
+    def test_glyphs_distinguish_not_examined_from_false(self) -> None:
+        assert item_glyph("PASS") == "✓"
+        assert item_glyph("FAIL") == "✗"
+        assert item_glyph("UNVERIFIED") == "—"
+        assert item_glyph("") == "—"
+        assert item_glyph(None) == "—"
+
+    def test_no_renderer_hardcodes_pass_else_fail(self) -> None:
+        """Every renderer must go through item_glyph.
+
+        The bug was not one site: judge.py, pipeline.py and persist.py each
+        carried their own `"✓" if status == "PASS" else "✗"`, so fixing one
+        would have left two lies in place. This pins all three.
+        """
+        here = Path(__file__).resolve().parents[1]
+        offenders = []
+        for name in ("judge.py", "pipeline.py", "persist.py"):
+            text = (here / "engine" / name).read_text(encoding="utf-8")
+            if '"PASS" else "✗"' in text or "'PASS' else '✗'" in text:
+                offenders.append(name)
+        assert offenders == [], f"renderers still binary-folding status: {offenders}"
+        assert "item_glyph" in (here / "engine" / "judge.py").read_text(encoding="utf-8")
+        assert "item_glyph" in (here / "engine" / "pipeline.py").read_text(encoding="utf-8")
+        assert "item_glyph" in (here / "engine" / "persist.py").read_text(encoding="utf-8")
