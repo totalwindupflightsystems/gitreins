@@ -3541,6 +3541,19 @@ class TestInstallHooksPath:
         assert "would not run" in (result.stdout + result.stderr)
 
 
+class TestInstallHooksPath:
+    def test_install_refuses_when_core_hooks_path_overrides_repo_hooks(self, tmp_path: Path) -> None:
+        repo = _init_real_git_repo(tmp_path)
+        subprocess.run(["git", "-C", str(repo), "config", "--global", "core.hooksPath", str(tmp_path / "other-hooks")], check=True)
+        try:
+            result = run_cli("install", cwd=repo)
+        finally:
+            subprocess.run(["git", "config", "--global", "--unset", "core.hooksPath"], check=False)
+        assert result.returncode != 0
+        assert "core.hooksPath" in (result.stdout + result.stderr)
+        assert "would not run" in (result.stdout + result.stderr)
+
+
 class TestInstallGitignoreTemplate:
     """DF-GITREINS-POC-31 — what `install` promises to ignore, it must ignore.
 
