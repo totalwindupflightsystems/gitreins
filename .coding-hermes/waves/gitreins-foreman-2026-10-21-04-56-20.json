@@ -1,0 +1,29 @@
+{
+  "tick_id": "gitreins-foreman-2026-10-21-04-56-20",
+  "project": "gitreins",
+  "base_sha": "be0e6bd",
+  "tasks": [
+    {
+      "id": "REVIEW-GITREINS-010",
+      "title": "Run mypy in full strict mode over gitreins and fix what it finds",
+      "priority": "P2",
+      "worktree": "/home/kara/worktrees/gitreins-REVIEW-GITREINS-010",
+      "branch": "wt/REVIEW-GITREINS-010",
+      "worker_model": "deepseek-v4-pro",
+      "worker_provider": "deepseek"
+    },
+    {
+      "id": "PERF-1",
+      "title": "Quality producer runs synchronously on commit-blocking path — move to background or async",
+      "priority": "P3",
+      "worktree": "/home/kara/worktrees/gitreins-PERF-1",
+      "branch": "wt/PERF-1",
+      "worker_model": "deepseek-v4-pro",
+      "worker_provider": "deepseek"
+    }
+  ],
+  "dispatched_at": "2026-10-21T04:57:43Z",
+  "finished_at": "2026-10-21T13:04:51Z",
+  "status": "finished",
+  "recovery_note": "Recovery tick found the manifest had zero workers; no branch gates or merges were required. Existing unrelated worktrees remain preserved as evidence."
+}

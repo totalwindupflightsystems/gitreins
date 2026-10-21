@@ -393,7 +393,7 @@ def _chat_response(content: object) -> object:
 class TestEvaluatorPrescreenIntegration:
     def _evaluate_once(
         self,
-        evaluator: object,
+        evaluator: AgenticEvaluator,
         task: object,
         content: str = '{"verdict":"COMPLETE","items":[],"summary":"s"}',
     ) -> object:
@@ -401,7 +401,7 @@ class TestEvaluatorPrescreenIntegration:
             verdict = evaluator.evaluate(task)
         return verdict, chat
 
-    def test_prompt_carries_the_prescreen_block_as_input(self, evaluator: object) -> None:
+    def test_prompt_carries_the_prescreen_block_as_input(self, evaluator: AgenticEvaluator) -> None:
         ps = _prescreen(criteria=["engine/x.py:12"])
         task = {"id": "t", "title": "T", "criteria": ["engine/x.py:12"], PRESCREEN_KEY: ps}
         verdict, chat = self._evaluate_once(evaluator, task)
@@ -412,7 +412,7 @@ class TestEvaluatorPrescreenIntegration:
         assert verdict.verdict == "COMPLETE"
 
     def test_abstain_injects_nothing_and_warns_exactly_once(
-        self, evaluator: object, caplog: pytest.LogCaptureFixture
+        self, evaluator: AgenticEvaluator, caplog: pytest.LogCaptureFixture
     ) -> None:
         task = {"id": "t", "title": "T", "criteria": ["c"]}
         with patch("engine.resolution.discover_keys", return_value=[]):
@@ -427,7 +427,9 @@ class TestEvaluatorPrescreenIntegration:
         assert len(warnings) == 1
         assert "pre-screen unavailable" in warnings[0].getMessage()
 
-    def test_resolved_prescreen_still_runs_the_judge_never_skips(self, evaluator: object) -> None:
+    def test_resolved_prescreen_still_runs_the_judge_never_skips(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
         """Constraint: the pre-screen can NOT skip tier 2 — even at p=0.99."""
         ps = _prescreen(probability=0.99, missing_kind="none")
         task = {"id": "t", "title": "T", "criteria": ["c"], PRESCREEN_KEY: ps}
@@ -459,7 +461,7 @@ class TestEvaluatorPrescreenIntegration:
         assert verdict.verdict == "COMPLETE"
 
     def test_abstain_with_real_prescreen_config_changes_nothing_else(
-        self, evaluator: object, no_credentials: bool, caplog: pytest.LogCaptureFixture
+        self, evaluator: AgenticEvaluator, no_credentials: bool, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Acceptance criterion 3: degraded run == today's judge path."""
         task = {"id": "t", "title": "T", "criteria": ["c"]}
@@ -470,7 +472,9 @@ class TestEvaluatorPrescreenIntegration:
         pre_screen_warnings = [r for r in caplog.records if "pre-screen" in r.getMessage()]
         assert len(pre_screen_warnings) == 1
 
-    def test_multiple_criteria_each_get_a_row_in_the_prompt(self, evaluator: object) -> None:
+    def test_multiple_criteria_each_get_a_row_in_the_prompt(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
         ps = _prescreen(criteria=["c1", "c2", "c3"])
         task = {"id": "t", "title": "T", "criteria": ["c1", "c2", "c3"], PRESCREEN_KEY: ps}
         _verdict, chat = self._evaluate_once(evaluator, task)

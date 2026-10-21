@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 VALID_PROFILES = ("quick", "standard", "deep")
 
@@ -64,7 +65,7 @@ class EffortLevel:
     max_tool_calls: int = 0
     label: str = "default"
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "max_passes": self.max_passes,
             "max_llm_calls": self.max_llm_calls,
@@ -75,14 +76,14 @@ class EffortLevel:
         }
 
     @classmethod
-    def from_dict(cls, d: dict | None) -> EffortLevel:
+    def from_dict(cls, d: dict[str, Any] | None) -> EffortLevel:
         if not d:
             return cls()
         known = {f for f in cls.__dataclass_fields__ if f != "label"}
         kwargs = {k: v for k, v in d.items() if k in known and v is not None}
         return cls(label=str(d.get("label", "custom")), **kwargs)
 
-    def merged(self, override: dict | None) -> EffortLevel:
+    def merged(self, override: dict[str, Any] | None) -> EffortLevel:
         """Return a copy with per-invocation overrides applied (highest precedence)."""
         if not override:
             return self
@@ -103,7 +104,7 @@ class ReviewProfile:
     passes: tuple[str, ...]  # subset of ("findings", "estimates", "remediation")
     effort: EffortLevel
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "name": self.name,
             "description": self.description,
@@ -225,8 +226,8 @@ def get_profile(name: str | None) -> ReviewProfile:
 
 def resolve_effort(
     profile: ReviewProfile,
-    repo_default: dict | None = None,
-    override: dict | None = None,
+    repo_default: dict[str, Any] | None = None,
+    override: dict[str, Any] | None = None,
 ) -> EffortLevel:
     """Resolve the effort budget: override > repo default > profile default.
 

@@ -9,6 +9,7 @@ from unittest.mock import patch
 from engine.judge import Judge, JudgeResult
 from engine.guard_manager import GuardResult, Tier1Result
 from engine.evaluator import Verdict, VerdictItem
+from engine.llm import LLMClient
 
 
 # ── Phase 1-5-1: JudgeResult, legacy path ────────────────────────────────────
@@ -71,7 +72,7 @@ class TestJudgeResult:
 class TestJudgeLegacyPath:
     """Test Judge._run_legacy — Tier 1 → Tier 2 — step-1-5-1-2."""
 
-    def test_legacy_guards_pass_tier2_runs(self, judge: object, llm_client: object) -> None:
+    def test_legacy_guards_pass_tier2_runs(self, judge: Judge, llm_client: LLMClient) -> None:
         """When guards pass, Tier 2 evaluator is called."""
         from engine.task_manager import Task
 
@@ -108,7 +109,7 @@ class TestJudgeLegacyPath:
         assert result.tier2 is not None
         assert result.tier2.verdict == "COMPLETE"
 
-    def test_legacy_guards_fail_tier2_skipped(self, judge: object) -> None:
+    def test_legacy_guards_fail_tier2_skipped(self, judge: Judge) -> None:
         """When guards fail, Tier 2 is skipped, result.passed=False."""
         from engine.task_manager import Task
 
@@ -134,7 +135,7 @@ class TestJudgeEvaluateTask:
     """Test Judge.evaluate_task() pipeline vs legacy dispatch."""
 
     def test_evaluate_task_uses_pipeline_when_config_has_stages(
-        self, judge: object, tmp_workdir: str
+        self, judge: Judge, tmp_workdir: str
     ) -> None:
         """evaluate_task runs pipeline when pipeline config has stages."""
         from engine.task_manager import Task
@@ -174,7 +175,7 @@ class TestJudgeEvaluateTask:
         assert "stages" in result.pipeline_result
 
     def test_evaluate_task_falls_back_to_legacy_without_config(
-        self, judge: object, llm_client: object
+        self, judge: Judge, llm_client: LLMClient
     ) -> None:
         """evaluate_task falls back to legacy when no pipeline config exists."""
         from engine.task_manager import Task
@@ -203,7 +204,7 @@ class TestJudgeEvaluateTask:
                 result = judge.evaluate_task(task)
         assert result.passed is True
 
-    def test_run_precommit_runs_pipeline(self, judge: object, tmp_workdir: str) -> None:
+    def test_run_precommit_runs_pipeline(self, judge: Judge, tmp_workdir: str) -> None:
         """run_precommit runs pipeline with trigger='pre-commit'."""
         import os
         import yaml
@@ -239,12 +240,12 @@ class TestJudgeEvaluateTask:
 class TestJudgeInit:
     """Test Judge initialization."""
 
-    def test_judge_constructor_creates_guard_manager(self, judge: object) -> None:
+    def test_judge_constructor_creates_guard_manager(self, judge: Judge) -> None:
         """Judge constructor creates a GuardManager."""
         assert judge.guard_manager is not None
 
     def test_judge_constructor_accepts_guard_config(
-        self, tmp_workdir: str, llm_client: object
+        self, tmp_workdir: str, llm_client: LLMClient
     ) -> None:
         """Judge constructor accepts guard_config dict."""
         judge = Judge(llm_client, tmp_workdir, guard_config={"guards": {"secrets": False}})
@@ -270,7 +271,7 @@ class TestExtendedJudge:
         assert "FAIL" in summary
 
     def test_evaluate_task_pipeline_exception_returns_error(
-        self, judge: object, tmp_workdir: str, llm_client: object
+        self, judge: Judge, tmp_workdir: str, llm_client: LLMClient
     ) -> None:
         """evaluate_task catches pipeline exception and returns error in result."""
         from engine.task_manager import Task
@@ -360,18 +361,18 @@ class TestExtendedJudge:
 class TestLspDiagnosticsParsing:
     """Test Judge._parse_lsp_output and _extract_lsp_diagnostics — step GR-NNN."""
 
-    def test_parse_lsp_output_empty(self, judge: object) -> None:
+    def test_parse_lsp_output_empty(self, judge: Judge) -> None:
         """Empty output returns empty list."""
         result = judge._parse_lsp_output("")
         assert result == []
 
-    def test_parse_lsp_output_clean(self, judge: object) -> None:
+    def test_parse_lsp_output_clean(self, judge: Judge) -> None:
         """Output with only clean lines returns empty list."""
         output = "  pylsp — clean"
         result = judge._parse_lsp_output(output)
         assert result == []
 
-    def test_parse_lsp_output_error_diag(self, judge: object) -> None:
+    def test_parse_lsp_output_error_diag(self, judge: Judge) -> None:
         """Parses '✗' prefixed line as error severity."""
         output = "  ✗ /path/to/file.py:5 [pylsp] Undefined variable 'x'"
         result = judge._parse_lsp_output(output)
@@ -383,7 +384,7 @@ class TestLspDiagnosticsParsing:
         assert d["message"] == "Undefined variable 'x'"
         assert d["tool"] == "pylsp"
 
-    def test_parse_lsp_output_warning_diag(self, judge: object) -> None:
+    def test_parse_lsp_output_warning_diag(self, judge: Judge) -> None:
         """Parses '⚠' prefixed line as warning severity."""
         output = "  ⚠ /path/to/file.py:10 [pylsp] unused variable 'y'"
         result = judge._parse_lsp_output(output)
@@ -392,7 +393,7 @@ class TestLspDiagnosticsParsing:
         assert result[0]["line"] == 10
         assert result[0]["message"] == "unused variable 'y'"
 
-    def test_parse_lsp_output_multiple(self, judge: object) -> None:
+    def test_parse_lsp_output_multiple(self, judge: Judge) -> None:
         """Multiple diagnostic lines are all parsed."""
         output = (
             "  ✗ /path/to/file.py:5 [pylsp] Undefined variable 'x'\n"
@@ -405,7 +406,7 @@ class TestLspDiagnosticsParsing:
         assert result[1]["severity"] == "warning"
         assert result[2]["severity"] == "error"
 
-    def test_parse_lsp_output_mixed_content(self, judge: object) -> None:
+    def test_parse_lsp_output_mixed_content(self, judge: Judge) -> None:
         """Non-diagnostic lines (status, blank) are ignored."""
         output = (
             "  pylsp — clean\n"
@@ -418,7 +419,7 @@ class TestLspDiagnosticsParsing:
         assert result[0]["line"] == 3
         assert result[0]["message"] == "undefined name 'foo'"
 
-    def test_extract_lsp_diagnostics_found(self, judge: object) -> None:
+    def test_extract_lsp_diagnostics_found(self, judge: Judge) -> None:
         """_extract_lsp_diagnostics finds the lsp GuardResult and parses it."""
         from engine.guard_manager import Tier1Result, GuardResult
 
@@ -438,7 +439,7 @@ class TestLspDiagnosticsParsing:
         assert diags[0]["file"] == "/path/to/file.py"
         assert diags[0]["severity"] == "error"
 
-    def test_extract_lsp_diagnostics_not_present(self, judge: object) -> None:
+    def test_extract_lsp_diagnostics_not_present(self, judge: Judge) -> None:
         """No lsp guard → empty list, no crash."""
         from engine.guard_manager import Tier1Result, GuardResult
 
@@ -452,7 +453,7 @@ class TestLspDiagnosticsParsing:
         diags = judge._extract_lsp_diagnostics(tier1)
         assert diags == []
 
-    def test_extract_lsp_diagnostics_empty_output(self, judge: object) -> None:
+    def test_extract_lsp_diagnostics_empty_output(self, judge: Judge) -> None:
         """LSP guard with empty output → empty list."""
         from engine.guard_manager import Tier1Result, GuardResult
 

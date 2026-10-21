@@ -21,6 +21,7 @@ from engine.pipeline import (
 )
 from pathlib import Path
 import pytest
+from engine.llm import LLMClient
 
 
 # ── Phase 1-5-1: StepResult/StageResult, conditions, templates, defaults ─────
@@ -561,7 +562,7 @@ class TestPipelineRun:
         assert "stages" in result
 
     def test_run_with_llm_injected(
-        self, pipeline_config_default: object, tmp_workdir: str, llm_client: object
+        self, pipeline_config_default: object, tmp_workdir: str, llm_client: LLMClient
     ) -> None:
         """Pipeline with LLM injected runs ai_eval stage."""
         p = Pipeline(pipeline_config_default, tmp_workdir, llm=llm_client)
@@ -1017,7 +1018,7 @@ class TestAiEvalCapForwarding:
         v.items = []
         return v
 
-    def test_no_step_caps_defers_to_config(self, tmp_workdir: str, llm_client: object) -> None:
+    def test_no_step_caps_defers_to_config(self, tmp_workdir: str, llm_client: LLMClient) -> None:
         """Step with only max_iterations: -1 defers — no explicit EvalCap."""
         from engine.pipeline import Pipeline
 
@@ -1053,7 +1054,9 @@ class TestAiEvalCapForwarding:
             "would make compaction threshold 0 (compaction loop)"
         )
 
-    def test_step_explicit_caps_override_config(self, tmp_workdir: str, llm_client: object) -> None:
+    def test_step_explicit_caps_override_config(
+        self, tmp_workdir: str, llm_client: LLMClient
+    ) -> None:
         """Step-level caps are forwarded (parsed) over the config base."""
         from engine.pipeline import Pipeline
 
@@ -1095,7 +1098,7 @@ class TestAiEvalCapForwarding:
         assert not cap.is_unlimited
 
     def test_partial_step_caps_merge_config_base(
-        self, tmp_workdir: str, llm_client: object
+        self, tmp_workdir: str, llm_client: LLMClient
     ) -> None:
         """Unset caps fall back to the config base, not to unlimited."""
         from engine.pipeline import Pipeline

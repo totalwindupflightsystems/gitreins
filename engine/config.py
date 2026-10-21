@@ -15,6 +15,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
+from typing import Any
 
 from engine import scanner_nice
 from engine.data_protection import DataProtectionPolicy
@@ -45,7 +46,7 @@ class QualityConfig:
     timeout: int = 300
 
     @classmethod
-    def from_dict(cls, value: dict | None) -> "QualityConfig":
+    def from_dict(cls, value: dict[str, Any] | None) -> "QualityConfig":
         value = value if isinstance(value, dict) else {}
         modes = value.get("per_metric_mode", {})
         modes = modes if isinstance(modes, dict) else {}
@@ -58,7 +59,7 @@ class QualityConfig:
             timeout=_coerce_positive_int(value.get("timeout", 300)),
         )
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "enabled": self.enabled,
             "command": self.command,
@@ -83,7 +84,7 @@ class DataProtectionConfig:
     policy: DataProtectionPolicy = field(default_factory=DataProtectionPolicy.default)
 
     @classmethod
-    def from_dict(cls, value: dict | None) -> "DataProtectionConfig":
+    def from_dict(cls, value: dict[str, Any] | None) -> "DataProtectionConfig":
         block = value if isinstance(value, dict) else {}
         return cls(policy=DataProtectionPolicy.from_dict(block))
 
@@ -91,7 +92,7 @@ class DataProtectionConfig:
     def enabled(self) -> bool:
         return self.policy.enabled
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return self.policy.to_dict()
 
 
@@ -171,7 +172,7 @@ class GitReinsDefaults:
 
     # ── Commit review profiles + effort (GR-148) ──
     commit_audit_review_profile: str = "standard"  # quick | standard | deep
-    commit_audit_review_effort: dict = field(default_factory=dict)
+    commit_audit_review_effort: dict[str, int] = field(default_factory=dict)
     """Repo-default effort budget (commit_audit.review_effort in .gitreins
     config). Keys: max_passes, max_llm_calls, max_tokens, time_budget_s,
     max_tool_calls. Per-invocation override (CLI) takes precedence over this;
@@ -219,7 +220,7 @@ class GitReinsDefaults:
     # Metadata
     _source: str = field(default="(built-in defaults)", repr=False)
 
-    def overlay(self, config_dict: dict | None) -> "GitReinsDefaults":
+    def overlay(self, config_dict: dict[str, Any] | None) -> "GitReinsDefaults":
         """Return a new defaults object with config.yaml values overlaid.
 
         Only keys explicitly present in config replace the defaults.
@@ -416,7 +417,7 @@ class GitReinsDefaults:
 
         return result
 
-    def to_config_dict(self) -> dict:
+    def to_config_dict(self) -> dict[str, Any]:
         """Produce a dict suitable for writing to .gitreins/config.yaml."""
         return {
             "model": self.model,
@@ -501,19 +502,19 @@ class GitReinsDefaults:
 # the default, never crash config loading (QA-GITREINS-POC-6 posture).
 
 
-def resolution_cfg(defaults: dict) -> dict:
+def resolution_cfg(defaults: dict[str, Any]) -> dict[str, Any]:
     """The `resolution:` block of a raw config dict, tolerating wrong types."""
     block = defaults.get("resolution", {})
     return block if isinstance(block, dict) else {}
 
 
-def resolution_bands(defaults: dict) -> dict:
+def resolution_bands(defaults: dict[str, Any]) -> dict[str, Any]:
     """The `resolution.bands:` mapping, tolerating a scalar/absent parent."""
     bands = resolution_cfg(defaults).get("bands", {})
     return bands if isinstance(bands, dict) else {}
 
 
-def _resolution_enabled(defaults: dict, surface: str) -> bool:
+def _resolution_enabled(defaults: dict[str, Any], surface: str) -> bool:
     """Per-surface enable flag; only an explicit `true` turns a surface on."""
     enabled = resolution_cfg(defaults).get("enabled", {})
     if not isinstance(enabled, dict):
@@ -521,7 +522,7 @@ def _resolution_enabled(defaults: dict, surface: str) -> bool:
     return enabled.get(surface) is True
 
 
-def _resolution_excludes(defaults: dict) -> tuple[str, ...]:
+def _resolution_excludes(defaults: dict[str, Any]) -> tuple[str, ...]:
     """The egress exclusion patterns, as a clean tuple of non-empty strings."""
     patterns = resolution_cfg(defaults).get("egress_exclude", [])
     if not isinstance(patterns, list):
@@ -529,14 +530,14 @@ def _resolution_excludes(defaults: dict) -> tuple[str, ...]:
     return tuple(str(p) for p in patterns if str(p).strip())
 
 
-def _resolution_tokens_max(defaults: dict, fallback: int) -> int:
+def _resolution_tokens_max(defaults: dict[str, Any], fallback: int) -> int:
     """``tokens_max`` accepts bare ints or '8k'-style strings (like max_input_tokens)."""
     value = resolution_cfg(defaults).get("tokens_max")
     coerced = _coerce_tokens(value) if value is not None else fallback
     return coerced if coerced > 0 else fallback
 
 
-def _guards_value(config_dict: dict, key: str) -> object:
+def _guards_value(config_dict: dict[str, Any], key: str) -> object:
     """One value out of the ``guards:`` block, tolerating a scalar/absent block.
 
     Config from other users is data, not schema (QA-GITREINS-POC-6 posture):
@@ -548,7 +549,9 @@ def _guards_value(config_dict: dict, key: str) -> object:
     return guards.get(key)
 
 
-def _worktree_fleet_value(config_dict: dict, defaults: dict, key: str, fallback: object) -> object:
+def _worktree_fleet_value(
+    config_dict: dict[str, Any], defaults: dict[str, Any], key: str, fallback: object
+) -> object:
     """Resolve a fleet option from the documented and legacy config shapes."""
     fleet = config_dict.get("worktree_fleet", {})
     if not isinstance(fleet, dict):
@@ -644,7 +647,7 @@ def load_defaults(workdir: str | None = None) -> GitReinsDefaults:
     return base
 
 
-def load_raw_config(workdir: str | None = None) -> dict:
+def load_raw_config(workdir: str | None = None) -> dict[str, Any]:
     """Load .gitreins/config.yaml as a raw dict. Returns {} if not found."""
     if not workdir:
         return {}
@@ -712,15 +715,16 @@ def check_for_update(workdir: str | None = None, force: bool = False) -> str | N
 # ── Internal helpers ──────────────────────────────────────────
 
 
-def _read_cache() -> dict:
+def _read_cache() -> dict[str, Any]:
     try:
         with open(UPDATE_CACHE_FILE) as f:
-            return json.load(f)
+            data: dict[str, Any] = json.load(f)
+            return data
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
 
 
-def _write_cache(data: dict) -> None:
+def _write_cache(data: dict[str, Any]) -> None:
     try:
         os.makedirs(UPDATE_CACHE_DIR, exist_ok=True)
         with open(UPDATE_CACHE_FILE, "w") as f:
@@ -736,7 +740,8 @@ def _fetch_latest_version() -> str | None:
     try:
         resp = requests.get("https://pypi.org/pypi/gitreins/json", timeout=15)
         resp.raise_for_status()
-        return resp.json()["info"]["version"]
+        version: str = resp.json()["info"]["version"]
+        return version
     except Exception:
         logger.debug("Failed to fetch latest version from PyPI", exc_info=True)
         return None
