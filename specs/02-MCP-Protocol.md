@@ -995,6 +995,7 @@ Parsing is lenient: missing components are treated as unlimited. Token suffixes 
 |------|------|-----------|-----------------|
 | `-32600` | Invalid Request | `jsonrpc` field missing or not `"2.0"` | `"Invalid Request: jsonrpc field must be '2.0'"` |
 | `-32601` | Method Not Found | Unknown `method` or unknown `tool` name | `"Unknown method: foo"` / `"Unknown tool: foo"` |
+| `-32602` | Invalid Params | `tools/call` arguments that cannot bind to the tool's parameters — missing or unexpected arguments, a non-object `arguments` value, or an argument not bindable by the handler's signature. The message names the tool and the offending arguments (never the Python signature); `data` carries `{"tool": "<name>"}` (DF-GITREINS-POC-92) | `"tool 'task.complete' validation failed: missing required argument(s): id"` |
 | `-32000` | Server Error | Unhandled exception in handler | `"<exception message>"` (sanitized) |
 
 ### 11.2 Domain Errors (in tool result text)
