@@ -410,9 +410,10 @@ class JudgeResult:
         # Legacy verdict items
         if self.verdict:
             lines.append(f"\nTier 2 (Agentic Evaluator): {self.verdict.verdict}")
+            from engine.evaluator import item_glyph
+
             for item in self.verdict.items:
-                status = "✓" if item.status == "PASS" else "✗"
-                lines.append(f"  {status} {item.criterion}: {item.detail}")
+                lines.append(f"  {item_glyph(item.status)} {item.criterion}: {item.detail}")
 
         if self.quality_snapshot and not self.pipeline_result.get("stages"):
             from engine.quality_metrics import format_quality_snapshot

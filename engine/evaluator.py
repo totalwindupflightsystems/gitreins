@@ -369,13 +369,28 @@ EVALUATOR_TOOLS = [
 @dataclass
 class VerdictItem:
     criterion: str
-    status: str  # "PASS" | "FAIL"
+    status: str  # "PASS" | "FAIL" | "UNVERIFIED"
     detail: str
     # JEVRES-004 per-criterion attribution (spec §4 row 4). Both default
     # to None so every verdict produced before the pre-screen existed — and
     # every degraded (ABSTAIN) run — serializes exactly as before.
     resolution_probability: float | None = None
     cited_path: str | None = None
+
+
+def item_glyph(status: str) -> str:
+    """The one vocabulary for rendering a criterion status.
+
+    PASS → ✓, FAIL → ✗, anything else (UNVERIFIED, or an unknown value from a
+    model) → "—", because "not examined" and "false" are different claims and
+    a renderer that prints ✗ for both manufactures a finding nobody made.
+    """
+    s = (status or "").upper()
+    if s == "PASS":
+        return "✓"
+    if s == "FAIL":
+        return "✗"
+    return "—"
 
 
 @dataclass
@@ -1414,11 +1429,20 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                     )
                 )
             else:
+                # A criterion the run never reached is NOT a criterion that
+                # failed. Reporting it as FAIL is a verdict that lies about
+                # work nobody did — it prints ✗ next to a claim that was never
+                # examined (measured: DF-CRIER-461 run 68649f1e, where
+                # criterion 2 rendered ✗ purely because the 75m cap fired).
+                # UNVERIFIED is its own status so every renderer can say
+                # "not examined" instead of "false". It still fails closed:
+                # `complete` below requires every item to be PASS, so a
+                # partial verdict stays INCOMPLETE either way.
                 items.append(
                     VerdictItem(
                         criterion=criterion,
-                        status="FAIL",
-                        detail="Not verified — evaluation terminated before this criterion was checked",
+                        status="UNVERIFIED",
+                        detail="Not examined — evaluation ended before this criterion was reached (no judgement was made about it)",
                     )
                 )
         if not has_any:

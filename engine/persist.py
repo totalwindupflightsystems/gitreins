@@ -68,6 +68,7 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 
 from engine import usage
+from engine.evaluator import item_glyph
 from engine.judge import JudgeResult
 from engine.repo_paths import WorktreeResolutionError, resolve_worktree_identity
 from engine.resolution import ResolutionVerdict
@@ -582,13 +583,13 @@ class VerdictPersister:
             lines.append("")
             for item in items:
                 if isinstance(item, dict):
-                    status = "✓" if item.get("status") == "PASS" else "✗"
+                    status = item_glyph(item.get("status"))
                     lines.append(f"- {status} **{item.get('criterion', '?')}**")
                     detail = item.get("detail", "")
                     if detail:
                         lines.append(f"  - {detail}")
                 else:
-                    status = "✓" if getattr(item, "status", None) == "PASS" else "✗"
+                    status = item_glyph(getattr(item, "status", None))
                     criterion = getattr(item, "criterion", str(item))
                     detail = getattr(item, "detail", "")
                     lines.append(f"- {status} **{criterion}**")
@@ -1278,12 +1279,14 @@ def build_report(workdir: str, n: int = 10) -> str:
         items = entry.get("items", [])
         criteria_str = ""
         if items:
+            from engine.evaluator import item_glyph
+
             item_statuses = []
             for item in items:
                 if isinstance(item, dict):
-                    s = "✓" if item.get("status") == "PASS" else "✗"
+                    s = item_glyph(item.get("status"))
                 else:
-                    s = "✓" if getattr(item, "status", None) == "PASS" else "✗"
+                    s = item_glyph(getattr(item, "status", None))
                 item_statuses.append(s)
             criteria_str = f" [{''.join(item_statuses)}]"
 
