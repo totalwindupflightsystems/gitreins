@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from collections.abc import Iterable
 
 import pytest
 
@@ -23,6 +24,7 @@ from engine.worktree_manager import (
     STALE_AFTER_SECONDS,
     WorktreeError,
     WorktreeManager,
+    WorktreeRecord,
     WorktreeValidationError,
     validate_task_id,
 )
@@ -240,7 +242,7 @@ class FakeClock:
 
 
 @pytest.fixture
-def wt_repo(tmp_path: Path) -> object:
+def wt_repo(tmp_path: Path) -> Path:
     """A real git repo with a canonical board, ready for worktree creation."""
     main = tmp_path / "main"
     main.mkdir()
@@ -294,7 +296,7 @@ def test_validate_task_id_accepts_reasonable_ids() -> None:
 # ── create / layout / branch / registry ──────────────────────────────────
 
 
-def test_create_builds_layout_branch_and_registry(wt_repo: str) -> None:
+def test_create_builds_layout_branch_and_registry(wt_repo: Path) -> None:
     clock = FakeClock()
     manager = WorktreeManager(wt_repo, clock=clock)
     record, created = manager.create("GR-1", brief_path="/brief.md", tick="t-9")
@@ -311,7 +313,7 @@ def test_create_builds_layout_branch_and_registry(wt_repo: str) -> None:
     assert record.branch_point  # recorded for merged-vs-idle semantics
 
 
-def test_create_is_idempotent_when_registry_and_git_agree(wt_repo: str) -> None:
+def test_create_is_idempotent_when_registry_and_git_agree(wt_repo: Path) -> None:
     manager = WorktreeManager(wt_repo)
     first, created_first = manager.create("GR-2")
     second, created_second = manager.create("GR-2", brief_path="/new-brief.md")
@@ -321,7 +323,7 @@ def test_create_is_idempotent_when_registry_and_git_agree(wt_repo: str) -> None:
     assert second.brief_path == "/new-brief.md"  # reuse refreshes the brief path
 
 
-def test_registry_lives_in_main_checkout_and_survives_restart(wt_repo: str) -> None:
+def test_registry_lives_in_main_checkout_and_survives_restart(wt_repo: Path) -> None:
     manager = WorktreeManager(wt_repo)
     manager.create("GR-3")
     registry = wt_repo / ".gitreins" / "worktrees.json"
@@ -333,7 +335,7 @@ def test_registry_lives_in_main_checkout_and_survives_restart(wt_repo: str) -> N
     assert [r.task_id for r in records] == ["GR-3"]
 
 
-def test_registry_shared_from_linked_worktree(wt_repo: str, tmp_path: Path) -> None:
+def test_registry_shared_from_linked_worktree(wt_repo: Path, tmp_path: Path) -> None:
     manager = WorktreeManager(wt_repo)
     manager.create("GR-4")
     linked = tmp_path / "linked"
@@ -347,7 +349,7 @@ def test_registry_shared_from_linked_worktree(wt_repo: str, tmp_path: Path) -> N
     assert [r.task_id for r in records] == ["GR-4"]
 
 
-def test_create_rejects_pre_existing_branch_outside_registry(wt_repo: str) -> None:
+def test_create_rejects_pre_existing_branch_outside_registry(wt_repo: Path) -> None:
     subprocess.run(
         ["git", "-C", str(wt_repo), "branch", "gitreins/task/GR-5"],
         check=True,
@@ -357,7 +359,7 @@ def test_create_rejects_pre_existing_branch_outside_registry(wt_repo: str) -> No
         manager.create("GR-5")
 
 
-def test_create_rejects_occupied_path_and_cross_task_collision(wt_repo: str) -> None:
+def test_create_rejects_occupied_path_and_cross_task_collision(wt_repo: Path) -> None:
     manager = WorktreeManager(wt_repo)
     manager.create("GR-6")
     occupied = wt_repo.parent / "main-wt" / "GR-7"
@@ -380,7 +382,7 @@ def test_create_rejects_occupied_path_and_cross_task_collision(wt_repo: str) -> 
         manager.create("GR-7")
 
 
-def test_create_refuses_reuse_when_registry_and_git_disagree_on_branch(wt_repo: str) -> None:
+def test_create_refuses_reuse_when_registry_and_git_disagree_on_branch(wt_repo: Path) -> None:
     manager = WorktreeManager(wt_repo)
     manager.create("GR-8")
     # Simulate drift: someone switched the tree to a foreign branch.
@@ -394,7 +396,7 @@ def test_create_refuses_reuse_when_registry_and_git_disagree_on_branch(wt_repo: 
 # ── reconcile semantics ──────────────────────────────────────────────────
 
 
-def test_reconcile_states_running_merged_orphan(wt_repo: str) -> None:
+def test_reconcile_states_running_merged_orphan(wt_repo: Path) -> None:
     manager = WorktreeManager(wt_repo)
 
     manager.create("WT-RUN")
@@ -420,7 +422,7 @@ def test_reconcile_states_running_merged_orphan(wt_repo: str) -> None:
     assert records["WT-ORPHAN"].notes  # classified with an explanatory note
 
 
-def test_reconcile_marks_stale_after_24h_without_heartbeat(wt_repo: str) -> None:
+def test_reconcile_marks_stale_after_24h_without_heartbeat(wt_repo: Path) -> None:
     clock = FakeClock()
     manager = WorktreeManager(wt_repo, clock=clock)
     manager.create("WT-STALE")
@@ -434,7 +436,7 @@ def test_reconcile_marks_stale_after_24h_without_heartbeat(wt_repo: str) -> None
     assert records["WT-STALE"].state == "running"
 
 
-def test_mark_phase_records_guarding_and_judging(wt_repo: str) -> None:
+def test_mark_phase_records_guarding_and_judging(wt_repo: Path) -> None:
     manager = WorktreeManager(wt_repo)
     manager.create("WT-PHASE")
     manager.mark_phase("WT-PHASE", "guarding")
@@ -446,7 +448,7 @@ def test_mark_phase_records_guarding_and_judging(wt_repo: str) -> None:
         manager.mark_phase("WT-PHASE", "bogus")
 
 
-def test_reconcile_survives_torn_registry_entries(wt_repo: str) -> None:
+def test_reconcile_survives_torn_registry_entries(wt_repo: Path) -> None:
     manager = WorktreeManager(wt_repo)
     manager.create("WT-TORN")
     registry = wt_repo / ".gitreins" / "worktrees.json"
@@ -462,7 +464,7 @@ def test_reconcile_survives_torn_registry_entries(wt_repo: str) -> None:
 # ── cleanup ──────────────────────────────────────────────────────────────
 
 
-def test_clean_reaps_merged_immediately_but_keeps_live_work(wt_repo: str) -> None:
+def test_clean_reaps_merged_immediately_but_keeps_live_work(wt_repo: Path) -> None:
     manager = WorktreeManager(wt_repo)
     manager.create("WT-LIVE")
     manager.create("WT-DONE")
@@ -484,7 +486,7 @@ def test_clean_reaps_merged_immediately_but_keeps_live_work(wt_repo: str) -> Non
     assert manager._load_registry().keys() == {"WT-LIVE"}
 
 
-def test_clean_never_reaps_stale_or_orphan_without_confirmation(wt_repo: str) -> None:
+def test_clean_never_reaps_stale_or_orphan_without_confirmation(wt_repo: Path) -> None:
     clock = FakeClock()
     manager = WorktreeManager(wt_repo, clock=clock)
     manager.create("WT-OLD")
@@ -508,7 +510,7 @@ def test_clean_never_reaps_stale_or_orphan_without_confirmation(wt_repo: str) ->
     assert not _branch_exists(wt_repo, "gitreins/task/WT-GONE")
 
 
-def test_confirmed_clean_keeps_unmerged_branch_of_stale_work(wt_repo: str) -> None:
+def test_confirmed_clean_keeps_unmerged_branch_of_stale_work(wt_repo: Path) -> None:
     """A stale tree with real unmerged work loses the tree, never the branch."""
     clock = FakeClock()
     manager = WorktreeManager(wt_repo, clock=clock)
@@ -528,7 +530,7 @@ def test_confirmed_clean_keeps_unmerged_branch_of_stale_work(wt_repo: str) -> No
 # ── DF-GITREINS-POC-50 — failed lanes are reapable, never silently reusable ──
 
 
-def test_clean_reaps_failed_lane_tree_and_branch(wt_repo: str) -> None:
+def test_clean_reaps_failed_lane_tree_and_branch(wt_repo: Path) -> None:
     """A failed lane is terminal, so plain clean reaps it like a merged one."""
     manager = WorktreeManager(wt_repo)
     record, _created = manager.create("WT-FAIL")
@@ -545,7 +547,7 @@ def test_clean_reaps_failed_lane_tree_and_branch(wt_repo: str) -> None:
     assert manager._load_registry() == {}
 
 
-def test_clean_reaps_failed_tree_but_keeps_its_unmerged_branch(wt_repo: str) -> None:
+def test_clean_reaps_failed_tree_but_keeps_its_unmerged_branch(wt_repo: Path) -> None:
     """Removal never destroys committed work the branch still carries."""
     manager = WorktreeManager(wt_repo)
     record, _created = manager.create("WT-FAIL-WIP")
@@ -561,7 +563,7 @@ def test_clean_reaps_failed_tree_but_keeps_its_unmerged_branch(wt_repo: str) -> 
     assert manager._load_registry() == {}
 
 
-def test_clean_keeps_failed_tree_holding_uncommitted_files_and_says_why(wt_repo: str) -> None:
+def test_clean_keeps_failed_tree_holding_uncommitted_files_and_says_why(wt_repo: Path) -> None:
     """The uncommitted-file doctrine: reap the tree, never its unread dirt."""
     manager = WorktreeManager(wt_repo)
     record, _created = manager.create("WT-FAIL-DIRTY")
@@ -587,7 +589,7 @@ def test_clean_keeps_failed_tree_holding_uncommitted_files_and_says_why(wt_repo:
     assert manager.clean()["removed"] == ["WT-FAIL-DIRTY"]
 
 
-def test_create_refuses_reuse_of_failed_lane_and_names_the_fix(wt_repo: str) -> None:
+def test_create_refuses_reuse_of_failed_lane_and_names_the_fix(wt_repo: Path) -> None:
     """A failed lane's tree sits at a stale HEAD — never reuse it silently."""
     manager = WorktreeManager(wt_repo)
     manager.create("WT-RERUN")
@@ -608,7 +610,7 @@ def test_create_refuses_reuse_of_failed_lane_and_names_the_fix(wt_repo: str) -> 
     assert created is True
 
 
-def test_failed_lane_aged_past_stale_is_refused_with_the_confirm_hint(wt_repo: str) -> None:
+def test_failed_lane_aged_past_stale_is_refused_with_the_confirm_hint(wt_repo: Path) -> None:
     """Reconcile rewrites an old failure to `stale`; lane_phase keeps the memory.
 
     The hint must still be the command that resolves it: plain clean protects
@@ -634,7 +636,7 @@ def test_failed_lane_aged_past_stale_is_refused_with_the_confirm_hint(wt_repo: s
     assert manager.clean(confirm_stale_orphan=True)["removed"] == ["WT-AGED"]
 
 
-def test_reconcile_hint_names_the_confirm_flag_for_an_orphaned_failed_lane(wt_repo: str) -> None:
+def test_reconcile_hint_names_the_confirm_flag_for_an_orphaned_failed_lane(wt_repo: Path) -> None:
     """DF-GITREINS-POC-50 AC4: the hint fits the problem class (orphan → flag)."""
     manager = WorktreeManager(wt_repo)
     record, _created = manager.create("WT-ORPHANED")
@@ -653,7 +655,7 @@ def test_reconcile_hint_names_the_confirm_flag_for_an_orphaned_failed_lane(wt_re
     assert manager.clean(confirm_stale_orphan=True)["removed"] == ["WT-ORPHANED"]
 
 
-def test_reconcile_hint_escalates_when_clean_cannot_reap_the_entry(wt_repo: str) -> None:
+def test_reconcile_hint_escalates_when_clean_cannot_reap_the_entry(wt_repo: Path) -> None:
     """A live entry on the wrong branch is not reapable by clean, and says so.
 
     The old hint pointed every mismatch at plain `clean`, the command that
@@ -674,7 +676,7 @@ def test_reconcile_hint_escalates_when_clean_cannot_reap_the_entry(wt_repo: str)
     assert manager.clean()["kept"] == [("WT-DRIFTED", "running")]
 
 
-def test_failed_lane_aged_past_stale_but_merged_is_reaped_by_plain_clean(wt_repo: str) -> None:
+def test_failed_lane_aged_past_stale_but_merged_is_reaped_by_plain_clean(wt_repo: Path) -> None:
     """When the branch reached HEAD, plain clean IS the fix and the hint says so."""
     clock = FakeClock()
     manager = WorktreeManager(wt_repo, clock=clock)
@@ -707,7 +709,7 @@ def test_failed_lane_aged_past_stale_but_merged_is_reaped_by_plain_clean(wt_repo
 # ── listing ──────────────────────────────────────────────────────────────
 
 
-def test_list_records_sorted_and_truthful(wt_repo: str) -> None:
+def test_list_records_sorted_and_truthful(wt_repo: Path) -> None:
     clock = FakeClock()
     manager = WorktreeManager(wt_repo)
     manager.create("WT-B")
@@ -722,7 +724,7 @@ def test_list_records_sorted_and_truthful(wt_repo: str) -> None:
 
 
 def test_doctor_still_reports_shared_store_after_lifecycle_wiring(
-    wt_repo: str, tmp_path: Path
+    wt_repo: Path, tmp_path: Path
 ) -> None:
     linked = tmp_path / "linked"
     subprocess.run(
@@ -750,7 +752,7 @@ def test_doctor_still_reports_shared_store_after_lifecycle_wiring(
 # ── CLI surfaces ─────────────────────────────────────────────────────────
 
 
-def _run_cli(*argv: object, cwd: str) -> object:
+def _run_cli(*argv: str, cwd: str | Path) -> subprocess.CompletedProcess[str]:
     env = os.environ.copy()
     env["PYTHONPATH"] = str(CLI_SCRIPT.parents[1])
     return subprocess.run(
@@ -764,7 +766,7 @@ def _run_cli(*argv: object, cwd: str) -> object:
     )
 
 
-def test_cli_task_worktree_creates_reports_and_reuses(wt_repo: str) -> None:
+def test_cli_task_worktree_creates_reports_and_reuses(wt_repo: Path) -> None:
     result = _run_cli("task", "worktree", "CLI-1", cwd=wt_repo)
     assert result.returncode == 0, result.stderr
     tree = wt_repo.parent / "main-wt" / "CLI-1"
@@ -780,14 +782,14 @@ def test_cli_task_worktree_creates_reports_and_reuses(wt_repo: str) -> None:
     assert "✓ Reused worktree" in reuse.stdout
 
 
-def test_cli_task_worktree_rejects_bad_id(wt_repo: str) -> None:
+def test_cli_task_worktree_rejects_bad_id(wt_repo: Path) -> None:
     result = _run_cli("task", "worktree", "../escape", cwd=wt_repo)
     assert result.returncode == 1
     assert "task worktree: failed" in result.stderr
     assert "invalid task id" in result.stderr
 
 
-def test_cli_worktree_list_shows_task_state_age(wt_repo: str) -> None:
+def test_cli_worktree_list_shows_task_state_age(wt_repo: Path) -> None:
     _run_cli("task", "worktree", "CLI-L", cwd=wt_repo)
     result = _run_cli("worktree", "list", cwd=wt_repo)
     assert result.returncode == 0, result.stderr
@@ -801,13 +803,13 @@ def test_cli_worktree_list_shows_task_state_age(wt_repo: str) -> None:
     assert "CLI-L" in empty.stdout
 
 
-def test_cli_worktree_list_empty(wt_repo: str) -> None:
+def test_cli_worktree_list_empty(wt_repo: Path) -> None:
     result = _run_cli("worktree", "list", cwd=wt_repo)
     assert result.returncode == 0, result.stderr
     assert "No worktrees registered." in result.stdout
 
 
-def test_cli_worktree_clean_requires_confirmation_then_reaps(wt_repo: str) -> None:
+def test_cli_worktree_clean_requires_confirmation_then_reaps(wt_repo: Path) -> None:
     _run_cli("task", "worktree", "CLI-M", cwd=wt_repo)
     _run_cli("task", "worktree", "CLI-O", cwd=wt_repo)
     merged_tree = wt_repo.parent / "main-wt" / "CLI-M"
@@ -832,7 +834,7 @@ def test_cli_worktree_clean_requires_confirmation_then_reaps(wt_repo: str) -> No
     assert "Reaped 1 worktree(s): CLI-O" in confirmed.stdout
 
 
-def test_cli_worktree_clean_reaps_failed_lane_without_flags(wt_repo: str) -> None:
+def test_cli_worktree_clean_reaps_failed_lane_without_flags(wt_repo: Path) -> None:
     """DF-GITREINS-POC-50 AC1: plain clean must reap a failed lane."""
     _run_cli("task", "worktree", "CLI-F", cwd=wt_repo)
     WorktreeManager(wt_repo).mark_lane("CLI-F", "failed", exit_code=3, error="lane boom")
@@ -846,7 +848,7 @@ def test_cli_worktree_clean_reaps_failed_lane_without_flags(wt_repo: str) -> Non
     assert not _branch_exists(wt_repo, "gitreins/task/CLI-F")
 
 
-def test_cli_worktree_clean_reports_why_a_failed_tree_was_kept(wt_repo: str) -> None:
+def test_cli_worktree_clean_reports_why_a_failed_tree_was_kept(wt_repo: Path) -> None:
     """A kept failed tree is never a mystery: the reason is printed."""
     _run_cli("task", "worktree", "CLI-FD", cwd=wt_repo)
     WorktreeManager(wt_repo).mark_lane("CLI-FD", "failed", exit_code=3)
@@ -881,7 +883,12 @@ def _write_merge_config(repo: Path) -> None:
 
 
 def _write_merge_verdict(
-    repo: Path, task_id: str, record: object, passed: bool, commit: str, stages: dict | None = None
+    repo: Path,
+    task_id: str,
+    record: WorktreeRecord,
+    passed: bool,
+    commit: str,
+    stages: dict[str, object] | None = None,
 ) -> Path:
     # Judge persistence is rooted at the producing task checkout.  Keep the
     # repo argument for callers that also use it to prepare config, but never
@@ -904,14 +911,16 @@ def _write_merge_verdict(
     return path
 
 
-def _make_task_commit(manager: WorktreeManager, task_id: str, filename: str = "task.txt") -> tuple:
+def _make_task_commit(
+    manager: WorktreeManager, task_id: str, filename: str = "task.txt"
+) -> tuple[WorktreeRecord, Path]:
     record, _ = manager.create(task_id)
     tree = Path(record.path)
     _commit_in(tree, filename, f"{task_id} work")
     return record, tree
 
 
-def test_merge_refuses_without_exact_pass_verdict_and_keeps_worktree(wt_repo: str) -> None:
+def test_merge_refuses_without_exact_pass_verdict_and_keeps_worktree(wt_repo: Path) -> None:
     manager = WorktreeManager(wt_repo)
     record, tree = _make_task_commit(manager, "MERGE-NO-VERDICT")
     before = _git(wt_repo, "rev-parse", "HEAD").stdout.strip()
@@ -923,7 +932,7 @@ def test_merge_refuses_without_exact_pass_verdict_and_keeps_worktree(wt_repo: st
     assert tree.exists() and _branch_exists(wt_repo, record.branch)
 
 
-def test_merge_fail_verdict_is_hold(wt_repo: str) -> None:
+def test_merge_fail_verdict_is_hold(wt_repo: Path) -> None:
     _write_merge_config(wt_repo)
     manager = WorktreeManager(wt_repo)
     record, tree = _make_task_commit(manager, "MERGE-FAIL")
@@ -938,7 +947,7 @@ def test_merge_fail_verdict_is_hold(wt_repo: str) -> None:
     assert tree.exists() and _branch_exists(wt_repo, record.branch)
 
 
-def test_merge_pass_verdict_with_tier1_skips_is_hold(wt_repo: str) -> None:
+def test_merge_pass_verdict_with_tier1_skips_is_hold(wt_repo: Path) -> None:
     """TRUST-001: a PASS whose Tier 1 carries skips cannot merge back.
 
     verdict.json records ``stages.tier1.skipped_steps`` when a substantive gate
@@ -976,7 +985,7 @@ def test_merge_pass_verdict_with_tier1_skips_is_hold(wt_repo: str) -> None:
     assert tree.exists() and _branch_exists(wt_repo, record.branch)
 
 
-def test_merge_pass_fast_forwards_logs_event_and_reaps(wt_repo: str) -> None:
+def test_merge_pass_fast_forwards_logs_event_and_reaps(wt_repo: Path) -> None:
     _write_merge_config(wt_repo)
     manager = WorktreeManager(wt_repo)
     record, tree = _make_task_commit(manager, "MERGE-FAST")
@@ -1030,7 +1039,7 @@ def test_merge_pass_fast_forwards_logs_event_and_reaps(wt_repo: str) -> None:
     assert event["destination_commit"] == source
 
 
-def test_merge_main_moved_rebases_reruns_guard_and_requires_fresh_judge(wt_repo: str) -> bool:
+def test_merge_main_moved_rebases_reruns_guard_and_requires_fresh_judge(wt_repo: Path) -> None:
     _write_merge_config(wt_repo)
     manager = WorktreeManager(wt_repo)
     record, tree = _make_task_commit(manager, "MERGE-REBASE")
@@ -1040,11 +1049,11 @@ def test_merge_main_moved_rebases_reruns_guard_and_requires_fresh_judge(wt_repo:
     main_before = _git(wt_repo, "rev-parse", "HEAD").stdout.strip()
     calls = []
 
-    def guard(path: str) -> bool:
+    def guard(path: Path) -> bool:
         calls.append(("guard", _git(path, "rev-parse", "HEAD").stdout.strip()))
         return True
 
-    def judge(path: str, task_id: str) -> None:
+    def judge(path: Path, task_id: str) -> None:
         calls.append(("judge", _git(path, "rev-parse", "HEAD").stdout.strip()))
         rebased = _git(path, "rev-parse", "HEAD").stdout.strip()
         _write_merge_verdict(wt_repo, task_id, record, True, rebased)
@@ -1060,7 +1069,7 @@ def test_merge_main_moved_rebases_reruns_guard_and_requires_fresh_judge(wt_repo:
     assert not tree.exists() and manager._load_registry() == {}
 
 
-def test_merge_rebase_red_guard_holds_rebased_worktree(wt_repo: str) -> None:
+def test_merge_rebase_red_guard_holds_rebased_worktree(wt_repo: Path) -> None:
     _write_merge_config(wt_repo)
     manager = WorktreeManager(wt_repo)
     record, tree = _make_task_commit(manager, "MERGE-GUARD-RED")
@@ -1077,7 +1086,7 @@ def test_merge_rebase_red_guard_holds_rebased_worktree(wt_repo: str) -> None:
     assert _git(tree, "rev-parse", "HEAD").stdout.strip() != old_source
 
 
-def test_merge_rebase_without_fresh_pass_holds_rebased_worktree(wt_repo: str) -> None:
+def test_merge_rebase_without_fresh_pass_holds_rebased_worktree(wt_repo: Path) -> None:
     _write_merge_config(wt_repo)
     manager = WorktreeManager(wt_repo)
     record, tree = _make_task_commit(manager, "MERGE-FRESH-FAIL")
@@ -1097,7 +1106,7 @@ def test_merge_rebase_without_fresh_pass_holds_rebased_worktree(wt_repo: str) ->
     assert tree.exists() and _branch_exists(wt_repo, record.branch)
 
 
-def test_merge_rebase_conflict_holds_main_and_worktree(wt_repo: str) -> None:
+def test_merge_rebase_conflict_holds_main_and_worktree(wt_repo: Path) -> None:
     _write_merge_config(wt_repo)
     manager = WorktreeManager(wt_repo)
     record, tree = _make_task_commit(manager, "MERGE-CONFLICT", "same.txt")
@@ -1119,7 +1128,7 @@ def test_merge_rebase_conflict_holds_main_and_worktree(wt_repo: str) -> None:
     assert tree.exists() and _branch_exists(wt_repo, record.branch)
 
 
-def test_merge_force_requires_actor_and_logs_override(wt_repo: str) -> None:
+def test_merge_force_requires_actor_and_logs_override(wt_repo: Path) -> None:
     manager = WorktreeManager(wt_repo)
     record, tree = _make_task_commit(manager, "MERGE-FORCE")
     source = _git(tree, "rev-parse", "HEAD").stdout.strip()
@@ -1142,7 +1151,7 @@ def test_merge_force_requires_actor_and_logs_override(wt_repo: str) -> None:
     assert override["reason"] == "emergency"
 
 
-def test_merge_rejects_unknown_and_unsafe_task_ids(wt_repo: str) -> None:
+def test_merge_rejects_unknown_and_unsafe_task_ids(wt_repo: Path) -> None:
     manager = WorktreeManager(wt_repo)
     with pytest.raises(WorktreeError, match="not registered"):
         manager.merge("UNKNOWN")
@@ -1157,7 +1166,7 @@ def test_merge_rejects_unknown_and_unsafe_task_ids(wt_repo: str) -> None:
         manager.merge(record.task_id, force=True, actor="test-actor")
 
 
-def test_cli_worktree_merge_force_is_wired_and_requires_actor(wt_repo: str) -> None:
+def test_cli_worktree_merge_force_is_wired_and_requires_actor(wt_repo: Path) -> None:
     created = _run_cli("task", "worktree", "CLI-MERGE", cwd=wt_repo)
     assert created.returncode == 0, created.stderr
     tree = wt_repo.parent / "main-wt" / "CLI-MERGE"
@@ -1182,7 +1191,7 @@ def test_cli_worktree_merge_force_is_wired_and_requires_actor(wt_repo: str) -> N
     assert not tree.exists()
 
 
-def test_cli_worktree_merge_without_verdict_prints_reference(wt_repo: str) -> None:
+def test_cli_worktree_merge_without_verdict_prints_reference(wt_repo: Path) -> None:
     created = _run_cli("task", "worktree", "CLI-NO-VERDICT", cwd=wt_repo)
     assert created.returncode == 0, created.stderr
     tree = wt_repo.parent / "main-wt" / "CLI-NO-VERDICT"
@@ -1213,7 +1222,7 @@ RUNTIME_ARTIFACTS_IN_MAIN = (
 )
 
 
-def _write_runtime_artifacts(repo: Path, names: object = RUNTIME_ARTIFACTS_IN_MAIN) -> None:
+def _write_runtime_artifacts(repo: Path, names: Iterable[str] = RUNTIME_ARTIFACTS_IN_MAIN) -> None:
     """Drop the runtime files an ordinary GitReins run leaves behind.
 
     Never clobbers an existing file: ``worktrees.json`` is the live registry,
@@ -1235,7 +1244,7 @@ def _porcelain_status(repo: Path) -> str:
     ).stdout
 
 
-def _linked_venv_manager(wt_repo: Path, task_id: str = "VENV-TREE") -> tuple:
+def _linked_venv_manager(wt_repo: Path, task_id: str = "VENV-TREE") -> tuple[WorktreeManager, Path]:
     """A manager whose create() symlinks a shared venv into the task tree.
 
     This is the production shape: ``_link_venv`` points the tree's configured

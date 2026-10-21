@@ -46,6 +46,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import wraps
 from pathlib import Path
+from typing import TypeVar, TypedDict
 
 # Task IDs become path components and branch names.  Keep the shape strict:
 # letters, digits, hyphen, underscore, dot — no separators, no traversal.
@@ -360,11 +361,28 @@ def read_disk_verdict(tree: str | os.PathLike[str]) -> dict | None:
     return data
 
 
-def _exclusive_operation(method: Callable[..., object]) -> Callable[..., object]:
-    """Serialize registry read-modify-write operations across processes."""
+_M = TypeVar("_M", bound="Callable[..., object]")
+
+
+class CleanReport(TypedDict):
+    """Shape of :meth:`WorktreeManager.clean`'s report (documented in its docstring)."""
+
+    removed: list[str]
+    kept: list[tuple[str, str]]
+    branches_deleted: list[str]
+    kept_reasons: dict[str, str]
+
+
+def _exclusive_operation(method: _M) -> _M:
+    """Serialize registry read-modify-write operations across processes.
+
+    Identity-preserving at the type level (a plain ``Callable[..., object]``
+    return would erase every decorated method's signature and cascade
+    not-indexable/not-iterable errors into callers), locking at runtime.
+    """
 
     @wraps(method)
-    def wrapped(self: object, *args: object, **kwargs: object) -> object:
+    def wrapped(self: WorktreeManager, *args: object, **kwargs: object) -> object:
         with self._exclusive_lock():
             return method(self, *args, **kwargs)
 
@@ -1321,7 +1339,7 @@ class WorktreeManager:
         self,
         *,
         confirm_stale_orphan: bool = False,
-    ) -> dict[str, list[str]]:
+    ) -> CleanReport:
         """Reap merged and failed trees immediately; stale/orphan when confirmed.
 
         ``failed`` is terminal — there is no retry path through ``clean`` (a
