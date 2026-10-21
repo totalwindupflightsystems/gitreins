@@ -70,7 +70,7 @@ FAILING_CELL_STATUSES = ("fail", "failed", "error")
 # ── Configuration and path resolution ──────────────────────────
 
 
-def _coerce_max_entries(value: object) -> int:  # JSON-sourced, validated below
+def _coerce_max_entries(value: Any) -> int:  # JSON-sourced, validated below
     """Positive int, or the default for anything unusable."""
     if isinstance(value, bool) or value is None:
         return DEFAULT_QA_LEDGER_MAX_ENTRIES
@@ -151,7 +151,7 @@ def _head_sha(workdir: str) -> str:
     return result.stdout.strip() if result.returncode == 0 else ""
 
 
-def _exit_code(value: object) -> int:  # JSON-sourced, coerced below
+def _exit_code(value: Any) -> int:  # JSON-sourced, coerced below
     if isinstance(value, bool) or value is None:
         return 1
     try:
@@ -452,7 +452,7 @@ def append_row(workdir: str, row: dict[str, Any]) -> str | None:
             f"qa ledger: rotation evicted {evicted} row(s) (max_entries={settings['max_entries']})",
             file=sys.stderr,
         )
-    return path
+    return str(path)
 
 
 def list_rows(

@@ -66,6 +66,7 @@ import subprocess
 import tempfile
 from collections.abc import Callable
 from datetime import datetime, timezone
+from typing import Any, cast
 
 from engine import usage
 from engine.judge import JudgeResult
@@ -103,7 +104,7 @@ DEFAULT_HISTORY_CONFIG = {
 }
 
 
-def load_history_config(workdir: str) -> dict:
+def load_history_config(workdir: str) -> dict[str, Any]:
     """Load history section from .gitreins/config.yaml, merged with defaults."""
     config = {}
     config_path = os.path.join(workdir, ".gitreins", "config.yaml")
@@ -211,20 +212,20 @@ class VerdictPersister:
     def history_dir(self) -> str:
         path = self.config.get("path", ".gitreins/history")
         if os.path.isabs(path):
-            return path
+            return str(path)
         return os.path.join(self.workdir, path)
 
     @property
     def storage_mode(self) -> str:
-        return self.config.get("storage", "git")
+        return str(self.config.get("storage", "git"))
 
     # ── Save ────────────────────────────────────────────────
 
     def persist(
         self,
         task_id: str,
-        verdict_data: dict,
-        collect_evidence: Callable[[str], dict] | None = None,
+        verdict_data: dict[str, Any],
+        collect_evidence: Callable[[str], dict[str, Any]] | None = None,
         *,
         evaluated_at: datetime | None = None,
     ) -> str:
@@ -323,7 +324,7 @@ class VerdictPersister:
 
     # ── List / Report ────────────────────────────────────────
 
-    def list_verdicts(self, n: int = 20, task_id: str | None = None) -> list[dict]:
+    def list_verdicts(self, n: int = 20, task_id: str | None = None) -> list[dict[str, Any]]:
         """Return recent verdicts as a list of dicts, newest first.
 
         Local filesystem entries take precedence. When the local history
@@ -345,7 +346,7 @@ class VerdictPersister:
             return self._list_branch_verdicts(n=n, task_id=task_id)
         return []
 
-    def _list_local_verdicts(self, n: int = 20, task_id: str | None = None) -> list[dict]:
+    def _list_local_verdicts(self, n: int = 20, task_id: str | None = None) -> list[dict[str, Any]]:
         """Read verdict entries from the local filesystem (original behavior)."""
         if not os.path.isdir(self.history_dir):
             return []
@@ -464,7 +465,7 @@ class VerdictPersister:
         # matches the local reader's newest-first (date desc, hash desc).
         return [(path, holder[path]) for path in sorted(holder, reverse=True)]
 
-    def _read_branch_verdict(self, ref: str, path: str) -> dict | None:
+    def _read_branch_verdict(self, ref: str, path: str) -> dict[str, Any] | None:
         """Parse one verdict.json off *ref*; None when it cannot be read."""
         try:
             show = subprocess.run(
@@ -480,12 +481,14 @@ class VerdictPersister:
         if show.returncode != 0:
             return None
         try:
-            return json.loads(show.stdout)
+            return cast(dict[str, Any], json.loads(show.stdout))
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             logger.warning("Failed to parse verdict %s from %s (non-fatal): %s", path, ref, e)
             return None
 
-    def _list_branch_verdicts(self, n: int = 20, task_id: str | None = None) -> list[dict]:
+    def _list_branch_verdicts(
+        self, n: int = 20, task_id: str | None = None
+    ) -> list[dict[str, Any]]:
         """Read verdict entries committed to the history ref(s).
 
         Enumerates verdict.json files under the history path on each history
@@ -551,7 +554,7 @@ class VerdictPersister:
 
     # ── Internal ─────────────────────────────────────────────
 
-    def _build_summary(self, task_id: str, verdict_data: dict) -> str:
+    def _build_summary(self, task_id: str, verdict_data: dict[str, Any]) -> str:
         # Resolution records are not graded tasks: they have no pass/fail, no
         # criteria and no pipeline stages, so the judge template would print a
         # fabricated "✗ FAIL" for a band that simply says UNRESOLVED.
@@ -618,7 +621,7 @@ class VerdictPersister:
 
         return "\n".join(lines)
 
-    def _build_resolution_summary(self, task_id: str, verdict_data: dict) -> str:
+    def _build_resolution_summary(self, task_id: str, verdict_data: dict[str, Any]) -> str:
         """Summary for a resolution record — band, question, bundle, tokens.
 
         Deliberately NOT the judge template: a resolution record has no
@@ -797,7 +800,7 @@ class VerdictPersister:
             logger.warning("Git operation failed (non-fatal): %s", e)
             return "dry-run"
 
-    def _history_subject(self, task_id: str, verdict_data: dict) -> str:
+    def _history_subject(self, task_id: str, verdict_data: dict[str, Any]) -> str:
         """Commit subject for one history entry, judge or resolution record.
 
         The ``gitreins`` branch's log is part of the audit trail, so a
@@ -875,7 +878,7 @@ class VerdictPersister:
             return None
         return result.stdout.strip() or None
 
-    def _git(self, args: list[str], env: dict | None = None) -> str:
+    def _git(self, args: list[str], env: dict[str, Any] | None = None) -> str:
         """Run a git plumbing command in the repo and return stripped stdout.
 
         *env* replaces the plumbing environment wholesale — the tree-building
@@ -902,7 +905,7 @@ class VerdictPersister:
         return result.stdout.strip()
 
     @staticmethod
-    def _git_env() -> dict:
+    def _git_env() -> dict[str, Any]:
         """Env for plumbing git calls; identity only when the user has none.
 
         setdefault on a private copy — an existing user/global identity is
@@ -950,7 +953,7 @@ class VerdictPersister:
 # ── Shared verdict persistence (CLI + MCP) ─────────────────────
 
 
-def _verdict_item_dict(item: object) -> dict:
+def _verdict_item_dict(item: Any) -> dict[str, Any]:
     """One verdict item as persisted — attribution keys only when present.
 
     The three-key shape is today's contract; ``resolution_probability`` and
@@ -968,7 +971,7 @@ def _verdict_item_dict(item: object) -> dict:
     return d
 
 
-def build_verdict_data(workdir: str, task: Task, result: JudgeResult) -> dict:
+def build_verdict_data(workdir: str, task: Task, result: JudgeResult) -> dict[str, Any]:
     """Build the verdict payload persisted for an evaluation.
 
     Behaviour moved verbatim from the CLI's historical ``_persist_result``:
@@ -1050,8 +1053,8 @@ def persist_evaluation(
     task: Task,
     result: JudgeResult,
     *,
-    extra: dict | None = None,
-    collect_evidence: Callable[[str], dict] | None = None,
+    extra: dict[str, Any] | None = None,
+    collect_evidence: Callable[[str], dict[str, Any]] | None = None,
 ) -> str:
     """Persist one evaluation verdict through the shared persistence path.
 
@@ -1113,7 +1116,7 @@ def _is_decision(verdict: ResolutionVerdict) -> bool:
     return getattr(verdict, "abstain_reason", None) is None
 
 
-def build_resolution_record(verdict: ResolutionVerdict, *, surface: str) -> dict:
+def build_resolution_record(verdict: ResolutionVerdict, *, surface: str) -> dict[str, Any]:
     """The persisted payload for one resolution-gate verdict.
 
     A resolution record is NOT a task verdict: no ``passed`` (the gate returns a
@@ -1303,14 +1306,15 @@ def build_report(workdir: str, n: int = 10) -> str:
     return "\n".join(lines)
 
 
-def _resolution_line(entry: dict) -> str:
+def _resolution_line(entry: dict[str, Any]) -> str:
     """One report line for a resolution record: band, probability, date, source.
 
     Reads only what the record itself carries (``band``/``probability`` →
     fallback to the nested engine verdict) so a record written by an older or
     partial writer still renders something true instead of an exception.
     """
-    payload = entry.get("verdict") if isinstance(entry.get("verdict"), dict) else {}
+    raw_verdict: Any = entry.get("verdict")
+    payload: dict[str, Any] = raw_verdict if isinstance(raw_verdict, dict) else {}
     band = entry.get("band") or payload.get("verdict") or "RESOLUTION"
     probability = entry.get("probability")
     if probability is None:

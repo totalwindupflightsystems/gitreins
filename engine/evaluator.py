@@ -25,6 +25,7 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass, field
+from typing import Any
 
 from engine import command_hygiene
 from engine.eval_cap import EvalCap, _fmt_tokens, eval_cap_from_config, parse_eval_cap
@@ -387,7 +388,7 @@ class Verdict:
     # criterion probabilities, missing kinds, evidence quality, and the
     # engine's own verdict incl. bundle manifest). None = no pre-screen ran
     # (disabled or ABSTAIN) — the degraded path never fabricates one.
-    prescreen: dict | None = None
+    prescreen: dict[str, Any] | None = None
 
 
 # DF-GITREINS-POC-14: the summary prefix the evaluator writes when it cannot
@@ -477,11 +478,11 @@ class AgenticEvaluator:
         # evaluate() from the task dict. Initialize to None so _system_prompt()
         # is always safe to call (2026-08-08).
         self._system_prompt_override: str | None = None
-        self._task_index: dict[str, dict] = {}
+        self._task_index: dict[str, dict[str, Any]] = {}
         self._files_read: set[str] = set()
         self._commands_run: set[str] = set()
         self._searches_done: set[str] = set()
-        self._tier1_diagnostics: list[dict] = []
+        self._tier1_diagnostics: list[dict[str, Any]] = []
         self._allowed_files: set[str] | None = None  # None = full scope, set = restricted
         # DF-CRIER-258: pgid of the last run_command's process group, for the
         # belt-and-braces reap in evaluate()'s finally (see there).
@@ -554,7 +555,7 @@ class AgenticEvaluator:
         except Exception:
             return False
 
-    def _build_code_context(self, config: dict) -> str:
+    def _build_code_context(self, config: dict[str, Any]) -> str:
         """Build a compact code-context block to pre-load into the evaluator prompt.
 
         Reads test_mode from config:
@@ -853,7 +854,7 @@ class AgenticEvaluator:
         clean = path.lstrip("./").rstrip("/")
         return clean in self._allowed_files
 
-    def _load_config(self) -> dict:
+    def _load_config(self) -> dict[str, Any]:
         """Load .gitreins/config.yaml if present."""
         import yaml
 
@@ -866,7 +867,9 @@ class AgenticEvaluator:
                 pass
         return {}
 
-    def _estimate_context_tokens(self, messages: list[dict], cumulative_prompt_tok: int = 0) -> int:
+    def _estimate_context_tokens(
+        self, messages: list[dict[str, Any]], cumulative_prompt_tok: int = 0
+    ) -> int:
         """Estimate total context tokens in the message array.
 
         Uses cumulative LLM-reported prompt tokens as primary source.
@@ -883,7 +886,7 @@ class AgenticEvaluator:
 
     def _build_compacted_prompt(
         self,
-        task: dict,
+        task: dict[str, Any],
         code_context: str,
         criteria_total: int,
     ) -> str:
@@ -984,12 +987,12 @@ class AgenticEvaluator:
 
     def _compact_context(
         self,
-        messages: list[dict],
-        task: dict,
+        messages: list[dict[str, Any]],
+        task: dict[str, Any],
         code_context: str,
         criteria_total: int,
         compaction_count: int,
-    ) -> tuple[list[dict], int]:
+    ) -> tuple[list[dict[str, Any]], int]:
         """Compact the conversation: save progress, rebuild clean context.
 
         Returns (new_messages, new_compaction_count).
@@ -1009,7 +1012,7 @@ class AgenticEvaluator:
         )
 
         # Fresh conversation: system prompt + compacted task
-        new_messages: list[dict] = [
+        new_messages: list[dict[str, Any]] = [
             {
                 "role": "system",
                 "content": self._system_prompt(),
@@ -1019,7 +1022,7 @@ class AgenticEvaluator:
 
         return new_messages, compaction_count + 1
 
-    def evaluate(self, task: dict) -> Verdict:
+    def evaluate(self, task: dict[str, Any]) -> Verdict:
         """Run the agentic loop against a task and return a verdict.
 
         Args:
@@ -1049,7 +1052,7 @@ class AgenticEvaluator:
                         pgid,
                     )
 
-    def _evaluate_loop(self, task: dict) -> Verdict:
+    def _evaluate_loop(self, task: dict[str, Any]) -> Verdict:
         """The agentic loop proper — evaluate() wraps this with the reap."""
         # Reset state
         self._sandbox.clear()
@@ -1150,7 +1153,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                     code_context += f"\n\n... [code context truncated: {ctx_est} → {max_ctx_tokens} estimated tokens]"
             task_prompt += f"\n\n{code_context}"
 
-        messages: list[dict] = [
+        messages: list[dict[str, Any]] = [
             {
                 "role": "system",
                 "content": self._system_prompt(),
@@ -1234,13 +1237,12 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                     with contextlib.suppress(Exception):
                         import requests
 
-                        if (
-                            isinstance(e, requests.HTTPError)
-                            and getattr(e, "response", None) is not None
-                        ):
-                            status = e.response.status_code
-                            if 400 <= status < 500 and status != 429:
-                                is_context_error = True
+                        if isinstance(e, requests.HTTPError):
+                            http_resp = e.response
+                            if http_resp is not None:
+                                status = http_resp.status_code
+                                if 400 <= status < 500 and status != 429:
+                                    is_context_error = True
                 except Exception:
                     pass
 
@@ -1325,7 +1327,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 )
 
             # Add assistant message with tool calls
-            assistant_msg: dict = {
+            assistant_msg: dict[str, Any] = {
                 "role": "assistant",
                 "content": response.content,
                 "tool_calls": [
@@ -1439,7 +1441,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             ),
         )
 
-    def _execute_tool_with_dedup(self, tc: ToolCall) -> tuple[dict, bool]:
+    def _execute_tool_with_dedup(self, tc: ToolCall) -> tuple[dict[str, Any], bool]:
         """Execute a tool and return (result, was_duplicate).
 
         Time-budget check: before running an expensive tool
@@ -1506,7 +1508,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         result = self._execute_tool(tc)
         return result, was_dup
 
-    def _execute_tool(self, tc: ToolCall) -> dict:
+    def _execute_tool(self, tc: ToolCall) -> dict[str, Any]:
         """Execute a tool call and return the result."""
         try:
             if tc.name == "read_file":
@@ -1549,7 +1551,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         byte_offset: int = 0,
         byte_limit: int = 0,
         mode: str = "lines",
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Read a file from the working tree with line or byte range support.
 
         Args:
@@ -1667,7 +1669,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         except Exception as e:
             return {"error": str(e)}
 
-    def _tool_run_command(self, cmd: str = None, command: str = None) -> dict:
+    def _tool_run_command(self, cmd: str = None, command: str = None) -> dict[str, Any]:
         """Run a shell command — bounded, group-clean, busy-wait-refusing.
 
         The judge is an LLM, so whatever it runs is untrusted shell. Two
@@ -1703,7 +1705,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             self._last_command_pgid = result["pgid"]
         return result
 
-    def _tool_search_pattern(self, regex: str, file_glob: str = "*") -> dict:
+    def _tool_search_pattern(self, regex: str, file_glob: str = "*") -> dict[str, Any]:
         """Search the codebase for a regex pattern using ripgrep (rg) with fallback."""
         # Validate regex first — catch invalid patterns before shelling out
         try:
@@ -1726,7 +1728,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         # ── Pure Python last resort ──
         return self._tool_search_pattern_python(regex, file_glob)
 
-    def _tool_search_pattern_rg(self, regex: str, file_glob: str, rg_path: str) -> dict:
+    def _tool_search_pattern_rg(self, regex: str, file_glob: str, rg_path: str) -> dict[str, Any]:
         """Search using ripgrep (fast, respects .gitignore)."""
         cmd = [
             rg_path,
@@ -1780,7 +1782,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 return self._tool_search_pattern_grep(regex, file_glob, grep_path)
             return {"error": "rg failed"}
 
-    def _tool_search_pattern_grep(self, regex: str, file_glob: str, grep_path: str) -> dict:
+    def _tool_search_pattern_grep(
+        self, regex: str, file_glob: str, grep_path: str
+    ) -> dict[str, Any]:
         """Search using GNU grep (slower than rg, faster than Python)."""
         cmd = [grep_path, "-rnI", "--exclude-dir=__pycache__", "--include=*", "-e", regex, "."]
         if file_glob != "*":
@@ -1808,7 +1812,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         except Exception:
             return self._tool_search_pattern_python(regex, file_glob)
 
-    def _tool_search_pattern_python(self, regex: str, file_glob: str = "*") -> dict:
+    def _tool_search_pattern_python(self, regex: str, file_glob: str = "*") -> dict[str, Any]:
         """Pure Python search — last resort fallback (slow, no .gitignore)."""
         matches: list[str] = []
         try:
@@ -1857,7 +1861,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
 
         return {"regex": regex, "matches": matches, "count": len(matches)}
 
-    def _tool_read_diff(self) -> dict:
+    def _tool_read_diff(self) -> dict[str, Any]:
         """Show git diff."""
         try:
             staged = subprocess.run(
@@ -1881,7 +1885,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         except Exception as e:
             return {"error": str(e)}
 
-    def _tool_read_static_analysis(self, path: str | None = None) -> dict:
+    def _tool_read_static_analysis(self, path: str | None = None) -> dict[str, Any]:
         """Return static analysis diagnostics for the project or a specific path."""
         from engine.static_analysis import run_static_check
 
@@ -1912,7 +1916,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             elif os.path.isdir(abs_path):
                 target_dir = abs_path
 
-        all_diagnostics: list[dict] = []
+        all_diagnostics: list[dict[str, Any]] = []
         for tool in lang_tools:
             try:
                 diags = run_static_check(tool, target_dir)
@@ -1936,7 +1940,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             "tools_used": lang_tools,
         }
 
-    def _tool_read_lsp_diagnostics(self) -> dict:
+    def _tool_read_lsp_diagnostics(self) -> dict[str, Any]:
         """Return LSP diagnostics collected during the Tier 1 guard run.
 
         These diagnostics were gathered by LSP tools (e.g. pylsp) during
@@ -1948,19 +1952,19 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             "count": len(self._tier1_diagnostics),
         }
 
-    def _tool_get_task_item(self, id: str) -> dict:
+    def _tool_get_task_item(self, id: str) -> dict[str, Any]:
         """Get task definition."""
         task = self._task_index.get(id)
         if task:
             return dict(task)
         return {"error": f"Task not found: {id}"}
 
-    def _tool_sandbox_write(self, key: str, content: str) -> dict:
+    def _tool_sandbox_write(self, key: str, content: str) -> dict[str, Any]:
         """Write to sandbox."""
         self._sandbox[key] = content
         return {"key": key, "written": len(content)}
 
-    def _tool_sandbox_read(self, key: str) -> dict:
+    def _tool_sandbox_read(self, key: str) -> dict[str, Any]:
         """Read from sandbox."""
         if key in self._sandbox:
             content = self._sandbox[key]
@@ -2056,7 +2060,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             summary=f"(auto-parsed from non-JSON response — {parse_reason}) {content[:300]}",
         )
 
-    def _tool_detect_dead_code(self) -> dict:
+    def _tool_detect_dead_code(self) -> dict[str, Any]:
         """Run dead code detection and return structured results."""
         try:
             from engine.dead_code import DeadCodeDetector
@@ -2066,7 +2070,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             unused = detector.find_unused_functions()
             report.findings.extend(unused)
 
-            by_category: dict[str, list[dict]] = {}
+            by_category: dict[str, list[dict[str, Any]]] = {}
             for f in report.findings:
                 by_category.setdefault(f.category, []).append(
                     {
@@ -2089,7 +2093,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         except Exception as e:
             return {"error": str(e)}
 
-    def _tool_skylos_scan(self) -> dict:
+    def _tool_skylos_scan(self) -> dict[str, Any]:
         """Run Skylos multi-language dead code and AI-mistake scan."""
         try:
             import json as _json
@@ -2137,7 +2141,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         except Exception as e:
             return {"error": str(e)}
 
-    def _tool_scan_security(self, path: str | None = None) -> dict:
+    def _tool_scan_security(self, path: str | None = None) -> dict[str, Any]:
         """Run ast-grep security-pattern scan against the CodeRabbit essential
         rules (deterministic, syntax-aware — finds real vulns without relying on
         the LLM). Scans each rule individually (--rule) because bulk directory

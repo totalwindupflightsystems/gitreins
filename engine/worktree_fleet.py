@@ -15,7 +15,7 @@ from collections.abc import Iterable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from engine.worktree_manager import WorktreeRecord
@@ -86,7 +86,7 @@ class FleetLane:
             raise FleetValidationError(f"lane {self.task_id!r} timeout_seconds must be positive")
 
     @classmethod
-    def from_dict(cls, data: dict) -> FleetLane:
+    def from_dict(cls, data: dict[str, Any]) -> FleetLane:
         if not isinstance(data, dict):
             raise FleetValidationError("each fleet lane must be an object")
         task_id = data.get("task_id", data.get("id"))
@@ -211,7 +211,7 @@ class WorktreeFleet:
         merge: bool = False,
         force_merge: bool = False,
         merge_actor: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Execute lanes and return a stable, JSON-serializable tick report.
 
         Worktrees are created before execution, so every accepted lane has one
@@ -245,12 +245,12 @@ class WorktreeFleet:
             )
             records[lane.task_id] = record
 
-        results: dict[str, dict] = {}
+        results: dict[str, dict[str, Any]] = {}
         with ThreadPoolExecutor(
             max_workers=self.max_concurrent_worktrees,
             thread_name_prefix="gitreins-fleet",
         ) as executor:
-            futures: dict[Future, FleetLane] = {
+            futures: dict[Future[dict[str, Any]], FleetLane] = {
                 executor.submit(self._run_lane, lane, records[lane.task_id]): lane for lane in lanes
             }
             for future in as_completed(futures):
@@ -356,7 +356,7 @@ class WorktreeFleet:
         )
         return True
 
-    def _run_lane(self, lane: FleetLane, record: WorktreeRecord) -> dict:
+    def _run_lane(self, lane: FleetLane, record: WorktreeRecord) -> dict[str, Any]:
         stages = [("running", lane.command)]
         if lane.guard is not None:
             stages.append(("guarding", lane.guard))
@@ -430,7 +430,7 @@ class WorktreeFleet:
 
     def _run_command(
         self, command: tuple[str, ...], cwd: Path, task_id: str, timeout: float | None
-    ) -> dict:
+    ) -> dict[str, Any]:
         started = time.monotonic()
         try:
             process = subprocess.Popen(

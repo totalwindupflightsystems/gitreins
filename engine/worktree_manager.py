@@ -42,6 +42,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from typing import Any, ParamSpec, TypeVar, cast
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from functools import wraps
@@ -98,7 +99,7 @@ class WorktreeRecord:
     branch_point: str | None = None
     notes: list[str] = field(default_factory=list)
     lane_phase: str | None = None
-    lane_result: dict | None = None
+    lane_result: dict[str, Any] | None = None
     lane_command: list[str] | None = None
     exit_code: int | None = None
     output: str | None = None
@@ -106,8 +107,8 @@ class WorktreeRecord:
     finished_at: float | None = None
     error: str | None = None
 
-    def to_dict(self) -> dict:
-        data: dict = {
+    def to_dict(self) -> dict[str, Any]:
+        data: dict[str, Any] = {
             "task_id": self.task_id,
             "path": self.path,
             "branch": self.branch,
@@ -145,7 +146,7 @@ class WorktreeRecord:
         return data
 
     @classmethod
-    def from_dict(cls, data: dict) -> WorktreeRecord:
+    def from_dict(cls, data: dict[str, Any]) -> WorktreeRecord:
         return cls(
             task_id=str(data["task_id"]),
             path=str(data["path"]),
@@ -207,7 +208,7 @@ def _branch_for(task_id: str) -> str:
     return BRANCH_PREFIX + task_id
 
 
-def _tier1_skipped_steps(verdict: dict) -> list[str]:
+def _tier1_skipped_steps(verdict: dict[str, Any]) -> list[str]:
     """Skipped Tier 1 step ids recorded in a persisted verdict (TRUST-001).
 
     ``verdict.json`` carries ``stages.tier1.{degraded,skipped_steps}``: either
@@ -321,7 +322,7 @@ def disk_verdict_path(tree: str | os.PathLike[str]) -> Path:
     return Path(tree) / DISK_VERDICT_DIR / DISK_VERDICT_FILE
 
 
-def write_disk_verdict(tree: str | os.PathLike[str], verdict: dict) -> Path:
+def write_disk_verdict(tree: str | os.PathLike[str], verdict: dict[str, Any]) -> Path:
     """Write the ONE verdict document the merge gate reads, and nothing else.
 
     Used by ``gitreins judge --ephemeral --persist-verdict``: a mode whose
@@ -342,7 +343,7 @@ def write_disk_verdict(tree: str | os.PathLike[str], verdict: dict) -> Path:
     return path
 
 
-def read_disk_verdict(tree: str | os.PathLike[str]) -> dict | None:
+def read_disk_verdict(tree: str | os.PathLike[str]) -> dict[str, Any] | None:
     """Read ``tree``'s disk verdict document, or ``None`` when absent/unusable.
 
     The returned mapping is stamped with ``_disk_verdict`` (the file it came
@@ -360,13 +361,18 @@ def read_disk_verdict(tree: str | os.PathLike[str]) -> dict | None:
     return data
 
 
-def _exclusive_operation(method: Callable[..., object]) -> Callable[..., object]:
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def _exclusive_operation(method: Callable[_P, _R]) -> Callable[_P, _R]:
     """Serialize registry read-modify-write operations across processes."""
 
     @wraps(method)
-    def wrapped(self: object, *args: object, **kwargs: object) -> object:
+    def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        self = cast(Any, args[0])
         with self._exclusive_lock():
-            return method(self, *args, **kwargs)
+            return method(*args, **kwargs)
 
     return wrapped
 
@@ -848,7 +854,7 @@ class WorktreeManager:
         phase: str,
         *,
         command: list[str] | None = None,
-        result: dict | None = None,
+        result: dict[str, Any] | None = None,
         exit_code: int | None = None,
         output: str | None = None,
         error: str | None = None,
@@ -902,7 +908,7 @@ class WorktreeManager:
         reason: str = "explicit judge-gate override",
         guard_runner: Callable[[Path], object] | None = None,
         judge_runner: Callable[[Path, str], object] | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Apply a task worktree to canonical main only after safety gates."""
         task_id = validate_task_id(task_id)
         if force and (not isinstance(actor, str) or not actor.strip()):
@@ -994,9 +1000,9 @@ class WorktreeManager:
                     "HOLD: configured guard failed after rebase; task worktree preserved"
                 )
             if not force:
-                runner = judge_runner or self._default_judge_runner
+                judge = judge_runner or self._default_judge_runner
                 try:
-                    fresh = runner(tree, task_id)
+                    fresh = judge(tree, task_id)
                 except Exception as exc:
                     raise WorktreeError(f"HOLD: fresh judge failed after rebase: {exc}") from exc
                 verdict = self._fresh_verdict(task_id, record, source_head, fresh)
@@ -1142,7 +1148,7 @@ class WorktreeManager:
         return result.returncode == 0
 
     def _verdict_reference(
-        self, task_id: str, record: WorktreeRecord, verdict: dict | None = None
+        self, task_id: str, record: WorktreeRecord, verdict: dict[str, Any] | None = None
     ) -> str:
         from engine.persist import HISTORY_REF, VerdictPersister
 
@@ -1178,7 +1184,7 @@ class WorktreeManager:
             return f"{verdict.get('_ref') or HISTORY_REF}:{branch_path} (from {task_tree})"
         return f"{persister.history_dir} (task {task_id})"
 
-    def _matching_verdicts(self, task_id: str, record: WorktreeRecord) -> list[dict]:
+    def _matching_verdicts(self, task_id: str, record: WorktreeRecord) -> list[dict[str, Any]]:
         from engine.persist import VerdictPersister
 
         # _persist_result(str(tree), ...) stamps and writes the verdict in the
@@ -1220,7 +1226,9 @@ class WorktreeManager:
             matching.insert(0, disk)
         return matching
 
-    def _find_verdict(self, task_id: str, record: WorktreeRecord, source_head: str) -> dict | None:
+    def _find_verdict(
+        self, task_id: str, record: WorktreeRecord, source_head: str
+    ) -> dict[str, Any] | None:
         for entry in self._matching_verdicts(task_id, record):
             if entry.get("commit") == source_head or entry.get("source_commit") == source_head:
                 return entry
@@ -1228,7 +1236,7 @@ class WorktreeManager:
 
     def _fresh_verdict(
         self, task_id: str, record: WorktreeRecord, source_head: str, fresh: object
-    ) -> dict | None:
+    ) -> dict[str, Any] | None:
         if (
             isinstance(fresh, dict)
             and fresh.get("passed") is True
@@ -1250,7 +1258,7 @@ class WorktreeManager:
         result = GuardManager(str(tree), config=load_config(str(tree))).run_all()
         return result.passed
 
-    def _default_judge_runner(self, tree: Path, task_id: str) -> dict:
+    def _default_judge_runner(self, tree: Path, task_id: str) -> dict[str, Any]:
         from engine.judge import Judge
         from engine.llm import LLMClient
         from engine.task_manager import TaskManager
@@ -1270,7 +1278,7 @@ class WorktreeManager:
             "branch": _git(tree, "symbolic-ref", "--quiet", "--short", "HEAD").stdout.strip(),
         }
 
-    def _append_board_event(self, event: dict) -> dict | None:
+    def _append_board_event(self, event: dict[str, Any]) -> dict[str, Any] | None:
         """Append one valid event while allocating an id under an advisory lock.
 
         Returns the written entry, or ``None`` when this checkout has no fleet
@@ -1321,7 +1329,7 @@ class WorktreeManager:
         self,
         *,
         confirm_stale_orphan: bool = False,
-    ) -> dict[str, list[str]]:
+    ) -> dict[str, Any]:
         """Reap merged and failed trees immediately; stale/orphan when confirmed.
 
         ``failed`` is terminal — there is no retry path through ``clean`` (a

@@ -431,11 +431,11 @@ class LLMClient:
 
         return LLMResponse(content=message.get("content"), tool_calls=tool_calls, usage=usage)
 
-    def _convert_messages_for_openai(self, messages: list[dict]) -> list[dict]:
+    def _convert_messages_for_openai(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Ensure messages use OpenAI format (identity for OpenAI-native)."""
         return messages
 
-    def _convert_tools_for_openai(self, tools: list[dict]) -> list[dict]:
+    def _convert_tools_for_openai(self, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Convert tools to OpenAI format."""
         # Our internal format is already OpenAI-compatible
         return tools
@@ -520,7 +520,9 @@ class LLMClient:
 
         return LLMResponse(content=content, tool_calls=tool_calls, usage=usage)
 
-    def _convert_messages_for_anthropic(self, messages: list[dict]) -> list[dict]:
+    def _convert_messages_for_anthropic(
+        self, messages: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
         """
         Convert to Anthropic-native format.
 
@@ -578,7 +580,7 @@ class LLMClient:
 
         return result
 
-    def _convert_tools_for_anthropic(self, tools: list[dict]) -> list[dict]:
+    def _convert_tools_for_anthropic(self, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Convert OpenAI tool format to Anthropic format."""
         result = []
         for tool in tools:

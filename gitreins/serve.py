@@ -49,7 +49,7 @@ import sqlite3
 import sys
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 from engine import evidence, qa_ledger, usage
 from engine.persist import KIND_RESOLUTION
@@ -256,7 +256,7 @@ def load_verdict(workdir: str, date: str, h: str) -> dict[str, Any] | None:
         return None
     try:
         with open(vpath) as fh:
-            return json.load(fh)
+            return cast(dict[str, Any], json.load(fh))
     except Exception:
         return None
 
@@ -425,7 +425,7 @@ def _epoch(value: Any) -> float | None:  # noqa: ANN401
     return parsed.timestamp()
 
 
-def load_usage(workdir: str) -> tuple[dict[str, UsageEntry], UsageSummary]:
+def load_usage(workdir: str) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
     """Attributed usage per verdict plus the aggregate the stats header shows.
 
     Attribution is by time (the telemetry carries no task id) and each line is

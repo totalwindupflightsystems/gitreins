@@ -46,7 +46,7 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from engine.config import load_defaults
 from engine.evidence_bounds import MAX_EVIDENCE_CHARS, bound_evidence
@@ -261,7 +261,7 @@ def _tree_venv_bin(
     manager surface; ``DisposableWorktreeManager`` delegates to its inner
     ``WorktreeManager``.
     """
-    manager = getattr(manager, "manager", manager)
+    manager = cast(WorktreeManager, getattr(manager, "manager", manager))
     destination, source = manager._venv_paths(tree_path)
     for candidate in (destination / "bin", None if source is None else source / "bin"):
         if candidate is not None and candidate.is_dir():
@@ -309,7 +309,7 @@ def _child_python(tree_path: Path, manager: WorktreeManager | DisposableWorktree
     ``sys.executable`` — which the ``PYTHONPATH`` pin from
     ``_child_cli_env`` makes importable regardless of provenance.
     """
-    manager = getattr(manager, "manager", manager)
+    manager = cast(WorktreeManager, getattr(manager, "manager", manager))
     destination, _source = manager._venv_paths(tree_path)
     candidate = destination / "bin" / "python"
     if candidate.is_file():
@@ -365,7 +365,7 @@ def _is_run_leader(pid: int | None) -> bool:
     of staying registered — and unreapable — forever.  A pid we cannot
     inspect (``PermissionError``) is not ours either.
     """
-    if not _pid_alive(pid):
+    if not _pid_alive(pid) or pid is None:
         return False
     try:
         return os.getpgid(pid) == pid
@@ -428,8 +428,8 @@ def enforce_disk_ceiling(
     current = 0
     for record in task_records.values():
         current += _tree_size(Path(record.path))
-    for record in disposable_records:
-        current += _tree_size(Path(record.path))
+    for disp_record in disposable_records:
+        current += _tree_size(Path(disp_record.path))
     projected = _tree_size(manager.main_root) if requested_bytes is None else requested_bytes
     projected = max(0, projected)
 
@@ -439,10 +439,10 @@ def enforce_disk_ceiling(
     # Disposable trees are ordered independently from task trees as required
     # by the feature: a retained failure is inspectable until the next cap hit.
     candidates: list[tuple[float, str, str, Any]] = []
-    for record in disposable_records:
-        if _run_is_live(record):
+    for disp_record in disposable_records:
+        if _run_is_live(disp_record):
             continue
-        candidates.append((record.created_at, "disposable", record.run_id, record))
+        candidates.append((disp_record.created_at, "disposable", disp_record.run_id, disp_record))
     for task_id, record in task_records.items():
         if record.state in LIVE_STATES:
             continue

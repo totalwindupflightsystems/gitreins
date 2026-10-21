@@ -29,7 +29,7 @@ class Judge:
 
     def __init__(
         self,
-        llm: LLMClient,
+        llm: LLMClient | None,
         workdir: str = ".",
         guard_config: dict[str, Any] | None = None,
         eval_cap: "str | EvalCap | None" = None,
@@ -261,6 +261,7 @@ class Judge:
         print("  Tier 1 PASSED")
         print("  Tier 2: Running agentic evaluator...")
 
+        assert self.llm is not None  # tier 2 dereferences the client
         evaluator = AgenticEvaluator(
             self.llm, self.scan_root, eval_cap=self.eval_cap, config_root=self.workdir
         )

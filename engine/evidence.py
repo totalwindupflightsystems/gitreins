@@ -43,7 +43,7 @@ import os
 import re
 import subprocess
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Callable
 
 from engine.version import __version__ as _gitreins_version
 
@@ -266,12 +266,13 @@ def collect_evidence(
     except OSError:
         return {"collected_at": _now(), "items": [], "detail": "evidence directory is not writable"}
 
-    for collector in (
+    collectors: tuple[Callable[[], tuple[dict[str, Any], str] | None], ...] = (
         lambda: _collect_brief(workdir, environ),
         lambda: _collect_log(environ),
         lambda: _collect_patch(workdir, commit),
         lambda: _collect_worktree(workdir),
-    ):
+    )
+    for collector in collectors:
         try:
             collected = collector()
         except Exception:  # evidence must never break a verdict
@@ -553,11 +554,11 @@ def _verdict_items(result: object) -> list[Any]:
     return []
 
 
-def _judge_gate_checks(result: object, flags: dict[str, bool], limit: int) -> list[dict]:
+def _judge_gate_checks(result: object, flags: dict[str, bool], limit: int) -> list[dict[str, Any]]:
     """Tier-1 evidence for a judge document: pipeline stages, else guard steps."""
     pipeline_result = getattr(result, "pipeline_result", None)
     stages = (pipeline_result.get("stages") or {}) if isinstance(pipeline_result, dict) else {}
-    checks: list[dict] = []
+    checks: list[dict[str, Any]] = []
     for stage_id, stage in list(stages.items())[:limit]:
         stage = stage if isinstance(stage, dict) else {}
         stage_passed = stage.get("passed") is True
@@ -716,7 +717,7 @@ def judge_evidence(
     return document
 
 
-def report_evidence(entries: object, storage_mode: str = "") -> dict[str, Any]:
+def report_evidence(entries: list[dict[str, Any]], storage_mode: str = "") -> dict[str, Any]:
     """Build the ``report`` evidence document from verdict-history entries.
 
     History has no single verdict, so ``passed`` stays ``null`` (``outcome:

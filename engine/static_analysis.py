@@ -33,6 +33,8 @@ import re
 import shutil
 import subprocess
 from dataclasses import dataclass
+from typing import Any
+from collections.abc import Callable
 
 logger = logging.getLogger("gitreins.static_analysis")
 
@@ -48,7 +50,7 @@ class StaticDiag:
     code: str = ""  # mypy error code, pyright rule, etc.
     tool: str = ""  # "mypy", "pyright", "sorbet", etc.
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "file": self.file,
             "line": self.line,
@@ -154,7 +156,7 @@ _STATIC_ANALYSIS_NO_LANGUAGE_REASON = (
 
 def select_tools(
     workdir: str,
-    configured: dict | None = None,
+    configured: dict[str, Any] | None = None,
     changed_files: list[str] | None = None,
 ) -> tuple[list[str], str]:
     """The static-analysis tools this lane would run on *workdir*.
@@ -361,7 +363,7 @@ def _parse_staticcheck(text: str, tool: str = "staticcheck") -> list[StaticDiag]
 # ── JSON output parsers ─────────────────────────────────────────────────
 
 
-def _parse_pyright_json(data: dict, tool: str = "pyright") -> list[StaticDiag]:
+def _parse_pyright_json(data: dict[str, Any], tool: str = "pyright") -> list[StaticDiag]:
     diagnostics: list[StaticDiag] = []
     for diag in data.get("generalDiagnostics", []):
         start = diag.get("range", {}).get("start", {})
@@ -378,7 +380,7 @@ def _parse_pyright_json(data: dict, tool: str = "pyright") -> list[StaticDiag]:
     return diagnostics
 
 
-def _parse_sqlfluff_json(data: object, tool: str = "sqlfluff") -> list[StaticDiag]:
+def _parse_sqlfluff_json(data: Any, tool: str = "sqlfluff") -> list[StaticDiag]:
     diagnostics: list[StaticDiag] = []
     # sqlfluff output is a list of file results
     files = data if isinstance(data, list) else [data]
@@ -463,7 +465,7 @@ def _parse_clippy_json(text: str, tool: str = "clippy") -> list[StaticDiag]:
     return diagnostics
 
 
-def _parse_eslint_json(data: object, tool: str = "eslint") -> list[StaticDiag]:
+def _parse_eslint_json(data: Any, tool: str = "eslint") -> list[StaticDiag]:
     """Parse eslint --format=json output.
 
     ESLint JSON output is a list of file results, each with ``filePath``
@@ -489,7 +491,7 @@ def _parse_eslint_json(data: object, tool: str = "eslint") -> list[StaticDiag]:
     return diagnostics
 
 
-def _parse_phpstan_json(data: dict, tool: str = "phpstan") -> list[StaticDiag]:
+def _parse_phpstan_json(data: dict[str, Any], tool: str = "phpstan") -> list[StaticDiag]:
     diagnostics: list[StaticDiag] = []
     for filepath, file_data in data.get("files", {}).items():
         for msg in file_data.get("messages", []):
@@ -508,14 +510,14 @@ def _parse_phpstan_json(data: dict, tool: str = "phpstan") -> list[StaticDiag]:
 
 # ── Main runner ─────────────────────────────────────────────────────────
 
-_JSON_PARSERS = {
+_JSON_PARSERS: dict[str, Callable[..., list[StaticDiag]]] = {
     "pyright": _parse_pyright_json,
     "sqlfluff": _parse_sqlfluff_json,
     "phpstan": _parse_phpstan_json,
     "eslint": _parse_eslint_json,
 }
 
-_TEXT_PARSERS = {
+_TEXT_PARSERS: dict[str, Callable[..., list[StaticDiag]]] = {
     "mypy": _parse_mypy,
     "sorbet": _parse_sorbet,
     "cppcheck": _parse_cppcheck,
@@ -524,7 +526,7 @@ _TEXT_PARSERS = {
 }
 
 
-def run_static_check(tool: str, workdir: str, timeout: float = 120.0) -> list[dict]:
+def run_static_check(tool: str, workdir: str, timeout: float = 120.0) -> list[dict[str, Any]]:
     """Run a static analysis tool against a directory and return diagnostics.
 
     Args:
@@ -592,7 +594,7 @@ def run_static_check(tool: str, workdir: str, timeout: float = 120.0) -> list[di
             logger.warning("%s returned invalid JSON", tool)
             return []
     elif tool in _TEXT_PARSERS:
-        parser = _TEXT_PARSERS[tool]  # type: ignore[assignment]
+        parser = _TEXT_PARSERS[tool]
         diags = parser(output, tool=tool)
     else:
         logger.warning("No parser available for tool '%s'", tool)

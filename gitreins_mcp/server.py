@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 import time
+from typing import Any
 
 from engine.eval_cap import EvalCap
 from engine.guard_manager import GuardManager
@@ -36,7 +37,7 @@ from engine.llm import LLMClient
 from engine.propagate import Propagator
 from engine.resolution import resolution_config
 from engine.resolution import resolve as resolve_question
-from engine.task_manager import TaskManager
+from engine.task_manager import Task, TaskManager
 from engine.version import __version__
 from gitreins.cli import DEFAULT_GITREINS_CONFIG
 
@@ -191,7 +192,7 @@ class GitReinsMCPServer:
         # ~300s client-side cap. Job record shape:
         #   {"id", "status": running|complete|error, "task_id", "workdir",
         #    "result": dict|None, "error": str|None, "started_at": float}
-        self._jobs: dict[str, dict] = {}
+        self._jobs: dict[str, dict[str, Any]] = {}
         self._jobs_lock = threading.Lock()
         # Serializes the actual evaluate_task call — evaluation jobs run ONE
         # at a time per server instance (parallel judges contend on
@@ -216,7 +217,7 @@ class GitReinsMCPServer:
             "repo.init": self._repo_init,
         }
 
-    def _tool_schemas(self) -> list[dict]:
+    def _tool_schemas(self) -> list[dict[str, Any]]:
         return [
             {
                 "name": "configure",
@@ -511,7 +512,7 @@ class GitReinsMCPServer:
         model: str | None = None,
         base_url: str | None = None,
         provider: str | None = None,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Hot-reload the MCP server's LLM configuration at runtime.
 
         Sets environment variables and recreates the LLM client and Judge
@@ -561,7 +562,7 @@ class GitReinsMCPServer:
             "note": "LLM client and Judge recreated — all subsequent tool calls use new config.",
         }
 
-    def _config_snapshot(self) -> dict:
+    def _config_snapshot(self) -> dict[str, Any]:
         """Return current LLM config state for reporting."""
         return {
             "model": self.llm.model,
@@ -572,7 +573,7 @@ class GitReinsMCPServer:
             "env_keys": sorted(k for k in os.environ if "API_KEY" in k or "LLM" in k),
         }
 
-    def _workdir_error(self, workdir: str | None) -> dict | None:
+    def _workdir_error(self, workdir: str | None) -> dict[str, Any] | None:
         """Refuse an unusable *workdir* before a tool touches any store.
 
         DF-GITREINS-POC-93: every workdir-taking tool handed its raw argument
@@ -617,7 +618,7 @@ class GitReinsMCPServer:
 
     def _task_create(
         self, id: str, title: str, criteria: list[str], workdir: str | None = None
-    ) -> dict:
+    ) -> dict[str, Any]:
         refusal = self._workdir_error(workdir)
         if refusal is not None:
             return refusal
@@ -626,7 +627,7 @@ class GitReinsMCPServer:
         logger.info("Task created: %s (workdir=%s)", id, tm.workdir)
         return tm.to_dict(task)
 
-    def _task_start(self, id: str, workdir: str | None = None) -> dict:
+    def _task_start(self, id: str, workdir: str | None = None) -> dict[str, Any]:
         refusal = self._workdir_error(workdir)
         if refusal is not None:
             return refusal
@@ -635,7 +636,7 @@ class GitReinsMCPServer:
         logger.info("Task started: %s (workdir=%s)", id, tm.workdir)
         return tm.to_dict(task)
 
-    def _task_complete(self, id: str, workdir: str | None = None) -> dict:
+    def _task_complete(self, id: str, workdir: str | None = None) -> dict[str, Any]:
         refusal = self._workdir_error(workdir)
         if refusal is not None:
             return refusal
@@ -663,7 +664,7 @@ class GitReinsMCPServer:
 
         return {"task": tm.to_dict(task), "note": f"{unusable} — skipping evaluation"}
 
-    def _task_list(self, status: str | None = None, workdir: str | None = None) -> dict:
+    def _task_list(self, status: str | None = None, workdir: str | None = None) -> dict[str, Any]:
         refusal = self._workdir_error(workdir)
         if refusal is not None:
             return refusal
@@ -671,7 +672,7 @@ class GitReinsMCPServer:
         tasks = tm.list_tasks(status)
         return {"tasks": [tm.to_dict(t) for t in tasks]}
 
-    def _task_get(self, id: str, workdir: str | None = None) -> dict:
+    def _task_get(self, id: str, workdir: str | None = None) -> dict[str, Any]:
         refusal = self._workdir_error(workdir)
         if refusal is not None:
             return refusal
@@ -681,7 +682,7 @@ class GitReinsMCPServer:
             return {"error": f"Task not found: {id}"}
         return tm.to_dict(task)
 
-    def _task_delete(self, id: str, workdir: str | None = None) -> dict:
+    def _task_delete(self, id: str, workdir: str | None = None) -> dict[str, Any]:
         refusal = self._workdir_error(workdir)
         if refusal is not None:
             return refusal
@@ -693,7 +694,7 @@ class GitReinsMCPServer:
         except KeyError:
             return {"error": f"Task not found: {id}"}
 
-    def _commit(self, message: str, workdir: str | None = None) -> dict:
+    def _commit(self, message: str, workdir: str | None = None) -> dict[str, Any]:
         """Commit staged changes; blocked while any task is in_progress.
 
         DF-GITREINS-POC-76: the optional *workdir* mirrors the sibling task
@@ -766,7 +767,7 @@ class GitReinsMCPServer:
         except Exception as e:
             return {"error": str(e)}
 
-    def _guard_manager_for(self, wd: str) -> "GuardManager | dict":
+    def _guard_manager_for(self, wd: str) -> "GuardManager | dict[str, Any]":
         """Build a config-bound ``GuardManager`` for the repo at *wd*.
 
         Returns the manager, or the refusal dict when *wd* has no
@@ -799,7 +800,7 @@ class GitReinsMCPServer:
             pass
         return GuardManager(wd, config=config)
 
-    def _repo_init(self, workdir: str = None) -> dict:
+    def _repo_init(self, workdir: str = None) -> dict[str, Any]:
         """Create .gitreins/config.yaml (default config) in a git repo.
 
         DF-GITREINS-POC-77: unblocks the MCP-only workflow (repo.init →
@@ -831,7 +832,7 @@ class GitReinsMCPServer:
         logger.info("repo.init: wrote default config (workdir=%s)", wd)
         return {"created": True, "config_path": config_path, "workdir": wd}
 
-    def _guard_run(self, workdir: str = None, dead_code: bool = False) -> dict:
+    def _guard_run(self, workdir: str = None, dead_code: bool = False) -> dict[str, Any]:
         """Run Tier 1 static guards. Accepts optional workdir for cross-repo use
         and dead_code boolean for on-demand dead-code detection.
 
@@ -862,7 +863,7 @@ class GitReinsMCPServer:
             response["quality_snapshot"] = quality_snapshot
         return response
 
-    def _quality_status(self, workdir: str | None = None) -> dict:
+    def _quality_status(self, workdir: str | None = None) -> dict[str, Any]:
         """Report this run's shared quality snapshot without triggering work.
 
         GR-143 agent-facing surface: reads the SAME process-wide snapshot the
@@ -929,7 +930,7 @@ class GitReinsMCPServer:
         tool_call_weight: float | None = None,
         eval_cap: str | None = None,
         wait: bool = False,
-    ) -> dict:
+    ) -> dict[str, Any]:
         """Run the full evaluation pipeline on a task.
 
         By default (``wait=False``) the evaluation is dispatched to a
@@ -1032,11 +1033,13 @@ class GitReinsMCPServer:
             "workdir": wd,
         }
 
-    def _judge_result_dict(self, task_id: str, wd: str, result) -> dict:
+    def _judge_result_dict(self, task_id: str, wd: str, result: Any) -> dict[str, Any]:
         """Build the standard judge.evaluate result dict from a JudgeResult."""
         return judge_result_to_dict(task_id, wd, result)
 
-    def _submit_eval_job(self, task_id: str, wd: str, task, eval_cap=None) -> str:
+    def _submit_eval_job(
+        self, task_id: str, wd: str, task: Task, eval_cap: EvalCap | None = None
+    ) -> str:
         """Register and start a background evaluation job.
 
         Evaluation jobs run ONE at a time per server instance: a lock
@@ -1077,7 +1080,7 @@ class GitReinsMCPServer:
                     task_id,
                     wd,
                 )
-                return job_id
+                return str(job_id)
             job = make_job(task_id, wd, caps=cap_to_dict(eval_cap))
             job["pid"] = os.getpid()
             job_id = job["id"]
@@ -1094,10 +1097,15 @@ class GitReinsMCPServer:
         if job_cap.max_seconds <= 0:
             job_cap.max_seconds = _JOB_MAX_SECONDS_FLOOR
         self._start_job_thread(job, wd, task, job_cap, store_dir=store_dir)
-        return job_id
+        return str(job_id)
 
     def _start_job_thread(
-        self, job: dict, wd: str, task, eval_cap=None, store_dir: str | None = None
+        self,
+        job: dict[str, Any],
+        wd: str,
+        task: Task,
+        eval_cap: EvalCap | None = None,
+        store_dir: str | None = None,
     ) -> None:
         """Spawn the worker thread for a job record (fresh or resumed)."""
         if store_dir is None:
@@ -1106,7 +1114,7 @@ class GitReinsMCPServer:
         # Judge.evaluate_task while a daemon thread is waiting to run.
         evaluate_task = Judge.evaluate_task
 
-        def _finish(update: dict) -> None:
+        def _finish(update: dict[str, Any]) -> None:
             # Disk-before-memory ordering: persist the terminal state FIRST so
             # a fresh server reading the job store sees complete/error even
             # while this instance's memory record still says running. A
@@ -1185,7 +1193,7 @@ class GitReinsMCPServer:
 
         threading.Thread(target=_run_job, name=f"judge-job-{job['id']}", daemon=True).start()
 
-    def _load_or_resume_disk_job(self, job_id: str) -> dict | None:
+    def _load_or_resume_disk_job(self, job_id: str) -> dict[str, Any] | None:
         """Load a job from the shared disk store, resuming it if orphaned.
 
         Jobs found in ``running`` state whose owning process is gone
@@ -1209,7 +1217,7 @@ class GitReinsMCPServer:
                 self._jobs[job_id] = job
         return job
 
-    def _resume_disk_job(self, job: dict) -> dict:
+    def _resume_disk_job(self, job: dict[str, Any]) -> dict[str, Any]:
         """Re-dispatch an orphaned running job in this server instance.
 
         The job keeps its id: the resume is the SAME logical run continuing, so
@@ -1275,7 +1283,7 @@ class GitReinsMCPServer:
         finally:
             release_resume_lease(lease)
 
-    def _judge_status(self, job_id: str) -> dict:
+    def _judge_status(self, job_id: str) -> dict[str, Any]:
         """Return the status of a background evaluation job.
 
         Memory first, then the shared disk store — so jobs survive MCP
@@ -1306,7 +1314,9 @@ class GitReinsMCPServer:
             d["started_at"] = job.get("started_at")
         return d
 
-    def _propagate(self, source: str | None = None, targets: list[str] | None = None) -> dict:
+    def _propagate(
+        self, source: str | None = None, targets: list[str] | None = None
+    ) -> dict[str, Any]:
         """Propagate guard configuration to sibling repos.
 
         Args:
@@ -1322,7 +1332,7 @@ class GitReinsMCPServer:
         propagator = Propagator(src)
         return propagator.propagate(targets)
 
-    def _context_resolve(self, question: str, budget: int | None = None) -> dict:
+    def _context_resolve(self, question: str, budget: int | None = None) -> dict[str, Any]:
         """Resolve *question* against the repo's code (JEVRES-002).
 
         The MCP surface of the Jev resolution gate (``engine/resolution.py`` —
@@ -1371,7 +1381,7 @@ class GitReinsMCPServer:
         persist_resolution(self.workdir, verdict, surface="mcp")
         return verdict.to_dict()
 
-    def handle_request(self, request: dict) -> dict | None:
+    def handle_request(self, request: dict[str, Any]) -> dict[str, Any] | None:
         """Handle a single MCP JSON-RPC request."""
         method = request.get("method", "")
         params = request.get("params", {}) or {}
@@ -1612,7 +1622,7 @@ class GitReinsMCPServer:
         # a client whose stdin closed (or whose parent died) reads this line.
         self._stderr_line(f"{SERVER_NAME} MCP server {__version__} — stdin closed (EOF), exiting 0")
 
-    def _write_response(self, response: dict) -> None:
+    def _write_response(self, response: dict[str, Any]) -> None:
         """Write a JSON-RPC response to stdout."""
         sys.stdout.write(json.dumps(response) + "\n")
         sys.stdout.flush()
