@@ -3529,17 +3529,29 @@ def _check_ignore_exit(repo: str, path: str) -> int:
 
 
 class TestInstallHooksPath:
-    def test_install_refuses_when_core_hooks_path_overrides_repo_hooks(self, tmp_path: Path) -> None:
+    def test_install_refuses_when_core_hooks_path_overrides_repo_hooks(
+        self, tmp_path: Path
+    ) -> None:
         repo = _init_real_git_repo(tmp_path)
         other_hooks = tmp_path / "other-hooks"
+        global_gitconfig = str(tmp_path / "global.gitconfig")
         env = os.environ.copy()
-        env["GIT_CONFIG_GLOBAL"] = str(tmp_path / "global.gitconfig")
+        env["GIT_CONFIG_GLOBAL"] = global_gitconfig
         subprocess.run(
             ["git", "config", "--global", "core.hooksPath", str(other_hooks)],
             env=env,
             check=True,
         )
-        result = run_cli("install", cwd=repo)
+        # The fixture (a32dad9-era) pins core.hooksPath=.git/hooks LOCALLY,
+        # and local overrides global — with the pin still set, git's effective
+        # value IS the repo hooks dir and refusal would be wrong. Drop the
+        # local pin so the global elsewhere-value is the effective one.
+        subprocess.run(["git", "-C", str(repo), "config", "--unset", "core.hooksPath"], check=True)
+        # The gate itself must SEE the value: run_cli is hermetic, so the
+        # global config has to travel in through extra_env (a leaked host
+        # config made this refusal pass for the wrong reason; a missing
+        # config made it pass vacuously — both unverified).
+        result = run_cli("install", cwd=repo, extra_env={"GIT_CONFIG_GLOBAL": global_gitconfig})
         assert result.returncode != 0
         assert "core.hooksPath" in (result.stdout + result.stderr)
         assert "would not run" in (result.stdout + result.stderr)
