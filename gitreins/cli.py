@@ -501,13 +501,21 @@ def cmd_install(_args: argparse.Namespace) -> None:
         print("Run `git init` first, then re-run `gitreins install`.")
         sys.exit(1)
 
-    hooks_override = subprocess.run(
-        ["git", "config", "--get", "core.hooksPath"],
-        cwd=workdir,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
+    hooks_override = None
+    try:
+        hooks_override = subprocess.run(
+            ["git", "config", "--get", "core.hooksPath"],
+            cwd=workdir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        # No git on PATH at all (e.g. a narrowly constructed test PATH):
+        # the old pre-gate behavior was to install without consulting git,
+        # so keep working rather than crash. Nothing was measured, so skip
+        # the whole gate — fail-open matches every gate-skip convention.
+        hooks_override = None
     if hooks_override.returncode == 0 and hooks_override.stdout.strip():
         # Git reads hooks from EXACTLY ONE directory: core.hooksPath if set,
         # else .git/hooks. A hooksPath that RESOLVES to the repo's own hooks
