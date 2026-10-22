@@ -849,3 +849,5 @@
 {"id": 798, "timestamp": "2026-10-22T10:12:34Z", "event_type": "task_completed", "task_id": "README-006", "actor": "foreman", "tick": null, "detail": "{\"status\":\"complete\"}"}
 {"id": 799, "timestamp": "2026-10-22T10:15:18Z", "event_type": "task_updated", "task_id": "DF-GITREINS-POC-83", "actor": "foreman", "tick": null, "detail": "{\"status\":\"pending\"}"}
 {"id": 800, "timestamp": "2026-10-22T10:15:23Z", "event_type": "task_updated", "task_id": "SKIPPED-install-bunker-2026-10-09-las-03", "actor": "foreman", "tick": null, "detail": "{\"status\":\"blocked\"}"}
+{"id": 801, "timestamp": "2026-10-22T10:16:09Z", "event_type": "task_completed", "task_id": "SKIPPED-install-bunker-mcp-2026-10-02", "actor": "foreman", "tick": null, "detail": "{\"status\":\"complete\"}"}
+{"id": 802, "timestamp": "2026-10-22T10:16:23Z", "event_type": "task_completed", "task_id": "RVR-GITREINS-104", "actor": "foreman", "tick": null, "detail": "{\"status\":\"complete\"}"}
