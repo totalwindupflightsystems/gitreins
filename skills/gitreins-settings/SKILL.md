@@ -316,8 +316,9 @@ table is documentation-era or spec-era, not a knob.
 
 | Variable | Read at | Effect |
 |---|---|---|
-| `GITREINS_LLM_API_KEY` | `engine/llm.py:120-121` | Primary LLM credential. Falls back in order to `NEURALWATT_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `KIMI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY` (`:124-136`). The source of the key is recorded so a rejected key names its variable — never the value. |
-| `GITREINS_LLM_BASE_URL` | `engine/llm.py:97-103` | API base URL (default `https://api.openai.com/v1`). |
+| `GITREINS_LLM_API_KEY` | `engine/llm.py:120-121` | Primary LLM credential. Only when `GITREINS_ALLOW_AMBIENT_KEYS` is set non-empty falls back in order to `NEURALWATT_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `KIMI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY` (`:124-140`). The source of the key is recorded so a rejected key names its variable — never the value. |
+| `GITREINS_ALLOW_AMBIENT_KEYS` | `engine/llm.py:135` | Opt-in gate for the ambient provider-key fallback above; any non-empty value enables it. Unset by default so a shell exporting a provider SDK's key is never picked up silently. |
+| `GITREINS_LLM_BASE_URL` | `engine/llm.py:97-110` | API base URL (default `https://api.deepseek.com/v1` — coherent with the `deepseek-v4-flash` default model). |
 | `GITREINS_LLM_MODEL` | `engine/llm.py:137` | Model id; wins over the code default. |
 | `GITREINS_LLM_REASONING` | `engine/llm.py:144` | `disabled` (default) or `enabled` — DeepSeek thinking mode. |
 | `GITREINS_ANTHROPIC_VERSION` | `engine/llm.py:158` | Anthropic API version header (default `2023-06-01`). |

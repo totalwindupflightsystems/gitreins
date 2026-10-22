@@ -327,10 +327,26 @@ class TestPassOnError:
 
 
 class TestApiKeyFallbackChain:
-    """Bug #4: API key fallback chain includes KIMI/GROQ/OPENROUTER."""
+    """Bug #4: opt-in ambient key fallback includes KIMI/GROQ/OPENROUTER.
+
+    REVIEW-GITREINS-031: the chain is now gated behind
+    GITREINS_ALLOW_AMBIENT_KEYS, so each test opts in before asserting pickup.
+    """
+
+    @staticmethod
+    def _opt_in() -> None:
+        import os
+
+        os.environ["GITREINS_ALLOW_AMBIENT_KEYS"] = "1"
+
+    @staticmethod
+    def _opt_out() -> None:
+        import os
+
+        os.environ.pop("GITREINS_ALLOW_AMBIENT_KEYS", None)
 
     def test_kimi_key_in_fallback(self) -> None:
-        """KIMI_API_KEY is picked up when GITREINS_LLM_API_KEY unset."""
+        """KIMI_API_KEY is picked up when GITREINS_LLM_API_KEY unset (opt-in)."""
         import os
 
         os.environ.pop("GITREINS_LLM_API_KEY", None)
@@ -339,14 +355,16 @@ class TestApiKeyFallbackChain:
         os.environ.pop("ANTHROPIC_API_KEY", None)
         os.environ.pop("DEEPSEEK_API_KEY", None)
         os.environ["KIMI_API_KEY"] = "sk-kimi-test"
+        self._opt_in()
         try:
             client = LLMClient(model="test/model")
             assert client.api_key == "sk-kimi-test"
         finally:
             os.environ.pop("KIMI_API_KEY", None)
+            self._opt_out()
 
     def test_groq_key_in_fallback(self) -> None:
-        """GROQ_API_KEY is picked up."""
+        """GROQ_API_KEY is picked up (opt-in)."""
         import os
 
         for k in (
@@ -359,14 +377,16 @@ class TestApiKeyFallbackChain:
         ):
             os.environ.pop(k, None)
         os.environ["GROQ_API_KEY"] = "sk-groq-test"
+        self._opt_in()
         try:
             client = LLMClient(model="test/model")
             assert client.api_key == "sk-groq-test"
         finally:
             os.environ.pop("GROQ_API_KEY", None)
+            self._opt_out()
 
     def test_openrouter_key_in_fallback(self) -> None:
-        """OPENROUTER_API_KEY is picked up."""
+        """OPENROUTER_API_KEY is picked up (opt-in)."""
         import os
 
         for k in (
@@ -380,11 +400,13 @@ class TestApiKeyFallbackChain:
         ):
             os.environ.pop(k, None)
         os.environ["OPENROUTER_API_KEY"] = "sk-or-test"
+        self._opt_in()
         try:
             client = LLMClient(model="test/model")
             assert client.api_key == "sk-or-test"
         finally:
             os.environ.pop("OPENROUTER_API_KEY", None)
+            self._opt_out()
 
     def test_existing_keys_take_priority(self) -> None:
         """GITREINS_LLM_API_KEY takes priority over fallback keys."""
