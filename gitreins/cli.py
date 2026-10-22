@@ -516,7 +516,11 @@ def cmd_install(_args: argparse.Namespace) -> None:
         # so keep working rather than crash. Nothing was measured, so skip
         # the whole gate — fail-open matches every gate-skip convention.
         hooks_override = None
-    if hooks_override.returncode == 0 and hooks_override.stdout.strip():
+    if (
+        hooks_override is not None
+        and hooks_override.returncode == 0
+        and hooks_override.stdout.strip()
+    ):
         # Git reads hooks from EXACTLY ONE directory: core.hooksPath if set,
         # else .git/hooks. A hooksPath that RESOLVES to the repo's own hooks
         # dir (e.g. the remedy value `.git/hooks`, or its absolute form) keeps
