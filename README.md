@@ -870,7 +870,7 @@ A lane whose own TREE is dirty fails the mirror-image check
 ## Tech Stack
 
 - **Language:** Python 3.10+
-- **Dependencies:** mcp, pyyaml, requests, packaging (4 packages)
+- **Dependencies:** mcp, pydantic-core, pyyaml, requests, packaging (5 packages; plus tomli, a conditional dependency used only on Python < 3.11)
 - **MCP Transport:** stdio (15 tools)
 - **Config:** YAML in `.gitreins/` directory
 - **Evaluator Default Model:** DeepSeek V4 Flash (~$0.01/eval)
