@@ -105,6 +105,9 @@ class GitReinsDefaults:
     """
 
     # ── LLM ──
+    # REVIEW-GITREINS-031: this model and engine/llm.py's default base_url
+    # (https://api.deepseek.com/v1) are a coherent PAIR — if either side
+    # changes, change the other (or add a `gitreins doctor` warning).
     model: str = "deepseek-v4-flash"
     llm_reasoning: str = "disabled"  # "disabled" | "enabled" — DeepSeek thinking mode
 

@@ -1003,7 +1003,16 @@ class DisposableWorktreeManager:
                 "GROQ_API_KEY",
                 "OPENROUTER_API_KEY",
             )
-            has_llm = any(os.environ.get(name) for name in key_names)
+            # REVIEW-GITREINS-031: the ambient provider keys are consulted by
+            # LLMClient ONLY when GITREINS_ALLOW_AMBIENT_KEYS opts in, so this
+            # gate mirrors that: without the opt-in, ambient keys present in
+            # the environment no longer make an LLM "configured" here.
+            has_llm = bool(os.environ.get("GITREINS_LLM_API_KEY")) or (
+                bool(os.environ.get("GITREINS_ALLOW_AMBIENT_KEYS", "").strip())
+                and any(
+                    os.environ.get(name) for name in key_names if name != "GITREINS_LLM_API_KEY"
+                )
+            )
             if skip_judge:
                 judge = {
                     "status": "skipped",

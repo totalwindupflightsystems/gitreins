@@ -591,12 +591,13 @@ environment variables:
 | Env var | Default | Description |
 |---------|---------|-------------|
 | `GITREINS_LLM_API_KEY` | none | API key for the LLM provider |
-| `GITREINS_LLM_BASE_URL` | `https://api.openai.com/v1` | Base URL of the LLM API |
+| `GITREINS_LLM_BASE_URL` | `https://api.deepseek.com/v1` | Base URL of the LLM API |
 | `GITREINS_LLM_MODEL` | `deepseek-v4-flash` | Model name |
 | `GITREINS_LLM_PROVIDER` | auto-detect | Force the wire protocol: `openai` or `anthropic` |
 | `GITREINS_LLM_REASONING` | `disabled` | DeepSeek thinking mode: `enabled` or `disabled` |
 | `GITREINS_LLM_TIMEOUT` | `120` | Per-attempt request timeout, in seconds |
 | `GITREINS_ANTHROPIC_VERSION` | `2023-06-01` | `anthropic-version` header (Anthropic path only) |
+| `GITREINS_ALLOW_AMBIENT_KEYS` | unset | Opt-in: when set non-empty and `GITREINS_LLM_API_KEY` is unset, fall back to ambient provider keys (`NEURALWATT_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `KIMI_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`) |
 
 Accepted values, precedence, and how the MCP `configure` tool interacts with
 these controls: [LLM Runtime Environment](#llm-runtime-environment).
@@ -1561,14 +1562,17 @@ the secrets guard blocks the commit, and anything already exposed must be
 rotated, not deleted.
 
 GitReins reads credentials only from the environment — `GITREINS_LLM_API_KEY`,
-falling back in order to the first non-empty of `NEURALWATT_API_KEY`,
-`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `KIMI_API_KEY`,
-`GROQ_API_KEY`, `OPENROUTER_API_KEY` — and never prints their value. What it
+and, ONLY when `GITREINS_ALLOW_AMBIENT_KEYS` is set non-empty, falling back in
+order to the first non-empty of `NEURALWATT_API_KEY`, `OPENAI_API_KEY`,
+`ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `KIMI_API_KEY`, `GROQ_API_KEY`,
+`OPENROUTER_API_KEY` — and never prints their value. What it
 does record is the **name** of the variable that supplied the key, so a
 rejected credential can be traced to its source; the MCP config snapshot
 reports only `api_key_configured` (a boolean) plus a short `api_key_prefix`.
-Set `GITREINS_LLM_API_KEY` explicitly when a provider SDK shares the
-environment: the fallback chain takes the first non-empty match, not the one
+Without the opt-in, a shell that exports a provider SDK's key is never picked
+up: gitreins spends no ambient provider credits by accident. When the opt-in
+is enabled, set `GITREINS_LLM_API_KEY` explicitly when a provider SDK shares
+the environment: the chain takes the first non-empty match, not the one
 that belongs to the configured base URL.
 
 ## Configuration

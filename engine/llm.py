@@ -10,6 +10,10 @@ Configure via environment variables:
     GITREINS_LLM_API_KEY    — API key
     GITREINS_LLM_MODEL      — Model name (default: from engine.config)
     GITREINS_LLM_PROVIDER   — Force provider: "openai" or "anthropic" (auto-detect if unset)
+    GITREINS_ALLOW_AMBIENT_KEYS — opt-in: fall back to ambient provider keys
+                              (NEURALWATT/OPENAI/ANTHROPIC/DEEPSEEK/KIMI/GROQ/
+                              OPENROUTER _API_KEY) when GITREINS_LLM_API_KEY
+                              is unset. Any non-empty value enables it.
 """
 
 import json
@@ -100,7 +104,15 @@ class LLMClient:
         elif env_base_url:
             resolved_base_url, self.base_url_source = env_base_url, "GITREINS_LLM_BASE_URL"
         else:
-            resolved_base_url, self.base_url_source = "https://api.openai.com/v1", "default"
+            # REVIEW-GITREINS-031: the default pair must be coherent. The
+            # default model (engine/config.py GitReinsDefaults.model) is
+            # deepseek-v4-flash, so the default endpoint is DeepSeek's API —
+            # the old https://api.openai.com/v1 default sent a non-OpenAI
+            # model name to OpenAI's endpoint, which 400s on every call.
+            resolved_base_url, self.base_url_source = (
+                "https://api.deepseek.com/v1",
+                "default",
+            )
         # Rebind the local name: provider detection and endpoint building below
         # read ``base_url``, and it must be the RESOLVED value — a None here
         # made ``_is_anthropic(None)`` raise AttributeError on any client built
@@ -109,9 +121,9 @@ class LLMClient:
         self.base_url = base_url
 
         # DF-GITREINS-POC-14: record WHERE the key came from, never the key.
-        # The eight-key fallback chain below means "a credential is present"
-        # says nothing about which provider it belongs to; a failed call used
-        # to report only "LLM request failed after 3 attempts", so the reader
+        # The ambient-key opt-in below means "a credential is present" says
+        # nothing about which provider it belongs to; a failed call used to
+        # report only "LLM request failed after 3 attempts", so the reader
         # could not tell which env var supplied the rejected key.
         if api_key:
             self.api_key = api_key
@@ -120,20 +132,24 @@ class LLMClient:
             self.api_key = os.getenv("GITREINS_LLM_API_KEY", "")
             self.api_key_source = "GITREINS_LLM_API_KEY" if self.api_key else "none"
             if not self.api_key:
-                # Fallback: try common provider keys
-                for env_key in (
-                    "NEURALWATT_API_KEY",
-                    "OPENAI_API_KEY",
-                    "ANTHROPIC_API_KEY",
-                    "DEEPSEEK_API_KEY",
-                    "KIMI_API_KEY",
-                    "GROQ_API_KEY",
-                    "OPENROUTER_API_KEY",
-                ):
-                    self.api_key = os.getenv(env_key, "")
-                    if self.api_key:
-                        self.api_key_source = f"{env_key} (fallback)"
-                        break
+                # REVIEW-GITREINS-031: the ambient provider-key fallback is
+                # OPT-IN. It used to run unconditionally, so any shell that
+                # exported e.g. OPENAI_API_KEY made gitreins silently spend
+                # that provider's credits with zero opt-in.
+                if os.getenv("GITREINS_ALLOW_AMBIENT_KEYS", "").strip():
+                    for env_key in (
+                        "NEURALWATT_API_KEY",
+                        "OPENAI_API_KEY",
+                        "ANTHROPIC_API_KEY",
+                        "DEEPSEEK_API_KEY",
+                        "KIMI_API_KEY",
+                        "GROQ_API_KEY",
+                        "OPENROUTER_API_KEY",
+                    ):
+                        self.api_key = os.getenv(env_key, "")
+                        if self.api_key:
+                            self.api_key_source = f"{env_key} (ambient opt-in)"
+                            break
         self.model = model or os.getenv("GITREINS_LLM_MODEL") or _default_model()
         # GR-LINT-001: configurable request timeout — the 120s hard-code killed
         # tier-2 judge calls against slow local gateways (read timeouts after 3
@@ -294,7 +310,7 @@ class LLMClient:
 
         DF-GITREINS-POC-14: every failure surface (the raised error, the CLI
         recovery block) names provider, model, endpoint and WHICH env var
-        supplied the key — never the key itself. The eight-key fallback chain
+        supplied the key — never the key itself. The ambient-key opt-in chain
         makes "a credential is present" meaningless on its own.
         """
         return (

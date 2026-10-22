@@ -166,50 +166,76 @@ class TestAPIKeyResolution:
         client = LLMClient(base_url="https://test.local/v1")
         assert client.api_key == "primary-key"
 
-    def test_fallback_to_neuralwatt(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Fallback to NEURALWATT_API_KEY if primary not set."""
+    def test_ambient_fallback_requires_opt_in(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Ambient provider keys are NOT used without GITREINS_ALLOW_AMBIENT_KEYS.
+
+        REVIEW-GITREINS-031: a shell exporting e.g. OPENAI_API_KEY must not
+        make gitreins silently spend that provider's credits.
+        """
         monkeypatch.delenv("GITREINS_LLM_API_KEY", raising=False)
+        monkeypatch.delenv("GITREINS_ALLOW_AMBIENT_KEYS", raising=False)
+        monkeypatch.setenv("NEURALWATT_API_KEY", "nw-key")
+        client = LLMClient(base_url="https://test.local/v1")
+        assert client.api_key == ""
+        assert client.api_key_source == "none"
+
+    def test_ambient_fallback_opt_in_uses_neuralwatt(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """With GITREINS_ALLOW_AMBIENT_KEYS set, NEURALWATT_API_KEY is used."""
+        monkeypatch.delenv("GITREINS_LLM_API_KEY", raising=False)
+        monkeypatch.setenv("GITREINS_ALLOW_AMBIENT_KEYS", "1")
         monkeypatch.setenv("NEURALWATT_API_KEY", "nw-key")
         client = LLMClient(base_url="https://test.local/v1")
         assert client.api_key == "nw-key"
+        assert client.api_key_source == "NEURALWATT_API_KEY (ambient opt-in)"
 
-    def test_fallback_to_openai_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Fallback to OPENAI_API_KEY."""
+    def test_ambient_fallback_opt_in_to_openai_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Opt-in fallback reaches OPENAI_API_KEY."""
         monkeypatch.delenv("GITREINS_LLM_API_KEY", raising=False)
+        monkeypatch.setenv("GITREINS_ALLOW_AMBIENT_KEYS", "1")
         monkeypatch.delenv("NEURALWATT_API_KEY", raising=False)
         monkeypatch.setenv("OPENAI_API_KEY", "openai-key")
         client = LLMClient(base_url="https://test.local/v1")
         assert client.api_key == "openai-key"
+        assert client.api_key_source == "OPENAI_API_KEY (ambient opt-in)"
 
-    def test_fallback_to_anthropic_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Fallback to ANTHROPIC_API_KEY."""
+    def test_ambient_fallback_opt_in_to_anthropic_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Opt-in fallback reaches ANTHROPIC_API_KEY."""
         monkeypatch.delenv("GITREINS_LLM_API_KEY", raising=False)
+        monkeypatch.setenv("GITREINS_ALLOW_AMBIENT_KEYS", "1")
         monkeypatch.delenv("NEURALWATT_API_KEY", raising=False)
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-key")
         client = LLMClient(base_url="https://test.local/v1")
         assert client.api_key == "anthropic-key"
+        assert client.api_key_source == "ANTHROPIC_API_KEY (ambient opt-in)"
 
-    def test_fallback_to_deepseek_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Fallback to DEEPSEEK_API_KEY."""
+    def test_ambient_fallback_opt_in_to_deepseek_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Opt-in fallback reaches DEEPSEEK_API_KEY."""
         monkeypatch.delenv("GITREINS_LLM_API_KEY", raising=False)
-        monkeypatch.delenv("NEURALWATT_API_KEY", raising=False)
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        monkeypatch.setenv("GITREINS_ALLOW_AMBIENT_KEYS", "1")
+        for var in ("NEURALWATT_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
         monkeypatch.setenv("DEEPSEEK_API_KEY", "deepseek-key")
         client = LLMClient(base_url="https://test.local/v1")
         assert client.api_key == "deepseek-key"
+        assert client.api_key_source == "DEEPSEEK_API_KEY (ambient opt-in)"
 
     def test_missing_all_keys_returns_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When no API keys are set, self.api_key = ''."""
         monkeypatch.delenv("GITREINS_LLM_API_KEY", raising=False)
-        monkeypatch.delenv("NEURALWATT_API_KEY", raising=False)
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-        monkeypatch.delenv("KIMI_API_KEY", raising=False)
-        monkeypatch.delenv("GROQ_API_KEY", raising=False)
-        monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+        monkeypatch.delenv("GITREINS_ALLOW_AMBIENT_KEYS", raising=False)
+        for var in (
+            "NEURALWATT_API_KEY",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+            "DEEPSEEK_API_KEY",
+            "KIMI_API_KEY",
+            "GROQ_API_KEY",
+            "OPENROUTER_API_KEY",
+        ):
+            monkeypatch.delenv(var, raising=False)
         client = LLMClient(base_url="https://test.local/v1")
         assert client.api_key == ""
 
@@ -778,6 +804,7 @@ class TestFailureDiagnostics:
 
     CREDENTIAL_KEYS = (
         "GITREINS_LLM_API_KEY",
+        "GITREINS_ALLOW_AMBIENT_KEYS",
         "NEURALWATT_API_KEY",
         "OPENAI_API_KEY",
         "ANTHROPIC_API_KEY",
@@ -820,12 +847,15 @@ class TestFailureDiagnostics:
         assert "key=<GITREINS_LLM_API_KEY>" in client.describe()
         assert "sk-primary-secret" not in client.describe()
 
-    def test_describe_names_the_fallback_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """A key taken from the fallback chain says WHICH var it came from."""
+    def test_describe_names_the_opt_in_ambient_env_var(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A key taken from the opt-in ambient chain says WHICH var it came from."""
         self._clear_credentials(monkeypatch)
+        monkeypatch.setenv("GITREINS_ALLOW_AMBIENT_KEYS", "1")
         monkeypatch.setenv("OPENROUTER_API_KEY", "sk-or-secret")
         client = LLMClient(base_url="https://openrouter.ai/api/v1")
-        assert "key=<OPENROUTER_API_KEY (fallback)>" in client.describe()
+        assert "key=<OPENROUTER_API_KEY (ambient opt-in)>" in client.describe()
         assert "sk-or-secret" not in client.describe()
 
     def test_describe_reports_no_credential(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -851,7 +881,9 @@ class TestFailureDiagnostics:
         monkeypatch.delenv("GITREINS_LLM_BASE_URL", raising=False)
         defaulted = LLMClient(api_key="k")
         assert defaulted.base_url_source == "default"
-        assert defaulted.base_url == "https://api.openai.com/v1"
+        # REVIEW-GITREINS-031: the default base_url matches the default model
+        # (deepseek-v4-flash) so the pair is coherent without configuration.
+        assert defaulted.base_url == "https://api.deepseek.com/v1"
 
 
 class TestPermanentClientErrorFailsFast:

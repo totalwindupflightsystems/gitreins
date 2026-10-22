@@ -536,6 +536,26 @@ class GitReinsMCPServer:
             for key, value in env.items():
                 os.environ[key] = value
                 logger.info("configure: set env %s", key)
+            # REVIEW-GITREINS-031: LLMClient consults ambient provider keys
+            # only when GITREINS_ALLOW_AMBIENT_KEYS opts in. Handing a
+            # provider key to configure() IS the explicit opt-in — the
+            # tool's documented contract ("these are pushed into os.environ
+            # so LLMClient picks them up") stays true.
+            if not os.environ.get("GITREINS_ALLOW_AMBIENT_KEYS"):
+                ambient = (
+                    "NEURALWATT_API_KEY",
+                    "OPENAI_API_KEY",
+                    "ANTHROPIC_API_KEY",
+                    "DEEPSEEK_API_KEY",
+                    "KIMI_API_KEY",
+                    "GROQ_API_KEY",
+                    "OPENROUTER_API_KEY",
+                )
+                if any(k in env for k in ambient):
+                    os.environ["GITREINS_ALLOW_AMBIENT_KEYS"] = "1"
+                    logger.info(
+                        "configure: ambient provider key supplied — set GITREINS_ALLOW_AMBIENT_KEYS=1"
+                    )
 
         # Push model/base_url/provider as GITREINS_LLM_* env vars
         if model:
