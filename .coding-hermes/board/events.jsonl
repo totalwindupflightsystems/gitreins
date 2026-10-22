@@ -854,3 +854,4 @@
 {"id":"evt-ob1-w1-release","task_id":"RELEASE-012","event":"task_closed","status":"complete","reasoning":"hooks-path gate accepts resolving value; refuse elsewhere intact; foreman re-verified","commit_hash":"15c8829","worker":"glm-5.3-flash/ollama-cloud"}
 {"id":"evt-ob1-w2-readme","task_id":"README-004","event":"task_closed","status":"complete","reasoning":"Tech Stack deps match pyproject; commit 4c89d91 merged 871a4d1; foreman re-verified","commit_hash":"871a4d1","worker":"glm-5.3-flash/ollama-cloud"}
 {"id":"evt-ob1-w3-rvr","task_id":"RVR-GITREINS-106","event":"task_closed","status":"complete","reasoning":"review_stale_bugs.py shipped; d92a702 merged 4db9ad8; drift check rc=0","commit_hash":"4db9ad8","worker":"glm-5.3-flash/ollama-cloud"}
+{"id":"evt-ob1-readme-restore","task_id":"README-004","event":"note","reasoning":"--theirs conflict resolution reverted the deps line; restored f2fcbfc; re-judge PASS 6270f507","commit_hash":"f2fcbfc"}
