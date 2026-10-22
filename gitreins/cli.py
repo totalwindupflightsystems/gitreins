@@ -501,6 +501,24 @@ def cmd_install(_args: argparse.Namespace) -> None:
         print("Run `git init` first, then re-run `gitreins install`.")
         sys.exit(1)
 
+    hooks_override = subprocess.run(
+        ["git", "config", "--show-origin", "--get", "core.hooksPath"],
+        cwd=workdir,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if hooks_override.returncode == 0 and hooks_override.stdout.strip():
+        configured = hooks_override.stdout.strip()
+        print(
+            "Error: Git core.hooksPath is configured, so hooks written under "
+            f"{hooks_dir} would not run ({configured}). Configure Git to use "
+            "the repository hooks path, then rerun `gitreins install`: "
+            "git config --local core.hooksPath .git/hooks",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     created = []
     skipped = []
 
