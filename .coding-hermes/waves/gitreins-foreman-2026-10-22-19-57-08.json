@@ -1,0 +1,11 @@
+{
+  "tick": "gitreins-foreman-2026-10-22-19-57-08",
+  "budget": 12,
+  "composed": 3,
+  "workers": [
+    {"task_id": "RELEASE-012", "worktree": "/home/kara/worktrees/gitreins-RELEASE-012", "branch": "wt/RELEASE-012", "role": "primary CI fix (hooks-path gate, 14 test_cli)"},
+    {"task_id": "README-004", "worktree": "/home/kara/worktrees/gitreins-README-004", "branch": "wt/README-004", "role": "independent README dependency list update"},
+    {"task_id": "RVR-GITREINS-106", "worktree": "/home/kara/worktrees/gitreins-RVR-106", "branch": "wt/RVR-GITREINS-106", "role": "independent review-lane automation row (open bug scan)"}
+  ],
+  "merge_order": ["RELEASE-012", "README-004", "RVR-GITREINS-106"]
+}

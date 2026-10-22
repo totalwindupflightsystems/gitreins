@@ -501,23 +501,49 @@ def cmd_install(_args: argparse.Namespace) -> None:
         print("Run `git init` first, then re-run `gitreins install`.")
         sys.exit(1)
 
-    hooks_override = subprocess.run(
-        ["git", "config", "--show-origin", "--get", "core.hooksPath"],
-        cwd=workdir,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if hooks_override.returncode == 0 and hooks_override.stdout.strip():
-        configured = hooks_override.stdout.strip()
-        print(
-            "Error: Git core.hooksPath is configured, so hooks written under "
-            f"{hooks_dir} would not run ({configured}). Configure Git to use "
-            "the repository hooks path, then rerun `gitreins install`: "
-            "git config --local core.hooksPath .git/hooks",
-            file=sys.stderr,
+    hooks_override = None
+    try:
+        hooks_override = subprocess.run(
+            ["git", "config", "--get", "core.hooksPath"],
+            cwd=workdir,
+            capture_output=True,
+            text=True,
+            check=False,
         )
-        sys.exit(1)
+    except FileNotFoundError:
+        # No git on PATH at all (e.g. a narrowly constructed test PATH):
+        # the old pre-gate behavior was to install without consulting git,
+        # so keep working rather than crash. Nothing was measured, so skip
+        # the whole gate — fail-open matches every gate-skip convention.
+        hooks_override = None
+    if (
+        hooks_override is not None
+        and hooks_override.returncode == 0
+        and hooks_override.stdout.strip()
+    ):
+        # Git reads hooks from EXACTLY ONE directory: core.hooksPath if set,
+        # else .git/hooks. A hooksPath that RESOLVES to the repo's own hooks
+        # dir (e.g. the remedy value `.git/hooks`, or its absolute form) keeps
+        # the installed hooks live — accept it silently. Only a path resolving
+        # ELSEWHERE (global ~/.hermes/hooks, a custom dir, a nonexistent path)
+        # means hooks written under {hooks_dir} would not run: refuse.
+        # Normalization is in-memory only (no filesystem writes).
+        configured_raw = hooks_override.stdout.strip()
+        if os.path.isabs(configured_raw):
+            configured_resolved = os.path.realpath(configured_raw)
+        else:
+            configured_resolved = os.path.realpath(
+                os.path.join(workdir, os.path.normpath(configured_raw))
+            )
+        if configured_resolved != os.path.realpath(hooks_dir):
+            print(
+                "Error: Git core.hooksPath is configured, so hooks written under "
+                f"{hooks_dir} would not run ({configured_raw}). Configure Git to use "
+                "the repository hooks path, then rerun `gitreins install`: "
+                "git config --local core.hooksPath .git/hooks",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     created = []
     skipped = []
