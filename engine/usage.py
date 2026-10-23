@@ -50,6 +50,44 @@ DEFAULT_PRICE_CONFIG: dict[str, Any] = {
 
 _TOKENS = ("tokens_in", "tokens_out", "cache_read", "cache_write")
 
+# Judge-provenance fields (REVIEW-GITREINS-030): credential-free identity for
+# the LLMClient that produced the tokens — resolved model name plus WHERE the
+# base URL and the API key were resolved FROM (LLMClient.describe()'s fields,
+# never the values). Optional on append_usage_row; a caller (the resolution
+# gate) that cannot attribute its client simply omits them and the row keeps
+# its pre-provenance shape — old readers and old rows stay compatible.
+_PROVENANCE_FIELDS = ("model", "base_url_source", "api_key_source")
+
+
+def _provenance(value: object) -> str | None:
+    """A credential-free provenance string as the schema stores it, else None.
+
+    Only a non-empty string survives; anything else (None, numbers, a dict) is
+    dropped entirely so a malformed value can never put a non-string key into
+    the JSON line — and never a secret, because callers pass the *source*
+    fields off the client, not key material.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    return value
+
+
+def provenance_fields(client: Any) -> dict[str, str]:
+    """Credential-free identity of an ``LLMClient``-shaped object.
+
+    Returns ``{"model": …, "base_url_source": …, "api_key_source": …}`` from
+    the same attributes ``LLMClient.describe()`` renders, so a usage row can
+    name the judge WITHOUT its endpoint URL or any key material. A client that
+    lacks the attributes (an old fake in a test, a duck-typed stand-in) simply
+    contributes no fields.
+    """
+    fields: dict[str, str] = {}
+    for name in _PROVENANCE_FIELDS:
+        value = _provenance(getattr(client, name, None))
+        if value is not None:
+            fields[name] = value
+    return fields
+
 
 def usage_path(workdir: str) -> str:
     """``<workdir>/.gitreins/usage.jsonl`` — the judge telemetry file."""
@@ -79,6 +117,9 @@ def append_usage_row(
     cache_read: int = 0,
     cache_write: int = 0,
     ts: float | None = None,
+    model: str | None = None,
+    base_url_source: str | None = None,
+    api_key_source: str | None = None,
 ) -> bool:
     """Append one telemetry row to ``<workdir>/.gitreins/usage.jsonl``.
 
@@ -95,6 +136,14 @@ def append_usage_row(
     ``ts`` defaults to now. A caller that already measured the moment passes it,
     because attribution is BY TIME (:func:`attribute_rows`): the row must land
     before the verdict it belongs to, never after it.
+
+    ``model``/``base_url_source``/``api_key_source`` (REVIEW-GITREINS-030) are
+    optional credential-free provenance: they land in the row only when given,
+    so the judge's ``tier2`` rows carry the identity of the client that produced
+    the tokens while the resolution gate's rows — which omit them — keep
+    byte-for-byte their pre-provenance shape. Values are the *sources* (which
+    env var / argument resolved the base URL and key), never the URL or key
+    themselves.
     """
     row = {
         "ts": time.time() if ts is None else _as_number(ts) or time.time(),
@@ -104,6 +153,14 @@ def append_usage_row(
         "cache_write": _counter(cache_write),
         "step": step,
     }
+    for name, value in (
+        ("model", model),
+        ("base_url_source", base_url_source),
+        ("api_key_source", api_key_source),
+    ):
+        provenance = _provenance(value)
+        if provenance is not None:
+            row[name] = provenance
     try:
         path = usage_path(workdir)
         os.makedirs(os.path.dirname(path), exist_ok=True)
