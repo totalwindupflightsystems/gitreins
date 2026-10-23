@@ -32,10 +32,14 @@ from collections.abc import Callable
 from typing import Any
 
 from engine.persist import persist_resolution
+from engine.resolution import _STRONG_PROVENANCE as STRONG_PROVENANCE
 from engine.resolution import (
+    MIN_RESOLVED_EVIDENCE_QUALITY,
     VERDICT_ABSTAIN,
     VERDICT_RESOLVED,
+    VERDICT_REVIEW,
     ResolutionVerdict,
+    band_for,
     effective_band_for,
     enabled_surfaces,
     resolve,
@@ -47,6 +51,7 @@ __all__ = [
     "DECISION_SKIP",
     "DECISIONS",
     "decide",
+    "evidence_floor_reason",
     "preflight",
 ]
 
@@ -68,17 +73,129 @@ DECISIONS: dict[str, str] = {
 
 #: The policy's one-line why, per decision — printed by the CLI and recorded so
 #: a human reading the annotation never has to re-derive the mapping.
+#:
+#: The REVIEW line deliberately does NOT claim the evidence is "partial": on the
+#: demotion path (a >= 0.85 probability whose evidence misses the floor) the
+#: evidence may resolve the row perfectly and still fail the floor, and a generic
+#: partial-evidence reason actively hid the real cause (JEVRES-007). A REVIEW
+#: record therefore states the probability frame, and
+#: :func:`evidence_floor_reason` supplies the cause whenever the demotion — not
+#: the probability — is what produced the band.
 _REASONS: dict[str, str] = {
     DECISION_SKIP: (
         "the evidence in the repo already resolves the row (probability >= 0.85) "
         "— annotate the row instead of dispatching a worker"
     ),
     DECISION_NOTE: (
-        "the evidence partially resolves the row — dispatch and carry "
-        "missing_kind + probability into the worker brief"
+        "the evidence does not yet resolve the row (probability in the REVIEW band "
+        "0.50-0.85) — dispatch-with-note and carry missing_kind + probability "
+        "into the worker brief"
     ),
     DECISION_DISPATCH: "the row is not resolved — dispatch as usual",
 }
+
+
+def evidence_floor_reason(verdict: ResolutionVerdict) -> str | None:
+    """Name WHY the evidence floor demoted a would-be ``RESOLVED`` verdict.
+
+    :func:`effective_band_for` folds six independent conditions into one bit and
+    returns a band only, so a record reading ``band: REVIEW`` next to
+    ``probability: 0.97`` cannot say which condition fired. This helper re-derives
+    the same conditions — the same constant (:data:`MIN_RESOLVED_EVIDENCE_QUALITY`),
+    the same provenance set imported from the resolver, the same order — and
+    returns the observed VALUES, so the record names the cause instead of only
+    the consequence.
+
+    The causes are reported independently and joined with ``"; "``: a low
+    ``evidence_quality`` is named as such (with the observed score and the floor),
+    a provenance/manifest failure is named as a provenance failure, and clipping
+    or budget exhaustion are named on their own. Nothing is attributed to
+    ``evidence_quality`` when ``evidence_quality`` was fine.
+
+    Returns ``None`` when nothing was demoted — the probability band was not
+    ``RESOLVED``, or the floor was satisfied. Pure and deterministic: no
+    resolution runs here.
+    """
+    if band_for(verdict.probability) != VERDICT_RESOLVED:
+        return None
+    effective = effective_band_for(
+        verdict.probability,
+        evidence_quality=verdict.evidence_quality,
+        manifest=verdict.manifest,
+        clipped=verdict.clipped,
+        budget_exhausted=verdict.budget_exhausted,
+    )
+    if effective != VERDICT_REVIEW:
+        return None
+
+    floor = MIN_RESOLVED_EVIDENCE_QUALITY
+    causes: list[str] = []
+
+    quality = verdict.evidence_quality
+    if quality is None:
+        observed = (
+            f" (the Jev score was {verdict.evidence_quality_score})"
+            if verdict.evidence_quality_score is not None
+            else ""
+        )
+        causes.append(
+            "evidence_quality could not be read off the answer"
+            f"{observed} — the floor requires evidence_quality >="
+            f" MIN_RESOLVED_EVIDENCE_QUALITY ({floor})"
+        )
+    elif quality < floor:
+        causes.append(
+            f"evidence_quality {quality} is below MIN_RESOLVED_EVIDENCE_QUALITY ({floor})"
+        )
+
+    if not verdict.manifest:
+        causes.append(
+            "the bundle manifest is empty — a RESOLVED needs at least one shipped"
+            " block with recognized provenance"
+        )
+    else:
+        strong = any(
+            entry.provenance in STRONG_PROVENANCE
+            and entry.score is not None
+            and entry.score >= 0.80
+            for entry in verdict.manifest
+        )
+        if not strong:
+            seen = ", ".join(sorted({entry.provenance for entry in verdict.manifest}))
+            best = max(
+                (entry.score for entry in verdict.manifest if entry.score is not None),
+                default=None,
+            )
+            strongest = f", best score {best:.2f}" if best is not None else ""
+            causes.append(
+                "no manifest entry has recognized provenance"
+                f" ({'/'.join(sorted(STRONG_PROVENANCE))}) with score >= 0.80"
+                f" — manifest provenance: {seen or 'unknown'}{strongest}"
+            )
+
+    if verdict.clipped:
+        causes.append("the bundle was clipped — clipped evidence is never sufficient")
+    if verdict.budget_exhausted:
+        causes.append("the bundle budget was exhausted — a partial bundle is never sufficient")
+
+    if not causes:  # pragma: no cover - guarded by the band comparison above
+        return (
+            "the evidence floor rejected the answer but no individual condition"
+            " explains it — evidence_floor_reason is out of sync with"
+            " effective_band_for"
+        )
+    return "; ".join(causes)
+
+
+def _reason_for(decision: str, demotion_reason: str | None) -> str:
+    """The record's one-line why: the demotion cause when there is one."""
+    if decision == DECISION_NOTE and demotion_reason:
+        return (
+            "the probability band resolved the row but the evidence floor demoted it"
+            f" to REVIEW: {demotion_reason} — dispatch-with-note and carry"
+            " missing_kind + probability into the worker brief"
+        )
+    return _REASONS[decision]
 
 
 def decide(verdict: ResolutionVerdict) -> dict[str, Any]:
@@ -86,7 +203,9 @@ def decide(verdict: ResolutionVerdict) -> dict[str, Any]:
 
     Pure policy over the verdict — no resolution runs here. The returned record
     carries the band, the probability, ``missing_kind``, the decision, the
-    reason, the abstain reason when the verdict abstained, and the verdict as a
+    reason, the demotion cause (``demotion_reason`` — non-null only when the
+    evidence floor, not the probability, produced ``REVIEW``), the abstain reason
+    when the verdict abstained, and the verdict as a
     first-class OBJECT (``verdict`` — the same shape ``gitreins resolve --json``
     prints, with the effective pre-dispatch band): a skip
     must never be blind, and an annotation must be able to show what the gate
@@ -105,13 +224,19 @@ def decide(verdict: ResolutionVerdict) -> dict[str, Any]:
     # raw probability band remains available to callers that invoke resolve()
     # directly, but a weak RESOLVED answer is REVIEW here and must dispatch.
     verdict_record["verdict"] = effective_band
+    # JEVRES-007: when the floor — not the probability — produced REVIEW, the
+    # record names the cause (evidence_quality below
+    # MIN_RESOLVED_EVIDENCE_QUALITY, a provenance failure, clipping, …) instead
+    # of leaving the undifferentiated band to speak for itself.
+    demotion_reason = evidence_floor_reason(verdict)
     record: dict[str, Any] = {
         "question": verdict.question,
         "band": effective_band,
         "probability": verdict.probability,
         "missing_kind": verdict.missing_kind,
         "decision": decision,
-        "reason": _REASONS[decision],
+        "reason": _reason_for(decision, demotion_reason),
+        "demotion_reason": demotion_reason,
         "abstain_reason": verdict.abstain_reason,
         "verdict": verdict_record,
     }

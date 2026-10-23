@@ -223,6 +223,142 @@ class TestDecide:
         assert record["verdict"] == verdict.to_dict()
         assert record["verdict"]["verdict"] == "RESOLVED"
         assert record["verdict"]["probability"] == pytest.approx(0.93)
+        # JEVRES-007: nothing was demoted, so there is no cause to name.
+        assert record["demotion_reason"] is None
+
+
+def _strong_entry() -> object:
+    """One manifest entry that satisfies the floor's provenance requirement."""
+    from engine.resolution import ManifestEntry
+
+    return ManifestEntry(
+        file="engine/guards.py",
+        provenance="ast_exact",
+        score=0.99,
+        bytes=100,
+        truncated=False,
+        source="understand",
+        lines=10,
+    )
+
+
+class TestEvidenceFloorDemotion:
+    """JEVRES-007 — a floor demotion must name its cause, not just its band.
+
+    ``effective_band_for`` returns a band and nothing else, so before this the
+    record read ``band: REVIEW`` beside ``probability: 0.93`` with the generic
+    "the evidence partially resolves the row" — misreporting evidence that fully
+    resolves the row but misses the floor. The cause now rides in the additive
+    ``demotion_reason`` field and in ``reason`` itself.
+    """
+
+    def test_low_evidence_quality_names_quality_score_and_floor(self) -> None:
+        from engine.resolution import ResolutionVerdict
+
+        verdict = ResolutionVerdict(
+            question="Is the row already implemented?",
+            verdict="RESOLVED",
+            probability=0.93,
+            evidence_quality=2,
+            evidence_quality_score=2.0,
+            manifest=[_strong_entry()],
+        )
+        cause = preflight_module.evidence_floor_reason(verdict)
+        assert cause is not None
+        # The observed score (integer), the field, and the floor — all named,
+        # without dragging in the conditions that were satisfied.
+        assert "evidence_quality 2 is below MIN_RESOLVED_EVIDENCE_QUALITY (3)" in cause
+        assert "provenance" not in cause
+        assert "clipped" not in cause
+
+        record = decide(verdict)
+        assert record["band"] == "REVIEW"
+        assert record["decision"] == DECISION_NOTE
+        assert record["demotion_reason"] == cause
+        assert "evidence_quality 2 is below MIN_RESOLVED_EVIDENCE_QUALITY (3)" in record["reason"]
+        # The misleading generic claim is gone, the action is preserved.
+        assert "partially resolves" not in record["reason"]
+        assert "dispatch-with-note" in record["reason"]
+
+    def test_unreadable_evidence_quality_names_the_missing_answer(self) -> None:
+        from engine.resolution import ResolutionVerdict
+
+        verdict = ResolutionVerdict(
+            question="q?",
+            verdict="RESOLVED",
+            probability=0.90,
+            evidence_quality=None,
+            evidence_quality_score=2.4,
+            manifest=[_strong_entry()],
+        )
+        cause = preflight_module.evidence_floor_reason(verdict)
+        assert cause is not None
+        assert "evidence_quality could not be read" in cause
+        assert "2.4" in cause  # the raw Jev score, since there is no integer
+        assert "MIN_RESOLVED_EVIDENCE_QUALITY (3)" in cause
+
+    def test_provenance_demotion_is_not_blamed_on_evidence_quality(self) -> None:
+        """evidence_quality 3 is fine; the provenance condition is the cause."""
+        from engine.resolution import ManifestEntry, ResolutionVerdict
+
+        weak = ManifestEntry(
+            file="engine/guards.py",
+            provenance="lexical",
+            score=0.99,
+            bytes=100,
+            truncated=False,
+            source="bundle",
+            lines=10,
+        )
+        verdict = ResolutionVerdict(
+            question="q?",
+            verdict="RESOLVED",
+            probability=0.91,
+            evidence_quality=3,
+            manifest=[weak],
+        )
+        cause = preflight_module.evidence_floor_reason(verdict)
+        assert cause is not None
+        assert "no manifest entry has recognized provenance" in cause
+        assert "lexical" in cause
+        assert "evidence_quality" not in cause, "a satisfied floor must not be blamed"
+
+        record = decide(verdict)
+        assert record["band"] == "REVIEW"
+        assert record["demotion_reason"] == cause
+        assert "dispatch-with-note" in record["reason"]
+
+    def test_clipping_is_named_as_the_cause(self) -> None:
+        from engine.resolution import ResolutionVerdict
+
+        verdict = ResolutionVerdict(
+            question="q?",
+            verdict="RESOLVED",
+            probability=0.95,
+            evidence_quality=3,
+            manifest=[_strong_entry()],
+            clipped=True,
+        )
+        cause = preflight_module.evidence_floor_reason(verdict)
+        assert cause is not None
+        assert "clipped" in cause
+        assert "evidence_quality" not in cause
+
+    def test_probability_review_is_untouched_and_names_no_demotion(
+        self, script_assembler: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The normal REVIEW path keeps dispatch-with-note and a null cause."""
+        script_assembler()
+        monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("plain-review"))
+        verdict = resolution.resolve("q?", poster=lambda *a, **k: _StubResponse(0.62))
+        assert verdict.verdict == "REVIEW"
+        record = decide(verdict)
+        assert record["band"] == "REVIEW"
+        assert record["decision"] == DECISION_NOTE
+        assert record["demotion_reason"] is None
+        assert record["reason"]
+        assert "partially resolves" not in record["reason"]
+        assert "dispatch-with-note" in record["reason"]
 
 
 class TestPreflightDispatchHook:
@@ -239,6 +375,37 @@ class TestPreflightDispatchHook:
         )
         assert record["decision"] == DECISION_SKIP
         assert dispatch.calls == 0, "a RESOLVED premise must not spawn a worker"
+
+    def test_evidence_floor_demotion_carries_the_cause_through_preflight(
+        self, script_assembler: object, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """JEVRES-007 end to end: 0.91 + rubric position 1 is REVIEW with a cause.
+
+        The live Jev answer scores ``evidence_quality`` 1 here (1.2 read off the
+        0-3 legend), which the floor rejects. The record must still dispatch with
+        the note — and must name ``evidence_quality``, the observed 1 and the
+        floor 3, instead of claiming the evidence is merely partial.
+        """
+        script_assembler()
+        monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("floor"))
+        dispatch = _RecordingDispatch()
+        record = preflight(
+            "Is the row already implemented?",
+            workdir=".",
+            dispatch=dispatch,
+            poster=lambda *a, **k: _StubResponse(0.91, evidence_quality_score=1.2),
+        )
+        assert record["probability"] == pytest.approx(0.91)
+        assert record["band"] == "REVIEW"
+        assert record["decision"] == DECISION_NOTE
+        assert dispatch.calls == 1, "a REVIEW still dispatches, with the note"
+        assert record["verdict"]["evidence_quality"] == 1
+        cause = record["demotion_reason"]
+        assert cause
+        assert "evidence_quality 1 is below MIN_RESOLVED_EVIDENCE_QUALITY (3)" in cause
+        assert "evidence floor" in record["reason"]
+        assert "partially resolves" not in record["reason"]
+        assert "dispatch-with-note" in record["reason"]
 
     def test_abstain_invokes_the_hook_and_records_the_reason(
         self, script_assembler: object
