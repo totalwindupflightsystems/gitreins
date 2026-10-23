@@ -474,8 +474,10 @@ question, abstain_reason, verdict_json} where `verdict_json` was an embedded JSO
 STRING you had to parse twice; scripts keyed on `verdict` found nothing in a
 preflight record and had to fall back to `band`. Since DF-GITREINS-POC-37 the
 record is {band, decision, probability, missing_kind, question, reason,
-abstain_reason, **verdict**}, with `verdict` the SAME object `resolve --json`
-prints (`ResolutionVerdict.to_dict()`) — one shape, one parse on both surfaces.
+demotion_reason, abstain_reason, **verdict**}, with `verdict` the SAME object
+`resolve --json` prints (`ResolutionVerdict.to_dict()`) — one shape, one parse on
+both surfaces. (`demotion_reason` is additive, JEVRES-007: null unless the
+evidence floor demoted a ≥0.85 probability — see pitfall 62.)
 
 Verified behavior worth trusting (measured live, 0.15.0): real discrimination on real
 premises — true premise → RESOLVED 0.85 / skip-dispatch; open premise → UNRESOLVED
@@ -968,11 +970,15 @@ gitreins preflight "<premise>" --surface cli   # default surface predispatch shi
 
 - **62 — preflight can hand back REVIEW at probability 0.97 (JEVRES-007).**
   The engine bands by probability, then `effective_band_for`
-  (`engine/preflight.py:84` → `engine/resolution.py:1530/182`) demotes any
+  (`engine/preflight.py` → `engine/resolution.py:1530/182`) demotes any
   RESOLVED whose rubric `evidence_quality < 3` ("3 = exact code path together
   with its test") or whose manifest lacks a ≥0.80 ast_exact/bounded-read entry.
-  The demotion is SILENT on the CLI surface and the printed reason claims "the
-  evidence partially resolves the row" even when nothing was partial. Read
+  The demotion is SILENT on the CLI surface unless you read the new
+  `demotion_reason` field (JEVRES-007): it names `evidence_quality`, the observed
+  score and the floor — e.g. `evidence_quality 2 is below
+  MIN_RESOLVED_EVIDENCE_QUALITY (3)` — or the provenance/clipping/budget
+  condition that actually failed, and `reason` repeats that cause instead of
+  claiming the evidence is merely partial. Read
   `verdict.evidence_quality` in the JSON before concluding the gate misfired;
   a repo whose tested module lacks tests can never produce skip-dispatch.
 - **63 — a fresh repo's first `resolve` ABSTAINs empty-bundle with a WRONG hint

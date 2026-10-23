@@ -1147,10 +1147,25 @@ gitreins preflight "<question>" [--surface <name>] [--json]
 
 | Verdict band | Decision | Meaning |
 |--------------|----------|---------|
-| `RESOLVED` (probability ≥ 0.85) | `skip-dispatch` | the evidence already resolves the row — annotate it, do NOT spawn a worker |
-| `REVIEW` (0.50–0.85) | `dispatch-with-note` | dispatch, carrying `missing_kind` + probability into the worker brief |
+| `RESOLVED` (probability ≥ 0.85 **and** `evidence_quality` ≥ 3) | `skip-dispatch` | the evidence already resolves the row — annotate it, do NOT spawn a worker |
+| `REVIEW` (0.50–0.85, **or** ≥ 0.85 with the evidence floor unmet) | `dispatch-with-note` | dispatch at the full probability, carrying `missing_kind` + probability into the worker brief |
 | `UNRESOLVED` (probability < 0.50) | `dispatch` | nothing changes — `missing_kind` names what to build |
 | `ABSTAIN` (any failure) | `dispatch` | **fail open, by design**: the reason is recorded, work proceeds |
+
+**The evidence floor (`MIN_RESOLVED_EVIDENCE_QUALITY = 3`).** A probability of
+0.85 or more is not sufficient on its own: `RESOLVED` also requires the Jev
+evidence rubric to reach its strongest position — `3`, "the exact path plus its
+test" (0 = mentions only, 1 = adjacent code, 2 = the exact code path) — *and* a
+non-empty bundle manifest with at least one block whose provenance is recognized
+(`ast_exact` / `bounded-read`) scoring ≥ 0.80, with no clipping and no budget
+exhaustion. Lexical overlap can push the probability high while the bundle only
+mentions the premise, so a would-be `RESOLVED` that misses any of those
+conditions is demoted to `REVIEW`: the decision stays `dispatch-with-note` at the
+full probability, and the record names the cause in `demotion_reason` (e.g.
+`evidence_quality 2 is below MIN_RESOLVED_EVIDENCE_QUALITY (3)`, or a provenance
+failure when the rubric position was fine). The `reason` field repeats that cause
+in one line — it never claims the evidence is merely partial when the real cause
+is the floor.
 
 The asymmetry with `gitreins resolve` is deliberate doctrine: the gate itself
 fails CLOSED (an ABSTAIN is never read as a pass) because it guards a merge
@@ -1163,7 +1178,7 @@ carries the probability, `missing_kind` and the full verdict OBJECT (`verdict`)
 (`ResolutionVerdict.to_dict()`), never an escaped JSON string: no skip is
 blind, and every row can be annotated with what the gate saw. The `--json`
 record is exactly `{question, band, probability, missing_kind, decision,
-reason, abstain_reason, verdict}`.
+reason, demotion_reason, abstain_reason, verdict}`.
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -1172,14 +1187,16 @@ reason, abstain_reason, verdict}`.
 | `probability` | number or `null` | the gate's resolution probability — `null` on an ABSTAIN |
 | `missing_kind` | string or `null` | what the evidence lacks (`none` / `implementation` / `test` / …) |
 | `decision` | string | `skip-dispatch` / `dispatch-with-note` / `dispatch` |
-| `reason` | string | the policy's one-line why for that decision |
+| `reason` | string | the policy's one-line why for that decision; on a floor demotion it names the cause |
+| `demotion_reason` | string or `null` | why a probability ≥ 0.85 was demoted to `REVIEW` — names `evidence_quality`, the observed score and `MIN_RESOLVED_EVIDENCE_QUALITY` (3), or the provenance/clipping/budget condition that actually failed; `null` when nothing was demoted |
 | `abstain_reason` | string or `null` | why the gate abstained (`no-credentials`, `surface-disabled`, …); `null` for a real band |
 | `verdict` | object | the full verdict — the SAME object `gitreins resolve --json` prints (`ResolutionVerdict.to_dict()`) |
 
 An ABSTAIN is not a second record shape: no credentials, a dead transport and
-the `surface-disabled` gate all return the same eight fields, with `probability`
-`null` and the reason spelled out inside `verdict.abstain_detail`, so a consumer
-keying on `.verdict` needs no ABSTAIN branch of its own.
+the `surface-disabled` gate all return the same nine fields, with `probability`
+`null`, `demotion_reason` `null` and the reason spelled out inside
+`verdict.abstain_detail`, so a consumer keying on `.verdict` needs no ABSTAIN
+branch of its own.
 
 **`--surface`: the enable flags are per surface, and independent.** The four
 surfaces (`cli`, `mcp`, `predispatch`, `judge_prescreen`) are switched on one by

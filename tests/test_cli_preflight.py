@@ -32,7 +32,7 @@ def _fake_key(tag: str) -> str:
     return "sk-or-" + "v1-" + tag + "-" + "0" * 16
 
 
-def _jev_payload(noul: float, choice: str = "none") -> dict:
+def _jev_payload(noul: float, choice: str = "none", evidence_quality_score: float = 2.6) -> dict:
     """The live decisions-endpoint answer shape, exactly as measured."""
     return {
         "model": "typesafe/jev-1.13-20260917",
@@ -46,7 +46,7 @@ def _jev_payload(noul: float, choice: str = "none") -> dict:
             },
             "evidence_quality": {
                 "type": "score",
-                "score": 2.6,
+                "score": evidence_quality_score,
                 "legend": {
                     "0": "mentions only",
                     "1": "adjacent code",
@@ -66,12 +66,15 @@ def _jev_payload(noul: float, choice: str = "none") -> dict:
 class _StubResponse:
     status_code = 200
 
-    def __init__(self, noul: float, choice: str = "none") -> None:
+    def __init__(
+        self, noul: float, choice: str = "none", evidence_quality_score: float = 2.6
+    ) -> None:
         self._noul = noul
         self._choice = choice
+        self._evidence_quality_score = evidence_quality_score
 
     def json(self) -> object:
-        return _jev_payload(self._noul, self._choice)
+        return _jev_payload(self._noul, self._choice, self._evidence_quality_score)
 
 
 def _enabled_resolution_defaults(surface: str) -> object:
@@ -269,6 +272,76 @@ class TestPreflightCLI:
         assert "Missing:  none" in out
         assert "Abstain:" not in out
 
+    def test_json_record_names_the_evidence_floor_cause_on_demotion(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """JEVRES-007 — a consumer-repo record answers WHY it was demoted.
+
+        probability 0.94 would be RESOLVED, but the Jev rubric position is 1
+        (below MIN_RESOLVED_EVIDENCE_QUALITY = 3), so the band is REVIEW. The
+        record must name the floor cause instead of the old generic
+        "the evidence partially resolves the row", and must keep the
+        dispatch-with-note action.
+        """
+        _script_assembler(monkeypatch)
+        monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("cli-floor"))
+        monkeypatch.setattr(
+            resolution,
+            "requests",
+            type(
+                "E",
+                (),
+                {
+                    "post": staticmethod(
+                        lambda *a, **k: _StubResponse(0.94, evidence_quality_score=1.2)
+                    )
+                },
+            )(),
+        )
+
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        code, out, err = run_preflight(
+            monkeypatch, str(workdir), "Is the row already implemented?", "--json"
+        )
+
+        assert code == 0
+        record = json.loads(out)
+        assert record["band"] == "REVIEW"
+        assert record["probability"] >= 0.85
+        assert record["decision"] == "dispatch-with-note"
+        assert record["verdict"]["evidence_quality"] == 1
+        cause = record["demotion_reason"]
+        assert cause, "a REVIEW at p >= 0.85 must carry the demotion cause"
+        assert "evidence_quality 1 is below MIN_RESOLVED_EVIDENCE_QUALITY (3)" in cause
+        assert "partially resolves" not in record["reason"]
+        assert "evidence floor" in record["reason"]
+        assert "dispatch-with-note" in record["reason"]
+        assert err == ""
+
+    def test_skip_record_has_no_demotion_reason(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The additive field is null on the paths that were never demoted."""
+        _script_assembler(monkeypatch)
+        monkeypatch.setenv("GITREINS_OPENROUTER_KEY", _fake_key("cli"))
+        monkeypatch.setattr(
+            resolution,
+            "requests",
+            type("E", (), {"post": staticmethod(lambda *a, **k: _StubResponse(0.87))})(),
+        )
+
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        code, out, _ = run_preflight(
+            monkeypatch, str(workdir), "Is JEVRES-003 already implemented?", "--json"
+        )
+
+        assert code == 0
+        record = json.loads(out)
+        assert record["band"] == "RESOLVED"
+        assert record["demotion_reason"] is None
+
     def test_abstain_is_a_valid_dispatch_outcome_exit_zero(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
@@ -296,6 +369,8 @@ class TestPreflightCLI:
         assert record["probability"] is None
         # One record shape for every band — including the one with no verdict
         # to report (`probability: null`): same keys, `verdict` still an object.
+        # `demotion_reason` is additive (JEVRES-007) and null wherever no floor
+        # demotion happened, so the shape stays uniform across bands.
         assert set(record) == {
             "question",
             "band",
@@ -303,9 +378,11 @@ class TestPreflightCLI:
             "missing_kind",
             "decision",
             "reason",
+            "demotion_reason",
             "abstain_reason",
             "verdict",
         }
+        assert record["demotion_reason"] is None
         verdict = record["verdict"]
         assert isinstance(verdict, dict), "no second parse, on the ABSTAIN path either"
         assert set(verdict) == set(ResolutionVerdict(question="q?", verdict="ABSTAIN").to_dict())
