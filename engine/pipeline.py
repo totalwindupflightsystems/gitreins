@@ -52,12 +52,13 @@ import re
 import shlex
 import subprocess
 import sys
+import time as _time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from engine import command_hygiene, lang_detect, scanner_nice
+from engine import command_hygiene, lang_detect, scanner_nice, usage
 from engine.evidence_bounds import (
     _ERROR_TEST_LINE,
     MAX_STEP_EVIDENCE_CHARS as _MAX_STEP_EVIDENCE_CHARS,
@@ -228,6 +229,11 @@ class StageResult:
     degraded: bool = False
     skipped_steps: list[str] = field(default_factory=list)
     degradation_reason: str = ""
+    # REVIEW-GITREINS-030: the judge's credential-free provenance (model +
+    # base_url_source + api_key_source), folded onto the stage dict so
+    # verdict.json's `stages.<id>` names WHO judged it without key or URL
+    # values. Absent (not null) when the client carries no identity fields.
+    provenance: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -237,6 +243,12 @@ class StageResult:
             "summary": self.summary,
             "steps": [s.to_dict() for s in self.steps],
         }
+        if self.provenance:
+            # Flat on the stage dict (AC 3: ``stages.tier2["model"]`` /
+            # ``["api_key_source"]``), never nested — a reader must not have
+            # to know the pipeline's internal step shape to name the judge.
+            for _field, _value in self.provenance.items():
+                d.setdefault(_field, _value)
         if self.coverage:
             d["coverage"] = self.coverage
         if self.degraded:
@@ -244,6 +256,31 @@ class StageResult:
             d["skipped_steps"] = list(self.skipped_steps)
             d["degradation_reason"] = self.degradation_reason
         return d
+
+
+def _fold_step_provenance(stage: StageResult) -> None:
+    """Lift one ai_eval step's provenance dict onto the STAGE result dict.
+
+    REVIEW-GITREINS-030: the tier2 verdict used to carry the judge's identity
+    only inside ``steps[].data["provenance"]``, which was easy to lose between
+    the pipeline result shape and the persisted verdict. Folding it here puts
+    the SAME fields on ``stages.<id>`` in verdict.json (and in
+    ``judge_result_to_dict``) as a first-class, credential-free attribution:
+    model + base_url_source + api_key_source, never key values or URLs. A
+    step with no provenance (an old fake, a non-ai_eval script) leaves the
+    stage's dict absent (not null).
+
+    Multi-ai_eval stages take the last non-empty one deterministically by
+    step order — in practice the default pipeline has exactly one.
+    """
+    folded: dict[str, Any] = {}
+    for step in stage.steps:
+        data = step.data if isinstance(step.data, dict) else {}
+        prov = data.get("provenance")
+        if isinstance(prov, dict) and prov:
+            folded = prov
+    if folded:
+        stage.provenance = dict(folded)
 
 
 def degradation_warning(stage: dict[str, Any]) -> str | None:
@@ -702,6 +739,7 @@ class Pipeline:
         result.any_failed = any(not s.passed for s in result.steps)
         result.passed = not result.any_failed
         result.summary = self._summarize_stage(result)
+        _fold_step_provenance(result)
         return result
 
     def _run_sequential_stage(
@@ -738,6 +776,7 @@ class Pipeline:
         result.passed = step_result.passed
         result.any_failed = not step_result.passed
         result.summary = step_result.output or step_result.error
+        _fold_step_provenance(result)
         return result
 
     def _run_step(
@@ -1099,10 +1138,16 @@ class Pipeline:
             # EVID-003: ``persist_telemetry=False`` (the ephemeral judge) skips
             # it — the line lands inside the graded tree, and an ephemeral run
             # has no persisted verdict to attribute it to anyway.
+            # REVIEW-GITREINS-030: credential-free judge provenance, taken from
+            # the SAME client the evaluator ran (self._llm) — the resolved model
+            # plus WHERE the base URL and API key came from, the exact fields
+            # LLMClient.describe() renders. Never the URL or key values. Duck-
+            # typed fakes without the attributes contribute no fields.
+            provenance = usage.provenance_fields(self._llm) if self._llm is not None else {}
+
             try:
                 import json as _uj
                 import os as _uos
-                import time as _time
 
                 _cap = getattr(evaluator, "eval_cap", None)
                 if _cap is not None and self.persist_telemetry:
@@ -1114,6 +1159,7 @@ class Pipeline:
                         "cache_write": getattr(_cap, "cumulative_cache_write", 0),
                         "step": step_id,
                     }
+                    usage_line.update(provenance)
                     usage_path = _uos.path.join(self.workdir, ".gitreins", "usage.jsonl")
                     _uos.makedirs(_uos.path.dirname(usage_path), exist_ok=True)
                     with open(usage_path, "a") as _f:
@@ -1130,6 +1176,10 @@ class Pipeline:
                     "verdict": verdict.verdict,
                     "items": [_verdict_item_data(i) for i in verdict.items],
                     "summary": verdict.summary,
+                    # REVIEW-GITREINS-030: persisted with the verdict so judge
+                    # provenance is attributable in verdict.json; absent (not
+                    # null) when the client carries no identity fields.
+                    **({"provenance": dict(provenance)} if provenance else {}),
                 },
             )
         except Exception as e:

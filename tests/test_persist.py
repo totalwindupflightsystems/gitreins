@@ -235,6 +235,82 @@ def test_build_summary_handles_pipeline_stages(tmp_path: Path) -> None:
     assert "tier1" in summary
 
 
+# ── REVIEW-GITREINS-030: judge provenance survives into verdict.json ────────
+
+
+def _judge_result(**attrs: object) -> object:
+    """A minimal JudgeResult-shaped stand-in for build_verdict_data."""
+    base = {
+        "passed": True,
+        "verdict": None,
+        "tier1": None,
+        "pipeline_result": {},
+        "provenance": {},
+        "summary": "Judge Result: t",
+    }
+    base.update(attrs)
+    return type("R", (), base)()
+
+
+def _task() -> object:
+    return type("T", (), {"id": "t", "title": "ti", "criteria": []})()
+
+
+def test_pipeline_stage_provenance_is_carried_into_the_verdict_data(
+    tmp_path: Path,
+) -> None:
+    """The tier2 stage dict reaches verdict.json unharmed — model included.
+
+    This is the surface AC 3 reads: ``d['stages']['tier2']['model']`` and
+    ``['api_key_source']``, taken from the ai_eval stage the pipeline compiled.
+    """
+    from engine.persist import build_verdict_data
+
+    stage = {
+        "id": "tier2",
+        "passed": True,
+        "any_failed": False,
+        "summary": "COMPLETE",
+        "steps": [],
+        "model": "deepseek-v4-flash",
+        "base_url_source": "GITREINS_LLM_BASE_URL",
+        "api_key_source": "GITREINS_LLM_API_KEY",
+    }
+    result = _judge_result(pipeline_result={"passed": True, "stages": {"tier2": stage}})
+
+    data = build_verdict_data(str(tmp_path), _task(), result)
+
+    persisted = data["stages"]["tier2"]
+    assert persisted["model"] == "deepseek-v4-flash"
+    assert persisted["api_key_source"] == "GITREINS_LLM_API_KEY"
+    # No key material, no endpoint URL anywhere in the record.
+    assert "SECRET" not in json.dumps(data)
+
+
+def test_legacy_judge_provenance_lands_at_the_top_level_of_the_record(
+    tmp_path: Path,
+) -> None:
+    """No pipeline stages → the client identity rides on the record itself."""
+    from engine.persist import build_verdict_data
+
+    result = _judge_result(
+        provenance={"model": "stub-judge", "api_key_source": "explicit argument"}
+    )
+
+    data = build_verdict_data(str(tmp_path), _task(), result)
+
+    assert data["provenance"] == {"model": "stub-judge", "api_key_source": "explicit argument"}
+
+
+def test_no_provenance_keeps_the_persisted_shape_absent(tmp_path: Path) -> None:
+    """A judge with no client identity adds no key — absent, not null."""
+    from engine.persist import build_verdict_data
+
+    data = build_verdict_data(str(tmp_path), _task(), _judge_result())
+
+    assert "provenance" not in data
+
+
 # ── git-branch fallback (DF-007) ─────────────────────────────
 
 
