@@ -1,0 +1,17 @@
+  Warning: no source files detected — language detection was
+  inconclusive, so static_analysis stays disabled and language-specific
+  guards (ruff, mypy, go vet, ...) will NOT be configured.
+  Add your source files, then re-run 'gitreins init'.
+GitReins init: /tmp/gitreins-df-20261023/consumer
+  Language:    unknown
+  Packages:    0
+  Test cmd:    pytest -x --tb=short
+  Test mode:   full
+  Eval cap:    100 iterations
+  History:     enabled
+  Static analysis: disabled (compiled language or explicitly off)
+
+Updated: resolution, backup: config.yaml.bak, .gitleaks.toml
+real 0.22
+user 0.16
+sys 0.03

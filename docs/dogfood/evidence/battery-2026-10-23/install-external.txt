@@ -1,0 +1,1 @@
+Error: Git core.hooksPath is configured, so hooks written under /tmp/gitreins-df-20261023/consumer/.git/hooks would not run (/tmp/gitreins-df-20261023/external-hooks). Configure Git to use the repository hooks path, then rerun `gitreins install`: git config --local core.hooksPath .git/hooks

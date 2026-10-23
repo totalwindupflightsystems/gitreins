@@ -1,0 +1,11 @@
+═══ GitReins Verdict Report ═══
+
+Recent: 1 evaluations
+Pass:   1 (100%)
+Fail:   0 (0%)
+
+  ✓ DFUSER-001               2026-10-23  
+     Verify a consumer task
+
+Storage: git (/tmp/gitreins-df-20261023/consumer/.gitreins/history)
+Total entries: 1

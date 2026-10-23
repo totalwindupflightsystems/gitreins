@@ -1,0 +1,27 @@
+GitReins installed in /tmp/gitreins-df-20261023/consumer
+
+Created:
+  + /tmp/gitreins-df-20261023/consumer/.gitreins/config.yaml
+  + /tmp/gitreins-df-20261023/consumer/.git/hooks/pre-commit
+  + /tmp/gitreins-df-20261023/consumer/.git/hooks/pre-push
+  + .gitignore (added .gitreins/tasks.yaml)
+  + .gitignore (added .gitreins/config.yaml.bak)
+  + .gitignore (added .gitreins/usage.jsonl)
+  + .gitignore (added .gitreins/logs/)
+  + .gitignore (added .gitreins/qa-ledger.jsonl)
+  + .gitignore (added .gitreins/worktrees.json)
+  + .gitignore (added .gitreins/worktrees.lock)
+  + .gitignore (added .gitreins/disposable.json)
+  + .gitignore (added .gitreins/disposable.lock)
+  + .gitignore (added .gitreins/tasks.yaml.lock)
+  + .gitignore (added .gitreins/verdicts/)
+  + .gitignore (added .gitreins/quality.json)
+
+Next steps:
+  - Run smart init:  gitreins init
+  - Create a task:  gitreins task create <id> <title> [criteria...]
+  - Run guards:     gitreins guard
+  - Try the hook:   make a change, git add ., git commit -m 'test'
+real 0.22
+user 0.17
+sys 0.03
