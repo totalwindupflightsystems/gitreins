@@ -1,0 +1,2 @@
+{"project":"gitreins","cell":"repo-head","status":"OK","detail":"tested HEAD=156c36c74f8a22716a24dfe706502a0f8cb7c8a5 at launch=2026-10-23T10:20:12Z (pull=clone dirty — pull skipped, testing recorded sha)","ts":"2026-10-23T10:19:36Z"}
+{"project":"gitreins","cell":"launch","status":"OK","detail":"agent=6d19e402 server=bunker-mvp ttl=4h script_bytes=137468 — battery started detached (qa-run.sh); phase B: bunker-qa.sh collect --evidence /tmp/gitreins-df-20261023/bunker-evidence.jsonl","ts":"2026-10-23T10:20:12Z"}

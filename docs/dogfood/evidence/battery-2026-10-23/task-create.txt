@@ -1,0 +1,3 @@
+Created task: DFUSER-001 — Verify a consumer task
+  1. README.md exists
+  2. git status is clean after setup

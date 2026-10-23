@@ -1,0 +1,2 @@
+Command exited with non-zero status 1
+resolve@repo-scale ctrl: 2.58s wall

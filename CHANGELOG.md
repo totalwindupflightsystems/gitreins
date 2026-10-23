@@ -5,6 +5,35 @@ All notable changes to GitReins will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.17.1] - 2026-10-23
+
+### Fixed
+- **Ambient provider-key fallback is opt-in (REVIEW-GITREINS-031)** — the
+  LLM client no longer falls back to ambient provider keys by default;
+  enabling that behavior now requires `GITREINS_ALLOW_AMBIENT_KEYS`, and the
+  coherent default LLM pair is `deepseek-v4-flash` + `api.deepseek.com/v1`
+  (918b3a8).
+- **`install` hooks-path gate hardened (RELEASE-012)** — the install gate
+  survives a PATH without git, accepts a hooksPath resolving to the repo's
+  own hooks dir, and detects an inactive hooks path during install
+  (d7fe982, 9a77f3c, 9d48223).
+- **`mypy --strict` tranches for engine/ (REVIEW-GITREINS-010)** — config,
+  pipeline, prescreen, review_profiles, worktree manager/fixtures and the
+  YAML boundary are now type-annotated under `mypy --strict`
+  (87ff146, 12f68df, 2b5a390, 8b0011d, 8b204a9).
+- **Quality-metric gate correctness (DF-GITREINS-POC-94/95/96)** — the
+  console shows the metric line instead of diff-scope, the declared ladder
+  target is authoritative over the artifact's own target, the producer runs
+  off the commit-blocking path, and `install` ignores the repo-produced
+  quality artifact (4da5f87, d49d46a, 1f17781, e39420d).
+- **MCP argument-error classification (DF-GITREINS-POC-92)** — tool argument
+  mismatches now classify as JSON-RPC `-32602` invalid-params instead of
+  leaking raw `-32000` signature errors (2de46c0).
+- **JSON-RPC `-32602` documented** in both MCP error taxonomies (DOC-24,
+  08c796a).
+
 ## [0.17.0] - 2026-10-16
 
 ### Added

@@ -1,0 +1,13 @@
+Completed: DFUSER-001 → complete
+Control root: /tmp/gitreins-df-20261023/consumer
+Scan scope:   /tmp/gitreins-df-20261023/consumer
+
+Evaluating...
+Judge Result: DFUSER-001
+
+Stage tier1: PASS
+  WARNING: coverage is secrets-only — lint, tests did not run (no language detected in /tmp/gitreins-df-20261023/consumer); run `gitreins guard` for the full gate
+    ✓ secrets: secrets: harness state excluded from gitleaks scope (.gitreins/**)
+
+Overall: PASS ✓
+  📋 Verdict saved: 9a59efdb

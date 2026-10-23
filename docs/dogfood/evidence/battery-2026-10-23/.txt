@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -u
+RUN=/tmp/gitreins-df-20261023
+REPO=/home/kara/gitreins
+export HOME="$RUN/home"
+export PATH="$REPO/.venv/bin:$HOME/.local/bin:$PATH"
+mkdir -p "$HOME"
+rm -rf "$RUN/consumer" "$RUN/output" "$RUN/external-hooks"
+mkdir -p "$RUN/output" "$RUN/external-hooks"
+mkdir "$RUN/consumer"
+cd "$RUN/consumer"
+git init -q
+git config user.email dogfood@example.invalid
+git config user.name Dogfood
+printf '# consumer\n' > README.md
+git add README.md
+git commit -qm 'seed consumer'
+printf '%s\n' '--- VERSION ---'
+gitreins --version
+printf '%s\n' '--- HELP ---'
+gitreins --help
+printf '%s\n' '--- INSTALL ---'
+/usr/bin/time -p gitreins install > "$RUN/output/install.txt" 2>&1; printf 'install_rc=%s\n' "$?"
+cat "$RUN/output/install.txt"
+printf '%s\n' '--- INIT ---'
+/usr/bin/time -p gitreins init > "$RUN/output/init.txt" 2>&1; printf 'init_rc=%s\n' "$?"
+cat "$RUN/output/init.txt"
+printf '%s\n' '--- CONFIG ---'
+cat .gitreins/config.yaml
+printf '%s\n' '--- HOOKS ---'
+git config --get core.hooksPath || true
+ls -l .git/hooks/pre-commit 2>&1 || true
+printf '%s\n' '--- GUARD ---'
+/usr/bin/time -p gitreins guard > "$RUN/output/guard.txt" 2>&1; printf 'guard_rc=%s\n' "$?"
+cat "$RUN/output/guard.txt"
+printf '%s\n' '--- TASK LIFECYCLE ---'
+gitreins task create DFUSER-001 'Verify a consumer task' 'README.md exists' 'git status is clean after setup' > "$RUN/output/task-create.txt" 2>&1; printf 'create_rc=%s\n' "$?"; cat "$RUN/output/task-create.txt"
+gitreins task start DFUSER-001 > "$RUN/output/task-start.txt" 2>&1; printf 'start_rc=%s\n' "$?"; cat "$RUN/output/task-start.txt"
+gitreins task complete --skip-tier2 DFUSER-001 > "$RUN/output/task-complete.txt" 2>&1; printf 'complete_rc=%s\n' "$?"; cat "$RUN/output/task-complete.txt"
+printf '%s\n' '--- REPORT ---'
+gitreins report -n 3 > "$RUN/output/report.txt" 2>&1; printf 'report_rc=%s\n' "$?"; cat "$RUN/output/report.txt"
+printf '%s\n' '--- HOOK PATH ACTIVE EXTERNAL ---'
+git config core.hooksPath "$RUN/external-hooks"
+gitreins install > "$RUN/output/install-external.txt" 2>&1; printf 'external_install_rc=%s\n' "$?"; cat "$RUN/output/install-external.txt"
+printf 'external_hook=%s\n' "$(test -f "$RUN/external-hooks/pre-commit" && echo present || echo absent)"
+printf '%s\n' '--- GUARD WARM TIMED ---'
+for i in 1 2 3; do /usr/bin/time -p gitreins guard > "$RUN/output/guard-warm-$i.txt" 2>&1; rc=$?; printf 'warm_%s_rc=%s\n' "$i" "$rc"; grep -E '^(real|user|sys|Tier 1 Guards|✓|✗|⊘|Warning|warning)' "$RUN/output/guard-warm-$i.txt" || true; done
+printf '%s\n' '--- FINAL STATUS ---'
+git status --short
+git config --get core.hooksPath || true

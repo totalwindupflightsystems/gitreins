@@ -1,0 +1,74 @@
+{
+  "kind": "resolution",
+  "source": "cli",
+  "band": "RESOLVED",
+  "probability": 0.97,
+  "missing_kind": "none",
+  "question": "Does summarize.py handle a log line whose level is TRACE?",
+  "task_title": "Does summarize.py handle a log line whose level is TRACE?",
+  "verdict": {
+    "question": "Does summarize.py handle a log line whose level is TRACE?",
+    "verdict": "RESOLVED",
+    "probability": 0.97,
+    "missing_kind": "none",
+    "missing_kind_probability": 0.93,
+    "evidence_quality": 2,
+    "evidence_quality_score": 1.91,
+    "evidence_quality_legend": {
+      "0": "the bundle only mentions the topic",
+      "1": "adjacent code: related, but not the code path the question asks about",
+      "2": "the exact code path the question asks about is present",
+      "3": "the exact code path is present together with its test"
+    },
+    "manifest": [
+      {
+        "file": "summarize.py",
+        "provenance": "ast_exact",
+        "score": 1.0,
+        "bytes": 951,
+        "truncated": false,
+        "source": "understand",
+        "lines": 30
+      }
+    ],
+    "model": "typesafe/jev-1.13-20260917",
+    "request_id": "gen-dec-1792750051-x3eLxMSmYPBf76IUd5NR",
+    "provider": "TypeSafe",
+    "tokens_estimated": 288,
+    "input_tokens": 941,
+    "output_tokens": 96,
+    "cost_usd": 3.9522e-05,
+    "clipped": false,
+    "clip_disclosure": "",
+    "chars_dropped": 0,
+    "lines_dropped": 0,
+    "dropped_files": [],
+    "budget_exhausted": false,
+    "seeds": [
+      {
+        "file": "summarize.py",
+        "score": 0.0328,
+        "symbols": [
+          "summarize",
+          "py"
+        ]
+      }
+    ],
+    "dependency_paths": {},
+    "abstain_reason": null,
+    "abstain_detail": null,
+    "abstain_action": null,
+    "attempts": [
+      "candidate 1/6: ok"
+    ],
+    "exit_code": 0,
+    "notes": [
+      "token check: estimated=288 reported=941 chars=1010 chars/token=1.07",
+      "safety bound: 727 tokens at the densest measured rate (1.39 chars/token) vs the 28000 ceiling"
+    ]
+  },
+  "task_id": "resolution",
+  "evaluated_at": "2026-10-23T10:07:31.541955",
+  "supersedes": null,
+  "superseded_by": null
+}
