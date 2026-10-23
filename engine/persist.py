@@ -1040,6 +1040,16 @@ def build_verdict_data(workdir: str, task: Task, result: JudgeResult) -> dict:
     if result.pipeline_result:
         verdict_data["stages"] = result.pipeline_result.get("stages", {})
 
+    # REVIEW-GITREINS-030: a legacy (no-pipeline) judge has no stage dict to
+    # name the tier2 client, so its credential-free provenance (model +
+    # base_url_source + api_key_source) is stamped at the top level of the
+    # record instead. Absent — never null — when the judge ran no LLM client,
+    # and never applied when pipeline stages already carry it, so a pipeline
+    # verdict keeps exactly the shape its stage dict describes.
+    provenance = getattr(result, "provenance", None)
+    if isinstance(provenance, dict) and provenance and not verdict_data.get("stages"):
+        verdict_data["provenance"] = dict(provenance)
+
     # Summary text
     verdict_data["summary"] = result.summary
 

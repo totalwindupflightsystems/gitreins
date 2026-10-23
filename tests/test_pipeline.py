@@ -343,6 +343,63 @@ class TestStageResult:
         assert d["any_failed"] is True
 
 
+class TestStageProvenance:
+    """REVIEW-GITREINS-030: an ai_eval stage dict names the judge that ran it.
+
+    verdict.json's ``stages.tier2`` is read by consumers that know nothing
+    about the pipeline's step shape, so the credential-free identity of the
+    judge client (model + base_url_source + api_key_source — sources only,
+    never key values or URLs) is folded onto the STAGE dict. A step without
+    provenance adds no keys at all: absent, not null.
+    """
+
+    def test_stage_dict_lifts_step_provenance_flat(self) -> None:
+        from engine.pipeline import _fold_step_provenance
+
+        stage = StageResult(
+            id="tier2",
+            passed=True,
+            steps=[
+                StepResult(
+                    id="tier2",
+                    type="ai_eval",
+                    data={
+                        "verdict": "COMPLETE",
+                        "provenance": {
+                            "model": "deepseek-v4-flash",
+                            "base_url_source": "GITREINS_LLM_BASE_URL",
+                            "api_key_source": "GITREINS_LLM_API_KEY",
+                        },
+                    },
+                )
+            ],
+        )
+
+        _fold_step_provenance(stage)
+        d = stage.to_dict()
+
+        assert d["model"] == "deepseek-v4-flash"
+        assert d["base_url_source"] == "GITREINS_LLM_BASE_URL"
+        assert d["api_key_source"] == "GITREINS_LLM_API_KEY"
+        # The step's own payload keeps the contract it already had.
+        assert d["steps"][0]["data"]["provenance"]["api_key_source"] == "GITREINS_LLM_API_KEY"
+
+    def test_step_without_identity_fields_keeps_the_old_stage_shape(self) -> None:
+        from engine.pipeline import _fold_step_provenance
+
+        stage = StageResult(
+            id="tier2",
+            passed=True,
+            steps=[StepResult(id="tier2", type="ai_eval", data={"verdict": "COMPLETE"})],
+        )
+
+        _fold_step_provenance(stage)
+        d = stage.to_dict()
+
+        for key in ("model", "base_url_source", "api_key_source", "provenance"):
+            assert key not in d, f"{key} must be absent, not null"
+
+
 class TestPipelineConditions:
     """Test Pipeline._check_condition — step-1-5-1-4."""
 
@@ -574,6 +631,60 @@ class TestPipelineRun:
         ):
             result = p.run(task, trigger="pre-eval")
         assert "stages" in result
+
+    def test_run_stamps_the_judge_identity_on_the_tier2_stage(
+        self, pipeline_config_default: object, tmp_workdir: str
+    ) -> None:
+        """REVIEW-GITREINS-030: the ai_eval stage dict names the judge.
+
+        The fields come from the SAME client the evaluator ran, and only the
+        *source* names are stamped — the key value must not survive anywhere
+        in the stage payload.
+        """
+        import json as _json
+
+        from engine.llm import LLMResponse, LLMUsage
+
+        client = LLMClient(
+            base_url="https://judge.invalid/v1", api_key="SECRET-JUDGE-KEY", model="stub-judge"
+        )
+        p = Pipeline(pipeline_config_default, tmp_workdir, llm=client)
+        task = {"id": "t1", "title": "Test", "criteria": ["c1"]}
+        verdict_json = '{"verdict":"COMPLETE","items":[],"summary":"done"}'
+        with patch.object(
+            client,
+            "chat",
+            return_value=LLMResponse(content=verdict_json, usage=LLMUsage(prompt_tokens=10)),
+        ):
+            result = p.run(task, trigger="pre-eval")
+
+        tier2 = result["stages"]["tier2"]
+        assert tier2["model"] == "stub-judge"
+        assert tier2["base_url_source"] == "explicit argument"
+        assert tier2["api_key_source"] == "explicit argument"
+        serialized = _json.dumps(tier2)
+        assert "SECRET-JUDGE-KEY" not in serialized
+        assert "judge.invalid" not in serialized
+
+    def test_a_client_without_identity_fields_adds_no_stage_keys(
+        self, pipeline_config_default: object, tmp_workdir: str
+    ) -> None:
+        """A duck-typed client (old fake) leaves the stage shape as it was."""
+        from engine.llm import LLMResponse, LLMUsage
+
+        class _NoIdentityClient:
+            def chat(self, *args: object, **kwargs: object) -> object:
+                return LLMResponse(
+                    content='{"verdict":"COMPLETE","items":[],"summary":"done"}',
+                    usage=LLMUsage(prompt_tokens=10),
+                )
+
+        p = Pipeline(pipeline_config_default, tmp_workdir, llm=_NoIdentityClient())
+        result = p.run({"id": "t1", "title": "Test", "criteria": ["c1"]}, trigger="pre-eval")
+
+        tier2 = result["stages"]["tier2"]
+        for key in ("model", "base_url_source", "api_key_source", "provenance"):
+            assert key not in tier2, f"{key} must be absent, not null"
 
     def test_trigger_filtering(self, pipeline_config_default: object, tmp_workdir: str) -> None:
         """Stages not matching trigger are skipped."""

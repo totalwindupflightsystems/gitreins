@@ -229,6 +229,11 @@ class StageResult:
     degraded: bool = False
     skipped_steps: list[str] = field(default_factory=list)
     degradation_reason: str = ""
+    # REVIEW-GITREINS-030: the judge's credential-free provenance (model +
+    # base_url_source + api_key_source), folded onto the stage dict so
+    # verdict.json's `stages.<id>` names WHO judged it without key or URL
+    # values. Absent (not null) when the client carries no identity fields.
+    provenance: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -238,6 +243,12 @@ class StageResult:
             "summary": self.summary,
             "steps": [s.to_dict() for s in self.steps],
         }
+        if self.provenance:
+            # Flat on the stage dict (AC 3: ``stages.tier2["model"]`` /
+            # ``["api_key_source"]``), never nested — a reader must not have
+            # to know the pipeline's internal step shape to name the judge.
+            for _field, _value in self.provenance.items():
+                d.setdefault(_field, _value)
         if self.coverage:
             d["coverage"] = self.coverage
         if self.degraded:
@@ -245,6 +256,31 @@ class StageResult:
             d["skipped_steps"] = list(self.skipped_steps)
             d["degradation_reason"] = self.degradation_reason
         return d
+
+
+def _fold_step_provenance(stage: StageResult) -> None:
+    """Lift one ai_eval step's provenance dict onto the STAGE result dict.
+
+    REVIEW-GITREINS-030: the tier2 verdict used to carry the judge's identity
+    only inside ``steps[].data["provenance"]``, which was easy to lose between
+    the pipeline result shape and the persisted verdict. Folding it here puts
+    the SAME fields on ``stages.<id>`` in verdict.json (and in
+    ``judge_result_to_dict``) as a first-class, credential-free attribution:
+    model + base_url_source + api_key_source, never key values or URLs. A
+    step with no provenance (an old fake, a non-ai_eval script) leaves the
+    stage's dict absent (not null).
+
+    Multi-ai_eval stages take the last non-empty one deterministically by
+    step order — in practice the default pipeline has exactly one.
+    """
+    folded: dict[str, Any] = {}
+    for step in stage.steps:
+        data = step.data if isinstance(step.data, dict) else {}
+        prov = data.get("provenance")
+        if isinstance(prov, dict) and prov:
+            folded = prov
+    if folded:
+        stage.provenance = dict(folded)
 
 
 def degradation_warning(stage: dict[str, Any]) -> str | None:
@@ -703,6 +739,7 @@ class Pipeline:
         result.any_failed = any(not s.passed for s in result.steps)
         result.passed = not result.any_failed
         result.summary = self._summarize_stage(result)
+        _fold_step_provenance(result)
         return result
 
     def _run_sequential_stage(
@@ -739,6 +776,7 @@ class Pipeline:
         result.passed = step_result.passed
         result.any_failed = not step_result.passed
         result.summary = step_result.output or step_result.error
+        _fold_step_provenance(result)
         return result
 
     def _run_step(

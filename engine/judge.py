@@ -20,8 +20,32 @@ from engine.llm import LLMClient
 from engine.pipeline import Pipeline, degradation_warning, load_pipeline_config
 from engine.task_manager import Task
 from engine.types import Tier1Result
+from engine.usage import provenance_fields
 
 logger = logging.getLogger("gitreins.judge")
+
+# REVIEW-GITREINS-030: the public verdict keys naming WHO judged a tier2 run.
+# The VALUES come from engine.usage.provenance_fields() (the single producer —
+# never re-implemented here); this tuple only fixes the schema the judge stamps
+# into its result dict and verdict.json. Sources, never key material or URLs.
+_PROVENANCE_KEYS = ("model", "base_url_source", "api_key_source")
+
+
+def _judge_provenance(llm: object) -> dict[str, Any]:
+    """Credential-free identity of the judge's own LLM client, or ``{}``.
+
+    REVIEW-GITREINS-030: delegates to :func:`engine.usage.provenance_fields`
+    (one producer for the usage row AND the verdict), keeps only the three
+    public schema keys, and drops empty values so a client without identity
+    attributes leaves every downstream shape untouched (absent, not null).
+    """
+    fields = provenance_fields(llm)
+    kept: dict[str, Any] = {}
+    for key in _PROVENANCE_KEYS:
+        value = fields.get(key)
+        if isinstance(value, str) and value:
+            kept[key] = value
+    return kept
 
 
 class Judge:
@@ -212,6 +236,9 @@ class Judge:
                 passed=result.get("passed", False),
                 tier1=tier1,
                 pipeline_result=result,
+                # REVIEW-GITREINS-030: the same client the tier2 ai_eval step
+                # ran, so the status dict and the persisted verdict name it.
+                provenance=_judge_provenance(self.llm),
             )
             judge_result.quality_snapshot = quality_snapshot
             return judge_result
@@ -276,6 +303,10 @@ class Judge:
             result.tier2 = tier2
             result.passed = tier2.verdict == "COMPLETE"
             result.verdict = tier2
+            # REVIEW-GITREINS-030: the legacy path has no pipeline stages, so
+            # the client identity rides on the result itself — persisted as a
+            # top-level provenance dict (see engine.persist.build_verdict_data).
+            result.provenance = _judge_provenance(self.llm)
         except Exception:
             if self._pass_on_error:
                 logger.warning("Tier 2 failed but pass_on_error=True — task passes on Tier 1 alone")
@@ -379,6 +410,7 @@ class JudgeResult:
         verdict: Verdict | None = None,
         tier1: Tier1Result | None = None,
         tier2: Verdict | None = None,
+        provenance: dict[str, Any] | None = None,
     ) -> None:
         self.task_id = task_id
         self.passed = passed
@@ -386,6 +418,10 @@ class JudgeResult:
         self.verdict = verdict
         self.tier1 = tier1  # Tier1Result from guard_manager.run_all()
         self.tier2 = tier2  # Verdict from AgenticEvaluator.evaluate()
+        # REVIEW-GITREINS-030: credential-free identity of the client that
+        # produced a tier2 verdict (model + base_url_source + api_key_source
+        # sources). Empty for a judge that ran no LLM — absent, never null.
+        self.provenance = provenance or {}
         self.quality_snapshot = tier1.extra.get("quality_snapshot") if tier1 else None
 
     @property
@@ -475,6 +511,19 @@ def judge_result_to_dict(task_id: str, workdir: str, result: Any) -> dict[str, A
             for i in tier2.items
         ]
         d["summary"] = tier2.summary
+        # REVIEW-GITREINS-030: the status dict names WHO judged — model,
+        # base_url_source, api_key_source — resolved from the judge's own
+        # client via engine.usage.provenance_fields() and carried on the result
+        # (see Judge.evaluate_task). Only the source names are stamped: never
+        # the key value, never the endpoint URL. A judge without a client (or a
+        # fake without identity attributes) adds nothing, so the historical
+        # dict shape is byte-identical for it.
+        provenance = getattr(result, "provenance", None)
+        if isinstance(provenance, dict):
+            for key in _PROVENANCE_KEYS:
+                value = provenance.get(key)
+                if isinstance(value, str) and value:
+                    d[key] = value
     return d
 
 

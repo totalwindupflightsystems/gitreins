@@ -552,3 +552,50 @@ class TestJudgeResultToDict:
         assert d["passed"] is True
         assert "verdict" not in d
         assert "items" not in d
+
+    def test_provenance_is_stamped_when_a_tier2_verdict_exists(self) -> None:
+        """REVIEW-GITREINS-030: the status dict names the judge's client."""
+        from engine.judge import _judge_provenance, judge_result_to_dict
+
+        tier1 = Tier1Result(passed=True, results=[])
+        tier2 = Verdict(
+            verdict="COMPLETE",
+            items=[VerdictItem("c1", "PASS", "ok")],
+            summary="all good",
+        )
+        result = JudgeResult(
+            task_id="t1",
+            passed=True,
+            tier1=tier1,
+            tier2=tier2,
+            verdict=tier2,
+            provenance={
+                "model": "deepseek-v4-flash",
+                "base_url_source": "GITREINS_LLM_BASE_URL",
+                "api_key_source": "GITREINS_LLM_API_KEY",
+            },
+        )
+
+        d = judge_result_to_dict("t1", "/wd", result)
+
+        assert d["model"] == "deepseek-v4-flash"
+        assert d["base_url_source"] == "GITREINS_LLM_BASE_URL"
+        assert d["api_key_source"] == "GITREINS_LLM_API_KEY"
+        # The item shape is the one consumers already parse.
+        assert d["items"] == [{"criterion": "c1", "status": "PASS", "detail": "ok"}]
+
+        # A client with no identity attributes yields an EMPTY dict, so the
+        # key never appears at all (absent, not null).
+        assert _judge_provenance(object()) == {}
+
+    def test_provenance_is_absent_without_a_client_identity(self) -> None:
+        from engine.judge import judge_result_to_dict
+
+        tier1 = Tier1Result(passed=True, results=[])
+        tier2 = Verdict(verdict="COMPLETE", items=[], summary="ok")
+        result = JudgeResult(task_id="t1", passed=True, tier1=tier1, tier2=tier2, verdict=tier2)
+
+        d = judge_result_to_dict("t1", "/wd", result)
+
+        for key in ("model", "base_url_source", "api_key_source", "provenance"):
+            assert key not in d
