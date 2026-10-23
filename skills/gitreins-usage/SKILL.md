@@ -4,7 +4,7 @@ description: >-
   How to use the GitReins quality harness in this repo (and any repo it's
   installed in): task lifecycle, guards, LLM judge, MCP tools, and the known
   pitfalls that will bite you. Load this before committing or creating tasks.
-version: 1.15.0
+version: 1.16.0
 category: software-development
 ---
 
@@ -949,3 +949,55 @@ re-triggered, `disabled`, workdir refusal). Five facts that are not.
   dependent behaviour, so **edit** the block instead; and the sample line's
   `via repo-producer` is not what any build prints (it prints `via <command>`, as line 70
   of the doc says).
+
+## Resolution gate + push-check, verified on 0.17.0 — pitfalls 62-65 (2026-10-23 dogfood run 24)
+
+Re-verified in real use (scratch consumer repo + bunker fresh-box): POC-35/36/37
+are FIXED on 0.17.0 — the init block is complete and documents §9 correctly,
+verdicts persist (kind:resolution + one usage.jsonl row per Jev call), and
+`preflight --json` carries a top-level `verdict` OBJECT (same dict as
+`resolve --json`). Working quickstart for the gate:
+
+```bash
+gitreins install && gitreins init
+# one literal edit: .gitreins/config.yaml resolution.enabled.cli: true
+hilo init && hilo graph warm          # REQUIRED on a fresh repo (see pitfall 63)
+gitreins resolve "<question>"         # RESOLVED 0.6-1.1 s warm on a consumer repo
+gitreins preflight "<premise>" --surface cli   # default surface predispatch ships off
+```
+
+- **62 — preflight can hand back REVIEW at probability 0.97 (JEVRES-007).**
+  The engine bands by probability, then `effective_band_for`
+  (`engine/preflight.py:84` → `engine/resolution.py:1530/182`) demotes any
+  RESOLVED whose rubric `evidence_quality < 3` ("3 = exact code path together
+  with its test") or whose manifest lacks a ≥0.80 ast_exact/bounded-read entry.
+  The demotion is SILENT on the CLI surface and the printed reason claims "the
+  evidence partially resolves the row" even when nothing was partial. Read
+  `verdict.evidence_quality` in the JSON before concluding the gate misfired;
+  a repo whose tested module lacks tests can never produce skip-dispatch.
+- **63 — a fresh repo's first `resolve` ABSTAINs empty-bundle with a WRONG hint
+  (DF-025).** It says "check that hilo is installed" and claims the abstain
+  detail names the searched path — hilo may already be installed; the real fix
+  is `hilo init && hilo graph warm`. Until fixed, run those two commands on any
+  repo where resolve abstains empty-bundle despite hilo being on PATH. On a
+  cache-free tree the abstain is FAST (0.195 s) — no hang, just no answer.
+- **64 — push-check misses a credential whose literal is split by string
+  concatenation (DF-026).** `"ghp_" + "<40-char body>"` on an added line reads
+  PUSH SECRET CHECK: clean and the push publishes the token, while the joined
+  form is refused (verified A/B, single-commit ranges:
+  docs/dogfood/2026-10-23-resolution-gate-integration.md). All six
+  `engine/push_secrets.py` classes are defeated by the same glue: token regexes
+  need a contiguous body after the prefix; the assignment class stops at the
+  first space (`"ghp_"` = 6 non-space chars). Before trusting a clean
+  push-check on code that assembles credentials from chunks, join-check by hand.
+- **65 — `guard --full` does NOT extend the secrets lane (DF-027).** The
+  banner says "whole tree" but secrets keeps scanning the staged diff
+  (`gitleaks protect --staged` + builtin staged scan): a COMMITTED credential is
+  invisible under --full ("✓ secrets — clean") and visible only to
+  `gitreins guard --scope working-tree` (which FAILS with the findings). After
+  any leak, run the working-tree scope, not --full.
+
+Measured on this 0.17.0 build (16-core host): guard 264-283 ms, push-check
+126-168 ms, resolve 0.57-1.08 s warm consumer-scale / 2.3-3.2 s at this repo's
+scale, preflight 0.64-0.66 s, per-call Jev cost $0.0000395 — all fast enough
+that nothing justifies profiling (PERF-2).

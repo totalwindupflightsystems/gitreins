@@ -1,0 +1,4 @@
+Question: Does summarize.py handle a log line whose level is TRACE?
+Verdict:  ABSTAIN
+Reason:   empty-bundle — no candidate evidence was assembled for this question
+Fix:      check that hilo is installed and the question names real code — hilo comes from https://github.com/gethilo/hilo (cargo source build), and the abstain detail names the exact path that was searched
