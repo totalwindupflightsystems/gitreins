@@ -32,9 +32,44 @@ import os
 import re
 import shutil
 import subprocess
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 
 logger = logging.getLogger("gitreins.static_analysis")
+
+
+Parser = Callable[..., list["StaticDiag"]]
+
+
+def _as_mapping(value: object) -> Mapping[str, object]:
+    """Narrow a JSON value to an object-shaped mapping."""
+    return value if isinstance(value, Mapping) else {}
+
+
+def _as_sequence(value: object) -> Sequence[object]:
+    """Narrow a JSON value to a non-string sequence."""
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return value
+    return ()
+
+
+def _as_string(value: object, default: str = "") -> str:
+    return value if isinstance(value, str) else default
+
+
+def _as_int(value: object, default: int = 0) -> int:
+    if isinstance(value, bool):
+        return default
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, (str, bytes, bytearray)):
+        try:
+            return int(value)
+        except ValueError:
+            return default
+    return default
 
 
 @dataclass
@@ -48,7 +83,7 @@ class StaticDiag:
     code: str = ""  # mypy error code, pyright rule, etc.
     tool: str = ""  # "mypy", "pyright", "sorbet", etc.
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, object]:
         return {
             "file": self.file,
             "line": self.line,
@@ -154,7 +189,7 @@ _STATIC_ANALYSIS_NO_LANGUAGE_REASON = (
 
 def select_tools(
     workdir: str,
-    configured: dict | None = None,
+    configured: Mapping[str, Sequence[str]] | None = None,
     changed_files: list[str] | None = None,
 ) -> tuple[list[str], str]:
     """The static-analysis tools this lane would run on *workdir*.
@@ -361,17 +396,19 @@ def _parse_staticcheck(text: str, tool: str = "staticcheck") -> list[StaticDiag]
 # ── JSON output parsers ─────────────────────────────────────────────────
 
 
-def _parse_pyright_json(data: dict, tool: str = "pyright") -> list[StaticDiag]:
+def _parse_pyright_json(data: object, tool: str = "pyright") -> list[StaticDiag]:
     diagnostics: list[StaticDiag] = []
-    for diag in data.get("generalDiagnostics", []):
-        start = diag.get("range", {}).get("start", {})
+    for raw_diag in _as_sequence(_as_mapping(data).get("generalDiagnostics")):
+        diag = _as_mapping(raw_diag)
+        start = _as_mapping(diag.get("range"))
+        start = _as_mapping(start.get("start"))
         diagnostics.append(
             StaticDiag(
-                file=diag.get("file", "unknown"),
-                line=start.get("line", 0) + 1,  # pyright uses 0-indexed lines
-                severity=diag.get("severity", "error"),
-                message=diag.get("message", ""),
-                code=diag.get("rule", ""),
+                file=_as_string(diag.get("file"), "unknown"),
+                line=_as_int(start.get("line"), 0) + 1,
+                severity=_as_string(diag.get("severity"), "error"),
+                message=_as_string(diag.get("message")),
+                code=_as_string(diag.get("rule")),
                 tool=tool,
             )
         )
@@ -381,17 +418,21 @@ def _parse_pyright_json(data: dict, tool: str = "pyright") -> list[StaticDiag]:
 def _parse_sqlfluff_json(data: object, tool: str = "sqlfluff") -> list[StaticDiag]:
     diagnostics: list[StaticDiag] = []
     # sqlfluff output is a list of file results
-    files = data if isinstance(data, list) else [data]
-    for file_result in files:
-        filepath = file_result.get("filepath", "unknown")
-        for violation in file_result.get("violations", []):
+    files = _as_sequence(data) if isinstance(data, list) else (data,)
+    for raw_file_result in files:
+        file_result = _as_mapping(raw_file_result)
+        filepath = _as_string(file_result.get("filepath"), "unknown")
+        for raw_violation in _as_sequence(file_result.get("violations")):
+            violation = _as_mapping(raw_violation)
             diagnostics.append(
                 StaticDiag(
                     file=filepath,
-                    line=violation.get("line_no", 0),
-                    severity="error" if violation.get("severity") in ("error", None) else "warning",
-                    message=violation.get("description", ""),
-                    code=violation.get("code", ""),
+                    line=_as_int(violation.get("line_no")),
+                    severity="error"
+                    if violation.get("severity") in ("error", None)
+                    else "warning",
+                    message=_as_string(violation.get("description")),
+                    code=_as_string(violation.get("code")),
                     tool=tool,
                 )
             )
@@ -470,35 +511,39 @@ def _parse_eslint_json(data: object, tool: str = "eslint") -> list[StaticDiag]:
     and ``messages``.  Severity 2 = error, 1 = warning, 0 = off (ignored).
     """
     diagnostics: list[StaticDiag] = []
-    files = data if isinstance(data, list) else [data]
-    for file_result in files:
-        filepath = file_result.get("filePath", "unknown")
-        for msg in file_result.get("messages", []):
-            sev = msg.get("severity", 1)
-            severity = "error" if sev >= 2 else "warning"
+    files = _as_sequence(data) if isinstance(data, list) else (data,)
+    for raw_file_result in files:
+        file_result = _as_mapping(raw_file_result)
+        filepath = _as_string(file_result.get("filePath"), "unknown")
+        for raw_msg in _as_sequence(file_result.get("messages")):
+            msg = _as_mapping(raw_msg)
+            severity_value = _as_int(msg.get("severity"), 1)
             diagnostics.append(
                 StaticDiag(
                     file=filepath,
-                    line=msg.get("line", 1),
-                    severity=severity,
-                    message=msg.get("message", ""),
-                    code=msg.get("ruleId", ""),
+                    line=_as_int(msg.get("line"), 1),
+                    severity="error" if severity_value >= 2 else "warning",
+                    message=_as_string(msg.get("message")),
+                    code=_as_string(msg.get("ruleId")),
                     tool=tool,
                 )
             )
     return diagnostics
 
 
-def _parse_phpstan_json(data: dict, tool: str = "phpstan") -> list[StaticDiag]:
+def _parse_phpstan_json(data: object, tool: str = "phpstan") -> list[StaticDiag]:
     diagnostics: list[StaticDiag] = []
-    for filepath, file_data in data.get("files", {}).items():
-        for msg in file_data.get("messages", []):
+    files = _as_mapping(_as_mapping(data).get("files"))
+    for filepath, raw_file_data in files.items():
+        file_data = _as_mapping(raw_file_data)
+        for raw_msg in _as_sequence(file_data.get("messages")):
+            msg = _as_mapping(raw_msg)
             diagnostics.append(
                 StaticDiag(
                     file=filepath,
-                    line=msg.get("line", 0),
+                    line=_as_int(msg.get("line")),
                     severity="error",
-                    message=msg.get("message", ""),
+                    message=_as_string(msg.get("message")),
                     code="",
                     tool=tool,
                 )
@@ -508,14 +553,14 @@ def _parse_phpstan_json(data: dict, tool: str = "phpstan") -> list[StaticDiag]:
 
 # ── Main runner ─────────────────────────────────────────────────────────
 
-_JSON_PARSERS = {
+_JSON_PARSERS: dict[str, Parser] = {
     "pyright": _parse_pyright_json,
     "sqlfluff": _parse_sqlfluff_json,
     "phpstan": _parse_phpstan_json,
     "eslint": _parse_eslint_json,
 }
 
-_TEXT_PARSERS = {
+_TEXT_PARSERS: dict[str, Parser] = {
     "mypy": _parse_mypy,
     "sorbet": _parse_sorbet,
     "cppcheck": _parse_cppcheck,
@@ -524,7 +569,9 @@ _TEXT_PARSERS = {
 }
 
 
-def run_static_check(tool: str, workdir: str, timeout: float = 120.0) -> list[dict]:
+def run_static_check(
+    tool: str, workdir: str, timeout: float = 120.0
+) -> list[dict[str, object]]:
     """Run a static analysis tool against a directory and return diagnostics.
 
     Args:
@@ -592,7 +639,7 @@ def run_static_check(tool: str, workdir: str, timeout: float = 120.0) -> list[di
             logger.warning("%s returned invalid JSON", tool)
             return []
     elif tool in _TEXT_PARSERS:
-        parser = _TEXT_PARSERS[tool]  # type: ignore[assignment]
+        parser = _TEXT_PARSERS[tool]
         diags = parser(output, tool=tool)
     else:
         logger.warning("No parser available for tool '%s'", tool)
