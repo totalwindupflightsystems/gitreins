@@ -196,15 +196,88 @@ ledger row):
 ## Relationship to the standing harness
 
 `~/.hermes/scripts/bunker-qa.sh` is the fleet's general fresh-system battery
-(install / act / compose / chaos cells). It is **disabled** (2026-10-11) because
-its `docker-deploy` cell re-chowns the host's `~/.hermes` and breaks the
-gateway; its header names the fix required before re-enabling. It also runs the
-suite without recording counts — the gap this lane closes for this repo.
+(install / act / compose / chaos cells). Its `docker-deploy` and `chaos-shutdown`
+lifecycle cells are **opt-in** (`BUNKER_QA_ENABLE_DOCKER_LIFECYCLE=1`) because
+`docker compose down/stop/kill` can affect an existing stack — that is the
+2026-10-11 shape, not a disabled harness. It also runs the suite without
+recording counts — the gap this lane closes for this repo.
 
 This lane is deliberately narrower and safe to run at any time: no docker
 lifecycle, no host state, one ephemeral agent that is destroyed on exit. It is
 the repo-side implementation of the prototype in
 `project-reviews/artifacts/subgoal-3-bunker-suite-hang-2026-09-23.md`.
+
+## Chaos cells: the missing-config row (chaos-errorpath)
+
+The identity lane above answers *"did the suite pass on the build I asked for"*.
+The fleet battery answers a different question — *is the product brittle on a
+clean machine* — with the cells `fresh-install`, `ci-pass`, `docker-deploy`,
+`ui-probe`, `upgrade`, `chaos-disconnect`, `chaos-shutdown`,
+`chaos-corruption`, `chaos-resource` and `chaos-errorpath`. This repo owns the
+last one's **premise** through the battery's opt-in project-probe hook.
+
+### The spec row
+
+With a repo present but `.gitreins/config.yaml` **absent**, a command that
+requires that config must print a message naming the missing file (or a usage
+banner) and exit **non-zero, promptly**. A hang, a crash, or a silent `rc=0` is
+a defect, not an error path:
+
+```text
+$ cd "$(mktemp -d)" && git init -q . && gitreins guard
+no .gitreins/config.yaml — run `gitreins init` first
+$ echo $?
+1
+```
+
+### The repo's probe
+
+`.qa/chaos-probes/errorpath.sh` (executable, run from the repo root by the
+battery). The harness consults it only when it exists and is executable; when
+it does, it replaces the generic missing-config guess for this repo. Its exit
+code *is* the cell grade:
+
+| exit | grade | meaning |
+|---|---|---|
+| `0` | OK | the documented clean error was observed; line 1 carries `rc=` |
+| `1` | FAIL | hang / crash / silent `rc=0` / a message that names nothing |
+| `2` | INFO | environment gap — no CLI to probe, so nothing was observed |
+| `124` | FAIL | the probe itself hung past the harness's own 120 s wrap |
+
+It bounds each command itself (`QA_EP_TIMEOUT`, default 20 s) and isolates
+`HOME`, so a hang is **classified** (exit 1 with a reason) instead of arriving
+at the harness as the ambiguous `rc=124` that reads as "unverified". It probes
+`guard` — a command that needs the config — and never `serve`, which is
+long-running by design. Re-run it locally, with no agent:
+
+```bash
+.qa/chaos-probes/errorpath.sh; echo "probe rc=$?"
+# clean error on missing config: '…/gitreins guard' -> rc=1, names the missing config (no .gitreins/config.yaml — run `gitreins init` first)
+# probe rc=0
+```
+
+### Why the generic arm could not answer this (QA-GITREINS-2, 2026-10-23)
+
+The generic probe discovers a start command from `gitreins --help` and preferred
+long-running subcommands (`serve|server|daemon|start`). `gitreins serve` is the
+judgment browser: it needs no config at all, announces its port, keeps serving —
+so the probe could only ever end at its own bound:
+
+```text
+{"cell": "chaos-errorpath", "status": "INFO",
+ "detail": "missing-config start probe timed out (rc=124) — error-path behavior UNVERIFIED: "}
+```
+
+A command that is *supposed* to stay up has no missing-config error path to
+reach, so that timeout said nothing about the product at all. Two things changed:
+this probe (above), and the harness calibration that trials a daemon candidate
+under a short bound and drops it when it runs happily without config — so the
+same artifact cannot reappear for another repo.
+
+The regression pin is `tests/test_qa_chaos_probe.py`: the four documented
+product shapes, the hang arm (exit `1`, never `124`), the environment-gap arm,
+`HOME` isolation, and one arm that runs this repo's real console script so a
+change to the missing-config message fails the suite instead of drifting.
 
 ## Limits (stated, not hidden)
 
