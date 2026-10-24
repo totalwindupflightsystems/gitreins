@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -265,11 +266,15 @@ def test_collect_reads_custom_evidence_meta(tmp_path: Path) -> None:
     """
     script = bunker_qa_script()
     custom_evidence = tmp_path / "collect-test.jsonl"
+    # Freshness matters: the harness treats a meta older than its TTL as a stale
+    # run and answers a different question, so a literal `launched=` date would
+    # silently change which arm this test exercises once it aged. Stamp it now.
+    launched = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     Path(f"{custom_evidence}.meta").write_text(
         "agent=\n"
         "server=test-server\n"
         f"evidence={custom_evidence}\n"
-        "launched=2026-10-23T00:00:00Z\n"
+        f"launched={launched}\n"
         "keep=0\n"
         "project=test\n",
         encoding="utf-8",
