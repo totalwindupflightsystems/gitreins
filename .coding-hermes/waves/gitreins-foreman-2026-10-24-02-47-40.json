@@ -1,0 +1,19 @@
+{
+  "tick": "gitreins-foreman-2026-10-24-02-47-40",
+  "mode": "serial",
+  "budget": 6,
+  "tasks": [
+    {
+      "task_id": "REVIEW-GITREINS-010",
+      "worktree": null,
+      "branch": null,
+      "worker_model": "glm-5.3-flash",
+      "worker_provider": "ollama-cloud",
+      "brief": "/tmp/gitreins-foreman-2026-10-24-02-47-40-REVIEW-GITREINS-010-brief.txt"
+    }
+  ],
+  "status": "failed",
+  "result": "worker_stalled_no_commit",
+  "gitreins_verdict": "job-9235d4beaab847c095231693f059504f",
+  "ci_finding": "INT-CI-19"
+}
