@@ -49,7 +49,7 @@ import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, TypedDict
 
 from engine.config import load_raw_config
 from engine.version import __version__
@@ -67,6 +67,12 @@ PASSING_CELL_STATUSES = ("pass", "passed", "ok")
 FAILING_CELL_STATUSES = ("fail", "failed", "error")
 
 
+class LedgerSettings(TypedDict):
+    enabled: bool
+    path: str
+    max_entries: int
+
+
 # ── Configuration and path resolution ──────────────────────────
 
 
@@ -74,9 +80,14 @@ def _coerce_max_entries(value: object) -> int:  # JSON-sourced, validated below
     """Positive int, or the default for anything unusable."""
     if isinstance(value, bool) or value is None:
         return DEFAULT_QA_LEDGER_MAX_ENTRIES
-    try:
-        entries = int(value)
-    except (TypeError, ValueError):
+    if isinstance(value, int):
+        entries = value
+    elif isinstance(value, (str, bytes, bytearray)):
+        try:
+            entries = int(value)
+        except ValueError:
+            return DEFAULT_QA_LEDGER_MAX_ENTRIES
+    else:
         return DEFAULT_QA_LEDGER_MAX_ENTRIES
     return entries if entries >= 1 else DEFAULT_QA_LEDGER_MAX_ENTRIES
 
@@ -108,7 +119,7 @@ def qa_ledger_path(workdir: str) -> str:
     return os.path.join(workdir, ".gitreins", DEFAULT_QA_LEDGER_FILE)
 
 
-def qa_ledger_settings(workdir: str) -> dict[str, Any]:
+def qa_ledger_settings(workdir: str) -> LedgerSettings:
     """Resolved ledger settings: ``enabled``, ``path``, ``max_entries``."""
     section: Any = {}
     try:
@@ -154,10 +165,14 @@ def _head_sha(workdir: str) -> str:
 def _exit_code(value: object) -> int:  # JSON-sourced, coerced below
     if isinstance(value, bool) or value is None:
         return 1
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return 1
+    if isinstance(value, int):
+        return value
+    if isinstance(value, (str, bytes, bytearray)):
+        try:
+            return int(value)
+        except ValueError:
+            return 1
+    return 1
 
 
 def _run_exit_code(kind: str, report: dict[str, Any]) -> int:
