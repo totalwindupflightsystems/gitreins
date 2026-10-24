@@ -428,9 +428,9 @@ def _parse_sqlfluff_json(data: object, tool: str = "sqlfluff") -> list[StaticDia
                 StaticDiag(
                     file=filepath,
                     line=_as_int(violation.get("line_no")),
-                    severity="error"
-                    if violation.get("severity") in ("error", None)
-                    else "warning",
+                    severity=(
+                        "error" if violation.get("severity") in ("error", None) else "warning"
+                    ),
                     message=_as_string(violation.get("description")),
                     code=_as_string(violation.get("code")),
                     tool=tool,
@@ -569,9 +569,7 @@ _TEXT_PARSERS: dict[str, Parser] = {
 }
 
 
-def run_static_check(
-    tool: str, workdir: str, timeout: float = 120.0
-) -> list[dict[str, object]]:
+def run_static_check(tool: str, workdir: str, timeout: float = 120.0) -> list[dict[str, object]]:
     """Run a static analysis tool against a directory and return diagnostics.
 
     Args:
