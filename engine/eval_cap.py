@@ -38,6 +38,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
+from typing import Any
 
 logger = logging.getLogger("gitreins.eval_cap")
 
@@ -409,7 +410,7 @@ def parse_eval_cap(raw: str) -> EvalCap:
     return cap
 
 
-def eval_cap_from_config(config: dict) -> EvalCap:
+def eval_cap_from_config(config: dict[str, Any]) -> EvalCap:
     """Build an EvalCap from .gitreins/config.yaml.
 
     Defaults come from engine.config.GitReinsDefaults (single source of truth),
