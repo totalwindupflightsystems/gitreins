@@ -49,7 +49,7 @@ import sqlite3
 import sys
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, TypedDict
+from typing import Any, TypedDict, cast
 
 from engine import evidence, qa_ledger, usage
 from engine.persist import KIND_RESOLUTION
@@ -256,9 +256,10 @@ def load_verdict(workdir: str, date: str, h: str) -> dict[str, Any] | None:
         return None
     try:
         with open(vpath) as fh:
-            return json.load(fh)
+            value = json.load(fh)
     except Exception:
         return None
+    return cast(dict[str, Any], value)
 
 
 def load_verdict_evidence(workdir: str, date: str, h: str, name: str) -> tuple[str, str] | None:
@@ -435,7 +436,11 @@ def load_usage(workdir: str) -> tuple[dict[str, UsageEntry], UsageSummary]:
     rows = usage.load_usage_rows(workdir)
     index = usage.attribute_rows(verdict_stamps(workdir), rows, prices)
     total = len(list_verdicts(workdir))
-    return index, usage.summarize(index, prices, total_verdicts=total)
+    summary = usage.summarize(index, prices, total_verdicts=total)
+    # The usage engine intentionally exposes JSON-shaped dicts.  These casts
+    # describe the already-established public payload boundary and are runtime
+    # no-ops; the TypedDicts above document the keys served by this module.
+    return cast(dict[str, UsageEntry], index), cast(UsageSummary, summary)
 
 
 # ── HTML viewer (hash-route SPA; fetches /api/* live) ───────────────────────
