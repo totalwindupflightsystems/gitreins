@@ -342,14 +342,14 @@ def _load_real_tokenizer() -> Callable[[str], int] | None:
     one can pass it to :func:`estimate_tokens` directly.
     """
     try:  # pragma: no cover - not installed in this venv, exercised by the seam test
-        import tiktoken  # type: ignore[import-not-found]
+        import tiktoken
 
         encoding = tiktoken.get_encoding("cl100k_base")
         return lambda text: len(encoding.encode(text))
     except Exception:  # noqa: BLE001 - any import/encoding failure means "no tokenizer"
         pass
     try:  # pragma: no cover - not installed in this venv
-        from transformers import AutoTokenizer  # type: ignore[import-not-found]
+        from transformers import AutoTokenizer
 
         tokenizer = AutoTokenizer.from_pretrained("gpt2")
         return lambda text: len(tokenizer.encode(text))
@@ -492,7 +492,7 @@ def is_excluded_path(path: str) -> bool:
 def is_excluded_path_for_surface(
     path: str,
     *,
-    egress_exclude: tuple[str, ...] = (),
+    egress_exclude: tuple[str, ...] | None = None,
     workdir: str = ".",
     defaults: Any = None,  # noqa: ANN401
 ) -> bool:
@@ -508,8 +508,8 @@ def is_excluded_path_for_surface(
     if is_excluded_path(path):
         return True
     patterns = (
-        tuple(egress_exclude)
-        if egress_exclude
+        egress_exclude
+        if egress_exclude is not None
         else _configured_egress_exclude(workdir=workdir, defaults=defaults)
     )
     if not patterns:
@@ -1884,7 +1884,8 @@ def resolve(
 
     payload = call.payload or {}
     typed: dict[str, TypedAnswer] = payload.get("_typed") or {}
-    usage = payload.get("usage") if isinstance(payload.get("usage"), dict) else {}
+    raw_usage = payload.get("usage")
+    usage: dict[str, Any] = raw_usage if isinstance(raw_usage, dict) else {}
     probability = typed["resolves"].value
     choice = typed["missing_kind"]
     score_answer = typed["evidence_quality"]
