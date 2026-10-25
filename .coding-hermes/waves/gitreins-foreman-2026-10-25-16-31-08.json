@@ -12,7 +12,8 @@
       "model": "glm-5.3-flash",
       "provider": "ollama-cloud",
       "brief": "/tmp/gitreins-foreman-2026-10-25-16-31-08-REVIEW-GITREINS-010-SCOPE6-brief.txt",
-      "status": "dispatched"
+      "status": "committed",
+      "commit": "56e404593efc3a50c3ff5b734f67981968016653"
     }
   ]
 }
