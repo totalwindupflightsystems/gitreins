@@ -13,7 +13,9 @@ decision (including the fail-open ABSTAIN), never for ``skip-dispatch``.
 
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
+from typing import get_type_hints
 
 import pytest
 
@@ -478,6 +480,21 @@ class TestPreflightDispatchHook:
         record = preflight("q?", workdir=".", keys=["whatever"], poster=poster)
         assert record["decision"] == DECISION_SKIP
         assert seen["endpoint"] == resolution.JEV_ENDPOINT
+
+        resolve_signature = inspect.signature(resolution.resolve)
+        resolve_kwargs_type = getattr(preflight_module, "_ResolveKwargs")
+        resolve_kwargs_hints = get_type_hints(resolve_kwargs_type)
+        # ``question`` is positional; every other non-workdir parameter is forwarded.
+        expected_keys = set(resolve_signature.parameters) - {"workdir"}
+        assert expected_keys == {"question"} | set(resolve_kwargs_hints)
+        assert set(resolve_kwargs_hints) == {
+            name
+            for name, parameter in resolve_signature.parameters.items()
+            if parameter.kind is inspect.Parameter.KEYWORD_ONLY and name != "workdir"
+        }
+        assert resolve_kwargs_type.__total__ is False
+        assert not resolve_kwargs_type.__required_keys__
+        assert set(resolve_kwargs_hints) == set(resolve_kwargs_type.__optional_keys__)
 
     def test_module_exports_the_policy_api(self) -> None:
         """The names a foreman-side caller imports exist (smoke, keeps drift loud)."""
