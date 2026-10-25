@@ -9,7 +9,7 @@
       "independent_from": [],
       "worktree": "/home/kara/worktrees/gitreins-INT-CI-21",
       "branch": "wt/INT-CI-21",
-      "status": "worker_committed",
+      "status": "judged",
       "base": "5800848628f0fa3d9e7ee88dfaf59b8ffcaffefd",
       "commit": "1fe02462859d3a4a5a7c35af51ea9511199db85d",
       "verification": {
@@ -17,7 +17,15 @@
         "ruff_check": "PASS",
         "focused_tests": "51 passed in 11.10s",
         "push": "github/wt/INT-CI-21 parity 0"
-      }
+      },
+      "judge": {
+        "result": "PASS",
+        "verdict_commit": "45fabdf",
+        "artifact": ".gitreins/history/2026-10-25/42e799db/verdict.json",
+        "tier1": "PASS",
+        "tier2": "PASS"
+      },
+      "notes": "Judge run used repository uv.lock ruff 0.16.10; local uv ruff format/check PASS; focused tests 51 passed."
     }
   ]
 }
