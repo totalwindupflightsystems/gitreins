@@ -66,9 +66,10 @@ import subprocess
 import tempfile
 from collections.abc import Callable
 from datetime import datetime, timezone
+from typing import Any, cast
 
 from engine import usage
-from engine.evaluator import item_glyph
+from engine.evaluator import VerdictItem, item_glyph
 from engine.judge import JudgeResult
 from engine.repo_paths import WorktreeResolutionError, resolve_worktree_identity
 from engine.resolution import ResolutionVerdict
@@ -104,9 +105,9 @@ DEFAULT_HISTORY_CONFIG = {
 }
 
 
-def load_history_config(workdir: str) -> dict:
+def load_history_config(workdir: str) -> dict[Any, Any]:
     """Load history section from .gitreins/config.yaml, merged with defaults."""
-    config = {}
+    config: dict[Any, Any] = {}
     config_path = os.path.join(workdir, ".gitreins", "config.yaml")
     if os.path.isfile(config_path):
         try:
@@ -210,22 +211,22 @@ class VerdictPersister:
 
     @property
     def history_dir(self) -> str:
-        path = self.config.get("path", ".gitreins/history")
+        path = cast(str, self.config.get("path", ".gitreins/history"))
         if os.path.isabs(path):
             return path
         return os.path.join(self.workdir, path)
 
     @property
     def storage_mode(self) -> str:
-        return self.config.get("storage", "git")
+        return cast(str, self.config.get("storage", "git"))
 
     # ── Save ────────────────────────────────────────────────
 
     def persist(
         self,
         task_id: str,
-        verdict_data: dict,
-        collect_evidence: Callable[[str], dict] | None = None,
+        verdict_data: dict[Any, Any],
+        collect_evidence: Callable[[str], dict[Any, Any]] | None = None,
         *,
         evaluated_at: datetime | None = None,
     ) -> str:
@@ -324,7 +325,7 @@ class VerdictPersister:
 
     # ── List / Report ────────────────────────────────────────
 
-    def list_verdicts(self, n: int = 20, task_id: str | None = None) -> list[dict]:
+    def list_verdicts(self, n: int = 20, task_id: str | None = None) -> list[dict[Any, Any]]:
         """Return recent verdicts as a list of dicts, newest first.
 
         Local filesystem entries take precedence. When the local history
@@ -346,7 +347,7 @@ class VerdictPersister:
             return self._list_branch_verdicts(n=n, task_id=task_id)
         return []
 
-    def _list_local_verdicts(self, n: int = 20, task_id: str | None = None) -> list[dict]:
+    def _list_local_verdicts(self, n: int = 20, task_id: str | None = None) -> list[dict[Any, Any]]:
         """Read verdict entries from the local filesystem (original behavior)."""
         if not os.path.isdir(self.history_dir):
             return []
@@ -465,7 +466,7 @@ class VerdictPersister:
         # matches the local reader's newest-first (date desc, hash desc).
         return [(path, holder[path]) for path in sorted(holder, reverse=True)]
 
-    def _read_branch_verdict(self, ref: str, path: str) -> dict | None:
+    def _read_branch_verdict(self, ref: str, path: str) -> dict[Any, Any] | None:
         """Parse one verdict.json off *ref*; None when it cannot be read."""
         try:
             show = subprocess.run(
@@ -481,12 +482,15 @@ class VerdictPersister:
         if show.returncode != 0:
             return None
         try:
-            return json.loads(show.stdout)
+            parsed: Any = json.loads(show.stdout)
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             logger.warning("Failed to parse verdict %s from %s (non-fatal): %s", path, ref, e)
             return None
+        return cast(dict[Any, Any], parsed)
 
-    def _list_branch_verdicts(self, n: int = 20, task_id: str | None = None) -> list[dict]:
+    def _list_branch_verdicts(
+        self, n: int = 20, task_id: str | None = None
+    ) -> list[dict[Any, Any]]:
         """Read verdict entries committed to the history ref(s).
 
         Enumerates verdict.json files under the history path on each history
@@ -552,7 +556,7 @@ class VerdictPersister:
 
     # ── Internal ─────────────────────────────────────────────
 
-    def _build_summary(self, task_id: str, verdict_data: dict) -> str:
+    def _build_summary(self, task_id: str, verdict_data: dict[Any, Any]) -> str:
         # Resolution records are not graded tasks: they have no pass/fail, no
         # criteria and no pipeline stages, so the judge template would print a
         # fabricated "✗ FAIL" for a band that simply says UNRESOLVED.
@@ -583,13 +587,13 @@ class VerdictPersister:
             lines.append("")
             for item in items:
                 if isinstance(item, dict):
-                    status = item_glyph(item.get("status"))
+                    status = item_glyph(cast(str, item.get("status")))
                     lines.append(f"- {status} **{item.get('criterion', '?')}**")
                     detail = item.get("detail", "")
                     if detail:
                         lines.append(f"  - {detail}")
                 else:
-                    status = item_glyph(getattr(item, "status", None))
+                    status = item_glyph(cast(str, getattr(item, "status", None)))
                     criterion = getattr(item, "criterion", str(item))
                     detail = getattr(item, "detail", "")
                     lines.append(f"- {status} **{criterion}**")
@@ -619,7 +623,7 @@ class VerdictPersister:
 
         return "\n".join(lines)
 
-    def _build_resolution_summary(self, task_id: str, verdict_data: dict) -> str:
+    def _build_resolution_summary(self, task_id: str, verdict_data: dict[Any, Any]) -> str:
         """Summary for a resolution record — band, question, bundle, tokens.
 
         Deliberately NOT the judge template: a resolution record has no
@@ -798,7 +802,7 @@ class VerdictPersister:
             logger.warning("Git operation failed (non-fatal): %s", e)
             return "dry-run"
 
-    def _history_subject(self, task_id: str, verdict_data: dict) -> str:
+    def _history_subject(self, task_id: str, verdict_data: dict[Any, Any]) -> str:
         """Commit subject for one history entry, judge or resolution record.
 
         The ``gitreins`` branch's log is part of the audit trail, so a
@@ -876,7 +880,7 @@ class VerdictPersister:
             return None
         return result.stdout.strip() or None
 
-    def _git(self, args: list[str], env: dict | None = None) -> str:
+    def _git(self, args: list[str], env: dict[str, str] | None = None) -> str:
         """Run a git plumbing command in the repo and return stripped stdout.
 
         *env* replaces the plumbing environment wholesale — the tree-building
@@ -903,7 +907,7 @@ class VerdictPersister:
         return result.stdout.strip()
 
     @staticmethod
-    def _git_env() -> dict:
+    def _git_env() -> dict[str, str]:
         """Env for plumbing git calls; identity only when the user has none.
 
         setdefault on a private copy — an existing user/global identity is
@@ -951,7 +955,7 @@ class VerdictPersister:
 # ── Shared verdict persistence (CLI + MCP) ─────────────────────
 
 
-def _verdict_item_dict(item: object) -> dict:
+def _verdict_item_dict(item: VerdictItem) -> dict[Any, Any]:
     """One verdict item as persisted — attribution keys only when present.
 
     The three-key shape is today's contract; ``resolution_probability`` and
@@ -969,7 +973,7 @@ def _verdict_item_dict(item: object) -> dict:
     return d
 
 
-def build_verdict_data(workdir: str, task: Task, result: JudgeResult) -> dict:
+def build_verdict_data(workdir: str, task: Task, result: JudgeResult) -> dict[Any, Any]:
     """Build the verdict payload persisted for an evaluation.
 
     Behaviour moved verbatim from the CLI's historical ``_persist_result``:
@@ -1061,8 +1065,8 @@ def persist_evaluation(
     task: Task,
     result: JudgeResult,
     *,
-    extra: dict | None = None,
-    collect_evidence: Callable[[str], dict] | None = None,
+    extra: dict[Any, Any] | None = None,
+    collect_evidence: Callable[[str], dict[Any, Any]] | None = None,
 ) -> str:
     """Persist one evaluation verdict through the shared persistence path.
 
@@ -1124,7 +1128,7 @@ def _is_decision(verdict: ResolutionVerdict) -> bool:
     return getattr(verdict, "abstain_reason", None) is None
 
 
-def build_resolution_record(verdict: ResolutionVerdict, *, surface: str) -> dict:
+def build_resolution_record(verdict: ResolutionVerdict, *, surface: str) -> dict[Any, Any]:
     """The persisted payload for one resolution-gate verdict.
 
     A resolution record is NOT a task verdict: no ``passed`` (the gate returns a
@@ -1294,9 +1298,9 @@ def build_report(workdir: str, n: int = 10) -> str:
             item_statuses = []
             for item in items:
                 if isinstance(item, dict):
-                    s = item_glyph(item.get("status"))
+                    s = item_glyph(cast(str, item.get("status")))
                 else:
-                    s = item_glyph(getattr(item, "status", None))
+                    s = item_glyph(cast(str, getattr(item, "status", None)))
                 item_statuses.append(s)
             criteria_str = f" [{''.join(item_statuses)}]"
 
@@ -1316,14 +1320,15 @@ def build_report(workdir: str, n: int = 10) -> str:
     return "\n".join(lines)
 
 
-def _resolution_line(entry: dict) -> str:
+def _resolution_line(entry: dict[Any, Any]) -> str:
     """One report line for a resolution record: band, probability, date, source.
 
     Reads only what the record itself carries (``band``/``probability`` →
     fallback to the nested engine verdict) so a record written by an older or
     partial writer still renders something true instead of an exception.
     """
-    payload = entry.get("verdict") if isinstance(entry.get("verdict"), dict) else {}
+    payload_value = entry.get("verdict")
+    payload = payload_value if isinstance(payload_value, dict) else {}
     band = entry.get("band") or payload.get("verdict") or "RESOLUTION"
     probability = entry.get("probability")
     if probability is None:

@@ -1,0 +1,25 @@
+{
+  "tick": "gitreins-foreman-2026-10-25-20-32-10",
+  "mode": "serial",
+  "budget": 2,
+  "base": "cf477a5ef91bce7f00fa89101f3ab722860a3ab7",
+  "workers": [
+    {
+      "task_id": "REVIEW-GITREINS-010-SCOPE12",
+      "worktree": "/home/kara/worktrees/gitreins-REVIEW-GITREINS-010-SCOPE12",
+      "branch": "wt/REVIEW-GITREINS-010-SCOPE12",
+      "base": "github/main",
+      "base_sha": "cf477a5ef91bce7f00fa89101f3ab722860a3ab7",
+      "worker_commit": "16ab6d491595974af5ad826b03c2d037ba6c7ff3",
+      "canonical_commit": "16ab6d491595974af5ad826b03c2d037ba6c7ff3",
+      "verdict": ".gitreins/history/2026-10-25/121a7fc3/verdict.json",
+      "tier1": "PASS",
+      "tier2": "PASS",
+      "mypy": "2.1.0 engine 109->91; worktree_manager 18->0",
+      "focused_tests": "181 passed",
+      "full_suite": "3101 passed, 16 skipped",
+      "push_parity": "0 ahead, 0 behind",
+      "status": "complete"
+    }
+  ]
+}

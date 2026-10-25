@@ -191,6 +191,27 @@ class TestToolsCall:
         # The key point: exception is caught, error response is returned.
         pass  # Tested indirectly via task.start and task.complete on nonexistent
 
+    def test_task_list_returns_jsonrpc_typed_task_payload(
+        self, mcp_server: GitReinsMCPServer
+    ) -> None:
+        """The task.list MCP tool returns a JSON task collection on the wire."""
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 11,
+                "method": "tools/call",
+                "params": {"name": "task.list", "arguments": {}},
+            }
+        )
+
+        assert response is not None
+        assert response["jsonrpc"] == "2.0"
+        assert response["id"] == 11
+        assert "error" not in response
+        content = response["result"]["content"]
+        assert content == [{"type": "text", "text": '{\n  "tasks": []\n}'}]
+        assert json.loads(content[0]["text"]) == {"tasks": []}
+
     def test_tools_call_wraps_result_in_content(
         self, mcp_server: GitReinsMCPServer, tmp_workdir: str
     ) -> None:

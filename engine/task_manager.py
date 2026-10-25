@@ -401,7 +401,7 @@ class TaskManager:
 
         self._locked_load_save(mutate)
 
-    def to_dict(self, task: Task) -> dict:
+    def to_dict(self, task: Task) -> dict[str, Any]:
         """Convert a Task to a plain dict (for MCP/serialization)."""
         result = {
             "id": task.id,
