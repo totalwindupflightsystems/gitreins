@@ -1,0 +1,18 @@
+{
+  "tick": "gitreins-foreman-2026-10-25-16-31-08",
+  "mode": "serial-fallback",
+  "budget": 7,
+  "base": "effae5534cfb33e4d027374596789305b0c4c92f",
+  "workers": [
+    {
+      "task_id": "REVIEW-GITREINS-010",
+      "worktree": "/home/kara/worktrees/gitreins-REVIEW-GITREINS-010-SCOPE6",
+      "branch": "wt/REVIEW-GITREINS-010-SCOPE6",
+      "base_sha": "effae5534cfb33e4d027374596789305b0c4c92f",
+      "model": "glm-5.3-flash",
+      "provider": "ollama-cloud",
+      "brief": "/tmp/gitreins-foreman-2026-10-25-16-31-08-REVIEW-GITREINS-010-SCOPE6-brief.txt",
+      "status": "dispatched"
+    }
+  ]
+}
