@@ -1,0 +1,17 @@
+{
+  "tick": "gitreins-foreman-2026-10-25-18-05-47",
+  "mode": "serial-fallback",
+  "budget": 3,
+  "base": "github/main@5a4f8a1",
+  "tasks": [
+    {
+      "task_id": "REVIEW-GITREINS-010",
+      "worktree": "/home/kara/worktrees/gitreins-SCOPE10",
+      "branch": "wt/SCOPE10",
+      "worker_model": "glm-5.3-flash",
+      "worker_provider": "ollama-cloud",
+      "brief": "/tmp/gitreins-foreman-2026-10-25-18-05-47-REVIEW-GITREINS-010-SCOPE10-brief.txt",
+      "dispatch": "serial worker; wave budget had fewer than two independent high-value tasks"
+    }
+  ]
+}
