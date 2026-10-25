@@ -15,7 +15,7 @@ from collections.abc import Iterable, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict, cast
 
 if TYPE_CHECKING:
     from engine.worktree_manager import WorktreeRecord
@@ -27,6 +27,28 @@ from engine.worktree_manager import WorktreeError, WorktreeManager, validate_tas
 
 class FleetValidationError(WorktreeError):
     """Raised when a fleet manifest or concurrency cap is invalid."""
+
+
+class _StageResult(TypedDict):
+    exit_code: int
+    output: str
+
+
+class _StageReport(_StageResult):
+    phase: str
+
+
+class _LaneResult(TypedDict, total=False):
+    task_id: str
+    state: str
+    passed: bool
+    exit_code: int
+    output: str
+    error: str
+    stages: list[_StageReport]
+    worktree: str
+    branch: str
+    merge: str | dict[str, object]
 
 
 def _command(value: object, field: str, task_id: str) -> tuple[str, ...] | None:
@@ -86,7 +108,7 @@ class FleetLane:
             raise FleetValidationError(f"lane {self.task_id!r} timeout_seconds must be positive")
 
     @classmethod
-    def from_dict(cls, data: dict) -> FleetLane:
+    def from_dict(cls, data: dict[str, object]) -> FleetLane:
         if not isinstance(data, dict):
             raise FleetValidationError("each fleet lane must be an object")
         task_id = data.get("task_id", data.get("id"))
@@ -95,14 +117,28 @@ class FleetLane:
         command = _command(data.get("command"), "command", task_id)
         if command is None:
             raise FleetValidationError(f"lane {task_id!r} requires command")
+        priority = data.get("priority", 0)
+        if isinstance(priority, bool) or not isinstance(priority, int):
+            raise FleetValidationError(f"lane {task_id!r} priority must be an integer")
+        brief_path = data.get("brief_path")
+        if brief_path is not None and not isinstance(brief_path, str):
+            raise FleetValidationError(f"lane {task_id!r} brief_path must be a string")
+        timeout_seconds = data.get("timeout_seconds")
+        if timeout_seconds is not None and (
+            isinstance(timeout_seconds, bool)
+            or not isinstance(timeout_seconds, (int, float))
+        ):
+            raise FleetValidationError(
+                f"lane {task_id!r} timeout_seconds must be a number"
+            )
         return cls(
             task_id=task_id,
             command=command,
             guard=_command(data.get("guard"), "guard", task_id),
             judge=_command(data.get("judge"), "judge", task_id),
-            priority=data.get("priority", 0),
-            brief_path=data.get("brief_path"),
-            timeout_seconds=data.get("timeout_seconds"),
+            priority=priority,
+            brief_path=brief_path,
+            timeout_seconds=timeout_seconds,
         )
 
 
@@ -211,7 +247,7 @@ class WorktreeFleet:
         merge: bool = False,
         force_merge: bool = False,
         merge_actor: str | None = None,
-    ) -> dict:
+    ) -> dict[str, object]:
         """Execute lanes and return a stable, JSON-serializable tick report.
 
         Worktrees are created before execution, so every accepted lane has one
@@ -236,7 +272,7 @@ class WorktreeFleet:
         if force_merge and (not isinstance(merge_actor, str) or not merge_actor.strip()):
             raise FleetValidationError("force_merge requires a non-empty merge_actor")
 
-        records = {}
+        records: dict[str, WorktreeRecord] = {}
         for lane in sorted(lanes, key=lambda item: (item.priority, item.task_id)):
             record, _created = self.manager.create(
                 lane.task_id,
@@ -245,30 +281,30 @@ class WorktreeFleet:
             )
             records[lane.task_id] = record
 
-        results: dict[str, dict] = {}
+        results: dict[str, _LaneResult] = {}
         with ThreadPoolExecutor(
             max_workers=self.max_concurrent_worktrees,
             thread_name_prefix="gitreins-fleet",
         ) as executor:
-            futures: dict[Future, FleetLane] = {
+            futures: dict[Future[dict[str, object]], FleetLane] = {
                 executor.submit(self._run_lane, lane, records[lane.task_id]): lane for lane in lanes
             }
             for future in as_completed(futures):
                 lane = futures[future]
                 try:
-                    results[lane.task_id] = future.result()
+                    results[lane.task_id] = cast(_LaneResult, future.result())
                 except Exception as exc:  # lane failures become truthful evidence, not lost futures
                     message = f"fleet lane failed before completion: {exc}"
                     self.manager.mark_lane(
                         lane.task_id, "failed", error=message, result={"passed": False}
                     )
-                    results[lane.task_id] = {
-                        "task_id": lane.task_id,
-                        "state": "failed",
-                        "passed": False,
-                        "error": message,
-                        "worktree": records[lane.task_id].path,
-                    }
+                    results[lane.task_id] = _LaneResult(
+                        task_id=lane.task_id,
+                        state="failed",
+                        passed=False,
+                        error=message,
+                        worktree=records[lane.task_id].path,
+                    )
 
         merge_order: list[str] = []
         merge_errors: dict[str, str] = {}
@@ -356,7 +392,7 @@ class WorktreeFleet:
         )
         return True
 
-    def _run_lane(self, lane: FleetLane, record: WorktreeRecord) -> dict:
+    def _run_lane(self, lane: FleetLane, record: WorktreeRecord) -> dict[str, object]:
         stages = [("running", lane.command)]
         if lane.guard is not None:
             stages.append(("guarding", lane.guard))
@@ -382,16 +418,23 @@ class WorktreeFleet:
             stage = self._run_command(
                 command, Path(record.path), lane.task_id, lane.timeout_seconds
             )
-            stage_results.append({"phase": phase, **stage})
-            if stage["exit_code"] != 0:
-                error = _phase_error(phase, stage["exit_code"], stage["output"])
+            stage_result = _StageReport(
+                phase=phase,
+                exit_code=cast(int, stage["exit_code"]),
+                output=cast(str, stage["output"]),
+            )
+            stage_results.append(stage_result)
+            if stage_result["exit_code"] != 0:
+                error = _phase_error(
+                    phase, stage_result["exit_code"], stage_result["output"]
+                )
                 result = {"passed": False, "stages": stage_results, "error": error}
                 self.manager.mark_lane(
                     lane.task_id,
                     "failed",
                     result=result,
-                    exit_code=stage["exit_code"],
-                    output=stage["output"],
+                    exit_code=stage_result["exit_code"],
+                    output=stage_result["output"],
                     error=error,
                 )
                 return {
@@ -430,7 +473,7 @@ class WorktreeFleet:
 
     def _run_command(
         self, command: tuple[str, ...], cwd: Path, task_id: str, timeout: float | None
-    ) -> dict:
+    ) -> dict[str, object]:
         started = time.monotonic()
         try:
             process = subprocess.Popen(

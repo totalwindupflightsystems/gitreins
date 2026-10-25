@@ -46,7 +46,10 @@ from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from engine.worktree_manager import WorktreeRecord
 
 from engine.config import load_defaults
 from engine.evidence_bounds import MAX_EVIDENCE_CHARS, bound_evidence
@@ -262,7 +265,7 @@ def _tree_venv_bin(
     ``WorktreeManager``.
     """
     manager = getattr(manager, "manager", manager)
-    destination, source = manager._venv_paths(tree_path)
+    destination, source = cast(WorktreeManager, manager)._venv_paths(tree_path)
     for candidate in (destination / "bin", None if source is None else source / "bin"):
         if candidate is not None and candidate.is_dir():
             return candidate
@@ -310,7 +313,7 @@ def _child_python(tree_path: Path, manager: WorktreeManager | DisposableWorktree
     ``_child_cli_env`` makes importable regardless of provenance.
     """
     manager = getattr(manager, "manager", manager)
-    destination, _source = manager._venv_paths(tree_path)
+    destination, _source = cast(WorktreeManager, manager)._venv_paths(tree_path)
     candidate = destination / "bin" / "python"
     if candidate.is_file():
         return os.fspath(candidate)
@@ -365,7 +368,7 @@ def _is_run_leader(pid: int | None) -> bool:
     of staying registered — and unreapable — forever.  A pid we cannot
     inspect (``PermissionError``) is not ours either.
     """
-    if not _pid_alive(pid):
+    if not _pid_alive(pid) or pid is None:
         return False
     try:
         return os.getpgid(pid) == pid
@@ -428,8 +431,8 @@ def enforce_disk_ceiling(
     current = 0
     for record in task_records.values():
         current += _tree_size(Path(record.path))
-    for record in disposable_records:
-        current += _tree_size(Path(record.path))
+    for disposable_record in disposable_records:
+        current += _tree_size(Path(disposable_record.path))
     projected = _tree_size(manager.main_root) if requested_bytes is None else requested_bytes
     projected = max(0, projected)
 
@@ -438,33 +441,47 @@ def enforce_disk_ceiling(
 
     # Disposable trees are ordered independently from task trees as required
     # by the feature: a retained failure is inspectable until the next cap hit.
-    candidates: list[tuple[float, str, str, Any]] = []
-    for record in disposable_records:
-        if _run_is_live(record):
+    candidates: list[tuple[float, str, str, DisposableRecord | WorktreeRecord]] = []
+    for disposable_record in disposable_records:
+        if _run_is_live(disposable_record):
             continue
-        candidates.append((record.created_at, "disposable", record.run_id, record))
-    for task_id, record in task_records.items():
-        if record.state in LIVE_STATES:
+        candidates.append(
+            (
+                disposable_record.created_at,
+                "disposable",
+                disposable_record.run_id,
+                disposable_record,
+            )
+        )
+    for task_id, task_record in task_records.items():
+        if task_record.state in LIVE_STATES:
             continue
-        if record.state not in {"merged", "completed"}:
+        if task_record.state not in {"merged", "completed"}:
             continue
-        if manager._heartbeat_age(record) <= STALE_AFTER_SECONDS:
+        if manager._heartbeat_age(task_record) <= STALE_AFTER_SECONDS:
             continue
-        candidates.append((record.created_at, "task", task_id, record))
+        candidates.append((task_record.created_at, "task", task_id, task_record))
     candidates.sort(key=lambda item: (0 if item[1] == "disposable" else 1, item[0], item[2]))
 
     reaped: list[str] = []
-    for _created_at, kind, identifier, record in candidates:
+    for _created_at, kind, identifier, candidate_record in candidates:
         if current + projected <= ceiling:
             break
-        path = Path(record.path)
-        size = _tree_size(path)
         if kind == "disposable":
+            disposable_record = cast(DisposableRecord, candidate_record)
+            path = Path(disposable_record.path)
+            size = _tree_size(path)
             _remove_disposable_tree(manager.main_root, path)
-            disposable_records = [item for item in disposable_records if item.run_id != identifier]
+            disposable_records = [
+                item for item in disposable_records if item.run_id != disposable_record.run_id
+            ]
         else:
+            if isinstance(candidate_record, DisposableRecord):
+                raise AssertionError("task candidate unexpectedly has disposable record")
+            path = Path(candidate_record.path)
+            size = _tree_size(path)
             branches_deleted: list[str] = []
-            manager._remove_tree(record, branches_deleted)
+            manager._remove_tree(candidate_record, branches_deleted)
             task_records.pop(identifier, None)
         current -= size
         reaped.append(identifier)
