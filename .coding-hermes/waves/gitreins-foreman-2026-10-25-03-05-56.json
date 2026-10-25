@@ -1,0 +1,16 @@
+{
+  "tick": "gitreins-foreman-2026-10-25-03-05-56",
+  "mode": "serial",
+  "wave_budget": 2,
+  "tasks": [
+    {
+      "task_id": "REVIEW-GITREINS-010",
+      "worktree": "/home/kara/worktrees/gitreins-REVIEW-GITREINS-010-SCOPE3",
+      "branch": "wt/REVIEW-GITREINS-010-SCOPE3",
+      "base": "github/main",
+      "dispatch": "serial-fallback",
+      "worker_commit": "3674c2c01f0e6ea7e815e15f7a57c69ed91701f2"
+    }
+  ],
+  "note": "Project-specific foreman rule limited this tick to one worker; no concurrent wave was composed. Isolated worktree and branch were recorded for the serial dispatch."
+}
