@@ -5,6 +5,9 @@ manifest of lane commands, while GitReins owns worktree isolation, durable
 phase evidence, and serialized optional merge-back.
 """
 
+# ruff: noqa: E501
+# ch:trace row=INT-CI-21 spec=.github/workflows/ci.yml#format-check wave=none:serial-fallback test=tests/test_worktree_fleet.py+tests/test_worktree_disposable.py doc=none:not-a-doc-task prompt=/tmp/gitreins-foreman-2026-10-25-07-10-13-INT-CI-21-brief.txt evidence=engine/worktree_fleet.py witness=ruff-format-check-and-focused-tests verdict=none:foreman-runs-judge commit=ff31dae memory=none:foreman-writes
+
 from __future__ import annotations
 
 import json
@@ -125,12 +128,9 @@ class FleetLane:
             raise FleetValidationError(f"lane {task_id!r} brief_path must be a string")
         timeout_seconds = data.get("timeout_seconds")
         if timeout_seconds is not None and (
-            isinstance(timeout_seconds, bool)
-            or not isinstance(timeout_seconds, (int, float))
+            isinstance(timeout_seconds, bool) or not isinstance(timeout_seconds, (int, float))
         ):
-            raise FleetValidationError(
-                f"lane {task_id!r} timeout_seconds must be a number"
-            )
+            raise FleetValidationError(f"lane {task_id!r} timeout_seconds must be a number")
         return cls(
             task_id=task_id,
             command=command,
@@ -425,9 +425,7 @@ class WorktreeFleet:
             )
             stage_results.append(stage_result)
             if stage_result["exit_code"] != 0:
-                error = _phase_error(
-                    phase, stage_result["exit_code"], stage_result["output"]
-                )
+                error = _phase_error(phase, stage_result["exit_code"], stage_result["output"])
                 result = {"passed": False, "stages": stage_results, "error": error}
                 self.manager.mark_lane(
                     lane.task_id,
