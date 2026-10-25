@@ -1,0 +1,29 @@
+{
+  "tick": "gitreins-foreman-2026-10-25-08-35-03",
+  "project": "gitreins",
+  "budget": 8,
+  "mode": "serial",
+  "reason": "Only one highest-value in-scope implementation row selected; other pending rows are docs, records-only, or owner/infrastructure-gated.",
+  "base_sha": "fa074e9f9d9159a15ef9c66b6c1387620a3a7c9c",
+  "workers": [
+    {
+      "task_id": "REVIEW-GITREINS-010",
+      "worktree": "/home/kara/worktrees/gitreins-REVIEW-GITREINS-010-SCOPE5",
+      "branch": "wt/REVIEW-GITREINS-010-SCOPE5",
+      "base_sha": "fa074e9f9d9159a15ef9c66b6c1387620a3a7c9c",
+      "model": "glm-5.3-flash",
+      "provider": "ollama-cloud",
+      "status": "merged",
+      "merged_commit": "aa0a8ce500f3ce67236342a299631329bb3524e8",
+      "judge": "6c007caa69ad20457215161f2512cf4a13bbaa93",
+      "mypy": "167 -> 150 strict engine errors",
+      "tests": "176 focused passed"
+    }
+  ],
+  "closeout": {
+    "status": "complete",
+    "finished_at": "2026-10-25T15:36:59Z",
+    "canonical_commit": "aa0a8ce500f3ce67236342a299631329bb3524e8",
+    "ci": "PENDING exact closeout run 40207660862"
+  }
+}

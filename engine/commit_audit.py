@@ -26,6 +26,9 @@ from typing import Any
 from engine.llm import LLMClient, LLMResponse, ToolCall
 from engine.review_profiles import ReviewProfile
 
+
+JSONDict = dict[str, Any]
+
 logger = logging.getLogger("gitreins.commit_audit")
 
 
@@ -505,7 +508,7 @@ class CommitAuditResult:
     iterations_used: int = 0
     """How many LLM iterations were consumed."""
 
-    review_issues: list = field(default_factory=list)
+    review_issues: list[JSONDict] = field(default_factory=list)
     """Full ReviewIssue dicts from CodeRabbit-style review (GR-065).
     Each dict has: file, line, severity, category, title, description, suggestion."""
 
@@ -515,7 +518,7 @@ class CommitAuditResult:
     review_profile: str = ""
     """Selected review profile name (GR-148)."""
 
-    review_effort: dict = field(default_factory=dict)
+    review_effort: JSONDict = field(default_factory=dict)
     """Resolved effort budget actually used (GR-148)."""
 
     review_passes_run: list[str] = field(default_factory=list)
@@ -525,10 +528,10 @@ class CommitAuditResult:
     review_partial_reason: str = ""
     """PARTIAL-review markers when a budget cap stopped the run (GR-148)."""
 
-    review_estimates: list = field(default_factory=list)
+    review_estimates: list[JSONDict] = field(default_factory=list)
     """Pass-2 FixEstimate dicts (GR-148)."""
 
-    review_remediation: dict | None = None
+    review_remediation: JSONDict | None = None
     """Pass-3 remediation brief dict, if run (GR-148)."""
 
     @property
@@ -561,7 +564,7 @@ class ReviewIssue:
         return compat_severity(self.severity)
 
     @classmethod
-    def from_dict(cls, d: dict) -> ReviewIssue:
+    def from_dict(cls, d: JSONDict) -> ReviewIssue:
         return cls(
             file=d.get("file", ""),
             line=int(d.get("line", 0)),
@@ -590,7 +593,7 @@ class FixEstimate:
     reason: str = ""  # REQUIRED when size is unknown
 
     @classmethod
-    def from_dict(cls, d: dict) -> FixEstimate:
+    def from_dict(cls, d: JSONDict) -> FixEstimate:
         return cls(
             file=str(d.get("file", "")),
             line=int(d.get("line", 0) or 0),
@@ -603,7 +606,7 @@ class FixEstimate:
             reason=str(d.get("reason", "") or ""),
         )
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> JSONDict:
         return {
             "file": self.file,
             "line": self.line,
@@ -628,7 +631,7 @@ class RemediationBrief:
     notes: str = ""
 
     @classmethod
-    def from_dict(cls, d: dict) -> RemediationBrief:
+    def from_dict(cls, d: JSONDict) -> RemediationBrief:
         return cls(
             summary=str(d.get("summary", "") or ""),
             steps=list(d.get("steps", []) or []),
@@ -636,7 +639,7 @@ class RemediationBrief:
             notes=str(d.get("notes", "") or ""),
         )
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> JSONDict:
         return {
             "summary": self.summary,
             "steps": self.steps,
@@ -659,7 +662,7 @@ class CommitReviewResult:
     overall_score: float = 0.0  # GR-066: worst issue score, 0 if no issues
     # ── GR-148: profile/effort selection and multi-pass outputs ──
     profile: str = ""
-    effort: dict = field(default_factory=dict)  # resolved EffortLevel.to_dict()
+    effort: JSONDict = field(default_factory=dict)  # resolved EffortLevel.to_dict()
     passes_run: list[str] = field(default_factory=list)  # e.g. ["findings", "estimates"]
     partial: bool = False  # True when a budget cap stopped the review early
     partial_reason: str = ""
@@ -686,7 +689,7 @@ class CommitReviewResult:
                 return e
         return None
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> JSONDict:
         """Structured output: existing fields plus GR-148 additions. The
         ``suggestion`` field is preserved on every issue; legacy consumers
         see compat-mapped severities via ReviewIssue.compat_severity()."""
@@ -799,13 +802,13 @@ class CommitAuditor:
         max_iterations: int = 3,
         suggest_message: bool = True,
         review_mode: str = "message",
-        review_checks: dict | None = None,
+        review_checks: JSONDict | None = None,
         review_severity: str = "standard",
         review_suggest_fix: bool = True,
         review_score_threshold: float = 8.0,
         review_score_offset: float = 1.0,
         review_profile: str | None = None,
-        review_effort_override: dict | None = None,
+        review_effort_override: JSONDict | None = None,
         mode: str = "warn",
     ) -> None:
         self.llm = llm
@@ -909,7 +912,7 @@ class CommitAuditor:
         diff: str | None = None,
         *,
         profile: str | None = None,
-        effort_override: dict | None = None,
+        effort_override: JSONDict | None = None,
     ) -> CommitReviewResult:
         """Run a CodeRabbit-style commit review under the selected profile.
 
@@ -1104,7 +1107,7 @@ class CommitAuditor:
             return None
         return RemediationBrief.from_dict(brief_data)
 
-    def _llm_json_call(self, prompt: str, max_tokens: int) -> dict | None:
+    def _llm_json_call(self, prompt: str, max_tokens: int) -> JSONDict | None:
         """One LLM call expected to return a JSON object; None on failure."""
         try:
             response = self.llm.chat(
@@ -1156,7 +1159,7 @@ class CommitAuditor:
     def _review_tool_loop(self, message: str, diff: str, review_prompt: str) -> CommitReviewResult:
         """Multi-turn review with tool access."""
         # Stub for agent mode — reuses existing tool loop pattern
-        messages: list[dict] = [
+        messages: list[JSONDict] = [
             {"role": "system", "content": COMMIT_REVIEW_SYSTEM_PROMPT},
             {"role": "user", "content": review_prompt},
         ]
@@ -1337,7 +1340,7 @@ class CommitAuditor:
             instructions=instructions,
         )
 
-        messages: list[dict] = [
+        messages: list[JSONDict] = [
             {"role": "system", "content": COMMIT_AUDIT_SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
         ]
