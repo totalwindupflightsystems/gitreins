@@ -271,6 +271,47 @@ class TestResolveCLI:
         assert verdict["verdict"] == "UNRESOLVED"
         assert verdict["abstain_reason"] is None
 
+    def test_missing_graph_cache_names_hilo_bootstrap_and_exits_zero(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Installed hilo + absent graph cache gives the actionable bootstrap hint."""
+        workdir = tmp_path / "repo"
+        config_dir = workdir / ".gitreins"
+        config_dir.mkdir(parents=True)
+        (config_dir / "config.yaml").write_text(
+            "resolution:\n  enabled:\n    cli: true\n", encoding="utf-8"
+        )
+        bin_dir = tmp_path / "bin"
+        bin_dir.mkdir()
+        hilo = bin_dir / "hilo"
+        hilo.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        hilo.chmod(0o755)
+        monkeypatch.setenv("PATH", str(bin_dir))
+
+        code, out, _ = run_resolve(
+            monkeypatch, str(workdir), "what does this project do?", "--json"
+        )
+
+        assert code == 0
+        verdict = json.loads(out)
+        assert verdict["abstain_reason"] == "hilo-not-initialized"
+        assert "hilo init" in verdict["abstain_action"]
+        assert "hilo graph warm" in verdict["abstain_action"]
+        assert "check that hilo is installed" not in out
+
+    def test_missing_hilo_binary_has_separate_not_installed_reason(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """An absent executable is not mislabeled as a missing project bootstrap."""
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        monkeypatch.setenv("PATH", "")
+
+        verdict = resolution.resolve("what does this project do?", workdir=str(workdir))
+
+        assert verdict.abstain_reason == "hilo-not-installed"
+        assert "install hilo" in (verdict.abstain_action or "")
+
     def test_abstain_without_credentials_exits_nonzero_with_named_reason(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, script_endpoint: str
     ) -> None:

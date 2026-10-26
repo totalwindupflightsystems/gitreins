@@ -1,0 +1,19 @@
+{
+  "tick": "gitreins-foreman-2026-10-25-23-43-36",
+  "project": "gitreins",
+  "base": "github/main",
+  "base_sha": "0a1011281574a0be9544a6269b1abbec757388e7",
+  "mode": "serial-isolated-worker",
+  "wave_budget": 4,
+  "workers": [
+    {
+      "task_id": "REVIEW-GITREINS-010-SCOPE15",
+      "parent_row": "REVIEW-GITREINS-010",
+      "worktree": "/home/kara/worktrees/gitreins-REVIEW-GITREINS-010-SCOPE15",
+      "branch": "wt/REVIEW-GITREINS-010-SCOPE15",
+      "model": "glm-5.3-flash",
+      "provider": "ollama-cloud",
+      "status": "prepared"
+    }
+  ]
+}

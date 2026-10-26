@@ -412,6 +412,35 @@ def test_verdict_detail_returns_full_record(live_server: object, repo_fixture: s
     assert served["stages"]["tier1"]["passed"] is True
     assert served["stages"]["tier2"]["items"][0]["status"] == "PASS"
 
+    # Direct typed-boundary check (REVIEW-GITREINS-010): the detail route reads
+    # the stored record through serve.load_verdict and its telemetry through
+    # serve.load_usage; both must return the exact payload shapes the
+    # strict-mypy casts promise, with a wrong shape failing here at runtime.
+    root = str(repo_fixture["root"])
+    typed_verdict = serve.load_verdict(root, date, verdict_hash)
+    assert typed_verdict == expected
+    # Unknown or malformed pairs stay ``None`` across both rejection arms.
+    assert serve.load_verdict(root, "2026-9-01", verdict_hash) is None
+    assert serve.load_verdict(root, date, "0000ff") is None
+
+    index, summary = serve.load_usage(root)
+    entry = index[f"{date}/{verdict_hash}"]
+    # The runtime payload must carry exactly the keys ``serve.UsageEntry``
+    # documents — no more, no less (REVIEW-GITREINS-010).
+    assert sorted(entry) == sorted(serve.UsageEntry.__annotations__)
+    assert entry["date"] == date
+    assert entry["hash"] == verdict_hash
+    assert entry["rows"] == 2
+    assert entry["tokens_in"] == 41250 + 50000
+    # No rates configured in this fixture: cost is absent, not zero.
+    assert entry["priced"] is False
+    assert entry["cost_usd"] is None
+    assert sorted(summary) == sorted(serve.UsageSummary.__annotations__)
+    assert summary["judgements"] == 2
+    assert summary["tokens_in"] == 41250 + 50000 + 9542
+    assert summary["cost_usd"] is None
+    assert summary["prices_configured"] is False
+
 
 def test_verdict_detail_returns_worktree_metadata_and_viewer_renders_it(
     live_server: object, repo_fixture: str

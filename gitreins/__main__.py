@@ -11,9 +11,9 @@ gate that blocks every commit instead of running the checks (DF-024).
 Keep this module free of side effects beyond delegating to ``cli.main``.
 """
 
-import sys
-
 from gitreins.cli import main
 
 if __name__ == "__main__":
-    sys.exit(main())
+    # cli.main() returns None and exits by raising SystemExit itself;
+    # handing its None to sys.exit() only ever produced exit code 0.
+    main()

@@ -389,8 +389,12 @@ class TestInit:
         skipped the pyproject.toml pythonpath check, so _detect_test_command
         wrongly returned 'python3 -m pytest ...' for pythonpath-configured
         projects (CI 3.10 job went red on the bare-pytest assertion).
+
+        Tranche 17: _has_pytest_pythonpath_config gates the import on
+        sys.version_info (mirroring engine/version.py, strict-mypy clean), so
+        the 3.10 path is simulated by patching version_info rather than by
+        raising ImportError on tomllib.
         """
-        import builtins
         import sys
         import types
 
@@ -404,15 +408,7 @@ class TestInit:
         fake_tomli = types.ModuleType("tomli")
         setattr(fake_tomli, "load", real_tomllib.load)  # noqa: B010 — dynamic module attr
         monkeypatch.setitem(sys.modules, "tomli", fake_tomli)
-
-        real_import = builtins.__import__
-
-        def fake_import(name: str, *args: object, **kwargs: object) -> object:
-            if name == "tomllib":
-                raise ImportError("No module named 'tomllib' (simulated Python 3.10)")
-            return real_import(name, *args, **kwargs)
-
-        monkeypatch.setattr(builtins, "__import__", fake_import)
+        monkeypatch.setattr(sys, "version_info", (3, 10, 0))
 
         from gitreins.cli import _has_pytest_pythonpath_config
 

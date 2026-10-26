@@ -29,7 +29,7 @@ foreman wiring that calls it per board row is external to this repo.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, TypedDict, cast
 
 from engine.persist import persist_resolution
 from engine.resolution import _STRONG_PROVENANCE as STRONG_PROVENANCE
@@ -39,6 +39,7 @@ from engine.resolution import (
     VERDICT_RESOLVED,
     VERDICT_REVIEW,
     ResolutionVerdict,
+    TraceSeed,
     band_for,
     effective_band_for,
     enabled_surfaces,
@@ -70,6 +71,24 @@ DECISIONS: dict[str, str] = {
     "UNRESOLVED": DECISION_DISPATCH,
     VERDICT_ABSTAIN: DECISION_DISPATCH,
 }
+
+
+class _ResolveKwargs(TypedDict, total=False):
+    """Typed boundary for the opaque keyword forwarding seam."""
+
+    keys: list[str] | None
+    poster: Callable[[str, str, dict[str, Any], int], Any] | None
+    runner: Callable[[list[str], str], tuple[int, str, str]] | None
+    seeds: list[TraceSeed] | None
+    traced: bool
+    read_files: bool
+    max_tokens: int
+    model: str
+    endpoint: str
+    resolved_at: float
+    review_at: float
+    egress_exclude: tuple[str, ...] | None
+
 
 #: The policy's one-line why, per decision — printed by the CLI and recorded so
 #: a human reading the annotation never has to re-derive the mapping.
@@ -317,7 +336,9 @@ def preflight(
             dispatch()
         return record
 
-    verdict = resolve(question, workdir=workdir, **resolve_kwargs)
+    # Keep the public seam opaque while checking the forwarding boundary against
+    # resolve's exact keyword contract; this does not alter the runtime mapping.
+    verdict = resolve(question, workdir=workdir, **cast(_ResolveKwargs, resolve_kwargs))
     record = decide(verdict)
     # DF-GITREINS-POC-36: the decision is filed in the same history store the
     # judge writes to, through the SHARED helper — this surface must never grow
