@@ -342,7 +342,7 @@ def _load_real_tokenizer() -> Callable[[str], int] | None:
     one can pass it to :func:`estimate_tokens` directly.
     """
     try:  # pragma: no cover - not installed in this venv, exercised by the seam test
-        import tiktoken
+        import tiktoken  # type: ignore[import-not-found]
 
         encoding = tiktoken.get_encoding("cl100k_base")
         return lambda text: len(encoding.encode(text))

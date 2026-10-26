@@ -46,7 +46,7 @@ import time
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import yaml
 
@@ -264,7 +264,7 @@ def _render_pre_push_hook() -> str:
     )
 
 
-def load_config(workdir: str) -> dict:
+def load_config(workdir: str) -> dict[str, Any]:
     """Load .gitreins/config.yaml, returning {} if not found.
 
     WARNING: If the file exists but cannot be parsed (YAML syntax error,
@@ -283,7 +283,7 @@ def load_config(workdir: str) -> dict:
             data = yaml.safe_load(f)
             if data is None:
                 return {}
-            return data
+            return cast(dict[str, Any], data)
     except yaml.YAMLError as e:
         logger.warning(
             "Failed to parse %s: %s — config file exists but YAML is invalid. "
@@ -412,7 +412,9 @@ def _ensure_gitignore_entry(workdir: str, entry: str) -> tuple[bool, str]:
     return True, f".gitignore (added {entry})"
 
 
-def _gitignore_entries_for_project(workdir: str, lang: dict | None = None) -> tuple[str, ...]:
+def _gitignore_entries_for_project(
+    workdir: str, lang: dict[str, Any] | None = None
+) -> tuple[str, ...]:
     """Return the GitReins-generated files to protect in this project.
 
     The universal entries cover GitReins state and telemetry. Python projects
@@ -595,7 +597,7 @@ def cmd_install(_args: argparse.Namespace) -> None:
     print("  - Try the hook:   make a change, git add ., git commit -m 'test'")
 
 
-def _load_init_config(workdir: str, config_path: str) -> dict:
+def _load_init_config(workdir: str, config_path: str) -> dict[str, Any]:
     """Load existing config for init, refusing to clobber a broken-but-present file.
 
     CRITICAL: load_config returns {} for BOTH "file doesn't exist" AND
@@ -618,9 +620,9 @@ def _load_init_config(workdir: str, config_path: str) -> dict:
 
 
 def _update_guards_section(
-    existing: dict,
+    existing: dict[str, Any],
     args: argparse.Namespace,
-    lang_info: dict,
+    lang_info: dict[str, Any],
     test_cmd: str,
     static_tools: list[str],
     changed: list[str],
@@ -646,7 +648,7 @@ def _update_guards_section(
 
 
 def _update_evaluator_history_sections(
-    existing: dict, args: argparse.Namespace, size: dict, changed: list[str]
+    existing: dict[str, Any], args: argparse.Namespace, size: dict[str, Any], changed: list[str]
 ) -> None:
     """Evaluator caps + history block (reset replaces, else additive)."""
     # Evaluator section — size-appropriate caps
@@ -669,7 +671,7 @@ def _update_evaluator_history_sections(
         changed.append("history")
 
 
-def _update_fleet_resolution_sections(existing: dict, changed: list[str]) -> None:
+def _update_fleet_resolution_sections(existing: dict[str, Any], changed: list[str]) -> None:
     """worktree_fleet policy + Jev resolution gate (both additive-only)."""
     # Disposable/fleet worktree policy — additive so existing settings stay intact.
     fleet = existing.setdefault("worktree_fleet", {})
@@ -698,7 +700,7 @@ def _update_fleet_resolution_sections(existing: dict, changed: list[str]) -> Non
 
 
 def _write_init_config(
-    gitreins_dir: str, config_path: str, existing: dict, changed: list[str]
+    gitreins_dir: str, config_path: str, existing: dict[str, Any], changed: list[str]
 ) -> None:
     """Write the merged config back, recording the backup file when one was made."""
     os.makedirs(gitreins_dir, exist_ok=True)
@@ -740,7 +742,12 @@ def _ensure_pre_commit_hook(workdir: str, reset: bool, changed: list[str]) -> No
 
 
 def _print_init_summary(
-    existing: dict, workdir: str, lang_info: dict, size: dict, test_cmd: str, changed: list[str]
+    existing: dict[str, Any],
+    workdir: str,
+    lang_info: dict[str, Any],
+    size: dict[str, Any],
+    test_cmd: str,
+    changed: list[str],
 ) -> None:
     """Print the init banner, config summary, and static-analysis warnings."""
     print(f"GitReins init: {workdir}")
@@ -862,7 +869,7 @@ _LANG_INFO: dict[str, tuple[str, str, str]] = {
 }
 
 
-def _detect_language(workdir: str) -> dict:
+def _detect_language(workdir: str) -> dict[str, Any]:
     """Detect project language(s). Returns {name, type, is_go, is_python, is_ts, ...}.
 
     Delegates entirely to engine.lang_detect — the signature-file table, the
@@ -907,7 +914,7 @@ def _detect_language(workdir: str) -> dict:
     return info
 
 
-def _detect_static_analysis_tools(_workdir: str, lang: dict) -> list[str]:
+def _detect_static_analysis_tools(_workdir: str, lang: dict[str, Any]) -> list[str]:
     """Return list of installed static analysis tools for all detected languages."""
     from engine.static_analysis import list_available_tools
 
@@ -987,9 +994,9 @@ def _has_pytest_pythonpath_config(workdir: str) -> bool:
     if os.path.isfile(pyproject):
         try:
             try:
-                import tomllib  # Python 3.11+
+                import tomllib  # type: ignore[import-not-found]  # Python 3.11+
             except ImportError:  # pragma: no cover — Python 3.10 fallback
-                import tomli as tomllib  # type: ignore[no-redef]
+                import tomli as tomllib
 
             with open(pyproject, "rb") as f:
                 data = tomllib.load(f)
@@ -1077,7 +1084,7 @@ def _detect_ts_test_command(workdir: str) -> str:
     return "npx vitest run"
 
 
-def _detect_test_command(workdir: str, lang: dict) -> str:
+def _detect_test_command(workdir: str, lang: dict[str, Any]) -> str:
     """Detect the right test command for the project."""
     if lang["is_go"]:
         return _detect_go_test_command(workdir)
@@ -1149,7 +1156,7 @@ def _count_python_packages(workdir: str) -> int:
     return len(py_pkgs) or 1
 
 
-def _detect_project_size(workdir: str, lang: dict) -> dict:
+def _detect_project_size(workdir: str, lang: dict[str, Any]) -> dict[str, Any]:
     """Estimate project size for evaluator cap recommendations."""
     if lang["is_go"]:
         packages = _count_go_packages(workdir)
@@ -1175,7 +1182,9 @@ def _detect_project_size(workdir: str, lang: dict) -> dict:
     }
 
 
-def _build_guards_section(lang: dict, test_cmd: str, static_tools: list[str] | None = None) -> dict:
+def _build_guards_section(
+    lang: dict[str, Any], test_cmd: str, static_tools: list[str] | None = None
+) -> dict[str, Any]:
     """Build guards section optimized for the detected language."""
     if static_tools is None:
         static_tools = []
@@ -1191,7 +1200,7 @@ def _build_guards_section(lang: dict, test_cmd: str, static_tools: list[str] | N
         "sql": ["sqlfluff"],
     }
 
-    section: dict
+    section: dict[str, Any]
     if lang["is_go"]:
         # DF-GITREINS-POC-45: the Go tests lane honours guards.test_command
         # (engine/guards.check_go_tests), so the detected command must be
@@ -1279,7 +1288,7 @@ def _build_guards_section(lang: dict, test_cmd: str, static_tools: list[str] | N
         }
 
 
-def _upgrade_install_default_test_command(guards: dict, detected_test_cmd: str) -> bool:
+def _upgrade_install_default_test_command(guards: dict[str, Any], detected_test_cmd: str) -> bool:
     """Upgrade only the untouched test command created by ``install``.
 
     ``install`` has no user input and writes ``INSTALL_DEFAULT_TEST_COMMAND``.
@@ -1295,16 +1304,16 @@ def _upgrade_install_default_test_command(guards: dict, detected_test_cmd: str) 
     return False
 
 
-def _configured_static_analysis_tools(guards: dict) -> list[str]:
+def _configured_static_analysis_tools(guards: dict[str, Any]) -> list[str]:
     """Flatten configured static-analysis tools for user-facing status output."""
     configured = guards.get("static_analysis_tools", {})
     values = configured.values() if isinstance(configured, dict) else [configured]
-    tools = []
+    tools: list[str] = []
     for value in values:
         if isinstance(value, str):
-            candidates = [value]
+            candidates: list[Any] = [value]
         elif isinstance(value, (list, tuple)):
-            candidates = value
+            candidates = list(value)
         else:
             candidates = []
         for tool in candidates:
@@ -1313,7 +1322,7 @@ def _configured_static_analysis_tools(guards: dict) -> list[str]:
     return tools
 
 
-def _missing_static_analysis_tools(guards: dict) -> list[str]:
+def _missing_static_analysis_tools(guards: dict[str, Any]) -> list[str]:
     """Configured static-analysis tools that are NOT installed on this machine.
 
     DF-019: `init` announced "Static analysis: enabled (mypy, pyright)" for
@@ -1333,7 +1342,9 @@ def _static_analysis_install_lines(missing: list[str]) -> list[str]:
     return [f"    {tool} — install: {_install_help(tool)}" for tool in missing]
 
 
-def _static_analysis_lane_selection(guards: dict, workdir: str | None) -> tuple[list[str], str]:
+def _static_analysis_lane_selection(
+    guards: dict[str, Any], workdir: str | None
+) -> tuple[list[str], str]:
     """What the static-analysis LANE would select for *workdir*.
 
     REVIEW-GITREINS-019: `engine.static_analysis.select_tools` is the
@@ -1348,7 +1359,7 @@ def _static_analysis_lane_selection(guards: dict, workdir: str | None) -> tuple[
     return select_tools(workdir, guards.get("static_analysis_tools", {}))
 
 
-def _static_analysis_install_hint(lang: dict) -> str:
+def _static_analysis_install_hint(lang: dict[str, Any]) -> str:
     """Install hint for the detected language's static-analysis tool."""
     if lang["is_python"]:
         return "pip install mypy"
@@ -1361,7 +1372,9 @@ def _static_analysis_install_hint(lang: dict) -> str:
     return "see docs for install instructions"
 
 
-def _static_analysis_status(guards: dict, lang: dict, workdir: str | None = None) -> str:
+def _static_analysis_status(
+    guards: dict[str, Any], lang: dict[str, Any], workdir: str | None = None
+) -> str:
     """Describe the persisted static-analysis toggle and configured tools.
 
     REVIEW-GITREINS-019: this line must describe what the lane will
@@ -1381,7 +1394,9 @@ def _static_analysis_status(guards: dict, lang: dict, workdir: str | None = None
     return "disabled (compiled language or explicitly off)"
 
 
-def _static_analysis_enabled_status(guards: dict, tools: list[str], workdir: str | None) -> str:
+def _static_analysis_enabled_status(
+    guards: dict[str, Any], tools: list[str], workdir: str | None
+) -> str:
     """Status text when static analysis is enabled AND tools are configured."""
     lane_tools, lane_gap = _static_analysis_lane_selection(guards, workdir)
     if not lane_tools and lane_gap:
@@ -1398,7 +1413,10 @@ def _static_analysis_enabled_status(guards: dict, tools: list[str], workdir: str
 
 
 def _fill_missing_guards(
-    guards: dict, lang: dict, test_cmd: str, static_tools: list[str] | None = None
+    guards: dict[str, Any],
+    lang: dict[str, Any],
+    test_cmd: str,
+    static_tools: list[str] | None = None,
 ) -> list[str]:
     """Fill in missing guard keys without overwriting existing values. Returns keys added."""
     added = []
@@ -1420,7 +1438,7 @@ def _fill_missing_guards(
     return added
 
 
-def _build_evaluator_section(size: dict) -> dict:
+def _build_evaluator_section(size: dict[str, Any]) -> dict[str, Any]:
     """Build evaluator section with size-appropriate caps."""
     return {
         "max_iterations": size["max_iterations"],
@@ -1448,7 +1466,7 @@ def _glob_to_regex(path: str) -> str:
     return "".join(out)
 
 
-def _generate_gitleaks_config(_workdir: str, lang: dict, target_path: str) -> None:
+def _generate_gitleaks_config(_workdir: str, lang: dict[str, Any], target_path: str) -> None:
     """Generate a .gitleaks.toml with sensible path exclusions.
 
     Prevents gitleaks from scanning dependency directories (node_modules,
@@ -1730,7 +1748,7 @@ def _rewrite_gitleaks_entries(text: str, replacements: list[tuple[int, str, int,
     return out
 
 
-def _gitleaks_entry_report(text: str, entries: list) -> list[tuple]:
+def _gitleaks_entry_report(text: str, entries: list[Any]) -> list[tuple[Any, ...]]:
     """Classify allowlist entries as valid or invalid; print one line each.
 
     Returns the invalid entries — callers print an OK summary when the list
@@ -1747,7 +1765,9 @@ def _gitleaks_entry_report(text: str, entries: list) -> list[tuple]:
     return invalid
 
 
-def _doctor_apply_fixes(config_path: str, text: str, invalid: list[tuple], total: int) -> None:
+def _doctor_apply_fixes(
+    config_path: str, text: str, invalid: list[tuple[Any, ...]], total: int
+) -> None:
     """Rewrite the invalid entries in place (with backup) and report the result."""
     new_text = _rewrite_gitleaks_entries(text, invalid)
     bak = _safe_overwrite(config_path, lambda f: f.write(new_text))
@@ -2075,7 +2095,10 @@ def cmd_task_complete(args: argparse.Namespace) -> None:
         print(f"Scan scope:   {scan_root}")
 
         print("\nEvaluating...")
-        judge = Judge(llm, workdir, scan_root=scan_root)
+        # skip_tier2 leaves llm None; Judge only dereferences it for tier-2.
+        # engine/judge.py annotates LLMClient (not | None) — widening that
+        # signature is out of scope for this tranche, so pin the gap here.
+        judge = Judge(llm, workdir, scan_root=scan_root)  # type: ignore[arg-type]
         result = judge.evaluate_task(task, skip_tier2=skip_tier2)
         print(result.summary)
 
@@ -2239,7 +2262,7 @@ def cmd_worktree_fleet(args: argparse.Namespace) -> None:
     print(_json.dumps(report, indent=2, sort_keys=True))
 
 
-def _write_worktree_json(path: str | None, payload: dict) -> None:
+def _write_worktree_json(path: str | None, payload: dict[str, Any]) -> None:
     """Write disposable evidence as UTF-8 JSON when requested."""
     from engine.worktree_manager import WorktreeError
 
@@ -2257,7 +2280,7 @@ def _write_worktree_json(path: str | None, payload: dict) -> None:
         raise WorktreeError(f"could not write evidence JSON {path}: {exc}") from exc
 
 
-def _record_qa_run(kind: str, report: dict, *, command: str | None = None) -> None:
+def _record_qa_run(kind: str, report: dict[str, Any], *, command: str | None = None) -> None:
     """Record a QA-run outcome in the ledger; never fail the run it records.
 
     ``None`` return from the ledger means recording is switched off
@@ -2330,7 +2353,7 @@ def cmd_worktree_repro(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
-def _format_dogfood_summary(report: dict) -> str:
+def _format_dogfood_summary(report: dict[str, Any]) -> str:
     """One honest human line for a dogfood report (DF-GITREINS-POC-73).
 
     The summary is also an API: a CI consumer keys on it, so a skipped step
@@ -2455,7 +2478,7 @@ def _persist_result(workdir: str, task: Task, result: JudgeResult) -> None:
         # so a verdict stays readable after /tmp is cleaned. Best-effort — the
         # collector swallows its own failures and the persister ignores a hook
         # that raises, because evidence must never fail a verdict.
-        def _collect_evidence(entry_dir: str) -> dict:
+        def _collect_evidence(entry_dir: str) -> dict[str, Any]:
             from engine.evidence import collect_evidence
 
             source_commit = ""
@@ -2637,7 +2660,7 @@ def cmd_serve(args: argparse.Namespace) -> None:
     )
 
 
-def _tui_verdict_lines(entries: list[dict]) -> list[str]:
+def _tui_verdict_lines(entries: list[dict[str, Any]]) -> list[str]:
     """Render history entries as TUI lines (icon, id, date, per-criterion marks)."""
     from engine.persist import KIND_RESOLUTION
 
@@ -2704,7 +2727,7 @@ def _cmd_report_tui(workdir: str, n: int = 20) -> None:
 
     verdict_lines = _tui_verdict_lines(entries)
 
-    class VerdictApp(App):
+    class VerdictApp(App):  # type: ignore[misc]
         CSS = """
         Screen { background: #0d1117; }
         Static { color: #c9d1d9; }
@@ -2724,7 +2747,7 @@ def _cmd_report_tui(workdir: str, n: int = 20) -> None:
 # ── Repo-produced quality snapshot (GR-143) ──────────────────────
 
 
-def quality_snapshot_for(workdir: str) -> dict | None:
+def quality_snapshot_for(workdir: str) -> dict[str, Any] | None:
     """The configured repo's quality snapshot, or None when not enabled.
 
     ONE computation point for the CLI surfaces (doctor here, plus any other
@@ -2947,7 +2970,7 @@ def _judge_require_id(args: argparse.Namespace) -> str:
     """The id argument is required for every non-ephemeral mode (EVID-003)."""
     if getattr(args, "id", None) is None:
         _judge_usage_error("the following arguments are required: id")
-    return args.id
+    return str(args.id)
 
 
 def _judge_dispatch_mode(
@@ -3374,7 +3397,7 @@ def _cmd_judge_worker(job_id: str) -> None:
         sys.exit(1)
 
 
-def _judge_status_print_header(job: dict, status: str) -> None:
+def _judge_status_print_header(job: dict[str, Any], status: str) -> None:
     """The status banner: job id, status word, task, workdir, pid, timestamps."""
     print(f"Job:      {job['id']}")
     print(f"Status:   {status}")
@@ -3389,7 +3412,7 @@ def _judge_status_print_header(job: dict, status: str) -> None:
     print()
 
 
-def _judge_status_running(job: dict) -> None:
+def _judge_status_running(job: dict[str, Any]) -> None:
     """Handle a `running` job record, flipping dead-pid orphans to error (QA-GITR-002).
 
     Exits: 2 still running, 3 orphan.
@@ -3438,7 +3461,7 @@ def _judge_status_running(job: dict) -> None:
     sys.exit(2)
 
 
-def _judge_status_result(job: dict) -> None:
+def _judge_status_result(job: dict[str, Any]) -> None:
     """Print a completed job's verdict details. Exits 0."""
     result = job.get("result") or {}
     print(f"Result:   {'PASS ✓' if result.get('passed') else 'FAIL ✗'}")
@@ -3755,7 +3778,7 @@ def cmd_commit_audit(args: argparse.Namespace) -> None:
     # stdout and stderr both empty) — the hook looked like a working gate.
     trigger = "commit-msg"
 
-    task = {
+    task: dict[str, Any] = {
         "id": "_commit_msg",
         "title": "Commit message audit",
         "criteria": [],
@@ -3765,7 +3788,7 @@ def cmd_commit_audit(args: argparse.Namespace) -> None:
     # GR-148: per-invocation review profile / effort overrides. The profile
     # name overrides repo config; effort overrides beat repo config too —
     # the profile default sits beneath both.
-    overrides: dict = {}
+    overrides: dict[str, Any] = {}
     profile_override = getattr(args, "review_profile", None)
     effort_flags = getattr(args, "review_effort", None)
     if profile_override:
@@ -4207,7 +4230,7 @@ _SETUP_TOOLS_INSTALL_GUIDE = {
 }
 
 
-def _setup_tools_language_list(workdir: str, lang: dict) -> list[str]:
+def _setup_tools_language_list(workdir: str, lang: dict[str, Any]) -> list[str]:
     """Detected language tokens, deduplicated, with SQL appended when present."""
     from engine.lang_detect import detect_languages
 
@@ -4960,7 +4983,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _parse_review_effort_flags(flags: list[str]) -> dict:
+def _parse_review_effort_flags(flags: list[str]) -> dict[str, Any]:
     """Parse repeatable --review-effort KEY=VALUE flags into an override dict.
 
     Numeric values are coerced to int/float so the EffortLevel fields type
@@ -4969,7 +4992,7 @@ def _parse_review_effort_flags(flags: list[str]) -> dict:
     """
     import sys as _sys
 
-    override: dict = {}
+    override: dict[str, Any] = {}
     for pair in flags:
         key, _, value = pair.partition("=")
         key, value = key.strip(), value.strip()
@@ -4977,8 +5000,9 @@ def _parse_review_effort_flags(flags: list[str]) -> dict:
             print(f"Invalid --review-effort override: {pair!r} (expected KEY=VALUE)")
             _sys.exit(2)
         if value.replace(".", "", 1).isdigit():
-            value = float(value) if "." in value else int(value)
-        override[key] = value
+            override[key] = float(value) if "." in value else int(value)
+        else:
+            override[key] = value
     return override
 
 

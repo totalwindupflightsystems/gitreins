@@ -1075,7 +1075,7 @@ class Pipeline:
                     continue
                 explicit_caps[key] = parsed
             else:
-                explicit_caps[key] = int(raw)  # type: ignore[arg-type]
+                explicit_caps[key] = int(raw)
         if step_def.get("tool_call_weight") is not None:
             explicit_caps["tool_call_weight"] = float(step_def["tool_call_weight"])
 
