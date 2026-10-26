@@ -1,0 +1,187 @@
+{
+  "question": "Does engine/evidence_bounds.py truncate text?",
+  "band": "REVIEW",
+  "probability": 0.68,
+  "missing_kind": "none",
+  "decision": "dispatch-with-note",
+  "reason": "the evidence does not yet resolve the row (probability in the REVIEW band 0.50-0.85) \u2014 dispatch-with-note and carry missing_kind + probability into the worker brief",
+  "demotion_reason": null,
+  "abstain_reason": null,
+  "verdict": {
+    "question": "Does engine/evidence_bounds.py truncate text?",
+    "verdict": "REVIEW",
+    "probability": 0.68,
+    "missing_kind": "none",
+    "missing_kind_probability": 0.53,
+    "evidence_quality": 1,
+    "evidence_quality_score": 1.45,
+    "evidence_quality_legend": {
+      "0": "the bundle only mentions the topic",
+      "1": "adjacent code: related, but not the code path the question asks about",
+      "2": "the exact code path the question asks about is present",
+      "3": "the exact code path is present together with its test"
+    },
+    "manifest": [
+      {
+        "file": "engine/evidence.py",
+        "provenance": "ast_exact",
+        "score": 1.0,
+        "bytes": 33488,
+        "truncated": false,
+        "source": "understand",
+        "lines": 729
+      },
+      {
+        "file": "engine/cve_feed.py",
+        "provenance": "ast_exact",
+        "score": 1.0,
+        "bytes": 13600,
+        "truncated": true,
+        "source": "understand",
+        "lines": 294
+      }
+    ],
+    "model": "typesafe/jev-1.13-20260917",
+    "request_id": "<redacted-provider-request-id>",
+    "provider": "TypeSafe",
+    "tokens_estimated": 13000,
+    "input_tokens": 12571,
+    "output_tokens": 96,
+    "cost_usd": 0.000527982,
+    "clipped": true,
+    "clip_disclosure": "bundle clipped line-aligned: 6365 chars / 138 line(s) omitted (see the omission markers in the bundle); state clipped to the worst-case wall: 52224 chars / 1215 line(s) omitted, 13000 tokens estimated (32850 at the densest measured rate); 3 manifest file(s) fell entirely outside the clipped state and are no longer claimed as evidence: engine/types.py, gitreins/cli.py, engine/evidence_bounds.py",
+    "chars_dropped": 58589,
+    "lines_dropped": 1353,
+    "dropped_files": [],
+    "budget_exhausted": false,
+    "seeds": [
+      {
+        "file": "engine/evidence.py",
+        "score": 0.032,
+        "symbols": [
+          "engine",
+          "evidence",
+          "py"
+        ]
+      },
+      {
+        "file": "engine/types.py",
+        "score": 0.0308,
+        "symbols": [
+          "engine",
+          "py"
+        ]
+      },
+      {
+        "file": "gitreins/cli.py",
+        "score": 0.0308,
+        "symbols": [
+          "py"
+        ]
+      },
+      {
+        "file": "engine/evidence_bounds.py",
+        "score": 0.0299,
+        "symbols": [
+          "engine",
+          "evidence",
+          "bounds",
+          "py"
+        ]
+      },
+      {
+        "file": "engine/static_analysis.py",
+        "score": 0.0293,
+        "symbols": [
+          "engine",
+          "py"
+        ]
+      },
+      {
+        "file": "engine/evaluator.py",
+        "score": 0.0281,
+        "symbols": [
+          "engine",
+          "py"
+        ]
+      },
+      {
+        "file": "engine/resolution.py",
+        "score": 0.0275,
+        "symbols": [
+          "engine",
+          "py"
+        ]
+      },
+      {
+        "file": "engine/worktree_fleet.py",
+        "score": 0.0272,
+        "symbols": [
+          "engine",
+          "py"
+        ]
+      },
+      {
+        "file": "gitreins_mcp/server.py",
+        "score": 0.0264,
+        "symbols": [
+          "py"
+        ]
+      },
+      {
+        "file": "gitreins/serve.py",
+        "score": 0.0244,
+        "symbols": [
+          "py"
+        ]
+      },
+      {
+        "file": "scripts/check_cli_doc_sync.py",
+        "score": 0.024,
+        "symbols": [
+          "py"
+        ]
+      }
+    ],
+    "dependency_paths": {
+      "engine/evidence.py": [
+        "0",
+        "gitreins/cli.py"
+      ],
+      "engine/types.py": [
+        "0",
+        "engine/guard_manager.py",
+        "tests/test_types.py",
+        "engine/pipeline.py",
+        "tests/test_guard_log_persistence.py",
+        "tests/test_guard_manager.py",
+        "tests/test_pytest_outcome.py",
+        "engine/evidence_bounds.py"
+      ],
+      "gitreins/cli.py": [
+        "0",
+        "tests/test_cli.py",
+        "tests/test_v07_features.py",
+        "tests/test_antares.py",
+        "engine/worktree_manager.py",
+        "tests/test_guard_degraded.py",
+        "gitreins/__main__.py",
+        "tests/test_mcp_verdict_persistence.py"
+      ]
+    },
+    "abstain_reason": null,
+    "abstain_detail": null,
+    "abstain_action": null,
+    "attempts": [
+      "candidate 1/6: ok"
+    ],
+    "exit_code": 0,
+    "notes": [
+      "state clipped to the worst-case wall: 52224 chars / 1215 line(s) omitted, 13000 tokens estimated (32850 at the densest measured rate)",
+      "3 manifest file(s) fell entirely outside the clipped state and are no longer claimed as evidence: engine/types.py, gitreins/cli.py, engine/evidence_bounds.py",
+      "bundle clipped line-aligned: 6365 chars / 138 line(s) omitted (see the omission markers in the bundle); state clipped to the worst-case wall: 52224 chars / 1215 line(s) omitted, 13000 tokens estimated (32850 at the densest measured rate); 3 manifest file(s) fell entirely outside the clipped state and are no longer claimed as evidence: engine/types.py, gitreins/cli.py, engine/evidence_bounds.py",
+      "token check: estimated=13000 reported=12571 chars=45661 chars/token=3.63",
+      "safety bound: 32850 tokens at the densest measured rate (1.39 chars/token) vs the 28000 ceiling"
+    ]
+  }
+}

@@ -279,6 +279,55 @@ product shapes, the hang arm (exit `1`, never `124`), the environment-gap arm,
 `HOME` isolation, and one arm that runs this repo's real console script so a
 change to the missing-config message fails the suite instead of drifting.
 
+## The fresh-install row's artifact identity (DF-GITREINS-POC-103)
+
+The battery's `fresh-install` cell decides `OK` vs `FAIL` by looking for an
+artifact after a successful install. Its generic detector searched PATH,
+`PREFIX/bin` and `~/.local/bin` for **one hard-wired name — another product's
+console script** — so this repo's genuinely-successful install graded FAIL on
+2026-10-26 (agent `339cb0f1`):
+
+```text
+{"cell": "fresh-install", "status": "FAIL",
+ "detail": "install rc=0 but no artifact found (toolsd not in PATH, PREFIX/bin/toolsd missing, or zero-size); Successfully installed ... gitreins-0.17.1 ..."}
+```
+
+The transcript inside the same failure row proves the install landed; the
+detector just looked for the wrong product's artifact. This repo owns that
+identity through the same opt-in hook pattern as the chaos cells:
+`.qa/probes/fresh-install.sh` (executable, run from the repo root). It derives
+the expected console script from the repo's OWN pyproject metadata
+(`[project] name` + the first `[project.scripts]` entry — `gitreins`, the
+console script `pip install .` really creates), locates it on PATH /
+`PREFIX/bin` / `~/.local/bin`, and asserts it is a non-empty executable whose
+`gitreins --version` exits `0`. It never consults a foreign artifact name, so
+an unrelated project's binary on PATH can never satisfy this cell, and it
+refuses to grade any repo whose pyproject does not declare `gitreins` (a
+project-mismatch FAIL, not a silent pass). Failure output names the project,
+the expected artifact, and — when the harness exports it — the install
+transcript path (`QA_FRESH_LOG`). Exit code = cell grade: `0` OK (line 1 names
+the artifact and the version output), `1` FAIL. Re-run it locally, no agent:
+
+```bash
+.qa/probes/fresh-install.sh; echo "probe rc=$?"
+# fresh-install OK: artifact=…/bin/gitreins (… bytes); gitreins --version → gitreins 0.17.1
+# probe rc=0
+```
+
+The regression pin is `tests/test_qa_fresh_install_probe.py`: the identity pin
+against the live `[project.scripts]` declaration, green with a fake installed
+console script while `toolsd` sits unused on the PATH, the missing-artifact
+FAIL that names `gitreins` (never the foreign name), and a `--version` failure
+that fails the cell even though the install itself returned `0`.
+
+*Boundary, stated:* the generic detector lives in the fleet harness
+(`bunker-qa.sh` — host-side, not this repository), and the harness-side
+consultation of `.qa/probes/` is the fleet change that must follow. Until it
+does, this tracked probe + test are the normative identity contract for this
+repo's `fresh-install` row: a fresh-install FAIL whose message names a foreign
+artifact is a harness defect, not a product one, and this file is the
+specification to fix the harness against.
+
 ## Limits (stated, not hidden)
 
 * **Synchronous.** A full run is minutes (spawn + pip install + suite). Run it
