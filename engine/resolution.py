@@ -198,6 +198,8 @@ ABSTAIN_REASONS = {
     "bundle-over-server-ceiling": "the server rejected the bundle as over its input ceiling",
     "budget-exhausted": "the assembled bundle did not fit MAX_BUNDLE_TOKENS",
     "empty-bundle": "no code could be assembled for the question",
+    "hilo-not-initialized": "hilo is installed, but this checkout has no .vfs/graph cache",
+    "hilo-not-installed": "the hilo executable could not be found",
     "empty-question": "the question was empty",
     "surface-disabled": (
         "this surface is disabled by config (resolution.enabled.<surface> in .gitreins/config.yaml)"
@@ -221,11 +223,9 @@ _REASON_ACTIONS = {
     "malformed-response": "the Jev answer shape changed — re-verify the model build",
     "bundle-over-server-ceiling": "lower max_tokens (the estimator undercounted this payload)",
     "budget-exhausted": "raise max_tokens or ask a narrower question",
-    "empty-bundle": (
-        "check that hilo is installed and the question names real code — hilo comes from"
-        " https://github.com/gethilo/hilo (cargo source build), and the abstain detail"
-        " names the exact path that was searched"
-    ),
+    "empty-bundle": "ask about code in this checkout; the assembled bundle was empty",
+    "hilo-not-initialized": "run `hilo init` and then `hilo graph warm` in this checkout",
+    "hilo-not-installed": "install hilo and ensure the executable is available on PATH",
     "empty-question": "pass a question for the repo to resolve",
 }
 
@@ -1618,15 +1618,17 @@ class ResolutionVerdict:
 
     @property
     def exit_code(self) -> int:
-        """0 for RESOLVED/REVIEW, 1 for UNRESOLVED and for ABSTAIN.
+        """0 for a usable decision or actionable bootstrap; 1 for other failures.
 
         The CLI/MCP surface (JEVRES-002) maps this onto its process exit; the
-        rule is here so no surface can invent its own: an ABSTAIN and an
-        UNRESOLVED are both non-zero, and they are distinguishable by
-        :attr:`abstain_reason` (a low score is a different failure from a dead
-        key or an exhausted budget).
+        rule is here so no surface can invent its own. A missing project graph
+        is an actionable local bootstrap state, not a resolution failure: the
+        ABSTAIN remains explicit in the verdict while the exact setup commands
+        can be run without treating the diagnostic as a failed command.
         """
-        if self.verdict in (VERDICT_RESOLVED, VERDICT_REVIEW):
+        if self.verdict in (VERDICT_RESOLVED, VERDICT_REVIEW) or (
+            self.abstain_reason == "hilo-not-initialized"
+        ):
             return 0
         return 1
 
@@ -1818,9 +1820,17 @@ def resolve(
         egress_exclude=egress_exclude,
     )
     if not bundle.text.strip():
+        reason = "budget-exhausted" if bundle.budget_exhausted else "empty-bundle"
+        if reason == "empty-bundle" and not (Path(workdir) / ".vfs" / "graph").exists():
+            missing_binary = any("hilo not found" in note.lower() for note in bundle.notes)
+            reason = (
+                "hilo-not-installed"
+                if missing_binary or not Path(_hilo_search_path()).exists()
+                else "hilo-not-initialized"
+            )
         return _abstain(
             question,
-            "budget-exhausted" if bundle.budget_exhausted else "empty-bundle",
+            reason,
             detail=bundle.notes[-1] if bundle.notes else None,
             bundle=bundle,
         )
