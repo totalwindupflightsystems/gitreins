@@ -93,6 +93,24 @@ def test_self_test_table_is_not_empty() -> None:
     assert len(identity.SELF_TEST_CASES) >= 8
 
 
+def test_native_enospc_is_infrastructure_and_not_a_suite_result() -> None:
+    """Disk exhaustion must not be reported as a product suite failure."""
+    facts = identity._facts(
+        suite={
+            "rc": 120,
+            "summary": "OSError: [Errno 28] No space left on device",
+            "stderr": "native.log write failed: ENOSPC",
+        }
+    )
+    exit_code, mismatches, warnings = identity.grade(facts)
+    text = "\n".join(identity.render_lines(facts, exit_code, mismatches, warnings))
+    assert exit_code == identity.EXIT_INFRA
+    assert "infrastructure failure" in text
+    assert "ENOSPC" in text
+    assert "UNVERIFIED" in text
+    assert "IDENTITY-OK / SUITE-FAIL" not in text
+
+
 @pytest.mark.parametrize(
     "name,facts,expected_exit,must,must_not",
     identity.SELF_TEST_CASES,

@@ -260,6 +260,16 @@ def test_disconnect_log_valid_requires_marker_and_counts() -> None:
 
 
 @requires_bunker_qa
+def test_external_enospc_contract_is_named_in_repo_docs() -> None:
+    """The host-only battery contract must remain discoverable from tracked docs."""
+    doc = Path(__file__).resolve().parents[1] / "docs" / "dogfood" / "2026-10-26-integration.md"
+    text = doc.read_text(encoding="utf-8")
+    assert "DF-GITREINS-POC-104" in text
+    assert "No space left on device" in text
+    assert "UNVERIFIED" in text
+
+
+@requires_bunker_qa
 def test_collect_preserves_the_disconnect_subject_log() -> None:
     """Collect must pull the exact disc.log to <evidence>.chaos-disconnect.log.
 

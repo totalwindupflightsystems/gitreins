@@ -113,6 +113,15 @@ def suite_total(suite: dict[str, Any]) -> int:
     )
 
 
+def is_storage_failure(suite: dict[str, Any]) -> bool:
+    """A host-disk failure is infrastructure evidence, not a suite verdict."""
+    text = "\n".join(
+        str(suite.get(key) or "")
+        for key in ("summary", "error", "stderr", "log_tail", "detail")
+    ).lower()
+    return "enospc" in text or "no space left on device" in text
+
+
 def is_vacuous(suite: dict[str, Any]) -> bool:
     """A zero-test rc=0 run (QA-AUGER-1).
 
@@ -209,7 +218,13 @@ def grade(facts: dict[str, Any]) -> tuple[int, list[str], list[str]]:
                 f"(scripts/check_deployed_surface.py rc={surface.get('exit_code')}){detail_text}"
             )
 
-    if is_vacuous(suite):
+    if is_storage_failure(suite):
+        mismatches.append(
+            "infrastructure failure: native suite hit disk-capacity exhaustion "
+            "(ENOSPC / No space left on device); preserve the complete artifact and "
+            "leave dependent chaos cells UNVERIFIED"
+        )
+    elif is_vacuous(suite):
         mismatches.append(
             "vacuous pass: pytest exited 0 with ZERO tests collected — a zero-test suite is not "
             "evidence about the build (QA-AUGER-1)"
@@ -249,6 +264,8 @@ def grade(facts: dict[str, Any]) -> tuple[int, list[str], list[str]]:
             f"{want_sha[:12]}, so working-tree edits are NOT part of what was tested"
         )
 
+    if is_storage_failure(suite):
+        return EXIT_INFRA, mismatches, warnings
     if mismatches:
         return EXIT_NOT_EVIDENCE, mismatches, warnings
     if not suite_ran(suite) or int(suite.get("rc") or 0) != 0:
@@ -521,6 +538,23 @@ SELF_TEST_CASES: list[tuple[str, dict[str, Any], int, list[str], list[str]]] = [
             "CLI version drift: tree 0.16.0 vs deployed 0.14.0",
         ],
         [],
+    ),
+    (
+        "native-enospc-is-infrastructure",
+        _facts(
+            suite={
+                "rc": 120,
+                "passed": 0,
+                "failed": 0,
+                "errors": 0,
+                "summary": "OSError: [Errno 28] No space left on device",
+                "stderr": "native suite output was truncated while writing native.log",
+                "log_tail": "ENOSPC",
+            }
+        ),
+        EXIT_INFRA,
+        [MISMATCH_MARKER, "infrastructure failure", "ENOSPC", "UNVERIFIED"],
+        ["IDENTITY-OK / SUITE-FAIL"],
     ),
     (
         "vacuous-zero-test-pass",
