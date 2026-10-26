@@ -1,0 +1,29 @@
+{
+  "tick": "gitreins-foreman-2026-10-26-05-02-22",
+  "project": "gitreins",
+  "base": "8069dd69e04d70cd7367acdcc347d7ea1b1b9d23",
+  "mode": "serial",
+  "wave_budget": 5,
+  "census": {
+    "pending_dispatchable": 9,
+    "eligible_independent_rows": ["DF-GITREINS-POC-100", "DF-GITREINS-POC-101", "DF-027", "DF-GITREINS-POC-102", "DF-GITREINS-POC-87", "DOC-23", "DOC-25", "PERF-2", "README-005"],
+    "selected": "DF-GITREINS-POC-100",
+    "reason": "Foreman instruction required max one worker per tick; selected highest-priority actionable implementation row. No dependency edges were present on the selected row."
+  },
+  "workers": [
+    {
+      "task_id": "DF-GITREINS-POC-100",
+      "worktree": "/home/kara/worktrees/gitreins-DF-GITREINS-POC-100",
+      "branch": "wt/DF-GITREINS-POC-100",
+      "base_sha": "8069dd69e04d70cd7367acdcc347d7ea1b1b9d23",
+      "worker_model": "glm-5.3-flash",
+      "worker_provider": "ollama-cloud",
+      "commit": "58feeec95c743793733dcacd4424ef1c2be4271f",
+      "merged_commit": "58feeec95c743793733dcacd4424ef1c2be4271f",
+      "disposition": "merged-and-verified",
+      "judge": "519a4ecb PASS",
+      "evidence": ".gitreins/history/2026-10-26/519a4ecb/verdict.json"
+    }
+  ],
+  "finished_at": "2026-10-26T05:30:00Z"
+}
