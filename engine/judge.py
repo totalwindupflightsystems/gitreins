@@ -399,6 +399,23 @@ class Judge:
         return bool(result.get("passed", True))
 
 
+_DEGRADED_DETAIL_MAX = 220
+
+
+def _format_degraded_detail(reasons: list[str]) -> str:
+    """Comma-join the skip reasons, capped so the Overall line stays one line.
+
+    DF-GITREINS-POC-83: the overall line is the LAST line of the summary, i.e.
+    the one a scripted consumer parses, so it must stay a single line however
+    many gates skipped. The cap truncates the DETAIL only — the DEGRADED token
+    is always printed in full.
+    """
+    detail = ", ".join(dict.fromkeys(reasons))
+    if len(detail) > _DEGRADED_DETAIL_MAX:
+        detail = detail[: _DEGRADED_DETAIL_MAX - 1].rstrip(", ") + "…"
+    return detail
+
+
 class JudgeResult:
     """Result of running the judge pipeline."""
 
@@ -423,6 +440,41 @@ class JudgeResult:
         # sources). Empty for a judge that ran no LLM — absent, never null.
         self.provenance = provenance or {}
         self.quality_snapshot = tier1.extra.get("quality_snapshot") if tier1 else None
+
+    def _degraded_lane_reasons(self) -> list[str]:
+        """``gate=reason`` for every gate that did no work this run.
+
+        DF-GITREINS-POC-83: a run whose lanes skipped is a PARTIAL run, and the
+        fresh-install dogfood proved the summary could still end in an
+        unqualified ``Overall: PASS ✓`` — scripted consumers read that last line
+        as full coverage. Reads BOTH shapes the judge can hold, because each
+        path hides the skip somewhere else:
+
+        * the legacy path keeps lane results on ``tier1.results``
+          (``GuardResult.skipped`` / ``skip_reason``);
+        * the pipeline path rebuilds ``tier1`` with ``results=[]`` and carries
+          the same facts on the stage dict (``degraded`` /
+          ``skipped_steps`` / ``degradation_reason``, see
+          :meth:`engine.pipeline.StageResult.to_dict`).
+
+        Reading only one shape leaves the marker dark on exactly one path.
+        """
+        reasons: list[str] = []
+        if self.tier1 is not None:
+            reasons.extend(
+                f"{lane.name}={lane.skip_reason or 'reason not recorded'}"
+                for lane in self.tier1.results
+                if lane.skipped
+            )
+        stages = self.pipeline_result.get("stages")
+        if isinstance(stages, dict):
+            for stage_id, stage in stages.items():
+                if not isinstance(stage, dict) or not stage.get("degraded"):
+                    continue
+                gates = "/".join(str(step) for step in stage.get("skipped_steps") or [])
+                reason = stage.get("degradation_reason") or "reason not recorded"
+                reasons.append(f"{stage_id}({gates or 'unknown checks'})={reason}")
+        return reasons
 
     @property
     def summary(self) -> str:
@@ -462,7 +514,18 @@ class JudgeResult:
             if quality_line:
                 lines.append(f"\n{quality_line}")
 
-        lines.append(f"\nOverall: {'PASS ✓' if self.passed else 'FAIL ✗'}")
+        # DF-GITREINS-POC-83: a run with skipped lanes is a DEGRADED (partial)
+        # run, and this is the LAST line — the one scripted consumers parse.
+        # Never let it read as an unqualified pass: a fresh-install dogfood
+        # printed `Overall: PASS ✓` while lint/tests/lsp had all skipped, so
+        # exit-code-0 consumers saw full coverage that never ran. The marker is
+        # a suffix, so `"Overall: PASS" in stdout` keeps working for readers
+        # that never expected it.
+        overall = f"Overall: {'PASS ✓' if self.passed else 'FAIL ✗'}"
+        degraded_reasons = self._degraded_lane_reasons()
+        if degraded_reasons:
+            overall = f"{overall} [DEGRADED — skipped: {_format_degraded_detail(degraded_reasons)}]"
+        lines.append(f"\n{overall}")
         return "\n".join(lines)
 
 

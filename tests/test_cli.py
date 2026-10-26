@@ -1702,6 +1702,133 @@ def _assert_untouched(before: object, after: object) -> None:
     assert not changed, f"--ephemeral mutated: {', '.join(changed)}\n{before}\n{after}"
 
 
+class TestJudgeSummaryDegradedMarker:
+    """DF-GITREINS-POC-83: the Overall line must never read as full coverage.
+
+    ``gitreins judge`` / ``task complete`` end their summary with ``Overall:``
+    — the line a scripted consumer parses. A run whose lanes skipped did not
+    grade anything, so a fresh-install dogfood printed ``Overall: PASS ✓`` while
+    lint/tests/lsp had all skipped and only the lane lines below said so. The
+    Overall line now carries a DEGRADED marker in that case.
+
+    The marker must come from BOTH shapes the judge can hold: the legacy path
+    (lane results on ``tier1.results``) and the pipeline path (tier1 rebuilt
+    with ``results=[]``, skip facts on the stage dict) — the dogfood hit the
+    pipeline one, so a lane-only reader would leave the bug in place.
+    """
+
+    @staticmethod
+    def _overall_line(summary: str) -> str:
+        return summary.strip().splitlines()[-1]
+
+    def test_summary_degraded_marker_when_lane_skipped(self) -> None:
+        """Legacy shape: a skipped lane marks the Overall line DEGRADED."""
+        from engine.judge import JudgeResult
+        from engine.types import GuardResult, Tier1Result
+
+        result = JudgeResult(
+            task_id="deg-lane",
+            passed=True,
+            tier1=Tier1Result(
+                passed=True,
+                results=[
+                    GuardResult(name="secrets", passed=True, output="clean"),
+                    GuardResult(
+                        name="tests",
+                        passed=True,
+                        skipped=True,
+                        skip_reason="no staged files",
+                    ),
+                ],
+            ),
+        )
+
+        overall = self._overall_line(result.summary)
+        # Suffix, not replacement: readers matching "Overall: PASS" keep working.
+        assert "Overall: PASS" in overall
+        assert "DEGRADED" in overall
+        assert "tests=no staged files" in overall
+
+    def test_summary_degraded_marker_when_pipeline_stage_degraded(self) -> None:
+        """Pipeline shape (the dogfood's): stage degradation marks the line."""
+        from engine.judge import JudgeResult
+        from engine.types import Tier1Result
+
+        pipeline: dict[str, object] = {
+            "passed": True,
+            "stages": {
+                "tier1": {
+                    "id": "tier1",
+                    "passed": True,
+                    "any_failed": False,
+                    "coverage": "secrets-only",
+                    "degraded": True,
+                    "skipped_steps": ["lint", "tests"],
+                    "degradation_reason": "no language detected",
+                    "steps": [],
+                }
+            },
+        }
+        result = JudgeResult(
+            task_id="deg-stage",
+            passed=True,
+            tier1=Tier1Result(passed=True, results=[], extra={"pipeline": True}),
+            pipeline_result=pipeline,
+        )
+
+        overall = self._overall_line(result.summary)
+        assert "Overall: PASS" in overall
+        assert "DEGRADED" in overall
+        assert "tier1(lint/tests)=no language detected" in overall
+
+    def test_summary_without_skips_is_not_degraded(self) -> None:
+        """Negative arm: full coverage prints an unqualified Overall line."""
+        from engine.judge import JudgeResult
+        from engine.types import GuardResult, Tier1Result
+
+        result = JudgeResult(
+            task_id="clean-run",
+            passed=True,
+            tier1=Tier1Result(
+                passed=True,
+                results=[
+                    GuardResult(name="secrets", passed=True, output="clean"),
+                    GuardResult(name="tests", passed=True, output="3 passed"),
+                ],
+            ),
+            pipeline_result={
+                "passed": True,
+                "stages": {"tier1": {"id": "tier1", "passed": True, "steps": []}},
+            },
+        )
+
+        overall = self._overall_line(result.summary)
+        assert "Overall: PASS" in overall
+        assert "DEGRADED" not in overall
+
+    def test_task_complete_cli_overall_line_is_degraded(self, tmp_path: Path) -> None:
+        """End-to-end: a real clean-tree ``task complete`` says DEGRADED.
+
+        Mirrors the fresh-install dogfood: a real repository, nothing staged and
+        no detectable language, so the substantive lanes cannot run.
+        """
+        workdir = _init_real_git_repo(tmp_path)
+        write_guard_config(workdir)
+        created = run_cli("task", "create", "poc83-summary", "Degraded summary", "c1", cwd=workdir)
+        assert created.returncode == 0, _cli_failure(created)
+        started = run_cli("task", "start", "poc83-summary", cwd=workdir)
+        assert started.returncode == 0, _cli_failure(started)
+
+        completed = run_cli("task", "complete", "--skip-tier2", "poc83-summary", cwd=workdir)
+        assert completed.returncode == 0, _cli_failure(completed)
+        overall_lines = [
+            line for line in completed.stdout.splitlines() if line.startswith("Overall:")
+        ]
+        assert len(overall_lines) == 1, _cli_failure(completed)
+        assert "PASS" in overall_lines[0]
+        assert "DEGRADED" in overall_lines[0], _cli_failure(completed)
+
+
 class TestJudgeEphemeralCLI:
     """`judge --ephemeral`: evaluate inline criteria, persist nothing (EVID-003).
 
