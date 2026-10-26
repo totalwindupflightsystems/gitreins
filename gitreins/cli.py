@@ -993,9 +993,13 @@ def _has_pytest_pythonpath_config(workdir: str) -> bool:
     pyproject = os.path.join(workdir, "pyproject.toml")
     if os.path.isfile(pyproject):
         try:
-            try:
-                import tomllib  # type: ignore[import-not-found]  # Python 3.11+
-            except ImportError:  # pragma: no cover — Python 3.10 fallback
+            # Mirror engine/version.py's conditional import: mypy evaluates the
+            # version_info branch per target python_version and needs no ignore
+            # comments, while try/except ImportError makes both branches live and
+            # trips unused-ignore/no-redef under --strict (tranche 17).
+            if sys.version_info >= (3, 11):
+                import tomllib
+            else:  # pragma: no cover — Python 3.10 fallback
                 import tomli as tomllib
 
             with open(pyproject, "rb") as f:
