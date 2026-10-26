@@ -50,6 +50,29 @@ def test_push_range_detects_secret_in_existing_commit(tmp_path, capsys):
     assert fake_token not in output
 
 
+def test_push_range_detects_secret_in_split_concatenation(tmp_path):
+    repo = tmp_path / "repo"
+    _repo(repo)
+    base = _commit(repo, "safe.txt", "safe\n")
+    fake_body = "FAKEKEYnotreal" + "0000000000000000001"
+    head = _commit(repo, "notes.txt", 'API_TOKEN = "ghp_" + "' + fake_body + '"\n')
+
+    findings = scan_push_range(str(repo), head, base)
+    assert findings, "split-concatenated credential must be detected"
+    assert any("GitHub personal access token" in finding for finding in findings)
+
+
+def test_push_range_detects_secret_in_joined_literal(tmp_path):
+    repo = tmp_path / "repo"
+    _repo(repo)
+    base = _commit(repo, "safe.txt", "safe\n")
+    fake_token = "ghp_" + "FAKEKEYnotreal" + "0000000000000000001"
+    head = _commit(repo, "notes.txt", "API_TOKEN = " + repr(fake_token) + "\n")
+
+    findings = scan_push_range(str(repo), head, base)
+    assert findings == ["GitHub personal access token"]
+
+
 def test_push_range_accepts_clean_and_initial_push(tmp_path):
     repo = tmp_path / "repo"
     _repo(repo)

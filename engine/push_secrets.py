@@ -23,6 +23,15 @@ _SECRET_PATTERNS = (
     ),
 )
 
+_CONCAT_GLUE = re.compile(r"""["']\s*\+\s*["']""")
+
+
+def _first_match(text: str) -> str | None:
+    for pattern, label in _SECRET_PATTERNS:
+        if pattern.search(text):
+            return label
+    return None
+
 
 def scan_push_range(workdir: str, local_sha: str, remote_sha: str) -> list[str]:
     """Scan introduced commit content between remote and local refs."""
@@ -41,10 +50,17 @@ def scan_push_range(workdir: str, local_sha: str, remote_sha: str) -> list[str]:
     for line in result.stdout.splitlines():
         if not line.startswith("+") or line.startswith("+++"):
             continue
-        for pattern, label in _SECRET_PATTERNS:
-            if pattern.search(line[1:]):
-                findings.append(label)
-                break
+        content = line[1:]
+        label = _first_match(content)
+        if label is None:
+            # A credential split across string concatenation ("ghp_" + "abc...")
+            # defeats contiguous-body regexes; re-scan with the quote-plus-quote
+            # glue removed so the chunks join into the real token.
+            glued = _CONCAT_GLUE.sub("", content)
+            if glued != content:
+                label = _first_match(glued)
+        if label is not None:
+            findings.append(label)
     return list(dict.fromkeys(findings))
 
 
