@@ -1007,3 +1007,10 @@ Measured on this 0.17.0 build (16-core host): guard 264-283 ms, push-check
 126-168 ms, resolve 0.57-1.08 s warm consumer-scale / 2.3-3.2 s at this repo's
 scale, preflight 0.64-0.66 s, per-call Jev cost $0.0000395 — all fast enough
 that nothing justifies profiling (PERF-2).
+
+
+## Dogfood 2026-10-26: battery identity and storage boundaries
+
+The local control path was healthy at HEAD 05dccc3: version, doctor, setup-tools, report JSON, push-check, quality-ensure, preflight JSON, and disposable worktree dogfood all executed. The fresh-machine battery exposed two evidence-boundary failures. First, the `fresh-install` cell said `install rc=0 but no artifact found (toolsd not in PATH, PREFIX/bin/toolsd missing, or zero-size)` even though its install transcript recorded `gitreins-0.17.1`; the detector was looking for another product's artifact. Never grade that row as a GitReins install failure. Derive the expected console script from the target package and assert `gitreins --version`.
+
+Second, the agent's native suite ended with rc 120 and `OSError: [Errno 28] No space left on device` while writing output. That is storage/environment pressure, not a clean suite verdict. Preserve the complete stderr/log, classify the cell as environment-blocked or infrastructure-failure, and leave dependent chaos cells UNVERIFIED when their prerequisite suite failed. A controller collect that loses the agent after the agent completed is partial evidence; the agent-side cell ledger is the stronger artifact when captured before teardown.
