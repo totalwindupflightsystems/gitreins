@@ -108,16 +108,55 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
     _LIVE_LOCK_FD = fd
 
 
-def pytest_runtest_teardown(item: pytest.Item, nextitem: pytest.Item | None) -> None:
-    """Release the live-run lock taken in :func:`pytest_runtest_setup`."""
+@pytest.hookimpl(hookwrapper=True)
+def pytest_runtest_teardown(item: pytest.Item, nextitem: pytest.Item | None) -> Iterator[None]:
+    """Release the live-run lock, then fail a test that leaked the CWD.
+
+    The lock release is the historical body (DF-GITREINS-POC-61). The CWD-leak
+    check (INT-CI-22) is the post-yield half: a hookwrapper's post-yield runs
+    after every non-wrapper impl of this hook — including pytest core's
+    ``trylast`` teardown, which finalizes fixtures — so at that point a
+    ``monkeypatch.chdir`` has been undone and a bare ``os.chdir`` still shows.
+    A plain impl or a fixture's post-yield code runs BEFORE fixture
+    finalization and can only ever see the in-test chdir.
+    """
     global _LIVE_LOCK_FD
-    if _LIVE_LOCK_FD is None:
+    if _LIVE_LOCK_FD is not None:
+        fd, _LIVE_LOCK_FD = _LIVE_LOCK_FD, None
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+    yield
+    before = _CWD_BEFORE_TEST[0] if _CWD_BEFORE_TEST else None
+    if before is None:
         return
-    fd, _LIVE_LOCK_FD = _LIVE_LOCK_FD, None
+    _CWD_BEFORE_TEST[:] = []
     try:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-    finally:
-        os.close(fd)
+        after = os.getcwd()
+    except OSError:
+        # The test chdir'ed into a directory it then deleted: still a leak.
+        os.chdir(before)
+        pytest.fail(
+            f"test leaked the working directory (bare os.chdir?): the CWD "
+            f"was moved to a directory that no longer exists (was {before!r}) "
+            "and was restored. Use monkeypatch.chdir(path) so pytest reverts "
+            "it after the test.",
+        )
+        return
+    try:
+        same = os.path.samefile(before, after)
+    except OSError:
+        same = False
+    if not same:
+        # Restore before failing: one leaked test must not poison every later
+        # test on this xdist worker even while the failure names the right one.
+        os.chdir(before)
+        pytest.fail(
+            "test leaked the working directory (bare os.chdir?): "
+            f"cwd moved {before!r} -> {after!r} and was restored. "
+            "Use monkeypatch.chdir(path) so pytest reverts it after the test.",
+        )
 
 
 def init_fake_git_workdir(workdir: Path) -> None:
@@ -173,6 +212,21 @@ def workdir_factory(tmp_path: Path) -> Callable[[], str]:
         return str(workdir)
 
     return _make
+
+
+#: Pre-test CWD baseline, recorded by :func:`cwd_leak_baseline` and checked
+#: by :func:`pytest_runtest_teardown`. A module-level slot is the honest way
+#: to move one value from the setup phase to the teardown phase: pytest-xdist
+#: runs tests within a worker serially, so setup→teardown of one test never
+#: interleaves with another's.
+_CWD_BEFORE_TEST: list[str] = []
+
+
+@pytest.fixture(autouse=True)
+def cwd_leak_baseline() -> Iterator[None]:
+    """Record the pre-test CWD for the teardown leak check (INT-CI-22)."""
+    _CWD_BEFORE_TEST[:] = [os.getcwd()]
+    yield
 
 
 @pytest.fixture(autouse=True)
