@@ -27,12 +27,10 @@ guards:
   allow_skips: true
   dead_code: false
   skylos: false
-  static_analysis: false
-  # static_analysis disabled 2026-07-19: 2150 pre-existing mypy --strict errors.
-  # Re-enable when the type-annotation project closes: board row TYPE-001 (filed
-  # 2026-09-22). The earlier pointer to GR-099 was wrong - GR-099 is the parked
-  # pydantic-core pin re-check, a different workstream. Ruff/lint covers quality
-  # meanwhile, and static analysis stays OFF here until TYPE-001 reaches zero.
+  static_analysis: true
+  # static_analysis re-enabled 2026-10-26: REVIEW-GITREINS-010 closed. Strict mypy
+  # tranches (SCOPE1-17) reduced 2150 errors to 0 across 46 source files under
+  # mypy 2.4.0. The guard now runs mypy --strict on every commit.
   static_analysis_tools:
     python:
     - mypy

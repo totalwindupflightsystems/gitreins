@@ -1066,7 +1066,7 @@ class Pipeline:
                 explicit_caps["max_seconds"] = float(max_seconds)
         for key in ("max_input_tokens", "max_output_tokens"):
             raw = step_def.get(key)
-            if raw in (None, -1):
+            if raw is None or raw == -1:
                 continue
             if isinstance(raw, str):
                 parsed = _parse_tokens(raw)
