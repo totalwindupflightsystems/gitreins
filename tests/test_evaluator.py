@@ -1301,12 +1301,19 @@ class TestCodeContextPreloading:
     """Tests for _build_code_context: full mode vs diff mode."""
 
     def test_diff_mode_returns_git_diff(
-        self, evaluator: AgenticEvaluator, tmp_workdir: str
+        self,
+        evaluator: AgenticEvaluator,
+        tmp_workdir: str,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """In diff mode, _build_code_context returns git diff hunks."""
         import subprocess
 
-        os.chdir(tmp_workdir)
+        # INT-CI-22: monkeypatch, never a bare os.chdir — the bare form leaks
+        # the tmp workdir as the worker's CWD for every later test on the
+        # same xdist worker, and downstream CWD-relative assertions then
+        # graded fixtures instead of this repo (two CI reds).
+        monkeypatch.chdir(tmp_workdir)
         subprocess.run(["git", "init", "-q"], cwd=tmp_workdir)
         subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp_workdir)
         subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_workdir)
@@ -1336,12 +1343,16 @@ class TestCodeContextPreloading:
         assert "main.py" in ctx  # Should reference the file
 
     def test_full_mode_returns_file_contents(
-        self, evaluator: AgenticEvaluator, tmp_workdir: str
+        self,
+        evaluator: AgenticEvaluator,
+        tmp_workdir: str,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """In full mode, _build_code_context returns full changed file content."""
         import subprocess
 
-        os.chdir(tmp_workdir)
+        # INT-CI-22: same xdist CWD-leak rule as the diff-mode test above.
+        monkeypatch.chdir(tmp_workdir)
         subprocess.run(["git", "init", "-q"], cwd=tmp_workdir)
         subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp_workdir)
         subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_workdir)
@@ -1371,11 +1382,17 @@ class TestCodeContextPreloading:
         assert "return 99" in ctx
         assert "main.py" in ctx
 
-    def test_no_changes_returns_empty(self, evaluator: AgenticEvaluator, tmp_workdir: str) -> None:
+    def test_no_changes_returns_empty(
+        self,
+        evaluator: AgenticEvaluator,
+        tmp_workdir: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """When nothing changed, _build_code_context returns empty string."""
         import subprocess
 
-        os.chdir(tmp_workdir)
+        # INT-CI-22: same xdist CWD-leak rule as the diff-mode test above.
+        monkeypatch.chdir(tmp_workdir)
         subprocess.run(["git", "init", "-q"], cwd=tmp_workdir)
         config = {"guards": {"test_mode": "full"}}
         ctx = evaluator._build_code_context(config)
@@ -1455,7 +1472,13 @@ class TestCodeContextPreloading:
         """Helper: git init + commit the given {path: content} files."""
         import subprocess
 
-        os.chdir(tmp_workdir)
+        # INT-CI-22: no chdir here. The historical bare os.chdir(tmp_workdir)
+        # was never restored — under pytest-xdist it left the tmp workdir as
+        # the worker's CWD for every later test, and CWD-relative code
+        # downstream then graded fixture dirs instead of this repo (CI runs
+        # 40311814400 and 40333037944). Nothing in this helper or in
+        # _build_code_context reads the CWD: every git call passes
+        # cwd=tmp_workdir explicitly.
         subprocess.run(["git", "init", "-q"], cwd=tmp_workdir)
         subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp_workdir)
         subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_workdir)

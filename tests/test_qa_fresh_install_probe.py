@@ -87,12 +87,20 @@ def test_fresh_install_identity_and_grades(tmp_path: Path) -> None:
         "HOME": str(tmp_path),
         "QA_FRESH_SKIP_VERSION": "1",
     }
+    # INT-CI-22: the probe resolves pyproject.toml relative to its CWD, so
+    # the test must pin cwd=REPO_ROOT — it cannot depend on the worker's
+    # ambient CWD (the unrestored os.chdir in an unrelated test file once
+    # left xdist workers sitting in a tmp dir, and the unpinned probe then
+    # graded the tmp dir: CI run 40333037944's "no pyproject.toml" red).
+    probe_cwd = str(REPO_ROOT)
 
     # ── green: the declared console script installed (as a fake) → OK
     good = fake_bin / _DECLARED_SCRIPT
     good.write_text("#!/usr/bin/env bash\necho 'gitreins 0.0.0-stub'\n", encoding="utf-8")
     good.chmod(0o755)
-    ok = subprocess.run([str(PROBE)], capture_output=True, text=True, env=env, timeout=60)
+    ok = subprocess.run(
+        [str(PROBE)], capture_output=True, text=True, env=env, timeout=60, cwd=probe_cwd
+    )
     assert ok.returncode == 0, ok.stdout + ok.stderr
     assert str(good) in ok.stdout, (
         f"OK must name the installed {_DECLARED_SCRIPT} artifact: {ok.stdout}"
@@ -106,7 +114,9 @@ def test_fresh_install_identity_and_grades(tmp_path: Path) -> None:
     good.unlink()
     log_env = dict(env)
     log_env["QA_FRESH_LOG"] = "/home/agent/qa-logs-339cb0f1/inst.log"
-    miss = subprocess.run([str(PROBE)], capture_output=True, text=True, env=log_env, timeout=60)
+    miss = subprocess.run(
+        [str(PROBE)], capture_output=True, text=True, env=log_env, timeout=60, cwd=probe_cwd
+    )
     assert miss.returncode == 1, miss.stdout + miss.stderr
     assert "FAIL" in miss.stdout
     assert _DECLARED_SCRIPT in miss.stdout, (
@@ -126,6 +136,8 @@ def test_fresh_install_identity_and_grades(tmp_path: Path) -> None:
     good.chmod(0o755)
     bad_env = dict(env)
     bad_env.pop("QA_FRESH_SKIP_VERSION")
-    bad = subprocess.run([str(PROBE)], capture_output=True, text=True, env=bad_env, timeout=60)
+    bad = subprocess.run(
+        [str(PROBE)], capture_output=True, text=True, env=bad_env, timeout=60, cwd=probe_cwd
+    )
     assert bad.returncode == 1, bad.stdout + bad.stderr
     assert "FAIL" in bad.stderr, f"version failure must be graded: {bad.stderr}"
