@@ -328,6 +328,73 @@ repo's `fresh-install` row: a fresh-install FAIL whose message names a foreign
 artifact is a harness defect, not a product one, and this file is the
 specification to fix the harness against.
 
+## The fresh-host clone row (DF-GITREINS-POC-87)
+
+`fresh-install` answers "does the product install on a clean machine". It cannot
+answer a question that comes *before* the install: **can a fresh user even get the
+code?** This repo's own origin is SSH, and a brand-new box has no `github.com`
+entry in `~/.ssh/known_hosts`, so the clone the docs implied dies immediately:
+
+```text
+$ git clone git@github.com:totalwindupflightsystems/gitreins.git
+Host key verification failed.
+fatal: Could not read from remote repository.
+# rc=128, 3s   (dogfood 2026-10-09 run 18, bunker leg)
+$ git clone https://github.com/totalwindupflightsystems/gitreins.git
+# rc=0, 3s — the public https path needs no key at all
+```
+
+Neither failure is a product bug, so the fix is a signpost: README.md now states
+both ways out (`ssh-keyscan github.com >> ~/.ssh/known_hosts` before an ssh
+clone, or use the https origin). The signpost is only worth what it is checked
+against, so this repo ships a probe for it:
+
+| probe | row | what it asserts |
+|---|---|---|
+| `.qa/probes/fresh-install.sh` | `fresh-install` | a successful install left THIS repo's console script behind (never a foreign artifact name) |
+| `.qa/chaos-probes/errorpath.sh` | `chaos-errorpath` | a command that needs the config prints an actionable error and exits non-zero, promptly |
+| `scripts/check_fresh_host_clone.sh` | DF-GITREINS-POC-87 (standalone) | an isolated fresh HOME makes the ssh arm fail on host keys **and** the https arm clone successfully |
+
+### The probe contract
+
+`scripts/check_fresh_host_clone.sh` (executable, run from anywhere — it uses a
+throwaway `HOME` and `mktemp` scratch, never the caller's state). Its exit code
+*is* the grade:
+
+| exit | grade | meaning |
+|---|---|---|
+| `0` | OK | both arms reproduced: ssh fails with `Host key verification failed`, https clone exits `0` and leaves a real clone (`.git` present) |
+| `1` | FAIL | a documented path does not behave as the README says — the ssh arm succeeded (the probe is not isolating what it claims), failed for a *different* reason, or the https clone failed while the host was reachable |
+| `2` | INFO | environment gap — no `git`, no answer from the network, so nothing was observed (never reported as a pass) |
+
+Isolation is what makes the result mean "fresh host" rather than "the operator's
+box": throwaway `HOME` (no `known_hosts`, no `~/.gitconfig`), `ssh -F /dev/null`
+with `GlobalKnownHostsFile=/dev/null`, `BatchMode=yes` as the deterministic
+stand-in for a user who cannot be prompted, `SSH_AUTH_SOCK`/`GIT_SSH`/`GIT_SSH_COMMAND`
+neutralised, `GIT_CONFIG_NOSYSTEM=1` so a system `url.*.insteadOf` rewrite cannot
+turn the ssh arm into an https one. The ssh arm runs first on purpose: its
+host-key failure proves the host is reachable, which is what makes a subsequent
+https failure a FAIL instead of a network gap.
+
+```bash
+scripts/check_fresh_host_clone.sh; echo "probe rc=$?"
+# fresh-host-clone arm1 OK: ssh clone without known_hosts fails on host keys (rc=128, 0s)
+# fresh-host-clone arm2 OK: https clone succeeded (rc=0, 2s, top-level entries=41, HEAD=…)
+# probe rc=0
+```
+
+The regression pin is `tests/test_fresh_host_clone_probe.py`: the shipped probe
+is executable and drives a STUB git through `QA_FHC_GIT` (no network in the
+suite), pinning OK / FAIL / INFO grading, plus a docs gate that fails if
+README.md stops naming **both** options (https clone URL and `ssh-keyscan
+github.com >> ~/.ssh/known_hosts`) — the drift that opened this row.
+
+*Boundary, stated:* this is a standalone probe, not a fleet-battery cell — the
+battery has no clone cell to hook into, and the same property is already
+exercised end-to-end by the `fresh-install` cell's own clone step on a real
+agent. If a clone cell is added to `bunker-qa.sh`, this script is the
+implementation to consult.
+
 ## Limits (stated, not hidden)
 
 * **Synchronous.** A full run is minutes (spawn + pip install + suite). Run it
