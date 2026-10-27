@@ -1169,6 +1169,7 @@ gitreins preflight "<question>" [--surface <name>] [--json]
 | `REVIEW` (0.50–0.85, **or** ≥ 0.85 with the evidence floor unmet) | `dispatch-with-note` | dispatch at the full probability, carrying `missing_kind` + probability into the worker brief |
 | `UNRESOLVED` (probability < 0.50) | `dispatch` | nothing changes — `missing_kind` names what to build |
 | `ABSTAIN` (any failure) | `dispatch` | **fail open, by design**: the reason is recorded, work proceeds |
+| evidence floor (inside `RESOLVED`: rubric floor 3 + a provenance block at ≥ 0.80) | floor unmet ⇒ `REVIEW` | the 0.85 probability threshold alone is insufficient — see the evidence-floor paragraph below |
 
 **The evidence floor (`MIN_RESOLVED_EVIDENCE_QUALITY = 3`).** A probability of
 0.85 or more is not sufficient on its own: `RESOLVED` also requires the Jev

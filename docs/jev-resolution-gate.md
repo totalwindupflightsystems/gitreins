@@ -110,6 +110,13 @@ question ──► TRACE (hilo)  ──► ASSEMBLE (hilo) ──► BUDGET (mea
 Thresholds are config, tunable without touching Jev. Fail-closed is doctrine, not preference: a
 silent PASS here would let unresolved work through the cheapest gate in the system.
 
+**The evidence floor's values** (`engine/resolution.py`): the rubric floor is
+`MIN_RESOLVED_EVIDENCE_QUALITY = 3` — the strongest evidence_quality position ("the exact
+path plus its test"; 0 = mentions only, 1 = adjacent code, 2 = the exact code path). The
+strong provenance condition is an entry whose `provenance` is one of the recognized strong
+sources (`ast_exact` or `bounded-read`) with a **source score ≥ 0.80**. Clipped or
+budget-exhausted evidence is never sufficient, and a `None` rubric score never passes.
+
 A production `RESOLVED` also requires the strongest evidence-rubric position, a non-empty
 manifest with at least one entry carrying recognized provenance and a strong source score, and no clipping or
 budget exhaustion. This is an evidence floor, not a replacement for the probability thresholds:
@@ -213,7 +220,7 @@ resolution:
   model: typesafe/jev-1.13 # the Jev build the bands were calibrated against; every verdict logs the id it returned
   tokens_max: 28000        # bundle ceiling — an over-budget bundle is clipped and the omission disclosed, never silently truncated
   bands:
-    resolved_at: 0.85      # probability >= this ⇒ RESOLVED (evidence is sufficient; a preflight may skip a dispatch)
+    resolved_at: 0.85      # probability >= this ⇒ RESOLVED *when the evidence floor is met* (its values are defined in §3.5); a preflight may skip a dispatch
     review_at: 0.50        # >= this and < resolved_at ⇒ REVIEW (a human or the full judge looks)
   egress_exclude:          # extra globs that are never assembled into a bundle, on top of the built-in secret floor
     - internal/keys.py
