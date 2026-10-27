@@ -1,0 +1,18 @@
+{
+  "tick": "gitreins-foreman-2026-10-27-21-28-12",
+  "project": "gitreins",
+  "mode": "serial fallback",
+  "budget": 12,
+  "workers": [
+    {
+      "task_id": "README-007",
+      "worktree": "/home/kara/worktrees/gitreins-README-007",
+      "branch": "wt/README-007",
+      "base": "0fb602b",
+      "brief": "/tmp/gitreins-foreman-2026-10-27-21-28-12-README-007-brief.txt",
+      "model": "glm-5.3-flash",
+      "provider": "ollama-cloud",
+      "status": "dispatched"
+    }
+  ]
+}
