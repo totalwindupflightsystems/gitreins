@@ -1,0 +1,59 @@
+DF-GITREINS-POC-102: Fresh-Install Dependency Name Audit
+=========================================================
+Date: 2026-10-27
+Scope: Verify that all transitive dependency names in the fresh-install set
+       resolve from PyPI and match pyproject.toml declarations.
+
+Source of concern:
+  DOGFOOD 2026-10-23 battery, agent 6d19e402, fresh-install cell.
+  The agent's fresh-install pip list reported these names:
+  ast-serialize, librt, httpcore2, httpx2, ujson.
+  At first glance these look like unusual renames vs. standard PyPI names.
+
+Verification procedure:
+  1. `python3 -m pip index versions <name>` for each of the 5 names.
+  2. `python3 -m pip download -d /tmp/gi-pypi gitreins[dev]==0.17.1`
+     to download the full dep tree from PyPI and inspect wheel names.
+  3. Cross-reference downloaded wheel names against pyproject.toml
+     [project.optional-dependencies].
+
+Results:
+  All five names resolve from PyPI and are legitimate packages:
+
+  Name          | PyPI Status      | Latest Version | Source (from pip tree)
+  --------------|------------------|----------------|----------------------
+  ast-serialize | 0.13.1 (23 ver.) | 0.13.1         | mypy >= 1.0 (via gitreins[dev])
+  librt         | 0.16.0 (33 ver.) | 0.16.0         | mypy >= 1.0 (via gitreins[dev])
+  httpcore2     | 2.16.0 (21 ver.) | 2.16.0         | mcp >= 2.0.0 (via httpx2)
+  httpx2        | 2.16.0 (21 ver.) | 2.16.0         | mcp >= 2.0.0
+  ujson         | 6.0.0 (38 ver.)  | 6.0.0          | python-lsp-server >= 1.10
+
+  pyproject.toml line 34: [project.optional-dependencies]
+  Dev extras include: mypy, pytest, pytest-timeout, twine, build,
+  python-lsp-server, pyflakes, pycodestyle, pyright, pytest-xdist, ruff,
+  types-PyYAML, types-jsonschema.
+
+Analysis:
+  - ast-serialize and librt are REAL PyPI packages. They are transitive
+    dependencies of mypy (ast-serialize >= 0.11.2, librt >= 0.16.0).
+    The "unusual" names (no hyphens where you'd expect them, or "-serialize"
+    vs "serialize") are simply their official PyPI names.
+  - httpcore2 and httpx2 are REAL PyPI packages. They are transitive
+    dependencies of mcp (httpcore2==2.16.0, httpx2>=2.10.0). These are
+    NOT the standard httpx/httpcore packages — mcp has its own forked/renamed
+    versions. The "2" suffix distinguishes them from the originals.
+  - ujson is a well-known PyPI package (6.0.0). It's a transitive dep of
+    python-lsp-server (via ujson>=3.0.0).
+
+  pydantic-core (version 2.50.1) was ALSO flagged in the original report as
+  "reads ahead of the pinned 2.47 floor but is consistent". Verification:
+  pyproject.toml requires pydantic-core<3,>=2.47.0. Version 2.50.1 satisfies
+  this constraint. No pin violation.
+
+Conclusion:
+  All five names are legitimate PyPI packages with real published versions.
+  They are NOT install-path surprises, mirror artifacts, or fake names.
+  The dogfood report's concern was unfounded — the names just looked
+  unusual because they don't follow the "httpx/httpcore" convention and
+  because mypy depends on packages with unconventional names (ast-serialize,
+  librt). No action required on the dependency set.
