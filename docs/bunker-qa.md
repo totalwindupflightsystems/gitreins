@@ -207,6 +207,20 @@ lifecycle, no host state, one ephemeral agent that is destroyed on exit. It is
 the repo-side implementation of the prototype in
 `project-reviews/artifacts/subgoal-3-bunker-suite-hang-2026-09-23.md`.
 
+**Teardown is repo-side too (DF-GITREINS-POC-101).** The battery's own
+`dbus-daemon` and `sshd` sessions run under the disposable agent uid and outlive
+the suite, and `bunker destroy` refuses to remove an agent that still has live
+sessions — so the EXIT trap would leave the agent behind on every graded run.
+`stop_agent_daemons()` (in `scripts/bunker-full-ci.sh`, called from `cleanup()`
+*before* `bunker destroy`) resolves the disposable uid with `id -u` on the agent
+and sends `pkill -TERM -u <uid> -x dbus-daemon` / `-x sshd` as that uid; an
+unresolved, non-numeric or root uid is refused rather than signalled. The
+regression pin is
+`tests/test_bunker_identity.py::test_teardown_stops_agent_daemons_before_destroy`,
+which extracts that shell function from the tracked harness and drives it with a
+stubbed `bunker`, so the fix is reproducible from a clone with no host-side
+script involved.
+
 ## Chaos cells: the missing-config row (chaos-errorpath)
 
 The identity lane above answers *"did the suite pass on the build I asked for"*.

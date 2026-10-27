@@ -20,6 +20,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -349,11 +350,122 @@ def test_rendered_block_names_the_toolchain_note() -> None:
     assert "venv created by this run" in text
 
 
+def _harness_function(name: str) -> str:
+    """Return the full `name() { ... }` definition from the in-repo harness.
+
+    Extracted rather than re-implemented so the test drives the SAME shell code
+    the lane runs; a copy would pass after the real function regressed.
+    """
+    text = HARNESS_PATH.read_text()
+    start = re.search(rf"(?m)^\s*{re.escape(name)}\(\) \{{\n", text)
+    assert start, f"{name}() must be defined in {HARNESS_PATH.name}"
+    tail = text[start.end() :]
+    end = re.search(r"(?m)^\s*\}\n", tail)
+    assert end, f"{name}() must close at the definition's own indentation"
+    definition = f"{name}() {{\n" + tail[: end.end()]
+    assert definition.count("{") == definition.count("}"), "unbalanced braces"
+    return definition
+
+
+def _run_cleanup(
+    tmp_path: Path, agent_uid: str | None, agent: str = "abc123", probe: str = "4242"
+) -> list[str]:
+    """Run the harness teardown with a stub `bunker`, returning the recorded calls."""
+    calls = tmp_path / "calls.log"
+    stub = "\n".join(
+        [
+            "set -uo pipefail",
+            "log() { :; }",
+            # `bunker run ... id -u` is the uid probe; everything else is recorded.
+            "bunker() {",
+            '    case "$*" in',
+            f'        *"id -u"*) printf "%s\\n" "{probe}" ;;',
+            '        *) printf "%s\\n" "$*" >> "$CALLS" ;;',
+            "    esac",
+            "}",
+            f"AGENT={agent}",
+            "SERVER=testbox",
+            "spawned=1",
+            "KEEP=0",
+        ]
+    )
+    if agent_uid is not None:
+        stub += f"\nAGENT_UID={agent_uid}"
+    stub += (
+        "\n"
+        + _harness_function("stop_agent_daemons")
+        + _harness_function("cleanup")
+        + "\ncleanup\n"
+    )
+    script = tmp_path / "teardown.sh"
+    script.write_text(stub, encoding="utf-8")
+    result = subprocess.run(
+        ["bash", str(script)],
+        env={**os.environ, "CALLS": str(calls)},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    return calls.read_text(encoding="utf-8").splitlines() if calls.exists() else []
+
+
 def test_teardown_trap_reads_only_defaulted_variables() -> None:
     """The EXIT trap fires after the function's locals are gone — under `set -u`
-    an unguarded read masks the run's own exit code with a teardown error."""
+    an unguarded read masks the run's own exit code with a teardown error.
+
+    The same trap also has to stop the battery's own daemons (dbus-daemon,
+    sshd) under the disposable agent uid BEFORE `bunker destroy`: destroy
+    refuses while they are alive, which is how every graded run became a
+    manual recovery (DF-GITREINS-POC-101).  Both contracts are pinned against
+    the IN-REPO harness, so the fix is reproducible from a clone.
+    """
     text = HARNESS_PATH.read_text()
     assert "${spawned:-0}" in text
+
+    helper = _harness_function("stop_agent_daemons")
+    cleanup = _harness_function("cleanup")
+    for marker in ("pkill", "dbus-daemon", "sshd", "-u "):
+        assert marker in helper, f"stop_agent_daemons() does not name {marker!r}"
+    # ordering matters: stopping after the destroy is the bug, not the fix
+    assert "stop_agent_daemons" in cleanup, "cleanup() never calls the daemon stop"
+    assert cleanup.index("stop_agent_daemons") < cleanup.index("bunker destroy"), (
+        "the daemons must be stopped BEFORE bunker destroy, which refuses live agents"
+    )
+
+
+def test_teardown_stops_agent_daemons_before_destroy(tmp_path: Path) -> None:
+    """Behaviour of the extracted trap: TERM the uid's daemons, then destroy."""
+    observed = _run_cleanup(tmp_path, agent_uid="4242")
+    kills = [line for line in observed if "pkill" in line]
+    assert kills, f"teardown never killed the agent daemons: {observed}"
+    assert any("pkill -TERM -u 4242 -x dbus-daemon" in line for line in kills)
+    assert any("pkill -TERM -u 4242 -x sshd" in line for line in kills)
+    destroy = [index for index, line in enumerate(observed) if line.startswith("destroy ")]
+    assert destroy, f"teardown never destroyed the agent: {observed}"
+    assert observed.index(kills[-1]) < destroy[0], "daemons must die before destroy"
+
+
+def test_teardown_resolves_the_uid_when_it_was_not_captured(tmp_path: Path) -> None:
+    """The trap cannot rely on a variable the run may never have set."""
+    observed = _run_cleanup(tmp_path, agent_uid=None)
+    assert any("pkill -TERM -u 4242 -x dbus-daemon" in line for line in observed)
+    assert any(line.startswith("destroy ") for line in observed)
+
+
+@pytest.mark.parametrize("uid", ["not-a-uid", "0"])
+def test_teardown_refuses_an_unusable_uid(tmp_path: Path, uid: str) -> None:
+    """A non-numeric or root uid must never reach pkill (see AGENTS.md)."""
+    observed = _run_cleanup(tmp_path, agent_uid=uid)
+    assert not [line for line in observed if "pkill" in line], observed
+    assert any(line.startswith("destroy ") for line in observed), observed
+
+
+def test_teardown_skips_the_kill_when_the_uid_probe_is_unusable(tmp_path: Path) -> None:
+    """An unreachable agent yields no uid — the teardown must still destroy it."""
+    observed = _run_cleanup(tmp_path, agent_uid=None, probe="")
+    assert not [line for line in observed if "pkill" in line], observed
+    assert any(line.startswith("destroy ") for line in observed), observed
 
 
 def test_dry_run_works_from_a_clean_repo_without_a_bunker(tmp_path: Path) -> None:
