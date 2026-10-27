@@ -617,7 +617,16 @@ class TestFullTreeSecretsLane:
     def test_index_scope_wording_is_unchanged(self, tmp_path: Path) -> None:
         """Negative arm (no silent default flip): without the opt-in the same
         tree grades the index and keeps the historical wording — no scope
-        clause, clean verdict."""
+        clause, clean verdict.
+
+        INT-CI-3721: assert only the branch-INDEPENDENT tokens. A runner with
+        no ``gitleaks`` on PATH (every CI runner) renders the clean clause as
+        ``clean (builtin cross-check; gitleaks not on PATH)`` instead of
+        ``clean (gitleaks + builtin cross-check)``, so pinning the presence
+        token here turned a wording test into a test of the runner's toolchain.
+        The negative arm below (no ``scope:`` clause) is what DF-027 actually
+        needs, and it holds on both branches.
+        """
         workdir = _committed_secret_tree(tmp_path)
         result = GuardManager(workdir, config=_secrets_config()).run_all()
 
@@ -625,7 +634,9 @@ class TestFullTreeSecretsLane:
         assert lane.passed is True, lane.output
         assert lane.graded_scope == ""
         cell = _secrets_cell(result.summary)
-        assert "clean (gitleaks + builtin cross-check)" in cell, cell
+        assert "✓ secrets" in cell, cell
+        assert "clean (" in cell, cell
+        assert "builtin cross-check" in cell, cell
         assert "scope:" not in cell, cell
 
     def test_working_tree_scope_still_reports_three_findings(self, tmp_path: Path) -> None:
