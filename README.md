@@ -902,6 +902,7 @@ A lane whose own TREE is dirty fails the mirror-image check
 | [Agentic Evaluator Design](docs/evaluator-loop.md) | How the evaluator loop works |
 | [Judgment Viewer](docs/judgment-viewer.md) | Verdict browser: API contract, data sources, security model, `--repo` |
 | [Tier-1 Data Protection](docs/data-protection.md) | Opt-in PII/network filter: policy reference, category inventory, measured false positives and limits |
+| [Review Profiles](docs/review-profiles.md) | Commit-audit review profiles (`quick`/`standard`/`deep`), effort budgets, and the `--review-profile` / `--review-effort` CLI flags |
 
 ## License
 
