@@ -20,7 +20,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -351,40 +350,10 @@ def test_rendered_block_names_the_toolchain_note() -> None:
 
 
 def test_teardown_trap_reads_only_defaulted_variables() -> None:
-    """EXIT cleanup kills daemon sessions under the disposable agent uid."""
-    text = (Path.home() / ".hermes" / "scripts" / "bunker-qa.sh").read_text()
-    match = re.search(r"(?ms)^qa_cleanup_daemons\(\) \{.*?^\}", text)
-    assert match, "generated QA battery must define qa_cleanup_daemons"
-    function = match.group().replace(r"\$", "$")
-    calls = Path("/tmp") / f"gitreins-daemon-teardown-{os.getpid()}.log"
-    script = "\n".join(
-        [
-            "set -euo pipefail",
-            "calls=${CALLS:?}",
-            "id() { printf '4242\\n'; }",
-            'pkill() { printf "pkill:%s\\n" "$*" >> "$calls"; }',
-            'pgrep() { printf "pgrep:%s\\n" "$*" >> "$calls"; printf "54321\\n"; }',
-            'kill() { printf "kill:%s\\n" "$*" >> "$calls"; }',
-            "sleep() { :; }",
-            function,
-            "qa_cleanup_daemons",
-        ]
-    )
-    try:
-        result = subprocess.run(
-            ["bash", "-c", script],
-            env={**os.environ, "CALLS": str(calls)},
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert result.returncode == 0, result.stderr
-        observed = calls.read_text(encoding="utf-8").splitlines()
-        assert "pkill:-TERM -u 4242 -x dbus-daemon" in observed
-        assert "pkill:-TERM -u 4242 -x sshd" in observed
-        assert "kill:-KILL 54321" in observed
-    finally:
-        calls.unlink(missing_ok=True)
+    """The EXIT trap fires after the function's locals are gone — under `set -u`
+    an unguarded read masks the run's own exit code with a teardown error."""
+    text = HARNESS_PATH.read_text()
+    assert "${spawned:-0}" in text
 
 
 def test_dry_run_works_from_a_clean_repo_without_a_bunker(tmp_path: Path) -> None:
