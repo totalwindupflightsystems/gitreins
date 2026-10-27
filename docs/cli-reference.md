@@ -199,7 +199,7 @@ gitreins guard [--dead-code] [--staged-only] [--full] [--scope staged|working-tr
 |--------|-------------|
 | `--dead-code` | Enable Python dead-code detection (overrides config) |
 | `--staged-only` | Run tests in diff mode — only packages with staged changes (overrides `guards.test_mode`) |
-| `--full` | Grade the whole tree even with an empty index: the tests lane runs and lint covers tracked+untracked Python files instead of skipping. On a Go project (`go.mod`) the same rule lands on the `go_build`/`go_lint`/`go_tests` lanes — they grade the whole tree instead of the index |
+| `--full` | Grade the whole tree even with an empty index: the tests lane runs, lint covers tracked+untracked Python files, and the secrets lane scans every file (`gitleaks detect --no-git` + whole-tree builtin cross-check, line named `; scope: working-tree`) instead of the staged diff. On a Go project (`go.mod`) the same rule lands on the `go_build`/`go_lint`/`go_tests` lanes — they grade the whole tree instead of the index |
 | `--scope staged\|working-tree` | Which change set to grade: `staged` (default) is the Git index; `working-tree` adds unstaged and non-ignored untracked files (the escape hatch when the files you care about are neither staged nor committed) |
 | `--json` | Emit one bounded, redacted [evidence v1](evidence-contract-v1.md) JSON document on stdout instead of the human summary (exit 0 pass, 1 non-pass) |
 
@@ -262,13 +262,19 @@ refuses a verdict whose Tier 1 carries skips.
 
 **`--full` grades the whole tree (empty index included).** A `--full` run
 does not produce skips on a clean tree: the tests lane runs the configured
-`guards.test_command`, and lint covers tracked + untracked-but-not-ignored
+`guards.test_command`, lint covers tracked + untracked-but-not-ignored
 Python files (the lint line names the scope, `ruff: clean (N tracked
-files)`). The mode note reads `(test mode: full, whole tree)` so a
-whole-tree run is distinguishable from a staged run, and the plain PASS
-header is only printed when the gates actually ran. `--staged-only` and a
-bare `gitreins guard` keep the degraded-pass semantics above; when the
-index is non-empty, staged files are graded rather than the whole tree.
+files)`), and the secrets lane widens from the index to every file in the
+tree — `gitleaks detect --no-git` plus the whole-tree built-in cross-check,
+the same scanners the Tier 1 judge step runs. The secrets line names the
+scope it graded (`✓ secrets — clean (gitleaks + builtin cross-check; scope:
+working-tree)`), so a credential committed to HEAD can no longer print
+`clean` under a flag that advertises the whole tree. The mode note reads
+`(test mode: full, whole tree)` so a whole-tree run is distinguishable from
+a staged run, and the plain PASS header is only printed when the gates
+actually ran. `--staged-only` and a bare `gitreins guard` keep the
+degraded-pass semantics above and grade the index; when the index is
+non-empty, staged files are graded rather than the whole tree.
 
 **Go projects are graded by the same rule.** On a repo with a `go.mod`, three
 Go-native lanes replace the Python ones: `go_build` (`go build ./...`),

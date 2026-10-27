@@ -11,7 +11,7 @@
 
 GitReins lives inside your git repository as a quality harness. It provides MCP tools for task lifecycle management, an agentic evaluator that judges code completeness against task definitions, and git hooks that ensure nothing bypasses the quality gates.
 
-> ✅ **v0.17.1** — the release that closes the loop between what is merged and what actually runs. `gitreins resolve "<question>"` (and the `context.resolve` MCP tool) traces a question to its seed files through Hilo, assembles a measured evidence bundle and returns a calibrated verdict band; `gitreins preflight` checks the premises of a task *before* a worker is dispatched, and annotates instead of dispatching when they do not hold; the judge pre-screens candidates and attributes a verdict per acceptance criterion; per-surface config knobs make the resolution gate tunable without touching code. Repo-owned quality metrics can also be surfaced by the guard, judge, doctor, and MCP `guard.run` from one JSON artifact; GitReins consumes the numbers but does not compute them. See [docs/quality-metrics.md](docs/quality-metrics.md) for the config and worked example. On the guard side, the `hook_timeout` early-return now carries `allow_skips` (a slow repo's docs/board commits were being blocked with exit 2 by a run whose own warning said the commit was allowed), the test lane pins its interpreter so a host whose PATH carries another virtualenv can no longer fail the lane with `unrecognized arguments: -n`, Go guard commands run through bounded execution, and the evaluator reaps the last run's process group on exit. `scripts/check_deployed_surface.py` is new: it compares the *deployed* CLI surface with this checkout and fails loudly when a merged subcommand exists only in the repo — the drift that used to be invisible because both copies reported the same version. 3149 tests pass / 94 test files, verified by collection (optional-tool skips vary).
+> ✅ **v0.17.1** — the release that closes the loop between what is merged and what actually runs. `gitreins resolve "<question>"` (and the `context.resolve` MCP tool) traces a question to its seed files through Hilo, assembles a measured evidence bundle and returns a calibrated verdict band; `gitreins preflight` checks the premises of a task *before* a worker is dispatched, and annotates instead of dispatching when they do not hold; the judge pre-screens candidates and attributes a verdict per acceptance criterion; per-surface config knobs make the resolution gate tunable without touching code. Repo-owned quality metrics can also be surfaced by the guard, judge, doctor, and MCP `guard.run` from one JSON artifact; GitReins consumes the numbers but does not compute them. See [docs/quality-metrics.md](docs/quality-metrics.md) for the config and worked example. On the guard side, the `hook_timeout` early-return now carries `allow_skips` (a slow repo's docs/board commits were being blocked with exit 2 by a run whose own warning said the commit was allowed), the test lane pins its interpreter so a host whose PATH carries another virtualenv can no longer fail the lane with `unrecognized arguments: -n`, Go guard commands run through bounded execution, and the evaluator reaps the last run's process group on exit. `scripts/check_deployed_surface.py` is new: it compares the *deployed* CLI surface with this checkout and fails loudly when a merged subcommand exists only in the repo — the drift that used to be invisible because both copies reported the same version. 3156 tests pass / 94 test files, verified by collection (optional-tool skips vary).
 
 Every resolution-gate surface ships **disabled**, because resolving a question sends the assembled bundle off the host: enabling one is an explicit act, `resolution.enabled.<surface>: true` (`cli`, `mcp`, `predispatch`, `judge_prescreen`) in `.gitreins/config.yaml` — `gitreins init` writes the block with all four `false`, and only a literal `true` opens a surface. A disabled surface fails closed with `abstain_reason: surface-disabled` and prints the enabling fix. The complete block, the defaults it may omit and the calibration caveat on the judge-adjacent surfaces are in [docs/jev-resolution-gate.md §9](docs/jev-resolution-gate.md).
 
@@ -473,19 +473,25 @@ graded nothing and the fix:
 **Full mode on a clean tree (`gitreins guard --full`):**
 ```
 Tier 1 Guards: PASS  (test mode: full, whole tree)
-  ✓ secrets — clean (gitleaks + builtin cross-check)
+  ✓ secrets — clean (gitleaks + builtin cross-check; scope: working-tree)
   ✓ lint — ok (42 tracked files)
   ✓ tests (full)
 ```
 
 `--full` grades the whole tree even with an empty index: the tests lane runs
-the configured `guards.test_command`, and lint covers tracked +
+the configured `guards.test_command`, lint covers tracked +
 untracked-but-not-ignored Python files (`ruff: clean (N tracked files)`
-names the graded scope) instead of returning the `no staged files` skip.
+names the graded scope) instead of returning the `no staged files` skip, and
+the secrets lane widens from the index to every file in the tree
+(`gitleaks detect --no-git` plus the whole-tree built-in cross-check) — the
+secrets line names the scope it graded (`; scope: working-tree`), so a
+committed credential can no longer read as `clean` under the flag that
+advertises the whole tree.
 The plain PASS header is the tell — a whole-tree run prints no `skips:`
 clause. `--staged-only` and a bare `gitreins guard` keep the degraded-pass
-skip semantics above; staged files always take precedence over the tree
-when the index is non-empty.
+skip semantics above, and grade the index (the secrets lane's historical
+scope, which prints no `scope:` clause); staged files always take precedence
+over the tree when the index is non-empty.
 
 **Go projects follow the same rule.** On a repo with a `go.mod` the three Go
 lanes (`go_build`, `go_lint`, `go_tests`) replace the Python ones, and their
@@ -880,7 +886,7 @@ A lane whose own TREE is dirty fails the mirror-image check
 - **MCP Transport:** stdio (15 tools)
 - **Config:** YAML in `.gitreins/` directory
 - **Evaluator Default Model:** DeepSeek V4 Flash (~$0.01/eval)
-- **Test suite:** 3149 tests collected across 94 test files (collection total; optional-tool skips vary)
+- **Test suite:** 3156 tests collected across 94 test files (collection total; optional-tool skips vary)
 
 ## Architecture & Docs
 

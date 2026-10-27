@@ -5,6 +5,15 @@ Before this change, an explicit `--full` run on a clean tree still returned
 the TRUST-001 skips (``no staged files``) from the tests and lint lanes —
 the flag that is supposed to gate everything ran zero tests and zero lint.
 
+DF-027 extends the same contract to the SECRETS lanes: `--full` left the
+secrets step on `gitleaks protect --staged` plus the builtin staged-diff scan,
+so a credential that was already COMMITTED printed
+"secrets — clean (gitleaks + builtin cross-check)" and the run exited 0 —
+the same class of defect as POC-42 (the Go lanes graded the INDEX under
+`--full`). Under `--full` the secrets step now grades the whole tree
+(`gitleaks detect --no-git` + the whole-tree builtin cross-check) and the
+console line names the scope it graded.
+
 These tests pin the whole-tree contract at the GuardManager level:
 
 - ``grade_full_tree=True`` (what the CLI builds for ``--full``): a clean tree
@@ -452,3 +461,213 @@ class TestRunAllExtraFlag:
 
         assert _log_test_scope({"test_mode": "full"}) == "all (full mode)"
         assert _log_test_scope({"test_mode": "full", "grade_full_tree": True}) == "all (whole tree)"
+
+
+# ── DF-027: --full grades the WHOLE TREE for secrets ──────────────
+#
+# `gitleaks protect --staged` grades the INDEX, so a credential that is already
+# COMMITTED was invisible to the flag that advertises the whole tree: the run
+# printed "secrets — clean (gitleaks + builtin cross-check)" and exited 0 while
+# the same tree under `--scope working-tree` exited non-zero. Same class of
+# defect as DF-GITREINS-POC-42 (the Go lanes graded the index under --full).
+#
+# Every fake credential below is BUILT AT RUNTIME: a literal `sk_live_…` in
+# this file would be committed, trip GitReins' own secrets gate and GitHub push
+# protection, and make the whole-tree scan find its own test data. The
+# fragments are also what keeps `tests/**` out of gitleaks' allowlist argument:
+# the scanner that grades this file sees no complete credential in it.
+_STRIPE_KEY_LINE = 'STRIPE_KEY = "' + "sk_" + "live_" + "0123456789abcdef01234567" + '"'
+_AWS_KEY_LINE = 'AWS_ACCESS_KEY = "AKIA' + "Z" * 16 + '"'
+_GH_TOKEN_LINE = 'GITHUB_TOKEN = "ghp_' + "a1" * 18 + '"'
+_SLACK_TOKEN_LINE = 'SLACK_TOKEN = "xoxb-' + "1" * 20 + '"'
+
+# Three working-tree credential findings, one per file, each a different
+# provider pattern the built-in cross-check knows (one finding per line) — so a
+# `--scope working-tree` run on the fixture reports exactly three.
+_WORKTREE_SECRET_FILES = {
+    "aws_keys.py": _AWS_KEY_LINE + "\n",
+    "gh_token.py": _GH_TOKEN_LINE + "\n",
+    "slack_cfg.py": _SLACK_TOKEN_LINE + "\n",
+}
+
+# The guard config the CLI preflight requires (`.gitreins/config.yaml`). Only
+# the secrets lane is armed: the verdict must come from it alone.
+_GUARD_CONFIG_YAML = (
+    "guards:\n"
+    "  secrets: true\n"
+    "  lint: false\n"
+    "  tests: false\n"
+    "  test_mode: full\n"
+    "  allow_skips: true\n"
+)
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CLI_SCRIPT = os.path.join(PROJECT_ROOT, "gitreins", "cli.py")
+
+
+def _secrets_config() -> dict:
+    """Guards config with only the secrets lane armed (no lint, no tests)."""
+    return {
+        "guards": {
+            "secrets": True,
+            "lint": False,
+            "tests": False,
+            "test_mode": "full",
+            "allow_skips": True,
+        }
+    }
+
+
+def _committed_secret_tree(tmp_path: Path) -> str:
+    """A tree whose HEAD commits a live-looking Stripe key.
+
+    The index is clean afterwards, so the staged scan cannot see the key at
+    all; three further credential findings are then left in the working tree so
+    the `--scope working-tree` regression arm grades a real change set.
+    """
+    workdir = _scratch_repo(
+        tmp_path,
+        {
+            ".gitreins/config.yaml": _GUARD_CONFIG_YAML,
+            "config.py": "# app config\n" + _STRIPE_KEY_LINE + "\n",
+        },
+    )
+    for name, content in _WORKTREE_SECRET_FILES.items():
+        with open(os.path.join(workdir, name), "w") as handle:
+            handle.write(content)
+    return workdir
+
+
+def _cli_env() -> dict:
+    """Environment for a CLI subprocess: no GIT_* leak (DF-008), no live-LLM
+    opt-in, and this CHECKOUT first on PYTHONPATH so the child grades the code
+    under test — the same resolution the pre-commit hook's
+    `python -m gitreins` gets from its cwd."""
+    env = {k: v for k, v in _git_env().items() if not k.startswith("GITREINS_")}
+    env["PYTHONPATH"] = PROJECT_ROOT + (":" + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
+    return env
+
+
+def _run_cli(*args: str, cwd: str) -> "subprocess.CompletedProcess[str]":
+    return subprocess.run(
+        [sys.executable, CLI_SCRIPT, *args],
+        capture_output=True,
+        text=True,
+        timeout=300,
+        cwd=cwd,
+        env=_cli_env(),
+    )
+
+
+def _secrets_cell(stdout: str) -> str:
+    """The secrets cell line from a printed guard summary."""
+    lines = [line for line in stdout.splitlines() if "secrets —" in line]
+    assert len(lines) == 1, f"expected exactly one secrets cell line, got {lines!r}"
+    return lines[0]
+
+
+class TestFullTreeSecretsLane:
+    def test_committed_credential_fails_the_full_run(self, tmp_path: Path) -> None:
+        """RED-PROOF: on the pre-fix tree this run printed a clean secrets
+        verdict and exited 0 — `--full` graded the empty index."""
+        workdir = _committed_secret_tree(tmp_path)
+        gm = GuardManager(workdir, config=_secrets_config(), grade_full_tree=True)
+        assert gm.changed_files == [], "precondition: the index is clean"
+
+        result = gm.run_all()
+
+        assert result.passed is False, result.summary
+        lane = next(r for r in result.results if r.name == "secrets")
+        assert lane.passed is False
+        assert lane.graded_scope == "working-tree"
+        assert "config.py" in lane.output, lane.output
+
+    def test_committed_credential_alone_is_enough(self, tmp_path: Path) -> None:
+        """The key lives only in HEAD: a tree with a clean index and no
+        working-tree changes is still graded, because the whole tree is."""
+        workdir = _scratch_repo(
+            tmp_path,
+            {
+                ".gitreins/config.yaml": _GUARD_CONFIG_YAML,
+                "config.py": "# app config\n" + _STRIPE_KEY_LINE + "\n",
+            },
+        )
+        gm = GuardManager(workdir, config=_secrets_config(), grade_full_tree=True)
+        assert gm.changed_files == [], "precondition: the index is clean"
+        assert os.listdir(workdir) and "config.py" in os.listdir(workdir)
+
+        lane = gm._check_secrets()
+
+        assert lane.passed is False, lane.output
+        assert lane.skipped is False
+        assert "config.py" in lane.output, lane.output
+
+    def test_secrets_cell_line_names_the_scope(self, tmp_path: Path) -> None:
+        """DF-027 AC2: the console line says WHICH tree it graded — 'clean'
+        alone could not be told from the index-scope verdict that hid the key."""
+        workdir = _committed_secret_tree(tmp_path)
+        result = GuardManager(workdir, config=_secrets_config(), grade_full_tree=True).run_all()
+
+        cell = next(line for line in result.summary.splitlines() if "secrets —" in line)
+
+        assert "✗ secrets" in cell, cell
+        assert "FAIL" in cell, cell
+        assert "scope: working-tree" in cell, cell
+
+    def test_index_scope_wording_is_unchanged(self, tmp_path: Path) -> None:
+        """Negative arm (no silent default flip): without the opt-in the same
+        tree grades the index and keeps the historical wording — no scope
+        clause, clean verdict."""
+        workdir = _committed_secret_tree(tmp_path)
+        result = GuardManager(workdir, config=_secrets_config()).run_all()
+
+        lane = next(r for r in result.results if r.name == "secrets")
+        assert lane.passed is True, lane.output
+        assert lane.graded_scope == ""
+        cell = _secrets_cell(result.summary)
+        assert "clean (gitleaks + builtin cross-check)" in cell, cell
+        assert "scope:" not in cell, cell
+
+    def test_working_tree_scope_still_reports_three_findings(self, tmp_path: Path) -> None:
+        """Regression arm (DF-027 AC3): `--scope working-tree` is untouched —
+        it still grades exactly the collected change set and finds 3."""
+        workdir = _committed_secret_tree(tmp_path)
+        gm = GuardManager(workdir, config=_secrets_config(), scope="working-tree")
+
+        lane = gm._check_secrets()
+
+        assert lane.passed is False, lane.output
+        reported = [
+            line
+            for line in lane.output.splitlines()
+            if line.startswith(tuple(_WORKTREE_SECRET_FILES))
+        ]
+        assert len(reported) == 3, lane.output
+        statuses = dict(lane.scanners)
+        assert statuses["builtin"] == "3 findings"
+
+
+class TestFullTreeSecretsCLI:
+    def test_guard_full_exits_non_zero_on_a_committed_credential(self, tmp_path: Path) -> None:
+        """The CLI-level acceptance criterion: `gitreins guard --full` on a
+        tree holding a committed credential exits non-zero and the secrets cell
+        carries the FAIL marker plus the scope it graded."""
+        workdir = _committed_secret_tree(tmp_path)
+
+        result = _run_cli("guard", "--full", cwd=workdir)
+
+        assert result.returncode != 0, f"stdout={result.stdout} stderr={result.stderr}"
+        assert "Tier 1 Guards: FAIL" in result.stdout, result.stdout
+        cell = _secrets_cell(result.stdout)
+        assert "✗ secrets" in cell, cell
+        assert "scope: working-tree" in cell, cell
+
+    def test_guard_working_tree_scope_reports_three_findings(self, tmp_path: Path) -> None:
+        """`--scope working-tree` on the same tree: unchanged, exit 1, 3 findings."""
+        workdir = _committed_secret_tree(tmp_path)
+
+        result = _run_cli("guard", "--scope", "working-tree", cwd=workdir)
+
+        assert result.returncode == 1, f"stdout={result.stdout} stderr={result.stderr}"
+        cell = _secrets_cell(result.stdout)
+        assert "builtin cross-check: 3 findings" in cell, cell
