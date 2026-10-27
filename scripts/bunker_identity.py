@@ -116,8 +116,7 @@ def suite_total(suite: dict[str, Any]) -> int:
 def is_storage_failure(suite: dict[str, Any]) -> bool:
     """A host-disk failure is infrastructure evidence, not a suite verdict."""
     text = "\n".join(
-        str(suite.get(key) or "")
-        for key in ("summary", "error", "stderr", "log_tail", "detail")
+        str(suite.get(key) or "") for key in ("summary", "error", "stderr", "log_tail", "detail")
     ).lower()
     return "enospc" in text or "no space left on device" in text
 
