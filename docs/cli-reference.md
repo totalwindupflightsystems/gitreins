@@ -435,12 +435,24 @@ commit-msg hook). Reads the message from the argument, or falls back
 to `.git/COMMIT_EDITMSG` when omitted.
 
 ```
-gitreins commit-audit [message]
+gitreins commit-audit [--review-profile <profile>] [--review-effort <key=value> ...] [message]
 ```
 
 | Argument | Description |
 |----------|-------------|
 | `message` | Commit message; omitted → read from `COMMIT_EDITMSG` |
+
+| Option | Values | Description |
+|--------|--------|-------------|
+| `--review-profile` | `quick`, `standard`, `deep` (default `standard`) | Review policy preset: `quick` (single-pass triage, critical-only), `standard` (findings + fix estimates), `deep` (multi-pass: findings, estimates, remediation brief). Overrides the repo-config profile |
+| `--review-effort` | `key=value`, repeatable (e.g. `--review-effort max_llm_calls=4 --review-effort time_budget_s=240`) | Per-invocation effort override. Budget keys: `max_passes`, `max_llm_calls`, `max_tokens`, `time_budget_s`, `max_tool_calls` |
+
+**Precedence** (highest first): the CLI flags override the repo config
+(`review_profile` / `review_effort` in the merged `commit_audit` section of
+`.gitreins/config.yaml` — `defaults.commit_audit` and a top-level
+`commit_audit` block merged, top-level keys winning), which overrides the
+built-in profile default. Profiles, effort levels and their pass contracts
+are documented in [docs/review-profiles.md](review-profiles.md).
 
 **The audit only runs for a pipeline stage of type `commit_audit` that is
 armed for the `commit-msg` trigger.** `gitreins install` and `gitreins init`
@@ -1157,6 +1169,7 @@ gitreins preflight "<question>" [--surface <name>] [--json]
 | `REVIEW` (0.50–0.85, **or** ≥ 0.85 with the evidence floor unmet) | `dispatch-with-note` | dispatch at the full probability, carrying `missing_kind` + probability into the worker brief |
 | `UNRESOLVED` (probability < 0.50) | `dispatch` | nothing changes — `missing_kind` names what to build |
 | `ABSTAIN` (any failure) | `dispatch` | **fail open, by design**: the reason is recorded, work proceeds |
+| evidence floor (inside `RESOLVED`: rubric floor 3 + a provenance block at ≥ 0.80) | floor unmet ⇒ `REVIEW` | the 0.85 probability threshold alone is insufficient — see the evidence-floor paragraph below |
 
 **The evidence floor (`MIN_RESOLVED_EVIDENCE_QUALITY = 3`).** A probability of
 0.85 or more is not sufficient on its own: `RESOLVED` also requires the Jev
