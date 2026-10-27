@@ -108,11 +108,20 @@ class GuardResult:
     # spawned nothing, so the console never claims a priority that was not set.
     nice_note: str = ""
 
+    # DF-027: the change scope this lane actually graded, named on the console
+    # line (``clean (gitleaks + builtin cross-check; scope: working-tree)``).
+    # Empty = the historical default the caller already knows about (the
+    # index for the secrets lane), so every pre-DF-027 line renders byte for
+    # byte. ``gitreins guard --full`` sets it because the whole-tree secrets
+    # scan is otherwise indistinguishable from the index one — the ambiguity
+    # that let a committed credential print "secrets — clean".
+    graded_scope: str = ""
+
     def _pass_detail(self) -> str:
         """Short detail string for passing guards (e.g. 'clean', '3 files')."""
         if self.name == "secrets":
             if self.scanners:
-                return f" — {render_secrets_scanners(self.scanners)}"
+                return f" — {render_secrets_scanners(self.scanners, scope=self.graded_scope)}"
             return " — clean"
         elif self.name in ("lint", "go_lint", "go_build", "go_vet"):
             return " — ok"
@@ -416,10 +425,16 @@ SCANNER_NOT_RUN = "not on PATH"
 # so an operator on a box where gitleaks IS installed read "gitleaks not on
 # PATH" and went hunting a missing install. Scope-skips get their own status.
 SCANNER_NOT_RUN_SCOPE = "not run (working-tree scope)"
+# DF-027: `gitreins guard --full` grades the whole tree with `detect --no-git`,
+# which reads every file instead of the index's handful — a large checkout can
+# overrun the lane's budget. Like a missing binary, an unfinished scan is NAMED
+# on the console line; the built-in cross-check still grades the same whole-tree
+# file listing, so the lane never silently narrows back to the index.
+SCANNER_NOT_RUN_TIMEOUT = "not run (whole-tree scan did not finish)"
 # Every per-scanner status that means "produced no verdict": not installed, or
-# skipped for the selected scope. The renderer treats them alike — never a
-# failure, always named on the console line.
-SCANNER_NOT_RUN_STATUSES = (SCANNER_NOT_RUN, SCANNER_NOT_RUN_SCOPE)
+# skipped for the selected scope, or a whole-tree walk that did not finish. The
+# renderer treats them alike — never a failure, always named on the console line.
+SCANNER_NOT_RUN_STATUSES = (SCANNER_NOT_RUN, SCANNER_NOT_RUN_SCOPE, SCANNER_NOT_RUN_TIMEOUT)
 # DF-GITREINS-POC-54: a scanner that died BEFORE scanning. gitleaks exits 2 with
 # a Go panic when an ``[allowlist] paths`` entry is not a compilable regexp —
 # the pre-DF-001 globs ('*.log', '*.egg-info/') that older `gitreins init`
@@ -450,7 +465,7 @@ def scanner_finding_status(findings: int) -> str:
     return "1 finding" if findings == 1 else f"{findings} findings"
 
 
-def render_secrets_scanners(scanners: tuple[tuple[str, str], ...]) -> str:
+def render_secrets_scanners(scanners: tuple[tuple[str, str], ...], scope: str = "") -> str:
     """Render scanner attribution for a console line or the run log.
 
     All clean: ``clean (gitleaks + builtin cross-check)``.
@@ -466,7 +481,25 @@ def render_secrets_scanners(scanners: tuple[tuple[str, str], ...]) -> str:
     the whole clause — ``CONFIG ERROR (gitleaks config failed to compile:
     *.log)`` — with only a non-clean sibling scanner appended (a clean
     cross-check adds nothing to the diagnosis).
+
+    DF-027: *scope* names the change scope the scanners graded, as a trailing
+    ``; scope: working-tree`` clause — ``clean (gitleaks + builtin
+    cross-check; scope: working-tree)``. The secrets lane graded the index for
+    so long that "clean" stopped saying WHICH tree it meant; the same defect
+    class as POC-42's Go lanes. Empty (the default) renders byte for byte as
+    before, because the historical index scope is the caller's own baseline.
     """
+    rendered = _render_scanner_clause(scanners)
+    if not scope:
+        return rendered
+    clause = f"; scope: {scope}"
+    # Keep the clause INSIDE the closing paren of the parenthesised forms so it
+    # reads as part of the attribution, not as a trailing remark.
+    return rendered[:-1] + clause + ")" if rendered.endswith(")") else rendered + clause
+
+
+def _render_scanner_clause(scanners: tuple[tuple[str, str], ...]) -> str:
+    """The pre-DF-027 scanner-attribution clause (see :func:`render_secrets_scanners`)."""
     labelled = [(scanner_label(sid), status) for sid, status in scanners]
     config_errors = [
         status for _name, status in labelled if status.startswith(SCANNER_CONFIG_ERROR)
@@ -665,7 +698,7 @@ class Tier1Result:
                     # TRUST-003 (AC2): name the scanner(s) that ran and each
                     # one's outcome — 'clean'/'fail' alone hid whether the
                     # built-in cross-check or gitleaks raised the finding.
-                    detail = f" — {render_secrets_scanners(r.scanners)}"
+                    detail = f" — {render_secrets_scanners(r.scanners, scope=r.graded_scope)}"
                     findings = _secrets_findings_detail(r.output) or _builtin_findings_detail(
                         r.output
                     )

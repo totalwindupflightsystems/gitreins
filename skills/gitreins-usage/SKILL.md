@@ -996,12 +996,18 @@ gitreins preflight "<premise>" --surface cli   # default surface predispatch shi
   need a contiguous body after the prefix; the assignment class stops at the
   first space (`"ghp_"` = 6 non-space chars). Before trusting a clean
   push-check on code that assembles credentials from chunks, join-check by hand.
-- **65 — `guard --full` does NOT extend the secrets lane (DF-027).** The
-  banner says "whole tree" but secrets keeps scanning the staged diff
-  (`gitleaks protect --staged` + builtin staged scan): a COMMITTED credential is
-  invisible under --full ("✓ secrets — clean") and visible only to
-  `gitreins guard --scope working-tree` (which FAILS with the findings). After
-  any leak, run the working-tree scope, not --full.
+- **65 — `guard --full` used to NOT extend the secrets lane (DF-027, FIXED).**
+  The banner said "whole tree" but secrets kept scanning the staged diff
+  (`gitleaks protect --staged` + builtin staged scan), so a COMMITTED
+  credential was invisible under `--full` (`✓ secrets — clean`) and visible
+  only to `gitreins guard --scope working-tree`. `--full` now runs the
+  secrets lane over the whole tree (`gitleaks detect --no-git` + the
+  whole-tree builtin cross-check, the same scanners the Tier 1 judge step
+  runs) and the console line names the scope it graded — `✓ secrets — clean
+  (gitleaks + builtin cross-check; scope: working-tree)`. A bare
+  `gitreins guard` still grades the index and prints no `scope:` clause, so
+  the two verdicts can no longer be confused. On a build older than the fix,
+  run `--scope working-tree` instead.
 
 Measured on this 0.17.0 build (16-core host): guard 264-283 ms, push-check
 126-168 ms, resolve 0.57-1.08 s warm consumer-scale / 2.3-3.2 s at this repo's

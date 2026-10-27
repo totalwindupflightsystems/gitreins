@@ -88,7 +88,7 @@ class TestSerialization:
                 "time.sleep(2)\n"
                 "tier1_lock.release()\n",
             ],
-            cwd=os.path.dirname(tier1_lock.__file__),
+            cwd=os.path.dirname(os.path.dirname(__file__)),
             env={
                 **os.environ,
                 "GITREINS_TIER1_REPO_ROOT": repo,

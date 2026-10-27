@@ -392,8 +392,47 @@ run_pipeline() {
     # reads is defaulted here — an unbound variable under `set -u` would mask the
     # run's own exit code with a teardown error (observed: "spawned: unbound variable"
     # after a graded run had already printed its verdict).
+    # DF-GITREINS-POC-101: the battery's OWN daemons (dbus-daemon, sshd) run
+    # under the disposable agent uid and outlive the suite. `bunker destroy`
+    # refuses to remove an agent that still has live sessions, so every graded
+    # run ended in a manual recovery. Stop them HERE, in the in-repo teardown,
+    # before the destroy call — this is the reproducible, tracked half of the
+    # fix (the fleet harness has its own copy and is not part of this repo).
+    #
+    # Same defaulted-variable contract as cleanup(): this runs from the EXIT
+    # trap after run_pipeline's locals are gone, so every read is defaulted.
+    stop_agent_daemons() {
+        local uid="${AGENT_UID:-}"
+        local agent="${AGENT:-}"
+        if [ -z "$agent" ]; then
+            log "── teardown: no agent recorded; skipping daemon stop"
+            return 0
+        fi
+        if [ -z "$uid" ]; then
+            uid=$(bunker run --server "${SERVER:-}" --timeout 120 "$agent" -- sh -c 'id -u' 2>/dev/null | tr -d '\r' | tail -1) || true
+        fi
+        # Only a real, non-root uid may reach pkill: an empty or non-numeric
+        # value would signal nothing useful, and uid 0 would hit the host's own
+        # daemons (the same class of mistake as an unvalidated os.kill()).
+        case "$uid" in
+            ''|*[!0-9]*)
+                log "── teardown: could not resolve the disposable uid; skipping daemon stop"
+                return 0
+                ;;
+            0)
+                log "── teardown: refusing to signal daemons of uid 0"
+                return 0
+                ;;
+        esac
+        log "── teardown: stopping daemon sessions under uid $uid on ${SERVER:-}"
+        bunker run --server "${SERVER:-}" --timeout 120 "$agent" -- \
+            sh -c "pkill -TERM -u $uid -x dbus-daemon; pkill -TERM -u $uid -x sshd" \
+            >/dev/null 2>&1 || true
+    }
+
     cleanup() {
         if [ "${spawned:-0}" = "1" ] && [ "${KEEP:-0}" != "1" ] && [ "${BUNKER_FULL_CI_KEEP:-0}" != "1" ]; then
+            stop_agent_daemons
             log "── teardown: destroying agent ${AGENT:-} on ${SERVER:-}"
             bunker destroy "${AGENT:-}" --server "${SERVER:-}" >/dev/null 2>&1 || true
         elif [ "${spawned:-0}" = "1" ]; then
