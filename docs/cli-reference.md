@@ -20,7 +20,7 @@ Running `gitreins` with no command prints the top-level help and exits
 **0**. An unknown command exits **2** (argparse behavior for
 unrecognized arguments).
 
-There are **19 top-level subcommands**:
+There are **20 top-level subcommands**:
 
 | # | Command | Purpose |
 |---|---------|---------|
@@ -43,6 +43,7 @@ There are **19 top-level subcommands**:
 | 17 | `doctor` | Validate `.gitleaks.toml` and migrate pre-DF-001 glob allowlist entries |
 | 18 | `push-check` | Refuse outgoing commit history containing credentials |
 | 19 | `quality-ensure` | Run the repo's quality producer to completion and enforce block-mode (pre-push) |
+| 20 | `fingerprint` | Hash final Git-visible workspace content without mutating the checkout or real index |
 
 ## 1. `gitreins install`
 
@@ -1452,6 +1453,23 @@ Exit codes:
 |------|---------|
 | 0 | quality disabled, unavailable, or present with no block-mode miss |
 | 1 | a block-mode metric is below its effective target |
+
+## 20. `gitreins fingerprint`
+
+Compute a SHA-256 binding for the final Git-visible workspace content: committed
+and indexed paths with the working-tree and untracked overlays applied. The
+command is read-only; it does not write the checkout or the real index.
+
+```bash
+gitreins fingerprint [--json]
+```
+
+Human output is `fingerprint: <64hex> (dirty=N, state=authoritative)`.
+`--json` emits exactly `digest`, `dirty_count`, and `state`. Exit **0** only for
+an authoritative observation. Unsupported transformations or repository states
+exit **1** and name the refusal state instead of falling back to `HEAD^{tree}`.
+The digest observes workspace content; it is not an atomic snapshot or protection
+against an adversary restoring previously observed state.
 
 ## Hooks
 

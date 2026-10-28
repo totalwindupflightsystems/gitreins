@@ -2769,6 +2769,29 @@ def quality_snapshot_for(workdir: str) -> dict[str, Any] | None:
     return read_quality_snapshot(workdir, QualityConfig.from_dict(raw))
 
 
+def cmd_fingerprint(args: argparse.Namespace) -> None:
+    """Print a read-only fingerprint of the final Git-visible workspace tree."""
+    from engine.fingerprint import compute
+
+    result = compute(get_workdir())
+    payload = {
+        "digest": result.digest,
+        "dirty_count": result.dirty_count,
+        "state": result.state,
+    }
+    if getattr(args, "json_output", False):
+        print(json.dumps(payload, sort_keys=True))
+    elif result.state == "authoritative":
+        print(f"fingerprint: {result.digest} (dirty={result.dirty_count}, state={result.state})")
+    else:
+        print(
+            f"fingerprint: unavailable (dirty={result.dirty_count}, state={result.state})",
+            file=sys.stderr,
+        )
+    if result.state != "authoritative":
+        raise SystemExit(1)
+
+
 def cmd_quality_ensure(_args: argparse.Namespace) -> None:
     """Run the quality producer to completion and enforce block-mode before push.
 
@@ -4358,6 +4381,17 @@ def _add_basic_parsers(parser: argparse.ArgumentParser, sub: _SubParsers) -> Non
         help="Path to the .gitleaks.toml to check (default: <repo>/.gitleaks.toml)",
     )
 
+    fingerprint_p = sub.add_parser(
+        "fingerprint",
+        help="Hash the final Git-visible workspace content without mutating the repo",
+    )
+    fingerprint_p.add_argument(
+        "--json",
+        dest="json_output",
+        action="store_true",
+        help="Emit {digest, dirty_count, state} JSON",
+    )
+
 
 def _add_task_parser(sub: _SubParsers) -> _SubParsers:
     """`task` subcommand tree. Returns the task _SubParsersAction."""
@@ -5060,6 +5094,7 @@ _SIMPLE_HANDLERS = {
     "install": "cmd_install",
     "init": "cmd_init",
     "doctor": "cmd_doctor",
+    "fingerprint": "cmd_fingerprint",
     "guard": "cmd_guard_run",
     "judge": "cmd_judge",
     "commit": "cmd_commit",
