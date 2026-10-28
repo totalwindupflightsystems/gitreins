@@ -138,10 +138,15 @@ gitreins task delete <id>
 gitreins judge <id>                   # Evaluate a task
 gitreins commit <message>             # Commit with guard checks
 gitreins commit-audit [message]       # Validate commit message against staged diff (commit-msg hook)
+gitreins push-check <local_sha> <remote_sha>  # Scan outgoing commit content for secrets (pre-push hook)
+gitreins quality-ensure               # Run the repo's quality producer to completion and enforce block-mode
+gitreins resolve <question>           # Resolve a question against the repo's code (Jev resolution gate)
+gitreins preflight <question>    # Pre-dispatch premise check: resolve a row, get a dispatch decision
 gitreins setup-tools                  # Show available static analysis tools and install instructions
 gitreins mcp-server                   # Run MCP stdio server (for AI agents)
 gitreins serve [--repo <path>] [--port <port>] [--project <name>]
                                       # Live judgment browser (local web server)
+gitreins worktree list                # Task worktree lifecycle (fleet/merge/clean/doctor)
 gitreins qa list [--json]             # QA run ledger (fresh/repro/dogfood verdicts)
 gitreins qa record --project <name> [--verdict PASS|FAIL --cell <name>=<status>]
                                       # Record a QA run produced outside the harness

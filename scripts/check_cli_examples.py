@@ -27,6 +27,13 @@ The command handlers are stubbed out before parsing, so nothing executes: only
 argparse runs. Exit 0 with one summary line, exit 1 naming the exact doc line
 that failed to parse.
 
+README Commands-block coverage
+    After the parse check, the script also verifies that every subcommand the
+    live CLI advertises via `gitreins --help` appears in the fenced Commands
+    block of README.md. A missing command is a silent discoverability bug —
+    a reader scanning the README cannot find it. This check fails closed: if
+    a subcommand is added to the CLI but not to the README, the script exits 1.
+
 Usage:
     python scripts/check_cli_examples.py [--repo-root PATH]
 """
@@ -36,6 +43,7 @@ import contextlib
 import io
 import re
 import shlex
+import subprocess
 import sys
 from pathlib import Path
 
@@ -48,6 +56,12 @@ _COMPOSITION_MARKERS = ("&&", "||", "|", ";", "$(", ">", "&")
 # docs/dogfood/** holds historical run transcripts (commands as they were
 # typed on the day), not instructions a reader follows — deliberately excluded.
 _DOC_GLOBS = ("README.md", "CONTRIBUTING.md", "docs/*.md")
+
+# README Commands-block coverage: every subcommand the live CLI advertises
+# must appear in the fenced Commands block. Drift between the CLI surface and
+# the README inventory is a silent discoverability bug — this check fails
+# closed.
+_README_COMMANDS_BLOCK_PATH = "README.md"
 
 
 def _iter_logical_lines(path):
@@ -104,10 +118,23 @@ def _classify(text):
 
 
 def _stub_handlers(cli):
-    """Replace every cmd_* handler with a recorder so parsing cannot execute."""
+    """Replace every cmd_* handler with a recorder so parsing cannot execute.
+
+    `push-check` is dispatched inline in ``main()`` rather than through a
+    ``cmd_*`` attribute, so its `engine.push_secrets.check_push_range` entry
+    point is stubbed separately — otherwise a documented `push-check` example
+    would scan real git ranges (and fail on placeholder SHAs) instead of only
+    parsing.
+    """
     for attr in dir(cli):
         if attr.startswith("cmd_"):
             setattr(cli, attr, lambda args: None)
+    try:
+        from engine import push_secrets
+
+        push_secrets.check_push_range = lambda workdir, local_sha, remote_sha: 0
+    except Exception:
+        pass
 
 
 def _parse(cli, command):
@@ -140,6 +167,75 @@ def resolve_repo_root(argv=None):
     if args.repo_root is not None:
         return args.repo_root
     return Path(__file__).resolve().parent.parent
+
+
+def _discover_live_subcommands(repo_root):
+    """Return the set of subcommand names the live CLI advertises in --help."""
+    try:
+        help_out = subprocess.run(
+            [sys.executable, "-m", "gitreins", "--help"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            cwd=repo_root,
+        )
+        help_text = help_out.stdout + help_out.stderr
+    except Exception:
+        return set()
+    m = re.search(r"\{([a-z0-9,_-]+)\}", help_text)
+    if not m:
+        return set()
+    return {c.strip() for c in m.group(1).split(",") if c.strip()}
+
+
+def _check_readme_commands_block(repo_root):
+    """Assert every live subcommand appears in the README Commands block.
+
+    Returns (ok: bool, message: str). ok=True means either the check passed
+    or it could not be run (missing README or could not discover commands);
+    ok=False means the block is missing at least one live subcommand.
+    """
+    readme_path = repo_root / _README_COMMANDS_BLOCK_PATH
+    if not readme_path.exists():
+        return True, "README.md not found; skipping Commands-block coverage"
+    try:
+        readme_text = readme_path.read_text(encoding="utf-8")
+    except OSError as e:
+        return True, f"could not read README.md: {e}"
+    # Extract the fenced block under the '## Commands' heading.
+    commands_block_lines = []
+    in_commands_section = False
+    in_fence = False
+    for line in readme_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("## Commands"):
+            in_commands_section = True
+            continue
+        if in_commands_section and stripped.startswith("## "):
+            break  # next section
+        if not in_commands_section:
+            continue
+        if stripped.startswith("```"):
+            if in_fence:
+                break  # closing fence ends the block
+            in_fence = True
+            continue
+        if in_fence:
+            commands_block_lines.append(line)
+    commands_block = "\n".join(commands_block_lines)
+    live = _discover_live_subcommands(repo_root)
+    if not live:
+        return True, "could not discover live subcommands; skipping coverage"
+    documented = {
+        m.group(1) for m in re.finditer(r"\bgitreins\s+([a-z][a-z0-9_-]*)", commands_block)
+    }
+    missing = sorted(live - documented)
+    if missing:
+        return False, (
+            f"README Commands block is missing {len(missing)} live subcommand(s): "
+            f"{', '.join(missing)}"
+        )
+    return True, f"README Commands block covers all {len(live)} live subcommands"
 
 
 def main(argv=None):
@@ -176,6 +272,14 @@ def main(argv=None):
         for item in failures:
             print(f"  {item}")
         return 1
+
+    # README Commands-block coverage (must appear after the parse check so a
+    # broken example is reported before a missing command).
+    ok, msg = _check_readme_commands_block(repo_root)
+    print(msg)
+    if not ok:
+        return 1
+
     print(
         f"All documented gitreins examples parse: {checked} checked across "
         f"{len(files)} doc(s), {len(skipped)} shell-composition line(s) skipped"
