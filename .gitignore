@@ -107,3 +107,9 @@ demo-slugify/
 # conflict on a file that carries no information (REVIEW-006).
 .gitreins/*.lock
 .coding-hermes/board/.lock
+
+# Embedded DuckBrain namespace store: a nested git repo. Tracked as an accidental
+# gitlink by the GR-146 sweep (48d7f7b); it made the tree unclonable and fails the
+# GR-153 authoritative-fingerprint preflight (state gitlink), so verdict persistence
+# refuses. The store stays on disk, outside git's view.
+namespaces/coding-hermes/

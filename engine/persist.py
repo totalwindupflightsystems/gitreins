@@ -1018,6 +1018,18 @@ def build_verdict_data(workdir: str, task: Task, result: JudgeResult) -> dict[An
         "branch": producing_branch,
         "commit": source_commit,
     }
+
+    # GR-153: bind the verdict to the workspace bytes that were actually
+    # observed, not only to HEAD. The fingerprint module is read-only and
+    # returns no digest for non-authoritative states; direct callers of this
+    # builder retain the historical shape, while persist_evaluation below
+    # refuses to write a verdict that could not carry this binding.
+    from engine.fingerprint import compute as compute_fingerprint
+
+    fingerprint = compute_fingerprint(workdir)
+    if fingerprint.state == "authoritative":
+        verdict_data["working_tree_content_fingerprint"] = fingerprint.digest
+        verdict_data["working_tree_dirty_path_count"] = fingerprint.dirty_count
     quality_snapshot = getattr(result, "quality_snapshot", None)
     if quality_snapshot is not None:
         verdict_data["quality_snapshot"] = quality_snapshot
@@ -1086,8 +1098,23 @@ def persist_evaluation(
             return "disabled"
 
         verdict_data = build_verdict_data(workdir, task, result)
+        if "working_tree_content_fingerprint" not in verdict_data:
+            from engine.fingerprint import compute as compute_fingerprint
+
+            state = compute_fingerprint(workdir).state
+            logger.warning(
+                "Refusing to persist verdict without authoritative working-tree fingerprint: %s",
+                state,
+            )
+            return "error"
         if extra:
+            digest = verdict_data["working_tree_content_fingerprint"]
+            dirty_count = verdict_data["working_tree_dirty_path_count"]
             verdict_data.update(extra)
+            # Caller metadata may extend a verdict, but it cannot replace the
+            # two values computed from this workspace observation.
+            verdict_data["working_tree_content_fingerprint"] = digest
+            verdict_data["working_tree_dirty_path_count"] = dirty_count
         return persister.persist(task.id, verdict_data, collect_evidence=collect_evidence)
     except Exception as exc:  # persistence must never fail the verdict
         logger.warning("Failed to persist verdict for %s (non-fatal): %s", workdir, exc)
