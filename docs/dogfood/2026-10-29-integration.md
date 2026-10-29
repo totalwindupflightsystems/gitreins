@@ -2,7 +2,7 @@
 
 Tick: `gitreins-dogfood-2026-10-29-12-57-48`
 Tested HEAD: `d8f0b159ad08046186069a21bed24976213ec5ea`
-Verdict: FAILED-incomplete for the mandatory fresh-install leg; local CLI workflow passed.
+Verdict: OK — local CLI workflow passed and the mandatory fresh-install/native smoke leg passed; local `act` remains unverified.
 
 ## Promise
 
@@ -32,4 +32,4 @@ No new product finding was filed. Existing `REVIEW-GITREINS-033` remains open fo
 
 The battery later completed and was collected as 22 agent evidence rows plus the collect row. Fresh install and upgrade were OK at the tested HEAD; the native suite was PASS. The local `act` leg was UNVERIFIED because Docker could not copy the setup-python action fixture (`lstat .../.prettierrc.js: no such file or directory`), which is harness/runner evidence rather than a hosted-CI product verdict. The disconnect chaos cell was OK under the network cut; resource-cap was PASS; missing-config error path was OK. Docker/UI/database legs were N/A because this CLI project has no compose file, web UI, or repo state database. The run-owned agent was destroyed and the final bunker list contained three agents without `a02aef60`.
 
-Final install verdict: PASS for the documented package install and native smoke, with local-act unverified and non-applicable cells explicitly separated. The overall tick remains FAILED-incomplete only because the first closeout draft captured the open leg; the final evidence now closes installability and teardown.
+Final install verdict: PASS for the documented package install and native smoke, with local-act unverified and non-applicable cells explicitly separated. The first bounded collection was incomplete, but the final evidence closes installability and teardown.
