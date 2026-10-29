@@ -331,3 +331,79 @@ def test_collect_live_counts_parses_fixture_tree(tmp_path: Path) -> None:
     live, reason = _load_module().collect_live_counts(root)
     assert reason is None
     assert live == (5, 2)
+
+
+# ---------------------------------------------------------------------------
+# REVIEW-GITREINS-032: regression coverage for the file-count semantics and
+# its reporting. Measured facts this row is built on: the live collection
+# enumerates 95 unique test-module paths while `find tests -name '*.py'`
+# reports 147 files — the difference is fixtures/conftest/helpers, so the
+# project's file-count semantics IS the collection's unique-path inventory,
+# not the raw filesystem count. These tests pin that: a file claim is
+# compared against the MEASURED inventory, and every drifted claim in both
+# documents is reported in one run. Fixtures use count != files (12/7) so a
+# file claim can never accidentally satisfy the total-count comparison.
+# ---------------------------------------------------------------------------
+
+_RG32_README = BANNER.format(version="0.12.1", p=12, f=7) + "\n" + TECH_STACK.format(p=12, f=7)
+_RG32_README_STALE_FILES = (
+    BANNER.format(version="0.12.1", p=12, f=3) + "\n" + TECH_STACK.format(p=12, f=3)
+)
+_RG32_CONTRIBUTING = "# Contributing\n\n" + CONTRIBUTING_CLAIM.format(p=12, f=7)
+# Stale-contributor shape: CONTRIBUTING claims 3 files while the fixture really
+# holds 7 test files (totals agree at 12) — a stale file count that the test
+# total alone cannot explain.
+_RG32_CONTRIBUTING_STALE_FILES = "# Contributing\n\n" + CONTRIBUTING_CLAIM.format(p=12, f=3)
+
+
+def _rg32_repo(tmp_path: Path, dirname: str, readme_body: object, contributing_body: object):
+    """README + CONTRIBUTING bodies over a fixture collecting 12 tests / 7 files."""
+    return _write_repo(
+        tmp_path,
+        readme_body=readme_body,
+        contributing_body=contributing_body,
+        n_tests=12,
+        n_files=7,
+        dirname=dirname,
+    )
+
+
+def test_rg32_file_claims_match_collection_inventory(tmp_path: Path) -> None:
+    """Positive arm: 'N test files' claims in README.md AND CONTRIBUTING.md that
+    equal the collection's unique-path inventory pass."""
+    root = _rg32_repo(tmp_path, "repo", _RG32_README, _RG32_CONTRIBUTING)
+    proc = _run_script(root)
+    assert proc.returncode == 0, proc.stdout + proc.stderr
+    assert "12 tests / 7 test files" in proc.stdout
+
+
+def test_rg32_stale_test_file_count_fails_even_when_total_matches(tmp_path: Path) -> None:
+    """Negative arm: CONTRIBUTING claims 12 tests / 3 test files, the fixture
+    really collects 12 tests over 7 files. The total agrees; the file inventory
+    does not — the claim must FAIL against the measured inventory, not pass
+    because the test total still matches."""
+    root = _rg32_repo(tmp_path, "repo", _RG32_README, _RG32_CONTRIBUTING_STALE_FILES)
+    proc = _run_script(root)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    out = proc.stdout
+    assert "test-file-count drift" in out
+    assert "12 tests in 7 files" in out
+    assert "CONTRIBUTING.md:3" in out
+
+
+def test_rg32_all_drifted_file_claims_across_both_docs_reported(tmp_path: Path) -> None:
+    """Aggregation arm: BOTH documents carry stale file claims (3 vs the real
+    7). One run must name every drifted claim — README.md:1 (banner),
+    README.md:3 (tech-stack line) and CONTRIBUTING.md:3 — instead of stopping
+    at the first, and must not repeat the same line twice."""
+    root = _rg32_repo(tmp_path, "repo", _RG32_README_STALE_FILES, _RG32_CONTRIBUTING_STALE_FILES)
+    proc = _run_script(root)
+    assert proc.returncode == 1, proc.stdout + proc.stderr
+    out = proc.stdout
+    assert "test-file-count drift" in out
+    assert "12 tests in 7 files" in out
+    assert "README.md:1" in out
+    assert "README.md:3" in out
+    assert "CONTRIBUTING.md:3" in out
+    fail_lines = [ln for ln in out.splitlines() if ln.startswith("FAIL:")]
+    assert len(fail_lines) == len(set(fail_lines)), out

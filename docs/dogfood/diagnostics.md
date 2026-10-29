@@ -12,6 +12,25 @@ Hermes, Codex, Pi) do the bulk of coding, so the harness targets agent workflows
 tasks with explicit completion criteria, an LLM evaluator that judges the work, and
 Tier-1 static gates that run on every commit.
 
+## Dogfood 2026-10-29: local workflow passed; bunker evidence remained open
+
+The current CLI composed cleanly in a scratch Git repository: editable install, install,
+init, full guard, authoritative fingerprint, task create/start/complete with explicit
+Tier-2 skip, task list, and report all returned success. The quality semantics were honest:
+with no source files or tests, guard reported DEGRADED PASS and the Tier-1-only verdict
+reported PASS with a DEGRADED coverage warning. That is usable for an empty repository,
+but it is not evidence that lint or tests run on a real project.
+
+The fresh-machine leg is a separate state machine. `bunker-qa.sh launch` reached a real
+agent at the tested HEAD; the first bounded collect returned RUNNING with only repo-head
+and launch rows, and the agent reported Docker degraded. A later collect harvested 22
+agent rows plus the collect row: fresh install, upgrade, native suite, disconnect chaos,
+resource-cap, and missing-config error path were successful; local `act` remained
+UNVERIFIED because Docker could not copy the setup-python action fixture. The run-owned
+agent was destroyed and absent from the final list. Launch success alone is not a product
+install pass; grade the completed per-cell evidence and teardown read-back.
+
+
 Architecture (see `specs/` for the originals):
 - `gitreins/cli.py` — CLI entry (install/init/task/guard/judge/commit/mcp-server/
   security-scan/setup-tools/report).

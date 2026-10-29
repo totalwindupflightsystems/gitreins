@@ -11,11 +11,18 @@ Check B (counts): the live test collection — run here with
 collection; pytest is invoked via subprocess, never imported) — is compared
 against EVERY ``N tests pass`` / ``N tests across`` / ``N tests collected`` /
     ``N test files`` claim in
-README.md AND CONTRIBUTING.md. A claim that disagrees with the live collection,
-or with a sibling claim in the same document, fails with FILE:LINE and both
-numbers. Unmeasurable collection is a FAIL, never a green: a gate must never
-certify a metric it did not measure. ``--static`` skips the live comparison and
-says so in its message (it then only checks internal claim agreement).
+README.md AND CONTRIBUTING.md. Each claim is compared against the inventory
+it describes: a total-count claim against the collected test total, a
+``N test files`` claim against the number of unique ``tests/...py`` paths the
+collection report itself enumerates (same regex the CI bash block used) — so
+the file-count semantics IS the collection's inventory, and a stale file-count
+claim fails even when the collected total still agrees. A claim that disagrees
+with the live collection, or with a sibling claim in the same document, fails
+with FILE:LINE and both numbers. Every drifted claim in every checked document
+is reported in one run. Unmeasurable collection is a FAIL, never a green: a
+gate must never certify a metric it did not measure. ``--static`` skips the
+live comparison and says so in its message (it then only checks internal claim
+agreement).
 
 Check C (evaluator tool counts, GR-141): every ``N tool(s)`` claim about the
 EVALUATOR in docs/architecture.md AND docs/evaluator-loop.md must equal the
@@ -517,10 +524,6 @@ def check_docs_drift(repo_root, static_only=False):
             f"collection was NOT compared, so the numbers are unverified. {c_message}",
         )
 
-    # Live path: the collection is the authority and it is checked FIRST, so a
-    # stale claim is reported against the measured numbers (GR-GAP-061).
-    # Internal-agreement checks are subsumed on this path — claims that all
-    # equal the live collection cannot disagree with each other.
     live, reason = collect_live_counts(repo_root)
     if live is None:
         return (
@@ -531,17 +534,36 @@ def check_docs_drift(repo_root, static_only=False):
     live_count, live_files = live
     measured = f"{live_count} tests in {live_files} files"
 
+    # Every claim is compared against the inventory it describes: a total-count
+    # claim against the collected total, a file-count claim against the number
+    # of unique test files the collection reports. Both comparisons are needed
+    # — a stale "N test files" claim is NOT caught by a matching total (the
+    # totals can agree while the file inventories have drifted apart).
+    failures = []
+    seen = set()
     for doc_name, claims in docs:
-        for phrase in (*_TEST_COUNT_CLAIMS, "test files"):
-            expected = str(live_files if phrase == "test files" else live_count)
-            for claim_phrase, value, line, snippet in claims:
-                if claim_phrase == phrase and value != expected:
-                    kind = "test-file-count" if phrase == "test files" else "test-count"
-                    return (
-                        1,
-                        f"FAIL: {doc_name}:{line} {kind} drift — documents '{snippet}' "
-                        f"but pytest collects {measured}. Update {doc_name}:{line}.",
-                    )
+        for claim_phrase, value, line, snippet in claims:
+            if claim_phrase == "test files":
+                expected, kind = str(live_files), "test-file-count"
+            elif claim_phrase in _TEST_COUNT_CLAIMS:
+                expected, kind = str(live_count), "test-count"
+            else:
+                continue
+            if value != expected:
+                # 'N tests across M files' yields a total claim AND a file
+                # claim on the same line; report each (doc, line, kind) once.
+                key = (doc_name, line, kind, value)
+                if key in seen:
+                    continue
+                seen.add(key)
+                failures.append(
+                    f"FAIL: {doc_name}:{line} {kind} drift — documents '{snippet}' "
+                    f"but pytest collects {measured}. Update {doc_name}:{line}."
+                )
+    if failures:
+        # Every drifted claim is reported, so a stale count in README.md AND a
+        # stale file count in CONTRIBUTING.md are both named in one run.
+        return 1, "\n".join(failures)
 
     for doc_name, claims in docs:
         missing = _missing_required_count_claim(doc_name, claims)
