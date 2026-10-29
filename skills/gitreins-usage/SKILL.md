@@ -1014,6 +1014,11 @@ Measured on this 0.17.0 build (16-core host): guard 264-283 ms, push-check
 scale, preflight 0.64-0.66 s, per-call Jev cost $0.0000395 — all fast enough
 that nothing justifies profiling (PERF-2).
 
+## Dogfood 2026-10-29: scratch-consumer workflow and open bunker leg
+
+A real scratch Git repository successfully exercised the current CLI composition: `gitreins install`, `gitreins init`, `gitreins guard --full`, `gitreins fingerprint --json`, task create/start/complete with `--skip-tier2`, task list, and report. `install` and `init` are fast (<0.2s cold in this run); `guard --full` is about 1.1s on a repository with no source/tests and honestly reports DEGRADED skips. A Tier-1-only task can still save a PASS verdict while explicitly labeling the missing lint/tests coverage as DEGRADED. Do not describe that as a full quality pass.
+
+The fresh-machine leg is separate evidence. On 2026-10-29 at HEAD d8f0b159, `bunker-qa.sh launch` spawned a02aef60 on bunker-mvp; the first collect returned RUNNING with only launch rows and the agent's Docker state degraded. A later collect harvested 22 evidence rows plus teardown: fresh install, upgrade, native suite, disconnect chaos, resource-cap, and missing-config error path were successful; local `act` remained UNVERIFIED because Docker could not copy the setup-python action fixture. The agent was destroyed and absent from the final list. Grade the completed cells, not the launch summary.
 
 ## Dogfood 2026-10-26: battery identity and storage boundaries
 
