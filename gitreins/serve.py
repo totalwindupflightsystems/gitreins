@@ -186,12 +186,59 @@ def _verdict_dir(workdir: str) -> str:
     return os.path.join(workdir, ".gitreins", "history")
 
 
+def _declared_criteria(value: object) -> list[Any]:
+    """The criteria list carried by a verdict field, or ``[]`` when it has none.
+
+    ``task_criteria`` is the criteria text as the task declared it: the field
+    ``engine.persist`` stamps on every verdict it writes, and the field
+    ``scripts/judgment_viewer.py`` already reads its ``criteria`` from. Only a
+    list/tuple is accepted — a record whose field holds one bare string must
+    not have its characters counted as criteria.
+    """
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    return []
+
+
+def _criteria_items(value: object) -> list[Any]:
+    """``value`` when it is a list of criterion records, else ``[]``.
+
+    ``evidence.items`` is the verdict's evidence MANIFEST, not its criteria: it
+    lists the artifacts collected next to ``verdict.json`` (``name``/``file``/
+    ``bytes``/``source`` — the brief, the driver log, the graded patch), and on
+    this repository's history every evidence item is an artifact, never a
+    criterion. Taking that list verbatim would report an artifact count as a
+    criterion count: a plausible number, which is worse than a missing one. The
+    fallback therefore fires only for genuinely criteria-shaped entries.
+    """
+    if not isinstance(value, list):
+        return []
+    if all(isinstance(entry, dict) and "criterion" in entry for entry in value):
+        return list(value)
+    return []
+
+
 def _verdict_row(day: str, h: str, v: dict[str, Any]) -> VerdictRow:
     """One metadata-only list row for a parsed verdict document."""
     stages = v.get("stages") or {}
     t1 = stages.get("tier1") or {}
     t2 = stages.get("tier2") or {}
-    items = v.get("items") or t2.get("items") or []
+    evidence_block = v.get("evidence") or {}
+    # REVIEW-GITREINS-033: the structured criteria are not always on the
+    # record's top level. A tier-2 judge that answers in prose writes no
+    # ``stages.tier2.items`` at all — not one verdict in this repository's
+    # history carries them — so the count collapsed to 0 for criteria that
+    # were in fact graded and reported in the judge's summary. Two further
+    # locations are tried after ``stages.tier2``, in the documented order: a
+    # criteria-shaped evidence manifest, then the declared ``task_criteria``
+    # list every persisted verdict carries.
+    items = (
+        v.get("items")
+        or t2.get("items")
+        or _criteria_items(evidence_block.get("items"))
+        or _declared_criteria(v.get("task_criteria"))
+        or []
+    )
     row: VerdictRow = {
         "date": day,
         "hash": h,

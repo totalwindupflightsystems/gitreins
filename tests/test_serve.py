@@ -1483,3 +1483,161 @@ def test_health_needs_no_verdict_store_to_answer(live_server: object) -> None:
 
     for verdict_key in ("total", "passed", "failed", "pass_rate", "usage"):
         assert verdict_key not in payload
+
+
+# ── list rows: where a verdict's criteria actually live ──────────────────────
+# REVIEW-GITREINS-033. `_verdict_row` counted `v.items or stages.tier2.items`
+# only, so a tier-2 judge that answered in PROSE — no structured items array
+# anywhere in its stages — reported "0 criteria" for criteria that were graded
+# and spelled out in the judge's summary. Two further locations are tried after
+# the structured ones: a criteria-shaped evidence manifest, and the
+# `task_criteria` list `engine.persist` stamps on every verdict it writes.
+#
+# The last test here is the one that keeps the fix honest: on this repository's
+# real records `evidence.items` is the EVIDENCE MANIFEST (the brief, the driver
+# log, the graded patch), so a fallback that took that list verbatim would
+# report an artifact count as a criterion count — 2 "criteria" for a verdict
+# that declared one. A plausible wrong number is worse than a missing one.
+
+
+def _criteria(n: int) -> list[dict]:
+    """``n`` criterion records, the shape a structured tier-2 verdict emits."""
+    return [
+        {"criterion": f"criterion {i} of {n}", "status": "PASS", "detail": f"evidence {i}"}
+        for i in range(1, n + 1)
+    ]
+
+
+def _prose_verdict(**overrides: object) -> dict:
+    """A verdict whose tier-2 stage answered in prose: no structured items."""
+    verdict = {
+        "task_id": "REVIEW-033",
+        "task_title": "Prose-judged task",
+        "passed": True,
+        "items": [],
+        "stages": {
+            "tier1": {"id": "tier1", "passed": True, "summary": "all static gates passed"},
+            "tier2": {
+                "id": "tier2",
+                "passed": True,
+                "summary": "COMPLETE\n  ✓ 1) first criterion: done.\n  ✓ 2) second: done.",
+            },
+        },
+    }
+    verdict.update(overrides)
+    return verdict
+
+
+def _recorded_prose_verdict() -> dict:
+    """The shape recorded by .gitreins/history/2026-10-22/62e9b852/verdict.json.
+
+    Every field below was read off that record: no top-level criteria, a tier-2
+    stage carrying only ``steps``/``summary``, one declared ``task_criteria``
+    entry, and an evidence manifest holding the patch artifacts it collected.
+    """
+    return {
+        "task_id": "REVIEW-GITREINS-LLM",
+        "task_title": "Coherent LLM defaults, no ambient keys",
+        "task_criteria": [
+            "1) ambient keys must be opt-in. 2) default base_url/model coherent."
+            " 3) pytest -k llm exits 0."
+        ],
+        "passed": True,
+        "items": [],
+        "stages": {
+            "tier1": {"id": "tier1", "passed": True, "any_failed": False, "summary": "gates ok"},
+            "tier2": {
+                "id": "tier2",
+                "passed": True,
+                "any_failed": False,
+                "summary": "COMPLETE\n  ✓ 1) ambient keys opt-in.\n  ✓ 3) 108 passed.",
+                "steps": [{"id": "tier2", "type": "ai_eval", "passed": True, "output": "COMPLETE"}],
+            },
+        },
+        "evidence": {
+            "collected_at": "2026-10-22T00:50:00Z",
+            "task_id": "REVIEW-GITREINS-LLM",
+            "items": [
+                {
+                    "name": "patch",
+                    "label": "Landed commit patch",
+                    "file": "commit.patch",
+                    "bytes": 33895,
+                    "truncated": False,
+                    "source": "git show 918b3a8d59f1",
+                },
+                {
+                    "name": "worktree",
+                    "label": "Working-tree diff (graded)",
+                    "file": "worktree.patch",
+                    "bytes": 262176,
+                    "truncated": True,
+                    "source": "git diff HEAD (working tree)",
+                },
+            ],
+        },
+    }
+
+
+def test_verdict_row_falls_back_to_criteria_inside_evidence_items() -> None:
+    """A criteria-shaped evidence manifest is counted when nothing else is."""
+    verdict = _prose_verdict(
+        evidence={"collected_at": "2026-09-10T12:00:00Z", "items": _criteria(3)}
+    )
+
+    row = serve._verdict_row("2026-09-10", "deadbeef", verdict)
+
+    assert row["n_criteria"] == 3
+
+
+def test_verdict_row_keeps_structured_items_ahead_of_the_fallbacks() -> None:
+    """The existing precedence is preserved: structured criteria still win."""
+    tier2_items = [{"criterion": "tier-2 criterion", "status": "PASS", "detail": "detail"}]
+    verdict = _prose_verdict(
+        evidence={"items": _criteria(3)},
+        task_criteria=["declared one", "declared two"],
+    )
+    verdict["stages"]["tier2"]["items"] = tier2_items
+
+    assert serve._verdict_row("2026-09-10", "deadbeef", verdict)["n_criteria"] == 1
+
+    # …and the legacy top-level list still outranks the tier-2 block.
+    verdict["items"] = _criteria(2)
+    assert serve._verdict_row("2026-09-10", "deadbeef", verdict)["n_criteria"] == 2
+
+
+def test_verdict_row_counts_task_criteria_for_a_prose_judged_verdict() -> None:
+    """The real prose-judged shape reports the criteria the task declared."""
+    verdict = _recorded_prose_verdict()
+
+    row = serve._verdict_row("2026-10-22", "62e9b852", verdict)
+
+    assert row["n_criteria"] == 1
+    # The manifest holds TWO artifacts. Counting them as criteria is the
+    # failure mode this test exists to forbid: the shipped row said 0, and a
+    # verbatim evidence.items fallback would have said 2.
+    assert row["n_criteria"] != len(verdict["evidence"]["items"]), (
+        "the evidence manifest's artifact count was reported as a criterion count"
+    )
+
+
+def test_verdict_row_counts_zero_only_when_no_criteria_are_recorded() -> None:
+    """No structured items, no criteria-shaped evidence, no task_criteria => 0."""
+    row = serve._verdict_row("2026-09-10", "deadbeef", _prose_verdict())
+
+    assert row["n_criteria"] == 0
+
+
+def test_verdict_list_route_reports_criteria_for_a_prose_judged_verdict(tmp_path: Path) -> None:
+    """The list route a client actually reads carries the corrected count."""
+    entry = tmp_path / ".gitreins" / "history" / "2026-10-22" / "62e9b852"
+    entry.mkdir(parents=True)
+    (entry / "verdict.json").write_text(json.dumps(_recorded_prose_verdict()), encoding="utf-8")
+
+    with running_server(str(tmp_path)) as address:
+        status, body = get(address, "/api/verdicts")
+
+    assert status == 200
+    rows = json_body(body)["verdicts"]
+    assert [row["task_id"] for row in rows] == ["REVIEW-GITREINS-LLM"]
+    assert rows[0]["n_criteria"] == 1
