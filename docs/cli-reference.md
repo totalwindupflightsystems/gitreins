@@ -294,7 +294,62 @@ exits 2 unless the repo sets `guards.allow_skips: true`. The reason names which
 scope was empty: `No Go files staged` (the index) or `No Go files in scope`
 (working-tree / whole tree).
 
-## 5. `gitreins judge`
+
+## Optional Auger spec-alignment guard (GR-154)
+
+The pre-commit hook can call an external Auger checker over the Git index
+without changing the existing guard behavior. The generated configuration is
+disabled by default; leaving `spec_alignment.enabled: false` preserves the
+legacy hook byte-for-byte and does not invoke a checker.
+
+```yaml
+spec_alignment:
+  enabled: false
+  command: "auger check-spec-alignment"  # command reads the staged diff on stdin
+  endpoint: ""                            # alternative JSON POST endpoint
+  spec_root: "specs"
+  mode: "warn"                            # confirmed fail: warn or block
+  missing_checker: "warn"                 # unavailable/invalid: warn or block
+  timeout: 30                              # seconds
+  protocol_version: "1"
+  min_checker_version: "1.0.0"
+```
+
+The command form is invoked without a shell and receives
+`--repo-root <absolute-repository-root>`, `--spec-root <absolute-spec-root>`,
+`--protocol-version <value>`, and `--diff-stdin`; the exact staged binary diff
+is sent on stdin. The endpoint form receives a JSON POST with `protocol`,
+`version`, `repo_root`, `spec_root`, and `diff`. Auger must return one JSON
+object with `protocol`, `version`, and `status` (`pass`, `warn`, or `fail`;
+`block` remains accepted as a backwards-compatible alias for `fail`). The
+configured protocol and minimum checker version are a compatibility handshake;
+incompatible responses are treated as an invalid checker result. A process exit
+without a parseable, compatible handshake and valid status does not infer a
+verdict from the exit code.
+
+Only staged content is sent. The adapter does not parse XML/specifications,
+run an LLM, or write source, spec, board, or evidence files. Commands are
+bounded and their process groups are joined on timeout. Checker output is
+redacted before it is printed or persisted, including token, password,
+authorization, and common API-key forms.
+
+| Result | `mode: warn` | `mode: block` |
+|--------|--------------|---------------|
+| `pass` | exit 0 | exit 0 |
+| `warn` | warning; exit 0 | warning; exit 0 |
+| confirmed `fail` (or `block` alias) | warning; exit 0 | fail; exit 1 |
+
+`mode` governs confirmed checker findings only. The compatibility-named
+`missing_checker` setting is the explicit policy for every unavailable or
+invalid checker outcome: a missing command, timeout, crash/unreachable checker,
+unparseable output, incompatible handshake, or invalid status. Its default
+`warn` records a warning (a missing command is shown as degraded/skipped) and
+preserves exit 0; `block` fails the gate. This keeps infrastructure failures
+separate from Auger's `pass`/`warn`/`fail` verdict vocabulary.
+
+ch:trace row=GR-154 spec=docs/traceability-doctrine.md#2-the-marker wave=none:serial-rework test=tests/test_spec_alignment.py::test_enabled_pass_warn_and_confirmed_block doc=docs/cli-reference.md prompt=/tmp/gitreins-foreman-2026-10-31-GR154-rework-brief.txt evidence=none:gate-logs-remain-local witness=none:worker-no-hosted-ci verdict=none:foreman-runs-judge-after-merge commit=none:worker-commit-sha-is-reported-after-commit memory=none:foreman-managed
+
+## 6. `gitreins judge`
 
 Evaluate a task: runs Tier 1 guards, then the Tier 2 LLM judge
 (unless skipped), and persists the verdict. With `--ephemeral` the criteria are

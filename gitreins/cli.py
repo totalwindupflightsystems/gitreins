@@ -150,6 +150,17 @@ quality:
   targets_source: ""
   per_metric_mode: {}
   timeout: 300
+# Optional Auger spec-alignment guard (GR-154); disabled preserves legacy hooks.
+spec_alignment:
+  enabled: false
+  command: ""                       # argv command; reads staged diff from stdin
+  endpoint: ""                       # alternatively, HTTPS JSON POST endpoint
+  spec_root: "specs"                 # passed as an absolute repository path
+  mode: "warn"                       # confirmed fail: "warn" or "block"
+  missing_checker: "warn"            # checker unavailable/invalid: "warn" or "block"
+  timeout: 30                         # seconds; process group is always joined
+  protocol_version: "1"               # Auger compatibility handshake
+  min_checker_version: "1.0.0"
 guards:
   secrets: true
   lint: true
@@ -682,6 +693,21 @@ def _update_fleet_resolution_sections(existing: dict[str, Any], changed: list[st
     if "disk_ceiling_mb" not in fleet:
         fleet["disk_ceiling_mb"] = 4096
         changed.append("worktree_fleet.disk_ceiling_mb")
+
+    # Optional Auger spec-alignment guard (GR-154), always generated disabled.
+    if "spec_alignment" not in existing:
+        existing["spec_alignment"] = {
+            "enabled": False,
+            "command": "",
+            "endpoint": "",
+            "spec_root": "specs",
+            "mode": "warn",
+            "missing_checker": "warn",
+            "timeout": 30,
+            "protocol_version": "1",
+            "min_checker_version": "1.0.0",
+        }
+        changed.append("spec_alignment")
 
     # Jev resolution gate (JEVRES-006) — additive like worktree_fleet: a fresh
     # or upgraded config gets the full block with EVERY SURFACE DISABLED (the

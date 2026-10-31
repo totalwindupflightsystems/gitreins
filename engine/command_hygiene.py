@@ -193,6 +193,7 @@ def run_bounded(
     timeout: float = 30.0,
     max_output: int = MAX_EVIDENCE_CHARS,
     env: dict[str, Any] | None = None,
+    input_text: str | None = None,
 ) -> dict[str, Any]:
     """Run ``cmd`` in its own session; always reap leftover group members.
 
@@ -227,6 +228,7 @@ def run_bounded(
         proc = subprocess.Popen(
             cmd,
             shell=not isinstance(cmd, list),
+            stdin=subprocess.PIPE if input_text is not None else subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -240,7 +242,7 @@ def run_bounded(
     timed_out = False
     output = ""
     try:
-        output, _ = proc.communicate(timeout=timeout)
+        output, _ = proc.communicate(input=input_text, timeout=timeout)
     except subprocess.TimeoutExpired:
         timed_out = True
         kill_group(proc.pid)
