@@ -1807,6 +1807,12 @@ class GuardManager:
                     )
                     return _finalize(self._timeout_result(results, warnings))
 
+        spec_alignment_cfg = self.config.get("spec_alignment", {})
+        if isinstance(spec_alignment_cfg, dict) and spec_alignment_cfg.get("enabled") is True:
+            spec_result = self._check_spec_alignment(spec_alignment_cfg)
+            results.append(spec_result)
+            self._full_outputs[spec_result.name] = spec_result.output or spec_result.error
+
         quality_cfg = self.config.get("quality", {})
         if isinstance(quality_cfg, dict) and quality_cfg.get("enabled") is True:
             from engine.config import QualityConfig
@@ -1909,6 +1915,43 @@ class GuardManager:
         result.extra["degraded"] = result.degraded
         result.extra["skipped_steps"] = result.skipped_steps
         return result
+
+    def _check_spec_alignment(self, raw_config: dict[str, Any]) -> GuardResult:
+        """Run the opt-in Auger adapter over the index diff only (GR-154)."""
+        from engine.config import SpecAlignmentConfig
+        from engine.spec_alignment import run_checker
+
+        try:
+            cfg = SpecAlignmentConfig.from_dict(raw_config)
+            outcome = run_checker(
+                self.workdir,
+                command=cfg.command,
+                endpoint=cfg.endpoint,
+                spec_root=cfg.spec_root,
+                mode=cfg.mode,
+                missing_checker=cfg.missing_checker,
+                timeout=cfg.timeout,
+                protocol_version=cfg.protocol_version,
+                min_checker_version=cfg.min_checker_version,
+            )
+        except (
+            Exception
+        ) as exc:  # a malformed optional gate must be visible, not fatal to the harness
+            return GuardResult(
+                name="spec_alignment",
+                passed=False,
+                error=f"spec alignment: {type(exc).__name__}",
+            )
+        return GuardResult(
+            name="spec_alignment",
+            passed=outcome.passed,
+            output=outcome.output,
+            error=outcome.error,
+            warning=outcome.warning,
+            exit_code=outcome.exit_code,
+            skipped=outcome.missing_checker and outcome.passed,
+            skip_reason="checker missing" if outcome.missing_checker and outcome.passed else "",
+        )
 
     def _timeout_result(self, results: list[GuardResult], warnings: list[str]) -> Tier1Result:
         """Build the Tier1Result for a hook_timeout early-return (GR-140).

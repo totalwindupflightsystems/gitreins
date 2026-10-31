@@ -71,6 +71,51 @@ class QualityConfig:
 
 
 @dataclass
+class SpecAlignmentConfig:
+    """Optional Auger-backed staged-diff specification alignment (GR-154)."""
+
+    enabled: bool = False
+    command: str = ""
+    endpoint: str = ""
+    spec_root: str = "specs"
+    mode: str = "warn"
+    missing_checker: str = "warn"
+    timeout: int = 30
+    protocol_version: str = "1"
+    min_checker_version: str = "1.0.0"
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any] | None) -> "SpecAlignmentConfig":
+        block = value if isinstance(value, dict) else {}
+        mode = str(block.get("mode", "warn")).lower()
+        missing = str(block.get("missing_checker", "warn")).lower()
+        return cls(
+            enabled=block.get("enabled") is True,
+            command=str(block.get("command", "")),
+            endpoint=str(block.get("endpoint", "")),
+            spec_root=str(block.get("spec_root", "specs")),
+            mode=mode if mode in {"warn", "block"} else "warn",
+            missing_checker=missing if missing in {"warn", "block"} else "warn",
+            timeout=_coerce_positive_int(block.get("timeout", 30)),
+            protocol_version=str(block.get("protocol_version", "1")),
+            min_checker_version=str(block.get("min_checker_version", "1.0.0")),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "enabled": self.enabled,
+            "command": self.command,
+            "endpoint": self.endpoint,
+            "spec_root": self.spec_root,
+            "mode": self.mode,
+            "missing_checker": self.missing_checker,
+            "timeout": self.timeout,
+            "protocol_version": self.protocol_version,
+            "min_checker_version": self.min_checker_version,
+        }
+
+
+@dataclass
 class DataProtectionConfig:
     """The top-level ``data_protection:`` policy block (GR-146).
 
@@ -212,6 +257,10 @@ class GitReinsDefaults:
 
     # ── Repo-produced quality snapshot (GR-142) ──
     quality: QualityConfig = field(default_factory=QualityConfig)
+
+    # ── Optional Auger spec-alignment guard (GR-154) ──
+    # Disabled and side-effect free unless a repository opts in explicitly.
+    spec_alignment: SpecAlignmentConfig = field(default_factory=SpecAlignmentConfig)
 
     # ── Tier-1 data protection (GR-146) ──
     # Ships DISABLED: an absent block is the backwards-compatible no-op, so an
@@ -414,6 +463,7 @@ class GitReinsDefaults:
             ),
             resolution_egress_exclude=_resolution_excludes(config_dict),
             quality=QualityConfig.from_dict(config_dict.get("quality")),
+            spec_alignment=SpecAlignmentConfig.from_dict(config_dict.get("spec_alignment")),
             data_protection=DataProtectionConfig.from_dict(config_dict.get("data_protection")),
             _source=".gitreins/config.yaml" if config_dict else self._source,
         )
@@ -495,6 +545,7 @@ class GitReinsDefaults:
                 "egress_exclude": list(self.resolution_egress_exclude),
             },
             "quality": self.quality.to_dict(),
+            "spec_alignment": self.spec_alignment.to_dict(),
             "data_protection": self.data_protection.to_dict(),
         }
 
