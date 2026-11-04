@@ -25,6 +25,7 @@ import os
 import re
 import shlex
 import subprocess
+import sys
 import tempfile
 import time
 from contextlib import suppress
@@ -1564,6 +1565,34 @@ class GuardManager:
         self._hook_timeout = _coerce_timeout(
             guards_cfg.get("hook_timeout", 300), "hook_timeout", 300
         )
+        # A hook budget at or below the tests arm can never finish: the tests arm
+        # is allowed to run to test_timeout, so the overall budget dies first and
+        # the run ends in the GR-140 timeout path — which reports passed=True and
+        # says "commit allowed to proceed (fail-open)" while the arms that never
+        # ran (build, lint, dead-code) were never checked at all.
+        #
+        # Measured 2026-11-03 in the scheduler repo: test_timeout 900, hook_timeout
+        # unset (300 default). The commit printed
+        #   "Tier 1 Guards: PASS" beside "go_tests - FAIL"
+        # and landed. An audit of the fleet's 695 gitreins configs that day found
+        # 575 (83%) in the same shape — mostly test_timeout 900/1800 with an
+        # implicit 300 hook budget, plus explicit pairs like 1800/1800.
+        #
+        # The budget is therefore DERIVED, not merely warned about: an impossible
+        # pair is corrected to test_timeout + slack, and the correction is loud,
+        # because silently accepting it is what made the gate lie. Repos that want
+        # a different budget should set hook_timeout above their tests arm.
+        if self._hook_timeout <= self._test_timeout:
+            derived = self._test_timeout + 120
+            print(
+                f"WARN: hook_timeout={self._hook_timeout}s <= test_timeout="
+                f"{self._test_timeout}s in {self.workdir}: the guard would be cut "
+                f"off mid-run and report a fail-open PASS. Raising this run's "
+                f"budget to {derived}s — set guards.hook_timeout above "
+                f"guards.test_timeout to fix it at the source.",
+                file=sys.stderr,
+            )
+            self._hook_timeout = derived
 
         # Project type detection — every marker query comes from
         # engine.lang_detect, the single source of truth shared with the
