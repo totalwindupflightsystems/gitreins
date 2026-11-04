@@ -373,9 +373,27 @@ class TestTimeoutCoercion:
             GuardManager(tmp_workdir, {"guards": {"test_timeout": "0"}})
 
     def test_hook_timeout_string_coerced(self, tmp_workdir: str) -> None:
-        """hook_timeout is the same bug class — '120s' → 120."""
+        """hook_timeout is the same bug class — '120s' → 120 before the budget check.
+
+        The parsed value is 120, but an explicit hook_timeout BELOW the tests arm
+        can never finish, so the manager derives test_timeout + 120 = 300 for this
+        run (2026-11-03: 575 of 695 fleet configs carried this impossible pair and
+        the guard fail-opened as a result). The coercion is still what is proven
+        here — the value is a number, not the string "120s" that used to crash
+        subprocess.run(timeout=...).
+        """
         gm = GuardManager(tmp_workdir, {"guards": {"hook_timeout": "120s"}})
-        assert gm._hook_timeout == 120
+        assert gm._hook_timeout == 180 + 120  # derived: test_timeout default 180 + slack
+
+    def test_hook_timeout_below_tests_arm_is_derived(self, tmp_workdir: str) -> None:
+        """An impossible pair (explicitly 1800/1800) is corrected, not accepted."""
+        gm = GuardManager(tmp_workdir, {"guards": {"test_timeout": 1800, "hook_timeout": 1800}})
+        assert gm._hook_timeout == 1800 + 120
+
+    def test_hook_timeout_above_tests_arm_is_untouched(self, tmp_workdir: str) -> None:
+        """A sane budget is left exactly as configured."""
+        gm = GuardManager(tmp_workdir, {"guards": {"test_timeout": 1800, "hook_timeout": 3900}})
+        assert gm._hook_timeout == 3900
 
     def test_hook_timeout_garbage_raises_value_error(self, tmp_workdir: str) -> None:
         """Garbage hook_timeout → clear ValueError naming hook_timeout."""
@@ -1213,6 +1231,12 @@ class TestTimeoutEarlyReturnCarriesAllowSkips:
                 }
             },
         )
+        # 2026-11-03: the manager now DERIVES hook_timeout above test_timeout
+        # (a hook budget below the tests arm can never finish and made the guard
+        # fail-open), so "hook_timeout: 1" no longer reaches the timeout path by
+        # config alone. Force the budget after construction: this test grades the
+        # timeout early-return's extra map, not the budget policy.
+        gm._hook_timeout = 1
         result = gm.run_all()
         assert any("timed out" in w for w in result.warnings)
         assert result.extra.get("allow_skips") is True
