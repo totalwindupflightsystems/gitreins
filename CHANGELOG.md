@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-11-04
+
+### Added
+- **Opt-in Auger spec-alignment guard (GR-154)** — a new `spec_alignment`
+  guard lane sends the staged diff and repo/spec root to Auger's documented
+  checker and reports `pass`/`warn`/`fail` (`block` accepted as an alias).
+  The lane ships **disabled by default**; in `warn` mode a confirmed failure
+  never blocks the commit, and a missing, timed-out, crashed or unreachable
+  checker follows an explicit `missing_checker` policy rather than guessing.
+  Scoped to staged content only, with findings redacted before they reach the
+  report.
+- **Working-tree content fingerprint (GR-153)** — `gitreins fingerprint
+  [--json]` hashes the final Git-visible workspace bytes without mutating the
+  repository or index, so a harness can pin exactly what a run observed.
+
+### Fixed
+- **QA and dogfood evidence integrity** — a native ENOSPC verdict is preserved
+  instead of being absorbed into a softer cell (DF-GITREINS-POC-104), the
+  fresh-install artifact identity is derived rather than borrowed from another
+  product (DF-GITREINS-POC-103), and the disconnect vacuity check now fails
+  closed (DF-GITREINS-POC-100).
+- **Secrets lane grades the whole tree under `--full` (DF-027)** and
+  `push-check` detects split-credential concatenation.
+- **Guard summary carries a DEGRADED marker** whenever a lane skips, so a
+  green summary can no longer hide a lane that never ran
+  (DF-GITREINS-POC-83).
+- **CI isolation** — the INT-CI-22 xdist CWD leak is repaired, and
+  `test_tier1_lock.py` / the gitleaks-absent branch tolerate a shared
+  subprocess cwd and a host without gitleaks (INT-CI-3720, INT-CI-3721).
+- **`mypy --strict` tranches 9–17** for `engine/` — serve, preflight, prescreen,
+  pipeline, container boundaries and the YAML boundary are now annotated under
+  strict mode (REVIEW-GITREINS-010).
+- **Docs count drift is reported in full** and the counts synced
+  (REVIEW-GITREINS-032); **`serve list` falls back to `evidence.items`** when a
+  tier-2 model omits the structured array (REVIEW-GITREINS-033).
+- **`resolve` names the Hilo bootstrap commands** in its empty-bundle ABSTAIN
+  hint (DF-025), and the embedded `namespaces/coding-hermes` store is ignored
+  instead of tracked as a gitlink.
+
 ## [0.17.1] - 2026-10-23
 
 ### Fixed
