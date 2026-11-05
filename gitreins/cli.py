@@ -51,6 +51,7 @@ from typing import TYPE_CHECKING, Any, cast
 import yaml
 
 from engine.version import __version__
+from engine.config_schema import ConfigIssue, validate_config, validate_config_file
 from engine.repo_paths import (
     WorktreeResolutionError,
     resolve_worktree_paths,
@@ -275,6 +276,32 @@ def _render_pre_push_hook() -> str:
     )
 
 
+_REPORTED_CONFIG_ISSUES: set[tuple[str, float]] = set()
+
+
+def _emit_config_issues(config_path: str, issues: list) -> None:
+    """Report schema issues once per (file, mtime) per process (GR-160).
+
+    The loader is called repeatedly in one run (guard, judge, commit all load
+    config), so the same warning must not be printed four times. Issues never
+    fail the load: a config shared across GitReins versions may legitimately
+    carry a key this build does not know.
+    """
+    if not issues:
+        return
+    try:
+        stamp = os.path.getmtime(config_path)
+    except OSError:
+        stamp = 0.0
+    key = (config_path, stamp)
+    if key in _REPORTED_CONFIG_ISSUES:
+        return
+    _REPORTED_CONFIG_ISSUES.add(key)
+    logger = logging.getLogger("gitreins")
+    for issue in issues:
+        logger.warning("%s: %s", config_path, issue.render())
+
+
 def load_config(workdir: str) -> dict[str, Any]:
     """Load .gitreins/config.yaml, returning {} if not found.
 
@@ -284,6 +311,11 @@ def load_config(workdir: str) -> dict[str, Any]:
     whether the original file existed before treating an empty return
     as "no config" — otherwise they will overwrite a broken-but-valuable
     config file with auto-generated defaults.
+
+    GR-160: a successful parse is validated against the keys GitReins actually
+    reads. Unknown keys, wrong types and bad enum values are reported as
+    warnings — never silently ignored, never fatal — because one config file is
+    commonly shared across several GitReins versions.
     """
     logger = logging.getLogger("gitreins")
     config_path = os.path.join(workdir, ".gitreins", "config.yaml")
@@ -294,7 +326,10 @@ def load_config(workdir: str) -> dict[str, Any]:
             data = yaml.safe_load(f)
             if data is None:
                 return {}
-            return cast(dict[str, Any], data)
+            loaded = cast(dict[str, Any], data)
+            _emit_config_issues(config_path, validate_config(loaded))
+            return loaded
+
     except yaml.YAMLError as e:
         logger.warning(
             "Failed to parse %s: %s — config file exists but YAML is invalid. "
@@ -1813,6 +1848,34 @@ def _doctor_apply_fixes(
     print(f"Summary: rewrote {len(invalid)} of {total} entries; {len(remaining)} invalid remain")
     if remaining:
         raise SystemExit(1)
+
+
+def cmd_config_validate(args: argparse.Namespace) -> None:
+    """Report config keys this GitReins does not read (GR-160).
+
+    A misspelled key parses fine, is ignored, and the guard runs at its default,
+    so the operator believes a guard is on when it is off. Warnings never fail
+    the command by default — one config file is often shared across versions —
+    and ``--strict`` promotes type/enum violations to a non-zero exit for CI.
+    """
+    workdir = get_workdir()
+    config_path = os.path.join(workdir, ".gitreins", "config.yaml")
+    if not os.path.isfile(config_path):
+        print(
+            f"no .gitreins/config.yaml in {workdir} — run `gitreins init` first",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    issues: list[ConfigIssue] = validate_config_file(config_path, strict=args.strict)
+    if args.json:
+        print(json.dumps([issue.to_dict() for issue in issues], indent=2))
+    elif issues:
+        for issue in issues:
+            print(issue.render())
+    else:
+        print(f"{config_path}: OK — every key is one this version reads")
+    errors = [issue for issue in issues if issue.severity == "error"]
+    raise SystemExit(1 if errors else 0)
 
 
 def cmd_doctor(args: argparse.Namespace) -> None:
@@ -4391,6 +4454,18 @@ def _add_basic_parsers(parser: argparse.ArgumentParser, sub: _SubParsers) -> Non
     init_p = sub.add_parser("init", help="Smart init — detect language, size, optimal config")
     init_p.add_argument("--reset", action="store_true", help="Reset config to smart defaults")
 
+    # config-validate — GR-160: report keys GitReins does not read
+    config_p = sub.add_parser(
+        "config-validate",
+        help="Check .gitreins/config.yaml for unknown keys, wrong types and bad values",
+    )
+    config_p.add_argument("--json", action="store_true", help="Machine-readable output")
+    config_p.add_argument(
+        "--strict",
+        action="store_true",
+        help="Exit 1 on type/enum violations (unknown keys stay warnings)",
+    )
+
     # doctor — .gitleaks.toml config check/migration (DF-GITREINS-POC-54)
     doctor_p = sub.add_parser(
         "doctor",
@@ -5119,6 +5194,7 @@ _QA_HANDLERS = {
 _SIMPLE_HANDLERS = {
     "install": "cmd_install",
     "init": "cmd_init",
+    "config-validate": "cmd_config_validate",
     "doctor": "cmd_doctor",
     "fingerprint": "cmd_fingerprint",
     "guard": "cmd_guard_run",
