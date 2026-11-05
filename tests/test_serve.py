@@ -259,6 +259,97 @@ def test_metrics_endpoint_exports_five_core_metric_families(live_server: object)
         assert name in exposition
 
 
+def _write_job(directory: Path, job_id: str, status: str, pid: int | None) -> None:
+    """Write one minimal job record into the isolated store (OBS-GITREINS-3)."""
+    directory.mkdir(parents=True, exist_ok=True)
+    record = {"id": job_id, "status": status, "pid": pid}
+    (directory / f"{job_id}.json").write_text(json.dumps(record), encoding="utf-8")
+
+
+def _gauge_value(exposition: str, name: str, labels: str | None = None) -> float | None:
+    """Return the sample value of one exposition series, or None if absent."""
+    series = f"{name}{{{labels}}}" if labels is not None else name
+    match = re.search(rf"^{re.escape(series)} ([0-9.eE+-]+)$", exposition, re.MULTILINE)
+    return float(match.group(1)) if match else None
+
+
+def test_metrics_exports_job_store_and_history_families(
+    live_server: object, tmp_path: Path
+) -> None:
+    """The three scrape-time families answer on the default (empty) store."""
+    _write_job(tmp_path / "gitreins-jobs", "job-running-0", "running", os.getpid())
+
+    status, body = get(live_server, "/metrics")
+
+    assert status == 200
+    exposition = body.decode("utf-8")
+    for name in (
+        "gitreins_jobs_records",
+        "gitreins_jobs_orphaned_running",
+        "gitreins_history_bytes",
+    ):
+        assert name in exposition
+
+
+def test_metrics_counts_job_records_and_orphaned_running(
+    live_server: object, tmp_path: Path
+) -> None:
+    """Records partition by status; orphans = running records with absent/dead pid."""
+    jobs_dir = tmp_path / "gitreins-jobs"
+    for i in range(2):
+        _write_job(jobs_dir, f"job-complete-{i}", "complete", os.getpid())
+    _write_job(jobs_dir, "job-error-0", "error", None)
+    _write_job(jobs_dir, "job-failed-0", "failed", 0)
+    # A running record owned by THIS process is alive: it must NOT count.
+    _write_job(jobs_dir, "job-running-live", "running", os.getpid())
+    # Absent pid (None) and a real, reaped pid both count as orphaned.
+    _write_job(jobs_dir, "job-running-no-pid", "running", None)
+    dead = subprocess.Popen([sys.executable, "-c", "pass"])
+    dead.wait()
+    assert serve.pid_alive(dead.pid) is False
+    _write_job(jobs_dir, "job-running-dead-pid", "running", dead.pid)
+
+    status, body = get(live_server, "/metrics")
+
+    assert status == 200
+    exposition = body.decode("utf-8")
+    assert _gauge_value(exposition, "gitreins_jobs_records", 'status="complete"') == 2
+    assert _gauge_value(exposition, "gitreins_jobs_records", 'status="error"') == 1
+    assert _gauge_value(exposition, "gitreins_jobs_records", 'status="failed"') == 1
+    assert _gauge_value(exposition, "gitreins_jobs_records", 'status="running"') == 3
+    # Exactly the two absent/dead-pid records — the live getpid one excluded.
+    assert _gauge_value(exposition, "gitreins_jobs_orphaned_running") == 2
+
+
+def test_metrics_reports_history_bytes_for_served_checkout(
+    live_server: object, repo_fixture: dict
+) -> None:
+    """gitreins_history_bytes equals the fixture history bytes, repo-labelled."""
+    history = Path(str(repo_fixture["root"])) / ".gitreins" / "history"
+    expected = sum(p.stat().st_size for p in history.rglob("*") if p.is_file())
+    assert expected > 0, "the fixture must have written verdict/evidence files"
+
+    status, body = get(live_server, "/metrics")
+
+    assert status == 200
+    exposition = body.decode("utf-8")
+    repo = os.path.basename(os.path.abspath(str(repo_fixture["root"])))
+    assert _gauge_value(exposition, "gitreins_history_bytes", f'repo="{repo}"') == expected
+
+
+def test_metrics_answers_200_with_missing_job_store(
+    live_server: object, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A nonexistent jobs dir degrades to zero; the orphaned gauge stays present."""
+    monkeypatch.setenv("GITREINS_JOB_DIR", str(tmp_path / "does-not-exist"))
+
+    status, body = get(live_server, "/metrics")
+
+    assert status == 200
+    exposition = body.decode("utf-8")
+    assert _gauge_value(exposition, "gitreins_jobs_orphaned_running") == 0
+
+
 def test_existing_route_increments_request_counter(live_server: object) -> None:
     def sample_value() -> float:
         exposition = serve.generate_latest(serve.REGISTRY).decode("utf-8")

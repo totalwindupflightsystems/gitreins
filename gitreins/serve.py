@@ -62,7 +62,8 @@ from prometheus_client import (  # type: ignore[import-not-found]
 )
 
 from engine import evidence, qa_ledger, usage
-from engine.persist import KIND_RESOLUTION
+from engine.job_store import list_jobs, pid_alive
+from engine.persist import KIND_RESOLUTION, VerdictPersister
 from engine.version import __version__
 from engine.repo_paths import (
     WorktreeResolutionError,
@@ -95,6 +96,68 @@ VERDICTS_TOTAL = Gauge(
 VERDICTS_FAILED_TOTAL = Gauge(
     "gitreins_verdicts_failed_total", "Failed graded verdicts in the served checkout.", ("repo",)
 )
+JOBS_RECORDS = Gauge(
+    "gitreins_jobs_records",
+    "Job-store records partitioned by the statuses actually observed.",
+    ("status",),
+)
+JOBS_ORPHANED_RUNNING = Gauge(
+    "gitreins_jobs_orphaned_running",
+    "Running job records whose pid is absent or dead (single-flight key blockers).",
+)
+HISTORY_BYTES = Gauge(
+    "gitreins_history_bytes",
+    "Verdict-history bytes on disk for the served checkout.",
+    ("repo",),
+)
+
+
+def _refresh_job_store_metrics() -> None:
+    """Recompute the job-store gauges from the shared disk store.
+
+    Scrape-time, spec §2b: the gauges read through the SAME ``list_jobs`` /
+    ``pid_alive`` readers the dispatch and judge-status paths use — never a
+    second implementation — because a gauge disagreeing with its source of
+    truth is a wiring bug. A missing or unreadable store degrades to zero
+    contributions; /metrics must still answer 200.
+    """
+    counts: dict[str, int] = {}
+    orphaned = 0
+    try:
+        jobs = list_jobs()
+    except OSError:
+        jobs = []
+    for job in jobs:
+        status = str(job.get("status", ""))
+        counts[status] = counts.get(status, 0) + 1
+        if status == "running" and not pid_alive(job.get("pid")):
+            orphaned += 1
+    for status, count in sorted(counts.items()):
+        JOBS_RECORDS.labels(status=status).set(count)
+    JOBS_ORPHANED_RUNNING.set(orphaned)
+
+
+def _refresh_history_metrics(repo: str, workdir: str) -> None:
+    """Recompute ``gitreins_history_bytes`` from the resolved history dir.
+
+    The path comes from the existing ``VerdictPersister.history_dir`` resolver
+    (config-aware, same source the verdict writes use). A missing or
+    non-directory path, or an unreadable entry, contributes 0 rather than
+    failing the scrape.
+    """
+    total = 0
+    try:
+        history = VerdictPersister(workdir).history_dir
+        if os.path.isdir(history):
+            for root, _dirs, files in os.walk(history):
+                for name in files:
+                    try:
+                        total += os.path.getsize(os.path.join(root, name))
+                    except OSError:
+                        continue
+    except Exception:  # noqa: BLE001 — a broken store must never fail /metrics
+        total = 0
+    HISTORY_BYTES.labels(repo=repo).set(total)
 
 
 def _route_name(path: str) -> str:
@@ -795,6 +858,8 @@ class Handler(BaseHTTPRequestHandler):
             verdict_stats = stats(list_verdicts(self.workdir))
             VERDICTS_TOTAL.labels(repo=repo).set(verdict_stats["total"])
             VERDICTS_FAILED_TOTAL.labels(repo=repo).set(verdict_stats["failed"])
+            _refresh_job_store_metrics()
+            _refresh_history_metrics(repo, self.workdir)
             self._send(200, generate_latest(REGISTRY), CONTENT_TYPE_LATEST)
         elif path == "/health":
             # REVIEW-GITREINS-022: a supervisor, container healthcheck or
