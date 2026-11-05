@@ -51,6 +51,7 @@ from typing import TYPE_CHECKING, Any, cast
 import yaml
 
 from engine.version import __version__
+from engine import install_manifest
 from engine.config_schema import ConfigIssue, validate_config, validate_config_file
 from engine.repo_paths import (
     WorktreeResolutionError,
@@ -190,6 +191,9 @@ history:
 
 PRE_COMMIT_HOOK = """\
 #!/usr/bin/env bash
+# gitreins-managed — this hook is written by `gitreins install` and recorded in
+# .gitreins/install-manifest.json. `gitreins disable` disarms it, `uninstall`
+# removes it, and a pre-existing user hook is restored from .gitreins/backups/.
 # GitReins pre-commit hook — runs Tier 1 guards on staged changes.
 # The gitreins command is PINNED at install time (DF-011): a bare
 # `gitreins` resolves via PATH at commit time and can silently run a
@@ -269,6 +273,7 @@ def _render_pre_push_hook() -> str:
     invocation = _resolve_gitreins_invocation() or "gitreins"
     return (
         "#!/bin/sh\n"
+        "# gitreins-managed — written by `gitreins install`; see .gitreins/install-manifest.json\n"
         f"{invocation} quality-ensure || exit $?\n"
         "while read local_ref local_sha remote_ref remote_sha; do\n"
         f'  {invocation} push-check "$local_sha" "$remote_sha" || exit $?\n'
@@ -605,18 +610,43 @@ def cmd_install(_args: argparse.Namespace) -> None:
             f.write(DEFAULT_GITREINS_CONFIG)
         created.append(config_path)
 
-    # 2. .git/hooks/pre-commit
+    # 2. hooks — back up anything the user already had, then write ours.
+    # GR-161: the backup is recorded in the manifest so `disable` can hand the
+    # repo back to its owner and `uninstall` can restore it rather than guess.
     os.makedirs(hooks_dir, exist_ok=True)
-    hook_existed = os.path.isfile(hook_path)
-    with open(hook_path, "w") as f:
-        f.write(_render_pre_commit_hook())
-    os.chmod(hook_path, 0o755)
-    created.append(hook_path + ("" if not hook_existed else " (overwritten)"))
-
-    with open(pre_push_path, "w") as f:
-        f.write(_render_pre_push_hook())
-    os.chmod(pre_push_path, 0o755)
-    created.append(pre_push_path)
+    artifacts: list[Any] = []
+    for name, target, body in (
+        ("pre-commit", hook_path, _render_pre_commit_hook()),
+        ("pre-push", pre_push_path, _render_pre_push_hook()),
+    ):
+        backup_rel = install_manifest.backup_displaced(workdir, target, name)
+        if backup_rel:
+            created.append(f"{target} (your existing hook saved to {backup_rel})")
+        elif os.path.isfile(target):
+            created.append(f"{target} (refreshed)")
+        else:
+            created.append(target)
+        with open(target, "w") as f:
+            f.write(body)
+        os.chmod(target, 0o755)
+        artifacts.append(
+            install_manifest.Artifact(
+                path=os.path.relpath(target, workdir),
+                kind="hook",
+                sha256=install_manifest.sha256_file(target),
+                backup=backup_rel,
+            )
+        )
+    if os.path.isfile(config_path):
+        artifacts.append(
+            install_manifest.Artifact(
+                path=os.path.relpath(config_path, workdir),
+                kind="config",
+                sha256=install_manifest.sha256_file(config_path),
+            )
+        )
+    manifest_file = install_manifest.record_install(workdir, artifacts)
+    created.append(f"{manifest_file} (manifest of what GitReins owns)")
 
     # 3. .gitignore — protect GitReins state and runtime artifacts
     for gitignore_msg in _ensure_gitignore_entries(
@@ -1876,6 +1906,45 @@ def cmd_config_validate(args: argparse.Namespace) -> None:
         print(f"{config_path}: OK — every key is one this version reads")
     errors = [issue for issue in issues if issue.severity == "error"]
     raise SystemExit(1 if errors else 0)
+
+
+def cmd_disable(_args: argparse.Namespace) -> None:
+    """Disarm the hooks without deleting config or history (GR-161).
+
+    A repo taken out of enforcement must be able to come back without losing
+    state: `disable` restores a displaced user hook or removes the managed one,
+    and leaves .gitreins/ untouched so `enable` is a full reversal.
+    """
+    workdir = get_workdir()
+    for step in install_manifest.disable(workdir):
+        print(f"  {step}")
+
+
+def cmd_enable(_args: argparse.Namespace) -> None:
+    """Re-arm the hooks that `disable` disarmed (GR-161)."""
+    workdir = get_workdir()
+    hooks = {
+        "pre-commit": _render_pre_commit_hook(),
+        "pre-push": _render_pre_push_hook(),
+    }
+    for step in install_manifest.enable(workdir, hooks):
+        print(f"  {step}")
+
+
+def cmd_uninstall(args: argparse.Namespace) -> None:
+    """Remove what install created: hooks + config, history only with --purge.
+
+    Dry-run unless --apply: this deletes files in a repo the operator owns, and
+    a mistake here is not recoverable from the harness side.
+    """
+    workdir = get_workdir()
+    steps = install_manifest.uninstall(
+        workdir, purge=bool(getattr(args, "purge", False)), apply=bool(args.apply)
+    )
+    for step in steps:
+        print(f"  {step}")
+    if not args.apply:
+        print("\nDry run — nothing changed. Re-run with --apply to execute.")
 
 
 def cmd_doctor(args: argparse.Namespace) -> None:
@@ -4454,7 +4523,20 @@ def _add_basic_parsers(parser: argparse.ArgumentParser, sub: _SubParsers) -> Non
     init_p = sub.add_parser("init", help="Smart init — detect language, size, optimal config")
     init_p.add_argument("--reset", action="store_true", help="Reset config to smart defaults")
 
-    # config-validate — GR-160: report keys GitReins does not read
+    # GR-161 lifecycle: disable (disarm, keep state) / enable (re-arm) / uninstall
+    sub.add_parser("disable", help="Disarm the hooks without removing config or history")
+    sub.add_parser("enable", help="Re-arm the hooks after `gitreins disable`")
+    uninstall_p = sub.add_parser(
+        "uninstall", help="Remove the hooks and config GitReins installed (dry-run by default)"
+    )
+    uninstall_p.add_argument(
+        "--apply", action="store_true", help="Execute the removals instead of printing them"
+    )
+    uninstall_p.add_argument(
+        "--purge",
+        action="store_true",
+        help="Also delete .gitreins/ (config, history, backups) — the only way history is removed",
+    )
     config_p = sub.add_parser(
         "config-validate",
         help="Check .gitreins/config.yaml for unknown keys, wrong types and bad values",
@@ -5195,6 +5277,9 @@ _SIMPLE_HANDLERS = {
     "install": "cmd_install",
     "init": "cmd_init",
     "config-validate": "cmd_config_validate",
+    "disable": "cmd_disable",
+    "enable": "cmd_enable",
+    "uninstall": "cmd_uninstall",
     "doctor": "cmd_doctor",
     "fingerprint": "cmd_fingerprint",
     "guard": "cmd_guard_run",

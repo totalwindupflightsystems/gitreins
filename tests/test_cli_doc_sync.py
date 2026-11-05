@@ -104,13 +104,15 @@ def test_live_surface_pins_the_current_cli() -> None:
     """The truth the doc is compared against — pinned so a silent parser
     change shows up here rather than as a mysterious doc failure."""
     top_level, worktree_options, qa_options = _load_module().live_surface(REPO_ROOT)
-    assert len(top_level) == 21
+    assert len(top_level) == 24
     assert "qa" in top_level
     assert "resolve" in top_level
     assert "preflight" in top_level
     # GR-160: the config schema check is a top-level command so an operator can
     # ask "does this file say what I think it says" without running a guard.
     assert "config-validate" in top_level
+    # GR-161: the lifecycle trio must stay reachable from the CLI.
+    assert {"disable", "enable", "uninstall"} <= set(top_level)
     # DF-GITREINS-POC-54: the .gitleaks.toml doctor is a TOP-LEVEL subcommand
     # (distinct from `worktree doctor`, which is the board-resolution check).
     assert "doctor" in top_level
