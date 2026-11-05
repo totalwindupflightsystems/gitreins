@@ -2039,7 +2039,10 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     """
     workdir = get_workdir()
     if doctor.is_installed(workdir):
-        checks = doctor.run_checks(workdir)
+        # GR-165: --strict upgrades wiring findings from warn to fail, which
+        # is the only way the exit code can change. Without the flag every
+        # pre-existing behavior (checks, output, exit contract) is untouched.
+        checks = doctor.run_checks(workdir, strict=bool(getattr(args, "strict", False)))
         if getattr(args, "json", False):
             print(json.dumps([check.to_dict() for check in checks], indent=2))
             raise SystemExit(1 if doctor.has_failures(checks) else 0)
@@ -4687,6 +4690,11 @@ def _add_basic_parsers(parser: argparse.ArgumentParser, sub: _SubParsers) -> Non
         "--json",
         action="store_true",
         help="Emit the health checks as JSON and exit (GR-162)",
+    )
+    doctor_p.add_argument(
+        "--strict",
+        action="store_true",
+        help="Fail (exit 1) on wiring findings: unwired commands, handlers, tools (GR-165)",
     )
 
     fingerprint_p = sub.add_parser(

@@ -1347,7 +1347,7 @@ gitreins preflight "Is JEVRES-003 already implemented?" --json
 ## 17. `gitreins doctor`
 
 **Repo health first.** When GitReins is installed in this repo (a manifest, or a
-managed hook, is present) `doctor` runs six checks and prints one screen:
+managed hook, is present) `doctor` runs seven checks and prints one screen:
 
 | Check | Fails when |
 |-------|-----------|
@@ -1357,10 +1357,26 @@ managed hook, is present) `doctor` runs six checks and prints one screen:
 | `manifest` | a recorded config artifact has disappeared (hooks are expected to be gone when the install is disabled) |
 | `version` | the installed distribution differs from this checkout's `pyproject.toml` — the commit hook runs the INSTALLED version |
 | `history` | `.gitreins/` is not writable, so verdicts cannot be recorded |
+| `wiring` | a definition is unreachable from any entry point, or a dispatched tool is absent from every consumed registry (GR-165) — **warns** by default; only `--strict` fails |
 
 The `hooks` check is the one that matters most: a `core.hooksPath` override
 displaces `.git/hooks` entirely, disarming every guard without touching a single
 hook file. A repo in that state used to pass `doctor` while enforcing nothing.
+
+The `wiring` check (GR-165) asks what call counting cannot: is every CLI
+command in its dispatch table, is every handler mounted, is every tool
+registered somewhere reachable, and is every definition reachable from an entry
+point? Findings list `file:line`, the symbol and the reason (including the
+config keys an uncalled path reads). Exemptions — the dead-code whitelist names
+(`main`/`run`/`handle`/`process`/`execute`/`dispatch`, dunders, test hooks) and
+the repo's own known-unwired set (`REPO_EXEMPTIONS` in `engine/wiring.py`) —
+are always REPORTED in the detail, never silently dropped. `--strict` upgrades
+findings from warn to fail so CI can gate on wiring:
+
+```
+gitreins doctor            # wiring findings are a WARN — exit code unchanged
+gitreins doctor --strict   # wiring findings FAIL (exit 1)
+```
 
 `--json` emits the checks as machine-readable objects and exits without running
 the allowlist section. A `fail` in any check exits **1**; warnings never do.
@@ -1380,7 +1396,7 @@ are exactly the ones the guard then reported as `✗ secrets — CONFIG ERROR
 (gitleaks config failed to compile: <pattern>)`.
 
 ```
-gitreins doctor [--fix] [--config <path>] [--json]
+gitreins doctor [--fix] [--config <path>] [--json] [--strict]
 ```
 
 | Option | Description |
@@ -1388,6 +1404,7 @@ gitreins doctor [--fix] [--config <path>] [--json]
 | `--fix` | Rewrite invalid `[allowlist] paths` entries in place (default: dry-run report) |
 | `--config` | Path to the `.gitleaks.toml` to check (default: `<repo>/.gitleaks.toml`) |
 | `--json` | Emit the health checks as JSON and exit (GR-162) |
+| `--strict` | Fail (exit 1) on wiring findings: unwired commands, handlers, tools (GR-165) |
 
 The report is per entry — line number, the entry as written, and (for an
 invalid one) the corrected regexp the package's own `_glob_to_regex` emits:

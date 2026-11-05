@@ -26,7 +26,7 @@ import shutil
 import subprocess
 from typing import Any
 
-from engine import install_manifest
+from engine import install_manifest, wiring
 from engine.config_schema import validate_config_file
 
 OK, WARN, FAIL, SKIP = "ok", "warn", "fail", "skip"
@@ -215,6 +215,21 @@ def check_history(workdir: str) -> Check:
     return Check("history", OK, ".gitreins/ present and writable")
 
 
+def check_wiring(workdir: str, strict: bool = False) -> Check:
+    """Wiring reachability (GR-165): is everything defined actually reachable?
+
+    Asks the question dead-code counting cannot: is every CLI command in the
+    dispatch table, every handler mounted, every tool registered somewhere
+    reachable — and is every definition reachable from an entry point?
+    ``warn`` when findings exist (an operator question, not a broken install);
+    ``--strict`` (``gitreins doctor --strict``) upgrades that to ``fail`` so
+    CI can gate on it. Exemptions (dead-code whitelist names) are reported in
+    the detail, never silent.
+    """
+    status, detail, hint = wiring.summarize(wiring.scan(workdir), strict=strict)
+    return Check("wiring", status, detail, hint)
+
+
 ALL_CHECKS = (
     check_config,
     check_hooks,
@@ -225,8 +240,16 @@ ALL_CHECKS = (
 )
 
 
-def run_checks(workdir: str) -> list[Check]:
-    return [check(workdir) for check in ALL_CHECKS]
+def run_checks(workdir: str, strict: bool = False) -> list[Check]:
+    """The six install checks, then wiring (GR-165) last.
+
+    ``strict`` applies to the wiring check only (findings become ``fail``);
+    every other check is untouched, and without the flag the exit-code
+    contract is identical to the pre-GR-165 behavior.
+    """
+    checks = [check(workdir) for check in ALL_CHECKS]
+    checks.append(check_wiring(workdir, strict=strict))
+    return checks
 
 
 def has_failures(checks: list[Check]) -> bool:
