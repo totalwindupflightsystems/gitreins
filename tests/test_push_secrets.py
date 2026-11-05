@@ -6,6 +6,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from engine.push_secrets import check_push_range, scan_push_range
 
 
@@ -156,3 +158,66 @@ def test_pre_push_hook_refuses_legacy_secret_commit(tmp_path, monkeypatch):
     assert fake_token not in output
     assert _git(remote, "rev-parse", "refs/heads/main") == base
     assert _git(repo, "rev-parse", "HEAD") == head
+
+
+def test_zero_sha_scans_only_commits_not_on_remote(tmp_path, capsys):
+    repo = tmp_path / "repo"
+    _repo(repo)
+    fake_token = "ghp_" + "A" * 30
+    base = _commit(repo, "fixture.txt", f"token={fake_token}\n")
+    _git(repo, "update-ref", "refs/remotes/origin/main", base)
+    head = _commit(repo, "notes.txt", "clean new branch work\n")
+
+    assert scan_push_range(str(repo), head, "0" * 40) == []
+    assert check_push_range(str(repo), head, "0" * 40) == 0
+    output = capsys.readouterr().out
+    assert f"scanned 1 commit in {head[:12]} --not --remotes" in output
+    assert "scanned 2 commits" not in output
+
+
+def test_zero_sha_refuses_credential_on_new_branch(tmp_path, capsys):
+    repo = tmp_path / "repo"
+    _repo(repo)
+    base = _commit(repo, "safe.txt", "safe\n")
+    _git(repo, "update-ref", "refs/remotes/origin/main", base)
+    fake_token = "ghp_" + "A" * 30
+    head = _commit(repo, "leak.txt", f"token={fake_token}\n")
+
+    findings = scan_push_range(str(repo), head, "0" * 40)
+    assert findings, "credential on the new branch must be detected"
+    assert any("GitHub personal access token" in finding for finding in findings)
+    assert check_push_range(str(repo), head, "0" * 40) == 1
+    output = capsys.readouterr().out
+    assert "PUSH REFUSED: GitHub personal access token" in output
+    assert f"Scanned 1 commit in {head[:12]} --not --remotes" in output
+    assert "Rotate the exposed credential" in output
+    assert fake_token not in output
+
+
+def test_nonzero_remote_message_reports_scope(tmp_path, capsys):
+    repo = tmp_path / "repo"
+    _repo(repo)
+    base = _commit(repo, "safe.txt", "safe\n")
+    fake_token = "ghp_" + "A" * 30
+    head = _commit(repo, "leak.txt", f"token={fake_token}\n")
+
+    assert check_push_range(str(repo), head, base) == 1
+    output = capsys.readouterr().out
+    assert f"Scanned 1 commit in {base[:12]}..{head[:12]}" in output
+    assert check_push_range(str(repo), base, base) == 0
+    output = capsys.readouterr().out
+    assert f"PUSH SECRET CHECK: clean (scanned 0 commits in {base[:12]}..{base[:12]})" in output
+
+
+def test_deleted_ref_push_is_refused_fail_closed(tmp_path, capsys):
+    repo = tmp_path / "repo"
+    _repo(repo)
+    base = _commit(repo, "safe.txt", "safe\n")
+    _commit(repo, "more.txt", "more\n")
+
+    assert check_push_range(str(repo), "0" * 40, base) == 1
+    output = capsys.readouterr().out
+    assert "could not verify the outgoing history" in output
+    assert "Invalid revision range" in output
+    with pytest.raises(RuntimeError, match="Invalid revision range"):
+        scan_push_range(str(repo), "0" * 40, base)
