@@ -375,19 +375,33 @@ class TestTimeoutCoercion:
     def test_hook_timeout_string_coerced(self, tmp_workdir: str) -> None:
         """hook_timeout is the same bug class — '120s' → 120 before the budget check.
 
-        The parsed value is 120, but an explicit hook_timeout BELOW the tests arm
-        can never finish, so the manager derives test_timeout + 120 = 300 for this
-        run (2026-11-03: 575 of 695 fleet configs carried this impossible pair and
-        the guard fail-opened as a result). The coercion is still what is proven
-        here — the value is a number, not the string "120s" that used to crash
-        subprocess.run(timeout=...).
+        The coercion is what is proven here: the value is the number 120, not the
+        string "120s" that used to crash subprocess.run(timeout=...). An explicit
+        value below the tests arm is HONORED (QA-GITREINS-REVIEW-1) rather than
+        silently replaced — only the implicit default is derived.
         """
         gm = GuardManager(tmp_workdir, {"guards": {"hook_timeout": "120s"}})
-        assert gm._hook_timeout == 180 + 120  # derived: test_timeout default 180 + slack
+        assert gm._hook_timeout == 120
 
-    def test_hook_timeout_below_tests_arm_is_derived(self, tmp_workdir: str) -> None:
-        """An impossible pair (explicitly 1800/1800) is corrected, not accepted."""
+    def test_hook_timeout_below_tests_arm_explicit_is_honored(self, tmp_workdir: str) -> None:
+        """An explicit hook_timeout is honored, even below the tests arm.
+
+        Deriving over an explicit value made the knob un-settable: a caller that
+        configures a short budget (or a test that grades the timeout path) could
+        never observe it. The pair is warned about loudly instead, and a failed
+        arm can no longer be laundered into PASS (see the _timeout_result tests).
+        """
         gm = GuardManager(tmp_workdir, {"guards": {"test_timeout": 1800, "hook_timeout": 1800}})
+        assert gm._hook_timeout == 1800
+
+    def test_hook_timeout_implicit_below_tests_arm_is_derived(self, tmp_workdir: str) -> None:
+        """The IMPLICIT budget (no hook_timeout key) is still derived above the tests arm.
+
+        2026-11-03: 575 of 695 fleet configs carried test_timeout 900/1800 with the
+        implicit 300 default, so the guard died mid-run and reported a fail-open
+        PASS beside a failed arm. Absence is corrected; an explicit value is not.
+        """
+        gm = GuardManager(tmp_workdir, {"guards": {"test_timeout": 1800}})
         assert gm._hook_timeout == 1800 + 120
 
     def test_hook_timeout_above_tests_arm_is_untouched(self, tmp_workdir: str) -> None:
@@ -3183,3 +3197,27 @@ class TestSensitivePathScopesAndOverride:
         result = gm._builtin_secrets_scan()
         assert result.passed is False
         assert "OpenAI/OpenRouter API key" in result.output
+
+
+class TestTimeoutResultLaundering:
+    """QA-GITREINS-REVIEW-1: a timeout must never launder a failed arm into PASS.
+
+    The hook_timeout early-return used to build its Tier1Result with
+    ``passed=True`` unconditionally, so a run cut off AFTER an arm had already
+    FAILED printed PASS beside a collected failure. ``passed`` is now the AND of
+    the arms that actually ran; a skipped arm still passes (TRUST-001).
+    """
+
+    def test_timeout_after_a_failed_arm_is_not_passed(self, tmp_workdir: str) -> None:
+        gm = GuardManager(tmp_workdir, {"guards": {"allow_skips": True}})
+        failed = GuardResult(name="secrets", passed=False, output="finding")
+        result = gm._timeout_result([failed], ["Guard timed out after 1s (hook_timeout)."])
+        assert result.passed is False
+
+    def test_timeout_after_clean_arms_still_passes(self, tmp_workdir: str) -> None:
+        gm = GuardManager(tmp_workdir, {"guards": {"allow_skips": True}})
+        clean = GuardResult(name="secrets", passed=True)
+        skipped = GuardResult(name="lint", passed=True, skipped=True, skip_reason="no staged files")
+        result = gm._timeout_result([clean, skipped], [])
+        assert result.passed is True
+        assert result.extra["allow_skips"] is True
