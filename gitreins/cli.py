@@ -52,6 +52,7 @@ import yaml
 
 from engine.version import __version__
 from engine import install_manifest
+from engine import doctor
 from engine.config_schema import ConfigIssue, validate_config, validate_config_file
 from engine.repo_paths import (
     WorktreeResolutionError,
@@ -1948,6 +1949,28 @@ def cmd_uninstall(args: argparse.Namespace) -> None:
 
 
 def cmd_doctor(args: argparse.Namespace) -> None:
+    """Repo health check: config, hooks, tools, manifest, version (GR-162).
+
+    The gitleaks allowlist check that named this command is now one section of
+    a wider answer. Health runs FIRST and fails the command on its own, because
+    an install whose hooks git never runs passes every allowlist check while
+    enforcing nothing.
+    """
+    workdir = get_workdir()
+    if doctor.is_installed(workdir):
+        checks = doctor.run_checks(workdir)
+        if getattr(args, "json", False):
+            print(json.dumps([check.to_dict() for check in checks], indent=2))
+            raise SystemExit(1 if doctor.has_failures(checks) else 0)
+        print("GitReins health:")
+        print(doctor.format_checks(checks))
+        print()
+        if doctor.has_failures(checks):
+            raise SystemExit(1)
+    _doctor_gitleaks(args)
+
+
+def _doctor_gitleaks(args: argparse.Namespace) -> None:
     """Validate (and with --fix, migrate) the repo's `.gitleaks.toml` (POC-54)."""
     workdir = get_workdir()
     # GR-143 one-authority: doctor prints the run's shared snapshot (the same
@@ -4562,6 +4585,11 @@ def _add_basic_parsers(parser: argparse.ArgumentParser, sub: _SubParsers) -> Non
         "--config",
         default=None,
         help="Path to the .gitleaks.toml to check (default: <repo>/.gitleaks.toml)",
+    )
+    doctor_p.add_argument(
+        "--json",
+        action="store_true",
+        help="Emit the health checks as JSON and exit (GR-162)",
     )
 
     fingerprint_p = sub.add_parser(

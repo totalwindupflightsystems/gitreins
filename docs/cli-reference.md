@@ -40,7 +40,7 @@ There are **24 top-level subcommands**:
 | 14 | `report` | Show verdict history |
 | 15 | `qa` | QA run ledger — record and read QA run outcomes |
 | 16 | `serve` | Live judgment browser (local web server) |
-| 17 | `doctor` | Validate `.gitleaks.toml` and migrate pre-DF-001 glob allowlist entries |
+| 17 | `doctor` | Repo health (config, hooks, tools, manifest, version) plus `.gitleaks.toml` validation |
 | 18 | `push-check` | Refuse outgoing commit history containing credentials |
 | 19 | `quality-ensure` | Run the repo's quality producer to completion and enforce block-mode (pre-push) |
 | 20 | `fingerprint` | Hash final Git-visible workspace content without mutating the checkout or real index |
@@ -1345,8 +1345,29 @@ gitreins preflight "Is JEVRES-003 already implemented?" --json
 
 ## 17. `gitreins doctor`
 
-Validates the repo's `.gitleaks.toml` and migrates the allowlist entries that
-break gitleaks. gitleaks compiles every `[allowlist] paths` entry as a **Go
+**Repo health first.** When GitReins is installed in this repo (a manifest, or a
+managed hook, is present) `doctor` runs six checks and prints one screen:
+
+| Check | Fails when |
+|-------|-----------|
+| `config` | `.gitreins/config.yaml` does not parse (warns on keys this version does not read) |
+| `hooks` | a managed hook is missing, not executable, or `core.hooksPath` points at a directory git will use instead |
+| `tools` | `git` is absent (warns when `gitleaks` is absent: the lane falls back to the builtin scanner) |
+| `manifest` | a recorded config artifact has disappeared (hooks are expected to be gone when the install is disabled) |
+| `version` | the installed distribution differs from this checkout's `pyproject.toml` — the commit hook runs the INSTALLED version |
+| `history` | `.gitreins/` is not writable, so verdicts cannot be recorded |
+
+The `hooks` check is the one that matters most: a `core.hooksPath` override
+displaces `.git/hooks` entirely, disarming every guard without touching a single
+hook file. A repo in that state used to pass `doctor` while enforcing nothing.
+
+`--json` emits the checks as machine-readable objects and exits without running
+the allowlist section. A `fail` in any check exits **1**; warnings never do.
+A repo that is configured but not installed (`gitreins init` without `install`)
+is left alone — config alone is a legitimate state, not a broken install.
+
+**Then the allowlist check.** Validates the repo's `.gitleaks.toml` and migrates
+the allowlist entries that break gitleaks. gitleaks compiles every `[allowlist] paths` entry as a **Go
 regexp**, so a bare glob (`'*.log'`, `'*.egg-info/'`) makes it abort with
 `panic: regexp: Compile(...): error parsing regexp: missing argument to
 repetition operator` and exit code **2** — before scanning anything.
@@ -1358,13 +1379,14 @@ are exactly the ones the guard then reported as `✗ secrets — CONFIG ERROR
 (gitleaks config failed to compile: <pattern>)`.
 
 ```
-gitreins doctor [--fix] [--config <path>]
+gitreins doctor [--fix] [--config <path>] [--json]
 ```
 
 | Option | Description |
 |--------|-------------|
 | `--fix` | Rewrite invalid `[allowlist] paths` entries in place (default: dry-run report) |
 | `--config` | Path to the `.gitleaks.toml` to check (default: `<repo>/.gitleaks.toml`) |
+| `--json` | Emit the health checks as JSON and exit (GR-162) |
 
 The report is per entry — line number, the entry as written, and (for an
 invalid one) the corrected regexp the package's own `_glob_to_regex` emits:
