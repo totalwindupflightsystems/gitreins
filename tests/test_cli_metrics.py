@@ -284,3 +284,129 @@ def test_transport_failure_does_not_change_the_cli_exit_code(tmp_path, monkeypat
     with pytest.raises(SystemExit) as excinfo:
         cli_module._run_subcommand_handler("cmd_obs_probe", argparse.Namespace())
     assert excinfo.value.code == 3
+
+
+# ── Rework: dispatcher wiring (issues a/b/c of the OBS-GITREINS-2 judge) ──
+
+
+def test_dispatcher_emits_tokens_from_the_usage_ledger_accumulator(tmp_path, monkeypatch):
+    """Issue (a) proof: the REAL dispatcher carries real token counts.
+
+    The judge pipeline's LLM steps already record their counts through the
+    ONE accounting path, ``engine.usage.append_usage_row``; the run-scoped
+    accumulator rides that same write, and the dispatcher resets it before
+    the handler and takes it after. Here the run's LLM step is stubbed to
+    append one row (11 in / 5 out) with the REAL writer, and the
+    dispatcher-produced exposition must carry both token series.
+    """
+    from engine.usage import append_usage_row
+
+    _set_textfile(monkeypatch, tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def _cmd_obs_probe(args):
+        assert append_usage_row(str(repo), step="tier2", tokens_in=11, tokens_out=5)
+
+    _install_handler(monkeypatch, "cmd_obs_probe", _cmd_obs_probe)
+    cli_module._run_subcommand_handler("cmd_obs_probe", argparse.Namespace())
+    text = _prom_lines(tmp_path / "gitreins-obs_probe.prom")
+    assert 'gitreins_cli_run_tokens_total{command="obs_probe",kind="input"} 11.0' in text
+    assert 'gitreins_cli_run_tokens_total{command="obs_probe",kind="output"} 5.0' in text
+    assert 'gitreins_cli_run_completed_total{command="obs_probe",outcome="pass"} 1.0' in text
+
+    # Reset per dispatch (like the cap-trip note): a follow-up run with no
+    # LLM step must not carry the previous run's counts.
+    _install_handler(monkeypatch, "cmd_obs_probe", lambda args: None)
+    cli_module._run_subcommand_handler("cmd_obs_probe", argparse.Namespace())
+    text = _prom_lines(tmp_path / "gitreins-obs_probe.prom")
+    assert not _series(text, "gitreins_cli_run_tokens_total")
+
+
+def test_run_token_accumulator_takes_and_resets(tmp_path, monkeypatch):
+    """The accumulator counts only rows that reached the ledger, and taking consumes."""
+    from engine import usage
+
+    monkeypatch.delenv("GITREINS_METRICS_TEXTFILE_DIR", raising=False)
+    monkeypatch.delenv("GITREINS_METRICS_PUSH_URL", raising=False)
+    usage.reset_run_tokens()
+    assert usage.take_run_tokens() == (0, 0)
+    assert usage.append_usage_row(str(tmp_path), step="tier2", tokens_in=3, tokens_out=1)
+    assert usage.take_run_tokens() == (3, 1)
+    assert usage.take_run_tokens() == (0, 0)  # taking consumes the counts
+
+
+def test_orphan_reap_records_closed_reason_orphaned(tmp_path, monkeypatch):
+    """Issue (b) proof: the dead-pid reap path produces ``reason="orphaned"``.
+
+    A synthetic ``running`` job record with a dead worker pid, reaped by the
+    REAL dispatcher path (``gitreins judge <id> --status``, the QA-GITR-002
+    flip) — the run's completion record must carry
+    ``gitreins_cli_run_failure_total{...,reason="orphaned"}`` with the
+    command's own typed outcome (exit 3 → ``fail``).
+    """
+    import subprocess
+    import sys
+
+    from engine.job_store import load_job, make_job, save_job
+
+    _set_textfile(monkeypatch, tmp_path)
+    monkeypatch.setenv("GITREINS_JOB_DIR", str(tmp_path / "jobs"))
+
+    exited = subprocess.Popen([sys.executable, "-c", "pass"])
+    exited.wait()  # reaped: the pid is gone
+
+    job = make_job("orphan-task", str(tmp_path))
+    job["id"] = "job-orphan0001"
+    job["pid"] = exited.pid
+    save_job(job)
+
+    monkeypatch.setattr(sys, "argv", ["gitreins", "judge", "job-orphan0001", "--status"])
+    with pytest.raises(SystemExit) as excinfo:
+        cli_module.main()
+    assert excinfo.value.code == 3
+
+    text = _prom_lines(tmp_path / "gitreins-judge.prom")
+    assert 'gitreins_cli_run_failure_total{command="judge",reason="orphaned"} 1.0' in text
+    assert 'gitreins_cli_run_completed_total{command="judge",outcome="fail"} 1.0' in text
+    # The reap really happened: the stored record is terminal.
+    assert load_job("job-orphan0001")["status"] == "error"
+
+
+def test_orphan_note_is_reset_and_consumed():
+    """The note is per-dispatch state: consumed once, never carried over."""
+    cli_metrics.reset_orphan_reap()
+    assert not cli_metrics.take_orphan_reap()
+    cli_metrics.note_orphan_reap()
+    assert cli_metrics.take_orphan_reap()
+    assert not cli_metrics.take_orphan_reap()
+
+
+def test_task_dispatch_records_a_bounded_task_label(tmp_path, monkeypatch):
+    """Issue (c) proof: `gitreins task list` writes a record via the shared seam.
+
+    The ``task`` family used to bypass the dispatcher entirely; now the one
+    seam covers it and the label is the bounded ``task_<action>`` derived
+    from the resolved subcommand — never argv text, a task id or a path.
+    """
+    import sys
+
+    _set_textfile(monkeypatch, tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()  # get_workdir(): a (fake) repo root
+    monkeypatch.chdir(repo)
+
+    monkeypatch.setattr(sys, "argv", ["gitreins", "task", "list"])
+    cli_module.main()  # empty store → "No tasks found.", exit 0
+
+    text = _prom_lines(tmp_path / "gitreins-task_list.prom")
+    assert 'gitreins_cli_run_completed_total{command="task_list",outcome="pass"} 1.0' in text
+    assert not _series(text, "gitreins_cli_run_failure_total")
+
+    # A bare `gitreins task` prints help and dispatches nothing —
+    # no record, no invented label.
+    (tmp_path / "gitreins-task_list.prom").unlink()
+    monkeypatch.setattr(sys, "argv", ["gitreins", "task"])
+    cli_module.main()
+    assert not (tmp_path / "gitreins-task_list.prom").exists()

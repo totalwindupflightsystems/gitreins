@@ -1,9 +1,11 @@
 """CLI completion records (OBS-GITREINS-2, docs/observability-spec.md §4b/§5b).
 
 Every ephemeral CLI subcommand emits exactly one completion record on exit —
-success, typed failure, crash and cap-stop alike — from the single dispatcher
-``gitreins.cli._run_subcommand_handler``. An ephemeral process cannot be
-scraped, so the record is PUSHED, never served:
+success, typed failure, crash and cap-stop alike — from the single recording
+seam ``gitreins.cli._run_completion``, shared by both dispatch sites
+(``_run_subcommand_handler`` for the simple/worktree/qa families and
+``_dispatch_task_command`` for the bounded ``task_<action>`` family). An
+ephemeral process cannot be scraped, so the record is PUSHED, never served:
 
 * ``GITREINS_METRICS_PUSH_URL`` set → POST the text exposition to
   ``<url>/metrics/job/gitreins_cli`` (pushgateway shape), 2 s timeout.
@@ -32,14 +34,22 @@ error — is swallowed. This module never raises, never prints, and never
 changes the process exit code. A fresh ``CollectorRegistry`` is built per
 record, so the payload carries only these series.
 
-Token counts: the dispatcher currently passes none. There is no cheap
-in-process source reachable at dispatch time (EvalCap instances are
-per-evaluator and die with the run; ``usage.jsonl`` is the persisted ledger
-the pipeline already writes per step), so the tokens counter is emitted only
-when a caller supplies a count rather than adding a second accounting path.
+Token counts: the dispatcher resets and takes the run-scoped accumulator in
+``engine.usage`` (``reset_run_tokens`` / ``take_run_tokens``) that
+``append_usage_row`` feeds as it writes its ledger row — the single
+accounting path the LLM steps already use — and passes the taken counts
+here. A run with no LLM step therefore still emits no tokens series.
 
 ``reason`` mapping lives in :func:`cap_reason` and :func:`failure_reason`.
 A reason outside :data:`REASONS` is dropped, never emitted as free text.
+``"orphaned"`` has a real producer: the judge-status liveness path
+(``gitreins.cli._judge_status_running``, QA-GITR-002) flips a dead-pid
+``running`` job record to ``error`` and notes the reap through
+:func:`note_orphan_reap`; the dispatcher's ``_completion_failure`` reads it
+via :func:`take_orphan_reap` and puts ``orphaned`` on that run's ONE
+completion record (outcome ``fail`` — exit 3 is the command's own typed
+result). The note is reset per dispatch, like the cap-trip note in
+``engine.eval_cap``, so a stale reap can never attach to a newer run.
 """
 
 from __future__ import annotations
@@ -114,6 +124,38 @@ def failure_reason(exc: BaseException) -> str | None:
     ):
         return "llm_network"
     return None
+
+
+# Orphan-reap note (OBS-GITREINS-2): the producer for the closed-set reason
+# ``"orphaned"`` is the moment the judge-status liveness path flips a
+# dead-pid ``running`` job record to ``error`` (``gitreins.cli
+# ._judge_status_running``). That path records the moment here; the CLI
+# dispatcher reads it in ``_completion_failure`` and puts ``orphaned`` on
+# the run's ONE completion record. Reset per dispatch — exactly like
+# ``engine.eval_cap.reset_cap_trip`` — so a long-lived in-process caller can
+# never attribute an older run's reap to a newer one. Setting the note is
+# free and cannot raise; the record emission itself stays env-gated.
+_orphan_reaped: bool = False
+
+
+def note_orphan_reap() -> None:
+    """Record that this process reaped an orphaned judge job (the flip path)."""
+    global _orphan_reaped
+    _orphan_reaped = True
+
+
+def reset_orphan_reap() -> None:
+    """Forget any earlier run's reap — the CLI dispatcher calls this per run."""
+    global _orphan_reaped
+    _orphan_reaped = False
+
+
+def take_orphan_reap() -> bool:
+    """Whether an orphan was reaped since the last reset, and reset."""
+    global _orphan_reaped
+    seen = _orphan_reaped
+    _orphan_reaped = False
+    return seen
 
 
 def _transport() -> tuple[str, str]:

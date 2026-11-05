@@ -50,6 +50,33 @@ DEFAULT_PRICE_CONFIG: dict[str, Any] = {
 
 _TOKENS = ("tokens_in", "tokens_out", "cache_read", "cache_write")
 
+# Run-scoped token accumulator for the CLI completion record (OBS-GITREINS-2).
+# ``append_usage_row`` is the single accounting path every LLM step's tokens
+# already flow through (judge ``tier2`` rows, the resolution gate's
+# ``resolution`` rows), so it increments this as it writes its ledger row —
+# there is deliberately no second accounting path. The CLI dispatcher resets
+# it before a run and takes it after (the same per-dispatch discipline as
+# ``engine.eval_cap.reset_cap_trip``), so a long-lived in-process caller (the
+# MCP server) can never attribute an older run's tokens to a newer one.
+_run_tokens: list[int] = [0, 0]
+
+
+def reset_run_tokens() -> None:
+    """Forget any earlier run's counts — the CLI dispatcher calls this per run."""
+    _run_tokens[0] = 0
+    _run_tokens[1] = 0
+
+
+def take_run_tokens() -> tuple[int, int]:
+    """The ``(tokens_in, tokens_out)`` accumulated since the last reset, then reset.
+
+    Taking consumes the counts: the next run always starts from zero.
+    """
+    counts = (_run_tokens[0], _run_tokens[1])
+    reset_run_tokens()
+    return counts
+
+
 # Judge-provenance fields (REVIEW-GITREINS-030): credential-free identity for
 # the LLMClient that produced the tokens — resolved model name plus WHERE the
 # base URL and the API key were resolved FROM (LLMClient.describe()'s fields,
@@ -145,10 +172,12 @@ def append_usage_row(
     env var / argument resolved the base URL and key), never the URL or key
     themselves.
     """
+    tokens_in_count = _counter(tokens_in)
+    tokens_out_count = _counter(tokens_out)
     row = {
         "ts": time.time() if ts is None else _as_number(ts) or time.time(),
-        "tokens_in": _counter(tokens_in),
-        "tokens_out": _counter(tokens_out),
+        "tokens_in": tokens_in_count,
+        "tokens_out": tokens_out_count,
         "cache_read": _counter(cache_read),
         "cache_write": _counter(cache_write),
         "step": step,
@@ -168,6 +197,10 @@ def append_usage_row(
             handle.write(json.dumps(row) + "\n")
     except Exception:
         return False
+    # The row reached the ledger: ride the same write into the run-scoped
+    # accumulator the CLI completion record reads (single accounting path).
+    _run_tokens[0] += tokens_in_count
+    _run_tokens[1] += tokens_out_count
     return True
 
 

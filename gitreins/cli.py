@@ -3735,6 +3735,13 @@ def _judge_status_running(job: dict[str, Any]) -> None:
                     current["finished_at"] = time.time()
                     save_job(current)
                     job = current
+                    # OBS-GITREINS-2: this process just reaped an orphan —
+                    # note it so the run's completion record carries the
+                    # closed-set reason ``orphaned`` (the reason's producer;
+                    # emission stays env-gated in the dispatcher).
+                    from engine.cli_metrics import note_orphan_reap
+
+                    note_orphan_reap()
                 else:
                     job = current
             finally:
@@ -5352,26 +5359,33 @@ def _dispatch_task_command(args: argparse.Namespace, parser: argparse.ArgumentPa
     # line + exit 1 instead of a traceback, like the other task paths do.
     from engine.task_manager import TaskStateCorruptError
 
-    try:
-        if args.subcommand == "create":
-            cmd_task_create(args)
-        elif args.subcommand == "start":
-            cmd_task_start(args)
-        elif args.subcommand == "get":
-            cmd_task_get(args)
-        elif args.subcommand == "complete":
-            cmd_task_complete(args)
-        elif args.subcommand == "list":
-            cmd_task_list(args)
-        elif args.subcommand == "delete":
-            cmd_task_delete(args)
-        elif args.subcommand == "worktree":
-            cmd_task_worktree(args)
-        else:
-            parser.print_help()
-    except TaskStateCorruptError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        raise SystemExit(1) from exc
+    # OBS-GITREINS-2: the task family records through the SAME seam as every
+    # other subcommand. The label is derived from the resolved action —
+    # never argv text, a task id or a path — so cardinality stays bounded.
+    handler_name = _TASK_HANDLERS.get(args.subcommand)
+    if handler_name is None:
+        parser.print_help()
+        return
+    with _run_completion(handler_name):
+        try:
+            globals()[f"cmd_{handler_name}"](args)
+        except TaskStateCorruptError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            raise SystemExit(1) from exc
+
+
+# OBS-GITREINS-2: bounded ``task_<action>`` command labels for the recording
+# seam, resolved from the parsed subcommand. Adding a task subcommand means
+# adding a row here — an unknown subcommand prints help and records nothing.
+_TASK_HANDLERS = {
+    "create": "task_create",
+    "start": "task_start",
+    "get": "task_get",
+    "complete": "task_complete",
+    "list": "task_list",
+    "delete": "task_delete",
+    "worktree": "task_worktree",
+}
 
 
 _WORKTREE_HANDLERS = {
@@ -5422,34 +5436,50 @@ def _completion_failure(exc: BaseException) -> tuple[str, str | None]:
     OBS-GITREINS-2. A noted cap trip wins over the exit shape: a cap-tripped
     judge degrades to an INCOMPLETE verdict and exits 1
     (``if not result.passed``), so without this the cap-stop — the spec's
-    silent failure mode — would be counted as a plain fail. Otherwise a
-    ``SystemExit`` the subcommand raised ITSELF (its own typed failure
-    result, the CLI's exit-code contract) is ``fail``; any other exception
-    is an unexpected crash, ``error``, with the reason mapped through
-    ``engine.cli_metrics.failure_reason`` (``None`` when unmappable — a
-    free-text label is never emitted).
+    silent failure mode — would be counted as a plain fail. An orphan reap
+    noted by the judge-status liveness path (``_judge_status_running``)
+    contributes the closed-set reason ``orphaned`` while the exit shape
+    still decides the outcome: the reap IS the command's own typed result
+    (exit 3), so ``fail``; an unexpected crash alongside a noted reap would
+    stay ``error``. Otherwise a ``SystemExit`` the subcommand raised ITSELF
+    (its own typed failure result, the CLI's exit-code contract) is
+    ``fail``; any other exception is an unexpected crash, ``error``, with
+    the reason mapped through ``engine.cli_metrics.failure_reason``
+    (``None`` when unmappable — a free-text label is never emitted).
     """
     from engine.eval_cap import last_cap_trip
-    from engine.cli_metrics import cap_reason, failure_reason
+    from engine.cli_metrics import cap_reason, failure_reason, take_orphan_reap
 
+    orphaned = take_orphan_reap()
     trip = last_cap_trip()
     if trip:
         return "cap", cap_reason(trip)
     if isinstance(exc, SystemExit):
-        return "fail", None
-    return "error", failure_reason(exc)
+        return "fail", "orphaned" if orphaned else None
+    return "error", "orphaned" if orphaned else failure_reason(exc)
 
 
-def _run_subcommand_handler(name: str, args: argparse.Namespace) -> None:
-    handler = globals()[name]
-    # OBS-GITREINS-2: exactly one completion record per subcommand invocation,
-    # on every exit path (pass / typed fail / error / cap), emitted from the
-    # finally below. Env-gated: with neither transport configured this costs
-    # one ``os.environ.get`` pair and nothing else. The handler call, its
-    # argv handling, its output and its exit code are untouched — every
-    # exception (including SystemExit) is re-raised unchanged, and the record
-    # function swallows all of its own errors (engine/cli_metrics.py, the
-    # append_usage_row contract).
+@contextlib.contextmanager
+def _run_completion(command: str) -> Iterator[None]:
+    """One completion record around one dispatched handler call (OBS-GITREINS-2).
+
+    The single recording seam used by BOTH dispatch sites:
+    ``_run_subcommand_handler`` (worktree/qa/simple families) and
+    ``_dispatch_task_command`` (the ``gitreins task`` family, whose bounded
+    ``task_<action>`` labels come from the resolved action). Pass/fail/
+    error/cap classification and the re-raise behaviour are identical for
+    both — exactly one record per invocation, emitted in the ``finally``.
+
+    Env-gated: with neither transport configured this costs one
+    ``os.environ.get`` pair and nothing else. The handler call, its argv
+    handling, its output and its exit code are untouched — every exception
+    (including SystemExit) is re-raised unchanged, and the record function
+    swallows all of its own errors (engine/cli_metrics.py, the
+    append_usage_row contract). Token counts are taken from the run-scoped
+    accumulator in ``engine.usage`` that ``append_usage_row`` feeds — the
+    accounting path the LLM steps already write — reset per dispatch like
+    the cap-trip note, never a second accounting path.
+    """
     started = time.perf_counter()
     outcome = "pass"
     reason = None
@@ -5458,11 +5488,15 @@ def _run_subcommand_handler(name: str, args: argparse.Namespace) -> None:
         or os.environ.get("GITREINS_METRICS_TEXTFILE_DIR")
     )
     if recording:
+        from engine.cli_metrics import reset_orphan_reap
         from engine.eval_cap import reset_cap_trip
+        from engine.usage import reset_run_tokens
 
         reset_cap_trip()
+        reset_orphan_reap()
+        reset_run_tokens()
     try:
-        handler(args)
+        yield
     except SystemExit as exc:
         if isinstance(exc.code, str) or (isinstance(exc.code, int) and exc.code != 0):
             outcome, reason = _completion_failure(exc)
@@ -5473,13 +5507,27 @@ def _run_subcommand_handler(name: str, args: argparse.Namespace) -> None:
     finally:
         if recording:
             from engine.cli_metrics import record_run_completion
+            from engine.usage import take_run_tokens
 
+            tokens_in, tokens_out = take_run_tokens()
             record_run_completion(
-                name[4:] if name.startswith("cmd_") else name,
+                command,
                 outcome=outcome,
                 duration_s=time.perf_counter() - started,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
                 reason=reason,
             )
+
+
+def _run_subcommand_handler(name: str, args: argparse.Namespace) -> None:
+    handler = globals()[name]
+    # OBS-GITREINS-2: exactly one completion record per subcommand invocation,
+    # on every exit path (pass / typed fail / error / cap), emitted from the
+    # shared seam below. Env-gated and best-effort by contract — see
+    # ``_run_completion``.
+    with _run_completion(name[4:] if name.startswith("cmd_") else name):
+        handler(args)
 
 
 def main() -> None:

@@ -165,12 +165,28 @@ duplicate the computation** — call the same functions the API calls.
 | `gitreins_cli_run_last_success_timestamp_seconds` | gauge | unixtime | `command` | When did this lane last actually work? |
 
 `reason` is a **closed set of ~6 constants**, never a free-text error message — that is
-where cardinality explosions come from. Cardinality estimate: 5 commands × 6 reasons for
-the failure counter; 5 for the rest. Total well under 100 series.
+where cardinality explosions come from. The `command` label set is the dispatcher's
+static handler tables (`gitreins/cli.py` `_WORKTREE_HANDLERS` / `_QA_HANDLERS` /
+`_SIMPLE_HANDLERS` / `_TASK_HANDLERS`) plus the seven bounded `task_<action>` rows —
+never argv text, a task id or a path. Cardinality: commands × 6 reasons for the
+failure counter, a few series per command for the rest — bounded by those tables
+(≈ 38 commands today), so no label can explode with usage.
 
 `gitreins_cli_run_last_success_timestamp_seconds` is the metric that catches the failure
 mode nobody else catches: a lane that silently stopped running. Alert on
 `time() - gitreins_cli_run_last_success_timestamp_seconds > 86400`.
+
+**Shipped sources (OBS-GITREINS-2 rework).** The recording seam is ONE context manager
+(`gitreins/cli.py:_run_completion`) used by BOTH dispatch sites — `_run_subcommand_handler`
+(simple/worktree/qa families) and `_dispatch_task_command` (`gitreins task`, labels
+`task_create` … `task_worktree` from the resolved action). Token counts come from the
+run-scoped accumulator in `engine/usage.py` that `append_usage_row` increments as it
+writes its ledger row — the single accounting path the LLM steps already use; the
+dispatcher resets it before the handler and passes the taken counts, so a run with no
+LLM step still emits no token series. `orphaned` has a real producer: the judge-status
+liveness path (`gitreins judge <id> --status`, the QA-GITR-002 dead-pid flip in
+`gitreins/cli.py:_judge_status_running`) notes the reap, and that run's ONE completion
+record carries `reason="orphaned"` with the command's own typed outcome (`fail`, exit 3).
 
 ---
 
@@ -196,9 +212,12 @@ handler. Route label must be the **matched route**, never the raw path
 
 **IMPLEMENTED (OBS-GITREINS-2) as `engine/cli_metrics.py`**, hooked at the dispatcher
 below in a `try/finally`; a cap trip is surfaced through the `last_cap_trip` note in
-`engine/eval_cap.py` (the reason string that previously died with the process, §2a‑4).
-The record function is best-effort per the contract described here and emits the §4b
-series verbatim; the tokens counter is emitted only when a caller supplies counts.
+`engine/eval_cap.py` (the reason string that previously died with the process, §2a‑4),
+and the judge-status orphan reap is surfaced the same way through the
+`note_orphan_reap` note in `engine/cli_metrics.py`. The record function is
+best-effort per the contract described here and emits the §4b series verbatim; the
+tokens counter is fed from the `engine.usage` run accumulator (§4b shipped sources),
+not from a second accounting path.
 
 Every CLI subcommand already returns through a single dispatcher
 (`gitreins/cli.py` `_run_subcommand_handler`). Emit the record there, in a
