@@ -20,7 +20,7 @@ Running `gitreins` with no command prints the top-level help and exits
 **0**. An unknown command exits **2** (argparse behavior for
 unrecognized arguments).
 
-There are **20 top-level subcommands**:
+There are **21 top-level subcommands**:
 
 | # | Command | Purpose |
 |---|---------|---------|
@@ -44,6 +44,7 @@ There are **20 top-level subcommands**:
 | 18 | `push-check` | Refuse outgoing commit history containing credentials |
 | 19 | `quality-ensure` | Run the repo's quality producer to completion and enforce block-mode (pre-push) |
 | 20 | `fingerprint` | Hash final Git-visible workspace content without mutating the checkout or real index |
+| 21 | `config-validate` | Check `.gitreins/config.yaml` for unknown keys, wrong types and bad values |
 
 ## 1. `gitreins install`
 
