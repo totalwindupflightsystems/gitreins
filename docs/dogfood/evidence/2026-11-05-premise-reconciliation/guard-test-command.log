@@ -1,0 +1,77 @@
+docs drift check OK: version 0.18.0 matches README banner; README.md + CONTRIBUTING.md test counts match the live collection (3221 tests / 98 test files). evaluator tool-count check OK: 3 evaluator tool claims match the 12 defined EVALUATOR_TOOLS (docs/architecture.md + docs/evaluator-loop.md)
+bringing up nodes...
+bringing up nodes...
+
+........................................................................ [  2%]
+........................................................................ [  4%]
+........................................................................ [  6%]
+........................................................................ [  8%]
+........................................................................ [ 11%]
+........................................................................ [ 13%]
+........................................................................ [ 15%]
+..............s......................................................... [ 17%]
+........................................................................ [ 20%]
+........................................................................ [ 22%]
+........................................................................ [ 24%]
+........................................................................ [ 26%]
+.........................ssss........................................... [ 29%]
+........................................................................ [ 31%]
+........................................................................ [ 33%]
+........................................................................ [ 35%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 44%]
+........................................................................ [ 46%]
+..............s..............................................ssssssss... [ 49%]
+.........................s..........s................................... [ 51%]
+........................................................................ [ 53%]
+........................................................................ [ 55%]
+........................................................................ [ 58%]
+........................................................................ [ 60%]
+........................................................................ [ 62%]
+........................................................................ [ 64%]
+........................................................................ [ 67%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 76%]
+........................................................................ [ 78%]
+........................................................................ [ 80%]
+.............s.......................................................... [ 82%]
+........................................................................ [ 84%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 96%]
+.....................................F..............
+=================================== FAILURES ===================================
+___________________ test_timeout_joins_checker_process_group ___________________
+[gw1] linux -- Python 3.10.20 /home/kara/gitreins/.venv/bin/python
+tests/test_spec_alignment.py:214: in test_timeout_joins_checker_process_group
+    pid = int(child_pid.read_text())
+../.local/share/uv/python/cpython-3.10-linux-x86_64-gnu/lib/python3.10/pathlib.py:1134: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+../.local/share/uv/python/cpython-3.10-linux-x86_64-gnu/lib/python3.10/pathlib.py:1119: in open
+    return self._accessor.open(self, mode, buffering, encoding, errors,
+E   FileNotFoundError: [Errno 2] No such file or directory: '/var/tmp/hermes-scratch/pytest-of-kara/pytest-708/popen-gw1/test_timeout_joins_checker_pro0/child.pid'
+=============================== warnings summary ===============================
+tests/reliability/dead-tests/test_arithmetic.py::test_subtract_no_assertion
+  /home/kara/gitreins/.venv/lib/python3.10/site-packages/_pytest/python.py:171: PytestReturnNotNoneWarning: Test functions should return None, but tests/reliability/dead-tests/test_arithmetic.py::test_subtract_no_assertion returned <class 'int'>.
+  Did you mean to use `assert` instead of `return`?
+  See https://docs.pytest.org/en/stable/how-to/assert.html#return-not-none for more information.
+    warnings.warn(
+
+tests/reliability/dead-tests/test_strings.py::test_reverse_against_wrong_value
+  /home/kara/gitreins/.venv/lib/python3.10/site-packages/_pytest/python.py:171: PytestReturnNotNoneWarning: Test functions should return None, but tests/reliability/dead-tests/test_strings.py::test_reverse_against_wrong_value returned <class 'bool'>.
+  Did you mean to use `assert` instead of `return`?
+  See https://docs.pytest.org/en/stable/how-to/assert.html#return-not-none for more information.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+FAILED tests/test_spec_alignment.py::test_timeout_joins_checker_process_group
+!!!!!!!!!!!!!!!!!!!!!!!!!! stopping after 1 failures !!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!! xdist.dsession.Interrupted: stopping after 1 failures !!!!!!!!!!!!!
+1 failed, 3130 passed, 17 skipped, 2 warnings in 152.08s (0:02:32)
