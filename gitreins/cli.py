@@ -1948,6 +1948,87 @@ def cmd_uninstall(args: argparse.Namespace) -> None:
         print("\nDry run — nothing changed. Re-run with --apply to execute.")
 
 
+def cmd_setup(args: argparse.Namespace) -> None:
+    """One guided path from a bare clone to a working guard (GR-159).
+
+    The four commands this wraps — init, install, setup-tools, guard — each had
+    their own preconditions and none of them told you when you were DONE. The
+    definition of done here is checkable, not narrative: setup finishes by
+    running the health checks and exits non-zero if any of them fails, so
+    "set up" means "the guard will actually run on the next commit".
+
+    Idempotent by construction: it calls the same init/install paths, both of
+    which preserve existing state (init keeps explicit settings, install keeps
+    your config and re-records the manifest).
+    """
+    workdir = get_workdir()
+    if not os.path.isdir(os.path.join(workdir, ".git")):
+        message = f"{workdir} is not a git repository — run `git init` first"
+        if getattr(args, "json", False):
+            print(json.dumps({"ok": False, "error": message}, indent=2))
+        else:
+            print(f"Error: {message}", file=sys.stderr)
+        raise SystemExit(2)
+
+    with_tools = bool(getattr(args, "with_tools", False))
+    as_json = bool(getattr(args, "json", False))
+    total = 3 if with_tools else 2
+    steps: list[dict[str, Any]] = []
+
+    # --json means "this command prints JSON, nothing else": init and install
+    # narrate to stdout, so their prose is captured rather than allowed to make
+    # the document unparseable.
+    sink = io.StringIO()
+    guard_ctx = contextlib.redirect_stdout(sink) if as_json else contextlib.nullcontext()
+
+    with guard_ctx:
+        if not as_json:
+            print(f"Setting up GitReins in {workdir}")
+            print(f"\n[1/{total}] Smart config (gitreins init)")
+        cmd_init(argparse.Namespace(reset=False))
+        steps.append({"step": "config", "status": "ok"})
+
+        if not as_json:
+            print(f"\n[2/{total}] Hooks + install manifest (gitreins install)")
+        cmd_install(argparse.Namespace())
+        steps.append({"step": "hooks", "status": "ok"})
+
+        if with_tools:
+            if not as_json:
+                print(f"\n[3/{total}] Static analysis tooling (gitreins setup-tools)")
+            cmd_setup_tools(argparse.Namespace())
+            steps.append({"step": "tools", "status": "reported"})
+
+    checks = doctor.run_checks(workdir)
+    healthy = not doctor.has_failures(checks)
+    if getattr(args, "json", False):
+        print(
+            json.dumps(
+                {
+                    "ok": healthy,
+                    "workdir": workdir,
+                    "steps": steps,
+                    "checks": [check.to_dict() for check in checks],
+                },
+                indent=2,
+            )
+        )
+    else:
+        print("\n[verify] Repo health (gitreins doctor)")
+        print(doctor.format_checks(checks))
+        print()
+        if healthy:
+            print("Setup complete — the guard will run on your next commit.")
+            print("Next: make a change, `git add .`, `git commit`.")
+        else:
+            print(
+                "Setup INCOMPLETE — the checks above failed, so the guard would not "
+                "run as expected. Fix them and re-run `gitreins setup`.",
+                file=sys.stderr,
+            )
+    raise SystemExit(0 if healthy else 1)
+
+
 def cmd_doctor(args: argparse.Namespace) -> None:
     """Repo health check: config, hooks, tools, manifest, version (GR-162).
 
@@ -4546,6 +4627,15 @@ def _add_basic_parsers(parser: argparse.ArgumentParser, sub: _SubParsers) -> Non
     init_p = sub.add_parser("init", help="Smart init — detect language, size, optimal config")
     init_p.add_argument("--reset", action="store_true", help="Reset config to smart defaults")
 
+    # GR-159: one guided path from bare clone to a working guard
+    setup_p = sub.add_parser(
+        "setup", help="Guided setup: smart config, hooks, then a health check that decides done"
+    )
+    setup_p.add_argument("--json", action="store_true", help="Machine-readable summary")
+    setup_p.add_argument(
+        "--with-tools", action="store_true", help="Also report missing static-analysis tools"
+    )
+
     # GR-161 lifecycle: disable (disarm, keep state) / enable (re-arm) / uninstall
     sub.add_parser("disable", help="Disarm the hooks without removing config or history")
     sub.add_parser("enable", help="Re-arm the hooks after `gitreins disable`")
@@ -5305,6 +5395,7 @@ _SIMPLE_HANDLERS = {
     "install": "cmd_install",
     "init": "cmd_init",
     "config-validate": "cmd_config_validate",
+    "setup": "cmd_setup",
     "disable": "cmd_disable",
     "enable": "cmd_enable",
     "uninstall": "cmd_uninstall",

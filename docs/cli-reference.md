@@ -20,7 +20,7 @@ Running `gitreins` with no command prints the top-level help and exits
 **0**. An unknown command exits **2** (argparse behavior for
 unrecognized arguments).
 
-There are **24 top-level subcommands**:
+There are **25 top-level subcommands**:
 
 | # | Command | Purpose |
 |---|---------|---------|
@@ -45,9 +45,10 @@ There are **24 top-level subcommands**:
 | 19 | `quality-ensure` | Run the repo's quality producer to completion and enforce block-mode (pre-push) |
 | 20 | `fingerprint` | Hash final Git-visible workspace content without mutating the checkout or real index |
 | 21 | `config-validate` | Check `.gitreins/config.yaml` for unknown keys, wrong types and bad values |
-| 22 | `disable` | Disarm the managed hooks without removing config or history |
-| 23 | `enable` | Re-arm the hooks `disable` removed |
-| 24 | `uninstall` | Remove the hooks and config GitReins installed (dry-run; `--apply`, `--purge`) |
+| 22 | `setup` | Guided setup: smart config → hooks → health check that decides done (`--json`, `--with-tools`) |
+| 23 | `disable` | Disarm the managed hooks without removing config or history |
+| 24 | `enable` | Re-arm the hooks `disable` removed |
+| 25 | `uninstall` | Remove the hooks and config GitReins installed (dry-run; `--apply`, `--purge`) |
 
 ## 1. `gitreins install`
 
