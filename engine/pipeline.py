@@ -73,6 +73,7 @@ from engine.guard_manager import (
 )
 from engine.types import (
     _FAILED_TEST_LINE,
+    _SECRETS_FINDING_LINE,
     _first_nonblank_line,
     parse_first_failing_test,
     pytest_outcome,
@@ -1554,7 +1555,11 @@ class Pipeline:
                 else:
                     for line in clean.split("\n"):
                         stripped = line.strip()
-                        if _FAILED_TEST_LINE.match(stripped) or _ERROR_TEST_LINE.match(stripped):
+                        if (
+                            _FAILED_TEST_LINE.match(stripped)
+                            or _ERROR_TEST_LINE.match(stripped)
+                            or _SECRETS_FINDING_LINE.search(stripped)
+                        ):
                             detail = stripped[:100]
                             break
             if not detail:
@@ -1657,7 +1662,14 @@ def _secrets_step_run(
 
     TRUST-002 / POC-17: gitleaks is handed the generated harness-state
     exclusion config, and the exclusion is echoed into the step output so a
-    FAIL diagnosis reads it instead of re-chasing the canary. Fail-closed:
+    FAIL diagnosis reads it instead of re-chasing the canary. DF-2026-20:
+    the echo used to run UNCONDITIONALLY at the top of the output, so a
+    failing step's one-line summary picked it as the failure reason and
+    every secrets FAIL was narrated as a harness-state scope disagreement
+    (fleet row DF-2026-20 was filed on exactly that misreading — the real
+    finding was the builtin credential-store path class on a repo's tracked
+    .npmrc/.env.example). The echo now prints only in the gitleaks-failure
+    branch, after the findings evidence, where TRUST-002 wants it. Fail-closed:
     if mktemp fails the missing config makes gitleaks exit non-zero rather
     than silently scanning with no scope.
 
@@ -1716,7 +1728,6 @@ def _secrets_step_run(
         "cat > \"$_glcfg\" <<'GITREINS_GITLEAKS_CFG'\n"
         f"{harness_scan_gitleaks_config(gitleaks_config_root)}\n"
         "GITREINS_GITLEAKS_CFG\n"
-        f'echo "secrets: harness state excluded from gitleaks scope ({exclusions})"; '
         # TRUST-003: name the scanners and each one's outcome in the step
         # evidence, so a judge FAIL says WHICH scanner raised it instead of
         # leaving "secrets" ambiguous (the ambiguity that cost POC-15 a cycle).
@@ -1733,7 +1744,7 @@ def _secrets_step_run(
         f'{nice_prefix}gitleaks detect --source {scan_source} --no-git --no-banner --no-color --config "$_glcfg"; '
         '_glrc=$?; rm -f "$_glcfg"; '
         'if [ "$_glrc" -eq 0 ]; then echo "secrets: gitleaks: clean"; '
-        'else echo "secrets: gitleaks: findings found (exit $_glrc)"; fi; '
+        f'else echo "secrets: gitleaks: findings found (exit $_glrc)"; echo "secrets: harness state excluded from gitleaks scope ({exclusions})"; fi; '
         "else _glrc=0; "
         'echo "secrets: scanners=builtin cross-check only (gitleaks not on PATH)"; '
         'echo "secrets: gitleaks: not on PATH"; fi; g1=$_glrc; '

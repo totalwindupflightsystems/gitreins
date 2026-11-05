@@ -162,10 +162,12 @@ def _scratch_repo(tmp_path: Path, files: dict[str, str], staged: dict[str, str])
 
 
 # ── the pre-change builders, transcribed verbatim ────────────────────────────
-# These reproduce the EXACT text before DF-GITREINS-POC-55 (verbatim from
-# `git show <base>:engine/pipeline.py`). They are literals on purpose: the AC2
-# claim is "byte-for-byte identical to the pre-change command", which cannot be
-# checked by calling the thing under test.
+# These reproduce the EXACT current no-nice baseline (originally verbatim from
+# `git show <base>:engine/pipeline.py` for DF-GITREINS-POC-55). Re-baselined
+# for DF-2026-20: the harness-state exclusion echo moved from an unconditional
+# leading echo into the gitleaks-failure branch, and the summarizer prefers
+# finding lines. The AC2 claim remains "level 0 == this baseline, byte for
+# byte", which cannot be checked by calling the thing under test.
 
 
 def _prechange_secrets_step(workdir: str) -> str:
@@ -176,12 +178,11 @@ def _prechange_secrets_step(workdir: str) -> str:
         "cat > \"$_glcfg\" <<'GITREINS_GITLEAKS_CFG'\n"
         f"{harness_scan_gitleaks_config(workdir)}\n"
         "GITREINS_GITLEAKS_CFG\n"
-        f'echo "secrets: harness state excluded from gitleaks scope ({exclusions})"; '
         'echo "secrets: scanners=gitleaks+builtin cross-check"; '
         'gitleaks detect --source . --no-git --no-banner --no-color --config "$_glcfg"; '
         '_glrc=$?; rm -f "$_glcfg"; '
         'if [ "$_glrc" -eq 0 ]; then echo "secrets: gitleaks: clean"; '
-        'else echo "secrets: gitleaks: findings found (exit $_glrc)"; fi; '
+        f'else echo "secrets: gitleaks: findings found (exit $_glrc)"; echo "secrets: harness state excluded from gitleaks scope ({exclusions})"; fi; '
         "else _glrc=0; "
         'echo "secrets: scanners=builtin cross-check only (gitleaks not on PATH)"; '
         'echo "secrets: gitleaks: not on PATH"; fi; g1=$_glrc; '

@@ -1422,14 +1422,19 @@ gitreins push-check "$(git rev-parse HEAD)" "$(git rev-parse origin/main)"
 
 The check builds the range `<remote_sha>..<local_sha>` and reads the patch of
 every commit inside it (`git log --no-ext-diff --diff-merges=first-parent -p`),
-inspecting only **added** lines (`+`, excluding `+++` headers). Three
+inspecting only **added** lines (`+`, excluding `+++` headers). It counts the
+commits in that range (`git rev-list --count` over the same revision args) and
+names the count and the range in every clean and refusal message. Three
 consequences follow from that pair:
 
 - It reports credentials **introduced by this push**. A secret already
   published on the remote sits outside the range and does not trip it.
 - `remote_sha` all zeros is git's spelling for "this ref does not exist on the
-  remote yet" (a new branch); the range then becomes the whole history
-  reachable from `local_sha`.
+  remote yet" (a new branch); the range then becomes only the commits **not
+  reachable from any remote-tracking ref** (`git log <local_sha> --not
+  --remotes`), so long-published history — a repository's own scanner fixtures
+  included — cannot block a clean new-branch push. Only the commits the push
+  actually introduces are scanned.
 - Order matters: the first positional is the newer end. Swapping them scans an
   empty range and prints `PUSH SECRET CHECK: clean`.
 
@@ -1441,17 +1446,23 @@ assignments (`*PASSWORD*=` / `*TOKEN*=` / `*SECRET*=` / `*API_KEY*=` with a
 
 ### Success and refusal
 
-A clean range prints exactly one line and exits 0:
+A clean range prints exactly one line — naming the scanned commit count and
+the range used — and exits 0 (measured in this repo, HEAD one commit ahead of
+`HEAD~1`):
 
 ```
-PUSH SECRET CHECK: clean
+PUSH SECRET CHECK: clean (scanned 1 commit in HEAD~1..HEAD)
 ```
 
 A range that introduces a credential prints one `PUSH REFUSED:` line per
-finding class plus the remediation line, and exits 1 — the push is refused:
+finding class, a scope line reporting how many commits were scanned and the
+range used, and the remediation line, and exits 1 — the push is refused
+(measured in a scratch repo whose remote tip sat one commit below a new branch
+carrying two commits, the newest holding a planted token):
 
 ```
 PUSH REFUSED: GitHub personal access token found in outgoing commit history.
+Scanned 2 commits in be44c89026b3 --not --remotes.
 Rotate the exposed credential and have a human rewrite the affected history before retrying.
 ```
 
@@ -1472,15 +1483,18 @@ from a run report:
 | 1 | a credential was found, or the range could not be inspected (fail-closed) |
 | 2 | argument error — a required positional missing, or extra arguments (argparse) |
 
-Measured on the 0.17.0 build (`./.venv/bin/gitreins`), clean ranges in this
-repo plus a scratch repo with one planted token:
+Measured on the 0.18.0 build (`./.venv/bin/gitreins`), clean ranges in this
+repo plus a scratch repo with a remote-published fixture token and planted
+tokens on new branches:
 
 | Invocation | Observed |
 |------------|----------|
-| `gitreins push-check HEAD HEAD` | empty `<sha>..<sha>` range → `PUSH SECRET CHECK: clean`, rc **0** |
-| `gitreins push-check HEAD HEAD~1` | clean follow-up commit → `PUSH SECRET CHECK: clean`, rc **0** |
-| `gitreins push-check <sha-with-planted-token> <base-sha>` | one `PUSH REFUSED: GitHub personal access token …` line → rc **1** |
-| `gitreins push-check <newest-sha> <older-sha>` (order swapped) | nothing outgoing → `PUSH SECRET CHECK: clean`, rc **0** |
+| `gitreins push-check HEAD HEAD` | empty `<sha>..<sha>` range → `PUSH SECRET CHECK: clean (scanned 0 commits in HEAD..HEAD)`, rc **0** |
+| `gitreins push-check HEAD HEAD~1` | clean follow-up commit → `PUSH SECRET CHECK: clean (scanned 1 commit in HEAD~1..HEAD)`, rc **0** |
+| `gitreins push-check <new-branch-sha> 0000…0` | clean new branch over a remote-published fixture token → `PUSH SECRET CHECK: clean (scanned 1 commit in f6f5f256246e --not --remotes)`, rc **0** |
+| `gitreins push-check <new-branch-sha> 0000…0` (newest commit holds a planted token) | `PUSH REFUSED: GitHub personal access token …` + `Scanned 2 commits in be44c89026b3 --not --remotes.` → rc **1** |
+| `gitreins push-check <sha-with-planted-token> <base-sha>` | `PUSH REFUSED: GitHub personal access token …` + `Scanned 2 commits in 73554c7871aa..914d8f214874.` → rc **1** |
+| `gitreins push-check <newest-sha> <older-sha>` (order swapped) | nothing outgoing → `PUSH SECRET CHECK: clean (scanned 0 commits in HEAD..HEAD~1)`, rc **0** |
 | `gitreins push-check HEAD nosuchref` | `PUSH REFUSED: secret scan could not verify the outgoing history: fatal: …` → rc **1** |
 | `gitreins push-check` | `error: the following arguments are required: local_sha, remote_sha` → rc **2** |
 | `gitreins push-check HEAD HEAD HEAD` | `error: unrecognized arguments: HEAD` → rc **2** |
