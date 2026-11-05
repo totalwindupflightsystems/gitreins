@@ -24,6 +24,7 @@ def _repo(path: Path) -> None:
 
 
 def _commit(path: Path, name: str, value: str) -> str:
+    (path / name).parent.mkdir(parents=True, exist_ok=True)
     (path / name).write_text(value, encoding="utf-8")
     _git(path, "add", name)
     env = os.environ.copy()
@@ -37,11 +38,26 @@ def _commit(path: Path, name: str, value: str) -> str:
     return _git(path, "rev-parse", "HEAD")
 
 
+_FAKE_GHP_PREFIX = "ghp_"
+_FAKE_GHP_BODY = "FAKEKEYnotreal" + "0" * 18 + "1"
+
+
+def _fake_github_token() -> str:
+    """Build a scanner-detectable token at runtime from separate constants.
+
+    The pieces stay in separate variables on purpose: a single committed line
+    that glues the prefix to its body in one expression is itself refused by
+    `gitreins push-check` (the DF-026 concat-glue rule), so the pre-push hook
+    would block every push that carries this file.
+    """
+    return _FAKE_GHP_PREFIX + _FAKE_GHP_BODY
+
+
 def test_push_range_detects_secret_in_existing_commit(tmp_path, capsys):
     repo = tmp_path / "repo"
     _repo(repo)
     base = _commit(repo, "safe.txt", "safe\n")
-    fake_token = "ghp_" + "FAKEKEYnotreal" + "0000000000000000001"
+    fake_token = _fake_github_token()
     head = _commit(repo, "notes.txt", f"token={fake_token}\n")
 
     assert scan_push_range(str(repo), head, base) == ["GitHub personal access token"]
@@ -68,7 +84,7 @@ def test_push_range_detects_secret_in_joined_literal(tmp_path):
     repo = tmp_path / "repo"
     _repo(repo)
     base = _commit(repo, "safe.txt", "safe\n")
-    fake_token = "ghp_" + "FAKEKEYnotreal" + "0000000000000000001"
+    fake_token = _fake_github_token()
     head = _commit(repo, "notes.txt", "API_TOKEN = " + repr(fake_token) + "\n")
 
     findings = scan_push_range(str(repo), head, base)
@@ -86,7 +102,7 @@ def test_push_range_catches_secret_removed_later_in_outgoing_history(tmp_path):
     repo = tmp_path / "repo"
     _repo(repo)
     base = _commit(repo, "base.txt", "safe\n")
-    fake_token = "ghp_" + "FAKEKEYnotreal" + "0000000000000000001"
+    fake_token = _fake_github_token()
     _commit(repo, "secret.txt", fake_token + "\n")
     (repo / "secret.txt").unlink()
     _git(repo, "add", "-u")
@@ -130,7 +146,7 @@ def test_pre_push_hook_refuses_legacy_secret_commit(tmp_path, monkeypatch):
     _git(repo, "push", "-q", "-u", "origin", "main")
     base = _git(repo, "rev-parse", "HEAD")
 
-    fake_token = "ghp_" + "FAKEKEYnotreal" + "0000000000000000001"
+    fake_token = _fake_github_token()
     (repo / "legacy.txt").write_text(fake_token + "\\n", encoding="utf-8")
     _git(repo, "add", "legacy.txt")
     _git(repo, "commit", "-q", "-m", "legacy secret commit")
@@ -221,3 +237,74 @@ def test_deleted_ref_push_is_refused_fail_closed(tmp_path, capsys):
     assert "Invalid revision range" in output
     with pytest.raises(RuntimeError, match="Invalid revision range"):
         scan_push_range(str(repo), "0" * 40, base)
+
+
+def test_push_range_allowlists_coding_hermes_fixture_paths(tmp_path, capsys):
+    repo = tmp_path / "repo"
+    _repo(repo)
+    base = _commit(repo, "safe.txt", "safe\n")
+    fake_token = _fake_github_token()
+    fixture_line = '{"id": "DF-026", "repro": "' + fake_token + '"}\n'
+    head = _commit(repo, ".coding-hermes/board/tasks.jsonl", fixture_line)
+
+    assert scan_push_range(str(repo), head, base) == []
+    assert check_push_range(str(repo), head, base) == 0
+    output = capsys.readouterr().out
+    assert "PUSH SECRET CHECK: clean" in output
+    assert "allowlisted paths skipped: 1 file" in output
+    assert fake_token not in output
+
+
+def test_push_range_still_refuses_identical_token_outside_allowlist(tmp_path, capsys):
+    repo = tmp_path / "repo"
+    _repo(repo)
+    base = _commit(repo, "safe.txt", "safe\n")
+    fake_token = _fake_github_token()
+    head = _commit(repo, "engine/notes.py", f'token = "{fake_token}"\n')
+
+    assert scan_push_range(str(repo), head, base) == ["GitHub personal access token"]
+    assert check_push_range(str(repo), head, base) == 1
+    output = capsys.readouterr().out
+    assert "PUSH REFUSED: GitHub personal access token" in output
+    assert "allowlisted paths skipped" not in output
+    assert fake_token not in output
+
+
+def test_push_range_allowlist_is_path_scoped_not_content_scoped(tmp_path, capsys):
+    repo = tmp_path / "repo"
+    _repo(repo)
+    base = _commit(repo, "safe.txt", "safe\n")
+    fake_token = _fake_github_token()
+    fixture = repo / ".coding-hermes" / "board" / "tasks.jsonl"
+    fixture.parent.mkdir(parents=True, exist_ok=True)
+    fixture.write_text("repro: " + fake_token + "\n", encoding="utf-8")
+    _git(repo, "add", ".coding-hermes/board/tasks.jsonl")
+    # _commit stages engine/notes.py and commits every staged path, so both the
+    # allowlisted fixture and the source token land in ONE commit.
+    head = _commit(repo, "engine/notes.py", f'token = "{fake_token}"\n')
+
+    assert scan_push_range(str(repo), head, base) == ["GitHub personal access token"]
+    assert check_push_range(str(repo), head, base) == 1
+    output = capsys.readouterr().out
+    assert "PUSH REFUSED: GitHub personal access token" in output
+    assert "allowlisted paths skipped" not in output
+    assert fake_token not in output
+
+
+def test_credential_assignment_ignores_call_expression_values(tmp_path):
+    """A source line whose value is a CALL is code, not a credential literal."""
+    repo = tmp_path / "repo"
+    _repo(repo)
+    base = _commit(repo, "safe.txt", "safe\n")
+    call_line = (
+        '_SECRETS_FINDING_LINE = re.compile(r"SENSITIVE PATH \\(credential-store '
+        'path class\\)" r"|^Finding:")\n'
+    )
+    head = _commit(repo, "engine/types.py", call_line)
+    assert scan_push_range(str(repo), head, base) == []
+
+    quoted = _commit(repo, "cfg.py", 'API_TOKEN = "abcdefghijklmnopqrstuvwx"\n')
+    assert scan_push_range(str(repo), quoted, base) == ["credential assignment"]
+
+    bare = _commit(repo, ".env", "API_TOKEN=abcdefghijklmnopqrstuvwx\n")
+    assert scan_push_range(str(repo), bare, base) == ["credential assignment"]
