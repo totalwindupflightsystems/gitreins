@@ -135,6 +135,18 @@ ignore_missing_imports = true
 module = ["huggingface_hub", "torch", "transformers"]
 ignore_missing_imports = true
 
+# OBS-GITREINS-2 — engine/cli_metrics.py imports prometheus_client, a declared
+# runtime dependency ([project] dependencies), but the mypy the guard resolves
+# from PATH is a standalone tool env whose site-packages do not include the
+# repo venv's packages, so the import reads as missing THERE (the venv mypy,
+# which does see it, keeps full strict checking via upstream py.typed). Same
+# class as the tomli relaxation above: a declared runtime dependency the
+# checking environment cannot observe. Module-scoped — widening it would hide
+# real defects elsewhere.
+[[tool.mypy.overrides]]
+module = "prometheus_client"
+ignore_missing_imports = true
+
 [tool.ruff]
 line-length = 100
 extend-exclude = [

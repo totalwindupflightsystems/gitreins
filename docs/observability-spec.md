@@ -1,9 +1,11 @@
 # Observability spec — `gitreins`
 
-Status: **audit complete, not yet implemented.** This document specifies what GitReins
-must emit, how a Prometheus-style collector receives it, and how a reviewer proves each
-metric is live. It records the CURRENT state (largely blind) and the target state.
-No service code was changed to produce this document.
+Status: **audit complete; §4b/§5b CLI completion records IMPLEMENTED.** The CLI half of
+this catalogue ships as `engine/cli_metrics.py` (one completion record per subcommand
+invocation, pushed from the single dispatcher `gitreins/cli.py` `_run_subcommand_handler`
+in a `try/finally`; transport and best-effort contract per §5b). The resident-server
+catalogue (§4a/§5a) is **still not implemented**. Sections 2/2a/2b below still record the
+audited pre-instrumentation state that motivated this document.
 
 Audited at version `0.17.1` (`pyproject.toml:7`), 2026-11-03.
 
@@ -192,8 +194,14 @@ handler. Route label must be the **matched route**, never the raw path
 
 ### 5b. CLI — completion record on exit
 
+**IMPLEMENTED (OBS-GITREINS-2) as `engine/cli_metrics.py`**, hooked at the dispatcher
+below in a `try/finally`; a cap trip is surfaced through the `last_cap_trip` note in
+`engine/eval_cap.py` (the reason string that previously died with the process, §2a‑4).
+The record function is best-effort per the contract described here and emits the §4b
+series verbatim; the tokens counter is emitted only when a caller supplies counts.
+
 Every CLI subcommand already returns through a single dispatcher
-(`gitreins/cli.py:5139-5142` `_run_subcommand_handler`). Emit the record there, in a
+(`gitreins/cli.py` `_run_subcommand_handler`). Emit the record there, in a
 `finally`, so it fires on success, on exception and on cap-stop alike:
 
 - **Primary:** POST to the pushgateway with a `gitreins_<command>` grouping key, shaping

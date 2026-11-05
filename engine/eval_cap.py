@@ -43,6 +43,35 @@ from typing import Any
 logger = logging.getLogger("gitreins.eval_cap")
 
 
+# ── Cap-trip note for the CLI completion record (OBS-GITREINS-2) ──────────
+# A cap trip dies with the process today (spec §2a: the reason string is
+# returned to a caller and discarded). This module-level note is the smallest
+# in-process seam the CLI completion record can read at dispatch time: the
+# trip-producing returns below record their message through :func:`_trip`
+# UNCHANGED. The dispatcher resets before a run and reads after, so a
+# long-lived process (the MCP server judging in-process) can never attribute
+# an older run's trip to a newer one.
+_last_cap_trip: str | None = None
+
+
+def _trip(message: str) -> str:
+    """Record a cap trip for the completion record; return the message unchanged."""
+    global _last_cap_trip
+    _last_cap_trip = message
+    return message
+
+
+def reset_cap_trip() -> None:
+    """Forget any earlier run's trip — the CLI dispatcher calls this per run."""
+    global _last_cap_trip
+    _last_cap_trip = None
+
+
+def last_cap_trip() -> str | None:
+    """The most recent cap-trip message in this process, if any."""
+    return _last_cap_trip
+
+
 @dataclass
 class EvalCap:
     """Caps that limit how much the evaluator can consume.
@@ -112,7 +141,7 @@ class EvalCap:
         """
         # Check iterations BEFORE adding (allows one final full call)
         if self.max_iterations > 0 and self.iteration_credit >= self.max_iterations:
-            return (
+            return _trip(
                 f"Iteration cap ({_fmt_num(self.max_iterations)}) reached "
                 f"({_fmt_num(self.iteration_credit)} used). "
                 "Increase max_iterations or split criteria."
@@ -134,7 +163,7 @@ class EvalCap:
         Same lenient check as record_llm_call — allows going slightly over.
         """
         if self.max_iterations > 0 and self.iteration_credit >= self.max_iterations:
-            return (
+            return _trip(
                 f"Iteration cap ({_fmt_num(self.max_iterations)}) reached "
                 f"({_fmt_num(self.iteration_credit)} used). "
                 "Increase max_iterations or split criteria."
@@ -169,21 +198,21 @@ class EvalCap:
         if self.max_seconds > 0 and self.start_time > 0:
             elapsed = time.time() - self.start_time
             if elapsed >= self.max_seconds:
-                return (
+                return _trip(
                     f"Time cap ({_fmt_seconds(self.max_seconds)}) exceeded "
                     f"({_fmt_seconds(elapsed)} elapsed). "
                     "Increase max_time or simplify criteria."
                 )
 
         if self.max_input_tokens > 0 and self.cumulative_input_tokens >= self.max_input_tokens:
-            return (
+            return _trip(
                 f"Input token budget ({_fmt_tokens(self.max_input_tokens)}) exceeded "
                 f"({_fmt_tokens(self.cumulative_input_tokens)} used). "
                 "Increase max_input_tokens or reduce message context."
             )
 
         if self.max_output_tokens > 0 and self.cumulative_output_tokens >= self.max_output_tokens:
-            return (
+            return _trip(
                 f"Output token budget ({_fmt_tokens(self.max_output_tokens)}) exceeded "
                 f"({_fmt_tokens(self.cumulative_output_tokens)} used). "
                 "Increase max_output_tokens or simplify criteria."

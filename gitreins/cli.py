@@ -5416,9 +5416,70 @@ _SIMPLE_HANDLERS = {
 }
 
 
+def _completion_failure(exc: BaseException) -> tuple[str, str | None]:
+    """``(outcome, reason)`` for a failed dispatch, from the closed reason set.
+
+    OBS-GITREINS-2. A noted cap trip wins over the exit shape: a cap-tripped
+    judge degrades to an INCOMPLETE verdict and exits 1
+    (``if not result.passed``), so without this the cap-stop — the spec's
+    silent failure mode — would be counted as a plain fail. Otherwise a
+    ``SystemExit`` the subcommand raised ITSELF (its own typed failure
+    result, the CLI's exit-code contract) is ``fail``; any other exception
+    is an unexpected crash, ``error``, with the reason mapped through
+    ``engine.cli_metrics.failure_reason`` (``None`` when unmappable — a
+    free-text label is never emitted).
+    """
+    from engine.eval_cap import last_cap_trip
+    from engine.cli_metrics import cap_reason, failure_reason
+
+    trip = last_cap_trip()
+    if trip:
+        return "cap", cap_reason(trip)
+    if isinstance(exc, SystemExit):
+        return "fail", None
+    return "error", failure_reason(exc)
+
+
 def _run_subcommand_handler(name: str, args: argparse.Namespace) -> None:
     handler = globals()[name]
-    handler(args)
+    # OBS-GITREINS-2: exactly one completion record per subcommand invocation,
+    # on every exit path (pass / typed fail / error / cap), emitted from the
+    # finally below. Env-gated: with neither transport configured this costs
+    # one ``os.environ.get`` pair and nothing else. The handler call, its
+    # argv handling, its output and its exit code are untouched — every
+    # exception (including SystemExit) is re-raised unchanged, and the record
+    # function swallows all of its own errors (engine/cli_metrics.py, the
+    # append_usage_row contract).
+    started = time.perf_counter()
+    outcome = "pass"
+    reason = None
+    recording = bool(
+        os.environ.get("GITREINS_METRICS_PUSH_URL")
+        or os.environ.get("GITREINS_METRICS_TEXTFILE_DIR")
+    )
+    if recording:
+        from engine.eval_cap import reset_cap_trip
+
+        reset_cap_trip()
+    try:
+        handler(args)
+    except SystemExit as exc:
+        if isinstance(exc.code, str) or (isinstance(exc.code, int) and exc.code != 0):
+            outcome, reason = _completion_failure(exc)
+        raise
+    except BaseException as exc:
+        outcome, reason = _completion_failure(exc)
+        raise
+    finally:
+        if recording:
+            from engine.cli_metrics import record_run_completion
+
+            record_run_completion(
+                name[4:] if name.startswith("cmd_") else name,
+                outcome=outcome,
+                duration_s=time.perf_counter() - started,
+                reason=reason,
+            )
 
 
 def main() -> None:
