@@ -4,10 +4,12 @@ Judge Orchestrator — Runs the evaluation pipeline.
 Now delegate to the Pipeline engine for configurable multi-stage evaluation.
 """
 
+import copy
 import logging
 import re
 from typing import Any, cast
 
+from engine.auger_packet import PacketValidationError, TaskPacketAdapter
 from engine.eval_cap import EvalCap
 from engine.evaluator import AgenticEvaluator, Verdict, VerdictItem
 from engine.guard_manager import GuardManager
@@ -19,7 +21,7 @@ from engine.guard_manager import GuardManager
 from engine.llm import LLMClient
 from engine.pipeline import Pipeline, degradation_warning, load_pipeline_config
 from engine.task_manager import Task
-from engine.types import Tier1Result
+from engine.types import GuardResult, Tier1Result
 from engine.usage import provenance_fields
 
 logger = logging.getLogger("gitreins.judge")
@@ -101,17 +103,148 @@ class Judge:
         the task dict before the pipeline runs.  Pipeline stages with the
         condition ``not task.skip_tier2`` will be skipped (GR-064c).
         """
+        packet_task, packet_context, packet_failure = self._prepare_auger_task(task)
+        if packet_failure is not None:
+            return packet_failure
+        task = packet_task
+
         config = load_pipeline_config(self.workdir, scan_root=self.scan_root)
         self._pass_on_error = self._read_pass_on_error()
 
         if config.get("pipeline", {}).get("stages"):
-            return self._run_pipeline(task, config, skip_tier2=skip_tier2)
+            result = self._run_pipeline(task, config, skip_tier2=skip_tier2)
+        elif skip_tier2:
+            # Legacy path doesn't use the condition system — just run
+            # Tier 1 and return a pass-on-tier1 result.
+            result = self._run_legacy_skip_tier2(task)
         else:
-            if skip_tier2:
-                # Legacy path doesn't use the condition system — just run
-                # Tier 1 and return a pass-on-tier1 result.
-                return self._run_legacy_skip_tier2(task)
-            return self._run_legacy(task)
+            result = self._run_legacy(task)
+        if packet_context is not None:
+            self._attach_auger_evidence(result, packet_context)
+        return result
+
+    def _prepare_auger_task(
+        self, task: Task
+    ) -> tuple[Task, dict[str, Any] | None, "JudgeResult | None"]:
+        """Validate an attached Auger packet and run its exact tracked tests.
+
+        Ordinary tasks return immediately without constructing the adapter.  A
+        packet failure is a fail-closed Tier-1 result, so Tier 2 is never
+        invoked and ``pass_on_error`` cannot turn missing evidence green.
+        """
+        packet = getattr(task, "auger_packet", None)
+        if not isinstance(packet, dict):
+            return task, None, None
+        board_task = getattr(task, "board_task", None)
+        if not isinstance(board_task, dict):
+            board_task = packet.get("board_task")
+        if not isinstance(board_task, dict):
+            return task, None, self._auger_failure(task.id, ["board_task"])
+
+        adapter = TaskPacketAdapter(self.scan_root)
+        try:
+            context = adapter.prepare(
+                board_task,
+                packet,
+                worker_summary=getattr(task, "worker_summary", None),
+            )
+            test_results = adapter.run_tests(context)
+        except PacketValidationError as exc:
+            return task, None, self._auger_failure(task.id, exc.unresolved_ids)
+
+        context["test_results"] = [result.to_dict() for result in test_results]
+        failed = [result for result in test_results if not result.passed]
+        if failed:
+            evidence = {
+                "valid": True,
+                "board_id": context["board_id"],
+                "test_results": context["test_results"],
+            }
+            tier1 = Tier1Result(
+                passed=False,
+                results=[
+                    GuardResult(
+                        name=f"auger_test:{result.id}",
+                        passed=False,
+                        output=result.output,
+                        exit_code=result.exit_code,
+                    )
+                    for result in failed
+                ],
+                extra={"auger_packet": evidence},
+            )
+            names = ", ".join(result.id for result in failed)
+            pipeline_result = {
+                "passed": False,
+                "stages": {
+                    "auger_packet": {
+                        "passed": False,
+                        "summary": f"packet test obligations failed: {names}",
+                    }
+                },
+                "auger_packet": evidence,
+            }
+            return (
+                task,
+                None,
+                JudgeResult(
+                    task_id=str(context["id"]),
+                    passed=False,
+                    tier1=tier1,
+                    pipeline_result=pipeline_result,
+                ),
+            )
+
+        prepared = copy.copy(task)
+        prepared.id = str(context["id"])
+        prepared.title = str(context["title"])
+        prepared.criteria = copy.deepcopy(context["criteria"])
+        setattr(prepared, "_auger_context", context)
+        return prepared, context, None
+
+    @staticmethod
+    def _auger_failure(task_id: str, unresolved_ids: list[str]) -> "JudgeResult":
+        unique_ids = list(dict.fromkeys(unresolved_ids))
+        evidence: dict[str, Any] = {"valid": False, "unresolved_ids": unique_ids}
+        detail = "unresolved Auger packet references: " + ", ".join(unique_ids)
+        tier1 = Tier1Result(passed=False, results=[], extra={"auger_packet": evidence})
+        return JudgeResult(
+            task_id=task_id,
+            passed=False,
+            tier1=tier1,
+            pipeline_result={
+                "passed": False,
+                "stages": {"auger_packet": {"passed": False, "summary": detail}},
+                "auger_packet": evidence,
+            },
+        )
+
+    @staticmethod
+    def _attach_auger_evidence(result: "JudgeResult", context: dict[str, Any]) -> None:
+        evidence = {
+            "valid": True,
+            "board_id": context["board_id"],
+            "board_id_mapping": context["board_id_mapping"],
+            "test_results": context["test_results"],
+        }
+        result.pipeline_result["auger_packet"] = evidence
+        if result.tier1 is not None:
+            result.tier1.extra["auger_packet"] = evidence
+
+    @staticmethod
+    def _task_context(task: Task, *, include_status: bool = False) -> dict[str, object]:
+        context = getattr(task, "_auger_context", None)
+        if isinstance(context, dict):
+            task_dict: dict[str, object] = copy.deepcopy(context)
+        else:
+            task_dict = {
+                "id": task.id,
+                "title": task.title,
+                "criteria": task.criteria,
+            }
+        if include_status:
+            task_dict["status"] = task.status
+        return task_dict
 
     def _run_quality_snapshot(self) -> dict[str, Any] | None:
         """Run the repository's producer once for a configured-pipeline judge.
@@ -180,12 +313,7 @@ class Judge:
             scan_root=self.scan_root,
         )
 
-        task_dict: dict[str, object] = {
-            "id": task.id,
-            "title": task.title,
-            "criteria": task.criteria,
-            "status": task.status,
-        }
+        task_dict = self._task_context(task, include_status=True)
         if skip_tier2:
             # Propagate flag to task dict so pipeline conditions
             # like "not task.skip_tier2" can skip the tier2 stage.
@@ -291,11 +419,7 @@ class Judge:
         evaluator = AgenticEvaluator(
             self.llm, self.scan_root, eval_cap=self.eval_cap, config_root=self.workdir
         )
-        task_dict: dict[str, object] = {
-            "id": task.id,
-            "title": task.title,
-            "criteria": task.criteria,
-        }
+        task_dict = self._task_context(task)
         if tier1_diagnostics:
             task_dict["tier1_diagnostics"] = tier1_diagnostics
         try:

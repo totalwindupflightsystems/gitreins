@@ -244,6 +244,39 @@ def test_stats_counts_fixture_verdicts(live_server: object) -> None:
     }
 
 
+def test_metrics_endpoint_exports_five_core_metric_families(live_server: object) -> None:
+    status, body = get(live_server, "/metrics")
+
+    assert status == 200
+    exposition = body.decode("utf-8")
+    for name in (
+        "gitreins_serve_http_requests_total",
+        "gitreins_serve_http_request_duration_seconds",
+        "gitreins_serve_up",
+        "gitreins_verdicts_total",
+        "gitreins_verdicts_failed_total",
+    ):
+        assert name in exposition
+
+
+def test_existing_route_increments_request_counter(live_server: object) -> None:
+    def sample_value() -> float:
+        exposition = serve.generate_latest(serve.REGISTRY).decode("utf-8")
+        match = re.search(
+            r'^gitreins_serve_http_requests_total\{method="GET",route="health",status_class="2xx"\} ([0-9.]+)$',
+            exposition,
+            re.MULTILINE,
+        )
+        return float(match.group(1)) if match else 0.0
+
+    before = sample_value()
+    status, _body = get(live_server, "/health")
+    after = sample_value()
+
+    assert status == 200
+    assert after == before + 1
+
+
 def test_stderr_carries_the_non_loopback_host_warning(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

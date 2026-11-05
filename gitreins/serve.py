@@ -47,9 +47,19 @@ import os
 import re
 import sqlite3
 import sys
+import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, TypedDict, cast
+
+from prometheus_client import (  # type: ignore[import-not-found]
+    CONTENT_TYPE_LATEST,
+    REGISTRY,
+    Counter,
+    Gauge,
+    Histogram,
+    generate_latest,
+)
 
 from engine import evidence, qa_ledger, usage
 from engine.persist import KIND_RESOLUTION
@@ -66,6 +76,40 @@ BOARD_NOT_CONFIGURED = (
 )
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _HASH_RE = re.compile(r"^[a-f0-9]{4,16}$")
+
+SERVE_HTTP_REQUESTS = Counter(
+    "gitreins_serve_http_requests_total",
+    "HTTP requests served by gitreins serve.",
+    ("method", "route", "status_class"),
+)
+SERVE_HTTP_REQUEST_DURATION = Histogram(
+    "gitreins_serve_http_request_duration_seconds",
+    "HTTP request duration in seconds.",
+    ("route",),
+)
+SERVE_UP = Gauge("gitreins_serve_up", "Whether gitreins serve has answered a request.")
+SERVE_UP.set(0)
+VERDICTS_TOTAL = Gauge(
+    "gitreins_verdicts_total", "Graded verdicts in the served checkout.", ("repo",)
+)
+VERDICTS_FAILED_TOTAL = Gauge(
+    "gitreins_verdicts_failed_total", "Failed graded verdicts in the served checkout.", ("repo",)
+)
+
+
+def _route_name(path: str) -> str:
+    """Return a bounded route label for a normalized request path."""
+    if path == "/health":
+        return "health"
+    if path == "/metrics":
+        return "metrics"
+    if path == "/api/stats":
+        return "stats"
+    if path == "/api/verdicts":
+        return "verdicts"
+    if path.startswith("/api/verdicts/"):
+        return "verdict_detail"
+    return "other"
 
 
 # ── typed API shapes (TypedDict = plain dict at runtime, so behaviour is ─────
@@ -697,6 +741,7 @@ class Handler(BaseHTTPRequestHandler):
     def _send(
         self, code: int, body: bytes, ctype: str, extra_headers: dict[str, str] | None = None
     ) -> None:
+        self._metric_status = code
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
@@ -745,7 +790,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def _dispatch_api(self, path: str) -> bool:
         """Serve an /api/* route. Returns False when the path is not an API route."""
-        if path == "/health":
+        if path == "/metrics":
+            repo = os.path.basename(os.path.abspath(self.workdir))
+            verdict_stats = stats(list_verdicts(self.workdir))
+            VERDICTS_TOTAL.labels(repo=repo).set(verdict_stats["total"])
+            VERDICTS_FAILED_TOTAL.labels(repo=repo).set(verdict_stats["failed"])
+            self._send(200, generate_latest(REGISTRY), CONTENT_TYPE_LATEST)
+        elif path == "/health":
             # REVIEW-GITREINS-022: a supervisor, container healthcheck or
             # smoke test had to guess at /api/stats — a full aggregation of
             # every verdict in the repo — to answer "is it up?". This is the
@@ -798,20 +849,30 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802 (http.server API)
         path = self.path.split("?")[0].rstrip("/") or "/"
+        route = _route_name(path)
+        started = time.perf_counter()
+        self._metric_status = 500
         try:
             if path == "/":
                 self._send(200, _PAGE.encode(), "text/html; charset=utf-8")
-            elif path == "/health" or path.startswith("/api/"):
+            elif path == "/health" or path == "/metrics" or path.startswith("/api/"):
                 self._dispatch_api(path)
             else:
                 self._json({"error": "not found"}, 404)
         except BrokenPipeError:
             pass
         except Exception as e:  # keep the server alive on handler bugs
+            self._metric_status = 500
             try:
                 self._json({"error": str(e)}, 500)
             except Exception:
                 pass
+        finally:
+            SERVE_HTTP_REQUESTS.labels(
+                method="GET", route=route, status_class=f"{self._metric_status // 100}xx"
+            ).inc()
+            SERVE_HTTP_REQUEST_DURATION.labels(route=route).observe(time.perf_counter() - started)
+            SERVE_UP.set(1)
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002, ANN401
         # Quiet by default; the name ``format`` matches http.server's own API.

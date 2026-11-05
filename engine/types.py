@@ -11,6 +11,15 @@ from typing import Any
 # count (DF-021).
 _FAILED_TEST_LINE = re.compile(r"^FAILED \S+::")
 
+# DF-2026-20: the secrets step's captured output opens with informational
+# banners ("harness state excluded from gitleaks scope (...)", "scanners="),
+# so a failing step with no pytest-shaped line summarized as the banner —
+# every secrets FAIL read as a harness-state scope disagreement. This class
+# matches the scanners' actual evidence lines: the builtin cross-check's
+# credential-store path findings and gitleaks' Finding blocks — preferred
+# over the banner when picking a failing step's summary detail.
+_SECRETS_FINDING_LINE = re.compile(r"SENSITIVE PATH \(credential-store path class\)" r"|^Finding:")
+
 # TRUST-003 (dogfood POC-14): the same anchored shapes, capturing the test id
 # so a bounded console line and the persisted run log can NAME the failure
 # instead of leaving the reader to re-run pytest. FAILED is preferred over

@@ -57,6 +57,7 @@ collection (specific, actionable message naming both values).
 
 import argparse
 import ast
+import os
 import re
 import subprocess
 import sys
@@ -171,12 +172,18 @@ def collect_live_counts(repo_root):
         "-q",
         "--override-ini=addopts=",
     ]
+    # DF-2026-20: the guard's diff-mode test lane injects the changed-file
+    # list via PYTEST_ADDOPTS; this nested collection must stay FULL (it is
+    # the CI-canonical count), so strip the env injection exactly the way
+    # auger_packet._test_env does for its own nested pytest.
+    child_env = {key: value for key, value in os.environ.items() if key not in {"PYTEST_ADDOPTS"}}
     try:
         proc = subprocess.run(
             cmd,
             cwd=str(repo_root),
             capture_output=True,
             text=True,
+            env=child_env,
         )
     except OSError as exc:
         return None, f"could not execute {cmd[0]}: {exc}"
