@@ -1,0 +1,1 @@
+docs drift check OK: version 0.18.0 matches README banner; README.md + CONTRIBUTING.md test counts match the live collection (3221 tests / 98 test files). evaluator tool-count check OK: 3 evaluator tool claims match the 12 defined EVALUATOR_TOOLS (docs/architecture.md + docs/evaluator-loop.md)
