@@ -201,16 +201,27 @@ def test_timeout_joins_checker_process_group(tmp_path: Path) -> None:
         ("warn", True, "warning"),
     ):
         child_pid.unlink(missing_ok=True)
+        # The handshake budget must cover interpreter startup on a loaded host:
+        # the checker writes child.pid only after spawning its child, so a bare
+        # 100 ms timeout raced the write and lost the handshake under load.
+        # The checker then sleeps 30 s, so it still exceeds this budget and the
+        # timeout path is still exercised.
         result = run_checker(
             str(repo),
             command=checker,
             mode="block",
             missing_checker=policy,
-            timeout=0.1,
+            timeout=5.0,
         )
         assert result.passed is passed
         assert result.timed_out
         assert "timed out" in getattr(result, marker)
+        if not child_pid.exists():
+            pytest.fail(
+                "checker timed out before writing child.pid — the child.pid "
+                "handshake was lost (interpreter startup exceeded the timeout "
+                "budget), so process-group reaping cannot be verified"
+            )
         pid = int(child_pid.read_text())
         for _ in range(20):
             try:
