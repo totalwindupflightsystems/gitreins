@@ -2543,7 +2543,10 @@ class TestJudgeAsyncCLI:
         real_popen = _subprocess.Popen
 
         class _FakeProc:
-            pid = 424242
+            # A LIVE pid: JUDGE-JOB-001 reaps a running record whose worker
+            # pid is gone, so a fake dead pid would (correctly) free the
+            # single-flight key and let the second dispatch spawn again.
+            pid = os.getpid()
 
         def _fake_popen(cmd: list[str], *args: object, **kwargs: object) -> object:
             # Spy ONLY the worker spawn (--run-job); let git rev-parse
@@ -2572,8 +2575,10 @@ class TestJudgeAsyncCLI:
         # never None (the pid=None window is closed by Popen-first ordering).
         job = load_job(m1.group(1))
         assert job is not None
-        assert job["pid"] == 424242
+        assert job["pid"] == os.getpid()
+        assert job["worker_pid"] == os.getpid()
         assert job["status"] == "running"
+        assert job.get("heartbeat_at")
 
     def test_async_no_credential_refuses_without_dispatch(
         self, tmp_workdir: str, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
@@ -2721,6 +2726,116 @@ class TestJudgeSyncSingleFlight:
         out = capsys.readouterr().out
         assert "already in progress" in out
         assert job["id"] in out
+
+    def test_judge_sync_proceeds_when_worker_heartbeat_is_stale(
+        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """JUDGE-JOB-001 falsifier: the incident shape must not block a re-judge.
+
+        The record carries this process's (live) pid — exactly what the MCP
+        dispatcher used to write — but its evaluation stopped reporting. Before
+        the fix the sync judge answered "Evaluation already in progress" for 20+
+        minutes against a job that no longer existed; now it starts a run.
+        """
+        from types import SimpleNamespace
+
+        from engine.job_store import make_job, save_job, worker_identity
+        from gitreins import cli as cli_mod
+
+        run_cli("task", "create", "sync-stale", "Sync Stale", "c1", cwd=tmp_workdir)
+        monkeypatch.chdir(tmp_workdir)
+        monkeypatch.setattr(cli_mod, "_check_for_updates", lambda: None)
+
+        job = make_job("sync-stale", tmp_workdir)
+        job["pid"] = os.getpid()  # live pid: the server that dispatched it
+        job.update(worker_identity("thread"))
+        job["heartbeat_at"] = 1.0  # the worker stopped reporting long ago
+        save_job(job)
+
+        verdict_json = json.dumps(
+            {
+                "verdict": "COMPLETE",
+                "items": [{"criterion": "c1", "status": "PASS", "detail": "ok"}],
+                "summary": "all good",
+            }
+        )
+        monkeypatch.setenv("GITREINS_MOCK_LLM_RESPONSE", json.dumps({"content": verdict_json}))
+
+        args = SimpleNamespace(
+            id="sync-stale",
+            status=False,
+            run_job=False,
+            async_dispatch=False,
+            skip_tier2=False,
+        )
+        cli_mod.cmd_judge(args)
+        out = capsys.readouterr().out
+        assert "Judge Result" in out
+        assert "already in progress" not in out
+
+    def test_status_names_the_dead_worker_of_a_stale_heartbeat(self, tmp_workdir: str) -> None:
+        """judge --status names the death (worker gone, no verdict) in the incident shape."""
+        from engine.job_store import load_job, make_job, save_job, worker_identity
+
+        job = make_job("stale-task", str(tmp_workdir))
+        job["id"] = "job-stale001"
+        job["pid"] = os.getpid()  # live: the server outlived the job
+        job.update(worker_identity("thread"))
+        job["heartbeat_at"] = 1.0
+        save_job(job)
+
+        result = run_cli("judge", "job-stale001", "--status", cwd=tmp_workdir)
+        assert result.returncode == 3, result.stdout + result.stderr
+        assert "heartbeat is stale" in result.stdout
+        assert "No verdict was written" in result.stdout
+        assert "Re-dispatch with: gitreins judge stale-task" in result.stdout
+
+        stored = load_job("job-stale001")
+        assert stored["status"] == "error"
+        assert stored["error_kind"] == "orphaned_worker"
+        assert stored["running"] is False
+
+    def test_async_dispatch_supersedes_a_stale_heartbeat_worker(
+        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`judge --async` dispatches past an orphan instead of reusing it."""
+        import subprocess as _subprocess
+
+        from engine.job_store import load_job, make_job, save_job, worker_identity
+        from gitreins import cli as cli_mod
+
+        run_cli("task", "create", "stale-async", "Stale Async", "c1", cwd=tmp_workdir)
+        monkeypatch.setenv("GITREINS_LLM_API_KEY", "sf-test-key")
+
+        orphan = make_job("stale-async", tmp_workdir)
+        orphan["id"] = "job-staleasync01"
+        orphan["pid"] = os.getpid()
+        orphan.update(worker_identity("thread"))
+        orphan["heartbeat_at"] = 1.0
+        save_job(orphan)
+
+        spawned: list = []
+        real_popen = _subprocess.Popen
+
+        class _FakeProc:
+            pid = os.getpid()
+
+        def _fake_popen(cmd: list[str], *args: object, **kwargs: object) -> object:
+            if "--run-job" in cmd:
+                spawned.append(cmd)
+                return _FakeProc()
+            return real_popen(cmd, *args, **kwargs)
+
+        monkeypatch.setattr(_subprocess, "Popen", _fake_popen)
+        monkeypatch.chdir(tmp_workdir)
+
+        cli_mod._cmd_judge_async("stale-async")
+        out = capsys.readouterr().out
+
+        assert len(spawned) == 1, out
+        assert "Async job dispatched" in out
+        assert "already running" not in out
+        assert load_job("job-staleasync01")["status"] == "error"
 
     def test_judge_sync_proceeds_when_running_job_is_orphaned(
         self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]

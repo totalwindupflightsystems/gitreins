@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Judge-job liveness belongs to the worker, not the dispatcher
+  (JUDGE-JOB-001)** — job records carry the evaluation worker's pid, kind and
+  a heartbeat; a dead worker pid or a heartbeat older than the stale cap is
+  reaped to a terminal `error` on the next dispatch/status poll. A job that
+  died used to keep answering "Evaluation already in progress" for as long as
+  the process that dispatched it stayed alive (the MCP server's pid), and the
+  poll never reported the death.
+
 ## [0.18.0] - 2026-11-04
 
 ### Added

@@ -21,6 +21,8 @@ from typing import Any, cast
 from engine.eval_cap import EvalCap
 from engine.guard_manager import GuardManager
 from engine.job_store import (
+    WORKER_KIND_THREAD,
+    JobHeartbeat,
     acquire_resume_lease,
     cap_from_dict,
     cap_to_dict,
@@ -28,9 +30,10 @@ from engine.job_store import (
     job_dir,
     load_job,
     make_job,
-    pid_alive,
     release_resume_lease,
     save_job,
+    worker_identity,
+    worker_liveness,
 )
 from engine.judge import Judge, judge_result_to_dict
 from engine.llm import LLMClient
@@ -1107,6 +1110,12 @@ class GitReinsMCPServer:
                 return cast(str, job_id)
             job = make_job(task_id, wd, caps=cap_to_dict(eval_cap))
             job["pid"] = os.getpid()
+            # JUDGE-JOB-001: name the worker explicitly. This worker is a
+            # thread of the server, so worker_pid is the server's pid and the
+            # worker_kind says so — liveness is the heartbeat this thread
+            # keeps writing below, never the pid alone (the server outlives
+            # the job, which is exactly how a dead job looked alive).
+            job.update(worker_identity(WORKER_KIND_THREAD))
             job_id = cast(str, job["id"])
             self._jobs[job_id] = job
             save_job(job, directory=store_dir)
@@ -1138,7 +1147,19 @@ class GitReinsMCPServer:
         # Judge.evaluate_task while a daemon thread is waiting to run.
         evaluate_task = Judge.evaluate_task
 
+        # JUDGE-JOB-001: the worker thread keeps the record's heartbeat fresh
+        # while it evaluates, so a poll can tell "still working" from "the
+        # thread died" without trusting the server's pid.
+        heartbeat = JobHeartbeat(
+            job["id"],
+            directory=store_dir,
+            extra={"worker_pid": os.getpid(), "worker_kind": WORKER_KIND_THREAD},
+        )
+
         def _finish(update: dict[str, Any]) -> None:
+            # Last beat lands before the terminal write: a heartbeat can never
+            # resurrect a record that already says complete/error.
+            heartbeat.stop()
             # Disk-before-memory ordering: persist the terminal state FIRST so
             # a fresh server reading the job store sees complete/error even
             # while this instance's memory record still says running. A
@@ -1156,6 +1177,7 @@ class GitReinsMCPServer:
                 job.update(update)
 
         def _run_job() -> None:
+            heartbeat.start()
             try:
                 # DF-GITREINS-POC-78: prove the credential on the REAL wire
                 # before any evaluation work — a present-but-unusable key used
@@ -1229,7 +1251,7 @@ class GitReinsMCPServer:
         job = load_job(job_id)
         if job is None:
             return None
-        if job.get("status") == "running" and not pid_alive(job.get("pid")):
+        if job.get("status") == "running" and not worker_liveness(job)[0]:
             job = self._resume_disk_job(job)
         elif job.get("status") == "running" and job.get("pid") == os.getpid():
             # Record written by this instance but evicted from memory
@@ -1269,7 +1291,7 @@ class GitReinsMCPServer:
             # Re-read under the lease: the caller's snapshot may predate
             # another instance's claim.
             fresh = load_job(job["id"], directory=store_dir) or job
-            if fresh.get("status") != "running" or pid_alive(fresh.get("pid")):
+            if fresh.get("status") != "running" or worker_liveness(fresh)[0]:
                 # Already claimed (live pid) or finished — nothing to resume.
                 return fresh
             wd = fresh.get("workdir") or self.workdir
@@ -1290,6 +1312,9 @@ class GitReinsMCPServer:
                 wd,
             )
             fresh["pid"] = os.getpid()
+            # The resumed evaluation runs in THIS server's worker thread, so
+            # claim it with a matching identity + fresh heartbeat (JUDGE-JOB-001).
+            fresh.update(worker_identity(WORKER_KIND_THREAD))
             fresh["resumed_at"] = time.time()
             # Additive (DF-GITREINS-POC-24): the claim write is a current-
             # build write, so stamp the field — an old-build record without

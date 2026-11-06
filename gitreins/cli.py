@@ -3342,14 +3342,20 @@ def cmd_judge(args: argparse.Namespace) -> None:
     # --json is exempt: its caller asked for a document for THIS run and has
     # nowhere to read a "poll the other job" pointer from (that pointer would
     # also be the only thing on a stdout that must hold one JSON document).
-    from engine.job_store import find_running_job, pid_alive
+    from engine.job_store import find_running_job, worker_liveness
 
     if not json_output:
+        # find_running_job reaps an orphaned record (dead worker / stale
+        # heartbeat) before answering, so a dead job can never block this
+        # dispatch (JUDGE-JOB-001).
         running = find_running_job(args.id, workdir)
-        if running is not None and pid_alive(running.get("pid")):
-            print(f"Evaluation already in progress for {args.id} (job {running['id']})")
-            print(f"  poll:    gitreins judge --status {running['id']}")
-            return
+        if running is not None:
+            live, why = worker_liveness(running)
+            if live:
+                print(f"Evaluation already in progress for {args.id} (job {running['id']})")
+                print(f"  poll:    gitreins judge --status {running['id']}")
+                return
+            print(f"Superseding orphaned job {running['id']} for {args.id}: {why}")
 
     if getattr(args, "skip_tier2", False) and not json_output:
         print("Tier 2 skipped (--skip-tier2 flag)")
@@ -3546,7 +3552,15 @@ def _cmd_judge_async(task_id: str) -> None:
     """
     import subprocess
 
-    from engine.job_store import find_running_job, job_log_path, make_job, new_job_id, save_job
+    from engine.job_store import (
+        WORKER_KIND_PROCESS,
+        find_running_job,
+        job_log_path,
+        make_job,
+        new_job_id,
+        save_job,
+        worker_identity,
+    )
     from engine.task_manager import TaskManager
 
     workdir = get_workdir()
@@ -3613,6 +3627,10 @@ def _cmd_judge_async(task_id: str) -> None:
     job = make_job(task_id, workdir)
     job["id"] = job_id
     job["pid"] = proc.pid
+    # The child claims the record itself on start; stamp its identity now so
+    # the first poll already reads a worker pid + a fresh heartbeat instead of
+    # a bare pid (JUDGE-JOB-001).
+    job.update(worker_identity(WORKER_KIND_PROCESS, pid=proc.pid))
     save_job(job)
     print(f"Async job dispatched: {job['id']}")
     print(f"  task:    {task_id}")
@@ -3628,7 +3646,13 @@ def _cmd_judge_worker(job_id: str) -> None:
     directly by tests). Writes the result back to the job record and
     persists the verdict exactly like a synchronous run.
     """
-    from engine.job_store import load_job, save_job
+    from engine.job_store import (
+        WORKER_KIND_PROCESS,
+        JobHeartbeat,
+        load_job,
+        save_job,
+        worker_identity,
+    )
     from engine.task_manager import TaskManager
     from engine.llm import LLMClient
     from engine.judge import Judge, judge_result_to_dict
@@ -3652,12 +3676,18 @@ def _cmd_judge_worker(job_id: str) -> None:
         sys.exit(0)
 
     job["pid"] = os.getpid()
+    # JUDGE-JOB-001: the record must name the EVALUATION WORKER (this
+    # detached `judge --run-job` process), and liveness is the heartbeat it
+    # keeps writing — never the pid of whoever dispatched the job.
+    job.update(worker_identity(WORKER_KIND_PROCESS))
     save_job(job)
+    heartbeat = JobHeartbeat(job_id).start()
 
     wd = job["workdir"]
     tm = TaskManager(wd)
     task = tm.get(job["task_id"])
     if not task:
+        heartbeat.stop()
         job["status"] = "error"
         job["running"] = False
         job["error"] = f"task {job['task_id']} not found in {wd}"
@@ -3671,6 +3701,9 @@ def _cmd_judge_worker(job_id: str) -> None:
         config = load_config(wd)
         judge = Judge(llm, wd, guard_config=config)
         result = judge.evaluate_task(task)
+        # Last beat lands before the terminal write, so a heartbeat can never
+        # resurrect a record that already says complete.
+        heartbeat.stop()
         job["result"] = judge_result_to_dict(job["task_id"], wd, result)
         job["status"] = "complete"
         job["running"] = False
@@ -3680,6 +3713,7 @@ def _cmd_judge_worker(job_id: str) -> None:
         _persist_result(wd, task, result)
         print(result.summary)
     except Exception as e:
+        heartbeat.stop()
         job["status"] = "error"
         job["running"] = False
         job["error"] = str(e)
@@ -3697,6 +3731,12 @@ def _judge_status_print_header(job: dict[str, Any], status: str) -> None:
     print(f"Workdir:  {job['workdir']}")
     if job.get("pid"):
         print(f"Pid:      {job['pid']}")
+    worker_pid = job.get("worker_pid")
+    if worker_pid and worker_pid != job.get("pid"):
+        print(f"Worker:   {worker_pid} ({job.get('worker_kind', 'process')})")
+    heartbeat = job.get("heartbeat_at")
+    if isinstance(heartbeat, (int, float)) and job.get("status") == "running":
+        print(f"Heartbeat: {max(0.0, time.time() - float(heartbeat)):.0f}s ago")
     if job.get("started_at"):
         print("Started:  " + time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(job["started_at"])))
     if job.get("finished_at"):
@@ -3705,59 +3745,38 @@ def _judge_status_print_header(job: dict[str, Any], status: str) -> None:
 
 
 def _judge_status_running(job: dict[str, Any]) -> None:
-    """Handle a `running` job record, flipping dead-pid orphans to error (QA-GITR-002).
+    """Handle a `running` job record, flipping orphaned workers to error.
+
+    Liveness is the worker's, never the dispatcher's (JUDGE-JOB-001): the
+    record is live only while its worker pid is alive and its heartbeat is
+    fresh. A dead worker pid, or a heartbeat older than the stale cap, is an
+    orphan — nothing will ever write a terminal status for it — so the record
+    is reaped (under the per-job resume lease, so concurrent polls race
+    safely) and the poll names the death WHY instead of claiming the job is
+    still running (QA-GITR-002 kept: exit 3). A record predating worker
+    identity keeps the historical still-running behavior.
 
     Exits: 2 still running, 3 orphan.
     """
-    from engine.job_store import (
-        acquire_resume_lease,
-        load_job,
-        pid_alive,
-        release_resume_lease,
-        save_job,
-    )
+    from engine.job_store import reap_stale_job, worker_liveness
 
-    # Liveness-aware (QA-GITR-002): a `running` record whose worker pid
-    # is dead is an orphan — the environment killed the worker (e.g.
-    # earlyoom) and nothing will ever write a terminal status. Flip the
-    # record to error under the resume lease so concurrent polls race
-    # safely, then report the orphan with a distinct exit code. A
-    # missing/None pid (records predating pid tracking) keeps the
-    # historical still-running behavior.
-    if job.get("pid") and not pid_alive(job.get("pid")):
-        lease = acquire_resume_lease(job["id"])
-        if lease is not None:
-            try:
-                current = load_job(job["id"]) or job
-                if current.get("status") == "running":
-                    current["status"] = "error"
-                    current["running"] = False
-                    current["error"] = (
-                        f"worker process died before completing (pid {current.get('pid')})"
-                    )
-                    current["finished_at"] = time.time()
-                    save_job(current)
-                    job = current
-                    # OBS-GITREINS-2: this process just reaped an orphan —
-                    # note it so the run's completion record carries the
-                    # closed-set reason ``orphaned`` (the reason's producer;
-                    # emission stays env-gated in the dispatcher).
-                    from engine.cli_metrics import note_orphan_reap
+    live, why = worker_liveness(job)
+    if live:
+        print(
+            f"Job is still running (pid {job.get('worker_pid') or job.get('pid') or 'unknown'}). Poll again later."
+        )
+        sys.exit(2)
 
-                    note_orphan_reap()
-                else:
-                    job = current
-            finally:
-                release_resume_lease(lease)
-        if job.get("status") != "error":
-            # Another poller holds the lease and may be flipping it; the
-            # record could still say running — report it as such.
-            print(f"Job is still running (pid {job.get('pid') or 'unknown'}). Poll again later.")
-            sys.exit(2)
-        print(f"Job worker process is GONE (pid {job.get('pid')}) — job marked error (orphan)")
-        sys.exit(3)
-    print(f"Job is still running (pid {job.get('pid') or 'unknown'}). Poll again later.")
-    sys.exit(2)
+    current = reap_stale_job(job["id"], reason=why) or job
+    if current.get("status") != "error":
+        # Another poller holds the lease and may be flipping it; the record
+        # could still say running — report it as such.
+        print(f"Job is still running (pid {current.get('pid') or 'unknown'}). Poll again later.")
+        sys.exit(2)
+    print(f"Job worker is GONE: {why}")
+    print("No verdict was written for this job — the record is marked error (orphan).")
+    print(f"Re-dispatch with: gitreins judge {current.get('task_id')}")
+    sys.exit(3)
 
 
 def _judge_status_result(job: dict[str, Any]) -> None:

@@ -62,7 +62,7 @@ from prometheus_client import (  # type: ignore[import-not-found]
 )
 
 from engine import evidence, qa_ledger, usage
-from engine.job_store import list_jobs, pid_alive
+from engine.job_store import list_jobs, worker_identified, worker_liveness
 from engine.persist import KIND_RESOLUTION, VerdictPersister
 from engine.version import __version__
 from engine.repo_paths import (
@@ -103,7 +103,7 @@ JOBS_RECORDS = Gauge(
 )
 JOBS_ORPHANED_RUNNING = Gauge(
     "gitreins_jobs_orphaned_running",
-    "Running job records whose pid is absent or dead (single-flight key blockers).",
+    "Running job records whose worker is gone, stale, or never named (single-flight blockers).",
 )
 HISTORY_BYTES = Gauge(
     "gitreins_history_bytes",
@@ -116,10 +116,15 @@ def _refresh_job_store_metrics() -> None:
     """Recompute the job-store gauges from the shared disk store.
 
     Scrape-time, spec §2b: the gauges read through the SAME ``list_jobs`` /
-    ``pid_alive`` readers the dispatch and judge-status paths use — never a
-    second implementation — because a gauge disagreeing with its source of
-    truth is a wiring bug. A missing or unreadable store degrades to zero
-    contributions; /metrics must still answer 200.
+    ``worker_liveness`` readers the dispatch and judge-status paths use —
+    never a second implementation — because a gauge disagreeing with its
+    source of truth is a wiring bug. ``orphaned`` therefore means what it
+    means everywhere else (JUDGE-JOB-001): a ``running`` record whose worker
+    is gone or whose heartbeat stopped, not a caller's guess from a pid. A
+    record predating worker identity (no pid, no heartbeat) can be verified
+    neither way and counts as orphaned so a monitor sees it. A missing or
+    unreadable store degrades to zero contributions; /metrics must still
+    answer 200.
     """
     counts: dict[str, int] = {}
     orphaned = 0
@@ -130,7 +135,7 @@ def _refresh_job_store_metrics() -> None:
     for job in jobs:
         status = str(job.get("status", ""))
         counts[status] = counts.get(status, 0) + 1
-        if status == "running" and not pid_alive(job.get("pid")):
+        if status == "running" and not (worker_liveness(job)[0] and worker_identified(job)):
             orphaned += 1
     for status, count in sorted(counts.items()):
         JOBS_RECORDS.labels(status=status).set(count)

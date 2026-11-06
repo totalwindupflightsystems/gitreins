@@ -27,8 +27,18 @@ Record shape::
         "started_at": float,
         "finished_at": float | None,
         "pid": int | None,        # process owning the run (None/0 = unknown/dead)
+        "worker_pid": int | None, # process actually running the evaluation
+        "worker_kind": str,       # "process" (detached worker) | "thread"
+        "worker_thread": str,     # thread name, threaded workers only
+        "worker_started_at": float,
+        "heartbeat_at": float,    # refreshed by the worker while it evaluates
         "caps": dict | None,      # captured EvalCap primitives (None = config-driven)
     }
+
+``worker_pid`` is the EVALUATION WORKER's pid, not the dispatcher's: for
+``judge --async`` it is the detached ``judge --run-job`` child, and it is
+never evidence that a job is alive on its own. Liveness is the heartbeat —
+see :func:`worker_liveness` (JUDGE-JOB-001).
 """
 
 from __future__ import annotations
@@ -36,6 +46,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 import uuid
 from typing import TYPE_CHECKING, Any, cast
@@ -139,20 +150,30 @@ def delete_job(job_id: str, directory: str | None = None) -> bool:
     return False
 
 
-def find_running_job(task_id: str, workdir: str, directory: str | None = None) -> JobRecord | None:
-    """Return the newest running job record for (task_id, workdir), if any.
+def find_running_job(
+    task_id: str,
+    workdir: str,
+    directory: str | None = None,
+    *,
+    reap: bool = True,
+) -> JobRecord | None:
+    """Return the newest LIVE running job record for (task_id, workdir), if any.
 
     Single-flight key (GR-GAP-046): at most ONE in-flight evaluation per
     (task_id, workdir) across ALL processes sharing the disk store. Any
     record still in ``running`` state blocks a new dispatch — a completed
     or error job for the same task is superseded (new run), a running one
-    is reused. ``pid`` is deliberately NOT consulted: a ``running`` record
-    with a dead/None pid is an orphan that the resume path re-dispatches
-    on the next poll, so dispatching a second job for the same key would
-    multiply evaluations (the exact bug this guards against). Orphaned
-    ``running`` records (dead pid) are flipped to ``error`` by the
-    ``judge --status`` liveness path (QA-GITR-002), which un-blocks the
-    key on the next poll; the deliberate no-pid-check design here stays.
+    is reused. Dispatching a second job for a live key would multiply
+    evaluations (the exact bug this guards against).
+
+    Liveness is the WORKER's, never the dispatcher's (JUDGE-JOB-001): a
+    ``running`` record whose worker pid is gone, or whose heartbeat stopped
+    longer ago than the stale cap, is an orphan — nothing will ever write a
+    terminal status for it, so it is reaped to ``error`` HERE (under the
+    per-job resume lease) and the key is free for the next dispatch. Before
+    this, a record written by the MCP server carried the SERVER's pid: the
+    server stayed alive, so ``judge <id>`` refused with "Evaluation already
+    in progress" forever against a job nobody was running.
     """
     wd = os.path.abspath(workdir)
     for job in list_jobs(directory):
@@ -160,8 +181,16 @@ def find_running_job(task_id: str, workdir: str, directory: str | None = None) -
             continue
         if os.path.abspath(job.get("workdir", "")) != wd:
             continue
-        if job.get("status") == "running":
+        if job.get("status") != "running":
+            continue
+        live, why = worker_liveness(job)
+        if live:
             return job
+        logger.warning("job %s for task %s is orphaned (%s) — reaping", job["id"], task_id, why)
+        if reap:
+            reap_stale_job(job["id"], directory=directory, reason=why)
+        # Re-read: another poller may have reaped it first; either way the
+        # record is terminal now and must not block this key.
     return None
 
 
@@ -247,3 +276,262 @@ def pid_alive(pid: int | None) -> bool:
         return True  # exists, owned by another user
     except OSError:
         return False
+
+
+# ── Worker identity and liveness (JUDGE-JOB-001) ────────────────────────────
+#
+# A job record used to be "alive" whenever ``pid`` was alive, but the pid the
+# MCP dispatcher wrote was the SERVER's: the evaluation could be gone and the
+# record still looked running, so ``gitreins judge <id>`` refused with
+# "Evaluation already in progress" against a job nobody was running, and
+# ``judge --status`` never reported the death.
+#
+# Liveness belongs to the WORKER:
+#
+#   pid                    owning process (kept for older readers)
+#   worker_pid             process running the evaluation
+#   worker_kind            "process" (detached judge worker) | "thread"
+#   worker_thread          thread name, threaded workers only
+#   worker_started_at      when the worker claimed the job
+#   heartbeat_at           refreshed by the worker every
+#                          ``heartbeat_interval()`` seconds while it evaluates
+#
+# A record is live only while that worker keeps reporting. A dead worker pid,
+# or a heartbeat older than ``heartbeat_stale_seconds()``, is an orphan and is
+# reaped to a terminal ``error`` record naming the death (and why no verdict
+# will appear) on the next :func:`find_running_job` / status poll.
+
+WORKER_KIND_PROCESS = "process"
+WORKER_KIND_THREAD = "thread"
+
+DEFAULT_HEARTBEAT_SECONDS = 15.0
+DEFAULT_HEARTBEAT_STALE_SECONDS = 180.0
+
+
+def heartbeat_interval(seconds: float | None = None) -> float:
+    """Seconds between worker heartbeats (env GITREINS_JOB_HEARTBEAT_SECONDS)."""
+    if seconds is not None:
+        return max(0.05, float(seconds))
+    raw = os.environ.get("GITREINS_JOB_HEARTBEAT_SECONDS")
+    if raw:
+        try:
+            return max(0.05, float(raw))
+        except ValueError:
+            pass
+    return DEFAULT_HEARTBEAT_SECONDS
+
+
+def heartbeat_stale_seconds(seconds: float | None = None) -> float:
+    """Age after which a silent heartbeat is an orphan (env override for tests)."""
+    if seconds is not None:
+        return max(0.0, float(seconds))
+    raw = os.environ.get("GITREINS_JOB_HEARTBEAT_STALE_SECONDS")
+    if raw:
+        try:
+            return max(0.0, float(raw))
+        except ValueError:
+            pass
+    return DEFAULT_HEARTBEAT_STALE_SECONDS
+
+
+def worker_identity(kind: str = WORKER_KIND_PROCESS, pid: int | None = None) -> JobRecord:
+    """Worker-identity fields for the CALLING process/thread.
+
+    Stamped on the job record when a worker claims it, so the record names the
+    evaluation worker instead of the process that dispatched it.
+    """
+    now = time.time()
+    worker_pid = os.getpid() if pid is None else int(pid)
+    ident: JobRecord = {
+        "worker_pid": worker_pid,
+        "worker_kind": kind,
+        "worker_started_at": now,
+        "heartbeat_at": now,
+    }
+    if kind == WORKER_KIND_THREAD:
+        ident["worker_thread"] = threading.current_thread().name
+    return ident
+
+
+def worker_liveness(job: JobRecord, now: float | None = None) -> tuple[bool, str]:
+    """Return ``(live, reason)`` for a job record's evaluation worker.
+
+    Live means the record is still ``running`` AND its worker is reporting:
+    the worker pid is alive (when the record names one) and the heartbeat is
+    no older than the stale cap. The dispatcher's pid is never evidence of
+    life (JUDGE-JOB-001). Records written before worker identity existed keep
+    the historical pid-only reading — a missing pid is not proof of death.
+    """
+    now = time.time() if now is None else now
+    status = str(job.get("status", ""))
+    if status != "running":
+        return False, f"job is {status or 'unknown'}, not running"
+
+    worker_pid = job.get("worker_pid", job.get("pid"))
+    if isinstance(worker_pid, int) and not isinstance(worker_pid, bool) and worker_pid > 0:
+        if not pid_alive(worker_pid):
+            return False, (
+                f"worker process died before completing (pid {worker_pid}); no verdict was written"
+            )
+
+    heartbeat = job.get("heartbeat_at")
+    if isinstance(heartbeat, (int, float)) and not isinstance(heartbeat, bool):
+        age = max(0.0, now - float(heartbeat))
+        cap = heartbeat_stale_seconds()
+        if age > cap:
+            return False, (
+                f"worker heartbeat is stale: last update {age:.0f}s ago "
+                f"(cap {cap:.0f}s), worker {worker_pid or 'unknown'} stopped "
+                "reporting (no verdict was written)"
+            )
+        return True, f"worker {worker_pid or 'unknown'} alive, heartbeat {age:.0f}s old"
+
+    if isinstance(worker_pid, int) and worker_pid > 0:
+        return True, f"legacy record, pid {worker_pid} alive (no heartbeat recorded)"
+    return True, "legacy record with no worker identity (no heartbeat recorded)"
+
+
+def worker_identified(job: JobRecord) -> bool:
+    """True when the record names a worker (a pid or a heartbeat).
+
+    Records written before worker identity existed have neither: liveness
+    cannot be verified for them, and they are neither proof of life nor proof
+    of death. Observability counts them as unverified; the reap path does not
+    flip them (there is nothing to attest that the worker died).
+    """
+    if isinstance(job.get("heartbeat_at"), (int, float)) and not isinstance(
+        job.get("heartbeat_at"), bool
+    ):
+        return True
+    pid = job.get("worker_pid", job.get("pid"))
+    return isinstance(pid, int) and not isinstance(pid, bool) and pid > 0
+
+
+def reap_stale_job(
+    job_id: str,
+    directory: str | None = None,
+    reason: str | None = None,
+) -> JobRecord | None:
+    """Flip an orphaned ``running`` record to a terminal ``error`` record.
+
+    The flip happens under the per-job resume lease, the same cross-process
+    lock the resume path uses, so a poll, a dispatch and a live worker's
+    heartbeat cannot interleave: a heartbeat that arrives first keeps the job
+    live, a reap that arrives first ends it. Returns the resulting record
+    (terminal, or still running when another poller owns the lease), or None
+    when the record does not exist.
+    """
+    lease = acquire_resume_lease(job_id, directory=directory)
+    if lease is None:
+        return load_job(job_id, directory=directory)
+    try:
+        current = load_job(job_id, directory=directory)
+        if current is None or current.get("status") != "running":
+            return current
+        live, why = worker_liveness(current)
+        if live:
+            return current
+        current["status"] = "error"
+        current["running"] = False
+        current["error"] = reason or why
+        current["error_kind"] = "orphaned_worker"
+        current["finished_at"] = time.time()
+        save_job(current, directory=directory)
+        logger.warning("reaped orphaned job %s: %s", job_id, current["error"])
+        try:
+            # OBS-GITREINS-2: the closed-set reason ``orphaned`` has exactly
+            # this producer — the reap. Best effort, like the CLI path.
+            from engine.cli_metrics import note_orphan_reap
+
+            note_orphan_reap()
+        except Exception:  # noqa: BLE001 — metrics must never fail a reap
+            pass
+        return current
+    finally:
+        release_resume_lease(lease)
+
+
+class JobHeartbeat:
+    """Keep a running job record's heartbeat fresh while its worker evaluates.
+
+    One daemon thread per running job; each beat re-reads the record under the
+    resume lease (so it can never resurrect a record a reaper just ended),
+    stamps ``heartbeat_at`` and stops as soon as the record stops being
+    ``running``. ``stop()`` joins the thread, so the worker's terminal write
+    always lands AFTER the last beat.
+    """
+
+    def __init__(
+        self,
+        job_id: str,
+        directory: str | None = None,
+        interval: float | None = None,
+        extra: JobRecord | None = None,
+    ) -> None:
+        self.job_id = job_id
+        self.directory = directory
+        self.interval = heartbeat_interval(interval)
+        self.extra = dict(extra or {})
+        self.beats = 0
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def beat(self) -> bool:
+        """Write one heartbeat; returns True when the record was stamped."""
+        lease = acquire_resume_lease(self.job_id, directory=self.directory)
+        if lease is None:
+            return False
+        try:
+            job = load_job(self.job_id, directory=self.directory)
+            if job is None or job.get("status") != "running":
+                return False
+            job["heartbeat_at"] = time.time()
+            job.update(self.extra)
+            try:
+                save_job(job, directory=self.directory)
+            except OSError as e:  # pragma: no cover — disk full/unwritable store
+                logger.warning("heartbeat save failed for %s: %s", self.job_id, e)
+                return False
+            return True
+        finally:
+            release_resume_lease(lease)
+
+    def _run(self) -> None:
+        while not self._stop.wait(self.interval):
+            if self.beat():
+                self.beats += 1
+
+    def start(self) -> "JobHeartbeat":
+        if self._thread is None:
+            self._thread = threading.Thread(
+                target=self._run,
+                name=f"job-heartbeat-{self.job_id}",
+                daemon=True,
+            )
+            self._thread.start()
+        return self
+
+    def stop(self, timeout: float = 10.0) -> None:
+        """Stop beating and wait for the last beat to land (best effort).
+
+        ``join`` is looked up defensively: test harnesses substitute their own
+        thread objects, and a missing join must never turn a terminal job write
+        into an exception.
+        """
+        self._stop.set()
+        thread = self._thread
+        self._thread = None
+        if thread is None or thread is threading.current_thread():
+            return
+        join = getattr(thread, "join", None)
+        if callable(join):
+            try:
+                join(timeout)
+            except RuntimeError:  # pragma: no cover — thread never started
+                pass
+
+    def __enter__(self) -> "JobHeartbeat":
+        return self.start()
+
+    def __exit__(self, *_exc: object) -> None:
+        self.stop()

@@ -19,6 +19,7 @@ from unittest import mock
 import pytest
 from collections.abc import Iterator
 
+from engine import job_store
 from gitreins import serve
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -294,7 +295,12 @@ def test_metrics_exports_job_store_and_history_families(
 def test_metrics_counts_job_records_and_orphaned_running(
     live_server: object, tmp_path: Path
 ) -> None:
-    """Records partition by status; orphans = running records with absent/dead pid."""
+    """Records partition by status; orphans = running records with no live worker.
+
+    JUDGE-JOB-001: the gauge reads the same ``worker_liveness`` helper the
+    dispatch and status paths use, so a running record counts as orphaned when
+    its worker pid is gone, its heartbeat is stale, or it never named a worker.
+    """
     jobs_dir = tmp_path / "gitreins-jobs"
     for i in range(2):
         _write_job(jobs_dir, f"job-complete-{i}", "complete", os.getpid())
@@ -306,7 +312,7 @@ def test_metrics_counts_job_records_and_orphaned_running(
     _write_job(jobs_dir, "job-running-no-pid", "running", None)
     dead = subprocess.Popen([sys.executable, "-c", "pass"])
     dead.wait()
-    assert serve.pid_alive(dead.pid) is False
+    assert job_store.pid_alive(dead.pid) is False
     _write_job(jobs_dir, "job-running-dead-pid", "running", dead.pid)
 
     status, body = get(live_server, "/metrics")

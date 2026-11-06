@@ -1367,6 +1367,51 @@ class TestJudgeAsyncPersistence:
         assert status["result"]["items"][0]["criterion"] == "c1"
         assert status["result"]["summary"] == "all criteria met"
 
+    def test_dispatch_supersedes_a_worker_that_stopped_reporting(
+        self, mcp_server: GitReinsMCPServer, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """JUDGE-JOB-001: the record carries the SERVER's pid but no live worker.
+
+        This is the incident shape — the server stays alive while the
+        evaluation is gone, so the old pid-only single-flight reused the dead
+        job forever (20+ minutes of "Evaluation already in progress"). The
+        stale heartbeat must free the key: a fresh job is dispatched and the
+        orphan is reaped to a terminal error that says no verdict was written.
+        """
+        monkeypatch.setenv("GITREINS_LLM_API_KEY", "sk-test")
+        monkeypatch.setattr(mcp_server.llm, "api_key", "sk-test")
+        _stub_judge_evaluate(monkeypatch, sleep=0.05)
+        self._create_task(mcp_server, "stale-me")
+
+        from engine.job_store import (
+            WORKER_KIND_THREAD,
+            load_job,
+            make_job,
+            save_job,
+            worker_identity,
+        )
+
+        orphan = make_job("stale-me", mcp_server.workdir)
+        orphan["id"] = "job-staleheart01"
+        orphan["pid"] = os.getpid()  # alive: the server that dispatched it
+        orphan.update(worker_identity(WORKER_KIND_THREAD))
+        orphan["heartbeat_at"] = 1.0  # the worker stopped reporting long ago
+        save_job(orphan)
+
+        result = _mcp_call(mcp_server, "judge.evaluate", {"id": "stale-me"})
+        assert result["job_id"] != "job-staleheart01", result
+        assert result["status"] == "running"
+
+        reaped = load_job("job-staleheart01")
+        assert reaped["status"] == "error"
+        assert reaped["error_kind"] == "orphaned_worker"
+        assert "heartbeat is stale" in reaped["error"]
+        assert "no verdict was written" in reaped["error"]
+
+        status = self._poll_status(mcp_server, result["job_id"])
+        assert status["status"] == "complete"
+        assert status["result"]["passed"] is True
+
     def test_orphaned_running_job_is_resumed_on_status(
         self, mcp_server: GitReinsMCPServer, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -1586,8 +1631,15 @@ class TestJudgeAsyncPersistence:
         class _ControlledThread:
             def __init__(self, *args: object, target: object = None, **kwargs: object) -> None:
                 self.target = target
+                self.name = str(kwargs.get("name", ""))
 
             def start(self) -> None:
+                # JUDGE-JOB-001: the per-job heartbeat thread is not the
+                # evaluation worker — let it run for real instead of taking a
+                # slot in the pending queue this test drains one job at a time.
+                if self.name.startswith("job-heartbeat-"):
+                    real_thread(target=self.target, daemon=True).start()
+                    return
                 pending_targets.append(self.target)
                 thread_started.set()
 
