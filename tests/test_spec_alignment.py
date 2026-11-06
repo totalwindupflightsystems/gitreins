@@ -223,12 +223,19 @@ def test_timeout_joins_checker_process_group(tmp_path: Path) -> None:
                 "budget), so process-group reaping cannot be verified"
             )
         pid = int(child_pid.read_text())
-        for _ in range(20):
+        # After run_checker returns, SIGKILL has already been sent to the
+        # checker's process group; this loop only waits for the kernel to
+        # actually reap the child, which lags behind delivery on a loaded
+        # host (xdist workers, memory caps). A 400 ms window (20 x 20 ms)
+        # flaked there with "checker child N survived timeout". The happy
+        # path still exits on the first poll, so the wider budget only
+        # extends the failure case, not the test's runtime.
+        for _ in range(150):
             try:
                 os.kill(pid, 0)
             except ProcessLookupError:
                 break
-            time.sleep(0.02)
+            time.sleep(0.1)
         else:
             pytest.fail(f"checker child {pid} survived timeout")
 
