@@ -1720,3 +1720,51 @@ numbers so the next run can measure drift instead of re-deriving.
 The local control path was healthy at HEAD 05dccc3: version, doctor, setup-tools, report JSON, push-check, quality-ensure, preflight JSON, and disposable worktree dogfood all executed. The fresh-machine battery exposed two evidence-boundary failures. First, the `fresh-install` cell said `install rc=0 but no artifact found (toolsd not in PATH, PREFIX/bin/toolsd missing, or zero-size)` even though its install transcript recorded `gitreins-0.17.1`; the detector was looking for another product's artifact. Never grade that row as a GitReins install failure. Derive the expected console script from the target package and assert `gitreins --version`.
 
 Second, the agent's native suite ended with rc 120 and `OSError: [Errno 28] No space left on device` while writing output. That is storage/environment pressure, not a clean suite verdict. Preserve the complete stderr/log, classify the cell as environment-blocked or infrastructure-failure, and leave dependent chaos cells UNVERIFIED when their prerequisite suite failed. A controller collect that loses the agent after the agent completed is partial evidence; the agent-side cell ledger is the stronger artifact when captured before teardown.
+
+## 2026-11-06 — staged security review under real use (tick gitreins-dogfood-2026-11-06-12-08-29)
+
+**Setup that mattered.** The canonical checkout `/home/kara/gitreins` was at the published tip
+(`HEAD == github/main`, 0/0) but carried a stale `.git/REBASE_HEAD` with no rebase directory, so it
+was treated as an operation-marker boundary and never used as the timed/probed tree. Probes ran in a
+fresh consumer repo; the CLI was the source-HEAD venv binary (`0.18.0`), while the pipx `gitreins`
+on the host is `0.17.1` and lacks `setup/disable/enable/uninstall/config-validate` — the shipped
+surface is behind the source surface.
+
+**Reproducing the tool-gating defect (GR-GAP-067).** Host had `semgrep` (`pip`) and no `ast-grep`
+(`cargo` only). With `security_review: {mode: staged, missing_tool_policy: fail}` and a staged
+`eval()`, `gitreins guard` exits 1 with `rules (missing_tool): ast-grep not on PATH`, while the run
+log shows semgrep's real finding (`[rules] gitreins-eval-call CWE-95 … conf=1.00`). Switch the
+policy to `skip` and the same tree yields `Tier 1: DEGRADED PASS` with the lane reported as
+`skipped … ast-grep not on PATH` — the stage is graded not-run even though semgrep executed. Code:
+`engine/security_stages.py:341-350` sets `degraded_status` when *either* tool is missing and
+`:372-378` returns that status for the whole stage; only the both-tools path (`:379-381`) is OK.
+
+**Reproducing the coverage gap (GR-GAP-068).** A staged module with
+`"… WHERE name = '%s'" % name`, `subprocess.run("gpg --import " + p, shell=True)` and an
+unvalidated `os.path.join` produced `security_review` with **no findings** and rc 0. The bundled
+tables (`engine/security_stages.py:255-289`) are eval/exec/pickle.loads/yaml.load (semgrep) and
+os.system (ast-grep). The Antares keyword fallback cannot compensate — its single hit in the same
+run was a comment containing "vulnerability", and it is dropped at the 0.7 floor by design.
+
+**Reporting (GR-GAP-070).** With the `eval()` finding present the console showed only
+`✗ security_review — localize: Antares ran the keyword fallback … heuristic findings carry con...`;
+the finding itself (`ledger/report.py:27 conf=1.00`) exists only in
+`.gitreins/logs/guard-*.log`. The secrets lane, by contrast, prints its files on the console.
+
+**Config drift (GR-GAP-069).** `gitreins install` writes `defaults.worktree_venv_source`,
+`defaults.worktree_venv_name` and a top-level `worktree_fleet`; `config-validate` flags all three
+as unknown on every run (including hook output). `engine/config.py:567-568` writes the first two,
+`engine/config.py:388-395` reads `defaults.venv_source`/`venv_name` — so those two knobs are dead,
+and `worktree_fleet` is read but rejected by `engine/config_schema.py`'s key table.
+
+**Measured cost (PERF-3).** `hyperfine --warmup 2 --runs 5 'gitreins guard'` → 22.050 s ± 3.567 s
+(min 17.943, max 27.790) at loadavg 32.97; first run on the fixture 27.46 s. Direct component
+timings: pyright 1.722 s ± 0.255, mypy 0.285 s ± 0.101. `strace -f -c`: 78 wait4 = 10.82 s child
+wait, 1174 execve (1113 ENOENT), ~30k mkdir (29.2k failing). Successful child census: git ×23,
+nice ×7, uname ×5, semgrep-core ×5, ruff ×3, node ×2, one each pyright/gitleaks/mypy. gitleaks and
+semgrep standalone timings were NOT measured (that compound command was refused by the harness),
+so they stay unmeasured rather than estimated.
+
+**What already worked (do not re-file).** `security-scan`'s `CVE-SIMULATED conf=0.00` +
+`[heuristic mode …]` disclosure reproduced verbatim from `docs/cli-reference.md`; the hook refused
+a real token with rc 1 and HEAD unmoved; `init`'s test-lane skip named the exact fix.

@@ -1025,3 +1025,49 @@ The fresh-machine leg is separate evidence. On 2026-10-29 at HEAD d8f0b159, `bun
 The local control path was healthy at HEAD 05dccc3: version, doctor, setup-tools, report JSON, push-check, quality-ensure, preflight JSON, and disposable worktree dogfood all executed. The fresh-machine battery exposed two evidence-boundary failures. First, the `fresh-install` cell said `install rc=0 but no artifact found (toolsd not in PATH, PREFIX/bin/toolsd missing, or zero-size)` even though its install transcript recorded `gitreins-0.17.1`; the detector was looking for another product's artifact. Never grade that row as a GitReins install failure. Derive the expected console script from the target package and assert `gitreins --version`.
 
 Second, the agent's native suite ended with rc 120 and `OSError: [Errno 28] No space left on device` while writing output. That is storage/environment pressure, not a clean suite verdict. Preserve the complete stderr/log, classify the cell as environment-blocked or infrastructure-failure, and leave dependent chaos cells UNVERIFIED when their prerequisite suite failed. A controller collect that loses the agent after the agent completed is partial evidence; the agent-side cell ledger is the stronger artifact when captured before teardown.
+
+## Dogfood 2026-11-06: the staged `security_review` lane in real use — pitfalls 66–70
+
+Verified on a fresh consumer repo with the source-HEAD CLI (0.18.0). The gate itself is sound: a
+staged `ghp_…` token produced `Tier 1 Guards: FAIL` (rc 1) and the installed pre-commit hook refused
+the commit with HEAD unmoved. The staged security pipeline is the rough part.
+
+**Pitfall 66 — a missing *optional* rules tool voids the whole stage.** Stage 1 wants both
+`semgrep` and `ast-grep`. With `semgrep` present and `ast-grep` absent (the normal Python shape —
+pip vs cargo) and `missing_tool_policy: fail` (the default), every commit is refused with
+`rules (missing_tool): ast-grep not on PATH`, even when semgrep already produced a real finding.
+Switch the policy to `skip` and the lane reports `skipped … ast-grep not on PATH` while semgrep ran,
+so the deterministic scan you installed semgrep for is graded not-run. The docs' "semgrep and/or
+ast-grep … neither required" does not hold. Install both tools if you want the lane to grade at all
+(`cargo install ast-grep`), and do not read a `security_review` PASS on a semgrep-only host.
+Rows: GR-GAP-067.
+
+**Pitfall 67 — green is narrow.** The bundled tables are four semgrep rules (`eval`, `exec`,
+`pickle.loads`, `yaml.load`) and one ast-grep rule (`os.system`). A staged module with
+`"… WHERE name = '%s'" % name`, `subprocess.run(…, shell=True)` and an unvalidated
+`os.path.join` produced NO finding and rc 0. Treat `security_review` as "these five patterns", not
+"security", and keep real review for injection classes. Row: GR-GAP-068.
+
+**Pitfall 68 — the console does not show the security finding.** A blocked commit printed only
+`✗ security_review — localize: Antares ran the keyword fallback … heuristic findings carry con...`;
+the actual `file:line conf=1.00` finding lives in `.gitreins/logs/guard-*.log`. Always open the run
+log named at the bottom of the guard output before deciding what blocked you, and expect the reason
+text to be cut mid-word. Row: GR-GAP-070.
+
+**Pitfall 69 — install writes config keys the loader does not read.** `gitreins install` writes
+`defaults.worktree_venv_source` / `_name` and a top-level `worktree_fleet`; `gitreins
+config-validate` flags all three as unknown on every command (three warnings in every hook run), and
+the first two are dead — the loader reads `defaults.venv_source` / `venv_name`. Editing the knob the
+generated file shows you changes nothing. Set the venv spelling the loader reads, and ignore the
+warning noise until GR-GAP-069 closes.
+
+**Pitfall 70 — the commit gate is not free.** `harness`: 22.05 s ± 3.57 s warm (5 runs) on a six-file
+repo at loadavg 33, first run 27.46 s. Only ~2.0 s was attributable (pyright 1.72 s, mypy 0.29 s);
+one run spawns 63 children (git ×23, semgrep ×8 incl. core, ruff ×3, node/pyright) and makes 1174
+execve attempts, 1113 of them ENOENT. On a small repo the hook is felt; do not enable extra lanes
+"just in case" without measuring. Row: PERF-3.
+
+Also re-proved as DOCUMENTED-CORRECT (do not re-file): `gitreins security-scan` without the ML stack
+prints `[CVE-SIMULATED conf=0.00]` plus `[heuristic mode (no ML stack installed) — keyword fallback,
+NOT a full scan]`, and in this run its only hit was a *comment* containing "vulnerability" while the
+real injection lines passed clean — exactly the limitation `docs/cli-reference.md` discloses.
