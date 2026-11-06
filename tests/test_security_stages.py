@@ -181,6 +181,15 @@ def _show_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(security_stages, "_tool_on_path", lambda tool: f"/usr/bin/{tool}")
 
 
+def _only_tools_on_path(monkeypatch: pytest.MonkeyPatch, present: tuple[str, ...]) -> None:
+    """Present only *present* on the stage-1 PATH probe seam (GR-GAP-067)."""
+
+    def _which(tool: str) -> str | None:
+        return f"/usr/bin/{tool}" if tool in present else None
+
+    monkeypatch.setattr(security_stages, "_tool_on_path", _which)
+
+
 def _staged_review(
     workdir: str,
     files: list[str],
@@ -758,6 +767,179 @@ class TestMissingToolPolicy:
         assert lane_skip.passed is True
         assert lane_skip.skipped is True
         assert "missing_tool_policy=skip" in lane_skip.skip_reason
+
+
+# ── Rules-stage partial coverage (GR-GAP-067) ────────────────────────────────
+
+
+class TestRulesStagePartialCoverage:
+    """One absent optional tool is PARTIAL COVERAGE, not a missing-tool stage.
+
+    The 4 arms (both / semgrep-only / ast-grep-only / neither) x 2 policies
+    (fail / skip) matrix: a covered stage is ``ok`` under both policies with
+    the absent tool named in notes/detail; only a stage with NO rules tool on
+    PATH is governed by ``missing_tool_policy``.
+    """
+
+    @pytest.mark.parametrize(
+        ("present", "expected_rules", "expected_notes"),
+        [
+            (("semgrep", "ast-grep"), ("gitreins-eval-call", "gitreins-os-system"), []),
+            (
+                ("semgrep",),
+                ("gitreins-eval-call",),
+                ["ast-grep unavailable (cargo install ast-grep)"],
+            ),
+            (("ast-grep",), ("gitreins-os-system",), ["semgrep unavailable (pip install semgrep)"]),
+        ],
+        ids=["both", "semgrep-only", "ast-grep-only"],
+    )
+    def test_covered_stage_is_ok_under_both_policies(
+        self,
+        tmp_workdir: str,
+        monkeypatch: pytest.MonkeyPatch,
+        present: tuple[str, ...],
+        expected_rules: tuple[str, ...],
+        expected_notes: list[str],
+    ) -> None:
+        _only_tools_on_path(monkeypatch, present)
+        for policy in ("fail", "skip"):
+            outcome = _staged_review(
+                tmp_workdir,
+                ["app.py"],
+                SecurityReviewConfig(mode="staged", missing_tool_policy=policy),
+                tool_runner=RecordedRunner(),
+                scanner_factory=lambda _: FakeScanner(),
+            )
+            rules = next(s for s in outcome.stages if s.stage == STAGE_RULES)
+            assert rules.status == "ok", policy  # covered: never missing_tool, never skipped
+            assert [f.rule_id for f in rules.findings] == list(expected_rules)
+            assert rules.notes == expected_notes, policy
+            if expected_notes:
+                assert expected_notes[0] in rules.detail
+            assert outcome.passed is False  # the delivered findings still fail the lane
+            assert "skipped by" not in rules.detail
+
+    @pytest.mark.parametrize("policy", ["fail", "skip"], ids=["fail", "skip"])
+    def test_neither_tool_is_governed_by_policy(
+        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch, policy: str
+    ) -> None:
+        _hide_tools(monkeypatch)
+        outcome = _staged_review(
+            tmp_workdir,
+            ["app.py"],
+            SecurityReviewConfig(mode="staged", missing_tool_policy=policy),
+            tool_runner=RecordedRunner(),
+            scanner_factory=lambda _: FakeScanner(),
+        )
+        rules = next(s for s in outcome.stages if s.stage == STAGE_RULES)
+        assert rules.findings == []
+        assert len(rules.notes) == 2  # both tools named as unavailable
+        if policy == "fail":
+            assert rules.status == "missing_tool"
+            assert "semgrep" in rules.detail and "ast-grep" in rules.detail
+            assert outcome.passed is False
+        else:
+            assert rules.status == "skipped"
+            assert "missing_tool_policy=skip" in rules.detail
+            assert outcome.passed is True
+
+    def test_spawn_file_not_found_is_absent_while_the_other_tool_covers(
+        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _show_tools(monkeypatch)  # both probed present, but semgrep vanishes at spawn
+
+        class _SemgrepVanishes(RecordedRunner):
+            def __call__(
+                self, workdir: str, argv: list[str], timeout: float
+            ) -> tuple[int, str, str]:
+                if argv[0] == "semgrep":
+                    raise FileNotFoundError("semgrep")
+                return super().__call__(workdir, argv, timeout)
+
+        outcome = _staged_review(
+            tmp_workdir,
+            ["app.py"],
+            tool_runner=_SemgrepVanishes(),
+            scanner_factory=lambda _: FakeScanner(),
+        )
+        rules = next(s for s in outcome.stages if s.stage == STAGE_RULES)
+        assert rules.status == "ok"  # FileNotFoundError == absence, ast-grep covered
+        assert [f.rule_id for f in rules.findings] == ["gitreins-os-system"]
+        assert rules.notes == ["semgrep unavailable (pip install semgrep)"]
+
+    def test_spawn_file_not_found_for_every_tool_is_missing_tool(
+        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _show_tools(monkeypatch)
+        outcome = _staged_review(
+            tmp_workdir,
+            ["app.py"],
+            tool_runner=RecordedRunner(raise_on="missing"),
+            scanner_factory=lambda _: FakeScanner(),
+        )
+        rules = next(s for s in outcome.stages if s.stage == STAGE_RULES)
+        assert rules.status == "missing_tool"  # no rules tool ran at all
+        assert rules.findings == []
+        assert outcome.passed is False
+
+    @pytest.mark.parametrize(
+        ("present", "absent", "surviving_rule"),
+        [
+            (("semgrep",), "ast-grep", "gitreins-eval-call"),
+            (("ast-grep",), "semgrep", "gitreins-os-system"),
+        ],
+        ids=["semgrep-only", "ast-grep-only"],
+    )
+    def test_guard_lane_fails_on_findings_not_on_the_absent_tool(
+        self,
+        tmp_workdir: str,
+        monkeypatch: pytest.MonkeyPatch,
+        present: tuple[str, ...],
+        absent: str,
+        surviving_rule: str,
+    ) -> None:
+        _stage_file(tmp_workdir, "app.py", "x = 1\n")
+        _only_tools_on_path(monkeypatch, present)
+        monkeypatch.setattr(security_stages, "_default_tool_runner", RecordedRunner())
+        monkeypatch.setattr(security_stages, "_default_scanner_factory", lambda _: FakeScanner())
+        manager = GuardManager(tmp_workdir, config={"security_review": {"mode": "staged"}})
+        result = manager.run_all()
+        lane = next(r for r in result.results if r.name == "security_review")
+        # The rule hit fails the lane — on findings, never on the absent tool.
+        assert lane.passed is False
+        assert "missing_tool" not in (lane.error or "")
+        assert surviving_rule in lane.output
+        # The absent tool is named as partial coverage on the warning surface.
+        assert "partial coverage" in lane.warning
+        assert f"{absent} unavailable" in lane.warning
+
+    @pytest.mark.parametrize(
+        ("present", "absent"),
+        [(("semgrep",), "ast-grep"), (("ast-grep",), "semgrep")],
+        ids=["semgrep-only", "ast-grep-only"],
+    )
+    def test_guard_lane_partial_pass_names_the_absent_tool(
+        self,
+        tmp_workdir: str,
+        monkeypatch: pytest.MonkeyPatch,
+        present: tuple[str, ...],
+        absent: str,
+    ) -> None:
+        _stage_file(tmp_workdir, "app.py", "x = 1\n")
+        _only_tools_on_path(monkeypatch, present)
+        clean = RecordedRunner(semgrep_stdout='{"results": []}', astgrep_stdout="[]")
+        monkeypatch.setattr(security_stages, "_default_tool_runner", clean)
+        monkeypatch.setattr(security_stages, "_default_scanner_factory", lambda _: FakeScanner())
+        manager = GuardManager(tmp_workdir, config={"security_review": {"mode": "staged"}})
+        result = manager.run_all()
+        lane = next(r for r in result.results if r.name == "security_review")
+        # A clean scan under partial coverage passes — but never silently.
+        assert lane.passed is True
+        assert lane.skipped is False
+        assert lane.error == ""
+        assert "partial coverage" in lane.warning
+        assert f"{absent} unavailable" in lane.warning
 
 
 # ── Guard lane integration ───────────────────────────────────────────────────

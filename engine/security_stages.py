@@ -64,6 +64,9 @@ STAGE_JUDGE = "judge"
 # Stage lifecycle statuses. Everything except "ok" and "skipped" is a
 # DEGRADED stage: it graded nothing, and SecurityReviewConfig.missing_tool_policy
 # decides whether that is a lane failure ("fail") or a named skip ("skip").
+# For the rules stage "ok" includes PARTIAL COVERAGE: at least one of its two
+# optional tools ran, the other being absent on this host (named in
+# StageOutcome.notes) — "missing_tool" means NO rules tool ran (GR-GAP-067).
 STATUS_OK = "ok"
 STATUS_MISSING_TOOL = "missing_tool"
 STATUS_TIMEOUT = "timeout"
@@ -156,6 +159,10 @@ class StageOutcome:
     unconfirmed: list[str] = field(default_factory=list)
     #: Human-readable notes: which tool was missing, why a stage skipped.
     detail: str = ""
+    #: Per-tool availability notes for a stage with optional tools (rules):
+    #: names a tool that is unavailable on this host while the stage still
+    #: ran and graded — partial coverage, not absence (GR-GAP-067).
+    notes: list[str] = field(default_factory=list)
 
     @property
     def degraded(self) -> bool:
@@ -312,17 +319,24 @@ def run_rules_stage(
 ) -> StageOutcome:
     """Stage 1: semgrep + ast-grep over *files* only. No ML, no LLM (AC2).
 
-    Each tool is optional. A missing tool is recorded per tool; the stage's
-    overall status is ``missing_tool`` when any tool is absent (the caller
-    applies ``missing_tool_policy``), ``timeout`` when a spawn outlives the
-    budget, and ``tool_error`` when a tool ran but its output could not be
-    parsed. Findings already collected before a degradation are kept.
+    The two tools are redundant optional scanners, so the stage is covered
+    when AT LEAST ONE of them runs: a single absent tool is PARTIAL COVERAGE
+    (status ``ok``, the absent tool named in ``detail`` and ``notes``), not a
+    ``missing_tool`` stage. The stage degrades only when no rules tool ran at
+    all (``missing_tool`` — governed by ``missing_tool_policy``) or when a
+    tool that IS present times out or fails (``timeout`` / ``tool_error``),
+    whether or not the other tool ran. A ``FileNotFoundError`` from the
+    runner for a probed-present binary counts as absence, not as a stage
+    failure, while the other tool covers the stage. Findings already
+    collected before a degradation are kept.
     """
     runner = tool_runner or _default_tool_runner
     findings: list[SecurityFinding] = []
-    notes: list[str] = []
+    notes: list[str] = []  # availability/tool notes, kept on the OK return too
+    ok_summary: list[str] = []  # per-tool finding counts for the OK detail
     degraded_status = ""
     degraded_detail = ""
+    ran_ok = False
 
     tools = (
         (
@@ -341,22 +355,23 @@ def run_rules_stage(
     for tool, argv_template, parser, install_hint in tools:
         if _tool_on_path(tool) is None:
             notes.append(f"{tool} unavailable ({install_hint})")
-            if not degraded_status:
-                degraded_status = STATUS_MISSING_TOOL
-            missing_note = f"{tool} not on PATH ({install_hint})"
-            degraded_detail = (
-                f"{degraded_detail}; {missing_note}" if degraded_detail else missing_note
-            )
             continue
         rc, out, err, spawn_status = _spawn_tool(runner, workdir, argv_template, files, timeout)
+        if spawn_status == STATUS_MISSING_TOOL:
+            # FileNotFoundError between the PATH probe and the spawn: treat
+            # as absent on this host, not as a stage failure (GR-GAP-067).
+            notes.append(f"{tool} unavailable ({install_hint})")
+            continue
         if spawn_status != STATUS_OK:
             notes.append(_spawn_detail(tool, spawn_status))
             if not degraded_status:
                 degraded_status = spawn_status
                 degraded_detail = _spawn_detail(tool, spawn_status)
             continue
+        ran_ok = True
         parsed, parse_error = parser(out, rc, err)
         findings.extend(parsed)
+        ok_summary.append(f"{tool}: {len(parsed)} finding(s)")
         if parse_error:
             notes.append(parse_error)
             if not degraded_status:
@@ -369,15 +384,21 @@ def run_rules_stage(
             if not degraded_status:
                 degraded_status, degraded_detail = STATUS_TOOL_ERROR, detail
 
+    if not ran_ok and not degraded_status:
+        # No rules tool ran at all: a genuinely absent stage.
+        degraded_status, degraded_detail = STATUS_MISSING_TOOL, "; ".join(notes)
     if degraded_status:
         return StageOutcome(
             stage=STAGE_RULES,
             status=degraded_status,
             findings=findings,
             detail=degraded_detail,
+            notes=notes,
         )
+    # Partial coverage still graded: name the absent tool, keep the counts.
+    detail = "; ".join([*notes, *ok_summary]) if notes else ""
     return StageOutcome(
-        stage=STAGE_RULES, status=STATUS_OK, findings=findings, detail="; ".join(notes)
+        stage=STAGE_RULES, status=STATUS_OK, findings=findings, detail=detail, notes=notes
     )
 
 
@@ -868,6 +889,7 @@ def _apply_policy(stages: list[StageOutcome], policy: str) -> list[StageOutcome]
                     escalations=stage.escalations,
                     unconfirmed=stage.unconfirmed,
                     detail=f"skipped by missing_tool_policy=skip: {stage.detail or stage.status}",
+                    notes=stage.notes,
                 )
             )
         else:
@@ -915,6 +937,7 @@ def outcome_summary(outcome: StagedReviewOutcome) -> dict[str, Any]:
         "findings": [f.to_dict() for f in outcome.findings],
         "stages": {s.stage: s.status for s in outcome.stages},
         "stage_details": {s.stage: s.detail for s in outcome.stages if s.detail},
+        "stage_notes": {s.stage: s.notes for s in outcome.stages if s.notes},
         "escalations": outcome.escalations,
         "unconfirmed": outcome.unconfirmed,
         "dropped_below_floor": outcome.dropped_below_floor(),

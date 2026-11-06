@@ -3691,6 +3691,15 @@ class GuardManager:
         if len(rendered) > 2000:
             rendered = rendered[:2000] + "\n... [truncated]"
 
+        # The lane warning carries non-failing caveats: judge hypotheses it
+        # could not cite, and rules-stage partial coverage (GR-GAP-067) — a
+        # passing run must never read as full coverage when one of the two
+        # optional rules tools is absent from this host.
+        warning_lines = [f"unconfirmed: {u}" for u in outcome.unconfirmed[:5]]
+        for stage in outcome.stages:
+            if stage.notes and not stage.degraded:
+                warning_lines.extend(f"{stage.stage} partial coverage: {n}" for n in stage.notes)
+
         result = GuardResult(
             name="security_review",
             passed=outcome.passed,
@@ -3702,7 +3711,7 @@ class GuardManager:
                 if skipped_stages
                 else ""
             ),
-            warning="\n".join(f"unconfirmed: {u}" for u in outcome.unconfirmed[:5]),
+            warning="\n".join(warning_lines),
         )
         self._security_review_summary = security_stages.outcome_summary(outcome)
         return result

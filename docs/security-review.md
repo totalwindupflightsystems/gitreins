@@ -65,6 +65,13 @@ The guard's `security_review` lane:
 - **FAILS** when any stage reports a finding, or when a stage cannot run and
   `missing_tool_policy: fail` (the default) applies — the error names the
   stage and why (`rules (missing_tool): semgrep not on PATH ...`).
+- **Treats one absent rules tool as partial coverage, not absence**: the
+  `rules` stage passes when at least one of semgrep/ast-grep ran, even if the
+  other is not installed — the surviving tool's findings are graded, and the
+  absent tool is named as a per-tool note in the stage detail and on the
+  lane's `warning` field (`rules partial coverage: ast-grep unavailable
+  (cargo install ast-grep)`), so a passing run never reads as full coverage.
+  Only a stage where NO rules tool ran is degraded by `missing_tool_policy`.
 - **PASSES clean** only when every enabled stage ran, found nothing, and
   nothing degraded. `unconfirmed` hypotheses do not fail the lane, but they
   are listed in the output and in the lane warning — they are never reported
@@ -106,10 +113,12 @@ Nothing new is required to *enable* the flag. Per stage:
 
 | Stage      | Needs                                             | Missing behavior                       |
 |------------|---------------------------------------------------|----------------------------------------|
-| `rules`    | `semgrep` and/or `ast-grep` on PATH               | `missing_tool_policy` applies          |
+| `rules`    | at least one of `semgrep` / `ast-grep` on PATH    | one tool absent → **passes** with partial coverage, the absent tool named in the stage detail and the lane warning; neither tool present → `missing_tool_policy` applies |
 | `localize` | nothing (heuristic fallback is built in)          | ML stack absent → disclosed fallback; scanner import failure → `missing_tool_policy` |
 | `judge`    | a configured LLM credential (as for Tier 2)       | `missing_tool_policy` applies          |
 
 Install hints are printed in the lane output when a tool is absent. Tests in
-`tests/test_security_stages.py` cover the full matrix hermetically — they
-never require semgrep, ast-grep, the ML stack, or network access.
+`tests/test_security_stages.py` cover the full matrix hermetically — the four
+tool arms (both / semgrep-only / ast-grep-only / neither) under both
+policies — and never require semgrep, ast-grep, the ML stack, or network
+access.
