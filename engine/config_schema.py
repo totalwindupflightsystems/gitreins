@@ -33,6 +33,7 @@ from engine.config import (
     DataProtectionConfig,
     GitReinsDefaults,
     QualityConfig,
+    SecurityReviewConfig,
     SpecAlignmentConfig,
 )
 
@@ -244,6 +245,10 @@ _SECTIONS: dict[str, dict[str, KeySpec]] = {
     "data_protection": {
         key: KeySpec(_kind_of(value)) for key, value in DataProtectionConfig().to_dict().items()
     },
+    "security_review": _specs_from_dataclass(
+        SecurityReviewConfig,
+        {"mode": ("off", "staged", "full"), "missing_tool_policy": ("skip", "fail")},
+    ),
 }
 
 # Flat top-level keys carrying GitReinsDefaults fields (model, max_*, ...).

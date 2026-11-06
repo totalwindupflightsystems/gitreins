@@ -1826,6 +1826,28 @@ class GuardManager:
                 )
                 return _finalize(self._timeout_result(results, warnings))
 
+        # GR-156: the staged security review lane runs only when the
+        # top-level `security_review:` block opts in (mode staged|full).
+        # mode "off" — the shipped default and the value for every config
+        # that predates GR-156 — runs NO step here, so guard output is
+        # behavior-identical to before (AC1).
+        from engine.config import SecurityReviewConfig
+
+        sr_mode = SecurityReviewConfig.from_dict(
+            self.config.get("security_review")
+            if isinstance(self.config.get("security_review"), dict)
+            else None
+        ).mode
+        if sr_mode != "off":
+            results.append(self._check_security_review())
+            if _timed_out():
+                warnings.append(
+                    f"Guard timed out after {self._hook_timeout}s "
+                    f"(hook_timeout). Remaining checks skipped — "
+                    f"commit allowed to proceed (fail-open)."
+                )
+                return _finalize(self._timeout_result(results, warnings))
+
         if self._is_go:
             if self._go_guards.get("build", True):
                 results.append(self._check_go_build())
@@ -1911,6 +1933,12 @@ class GuardManager:
             # the exit-code policy; library/MCP callers read them without
             # having to re-derive skips from the per-guard results.
             "allow_skips": self._allow_skips,
+            # GR-156: per-stage security review status when the lane ran.
+            **(
+                {"security_review": self._security_review_summary}
+                if hasattr(self, "_security_review_summary")
+                else {}
+            ),
         }
         if self._data_protection_result is not None:
             dp = self._data_protection_result
@@ -3624,6 +3652,60 @@ class GuardManager:
             output = output[:2000] + "\n... [truncated]"
 
         return GuardResult(name="security_scan", passed=False, output=output)
+
+    def _check_security_review(self) -> GuardResult:
+        """Run the staged security review pipeline over the change set (GR-156).
+
+        Three stages (rules -> localize -> judge) live in
+        engine.security_stages; this lane collects the change set, hands it to
+        the pipeline, and renders the verdict. Findings fail the lane; a
+        degraded stage fails or skips per ``security_review.missing_tool_policy``
+        — never a silent pass (AC7). Machine-readable per-stage status rides in
+        ``Tier1Result.extra["security_review"]``.
+        """
+        from engine import security_stages
+        from engine.config import SecurityReviewConfig
+
+        sr_block = self.config.get("security_review")
+        cfg = SecurityReviewConfig.from_dict(sr_block if isinstance(sr_block, dict) else None)
+        # Deleted paths are part of a scope but have no content to grade; the
+        # pipeline skips missing files too, so filter them here to keep the
+        # empty-scope skip honest.
+        files = [f for f in self.changed_files if os.path.isfile(os.path.join(self.workdir, f))]
+        if not files:
+            return GuardResult(
+                name="security_review",
+                passed=True,
+                output="No files in scope to review",
+                skipped=True,
+                skip_reason="no files in scope",
+            )
+
+        outcome = security_stages.run_staged_review(self.workdir, files, cfg)
+        rendered = security_stages.render_outcome(outcome, cfg.min_confidence)
+        self._remember_full_output("security_review", rendered)
+
+        failed = outcome.failed_stages()
+        skipped_stages = outcome.skipped_stages()
+        error = "; ".join(f"{s.stage} ({s.status}): {s.detail}" for s in failed) if failed else ""
+        if len(rendered) > 2000:
+            rendered = rendered[:2000] + "\n... [truncated]"
+
+        result = GuardResult(
+            name="security_review",
+            passed=outcome.passed,
+            output=rendered,
+            error=error,
+            skipped=bool(skipped_stages) and not outcome.findings and not failed,
+            skip_reason=(
+                "; ".join(f"{s.stage}: {s.detail}" for s in skipped_stages)
+                if skipped_stages
+                else ""
+            ),
+            warning="\n".join(f"unconfirmed: {u}" for u in outcome.unconfirmed[:5]),
+        )
+        self._security_review_summary = security_stages.outcome_summary(outcome)
+        return result
 
     def _check_data_protection(self) -> GuardResult:
         """Run the opt-in data-protection lane (GR-146).

@@ -142,6 +142,65 @@ class DataProtectionConfig:
 
 
 @dataclass
+class SecurityReviewConfig:
+    """Staged security review pipeline (GR-156).
+
+    ``mode`` gates the guard's ``security_review`` lane:
+
+      * ``off``    — no stage runs; guard output is unchanged (default).
+      * ``staged`` — deterministic rules (semgrep/ast-grep) + Antares
+        localization over the staged files.
+      * ``full``   — staged plus the LLM judge over surviving hypotheses.
+
+    ``missing_tool_policy`` decides how a stage degrades when its tool is
+    absent (semgrep/ast-grep/Antares/judge): ``fail`` fails the lane loudly;
+    ``skip`` records a named skip — never a silent pass.
+    """
+
+    mode: str = "off"  # "off" | "staged" | "full"
+    min_confidence: float = 0.7
+    per_stage_timeout_seconds: int = 60
+    missing_tool_policy: str = "fail"  # "skip" | "fail"
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any] | None) -> "SecurityReviewConfig":
+        block = value if isinstance(value, dict) else {}
+        mode = str(block.get("mode", "off")).strip().lower()
+        policy = str(block.get("missing_tool_policy", "fail")).strip().lower()
+        confidence = block.get("min_confidence", 0.7)
+        try:
+            min_confidence = float(confidence)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"security_review.min_confidence must be a number, got {confidence!r}"
+            ) from None
+        if not 0.0 <= min_confidence <= 1.0:
+            raise ValueError(
+                f"security_review.min_confidence must be between 0.0 and 1.0, got {confidence!r}"
+            )
+        timeout = block.get("per_stage_timeout_seconds", 60)
+        if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout < 1:
+            raise ValueError(
+                "security_review.per_stage_timeout_seconds must be a positive "
+                f"integer, got {timeout!r}"
+            )
+        return cls(
+            mode=mode if mode in ("off", "staged", "full") else "off",
+            min_confidence=min_confidence,
+            per_stage_timeout_seconds=timeout,
+            missing_tool_policy=policy if policy in ("skip", "fail") else "fail",
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "min_confidence": self.min_confidence,
+            "per_stage_timeout_seconds": self.per_stage_timeout_seconds,
+            "missing_tool_policy": self.missing_tool_policy,
+        }
+
+
+@dataclass
 class GitReinsDefaults:
     """Every default GitReins needs, in one place.
 
@@ -268,6 +327,11 @@ class GitReinsDefaults:
     # until an operator opts in (AC1). Validation is delegated to
     # engine.data_protection so a malformed policy fails loudly (AC3).
     data_protection: DataProtectionConfig = field(default_factory=DataProtectionConfig)
+
+    # ── Staged security review (GR-156) ──
+    # Ships OFF: mode "off" runs no stage, so an existing repository's guard
+    # output is byte-for-byte unchanged until an operator opts in.
+    security_review: SecurityReviewConfig = field(default_factory=SecurityReviewConfig)
 
     # Metadata
     _source: str = field(default="(built-in defaults)", repr=False)
@@ -465,6 +529,7 @@ class GitReinsDefaults:
             quality=QualityConfig.from_dict(config_dict.get("quality")),
             spec_alignment=SpecAlignmentConfig.from_dict(config_dict.get("spec_alignment")),
             data_protection=DataProtectionConfig.from_dict(config_dict.get("data_protection")),
+            security_review=SecurityReviewConfig.from_dict(config_dict.get("security_review")),
             _source=".gitreins/config.yaml" if config_dict else self._source,
         )
 
@@ -547,6 +612,7 @@ class GitReinsDefaults:
             "quality": self.quality.to_dict(),
             "spec_alignment": self.spec_alignment.to_dict(),
             "data_protection": self.data_protection.to_dict(),
+            "security_review": self.security_review.to_dict(),
         }
 
 
