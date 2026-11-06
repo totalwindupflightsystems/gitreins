@@ -272,6 +272,21 @@ def _sanitized_env() -> dict[str, str]:
     return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
 
 
+def _go_build_env(base: dict[str, str]) -> dict[str, str]:
+    """INT-FLAKE-8: bound Go's build parallelism unless set (earlyoom prefers go/pytest)."""
+    # A `go test` compile inside a pytest xdist worker (or any agent process)
+    # inflates that caller's memory envelope, and hosts whose earlyoom runs
+    # with `--prefer (^|/)(go|pytest|...)$` kill exactly those processes first.
+    # An explicitly-set GOMAXPROCS/GOFLAGS is preserved verbatim: the guard
+    # runs as a child of an agent/test process — user intent wins.
+    env = dict(base)
+    if "GOMAXPROCS" not in env:
+        env["GOMAXPROCS"] = str(min(4, os.cpu_count() or 1))
+    if "GOFLAGS" not in env:
+        env["GOFLAGS"] = "-p=2"
+    return env
+
+
 def _coerce_timeout(value: object, name: str, default: int) -> int:
     """Coerce a guard timeout config value to a positive int of seconds.
 
@@ -601,7 +616,7 @@ def check_go_tests(
         cmd,
         cwd=workdir,
         timeout=timeout,
-        env=_sanitized_env(),
+        env=_go_build_env(_sanitized_env()),
     )
     if result.get("timed_out"):
         return GoGuardResult(
@@ -654,7 +669,7 @@ def check_go_build(
         [*prefix, "go", "build", "-buildvcs=false", "./..."],
         cwd=workdir,
         timeout=120,
-        env=_sanitized_env(),
+        env=_go_build_env(_sanitized_env()),
     )
     if "error" in result and "exit_code" not in result:
         # Spawn failure (e.g. go missing) — old except-Exception contract, now
