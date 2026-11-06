@@ -325,6 +325,12 @@ default 8616, `--host` default 127.0.0.1) that renders the same verdict
 directories, with `--project <name>` to label a scheduler tick ledger and `--open`
 to launch a browser. Stop it with Ctrl-C.
 
+Operating it — start/stop, where its output goes (stdout only; requests are not
+logged), what is durable and what a backup actually covers, and the upgrade traps
+— is the operator runbook in [operations.md](operations.md). Nothing supervises
+`serve` today: whether it becomes a systemd-managed service or remains an
+on-demand viewer is an open decision, tracked separately from this guide.
+
 ## 7. Judge token telemetry
 
 Every Tier 2 evaluation appends one JSON line per step to

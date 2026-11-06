@@ -916,6 +916,7 @@ A lane whose own TREE is dirty fails the mirror-image check
 | [Component Map](docs/component-map.md) | Module inventory with paths and line counts |
 | [Agentic Evaluator Design](docs/evaluator-loop.md) | How the evaluator loop works |
 | [Judgment Viewer](docs/judgment-viewer.md) | Verdict browser: API contract, data sources, security model, `--repo` |
+| [Operations](docs/operations.md) | Operator runbook: run/restart `gitreins serve`, its log surface, what is durable and what a backup actually covers, upgrade traps |
 | [Tier-1 Data Protection](docs/data-protection.md) | Opt-in PII/network filter: policy reference, category inventory, measured false positives and limits |
 | [Review Profiles](docs/review-profiles.md) | Commit-audit review profiles (`quick`/`standard`/`deep`), effort budgets, and the `--review-profile` / `--review-effort` CLI flags |
 
