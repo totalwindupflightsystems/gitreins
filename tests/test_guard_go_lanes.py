@@ -57,6 +57,16 @@ CLI_SCRIPT = os.path.join(PROJECT_ROOT, "gitreins", "cli.py")
 GO_BIN = shutil.which("go")
 requires_go = pytest.mark.skipif(GO_BIN is None, reason="go toolchain not installed (POC-46)")
 
+# INT-FLAKE-8: every ``requires_go`` test here drives a real ``go build`` /
+# ``go test`` compile as a child of the pytest worker. Compiling Go concurrently
+# in up to ``-n`` workers is the shape that produced the intermittent
+# ``worker gwN crashed while running tests/…`` signature (green alone, red twice
+# in three ``-n 8`` full-suite runs). The module shares the ``go-compile`` xdist
+# group so, with the ``--dist=loadgroup`` addopts, only one Go compile is ever in
+# flight per run. Measured cost of the stage: ~225 MiB peak tree RSS, far under
+# the 4 GiB sandbox cap, so the group is about concurrency, not memory budget.
+pytestmark = pytest.mark.xdist_group("go-compile")
+
 GO_MOD = "module example.com/poc42\n\ngo 1.21\n"
 CLEAN_GO = "package quota\n\n// Clean returns a real int.\nfunc Clean() int {\n\treturn 0\n}\n"
 # A SECOND distinct Go file for the staged scope (POC-45): same package, a

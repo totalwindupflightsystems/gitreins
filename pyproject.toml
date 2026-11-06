@@ -74,7 +74,13 @@ include = ["engine*", "gitreins*", "gitreins_mcp*"]
 # REVIEW-004: bound EVERY test. The suite used to hang indefinitely when an LSP
 # test spawned a tool that never answers (a missing/stand-in gopls), which a foreman
 # tick or CI would sit on instead of failing. pytest-timeout is a dev dependency.
-addopts = "-n 4 --timeout=120 --timeout-method=thread"
+# INT-FLAKE-8: `--dist=loadgroup` is what makes the `xdist_group("go-compile")`
+# markers effective. Tests that compile a Go module (`go test` inside the pytest
+# worker) are the only tests here that behave differently under -n 8 than they do
+# alone, so they all share one group and one worker — at most one Go compile in
+# flight per run. Under plain `load` the markers are ignored (xdist docs), which
+# left the "worker gwN crashed while running …" signature in place.
+addopts = "-n 4 --dist=loadgroup --timeout=120 --timeout-method=thread"
 testpaths = ["tests"]
 pythonpath = ["."]
 markers = [

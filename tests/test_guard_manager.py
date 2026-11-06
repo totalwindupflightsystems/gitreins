@@ -335,7 +335,25 @@ class TestTimeoutCoercion:
     crashed subprocess.run(timeout=...) with TypeError fleet-wide
     (Kobayashi-Maru ticks 240-242). Leading digits are parsed; garbage
     raises a clear ValueError naming the config key.
+
+    INT-FLAKE-8: ``test_go_tests_stage_runs_with_string_test_timeout`` is the
+    only test in this file that compiles a real Go module — the go_tests stage
+    runs ``go test`` as a child of the pytest worker. That makes it the one test
+    here whose behaviour changes under ``-n 8``: it was red twice out of three
+    full-suite runs with ``worker gwN crashed while running …`` while passing
+    alone. The whole class therefore carries the shared ``go-compile`` xdist
+    group (effective under the ``--dist=loadgroup`` addopts), so at most one Go
+    compile is in flight per run instead of up to ``-n`` of them.
+
+    Measured on this host (2026-11-06, load average ≈40): the go_tests stage's
+    peak process-tree RSS is ~225 MiB (pytest → go test), and a full ``-n 8``
+    suite peaks at ~852 MiB across the whole tree — both far inside the 4 GiB
+    terminal-sandbox cap, so the crash signature is a concurrency-sensitivity
+    of the Go toolchain children, not host OOM. Budget: keep the group's
+    concurrent compiles at one and the stage inside that 4 GiB cap.
     """
+
+    pytestmark = pytest.mark.xdist_group("go-compile")
 
     def test_test_timeout_string_with_unit_coerced(self, tmp_workdir: str) -> None:
         """'300s' → 300 (the GR-GAP-028 repro config)."""
