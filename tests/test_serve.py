@@ -362,7 +362,17 @@ def test_existing_route_increments_request_counter(live_server: object) -> None:
 
     before = sample_value()
     status, _body = get(live_server, "/health")
+
+    # The production handler records the counter in its ``finally`` block, i.e.
+    # after ``_send`` has written the response body, so a client that samples the
+    # registry once can legitimately observe the pre-increment value (this is the
+    # xdist flake filed as INT-FLAKE-9). Poll with a bounded deadline instead of
+    # asserting on a single racing observation.
+    deadline = time.monotonic() + 2.0
     after = sample_value()
+    while after != before + 1 and time.monotonic() < deadline:
+        time.sleep(0.01)
+        after = sample_value()
 
     assert status == 200
     assert after == before + 1
