@@ -1081,3 +1081,4 @@
 {"id":1793985585335470970,"timestamp":"2026-11-06T18:51:59","event_type":"task_updated","task_id":"SKIPPED-INSTALL-BUNKER-1","actor":"foreman","detail":"{\"status\":\"pending\"}","tick_number":null}
 {"id":1793985585335470971,"timestamp":"2026-11-06T18:52:10","event_type":"task_updated","task_id":"SKIPPED-install-bunker-2026-10-09-las-03","actor":"foreman","detail":"{\"status\":\"blocked\"}","tick_number":null}
 {"id":1793985585335470972,"timestamp":"2026-11-06T18:52:17","event_type":"task_updated","task_id":"OBS-GITREINS-4","actor":"foreman","detail":"{\"status\":\"blocked\"}","tick_number":null}
+{"id":1793985585335470973,"timestamp":"2026-11-06T19:22:16","event_type":"task_created","task_id":"RELEASE-016","actor":"foreman","detail":"{\"id\":\"RELEASE-016\",\"status\":\"pending\"}","tick_number":null}
