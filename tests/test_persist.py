@@ -235,6 +235,26 @@ def test_build_summary_handles_pipeline_stages(tmp_path: Path) -> None:
     assert "tier1" in summary
 
 
+def test_build_summary_preserves_degraded_tier1_shape(tmp_path: Path) -> None:
+    p = VerdictPersister(str(tmp_path))
+    data = {
+        "passed": True,
+        "task_title": "Clean landed commit",
+        "verdict": None,
+        "stages": {
+            "tier1": {
+                "passed": True,
+                "degraded": True,
+                "summary": "guard reported DEGRADED PASS",
+            },
+            "tier2": {"passed": True, "summary": "COMPLETE"},
+        },
+    }
+    summary = p._build_summary("task-x", data)
+    assert "**tier1**" in summary
+    assert "**tier2**" in summary
+
+
 # ── REVIEW-GITREINS-030: judge provenance survives into verdict.json ────────
 
 

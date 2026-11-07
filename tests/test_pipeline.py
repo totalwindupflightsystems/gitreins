@@ -18,6 +18,7 @@ from engine.pipeline import (
     _secrets_step_run,
     load_pipeline_config,
     parse_secrets_scanners,
+    _is_degraded_guard_pass,
 )
 from pathlib import Path
 import pytest
@@ -46,6 +47,25 @@ class TestStepResult:
         d = sr.to_dict()
         assert d["passed"] is False
         assert d["error"] == "E501"
+
+    def test_guard_degraded_pass_is_recorded_as_pass_and_degraded(self) -> None:
+        command = "gitreins guard"
+        output = "Tier 1: DEGRADED PASS (skips: lint=no staged files)"
+        assert _is_degraded_guard_pass(command, 2, output)
+        step = StepResult(
+            id="guard",
+            type="script",
+            passed=True,
+            output=output,
+            data={"exit_code": 2, "degraded": True},
+            degraded=True,
+        )
+        assert step.to_dict()["passed"] is True
+        assert step.to_dict()["degraded"] is True
+
+    def test_guard_real_failure_and_timeout_are_not_degraded_passes(self) -> None:
+        assert not _is_degraded_guard_pass("gitreins guard", 1, "Tier 1 Guards: FAIL")
+        assert not _is_degraded_guard_pass("gitreins guard", 2, "Command timed out")
 
     def test_step_result_output_truncated(self) -> None:
         """1000 chars is under the 4000 budget — stored byte-identical (DF-GITREINS-POC-8)."""
