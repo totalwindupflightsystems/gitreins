@@ -32,6 +32,16 @@ PASS_CLASS_JUDGED = "judged"
 #: Tier 2 never ran: the verdict grades Tier 1 alone.
 PASS_CLASS_TIER1_ONLY = "tier1-only"
 
+#: GR-178: the status for a criterion the judge could not assess from the code
+#: at all — a UI actually rendering, an external API contract, a migration
+#: against real data. A third claim distinct from PASS ("verified good"),
+#: FAIL ("verified broken") and UNVERIFIED ("the budget stopped before this
+#: was reached"): the judge LOOKED and code review alone cannot settle it.
+#: The item names what would settle it, and the merge recommendation
+#: degrades to ``needs_review`` while one exists. Fail-closed: it is never
+#: counted as PASS by the coverage gate.
+STATUS_NOT_VERIFIABLE = "NOT_VERIFIABLE"
+
 #: A prefix match needs this much shared text to mean anything; shorter
 #: criteria ("c1" vs "c10") match by exact text only.
 _PREFIX_MIN_CHARS = 10
@@ -181,6 +191,12 @@ class Coverage:
     graded: tuple[str, ...]
     ungraded: tuple[str, ...]
     failing: tuple[str, ...]
+    #: GR-178: criteria whose item is NOT_VERIFIABLE — the judge could look
+    #: at the code and still not settle them (a browser check, an external
+    #: API, live data). Listed separately from ``failing`` because "cannot be
+    #: verified from here" is not "verified broken", and routed to a human
+    #: (merge recommendation ``needs_review``) instead of graded.
+    not_verifiable: tuple[str, ...] = ()
 
     @property
     def complete(self) -> bool:
@@ -188,9 +204,16 @@ class Coverage:
 
         An empty ``criteria`` is NOT complete: a verdict that graded nothing
         cannot be evidence that everything is done (GR-167: an empty task
-        criteria list must not silently pass).
+        criteria list must not silently pass). A NOT_VERIFIABLE item is also
+        not complete (GR-178): a criterion only a human can settle is not a
+        criterion the machine verified.
         """
-        return bool(self.criteria) and not self.ungraded and not self.failing
+        return (
+            bool(self.criteria)
+            and not self.ungraded
+            and not self.failing
+            and not self.not_verifiable
+        )
 
     @property
     def reason(self) -> str:
@@ -200,6 +223,8 @@ class Coverage:
         parts: list[str] = []
         if self.ungraded:
             parts.append("ungraded: " + "; ".join(self.ungraded))
+        if self.not_verifiable:
+            parts.append("not verifiable — needs human review: " + "; ".join(self.not_verifiable))
         if self.failing:
             parts.append("not passing: " + "; ".join(self.failing))
         return ", ".join(parts)
@@ -221,6 +246,7 @@ def check_coverage(verdict: object, criteria: Any) -> Coverage:
     graded: list[str] = []
     ungraded: list[str] = []
     failing: list[str] = []
+    not_verifiable: list[str] = []
 
     for criterion in wanted:
         needle = _norm(criterion)
@@ -239,7 +265,13 @@ def check_coverage(verdict: object, criteria: Any) -> Coverage:
             continue
         used.add(match)
         graded.append(criterion)
-        if _status_of(items[match]) != "PASS":
+        status = _status_of(items[match])
+        if status == STATUS_NOT_VERIFIABLE:
+            # GR-178: "code review cannot settle this" is its own bucket —
+            # routed to a human, never silently a PASS and never conflated
+            # with a verified FAIL.
+            not_verifiable.append(criterion)
+        elif status != "PASS":
             failing.append(criterion)
 
     return Coverage(
@@ -247,6 +279,7 @@ def check_coverage(verdict: object, criteria: Any) -> Coverage:
         graded=tuple(graded),
         ungraded=tuple(ungraded),
         failing=tuple(failing),
+        not_verifiable=tuple(not_verifiable),
     )
 
 
@@ -271,3 +304,37 @@ def ungraded_note(coverage: Coverage) -> str:
     if coverage.complete:
         return ""
     return f"Coverage FAILED — {coverage.reason}"
+
+
+# ── GR-178: merge recommendation ────────────────────────────────────────────
+
+#: Merge recommendations, mirroring PR-Agent's three-valued schema
+#: (no_concerns_found / needs_review / changes_required). Advisory only:
+#: the merge gate keys on ``pass_class`` (GR-166), never on this value, so
+#: the recommendation cannot become a new bypass.
+MERGE_RECOMMENDATION_OK = "no_concerns_found"
+MERGE_RECOMMENDATION_REVIEW = "needs_review"
+MERGE_RECOMMENDATION_CHANGES = "changes_required"
+
+
+def merge_recommendation(verdict: object, criteria: Any = None) -> str:
+    """The three-valued merge recommendation for *verdict* (GR-178).
+
+    ``changes_required`` when any item grades FAIL; ``needs_review`` when any
+    item is NOT_VERIFIABLE (a criterion only a human can settle — the whole
+    point of GR-178) or a supplied criterion went ungraded; ``no_concerns_found``
+    only when every item is PASS and every criterion was graded. The merge
+    gate does NOT read this: ``pass_class`` still governs merging, so this is
+    routing advice for a human, never a key.
+    """
+    items = verdict_items(verdict)
+    statuses = [_status_of(item) for item in items]
+    if "FAIL" in statuses:
+        return MERGE_RECOMMENDATION_CHANGES
+    if STATUS_NOT_VERIFIABLE in statuses:
+        return MERGE_RECOMMENDATION_REVIEW
+    if criteria:
+        coverage = check_coverage(verdict, criteria)
+        if coverage.ungraded or coverage.not_verifiable:
+            return MERGE_RECOMMENDATION_REVIEW
+    return MERGE_RECOMMENDATION_OK

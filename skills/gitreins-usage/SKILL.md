@@ -1054,12 +1054,15 @@ the actual `file:line conf=1.00` finding lives in `.gitreins/logs/guard-*.log`. 
 log named at the bottom of the guard output before deciding what blocked you, and expect the reason
 text to be cut mid-word. Row: GR-GAP-070.
 
-**Pitfall 69 — install writes config keys the loader does not read.** `gitreins install` writes
-`defaults.worktree_venv_source` / `_name` and a top-level `worktree_fleet`; `gitreins
-config-validate` flags all three as unknown on every command (three warnings in every hook run), and
-the first two are dead — the loader reads `defaults.venv_source` / `venv_name`. Editing the knob the
-generated file shows you changes nothing. Set the venv spelling the loader reads, and ignore the
-warning noise until GR-GAP-069 closes.
+**Pitfall 69 — the product's own config can drift from its validator.** `gitreins install` wrote
+`defaults.worktree_venv_source` / `_name` and a top-level `worktree_fleet`, and `gitreins
+config-validate` flagged all three as unknown on every command — three warnings in every hook run.
+The "dead keys" half of that report was WRONG: the loader read the writer's spellings all along
+through the `_worktree_fleet_value` alias map (`defaults.worktree_venv_source` → the worktree fleet
+knobs); only the validator was behind. GR-GAP-069 fixed the validator: the schema now knows the
+writer spellings and the `worktree_fleet` section, and `test_install_generated_config_is_clean`
+pins the generated config to zero issues. Lesson: any key a bundled writer emits must be
+schema-known, or the validator lies about the product's own file. Row: GR-GAP-069.
 
 **Pitfall 70 — the commit gate is not free.** `harness`: 22.05 s ± 3.57 s warm (5 runs) on a six-file
 repo at loadavg 33, first run 27.46 s. Only ~2.0 s was attributable (pyright 1.72 s, mypy 0.29 s);

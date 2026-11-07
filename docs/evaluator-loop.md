@@ -164,6 +164,76 @@ prompt:
 Persisted items carry `"derived": true` only when set, so a verdict with no
 derived criteria serializes byte-identically to the pre-GR-176 shape.
 
+## What the judge could NOT verify routes to a human (GR-178)
+
+A criterion that code review alone cannot settle — a UI that must render in a
+browser, an external API contract, a migration against real data — gets its
+own status: `NOT_VERIFIABLE`, with a `not_verifiable_reason` naming what would
+settle it (the exact command, the environment it needs, or the human check to
+perform). It is a fourth claim, distinct from `UNVERIFIED` ("the budget
+stopped before I reached this"): the judge looked, and looking at code cannot
+answer it. Grading it PASS by absence of complaint is the slop this exists to
+kill, so it fails closed and routes:
+
+* The parser keeps `NOT_VERIFIABLE` through verdict parsing instead of
+  coercing it to `FAIL`, and a `COMPLETE` carrying one is downgraded to
+  `INCOMPLETE` (it is non-PASS).
+* `engine.gate.check_coverage` puts it in its own `Coverage.not_verifiable`
+  bucket — never counted as PASS, listed separately from `failing` — and
+  `Coverage.complete` is False while one exists.
+* `engine.gate.merge_recommendation` degrades to `needs_review` while any
+  `NOT_VERIFIABLE` item exists. The recommendation is advisory only: the
+  merge gate still keys on `pass_class`, so this cannot become a bypass.
+* The judge summary and the persisted `summary.md` list these items in their
+  own "Could NOT verify — needs human review" section, so a human is shown
+  exactly what was not verified and what would settle it.
+
+
+## The author-independent second pass (GR-171)
+
+GR-176 lets the judge set its own bar *on top of* the author's criteria — but
+those criteria still anchor everything it reads. GR-171 adds a reviewer that
+runs BESIDE the criteria grading and never sees them: it is constructed
+without any criteria parameter, and its prompt is assembled from the diff
+alone. By construction it cannot quietly become a re-grade of the author's
+rubric.
+
+What it does (`engine.review_profiles.SecondPassReviewer`):
+
+1. **Input** — the diff of the change under review (working tree vs HEAD, or
+   the last commit when the tree is clean — the same GR-GAP-046 anchor the
+   evaluator uses). Nothing else.
+2. **Concerns** — correctness defects, missing wiring, missing failure-path
+   tests, convention drift relative to the surrounding code.
+3. **No-speculation rule** — report only findings the diff can evidence;
+   a silent non-finding is the correct answer to a guess; findings capped at
+   `MAX_SECOND_PASS_FINDINGS = 10`.
+4. **Output** — structured findings, each carrying `severity` (the canonical
+   set), `file:line`, and a `detection` rule; malformed findings are dropped
+   with a logged reason, never coerced. critical|high are the blocking
+   severities (`blocking_second_pass_findings`); lower ones are advisory.
+
+Reviewer identity (the AC the PR-Agent contrast exposed): every run — even a
+failed one — records the judging environment's git identity next to the HEAD
+commit author's and flags `self_review` when the two are the same person.
+Unknown identities record `self_review: null`; unknown is never recorded as
+"independent".
+
+It is opt-in — `.gitreins/config.yaml`:
+
+```yaml
+review:
+  second_pass: true   # default off; existing runs change nothing
+```
+
+When enabled, the judge attaches the review to the verdict record as a
+`review` block (same key in the machine-readable judge status), absent when
+the pass does not run. A review failure lands on the block as `error`: the
+second pass can never fail the judge run it accompanies.
+`scripts/review_dry_run.py --repo . --n 20 --out report.md` produces the
+AC4 precision sample — findings per landed commit, with TP/FP labeling
+columns a HUMAN fills in; the precision number is never self-reported.
+
 
 ## Evaluation Tools (12)
 

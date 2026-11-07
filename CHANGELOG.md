@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **The author-independent second-pass reviewer (GR-171)** — a tier2 verdict now
+  has a reviewer beside it that never sees the author's acceptance criteria.
+  `engine.review_profiles.SecondPassReviewer` builds its prompt from the diff
+  alone (no criteria parameter exists to hand it one), reviews the change for
+  correctness, missing wiring, missing failure-path tests and convention
+  drift, under an explicit "do not speculate beyond evidence" rule with a
+  findings cap (`MAX_SECOND_PASS_FINDINGS = 10`). Each finding is a structured
+  item — `severity`, `file:line` and a `detection` rule — validated against
+  the canonical severity set and dropped (never coerced) when malformed;
+  critical|high are the blocking severities a gate acts on
+  (`blocking_second_pass_findings`). Every run records the judging
+  environment's git identity next to the HEAD commit author's and flags
+  `self_review` when the two are the same person (unknown identities record
+  `null`, never a false "independent"). Opt-in via `.gitreins/config.yaml`:
+
+  ```yaml
+  review:
+    second_pass: true        # default off — no existing run changes shape
+    max_findings: 10         # optional
+  ```
+
+  When enabled, the judge attaches the review to the verdict record as a
+  `review` block (and the machine-readable judge status as the same key); the
+  block is absent — never null — when the pass does not run, so pre-GR-171
+  verdict shapes are byte-identical. A review failure is recorded on the
+  block as `error`; the second pass can never fail the judge run it
+  accompanies. `scripts/review_dry_run.py` runs the pass over the last N
+  landed commits and emits a precision-sample report whose TP/FP labels are
+  filled in by a human reader (AC4 of the board row).
+
 ## [0.19.0] - 2026-11-07
 
 ### Added

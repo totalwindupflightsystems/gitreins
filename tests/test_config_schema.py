@@ -81,6 +81,48 @@ def test_this_repos_own_config_is_clean() -> None:
     assert issues == [], "repo config warns: " + "; ".join(i.render() for i in issues)
 
 
+def test_install_generated_config_is_clean() -> None:
+    """GR-GAP-069: the config `gitreins install` writes must not trip the validator.
+
+    DEFAULT_GITREINS_CONFIG emits `defaults.worktree_venv_source`/`_name` and a
+    top-level `worktree_fleet`; the schema must know every key the product's own
+    writers emit, or every hook run in every consumer repo prints warnings.
+    """
+    import yaml
+
+    from gitreins.cli import DEFAULT_GITREINS_CONFIG
+
+    config = yaml.safe_load(DEFAULT_GITREINS_CONFIG)
+    issues = validate_config(config)
+    assert issues == [], "install-generated config warns: " + "; ".join(i.render() for i in issues)
+
+
+def test_worktree_fleet_section_keys_are_known() -> None:
+    """Every shape _worktree_fleet_value reads out of `worktree_fleet:` validates."""
+    config = {
+        "worktree_fleet": {
+            "max_concurrent_worktrees": 3,
+            "venv_source": ".venv",
+            "venv_name": ".venv",
+            "disk_ceiling_mb": 4096,
+            "venv": {"source": "shared-env", "name": ".fleet-venv"},
+        }
+    }
+    assert validate_config(config) == []
+
+
+def test_loader_reads_the_writers_venv_spellings() -> None:
+    """The venv knobs the install writer emits must reach the loaded defaults."""
+    config = {
+        "defaults": {"worktree_venv_source": "shared-env", "worktree_venv_name": ".tree-venv"},
+        "worktree_fleet": {"disk_ceiling_mb": 2048},
+    }
+    defaults = GitReinsDefaults().overlay(config)
+    assert defaults.worktree_venv_source == "shared-env"
+    assert defaults.worktree_venv_name == ".tree-venv"
+    assert defaults.worktree_disk_ceiling_mb == 2048
+
+
 # ── the defect: a misspelled key was silently ignored ────────────────────────
 
 

@@ -585,6 +585,7 @@ class VerdictPersister:
         if items:
             lines.append("## Criteria")
             lines.append("")
+            not_verifiable_items: list[tuple[str, str, str]] = []
             for item in items:
                 if isinstance(item, dict):
                     status = item_glyph(cast(str, item.get("status")))
@@ -592,6 +593,14 @@ class VerdictPersister:
                     detail = item.get("detail", "")
                     if detail:
                         lines.append(f"  - {detail}")
+                    if str(item.get("status", "")).upper() == "NOT_VERIFIABLE":
+                        not_verifiable_items.append(
+                            (
+                                str(item.get("criterion", "?")),
+                                str(item.get("detail", "")),
+                                str(item.get("not_verifiable_reason", "") or ""),
+                            )
+                        )
                 else:
                     status = item_glyph(cast(str, getattr(item, "status", None)))
                     criterion = getattr(item, "criterion", str(item))
@@ -599,7 +608,25 @@ class VerdictPersister:
                     lines.append(f"- {status} **{criterion}**")
                     if detail:
                         lines.append(f"  - {detail}")
+                    if str(getattr(item, "status", "")).upper() == "NOT_VERIFIABLE":
+                        not_verifiable_items.append(
+                            (
+                                str(criterion),
+                                str(detail),
+                                str(getattr(item, "not_verifiable_reason", "") or ""),
+                            )
+                        )
             lines.append("")
+            # GR-178: what the judge could NOT verify gets its own section —
+            # the human routing surface. These are not passes and not fails;
+            # someone must settle them outside code review.
+            if not_verifiable_items:
+                lines.append("## Could NOT verify — needs human review")
+                lines.append("")
+                for criterion, detail, reason in not_verifiable_items:
+                    lines.append(f"- **{criterion}** — {detail or 'no detail recorded'}")
+                    lines.append(f"  - What would settle it: {reason or 'not named'}")
+                lines.append("")
 
         # Pipeline stages
         if stages:
@@ -978,6 +1005,11 @@ def _verdict_item_dict(item: VerdictItem) -> dict[Any, Any]:
     # a verdict with no derived criteria serializes byte-identically.
     if getattr(item, "derived", False):
         d["derived"] = True
+    # GR-178: what would settle a NOT_VERIFIABLE item. Only present when the
+    # item actually carries one, so pre-GR-178 items serialize byte-identically.
+    reason = getattr(item, "not_verifiable_reason", None)
+    if reason:
+        d["not_verifiable_reason"] = reason
     return d
 
 
@@ -1085,6 +1117,16 @@ def build_verdict_data(workdir: str, task: Task, result: JudgeResult) -> dict[An
     else:
         verdict_data["items"] = []
 
+    # GR-178: the advisory merge recommendation (no_concerns_found /
+    # needs_review / changes_required), degraded to needs_review while any
+    # NOT_VERIFIABLE item exists. Advisory ONLY — the merge gate keys on
+    # pass_class (GR-166) and never reads this value, so it cannot become a
+    # new bypass. Absent when no tier-2 verdict object exists (tier1-only).
+    if verdict_obj is not None and hasattr(verdict_obj, "items"):
+        from engine.gate import merge_recommendation
+
+        verdict_data["merge_recommendation"] = merge_recommendation(verdict_obj, task.criteria)
+
     # JEVRES-004 tier 1.5: the full pre-screen (per-criterion probabilities,
     # missing kinds, evidence quality, and the engine's own verdict with its
     # bundle manifest) persists INSIDE the existing verdict record, so
@@ -1107,6 +1149,15 @@ def build_verdict_data(workdir: str, task: Task, result: JudgeResult) -> dict[An
     provenance = getattr(result, "provenance", None)
     if isinstance(provenance, dict) and provenance and not verdict_data.get("stages"):
         verdict_data["provenance"] = dict(provenance)
+
+    # GR-171: the author-independent second pass rides the verdict record as
+    # a ``review`` block — structured findings (severity, file:line,
+    # detection) plus reviewer vs commit-author identity and the self_review
+    # flag. Absent when the pass did not run, so pre-GR-171 verdict shapes
+    # are byte-identical.
+    review = getattr(result, "second_pass_review", None)
+    if isinstance(review, dict) and review:
+        verdict_data["review"] = review
 
     # Summary text
     verdict_data["summary"] = result.summary

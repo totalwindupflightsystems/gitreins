@@ -35,7 +35,7 @@ Out of scope: the LLM client itself (`engine/llm.py`), the guard manager (`engin
 | Output | Type | Description |
 |--------|------|-------------|
 | `Verdict` | dataclass | `{verdict: "COMPLETE"|"INCOMPLETE", items: [VerdictItem], summary: str}` |
-| `VerdictItem` | dataclass | `{criterion: str, status: "PASS"|"FAIL", detail: str}` |
+| `VerdictItem` | dataclass | `{criterion: str, status: "PASS"|"FAIL"|"NOT_VERIFIABLE", detail: str, not_verifiable_reason?: str}` — `not_verifiable_reason` is present only on `NOT_VERIFIABLE` items (GR-178) and names what would settle the criterion: the command, the environment, or the human check |
 
 ## 4. Operating Contract
 
@@ -58,7 +58,7 @@ Out of scope: the LLM client itself (`engine/llm.py`), the guard manager (`engin
 
 ### 4.3 Success Criteria
 
-- Every task criterion receives a PASS or FAIL item in the verdict
+- Every task criterion receives a PASS or FAIL item in the verdict, or NOT_VERIFIABLE (GR-178) when code review alone cannot settle it — a criterion needing a browser check, an external API, or real data is routed to a human with a `not_verifiable_reason` naming what would settle it, never graded PASS by absence of complaint
 - Verdict parsing succeeds even when the LLM wraps JSON in markdown fences or adds extra text
 - Cap enforcement prevents runaway loops without false positives (lenient iteration check allows one final call at the boundary)
 - Deduplication warnings reduce redundant tool calls by >50% in typical evaluations
@@ -556,7 +556,7 @@ These tools are defined in `EVALUATOR_TOOLS` but are opt-in depending on environ
 
 **System prompt instruction:**
 
-> Output ONLY the JSON object. Nothing before. Nothing after. "verdict" must be "COMPLETE" or "INCOMPLETE". "status" must be "PASS" or "FAIL". EVERY criterion must have a corresponding item. PASS requires concrete evidence (file path, line number, or test output). FAIL requires explaining exactly what's missing.
+> Output ONLY the JSON object. Nothing before. Nothing after. "verdict" must be "COMPLETE" or "INCOMPLETE". "status" must be "PASS", "FAIL", or "NOT_VERIFIABLE". EVERY criterion must have a corresponding item. PASS requires concrete evidence (file path, line number, or test output). FAIL requires explaining exactly what's missing. NOT_VERIFIABLE is for a criterion code review alone cannot settle (a browser check, an external API, live data); its `not_verifiable_reason` must name what would settle it — the command, the environment, or the human check. A NOT_VERIFIABLE item is not a pass: it fails the verdict closed AND routes the criterion to a human.
 
 **Parser: `_parse_verdict(content: str) → Verdict`**
 
@@ -570,7 +570,7 @@ These tools are defined in `EVALUATOR_TOOLS` but are opt-in depending on environ
 - Extract substring and attempt `json.loads()`
 - Validate: `verdict` field present, `items` field present
 - Normalize `verdict` to `"COMPLETE"` or `"INCOMPLETE"` (default `"INCOMPLETE"` if invalid)
-- Normalize each item's `status` to `"PASS"` or `"FAIL"` (default `"FAIL"` if invalid)
+- Normalize each item's `status` to `"PASS"`, `"FAIL"`, or `"NOT_VERIFIABLE"` (default `"FAIL"` if invalid); a NOT_VERIFIABLE item also carries its optional `not_verifiable_reason` (GR-178)
 - Build `Verdict` with `VerdictItem` list
 
 **Strategy 3 — Keyword Fallback:**

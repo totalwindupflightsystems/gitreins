@@ -171,6 +171,7 @@ select = [
 [tool.ruff.lint.per-file-ignores]
 # LLM system prompts — breaking lines changes the prompt text sent to the model
 "engine/evaluator.py" = ["E501"]
+"engine/review_profiles.py" = ["E501"]
 # Commit audit — LLM review prompts in docstrings; config — inline comments on dataclass fields
 "engine/commit_audit.py" = ["E501"]
 "engine/config.py" = ["E501"]
