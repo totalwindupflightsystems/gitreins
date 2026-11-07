@@ -164,6 +164,30 @@ prompt:
 Persisted items carry `"derived": true` only when set, so a verdict with no
 derived criteria serializes byte-identically to the pre-GR-176 shape.
 
+## What the judge could NOT verify routes to a human (GR-178)
+
+A criterion that code review alone cannot settle — a UI that must render in a
+browser, an external API contract, a migration against real data — gets its
+own status: `NOT_VERIFIABLE`, with a `not_verifiable_reason` naming what would
+settle it (the exact command, the environment it needs, or the human check to
+perform). It is a fourth claim, distinct from `UNVERIFIED` ("the budget
+stopped before I reached this"): the judge looked, and looking at code cannot
+answer it. Grading it PASS by absence of complaint is the slop this exists to
+kill, so it fails closed and routes:
+
+* The parser keeps `NOT_VERIFIABLE` through verdict parsing instead of
+  coercing it to `FAIL`, and a `COMPLETE` carrying one is downgraded to
+  `INCOMPLETE` (it is non-PASS).
+* `engine.gate.check_coverage` puts it in its own `Coverage.not_verifiable`
+  bucket — never counted as PASS, listed separately from `failing` — and
+  `Coverage.complete` is False while one exists.
+* `engine.gate.merge_recommendation` degrades to `needs_review` while any
+  `NOT_VERIFIABLE` item exists. The recommendation is advisory only: the
+  merge gate still keys on `pass_class`, so this cannot become a bypass.
+* The judge summary and the persisted `summary.md` list these items in their
+  own "Could NOT verify — needs human review" section, so a human is shown
+  exactly what was not verified and what would settle it.
+
 
 ## Evaluation Tools (12)
 

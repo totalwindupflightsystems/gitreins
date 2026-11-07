@@ -439,6 +439,179 @@ class TestVerdictCoverage:
         assert verdict_is_passing(verdict, ["c1 shipped"]) is False
 
 
+class TestNotVerifiableRouting:
+    """GR-178: what the judge could NOT verify is routed to a human.
+
+    A criterion that code review alone cannot settle (a browser check, an
+    external API, live data) must be a claim of its own — NOT_VERIFIABLE —
+    never a PASS by absence of complaint and never a manufactured FAIL.
+    """
+
+    # The acceptance criterion's own example: a UI criterion that needs a
+    # browser. Code review can read the nav component; it cannot see it render.
+    BROWSER_CRITERION = "the settings page renders the new nav in a real browser"
+
+    def _browser_verdict(self) -> Verdict:
+        return Verdict(
+            verdict="COMPLETE",
+            items=[
+                VerdictItem(
+                    self.BROWSER_CRITERION,
+                    "NOT_VERIFIABLE",
+                    "Read settings/nav.tsx; rendering can only be confirmed in a browser",
+                    not_verifiable_reason=(
+                        "Human check: open the built site in a browser and confirm the nav renders"
+                    ),
+                ),
+            ],
+        )
+
+    def test_a_browser_check_criterion_is_not_counted_as_passed(self) -> None:
+        """A NOT_VERIFIABLE item is never a PASS in the coverage gate."""
+        from engine.gate import check_coverage, verdict_is_passing
+
+        verdict = self._browser_verdict()
+        assert verdict_is_passing(verdict, [self.BROWSER_CRITERION]) is False
+        coverage = check_coverage(verdict, [self.BROWSER_CRITERION])
+        # It WAS graded — the judge looked — but it landed in its own bucket,
+        # not in PASS and not in a manufactured FAIL.
+        assert coverage.graded == (self.BROWSER_CRITERION,)
+        assert coverage.not_verifiable == (self.BROWSER_CRITERION,)
+        assert coverage.failing == ()
+        assert coverage.complete is False
+
+    def test_not_verifiable_listed_separately_from_failing(self) -> None:
+        """'Cannot be verified from here' is not 'verified broken'."""
+        from engine.gate import check_coverage
+
+        verdict = Verdict(
+            verdict="INCOMPLETE",
+            items=[
+                VerdictItem(self.BROWSER_CRITERION, "NOT_VERIFIABLE", "needs a browser"),
+                VerdictItem("c2 broken", "FAIL", "returns 500"),
+            ],
+        )
+        coverage = check_coverage(verdict, [self.BROWSER_CRITERION, "c2 broken"])
+        assert coverage.not_verifiable == (self.BROWSER_CRITERION,)
+        assert coverage.failing == ("c2 broken",)
+        # The summary line names both, in separate buckets.
+        assert "not verifiable" in coverage.reason
+        assert self.BROWSER_CRITERION in coverage.reason
+        assert "not passing" in coverage.reason
+
+    def test_the_persisted_dict_shape_reads_the_same(self) -> None:
+        """A verdict.json dict with NOT_VERIFIABLE answers like a live verdict."""
+        from engine.gate import check_coverage, verdict_is_passing
+
+        record = {
+            "verdict": "COMPLETE",
+            "items": [
+                {
+                    "criterion": self.BROWSER_CRITERION,
+                    "status": "NOT_VERIFIABLE",
+                    "detail": "needs a browser",
+                    "not_verifiable_reason": "human check",
+                }
+            ],
+        }
+        assert verdict_is_passing(record, [self.BROWSER_CRITERION]) is False
+        assert check_coverage(record, [self.BROWSER_CRITERION]).not_verifiable == (
+            self.BROWSER_CRITERION,
+        )
+
+    def test_merge_recommendation_degrades_to_needs_review(self) -> None:
+        """Any NOT_VERIFIABLE item degrades the merge recommendation."""
+        from engine.gate import (
+            MERGE_RECOMMENDATION_OK,
+            MERGE_RECOMMENDATION_REVIEW,
+            merge_recommendation,
+        )
+
+        criteria = [self.BROWSER_CRITERION]
+        assert (
+            merge_recommendation(self._browser_verdict(), criteria) == MERGE_RECOMMENDATION_REVIEW
+        )
+        # All-PASS verdict over the same criteria: no concerns.
+        clean = Verdict(
+            verdict="COMPLETE",
+            items=[VerdictItem(self.BROWSER_CRITERION, "PASS", "verified by hand")],
+        )
+        assert merge_recommendation(clean, criteria) == MERGE_RECOMMENDATION_OK
+
+    def test_merge_recommendation_three_values(self) -> None:
+        """FAIL → changes_required outranks, NOT_VERIFIABLE → needs_review."""
+        from engine.gate import (
+            MERGE_RECOMMENDATION_CHANGES,
+            MERGE_RECOMMENDATION_OK,
+            MERGE_RECOMMENDATION_REVIEW,
+            merge_recommendation,
+        )
+
+        assert merge_recommendation(self._browser_verdict()) == MERGE_RECOMMENDATION_REVIEW
+        failing = Verdict(
+            verdict="INCOMPLETE",
+            items=[
+                VerdictItem(self.BROWSER_CRITERION, "NOT_VERIFIABLE", "needs a browser"),
+                VerdictItem("c2 broken", "FAIL", "returns 500"),
+            ],
+        )
+        assert merge_recommendation(failing) == MERGE_RECOMMENDATION_CHANGES
+        clean = Verdict(verdict="COMPLETE", items=[VerdictItem("c1 ok", "PASS", "evidence")])
+        assert merge_recommendation(clean) == MERGE_RECOMMENDATION_OK
+
+    def test_merge_gate_still_keys_on_pass_class(self) -> None:
+        """The recommendation is advisory: the gate never reads it."""
+        from engine.gate import verdict_is_passing
+
+        # Even a needs_review verdict answers through the same coverage
+        # authority — no new bypass exists.
+        verdict = self._browser_verdict()
+        assert verdict_is_passing(verdict, [self.BROWSER_CRITERION]) is False
+
+    def test_not_verifiable_listed_separately_in_judge_summary(self) -> None:
+        """The JudgeResult summary carries its own human-routing section."""
+        result = JudgeResult(
+            task_id="GR-178",
+            verdict=self._browser_verdict(),
+            passed=False,
+        )
+        summary = result.summary
+        assert "Could NOT verify — needs human review" in summary
+        assert self.BROWSER_CRITERION in summary
+        assert "open the built site in a browser" in summary
+
+    def test_parser_keeps_not_verifiable_instead_of_coercing(self) -> None:
+        """A model's NOT_VERIFIABLE survives _parse_verdict with its reason."""
+        from engine.evaluator import AgenticEvaluator
+
+        content = (
+            '{"verdict":"INCOMPLETE","items":[{"criterion":"'
+            + self.BROWSER_CRITERION
+            + '","status":"NOT_VERIFIABLE","detail":"needs a browser",'
+            + '"not_verifiable_reason":"human browser check"}],"summary":"s"}'
+        )
+        evaluator = AgenticEvaluator.__new__(AgenticEvaluator)
+        evaluator._sandbox = {}
+        verdict = evaluator._parse_verdict(content)
+        assert verdict.items[0].status == "NOT_VERIFIABLE"
+        assert verdict.items[0].not_verifiable_reason == "human browser check"
+
+    def test_complete_with_not_verifiable_is_forced_incomplete(self) -> None:
+        """A COMPLETE carrying a NOT_VERIFIABLE item cannot stand."""
+        from engine.evaluator import AgenticEvaluator
+
+        content = (
+            '{"verdict":"COMPLETE","items":[{"criterion":"'
+            + self.BROWSER_CRITERION
+            + '","status":"NOT_VERIFIABLE","detail":"needs a browser"}],"summary":"s"}'
+        )
+        evaluator = AgenticEvaluator.__new__(AgenticEvaluator)
+        evaluator._sandbox = {}
+        verdict = evaluator._parse_verdict(content)
+        assert verdict.verdict == "INCOMPLETE"
+        assert verdict.items[0].status == "NOT_VERIFIABLE"
+
+
 class TestJudgeInit:
     """Test Judge initialization."""
 

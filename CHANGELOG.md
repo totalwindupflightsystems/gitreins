@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **The verdict names what it could NOT verify and routes it to a human
+  (GR-178)** — a criterion code review alone cannot settle (a UI that must
+  render in a browser, an external API contract, a migration against real
+  data) can now carry status `NOT_VERIFIABLE` with a `not_verifiable_reason`
+  naming what would settle it: the command, the environment, or the human
+  check. The parser keeps the status instead of coercing it to `FAIL` (and a
+  `COMPLETE` carrying one is forced `INCOMPLETE`); the coverage gate counts it
+  in its own bucket — never a PASS, listed separately from `failing`; the
+  judge summary and the persisted `summary.md` give these items their own
+  "Could NOT verify — needs human review" section; and a new advisory
+  `merge_recommendation` (`no_concerns_found` / `needs_review` /
+  `changes_required`) degrades to `needs_review` while any exists. The merge
+  gate still keys on `pass_class`, so the recommendation cannot become a
+  bypass.
+
 ## [0.19.0] - 2026-11-07
 
 ### Added
