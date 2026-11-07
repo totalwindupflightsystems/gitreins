@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **The judge derives criteria for the change it is reviewing (GR-176)** — the
+  base prompt now asks for the owner's layer-3 behaviour: explore first
+  (changed files → call sites → entrypoint → tests), then propose up to five
+  additional criteria this specific change needs (reachability from an
+  entrypoint, failure path returns an error instead of silently succeeding,
+  idempotency on re-run, back-compat, the write/read seam), marked
+  `"derived": true` in the verdict item and graded exactly like given ones.
+  A derived FAIL fails the verdict — enforced in `_parse_verdict`, which
+  downgrades a `COMPLETE` carrying any non-PASS item — and a capped run still
+  lists every derived criterion it proposed (`UNVERIFIED` when ungraded) rather
+  than dropping it. The prompt also states the precision rule (a missing TODO,
+  a style nit or a requirement the task never implied is not a failure; prefer
+  one evidenced complaint over five speculative ones) and requires a
+  `file:line`/command-output evidence per item, with the pre-existing hard rule
+  for test/build criteria kept intact. Persisted items carry `"derived": true`
+  only when set, so a verdict with no derived criteria serializes
+  byte-identically.
+
 ### Changed
 - **Repo-wide review is the judge's default (GR-170)** — `evaluator.file_scope`
   now defaults to `full`, so the judge may read any file inside the worktree and

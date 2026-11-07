@@ -194,6 +194,31 @@ the same ground with two cheaper, more reliable verdicts *(measured per-
 criterion iteration burn: ~8-12 iterations/criterion non-trivial — prior
 reports, **unverified** at HEAD)*.
 
+## Letting the judge set its own bar (GR-176)
+
+The base prompt no longer treats the criteria list as the ceiling. After
+exploring (changed files → call sites → entrypoint → tests) the judge may add
+**up to 5 derived criteria** specific to the change — reachability from an
+entrypoint, failure path vs silent success, idempotency, back-compat, the
+write/read seam — recorded as `sandbox_write("derived_<k>", …)` and emitted in
+the verdict with `"derived": true`.
+
+What is enforced, so you can rely on it from a pipeline:
+
+- a derived FAIL makes the verdict `INCOMPLETE` even if the model wrote
+  `COMPLETE` (`_parse_verdict` downgrades and logs);
+- a capped run still lists every derived criterion it proposed — `UNVERIFIED`
+  when the budget stopped the grading — instead of dropping it;
+- persisted items carry `"derived": true` only when set, so a no-derived
+  verdict is byte-identical to the old shape.
+
+What is *not* enforced: the judge declining to review outside the given list.
+It can derive none, and the prompt tells it not to invent requirements a task
+never implied (a missing TODO or a style nit is not a failure) and to prefer
+one evidenced complaint over five speculative ones. If a run shows no derived
+criteria on a change that clearly needed a reachability check, the review was
+shallow — read the verdict items, not just the overall PASS.
+
 ## Judging a big repo cheaply
 
 The most effective lever is `file_scope` — and since GR-170 the default is

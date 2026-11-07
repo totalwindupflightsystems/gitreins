@@ -963,13 +963,21 @@ def _verdict_item_dict(item: VerdictItem) -> dict[Any, Any]:
     them, so a verdict from a degraded run serializes byte-identically to the
     pre-JEVRES-004 shape.
     """
-    d = {"criterion": item.criterion, "status": item.status, "detail": item.detail}
+    d: dict[Any, Any] = {
+        "criterion": item.criterion,
+        "status": item.status,
+        "detail": item.detail,
+    }
     probability = getattr(item, "resolution_probability", None)
     cited = getattr(item, "cited_path", None)
     if probability is not None:
         d["resolution_probability"] = probability
     if cited:
         d["cited_path"] = cited
+    # GR-176: a criterion the judge proposed itself. Only present when true, so
+    # a verdict with no derived criteria serializes byte-identically.
+    if getattr(item, "derived", False):
+        d["derived"] = True
     return d
 
 

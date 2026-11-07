@@ -82,6 +82,19 @@ DEFAULT_FILE_SCOPE = "full"
 # whole-file read and asks for a range — see AgenticEvaluator.max_read_bytes.
 DEFAULT_MAX_READ_BYTES = 524_288
 
+# GR-176: how many criteria the judge may add to the task's own list. The owner's
+# layer-3 point — "it needs to look at the task and decide what criteria is extra
+# needed for itself" — needs a cap so "set your own bar" cannot become an
+# unbounded rubric that fails everything. Five is enough for reachability,
+# failure path, idempotency, back-compat and the integration seam.
+MAX_DERIVED_CRITERIA = 5
+
+# Sandbox keys for derived criteria: ``derived_<k>`` (the text the judge
+# proposed) and ``verified_derived_<k>`` (its finding). Their cost marks live in
+# the same ``_criterion_marks`` map as given criteria, offset into this range so
+# a derived index can never collide with a given criterion's index.
+DERIVED_MARK_OFFSET = 10_000
+
 
 def _is_data_file_path(path: str) -> bool:
     """Return True when a repo-relative path is a non-code/data file.
@@ -169,6 +182,34 @@ Do NOT grade from the diff alone. A diff shows what was written, never whether i
 
 Only then grade. A verdict that never looked outside the diff cannot tell "works" from "exists".
 
+## SET YOUR OWN BAR — DERIVE CRITERIA FOR THIS CHANGE (at most {max_derived})
+
+The criteria list is what the task author thought to write down. It is the FLOOR, not the ceiling. After you have read the task and the changed files, propose up to {max_derived} additional criteria that THIS change needs in order to be correct, e.g.:
+
+- **Reachability** — "the new flag is reachable from <entrypoint>", "the new config key is read where it is documented".
+- **Failure path** — "the failure path returns an error rather than silently succeeding".
+- **Re-run/idempotency** — "the migration is idempotent on re-run".
+- **Back-compat** — "existing callers of <symbol> keep their behaviour".
+- **Seam** — "the value the new code writes is the value the consumer reads".
+
+Rules for derived criteria:
+1. Propose them BEFORE grading, and save each one to the sandbox: `sandbox_write("derived_0", "<criterion text>")`, up to `derived_{max_index}`. Save your finding as `sandbox_write("verified_derived_0", "PASS: …")`.
+2. Mark each derived item with `"derived": true` in the verdict JSON.
+3. Grade them exactly like given criteria — same evidence bar, same PASS/FAIL. **A derived FAIL fails the verdict** just as a given FAIL does.
+4. At most {max_derived}. If this change needs nothing beyond the given criteria, derive NONE — an empty derived list is the correct answer for a trivial change.
+5. A derived criterion must be checkable against the repository. "Code is maintainable" is not a criterion; "the new retry loop terminates on a permanent error" is.
+
+## PRECISION — DO NOT INVENT REQUIREMENTS
+
+- A missing TODO, a style preference, an unrequested refactor, a docstring on a private helper: **not failures**. Do not turn taste into criteria.
+- The task's own words set the floor. Do not add requirements the task never implied and the repository does not already enforce (a linter rule it does not run, a metric nobody tracks).
+- Prefer ONE correct, evidenced complaint over five speculative ones. If you suspect a defect but cannot evidence it, say so in the detail — do not fail work on suspicion.
+- Strictness is earned by evidence, not by coverage: a FAIL must name the `file:line` or the command output that shows the defect.
+
+## EVIDENCE FOR EVERY ITEM (REQUIRED)
+
+Every item in the verdict — given or derived — must name the evidence that proves it: a `file:line`, a command with its decisive output line, or a tool result you actually saw. An item whose detail carries no evidence is INCOMPLETE, not PASS. If you could not find evidence, say what you searched and what you did not find, and mark it FAIL (UNVERIFIED is only for a criterion the budget stopped you from reaching).
+
 ## CRITERIA TRACKING (REQUIRED)
 
 After you verify EACH criterion, IMMEDIATELY save your finding to the sandbox:
@@ -176,7 +217,7 @@ After you verify EACH criterion, IMMEDIATELY save your finding to the sandbox:
   sandbox_write("verified_0", "PASS: tests/test_auth.py:45 confirms token validation")
   sandbox_write("verified_2", "FAIL: missing error handling in engine/handler.py:120")
 
-Use the criterion's index number (0-based, from the criteria list). This is NOT optional — it is how the evaluation survives context compaction. If the context window fills up, your progress is saved and you resume with a clean slate.
+Use the criterion's index number (0-based, from the criteria list) for given criteria; use `verified_derived_<k>` for derived ones. This is NOT optional — it is how the evaluation survives context compaction. If the context window fills up, your progress is saved and you resume with a clean slate.
 
 ## COMPACTION AWARENESS
 
@@ -191,7 +232,7 @@ For each criterion:
 ## EFFICIENCY RULES
 
 - **Token budget: {token_budget}.** You have {token_budget} input tokens and {output_budget} output tokens. Exploration spends this budget: read whole files when they are small, use offset/limit for large ones, and use `search_pattern` to find call sites instead of wandering directories. If the budget runs out mid-exploration the run ends INCOMPLETE — an unverified PASS is worse than an honest shortfall, so record each finding in the sandbox as you go.
-- **{file_scope_rule}**
+- {file_scope_rule}
 - **The pre-loaded context is a starting point, not evidence.** The diff (or changed files) is included below so you start oriented — it is NOT proof the code works and NOT a reason to skip step 1 above.
 - **Fast-track mode: {fast_track_mode}.** {fast_track_instruction}
 - **Do not re-read the same file twice.** If read_file returned content, you already have it.
@@ -233,13 +274,16 @@ command output MUST be marked FAIL, not PASS.
 
 When you've checked EVERY criterion, deliver your verdict. You MUST output EXACTLY this JSON format with NO surrounding text, NO markdown fences, NO commentary:
 
-{"verdict":"COMPLETE","items":[{"criterion":"<exact criterion text>","status":"PASS","detail":"<specific file:line evidence>"},{"criterion":"<exact criterion text>","status":"FAIL","detail":"<what is missing and where>"}],"summary":"<one sentence>"}
+{"verdict":"COMPLETE","items":[{"criterion":"<exact criterion text>","status":"PASS","detail":"<specific file:line evidence>"},{"criterion":"<exact criterion text>","status":"FAIL","detail":"<what is missing and where>"},{"criterion":"<derived criterion you proposed>","derived":true,"status":"PASS","detail":"<file:line or command output that proves it>"}],"summary":"<one sentence>"}
 
 CRITICAL RULES:
 - Output ONLY the JSON object. Nothing before. Nothing after.
 - "verdict" must be "COMPLETE" or "INCOMPLETE" — nothing else
 - "status" must be "PASS" or "FAIL" — nothing else
-- EVERY criterion from the task must have a corresponding item
+- EVERY given criterion must have a corresponding item, plus every derived criterion you proposed
+- `"derived": true` marks an item you proposed yourself; given criteria carry no `derived` key
+- A derived FAIL is a FAIL: it makes the verdict INCOMPLETE exactly like a given FAIL
+- COMPLETE requires every item to PASS; one FAIL (given or derived) means INCOMPLETE
 - PASS requires concrete evidence (file path, line number, or test output)
 - FAIL requires explaining exactly what's missing
 - Read actual code — never assume"""
@@ -428,6 +472,11 @@ class VerdictItem:
     # every degraded (ABSTAIN) run — serializes exactly as before.
     resolution_probability: float | None = None
     cited_path: str | None = None
+    # GR-176: True when the judge proposed this criterion itself (a derived
+    # criterion) rather than receiving it in the task. Additive and defaulting
+    # to False, so every verdict produced before derived criteria existed — and
+    # every verdict with none — serializes exactly as before.
+    derived: bool = False
 
 
 def item_glyph(status: str) -> str:
@@ -1002,6 +1051,28 @@ class AgenticEvaluator:
                     lines.append(f"  Evidence: {evidence}")
             lines.append("")
 
+        # GR-176: derived criteria must survive compaction too — they are part
+        # of the verdict, and a resumed run that forgot it proposed them would
+        # silently drop the bar it set.
+        derived_rows = self._derived_criteria_from_sandbox()
+        if derived_rows:
+            lines.append(f"### Derived criteria you proposed ({len(derived_rows)}):")
+            for _k, derived_text, derived_evidence in derived_rows:
+                glyph = (
+                    "✓"
+                    if (derived_evidence or "").startswith("PASS")
+                    else ("✗" if derived_evidence else "—")
+                )
+                lines.append(f"- {glyph} {derived_text}")
+                if derived_evidence:
+                    lines.append(f"  Evidence: {derived_evidence}")
+            lines.append("")
+            lines.append(
+                "Include each derived criterion in the verdict JSON with "
+                '"derived": true — they are graded exactly like given criteria.'
+            )
+            lines.append("")
+
         if remaining_indices:
             lines.append(f"### Still to verify ({len(remaining_indices)}/{criteria_total}):")
             for i in remaining_indices:
@@ -1075,6 +1146,8 @@ class AgenticEvaluator:
             )
             .replace("{file_scope}", "full" if full_scope else "changed")
             .replace("{file_scope_rule}", scope_rule)
+            .replace("{max_derived}", str(MAX_DERIVED_CRITERIA))
+            .replace("{max_index}", str(MAX_DERIVED_CRITERIA - 1))
             .replace("{fast_track_mode}", "ON" if self.fast_track else "OFF")
             .replace(
                 "{fast_track_instruction}",
@@ -1503,6 +1576,11 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         if cap is None:
             return
         graded = sum(1 for i in range(criteria_total) if f"verified_{i}" in self._sandbox)
+        # GR-176: derived criteria are graded work too — count them so the
+        # cost-per-criterion signal on a "sets its own bar" run is not wrong.
+        derived_rows = self._derived_criteria_from_sandbox()
+        graded += sum(1 for _k, _t, ev in derived_rows if ev is not None)
+        criteria_total += len(derived_rows)
         if graded == self._logged_graded and iteration % 25:
             return
         self._logged_graded = graded
@@ -1538,6 +1616,25 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             return partial
         # No criteria to name (a task with none): the cap message is all there is.
         return Verdict(verdict="INCOMPLETE", summary=f"Cap exceeded: {cap_error}")
+
+    def _derived_criteria_from_sandbox(self) -> list[tuple[int, str, str | None]]:
+        """(k, criterion text, evidence or None) for each derived criterion recorded.
+
+        GR-176: the judge proposes a derived criterion in ``derived_<k>`` and
+        grades it in ``verified_derived_<k>``. A run that ends on a cap must
+        still name every one it proposed — the same reason given criteria get
+        an item each (JUDGE-TIER2-001): a derived criterion the budget stopped
+        is UNVERIFIED, not absent. Capped at ``MAX_DERIVED_CRITERIA`` so a
+        model that invents twenty keys cannot grow the item list unbounded.
+        """
+        rows: list[tuple[int, str, str | None]] = []
+        for k in range(MAX_DERIVED_CRITERIA):
+            text = self._sandbox.get(f"derived_{k}")
+            evidence = self._sandbox.get(f"verified_derived_{k}")
+            if text is None and evidence is None:
+                continue
+            rows.append((k, (text or f"derived criterion {k}").strip(), evidence))
+        return rows
 
     def _criterion_spans(self) -> dict[int, str]:
         """Render each graded criterion's own spend, in the order it was graded.
@@ -1609,6 +1706,34 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                         detail="Not examined — evaluation ended before this criterion was reached (no judgement was made about it)",
                     )
                 )
+        # GR-176: a derived criterion the run proposed is part of the item list
+        # too — graded if the run reached it, UNVERIFIED if the budget stopped it.
+        for k, derived_criterion, derived_evidence in self._derived_criteria_from_sandbox():
+            span = spans.get(DERIVED_MARK_OFFSET + k)
+            if derived_evidence is None:
+                items.append(
+                    VerdictItem(
+                        criterion=derived_criterion,
+                        status="UNVERIFIED",
+                        detail=(
+                            "Not examined — derived criterion proposed but the evaluation "
+                            "ended before it was graded"
+                        ),
+                        derived=True,
+                    )
+                )
+                continue
+            graded += 1
+            status = "PASS" if derived_evidence.startswith("PASS") else "FAIL"
+            items.append(
+                VerdictItem(
+                    criterion=derived_criterion,
+                    status=status,
+                    detail=f"{derived_evidence} · {span}" if span else derived_evidence,
+                    derived=True,
+                )
+            )
+
         # A partial verdict must reflect whether ALL criteria passed, not just
         # whether ANY were verified. Previously this returned COMPLETE whenever
         # at least one criterion was checked, so a run that hit the cap after
@@ -2204,8 +2329,16 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         if isinstance(key, str) and key.startswith("verified_"):
             suffix = key[len("verified_") :]
             cap = getattr(self, "eval_cap", None)
-            if suffix.isdigit() and cap is not None:
-                self._criterion_marks[int(suffix)] = {
+            # GR-176: ``verified_derived_<k>`` is the same checkpoint for a
+            # criterion the judge proposed itself; the offset keeps its mark
+            # from colliding with a given criterion's index.
+            mark_index: int | None = None
+            if suffix.isdigit():
+                mark_index = int(suffix)
+            elif suffix.startswith("derived_") and suffix[len("derived_") :].isdigit():
+                mark_index = DERIVED_MARK_OFFSET + int(suffix[len("derived_") :])
+            if mark_index is not None and cap is not None:
+                self._criterion_marks[mark_index] = {
                     "seq": len(self._criterion_marks),
                     "iteration": round(float(cap.iteration_credit), 1),
                     "tokens_in": int(cap.cumulative_input_tokens),
@@ -2276,8 +2409,22 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                                 criterion=item.get("criterion", "unknown"),
                                 status=status,
                                 detail=item.get("detail", ""),
+                                # GR-176: the judge's own criteria ride the same
+                                # item list, flagged so a renderer can tell the
+                                # task's bar from the reviewer's.
+                                derived=bool(item.get("derived", False)),
                             )
                         )
+                    # GR-176: "a derived FAIL fails the verdict" must be true of
+                    # the ARTIFACT, not only of the prompt. A model that grades a
+                    # derived criterion FAIL and still writes COMPLETE would
+                    # otherwise pass the task on its own contradiction.
+                    if verdict_val == "COMPLETE" and any(i.status != "PASS" for i in items):
+                        logger.warning(
+                            "Verdict said COMPLETE with %d non-PASS item(s) — forcing INCOMPLETE",
+                            sum(1 for i in items if i.status != "PASS"),
+                        )
+                        verdict_val = "INCOMPLETE"
                     return Verdict(
                         verdict=verdict_val,
                         items=items,
