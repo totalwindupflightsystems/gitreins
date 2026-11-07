@@ -37,6 +37,31 @@ security_review:
    this stage**. Every finding carries `rule_id`, CWE, `file:line` and
    `stage="rules"`. Both tools are optional installs (`pip install semgrep`,
    `cargo install ast-grep`); neither is required.
+
+   **Bundled rule inventory (GR-GAP-068).** These are ALL the deterministic
+   rules that ship — a green `rules` stage means these patterns found nothing,
+   **not** that the diff is secure:
+
+   | rule id | catches | CWE |
+   |---|---|---|
+   | `gitreins-eval-call` | `eval(...)` | CWE-95 |
+   | `gitreins-exec-call` | `exec(...)` | CWE-94 |
+   | `gitreins-pickle-loads` | `pickle.loads(...)` | CWE-502 |
+   | `gitreins-yaml-unsafe-load` | `yaml.load(...)` (any loader) | CWE-502 |
+   | `gitreins-os-system` | `os.system(...)` (ast-grep only) | CWE-78 |
+   | `gitreins-sql-execute-percent` | `execute("SELECT …" % x)` | CWE-89 |
+   | `gitreins-sql-execute-fstring` | `execute(f"SELECT … {x}")` | CWE-89 |
+   | `gitreins-sql-execute-format` | `execute("SELECT …".format(…))` | CWE-89 |
+   | `gitreins-sql-assign-interpolation` | SQL string built by interpolation, then executed | CWE-89 |
+   | `gitreins-shell-true-nonliteral` | `subprocess.*(…, shell=True)` on a non-literal command | CWE-78 |
+   | `gitreins-path-join-open` | `open(os.path.join(base, x))` with non-literal `x` | CWE-22 |
+
+   Two honest limits of this table: pattern rules are **syntactic** — a
+   value passed through an intermediate variable can evade the execute-form
+   rules (the assign rule catches the common `q = "SELECT …" % x` shape), and
+   `gitreins-os-system` only runs where the `ast-grep` binary is installed
+   (`semgrep` covers the other ten). Grep is a floor, not a review — the
+   `judge` stage and a human still own the rest.
 2. **`localize` — the existing Antares scanner** (`engine/antares.py`,
    GR-117) over the *same* file set. Findings carry `stage="localize"` and a
    confidence score. Anything below `min_confidence` is **dropped and
