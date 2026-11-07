@@ -21,6 +21,12 @@ Thumbs.db
 .gitreins-sandbox/
 # GitReins guard history (runtime artifacts, no versioning needed)
 .gitreins/history/
+# Reaped-worktree preservation bundles (worktree-hygiene.py writes
+# .gitreins/rescued-<date>/<tree>/ before every removal — same class as
+# `history/` above: durable on-disk evidence, never versioned). Without this
+# rule every reap leaves ~30 permanently-untracked paths that read as an
+# ownership barrier to each subsequent lane tick.
+.gitreins/rescued-*/
 # Judge token-usage telemetry (PR #2 — best-effort cost log, never committed)
 .gitreins/usage.jsonl
 # Guard run logs (DF-018 — one full, untruncated log per guard run; runtime
