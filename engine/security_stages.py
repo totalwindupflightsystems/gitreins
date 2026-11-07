@@ -288,6 +288,64 @@ _SEMGREP_RULES_YAML = """rules:
     metadata:
       cwe: "CWE-502: Deserialization of Untrusted Data"
     pattern: yaml.load(...)
+  - id: gitreins-sql-execute-percent
+    languages: [python]
+    severity: WARNING
+    message: "SQL executed from a %-interpolated string — SQL injection risk"
+    metadata:
+      cwe: "CWE-89: SQL Injection"
+    pattern: $C.execute("..." % $X)
+  - id: gitreins-sql-execute-fstring
+    languages: [python]
+    severity: WARNING
+    message: "SQL executed from an f-string — SQL injection risk"
+    metadata:
+      cwe: "CWE-89: SQL Injection"
+    pattern: $C.execute(f"...{$X}...")
+  - id: gitreins-sql-execute-format
+    languages: [python]
+    severity: WARNING
+    message: "SQL executed from a .format() string — SQL injection risk"
+    metadata:
+      cwe: "CWE-89: SQL Injection"
+    pattern: $C.execute("...".format(...))
+  - id: gitreins-sql-assign-interpolation
+    languages: [python]
+    severity: WARNING
+    message: "SQL string built by interpolation, then executed — SQL injection risk"
+    metadata:
+      cwe: "CWE-89: SQL Injection"
+    patterns:
+      - pattern-either:
+          - pattern: '$Q = $S % $X'
+          - pattern: "$Q = $S.format(...)"
+          - pattern: '$Q = f"...{$X}..."'
+      - metavariable-pattern:
+          metavariable: $S
+          pattern-regex: '(?i)(select|insert|update|delete)'
+  - id: gitreins-shell-true-nonliteral
+    languages: [python]
+    severity: WARNING
+    message: "subprocess with shell=True on a non-literal command — command injection risk"
+    metadata:
+      cwe: "CWE-78: Improper Neutralization of Special Elements used in an OS Command"
+    patterns:
+      - pattern-either:
+          - pattern: subprocess.run($CMD, ..., shell=True, ...)
+          - pattern: subprocess.call($CMD, ..., shell=True, ...)
+          - pattern: subprocess.Popen($CMD, ..., shell=True, ...)
+          - pattern: subprocess.check_call($CMD, ..., shell=True, ...)
+          - pattern: subprocess.check_output($CMD, ..., shell=True, ...)
+      - pattern-not: subprocess.$F("...", ..., shell=True, ...)
+  - id: gitreins-path-join-open
+    languages: [python]
+    severity: WARNING
+    message: "open() on a non-literal joined path — path traversal risk"
+    metadata:
+      cwe: "CWE-22: Improper Limitation of a Pathname to a Restricted Directory"
+    patterns:
+      - pattern: open(os.path.join($BASE, $X), ...)
+      - pattern-not: open(os.path.join($BASE, "..."), ...)
 """
 
 _ASTGREP_RULES_YAML = """id: gitreins-os-system
@@ -476,10 +534,19 @@ def _parse_semgrep_output(
         cwe = metadata.get("cwe", "")
         if isinstance(cwe, list):
             cwe = cwe[0] if cwe else ""
+        check_id = str(item.get("check_id", "semgrep"))
+        # When the config is a file, semgrep prefixes that file's PATH to the
+        # rule id (e.g. "var.tmp...gitreins-eval-call"), so the reported id
+        # changed with the temp directory on every host and every run. The
+        # bundled rules all carry the gitreins- prefix; the stable identity is
+        # the last dotted component.
+        parts = check_id.split(".")
+        if len(parts) > 1 and parts[-1].startswith("gitreins-"):
+            check_id = parts[-1]
         findings.append(
             SecurityFinding(
                 stage=STAGE_RULES,
-                rule_id=str(item.get("check_id", "semgrep")),
+                rule_id=check_id,
                 cwe=_cwe_of(str(cwe)),
                 file=str(item.get("path", "")),
                 line=int(start.get("line", 0) or 0),
