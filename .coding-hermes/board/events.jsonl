@@ -1109,3 +1109,5 @@
 {"actor": "foreman", "detail": "{\"id\":\"GR-180\",\"status\":\"pending\"}", "event_type": "task_created", "id": 1793985585335470998, "task_id": "GR-180", "tick_number": null, "timestamp": "2026-11-07T06:43:30"}
 {"actor": "foreman", "detail": "{\"id\":\"GR-181\",\"status\":\"pending\"}", "event_type": "task_created", "id": 1793985585335470999, "task_id": "GR-181", "tick_number": null, "timestamp": "2026-11-07T06:43:35"}
 {"actor": "foreman", "detail": "{\"id\":\"GR-182\",\"status\":\"pending\"}", "event_type": "task_created", "id": 1793985585335471000, "task_id": "GR-182", "tick_number": null, "timestamp": "2026-11-07T06:43:35"}
+{"actor": "foreman", "detail": "{\"status\":\"in_progress\"}", "event_type": "task_updated", "id": 1793985585335471001, "task_id": "GR-172", "tick_number": null, "timestamp": "2026-11-07T10:35:15"}
+{"actor": "foreman", "detail": "{\"status\":\"in_progress\",\"worker\":\"glm-5.3-flash@zai-glm\",\"pid\":2270878,\"tick\":\"gitreins-foreman-2026-11-07-10-25-20\"}", "event_type": "task_dispatched", "id": 1793985585335471002, "task_id": "GR-172", "tick_number": null, "timestamp": "2026-11-07T10:35:15"}
