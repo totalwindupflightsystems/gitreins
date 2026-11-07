@@ -636,6 +636,17 @@ class JudgeResult:
 
             for item in self.verdict.items:
                 lines.append(f"  {item_glyph(item.status)} {item.criterion}: {item.detail}")
+            # GR-178: what the judge could NOT verify is listed separately and
+            # routed to a human — it is not a pass, and burying it among the
+            # graded items would let a reader mistake silence for coverage.
+            from engine.gate import STATUS_NOT_VERIFIABLE
+
+            not_verifiable = [i for i in self.verdict.items if i.status == STATUS_NOT_VERIFIABLE]
+            if not_verifiable:
+                lines.append("\nCould NOT verify — needs human review (NOT_VERIFIABLE):")
+                for item in not_verifiable:
+                    reason = item.not_verifiable_reason or "no settling step named"
+                    lines.append(f"  — {item.criterion}: {reason}")
 
         if self.quality_snapshot and not self.pipeline_result.get("stages"):
             from engine.quality_metrics import format_quality_snapshot

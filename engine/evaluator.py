@@ -208,7 +208,7 @@ Rules for derived criteria:
 
 ## EVIDENCE FOR EVERY ITEM (REQUIRED)
 
-Every item in the verdict — given or derived — must name the evidence that proves it: a `file:line`, a command with its decisive output line, or a tool result you actually saw. An item whose detail carries no evidence is INCOMPLETE, not PASS. If you could not find evidence, say what you searched and what you did not find, and mark it FAIL (UNVERIFIED is only for a criterion the budget stopped you from reaching).
+Every item in the verdict — given or derived — must name the evidence that proves it: a `file:line`, a command with its decisive output line, or a tool result you actually saw. An item whose detail carries no evidence is INCOMPLETE, not PASS. If you could not find evidence, say what you searched and what you did not find, and mark it FAIL (UNVERIFIED is only for a criterion the budget stopped you from reaching). If a criterion cannot be settled by code review ALONE — a UI that must render in a browser, an external API contract, a migration against real data — mark it NOT_VERIFIABLE with `not_verifiable_reason` naming what would settle it (the command, the environment, or the human check). NEVER grade such a criterion PASS by absence of complaint: silence about what you could not verify is the failure mode this rule exists to kill (GR-178).
 
 ## CRITERIA TRACKING (REQUIRED)
 
@@ -274,18 +274,19 @@ command output MUST be marked FAIL, not PASS.
 
 When you've checked EVERY criterion, deliver your verdict. You MUST output EXACTLY this JSON format with NO surrounding text, NO markdown fences, NO commentary:
 
-{"verdict":"COMPLETE","items":[{"criterion":"<exact criterion text>","status":"PASS","detail":"<specific file:line evidence>"},{"criterion":"<exact criterion text>","status":"FAIL","detail":"<what is missing and where>"},{"criterion":"<derived criterion you proposed>","derived":true,"status":"PASS","detail":"<file:line or command output that proves it>"}],"summary":"<one sentence>"}
+{"verdict":"COMPLETE","items":[{"criterion":"<exact criterion text>","status":"PASS","detail":"<specific file:line evidence>"},{"criterion":"<exact criterion text>","status":"FAIL","detail":"<what is missing and where>"},{"criterion":"<exact criterion text>","status":"NOT_VERIFIABLE","detail":"<what you looked at and what you could not assess>","not_verifiable_reason":"<what would settle it: the command, the environment, or the human check>"},{"criterion":"<derived criterion you proposed>","derived":true,"status":"PASS","detail":"<file:line or command output that proves it>"}],"summary":"<one sentence>"}
 
 CRITICAL RULES:
 - Output ONLY the JSON object. Nothing before. Nothing after.
 - "verdict" must be "COMPLETE" or "INCOMPLETE" — nothing else
-- "status" must be "PASS" or "FAIL" — nothing else
+- "status" must be "PASS", "FAIL", or "NOT_VERIFIABLE" — nothing else
 - EVERY given criterion must have a corresponding item, plus every derived criterion you proposed
 - `"derived": true` marks an item you proposed yourself; given criteria carry no `derived` key
 - A derived FAIL is a FAIL: it makes the verdict INCOMPLETE exactly like a given FAIL
 - COMPLETE requires every item to PASS; one FAIL (given or derived) means INCOMPLETE
 - PASS requires concrete evidence (file path, line number, or test output)
 - FAIL requires explaining exactly what's missing
+- NOT_VERIFIABLE (GR-178) is for a criterion that code review ALONE cannot settle: a UI actually rendering, an external API contract, a migration against real data, a browser check. Never grade such a criterion PASS by absence of complaint — say what you could not verify. Its `not_verifiable_reason` must name what would settle it: the exact command to run, the environment it needs, or the human check to perform. A NOT_VERIFIABLE item is not a pass: it fails the verdict closed AND routes the criterion to a human.
 - Read actual code — never assume"""
 
 EVALUATOR_TOOLS = [
@@ -465,7 +466,7 @@ EVALUATOR_TOOLS = [
 @dataclass
 class VerdictItem:
     criterion: str
-    status: str  # "PASS" | "FAIL" | "UNVERIFIED"
+    status: str  # "PASS" | "FAIL" | "UNVERIFIED" | "NOT_VERIFIABLE"
     detail: str
     # JEVRES-004 per-criterion attribution (spec §4 row 4). Both default
     # to None so every verdict produced before the pre-screen existed — and
@@ -477,14 +478,21 @@ class VerdictItem:
     # to False, so every verdict produced before derived criteria existed — and
     # every verdict with none — serializes exactly as before.
     derived: bool = False
+    # GR-178: when status is NOT_VERIFIABLE, WHAT WOULD SETTLE the criterion —
+    # the command to run, the environment to run it in, or the human check to
+    # perform (e.g. "open the built site in a browser and confirm the nav
+    # renders"). None for every other status, so items from before GR-178
+    # serialize exactly as before.
+    not_verifiable_reason: str | None = None
 
 
 def item_glyph(status: str) -> str:
     """The one vocabulary for rendering a criterion status.
 
-    PASS → ✓, FAIL → ✗, anything else (UNVERIFIED, or an unknown value from a
-    model) → "—", because "not examined" and "false" are different claims and
-    a renderer that prints ✗ for both manufactures a finding nobody made.
+    PASS → ✓, FAIL → ✗, anything else (UNVERIFIED, NOT_VERIFIABLE, or an
+    unknown value from a model) → "—", because "not examined" / "cannot be
+    examined from here" and "false" are different claims and a renderer that
+    prints ✗ for both manufactures a finding nobody made.
     """
     s = (status or "").upper()
     if s == "PASS":
@@ -2402,7 +2410,12 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                     items = []
                     for item in data.get("items", []):
                         status = str(item.get("status", "FAIL")).upper()
-                        if status not in ("PASS", "FAIL"):
+                        # GR-178: NOT_VERIFIABLE survives parsing. Coercing it
+                        # to FAIL (the old behaviour) manufactures a finding
+                        # nobody made, and coercing it to PASS grades what was
+                        # never verified — both lies. An honest "only a human
+                        # can settle this" rides through with its reason.
+                        if status not in ("PASS", "FAIL", "NOT_VERIFIABLE"):
                             status = "FAIL"
                         items.append(
                             VerdictItem(
@@ -2413,6 +2426,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                                 # item list, flagged so a renderer can tell the
                                 # task's bar from the reviewer's.
                                 derived=bool(item.get("derived", False)),
+                                # GR-178: what would settle a NOT_VERIFIABLE
+                                # item (command, environment, human check).
+                                not_verifiable_reason=item.get("not_verifiable_reason"),
                             )
                         )
                     # GR-176: "a derived FAIL fails the verdict" must be true of
