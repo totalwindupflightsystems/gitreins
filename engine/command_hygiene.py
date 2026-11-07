@@ -232,6 +232,15 @@ def run_bounded(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
+            # JUDGE-TIER2-001: a graded tool's stdout is untrusted BYTES. With
+            # Python's strict default, one non-UTF-8 byte (0x93, a Windows-1252
+            # curly quote, in a single log line) raised UnicodeDecodeError from
+            # subprocess._translate_newlines *inside* communicate(), aborting a
+            # 48-minute evaluation and leaving its pipe unreaped. Decoding with
+            # errors="replace" keeps the evidence (the bad byte renders U+FFFD,
+            # the rest of the line survives) instead of killing the run.
+            encoding="utf-8",
+            errors="replace",
             cwd=cwd,
             env=env,
             start_new_session=True,  # own process group → backgrounded children cannot escape

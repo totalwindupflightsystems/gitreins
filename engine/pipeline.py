@@ -52,7 +52,6 @@ import re
 import shlex
 import subprocess
 import sys
-import time as _time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -1146,27 +1145,7 @@ class Pipeline:
             # typed fakes without the attributes contribute no fields.
             provenance = usage.provenance_fields(self._llm) if self._llm is not None else {}
 
-            try:
-                import json as _uj
-                import os as _uos
-
-                _cap = getattr(evaluator, "eval_cap", None)
-                if _cap is not None and self.persist_telemetry:
-                    usage_line = {
-                        "ts": _time.time(),
-                        "tokens_in": getattr(_cap, "cumulative_input_tokens", 0),
-                        "tokens_out": getattr(_cap, "cumulative_output_tokens", 0),
-                        "cache_read": getattr(_cap, "cumulative_cache_read", 0),
-                        "cache_write": getattr(_cap, "cumulative_cache_write", 0),
-                        "step": step_id,
-                    }
-                    usage_line.update(provenance)
-                    usage_path = _uos.path.join(self.workdir, ".gitreins", "usage.jsonl")
-                    _uos.makedirs(_uos.path.dirname(usage_path), exist_ok=True)
-                    with open(usage_path, "a") as _f:
-                        _f.write(_uj.dumps(usage_line) + "\n")
-            except Exception:
-                pass  # non-fatal
+            self._append_judge_usage(evaluator, step_id, outcome="graded")
 
             return StepResult(
                 id=step_id,
@@ -1185,7 +1164,43 @@ class Pipeline:
             )
         except Exception as e:
             logger.exception("AI eval failed")
+            # JUDGE-TIER2-001: a run that DIED still burned its budget. The row
+            # used to be written only after a verdict came back, so the measured
+            # 48-minute / 3.1M-token run that hit a UnicodeDecodeError left no
+            # cost row at all — the ledger showed the failure as free. Written
+            # here, on the failure path, with outcome="error" so the two shapes
+            # are distinguishable.
+            self._append_judge_usage(evaluator, step_id, outcome="error")
             return StepResult(id=step_id, type="ai_eval", passed=False, error=str(e))
+
+    def _append_judge_usage(self, evaluator: Any, step_id: str, *, outcome: str) -> None:
+        """Append this run's cost row to ``.gitreins/usage.jsonl`` — on any exit.
+
+        Best-effort by the same contract as the ledger itself (see
+        ``engine.usage.append_usage_row``): telemetry never fails or blocks a
+        grade. ``outcome`` is ``"graded"`` (a verdict was produced, COMPLETE or
+        INCOMPLETE alike) or ``"error"`` (the run raised), so a spent-but-dead
+        run is visible in the ledger instead of absent from it.
+        """
+        try:
+            cap = getattr(evaluator, "eval_cap", None)
+            if cap is None or not self.persist_telemetry:
+                return
+            provenance = usage.provenance_fields(self._llm) if self._llm is not None else {}
+            usage.append_usage_row(
+                self.workdir,
+                step=step_id,
+                tokens_in=getattr(cap, "cumulative_input_tokens", 0),
+                tokens_out=getattr(cap, "cumulative_output_tokens", 0),
+                cache_read=getattr(cap, "cumulative_cache_read", 0),
+                cache_write=getattr(cap, "cumulative_cache_write", 0),
+                outcome=outcome,
+                model=provenance.get("model"),
+                base_url_source=provenance.get("base_url_source"),
+                api_key_source=provenance.get("api_key_source"),
+            )
+        except Exception:
+            pass  # non-fatal — the same contract the inline append held
 
     def _run_commit_audit(self, step_def: dict[str, Any], task: dict[str, Any]) -> StepResult:
         """Run the commit message auditor as a pipeline step.

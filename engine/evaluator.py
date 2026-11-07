@@ -24,6 +24,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -489,6 +490,12 @@ class AgenticEvaluator:
         self.command_timeout = command_timeout
 
         self._sandbox: dict[str, str] = {}
+        # JUDGE-TIER2-001: cost checkpoint for every criterion the run grades
+        # (``verified_<i>`` sandbox write): iteration credit + token counters at
+        # the grading moment, so a cap-hit verdict can attribute what it spent
+        # instead of reporting a 250-iteration / 9M-token run as if it were free.
+        self._criterion_marks: dict[int, dict[str, Any]] = {}
+        self._logged_graded: int = -1
         # Custom system-prompt override from a pipeline prompt_template; set by
         # evaluate() from the task dict. Initialize to None so _system_prompt()
         # is always safe to call (2026-08-08).
@@ -1072,6 +1079,8 @@ class AgenticEvaluator:
         """The agentic loop proper — evaluate() wraps this with the reap."""
         # Reset state
         self._sandbox.clear()
+        self._criterion_marks.clear()
+        self._logged_graded = -1
         self._files_read.clear()
         self._commands_run.clear()
         self._searches_done.clear()
@@ -1202,13 +1211,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             cap_error = self.eval_cap.check()
             if cap_error:
                 logger.warning("Eval cap exceeded: %s", cap_error)
-                partial = self._extract_partial_verdict(criteria_list)
-                if partial is not None:
-                    return attach_prescreen(partial, prescreen)
-                return Verdict(
-                    verdict="INCOMPLETE",
-                    summary=f"Cap exceeded: {cap_error}",
-                )
+                return attach_prescreen(self._cap_verdict(criteria_list, cap_error), prescreen)
 
             # Proactive compaction: compact when cumulative input consumption
             # exceeds the configured threshold (default 90% of the input
@@ -1326,13 +1329,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             )
             if cap_error:
                 logger.warning("Eval cap exceeded: %s", cap_error)
-                partial = self._extract_partial_verdict(criteria_list)
-                if partial is not None:
-                    return attach_prescreen(partial, prescreen)
-                return Verdict(
-                    verdict="INCOMPLETE",
-                    summary=f"Cap exceeded: {cap_error}",
-                )
+                return attach_prescreen(self._cap_verdict(criteria_list, cap_error), prescreen)
 
             # No tool calls → LLM is delivering a verdict
             if not response.tool_calls:
@@ -1369,13 +1366,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 cap_error = self.eval_cap.record_tool_call()
                 if cap_error:
                     logger.warning("Eval cap exceeded during tool call: %s", cap_error)
-                    partial = self._extract_partial_verdict(criteria_list)
-                    if partial is not None:
-                        return partial
-                    return Verdict(
-                        verdict="INCOMPLETE",
-                        summary=f"Cap exceeded: {cap_error}",
-                    )
+                    return attach_prescreen(self._cap_verdict(criteria_list, cap_error), prescreen)
 
                 # Add dedup warning to result if this was a repeat
                 if was_dup and isinstance(result, dict):
@@ -1400,6 +1391,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             )
 
             iteration += 1
+            self._log_grading_progress(iteration, iter_limit, criteria_total)
 
         # Hit iteration cap — return clear error
         msg = (
@@ -1408,28 +1400,112 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             "or split criteria into focused single-criterion tasks."
         )
         logger.warning(msg)
-        return Verdict(verdict="INCOMPLETE", summary=msg)
+        return attach_prescreen(
+            self._cap_verdict(criteria_list, self.eval_cap.summary()), prescreen
+        )
 
-    def _extract_partial_verdict(self, criteria_list: list[str]) -> Verdict | None:
-        """Extract a best-effort verdict from sandbox when caps are exceeded.
+    def _log_grading_progress(self, iteration: int, iter_limit: int, criteria_total: int) -> None:
+        """Log coverage + spend each time a criterion is graded (and periodically).
 
-        Returns a Verdict with verdict="COMPLETE" if ANY criterion was
-        verified (partial findings are still a signal), or None if NO
-        criteria were verified (caller should fall through to INCOMPLETE).
+        JUDGE-TIER2-001: the only cost signal before the cap was the config's
+        own comment history (max_input_tokens raised 4M→10M). A grading now says,
+        while it is still running, how many criteria are done and how much of
+        the budget they ate — so "this is 9M tokens for one criterion" is
+        visible at 2M, not after the run has already been thrown away.
+        """
+        if criteria_total <= 0:
+            return
+        cap = getattr(self, "eval_cap", None)
+        if cap is None:
+            return
+        graded = sum(1 for i in range(criteria_total) if f"verified_{i}" in self._sandbox)
+        if graded == self._logged_graded and iteration % 25:
+            return
+        self._logged_graded = graded
+        elapsed = int(time.time() - cap.start_time) if cap.start_time else 0
+        per_graded = cap.cumulative_input_tokens // graded if graded else 0
+        logger.info(
+            "Grading progress: %d/%d criteria graded, iteration %d/%d, "
+            "tokens in %s/%s out %s, %ds elapsed%s",
+            graded,
+            criteria_total,
+            iteration,
+            iter_limit,
+            f"{cap.cumulative_input_tokens:,}",
+            f"{cap.max_input_tokens:,}" if cap.max_input_tokens > 0 else "unlimited",
+            f"{cap.cumulative_output_tokens:,}",
+            elapsed,
+            f", {per_graded:,} in tokens per graded criterion" if graded else "",
+        )
+
+    def _cap_verdict(self, criteria_list: list[str], cap_error: str) -> Verdict:
+        """The verdict a cap-hit run returns — per-criterion, never a bare INCOMPLETE.
+
+        JUDGE-TIER2-001: the measured failure returned ``items=[]`` ("Cap
+        exceeded: Iteration cap (250) reached (250.2 used)") after a 48-minute
+        grading, so no criterion could be read as graded, failed or unexamined —
+        the run could not be closed, retried selectively, or even argued about.
+        A cap is a statement about the budget, not about the work, so the
+        verdict carries the work: one item per criterion.
+        """
+        partial = self._extract_partial_verdict(criteria_list)
+        if partial.items:
+            partial.summary = f"Cap exceeded: {cap_error.rstrip('. ')}. {partial.summary}"
+            return partial
+        # No criteria to name (a task with none): the cap message is all there is.
+        return Verdict(verdict="INCOMPLETE", summary=f"Cap exceeded: {cap_error}")
+
+    def _criterion_spans(self) -> dict[int, str]:
+        """Render each graded criterion's own spend, in the order it was graded.
+
+        A mark records cumulative counters at grading time; the spend of one
+        criterion is the delta from the previous mark, so the sum of the spans
+        never exceeds the run total (cumulative counters: monotonic during a
+        context, whose only reset is compaction, and a negative delta is
+        clamped to 0 rather than reported as a credit).
+        """
+        marks = self._criterion_marks
+        spans: dict[int, str] = {}
+        prev_in = prev_out = 0
+        prev_iter = 0.0
+        for idx in sorted(marks, key=lambda k: (marks[k].get("seq", 0), k)):
+            mark = marks[idx]
+            spent_in = max(0, int(mark.get("tokens_in", 0)) - prev_in)
+            spent_out = max(0, int(mark.get("tokens_out", 0)) - prev_out)
+            spent_iter = max(0.0, float(mark.get("iteration", 0.0)) - prev_iter)
+            prev_in = int(mark.get("tokens_in", prev_in))
+            prev_out = int(mark.get("tokens_out", prev_out))
+            prev_iter = float(mark.get("iteration", prev_iter))
+            spans[idx] = (
+                f"graded at iteration {mark.get('iteration', 0)} "
+                f"({spent_in:,} in / {spent_out:,} out, {spent_iter:.1f} iterations "
+                f"and {int(mark.get('elapsed_s', 0))}s into the run)"
+            )
+        return spans
+
+    def _extract_partial_verdict(self, criteria_list: list[str]) -> Verdict:
+        """Per-criterion verdict from the evidence the run reached — ALWAYS items.
+
+        One item per criterion, no exceptions: a ran-out-of-budget run answers
+        with what it graded (PASS/FAIL plus that criterion's own cost) and what
+        it never reached (UNVERIFIED — "not examined" is its own claim, never
+        FAIL). ``items=[]`` is the shape that made JUDGE-TIER2-001 unclosable.
         """
         items: list[VerdictItem] = []
-        has_any = False
+        graded = 0
+        spans = self._criterion_spans()
         for i, criterion in enumerate(criteria_list):
             key = f"verified_{i}"
             if key in self._sandbox:
-                has_any = True
+                graded += 1
                 evidence = self._sandbox[key]
                 status = "PASS" if evidence.startswith("PASS") else "FAIL"
+                span = spans.get(i)
                 items.append(
                     VerdictItem(
                         criterion=criterion,
                         status=status,
-                        detail=evidence,
+                        detail=f"{evidence} · {span}" if span else evidence,
                     )
                 )
             else:
@@ -1449,21 +1525,29 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                         detail="Not examined — evaluation ended before this criterion was reached (no judgement was made about it)",
                     )
                 )
-        if not has_any:
-            return None
         # A partial verdict must reflect whether ALL criteria passed, not just
         # whether ANY were verified. Previously this returned COMPLETE whenever
         # at least one criterion was checked, so a run that hit the cap after
         # one PASS (with the rest marked FAIL — Not verified) still reported
         # COMPLETE and the pipeline passed the task. (2026-08-08 fix)
-        complete = all(item.status == "PASS" for item in items)
+        complete = bool(items) and all(item.status == "PASS" for item in items)
+        ungraded = len(items) - graded
+        cap = getattr(self, "eval_cap", None)
+        spend = ""
+        if cap is not None and (cap.cumulative_input_tokens or cap.cumulative_output_tokens):
+            spend = (
+                f" The run spent {cap.cumulative_input_tokens:,} in / "
+                f"{cap.cumulative_output_tokens:,} out over "
+                f"{float(cap.iteration_credit):.1f} iterations."
+            )
         return Verdict(
             verdict="COMPLETE" if complete else "INCOMPLETE",
             items=items,
             summary=(
-                "Partial verdict — evaluation hit resource cap before all criteria verified"
+                f"Partial verdict — {graded} of {len(items)} criteria graded, "
+                f"{ungraded} ungraded.{spend}"
                 if not complete
-                else "Partial verdict — all verified criteria passed"
+                else f"Partial verdict — all {len(items)} criteria graded and passed."
             ),
         )
 
@@ -1986,8 +2070,26 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         return {"error": f"Task not found: {id}"}
 
     def _tool_sandbox_write(self, key: str, content: str) -> dict[str, Any]:
-        """Write to sandbox."""
+        """Write to sandbox; a ``verified_<n>`` write checkpoints cost.
+
+        The judge grades a criterion by writing ``verified_<n>``. That write is
+        therefore the moment the criterion was graded, and the only place where
+        the cost of grading it is still knowable — JUDGE-TIER2-001: without a
+        checkpoint a capped run could only report its total, and a 9M-token
+        grading ended as ``items=[]`` with no per-criterion attribution.
+        """
         self._sandbox[key] = content
+        if isinstance(key, str) and key.startswith("verified_"):
+            suffix = key[len("verified_") :]
+            cap = getattr(self, "eval_cap", None)
+            if suffix.isdigit() and cap is not None:
+                self._criterion_marks[int(suffix)] = {
+                    "seq": len(self._criterion_marks),
+                    "iteration": round(float(cap.iteration_credit), 1),
+                    "tokens_in": int(cap.cumulative_input_tokens),
+                    "tokens_out": int(cap.cumulative_output_tokens),
+                    "elapsed_s": int(time.time() - cap.start_time) if cap.start_time else 0,
+                }
         return {"key": key, "written": len(content)}
 
     def _tool_sandbox_read(self, key: str) -> dict[str, Any]:

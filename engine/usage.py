@@ -147,6 +147,7 @@ def append_usage_row(
     model: str | None = None,
     base_url_source: str | None = None,
     api_key_source: str | None = None,
+    outcome: str | None = None,
 ) -> bool:
     """Append one telemetry row to ``<workdir>/.gitreins/usage.jsonl``.
 
@@ -182,6 +183,12 @@ def append_usage_row(
         "cache_write": _counter(cache_write),
         "step": step,
     }
+    # JUDGE-TIER2-001: a failed run still spent its tokens, so its row must
+    # still land — and it must say so, or an analyst reading the ledger cannot
+    # tell a graded run from one that died mid-flight. Optional (absent unless
+    # given) so every existing producer keeps its byte-identical row shape.
+    if outcome:
+        row["outcome"] = str(outcome)
     for name, value in (
         ("model", model),
         ("base_url_source", base_url_source),
