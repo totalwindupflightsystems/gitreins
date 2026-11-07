@@ -389,7 +389,10 @@ class TestDeduplication:
 
 
 class TestVerdictParsing:
-    """Test _parse_verdict — JSON parse, markdown fence, keyword fallback — step-1-4-1-6."""
+    """Test _parse_verdict — JSON parse, markdown fence, INCOMPLETE fallback.
+
+    step-1-4-1-6 (GR-168: the fallback may only ever produce INCOMPLETE).
+    """
 
     def test_valid_json_verdict(self, evaluator: AgenticEvaluator) -> None:
         """Valid JSON verdict parses correctly."""
@@ -427,25 +430,53 @@ class TestVerdictParsing:
         verdict = evaluator._parse_verdict(content)
         assert verdict.verdict == "INCOMPLETE"
 
-    def test_missing_items_falls_to_keyword(self, evaluator: AgenticEvaluator) -> None:
-        """JSON missing 'items' key falls to keyword parse."""
+    def test_missing_items_cannot_mint_complete(self, evaluator: AgenticEvaluator) -> None:
+        """GR-168: a reply missing 'items' is unparseable, never COMPLETE.
+
+        The old keyword path read the WORD "complete" out of the response and
+        returned COMPLETE with no items — which the gate then passed.
+        """
         content = '{"verdict":"COMPLETE","summary":"all criteria pass"}'
         verdict = evaluator._parse_verdict(content)
-        # Should fall to keyword parse (which finds 'complete' → COMPLETE)
-        assert verdict.verdict == "COMPLETE"
+        assert verdict.verdict == "INCOMPLETE"
+        assert verdict.items == []
+        assert "Missing required fields" in verdict.summary
 
-    def test_keyword_complete_detected(self, evaluator: AgenticEvaluator) -> None:
-        """Content with 'all criteria pass' → keyword parse yields COMPLETE."""
+    def test_prose_containing_complete_is_incomplete(self, evaluator: AgenticEvaluator) -> None:
+        """GR-168 AC3: prose with the word 'complete' yields INCOMPLETE."""
         content = "I have verified all criteria, everything passes and is complete."
         verdict = evaluator._parse_verdict(content)
-        # Keyword fallback: "all criteria" + "pass" → COMPLETE
-        assert verdict.verdict == "COMPLETE"
+        assert verdict.verdict == "INCOMPLETE"
+        assert verdict.items == []
 
-    def test_keyword_all_criteria_pass(self, evaluator: AgenticEvaluator) -> None:
-        """Content with 'all criteria' and 'pass' → COMPLETE."""
+    def test_prose_claiming_all_criteria_pass_is_incomplete(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
+        """GR-168: 'all criteria pass' in prose is a claim, not a verdict."""
         content = "After reviewing, all criteria pass."
         verdict = evaluator._parse_verdict(content)
-        assert verdict.verdict == "COMPLETE"
+        assert verdict.verdict == "INCOMPLETE"
+
+    @pytest.mark.parametrize(
+        "content",
+        [
+            "complete",
+            "COMPLETE",
+            'verdict": "complete"',
+            "All criteria pass — the work is complete.",
+            '{"verdict": "COMPLETE"}',
+            '{"verdict": "COMPLETE", "items": [}',
+            "```json\n{not json at all\n```",
+            "The implementation is complete and every criterion has passed.",
+        ],
+    )
+    def test_unparseable_output_never_completes(
+        self, evaluator: AgenticEvaluator, content: str
+    ) -> None:
+        """GR-168 AC1: for EVERY unparseable input, the answer is INCOMPLETE."""
+        verdict = evaluator._parse_verdict(content)
+        assert verdict.verdict == "INCOMPLETE", f"{content!r} minted {verdict.verdict}"
+        assert verdict.items == []
 
     def test_empty_response_is_incomplete(self, evaluator: AgenticEvaluator) -> None:
         """Empty response → INCOMPLETE with error summary."""
@@ -514,21 +545,22 @@ class TestVerdictParsing:
     def test_no_json_object_records_parse_reason(self, evaluator: AgenticEvaluator) -> None:
         """AC3: no JSON object at all → keyword verdict + parse reason in summary."""
         verdict = evaluator._parse_verdict("After reviewing, all criteria pass.")
-        assert verdict.verdict == "COMPLETE"  # existing keyword behavior
+        # GR-168: unparseable output is INCOMPLETE — there is no COMPLETE fallback.
+        assert verdict.verdict == "INCOMPLETE"
         assert "auto-parsed" in verdict.summary
         assert "no JSON object found" in verdict.summary
 
     def test_malformed_json_records_parse_error(self, evaluator: AgenticEvaluator) -> None:
         """A malformed object → keyword verdict + the JSON error in summary."""
         verdict = evaluator._parse_verdict('{"verdict": "COMPLETE", "items": [}')
-        assert verdict.verdict == "COMPLETE"  # existing keyword behavior
+        assert verdict.verdict == "INCOMPLETE"  # GR-168: no COMPLETE fallback
         assert "auto-parsed" in verdict.summary
         assert "JSON parse failed" in verdict.summary
 
     def test_missing_items_records_parse_reason(self, evaluator: AgenticEvaluator) -> None:
         """A valid object missing 'items' → keyword fallback names the reason."""
         verdict = evaluator._parse_verdict('{"verdict":"COMPLETE","summary":"all criteria pass"}')
-        assert verdict.verdict == "COMPLETE"
+        assert verdict.verdict == "INCOMPLETE"
         assert "Missing required fields" in verdict.summary
 
 
@@ -737,11 +769,11 @@ class TestExtendedEvaluator:
         verdict = evaluator._parse_verdict(content)
         assert verdict.verdict == "COMPLETE"
 
-    def test_verdict_missing_items_falls_to_keyword(self, evaluator: AgenticEvaluator) -> None:
-        """JSON with verdict but missing items falls back to keyword parse."""
+    def test_verdict_missing_items_is_not_complete(self, evaluator: AgenticEvaluator) -> None:
+        """GR-168: "The task is complete." in prose is not a verdict."""
         content = "The task is complete. All criteria pass."
         verdict = evaluator._parse_verdict(content)
-        assert verdict.verdict == "COMPLETE"
+        assert verdict.verdict == "INCOMPLETE"
 
     def test_search_all_files_with_glob(
         self, evaluator: AgenticEvaluator, tmp_workdir: str

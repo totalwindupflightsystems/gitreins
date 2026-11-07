@@ -2164,28 +2164,28 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 except (json.JSONDecodeError, ValueError) as e:
                     parse_reason = f"JSON parse failed: {e}"
 
-        # Strategy 3: Keyword-based fallback
-        content_lower = content.lower()
-        if (
-            '"complete"' in content_lower
-            or 'verdict":"complete"' in content_lower.replace(" ", "")
-            or "all criteria" in content_lower
-            and "pass" in content_lower
-        ):
-            verdict = "COMPLETE"
-        else:
-            verdict = "INCOMPLETE"
-
-        # The fallback must not masquerade as a criterion failure: keep the
-        # content preview AND name the parse reason so the persisted verdict
-        # artifact says why the item list is empty (GR-GAP-059).
+        # GR-168: an unparseable reply is NOT evidence of completeness.
+        #
+        # There used to be a Strategy 3 here that set verdict=COMPLETE whenever
+        # the response contained the word "complete" (or "all criteria" + "pass")
+        # and returned it with an EMPTY item list — which the tier-2 gate then
+        # passed as a full pass. Prose is not a verdict: the model saying "the
+        # work is complete" is exactly the claim a judge exists to check, and a
+        # parse failure means nothing was graded.
+        #
+        # The fallback therefore has ONE outcome: INCOMPLETE, naming the reason
+        # it could not parse (GR-GAP-059) so the persisted record explains
+        # itself instead of looking like a criterion failure.
         parse_reason = parse_reason or "unparseable response"
         logger.warning(
-            "Falling back to keyword parse: verdict=%s (reason: %s)", verdict, parse_reason
+            "Unparseable evaluator response — returning INCOMPLETE (reason: %s)", parse_reason
         )
         return Verdict(
-            verdict=verdict,
-            summary=f"(auto-parsed from non-JSON response — {parse_reason}) {content[:300]}",
+            verdict="INCOMPLETE",
+            summary=(
+                f"(auto-parsed from non-JSON response — {parse_reason}; no verdict could be "
+                f"read, so nothing was graded) {content[:300]}"
+            ),
         )
 
     def _tool_detect_dead_code(self) -> dict[str, Any]:
