@@ -19,6 +19,12 @@ guards:
     .venv/bin/python scripts/check_docs_drift.py &&
     .venv/bin/python -m pytest -x --tb=short
   test_timeout: 900
+  # GR-177: state the overall hook budget explicitly. Omitting this key is not
+  # harmless — the manager DERIVES test_timeout+120 at run time and warns, which
+  # is what the judge run on 2026-11-07 hit ("Raising this run's budget to
+  # 1020s"). An implicit budget that only exists in someone's head is how the
+  # gate lied before v0.18.1. 1020 keeps the whole battery inside the budget.
+  hook_timeout: 1020
   # TRUST-001: this repo's own gate is graded by `pytest tests/ -v` in CI, and
   # `gitreins guard` here runs on a clean checkout (nothing staged → lint/tests
   # skip, so the run is a DEGRADED pass). Accept that explicitly instead of
