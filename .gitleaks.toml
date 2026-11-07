@@ -39,4 +39,10 @@ paths = [
   # them yields permission-denied noise, never committed content
   '''demo-slugify/.*''',
   '''demo-calc/.*''',
+  # GR-166: the merge-gate suite stands up a throwaway repo whose
+  # .gitreins/config.yaml carries a fixture waiver token, and asserts a
+  # tier1-only verdict carrying its digest fast-forwards. Same policy as the
+  # other scanner-fixture suites listed above: the file is a test, the value is
+  # a fixture name, and it never leaves a temp dir.
+  '''tests/test_worktree\.py''',
 ]
