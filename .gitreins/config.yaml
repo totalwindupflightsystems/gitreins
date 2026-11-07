@@ -99,3 +99,15 @@ data_protection:
   #     match: 198.51.100.7
   #     scope: "docs/*"
   #     reason: "RFC 5737 documentation address"
+
+# GR-172: task-criteria enforcement on the author-facing create surfaces (CLI
+# `task create`, MCP task.create). Each criterion must carry a failure condition
+# (`FAILIF: ...` / `FAILS WHEN:` / `FAILURE CONDITION:`) and a proof
+# (`PROOF: <command or path:line>`). The built-in default is `warn` (create +
+# print the gap) so existing fleet `gitreins task create` automation keeps
+# working until each repo opts in; THIS repo opts into `refuse` to dogfood the
+# strict policy. `--allow-thin` (CLI) / `allow_thin` (MCP) downgrades one call
+# to warn. Existing stored rows are only counted in the post-create audit line,
+# never rewritten.
+criteria:
+  enforce: refuse

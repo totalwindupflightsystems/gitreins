@@ -493,6 +493,98 @@ class TestTaskCreateCLI:
         assert "Created task: empty" in result.stdout
 
 
+def write_criteria_config(workdir: str, enforce: str) -> None:
+    """Write a minimal criteria-enforcement config into workdir (GR-172)."""
+    cfg_dir = os.path.join(workdir, ".gitreins")
+    os.makedirs(cfg_dir, exist_ok=True)
+    with open(os.path.join(cfg_dir, "config.yaml"), "w") as f:
+        f.write(f"criteria:\n  enforce: {enforce}\n")
+
+
+class TestCriteriaEnforcementCLI:
+    """GR-172: `task create` validates criteria on the CLI surface."""
+
+    VALID = "FAILIF: returns 401 on bad credentials; PROOF: tests/test_login.py::test_401"
+    THIN = "Has tests for happy path and error cases"
+
+    def test_refuse_policy_exits_1_and_does_not_write(self, tmp_workdir: str) -> None:
+        """A thin criterion under criteria.enforce: refuse exits 1 and writes nothing."""
+        write_criteria_config(tmp_workdir, "refuse")
+        result = run_cli("task", "create", "thin-task", "Thin", self.THIN, cwd=tmp_workdir)
+        assert result.returncode == 1
+        assert "Refusing to create task thin-task" in result.stdout
+        assert "failure_condition" in result.stdout
+        assert "proof" in result.stdout
+        assert "criterion 1" in result.stdout
+        yaml_path = os.path.join(tmp_workdir, ".gitreins", "tasks.yaml")
+        assert not os.path.exists(yaml_path)
+
+    def test_allow_thin_flag_creates_task_under_refuse(self, tmp_workdir: str) -> None:
+        """--allow-thin downgrades the refusal to a warning and creates the task."""
+        write_criteria_config(tmp_workdir, "refuse")
+        result = run_cli(
+            "task",
+            "create",
+            "thin-ok",
+            "Thin but allowed",
+            self.THIN,
+            "--allow-thin",
+            cwd=tmp_workdir,
+        )
+        assert result.returncode == 0
+        assert "Created task: thin-ok" in result.stdout
+        assert "criteria warning: criterion 1 is missing failure_condition, proof" in result.stdout
+        yaml_path = os.path.join(tmp_workdir, ".gitreins", "tasks.yaml")
+        assert os.path.exists(yaml_path)
+        assert "thin-ok" in open(yaml_path).read()
+
+    def test_valid_criteria_pass_refuse_without_warning(self, tmp_workdir: str) -> None:
+        """A criterion carrying FAILIF: and PROOF: creates cleanly under refuse."""
+        write_criteria_config(tmp_workdir, "refuse")
+        result = run_cli("task", "create", "valid-task", "Valid", self.VALID, cwd=tmp_workdir)
+        assert result.returncode == 0
+        assert "Created task: valid-task" in result.stdout
+        assert "criteria warning" not in result.stdout
+
+    def test_audit_line_counts_existing_thin_rows(self, tmp_workdir: str) -> None:
+        """After a successful create, one audit line counts EXISTING thin rows."""
+        from engine.task_manager import TaskManager
+
+        # Seed the store through the unvalidated internal path.
+        tm = TaskManager(tmp_workdir)
+        tm.create("seed-thin-1", "Thin one", ["prose only"])
+        tm.create("seed-full", "Full one", ["FAILIF: x. PROOF: tests/t.py::t"])
+        tm.create("seed-thin-2", "Thin two", ["FAILIF: y"])
+        write_criteria_config(tmp_workdir, "refuse")
+        result = run_cli("task", "create", "new-valid", "New", self.VALID, cwd=tmp_workdir)
+        assert result.returncode == 0
+        assert (
+            "criteria audit: 2 of 3 existing task(s) have at least one criterion "
+            "without a proof (not rewritten)" in result.stdout
+        )
+        # Counted, not rewritten (GR-172 AC 3): every stored row is verbatim.
+        tm2 = TaskManager(tmp_workdir)
+        seeded = tm2.get("seed-thin-1")
+        assert seeded is not None and seeded.criteria == ["prose only"]
+        seeded2 = tm2.get("seed-thin-2")
+        assert seeded2 is not None and seeded2.criteria == ["FAILIF: y"]
+        full = tm2.get("seed-full")
+        assert full is not None and full.criteria == ["FAILIF: x. PROOF: tests/t.py::t"]
+
+    def test_audit_line_zero_of_n_when_no_thin_rows(self, tmp_workdir: str) -> None:
+        """The audit line prints '0 of N' when every existing row is complete."""
+        from engine.task_manager import TaskManager
+
+        tm = TaskManager(tmp_workdir)
+        tm.create("full-1", "Full one", ["FAILIF: x. PROOF: tests/t.py::t"])
+        result = run_cli("task", "create", "new-valid", "New", self.VALID, cwd=tmp_workdir)
+        assert result.returncode == 0
+        assert (
+            "criteria audit: 0 of 1 existing task(s) have at least one criterion "
+            "without a proof (not rewritten)" in result.stdout
+        )
+
+
 class TestTaskStartCompleteCLI:
     """Test task start/complete CLI — step-3-2-1-2."""
 

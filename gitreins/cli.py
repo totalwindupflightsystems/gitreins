@@ -2108,17 +2108,34 @@ def _doctor_gitleaks(args: argparse.Namespace) -> None:
 
 
 def cmd_task_create(args: argparse.Namespace) -> None:
-    from engine.task_manager import TaskManager
+    from engine.task_manager import CriterionError, TaskManager, validate_task_criteria
 
     tm = TaskManager(get_workdir())
     criteria = args.criteria if args.criteria else []
     depends_on = args.depends_on if hasattr(args, "depends_on") and args.depends_on else []
+    enforce = "warn" if getattr(args, "allow_thin", False) else None
+    try:
+        policy, thin = validate_task_criteria(criteria, args.id, tm.workdir, enforce=enforce)
+    except CriterionError as exc:
+        print(str(exc))
+        raise SystemExit(1) from exc
+    # Audit snapshot BEFORE create so the new task is never counted among the
+    # EXISTING rows (GR-172 AC 3: counted and reported, never rewritten).
+    audit_total = len(tm.all_tasks())
+    audit_thin = tm.count_thin_criteria_tasks()
     task = tm.create(args.id, args.title, criteria, depends_on=depends_on)
     print(f"Created task: {task.id} — {task.title}")
     if task.depends_on:
         print(f"  Depends on: {', '.join(task.depends_on)}")
     for i, c in enumerate(task.criteria, 1):
         print(f"  {i}. {c}")
+    for index, gaps in thin:
+        print(f"criteria warning: criterion {index} is missing {', '.join(gaps)}")
+    if policy != "off":
+        print(
+            f"criteria audit: {audit_thin} of {audit_total} existing task(s) have "
+            "at least one criterion without a proof (not rewritten)"
+        )
 
 
 def cmd_task_start(args: argparse.Namespace) -> None:
@@ -4804,7 +4821,10 @@ def _add_task_parser(sub: _SubParsers) -> _SubParsers:
     task_p = sub.add_parser("task", help="Task management")
     task_sub = task_p.add_subparsers(dest="subcommand")
 
-    create_p = task_sub.add_parser("create", help="Create a task")
+    create_p = task_sub.add_parser(
+        "create",
+        help="Create a task (each criterion must carry a FAILIF: and a PROOF: section)",
+    )
     create_p.add_argument("id")
     create_p.add_argument("title")
     create_p.add_argument("criteria", nargs="*")
@@ -4813,6 +4833,15 @@ def _add_task_parser(sub: _SubParsers) -> _SubParsers:
         action="append",
         default=[],
         help="Task ID that must complete first (repeatable)",
+    )
+    create_p.add_argument(
+        "--allow-thin",
+        action="store_true",
+        help=(
+            "Create the task even when a criterion is missing its failure condition "
+            "(FAILIF:) or proof (PROOF:); downgrades the refusal to a warning for "
+            "this call"
+        ),
     )
 
     start_p = task_sub.add_parser("start", help="Start a task")

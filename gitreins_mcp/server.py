@@ -40,7 +40,7 @@ from engine.llm import LLMClient
 from engine.propagate import Propagator
 from engine.resolution import resolution_config
 from engine.resolution import resolve as resolve_question
-from engine.task_manager import Task, TaskManager
+from engine.task_manager import CriterionError, Task, TaskManager, validate_task_criteria
 from engine.version import __version__
 from gitreins.cli import DEFAULT_GITREINS_CONFIG
 
@@ -264,7 +264,7 @@ class GitReinsMCPServer:
             },
             {
                 "name": "task.create",
-                "description": "Create a new task with criteria that must be met before commit.",
+                "description": "Create a new task with criteria that must be met before commit. Each criterion must carry a failure condition ('FAILIF: ...') and a proof ('PROOF: <command or path:line>'); a criterion missing either is refused with criterion_validation_failed unless allow_thin is set. The built-in default policy is warn (create + report); a repo can set criteria.enforce: refuse|warn|off in .gitreins/config.yaml.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -276,7 +276,11 @@ class GitReinsMCPServer:
                         "criteria": {
                             "type": "array",
                             "items": {"type": "string"},
-                            "description": "List of completion criteria — each must be verified",
+                            "description": "List of completion criteria — each must be verified and must carry 'FAILIF: <condition>' and 'PROOF: <command or path:line>'",
+                        },
+                        "allow_thin": {
+                            "type": "boolean",
+                            "description": "Create the task even when a criterion is missing its failure condition (FAILIF:) or proof (PROOF:); downgrades the refusal to a warning for this call. Default false.",
                         },
                         "workdir": {
                             "type": "string",
@@ -640,15 +644,47 @@ class GitReinsMCPServer:
         return self.tasks
 
     def _task_create(
-        self, id: str, title: str, criteria: list[str], workdir: str | None = None
+        self,
+        id: str,
+        title: str,
+        criteria: list[str],
+        workdir: str | None = None,
+        allow_thin: bool = False,
     ) -> dict[str, Any]:
         refusal = self._workdir_error(workdir)
         if refusal is not None:
             return refusal
         tm = self._task_manager_for(workdir)
+        try:
+            policy, thin = validate_task_criteria(
+                criteria, id, tm.workdir, enforce="warn" if allow_thin else None
+            )
+        except CriterionError as exc:
+            # GR-172: refused creates answer a structured error dict — the task
+            # is NOT created and the store is untouched.
+            return {
+                "error": "criterion_validation_failed",
+                "task_id": exc.task_id,
+                "gaps": exc.gaps,
+                "message": str(exc),
+            }
+        # Audit snapshot BEFORE create so the new task is never counted among
+        # the EXISTING rows (GR-172 AC 3: counted and reported, never rewritten).
+        audit_total = len(tm.all_tasks())
+        audit_thin = tm.count_thin_criteria_tasks()
         task = tm.create(id, title, criteria)
         logger.info("Task created: %s (workdir=%s)", id, tm.workdir)
-        return tm.to_dict(task)
+        result = tm.to_dict(task)
+        if policy == "warn":
+            result["criteria_warnings"] = [
+                f"criterion {index} is missing {', '.join(gaps)}" for index, gaps in thin
+            ]
+        if policy != "off":
+            result["criteria_audit"] = (
+                f"criteria audit: {audit_thin} of {audit_total} existing task(s) have "
+                "at least one criterion without a proof (not rewritten)"
+            )
+        return result
 
     def _task_start(self, id: str, workdir: str | None = None) -> dict[str, Any]:
         refusal = self._workdir_error(workdir)

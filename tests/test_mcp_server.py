@@ -469,6 +469,112 @@ class TestTaskCreateMCP:
         assert "persist-me" in content
 
 
+def write_refuse_config(workdir: str) -> None:
+    """Write a criteria.enforce: refuse config into workdir (GR-172)."""
+    cfg_dir = os.path.join(workdir, ".gitreins")
+    os.makedirs(cfg_dir, exist_ok=True)
+    with open(os.path.join(cfg_dir, "config.yaml"), "w") as f:
+        f.write("criteria:\n  enforce: refuse\n")
+
+
+class TestCriteriaEnforcementMCP:
+    """GR-172: task.create validates criteria on the MCP surface."""
+
+    THIN = ["Has tests for happy path and error cases"]
+
+    def _call_create(self, mcp_server: GitReinsMCPServer, arguments: dict) -> dict:
+        response = mcp_server.handle_request(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {"name": "task.create", "arguments": arguments},
+            }
+        )
+        assert response is not None
+        return json.loads(response["result"]["content"][0]["text"])
+
+    def test_task_create_refuses_thin_criteria(
+        self, mcp_server: GitReinsMCPServer, tmp_workdir: str
+    ) -> None:
+        """Thin criteria under refuse return the structured error dict and create nothing."""
+        write_refuse_config(tmp_workdir)
+        parsed = self._call_create(
+            mcp_server,
+            {"id": "thin-mcp", "title": "Thin", "criteria": self.THIN},
+        )
+        assert parsed["error"] == "criterion_validation_failed"
+        assert parsed["task_id"] == "thin-mcp"
+        assert parsed["gaps"] == ["failure_condition", "proof"]
+        assert "Refusing to create task thin-mcp" in parsed["message"]
+        assert "criterion 1" in parsed["message"]
+        yaml_path = os.path.join(tmp_workdir, ".gitreins", "tasks.yaml")
+        assert not os.path.exists(yaml_path)
+
+    def test_task_create_allow_thin_creates(
+        self, mcp_server: GitReinsMCPServer, tmp_workdir: str
+    ) -> None:
+        """allow_thin: true downgrades the refusal to a warning and creates."""
+        write_refuse_config(tmp_workdir)
+        parsed = self._call_create(
+            mcp_server,
+            {
+                "id": "thin-allowed",
+                "title": "Thin but allowed",
+                "criteria": self.THIN,
+                "allow_thin": True,
+            },
+        )
+        assert parsed["id"] == "thin-allowed"
+        assert parsed["criteria"] == self.THIN
+        assert parsed["criteria_warnings"] == ["criterion 1 is missing failure_condition, proof"]
+        yaml_path = os.path.join(tmp_workdir, ".gitreins", "tasks.yaml")
+        assert os.path.exists(yaml_path)
+        assert "thin-allowed" in open(yaml_path).read()
+
+    def test_task_create_warn_policy_creates_with_warning(
+        self, mcp_server: GitReinsMCPServer
+    ) -> None:
+        """The default warn policy creates the task and reports the gap + audit."""
+        parsed = self._call_create(
+            mcp_server,
+            {"id": "warn-mcp", "title": "Warn path", "criteria": self.THIN},
+        )
+        assert parsed["id"] == "warn-mcp"
+        assert parsed["criteria_warnings"] == ["criterion 1 is missing failure_condition, proof"]
+        assert parsed["criteria_audit"] == (
+            "criteria audit: 0 of 0 existing task(s) have at least one criterion "
+            "without a proof (not rewritten)"
+        )
+
+    def test_task_create_audit_counts_existing_rows(
+        self, mcp_server: GitReinsMCPServer, tmp_workdir: str
+    ) -> None:
+        """The audit counts previously stored thin rows, not the new task."""
+        from engine.task_manager import TaskManager
+
+        tm = TaskManager(tmp_workdir)  # unvalidated internal path seeds the store
+        tm.create("seed-thin", "Thin one", ["prose only"])
+        tm.create("seed-full", "Full one", ["FAILIF: x. PROOF: tests/t.py::t"])
+        parsed = self._call_create(
+            mcp_server,
+            {
+                "id": "valid-mcp",
+                "title": "Valid",
+                "criteria": ["FAILIF: y. PROOF: tests/t.py::t2"],
+            },
+        )
+        assert parsed["id"] == "valid-mcp"
+        assert parsed["criteria_audit"] == (
+            "criteria audit: 1 of 2 existing task(s) have at least one criterion "
+            "without a proof (not rewritten)"
+        )
+        # Counted, not rewritten (GR-172 AC 3).
+        tm2 = TaskManager(tmp_workdir)
+        seeded = tm2.get("seed-thin")
+        assert seeded is not None and seeded.criteria == ["prose only"]
+
+
 class TestTaskStartComplete:
     """Test task.start and task.complete — step-2-2-1-2."""
 

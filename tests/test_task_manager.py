@@ -7,7 +7,13 @@ import os
 import pytest
 from datetime import datetime
 
-from engine.task_manager import Task, TaskManager
+from engine.task_manager import (
+    CriterionError,
+    Task,
+    TaskManager,
+    resolve_criteria_enforce,
+    validate_task_criteria,
+)
 from pathlib import Path
 
 
@@ -402,3 +408,111 @@ class TestTruncatedStoreDetection:
         # Reload from the intact store: no warning.
         TaskManager(workdir=str(tmp_path))
         assert "truncated" not in capsys.readouterr().out
+
+
+class TestCriteriaEnforcement:
+    """GR-172: validator + policy resolution on the author-facing create path.
+
+    ``TaskManager.create`` itself stays UNVALIDATED (internal callers and the
+    existing tests pass plain prose); only ``validate_task_criteria`` — the
+    function the CLI and MCP surfaces call before ``create`` — enforces the
+    failure-condition + proof rule.
+    """
+
+    def test_warn_policy_reports_thin_and_create_still_works(self, tmp_workdir: str) -> None:
+        """enforce='warn' returns the thin list and does not block TaskManager.create."""
+        tm = TaskManager(tmp_workdir)
+        policy, thin = validate_task_criteria(
+            ["FAILIF: returns 401. PROOF: tests/test_a.py::test_one", "plain prose"],
+            "GR-1",
+            tmp_workdir,
+            enforce="warn",
+        )
+        assert policy == "warn"
+        assert thin == [(2, ["failure_condition", "proof"])]
+        task = tm.create("GR-1", "Warn path", ["plain prose"])
+        assert task.criteria == ["plain prose"]
+
+    def test_off_policy_skips_the_scan(self, tmp_workdir: str) -> None:
+        """enforce='off' reports nothing and validates nothing."""
+        policy, thin = validate_task_criteria(["prose"], "GR-2", tmp_workdir, enforce="off")
+        assert policy == "off"
+        assert thin == []
+
+    def test_refuse_policy_raises_and_store_is_byte_identical(self, tmp_workdir: str) -> None:
+        """enforce='refuse' raises CriterionError; tasks.yaml is untouched."""
+        tm = TaskManager(tmp_workdir)
+        tm.create("seed", "Seed task", ["seed criterion"])
+        store = os.path.join(tmp_workdir, ".gitreins", "tasks.yaml")
+        with open(store, "rb") as f:
+            before = f.read()
+        with pytest.raises(CriterionError) as excinfo:
+            validate_task_criteria(
+                ["FAILIF: x. PROOF: tests/t.py::t", "thin prose", "FAILIF: y"],
+                "GR-172",
+                tmp_workdir,
+                enforce="refuse",
+            )
+        message = str(excinfo.value)
+        assert "failure_condition" in message
+        assert "proof" in message
+        assert "criterion 2" in message
+        assert excinfo.value.task_id == "GR-172"
+        assert excinfo.value.index == 2
+        assert excinfo.value.gaps == ["failure_condition", "proof"]
+        with open(store, "rb") as f:
+            after = f.read()
+        assert before == after, "a refused create must leave tasks.yaml byte-identical"
+        assert tm.get("GR-172") is None
+
+    def test_refuse_policy_resolved_from_config(self, tmp_workdir: str) -> None:
+        """A repo with criteria.enforce: refuse refuses without an explicit arg."""
+        cfg_dir = os.path.join(tmp_workdir, ".gitreins")
+        os.makedirs(cfg_dir, exist_ok=True)
+        with open(os.path.join(cfg_dir, "config.yaml"), "w") as f:
+            f.write("criteria:\n  enforce: refuse\n")
+        with pytest.raises(CriterionError):
+            validate_task_criteria(["prose"], "GR-3", tmp_workdir)
+
+    def test_policy_defaults_to_warn_without_config(self, tmp_workdir: str) -> None:
+        """No config file and no explicit arg resolve to the built-in 'warn'."""
+        assert resolve_criteria_enforce(tmp_workdir) == "warn"
+
+    def test_policy_reads_config_key(self, tmp_workdir: str) -> None:
+        """criteria.enforce in config.yaml is honoured."""
+        cfg_dir = os.path.join(tmp_workdir, ".gitreins")
+        os.makedirs(cfg_dir, exist_ok=True)
+        with open(os.path.join(cfg_dir, "config.yaml"), "w") as f:
+            f.write("criteria:\n  enforce: refuse\n")
+        assert resolve_criteria_enforce(tmp_workdir) == "refuse"
+
+    def test_explicit_enforce_overrides_config(self, tmp_workdir: str) -> None:
+        """The explicit enforce= argument wins over the config key (first match)."""
+        cfg_dir = os.path.join(tmp_workdir, ".gitreins")
+        os.makedirs(cfg_dir, exist_ok=True)
+        with open(os.path.join(cfg_dir, "config.yaml"), "w") as f:
+            f.write("criteria:\n  enforce: refuse\n")
+        assert resolve_criteria_enforce(tmp_workdir, explicit="warn") == "warn"
+
+    def test_unknown_config_value_falls_back_to_default(self, tmp_workdir: str) -> None:
+        """An unrecognised criteria.enforce value degrades to the default, never hardens."""
+        cfg_dir = os.path.join(tmp_workdir, ".gitreins")
+        os.makedirs(cfg_dir, exist_ok=True)
+        with open(os.path.join(cfg_dir, "config.yaml"), "w") as f:
+            f.write("criteria:\n  enforce: strict\n")
+        assert resolve_criteria_enforce(tmp_workdir) == "warn"
+
+    def test_count_thin_criteria_tasks_counts_existing_rows(self, tmp_workdir: str) -> None:
+        """The audit census counts stored tasks with at least one thin criterion."""
+        tm = TaskManager(tmp_workdir)
+        tm.create("thin-1", "Thin one", ["prose only"])
+        tm.create("full-1", "Full one", ["FAILIF: x. PROOF: tests/t.py::t"])
+        tm.create("thin-2", "Thin two", ["FAILIF: y"])
+        assert tm.count_thin_criteria_tasks() == 2
+        assert len(tm.all_tasks()) == 3
+
+    def test_create_via_manager_is_never_validated(self, tmp_workdir: str) -> None:
+        """TaskManager.create keeps accepting prose — internal callers keep working."""
+        tm = TaskManager(tmp_workdir)
+        task = tm.create("legacy", "Legacy caller", ["plain prose criterion"])
+        assert task.criteria == ["plain prose criterion"]

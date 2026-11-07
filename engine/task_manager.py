@@ -26,6 +26,8 @@ from typing import Any
 
 import yaml
 
+from engine.criteria import criterion_gaps
+
 
 class DependencyError(Exception):
     """Raised when a task cannot complete because its dependencies are not met."""
@@ -50,6 +52,99 @@ class TaskStateCorruptError(RuntimeError):
 CORRUPT_STATE_SUFFIX = ".corrupt-"
 
 TASKS_LOCK_SUFFIX = ".lock"
+
+#: GR-172: the enforcement policies accepted by ``criteria.enforce`` (config)
+#: and the validator's explicit ``enforce=`` argument.
+CRITERIA_ENFORCE_POLICIES: tuple[str, ...] = ("refuse", "warn", "off")
+
+#: GR-172: built-in policy when neither an explicit argument nor a config key
+#: resolves. ``warn`` keeps existing fleet automation creating tasks while the
+#: thin-criterion backlog becomes visible; a repo opts into ``refuse`` via
+#: ``.gitreins/config.yaml``.
+DEFAULT_CRITERIA_ENFORCE = "warn"
+
+
+class CriterionError(ValueError):
+    """GR-172: a task-create call was refused because a criterion is thin.
+
+    A "thin" criterion carries neither a labelled failure condition
+    (``FAILIF:``/``FAILS WHEN:``/``FAILURE CONDITION:``) nor a proof
+    (``PROOF:``/``PROOF COMMAND:``) — detection lives in ``engine.criteria``.
+    Raised only from :func:`validate_task_criteria`, which the author-facing
+    surfaces call (CLI ``task create``, MCP ``task.create``);
+    ``TaskManager.create`` itself stays unvalidated so internal callers and
+    already-stored rows keep working untouched.
+    """
+
+    def __init__(self, task_id: str, index: int, gaps: list[str]) -> None:
+        self.task_id = task_id
+        self.index = index
+        self.gaps = list(gaps)
+        super().__init__(
+            f"Refusing to create task {task_id}: criterion {index} is missing "
+            f"{', '.join(self.gaps)}. Each criterion must carry 'FAILIF: <condition>' "
+            f"and 'PROOF: <command or path:line>' (use --allow-thin to override)."
+        )
+
+
+def resolve_criteria_enforce(workdir: str | None, explicit: str | None = None) -> str:
+    """Resolve the criteria-enforcement policy for one create call (GR-172).
+
+    First match wins: an explicit ``enforce=`` argument (the CLI ``--allow-thin``
+    flag passes ``"warn"``), then the ``criteria.enforce`` key of the repo's
+    ``.gitreins/config.yaml``, then :data:`DEFAULT_CRITERIA_ENFORCE`. A missing
+    config file, missing key, or unrecognised value falls back to the default —
+    a config typo must not silently harden or soften the policy.
+    """
+    if explicit is not None and explicit in CRITERIA_ENFORCE_POLICIES:
+        return explicit
+    from engine.config import load_raw_config
+
+    raw = load_raw_config(workdir).get("criteria")
+    if isinstance(raw, dict):
+        value = raw.get("enforce")
+        if isinstance(value, str) and value in CRITERIA_ENFORCE_POLICIES:
+            return value
+    return DEFAULT_CRITERIA_ENFORCE
+
+
+def find_thin_criteria(criteria: list[str]) -> list[tuple[int, list[str]]]:
+    """Return ``(1-based index, missing field names)`` for every thin criterion.
+
+    Pure scan over *criteria* via :func:`engine.criteria.criterion_gaps`; empty
+    list when every criterion carries its failure condition and proof.
+    """
+    thin: list[tuple[int, list[str]]] = []
+    for index, criterion in enumerate(criteria, start=1):
+        gaps = criterion_gaps(criterion)
+        if gaps:
+            thin.append((index, gaps))
+    return thin
+
+
+def validate_task_criteria(
+    criteria: list[str],
+    task_id: str,
+    workdir: str,
+    enforce: str | None = None,
+) -> tuple[str, list[tuple[int, list[str]]]]:
+    """Validate *criteria* for one author-facing create call (GR-172).
+
+    Returns ``(policy, thin)``: the resolved enforcement policy and the thin
+    list from :func:`find_thin_criteria`. ``refuse`` raises
+    :class:`CriterionError` naming the first thin criterion (the task is NOT
+    created and the store is untouched); ``warn`` returns the list for the
+    caller to report while still creating; ``off`` skips the scan entirely and
+    returns an empty list.
+    """
+    policy = resolve_criteria_enforce(workdir, explicit=enforce)
+    if policy == "off":
+        return policy, []
+    thin = find_thin_criteria(criteria)
+    if thin and policy == "refuse":
+        index, gaps = thin[0]
+        raise CriterionError(task_id=task_id, index=index, gaps=gaps)
+    return policy, thin
 
 
 @dataclass
@@ -388,6 +483,20 @@ class TaskManager:
     def all_tasks(self) -> list["Task"]:
         """Return all tasks."""
         return list(self._tasks.values())
+
+    def count_thin_criteria_tasks(self) -> int:
+        """GR-172 AC 3: how many stored tasks carry at least one thin criterion.
+
+        Read-only census for the author-facing create surfaces' audit line.
+        Stored criteria are never rewritten, normalized or truncated by this —
+        existing rows keep their prose verbatim; the count only makes the
+        backlog visible.
+        """
+        return sum(
+            1
+            for task in self._tasks.values()
+            if any(criterion_gaps(criterion) for criterion in task.criteria)
+        )
 
     def delete(self, id: str) -> None:
         """Delete a task by ID."""

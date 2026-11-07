@@ -117,8 +117,28 @@ gitreins task delete <id>
 | `title` | Task title (required, positional) |
 | `criteria` | One or more acceptance criteria (variadic positional) |
 | `--depends-on <id>` | Task ID that must complete first; repeatable |
+| `--allow-thin` | Create the task even when a criterion is thin (downgrades the refusal to a warning for this call) |
 
-Exit **0** on success.
+Exit **0** on success; exit **1** when the create is refused.
+
+Each criterion must carry a **failure condition** (`FAILIF: <condition>`, also
+accepted as `FAILS WHEN:` or `FAILURE CONDITION:`) and a **proof** (`PROOF:
+<command or path:line>`, also accepted as `PROOF COMMAND:`). The proof payload
+must be non-empty and look like a command or a locator — e.g.
+`PROOF: tests/test_login.py::test_401`, `PROOF: .venv/bin/python -m pytest -q
+tests/test_login.py`, or `PROOF: make test`. Markers are case-insensitive and
+may follow leading prose (`Accepts JSON; FAILIF: returns 200 on bad
+credentials. PROOF: tests/test_login.py::test_401`).
+
+Enforcement is resolved per call (first match wins): the explicit
+`--allow-thin` flag (→ warn), then the `criteria.enforce` key of
+`.gitreins/config.yaml` (`refuse` | `warn` | `off`), then the built-in default
+**`warn`**. `refuse` prints a message naming the missing field(s) and the
+criterion index and creates nothing; `warn` creates the task and prints one
+`criteria warning:` line per thin criterion; `off` skips validation. After
+every successful create, one `criteria audit:` line reports how many EXISTING
+tasks still carry a thin criterion — existing rows are counted, never
+rewritten.
 
 Put `--depends-on` **after** the criteria: `criteria` is a variadic positional
 argument, so argparse rejects criteria written after an option (the error is

@@ -214,6 +214,12 @@ _RESOLUTION: dict[str, KeySpec] = {
     "egress_exclude": KeySpec("list"),
 }
 
+# ── criteria: ────────────────────────────────────────────────────────────────
+# Read through engine/task_manager.py resolve_criteria_enforce (GR-172).
+_CRITERIA: dict[str, KeySpec] = {
+    "enforce": KeySpec("str", ("refuse", "warn", "off")),
+}
+
 # ── pipeline / commit_audit: ─────────────────────────────────────────────────
 _PIPELINE: dict[str, KeySpec] = {"stages": KeySpec("list")}
 _COMMIT_AUDIT: dict[str, KeySpec] = {
@@ -238,6 +244,7 @@ _SECTIONS: dict[str, dict[str, KeySpec]] = {
     "defaults": _DEFAULTS,
     "history": _HISTORY,
     "resolution": _RESOLUTION,
+    "criteria": _CRITERIA,
     "pipeline": _PIPELINE,
     "commit_audit": _COMMIT_AUDIT,
     "quality": _specs_from_dataclass(QualityConfig),

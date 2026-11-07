@@ -169,7 +169,7 @@ class SecurityReviewConfig:
         policy = str(block.get("missing_tool_policy", "fail")).strip().lower()
         confidence = block.get("min_confidence", 0.7)
         try:
-            min_confidence = float(confidence)  # type: ignore[arg-type]
+            min_confidence = float(confidence)
         except (TypeError, ValueError):
             raise ValueError(
                 f"security_review.min_confidence must be a number, got {confidence!r}"
