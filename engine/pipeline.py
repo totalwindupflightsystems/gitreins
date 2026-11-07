@@ -130,13 +130,20 @@ def _verdict_item_data(item: "VerdictItem") -> dict[str, Any]:
     historical keys always, the JEVRES-004 attribution keys only when the
     item carries them (i.e. a pre-screen ran).
     """
-    d = {"criterion": item.criterion, "status": item.status, "detail": item.detail}
+    d: dict[str, Any] = {
+        "criterion": item.criterion,
+        "status": item.status,
+        "detail": item.detail,
+    }
     probability = getattr(item, "resolution_probability", None)
     cited = getattr(item, "cited_path", None)
     if probability is not None:
         d["resolution_probability"] = probability
     if cited:
         d["cited_path"] = cited
+    # GR-176: derived criteria are marked in every persisted item list.
+    if getattr(item, "derived", False):
+        d["derived"] = True
     return d
 
 

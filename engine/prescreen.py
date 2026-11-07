@@ -400,6 +400,9 @@ def attribute_items(items: list[VerdictItem], prescreen: PrescreenResult) -> lis
                 detail=detail,
                 resolution_probability=row.probability,
                 cited_path=row.cited_path or None,
+                # GR-176: re-building an item for attribution must not drop the
+                # fact that the judge proposed it.
+                derived=getattr(item, "derived", False),
             )
         )
     return out

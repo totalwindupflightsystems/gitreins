@@ -101,7 +101,7 @@ Overlaid onto `GitReinsDefaults` by `GitReinsDefaults.overlay()`
 | `tool_call_weight` | `0.1` (`:51`) | Fraction of an iteration each tool call costs. Raise → caps exhaust sooner. |
 | `compaction_threshold` | `0.90` (`:54`) | Compact once cumulative input since the last compaction exceeds this share of `max_input_tokens`. Lower = more compactions, more cost/latency, more lost detail. |
 | `code_context_budget` | `0.70` (`:55`) | Share of the input budget the pre-loaded code context may take. Too high starves the judge's own reasoning. |
-| `file_scope` | `changed` (`:56`) | `changed` (changed files + tests) or `full` (whole codebase). `full` on a large repo = prompt/context explosion. |
+| `file_scope` | `full` (`:56`) | GR-170: repo-wide review is the DEFAULT — the judge may read any file in the worktree (credentials refused, 512 KB whole-read cap). `changed` is the explicit opt-out: changed files + mapped tests + allowed config only. |
 | `fast_track` | `auto` (`:57`) | `on`/`off`/`auto`; `auto` turns it ON at ≥20 packages (`engine/evaluator.py:498-506`). Skips full call-graph expansion. |
 | `max_file_bytes` | `131_072` (`:58-60`) | Caps `read_file` results to stop context explosion. Also read by the commit auditor (`engine/commit_audit.py`). |
 | `pass_on_error` | `False` (`:61`) | `True` = skip Tier 2 when the LLM is unavailable (advisory-only mode). Turns a hard failure into a pass; only correct where the harness is advisory. |
@@ -150,7 +150,7 @@ string forms: `_parse_tokens` accepts `10M`/`200k`/`0.1M`; `_parse_time` accepts
 | `tool_call_weight` | `0.1` | |
 | `compaction_threshold` | `0.90` | |
 | `code_context_budget` | `0.70` | |
-| `file_scope`, `fast_track` | `changed`, `auto` | |
+| `file_scope`, `fast_track` | `full`, `auto` | |
 | `max_file_bytes`, `pass_on_error` | `131072`, `False` | |
 | `static_analysis_diagnostics` | `False` | Off by default (`gitreins/cli.py:1153`). When false the judge does not even advertise `read_static_analysis` (`engine/evaluator.py:1162`, `:1888-1889`), and calling it returns `{"error": "static_analysis_diagnostics is not enabled in .gitreins/config.yaml"}`. |
 | `cap` (legacy) | — | `"100/30m/200k/50k"` — **replaces the whole cap object** (`engine/eval_cap.py:451-453`); individual keys then override per field. |

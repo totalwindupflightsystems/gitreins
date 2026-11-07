@@ -226,11 +226,18 @@ class GitReinsDefaults:
     # exceed this share of max_input_tokens — the same quantity the cap meters.
     compaction_threshold: float = 0.90
     code_context_budget: float = 0.70  # cap pre-loaded code context to 70% of input budget
-    file_scope: str = "changed"  # "changed" = only changed files + tests, "full" = entire codebase
+    # GR-170: repo-wide review is the default — the reviewer must be able to
+    # follow a changed symbol to its callers and entrypoint. 'changed' (only
+    # changed files + mapped tests + always-allowed config) is the explicit
+    # opt-out and stays available for large trees with tight budgets.
+    file_scope: str = "full"
     fast_track: str = "auto"  # skip full call-graph on large repos (GR-064a)
     max_file_bytes: int = (
         131_072  # 128KB — cap read_file results to prevent context explosion (GR-064d)
     )
+    # GR-170: a whole-file read above this many bytes is REFUSED (not truncated)
+    # so the judge never grades against a partial file; range reads still work.
+    max_read_bytes: int = 524_288
     pass_on_error: bool = False  # skip Tier 2 when LLM is unavailable (advisory-only mode)
 
     # ── Guard defaults ──
@@ -369,6 +376,7 @@ class GitReinsDefaults:
             file_scope=str(defaults.get("file_scope", self.file_scope)),
             fast_track=str(defaults.get("fast_track", self.fast_track)),
             max_file_bytes=int(defaults.get("max_file_bytes", self.max_file_bytes)),
+            max_read_bytes=int(defaults.get("max_read_bytes", self.max_read_bytes)),
             pass_on_error=bool(defaults.get("pass_on_error", self.pass_on_error)),
             hook_timeout=int(defaults.get("hook_timeout", self.hook_timeout)),
             # DF-GITREINS-POC-55: the scanner nice level is read from the
@@ -561,6 +569,7 @@ class GitReinsDefaults:
             "file_scope": self.file_scope,
             "fast_track": self.fast_track,
             "max_file_bytes": self.max_file_bytes,
+            "max_read_bytes": self.max_read_bytes,
             "pass_on_error": self.pass_on_error,
             "hook_timeout": self.hook_timeout,
             "max_concurrent_worktrees": self.max_concurrent_worktrees,

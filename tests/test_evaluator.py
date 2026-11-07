@@ -1833,31 +1833,37 @@ class TestCodeContextPreloading:
             verdict = evaluator.evaluate({"id": "t", "title": "scope test", "criteria": ["c0"]})
         assert verdict.verdict == "COMPLETE"
 
-    def test_file_scope_default_is_changed(
-        self, evaluator: AgenticEvaluator, tmp_workdir: str
+    def test_file_scope_default_is_full(
+        self, evaluator: AgenticEvaluator, llm_client: LLMClient, tmp_workdir: str
     ) -> None:
-        """Without config override, file_scope defaults to 'changed'."""
-        import os
+        """GR-170: without config override, file_scope defaults to 'full'.
 
-        # Ensure no config.yaml exists
-        cdir = os.path.join(tmp_workdir, ".gitreins")
-        cfg = os.path.join(cdir, "config.yaml")
+        The old default was 'changed' — the judge could verify the diff but
+        could not follow a symbol to its entrypoint. Repo-wide is now the
+        default; 'changed' remains an explicit opt-out (covered in
+        tests/test_judge_repo_read.py).
+        """
+        cfg = os.path.join(tmp_workdir, ".gitreins", "config.yaml")
         if os.path.exists(cfg):
             os.remove(cfg)
-
-        # In a fresh git repo with no changes, _allowed_files will be empty
-        import subprocess
 
         subprocess.run(["git", "init"], cwd=tmp_workdir, capture_output=True)
         subprocess.run(
             ["git", "commit", "--allow-empty", "-m", "init"], cwd=tmp_workdir, capture_output=True
         )
 
-        evaluator._allowed_files = evaluator._compute_allowed_files()
-        # In a clean repo with no uncommitted changes, set should be empty (or just config files)
-        assert "src/main.py" not in evaluator._allowed_files, (
-            "No changed files should be in scope for a clean repo"
+        def fake_chat(messages: list, tools: object = None, max_tokens: int = None) -> object:
+            return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
+
+        with patch.object(llm_client, "chat", side_effect=fake_chat):
+            evaluator.evaluate({"id": "t", "title": "default scope", "criteria": ["c0"]})
+
+        assert evaluator._allowed_files is None, (
+            "config-less default must be full scope (None = no restriction)"
         )
+        # The scope computation itself still works — it is just not the default.
+        allowed = evaluator._compute_allowed_files()
+        assert "src/main.py" not in allowed, "No changed files should be in scope for a clean repo"
 
 
 class TestDataFileHelpers:

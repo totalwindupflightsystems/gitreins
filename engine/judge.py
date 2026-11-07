@@ -712,6 +712,7 @@ def judge_result_to_dict(task_id: str, workdir: str, result: Any) -> dict[str, A
                     else {}
                 ),
                 **({"cited_path": i.cited_path} if getattr(i, "cited_path", None) else {}),
+                **({"derived": True} if getattr(i, "derived", False) else {}),
             }
             for i in tier2.items
         ]
@@ -743,6 +744,7 @@ def _find_pipeline_verdict(pipeline_result: dict[str, Any]) -> Verdict | None:
                         criterion=i.get("criterion"),
                         status=i.get("status"),
                         detail=i.get("detail"),
+                        derived=bool(i.get("derived", False)),
                     )
                     for i in (data.get("items") or [])
                 ]

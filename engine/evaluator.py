@@ -71,6 +71,30 @@ DATA_FILE_AVG_LINE_CHARS = 500
 # Number of preview lines included for data-smelling files in FULL mode.
 DATA_FILE_PREVIEW_LINES = 5
 
+# GR-170: the default `evaluator.file_scope`. Repo-wide review is the default
+# because the reviewer cannot judge reachability — "is this new behaviour
+# called from an entrypoint?" — without reading past the diff. 'changed' is the
+# explicit opt-out. engine/config.py's EvaluatorConfig default mirrors this
+# value; tests/test_evaluator.py pins the two together.
+DEFAULT_FILE_SCOPE = "full"
+
+# Default cap on a whole-file read (GR-170). Above this, read_file refuses the
+# whole-file read and asks for a range — see AgenticEvaluator.max_read_bytes.
+DEFAULT_MAX_READ_BYTES = 524_288
+
+# GR-176: how many criteria the judge may add to the task's own list. The owner's
+# layer-3 point — "it needs to look at the task and decide what criteria is extra
+# needed for itself" — needs a cap so "set your own bar" cannot become an
+# unbounded rubric that fails everything. Five is enough for reachability,
+# failure path, idempotency, back-compat and the integration seam.
+MAX_DERIVED_CRITERIA = 5
+
+# Sandbox keys for derived criteria: ``derived_<k>`` (the text the judge
+# proposed) and ``verified_derived_<k>`` (its finding). Their cost marks live in
+# the same ``_criterion_marks`` map as given criteria, offset into this range so
+# a derived index can never collide with a given criterion's index.
+DERIVED_MARK_OFFSET = 10_000
+
 
 def _is_data_file_path(path: str) -> bool:
     """Return True when a repo-relative path is a non-code/data file.
@@ -111,13 +135,80 @@ def _filter_diff_text(diff_text: str) -> str:
     return "\n".join(kept)
 
 
-EVALUATOR_SYSTEM_PROMPT = """You are a code quality evaluator. Your job is to judge whether a completed task meets ALL of its defined criteria.
+def _is_sensitive_read_path(path: str) -> bool:
+    """True when *path* names a credential store the commit guard class refuses.
+
+    GR-170: repo-wide scope means the judge may read anything in the worktree,
+    which would otherwise include the secrets the guard exists to keep out of
+    the repository. The classification is NOT re-invented here — it is
+    :func:`engine.guard_manager.is_sensitive_path`, the same
+    ``SENSITIVE_PATH_PATTERNS`` class the commit guard enforces, including its
+    test-fixture exemption (``tests/``, ``test/``, ``fixtures/``), so a
+    deliberate fake-credential fixture stays readable while a real ``.env``
+    does not. The import is lazy: guard_manager is heavy and nothing on the
+    read path may fail because of it.
+    """
+    try:
+        from engine.guard_manager import _is_sensitive_fixture_path, is_sensitive_path
+    except Exception:  # pragma: no cover - an import failure must not block reads
+        logger.warning("sensitive-path classifier unavailable; read allowed: %s", path)
+        return False
+    normalized = path.replace(os.sep, "/")
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    if not normalized:
+        return False
+    if _is_sensitive_fixture_path(normalized):
+        return False
+    return is_sensitive_path(normalized)
+
+
+EVALUATOR_SYSTEM_PROMPT = """You are a senior code reviewer. Your job is to decide whether a completed task actually delivers what its task asked for, read against the repository it landed in — not merely whether the diff contains plausible lines.
 
 ## YOUR TOOLS
 
 You have tools to read files, run commands, and search the codebase. Use them aggressively — don't guess. Read the actual code, run the actual tests.
 
 If available, use read_static_analysis to check for type errors and static analysis warnings, and read_lsp_diagnostics to check LSP (Language Server Protocol) diagnostics before judging criteria — type violations and LSP errors are hard evidence for FAIL.
+
+## HOW TO REVIEW — EXPLORE FIRST (REQUIRED)
+
+Do NOT grade from the diff alone. A diff shows what was written, never whether it is wired, reachable or correct in its file. Before you decide anything, work outward in four steps:
+
+1. **Changed files, in full.** Read every changed file (not just the hunks) — a change is only judgeable in the context of the file it lands in.
+2. **Call sites of changed symbols.** For every function, flag, option, class, config key or constant the change adds or alters, `search_pattern` for its name and read the places that use it.
+3. **The entrypoint that must reach the new behaviour.** Find where a user, CLI, API or config loader actually enters this path (main, command registration, HTTP route, exported API, settings loader) and confirm the new behaviour is reachable from it. Code that exists but is never called does not deliver the task.
+4. **The tests.** Read the tests that cover the change and run them (see MANDATORY TEST VERIFICATION).
+
+Only then grade. A verdict that never looked outside the diff cannot tell "works" from "exists".
+
+## SET YOUR OWN BAR — DERIVE CRITERIA FOR THIS CHANGE (at most {max_derived})
+
+The criteria list is what the task author thought to write down. It is the FLOOR, not the ceiling. After you have read the task and the changed files, propose up to {max_derived} additional criteria that THIS change needs in order to be correct, e.g.:
+
+- **Reachability** — "the new flag is reachable from <entrypoint>", "the new config key is read where it is documented".
+- **Failure path** — "the failure path returns an error rather than silently succeeding".
+- **Re-run/idempotency** — "the migration is idempotent on re-run".
+- **Back-compat** — "existing callers of <symbol> keep their behaviour".
+- **Seam** — "the value the new code writes is the value the consumer reads".
+
+Rules for derived criteria:
+1. Propose them BEFORE grading, and save each one to the sandbox: `sandbox_write("derived_0", "<criterion text>")`, up to `derived_{max_index}`. Save your finding as `sandbox_write("verified_derived_0", "PASS: …")`.
+2. Mark each derived item with `"derived": true` in the verdict JSON.
+3. Grade them exactly like given criteria — same evidence bar, same PASS/FAIL. **A derived FAIL fails the verdict** just as a given FAIL does.
+4. At most {max_derived}. If this change needs nothing beyond the given criteria, derive NONE — an empty derived list is the correct answer for a trivial change.
+5. A derived criterion must be checkable against the repository. "Code is maintainable" is not a criterion; "the new retry loop terminates on a permanent error" is.
+
+## PRECISION — DO NOT INVENT REQUIREMENTS
+
+- A missing TODO, a style preference, an unrequested refactor, a docstring on a private helper: **not failures**. Do not turn taste into criteria.
+- The task's own words set the floor. Do not add requirements the task never implied and the repository does not already enforce (a linter rule it does not run, a metric nobody tracks).
+- Prefer ONE correct, evidenced complaint over five speculative ones. If you suspect a defect but cannot evidence it, say so in the detail — do not fail work on suspicion.
+- Strictness is earned by evidence, not by coverage: a FAIL must name the `file:line` or the command output that shows the defect.
+
+## EVIDENCE FOR EVERY ITEM (REQUIRED)
+
+Every item in the verdict — given or derived — must name the evidence that proves it: a `file:line`, a command with its decisive output line, or a tool result you actually saw. An item whose detail carries no evidence is INCOMPLETE, not PASS. If you could not find evidence, say what you searched and what you did not find, and mark it FAIL (UNVERIFIED is only for a criterion the budget stopped you from reaching).
 
 ## CRITERIA TRACKING (REQUIRED)
 
@@ -126,7 +217,7 @@ After you verify EACH criterion, IMMEDIATELY save your finding to the sandbox:
   sandbox_write("verified_0", "PASS: tests/test_auth.py:45 confirms token validation")
   sandbox_write("verified_2", "FAIL: missing error handling in engine/handler.py:120")
 
-Use the criterion's index number (0-based, from the criteria list). This is NOT optional — it is how the evaluation survives context compaction. If the context window fills up, your progress is saved and you resume with a clean slate.
+Use the criterion's index number (0-based, from the criteria list) for given criteria; use `verified_derived_<k>` for derived ones. This is NOT optional — it is how the evaluation survives context compaction. If the context window fills up, your progress is saved and you resume with a clean slate.
 
 ## COMPACTION AWARENESS
 
@@ -140,9 +231,9 @@ For each criterion:
 
 ## EFFICIENCY RULES
 
-- **Token budget: {token_budget}.** You have {token_budget} input tokens and {output_budget} output tokens. The code context pre-loaded below consumes part of this — be selective about what you re-read. Prioritize criteria-driven investigation over exhaustive file reading.
-- **Code context is pre-loaded.** The changed code is already included in this prompt — you do NOT need to call read_file() on files shown below unless you need a specific line range not included.
-- **File scope: {file_scope}.** When scope is 'changed', you can ONLY access modified files (plus their tests and config files). read_file() and search_pattern() will reject files outside this set. This prevents context explosion on large repos.
+- **Token budget: {token_budget}.** You have {token_budget} input tokens and {output_budget} output tokens. Exploration spends this budget: read whole files when they are small, use offset/limit for large ones, and use `search_pattern` to find call sites instead of wandering directories. If the budget runs out mid-exploration the run ends INCOMPLETE — an unverified PASS is worse than an honest shortfall, so record each finding in the sandbox as you go.
+- {file_scope_rule}
+- **The pre-loaded context is a starting point, not evidence.** The diff (or changed files) is included below so you start oriented — it is NOT proof the code works and NOT a reason to skip step 1 above.
 - **Fast-track mode: {fast_track_mode}.** {fast_track_instruction}
 - **Do not re-read the same file twice.** If read_file returned content, you already have it.
 - **Do not re-run the same command.** Check previous results before running again.
@@ -183,13 +274,16 @@ command output MUST be marked FAIL, not PASS.
 
 When you've checked EVERY criterion, deliver your verdict. You MUST output EXACTLY this JSON format with NO surrounding text, NO markdown fences, NO commentary:
 
-{"verdict":"COMPLETE","items":[{"criterion":"<exact criterion text>","status":"PASS","detail":"<specific file:line evidence>"},{"criterion":"<exact criterion text>","status":"FAIL","detail":"<what is missing and where>"}],"summary":"<one sentence>"}
+{"verdict":"COMPLETE","items":[{"criterion":"<exact criterion text>","status":"PASS","detail":"<specific file:line evidence>"},{"criterion":"<exact criterion text>","status":"FAIL","detail":"<what is missing and where>"},{"criterion":"<derived criterion you proposed>","derived":true,"status":"PASS","detail":"<file:line or command output that proves it>"}],"summary":"<one sentence>"}
 
 CRITICAL RULES:
 - Output ONLY the JSON object. Nothing before. Nothing after.
 - "verdict" must be "COMPLETE" or "INCOMPLETE" — nothing else
 - "status" must be "PASS" or "FAIL" — nothing else
-- EVERY criterion from the task must have a corresponding item
+- EVERY given criterion must have a corresponding item, plus every derived criterion you proposed
+- `"derived": true` marks an item you proposed yourself; given criteria carry no `derived` key
+- A derived FAIL is a FAIL: it makes the verdict INCOMPLETE exactly like a given FAIL
+- COMPLETE requires every item to PASS; one FAIL (given or derived) means INCOMPLETE
 - PASS requires concrete evidence (file path, line number, or test output)
 - FAIL requires explaining exactly what's missing
 - Read actual code — never assume"""
@@ -378,6 +472,11 @@ class VerdictItem:
     # every degraded (ABSTAIN) run — serializes exactly as before.
     resolution_probability: float | None = None
     cited_path: str | None = None
+    # GR-176: True when the judge proposed this criterion itself (a derived
+    # criterion) rather than receiving it in the task. Additive and defaulting
+    # to False, so every verdict produced before derived criteria existed — and
+    # every verdict with none — serializes exactly as before.
+    derived: bool = False
 
 
 def item_glyph(status: str) -> str:
@@ -520,6 +619,14 @@ class AgenticEvaluator:
         config = self._load_config()
         evaluator_cfg = config.get("evaluator", {})
         self.max_file_bytes: int = int(evaluator_cfg.get("max_file_bytes", 131_072))
+        # ── Max readable file size (GR-170) ──
+        # Distinct from max_file_bytes, which TRUNCATES a result. This is the
+        # point where reading is refused outright: repo-wide scope makes it
+        # possible to point read_file at a generated blob (a lockfile, a data
+        # dump, a minified bundle) and a truncated read of one of those is
+        # worse than no read — the judge would grade against half a file and
+        # believe it saw the whole thing. Range reads remain available.
+        self.max_read_bytes: int = int(evaluator_cfg.get("max_read_bytes", DEFAULT_MAX_READ_BYTES))
 
     def _resolve_fast_track(self) -> bool:
         """Resolve fast_track setting: 'on'→True, 'off'→False, 'auto'→detect.
@@ -944,6 +1051,28 @@ class AgenticEvaluator:
                     lines.append(f"  Evidence: {evidence}")
             lines.append("")
 
+        # GR-176: derived criteria must survive compaction too — they are part
+        # of the verdict, and a resumed run that forgot it proposed them would
+        # silently drop the bar it set.
+        derived_rows = self._derived_criteria_from_sandbox()
+        if derived_rows:
+            lines.append(f"### Derived criteria you proposed ({len(derived_rows)}):")
+            for _k, derived_text, derived_evidence in derived_rows:
+                glyph = (
+                    "✓"
+                    if (derived_evidence or "").startswith("PASS")
+                    else ("✗" if derived_evidence else "—")
+                )
+                lines.append(f"- {glyph} {derived_text}")
+                if derived_evidence:
+                    lines.append(f"  Evidence: {derived_evidence}")
+            lines.append("")
+            lines.append(
+                "Include each derived criterion in the verdict JSON with "
+                '"derived": true — they are graded exactly like given criteria.'
+            )
+            lines.append("")
+
         if remaining_indices:
             lines.append(f"### Still to verify ({len(remaining_indices)}/{criteria_total}):")
             for i in remaining_indices:
@@ -983,6 +1112,25 @@ class AgenticEvaluator:
         Token/file-scope/fast-track placeholders are substituted either way.
         (2026-08-08: prompt_template is now actually wired through.)"""
         base = self._system_prompt_override or EVALUATOR_SYSTEM_PROMPT
+        full_scope = self._allowed_files is None
+        if full_scope:
+            scope_rule = (
+                "**File scope: full.** You MAY read any file inside the worktree and search the "
+                "whole repository — trace a symbol from its definition to its callers and its "
+                "entrypoint. Two limits still apply: reads stay inside the worktree root (no "
+                "absolute paths outside it, no `..` escapes), and credential stores (`.env`, "
+                "`*.pem`, `credentials*`, `.netrc`, …) are refused. Files larger than "
+                f"{self.max_read_bytes:,} bytes must be read as a range "
+                "(offset/limit or byte mode)."
+            )
+        else:
+            scope_rule = (
+                "**File scope: changed.** `evaluator.file_scope: changed` is the explicit opt-out "
+                "from repo-wide review: you can ONLY access modified files plus their mapped test "
+                "files and always-allowed config files, and read_file()/search_pattern() reject "
+                "anything else with `File not in scope: …`. If a criterion needs a file outside "
+                "that set, say so in its detail instead of guessing at its contents."
+            )
         return (
             base.replace(
                 "{token_budget}",
@@ -996,15 +1144,19 @@ class AgenticEvaluator:
                 if self.eval_cap.max_output_tokens > 0
                 else "unlimited",
             )
-            .replace("{file_scope}", self._allowed_files is not None and "changed" or "full")
+            .replace("{file_scope}", "full" if full_scope else "changed")
+            .replace("{file_scope_rule}", scope_rule)
+            .replace("{max_derived}", str(MAX_DERIVED_CRITERIA))
+            .replace("{max_index}", str(MAX_DERIVED_CRITERIA - 1))
             .replace("{fast_track_mode}", "ON" if self.fast_track else "OFF")
             .replace(
                 "{fast_track_instruction}",
-                "ON — Verify ONLY changed lines and immediate callers. Skip deep call-graph analysis. "
-                "Trust the diff: if a criterion references code outside changed files, check only the "
-                "interface boundary (function signature, type) — do NOT trace into unchanged code."
+                "ON — cost-saving mode on this large tree: verify the changed lines and immediate "
+                "callers, and skip deep call-graph expansion. Step 3 (entrypoint reachability) is "
+                "still required, but with ONE targeted search for the new symbol, not a full trace."
                 if self.fast_track
-                else "OFF — Normal mode. Read surrounding code as needed to verify criteria.",
+                else "OFF — Normal mode. Read surrounding code as needed to verify criteria, "
+                "including the entrypoint that reaches the change.",
             )
         )
 
@@ -1151,8 +1303,13 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         # Build tools list based on config — the same evaluator_cfg block the
         # pre-screen read above; config is loaded exactly once per evaluation.
 
-        # Compute file scope — which files the evaluator is allowed to touch
-        file_scope = evaluator_cfg.get("file_scope", "changed")
+        # Compute file scope — which files the evaluator is allowed to touch.
+        # GR-170: repo-wide ('full') is the DEFAULT; the reviewer must be able
+        # to follow a changed symbol to its callers and its entrypoint, which is
+        # where "wired but unreachable" hides. 'changed' stays as the explicit
+        # opt-out for repos where the pre-loaded diff is genuinely the whole
+        # question and the context budget is tight.
+        file_scope = str(evaluator_cfg.get("file_scope", DEFAULT_FILE_SCOPE)).strip().lower()
         self._allowed_files = (
             self._compute_allowed_files() if file_scope == "changed" else None
         )  # None = full scope
@@ -1419,6 +1576,11 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         if cap is None:
             return
         graded = sum(1 for i in range(criteria_total) if f"verified_{i}" in self._sandbox)
+        # GR-176: derived criteria are graded work too — count them so the
+        # cost-per-criterion signal on a "sets its own bar" run is not wrong.
+        derived_rows = self._derived_criteria_from_sandbox()
+        graded += sum(1 for _k, _t, ev in derived_rows if ev is not None)
+        criteria_total += len(derived_rows)
         if graded == self._logged_graded and iteration % 25:
             return
         self._logged_graded = graded
@@ -1454,6 +1616,25 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             return partial
         # No criteria to name (a task with none): the cap message is all there is.
         return Verdict(verdict="INCOMPLETE", summary=f"Cap exceeded: {cap_error}")
+
+    def _derived_criteria_from_sandbox(self) -> list[tuple[int, str, str | None]]:
+        """(k, criterion text, evidence or None) for each derived criterion recorded.
+
+        GR-176: the judge proposes a derived criterion in ``derived_<k>`` and
+        grades it in ``verified_derived_<k>``. A run that ends on a cap must
+        still name every one it proposed — the same reason given criteria get
+        an item each (JUDGE-TIER2-001): a derived criterion the budget stopped
+        is UNVERIFIED, not absent. Capped at ``MAX_DERIVED_CRITERIA`` so a
+        model that invents twenty keys cannot grow the item list unbounded.
+        """
+        rows: list[tuple[int, str, str | None]] = []
+        for k in range(MAX_DERIVED_CRITERIA):
+            text = self._sandbox.get(f"derived_{k}")
+            evidence = self._sandbox.get(f"verified_derived_{k}")
+            if text is None and evidence is None:
+                continue
+            rows.append((k, (text or f"derived criterion {k}").strip(), evidence))
+        return rows
 
     def _criterion_spans(self) -> dict[int, str]:
         """Render each graded criterion's own spend, in the order it was graded.
@@ -1525,6 +1706,34 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                         detail="Not examined — evaluation ended before this criterion was reached (no judgement was made about it)",
                     )
                 )
+        # GR-176: a derived criterion the run proposed is part of the item list
+        # too — graded if the run reached it, UNVERIFIED if the budget stopped it.
+        for k, derived_criterion, derived_evidence in self._derived_criteria_from_sandbox():
+            span = spans.get(DERIVED_MARK_OFFSET + k)
+            if derived_evidence is None:
+                items.append(
+                    VerdictItem(
+                        criterion=derived_criterion,
+                        status="UNVERIFIED",
+                        detail=(
+                            "Not examined — derived criterion proposed but the evaluation "
+                            "ended before it was graded"
+                        ),
+                        derived=True,
+                    )
+                )
+                continue
+            graded += 1
+            status = "PASS" if derived_evidence.startswith("PASS") else "FAIL"
+            items.append(
+                VerdictItem(
+                    criterion=derived_criterion,
+                    status=status,
+                    detail=f"{derived_evidence} · {span}" if span else derived_evidence,
+                    derived=True,
+                )
+            )
+
         # A partial verdict must reflect whether ALL criteria passed, not just
         # whether ANY were verified. Previously this returned COMPLETE whenever
         # at least one criterion was checked, so a run that hit the cap after
@@ -1674,7 +1883,11 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         """
         full_path = os.path.join(self.workdir, path)
         real = os.path.realpath(full_path)
-        if not real.startswith(os.path.realpath(self.workdir)):
+        # GR-170: compare with a separator boundary. ``str.startswith`` alone
+        # accepts a sibling that merely shares the prefix (``/repo-evil`` for
+        # workdir ``/repo``) — the exact-escape the guard must not have.
+        root = os.path.realpath(self.workdir)
+        if real != root and not real.startswith(root + os.sep):
             return {"error": f"Path outside working tree: {path}"}
         # Enforce file scope BEFORE existence check — reject out-of-scope files
         # even if they exist, so the LLM knows why it can't access them
@@ -1682,12 +1895,42 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             return {
                 "error": f"File not in scope: {path}. Evaluator is scoped to changed files only. Set evaluator.file_scope: full in .gitreins/config.yaml to allow all files."
             }
+        # GR-170: repo-wide scope must not open the credential stores the commit
+        # guard refuses. Same classifier, same fixture exemption.
+        if _is_sensitive_read_path(path):
+            return {
+                "error": (
+                    f"Refusing to read sensitive path: {path}. This file matches "
+                    "guards.SENSITIVE_PATH_PATTERNS (credential-store class) and is never "
+                    "readable by the evaluator. Judge the criterion from the code that "
+                    "consumes the credential, the diff, or the guard output instead."
+                )
+            }
         if not os.path.exists(real):
             return {"error": f"File not found: {path}"}
         if os.path.isdir(real):
             return {"error": f"Path is a directory: {path}"}
         try:
             total_bytes = os.path.getsize(real)
+
+            # GR-170: refuse an over-cap file rather than silently truncating.
+            # Range reads stay allowed — refusal is about a judge believing it
+            # read the whole file, not about forbidding targeted access.
+            whole_read = (mode == "bytes" and byte_offset <= 0 and byte_limit <= 0) or (
+                mode != "bytes" and offset <= 1 and limit <= 0
+            )
+            if total_bytes > self.max_read_bytes and whole_read:
+                return {
+                    "error": (
+                        f"File too large to read whole: {path} is {total_bytes:,} bytes "
+                        f"(cap {self.max_read_bytes:,}, evaluator.max_read_bytes). Read a "
+                        "range instead (offset/limit, or mode='bytes' with byte_offset/"
+                        "byte_limit), or raise evaluator.max_read_bytes in .gitreins/config.yaml."
+                    ),
+                    "path": path,
+                    "total_bytes": total_bytes,
+                    "max_read_bytes": self.max_read_bytes,
+                }
 
             if mode == "bytes":
                 # Byte-level read
@@ -1882,6 +2125,10 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 )
             # rg returns 0=matches, 1=no matches, >1=error
             lines = result.stdout.strip().split("\n") if result.stdout else []
+            # GR-170: a whole-repo search must not surface credential stores
+            # either (gitignored files are usually skipped by rg, but not
+            # always — e.g. a tracked .env).
+            lines = [ln for ln in lines if not _is_sensitive_read_path(ln.split(":", 1)[0])]
             return {"matches": lines[:200], "count": min(len(lines), 200)}
         except subprocess.TimeoutExpired:
             if grep_path := shutil.which("grep"):
@@ -2082,8 +2329,16 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         if isinstance(key, str) and key.startswith("verified_"):
             suffix = key[len("verified_") :]
             cap = getattr(self, "eval_cap", None)
-            if suffix.isdigit() and cap is not None:
-                self._criterion_marks[int(suffix)] = {
+            # GR-176: ``verified_derived_<k>`` is the same checkpoint for a
+            # criterion the judge proposed itself; the offset keeps its mark
+            # from colliding with a given criterion's index.
+            mark_index: int | None = None
+            if suffix.isdigit():
+                mark_index = int(suffix)
+            elif suffix.startswith("derived_") and suffix[len("derived_") :].isdigit():
+                mark_index = DERIVED_MARK_OFFSET + int(suffix[len("derived_") :])
+            if mark_index is not None and cap is not None:
+                self._criterion_marks[mark_index] = {
                     "seq": len(self._criterion_marks),
                     "iteration": round(float(cap.iteration_credit), 1),
                     "tokens_in": int(cap.cumulative_input_tokens),
@@ -2154,8 +2409,22 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                                 criterion=item.get("criterion", "unknown"),
                                 status=status,
                                 detail=item.get("detail", ""),
+                                # GR-176: the judge's own criteria ride the same
+                                # item list, flagged so a renderer can tell the
+                                # task's bar from the reviewer's.
+                                derived=bool(item.get("derived", False)),
                             )
                         )
+                    # GR-176: "a derived FAIL fails the verdict" must be true of
+                    # the ARTIFACT, not only of the prompt. A model that grades a
+                    # derived criterion FAIL and still writes COMPLETE would
+                    # otherwise pass the task on its own contradiction.
+                    if verdict_val == "COMPLETE" and any(i.status != "PASS" for i in items):
+                        logger.warning(
+                            "Verdict said COMPLETE with %d non-PASS item(s) — forcing INCOMPLETE",
+                            sum(1 for i in items if i.status != "PASS"),
+                        )
+                        verdict_val = "INCOMPLETE"
                     return Verdict(
                         verdict=verdict_val,
                         items=items,

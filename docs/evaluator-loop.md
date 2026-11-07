@@ -37,10 +37,11 @@ differs, the evaluator's read is what runs.
 
 | Key | Default | Effect |
 |-----|---------|--------|
-| `file_scope` | `"changed"` | `"changed"` restricts the judge to changed files plus their mapped test files, always-allowed config files (`pyproject.toml`, `go.mod`, `Makefile`, …) and `.gitreins/config.yaml` — enforced per `read_file`/`search_pattern` call. Any other value (e.g. `"full"`) means full scope. An out-of-scope read returns: *"File not in scope: \<path\>. Evaluator is scoped to changed files only. Set evaluator.file_scope: full in .gitreins/config.yaml to allow all files."* — practical meaning: the judge can verify the change and its tests, but cannot trace helpers in unchanged code; setting `full` trades context protection for reach. |
+| `file_scope` | `"full"` | **GR-170: repo-wide review is the default.** `"full"` lets the judge read any file inside the worktree and search the whole repository, which is what makes reachability checkable ("is this new flag called from an entrypoint?"). Reads are still confined to the worktree root (no `..` escapes, no absolute paths outside it) and credential stores (`SENSITIVE_PATH_PATTERNS`: `.env`, `*.pem`, `credentials*`, `.netrc`, …) are refused with *"Refusing to read sensitive path: <path>…"*; test fixture dirs (`tests/`, `fixtures/`) keep the guard's exemption. `"changed"` is the explicit opt-out: the judge may only read changed files plus their mapped test files, always-allowed config files (`pyproject.toml`, `go.mod`, `Makefile`, …) and `.gitreins/config.yaml`, and any other read returns *"File not in scope: <path>. Evaluator is scoped to changed files only. Set evaluator.file_scope: full in .gitreins/config.yaml to allow all files."* Choose `changed` when the diff genuinely is the whole question and the input budget is tight. |
 | `code_context_budget` | `0.70` | Caps the pre-loaded code-context block to this share of `max_input_tokens`; a larger block is line-trimmed to fit with a truncation notice. The judge can still read individual files afterward. |
 | `max_file_bytes` | `131072` (128 KB) | Caps what a single `read_file` result may return: content above the cap is cut at the limit with a `[capped at N bytes, M total — use offset/limit …]` notice, so one huge file cannot eat the context window (range reads let the judge reach the rest). The injected context block uses its own separate caps (500-line diff; 20 files × 200 lines; >500 KB files skipped). |
-| `fast_track` | `"auto"` | `"on"`/`"true"` → fast track on: the prompt tells the judge to verify only changed lines and immediate callers, not trace unchanged code. `"off"`/`"false"` → normal mode. `"auto"` (the default) counts top-level source packages (excluding hidden/test/venv/build dirs) and turns fast track ON at ≥ 20 packages; on detection failure it is OFF. Fast-track judgments of out-of-diff behavior stay shallow by design. |
+| `max_read_bytes` | `524288` (512 KB) | GR-170: a **whole-file** `read_file` above this size is refused, not truncated — *"File too large to read whole: … (cap N, evaluator.max_read_bytes). Read a range instead …"*. Truncation would let a judge grade a half-read lockfile or bundle and believe it saw the file. Range reads (`offset`/`limit`, `mode='bytes'` with `byte_offset`/`byte_limit`) are still allowed at any file size. Distinct from `max_file_bytes`, which truncates an accepted result. |
+| `fast_track` | `"auto"` | `"on"`/`"true"` → fast track on: the prompt tells the judge to verify changed lines and immediate callers and skip deep call-graph expansion, while still doing ONE targeted search for entrypoint reachability (GR-170 kept that step mandatory). `"off"`/`"false"` → normal mode. `"auto"` (the default) counts top-level source packages (excluding hidden/test/venv/build dirs) and turns fast track ON at ≥ 20 packages; on detection failure it is OFF. Fast-track judgments of out-of-diff behavior stay shallow by design. |
 
 ### When a cap is hit
 
@@ -119,6 +120,49 @@ have run tests but whose detail shows no output **must be marked FAIL, not
 PASS**. The only exception is a project with no test suite at all (docs-only
 repo, `test_command: true`), which must be recorded as
 *"no test suite — verified <command or none>"*.
+
+
+## Review posture, and criteria the judge derives (GR-176)
+
+The judge is prompted as a reviewer that explores first and sets part of its
+own bar, not as a compliance checker over the diff:
+
+1. **EXPLORE FIRST** — changed files in full → call sites of every changed
+   symbol (`search_pattern`) → the entrypoint that must reach the new behaviour
+   (main, CLI registration, HTTP route, exported API, settings loader) → the
+   tests. Only then grade. A diff-only judge cannot distinguish "works" from
+   "exists".
+2. **DERIVE ITS OWN CRITERIA** — after reading the task and the diff the judge
+   proposes additional criteria *this change* needs (reachability from an
+   entrypoint, failure path returns an error instead of silently succeeding,
+   idempotency on re-run, back-compat for existing callers, the write/read
+   seam), capped at `MAX_DERIVED_CRITERIA = 5`. It records each as
+   `sandbox_write("derived_<k>", "<text>")` before grading and marks it
+   `"derived": true` in the verdict item.
+3. **NOT UNIVERSALLY STRICT** — a missing TODO, a style preference or an
+   unrequested refactor is not a failure, and the judge must not invent
+   requirements the task never implied. One correct, evidenced complaint beats
+   five speculative ones.
+4. **EVIDENCE PER ITEM** — every item, given or derived, must name a
+   `file:line`, command output or tool result; an item with no evidence is
+   INCOMPLETE, not PASS.
+
+Derived criteria are graded exactly like given ones and share the same
+`items` list. Two guarantees are enforced in code, not just requested in the
+prompt:
+
+* **A derived FAIL fails the verdict.** `_parse_verdict` downgrades a
+  `COMPLETE` that carries any non-PASS item to `INCOMPLETE` (logged), so a model
+  cannot grade its own criterion FAIL and still ship a pass.
+* **A capped run still names them.** `_extract_partial_verdict` appends one item
+  per derived criterion from the sandbox — `PASS`/`FAIL` if it was graded,
+  `UNVERIFIED` ("not examined") if the budget stopped first — and the verdict
+  stays `INCOMPLETE`. Compaction re-states the derived criteria in the resume
+  prompt (`_build_compacted_prompt`) so a fresh context does not silently drop
+  the bar it set.
+
+Persisted items carry `"derived": true` only when set, so a verdict with no
+derived criteria serializes byte-identically to the pre-GR-176 shape.
 
 
 ## Evaluation Tools (12)
@@ -457,11 +501,19 @@ The fallback logs a warning and includes the raw text in the summary.
     {"criterion": "tests", "status": "FAIL",
      "detail": "Missing 3 required tests — test_login.py only has happy-path"},
     {"criterion": "login-endpoint", "status": "PASS",
-     "detail": "POST /login confirmed at routes.py:42-68"}
+     "detail": "POST /login confirmed at routes.py:42-68"},
+    {"criterion": "the new session cookie is read by the middleware",
+     "derived": true, "status": "FAIL",
+     "detail": "middleware.py:31 reads 'sid'; auth.py:70 writes 'session_id'"}
   ],
-  "summary": "2 of 3 criteria fail"
+  "summary": "2 of 3 given criteria fail"
 }
 ```
+
+`"derived": true` marks a criterion the judge proposed itself (GR-176). It is
+absent on given criteria and on every pre-GR-176 artifact. `COMPLETE` requires
+every item to PASS; one FAIL — derived or given — makes the artifact
+`INCOMPLETE` even if the model wrote `COMPLETE`.
 
 ## State Lifecycle
 
