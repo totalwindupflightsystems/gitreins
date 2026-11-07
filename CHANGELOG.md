@@ -7,14 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-11-06
+
+### Added
+- **Staged security review pipeline (GR-156)** — an opt-in top-level
+  `security_review:` block drives `rules → localize → judge` over the change set
+  the guard already grades. `mode: staged` runs bundled, offline semgrep and
+  ast-grep rule tables over the staged files only, so every `rules` finding
+  carries its `rule_id`, CWE and `file:line`; stage 2 runs the Antares scanner
+  over the same file set and drops anything below `min_confidence` while
+  counting the drops, so a low-confidence hit is never silently promoted.
+  `mode: off` is the default and leaves guard output behaviour-identical.
+- **Operator runbook for `gitreins serve`** — deployment, the `/metrics`
+  endpoint and root dev-DB cleanup in one place (OPS-GITREINS-1).
+
 ### Fixed
 - **Judge-job liveness belongs to the worker, not the dispatcher
   (JUDGE-JOB-001)** — job records carry the evaluation worker's pid, kind and
-  a heartbeat; a dead worker pid or a heartbeat older than the stale cap is
-  reaped to a terminal `error` on the next dispatch/status poll. A job that
-  died used to keep answering "Evaluation already in progress" for as long as
-  the process that dispatched it stayed alive (the MCP server's pid), and the
-  poll never reported the death.
+  a heartbeat; a dead worker pid or a heartbeat older than the 180 s stale cap is
+  reaped to a terminal `error` (`error_kind=orphaned_worker`, no verdict) on the
+  next dispatch or `judge --status` poll. A job that died used to keep answering
+  "Evaluation already in progress" for as long as the process that dispatched it
+  stayed alive (the MCP server's pid), and the poll never reported the death.
+- **A non-UTF-8 tool line cannot kill a grading (JUDGE-TIER2-001)** — bounded
+  subprocess output decodes with `errors="replace"`, so one 0x93 byte on a
+  tool's stdout no longer raises inside `communicate()` and abandons a live
+  evaluation. A cap-hit verdict always carries one item per criterion
+  (PASS/FAIL with that criterion's own token and iteration spend, or
+  UNVERIFIED "not examined") instead of `items=[]`, logs coverage and spend
+  each iteration before the cap fires, and writes its `usage.jsonl` cost row
+  (outcome `graded`/`error`) even when the run raises.
+- **A partially-covered rules stage is not a missing-tool stage (GR-GAP-067)** —
+  with one optional rules tool absent the stage is `ok`, the absent tool is
+  named in the stage detail and the guard lane warning, and the findings the
+  present tool collected are delivered. `missing_tool` is reserved for a host
+  with no rules tool at all, so a semgrep-only host no longer blocks every
+  commit (policy `fail`) or grades the stage skipped while semgrep did run
+  (policy `skip`).
+- **`push-check` applies the repo's own path allowlist (GR-GAP-066)** — the
+  pre-push gate reads `.gitleaks.toml` `[allowlist].paths` (degrading to the
+  built-in board pattern on any read/parse failure) plus a fixture-shaped value
+  guard, so deliberate test fixtures stop blocking publication while a real
+  split-credential concatenation is still refused.
+- **`hook_timeout` is derived above `test_timeout`** — a hook budget at or below
+  the tests arm expired first, took the GR-140 timeout early-return and reported
+  `passed=True` while the console also said `go_tests FAIL` (measured on a
+  900/300 config; 575 of 695 audited fleet configs carried the same inversion).
+  The budget is now derived rather than defaulted, closing the fail-open window.
+- **The `go_tests` lane bounds its build budget (INT-FLAKE-8)** — `GOMAXPROCS`
+  and `-p=2` are set only when the caller's environment does not already carry
+  them, so an unbounded Go compile can no longer inflate a pytest worker's
+  envelope until an earlyoom policy kills the worker; explicit ambient values
+  are preserved verbatim and the lane records its measured peak RSS.
+
+### Changed
+- **Test-robustness tranche** — Go-compiling guard tests run serialized under
+  xdist (INT-FLAKE-8), the serve request-counter assertion polls with a bound
+  (INT-FLAKE-9), and the spec-alignment post-timeout reaping poll is widened for
+  loaded hosts (INT-FLAKE-7-R2).
 
 ## [0.18.0] - 2026-11-04
 

@@ -7,7 +7,7 @@ in a `try/finally`; transport and best-effort contract per §5b). The resident-s
 catalogue (§4a/§5a) is **still not implemented**. Sections 2/2a/2b below still record the
 audited pre-instrumentation state that motivated this document.
 
-Audited at version `0.17.1` (`pyproject.toml:7` at audit time; the package now declares `0.18.0`), 2026-11-03.
+Audited at version `0.17.1` (`pyproject.toml:7` at audit time; the package now declares `0.18.1`), 2026-11-03.
 
 ---
 
