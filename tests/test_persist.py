@@ -311,6 +311,95 @@ def test_no_provenance_keeps_the_persisted_shape_absent(tmp_path: Path) -> None:
     assert "provenance" not in data
 
 
+# ── GR-166: pass class ───────────────────────────────────────
+
+
+def test_a_judged_result_records_pass_class_judged(tmp_path: Path) -> None:
+    """A run whose Tier 2 produced a verdict persists ``pass_class: judged``."""
+    from engine.persist import build_verdict_data
+
+    result = _judge_result(
+        pipeline_result={
+            "passed": True,
+            "stages": {
+                "tier2": {
+                    "id": "tier2",
+                    "passed": True,
+                    "steps": [
+                        {
+                            "id": "eval",
+                            "type": "ai_eval",
+                            "passed": True,
+                            "data": {"verdict": "COMPLETE", "items": []},
+                        }
+                    ],
+                }
+            },
+        }
+    )
+
+    data = build_verdict_data(str(tmp_path), _task(), result)
+
+    assert data["pass_class"] == "judged"
+    assert data["tier2_skipped"] is False
+
+
+def test_a_tier1_only_result_records_the_weaker_class(tmp_path: Path) -> None:
+    """GR-166 AC1: no Tier 2 evidence → ``tier1-only`` + ``tier2_skipped``."""
+    from engine.persist import build_verdict_data
+
+    result = _judge_result(
+        pipeline_result={"passed": True, "stages": {"tier1": {"id": "tier1", "passed": True}}}
+    )
+
+    data = build_verdict_data(str(tmp_path), _task(), result)
+
+    assert data["pass_class"] == "tier1-only"
+    assert data["tier2_skipped"] is True
+    # No owner waiver configured here, so nothing claims one.
+    assert "tier2_waiver_digest" not in data
+
+
+def test_a_tier1_only_result_records_the_owner_waiver_digest(tmp_path: Path) -> None:
+    """GR-166 AC2: the waiver is read from config and recorded as a digest.
+
+    The token itself must never appear in ``verdict.json`` — that file is
+    committed — so the record carries its SHA-256.
+    """
+    import hashlib
+
+    from engine.persist import build_verdict_data
+
+    token = "owner-waiver-token-persist"
+    config = tmp_path / ".gitreins" / "config.yaml"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text(f"gate:\n  tier2_waiver: {token}\n", encoding="utf-8")
+
+    result = _judge_result(pipeline_result={"passed": True, "stages": {}})
+
+    data = build_verdict_data(str(tmp_path), _task(), result)
+
+    assert data["pass_class"] == "tier1-only"
+    assert data["tier2_waiver_digest"] == hashlib.sha256(token.encode()).hexdigest()
+    assert token not in json.dumps(data)
+
+
+def test_the_waiver_comes_from_the_environment_too(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """GR-166: ``GITREINS_TIER2_WAIVER`` is the env half of the same token."""
+    import hashlib
+
+    from engine.persist import build_verdict_data
+
+    monkeypatch.setenv("GITREINS_TIER2_WAIVER", "env-waiver-token")
+    result = _judge_result(pipeline_result={"passed": True, "stages": {}})
+
+    data = build_verdict_data(str(tmp_path), _task(), result)
+
+    assert data["tier2_waiver_digest"] == hashlib.sha256(b"env-waiver-token").hexdigest()
+
+
 # ── git-branch fallback (DF-007) ─────────────────────────────
 
 

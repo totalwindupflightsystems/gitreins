@@ -402,7 +402,35 @@ class Result:
     passed = True
     summary = "lane judged PASS"
     verdict = None
-    pipeline_result = None
+    # GR-166: the lane's judge phase ran BOTH tiers — a pass with no Tier 2
+    # evidence is tier1-only and the merge gate refuses it, correctly.
+    pipeline_result = {
+        "passed": True,
+        "stages": {
+            "tier2": {
+                "id": "tier2",
+                "passed": True,
+                "steps": [
+                    {
+                        "id": "eval",
+                        "type": "ai_eval",
+                        "passed": True,
+                        "data": {
+                            "verdict": "COMPLETE",
+                            "items": [
+                                {
+                                    "criterion": "GET /status returns 200",
+                                    "status": "PASS",
+                                    "detail": "app.status() returns ok",
+                                }
+                            ],
+                            "summary": "criterion satisfied",
+                        },
+                    }
+                ],
+            }
+        },
+    }
 
 
 path = write_disk_verdict(tree, build_verdict_data(str(tree), Task(), Result()))
@@ -649,6 +677,9 @@ def test_merge_gate_reads_the_disk_verdict_for_the_commit_it_grades(fleet_repo: 
         return {
             "task_id": record.task_id,
             "passed": True,
+            # GR-166: a JUDGED pass — this fixture grades the disk-verdict
+            # lookup, not the pass class, so it says which class it is.
+            "pass_class": "judged",
             "worktree": str(tree.resolve()),
             "branch": record.branch,
             "commit": commit,

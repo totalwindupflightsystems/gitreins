@@ -1,0 +1,138 @@
+"""The verdict gate — one authority for what a stored verdict MEANS.
+
+Two questions live here, and nowhere else:
+
+* **GR-166** — did Tier 2 ever run? A ``--skip-tier2`` run is a Tier 1
+  grade, not a judged pass. ``pass_class`` records which one a verdict is,
+  and the merge-back refuses ``tier1-only`` unless the owner's waiver token
+  is recorded in the verdict itself.
+
+Reading is deliberately tolerant: the same functions accept the live
+``Verdict`` / ``JudgeResult`` objects AND a persisted ``verdict.json`` dict,
+and a verdict written before these fields existed is classified from its
+stages instead of failing closed on a missing key (GR-166 AC1).
+"""
+
+from __future__ import annotations
+
+import hashlib
+import hmac
+import logging
+import os
+from typing import Any, Mapping
+
+logger = logging.getLogger("gitreins.gate")
+
+#: Tier 2 (the only stage that reads the code) produced a verdict.
+PASS_CLASS_JUDGED = "judged"
+#: Tier 2 never ran: the verdict grades Tier 1 alone.
+PASS_CLASS_TIER1_ONLY = "tier1-only"
+
+#: Env var carrying the owner's tier-1-only merge waiver token. Takes
+#: precedence over ``gate.tier2_waiver`` in ``.gitreins/config.yaml``. Never
+#: read from a commit message: the author controls that text.
+TIER2_WAIVER_ENV = "GITREINS_TIER2_WAIVER"
+
+#: Verdict key holding the digest of the owner's waiver token (see
+#: :func:`waiver_digest`). A digest, not the token: verdicts are committed.
+WAIVER_DIGEST_KEY = "tier2_waiver_digest"
+
+
+def _field(obj: object, key: str, default: Any = None) -> Any:
+    """Read *key* from a dict-shaped record or an attribute-bearing object."""
+    if isinstance(obj, Mapping):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _tier2_evidence(source: object) -> bool:
+    """True when *source* carries a Tier 2 verdict (live or persisted shape).
+
+    Three shapes exist and all three are read here, because a gate that
+    understands only one of them refuses the verdicts produced by the others:
+
+    * live legacy result — ``JudgeResult.tier2`` is a :class:`Verdict`;
+    * live/persisted pipeline result — a stage step's ``data["verdict"]``;
+    * persisted legacy verdict — top-level ``items`` were written by a Tier 2
+      run even though no stage dict was recorded.
+    """
+    for candidate in (source, _field(source, "pipeline_result", None)):
+        if candidate is None:
+            continue
+        if _field(candidate, "tier2", None) is not None:
+            return True
+        stages = _field(candidate, "stages", None)
+        if isinstance(stages, Mapping):
+            for stage in stages.values():
+                for step in _field(stage, "steps", None) or []:
+                    data = _field(step, "data", None)
+                    if isinstance(data, Mapping) and data.get("verdict"):
+                        return True
+    return False
+
+
+def pass_class(source: object) -> str:
+    """``judged`` or ``tier1-only`` for a verdict, a result, or a record.
+
+    GR-166: an explicit ``pass_class`` wins; a record written before the field
+    existed is classified from its stages — ``judged`` when Tier 2 evidence is
+    present, ``tier1-only`` when it is not.
+    """
+    explicit = _field(source, "pass_class", None)
+    if explicit in (PASS_CLASS_JUDGED, PASS_CLASS_TIER1_ONLY):
+        return str(explicit)
+    return PASS_CLASS_JUDGED if _tier2_evidence(source) else PASS_CLASS_TIER1_ONLY
+
+
+def waiver_digest(token: str) -> str:
+    """SHA-256 of the owner's waiver token.
+
+    The verdict records this digest rather than the token: ``verdict.json`` is
+    committed to the repository, so the token itself must never appear in it.
+    The digest is only reproducible by someone who already holds the token.
+    """
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def configured_waiver(workdir: str) -> str | None:
+    """The owner's tier-1-only merge waiver token, or ``None``.
+
+    Read from ``GITREINS_TIER2_WAIVER`` first, then ``gate.tier2_waiver`` in
+    the repo's ``.gitreins/config.yaml``. Deliberately NOT read from the commit
+    message, a trailer, or the verdict: all three are author-controlled, and
+    the whole point of the waiver is that the author cannot mint it.
+    """
+    token = os.environ.get(TIER2_WAIVER_ENV, "").strip()
+    if token:
+        return token
+    try:
+        from engine.config import load_raw_config
+
+        raw = load_raw_config(workdir)
+    except Exception:  # a broken config must not turn the gate into a crash
+        logger.debug("waiver lookup failed for %s", workdir, exc_info=True)
+        return None
+    section = raw.get("gate") if isinstance(raw, Mapping) else None
+    value = section.get("tier2_waiver") if isinstance(section, Mapping) else None
+    token = str(value).strip() if value is not None else ""
+    return token or None
+
+
+def recorded_waiver_digest(verdict: object) -> str | None:
+    """The waiver digest a verdict carries, or ``None`` when it carries none."""
+    value = _field(verdict, WAIVER_DIGEST_KEY, None)
+    return value if isinstance(value, str) and value else None
+
+
+def waiver_satisfied(verdict: object, workdir: str) -> bool:
+    """True when *verdict* records the waiver the owner configured for *workdir*.
+
+    Both halves are required: a configured token alone does not retroactively
+    waive a verdict produced without it, and a recorded digest alone does not
+    survive an owner who has since removed the token.
+    """
+    recorded = recorded_waiver_digest(verdict)
+    token = configured_waiver(workdir)
+    if not recorded or not token:
+        return False
+    return hmac.compare_digest(recorded, waiver_digest(token))

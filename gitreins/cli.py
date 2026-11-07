@@ -2371,6 +2371,23 @@ def cmd_task_complete(args: argparse.Namespace) -> None:
         result = judge.evaluate_task(task, skip_tier2=skip_tier2)
         print(result.summary)
 
+        # GR-166: the weaker class must be visible where the author reads the
+        # result, not only in verdict.json. A Tier 1-only pass is a Tier 1
+        # grade; it does not satisfy a judge-gated merge on its own.
+        from engine.gate import PASS_CLASS_TIER1_ONLY, configured_waiver, pass_class
+
+        if pass_class(result) == PASS_CLASS_TIER1_ONLY:
+            waiver = (
+                "the owner waiver is configured, so the verdict records its digest"
+                if configured_waiver(workdir)
+                else "no owner waiver is configured, so this verdict cannot satisfy a "
+                "judge-gated merge"
+            )
+            print(
+                "\nPass class: tier1-only — Tier 2 did not run, so this is a Tier 1 grade, "
+                f"not a judged pass ({waiver})."
+            )
+
         _persist_result(workdir, task, result)
         if not result.passed:
             if LLM_FAILURE_SUMMARY_PREFIX in (result.summary or ""):

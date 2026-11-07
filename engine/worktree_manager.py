@@ -990,6 +990,7 @@ class WorktreeManager:
                     "--actor to override). Verdict: "
                     f"{self._verdict_reference(task_id, record, verdict)}"
                 )
+            self._refuse_tier1_only(task_id, record, verdict)
 
         rebased = False
         if main_head != record.branch_point:
@@ -1033,6 +1034,7 @@ class WorktreeManager:
                         f"({', '.join(skipped)}) — a PASS whose gates never ran cannot "
                         "merge; task worktree preserved."
                     )
+                self._refuse_tier1_only(task_id, record, verdict)
 
         # Recheck all safety facts immediately before changing canonical main.
         if self._head(self.main_root) != main_head:
@@ -1096,6 +1098,38 @@ class WorktreeManager:
             "branch": record.branch,
             "worktree": str(tree),
         }
+
+    def _refuse_tier1_only(
+        self, task_id: str, record: WorktreeRecord, verdict: dict[str, Any]
+    ) -> None:
+        """HOLD a PASS whose Tier 2 never ran, unless the owner waived it (GR-166).
+
+        Tier 2 is the only stage that reads the change; ``--skip-tier2`` lets
+        the author switch it off, so a ``tier1-only`` verdict is a Tier 1 grade
+        and nothing more. 49 of 297 stored passes were that class and were
+        indistinguishable from a judged pass, which made the weaker class the
+        cheap way through the gate.
+
+        The waiver is the owner's: the token is read from ``GITREINS_TIER2_WAIVER``
+        or ``gate.tier2_waiver`` in this checkout's config — never from the
+        commit message, a trailer, or the verdict body — and the verdict must
+        carry its digest, so an author cannot mint one by writing one.
+        """
+        from engine.gate import PASS_CLASS_TIER1_ONLY, pass_class, waiver_satisfied
+
+        if pass_class(verdict) != PASS_CLASS_TIER1_ONLY:
+            return
+        if waiver_satisfied(verdict, str(self.main_root)):
+            return
+        raise WorktreeError(
+            "HOLD: the matching verdict is tier1-only — Tier 2 (the only stage that "
+            "reads the change) never ran, so this PASS is a Tier 1 grade, not a judged "
+            "pass, and it cannot satisfy the merge gate. Re-run the judge without "
+            "--skip-tier2, or record the owner's waiver (gate.tier2_waiver in "
+            ".gitreins/config.yaml, or GITREINS_TIER2_WAIVER) and re-judge so the "
+            "verdict carries it. Verdict: "
+            f"{self._verdict_reference(task_id, record, verdict)}"
+        )
 
     def _is_task_worktree(self, workdir: Path) -> bool:
         """True when ``workdir`` is a linked task worktree, not canonical main.
@@ -1286,8 +1320,14 @@ class WorktreeManager:
             task
         )
         _persist_result(str(tree), task, result)
+        from engine.gate import pass_class
+
         return {
             "passed": result.passed,
+            # GR-166: the freshly judged class rides with the result, so the
+            # post-rebase gate reads the same evidence the persisted record
+            # carries instead of inferring "judged" from a bare `passed`.
+            "pass_class": pass_class(result),
             "commit": self._head(tree),
             "worktree": str(tree.resolve()),
             "branch": _git(tree, "symbolic-ref", "--quiet", "--short", "HEAD").stdout.strip(),

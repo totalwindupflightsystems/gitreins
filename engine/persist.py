@@ -1019,6 +1019,27 @@ def build_verdict_data(workdir: str, task: Task, result: JudgeResult) -> dict[An
         "commit": source_commit,
     }
 
+    # GR-166: record WHICH KIND of pass this is. A `--skip-tier2` run grades
+    # Tier 1 alone, so 49 of 297 stored passes were indistinguishable from a
+    # judged one. `passed` stays for backwards compatibility, but it is not
+    # evidence of a judged pass and the merge gate reads `pass_class` instead.
+    # The waiver is read from config/env (never the commit message) and only
+    # its digest is recorded: the token must not ride into a committed file.
+    from engine.gate import (
+        PASS_CLASS_TIER1_ONLY,
+        configured_waiver,
+        pass_class,
+        waiver_digest,
+    )
+
+    verdict_class = pass_class(result)
+    verdict_data["pass_class"] = verdict_class
+    verdict_data["tier2_skipped"] = verdict_class == PASS_CLASS_TIER1_ONLY
+    if verdict_class == PASS_CLASS_TIER1_ONLY:
+        waiver_token = configured_waiver(workdir)
+        if waiver_token:
+            verdict_data["tier2_waiver_digest"] = waiver_digest(waiver_token)
+
     # GR-153: bind the verdict to the workspace bytes that were actually
     # observed, not only to HEAD. The fingerprint module is read-only and
     # returns no digest for non-authoritative states; direct callers of this

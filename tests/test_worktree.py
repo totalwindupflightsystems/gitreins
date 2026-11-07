@@ -874,12 +874,38 @@ def test_cli_worktree_help_lists_new_subcommands() -> None:
 # ── WORKTREE-004 — judge-gated merge-back ────────────────────────────────
 
 
-def _write_merge_config(repo: Path) -> None:
+def _write_merge_config(repo: Path, waiver: str | None = None) -> None:
     config = repo / ".gitreins" / "config.yaml"
     config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text("history:\n  storage: filesystem\n", encoding="utf-8")
+    body = "history:\n  storage: filesystem\n"
+    if waiver is not None:
+        # GR-166: the owner's tier-1-only merge waiver lives in config (or
+        # GITREINS_TIER2_WAIVER) — never in the commit message, which the
+        # author controls.
+        body += f"gate:\n  tier2_waiver: {waiver}\n"
+    config.write_text(body, encoding="utf-8")
     _git(repo, "add", ".gitreins/config.yaml")
     _git(repo, "commit", "-qm", "test merge config")
+
+
+#: The stage shape a JUDGED pass persists: Tier 2 ran and produced a verdict.
+#: GR-166: a pass with no Tier 2 evidence is `tier1-only` and cannot merge, so
+#: the merge-mechanics fixtures carry a real tier2 stage.
+_JUDGED_STAGES: dict[str, object] = {
+    "tier1": {"id": "tier1", "passed": True, "coverage": "full"},
+    "tier2": {
+        "id": "tier2",
+        "passed": True,
+        "steps": [
+            {
+                "id": "eval",
+                "type": "ai_eval",
+                "passed": True,
+                "data": {"verdict": "COMPLETE", "items": [], "summary": "all good"},
+            }
+        ],
+    },
+}
 
 
 def _write_merge_verdict(
@@ -889,6 +915,7 @@ def _write_merge_verdict(
     passed: bool,
     commit: str,
     stages: dict[str, object] | None = None,
+    extra: dict[str, object] | None = None,
 ) -> Path:
     # Judge persistence is rooted at the producing task checkout.  Keep the
     # repo argument for callers that also use it to prepare config, but never
@@ -904,8 +931,12 @@ def _write_merge_verdict(
         "branch": record.branch,
         "commit": commit,
     }
+    if stages is None:
+        stages = _JUDGED_STAGES if passed else None
     if stages is not None:
         verdict["stages"] = stages
+    if extra:
+        verdict.update(extra)
     path = entry / "verdict.json"
     path.write_text(json.dumps(verdict), encoding="utf-8")
     return path
@@ -985,6 +1016,129 @@ def test_merge_pass_verdict_with_tier1_skips_is_hold(wt_repo: Path) -> None:
     assert tree.exists() and _branch_exists(wt_repo, record.branch)
 
 
+def test_merge_refuses_a_tier1_only_pass_and_keeps_the_worktree(wt_repo: Path) -> None:
+    """GR-166: a pass whose Tier 2 never ran cannot satisfy the merge gate.
+
+    The author chooses whether the judge runs (``--skip-tier2``), so a
+    ``tier1-only`` verdict is a Tier 1 grade, not a judged pass. 49 of 297
+    passing verdicts in the stored history were exactly this class and were
+    indistinguishable from a judged pass.
+    """
+    _write_merge_config(wt_repo)
+    manager = WorktreeManager(wt_repo)
+    record, tree = _make_task_commit(manager, "MERGE-TIER1ONLY")
+    source = _git(tree, "rev-parse", "HEAD").stdout.strip()
+    # Only Tier 1 ran — no tier2 stage, so the record classifies as tier1-only.
+    _write_merge_verdict(
+        wt_repo,
+        record.task_id,
+        record,
+        True,
+        source,
+        stages={"tier1": {"id": "tier1", "passed": True, "coverage": "full"}},
+    )
+    before = _git(wt_repo, "rev-parse", "HEAD").stdout.strip()
+
+    with pytest.raises(WorktreeError, match="tier1-only"):
+        manager.merge(record.task_id)
+
+    assert _git(wt_repo, "rev-parse", "HEAD").stdout.strip() == before
+    assert tree.exists() and _branch_exists(wt_repo, record.branch)
+
+
+def test_merge_refuses_a_recorded_tier1_only_pass_class(wt_repo: Path) -> None:
+    """GR-166: the RECORDED class is authoritative, not the stage shape.
+
+    A verdict written by the judge carries ``pass_class``; the gate reads that
+    field first, so a record that says ``tier1-only`` is refused even when its
+    stage dict happens to look judged.
+    """
+    _write_merge_config(wt_repo)
+    manager = WorktreeManager(wt_repo)
+    record, tree = _make_task_commit(manager, "MERGE-RECORDED")
+    source = _git(tree, "rev-parse", "HEAD").stdout.strip()
+    _write_merge_verdict(
+        wt_repo,
+        record.task_id,
+        record,
+        True,
+        source,
+        extra={"pass_class": "tier1-only", "tier2_skipped": True},
+    )
+    before = _git(wt_repo, "rev-parse", "HEAD").stdout.strip()
+
+    with pytest.raises(WorktreeError, match="tier1-only"):
+        manager.merge(record.task_id)
+
+    assert _git(wt_repo, "rev-parse", "HEAD").stdout.strip() == before
+    assert tree.exists() and _branch_exists(wt_repo, record.branch)
+
+
+def test_merge_accepts_a_tier1_only_pass_recording_the_owner_waiver(wt_repo: Path) -> None:
+    """GR-166 AC3: an owner waiver recorded in the verdict lets it merge.
+
+    The token comes from config/env (never the commit message) and only its
+    digest is stored, so the verdict carries proof the owner waived Tier 2
+    without leaking the token into a committed artifact.
+    """
+    import hashlib
+
+    token = "owner-waiver-token-gr166"
+    _write_merge_config(wt_repo, waiver=token)
+    manager = WorktreeManager(wt_repo)
+    record, tree = _make_task_commit(manager, "MERGE-WAIVED")
+    source = _git(tree, "rev-parse", "HEAD").stdout.strip()
+    _write_merge_verdict(
+        wt_repo,
+        record.task_id,
+        record,
+        True,
+        source,
+        stages={"tier1": {"id": "tier1", "passed": True, "coverage": "full"}},
+        extra={
+            "pass_class": "tier1-only",
+            "tier2_skipped": True,
+            "tier2_waiver_digest": hashlib.sha256(token.encode()).hexdigest(),
+        },
+    )
+
+    result = manager.merge(record.task_id)
+
+    assert result["mode"] == "fast-forward"
+    assert _git(wt_repo, "rev-parse", "HEAD").stdout.strip() == source
+    assert not tree.exists()
+
+
+def test_merge_refuses_a_tier1_only_pass_whose_waiver_does_not_match(wt_repo: Path) -> None:
+    """GR-166: a digest that is not the owner's token waives nothing."""
+    import hashlib
+
+    _write_merge_config(wt_repo, waiver="the-owners-token")
+    manager = WorktreeManager(wt_repo)
+    record, tree = _make_task_commit(manager, "MERGE-FORGED")
+    source = _git(tree, "rev-parse", "HEAD").stdout.strip()
+    _write_merge_verdict(
+        wt_repo,
+        record.task_id,
+        record,
+        True,
+        source,
+        stages={"tier1": {"id": "tier1", "passed": True, "coverage": "full"}},
+        extra={
+            "pass_class": "tier1-only",
+            "tier2_skipped": True,
+            "tier2_waiver_digest": hashlib.sha256(b"something-the-author-made-up").hexdigest(),
+        },
+    )
+    before = _git(wt_repo, "rev-parse", "HEAD").stdout.strip()
+
+    with pytest.raises(WorktreeError, match="tier1-only"):
+        manager.merge(record.task_id)
+
+    assert _git(wt_repo, "rev-parse", "HEAD").stdout.strip() == before
+    assert tree.exists() and _branch_exists(wt_repo, record.branch)
+
+
 def test_merge_pass_fast_forwards_logs_event_and_reaps(wt_repo: Path) -> None:
     _write_merge_config(wt_repo)
     manager = WorktreeManager(wt_repo)
@@ -1006,6 +1160,9 @@ def test_merge_pass_fast_forwards_logs_event_and_reaps(wt_repo: Path) -> None:
         record.task_id,
         {
             "passed": True,
+            # GR-166: a JUDGED pass — Tier 2 ran. A pass with no Tier 2
+            # evidence is tier1-only and the merge gate refuses it.
+            "stages": _JUDGED_STAGES,
             "worktree": str(tree.resolve()),
             "branch": record.branch,
             "commit": source,

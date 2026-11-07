@@ -371,6 +371,11 @@ class TestMcpSyncVerdictPersistence:
             "passed",
             "workdir",
             "tier1_passed",
+            # GR-166: `passed` alone cannot distinguish a judged pass from a
+            # Tier 1-only one, so the class rides on every machine-readable
+            # status. Additive: the documented keys above are unchanged.
+            "pass_class",
+            "tier2_skipped",
             "verdict",
             "items",
             "summary",

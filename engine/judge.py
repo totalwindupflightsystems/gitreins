@@ -667,6 +667,14 @@ def judge_result_to_dict(task_id: str, workdir: str, result: Any) -> dict[str, A
         "workdir": workdir,
         "tier1_passed": result.tier1.passed if result.tier1 else None,
     }
+    # GR-166: `passed` alone cannot tell a judged pass from a Tier 1-only one,
+    # and 49 of 297 stored passes were the latter. Every machine-readable
+    # status carries the class so a consumer never has to infer it.
+    from engine.gate import PASS_CLASS_TIER1_ONLY, pass_class
+
+    result_class = pass_class(result)
+    d["pass_class"] = result_class
+    d["tier2_skipped"] = result_class == PASS_CLASS_TIER1_ONLY
     quality_snapshot = getattr(result, "quality_snapshot", None)
     if quality_snapshot is not None:
         d["quality_snapshot"] = quality_snapshot
