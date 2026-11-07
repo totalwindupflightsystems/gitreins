@@ -8,20 +8,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **The verdict names what it could NOT verify and routes it to a human
-  (GR-178)** — a criterion code review alone cannot settle (a UI that must
-  render in a browser, an external API contract, a migration against real
-  data) can now carry status `NOT_VERIFIABLE` with a `not_verifiable_reason`
-  naming what would settle it: the command, the environment, or the human
-  check. The parser keeps the status instead of coercing it to `FAIL` (and a
-  `COMPLETE` carrying one is forced `INCOMPLETE`); the coverage gate counts it
-  in its own bucket — never a PASS, listed separately from `failing`; the
-  judge summary and the persisted `summary.md` give these items their own
-  "Could NOT verify — needs human review" section; and a new advisory
-  `merge_recommendation` (`no_concerns_found` / `needs_review` /
-  `changes_required`) degrades to `needs_review` while any exists. The merge
-  gate still keys on `pass_class`, so the recommendation cannot become a
-  bypass.
+- **The author-independent second-pass reviewer (GR-171)** — a tier2 verdict now
+  has a reviewer beside it that never sees the author's acceptance criteria.
+  `engine.review_profiles.SecondPassReviewer` builds its prompt from the diff
+  alone (no criteria parameter exists to hand it one), reviews the change for
+  correctness, missing wiring, missing failure-path tests and convention
+  drift, under an explicit "do not speculate beyond evidence" rule with a
+  findings cap (`MAX_SECOND_PASS_FINDINGS = 10`). Each finding is a structured
+  item — `severity`, `file:line` and a `detection` rule — validated against
+  the canonical severity set and dropped (never coerced) when malformed;
+  critical|high are the blocking severities a gate acts on
+  (`blocking_second_pass_findings`). Every run records the judging
+  environment's git identity next to the HEAD commit author's and flags
+  `self_review` when the two are the same person (unknown identities record
+  `null`, never a false "independent"). Opt-in via `.gitreins/config.yaml`:
+
+  ```yaml
+  review:
+    second_pass: true        # default off — no existing run changes shape
+    max_findings: 10         # optional
+  ```
+
+  When enabled, the judge attaches the review to the verdict record as a
+  `review` block (and the machine-readable judge status as the same key); the
+  block is absent — never null — when the pass does not run, so pre-GR-171
+  verdict shapes are byte-identical. A review failure is recorded on the
+  block as `error`; the second pass can never fail the judge run it
+  accompanies. `scripts/review_dry_run.py` runs the pass over the last N
+  landed commits and emits a precision-sample report whose TP/FP labels are
+  filled in by a human reader (AC4 of the board row).
 
 ## [0.19.0] - 2026-11-07
 

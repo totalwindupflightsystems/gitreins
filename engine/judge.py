@@ -119,9 +119,46 @@ class Judge:
             result = self._run_legacy_skip_tier2(task)
         else:
             result = self._run_legacy(task)
+        # GR-171: the author-independent second pass. Opt-in via config
+        # (``review.second_pass: true``), run ONLY when tier2 actually judged
+        # (an LLM client exists) — it reviews the diff itself, never the
+        # task's acceptance criteria, and its findings ride the verdict
+        # record as a ``review`` block. A review failure is recorded on the
+        # block, never raised: a second pass must not fail the run it
+        # accompanies.
+        self._run_second_pass(result, skip_tier2=skip_tier2)
         if packet_context is not None:
             self._attach_auger_evidence(result, packet_context)
         return result
+
+    def _run_second_pass(self, result: "JudgeResult", skip_tier2: bool = False) -> None:
+        """Attach the GR-171 second-pass review to *result* when enabled.
+
+        Enabled means ``review.second_pass: true`` in .gitreins/config.yaml
+        and a tier2 LLM client present. Disabled/absent config leaves the
+        result — and every persisted verdict shape — untouched.
+        """
+        if skip_tier2 or self.llm is None:
+            return
+        try:
+            from engine.config import load_raw_config
+
+            review_cfg = load_raw_config(self.workdir).get("review")
+        except Exception:  # a broken config must not fail the judge run
+            logger.debug("second-pass config read failed", exc_info=True)
+            return
+        if not isinstance(review_cfg, dict) or review_cfg.get("second_pass") is not True:
+            return
+        from engine.review_profiles import SecondPassReviewer
+
+        max_findings = review_cfg.get("max_findings", 10)
+        reviewer = SecondPassReviewer(self.llm, self.scan_root, max_findings=int(max_findings))
+        try:
+            review = reviewer.review()
+        except Exception:  # belt and braces — review() itself never raises
+            logger.exception("Second-pass reviewer failed unexpectedly")
+            return
+        result.second_pass_review = review.to_dict()
 
     def _prepare_auger_task(
         self, task: Task
@@ -573,6 +610,11 @@ class JudgeResult:
         # produced a tier2 verdict (model + base_url_source + api_key_source
         # sources). Empty for a judge that ran no LLM — absent, never null.
         self.provenance = provenance or {}
+        # GR-171: the author-independent second pass's review block (its
+        # findings, reviewer vs commit-author identities, self_review flag).
+        # None unless the judge ran with ``review.second_pass: true`` —
+        # absent from every persisted shape otherwise.
+        self.second_pass_review: dict[str, Any] | None = None
         self.quality_snapshot = tier1.extra.get("quality_snapshot") if tier1 else None
 
     def _degraded_lane_reasons(self) -> list[str]:
@@ -741,6 +783,13 @@ def judge_result_to_dict(task_id: str, workdir: str, result: Any) -> dict[str, A
                 value = provenance.get(key)
                 if isinstance(value, str) and value:
                     d[key] = value
+    # GR-171: surface the author-independent second pass in the machine-
+    # readable status too — findings (severity, file:line, detection) plus
+    # reviewer vs commit-author identity and the self_review flag. Absent
+    # when the pass did not run, so the historical dict shape is untouched.
+    review = getattr(result, "second_pass_review", None)
+    if isinstance(review, dict) and review:
+        d["review"] = review
     return d
 
 
