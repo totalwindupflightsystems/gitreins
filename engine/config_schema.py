@@ -158,8 +158,11 @@ _EVALUATOR: dict[str, KeySpec] = {key: KeySpec("any") for key in _EVALUATOR_KEYS
 
 # ── defaults: ────────────────────────────────────────────────────────────────
 # `defaults:` mirrors GitReinsDefaults with its own key names (max_time maps to
-# max_seconds; venv_source/venv_name/disk_ceiling_mb are the worktree fleet
-# spellings). Read by GitReinsDefaults.load_defaults (engine/config.py:278+).
+# max_seconds). The worktree fleet knobs are resolved through
+# _worktree_fleet_value, which reads the spellings the writers emit
+# (worktree_venv_source/_name, as in DEFAULT_GITREINS_CONFIG and to_dict) and
+# tolerates the legacy flat venv_source/venv_name and nested worktree_venv
+# shapes. Read by GitReinsDefaults.load_defaults (engine/config.py:278+).
 _DEFAULTS: dict[str, KeySpec] = {
     "model": KeySpec("str"),
     "llm_reasoning": KeySpec("str", ("disabled", "enabled")),
@@ -178,6 +181,8 @@ _DEFAULTS: dict[str, KeySpec] = {
     "pass_on_error": KeySpec("bool"),
     "hook_timeout": KeySpec("any"),
     "max_concurrent_worktrees": KeySpec("any"),
+    "worktree_venv_source": KeySpec("str"),
+    "worktree_venv_name": KeySpec("str"),
     "venv_source": KeySpec("str"),
     "venv_name": KeySpec("str"),
     "disk_ceiling_mb": KeySpec("any"),
@@ -193,6 +198,19 @@ _DEFAULTS: dict[str, KeySpec] = {
     "history_max_verdicts": KeySpec("any"),
     "resolution": KeySpec("dict"),
     "worktree_venv": KeySpec("dict"),
+}
+
+# ── worktree_fleet: ──────────────────────────────────────────────────────────
+# Read through engine/config.py _worktree_fleet_value: a top-level fleet block
+# may carry any of the fleet knobs directly, or nest the venv options under
+# `venv:` (source/name). GR-GAP-069: this block is written by DEFAULT_GITREINS_CONFIG,
+# so it must be known, not warned about, on every run.
+_WORKTREE_FLEET: dict[str, KeySpec] = {
+    "max_concurrent_worktrees": KeySpec("any"),
+    "venv_source": KeySpec("str"),
+    "venv_name": KeySpec("str"),
+    "disk_ceiling_mb": KeySpec("any"),
+    "venv": KeySpec("dict", nested=frozenset({"source", "name"})),
 }
 
 # ── history: ─────────────────────────────────────────────────────────────────
@@ -242,6 +260,7 @@ _SECTIONS: dict[str, dict[str, KeySpec]] = {
     "guards": _GUARDS,
     "evaluator": _EVALUATOR,
     "defaults": _DEFAULTS,
+    "worktree_fleet": _WORKTREE_FLEET,
     "history": _HISTORY,
     "resolution": _RESOLUTION,
     "criteria": _CRITERIA,
