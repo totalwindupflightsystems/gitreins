@@ -59,6 +59,7 @@ from engine.types import (
     DataProtectionResult,
     GuardResult,
     Tier1Result,
+    _step_id,
     parse_first_failing_test,
     parse_gitleaks_finding_count,
     render_secrets_scanners,
@@ -1735,8 +1736,8 @@ class GuardManager:
             if _timed_out():
                 warnings.append(
                     f"Guard timed out after {self._hook_timeout}s "
-                    f"(hook_timeout). Remaining checks skipped — "
-                    f"commit allowed to proceed (fail-open)."
+                    f"(hook_timeout). Remaining checks did not run — the run is "
+                    f"DEGRADED, not a pass (GR-169)."
                 )
                 return _finalize(self._timeout_result(results, warnings))
 
@@ -1750,8 +1751,8 @@ class GuardManager:
             if _timed_out():
                 warnings.append(
                     f"Guard timed out after {self._hook_timeout}s "
-                    f"(hook_timeout). Remaining checks skipped — "
-                    f"commit allowed to proceed (fail-open)."
+                    f"(hook_timeout). Remaining checks did not run — the run is "
+                    f"DEGRADED, not a pass (GR-169)."
                 )
                 return _finalize(self._timeout_result(results, warnings))
 
@@ -1760,8 +1761,8 @@ class GuardManager:
             if _timed_out():
                 warnings.append(
                     f"Guard timed out after {self._hook_timeout}s "
-                    f"(hook_timeout). Remaining checks skipped — "
-                    f"commit allowed to proceed (fail-open)."
+                    f"(hook_timeout). Remaining checks did not run — the run is "
+                    f"DEGRADED, not a pass (GR-169)."
                 )
                 return _finalize(self._timeout_result(results, warnings))
 
@@ -1770,8 +1771,8 @@ class GuardManager:
             if _timed_out():
                 warnings.append(
                     f"Guard timed out after {self._hook_timeout}s "
-                    f"(hook_timeout). Remaining checks skipped — "
-                    f"commit allowed to proceed (fail-open)."
+                    f"(hook_timeout). Remaining checks did not run — the run is "
+                    f"DEGRADED, not a pass (GR-169)."
                 )
                 return _finalize(self._timeout_result(results, warnings))
 
@@ -1781,8 +1782,8 @@ class GuardManager:
             if _timed_out():
                 warnings.append(
                     f"Guard timed out after {self._hook_timeout}s "
-                    f"(hook_timeout). Remaining checks skipped — "
-                    f"commit allowed to proceed (fail-open)."
+                    f"(hook_timeout). Remaining checks did not run — the run is "
+                    f"DEGRADED, not a pass (GR-169)."
                 )
                 return _finalize(self._timeout_result(results, warnings))
 
@@ -1791,8 +1792,8 @@ class GuardManager:
             if _timed_out():
                 warnings.append(
                     f"Guard timed out after {self._hook_timeout}s "
-                    f"(hook_timeout). Remaining checks skipped — "
-                    f"commit allowed to proceed (fail-open)."
+                    f"(hook_timeout). Remaining checks did not run — the run is "
+                    f"DEGRADED, not a pass (GR-169)."
                 )
                 return _finalize(self._timeout_result(results, warnings))
 
@@ -1801,8 +1802,8 @@ class GuardManager:
             if _timed_out():
                 warnings.append(
                     f"Guard timed out after {self._hook_timeout}s "
-                    f"(hook_timeout). Remaining checks skipped — "
-                    f"commit allowed to proceed (fail-open)."
+                    f"(hook_timeout). Remaining checks did not run — the run is "
+                    f"DEGRADED, not a pass (GR-169)."
                 )
                 return _finalize(self._timeout_result(results, warnings))
 
@@ -1811,8 +1812,8 @@ class GuardManager:
             if _timed_out():
                 warnings.append(
                     f"Guard timed out after {self._hook_timeout}s "
-                    f"(hook_timeout). Remaining checks skipped — "
-                    f"commit allowed to proceed (fail-open)."
+                    f"(hook_timeout). Remaining checks did not run — the run is "
+                    f"DEGRADED, not a pass (GR-169)."
                 )
                 return _finalize(self._timeout_result(results, warnings))
 
@@ -1821,8 +1822,8 @@ class GuardManager:
             if _timed_out():
                 warnings.append(
                     f"Guard timed out after {self._hook_timeout}s "
-                    f"(hook_timeout). Remaining checks skipped — "
-                    f"commit allowed to proceed (fail-open)."
+                    f"(hook_timeout). Remaining checks did not run — the run is "
+                    f"DEGRADED, not a pass (GR-169)."
                 )
                 return _finalize(self._timeout_result(results, warnings))
 
@@ -1843,8 +1844,8 @@ class GuardManager:
             if _timed_out():
                 warnings.append(
                     f"Guard timed out after {self._hook_timeout}s "
-                    f"(hook_timeout). Remaining checks skipped — "
-                    f"commit allowed to proceed (fail-open)."
+                    f"(hook_timeout). Remaining checks did not run — the run is "
+                    f"DEGRADED, not a pass (GR-169)."
                 )
                 return _finalize(self._timeout_result(results, warnings))
 
@@ -1854,8 +1855,8 @@ class GuardManager:
                 if _timed_out():
                     warnings.append(
                         f"Guard timed out after {self._hook_timeout}s "
-                        f"(hook_timeout). Remaining checks skipped — "
-                        f"commit allowed to proceed (fail-open)."
+                        f"(hook_timeout). Remaining checks did not run — the run is "
+                        f"DEGRADED, not a pass (GR-169)."
                     )
                     return _finalize(self._timeout_result(results, warnings))
             if self._go_guards.get("lint", True):
@@ -1863,8 +1864,8 @@ class GuardManager:
                 if _timed_out():
                     warnings.append(
                         f"Guard timed out after {self._hook_timeout}s "
-                        f"(hook_timeout). Remaining checks skipped — "
-                        f"commit allowed to proceed (fail-open)."
+                        f"(hook_timeout). Remaining checks did not run — the run is "
+                        f"DEGRADED, not a pass (GR-169)."
                     )
                     return _finalize(self._timeout_result(results, warnings))
             if self._go_guards.get("tests", True):
@@ -1872,8 +1873,8 @@ class GuardManager:
                 if _timed_out():
                     warnings.append(
                         f"Guard timed out after {self._hook_timeout}s "
-                        f"(hook_timeout). Remaining checks skipped — "
-                        f"commit allowed to proceed (fail-open)."
+                        f"(hook_timeout). Remaining checks did not run — the run is "
+                        f"DEGRADED, not a pass (GR-169)."
                     )
                     return _finalize(self._timeout_result(results, warnings))
 
@@ -2033,27 +2034,37 @@ class GuardManager:
         """Build the Tier1Result for a hook_timeout early-return (GR-140).
 
         Every timeout exit shares the normal exit's ``extra`` contract: the
-        CLI's DEGRADED PASS / exit-code policy (TRUST-001) reads
-        ``allow_skips`` from it, and MCP/library callers read ``test_mode``
-        and ``grade_full_tree``. The early-returns used to pass no extra at
-        all, so ``allow_skips`` read as False and a repo that opted into
-        fail-open got exit 2 anyway — the warning said the commit was
-        allowed while the hook blocked it.
+        CLI's DEGRADED / exit-code policy (TRUST-001) reads ``allow_skips``
+        from it, and MCP/library callers read ``test_mode`` and
+        ``grade_full_tree``.
 
-        QA-GITREINS-REVIEW-1: ``passed`` is the AND of the arms that actually
-        ran, never a hard-coded True. A timeout that interrupts the run AFTER
-        an arm has already FAILED used to report ``passed=True`` — the console
-        could then print PASS beside a collected failure, which is the one
-        thing a gate must never do. A skipped arm still passes (TRUST-001), so
-        an interrupted-but-clean run keeps its DEGRADED PASS.
+        GR-169: a run that never finished grading the tree is DEGRADED, not a
+        pass. ``passed`` used to be the AND of the arms that happened to run,
+        so a budget that expired before the tests arm reported PASS — a guard
+        that times out and reports PASS is worse than no guard. The result now
+        carries ``extra["timeout"]`` (the guard whose arm consumed the budget,
+        the budget itself, and a reason naming both), ``passed=False``, and
+        ``degraded`` true through the marker, which the CLI turns into exit 2
+        whatever ``guards.allow_skips`` says.
         """
+        guard = _step_id(results[-1].name) if results else "guard"
+        budget = self._hook_timeout
+        reason = (
+            f"{guard} exceeded the {budget}s hook_timeout budget; the remaining "
+            "checks did not run, so this run is not evidence the tree passes"
+        )
         return Tier1Result(
-            passed=all(result.passed for result in results),
+            passed=False,
             results=results,
             extra={
                 "test_mode": self._test_mode,
                 "grade_full_tree": self._grade_full_tree,
                 "allow_skips": self._allow_skips,
+                "timeout": {
+                    "guard": guard,
+                    "budget_seconds": budget,
+                    "reason": reason,
+                },
             },
             warnings=warnings,
         )

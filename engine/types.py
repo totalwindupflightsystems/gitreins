@@ -668,7 +668,31 @@ class Tier1Result:
     @property
     def degraded(self) -> bool:
         """True when a substantive gate did no work this run."""
-        return bool(self.degraded_steps)
+        return bool(self.degraded_steps) or self.timed_out
+
+    @property
+    def timeout(self) -> dict[str, object] | None:
+        """The ``hook_timeout`` marker the timeout early-return writes (GR-169).
+
+        ``{"guard", "budget_seconds", "reason"}`` — absent from a run that
+        finished inside its budget, so no consumer's shape changes.
+        """
+        marker = self.extra.get("timeout")
+        return marker if isinstance(marker, dict) else None
+
+    @property
+    def timed_out(self) -> bool:
+        """True when the guard ran out of budget before grading the tree."""
+        return self.timeout is not None
+
+    @property
+    def timeout_reason(self) -> str:
+        """'<guard> exceeded the <N>s hook_timeout budget' — names both."""
+        marker = self.timeout or {}
+        reason = marker.get("reason")
+        if isinstance(reason, str) and reason:
+            return reason
+        return "the guard run exceeded its hook_timeout budget"
 
     @property
     def skip_summary(self) -> str:

@@ -650,15 +650,14 @@ class TestGuardRunCLI:
         assert result.returncode == 0
         assert "(test mode: diff" in result.stdout
 
-    def test_guard_timeout_allow_skips_exits_zero(self, tmp_workdir: str) -> None:
-        """GR-140: a timeout run with allow_skips: true commits (exit 0), not 2.
+    def test_guard_timeout_is_degraded_and_exits_two(self, tmp_workdir: str) -> None:
+        """GR-169: a hook_timeout run is DEGRADED (exit 2), never a pass.
 
-        Clean tree with test_on_clean: lint is an honest skip (degraded) and
-        the tests lane stalls past hook_timeout, so cmd_guard_run takes a
-        timeout early-return. The extra map used to be empty there,
-        allow_skips read as False, and the CLI blocked the commit its own
-        warning said was allowed — this test pins the exit code to the
-        warning's promise.
+        This used to be `..._allow_skips_exits_zero` (GR-140): the tests arm
+        stalled past hook_timeout, the run reported PASS, and allow_skips let
+        the commit through — so a guard that graded nothing waved the commit
+        past. A timeout is not a zero-work run: it is a run that never
+        finished, and allow_skips does not apply to it.
         """
         write_guard_config(
             tmp_workdir,
@@ -668,18 +667,15 @@ class TestGuardRunCLI:
         )
         result = run_cli("guard", cwd=tmp_workdir)
         output = result.stdout + result.stderr
-        assert result.returncode == 0, _cli_failure(result)
+        assert result.returncode == 2, _cli_failure(result)
         assert "timed out after 1s" in output
-        assert "DEGRADED PASS (skips:" in result.stdout
+        assert "DEGRADED" in result.stdout
+        # The green header is proof the gates ran; a timed-out run must not
+        # print it.
+        assert "Tier 1 Guards: PASS" not in result.stdout
 
     def test_guard_timeout_without_allow_skips_exits_two(self, tmp_workdir: str) -> None:
-        """GR-140: allow_skips absent + timeout → the blocking exit 2 stays.
-
-        Same shape as the exit-0 test but without the allow_skips opt-in:
-        TRUST-001 keeps a degraded pass non-zero (exit 2, 'a gate never ran'
-        distinct from 'a gate failed'). The GR-140 fix must carry the extra
-        map faithfully, not widen this into exit 0.
-        """
+        """GR-169: with no allow_skips opt-in the timeout is still exit 2."""
         cfg_dir = os.path.join(tmp_workdir, ".gitreins")
         os.makedirs(cfg_dir, exist_ok=True)
         with open(os.path.join(cfg_dir, "config.yaml"), "w") as f:
@@ -693,7 +689,7 @@ class TestGuardRunCLI:
         output = result.stdout + result.stderr
         assert result.returncode == 2, _cli_failure(result)
         assert "timed out after 1s" in output
-        assert "DEGRADED PASS" in output
+        assert "DEGRADED" in output
 
 
 class TestJudgeCLI:
@@ -4326,6 +4322,76 @@ exit $?
             text=True,
         )
         assert result.returncode == 0, f"Hook blocked clean commit. stderr: {result.stderr[:300]}"
+
+
+class TestPreCommitHookMissingConfig:
+    """GR-169: a hook with no config must refuse the commit, not pass it.
+
+    The generated hook used to `exit 0` when ``.gitreins/config.yaml`` was
+    absent, so a repo whose config was deleted — or never written — committed
+    completely ungraded while git reported success.
+    """
+
+    def test_the_generated_hook_refuses_without_a_config(self) -> None:
+        """The template's missing-config branch exits 2 and says why."""
+        from gitreins.cli import _render_pre_commit_hook
+
+        hook = _render_pre_commit_hook()
+        lines = hook.splitlines()
+        start = next(
+            i
+            for i, line in enumerate(lines)
+            if 'if [ ! -f "$REPO_ROOT/.gitreins/config.yaml" ]' in line
+        )
+        end = next(i for i, line in enumerate(lines[start:], start) if line.strip() == "fi")
+        branch = "\n".join(lines[start:end])
+
+        assert "exit 2" in branch
+        assert "exit 0" not in branch
+        assert "DEGRADED" in branch
+        # The rest of the hook still forwards the guard's own exit code.
+        assert "exit $?" in hook
+
+    def test_a_commit_in_a_configless_repo_is_refused(
+        self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """End-to-end: the rendered hook blocks a commit with no config."""
+        from gitreins.cli import _render_pre_commit_hook
+
+        repo = os.path.join(tmp_workdir, "repo")
+        os.makedirs(repo)
+        subprocess.run(["git", "init", "-q"], cwd=repo, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "t@t.com"], cwd=repo, capture_output=True)
+        subprocess.run(["git", "config", "user.name", "T"], cwd=repo, capture_output=True)
+
+        hooks_dir = os.path.join(repo, ".git", "hooks")
+        os.makedirs(hooks_dir, exist_ok=True)
+        hook_path = os.path.join(hooks_dir, "pre-commit")
+        with open(hook_path, "w") as f:
+            f.write(_render_pre_commit_hook())
+        os.chmod(hook_path, 0o755)
+
+        with open(os.path.join(repo, "clean.py"), "w") as f:
+            f.write("# clean\n")
+        subprocess.run(["git", "add", "clean.py"], cwd=repo, capture_output=True)
+
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        env = dict(os.environ)
+        existing = env.get("PYTHONPATH", "")
+        env["PYTHONPATH"] = project_root + (os.pathsep + existing if existing else "")
+
+        commit = subprocess.run(
+            ["git", "commit", "-m", "probe"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=180,
+        )
+        output = commit.stdout + commit.stderr
+
+        assert commit.returncode != 0, output
+        assert "no .gitreins/config.yaml" in output, output
 
 
 class TestPreCommitHookPathPinning:

@@ -382,3 +382,50 @@ class TestRunnerMissingHookParity:
         assert result.returncode == 0, f"provisioned repo must pass: {output[:400]}"
         assert "✓ tests (full)" in result.stdout
         assert "DEGRADED" not in result.stdout
+
+
+class TestGuardExitCodePolicy:
+    """GR-169: the one exit-code decision, applied to every shape it can see.
+
+    `_guard_exit_code` is shared by the human path and the `--json` contract
+    path, so these cases pin both surfaces at once: 2 = DEGRADED (the run did
+    not grade the tree), 1 = a gate FAILED, 0 = the gates ran and passed.
+    """
+
+    def _result(self, **extra: object) -> object:
+        from engine.types import GuardResult, Tier1Result
+
+        return Tier1Result(
+            passed=True, results=[GuardResult("tests", True, "ok")], extra=dict(extra)
+        )
+
+    def test_a_timed_out_run_is_two_whatever_allow_skips_says(self) -> None:
+        from gitreins.cli import _guard_exit_code
+
+        timed_out = {
+            "timeout": {"guard": "tests", "budget_seconds": 300, "reason": "tests exceeded 300s"}
+        }
+        assert _guard_exit_code(self._result(allow_skips=True, **timed_out)) == 2
+        assert _guard_exit_code(self._result(allow_skips=False, **timed_out)) == 2
+
+    def test_a_failed_tree_is_one(self) -> None:
+        from engine.types import GuardResult, Tier1Result
+        from gitreins.cli import _guard_exit_code
+
+        failed = Tier1Result(passed=False, results=[GuardResult("tests", False, "red")])
+        assert _guard_exit_code(failed) == 1
+
+    def test_a_zero_work_run_is_two_unless_the_repo_opted_in(self) -> None:
+        from engine.types import GuardResult, Tier1Result
+        from gitreins.cli import _guard_exit_code
+
+        skipped = GuardResult("lint", True, skipped=True, skip_reason="no staged files")
+        run = Tier1Result(passed=True, results=[skipped], extra={"allow_skips": False})
+        assert _guard_exit_code(run) == 2
+        run.extra["allow_skips"] = True
+        assert _guard_exit_code(run) == 0
+
+    def test_a_graded_pass_is_zero(self) -> None:
+        from gitreins.cli import _guard_exit_code
+
+        assert _guard_exit_code(self._result()) == 0

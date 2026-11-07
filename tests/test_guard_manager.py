@@ -1164,6 +1164,32 @@ class TestTimeoutEarlyReturnCarriesAllowSkips:
 
         return _Clock(elapsed_at_call)
 
+    def test_timeout_is_not_a_pass_and_names_guard_and_budget(self, tmp_workdir: str) -> None:
+        """GR-169: a timeout is DEGRADED — never passed — and says which/budget.
+
+        The old result was ``passed=all(arms that ran)``, so a budget that
+        expired before the tests arm reported PASS. A guard that times out and
+        reports PASS is worse than no guard.
+        """
+        gm = self._manager(tmp_workdir, {"allow_skips": True, "hook_timeout": 30})
+        with (
+            patch.object(gm, "_check_secrets", return_value=GuardResult("secrets", True, "ok")),
+            patch.object(gm, "_check_lint", return_value=GuardResult("lint", True, "ok")),
+            patch("engine.guard_manager.time", self._fake_clock([0.0, 1.0, 40.0])),
+        ):
+            result = gm.run_all()
+
+        assert result.passed is False
+        assert result.timed_out is True
+        assert result.timeout is not None
+        assert result.timeout["guard"] == "lint"
+        assert result.timeout["budget_seconds"] == 30
+        assert "lint" in result.timeout_reason
+        assert "30s" in result.timeout_reason
+        # DEGRADED, whatever allow_skips says.
+        assert result.degraded is True
+        assert any("timed out after 30s" in w for w in result.warnings)
+
     def test_timeout_after_tests_check_carries_allow_skips(self, tmp_workdir: str) -> None:
         """Timeout early-return: extra['allow_skips'] matches the config value."""
         gm = self._manager(tmp_workdir, {"allow_skips": True})
@@ -1175,7 +1201,11 @@ class TestTimeoutEarlyReturnCarriesAllowSkips:
         ):
             result = gm.run_all()
         assert len(result.results) == 3
-        assert result.passed is True
+        # GR-169: the run is DEGRADED, not passed — the budget expired. The
+        # extra map still carries allow_skips (the CLI reads it for the
+        # zero-work case); it no longer buys a pass for a timeout.
+        assert result.passed is False
+        assert result.timed_out is True
         assert any("timed out" in w for w in result.warnings)
         assert result.extra.get("allow_skips") is True
 
@@ -3218,12 +3248,12 @@ class TestSensitivePathScopesAndOverride:
 
 
 class TestTimeoutResultLaundering:
-    """QA-GITREINS-REVIEW-1: a timeout must never launder a failed arm into PASS.
+    """GR-169: a timeout is DEGRADED — it never reports PASS.
 
-    The hook_timeout early-return used to build its Tier1Result with
-    ``passed=True`` unconditionally, so a run cut off AFTER an arm had already
-    FAILED printed PASS beside a collected failure. ``passed`` is now the AND of
-    the arms that actually ran; a skipped arm still passes (TRUST-001).
+    QA-GITREINS-REVIEW-1 fixed the worst half (a failed arm laundered into
+    PASS); GR-169 closes the other half: even with every arm that ran clean,
+    a run cut off by the budget graded nothing after the cut and is not
+    evidence the tree passes.
     """
 
     def test_timeout_after_a_failed_arm_is_not_passed(self, tmp_workdir: str) -> None:
@@ -3231,11 +3261,17 @@ class TestTimeoutResultLaundering:
         failed = GuardResult(name="secrets", passed=False, output="finding")
         result = gm._timeout_result([failed], ["Guard timed out after 1s (hook_timeout)."])
         assert result.passed is False
+        assert result.timed_out is True
 
-    def test_timeout_after_clean_arms_still_passes(self, tmp_workdir: str) -> None:
+    def test_timeout_after_clean_arms_is_still_degraded(self, tmp_workdir: str) -> None:
+        """Clean arms + an expired budget is DEGRADED, not a pass."""
         gm = GuardManager(tmp_workdir, {"guards": {"allow_skips": True}})
         clean = GuardResult(name="secrets", passed=True)
         skipped = GuardResult(name="lint", passed=True, skipped=True, skip_reason="no staged files")
         result = gm._timeout_result([clean, skipped], [])
-        assert result.passed is True
+        assert result.passed is False
+        assert result.timed_out is True
+        assert result.degraded is True
+        # The zero-work skip is still reported as such; the timeout is what
+        # makes the run non-passing, not the skip.
         assert result.extra["allow_skips"] is True

@@ -202,10 +202,17 @@ PRE_COMMIT_HOOK = """\
 # with the absolute path (or `python -m gitreins`) of the binary that
 # ran `gitreins install`.
 
-# Skip cleanly if the repo hasn't been initialised with a config.
+# GR-169: no config means the guard CANNOT run — refuse the commit instead of
+# passing it. This branch used to `exit 0`, so a repo whose .gitreins/ was
+# deleted (or whose config was never written) committed completely ungraded
+# while the hook reported success. Exit 2 is the DEGRADED code: distinct from
+# 1 ("a gate failed"), and never 0.
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 if [ ! -f "$REPO_ROOT/.gitreins/config.yaml" ]; then
-    exit 0
+    echo "gitreins: DEGRADED — no .gitreins/config.yaml in $REPO_ROOT." >&2
+    echo "  The guard cannot grade this commit, so the commit is refused (exit 2)." >&2
+    echo "  Fix: run 'gitreins init' (or restore the config); 'gitreins uninstall' removes this hook." >&2
+    exit 2
 fi
 
 cd "$REPO_ROOT"
@@ -3126,6 +3133,30 @@ def _guard_mode_note(gm: GuardManager, scope: str, result: Tier1Result) -> str:
     return mode_note
 
 
+def _guard_exit_code(result: Tier1Result) -> int:
+    """The CLI exit code for one guard run (TRUST-001 + GR-169).
+
+    One decision, two callers (the human path and the JSON contract path), so a
+    machine consumer can never read a different verdict from a human one:
+
+    * ``2`` — DEGRADED. The run did not grade the tree: either the
+      ``hook_timeout`` budget expired (GR-169: a guard that times out and
+      reports PASS is worse than no guard, so ``allow_skips`` does not apply),
+      or a substantive gate did no work and the repo has not opted into skips.
+    * ``1`` — a gate FAILED; the tree is red.
+    * ``0`` — the gates ran and passed.
+    """
+    if result.timed_out:
+        return 2
+    if not result.passed:
+        return 1
+    # TRUST-001: a degraded pass exits 0 ONLY with guards.allow_skips: true.
+    # Exit 2 (not 1) keeps "a gate failed" distinct from "a gate never ran".
+    if result.degraded and not result.extra.get("allow_skips", False):
+        return 2
+    return 0
+
+
 def _guard_print_result(gm: GuardManager, scope: str, result: Tier1Result) -> None:
     """Print the human-readable guard result (banner, summary, log, warnings)."""
     mode_note = _guard_mode_note(gm, scope, result)
@@ -3135,7 +3166,13 @@ def _guard_print_result(gm: GuardManager, scope: str, result: Tier1Result) -> No
     # a DEGRADED PASS, and it never prints the green "Tier 1 Guards: PASS"
     # header — grepping that string is now proof the gates actually ran. The
     # exit code is 0 only when the repo opted in via guards.allow_skips.
-    if not result.passed:
+    #
+    # GR-169: a run that ran out of budget is DEGRADED, never "PASS" and never
+    # "FAIL" either — nothing was graded after the cut, and the line names the
+    # guard and the budget so the reader knows which arm consumed it.
+    if result.timed_out:
+        print(f"Tier 1: DEGRADED (timed out: {result.timeout_reason}){mode_note}")
+    elif not result.passed:
         print(f"Tier 1 Guards: FAIL{mode_note}")
     elif result.degraded:
         print(f"Tier 1: DEGRADED PASS (skips: {result.skip_summary}){mode_note}")
@@ -3203,22 +3240,39 @@ def cmd_guard_run(args: argparse.Namespace) -> None:
         if not result.passed:
             sys.stderr.write(captured.getvalue())
         print(dumps_evidence(guard_evidence(result, scope)))
-        # Contract exit codes: 0 for a passing result, 1 for a non-passing one
-        # (a DEGRADED pass is a pass here — the document carries the skipped
-        # steps and metadata.degraded; write_guard_log already records it).
-        sys.exit(0 if result.passed else 1)
+        # Contract exit codes come from the SAME decision the human path uses
+        # (GR-169): a timed-out run is DEGRADED (2) on both surfaces, never a
+        # pass, and never a bare 1 that reads as "a gate failed".
+        sys.exit(_guard_exit_code(result))
 
     result = gm.run_all(force_dead_code=getattr(args, "dead_code", False))
     _guard_print_result(gm, scope, result)
 
-    if not result.passed:
+    exit_code = _guard_exit_code(result)
+
+    if exit_code == 2 and result.timed_out:
+        # GR-169: the budget expired, so nothing after the cut was graded.
+        # allow_skips does not apply: a timeout is not a zero-work run, it is
+        # a run that never finished.
+        print()
+        budget = (result.timeout or {}).get("budget_seconds", "?")
+        print(
+            f"\033[33m⚠ DEGRADED: {result.timeout_reason}.\n"
+            "  Remaining checks did not run, so this run is NOT evidence the tree passes.\n"
+            f"  Raise guards.hook_timeout (currently {budget}s) or make the slow arm "
+            "faster, then re-run: gitreins guard\033[0m",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+
+    if exit_code == 1:
         print()
         print("Fix the issues above and re-run: gitreins guard")
         sys.exit(1)
 
     # TRUST-001: a degraded pass exits 0 ONLY with guards.allow_skips: true.
     # Exit 2 (not 1) keeps "a gate failed" distinct from "a gate never ran".
-    if result.degraded and not result.extra.get("allow_skips", False):
+    if exit_code == 2:
         print()
         print(
             "\033[33m⚠ DEGRADED PASS: "
