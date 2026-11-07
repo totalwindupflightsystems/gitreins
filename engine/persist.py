@@ -1150,6 +1150,15 @@ def build_verdict_data(workdir: str, task: Task, result: JudgeResult) -> dict[An
     if isinstance(provenance, dict) and provenance and not verdict_data.get("stages"):
         verdict_data["provenance"] = dict(provenance)
 
+    # GR-171: the author-independent second pass rides the verdict record as
+    # a ``review`` block — structured findings (severity, file:line,
+    # detection) plus reviewer vs commit-author identity and the self_review
+    # flag. Absent when the pass did not run, so pre-GR-171 verdict shapes
+    # are byte-identical.
+    review = getattr(result, "second_pass_review", None)
+    if isinstance(review, dict) and review:
+        verdict_data["review"] = review
+
     # Summary text
     verdict_data["summary"] = result.summary
 

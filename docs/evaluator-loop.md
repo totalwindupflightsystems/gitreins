@@ -189,6 +189,52 @@ kill, so it fails closed and routes:
   exactly what was not verified and what would settle it.
 
 
+## The author-independent second pass (GR-171)
+
+GR-176 lets the judge set its own bar *on top of* the author's criteria — but
+those criteria still anchor everything it reads. GR-171 adds a reviewer that
+runs BESIDE the criteria grading and never sees them: it is constructed
+without any criteria parameter, and its prompt is assembled from the diff
+alone. By construction it cannot quietly become a re-grade of the author's
+rubric.
+
+What it does (`engine.review_profiles.SecondPassReviewer`):
+
+1. **Input** — the diff of the change under review (working tree vs HEAD, or
+   the last commit when the tree is clean — the same GR-GAP-046 anchor the
+   evaluator uses). Nothing else.
+2. **Concerns** — correctness defects, missing wiring, missing failure-path
+   tests, convention drift relative to the surrounding code.
+3. **No-speculation rule** — report only findings the diff can evidence;
+   a silent non-finding is the correct answer to a guess; findings capped at
+   `MAX_SECOND_PASS_FINDINGS = 10`.
+4. **Output** — structured findings, each carrying `severity` (the canonical
+   set), `file:line`, and a `detection` rule; malformed findings are dropped
+   with a logged reason, never coerced. critical|high are the blocking
+   severities (`blocking_second_pass_findings`); lower ones are advisory.
+
+Reviewer identity (the AC the PR-Agent contrast exposed): every run — even a
+failed one — records the judging environment's git identity next to the HEAD
+commit author's and flags `self_review` when the two are the same person.
+Unknown identities record `self_review: null`; unknown is never recorded as
+"independent".
+
+It is opt-in — `.gitreins/config.yaml`:
+
+```yaml
+review:
+  second_pass: true   # default off; existing runs change nothing
+```
+
+When enabled, the judge attaches the review to the verdict record as a
+`review` block (same key in the machine-readable judge status), absent when
+the pass does not run. A review failure lands on the block as `error`: the
+second pass can never fail the judge run it accompanies.
+`scripts/review_dry_run.py --repo . --n 20 --out report.md` produces the
+AC4 precision sample — findings per landed commit, with TP/FP labeling
+columns a HUMAN fills in; the precision number is never self-reported.
+
+
 ## Evaluation Tools (12)
 
 All 12 tools are defined in `engine/evaluator.py` (`EVALUATOR_TOOLS`) as OpenAI

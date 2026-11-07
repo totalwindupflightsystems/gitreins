@@ -53,7 +53,11 @@ def test_setup_ends_with_a_health_check_not_a_claim(tmp_path) -> None:
     result = _run(workdir, "setup")
     assert "[verify]" in result.stdout
     assert "hooks" in result.stdout and "manifest" in result.stdout
-    assert "All checks passed" in result.stdout or "healthy with" in result.stdout
+    # The doctor's verdict line: "Summary: all checks passed" when every check
+    # ran, "healthy with N of M" when degraded. Match case-insensitively — the
+    # capitalised form never existed in the product's output.
+    summary = result.stdout.lower()
+    assert "all checks passed" in summary or "healthy with" in summary
 
 
 def test_setup_is_idempotent(tmp_path) -> None:

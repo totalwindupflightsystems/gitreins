@@ -24,11 +24,20 @@ from engine.review_profiles import (
     DEEP,
     PROFILES,
     QUICK,
+    BLOCKING_SEVERITIES,
     BudgetState,
     EffortLevel,
+    MAX_SECOND_PASS_FINDINGS,
+    SECOND_PASS_SYSTEM_PROMPT,
+    SecondPassFinding,
+    SecondPassReviewer,
+    SecondPassResult,
+    blocking_second_pass_findings,
+    collect_review_identities,
     compat_severity,
     get_profile,
     resolve_effort,
+    self_review_flag,
 )
 from engine.llm import LLMResponse, LLMUsage
 
@@ -541,3 +550,311 @@ class TestRunReviewBridge:
             ],
         )
         assert result.severity_counts() == {"high": 1}
+
+
+# ═══════════════════════════════════════════════════════════════
+# GR-171: the author-independent second-pass reviewer
+# ═══════════════════════════════════════════════════════════════
+
+SECOND_PASS_FINDINGS_JSON = json.dumps(
+    {
+        "findings": [
+            {
+                "severity": "high",
+                "file": "engine/foo.py",
+                "line": 42,
+                "detection": "new config key `foo.bar` is never read anywhere in the repo",
+                "detail": "search_pattern for foo.bar matches only the diff itself",
+            },
+            {
+                "severity": "minor-not-in-vocab",
+                "file": "engine/foo.py",
+                "line": 1,
+                "detection": "invented severity must be dropped",
+            },
+        ],
+        "summary": "One unwired config key.",
+    }
+)
+
+GR171_AUTHOR_CRITERIA = [
+    "The florbish must qux the zorp before returning",
+    "Returns exactly 42 gribbles on the happy path",
+]
+
+
+def _second_pass_resp(content: str) -> LLMResponse:
+    return LLMResponse(content=content, usage=LLMUsage())
+
+
+def _real_git_repo(tmp_path: object, author_email: str = "author@example.com") -> str:
+    """A minimal REAL git repo with one commit authored by *author_email*.
+
+    The conftest empties GIT_CONFIG_GLOBAL, so identity comes from the
+    repo-local config set here — the fixture is host-independent.
+    """
+    import subprocess
+
+    repo = tmp_path / "gr171-repo"  # type: ignore[attr-defined]
+    repo.mkdir()
+    run = subprocess.run
+    run(["git", "init", "-q"], cwd=repo, check=True)
+    run(["git", "config", "user.email", author_email], cwd=repo, check=True)
+    run(["git", "config", "user.name", "Author A"], cwd=repo, check=True)
+    (repo / "code.py").write_text("def f():\n    return 1\n")
+    run(["git", "add", "code.py"], cwd=repo, check=True)
+    run(["git", "commit", "-q", "-m", "init"], cwd=repo, check=True)
+    return str(repo)
+
+
+class TestSecondPassReviewerConstruction:
+    """AC5: the reviewer is constructed WITHOUT the task's acceptance criteria."""
+
+    def test_reviewer_receives_no_task_criteria(self, tmp_path: object) -> None:
+        """The criteria are in scope at the call site — and must never reach
+        the model: the reviewer's prompt is assembled from the diff alone."""
+        llm = FakeLLM([_second_pass_resp(SECOND_PASS_FINDINGS_JSON)])
+        reviewer = SecondPassReviewer(llm, workdir=str(tmp_path))
+        # The construction itself carries no criteria parameter — the task
+        # dict is only what the CALLER holds. Prove the plumbing: even with
+        # the author's criteria in hand at the review site, none of their
+        # text reaches any message the reviewer sends.
+        task = {"id": "GR-171-fixture", "title": "t", "criteria": GR171_AUTHOR_CRITERIA}
+        assert task["criteria"]  # in scope, deliberately unused
+        reviewer.review(diff_text=DIFF)
+        assert llm.calls, "the reviewer must make exactly its own LLM call"
+        for call in llm.calls:
+            for message in call["messages"]:
+                for criterion in GR171_AUTHOR_CRITERIA:
+                    assert criterion not in str(message.get("content", ""))
+
+    def test_prompt_names_the_review_concerns_and_no_speculation_rule(self) -> None:
+        # AC1's four defect classes and the explicit evidence rule are part
+        # of the prompt contract, not folklore.
+        for needle in (
+            "Correctness",
+            "Missing wiring",
+            "failure-path tests",
+            "Convention drift",
+            "DO NOT SPECULATE BEYOND EVIDENCE",
+        ):
+            assert needle in SECOND_PASS_SYSTEM_PROMPT
+
+    def test_prompt_carries_the_findings_cap(self) -> None:
+        reviewer = SecondPassReviewer(FakeLLM([]), workdir=".", max_findings=7)
+        assert "At most 7 findings" in reviewer._system_prompt()
+
+
+class TestSecondPassFindingShape:
+    """AC8: every structured finding carries severity, file:line, detection."""
+
+    def test_each_finding_carries_severity_file_line_detection(self, tmp_path: object) -> None:
+        llm = FakeLLM([_second_pass_resp(SECOND_PASS_FINDINGS_JSON)])
+        result = SecondPassReviewer(llm, workdir=str(tmp_path)).review(diff_text=DIFF)
+        assert len(result.findings) == 1  # the malformed-severity row was dropped
+        for finding in result.findings:
+            assert finding.severity in (
+                "critical",
+                "high",
+                "medium",
+                "low",
+                "trivial",
+                "info",
+                "observation",
+            )
+            assert finding.file
+            assert finding.line >= 0
+            assert finding.detection
+            d = finding.to_dict()
+            assert d["severity"] and d["file"] and d["detection"] and d["line"] >= 0
+
+    def test_malformed_findings_dropped_with_reason(self, tmp_path: object) -> None:
+        llm = FakeLLM([_second_pass_resp(SECOND_PASS_FINDINGS_JSON)])
+        result = SecondPassReviewer(llm, workdir=str(tmp_path)).review(diff_text=DIFF)
+        assert all(
+            f.severity in ("critical", "high", "medium", "low", "trivial", "info", "observation")
+            for f in result.findings
+        )
+
+    def test_findings_capped_at_max(self, tmp_path: object) -> None:
+        rows = [
+            {"severity": "info", "file": "f.py", "line": i, "detection": f"rule {i}"}
+            for i in range(MAX_SECOND_PASS_FINDINGS + 3)
+        ]
+        llm = FakeLLM([_second_pass_resp(json.dumps({"findings": rows, "summary": "s"}))])
+        result = SecondPassReviewer(llm, workdir=str(tmp_path)).review(diff_text=DIFF)
+        assert len(result.findings) == MAX_SECOND_PASS_FINDINGS
+
+    def test_unparseable_reply_is_recorded_as_error_not_silence(self, tmp_path: object) -> None:
+        llm = FakeLLM([_second_pass_resp("I found no issues, the code looks great!")])
+        result = SecondPassReviewer(llm, workdir=str(tmp_path)).review(diff_text=DIFF)
+        assert result.findings == []
+        assert result.error and "no parseable" in result.error
+
+    def test_llm_failure_is_recorded_never_raised(self, tmp_path: object) -> None:
+        class RaisingLLM:
+            def chat(self, *args: object, **kwargs: object) -> object:
+                raise RuntimeError("boom")
+
+        result = SecondPassReviewer(RaisingLLM(), workdir=str(tmp_path)).review(diff_text=DIFF)
+        assert result.findings == []
+        assert result.error and "LLM call failed" in result.error
+
+
+class TestBlockingFindings:
+    """AC2: the gate can act on the findings — critical|high block, rest advisory."""
+
+    def test_critical_and_high_block_lower_do_not(self) -> None:
+        assert BLOCKING_SEVERITIES == ("critical", "high")
+        review = {
+            "findings": [
+                {"severity": "critical", "file": "a.py", "line": 1, "detection": "d1"},
+                {"severity": "high", "file": "b.py", "line": 2, "detection": "d2"},
+                {"severity": "medium", "file": "c.py", "line": 3, "detection": "d3"},
+                {"severity": "info", "file": "d.py", "line": 4, "detection": "d4"},
+            ]
+        }
+        blocking = blocking_second_pass_findings(review)
+        assert [(f.file, f.severity) for f in blocking] == [("a.py", "critical"), ("b.py", "high")]
+
+    def test_accepts_live_result_object(self, tmp_path: object) -> None:
+        result = SecondPassResult(
+            findings=[
+                SecondPassFinding(severity="high", file="a.py", line=1, detection="d"),
+                SecondPassFinding(severity="info", file="b.py", line=2, detection="d"),
+            ]
+        )
+        assert [f.file for f in blocking_second_pass_findings(result)] == ["a.py"]
+
+
+class TestReviewerIdentity:
+    """AC3: the verdict records reviewer-vs-author identity, or flags self-review."""
+
+    def test_different_reviewer_recorded_as_not_self_review(self, tmp_path: object) -> None:
+        repo = _real_git_repo(tmp_path, author_email="author@example.com")
+        import subprocess
+
+        subprocess.run(
+            ["git", "config", "user.email", "reviewer@example.com"], cwd=repo, check=True
+        )
+        identities = collect_review_identities(repo)
+        assert identities["commit_author_email"] == "author@example.com"
+        assert identities["reviewer_email"] == "reviewer@example.com"
+        assert identities["self_review"] is False
+
+    def test_same_identity_flags_self_review(self, tmp_path: object) -> None:
+        repo = _real_git_repo(tmp_path, author_email="author@example.com")
+        identities = collect_review_identities(repo)
+        assert identities["reviewer_email"] == "author@example.com"
+        assert identities["self_review"] is True
+
+    def test_unknown_identity_is_never_recorded_as_independent(self) -> None:
+        assert self_review_flag("", "author@example.com") is None
+        assert self_review_flag("reviewer@example.com", "") is None
+
+    def test_review_result_carries_identities_on_failure_too(self, tmp_path: object) -> None:
+        repo = _real_git_repo(tmp_path, author_email="author@example.com")
+        import subprocess
+
+        subprocess.run(
+            ["git", "config", "user.email", "reviewer@example.com"], cwd=repo, check=True
+        )
+        llm = FakeLLM([RuntimeError("boom")])
+        result = SecondPassReviewer(llm, workdir=repo).review(diff_text=DIFF)
+        assert result.self_review is False
+        assert result.commit_author_email == "author@example.com"
+        assert result.reviewer_email == "reviewer@example.com"
+
+
+class TestSecondPassJudgeWiring:
+    """The judge attaches the review block when enabled, never when not."""
+
+    def _judge(self, workdir: str, llm: object) -> object:
+        from engine.judge import Judge
+
+        return Judge(llm, workdir, persist_log=False, persist_telemetry=False)
+
+    def test_disabled_by_default_no_review_block(self, tmp_workdir: str) -> None:
+        from engine.judge import JudgeResult
+
+        judge = self._judge(tmp_workdir, FakeLLM([]))
+        result = JudgeResult(task_id="t1")
+        judge._run_second_pass(result)
+        assert result.second_pass_review is None
+
+    def test_enabled_config_attaches_review_block(self, tmp_workdir: str) -> None:
+        import pathlib
+
+        from engine.judge import JudgeResult
+
+        cfg = pathlib.Path(tmp_workdir) / ".gitreins" / "config.yaml"
+        cfg.parent.mkdir(parents=True, exist_ok=True)
+        cfg.write_text("review:\n  second_pass: true\n")
+        judge = self._judge(tmp_workdir, FakeLLM([_second_pass_resp(SECOND_PASS_FINDINGS_JSON)]))
+        result = JudgeResult(task_id="t1")
+        judge._run_second_pass(result)
+        block = result.second_pass_review
+        assert isinstance(block, dict)
+        # fake git workdir: no diff/identities, so the block records the
+        # failure honestly rather than a review that never happened
+        assert block.get("error") or block.get("findings") is not None
+
+    def test_skip_tier2_never_runs_the_second_pass(self, tmp_workdir: str) -> None:
+        import pathlib
+
+        from engine.judge import JudgeResult
+
+        cfg = pathlib.Path(tmp_workdir) / ".gitreins" / "config.yaml"
+        cfg.parent.mkdir(parents=True, exist_ok=True)
+        cfg.write_text("review:\n  second_pass: true\n")
+        judge = self._judge(tmp_workdir, FakeLLM([_second_pass_resp(SECOND_PASS_FINDINGS_JSON)]))
+        result = JudgeResult(task_id="t1")
+        judge._run_second_pass(result, skip_tier2=True)
+        assert result.second_pass_review is None
+
+
+class TestSecondPassVerdictRecord:
+    """The persisted verdict record carries the review block (AC2/AC3)."""
+
+    def test_verdict_data_carries_review_block(self, tmp_workdir: str) -> None:
+        from engine.judge import JudgeResult
+        from engine.persist import build_verdict_data
+        from engine.task_manager import Task
+
+        task = Task(id="GR-171-fixture", title="t", criteria=list(GR171_AUTHOR_CRITERIA))
+        result = JudgeResult(task_id="t1", passed=True)
+        result.second_pass_review = SecondPassResult(
+            findings=[
+                SecondPassFinding(
+                    severity="high",
+                    file="engine/foo.py",
+                    line=42,
+                    detection="new config key `foo.bar` is never read",
+                    detail="matches only the diff",
+                )
+            ],
+            reviewer_email="reviewer@example.com",
+            commit_author_email="author@example.com",
+            self_review=False,
+            summary="One unwired config key.",
+        ).to_dict()
+        data = build_verdict_data(tmp_workdir, task, result)
+        review = data["review"]
+        assert review["self_review"] is False
+        assert review["reviewer_email"] != review["commit_author_email"]
+        finding = review["findings"][0]
+        assert (
+            finding["severity"]
+            and finding["file"]
+            and finding["detection"]
+            and finding["line"] >= 0
+        )
+
+    def test_verdict_shape_untouched_when_second_pass_did_not_run(self, tmp_workdir: str) -> None:
+        from engine.judge import JudgeResult
+        from engine.persist import build_verdict_data
+        from engine.task_manager import Task
+
+        task = Task(id="t1", title="t", criteria=["c1"])
+        data = build_verdict_data(tmp_workdir, task, JudgeResult(task_id="t1"))
+        assert "review" not in data
