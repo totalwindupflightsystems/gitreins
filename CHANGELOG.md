@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-11-07
+
 ### Added
 - **The judge derives criteria for the change it is reviewing (GR-176)** — the
   base prompt now asks for the owner's layer-3 behaviour: explore first
@@ -25,6 +27,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for test/build criteria kept intact. Persisted items carry `"derived": true`
   only when set, so a verdict with no derived criteria serializes
   byte-identically.
+- **`task create` checks every criterion for a failure condition and a proof
+  (GR-172)** — each acceptance criterion must carry a failure condition
+  (`FAILIF:` / `FAILS WHEN:` / `FAILURE CONDITION:`) and a proof (`PROOF:` /
+  `PROOF COMMAND:` naming a runnable command or a `path:line` locator),
+  validated in `engine/criteria.py`. The policy is `warn` by default — the
+  create succeeds and names the gap, so existing fleet automation keeps
+  working — with `refuse` opted in per repo through `criteria.enforce` in
+  `.gitreins/config.yaml`, and `--allow-thin` overriding it for one call.
+- **A verdict records how it was earned, and a Tier-1-only pass cannot merge
+  (GR-166)** — 49 of 297 stored passing verdicts had run with Tier 2 skipped
+  and were indistinguishable from a judged pass. Every verdict now persists
+  `pass_class` (`judged` or `tier1-only`) and `tier2_skipped`; a pre-GR-166
+  verdict still reads correctly because the class is inferred from its stages
+  when the field is absent. A worktree merge refuses a Tier-1-only pass unless
+  the verdict records the SHA-256 digest of an owner waiver token read from
+  `GITREINS_TIER2_WAIVER` or `gate.tier2_waiver` — never from the commit
+  message or a trailer, both of which the author controls.
 
 ### Changed
 - **Repo-wide review is the judge's default (GR-170)** — `evaluator.file_scope`
@@ -42,6 +61,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   files in full → call sites → the entrypoint that must reach the change →
   tests. Exploration spends the configured budget; a cap hit mid-exploration
   still ends INCOMPLETE with a reason, never COMPLETE.
+
+### Fixed
+- **A `COMPLETE` verdict must cover every criterion (GR-167)** — 76 of 297
+  passing verdicts carried zero per-criterion items. `verdict_is_passing(
+  verdict, criteria)` is now the only passing test: false when the item list is
+  empty, when any task criterion has no graded item, when a graded criterion is
+  not PASS, and when the task carries no criteria at all. Both the legacy judge
+  and the ai_eval pipeline use it, and the gap is reported where a reader looks
+  — a `Coverage FAILED — ungraded: …` line plus `ungraded_criteria` in the step
+  data, absent when coverage is complete so a fully graded verdict keeps its
+  historical shape.
+- **Unparseable evaluator output can only yield `INCOMPLETE` (GR-168)** — the
+  keyword fallback that minted `COMPLETE` from a raw response containing
+  "complete" (or "all criteria" plus "pass") with an empty item list is gone.
+  One outcome remains: `INCOMPLETE`, carrying the parse reason and a note that
+  nothing was graded, so a reply that graded nothing can no longer satisfy the
+  Tier-2 gate.
+- **A guard timeout is `DEGRADED`, and a configless hook refuses (GR-169)** — a
+  `hook_timeout` budget that expired before the tests arm reported PASS, because
+  `passed` was the AND of whichever arms happened to run. The result now carries
+  `extra["timeout"]` with the guard, budget and reason, has `passed=False`, is
+  DEGRADED, and exits 2 on both the human and `--json` paths; `allow_skips` does
+  not apply, since a timeout is a run that never finished. The generated
+  pre-commit hook exits 2 naming the fix when `.gitreins/config.yaml` is
+  missing, instead of committing completely ungraded.
 
 ## [0.18.1] - 2026-11-06
 
