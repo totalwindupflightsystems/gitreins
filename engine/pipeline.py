@@ -206,9 +206,13 @@ class StepResult:
     output: str = ""
     error: str = ""
     data: dict[str, Any] = field(default_factory=dict)
+    # A guard may report a skip-only degraded pass with a non-zero contract
+    # exit code. Keep that distinction on the step rather than making the
+    # stage look like an ordinary green gate.
+    degraded: bool = False
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        result = {
             "id": self.id,
             "type": self.type,
             "passed": self.passed,
@@ -218,6 +222,27 @@ class StepResult:
             "error": self.error,
             "data": self.data,
         }
+        if self.degraded:
+            result["degraded"] = True
+        return result
+
+
+def _is_degraded_guard_pass(command: str, exit_code: int | None, output: str) -> bool:
+    """Recognize the guard's skip-only degraded exit without weakening failures.
+
+    ``gitreins guard`` deliberately exits 2 when ``allow_skips`` is absent,
+    even though its own result says ``Tier 1: DEGRADED PASS``. That is distinct
+    from a failed guard (which prints FAIL) and from a timeout (handled before
+    this classifier). Only the guard command's explicit degraded-pass banner
+    can opt into this compatibility mapping.
+    """
+    if exit_code != 2:
+        return False
+    # The configured command may be a shell wrapper, so identify the guard by
+    # its own unambiguous result line rather than by command text.
+    return bool(re.search(r"Tier 1:\s+DEGRADED PASS\b", output or "")) and not bool(
+        re.search(r"Tier 1 Guards:\s+FAIL\b", output or "")
+    )
 
 
 @dataclass
@@ -364,6 +389,10 @@ def _record_runtime_skips(stage: StageResult) -> None:
     """
     found: list[tuple[str, str]] = []
     for step in stage.steps:
+        step_data = step.data if isinstance(step.data, dict) else {}
+        if step.degraded or step_data.get("degraded"):
+            if step.id not in stage.skipped_steps and step.id not in [sid for sid, _ in found]:
+                found.append((step.id, str(step_data.get("skip_reason") or "degraded guard pass")))
         for step_id, reason in parse_skip_sentinels(f"{step.output}\n{step.error}"):
             if step_id in stage.skipped_steps or step_id in [sid for sid, _ in found]:
                 continue
@@ -913,9 +942,14 @@ class Pipeline:
             # only controls whether later steps still run; it must never turn a
             # failed lint/test into a pass (previously `on_fail: continue` and
             # generated `cmd || true` both zeroed the failure). 2026-08-08.
-            passed = exit_code == 0
+            degraded_guard_pass = _is_degraded_guard_pass(cmd, exit_code, output)
+            passed = exit_code == 0 or degraded_guard_pass
 
             data: dict[str, Any] = {"exit_code": exit_code}
+            if degraded_guard_pass:
+                data["degraded"] = True
+                data["skip_reason"] = "guard reported DEGRADED PASS"
+
             if tier1_lock_result is not None:
                 # INT-FLAKE-6 attribution: the verdict shows the run took the
                 # per-repo tier1 tests lock (acquired / waited / wait-expired).
@@ -1014,6 +1048,7 @@ class Pipeline:
                 passed=passed,
                 output=output,
                 data=data,
+                degraded=degraded_guard_pass,
             )
         except subprocess.TimeoutExpired:
             # GAP-058: same budget attribution as the run_bounded path above —
