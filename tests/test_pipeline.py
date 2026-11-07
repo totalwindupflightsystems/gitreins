@@ -1113,6 +1113,129 @@ class TestScalaLanguageDetection:
         assert "sbt" in test_step["run"], f"Expected sbt, got {test_step['run']}"
 
 
+class TestAiEvalCoverageGate:
+    """GR-167: the ai_eval step is a GATE, not a `verdict == "COMPLETE"` test.
+
+    76 of 297 stored passes (25.6%) carried no per-criterion items, and 40 of
+    those landed in October 2026 alone: the step's `passed` was the model's own
+    word with nothing asserting that any criterion had actually been graded.
+    """
+
+    def _pipeline(self, tmp_workdir: str, llm_client: LLMClient) -> Pipeline:
+        config = {
+            "pipeline": {
+                "stages": [
+                    {
+                        "id": "tier2",
+                        "type": "ai_eval",
+                        "on": ["pre-eval"],
+                        "condition": "true",
+                        "max_iterations": 2,
+                    }
+                ]
+            }
+        }
+        return Pipeline(config, tmp_workdir, llm=llm_client)
+
+    def _run(self, pipeline: Pipeline, criteria: list, verdict: object) -> dict:
+        with patch("engine.evaluator.AgenticEvaluator") as mock_eval:
+            mock_eval.return_value.evaluate.return_value = verdict
+            return pipeline.run(
+                {"id": "t1", "title": "x", "criteria": criteria}, trigger="pre-eval"
+            )
+
+    def test_empty_items_complete_fails_the_stage(
+        self, tmp_workdir: str, llm_client: LLMClient
+    ) -> None:
+        """A COMPLETE with no item list is refused (the 76/297 class)."""
+        from engine.evaluator import Verdict
+
+        result = self._run(
+            self._pipeline(tmp_workdir, llm_client),
+            ["c1 shipped"],
+            Verdict(verdict="COMPLETE", items=[], summary="done"),
+        )
+
+        assert result["stages"]["tier2"]["passed"] is False
+        assert result["passed"] is False
+
+    def test_ungraded_criterion_fails_the_stage_and_is_named(
+        self, tmp_workdir: str, llm_client: LLMClient
+    ) -> None:
+        """One item for two criteria is not coverage — and the gap is printed."""
+        from engine.evaluator import Verdict, VerdictItem
+
+        result = self._run(
+            self._pipeline(tmp_workdir, llm_client),
+            ["c1 shipped", "c2 documented"],
+            Verdict(
+                verdict="COMPLETE",
+                items=[VerdictItem("c1 shipped", "PASS", "ok")],
+                summary="done",
+            ),
+        )
+
+        stage = result["stages"]["tier2"]
+        assert stage["passed"] is False
+        assert "c2 documented" in stage["summary"] or "c2 documented" in stage["steps"][0]["output"]
+        assert stage["steps"][0]["data"]["ungraded_criteria"] == ["c2 documented"]
+
+    def test_a_shortened_item_matches_by_prefix(
+        self, tmp_workdir: str, llm_client: LLMClient
+    ) -> None:
+        """Exact text first, then prefix: a trimmed item still grades the criterion."""
+        from engine.evaluator import Verdict, VerdictItem
+
+        result = self._run(
+            self._pipeline(tmp_workdir, llm_client),
+            ["GET /status returns 200 with a json body"],
+            Verdict(
+                verdict="COMPLETE",
+                items=[VerdictItem("GET /status returns 200", "PASS", "ok")],
+                summary="done",
+            ),
+        )
+
+        assert result["stages"]["tier2"]["passed"] is True
+
+    def test_full_coverage_still_passes(self, tmp_workdir: str, llm_client: LLMClient) -> None:
+        """Positive control: every criterion graded and PASSing still passes."""
+        from engine.evaluator import Verdict, VerdictItem
+
+        result = self._run(
+            self._pipeline(tmp_workdir, llm_client),
+            ["c1 shipped", "c2 documented"],
+            Verdict(
+                verdict="COMPLETE",
+                items=[
+                    VerdictItem("c1 shipped", "PASS", "ok"),
+                    VerdictItem("c2 documented", "PASS", "ok"),
+                ],
+                summary="done",
+            ),
+        )
+
+        assert result["stages"]["tier2"]["passed"] is True
+
+    def test_a_no_criteria_task_cannot_pass_silently(
+        self, tmp_workdir: str, llm_client: LLMClient
+    ) -> None:
+        """An empty task criteria list must not read as 'everything covered'."""
+        from engine.evaluator import Verdict, VerdictItem
+
+        result = self._run(
+            self._pipeline(tmp_workdir, llm_client),
+            [],
+            Verdict(
+                verdict="COMPLETE",
+                items=[VerdictItem("c1 shipped", "PASS", "ok")],
+                summary="done",
+            ),
+        )
+
+        assert result["stages"]["tier2"]["passed"] is False
+
+
 class TestAiEvalCapForwarding:
     """_run_ai_eval cap resolution: step overrides over config base.
 
@@ -1123,11 +1246,15 @@ class TestAiEvalCapForwarding:
     """
 
     def _make_verdict(self) -> object:
-        v = MagicMock()
-        v.verdict = "COMPLETE"
-        v.summary = "ok"
-        v.items = []
-        return v
+        from engine.evaluator import Verdict, VerdictItem
+
+        # GR-167: a passing verdict must grade the task's criteria; these tests
+        # grade cap forwarding, so the verdict they stub is a fully covered one.
+        return Verdict(
+            verdict="COMPLETE",
+            items=[VerdictItem("c1", "PASS", "ok")],
+            summary="ok",
+        )
 
     def test_no_step_caps_defers_to_config(self, tmp_workdir: str, llm_client: LLMClient) -> None:
         """Step with only max_iterations: -1 defers — no explicit EvalCap."""

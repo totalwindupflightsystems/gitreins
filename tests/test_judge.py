@@ -12,6 +12,23 @@ from engine.evaluator import Verdict, VerdictItem
 from engine.llm import LLMClient
 
 
+def _mock_verdict_response(content: str) -> mock.MagicMock:
+    """A ``chat()`` response the evaluator can cost and parse.
+
+    The evaluator reads numeric usage fields off every response; a bare
+    MagicMock answers comparisons with another MagicMock and the run dies in
+    the loop, which would make a gate test pass for the wrong reason.
+    """
+    usage = mock.MagicMock(
+        prompt_tokens=0,
+        completion_tokens=0,
+        cache_read_tokens=0,
+        cache_write_tokens=0,
+        total_tokens=0,
+    )
+    return mock.MagicMock(content=content, tool_calls=None, usage=usage)
+
+
 # ── Phase 1-5-1: JudgeResult, legacy path ────────────────────────────────────
 
 
@@ -204,6 +221,131 @@ class TestJudgeEvaluateTask:
                 result = judge.evaluate_task(task)
         assert result.passed is True
 
+    def test_empty_items_complete_is_not_a_pass_through_evaluate_task(
+        self, judge: Judge, llm_client: LLMClient, tmp_workdir: str
+    ) -> None:
+        """GR-167 AC3: COMPLETE with no items does not pass evaluate_task.
+
+        76 of 297 stored passes (25.6%) carried zero per-criterion items:
+        `passed` was `verdict == "COMPLETE"` and nothing asserted that any
+        criterion had been graded.
+        """
+        import os
+
+        import yaml
+
+        from engine.task_manager import Task
+
+        config_dir = os.path.join(tmp_workdir, ".gitreins")
+        os.makedirs(config_dir, exist_ok=True)
+        with open(os.path.join(config_dir, "config.yaml"), "w") as f:
+            yaml.dump(
+                {
+                    "pipeline": {
+                        "stages": [
+                            {
+                                "id": "tier1",
+                                "parallel": True,
+                                "on": ["pre-eval"],
+                                "steps": [
+                                    {
+                                        "id": "secrets",
+                                        "type": "script",
+                                        "run": "echo clean",
+                                        "on_fail": "continue",
+                                    }
+                                ],
+                            },
+                            {
+                                "id": "tier2",
+                                "type": "ai_eval",
+                                "on": ["pre-eval"],
+                                "condition": "true",
+                                "max_iterations": 2,
+                            },
+                        ]
+                    }
+                },
+                f,
+            )
+
+        task = Task(id="t1", title="Test", criteria=["c1"])
+        verdict_json = '{"verdict":"COMPLETE","items":[],"summary":"done"}'
+        with patch.object(llm_client, "chat", return_value=_mock_verdict_response(verdict_json)):
+            result = judge.evaluate_task(task)
+
+        assert result.passed is False
+        assert result.pipeline_result["stages"]["tier2"]["passed"] is False
+
+    def test_legacy_path_refuses_complete_without_items(
+        self, judge: Judge, llm_client: LLMClient
+    ) -> None:
+        """GR-167: the legacy call site (`_run_legacy`) applies the same rule."""
+        from engine.task_manager import Task
+
+        task = Task(id="t1", title="Test", criteria=["c1"])
+        tier1_pass = Tier1Result(passed=True, results=[GuardResult("tests", True, "ok")])
+        judge._pass_on_error = False
+        with patch.object(judge.guard_manager, "run_all", return_value=tier1_pass):
+            verdict_json = '{"verdict":"COMPLETE","items":[],"summary":"done"}'
+            with patch.object(
+                llm_client, "chat", return_value=_mock_verdict_response(verdict_json)
+            ):
+                result = judge._run_legacy(task)
+
+        assert result.passed is False
+        assert result.tier2 is not None and result.tier2.verdict == "COMPLETE"
+        # The reason is visible where a reader looks: the verdict summary.
+        assert "Coverage FAILED" in result.tier2.summary
+
+    def test_legacy_path_refuses_a_complete_that_leaves_a_criterion_ungraded(
+        self, judge: Judge, llm_client: LLMClient
+    ) -> None:
+        """GR-167 AC1: an item list that does not cover the task fails."""
+        from engine.task_manager import Task
+
+        task = Task(id="t1", title="Test", criteria=["c1 shipped", "c2 documented"])
+        tier1_pass = Tier1Result(passed=True, results=[GuardResult("tests", True, "ok")])
+        judge._pass_on_error = False
+        with patch.object(judge.guard_manager, "run_all", return_value=tier1_pass):
+            verdict_json = (
+                '{"verdict":"COMPLETE","items":'
+                '[{"criterion":"c1 shipped","status":"PASS","detail":"ok"}],'
+                '"summary":"done"}'
+            )
+            with patch.object(
+                llm_client, "chat", return_value=_mock_verdict_response(verdict_json)
+            ):
+                result = judge._run_legacy(task)
+
+        assert result.passed is False
+        # The ungraded criterion is named, not just counted.
+        assert result.tier2 is not None
+        assert "c2 documented" in result.tier2.summary
+
+    def test_legacy_path_still_passes_a_fully_graded_complete(
+        self, judge: Judge, llm_client: LLMClient
+    ) -> None:
+        """Positive control: full coverage still passes (nothing was weakened)."""
+        from engine.task_manager import Task
+
+        task = Task(id="t1", title="Test", criteria=["c1 shipped", "c2 documented"])
+        tier1_pass = Tier1Result(passed=True, results=[GuardResult("tests", True, "ok")])
+        judge._pass_on_error = False
+        with patch.object(judge.guard_manager, "run_all", return_value=tier1_pass):
+            verdict_json = (
+                '{"verdict":"COMPLETE","items":['
+                '{"criterion":"c1 shipped","status":"PASS","detail":"ok"},'
+                '{"criterion":"c2 documented","status":"PASS","detail":"ok"}],'
+                '"summary":"done"}'
+            )
+            with patch.object(
+                llm_client, "chat", return_value=_mock_verdict_response(verdict_json)
+            ):
+                result = judge._run_legacy(task)
+
+        assert result.passed is True
+
     def test_run_precommit_runs_pipeline(self, judge: Judge, tmp_workdir: str) -> None:
         """run_precommit runs pipeline with trigger='pre-commit'."""
         import os
@@ -235,6 +377,66 @@ class TestJudgeEvaluateTask:
 
         result = judge.run_precommit()
         assert result is True
+
+
+class TestVerdictCoverage:
+    """GR-167: ``engine.gate`` is the one authority on what a verdict covers."""
+
+    def test_exact_text_beats_a_prefix(self) -> None:
+        """'c1' must grade 'c1', not the item that merely starts with it."""
+        from engine.gate import check_coverage
+
+        verdict = Verdict(
+            verdict="COMPLETE",
+            items=[
+                VerdictItem("c1 extended criterion text", "FAIL", "no"),
+                VerdictItem("c1", "PASS", "ok"),
+            ],
+        )
+        coverage = check_coverage(verdict, ["c1"])
+        assert coverage.graded == ("c1",)
+        assert coverage.failing == ()
+
+    def test_one_item_cannot_grade_two_criteria(self) -> None:
+        """Coverage is per criterion: a duplicated item covers one of them."""
+        from engine.gate import verdict_is_passing
+
+        verdict = Verdict(
+            verdict="COMPLETE",
+            items=[VerdictItem("shared criterion text here", "PASS", "ok")],
+        )
+        assert verdict_is_passing(verdict, ["shared criterion text here"]) is True
+        assert (
+            verdict_is_passing(
+                verdict, ["shared criterion text here", "shared criterion text here"]
+            )
+            is False
+        )
+
+    def test_a_fail_item_does_not_complete(self) -> None:
+        """COMPLETE beside a FAIL item is a contradiction, not a pass."""
+        from engine.gate import verdict_is_passing
+
+        verdict = Verdict(verdict="COMPLETE", items=[VerdictItem("c1 shipped", "FAIL", "missing")])
+        assert verdict_is_passing(verdict, ["c1 shipped"]) is False
+
+    def test_the_persisted_dict_shape_reads_the_same(self) -> None:
+        """A verdict.json dict and a live Verdict answer identically."""
+        from engine.gate import verdict_is_passing
+
+        record = {
+            "verdict": "COMPLETE",
+            "items": [{"criterion": "c1 shipped", "status": "PASS", "detail": "ok"}],
+        }
+        assert verdict_is_passing(record, ["c1 shipped"]) is True
+        assert verdict_is_passing(record, ["c1 shipped", "c2 documented"]) is False
+
+    def test_incomplete_never_passes(self) -> None:
+        """An INCOMPLETE verdict with full items still does not pass."""
+        from engine.gate import verdict_is_passing
+
+        verdict = Verdict(verdict="INCOMPLETE", items=[VerdictItem("c1 shipped", "PASS", "ok")])
+        assert verdict_is_passing(verdict, ["c1 shipped"]) is False
 
 
 class TestJudgeInit:

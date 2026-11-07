@@ -425,7 +425,17 @@ class Judge:
         try:
             tier2 = evaluator.evaluate(task_dict)
             result.tier2 = tier2
-            result.passed = tier2.verdict == "COMPLETE"
+            # GR-167: `passed` is a COVERAGE verdict, not the model's own word.
+            # 76 of 297 stored passes carried zero per-criterion items, so a
+            # COMPLETE with no evidence is not a pass here (and the missing
+            # criteria are named in the summary a reader sees).
+            from engine.gate import check_coverage, ungraded_note, verdict_is_passing
+
+            coverage = check_coverage(tier2, task.criteria)
+            note = ungraded_note(coverage)
+            if note:
+                tier2.summary = f"{tier2.summary}\n{note}".strip()
+            result.passed = verdict_is_passing(tier2, task.criteria)
             result.verdict = tier2
             # REVIEW-GITREINS-030: the legacy path has no pipeline stages, so
             # the client identity rides on the result itself — persisted as a

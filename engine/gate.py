@@ -2,6 +2,9 @@
 
 Two questions live here, and nowhere else:
 
+* **GR-167** — does a COMPLETE verdict carry per-criterion evidence? A
+  verdict with no items, or one that does not grade every criterion, is not a
+  pass. ``verdict_is_passing`` is the only passing test a caller may use.
 * **GR-166** — did Tier 2 ever run? A ``--skip-tier2`` run is a Tier 1
   grade, not a judged pass. ``pass_class`` records which one a verdict is,
   and the merge-back refuses ``tier1-only`` unless the owner's waiver token
@@ -19,6 +22,7 @@ import hashlib
 import hmac
 import logging
 import os
+from dataclasses import dataclass
 from typing import Any, Mapping
 
 logger = logging.getLogger("gitreins.gate")
@@ -27,6 +31,10 @@ logger = logging.getLogger("gitreins.gate")
 PASS_CLASS_JUDGED = "judged"
 #: Tier 2 never ran: the verdict grades Tier 1 alone.
 PASS_CLASS_TIER1_ONLY = "tier1-only"
+
+#: A prefix match needs this much shared text to mean anything; shorter
+#: criteria ("c1" vs "c10") match by exact text only.
+_PREFIX_MIN_CHARS = 10
 
 #: Env var carrying the owner's tier-1-only merge waiver token. Takes
 #: precedence over ``gate.tier2_waiver`` in ``.gitreins/config.yaml``. Never
@@ -136,3 +144,130 @@ def waiver_satisfied(verdict: object, workdir: str) -> bool:
     if not recorded or not token:
         return False
     return hmac.compare_digest(recorded, waiver_digest(token))
+
+
+# ── GR-167: per-criterion coverage ──────────────────────────────────────────
+
+
+def verdict_outcome(verdict: object) -> str:
+    """The verdict's own word: ``COMPLETE`` / ``INCOMPLETE`` / ``""``."""
+    return str(_field(verdict, "verdict", "") or "").strip().upper()
+
+
+def verdict_items(verdict: object) -> list[Any]:
+    """The verdict's per-criterion items, whatever shape it is stored in."""
+    items = _field(verdict, "items", None)
+    return list(items) if isinstance(items, (list, tuple)) else []
+
+
+def _norm(text: object) -> str:
+    return " ".join(str(text or "").split()).casefold()
+
+
+def _matches(wanted: str, graded: str) -> bool:
+    """Exact text first, then a long-enough prefix in either direction."""
+    if wanted == graded:
+        return True
+    if len(graded) < _PREFIX_MIN_CHARS or len(wanted) < _PREFIX_MIN_CHARS:
+        return False
+    return graded.startswith(wanted) or wanted.startswith(graded)
+
+
+@dataclass(frozen=True)
+class Coverage:
+    """Which task criteria a verdict actually graded, and how."""
+
+    criteria: tuple[str, ...]
+    graded: tuple[str, ...]
+    ungraded: tuple[str, ...]
+    failing: tuple[str, ...]
+
+    @property
+    def complete(self) -> bool:
+        """Every criterion graded, and every graded criterion PASSing.
+
+        An empty ``criteria`` is NOT complete: a verdict that graded nothing
+        cannot be evidence that everything is done (GR-167: an empty task
+        criteria list must not silently pass).
+        """
+        return bool(self.criteria) and not self.ungraded and not self.failing
+
+    @property
+    def reason(self) -> str:
+        """One line naming what is missing, for the verdict summary."""
+        if not self.criteria:
+            return "no task criteria were supplied, so nothing was graded"
+        parts: list[str] = []
+        if self.ungraded:
+            parts.append("ungraded: " + "; ".join(self.ungraded))
+        if self.failing:
+            parts.append("not passing: " + "; ".join(self.failing))
+        return ", ".join(parts)
+
+
+def _criterion_of(item: object) -> str:
+    return str(_field(item, "criterion", "") or "")
+
+
+def _status_of(item: object) -> str:
+    return str(_field(item, "status", "") or "").strip().upper()
+
+
+def check_coverage(verdict: object, criteria: Any) -> Coverage:
+    """Match *criteria* against the verdict's items, one item per criterion."""
+    wanted = [str(c) for c in (criteria or []) if str(c).strip()]
+    items = verdict_items(verdict)
+    used: set[int] = set()
+    graded: list[str] = []
+    ungraded: list[str] = []
+    failing: list[str] = []
+
+    for criterion in wanted:
+        needle = _norm(criterion)
+        match: int | None = None
+        for index, item in enumerate(items):
+            if index not in used and _norm(_criterion_of(item)) == needle:
+                match = index
+                break
+        if match is None:
+            for index, item in enumerate(items):
+                if index not in used and _matches(needle, _norm(_criterion_of(item))):
+                    match = index
+                    break
+        if match is None:
+            ungraded.append(criterion)
+            continue
+        used.add(match)
+        graded.append(criterion)
+        if _status_of(items[match]) != "PASS":
+            failing.append(criterion)
+
+    return Coverage(
+        criteria=tuple(wanted),
+        graded=tuple(graded),
+        ungraded=tuple(ungraded),
+        failing=tuple(failing),
+    )
+
+
+def verdict_is_passing(verdict: object, criteria: Any) -> bool:
+    """The ONLY passing test a gate may use (GR-167).
+
+    A COMPLETE verdict passes only when its items grade every task criterion
+    and every graded criterion is PASS. An empty item list never passes, and an
+    empty criteria list never passes either. The persisted ``passed`` value is
+    not consulted: before GR-167 it was ``verdict == "COMPLETE"`` and nothing
+    more, which is the hole this function closes.
+    """
+    if verdict_outcome(verdict) != "COMPLETE":
+        return False
+    if not verdict_items(verdict):
+        return False
+    return check_coverage(verdict, criteria).complete
+
+
+def ungraded_note(coverage: Coverage) -> str:
+    """The line appended to a verdict summary when coverage is short."""
+    if coverage.complete:
+        return ""
+    return f"Coverage FAILED — {coverage.reason}"

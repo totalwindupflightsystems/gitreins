@@ -1120,13 +1120,23 @@ class Pipeline:
 
         try:
             verdict = evaluator.evaluate(task)
-            passed = verdict.verdict == "COMPLETE"
+            # GR-167: a COMPLETE verdict is not a pass on its own word. The
+            # items must grade every task criterion (76 of 297 stored passes
+            # carried no items at all), and the criteria that were not graded
+            # are named in the step output a reader sees.
+            from engine.gate import check_coverage, ungraded_note, verdict_is_passing
+
+            coverage = check_coverage(verdict, task.get("criteria"))
+            passed = verdict_is_passing(verdict, task.get("criteria"))
+            coverage_note = ungraded_note(coverage)
 
             from engine.evaluator import item_glyph
 
             items_output = "\n".join(
                 f"  {item_glyph(i.status)} {i.criterion}: {i.detail}" for i in verdict.items
             )
+            if coverage_note:
+                items_output = f"{items_output}\n  ✗ {coverage_note}".lstrip("\n")
 
             # Persist the judge's real token usage so external tools (e.g. the
             # coding-hermes scheduler dashboard) can sum GitReins judge cost
@@ -1156,6 +1166,11 @@ class Pipeline:
                     "verdict": verdict.verdict,
                     "items": [_verdict_item_data(i) for i in verdict.items],
                     "summary": verdict.summary,
+                    # GR-167: the criteria the verdict never graded, named so a
+                    # consumer can act on the gap instead of only seeing a
+                    # failed step. Absent when coverage is complete, keeping the
+                    # historical shape for a fully graded verdict.
+                    **({"ungraded_criteria": list(coverage.ungraded)} if coverage.ungraded else {}),
                     # REVIEW-GITREINS-030: persisted with the verdict so judge
                     # provenance is attributable in verdict.json; absent (not
                     # null) when the client carries no identity fields.
