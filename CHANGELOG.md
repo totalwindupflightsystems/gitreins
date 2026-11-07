@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Repo-wide review is the judge's default (GR-170)** — `evaluator.file_scope`
+  now defaults to `full`, so the judge may read any file inside the worktree and
+  search the whole repository instead of being confined to the diff. Repo-wide
+  reads are guarded, not unbounded: reads stay inside the worktree root (a
+  sibling that merely shares the worktree's string prefix is refused too),
+  credential stores are refused by the commit guard's own
+  `SENSITIVE_PATH_PATTERNS` classifier (test fixtures keep the guard's
+  exemption), and a whole-file read above the new `evaluator.max_read_bytes`
+  cap (default 512 KB) is refused with an instruction to range-read rather than
+  silently truncated. `file_scope: changed` remains the explicit opt-out. The
+  judge prompt drops the "code is pre-loaded, you do not need to `read_file`"
+  discouragement and adds a required four-step EXPLORE FIRST order: changed
+  files in full → call sites → the entrypoint that must reach the change →
+  tests. Exploration spends the configured budget; a cap hit mid-exploration
+  still ends INCOMPLETE with a reason, never COMPLETE.
+
 ## [0.18.1] - 2026-11-06
 
 ### Added

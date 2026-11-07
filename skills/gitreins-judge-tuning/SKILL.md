@@ -42,7 +42,7 @@ overridden per-repo under `evaluator:` in `.gitreins/config.yaml`
 | `tool_call_weight` | `0.1` | iterations charged per tool call (a 100-iter cap ≈ ~1000 tool calls) | `engine/config.py:51` |
 | `compaction_threshold` | `0.90` | share of `max_input_tokens` of *cumulative* input tokens at which the conversation is rebuilt | `engine/config.py:53-54` |
 | `code_context_budget` | `0.70` | share of `max_input_tokens` allowed for the pre-loaded code block | `engine/config.py:55`, enforced `engine/evaluator.py:1135-1147` |
-| `file_scope` | `"changed"` | which files the judge may `read_file`/`search_pattern` | `engine/config.py:56`, `engine/evaluator.py:1123-1127` |
+| `file_scope` | `"full"` | which files the judge may `read_file`/`search_pattern` — `full` = whole worktree (GR-170 default), `changed` = the explicit opt-out | `engine/config.py:56`, `engine/evaluator.py:1219-1231` |
 | `fast_track` | `"auto"` | `on`/`off`/`auto`; `auto` turns it **on** at ≥20 source packages | `engine/config.py:57`, `engine/evaluator.py:498-550` |
 | `max_file_bytes` | `131_072` | cap on one `read_file` result | `engine/config.py:58-60`, `engine/evaluator.py:496` |
 
@@ -181,7 +181,7 @@ Rules that hold up in practice:
    handlers are registered"), a superlative with no test ("the API is
    performant"), a criterion about a system the judge cannot reach (a live
    service it cannot start), or one whose only evidence is *outside* the file
-   scope it is allowed to read (`file_scope: changed` rejects reads outside the
+   scope it is allowed to read (`file_scope: changed`, the opt-out, rejects reads outside the
    changed set with `File not in scope: …`, `engine/evaluator.py:1566`). The
    criterion is not wrong — it is unscoped. Split it or restate it as a
    countable check.
@@ -196,21 +196,29 @@ reports, **unverified** at HEAD)*.
 
 ## Judging a big repo cheaply
 
-The single most effective lever is `file_scope`. It is already the default
-(`changed`, `engine/config.py:56`): the allowed set is computed from
+The most effective lever is `file_scope` — and since GR-170 the default is
+`full` (repo-wide), not `changed`. That is deliberate: a reviewer that cannot
+follow a changed symbol to its callers and its entrypoint cannot tell "works"
+from "exists", and the diff-only judge approved wired-but-unreachable changes.
+`full` still has guardrails: reads are confined to the worktree, credential
+stores (`SENSITIVE_PATH_PATTERNS`) are refused, and a whole-file read over
+`max_read_bytes` (512 KB) is refused in favour of a range read
+(`engine/evaluator.py:1740-1800`).
+
+`file_scope: changed` remains the cost lever: the allowed set is computed from
 `git diff --cached` + `git diff` plus mapped test files and config files
-(`_compute_allowed_files`, `engine/evaluator.py:767-851`), and both `read_file`
-and `search_pattern` are gated to it (`engine/evaluator.py:1566, 1713, 1752,
-1838`). `run_command` stays unrestricted because tests must run anywhere.
+(`_compute_allowed_files`, `engine/evaluator.py`), and both `read_file`
+and `search_pattern` are gated to it. `run_command` stays unrestricted because
+tests must run anywhere.
 
 Cheap-judging recipe, in order:
 
-1. **Grade the diff, not the repo.** `file_scope: changed` (default) + `diff`
-   test mode + a criterion set that talks about the changed files' names. The
-   pre-loaded block and the allowed set then agree with the criteria.
-2. **Use `file_scope: full` only when the criteria genuinely span the tree**
-   (small repos, cross-cutting invariants) — on a 100+ package monorepo it is
-   how the loop drowns before producing output.
+1. **Keep the reachability step even when you cut cost.** `fast_track: on` +
+   `diff` test mode + criteria that name the changed files still permits the
+   one search that proves the new symbol is called from an entrypoint.
+2. **Switch to `file_scope: changed` only when the diff genuinely is the whole
+   question** — a 100+ package monorepo with a tight input budget — and say so
+   in the criteria, because the judge can no longer trace unchanged code.
 3. **Grade without persisting when it is a review, not a record** — `gitreins
    judge --ephemeral --title … --criterion …` evaluates inline criteria and
    persists **nothing**: no task entry, no verdict history, no branch, no
@@ -391,7 +399,7 @@ evaluator:
   tool_call_weight: 0.1
   compaction_threshold: 0.90 # 1.0 disables proactive compaction
   code_context_budget: 0.70  # share of the input cap for pre-loaded code
-  file_scope: changed        # the single biggest cost lever — keep it
+  file_scope: full           # GR-170 default (repo-wide); 'changed' is the cost lever
   fast_track: auto           # on at >=20 source packages
 ```
 
@@ -413,8 +421,8 @@ tail -1 .gitreins/usage.jsonl     # tokens for the last tier2 step
   over-limit per-call value is clamped to 393 216 on DeepSeek rather than
   rejected (`engine/llm.py:279-303`, `engine/evaluator.py:1222-1225`).
 - **"The evaluator reads ALL source files every iteration, so size
-  `max_input_tokens` off repo size"** — obsolete since `file_scope: changed`
-  became the default (`engine/config.py:56`). Cost tracks the changed set and
+  `max_input_tokens` off repo size"** — obsolete since GR-170 made repo-wide reads
+  bounded by guards rather than by scope (`engine/config.py:56`, `engine/evaluator.py:1740-1800`). Cost tracks the changed set and
   the criteria, not the package count. Cap-sizing tables keyed on "packages"
   predate that and over-provision badly.
 - **"`max_time` unset is a safe default"** — the engine default is `-1`
