@@ -1067,8 +1067,21 @@ def build_verdict_data(workdir: str, task: Task, result: JudgeResult) -> dict[An
     # the per-criterion resolution attribution when a pre-screen ran; the
     # fields are omitted entirely when absent so verdicts from degraded
     # (ABSTAIN) or pre-screen-era runs keep today's exact shape.
-    if result.verdict and hasattr(result.verdict, "items"):
-        verdict_data["items"] = [_verdict_item_dict(item) for item in result.verdict.items]
+    # GR-184: the staged-pipeline path (every modern judge run) leaves
+    # result.verdict unset — the graded evidence lives in the pipeline's
+    # ai_eval step data, and only the pipeline verdict carries it. Without
+    # this fallback every pipeline verdict persisted items=[] while the judge
+    # had actually graded the criteria with proof (116/116 judged passes
+    # measured empty on 2026-11-06/07).
+    verdict_obj = result.verdict
+    if verdict_obj is None or not hasattr(verdict_obj, "items"):
+        pipeline_result = getattr(result, "pipeline_result", None)
+        if pipeline_result:
+            from engine.judge import _find_pipeline_verdict
+
+            verdict_obj = _find_pipeline_verdict(pipeline_result)
+    if verdict_obj is not None and hasattr(verdict_obj, "items"):
+        verdict_data["items"] = [_verdict_item_dict(item) for item in verdict_obj.items]
     else:
         verdict_data["items"] = []
 
