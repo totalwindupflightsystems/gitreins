@@ -67,6 +67,41 @@ class TestStepResult:
         assert not _is_degraded_guard_pass("gitreins guard", 1, "Tier 1 Guards: FAIL")
         assert not _is_degraded_guard_pass("gitreins guard", 2, "Command timed out")
 
+    def test_pipeline_records_real_degraded_guard_as_pass(self, tmp_workdir: str) -> None:
+        """A real guard-shaped command keeps degraded evidence without failing tier1."""
+        config = {
+            "pipeline": {
+                "stages": [
+                    {
+                        "id": "tier1",
+                        "on": ["pre-eval"],
+                        "steps": [
+                            {
+                                "id": "guard",
+                                "type": "script",
+                                "run": "printf 'Tier 1: DEGRADED PASS (skips: lint=no staged files)\\n'; exit 2",
+                            }
+                        ],
+                    },
+                    {
+                        "id": "tier2",
+                        "on": ["pre-eval"],
+                        "steps": [{"id": "tier2", "type": "script", "run": "printf 'tier2 ok\\n'"}],
+                    },
+                ]
+            }
+        }
+        result = Pipeline(config, tmp_workdir).run(
+            {"id": "gr-183", "title": "degraded guard", "criteria": []}, trigger="pre-eval"
+        )
+        tier1 = result["stages"]["tier1"]
+        step = tier1["steps"][0]
+        assert step["passed"] is True
+        assert step["degraded"] is True
+        assert step["data"]["exit_code"] == 2
+        assert tier1["passed"] is True
+        assert result["passed"] is True
+
     def test_step_result_output_truncated(self) -> None:
         """1000 chars is under the 4000 budget — stored byte-identical (DF-GITREINS-POC-8)."""
         long_output = "x" * 1000
