@@ -616,7 +616,9 @@ class JudgeResult:
 
         if self.pipeline_result:
             stages = self.pipeline_result.get("stages", {})
-            first_stage = True
+            if not stages:
+                lines.append(f"Judge Result: {self.task_id}")
+            first_stage = not bool(lines)
             for stage_id, stage in stages.items():
                 status = "PASS" if stage.get("passed") else "FAIL"
                 degraded = " (DEGRADED - skipped checks)" if stage.get("degraded") else ""
