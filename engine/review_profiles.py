@@ -545,6 +545,11 @@ class SecondPassResult:
     # so a consumer can tell "the reviewer found nothing" from "the reviewer
     # never reported".
     error: str | None = None
+    # GR-180: the reflection pass's drop record ({dropped, threshold,
+    # dropped_findings[, error]}), set only when reflection ran AND it dropped
+    # something. Absent — never an empty dict — otherwise, so every pre-GR-180
+    # (and every no-drop) review dict serializes byte-identically.
+    reflection: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -558,6 +563,8 @@ class SecondPassResult:
         }
         if self.error is not None:
             d["error"] = self.error
+        if self.reflection is not None:
+            d["reflection"] = self.reflection
         return d
 
 
@@ -577,6 +584,44 @@ def _extract_json_object(content: str) -> dict[str, Any] | None:
     except (json.JSONDecodeError, ValueError):
         return None
     return data if isinstance(data, dict) else None
+
+
+def collect_review_diff(workdir: str) -> str:
+    """The diff under review: working tree vs HEAD, else the last commit.
+
+    Shared by the second-pass reviewer and the GR-180 reflection pass so both
+    reads resolve the SAME change. Mirrors the evaluator's context rule
+    (GR-GAP-046): a judge run after a committed change has an empty
+    ``git diff HEAD``, so anchor on the last commit instead of reviewing an
+    empty diff.
+    """
+    try:
+        result = subprocess.run(  # noqa: S607 - git resolved via PATH by design
+            ["git", "diff", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=workdir,
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return result.stdout.strip()
+        if result.returncode != 0:
+            return ""
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    try:
+        shown = subprocess.run(  # noqa: S607 - git resolved via PATH by design
+            ["git", "show", "--format=", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            cwd=workdir,
+            check=False,
+        )
+        return shown.stdout.strip() if shown.returncode == 0 else ""
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
 
 
 class SecondPassReviewer:
@@ -603,39 +648,8 @@ class SecondPassReviewer:
         return SECOND_PASS_SYSTEM_PROMPT.replace("{max_findings}", str(self.max_findings))
 
     def _collect_diff(self) -> str:
-        """The diff under review: working tree vs HEAD, else the last commit.
-
-        Mirrors the evaluator's context rule (GR-GAP-046): a judge run after
-        a committed change has an empty ``git diff HEAD``, so anchor on the
-        last commit instead of reviewing an empty diff.
-        """
-        try:
-            result = subprocess.run(  # noqa: S607 - git resolved via PATH by design
-                ["git", "diff", "HEAD"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                cwd=self.workdir,
-                check=False,
-            )
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip()
-            if result.returncode != 0:
-                return ""
-        except (OSError, subprocess.TimeoutExpired):
-            return ""
-        try:
-            shown = subprocess.run(  # noqa: S607 - git resolved via PATH by design
-                ["git", "show", "--format=", "HEAD"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                cwd=self.workdir,
-                check=False,
-            )
-            return shown.stdout.strip() if shown.returncode == 0 else ""
-        except (OSError, subprocess.TimeoutExpired):
-            return ""
+        """The diff under review — :func:`collect_review_diff` (GR-180 shares it)."""
+        return collect_review_diff(self.workdir)
 
     def _build_user_prompt(self, diff_text: str) -> str:
         return (
@@ -708,4 +722,333 @@ class SecondPassReviewer:
         result.summary = summary
         if not findings and drops and drops[0].startswith("no parseable"):
             result.error = f"unparseable reviewer reply: {drops[0]}"
+        return result
+
+
+# ════════════════════════════════════════════════════════════════
+# GR-180: the reflection pass — vet the reviewer's own findings
+# ════════════════════════════════════════════════════════════════
+#
+# The second pass (above) produces the candidate findings a verdict carries.
+# Whatever its model hallucinated — a real-sounding defect about a line that is
+# not in the diff, a plausible claim with no evidence behind it — rides into
+# the verdict record as if it were verified. The reflection pass is the check
+# ON the reviewer: each candidate finding is scored, read against the same
+# diff, for correctness (is the claimed defect real?) and evidence (does the
+# citation actually show it?), and anything below ``review.reflection_threshold``
+# is DROPPED before the verdict record is written.
+#
+# Fail-closed by construction: a finding whose score is missing, malformed or
+# unparseable is dropped, and a reflection whose LLM call fails or whose whole
+# reply cannot be parsed drops EVERY candidate — a broken filter never
+# promotes. The drop record ({dropped, threshold, dropped_findings, error})
+# rides the review block into the persisted verdict, so a drop is visible with
+# its reason, never silent.
+
+#: Findings scoring at or above this on BOTH dimensions survive; below it
+#: (either dimension) they are dropped with the failing dimension named.
+#: Overridable per repo via ``review.reflection_threshold`` in
+#: .gitreins/config.yaml — this constant is that setting's default.
+DEFAULT_REFLECTION_THRESHOLD = 0.6
+
+REFLECTION_SYSTEM_PROMPT = """\
+You are a reflection pass auditing another reviewer's candidate findings before they are written into a verdict. For EACH candidate finding, score two independent dimensions and nothing else — you are a filter, not a second reviewer, and you never add, remove or rewrite findings.
+
+## YOUR INPUT
+
+You receive the diff under review and the candidate findings (each with an index, a severity, a file:line, a detection rule and a detail). That is all.
+
+## SCORE EACH FINDING (0.0–1.0)
+
+- "correctness" — is the claimed defect REAL in this diff? 1.0 = the exact code shape the detection names is visible in the diff and the claim about it is right. 0.0 = the claim contradicts the code.
+- "evidence" — does the finding cite evidence that actually shows the defect? The file:line it names must exist in this diff and show what the detection claims. A plausible-sounding claim about a line that is not in the diff, or a detection rule the diff cannot confirm, scores LOW evidence.
+
+Score the two dimensions independently: a real defect whose citation does not hold scores high correctness and LOW evidence.
+
+## OUTPUT FORMAT
+
+When done, output EXACTLY this JSON with no surrounding text, no markdown fences:
+
+{"scores":[{"index":0,"correctness":0.9,"evidence":0.8,"reason":"one line: what you checked"},{"index":1,"correctness":0.2,"evidence":0.1,"reason":"the named line is not in this diff"}],"summary":"<one sentence>"}
+
+Rules:
+- Exactly one score entry per candidate finding, keyed by its given "index".
+- A finding you cannot assess scores 0.0 on the dimension you cannot assess — you may NOT skip an entry or leave it unscored.
+- NEVER invent findings or scores beyond the candidates given."""
+
+
+@dataclass(frozen=True)
+class ReflectionScore:
+    """One candidate finding's reflection scores (GR-180).
+
+    ``correctness`` and ``evidence`` are 0.0–1.0; ``reason`` is the scorer's
+    one-line account of what it checked (recorded with the drop when the
+    scores fall below the threshold).
+    """
+
+    correctness: float
+    evidence: float
+    reason: str = ""
+
+
+def reflection_score_from_dict(data: Any) -> tuple[ReflectionScore | None, str | None]:
+    """Validate one parsed score entry. Returns (score, None) or (None, reason).
+
+    Fail-closed like :func:`second_pass_finding_from_dict`: a score missing a
+    dimension, carrying a non-numeric value, or falling outside [0.0, 1.0]
+    validates to None — the caller DROPS the finding, never guesses a
+    passing value for it.
+    """
+    if not isinstance(data, dict):
+        return None, f"not an object ({type(data).__name__})"
+    values: dict[str, float] = {}
+    for name in ("correctness", "evidence"):
+        raw = data.get(name)
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            return None, f"{name} {raw!r} is not a number"
+        value = float(raw)
+        if not 0.0 <= value <= 1.0:
+            return None, f"{name} {value!r} outside [0.0, 1.0]"
+        values[name] = value
+    reason = str(data.get("reason", "") or "").strip()
+    return (
+        ReflectionScore(
+            correctness=values["correctness"], evidence=values["evidence"], reason=reason
+        ),
+        None,
+    )
+
+
+@dataclass
+class DroppedFinding:
+    """One candidate finding the reflection dropped, with the reason (GR-180).
+
+    ``finding`` is kept whole so the verdict record can show exactly WHAT was
+    dropped — a silent shrink of the findings list is the failure mode this
+    pass exists to prevent.
+    """
+
+    index: int
+    finding: SecondPassFinding
+    reason: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "index": self.index,
+            "severity": self.finding.severity,
+            "file": self.finding.file,
+            "line": self.finding.line,
+            "detection": self.finding.detection,
+            "reason": self.reason,
+        }
+
+
+@dataclass
+class ReflectionResult:
+    """The reflection pass's outcome, in the shape a verdict record persists."""
+
+    kept: list[SecondPassFinding] = field(default_factory=list)
+    dropped: list[DroppedFinding] = field(default_factory=list)
+    threshold: float = DEFAULT_REFLECTION_THRESHOLD
+    # Set when the reflection itself failed (transport, unparseable reply) —
+    # the fail-closed contract means the error explains a total drop.
+    error: str | None = None
+
+    def to_dict(self) -> dict[str, Any] | None:
+        """The verdict-record block, or None when nothing was dropped.
+
+        Absence contract (GR-180): a reflection that dropped nothing — or
+        never ran — adds no key, so every pre-GR-180 review dict serializes
+        byte-identically. Drops are never silent: every dropped finding is
+        listed beside the reason it fell.
+        """
+        if not self.dropped and self.error is None:
+            return None
+        d: dict[str, Any] = {
+            "dropped": len(self.dropped),
+            "threshold": self.threshold,
+            "dropped_findings": [entry.to_dict() for entry in self.dropped],
+        }
+        if self.error is not None:
+            d["error"] = self.error
+        return d
+
+
+class FindingReflector:
+    """The GR-180 reflection pass: candidate findings in, scored survivors out.
+
+    One LLM call, no tools — the same discipline as SecondPassReviewer, one
+    layer up: it never adds findings, and every candidate that fails to earn
+    a valid score at or above the threshold on BOTH dimensions is dropped
+    with a recorded reason. Deterministic enforcement: the threshold
+    comparison happens HERE, in code, never in the model.
+    """
+
+    def __init__(
+        self,
+        llm: Any,
+        workdir: str,
+        threshold: float = DEFAULT_REFLECTION_THRESHOLD,
+    ) -> None:
+        self.llm = llm
+        self.workdir = workdir
+        # Config garbage must not crash the judge run or widen the filter:
+        # an unusable threshold falls back to the default (which still vets)
+        # and says so in the log.
+        if isinstance(threshold, bool):
+            logger.warning(
+                "reflection_threshold %r is not a number — using default %.2f",
+                threshold,
+                DEFAULT_REFLECTION_THRESHOLD,
+            )
+            threshold = DEFAULT_REFLECTION_THRESHOLD
+        try:
+            self.threshold = float(threshold)
+        except (TypeError, ValueError):
+            logger.warning(
+                "reflection_threshold %r is not a number — using default %.2f",
+                threshold,
+                DEFAULT_REFLECTION_THRESHOLD,
+            )
+            self.threshold = DEFAULT_REFLECTION_THRESHOLD
+
+    # ── Prompt assembly ──────────────────────────────────────────────────
+
+    def _system_prompt(self) -> str:
+        return REFLECTION_SYSTEM_PROMPT
+
+    def _build_user_prompt(self, findings: list[SecondPassFinding], diff_text: str) -> str:
+        rows = "\n".join(
+            f"- index={i} severity={f.severity} file={f.file}:{f.line} "
+            f"detection: {f.detection} detail: {f.detail or '(none)'}"
+            for i, f in enumerate(findings)
+        )
+        return (
+            "## DIFF UNDER REVIEW\n\n"
+            f"{diff_text}\n\n"
+            "## CANDIDATE FINDINGS TO SCORE\n\n"
+            f"{rows}\n\n"
+            "Score each finding per your instructions and output the JSON scores."
+        )
+
+    # ── Parsing ──────────────────────────────────────────────────────────
+
+    def _parse_scores(self, content: str) -> tuple[dict[int, Any] | None, str | None]:
+        """(index → raw score entry) from one reflection reply, or (None, reason).
+
+        ``_extract_json_object`` consumes exactly one JSON value, so trailing
+        commentary cannot poison the parse (the module's standing discipline).
+        Entries whose index is not a plain integer are skipped here and
+        surface later as that finding's per-finding fail-closed drop.
+        """
+        data = _extract_json_object(content)
+        if data is None:
+            return None, f"no parseable JSON object in reply: {content[:200]!r}"
+        rows = data.get("scores")
+        if not isinstance(rows, list):
+            return None, "reply carries no 'scores' list"
+        by_index: dict[int, Any] = {}
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            index = row.get("index")
+            if isinstance(index, bool) or not isinstance(index, int):
+                continue
+            by_index[index] = row
+        return by_index, None
+
+    # ── The pass itself ──────────────────────────────────────────────────
+
+    def reflect(
+        self, findings: list[SecondPassFinding], diff_text: str | None = None
+    ) -> ReflectionResult:
+        """Score *findings* against the diff; keep only what clears the threshold.
+
+        Fail-closed everywhere: a finding with no score entry, an unusable
+        score, or a score below the threshold on either dimension is DROPPED
+        with the reason recorded; an LLM failure or an unparseable reply drops
+        EVERY candidate and names the failure on the result. Never raises —
+        the reflection must not be able to fail the judge run it vets, and it
+        must never promote a finding it could not score.
+        """
+        result = ReflectionResult(threshold=self.threshold)
+        if not findings:
+            return result  # nothing to vet — no LLM call, no drops, no record
+        diff = diff_text if diff_text is not None else collect_review_diff(self.workdir)
+        messages = [
+            {"role": "system", "content": self._system_prompt()},
+            {"role": "user", "content": self._build_user_prompt(findings, diff)},
+        ]
+        try:
+            response = self.llm.chat(messages, max_tokens=4096)
+        except Exception as e:
+            logger.warning(
+                "Reflection pass LLM call failed: %s — dropping %d finding(s) fail-closed",
+                e,
+                len(findings),
+            )
+            result.error = f"reflection LLM call failed: {e}"
+            result.dropped = [
+                DroppedFinding(index=i, finding=f, reason=f"reflection LLM call failed: {e}")
+                for i, f in enumerate(findings)
+            ]
+            return result
+        content = getattr(response, "content", "") or ""
+        by_index, parse_error = self._parse_scores(content)
+        if by_index is None:
+            logger.warning(
+                "Reflection reply unparseable — dropping %d finding(s) fail-closed",
+                len(findings),
+            )
+            result.error = f"unparseable reflection reply: {parse_error}"
+            result.dropped = [
+                DroppedFinding(index=i, finding=f, reason=str(parse_error))
+                for i, f in enumerate(findings)
+            ]
+            return result
+        for i, finding in enumerate(findings):
+            raw = by_index.get(i)
+            if raw is None:
+                result.dropped.append(
+                    DroppedFinding(
+                        index=i,
+                        finding=finding,
+                        reason=f"reflection returned no score for finding {i}",
+                    )
+                )
+                continue
+            score, why = reflection_score_from_dict(raw)
+            if score is None:
+                result.dropped.append(
+                    DroppedFinding(
+                        index=i,
+                        finding=finding,
+                        reason=f"unusable reflection score for finding {i}: {why}",
+                    )
+                )
+                continue
+            below = [
+                name
+                for name, value in (
+                    ("correctness", score.correctness),
+                    ("evidence", score.evidence),
+                )
+                if value < self.threshold
+            ]
+            if below:
+                result.dropped.append(
+                    DroppedFinding(
+                        index=i,
+                        finding=finding,
+                        reason=(
+                            f"{' and '.join(below)} below threshold "
+                            f"{self.threshold:.2f} (correctness {score.correctness:.2f}, "
+                            f"evidence {score.evidence:.2f})"
+                        ),
+                    )
+                )
+                continue
+            result.kept.append(finding)
+        for dropped in result.dropped:
+            logger.warning("Reflection dropped finding %d: %s", dropped.index, dropped.reason)
         return result

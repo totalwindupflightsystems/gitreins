@@ -152,7 +152,11 @@ class Judge:
             review_cfg = {}
         if review_cfg.get("second_pass", True) is not True:
             return
-        from engine.review_profiles import SecondPassReviewer
+        from engine.review_profiles import (
+            DEFAULT_REFLECTION_THRESHOLD,
+            FindingReflector,
+            SecondPassReviewer,
+        )
 
         max_findings = review_cfg.get("max_findings", 10)
         reviewer = SecondPassReviewer(self.llm, self.scan_root, max_findings=int(max_findings))
@@ -161,6 +165,27 @@ class Judge:
         except Exception:  # belt and braces — review() itself never raises
             logger.exception("Second-pass reviewer failed unexpectedly")
             return
+        # GR-180: the reflection pass vets the second pass's own findings
+        # BEFORE they ride the verdict — each candidate is scored for
+        # correctness and evidence against the same diff, and a score below
+        # ``review.reflection_threshold`` (default DEFAULT_REFLECTION_THRESHOLD)
+        # DROPS the finding. Fail-closed: a reflection whose LLM call fails or
+        # whose reply cannot be parsed drops every finding rather than
+        # promoting one, and the drop record rides the review block so the
+        # verdict shows what fell and why. Opt-in via ``review.reflection:
+        # true``; with reflection off — or when nothing is dropped — the
+        # review block is byte-identical to the pre-GR-180 shape.
+        if review_cfg.get("reflection", False) is True:
+            reflector = FindingReflector(
+                self.llm,
+                self.scan_root,
+                threshold=review_cfg.get("reflection_threshold", DEFAULT_REFLECTION_THRESHOLD),
+            )
+            reflection = reflector.reflect(review.findings)
+            review.findings = reflection.kept
+            record = reflection.to_dict()
+            if record is not None:
+                review.reflection = record
         result.second_pass_review = review.to_dict()
 
     def _prepare_auger_task(

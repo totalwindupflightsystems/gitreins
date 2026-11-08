@@ -1228,3 +1228,287 @@ class _VerdictHolder:
         self.passed = verdict.verdict == "COMPLETE"
         self.summary = verdict.summary
         self.pipeline_result: dict[str, object] = {}
+
+
+# ── GR-180: reflection pass vetting the second-pass findings ─────────────────
+#
+# ch:trace GR-180 row=GR-180 spec=docs/evaluator-loop.md#the-author-independent-second-pass-gr-171 test=tests/test_judge.py::TestFindingReflection test=tests/test_judge.py::TestReflectionJudgeWiring evidence=none:pre-fix-red-proof-quoted-in-worker-report witness=none:worker-terminal-run commit=none:open
+#
+# The reflection pass (engine.review_profiles.FindingReflector) scores each
+# second-pass candidate finding for correctness and evidence and DROPS the
+# ones below review.reflection_threshold before the verdict record is written.
+# Fail-closed (AC2): a reflection that fails or cannot be parsed drops every
+# finding, never promotes one. Visibility (AC3): the drop record rides the
+# review block into build_verdict_data's persisted verdict shape unchanged.
+
+
+def _llm_response(content: str) -> object:
+    from engine.llm import LLMResponse, LLMUsage
+
+    return LLMResponse(content=content, usage=LLMUsage())
+
+
+class _ScriptedLLM:
+    """Queued chat() responses in order; records every call; raises on empty."""
+
+    def __init__(self, responses: list[object]) -> None:
+        self.responses = list(responses)
+        self.calls: list[dict[str, object]] = []
+
+    def chat(self, messages: object, tools: object = None, max_tokens: object = None) -> object:
+        self.calls.append({"messages": messages, "max_tokens": max_tokens})
+        if not self.responses:
+            raise AssertionError("scripted LLM ran out of responses")
+        response = self.responses.pop(0)
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+
+def _scores_json(entries: list[dict[str, object]]) -> str:
+    import json
+
+    return json.dumps({"scores": entries, "summary": "scored"})
+
+
+GR180_FINDINGS_JSON = (
+    '{"findings":['
+    '{"severity":"high","file":"engine/a.py","line":1,"detection":"rule a","detail":"d a"},'
+    '{"severity":"medium","file":"engine/b.py","line":2,"detection":"rule b","detail":"d b"}],'
+    '"summary":"two candidates"}'
+)
+
+GR180_SCORES_DROP_B = (
+    '{"scores":['
+    '{"index":0,"correctness":0.9,"evidence":0.8,"reason":"visible in diff"},'
+    '{"index":1,"correctness":0.2,"evidence":0.2,"reason":"speculation"}],'
+    '"summary":"one survives"}'
+)
+
+GR180_SCORES_KEEP_ALL = (
+    '{"scores":['
+    '{"index":0,"correctness":0.9,"evidence":0.8},'
+    '{"index":1,"correctness":0.8,"evidence":0.9}],'
+    '"summary":"both solid"}'
+)
+
+
+class TestFindingReflection:
+    """GR-180 AC1/AC2: score each candidate finding for correctness and
+    evidence; drop below the threshold; fail closed on any reflection
+    failure — a broken filter never promotes."""
+
+    def _findings(self, n: int) -> list[object]:
+        from engine.review_profiles import SecondPassFinding
+
+        return [
+            SecondPassFinding(
+                severity="high",
+                file=f"engine/f{i}.py",
+                line=i + 1,
+                detection=f"rule {i}",
+                detail="evidence citation",
+            )
+            for i in range(n)
+        ]
+
+    def test_findings_below_threshold_are_dropped(self) -> None:
+        """AC1: a score below review.reflection_threshold drops the finding;
+        the drop reason names the dimension that fell and the threshold."""
+        from engine.review_profiles import FindingReflector
+
+        findings = self._findings(3)
+        reply = _scores_json(
+            [
+                {"index": 0, "correctness": 0.9, "evidence": 0.8, "reason": "visible"},
+                {"index": 1, "correctness": 0.2, "evidence": 0.9, "reason": "wrong claim"},
+                {"index": 2, "correctness": 0.9, "evidence": 0.1, "reason": "no such line"},
+            ]
+        )
+        result = FindingReflector(_ScriptedLLM([_llm_response(reply)]), ".").reflect(findings)
+        assert [f.file for f in result.kept] == ["engine/f0.py"]
+        assert result.error is None
+        assert [d.index for d in result.dropped] == [1, 2]
+        assert "correctness" in result.dropped[0].reason
+        assert "below threshold" in result.dropped[0].reason
+        assert "evidence" in result.dropped[1].reason
+        record = result.to_dict()
+        assert record is not None
+        assert record["dropped"] == 2
+        assert record["dropped_findings"][1]["detection"] == "rule 2"
+
+    def test_score_at_the_threshold_survives(self) -> None:
+        """ "Below a configurable threshold" — exactly AT the threshold is kept,
+        and a no-drop reflection adds no record (absence contract)."""
+        from engine.review_profiles import FindingReflector
+
+        findings = self._findings(1)
+        reply = _scores_json([{"index": 0, "correctness": 0.6, "evidence": 0.6}])
+        result = FindingReflector(_ScriptedLLM([_llm_response(reply)]), ".").reflect(findings)
+        assert len(result.kept) == 1
+        assert result.to_dict() is None
+
+    def test_unparseable_reply_drops_every_finding(self) -> None:
+        """AC2 fail-closed: a reflection that cannot be parsed drops the
+        findings — it never promotes them."""
+        from engine.review_profiles import FindingReflector
+
+        findings = self._findings(2)
+        result = FindingReflector(
+            _ScriptedLLM([_llm_response("they all look fine to me")]), "."
+        ).reflect(findings)
+        assert result.kept == []
+        assert result.error is not None and "unparseable" in result.error
+        assert [d.index for d in result.dropped] == [0, 1]
+        record = result.to_dict()
+        assert record is not None
+        assert record["dropped"] == 2 and "error" in record
+
+    def test_llm_failure_drops_every_finding(self) -> None:
+        """AC2 fail-closed: a reflection whose LLM call fails drops everything."""
+        from engine.review_profiles import FindingReflector
+
+        findings = self._findings(2)
+        result = FindingReflector(_ScriptedLLM([RuntimeError("boom")]), ".").reflect(findings)
+        assert result.kept == []
+        assert result.error is not None and "LLM call failed" in result.error
+        assert result.to_dict()["dropped"] == 2
+
+    def test_missing_or_malformed_scores_drop_only_their_finding(self) -> None:
+        """AC2 fail-closed per finding: a missing score entry, or a non-numeric
+        dimension, drops THAT finding with the reason — others are untouched."""
+        from engine.review_profiles import FindingReflector
+
+        findings = self._findings(3)
+        reply = _scores_json(
+            [
+                {"index": 0, "correctness": 0.9, "evidence": 0.9},
+                # index 1 never scored
+                {"index": 2, "correctness": "high", "evidence": 0.9},
+            ]
+        )
+        result = FindingReflector(_ScriptedLLM([_llm_response(reply)]), ".").reflect(findings)
+        assert [f.file for f in result.kept] == ["engine/f0.py"]
+        reasons = {d.index: d.reason for d in result.dropped}
+        assert "no score" in reasons[1]
+        assert "unusable reflection score" in reasons[2]
+
+    def test_empty_findings_make_no_llm_call(self) -> None:
+        """Nothing to vet → no reflection call, no drops, no record."""
+        from engine.review_profiles import FindingReflector
+
+        llm = _ScriptedLLM([])
+        result = FindingReflector(llm, ".").reflect([])
+        assert result.kept == [] and result.dropped == []
+        assert result.to_dict() is None
+        assert llm.calls == []
+
+
+def _wired_repo(tmp_path: object) -> str:
+    """A minimal REAL git repo with one commit, so the second pass and the
+    reflection both resolve a non-empty diff (collect_review_diff)."""
+    import subprocess
+
+    repo = tmp_path / "gr180-repo"  # type: ignore[attr-defined]
+    repo.mkdir()
+    run = subprocess.run
+    run(["git", "init", "-q"], cwd=repo, check=True)
+    run(["git", "config", "user.email", "author@example.com"], cwd=repo, check=True)
+    run(["git", "config", "user.name", "Author A"], cwd=repo, check=True)
+    (repo / "code.py").write_text("def f():\n    return 1\n")
+    run(["git", "add", "code.py"], cwd=repo, check=True)
+    run(["git", "commit", "-q", "-m", "init"], cwd=repo, check=True)
+    return str(repo)
+
+
+def _write_review_config(workdir: str, review_block: str) -> None:
+    import pathlib
+
+    cfg = pathlib.Path(workdir) / ".gitreins" / "config.yaml"
+    cfg.parent.mkdir(parents=True, exist_ok=True)
+    cfg.write_text("review:\n" + review_block)
+
+
+class TestReflectionJudgeWiring:
+    """GR-180 AC3/AC5: the drop record rides the verdict record (persisted
+    shape unchanged otherwise); the threshold and the opt-in come from the
+    existing review config surface."""
+
+    def _judge(self, workdir: str, llm: object) -> Judge:
+        return Judge(llm, workdir, persist_log=False, persist_telemetry=False)
+
+    def test_drop_record_rides_the_review_block(self, tmp_path: object) -> None:
+        """AC3: dropped count and per-drop reasons are visible on the verdict
+        record — and reach build_verdict_data's persisted shape unchanged."""
+        from engine.persist import build_verdict_data
+        from engine.task_manager import Task
+
+        workdir = _wired_repo(tmp_path)
+        _write_review_config(workdir, "  second_pass: true\n  reflection: true\n")
+        llm = _ScriptedLLM([_llm_response(GR180_FINDINGS_JSON), _llm_response(GR180_SCORES_DROP_B)])
+        result = JudgeResult(task_id="t1")
+        self._judge(workdir, llm)._run_second_pass(result)
+        block = result.second_pass_review
+        assert isinstance(block, dict)
+        assert [f["file"] for f in block["findings"]] == ["engine/a.py"]
+        reflection = block["reflection"]
+        assert reflection["dropped"] == 1
+        assert reflection["dropped_findings"][0]["detection"] == "rule b"
+        assert "below threshold" in reflection["dropped_findings"][0]["reason"]
+
+        persisted = JudgeResult(task_id="t1", passed=True)
+        persisted.second_pass_review = block
+        data = build_verdict_data(workdir, Task(id="t1", title="t", criteria=["c"]), persisted)
+        assert data["review"]["reflection"]["dropped"] == 1
+        assert data["review"]["reflection"]["threshold"] == 0.6
+
+    def test_reflection_off_keeps_the_block_unchanged(self, tmp_path: object) -> None:
+        """Backward compat: without review.reflection, findings ride untouched,
+        the review block carries NO reflection key (absent, never empty), and
+        the judge makes exactly one LLM call."""
+        workdir = _wired_repo(tmp_path)
+        _write_review_config(workdir, "  second_pass: true\n")
+        llm = _ScriptedLLM([_llm_response(GR180_FINDINGS_JSON)])
+        result = JudgeResult(task_id="t1")
+        self._judge(workdir, llm)._run_second_pass(result)
+        block = result.second_pass_review
+        assert isinstance(block, dict)
+        assert len(block["findings"]) == 2
+        assert "reflection" not in block
+        assert len(llm.calls) == 1
+
+    def test_reflection_threshold_is_configurable(self, tmp_path: object) -> None:
+        """AC1: the threshold comes from review.reflection_threshold — a strict
+        one drops findings the default keeps."""
+        workdir = _wired_repo(tmp_path)
+        _write_review_config(
+            workdir, "  second_pass: true\n  reflection: true\n  reflection_threshold: 0.95\n"
+        )
+        llm = _ScriptedLLM(
+            [_llm_response(GR180_FINDINGS_JSON), _llm_response(GR180_SCORES_KEEP_ALL)]
+        )
+        result = JudgeResult(task_id="t1")
+        self._judge(workdir, llm)._run_second_pass(result)
+        block = result.second_pass_review
+        assert isinstance(block, dict)
+        assert block["findings"] == []
+        reflection = block["reflection"]
+        assert reflection["dropped"] == 2
+        assert reflection["threshold"] == 0.95
+
+    def test_reflection_failure_drops_findings_in_the_record(self, tmp_path: object) -> None:
+        """AC2 through the judge: an unparseable reflection reply leaves the
+        verdict record with zero findings and the failure named — fail-closed
+        and visible, never promoted."""
+        workdir = _wired_repo(tmp_path)
+        _write_review_config(workdir, "  second_pass: true\n  reflection: true\n")
+        llm = _ScriptedLLM(
+            [_llm_response(GR180_FINDINGS_JSON), _llm_response("no JSON here at all")]
+        )
+        result = JudgeResult(task_id="t1")
+        self._judge(workdir, llm)._run_second_pass(result)
+        block = result.second_pass_review
+        assert isinstance(block, dict)
+        assert block["findings"] == []
+        assert block["reflection"]["dropped"] == 2
+        assert "unparseable" in block["reflection"]["error"]
