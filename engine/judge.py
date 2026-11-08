@@ -654,13 +654,19 @@ class JudgeResult:
 
     @property
     def summary(self) -> str:
-        lines = [f"Judge Result: {self.task_id}"]
+        lines: list[str] = []
 
         if self.pipeline_result:
             stages = self.pipeline_result.get("stages", {})
+            if not stages:
+                lines.append(f"Judge Result: {self.task_id}")
+            first_stage = not bool(lines)
             for stage_id, stage in stages.items():
                 status = "PASS" if stage.get("passed") else "FAIL"
-                lines.append(f"\nStage {stage_id}: {status}")
+                degraded = " (DEGRADED - skipped checks)" if stage.get("degraded") else ""
+                prefix = "" if first_stage else "\n"
+                lines.append(f"{prefix}Stage {stage_id}: {status}{degraded}")
+                first_stage = False
                 # DF-GITREINS-POC-16: a stage that graded LESS than the guard
                 # gate must say so out loud — a green verdict on a
                 # secrets-only tier1 is not evidence the tree passes.
@@ -670,6 +676,8 @@ class JudgeResult:
                 summary = stage.get("summary", "")
                 if summary:
                     lines.append(f"  {summary}")
+        else:
+            lines.append(f"Judge Result: {self.task_id}")
 
         # Legacy verdict items
         if self.verdict:

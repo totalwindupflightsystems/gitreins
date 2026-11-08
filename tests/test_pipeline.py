@@ -18,6 +18,7 @@ from engine.pipeline import (
     _secrets_step_run,
     load_pipeline_config,
     parse_secrets_scanners,
+    _is_degraded_guard_pass,
 )
 from pathlib import Path
 import pytest
@@ -46,6 +47,86 @@ class TestStepResult:
         d = sr.to_dict()
         assert d["passed"] is False
         assert d["error"] == "E501"
+
+    def test_guard_degraded_pass_is_recorded_as_pass_and_degraded(self) -> None:
+        command = "gitreins guard"
+        output = "Tier 1: DEGRADED PASS (skips: lint=no staged files)"
+        assert _is_degraded_guard_pass(command, 2, output)
+        step = StepResult(
+            id="guard",
+            type="script",
+            passed=True,
+            output=output,
+            data={"exit_code": 2, "degraded": True},
+            degraded=True,
+        )
+        assert step.to_dict()["passed"] is True
+        assert step.to_dict()["degraded"] is True
+
+    def test_guard_real_failure_and_timeout_are_not_degraded_passes(self) -> None:
+        assert not _is_degraded_guard_pass("gitreins guard", 1, "Tier 1 Guards: FAIL")
+        assert not _is_degraded_guard_pass("gitreins guard", 2, "Command timed out")
+
+    def test_pipeline_records_real_degraded_guard_as_pass(self, tmp_workdir: str) -> None:
+        """A real guard-shaped command keeps degraded evidence without failing tier1."""
+        config = {
+            "pipeline": {
+                "stages": [
+                    {
+                        "id": "tier1",
+                        "on": ["pre-eval"],
+                        "steps": [
+                            {
+                                "id": "guard",
+                                "type": "script",
+                                "run": "printf 'Tier 1: DEGRADED PASS (skips: lint=no staged files)\\n'; exit 2",
+                            }
+                        ],
+                    },
+                    {
+                        "id": "tier2",
+                        "on": ["pre-eval"],
+                        "steps": [{"id": "tier2", "type": "script", "run": "printf 'tier2 ok\\n'"}],
+                    },
+                ]
+            }
+        }
+        result = Pipeline(config, tmp_workdir).run(
+            {"id": "gr-183", "title": "degraded guard", "criteria": []}, trigger="pre-eval"
+        )
+        tier1 = result["stages"]["tier1"]
+        step = tier1["steps"][0]
+        assert step["passed"] is True
+        assert step["degraded"] is True
+        assert step["data"]["exit_code"] == 2
+        assert tier1["passed"] is True
+        assert result["passed"] is True
+
+    def test_degraded_guard_warning_does_not_claim_the_guard_never_ran(self) -> None:
+        """GR-183: a skip-only guard pass RAN — the stage warning must not say otherwise."""
+        from engine.pipeline import degradation_warning
+
+        degraded_guard = {
+            "degraded": True,
+            "coverage": "unknown",
+            "skipped_steps": ["guard"],
+            "degradation_reason": "guard reported DEGRADED PASS",
+        }
+        warning = degradation_warning(degraded_guard)
+        assert warning is not None
+        assert "did not run" not in warning
+        assert "graded a subset" in warning
+
+        # A step that genuinely never executed keeps the old wording.
+        never_ran = {
+            "degraded": True,
+            "coverage": "secrets-only",
+            "skipped_steps": ["lint", "tests"],
+            "degradation_reason": "no language detected",
+        }
+        other = degradation_warning(never_ran)
+        assert other is not None
+        assert "did not run" in other
 
     def test_step_result_output_truncated(self) -> None:
         """1000 chars is under the 4000 budget — stored byte-identical (DF-GITREINS-POC-8)."""

@@ -691,6 +691,24 @@ class TestExtendedJudge:
         assert "FAIL" in summary
         assert "tier1" in summary
 
+    def test_degraded_tier1_is_first_summary_line(self) -> None:
+        result = JudgeResult(
+            task_id="t-degraded",
+            passed=True,
+            pipeline_result={
+                "passed": True,
+                "stages": {
+                    "tier1": {
+                        "passed": True,
+                        "degraded": True,
+                        "summary": "  ~ guard: skipped (no staged files)",
+                    },
+                    "tier2": {"passed": True, "summary": "COMPLETE"},
+                },
+            },
+        )
+        assert result.summary.splitlines()[0] == "Stage tier1: PASS (DEGRADED - skipped checks)"
+
     def test_judge_result_tier2_verdict_items_shown(self) -> None:
         """JudgeResult summary shows verdict items from Tier 2."""
         items = [
