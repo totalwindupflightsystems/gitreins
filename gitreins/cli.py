@@ -690,6 +690,19 @@ def _load_init_config(workdir: str, config_path: str) -> dict[str, Any]:
     """
     config_exists = os.path.isfile(config_path) and os.path.getsize(config_path) > 0
     existing = load_config(workdir)
+    if existing and not isinstance(existing, dict):
+        # GR-194: a file whose ROOT is a list or scalar parses "successfully"
+        # but is not a mapping cmd_init can merge — refuse loudly rather than
+        # crash (list assignment) or clobber (build a fresh dict anyway).
+        if config_exists:
+            print(
+                f"Error: {config_path} is a {type(existing).__name__}, not a mapping.\n"
+                f"Fix the YAML structure in that file, then re-run 'gitreins init'.\n"
+                f"To start fresh (discarding existing config), use --reset.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        existing = {}
     if not existing:
         if config_exists:
             print(
@@ -799,19 +812,73 @@ def _update_fleet_resolution_sections(existing: dict[str, Any], changed: list[st
 
 
 def _write_init_config(
-    gitreins_dir: str, config_path: str, existing: dict[str, Any], changed: list[str]
+    gitreins_dir: str,
+    config_path: str,
+    existing: dict[str, Any],
+    changed: list[str],
+    allow_section_rebuild: bool = False,
 ) -> None:
-    """Write the merged config back, recording the backup file when one was made."""
+    """Write the merged config back, recording the backup file when one was made.
+
+    GR-194: when the file already exists the merge is applied at the TEXT
+    level (engine.config.merge_config_text), so untouched lines — and every
+    rationale comment on them — stay byte-identical instead of being lost to
+    a wholesale yaml.dump. A file whose structure cannot be merged safely is
+    refused loudly and left untouched, never silently re-dumped without its
+    comments. ``allow_section_rebuild`` (``init --reset``) permits replacing a
+    section whose keys were removed, which is the semantics reset asks for.
+    Backup behaviour is unchanged (_safe_overwrite records one).
+    """
+    from engine.config import ConfigMergeError, merge_config_text
+
     os.makedirs(gitreins_dir, exist_ok=True)
-    bak = _safe_overwrite(
-        config_path,
-        lambda f: yaml.dump(
-            existing,
-            f,
-            default_flow_style=False,
-            sort_keys=False,
-        ),
-    )
+    original_text = ""
+    file_exists = os.path.isfile(config_path) and os.path.getsize(config_path) > 0
+    if file_exists:
+        try:
+            with open(config_path, encoding="utf-8") as f:
+                original_text = f.read()
+        except (OSError, UnicodeDecodeError) as exc:
+            print(
+                f"Error: cannot read {config_path}: {exc}\n{config_path} left untouched.",
+                file=sys.stderr,
+            )
+            raise SystemExit(1) from exc
+
+    def _warn_re_rendered(section: str) -> None:
+        print(
+            f"  Warning: section '{section}' could not be merged in place and was "
+            "re-rendered — comments inside that section were not preserved.",
+            file=sys.stderr,
+        )
+
+    if file_exists:
+        try:
+            merged_text = merge_config_text(
+                original_text,
+                existing,
+                on_full_render=_warn_re_rendered,
+                allow_section_rebuild=allow_section_rebuild,
+            )
+        except ConfigMergeError as exc:
+            print(
+                f"Error: {config_path} cannot be rewritten without losing comments: {exc}\n"
+                f"{config_path} left untouched — fix the structure named above, "
+                "then re-run 'gitreins init'.",
+                file=sys.stderr,
+            )
+            raise SystemExit(1) from exc
+        bak = _safe_overwrite(config_path, lambda f: f.write(merged_text))
+    else:
+        bak = _safe_overwrite(
+            config_path,
+            lambda f: yaml.dump(
+                existing,
+                f,
+                default_flow_style=False,
+                sort_keys=False,
+            ),
+        )
     if bak:
         changed.append(f"backup: {os.path.basename(bak)}")
 
@@ -930,7 +997,9 @@ def cmd_init(args: argparse.Namespace) -> None:
     _update_guards_section(existing, args, lang_info, test_cmd, static_tools, changed)
     _update_evaluator_history_sections(existing, args, size, changed)
     _update_fleet_resolution_sections(existing, changed)
-    _write_init_config(gitreins_dir, config_path, existing, changed)
+    _write_init_config(
+        gitreins_dir, config_path, existing, changed, allow_section_rebuild=bool(args.reset)
+    )
     _ensure_pre_commit_hook(workdir, args.reset, changed)
 
     # Generate .gitleaks.toml if missing (prevents scanning node_modules/.venv/vendor)

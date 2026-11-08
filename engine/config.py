@@ -13,7 +13,9 @@ Load order (later overrides earlier):
 import json
 import logging
 import os
+import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -790,6 +792,363 @@ def load_raw_config(workdir: str | None = None) -> dict[str, Any]:
         except Exception:
             pass
     return {}
+
+
+# ── Comment-preserving config rewrite (GR-194) ────────────────
+# A config file that loses its rationale comments is not reviewable, so a
+# rewrite of an existing .gitreins/config.yaml is a TEXT-level merge: untouched
+# lines (and every comment on them) stay byte-identical, and any structure the
+# line-level machinery cannot merge safely is REFUSED loudly instead of being
+# silently re-dumped without comments.
+
+
+class ConfigMergeError(Exception):
+    """A config rewrite was refused because it could not be merged safely.
+
+    The caller must leave the existing file untouched and report the reason —
+    never fall back to a wholesale re-dump that would strip the operator's
+    rationale comments.
+    """
+
+
+_TOP_LEVEL_KEY_RE = re.compile(r"^([^\s:#][^:\s]*):(?:\s|$)")
+
+
+def _yaml_scalar(value: Any) -> str:
+    """Render one scalar as a single-line YAML value (no wrapping)."""
+    import yaml
+
+    rendered = yaml.dump(value, default_flow_style=False, sort_keys=False, width=4096)
+    lines = rendered.rstrip("\n").split("\n")
+    if lines and lines[-1] == "...":
+        # yaml.dump terminates a scalar-only document with an explicit
+        # "..." document-end marker; a mapping document does not carry one.
+        lines = lines[:-1]
+    if len(lines) != 1:
+        raise ValueError(f"value does not render as a single line: {value!r}")
+    return lines[0]
+
+
+def _render_fragment(key: str, value: Any, indent: int) -> list[str]:
+    """Render ``key: <value>`` as block YAML lines, indented by *indent*."""
+    import yaml
+
+    dumped = yaml.dump({key: value}, default_flow_style=False, sort_keys=False, width=4096)
+    pad = " " * indent
+    return [pad + line for line in dumped.rstrip("\n").split("\n")]
+
+
+def _split_trailing_comment(text: str) -> tuple[str, str]:
+    """Split ``value  # comment`` into (value, value_gap + comment).
+
+    The gap whitespace between the value and the ``#`` is preserved verbatim
+    so a patched line keeps the comment exactly where the operator put it.
+    Quotes are honoured: a ``#`` inside quotes is not a comment.
+    """
+    quote: str | None = None
+    for i, ch in enumerate(text):
+        if quote is not None:
+            if ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "#" and (i == 0 or text[i - 1] in " \t"):
+            value = text[:i].rstrip()
+            gap = text[len(value) : i]
+            comment = text[i:].rstrip()
+            return value, f"{gap}{comment}" if comment else ""
+    return text.rstrip(), ""
+
+
+def _find_key_line(lines: list[str], key: str, indent: int) -> int | None:
+    """Last index whose line defines *key* at exactly *indent* columns, or None."""
+    prefix = " " * indent
+    found: int | None = None
+    for i, line in enumerate(lines):
+        if not line.startswith(prefix):
+            continue
+        rest = line[indent:]
+        if not rest or rest.startswith((" ", "\t")) or rest.lstrip().startswith("#"):
+            continue
+        if rest == f"{key}:" or rest.startswith(f"{key}: "):
+            found = i
+    return found
+
+
+def _parent_insertion_index(lines: list[str], parent: tuple[str, ...]) -> int | None:
+    """Index just past the parent mapping's subtree (added children go there)."""
+    depth = len(parent)
+    if depth == 0:
+        return len(lines)
+    idx = _find_key_line(lines, parent[-1], 2 * (depth - 1))
+    if idx is None:
+        return None
+    j = idx + 1
+    while j < len(lines):
+        line = lines[j]
+        if not line.strip() or line.lstrip().startswith("#"):
+            j += 1
+            continue
+        if len(line) - len(line.lstrip()) <= 2 * (depth - 1):
+            break
+        j += 1
+    return j
+
+
+def _dict_leaf_changes(
+    old: dict[str, Any], new: dict[str, Any]
+) -> tuple[
+    list[tuple[tuple[str, ...], Any]],
+    list[tuple[tuple[str, ...], Any, Any]],
+    list[tuple[tuple[str, ...], Any]],
+]:
+    """Diff two nested dicts into added / replaced / removed leaf paths."""
+    added: list[tuple[tuple[str, ...], Any]] = []
+    replaced: list[tuple[tuple[str, ...], Any, Any]] = []
+    removed: list[tuple[tuple[str, ...], Any]] = []
+
+    def walk(o: dict[str, Any], n: dict[str, Any], path: tuple[str, ...]) -> None:
+        for key, value in n.items():
+            child = path + (key,)
+            if key not in o:
+                added.append((child, value))
+            elif isinstance(o[key], dict) and isinstance(value, dict):
+                walk(o[key], value, child)
+            elif o[key] != value:
+                replaced.append((child, o[key], value))
+        for key in o:
+            if key not in n:
+                removed.append((path + (key,), o[key]))
+
+    walk(old, new, ())
+    return added, replaced, removed
+
+
+def _merge_block_lines(
+    lines: list[str], old: dict[str, Any], new: dict[str, Any]
+) -> list[str] | None:
+    """Rewrite a block's lines for the old→new dict change, or None to re-render.
+
+    Only two shapes are merged in place: a replaced scalar leaf (the value is
+    patched on its own line, trailing comment kept) and added keys/subtrees
+    (rendered and inserted after the parent's existing subtree). Anything else
+    — key removal, block scalars, flow-style subtrees — returns None and the
+    caller re-renders the whole block.
+    """
+    added, replaced, removed = _dict_leaf_changes(old, new)
+    if removed:
+        return None
+    out = list(lines)
+
+    # 1. Patch replaced scalar leaves in place (no line count change, so the
+    # indexes computed here stay valid for step 2).
+    for path, _old_value, new_value in replaced:
+        idx = _find_key_line(out, path[-1], 2 * len(path))
+        if idx is None:
+            return None
+        try:
+            rendered = _yaml_scalar(new_value)
+        except ValueError:
+            return None
+        rest = out[idx][2 * len(path) + len(path[-1]) + 1 :]
+        value_part, comment = _split_trailing_comment(rest)
+        if not value_part or value_part.lstrip()[:1] in ("|", ">"):
+            return None  # block scalar (or empty value) is not a single-line leaf
+        out[idx] = f"{' ' * (2 * len(path))}{path[-1]}: {rendered}{comment}"
+
+    # 2. Insert added keys/subtrees after their parent's existing subtree,
+    # deepest insertion index first so the not-yet-applied indexes stay valid.
+    insertions: dict[tuple[str, ...], list[str]] = {}
+    for path, value in added:
+        parent = path[:-1]
+        chunk = _render_fragment(path[-1], value, 2 * len(parent) + 2)
+        insertions.setdefault(parent, []).extend(chunk)
+    points = []
+    for parent, chunk in insertions.items():
+        idx = _parent_insertion_index(out, parent)
+        if idx is None:
+            return None
+        points.append((idx, chunk))
+    for idx, chunk in sorted(points, key=lambda point: point[0], reverse=True):
+        out[idx:idx] = chunk
+    return out
+
+
+def _block_lines_carry_anchors(lines: list[str]) -> str | None:
+    """A sample line if the block uses anchors/aliases/merge keys, else None."""
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if re.match(r"^<<\s*:", stripped) or stripped.startswith("? "):
+            return stripped
+        quote: str | None = None
+        for i, ch in enumerate(stripped):
+            if quote is not None:
+                if ch == quote:
+                    quote = None
+            elif ch in "'\"":
+                quote = ch
+            elif ch == ":" and (i + 1 == len(stripped) or stripped[i + 1] in " \t"):
+                if stripped[i + 1 :].lstrip()[:1] in ("&", "*"):
+                    return stripped
+                break
+            elif ch == "#":
+                break
+    return None
+
+
+def _segment_config_lines(
+    lines: list[str],
+) -> tuple[list[str], list[tuple[str, int, int]]]:
+    """Split *lines* into (preamble, blocks); each block is (key, start, stop).
+
+    ``stop`` includes the block's trailing blank/comment tail, which stays
+    attached to the block and is kept verbatim on every merge path.
+    """
+    keys: list[tuple[str, int]] = []
+    for i, line in enumerate(lines):
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        if line[0] in " \t":
+            continue
+        if line.startswith(("---", "...")):
+            raise ConfigMergeError(
+                f"line {i + 1}: YAML document markers are not supported by the "
+                "comment-preserving merge — remove them, then re-run"
+            )
+        match = _TOP_LEVEL_KEY_RE.match(line)
+        if match is None:
+            raise ConfigMergeError(
+                f"line {i + 1} is not a top-level key, comment or blank line "
+                f"({line!r}) — structure not understood, refusing to merge"
+            )
+        keys.append((match.group(1), i))
+    seen: set[str] = set()
+    for key, i in keys:
+        if key in seen:
+            raise ConfigMergeError(
+                f"line {i + 1}: duplicate top-level key {key!r} — refusing to merge"
+            )
+        seen.add(key)
+    preamble_end = keys[0][1] if keys else len(lines)
+    blocks = []
+    for j, (key, start) in enumerate(keys):
+        stop = keys[j + 1][1] if j + 1 < len(keys) else len(lines)
+        blocks.append((key, start, stop))
+    return lines[:preamble_end], blocks
+
+
+def _block_content_stop(lines: list[str], start: int, stop: int) -> int:
+    """End of a block's KEY CONTENT (trailing blank/comment tail excluded)."""
+    end = stop
+    while end > start and (not lines[end - 1].strip() or lines[end - 1].lstrip().startswith("#")):
+        end -= 1
+    return end
+
+
+def merge_config_text(
+    original_text: str,
+    merged: dict[str, Any],
+    on_full_render: Callable[[str], None] | None = None,
+    allow_section_rebuild: bool = False,
+) -> str:
+    """Apply the merged mapping to the existing file's TEXT, keeping comments.
+
+    Untouched lines (whole unchanged blocks, comments, blank separators) come
+    back byte-identical; a changed dict block is merged leaf-by-leaf so the
+    rationale comments around the changed values survive; a block whose
+    structure cannot be merged in place is re-rendered and reported through
+    ``on_full_render`` (values are kept — only that section's comments are
+    not). The rebuilt text is always verified to parse back to exactly
+    *merged* before it is returned.
+
+    Fail-closed refusals (:class:`ConfigMergeError`; caller must leave the
+    file untouched): the text cannot be parsed as a mapping, uses document
+    markers or CR line endings, removes a key the file carries, or would not
+    round-trip. Removing a key INSIDE a block is also a refusal unless
+    ``allow_section_rebuild`` is set — an additive upgrade must never strip a
+    user's setting; with the flag (``gitreins init --reset``) the rebuilt
+    section is re-rendered through ``on_full_render`` instead, which is the
+    semantics the operator explicitly asked for.
+    """
+    import yaml
+
+    if not isinstance(merged, dict):
+        raise ConfigMergeError(f"merged config is a {type(merged).__name__}, not a mapping")
+    if not original_text.strip():
+        raise ConfigMergeError("existing config is empty — nothing to merge into")
+    if "\r" in original_text:
+        raise ConfigMergeError("CR line endings are not supported by the comment-preserving merge")
+    try:
+        original = yaml.safe_load(original_text)
+    except yaml.YAMLError as exc:
+        raise ConfigMergeError(f"existing config cannot be parsed: {exc}") from exc
+    if original is None:
+        original = {}
+    if not isinstance(original, dict):
+        raise ConfigMergeError(
+            f"existing config is a {type(original).__name__}, not a mapping — refusing"
+        )
+    for key in original:
+        if key not in merged:
+            raise ConfigMergeError(
+                f"key {key!r} exists in the file but not in the merged config — "
+                "key removal is not a merge, refusing"
+            )
+
+    original_lines = original_text.split("\n")
+    preamble, blocks = _segment_config_lines(original_lines)
+
+    out: list[str] = list(preamble)
+    appended_new_block = False
+    for key, start, stop in blocks:
+        content_stop = _block_content_stop(original_lines, start, stop)
+        tail = original_lines[content_stop:stop]
+        old_value = original[key]
+        new_value = merged[key]
+        if old_value == new_value:
+            out.extend(original_lines[start:stop])
+            continue
+        anchor = _block_lines_carry_anchors(original_lines[start:content_stop])
+        if anchor is not None:
+            raise ConfigMergeError(
+                f"section {key!r} changes value but uses YAML anchors/aliases/merge "
+                f"keys ({anchor!r}) — cannot merge textually, refusing"
+            )
+        new_lines: list[str] | None = None
+        if isinstance(old_value, dict) and isinstance(new_value, dict):
+            removed = _dict_leaf_changes(old_value, new_value)[2]
+            if removed and not allow_section_rebuild:
+                dotted = ".".join((key, *removed[0][0]))
+                raise ConfigMergeError(
+                    f"key {dotted!r} exists in the file but was removed from the "
+                    "merged config — an additive upgrade never strips settings, "
+                    "refusing"
+                )
+            new_lines = _merge_block_lines(original_lines[start:content_stop], old_value, new_value)
+        if new_lines is None:
+            if on_full_render is not None:
+                on_full_render(key)
+            new_lines = _render_fragment(key, new_value, 0)
+        out.extend(new_lines)
+        out.extend(tail)
+    for key in [k for k in merged if k not in original]:
+        out.extend(_render_fragment(key, merged[key], 0))
+        appended_new_block = True
+
+    text = "\n".join(out)
+    if appended_new_block and not text.endswith("\n"):
+        text += "\n"
+    try:
+        final = yaml.safe_load(text)
+    except yaml.YAMLError as exc:
+        raise ConfigMergeError(f"merged text does not parse: {exc}") from exc
+    if final != merged:
+        raise ConfigMergeError(
+            "merged text does not round-trip to the merged config — refusing to write"
+        )
+    return text
 
 
 # ── Update checker ────────────────────────────────────────────
