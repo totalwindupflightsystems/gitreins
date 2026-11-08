@@ -1,0 +1,55 @@
+{
+  "tick": "gitreins-foreman-2026-11-08-10-25-09",
+  "base": "main",
+  "base_sha": "c98ae6dd0c131e8808948a0232f951b360f3eea0",
+  "armed_at": "2026-11-08T10:32:00Z",
+  "wave_budget": 8,
+  "finished_at": "2026-11-08T11:45:00Z",
+  "closeout_note": "3 tasks dispatched, 3 landed. Merges: 6193a840 (GR-193-FU), 6d455b5d (GR-196 first attempt, judged FAIL), 77b93181 (GR-198), b6dfeaa4 (GR-196-R2 rework), plus docs-count commits eabd327b/913e1a8d. Verdicts: GR-193-FU d45b0805 PASS, GR-198 4e8a15fb PASS, GR-196 818fcd2e FAIL, GR-196-R2 83c14425 PASS.",
+  "workers": [
+    {
+      "task_id": "GR-196",
+      "worktree": "/home/kara/worktrees/gitreins-GR-196",
+      "branch": "wt/GR-196",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "status": "merged",
+      "commit": "24c05002272addb897bc761bdb732d34c084be18",
+      "merge_commit": "6d455b5d",
+      "verdict": "818fcd2e FAIL (stage-level only); closed via rework GR-196-R2"
+    },
+    {
+      "task_id": "GR-196-R2",
+      "worktree": "/home/kara/worktrees/gitreins-GR-196-r2",
+      "branch": "wt/GR-196-r2",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "status": "merged",
+      "commit": "69a9a63e738ef92a80808d04f7d6cad08f66dd31",
+      "merge_commit": "b6dfeaa4778742f317aff88280687265f950e3e0",
+      "verdict": "83c14425 PASS"
+    },
+    {
+      "task_id": "GR-198",
+      "worktree": "/home/kara/worktrees/gitreins-GR-198",
+      "branch": "wt/GR-198",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "status": "merged",
+      "commit": "da8f471350fb62adcab37013146fb28fd818b1f3",
+      "merge_commit": "77b93181",
+      "verdict": "4e8a15fb PASS"
+    },
+    {
+      "task_id": "GR-193-FU",
+      "worktree": "/home/kara/worktrees/gitreins-GR-193-FU",
+      "branch": "wt/GR-193-FU",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm-default",
+      "status": "merged",
+      "commit": "5c306dd3dc7e9dbc623a16b0740c1df175bf2798",
+      "merge_commit": "6193a840",
+      "verdict": "d45b0805 PASS"
+    }
+  ]
+}
