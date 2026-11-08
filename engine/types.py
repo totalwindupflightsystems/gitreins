@@ -223,6 +223,27 @@ def _truncate_line(line: str, limit: int = 100) -> str:
     return line[:cut].rstrip() + "..."
 
 
+def _bounded_finding_line(prefix: str, location: str, limit: int = 100) -> str:
+    """Compose a finding identity that keeps ``file:line`` when it must shrink.
+
+    GR-GAP-070 judge rework: the generic word-boundary truncator cuts from the
+    END of the line, so a long rule id plus a long path dropped exactly the
+    ``file:line`` the console contract demands — a line that names a rule but
+    not where it fired. Here the free-text prefix (count/stage/rule/CWE) is
+    the part that yields: it is cut at a word boundary with room reserved for
+    the location, and the location is re-appended intact behind an ellipsis.
+    When the location alone overflows the window there is no room for any
+    prefix, so the locator is returned uncut rather than half a ``file:line``.
+    """
+    line = f"{prefix} {location}"
+    if len(line) <= limit:
+        return line
+    keep = limit - len(location) - 1  # 1 for the space before the location
+    if keep <= 0:
+        return location
+    return f"{_truncate_line(prefix, keep)} {location}"
+
+
 def _security_review_lane_detail(extra: dict[str, Any] | None) -> str:
     """Finding identity for a blocked security_review lane line (GR-GAP-070).
 
@@ -233,7 +254,9 @@ def _security_review_lane_detail(extra: dict[str, Any] | None) -> str:
     unavailable (pip install semgrep)"), leaving the finding that actually
     failed the commit visible only in the run log. Returns "" when there is
     nothing to name — no summary, or a degraded run with zero findings — so
-    those lanes keep the tail behavior, which names the gap instead.
+    those lanes keep the tail behavior, which names the gap instead. The line
+    is bounded here (not by the generic tail-cutting truncator at the call
+    site) so a long rule id + path keeps the trailing ``file:line``.
     """
     sr = (extra or {}).get("security_review")
     if not isinstance(sr, dict):
@@ -248,7 +271,8 @@ def _security_review_lane_detail(extra: dict[str, Any] | None) -> str:
     rule_id = str(first.get("rule_id") or "?")
     cwe = str(first.get("cwe") or "?")
     location = f"{first.get('file', '?')}:{first.get('line', '?')}"
-    return f"{len(findings)} finding(s); [{stage}] {rule_id} {cwe} {location}"
+    prefix = f"{len(findings)} finding(s); [{stage}] {rule_id} {cwe}"
+    return _bounded_finding_line(prefix, location)
 
 
 def _first_traceback_id(output: str) -> str | None:
@@ -793,10 +817,13 @@ class Tier1Result:
                     # the finding that failed the commit lived only in the run
                     # log. Name it: the finding count, plus stage, rule, CWE
                     # and file:line of the first finding, bounded like every
-                    # lane line. Runs with findings but no machine summary (or
-                    # zero findings) fall through to the tail behavior below;
-                    # the full untruncated finding list stays in the run log.
-                    detail = f" — {_truncate_line(sr_detail)}"
+                    # lane line — but bounded by _bounded_finding_line, not
+                    # this tail-cutting truncator, so a long rule id + path
+                    # keeps the trailing file:line (judge rework). Runs with
+                    # findings but no machine summary (or zero findings) fall
+                    # through to the tail behavior below; the full
+                    # untruncated finding list stays in the run log.
+                    detail = f" — {sr_detail}"
                 elif r.name == "quality":
                     # DF-GITREINS-POC-94: quality output puts the metric line
                     # FIRST (e.g. "quality: type_hint_pct=72.3% (target 80%...)")
