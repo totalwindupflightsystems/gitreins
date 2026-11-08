@@ -1677,3 +1677,188 @@ def test_readme_fetch_recipe_makes_canonical_history_visible_in_a_clone(tmp_path
     assert [e["task_id"] for e in p.list_verdicts()] == ["remote-new-task", "remote-old-task"]
     assert {e["_ref"] for e in p.list_verdicts()} == {HISTORY_REF}
     assert "No verdict history found" not in build_report(str(clone))
+
+
+# ── GR-195: the judge's execution transcript survives into verdict.json ──────
+
+
+def _tier2_stage() -> dict:
+    """The tier2 stage dict a compiled pipeline hands the persister."""
+    return {
+        "id": "tier2",
+        "passed": True,
+        "any_failed": False,
+        "summary": "COMPLETE",
+        "steps": [],
+    }
+
+
+def _sample_tool_record() -> list[str]:
+    """Two entries in the exact shape AgenticEvaluator._tool_record appends."""
+    return [
+        json.dumps(
+            {
+                "tool": "run_command",
+                "arguments": {"command": "pytest -q tests/test_auth.py"},
+                "result": {
+                    "cmd": "pytest -q tests/test_auth.py",
+                    "exit_code": 0,
+                    "stdout": "1 passed in 0.02s",
+                    "stderr": "",
+                },
+            }
+        ),
+        json.dumps(
+            {
+                "tool": "read_file",
+                "arguments": {"path": "engine/auth.py", "limit": 20},
+                "result": {"path": "engine/auth.py", "content": "def login(): ..."},
+            }
+        ),
+    ]
+
+
+def _result_with_transcript(tmp_path: Path, transcript: object) -> object:
+    result = _judge_result(
+        pipeline_result={"passed": True, "stages": {"tier2": _tier2_stage()}},
+        tool_calls=transcript,
+    )
+    return result
+
+
+def test_transcript_from_tool_record_persists_command_exit_code_output_sha(
+    tmp_path: Path,
+) -> None:
+    """A judge result carrying the converted tool record lands at the tier2
+    stage with command / exit_code / output_sha per entry (GR-195)."""
+    import hashlib
+
+    from engine.persist import build_verdict_data
+    from engine.evaluator import tool_calls_transcript
+
+    transcript = tool_calls_transcript(_sample_tool_record())
+    assert transcript is not None
+    result = _result_with_transcript(tmp_path, transcript)
+
+    data = build_verdict_data(str(tmp_path), _task(), result)
+
+    calls = data["stages"]["tier2"]["tool_calls"]
+    assert len(calls) == 2
+    first = calls[0]
+    assert first["tool"] == "run_command"
+    assert first["command"] == "pytest -q tests/test_auth.py"  # the exact command
+    assert first["exit_code"] == 0
+    assert isinstance(first["exit_code"], int)
+    assert (
+        first["output_sha"]
+        == hashlib.sha256(
+            json.dumps(
+                {
+                    "cmd": "pytest -q tests/test_auth.py",
+                    "exit_code": 0,
+                    "stdout": "1 passed in 0.02s",
+                    "stderr": "",
+                },
+                sort_keys=True,
+                default=str,
+            ).encode()
+        ).hexdigest()
+    )
+    second = calls[1]
+    assert second["tool"] == "read_file"
+    assert second["command"] == ('read_file {"limit": 20, "path": "engine/auth.py"}')
+    assert second["exit_code"] == 0
+    assert len(second["output_sha"]) == 64
+
+
+def test_transcript_absent_when_tool_record_empty(tmp_path: Path) -> None:
+    """No record → no key anywhere: absent, never an empty list (GR-195)."""
+    from engine.persist import build_verdict_data
+    from engine.evaluator import tool_calls_transcript
+
+    assert tool_calls_transcript([]) is None
+
+    result = _result_with_transcript(tmp_path, None)
+    data = build_verdict_data(str(tmp_path), _task(), result)
+
+    assert "tool_calls" not in data
+    assert "tool_calls" not in data["stages"]["tier2"]
+    assert "tool_calls_omitted" not in data["stages"]["tier2"]
+
+
+def test_transcript_round_trips_through_the_persisted_verdict_store(
+    tmp_path: Path,
+) -> None:
+    """The transcript read back from verdict.json equals what was persisted."""
+    from engine.persist import build_verdict_data
+    from engine.evaluator import tool_calls_transcript
+
+    transcript = tool_calls_transcript(_sample_tool_record())
+    result = _result_with_transcript(tmp_path, transcript)
+    data = build_verdict_data(str(tmp_path), _task(), result)
+
+    p = VerdictPersister(str(tmp_path))
+    p.config["storage"] = "filesystem"  # skip git
+    p.config["max_verdicts"] = 0  # no pruning
+    assert p.persist("task-t", data) == "dry-run"
+
+    history = p.history_dir
+    date_dirs = os.listdir(history)
+    entry = os.path.join(history, date_dirs[0], os.listdir(os.path.join(history, date_dirs[0]))[0])
+    with open(os.path.join(entry, "verdict.json")) as f:
+        persisted = json.load(f)
+
+    assert persisted["stages"]["tier2"]["tool_calls"] == transcript["tool_calls"]
+
+
+def test_transcript_cap_keeps_the_last_entries_and_records_the_omissions() -> None:
+    """A long run is capped at the LAST entries; the omitted count is recorded,
+    never dropped silently (GR-195)."""
+    from engine.evaluator import TOOL_TRANSCRIPT_MAX_ENTRIES, tool_calls_transcript
+
+    total = TOOL_TRANSCRIPT_MAX_ENTRIES + 3
+    record = [
+        json.dumps(
+            {
+                "tool": "run_command",
+                "arguments": {"command": f"cmd-{i}"},
+                "result": {"cmd": f"cmd-{i}", "exit_code": i, "stdout": "", "stderr": ""},
+            }
+        )
+        for i in range(total)
+    ]
+
+    transcript = tool_calls_transcript(record)
+
+    assert transcript is not None
+    assert transcript["tool_calls_omitted"] == 3
+    calls = transcript["tool_calls"]
+    assert len(calls) == TOOL_TRANSCRIPT_MAX_ENTRIES
+    # The KEPT entries are the last ones — the commands closest to the verdict.
+    assert calls[0]["command"] == f"cmd-{total - TOOL_TRANSCRIPT_MAX_ENTRIES}"
+    assert calls[-1]["command"] == f"cmd-{total - 1}"
+    assert calls[-1]["exit_code"] == total - 1
+
+
+def test_transcript_refused_command_records_negative_exit_code() -> None:
+    """A command that never completed (refused / errored) is still on the
+    transcript, with exit_code -1 — it ran nowhere, but the judge asked."""
+    from engine.evaluator import tool_calls_transcript
+
+    record = [
+        json.dumps(
+            {
+                "tool": "run_command",
+                "arguments": {"command": "yes | head -1"},
+                "result": {"cmd": "yes | head -1", "error": "refused: busy-wait", "refused": True},
+            }
+        )
+    ]
+
+    transcript = tool_calls_transcript(record)
+
+    assert transcript is not None
+    (call,) = transcript["tool_calls"]
+    assert call["command"] == "yes | head -1"
+    assert call["exit_code"] == -1
+    assert len(call["output_sha"]) == 64

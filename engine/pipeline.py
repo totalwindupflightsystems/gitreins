@@ -650,6 +650,12 @@ class Pipeline:
         # attributed to (see engine/usage.py), so nothing is lost. Keyword-only
         # and defaulting True so every existing caller writes it as before.
         self.persist_telemetry = persist_telemetry
+        # GR-195: the execution transcript (capped {tool_calls,
+        # tool_calls_omitted}) of the last ai_eval step that ran an evaluator,
+        # or None. Kept on the pipeline — not in the step or stage dicts — so
+        # the transcript is persisted ONCE, at ``stages.tier2.tool_calls``, by
+        # build_verdict_data (Judge lifts it onto its JudgeResult).
+        self._last_tool_transcript: dict[str, Any] | None = None
 
     def run(self, task: dict[str, Any], trigger: str = "pre-eval") -> dict[str, Any]:
         """Run all stages that match the trigger.
@@ -1088,7 +1094,7 @@ class Pipeline:
             _parse_tokens,
             eval_cap_from_config,
         )
-        from engine.evaluator import AgenticEvaluator
+        from engine.evaluator import AgenticEvaluator, tool_calls_transcript
 
         # Cap resolution: config.yaml evaluator: section is the base;
         # caps EXPLICITLY set in the step config override it. A step that
@@ -1163,8 +1169,17 @@ class Pipeline:
             task["_system_prompt_override"] = rendered
             task["_pipeline_context"] = pipeline_context
 
+        # GR-195: a fresh step clears the slot so a previous ai_eval stage's
+        # transcript can never be mistaken for this one's.
+        self._last_tool_transcript = None
         try:
             verdict = evaluator.evaluate(task)
+            # GR-195: the evaluator's in-run tool record (GR-179) becomes the
+            # execution transcript the verdict persists. None (the slot stays
+            # empty) when the evaluator kept no record — absent, never empty.
+            self._last_tool_transcript = tool_calls_transcript(
+                getattr(evaluator, "_tool_record", [])
+            )
             # GR-167: a COMPLETE verdict is not a pass on its own word. The
             # items must grade every task criterion (76 of 297 stored passes
             # carried no items at all), and the criteria that were not graded

@@ -409,6 +409,11 @@ class Judge:
                 provenance=_judge_provenance(self.llm),
             )
             judge_result.quality_snapshot = quality_snapshot
+            # GR-195: the tier2 execution transcript the pipeline captured off
+            # the evaluator's in-run tool record rides the result so the
+            # persister can place it under ``stages.tier2.tool_calls``. None
+            # when the judge kept no record — the key stays absent then.
+            judge_result.tool_calls = getattr(pipeline, "_last_tool_transcript", None)
             return judge_result
         except Exception as e:
             if self._pass_on_error:
@@ -618,6 +623,12 @@ class JudgeResult:
         # None unless the judge ran with ``review.second_pass: true`` —
         # absent from every persisted shape otherwise.
         self.second_pass_review: dict[str, Any] | None = None
+        # GR-195: the tier2 execution transcript — capped {tool_calls,
+        # tool_calls_omitted} built from the evaluator's in-run tool record —
+        # or None when the judge kept no record. Persisted under
+        # ``stages.tier2.tool_calls`` by build_verdict_data; absent from every
+        # persisted shape otherwise.
+        self.tool_calls: dict[str, Any] | None = None
         self.quality_snapshot = tier1.extra.get("quality_snapshot") if tier1 else None
 
     def _degraded_lane_reasons(self) -> list[str]:
