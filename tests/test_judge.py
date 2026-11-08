@@ -992,3 +992,239 @@ class TestJudgeResultToDict:
 
         for key in ("model", "base_url_source", "api_key_source", "provenance"):
             assert key not in d
+
+
+# ── GR-179: graded failure-mode block ────────────────────────────────────────
+
+
+class TestFailureModeBlock:
+    """GR-179: every verdict can carry up to 3 graded failure modes.
+
+    Each entry names what fails, where (file:function), the realistic trigger,
+    what would detect it (detected_by) and whether a test in this change
+    covers it (covered_in_this_pr). An empty block is normal and unpenalised;
+    an entry whose detected_by claims a test that no tool result of the run
+    shows running degrades the summary instead of silently passing.
+    """
+
+    EMPTY_BLOCK_CONTENT = (
+        '{"verdict":"COMPLETE","items":[{"criterion":"c1","status":"PASS","detail":"ok"}],'
+        '"summary":"all good","failure_modes":[]}'
+    )
+
+    BACKED_CONTENT = (
+        '{"verdict":"COMPLETE","items":[{"criterion":"c1","status":"PASS","detail":"ok"}],'
+        '"summary":"all good","failure_modes":[{"what":"import error when plugin dir missing",'
+        '"where":"engine/plugins.py:load","trigger":"worktree without an empty plugins/ dir",'
+        '"detected_by":"tests/test_judge.py::test_failure_modes_empty_is_unpenalised",'
+        '"covered_in_this_pr":true}]}'
+    )
+
+    UNBACKED_CONTENT = (
+        '{"verdict":"COMPLETE","items":[{"criterion":"c1","status":"PASS","detail":"ok"}],'
+        '"summary":"all good","failure_modes":[{"what":"import error when plugin dir missing",'
+        '"where":"engine/plugins.py:load","trigger":"worktree without an empty plugins/ dir",'
+        '"detected_by":"tests/test_never_ran.py::test_absent","covered_in_this_pr":true}]}'
+    )
+
+    def _parse(self, content: str, run_record: list[str]) -> Verdict:
+        """Parse *content* with the run's tool record set to *run_record*."""
+        import json
+
+        from engine.evaluator import AgenticEvaluator
+
+        evaluator = AgenticEvaluator.__new__(AgenticEvaluator)
+        evaluator._sandbox = {}
+        evaluator._tool_record = [json.dumps(r) if isinstance(r, dict) else r for r in run_record]
+        return evaluator._parse_verdict(content)
+
+    def test_failure_modes_empty_is_unpenalised(self) -> None:
+        """Arms 4+5: an empty block parses to [] and the summary stays byte-identical.
+
+        A verdict that OMITS the block entirely must parse to the same empty
+        list (R1) — the block is additive, never required.
+        """
+        verdict = self._parse(self.EMPTY_BLOCK_CONTENT, run_record=[])
+        assert verdict.verdict == "COMPLETE"
+        assert verdict.failure_modes == []
+        assert verdict.summary == "all good"  # no flags — unpenalised
+
+        omitted = self._parse('{"verdict":"COMPLETE","items":[],"summary":"s"}', run_record=[])
+        assert omitted.failure_modes == []
+        assert omitted.summary == "s"
+
+    def test_failure_modes_populated_backed_entry_is_unpenalised(self) -> None:
+        """Arm 6: populated entry whose detected_by names a test that DID run.
+
+        The run record holds the run_command the evaluator actually executed
+        (tool + arguments + result); the cited node id appears in it, so the
+        citation is backed and the summary keeps its original text.
+        """
+        record_entry = {
+            "tool": "run_command",
+            "arguments": {
+                "cmd": ".venv/bin/python -m pytest "
+                "tests/test_judge.py::test_failure_modes_empty_is_unpenalised -q"
+            },
+            "result": {"exit_code": 0, "output": "1 passed in 0.02s"},
+        }
+        verdict = self._parse(self.BACKED_CONTENT, run_record=[record_entry])
+        assert verdict.verdict == "COMPLETE"
+        assert len(verdict.failure_modes) == 1
+        fm = verdict.failure_modes[0]
+        assert fm.what == "import error when plugin dir missing"
+        assert fm.where == "engine/plugins.py:load"
+        assert fm.trigger == "worktree without an empty plugins/ dir"
+        assert fm.detected_by == "tests/test_judge.py::test_failure_modes_empty_is_unpenalised"
+        assert fm.covered_in_this_pr is True
+        assert verdict.summary == "all good"  # backed citation → no degradation
+
+    def test_failure_modes_unbacked_citation_degrades_summary(self) -> None:
+        """Arm 7: detected_by names a test with no tool result behind it.
+
+        The claim degrades the SUMMARY (the uncovered failure path is named
+        there) without flipping the verdict — the parse is honest, the
+        unsupported detection claim is not.
+        """
+        verdict = self._parse(self.UNBACKED_CONTENT, run_record=[])
+        assert verdict.verdict == "COMPLETE"  # degradation ≠ verdict flip
+        assert "uncovered failure paths" in verdict.summary
+        assert "tests/test_never_ran.py::test_absent" in verdict.summary
+        assert "all good" in verdict.summary  # original summary survives, degraded
+
+    def test_failure_modes_empty_detected_by_is_flagged_not_rejected(self) -> None:
+        """Arm 2: an entry with no detector is allowed — but the summary flags it."""
+        content = (
+            '{"verdict":"INCOMPLETE","items":[{"criterion":"c1","status":"FAIL","detail":"x"}],'
+            '"summary":"one fail","failure_modes":[{"what":"lockfile race",'
+            '"where":"engine/pipeline.py:run","trigger":"two writers stage at once",'
+            '"detected_by":"","covered_in_this_pr":false}]}'
+        )
+        verdict = self._parse(content, run_record=[])
+        assert verdict.verdict == "INCOMPLETE"
+        assert len(verdict.failure_modes) == 1  # allowed, not dropped
+        assert "detected_by is empty" in verdict.summary
+        assert "uncovered failure path" in verdict.summary
+
+    def test_failure_modes_capped_at_three(self) -> None:
+        """R3: entries beyond 3 are truncated, not an error."""
+        entries = ",".join(
+            '{"what":"m%d","where":"a.py:f","trigger":"t","detected_by":"","covered_in_this_pr":false}'
+            % i
+            for i in range(5)
+        )
+        content = (
+            '{"verdict":"COMPLETE","items":[],"summary":"s","failure_modes":[' + entries + "]}"
+        )
+        verdict = self._parse(content, run_record=[])
+        assert len(verdict.failure_modes) == 3
+
+    def test_detected_by_backing_helper_is_direct_and_deterministic(self) -> None:
+        """R2: the backing check is a plain helper tests call directly."""
+        from engine.evaluator import detected_by_is_backed, failure_mode_test_refs
+
+        # Prose naming no test needs no backing.
+        assert failure_mode_test_refs("manual browser check") == []
+        assert detected_by_is_backed("manual browser check", []) is True
+        # A node id that ran (in the command AND its output) is backed.
+        assert detected_by_is_backed(
+            "tests/test_a.py::test_x", ["pytest tests/test_a.py::test_x", "1 passed"]
+        )
+        # The same node id with an empty record has nothing behind it.
+        assert detected_by_is_backed("tests/test_a.py::test_x", []) is False
+        # A bare test_ identifier resolves the same way.
+        assert detected_by_is_backed("test_expired_token", ["ran test_expired_token"]) is True
+        assert detected_by_is_backed("test_expired_token", []) is False
+
+    def test_failure_modes_persisted_with_five_fields(self) -> None:
+        """build_verdict_data persists the block additively with five plain fields.
+
+        Populated block → verdict.json carries exactly the five fields per
+        entry. Empty block → NO ``failure_modes`` key at all (asserted as
+        absent, not empty), so a pre-GR-179 verdict serializes byte-identically.
+        """
+        from engine.persist import build_verdict_data
+        from engine.task_manager import Task
+
+        populated = self._parse(self.BACKED_CONTENT, run_record=[])
+        data = build_verdict_data(
+            ".", Task(id="T-1", title="t", criteria=["c"]), _VerdictHolder(populated)
+        )
+        assert data["failure_modes"] == [
+            {
+                "what": "import error when plugin dir missing",
+                "where": "engine/plugins.py:load",
+                "trigger": "worktree without an empty plugins/ dir",
+                "detected_by": "tests/test_judge.py::test_failure_modes_empty_is_unpenalised",
+                "covered_in_this_pr": True,
+            }
+        ]
+
+        empty = self._parse(self.EMPTY_BLOCK_CONTENT, run_record=[])
+        empty_data = build_verdict_data(
+            ".", Task(id="T-1", title="t", criteria=["c"]), _VerdictHolder(empty)
+        )
+        assert "failure_modes" not in empty_data  # absent, never an empty list
+
+    def test_failure_modes_status_dict_includes_block_only_when_nonempty(self) -> None:
+        """judge_result_to_dict carries the block only when it has entries.
+
+        The degraded-flag contract is untouched either way: a summary whose
+        detected_by names a test with no tool result behind it still carries
+        its ``[uncovered failure paths: …]`` flag in ``d["summary"]`` exactly
+        as failure_mode_summary_flags appended it.
+        """
+        from engine.judge import judge_result_to_dict
+
+        populated = self._parse(self.BACKED_CONTENT, run_record=[])
+        result = JudgeResult(task_id="t1", passed=True, tier2=populated, verdict=populated)
+        d = judge_result_to_dict("t1", "/wd", result)
+        assert d["failure_modes"] == [
+            {
+                "what": "import error when plugin dir missing",
+                "where": "engine/plugins.py:load",
+                "trigger": "worktree without an empty plugins/ dir",
+                "detected_by": "tests/test_judge.py::test_failure_modes_empty_is_unpenalised",
+                "covered_in_this_pr": True,
+            }
+        ]
+
+        empty = self._parse(self.EMPTY_BLOCK_CONTENT, run_record=[])
+        empty_result = JudgeResult(task_id="t1", passed=True, tier2=empty, verdict=empty)
+        empty_d = judge_result_to_dict("t1", "/wd", empty_result)
+        assert "failure_modes" not in empty_d
+
+        # Degradation flags survive, verbatim, in the machine-readable summary.
+        degraded = self._parse(self.UNBACKED_CONTENT, run_record=[])
+        degraded_result = JudgeResult(task_id="t1", passed=True, tier2=degraded, verdict=degraded)
+        degraded_d = judge_result_to_dict("t1", "/wd", degraded_result)
+        assert "uncovered failure paths" in degraded_d["summary"]
+        assert "tests/test_never_ran.py::test_absent" in degraded_d["summary"]
+
+    def test_failure_modes_rendered_in_judge_summary(self) -> None:
+        """JudgeResult.summary lists populated entries; renders nothing when empty."""
+        populated = self._parse(self.BACKED_CONTENT, run_record=[])
+        result = JudgeResult(task_id="t1", passed=True, verdict=populated)
+        summary = result.summary
+        assert "Failure modes (what can still go wrong):" in summary
+        assert "import error when plugin dir missing" in summary  # what
+        assert "engine/plugins.py:load" in summary  # where
+        assert (
+            "tests/test_judge.py::test_failure_modes_empty_is_unpenalised" in summary
+        )  # detected_by
+        assert "covered in this PR" in summary
+
+        empty = self._parse(self.EMPTY_BLOCK_CONTENT, run_record=[])
+        empty_result = JudgeResult(task_id="t1", passed=True, verdict=empty)
+        assert "Failure modes" not in empty_result.summary
+
+
+class _VerdictHolder:
+    """Minimal JudgeResult stand-in for build_verdict_data (persist reads
+    ``verdict`` / ``passed`` / ``pipeline_result`` only)."""
+
+    def __init__(self, verdict: Verdict) -> None:
+        self.verdict = verdict
+        self.passed = verdict.verdict == "COMPLETE"
+        self.summary = verdict.summary
+        self.pipeline_result: dict[str, object] = {}
