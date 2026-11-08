@@ -2393,7 +2393,7 @@ def cmd_task_complete(args: argparse.Namespace) -> None:
         # signature is out of scope for this tranche, so pin the gap here.
         judge = Judge(llm, workdir, scan_root=scan_root)  # type: ignore[arg-type]
         result = judge.evaluate_task(task, skip_tier2=skip_tier2)
-        print(result.summary)
+        _print_judge_result(result)
 
         # GR-166: the weaker class must be visible where the author reads the
         # result, not only in verdict.json. A Tier 1-only pass is a Tier 1
@@ -2766,6 +2766,20 @@ def cmd_worktree_clean(args: argparse.Namespace) -> None:
             elif task_id in reasons:
                 line += f" — {reasons[task_id]}"
             print(line)
+
+
+def _print_judge_result(result: JudgeResult) -> None:
+    """Print a judge result summary with its task identity line.
+
+    GR-183: the persisted summary's first line is the tier-1 verdict line, so the
+    ``Judge Result: <task>`` header is emitted here, where the author reads the
+    result, instead of inside ``summary`` itself.
+    """
+    summary = result.summary or ""
+    task_id = getattr(result, "task_id", "")
+    if task_id and "Judge Result:" not in summary:
+        print(f"Judge Result: {task_id}")
+    print(summary)
 
 
 def _persist_result(workdir: str, task: Task, result: JudgeResult) -> None:
@@ -3487,7 +3501,7 @@ def _judge_evaluate_and_persist(
         print(dumps_evidence(judge_evidence(result, task, scope)))
     else:
         result = judge.evaluate_task(task, skip_tier2=getattr(args, "skip_tier2", False))
-        print(result.summary)
+        _print_judge_result(result)
         # Persist verdict
         _persist_result(workdir, task, result)
     return result
@@ -3582,7 +3596,7 @@ def _cmd_judge_ephemeral(
         print(dumps_evidence(judge_evidence(result, task, scope, ephemeral=True)))
     else:
         result = judge.evaluate_task(task, skip_tier2=getattr(args, "skip_tier2", False))
-        print(result.summary)
+        _print_judge_result(result)
         if not persist_verdict:
             print(
                 "Ephemeral run — no task, verdict, branch or stash state was written.",
@@ -3799,7 +3813,7 @@ def _cmd_judge_worker(job_id: str) -> None:
         save_job(job)
         # Same verdict persistence as a synchronous run
         _persist_result(wd, task, result)
-        print(result.summary)
+        _print_judge_result(result)
     except Exception as e:
         heartbeat.stop()
         job["status"] = "error"
