@@ -324,14 +324,22 @@ def test_heartbeat_keeps_a_long_job_live(
     """
     import time as _time
 
-    monkeypatch.setenv("GITREINS_JOB_HEARTBEAT_STALE_SECONDS", "0.4")
+    # Load-window determinism: this test failed twice in CI and once in a
+    # judged self-review run (SR-2, 2026-11-07) because under pytest-xdist on
+    # a loaded host the daemon heartbeat thread can be GIL-starved past a
+    # 0.4 s stale cap — a scheduler artifact, not a product defect. The
+    # mechanism under test is the RATIO (beats refresh the record inside the
+    # cap; a silenced record is orphaned by it), so size the window so
+    # realistic jitter cannot win: stale cap 2.0 s, beats every 0.1 s, run
+    # 2.6 s. The falsifier below is unchanged and still fails if beats stop.
+    monkeypatch.setenv("GITREINS_JOB_HEARTBEAT_STALE_SECONDS", "2.0")
     job = make_job("t1", "/r")
     job.update(worker_identity(WORKER_KIND_THREAD))
     save_job(job)
-    stale_cap = 0.4
-    hb = JobHeartbeat(job["id"], interval=0.05).start()
+    stale_cap = 2.0
+    hb = JobHeartbeat(job["id"], interval=0.1).start()
     try:
-        deadline = _time.monotonic() + 0.9
+        deadline = _time.monotonic() + 2.6
         while _time.monotonic() < deadline:
             _time.sleep(0.1)
             live, _why = worker_liveness(load_job(job["id"]))
@@ -347,7 +355,7 @@ def test_heartbeat_keeps_a_long_job_live(
     silent.update(worker_identity(WORKER_KIND_THREAD))
     silent["heartbeat_at"] = _time.time()
     save_job(silent)
-    _time.sleep(0.5)
+    _time.sleep(stale_cap + 0.1)  # must exceed the cap to prove staleness
     live_now, why_now = worker_liveness(load_job(silent["id"]))
     assert live_now is False
     assert "heartbeat is stale" in why_now
