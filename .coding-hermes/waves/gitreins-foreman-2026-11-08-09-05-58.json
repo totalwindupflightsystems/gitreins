@@ -1,0 +1,54 @@
+{
+  "tick": "gitreins-foreman-2026-11-08-09-05-58",
+  "project": "gitreins",
+  "mode": "wave",
+  "budget": 7,
+  "base": "da602eb4645eb11fdc6b02af73582fb9fee8556f",
+  "workers": [
+    {
+      "task_id": "GR-195",
+      "title": "P1 - persist the judge's execution transcript: every tool call recorded as (command, exit_code, output_sha) in verdict data",
+      "worktree": "/home/kara/worktrees/gitreins-GR-195",
+      "branch": "wt/GR-195",
+      "base": "da602eb4645eb11fdc6b02af73582fb9fee8556f",
+      "brief": "/home/kara/.hermes/cache/scratch/gr-wave-20261108-0905/brief-GR-195.txt",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm",
+      "status": "dispatched"
+    },
+    {
+      "task_id": "GR-GAP-070",
+      "title": "guard console summary never names a security_review finding and truncates the lane reason mid-word",
+      "worktree": "/home/kara/worktrees/gitreins-GR-GAP-070",
+      "branch": "wt/GR-GAP-070",
+      "base": "da602eb4645eb11fdc6b02af73582fb9fee8556f",
+      "brief": "/home/kara/.hermes/cache/scratch/gr-wave-20261108-0905/brief-GR-GAP-070.txt",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm",
+      "status": "dispatched"
+    },
+    {
+      "task_id": "GR-193",
+      "title": "P3 - untrack the .vfs symbols cache: worktree root churn pollutes every diff",
+      "worktree": "/home/kara/worktrees/gitreins-GR-193",
+      "branch": "wt/GR-193",
+      "base": "da602eb4645eb11fdc6b02af73582fb9fee8556f",
+      "brief": "/home/kara/.hermes/cache/scratch/gr-wave-20261108-0905/brief-GR-193.txt",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm",
+      "status": "dispatched"
+    },
+    {
+      "task_id": "GR-194",
+      "title": "P3 - config rewrite must preserve rationale comments",
+      "worktree": "/home/kara/worktrees/gitreins-GR-194",
+      "branch": "wt/GR-194",
+      "base": "da602eb4645eb11fdc6b02af73582fb9fee8556f",
+      "brief": "/home/kara/.hermes/cache/scratch/gr-wave-20261108-0905/brief-GR-194.txt",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm",
+      "status": "dispatched"
+    }
+  ],
+  "independence": "no depends_on edges among the four rows; disjoint file surfaces: engine/persist.py + engine/judge.py + tests/test_persist.py (GR-195) vs engine/guard_manager.py + tests/test_guard_manager.py (GR-GAP-070) vs .gitignore + .vfs tracked-path removal (GR-193) vs engine/config.py + config rewrite path + tests/test_config.py (GR-194)"
+}
