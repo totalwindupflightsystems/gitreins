@@ -32,7 +32,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 from engine import command_hygiene as ch  # noqa: E402
 from engine.eval_cap import EvalCap  # noqa: E402
 from engine.evaluator import AgenticEvaluator  # noqa: E402
-from engine.llm import LLMClient  # noqa: E402
+from engine.llm import LLMClient, LLMResponse  # noqa: E402
 
 
 @pytest.fixture()
@@ -242,3 +242,89 @@ class TestUsageRowOnFailedRun:
         )
         assert ".." not in verdict.summary, verdict.summary
         assert verdict.summary.startswith("Cap exceeded: Iteration cap (2) reached")
+
+
+# ── GR-198: an unparseable verdict reply gets exactly ONE re-ask ──────────
+
+
+class TestUnparseableVerdictRetry:
+    """A reply that yields no parseable structured grading must not end the run
+    silently: the loop re-asks once (JSON-only instruction) and uses the retry's
+    verdict if it parses; a second failure is terminal INCOMPLETE that names
+    both the parse reason and the retry. Nothing here can grade PASS with an
+    empty item list — the GR-168 invariant holds on every path."""
+
+    def test_parseable_first_reply_is_not_retried(
+        self, evaluator: AgenticEvaluator, llm_client: LLMClient
+    ) -> None:
+        """Regression guard: a parseable verdict never triggers the retry."""
+        verdict_json = '{"verdict":"COMPLETE","items":[],"summary":"done"}'
+        with patch.object(llm_client, "chat", return_value=LLMResponse(content=verdict_json)) as m:
+            verdict = evaluator.evaluate({"id": "t1", "title": "x", "criteria": []})
+        assert m.call_count == 1, "a parseable first reply must be graded with one call"
+        assert verdict.verdict == "COMPLETE"
+
+    def test_unparseable_reply_is_retried_once_and_retry_wins(
+        self, evaluator: AgenticEvaluator, llm_client: LLMClient
+    ) -> None:
+        """(a) prose first, JSON second → the retry's verdict is graded, calls == 2."""
+        seen: list[list[dict]] = []
+
+        def chat(messages, **kwargs):
+            seen.append(list(messages))
+            if len(seen) == 1:
+                return LLMResponse(content="After reviewing, all criteria pass.")
+            return LLMResponse(
+                content=(
+                    '{"verdict":"COMPLETE","items":'
+                    '[{"criterion":"c1","status":"PASS","detail":"tests pass"}],'
+                    '"summary":"graded on retry"}'
+                )
+            )
+
+        with patch.object(llm_client, "chat", side_effect=chat) as m:
+            verdict = evaluator.evaluate({"id": "t1", "title": "x", "criteria": ["c1"]})
+        assert m.call_count == 2, "the grading prompt must be sent exactly twice"
+        # The re-ask repeats the grading conversation plus the JSON-only nudge.
+        assert "JSON" in seen[1][-1]["content"], seen[1][-1]["content"]
+        assert m.call_args_list[1].kwargs.get("tools") is None
+        assert verdict.verdict == "COMPLETE"
+        assert [i.status for i in verdict.items] == ["PASS"]
+        assert "graded on retry" in verdict.summary
+
+    def test_both_replies_unparseable_terminal_incomplete(
+        self, evaluator: AgenticEvaluator, llm_client: LLMClient
+    ) -> None:
+        """(b) prose twice → terminal INCOMPLETE naming the parse reason AND the retry."""
+
+        def chat(messages, **kwargs):
+            return LLMResponse(content="After reviewing, all criteria pass.")
+
+        with patch.object(llm_client, "chat", side_effect=chat) as m:
+            verdict = evaluator.evaluate({"id": "t1", "title": "x", "criteria": ["c1"]})
+        assert m.call_count == 2, "exactly one re-ask — never a loop"
+        assert verdict.verdict == "INCOMPLETE"
+        assert verdict.verdict != "COMPLETE"
+        assert all(i.status != "PASS" for i in verdict.items)
+        assert "no JSON object found" in verdict.summary
+        assert "after 1 retry" in verdict.summary
+
+    def test_retry_transport_error_degrades_to_incomplete(
+        self, evaluator: AgenticEvaluator, llm_client: LLMClient
+    ) -> None:
+        """A raise in the retry call must not propagate — INCOMPLETE, reason recorded."""
+        calls = {"n": 0}
+
+        def chat(messages, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return LLMResponse(content='{"verdict": "COMPLETE", "items": [}')
+            raise RuntimeError("connection reset by peer")
+
+        with patch.object(llm_client, "chat", side_effect=chat):
+            verdict = evaluator.evaluate({"id": "t1", "title": "x", "criteria": ["c1"]})
+        assert calls["n"] == 2
+        assert verdict.verdict == "INCOMPLETE"
+        assert "JSON parse failed" in verdict.summary
+        assert "retry LLM call failed" in verdict.summary
+        assert "after 1 retry" in verdict.summary

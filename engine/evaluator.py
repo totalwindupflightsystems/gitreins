@@ -698,6 +698,16 @@ def failure_mode_summary_flags(verdict: Verdict, run_record: Iterable[str]) -> l
 # recovery path instead of leaving a bare FAIL behind.
 LLM_FAILURE_SUMMARY_PREFIX = "Evaluator error: LLM call failed:"
 
+# GR-198: the JSON-only nudge appended to the grading conversation when the
+# first verdict reply cannot be parsed. The retry is bounded to exactly ONE
+# re-ask under the loop's existing per-call token cap — no loop, no new
+# config knob.
+VERDICT_RETRY_INSTRUCTION = (
+    "Your previous reply was not a parseable JSON verdict. Reply with ONLY the "
+    'JSON verdict object ({"verdict": ..., "summary": ..., "items": [...]}) — '
+    "no prose, no markdown fences."
+)
+
 
 def _is_transport_failure(exc: BaseException) -> bool:
     """True when *exc* (or its cause chain) never reached the provider.
@@ -1684,7 +1694,24 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             # No tool calls → LLM is delivering a verdict
             if not response.tool_calls:
                 if response.content:
-                    return attach_prescreen(self._parse_verdict(response.content), prescreen)
+                    verdict, parse_reason = self._try_parse_verdict(response.content)
+                    if verdict is not None:
+                        return attach_prescreen(verdict, prescreen)
+                    # GR-198: prose or malformed JSON gets exactly ONE bounded
+                    # re-ask — the same conversation plus a JSON-only nudge —
+                    # before the GR-168 terminal INCOMPLETE applies. One cheap
+                    # retry recovers models that wrapped a correct verdict in
+                    # commentary; a second failure ends the run for good.
+                    return attach_prescreen(
+                        self._retry_verdict_once(
+                            messages=messages,
+                            criteria_list=criteria_list,
+                            max_tokens=max_tokens_per_call,
+                            parse_reason=parse_reason,
+                            original_content=response.content,
+                        ),
+                        prescreen,
+                    )
                 return Verdict(
                     verdict="INCOMPLETE",
                     summary="Evaluator returned empty response.",
@@ -2557,8 +2584,15 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             return {"key": key, "content": content}
         return {"error": f"Key not found: {key}"}
 
-    def _parse_verdict(self, content: str) -> Verdict:
-        """Parse JSON verdict from LLM response — robust against markdown fences and extra text."""
+    def _try_parse_verdict(self, content: str) -> tuple[Verdict | None, str]:
+        """Read a structured verdict out of ``content`` — fences and extra text tolerated.
+
+        GR-198 seam: returns ``(verdict, "")`` when a parseable verdict was
+        read, ``(None, parse_reason)`` when it was not, so the agentic loop
+        can re-ask the model exactly once before falling back to the
+        terminal INCOMPLETE. ``_parse_verdict`` wraps this seam and applies
+        the GR-168 fallback directly for single-shot callers.
+        """
         logger.debug("Parsing verdict from: %.200s", content)
 
         # Strategy 1: Strip markdown fences
@@ -2669,7 +2703,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                     if flags:
                         prefix = f"{verdict.summary} " if verdict.summary else ""
                         verdict.summary = f"{prefix}[uncovered failure paths: {'; '.join(flags)}]"
-                    return verdict
+                    return verdict, ""
                 except (json.JSONDecodeError, ValueError) as e:
                     parse_reason = f"JSON parse failed: {e}"
 
@@ -2680,21 +2714,103 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         # and returned it with an EMPTY item list — which the tier-2 gate then
         # passed as a full pass. Prose is not a verdict: the model saying "the
         # work is complete" is exactly the claim a judge exists to check, and a
-        # parse failure means nothing was graded.
-        #
-        # The fallback therefore has ONE outcome: INCOMPLETE, naming the reason
-        # it could not parse (GR-GAP-059) so the persisted record explains
-        # itself instead of looking like a criterion failure.
-        parse_reason = parse_reason or "unparseable response"
+        # parse failure means nothing was graded. This seam returns the failure
+        # instead of grading; `_unparseable_verdict` below builds the one
+        # allowed outcome (INCOMPLETE, reason named — GR-GAP-059).
+        return None, parse_reason or "unparseable response"
+
+    def _parse_verdict(self, content: str) -> Verdict:
+        """Parse JSON verdict from LLM response — robust against markdown fences and extra text.
+
+        GR-198: the agentic loop goes through `_try_parse_verdict` instead, so
+        an unparseable first reply can be re-asked once; this wrapper keeps
+        the direct single-shot shape (and its callers/tests) intact.
+        """
+        verdict, parse_reason = self._try_parse_verdict(content)
+        if verdict is not None:
+            return verdict
         logger.warning(
             "Unparseable evaluator response — returning INCOMPLETE (reason: %s)", parse_reason
         )
+        return self._unparseable_verdict(parse_reason, content)
+
+    def _unparseable_verdict(
+        self, parse_reason: str, content: str, retried: bool = False
+    ) -> Verdict:
+        """The ONE fallback outcome for an unparseable reply (GR-168/GR-GAP-059).
+
+        INCOMPLETE, naming the parse reason so the persisted record explains
+        itself instead of looking like a criterion failure. When ``retried``
+        (GR-198: the caller already re-asked once and that failed too) the
+        summary says "after 1 retry", so the record shows the model was
+        asked twice before anything was declared.
+        """
+        retry_note = " after 1 retry" if retried else ""
         return Verdict(
             verdict="INCOMPLETE",
             summary=(
                 f"(auto-parsed from non-JSON response — {parse_reason}; no verdict could be "
-                f"read, so nothing was graded) {content[:300]}"
+                f"read{retry_note}, so nothing was graded) {content[:300]}"
             ),
+        )
+
+    def _retry_verdict_once(
+        self,
+        messages: list[dict[str, Any]],
+        criteria_list: list[str],
+        max_tokens: int,
+        parse_reason: str,
+        original_content: str,
+    ) -> Verdict:
+        """GR-198: exactly ONE re-ask after an unparseable verdict reply.
+
+        Models intermittently wrap an otherwise-correct JSON verdict in
+        prose; one cheap re-ask recovers most of them. The re-ask repeats
+        the same grading conversation plus `VERDICT_RETRY_INSTRUCTION`,
+        WITHOUT tools (a text-only answer is the point) and under the same
+        per-call ``max_tokens`` cap the loop already uses — no loop, no new
+        config knob. A retry whose LLM call raises, comes back empty, hits
+        the eval cap, or still fails to parse degrades to the GR-168
+        terminal INCOMPLETE with both reasons recorded and a summary that
+        names the retry ("after 1 retry").
+        """
+        retry_messages = list(messages) + [{"role": "user", "content": VERDICT_RETRY_INSTRUCTION}]
+        try:
+            retry_response = self.llm.chat(retry_messages, tools=None, max_tokens=max_tokens)
+        except Exception as e:
+            logger.warning("Verdict retry LLM call failed — terminal INCOMPLETE: %s", str(e)[:200])
+            return self._unparseable_verdict(
+                f"{parse_reason}; retry LLM call failed: {str(e)[:200]}",
+                original_content,
+                retried=True,
+            )
+
+        # Charge the retry to the same cap accounting the loop uses, so the
+        # one extra call is visible in token totals; a cap hit ends the retry
+        # exactly like it ends a loop iteration.
+        usage = retry_response.usage
+        cap_error = self.eval_cap.record_llm_call(
+            prompt_tokens=usage.prompt_tokens if usage else 0,
+            completion_tokens=usage.completion_tokens if usage else 0,
+            cache_read_tokens=usage.cache_read_tokens if usage else 0,
+            cache_write_tokens=usage.cache_write_tokens if usage else 0,
+        )
+        if cap_error:
+            logger.warning("Verdict retry exceeded eval cap: %s", cap_error)
+            return self._cap_verdict(criteria_list, cap_error)
+
+        if not retry_response.content:
+            return self._unparseable_verdict(
+                f"{parse_reason}; retry reply empty", original_content, retried=True
+            )
+        verdict, retry_reason = self._try_parse_verdict(retry_response.content)
+        if verdict is not None:
+            logger.info("Verdict parsed on the GR-198 retry — using the re-asked reply")
+            return verdict
+        return self._unparseable_verdict(
+            f"{parse_reason}; retry unparseable ({retry_reason})",
+            retry_response.content,
+            retried=True,
         )
 
     def _tool_detect_dead_code(self) -> dict[str, Any]:
