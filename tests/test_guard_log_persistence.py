@@ -578,6 +578,11 @@ class TestRuntimeArtifactsAreIgnored:
 
         assert ".vfs/graph/.last_reconcile" in entries
         assert ".vfs/graph/.parse_cache.json" in entries
+        # GR-193: the symbols cache is writer output too — the hilo graph
+        # writer re-creates it after every commit/merge, so without this
+        # entry its tracked copy re-dirtied every clean worktree with
+        # untracked dirt (the class QA kept re-filing).
+        assert ".vfs/graph/.symbols_cache.json" in entries
         # The tracked edge store must NOT be ignored: git would then keep
         # reporting the refresh as uncommitted work with no way to land it.
         assert ".vfs/graph/edges.jsonl" not in entries
