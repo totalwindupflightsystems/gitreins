@@ -26,7 +26,7 @@ import shutil
 import subprocess
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Iterable
 
 from engine import command_hygiene
 from engine.eval_cap import EvalCap, _fmt_tokens, eval_cap_from_config, parse_eval_cap
@@ -274,7 +274,7 @@ command output MUST be marked FAIL, not PASS.
 
 When you've checked EVERY criterion, deliver your verdict. You MUST output EXACTLY this JSON format with NO surrounding text, NO markdown fences, NO commentary:
 
-{"verdict":"COMPLETE","items":[{"criterion":"<exact criterion text>","status":"PASS","detail":"<specific file:line evidence>"},{"criterion":"<exact criterion text>","status":"FAIL","detail":"<what is missing and where>"},{"criterion":"<exact criterion text>","status":"NOT_VERIFIABLE","detail":"<what you looked at and what you could not assess>","not_verifiable_reason":"<what would settle it: the command, the environment, or the human check>"},{"criterion":"<derived criterion you proposed>","derived":true,"status":"PASS","detail":"<file:line or command output that proves it>"}],"summary":"<one sentence>"}
+{"verdict":"COMPLETE","items":[{"criterion":"<exact criterion text>","status":"PASS","detail":"<specific file:line evidence>"},{"criterion":"<exact criterion text>","status":"FAIL","detail":"<what is missing and where>"},{"criterion":"<exact criterion text>","status":"NOT_VERIFIABLE","detail":"<what you looked at and what you could not assess>","not_verifiable_reason":"<what would settle it: the command, the environment, or the human check>"},{"criterion":"<derived criterion you proposed>","derived":true,"status":"PASS","detail":"<file:line or command output that proves it>"}],"failure_modes":[{"what":"<what fails>","where":"<file:function>","trigger":"<realistic trigger>","detected_by":"<test node id or command that would catch it, or empty string if nothing would>","covered_in_this_pr":true}],"summary":"<one sentence>"}
 
 CRITICAL RULES:
 - Output ONLY the JSON object. Nothing before. Nothing after.
@@ -287,6 +287,8 @@ CRITICAL RULES:
 - PASS requires concrete evidence (file path, line number, or test output)
 - FAIL requires explaining exactly what's missing
 - NOT_VERIFIABLE (GR-178) is for a criterion that code review ALONE cannot settle: a UI actually rendering, an external API contract, a migration against real data, a browser check. Never grade such a criterion PASS by absence of complaint — say what you could not verify. Its `not_verifiable_reason` must name what would settle it: the exact command to run, the environment it needs, or the human check to perform. A NOT_VERIFIABLE item is not a pass: it fails the verdict closed AND routes the criterion to a human.
+- "failure_modes" is a graded block of AT MOST 3 entries naming what can still go wrong: one entry per failure mode with the five fields (what / where / trigger / detected_by / covered_in_this_pr). An empty list [] is the normal, correct answer when you found no failure mode — it is never penalised and must never be padded. Entries beyond 3 are dropped by the parser, not an error.
+- You may NOT claim a test detects a failure mode unless a run_command result IN THIS CONVERSATION actually ran that test: "detected_by" citing a test with no tool result behind it is flagged and the verdict summary is degraded to name the uncovered failure path. An entry with no detector at all (empty detected_by) is allowed but flagged the same way.
 - Read actual code — never assume"""
 
 EVALUATOR_TOOLS = [
@@ -503,6 +505,23 @@ def item_glyph(status: str) -> str:
 
 
 @dataclass
+class FailureMode:
+    """One graded failure-mode entry in a verdict (GR-179).
+
+    Five fields: what fails, where it fails (file:function), the realistic
+    trigger, what would detect it (detected_by), and whether a test in this
+    change covers it (covered_in_this_pr). All five default so a partial
+    entry from a sloppy model still parses instead of erroring.
+    """
+
+    what: str = ""
+    where: str = ""
+    trigger: str = ""
+    detected_by: str = ""
+    covered_in_this_pr: bool = False
+
+
+@dataclass
 class Verdict:
     verdict: str  # "COMPLETE" | "INCOMPLETE"
     items: list[VerdictItem] = field(default_factory=list)
@@ -512,6 +531,86 @@ class Verdict:
     # engine's own verdict incl. bundle manifest). None = no pre-screen ran
     # (disabled or ABSTAIN) — the degraded path never fabricates one.
     prescreen: dict[str, Any] | None = None
+    # GR-179: the graded failure-mode block — at most MAX_FAILURE_MODES entries
+    # naming what can still go wrong (what / where / trigger / detected_by /
+    # covered_in_this_pr). Additive and defaulting to empty, so every verdict
+    # produced before the block existed serializes exactly as before, and an
+    # empty block is the normal, unpenalised case.
+    failure_modes: list[FailureMode] = field(default_factory=list)
+
+
+# GR-179: the failure-mode block is bounded. The prompt says "up to 3"; the
+# parser truncates beyond the bound instead of erroring, because an over-long
+# block is not a verdict failure.
+MAX_FAILURE_MODES = 3
+
+# What "detected_by names a test" looks like: a pytest-style node id
+# (``tests/test_auth.py::test_expired``), a test-file path (``tests/test_auth.py``),
+# or a bare ``test_*`` identifier. Deliberately narrow — prose like "manual
+# browser check" names no test and needs no tool-result backing.
+_FAILURE_MODE_TEST_REF_RE = re.compile(
+    r"[\w./+-]*test_[\w]+\.(?:py|go|ts)(?:::[\w:]+)?|\btest_[A-Za-z][\w_]{2,}\b"
+)
+
+
+def failure_mode_test_refs(detected_by: str) -> list[str]:
+    """Test identifiers a ``failure_modes[].detected_by`` string claims.
+
+    A pytest-style node id, a test-file path, or a bare ``test_*`` identifier
+    counts as naming a test; prose that names none yields an empty list and
+    needs no tool-result backing. First-seen order, duplicates dropped.
+    """
+    refs: list[str] = []
+    for match in _FAILURE_MODE_TEST_REF_RE.finditer(detected_by or ""):
+        ref = match.group(0)
+        if ref not in refs:
+            refs.append(ref)
+    return refs
+
+
+def detected_by_is_backed(detected_by: str, run_record: Iterable[str]) -> bool:
+    """True iff every test *detected_by* names appears in the run's tool record.
+
+    GR-179 arm 3: the model may not assert a test ran unless it ran one. The
+    run record is the evaluator's OWN transcript — the tool name, arguments
+    and result of every tool call it actually executed (see
+    ``AgenticEvaluator._tool_record``). A citation no record entry contains
+    has no tool result behind it.
+
+    Deterministic and pure: substring resolution against the record only —
+    no network call, no sandbox tool.
+    """
+    refs = failure_mode_test_refs(detected_by)
+    if not refs:
+        return True
+    joined = "\n".join(run_record)
+    return all(ref in joined for ref in refs)
+
+
+def failure_mode_summary_flags(verdict: Verdict, run_record: Iterable[str]) -> list[str]:
+    """Degradation flags a verdict's failure-mode block earns (GR-179).
+
+    An entry is flagged when its ``detected_by`` is empty — the failure path
+    is named but nothing would detect it — or when it cites a test no tool
+    result in *run_record* shows running. An empty block earns no flags, so a
+    verdict reporting no failure modes is untouched: the empty block is the
+    normal, unpenalised case (GR-179 arm 4).
+    """
+    joined = "\n".join(run_record)
+    flags: list[str] = []
+    for i, fm in enumerate(verdict.failure_modes):
+        detected_by = (fm.detected_by or "").strip()
+        label = f"failure mode {i} ({fm.what or fm.where or 'unnamed'})"
+        if not detected_by:
+            flags.append(f"{label}: detected_by is empty — uncovered failure path")
+            continue
+        unbacked = [ref for ref in failure_mode_test_refs(detected_by) if ref not in joined]
+        if unbacked:
+            flags.append(
+                f"{label}: detected_by cites {', '.join(unbacked)} but no tool result "
+                "in this run shows it ran — uncovered failure path"
+            )
+    return flags
 
 
 # DF-GITREINS-POC-14: the summary prefix the evaluator writes when it cannot
@@ -597,6 +696,13 @@ class AgenticEvaluator:
         self.command_timeout = command_timeout
 
         self._sandbox: dict[str, str] = {}
+        # GR-179: the run record — every tool call the evaluator actually
+        # executed, as one JSON line {"tool", "arguments", "result"}. A
+        # verdict's failure_modes[].detected_by may cite a test; the backing
+        # check (detected_by_is_backed) resolves that citation against THIS
+        # record, so "a test ran" is proven by a collected result, never by
+        # the model asserting it.
+        self._tool_record: list[str] = []
         # JUDGE-TIER2-001: cost checkpoint for every criterion the run grades
         # (``verified_<i>`` sandbox write): iteration credit + token counters at
         # the grading moment, so a cap-hit verdict can attribute what it spent
@@ -1527,6 +1633,14 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             for tc in response.tool_calls:
                 result, was_dup = self._execute_tool_with_dedup(tc)
 
+                # GR-179: every executed tool call lands in the run record —
+                # the backing check for failure_modes[].detected_by resolves
+                # "did that test actually run" against THIS record, never
+                # against the model's say-so.
+                self._tool_record.append(
+                    json.dumps({"tool": tc.name, "arguments": tc.arguments, "result": result})
+                )
+
                 # Track tool call (costs tool_call_weight, default 0.1 iterations)
                 cap_error = self.eval_cap.record_tool_call()
                 if cap_error:
@@ -2441,11 +2555,42 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                             sum(1 for i in items if i.status != "PASS"),
                         )
                         verdict_val = "INCOMPLETE"
-                    return Verdict(
+                    # GR-179: the graded failure-mode block rides additively —
+                    # a verdict that omits it parses to an empty list and is
+                    # otherwise untouched. Beyond MAX_FAILURE_MODES entries
+                    # are truncated (R3): an over-long block is not a verdict
+                    # failure. Non-dict entries are ignored, not errors.
+                    failure_modes: list[FailureMode] = []
+                    raw_modes = data.get("failure_modes")
+                    if isinstance(raw_modes, list):
+                        for raw in raw_modes[:MAX_FAILURE_MODES]:
+                            if not isinstance(raw, dict):
+                                continue
+                            failure_modes.append(
+                                FailureMode(
+                                    what=str(raw.get("what", "")),
+                                    where=str(raw.get("where", "")),
+                                    trigger=str(raw.get("trigger", "")),
+                                    detected_by=str(raw.get("detected_by", "")),
+                                    covered_in_this_pr=bool(raw.get("covered_in_this_pr", False)),
+                                )
+                            )
+                    verdict = Verdict(
                         verdict=verdict_val,
                         items=items,
                         summary=data.get("summary", ""),
+                        failure_modes=failure_modes,
                     )
+                    # GR-179 arms 2/7: an entry that names no detector, or
+                    # cites a test with no tool result behind it, degrades the
+                    # summary — the uncovered failure path is NAMED there, not
+                    # silently passed. An empty block earns no flags, so an
+                    # ordinary verdict's summary stays byte-identical.
+                    flags = failure_mode_summary_flags(verdict, getattr(self, "_tool_record", ()))
+                    if flags:
+                        prefix = f"{verdict.summary} " if verdict.summary else ""
+                        verdict.summary = f"{prefix}[uncovered failure paths: {'; '.join(flags)}]"
+                    return verdict
                 except (json.JSONDecodeError, ValueError) as e:
                     parse_reason = f"JSON parse failed: {e}"
 
