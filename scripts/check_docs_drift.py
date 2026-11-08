@@ -78,9 +78,14 @@ _CLAIM_PATTERNS = {
     "test files": re.compile(r"(\d+)\s+test\s+files?\b(?!\s*\(s\))"),
 }
 _TEST_COUNT_CLAIMS = ("tests collected", "tests pass", "tests across")
-# The unique-test-file paths in a `--collect-only -q` report, same regex the CI
-# bash block used so the two cannot disagree.
-_TEST_PATH_RE = re.compile(r"^tests/[a-zA-Z0-9_./-]+\.py")
+# The unique-test-file paths in a `--collect-only -q` report, matched ANYWHERE
+# on the line (GR-GAP-071): pytest prints node IDs relative to the rootdir it
+# discovers, so a tree under an ancestor pytest config yields prefixed IDs
+# like ``.hermes/cache/scratch/<tree>/tests/test_a.py`` — the old anchored
+# ``^tests/`` match counted zero files there and the file inventory silently
+# emptied. The character class is unchanged, so only ``tests/...py`` paths
+# match, never other paths.
+_TEST_PATH_RE = re.compile(r"tests/[A-Za-z0-9_./-]+\.py")
 # The collected-total footer pytest prints on the last stdout line:
 # "<N> tests collected in 0.47s" / "<N> tests collected" / "1 error".
 _COLLECTED_RE = re.compile(r"^(\d+)\s+(?:tests?|test)\s+collected\b")
@@ -152,17 +157,52 @@ def read_banner_version(readme_path):
     return None
 
 
+def _resolve_pytest_config_file(repo_root):
+    """The pytest config file in repo_root that ``pytest -c`` accepts, or None.
+
+    Mirrors pytest's own inifile precedence (GR-GAP-071): ``pytest.ini`` always
+    qualifies; ``pyproject.toml`` only when its text contains a
+    ``[tool.pytest.ini_options]`` table; ``setup.cfg`` only with
+    ``[tool:pytest]``; ``tox.ini`` only with ``[pytest]``. None when nothing
+    qualifies — the caller then passes no ``-c`` (a config file is never
+    fabricated and repo_root is never written to).
+    """
+    candidates = (
+        (repo_root / "pytest.ini", None),
+        (repo_root / "pyproject.toml", "[tool.pytest.ini_options]"),
+        (repo_root / "setup.cfg", "[tool:pytest]"),
+        (repo_root / "tox.ini", "[pytest]"),
+    )
+    for path, required_marker in candidates:
+        if not path.exists():
+            continue
+        if required_marker is None:
+            return path
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+        if required_marker in text:
+            return path
+    return None
+
+
 def collect_live_counts(repo_root):
     """Run the CI collection in repo_root. Return (count, files) or (None, reason).
 
     Executes ``[sys.executable, "-m", "pytest", "--collect-only", "-q",
     "--override-ini=addopts="]`` via subprocess with cwd=repo_root (pytest is
     NEVER imported here — stdlib only), captures stdout+stderr and the exit
-    code, and parses the numbers the same way the CI bash block did: COUNT is
-    the leading integer of the last non-empty stdout line, FILES is the number
-    of unique ``tests/...py`` paths matched by the exact CI regex. A missing
-    pytest, a non-zero exit, or an unparseable total returns (None, reason) —
-    callers must treat that as a FAIL, never as a green.
+    code, and parses the numbers: COUNT is the leading integer of the last
+    non-empty stdout line, FILES is the number of unique ``tests/...py`` paths
+    matched anywhere on the stdout lines (GR-GAP-071: node IDs may carry a
+    rootdir-relative prefix when an ancestor config sets the rootdir, and the
+    inventory must still count them). When repo_root holds a pytest config
+    pytest itself accepts via ``-c``, that file is passed explicitly so the
+    nested collection is pinned to the tree and an ancestor config cannot
+    become the child's inifile/rootdir. A missing pytest, a non-zero exit, or
+    an unparseable total returns (None, reason) — callers must treat that as a
+    FAIL, never as a green.
     """
     cmd = [
         sys.executable,
@@ -172,6 +212,13 @@ def collect_live_counts(repo_root):
         "-q",
         "--override-ini=addopts=",
     ]
+    # GR-GAP-071: pin the nested collection to repo_root's OWN pytest config
+    # (same precedence pytest itself applies to -c) so an ancestor config —
+    # e.g. a pytest.ini above a scratch-TMPDIR tree — cannot become the child's
+    # inifile/rootdir and reprefix every node ID it prints.
+    config_file = _resolve_pytest_config_file(repo_root)
+    if config_file is not None:
+        cmd += ["-c", str(config_file)]
     # DF-2026-20: the guard's diff-mode test lane injects the changed-file
     # list via PYTEST_ADDOPTS; this nested collection must stay FULL (it is
     # the CI-canonical count), so strip the env injection exactly the way
@@ -209,7 +256,7 @@ def collect_live_counts(repo_root):
             f"could not parse a collected-test count from pytest's last stdout line ({last!r})"
         )
     count = int(count_match.group(1))
-    files = len({m.group(0) for ln in stdout_lines if (m := _TEST_PATH_RE.match(ln))})
+    files = len({m.group(0) for ln in stdout_lines if (m := _TEST_PATH_RE.search(ln))})
     return (count, files), None
 
 

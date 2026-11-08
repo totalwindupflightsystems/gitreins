@@ -50,6 +50,11 @@ def _write_repo(
             "[project]\n"
             'name = "gitreins"\n'
             f'version = "{pyproject_version}"\n'
+            # GR-GAP-071: the tree's own pytest config qualifies, so every
+            # fixture genuinely exercises the collector's -c pin (the child
+            # collection runs against THIS table, not an ancestor config).
+            "[tool.pytest.ini_options]\n"
+            'python_files = ["test_*.py"]\n'
         )
     if readme_body is None:
         readme_body = (
@@ -331,6 +336,17 @@ def test_collect_live_counts_parses_fixture_tree(tmp_path: Path) -> None:
     live, reason = _load_module().collect_live_counts(root)
     assert reason is None
     assert live == (5, 2)
+    # GR-GAP-071: the nested collection is hermetic against an ancestor pytest
+    # config. A hostile pytest.ini in the tmp_path parent (the same shape
+    # /home/kara/pytest.ini casts over scratch-TMPDIR fixture trees) must not
+    # become the child's inifile — its testpaths redirect cannot send the
+    # collection elsewhere — and the fixture's real module count (5 tests /
+    # 2 files) is still what the collector measures.
+    (tmp_path / "pytest.ini").write_text(
+        "[pytest]\ntestpaths = hostile_missing_dir\n", encoding="utf-8"
+    )
+    live_pinned, reason_pinned = _load_module().collect_live_counts(root)
+    assert reason_pinned is None and live_pinned == (5, 2)
 
 
 # ---------------------------------------------------------------------------
