@@ -97,6 +97,13 @@ hivemind-audit.md
 # stays TRACKED on purpose — its refresh is a separate chore commit.)
 .vfs/graph/.last_reconcile
 .vfs/graph/.parse_cache.json
+# GR-193: the symbols cache is writer output too — the repo's post-commit and
+# post-merge hooks run `hilo graph warm --changed`, which rewrites it after
+# every commit, so its tracked copy re-dirtied a clean tree in every worktree
+# and rode along inside unrelated commits. It is rebuilt by the hilo writer
+# on demand; edges.jsonl above stays TRACKED on purpose (its refresh is a
+# separate chore commit), only this cache is local.
+.vfs/graph/.symbols_cache.json
 
 # Demo projects (own git repos, not part of GitReins source)
 demo-calc/
