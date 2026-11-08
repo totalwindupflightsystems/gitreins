@@ -5,6 +5,22 @@ All notable changes to GitReins will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.20.0] - 2026-11-08
+
+### Changed
+- **The second-pass review is ON by default (GR-190)** — every judged run
+  with a tier2 LLM client now also gets the author-independent, diff-only
+  second reviewer without any configuration; `review.second_pass: false`
+  is the opt-out. The default flip is the "real code review BY DEFAULT"
+  commitment: the fleet's verdicts carry the independent review whether
+  or not a repo remembers to ask for it.
+
+### Fixed
+- **Persisted verdicts always carry their graded evidence (GR-184, released)**
+  — `build_verdict_data` falls back to the pipeline verdict, so the
+  top-level `items` of a persisted `verdict.json` hold the judge's
+  per-criterion proof instead of `[]`.
+
 ## [Unreleased]
 
 ### Added

@@ -774,10 +774,27 @@ class TestSecondPassJudgeWiring:
 
         return Judge(llm, workdir, persist_log=False, persist_telemetry=False)
 
-    def test_disabled_by_default_no_review_block(self, tmp_workdir: str) -> None:
+    def test_enabled_by_default_no_config_needed(self, tmp_workdir: str) -> None:
+        """GR-190 default flip: absent config means the review RUNS (0.20.0)."""
         from engine.judge import JudgeResult
 
-        judge = self._judge(tmp_workdir, FakeLLM([]))
+        judge = self._judge(tmp_workdir, FakeLLM([_second_pass_resp(SECOND_PASS_FINDINGS_JSON)]))
+        result = JudgeResult(task_id="t1")
+        judge._run_second_pass(result)
+        # The point of this test is the DEFAULT flip: with no config at all,
+        # the enable check passes and the review attaches (empty diff in the
+        # fixture → empty findings; shape covered by the config test).
+        assert result.second_pass_review is not None
+
+    def test_explicit_false_is_the_opt_out(self, tmp_workdir: str) -> None:
+        import pathlib
+
+        from engine.judge import JudgeResult
+
+        cfg = pathlib.Path(tmp_workdir) / ".gitreins" / "config.yaml"
+        cfg.parent.mkdir(parents=True, exist_ok=True)
+        cfg.write_text("review:\n  second_pass: false\n")
+        judge = self._judge(tmp_workdir, FakeLLM([_second_pass_resp(SECOND_PASS_FINDINGS_JSON)]))
         result = JudgeResult(task_id="t1")
         judge._run_second_pass(result)
         assert result.second_pass_review is None
