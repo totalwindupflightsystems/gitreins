@@ -325,8 +325,11 @@ def degradation_warning(stage: dict[str, Any]) -> str | None:
         return None
     skipped = ", ".join(stage.get("skipped_steps") or []) or "unknown checks"
     reason = stage.get("degradation_reason") or "unknown reason"
+    # GR-183: a skip-only guard pass RAN and graded a subset — saying it "did not
+    # run" (the right words for a step that never executed) would be false here.
+    verb = "graded a subset of their checks" if "DEGRADED PASS" in reason else "did not run"
     return (
-        f"WARNING: coverage is {stage.get('coverage') or 'unknown'} — {skipped} did not run "
+        f"WARNING: coverage is {stage.get('coverage') or 'unknown'} — {skipped} {verb} "
         f"({reason}); run `gitreins guard` for the full gate"
     )
 

@@ -102,6 +102,32 @@ class TestStepResult:
         assert tier1["passed"] is True
         assert result["passed"] is True
 
+    def test_degraded_guard_warning_does_not_claim_the_guard_never_ran(self) -> None:
+        """GR-183: a skip-only guard pass RAN — the stage warning must not say otherwise."""
+        from engine.pipeline import degradation_warning
+
+        degraded_guard = {
+            "degraded": True,
+            "coverage": "unknown",
+            "skipped_steps": ["guard"],
+            "degradation_reason": "guard reported DEGRADED PASS",
+        }
+        warning = degradation_warning(degraded_guard)
+        assert warning is not None
+        assert "did not run" not in warning
+        assert "graded a subset" in warning
+
+        # A step that genuinely never executed keeps the old wording.
+        never_ran = {
+            "degraded": True,
+            "coverage": "secrets-only",
+            "skipped_steps": ["lint", "tests"],
+            "degradation_reason": "no language detected",
+        }
+        other = degradation_warning(never_ran)
+        assert other is not None
+        assert "did not run" in other
+
     def test_step_result_output_truncated(self) -> None:
         """1000 chars is under the 4000 budget — stored byte-identical (DF-GITREINS-POC-8)."""
         long_output = "x" * 1000
