@@ -1261,6 +1261,93 @@ class TestAiEvalCoverageGate:
         assert "c2 documented" in stage["summary"] or "c2 documented" in stage["steps"][0]["output"]
         assert stage["steps"][0]["data"]["ungraded_criteria"] == ["c2 documented"]
 
+    def test_ungraded_criteria_persist_on_the_tier2_stage_surface(
+        self, tmp_workdir: str, llm_client: LLMClient
+    ) -> None:
+        """GR-196: the persisted tier2 verdict names the gap at stage level.
+
+        ``steps[0].data`` is not the surface a reviewer reads — verdict.json's
+        ``stages.tier2`` showed ``passed: false`` with PASS items and no
+        reason. ``build_verdict_data`` persists the pipeline's stage dicts
+        verbatim, so the stage dict itself must carry the list; asserted here
+        through the actual persistence payload builder, not just the live
+        pipeline shape.
+        """
+        from engine.evaluator import Verdict, VerdictItem
+        from engine.persist import build_verdict_data
+
+        criteria = ["c1 shipped", "c2 documented"]
+        result = self._run(
+            self._pipeline(tmp_workdir, llm_client),
+            criteria,
+            Verdict(
+                verdict="COMPLETE",
+                items=[VerdictItem("c1 shipped", "PASS", "ok")],
+                summary="done",
+            ),
+        )
+
+        stage = result["stages"]["tier2"]
+        assert stage["passed"] is False
+        assert stage["ungraded_criteria"] == ["c2 documented"]
+
+        judge_result = type(
+            "R",
+            (),
+            {
+                "passed": result["passed"],
+                "verdict": None,
+                "tier1": None,
+                "pipeline_result": result,
+                "provenance": {},
+                "summary": "Judge Result: t1",
+            },
+        )()
+        task = type("T", (), {"id": "t1", "title": "x", "criteria": criteria})()
+        data = build_verdict_data(tmp_workdir, task, judge_result)
+        assert data["stages"]["tier2"]["ungraded_criteria"] == ["c2 documented"]
+
+    def test_fully_graded_pass_persists_no_ungraded_criteria_key(
+        self, tmp_workdir: str, llm_client: LLMClient
+    ) -> None:
+        """Coverage complete → the key stays absent (absent, never empty)."""
+        from engine.evaluator import Verdict, VerdictItem
+        from engine.persist import build_verdict_data
+
+        criteria = ["c1 shipped", "c2 documented"]
+        result = self._run(
+            self._pipeline(tmp_workdir, llm_client),
+            criteria,
+            Verdict(
+                verdict="COMPLETE",
+                items=[
+                    VerdictItem("c1 shipped", "PASS", "ok"),
+                    VerdictItem("c2 documented", "PASS", "ok"),
+                ],
+                summary="done",
+            ),
+        )
+
+        stage = result["stages"]["tier2"]
+        assert stage["passed"] is True
+        assert "ungraded_criteria" not in stage
+
+        judge_result = type(
+            "R",
+            (),
+            {
+                "passed": result["passed"],
+                "verdict": None,
+                "tier1": None,
+                "pipeline_result": result,
+                "provenance": {},
+                "summary": "Judge Result: t1",
+            },
+        )()
+        task = type("T", (), {"id": "t1", "title": "x", "criteria": criteria})()
+        data = build_verdict_data(tmp_workdir, task, judge_result)
+        assert "ungraded_criteria" not in data["stages"]["tier2"]
+
     def test_a_shortened_item_matches_by_prefix(
         self, tmp_workdir: str, llm_client: LLMClient
     ) -> None:
