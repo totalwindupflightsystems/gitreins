@@ -266,6 +266,12 @@ class StageResult:
     # verdict.json's `stages.<id>` names WHO judged it without key or URL
     # values. Absent (not null) when the client carries no identity fields.
     provenance: dict[str, Any] = field(default_factory=dict)
+    # GR-196: the criteria the stage's ai_eval verdict never graded, folded
+    # from the step data onto the stage dict — a FAIL that is really a
+    # coverage gap must name its reason where verdict.json's ``stages.<id>``
+    # is read, not only inside ``steps[].data``. Absent (never an empty list)
+    # when coverage is complete, keeping the historical shape byte-identical.
+    ungraded_criteria: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -287,6 +293,11 @@ class StageResult:
             d["degraded"] = True
             d["skipped_steps"] = list(self.skipped_steps)
             d["degradation_reason"] = self.degradation_reason
+        if self.ungraded_criteria:
+            # GR-196: flat on the stage dict like the provenance fold above —
+            # a reader of ``stages.tier2`` must not have to walk
+            # ``steps[].data`` to learn WHY a verdict failed.
+            d["ungraded_criteria"] = list(self.ungraded_criteria)
         return d
 
 
@@ -313,6 +324,29 @@ def _fold_step_provenance(stage: StageResult) -> None:
             folded = prov
     if folded:
         stage.provenance = dict(folded)
+
+
+def _fold_step_ungraded_criteria(stage: StageResult) -> None:
+    """Lift one ai_eval step's ``ungraded_criteria`` onto the STAGE result.
+
+    GR-196: a run that failed because a criterion was never graded presented
+    ``passed: false`` at the top of the tier2 verdict with no reason — the
+    gap was named only inside ``steps[].data``, the same burial the
+    REVIEW-GITREINS-030 provenance fold fixed for judge identity. Folding
+    here puts the SAME list on ``stages.<id>`` in verdict.json (and in
+    ``judge_result_to_dict``), where a reviewer reads the stage. Multi-ai_eval
+    stages take the last non-empty one deterministically by step order — in
+    practice the default pipeline has exactly one. Nothing is folded when no
+    step named a gap, so a fully graded verdict serializes byte-identically.
+    """
+    folded: list[str] = []
+    for step in stage.steps:
+        data = step.data if isinstance(step.data, dict) else {}
+        ungraded = data.get("ungraded_criteria")
+        if isinstance(ungraded, list) and ungraded:
+            folded = [str(c) for c in ungraded]
+    if folded:
+        stage.ungraded_criteria = folded
 
 
 def degradation_warning(stage: dict[str, Any]) -> str | None:
@@ -785,6 +819,7 @@ class Pipeline:
         result.passed = not result.any_failed
         result.summary = self._summarize_stage(result)
         _fold_step_provenance(result)
+        _fold_step_ungraded_criteria(result)
         return result
 
     def _run_sequential_stage(
@@ -822,6 +857,7 @@ class Pipeline:
         result.any_failed = not step_result.passed
         result.summary = step_result.output or step_result.error
         _fold_step_provenance(result)
+        _fold_step_ungraded_criteria(result)
         return result
 
     def _run_step(
