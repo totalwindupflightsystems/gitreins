@@ -1135,3 +1135,96 @@ class TestFailureModeBlock:
         # A bare test_ identifier resolves the same way.
         assert detected_by_is_backed("test_expired_token", ["ran test_expired_token"]) is True
         assert detected_by_is_backed("test_expired_token", []) is False
+
+    def test_failure_modes_persisted_with_five_fields(self) -> None:
+        """build_verdict_data persists the block additively with five plain fields.
+
+        Populated block → verdict.json carries exactly the five fields per
+        entry. Empty block → NO ``failure_modes`` key at all (asserted as
+        absent, not empty), so a pre-GR-179 verdict serializes byte-identically.
+        """
+        from engine.persist import build_verdict_data
+        from engine.task_manager import Task
+
+        populated = self._parse(self.BACKED_CONTENT, run_record=[])
+        data = build_verdict_data(
+            ".", Task(id="T-1", title="t", criteria=["c"]), _VerdictHolder(populated)
+        )
+        assert data["failure_modes"] == [
+            {
+                "what": "import error when plugin dir missing",
+                "where": "engine/plugins.py:load",
+                "trigger": "worktree without an empty plugins/ dir",
+                "detected_by": "tests/test_judge.py::test_failure_modes_empty_is_unpenalised",
+                "covered_in_this_pr": True,
+            }
+        ]
+
+        empty = self._parse(self.EMPTY_BLOCK_CONTENT, run_record=[])
+        empty_data = build_verdict_data(
+            ".", Task(id="T-1", title="t", criteria=["c"]), _VerdictHolder(empty)
+        )
+        assert "failure_modes" not in empty_data  # absent, never an empty list
+
+    def test_failure_modes_status_dict_includes_block_only_when_nonempty(self) -> None:
+        """judge_result_to_dict carries the block only when it has entries.
+
+        The degraded-flag contract is untouched either way: a summary whose
+        detected_by names a test with no tool result behind it still carries
+        its ``[uncovered failure paths: …]`` flag in ``d["summary"]`` exactly
+        as failure_mode_summary_flags appended it.
+        """
+        from engine.judge import judge_result_to_dict
+
+        populated = self._parse(self.BACKED_CONTENT, run_record=[])
+        result = JudgeResult(task_id="t1", passed=True, tier2=populated, verdict=populated)
+        d = judge_result_to_dict("t1", "/wd", result)
+        assert d["failure_modes"] == [
+            {
+                "what": "import error when plugin dir missing",
+                "where": "engine/plugins.py:load",
+                "trigger": "worktree without an empty plugins/ dir",
+                "detected_by": "tests/test_judge.py::test_failure_modes_empty_is_unpenalised",
+                "covered_in_this_pr": True,
+            }
+        ]
+
+        empty = self._parse(self.EMPTY_BLOCK_CONTENT, run_record=[])
+        empty_result = JudgeResult(task_id="t1", passed=True, tier2=empty, verdict=empty)
+        empty_d = judge_result_to_dict("t1", "/wd", empty_result)
+        assert "failure_modes" not in empty_d
+
+        # Degradation flags survive, verbatim, in the machine-readable summary.
+        degraded = self._parse(self.UNBACKED_CONTENT, run_record=[])
+        degraded_result = JudgeResult(task_id="t1", passed=True, tier2=degraded, verdict=degraded)
+        degraded_d = judge_result_to_dict("t1", "/wd", degraded_result)
+        assert "uncovered failure paths" in degraded_d["summary"]
+        assert "tests/test_never_ran.py::test_absent" in degraded_d["summary"]
+
+    def test_failure_modes_rendered_in_judge_summary(self) -> None:
+        """JudgeResult.summary lists populated entries; renders nothing when empty."""
+        populated = self._parse(self.BACKED_CONTENT, run_record=[])
+        result = JudgeResult(task_id="t1", passed=True, verdict=populated)
+        summary = result.summary
+        assert "Failure modes (what can still go wrong):" in summary
+        assert "import error when plugin dir missing" in summary  # what
+        assert "engine/plugins.py:load" in summary  # where
+        assert (
+            "tests/test_judge.py::test_failure_modes_empty_is_unpenalised" in summary
+        )  # detected_by
+        assert "covered in this PR" in summary
+
+        empty = self._parse(self.EMPTY_BLOCK_CONTENT, run_record=[])
+        empty_result = JudgeResult(task_id="t1", passed=True, verdict=empty)
+        assert "Failure modes" not in empty_result.summary
+
+
+class _VerdictHolder:
+    """Minimal JudgeResult stand-in for build_verdict_data (persist reads
+    ``verdict`` / ``passed`` / ``pipeline_result`` only)."""
+
+    def __init__(self, verdict: Verdict) -> None:
+        self.verdict = verdict
+        self.passed = verdict.verdict == "COMPLETE"
+        self.summary = verdict.summary
+        self.pipeline_result: dict[str, object] = {}

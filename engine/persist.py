@@ -1117,6 +1117,25 @@ def build_verdict_data(workdir: str, task: Task, result: JudgeResult) -> dict[An
     else:
         verdict_data["items"] = []
 
+    # GR-179: the graded failure-mode block (what / where / trigger /
+    # detected_by / covered_in_this_pr) rides the persisted record additively —
+    # present only when the verdict actually carries entries, so a pre-GR-179
+    # verdict serializes byte-identically (the same contract as GR-176
+    # ``derived`` and GR-178 ``not_verifiable_reason`` above). getattr reads on
+    # each entry keep a duck-typed stand-in from blowing up the persister.
+    failure_modes = getattr(verdict_obj, "failure_modes", None)
+    if failure_modes:
+        verdict_data["failure_modes"] = [
+            {
+                "what": getattr(fm, "what", ""),
+                "where": getattr(fm, "where", ""),
+                "trigger": getattr(fm, "trigger", ""),
+                "detected_by": getattr(fm, "detected_by", ""),
+                "covered_in_this_pr": bool(getattr(fm, "covered_in_this_pr", False)),
+            }
+            for fm in failure_modes
+        ]
+
     # GR-178: the advisory merge recommendation (no_concerns_found /
     # needs_review / changes_required), degraded to needs_review while any
     # NOT_VERIFIABLE item exists. Advisory ONLY — the merge gate keys on

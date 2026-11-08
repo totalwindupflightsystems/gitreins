@@ -697,6 +697,25 @@ class JudgeResult:
                 for item in not_verifiable:
                     reason = item.not_verifiable_reason or "no settling step named"
                     lines.append(f"  — {item.criterion}: {reason}")
+            # GR-179: the graded failure-mode block is listed per entry — what
+            # can still go wrong, where, its trigger, what would detect it and
+            # whether a test in this change covers it. Nothing renders for an
+            # empty block, so an ordinary summary is unchanged; degradation
+            # flags stay where failure_mode_summary_flags appended them (the
+            # verdict's own summary string), untouched by this section.
+            if self.verdict.failure_modes:
+                lines.append("\nFailure modes (what can still go wrong):")
+                for fm in self.verdict.failure_modes:
+                    coverage = (
+                        "covered in this PR" if fm.covered_in_this_pr else "NOT covered in this PR"
+                    )
+                    lines.append(
+                        f"  — {fm.what or 'unnamed'}"
+                        f" (at {fm.where or 'unknown location'});"
+                        f" trigger: {fm.trigger or 'unspecified'};"
+                        f" detected by: {fm.detected_by or 'nothing — uncovered'};"
+                        f" {coverage}"
+                    )
 
         if self.quality_snapshot and not self.pipeline_result.get("stages"):
             from engine.quality_metrics import format_quality_snapshot
@@ -778,6 +797,21 @@ def judge_result_to_dict(task_id: str, workdir: str, result: Any) -> dict[str, A
             for i in tier2.items
         ]
         d["summary"] = tier2.summary
+        # GR-179: the graded failure-mode block rides the machine-readable
+        # status additively — present only when the verdict carries entries,
+        # so the historical dict shape is untouched otherwise.
+        failure_modes = getattr(tier2, "failure_modes", None)
+        if failure_modes:
+            d["failure_modes"] = [
+                {
+                    "what": getattr(fm, "what", ""),
+                    "where": getattr(fm, "where", ""),
+                    "trigger": getattr(fm, "trigger", ""),
+                    "detected_by": getattr(fm, "detected_by", ""),
+                    "covered_in_this_pr": bool(getattr(fm, "covered_in_this_pr", False)),
+                }
+                for fm in failure_modes
+            ]
         # REVIEW-GITREINS-030: the status dict names WHO judged — model,
         # base_url_source, api_key_source — resolved from the judge's own
         # client via engine.usage.provenance_fields() and carried on the result
