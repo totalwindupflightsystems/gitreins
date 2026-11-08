@@ -3369,18 +3369,21 @@ class TestSecurityReviewConsoleSummary:
     def test_console_reason_truncates_on_word_boundary_and_log_keeps_full(
         self, tmp_workdir: str, guard_manager: GuardManager
     ) -> None:
-        """A too-long identity cuts at whitespace, and the run log keeps it all."""
+        """A too-long identity cuts at whitespace in the free-text prefix,
+        keeps the trailing file:line, and the run log keeps it all."""
         tier1, rendered = self._blocked_run(long_identity=True)
         line = self._console_line(tier1.summary)
         detail = line.split(" — ", 1)[1]
-        assert detail.endswith("...")
+        location = f"{self.LONG_FILE}:{self.FINDING_LINE}"
+        # GR-GAP-070 rework: the bounded finding line keeps the trailing
+        # file:line — the shrink lands in the prefix, never on the locator.
+        assert location in detail
+        assert "..." in detail  # the shrink is visible, not silent overflow
+        assert len(detail) <= 100  # still bounded like every lane line
         # GR-GAP-070: the cut is on WHITESPACE — the kept text is a prefix of
         # the full detail ending on a whole token, never half a word.
-        kept = detail[:-3].rstrip()
-        full_detail = (
-            f"2 finding(s); [rules] {self.LONG_RULE} {self.FINDING_CWE} "
-            f"{self.LONG_FILE}:{self.FINDING_LINE}"
-        )
+        kept = detail.split("...", 1)[0].rstrip()
+        full_detail = f"2 finding(s); [rules] {self.LONG_RULE} {self.FINDING_CWE} {location}"
         assert full_detail.startswith(kept), "console detail must be a prefix"
         assert len(kept) == len(full_detail) or full_detail[len(kept)] == " ", (
             "cut must land on a word boundary"
@@ -3398,6 +3401,17 @@ class TestSecurityReviewConsoleSummary:
         # The install hint survives in the full output too — it is evidence,
         # just never a substitute for the finding on the console line.
         assert "pip install semgrep" in log_body
+
+    def test_console_long_rule_and_path_keep_location(self) -> None:
+        """The judge-named case: a long rule id AND a long file path push the
+        identity past the bound, and the console lane line still carries
+        ``<file>:<line>`` — the location is never the part that is cut."""
+        tier1, _ = self._blocked_run(long_identity=True)
+        line = self._console_line(tier1.summary)
+        assert f"{self.LONG_FILE}:{self.FINDING_LINE}" in line
+        # The count survives the shrink too, so the line stays a finding
+        # identity, not a bare path.
+        assert "2 finding(s)" in line
 
     def test_console_falls_back_to_tail_without_machine_summary(self) -> None:
         """Findings but no extra summary (library-built GuardResult): the old
