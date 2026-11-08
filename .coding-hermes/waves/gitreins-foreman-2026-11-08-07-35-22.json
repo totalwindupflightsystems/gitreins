@@ -1,0 +1,32 @@
+{
+  "tick": "gitreins-foreman-2026-11-08-07-35-22",
+  "project": "gitreins",
+  "mode": "wave",
+  "budget": 8,
+  "base": "0fad76a8",
+  "workers": [
+    {
+      "task_id": "GR-179",
+      "title": "Add a graded failure-mode block to every verdict",
+      "worktree": "/home/kara/worktrees/gitreins-GR-179",
+      "branch": "wt/GR-179",
+      "base": "0fad76a8",
+      "brief": "/home/kara/.hermes/cache/scratch/gitreins-foreman-2026-11-08-07-35-22-GR-179-brief.txt",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm",
+      "status": "dispatched"
+    },
+    {
+      "task_id": "GR-GAP-071",
+      "title": "check_docs_drift live collector reads 0 test files under an ancestor pytest config",
+      "worktree": "/home/kara/worktrees/gitreins-GR-GAP-071",
+      "branch": "wt/GR-GAP-071",
+      "base": "0fad76a8",
+      "brief": "/home/kara/.hermes/cache/scratch/gitreins-foreman-2026-11-08-07-35-22-GR-GAP-071-brief.txt",
+      "model": "glm-5.3-flash",
+      "provider": "zai-glm",
+      "status": "dispatched"
+    }
+  ],
+  "independence": "no depends_on edges between the rows; disjoint file sets (engine/evaluator.py + tests/test_judge.py vs scripts/check_docs_drift.py + tests/test_docs_drift.py)"
+}
