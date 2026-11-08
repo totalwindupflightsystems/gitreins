@@ -18,6 +18,7 @@ Usage:
 """
 
 import contextlib
+import hashlib
 import json
 import logging
 import os
@@ -537,6 +538,84 @@ class Verdict:
     # produced before the block existed serializes exactly as before, and an
     # empty block is the normal, unpenalised case.
     failure_modes: list[FailureMode] = field(default_factory=list)
+
+
+# GR-195: the execution transcript persisted under ``stages.tier2.tool_calls``
+# keeps at most this many entries — the LAST ones, the commands closest to the
+# grading decision — and records how many older entries were dropped beside
+# the list, so a long run is capped without a silent drop.
+TOOL_TRANSCRIPT_MAX_ENTRIES = 200
+
+
+def tool_calls_transcript(record: list[str]) -> dict[str, Any] | None:
+    """The persisted execution transcript for one judge run's tool record.
+
+    The in-run record (GR-179, ``AgenticEvaluator._tool_record``) is a list of
+    JSON strings appended per executed tool call — ``{"tool", "arguments",
+    "result"}`` — and it dies with the process. This converts it into the
+    transcript that survives in verdict data (GR-195): one entry per call with
+    ``command`` (the exact command string the judge issued), ``exit_code``
+    (int) and ``output_sha`` (sha256 hex of the captured output), plus ``tool``
+    for attribution.
+
+    A ``run_command`` entry carries its shell command verbatim and the
+    command's real exit code; -1 means the command never completed (refused,
+    or errored before an exit code existed). Every other tool renders its
+    exact invocation as ``<tool> <arguments-json>`` with exit 0, or 1 when the
+    result carries an ``error``. The output hash covers the result exactly as
+    the record captured it (the raw text, or its deterministic JSON) — never
+    the raw file bytes a reader no longer has. Unparseable entries are
+    skipped, not fatal: a transcript must not fail a verdict.
+
+    Returns ``{"tool_calls": [...], "tool_calls_omitted": N}`` or ``None`` for
+    an empty record — None, never an empty dict, so no consumer adds an empty
+    key (the persisted contract is absent, never empty).
+    """
+    if not record:
+        return None
+    entries: list[dict[str, Any]] = []
+    for raw in record:
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError):
+            continue
+        if not isinstance(parsed, dict):
+            continue
+        tool = parsed.get("tool")
+        arguments = parsed.get("arguments")
+        if not isinstance(arguments, dict):
+            arguments = {}
+        result = parsed.get("result")
+        result_text = (
+            result if isinstance(result, str) else json.dumps(result, sort_keys=True, default=str)
+        )
+        if tool == "run_command":
+            command = arguments.get("cmd") or arguments.get("command") or ""
+            if not isinstance(command, str):
+                command = json.dumps(command, sort_keys=True, default=str)
+            exit_code = result.get("exit_code") if isinstance(result, dict) else None
+            if not isinstance(exit_code, int) or isinstance(exit_code, bool):
+                exit_code = -1  # refused / errored — the command never completed
+        else:
+            command = f"{tool} {json.dumps(arguments, sort_keys=True, default=str)}"
+            exit_code = 1 if isinstance(result, dict) and result.get("error") else 0
+        entries.append(
+            {
+                "tool": tool,
+                "command": command,
+                "exit_code": exit_code,
+                "output_sha": hashlib.sha256(
+                    result_text.encode("utf-8", errors="replace")
+                ).hexdigest(),
+            }
+        )
+    if not entries:
+        return None
+    omitted = 0
+    if len(entries) > TOOL_TRANSCRIPT_MAX_ENTRIES:
+        omitted = len(entries) - TOOL_TRANSCRIPT_MAX_ENTRIES
+        entries = entries[-TOOL_TRANSCRIPT_MAX_ENTRIES:]
+    return {"tool_calls": entries, "tool_calls_omitted": omitted}
 
 
 # GR-179: the failure-mode block is bounded. The prompt says "up to 3"; the

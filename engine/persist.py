@@ -1159,6 +1159,27 @@ def build_verdict_data(workdir: str, task: Task, result: JudgeResult) -> dict[An
     if result.pipeline_result:
         verdict_data["stages"] = result.pipeline_result.get("stages", {})
 
+    # GR-195: the judge's execution transcript — the in-run tool record the
+    # AgenticEvaluator kept (GR-179), converted and capped by
+    # ``tool_calls_transcript`` — persists under the tier2 stage so a judged
+    # verdict can answer "which commands did the judge run". Additive +
+    # only-when-present: absent (never an empty list) when the run kept no
+    # record, so pre-GR-195 verdicts serialize byte-identically — the same
+    # contract as GR-176 ``derived`` and GR-178 ``not_verifiable_reason``.
+    # Attached only where a tier2 stage dict already exists (the staged
+    # pipeline — every modern judge run); a shape without one is left
+    # exactly as it serialized before.
+    transcript = getattr(result, "tool_calls", None)
+    if isinstance(transcript, dict) and transcript.get("tool_calls"):
+        stages = verdict_data.get("stages")
+        if isinstance(stages, dict):
+            tier2_stage = stages.get("tier2")
+            if isinstance(tier2_stage, dict):
+                tier2_stage["tool_calls"] = transcript["tool_calls"]
+                omitted = transcript.get("tool_calls_omitted")
+                if omitted:
+                    tier2_stage["tool_calls_omitted"] = omitted
+
     # REVIEW-GITREINS-030: a legacy (no-pipeline) judge has no stage dict to
     # name the tier2 client, so its credential-free provenance (model +
     # base_url_source + api_key_source) is stamped at the top level of the
