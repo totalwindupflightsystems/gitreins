@@ -528,7 +528,8 @@ telemetry of the agent that invoked the judge.
 
 ## Verdict Parsing
 
-When the LLM stops making tool calls, its response is parsed via a 3-strategy fallback chain in `_parse_verdict()`:
+When the LLM stops making tool calls, its response is parsed by `_parse_verdict()`:
+a markdown-fence strip, then ONE JSON strategy with a fail-closed default.
 
 ### Strategy 1: Strip Markdown Fences
 
@@ -542,23 +543,32 @@ If the response starts with ` ``` `, remove the fence markers (optional `json` l
 
 Stripped to raw JSON.
 
-### Strategy 2: JSON Boundaries
+### Strategy 2: First Complete JSON Object
 
-Find the first `{` and last `}` in the cleaned string. Attempt `json.loads()` on the extracted substring.
+`json.JSONDecoder().raw_decode()` consumes exactly ONE JSON value starting at
+the first `{`. Trailing text after that object — a duplicated verdict, an
+echoed example, a trailing note — is ignored instead of poisoning the parse
+(GR-GAP-059): the old first-`{`-to-last-`}` slice turned such trailing data
+into an `Extra data` error and silently degraded to an empty-item verdict that
+could no longer name which criterion failed.
 
 Validates:
 - `verdict` must be `"COMPLETE"` or `"INCOMPLETE"` (defaults to `INCOMPLETE` if invalid)
 - `items` must be present
-- Each item's `status` must be `"PASS"` or `"FAIL"` (defaults to `FAIL`)
+- Each item's `status` must be `"PASS"`, `"FAIL"` or `"NOT_VERIFIABLE"`
+  (GR-178); anything else — including a missing field — defaults to `FAIL`
+- A `NOT_VERIFIABLE` item rides through parsing with its optional
+  `not_verifiable_reason` naming what would settle it
 
-### Strategy 3: Keyword Fallback
+### No Keyword Fallback
 
-If JSON parsing fails, search the raw text for:
-- `"complete"` (case-insensitive) → `COMPLETE`
-- `"all criteria"` + `"pass"` → `COMPLETE`
-- Everything else → `INCOMPLETE`
-
-The fallback logs a warning and includes the raw text in the summary.
+An unparseable reply is NOT evidence of completeness (GR-168). The keyword
+path this section once documented — the word `"complete"` (or `"all criteria"`
++ `"pass"`) in the text producing `COMPLETE`, with an EMPTY item list — is
+removed: prose is not a verdict, and a parse failure means nothing was graded.
+A parse failure has one outcome: `INCOMPLETE`, with the parse reason recorded
+and the first 300 characters of the raw response in the summary, so the
+persisted record explains itself instead of looking like a criterion failure.
 
 ### Verdict Schema
 
@@ -574,16 +584,32 @@ The fallback logs a warning and includes the raw text in the summary.
      "detail": "POST /login confirmed at routes.py:42-68"},
     {"criterion": "the new session cookie is read by the middleware",
      "derived": true, "status": "FAIL",
-     "detail": "middleware.py:31 reads 'sid'; auth.py:70 writes 'session_id'"}
+     "detail": "middleware.py:31 reads 'sid'; auth.py:70 writes 'session_id'"},
+    {"criterion": "the OAuth popup renders in the browser", "status": "NOT_VERIFIABLE",
+     "not_verifiable_reason": "code review alone cannot settle this — open the page and check the popup; a Playwright run against a staging URL would settle it"}
   ],
-  "summary": "2 of 3 given criteria fail"
+  "summary": "2 of 4 given criteria fail; 1 needs human review"
 }
 ```
 
 `"derived": true` marks a criterion the judge proposed itself (GR-176). It is
-absent on given criteria and on every pre-GR-176 artifact. `COMPLETE` requires
-every item to PASS; one FAIL — derived or given — makes the artifact
+absent on given criteria and on every pre-GR-176 artifact. `NOT_VERIFIABLE`
+(GR-178) marks a criterion code review alone cannot settle; it is never
+counted as a pass. `COMPLETE` requires every item to be PASS; one non-PASS
+item — FAIL, `NOT_VERIFIABLE`, derived or given — makes the artifact
 `INCOMPLETE` even if the model wrote `COMPLETE`.
+
+### Persisted verdict evidence (GR-184)
+
+The persisted `verdict.json` carries the graded per-criterion evidence in its
+top-level `items` field. `build_verdict_data` reads the judge's
+`result.verdict`, and when that is unset — the staged-pipeline path, which is
+every modern judge run, constructs its result without one — it falls back to
+the pipeline's own verdict, where the graded evidence lives
+(`stages.tier2` step data). Without that fallback every pipeline-run verdict
+persisted `items: []` while the judge had graded and named its proof;
+dashboards, quality gates and coverage readers of the items contract now see
+the graded items. The legacy `result.verdict` path keeps its exact shape.
 
 ## State Lifecycle
 

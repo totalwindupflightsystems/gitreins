@@ -301,7 +301,10 @@ gitreins judge fix-auth --async
 `--async` dispatches the evaluation as a detached background job that survives
 the CLI exiting; poll it with `gitreins judge --status <job_id>` (the id is the
 job id, not the task id). The Tier 2 evaluator reads code, can run your test
-command, and issues a per-criterion PASS/FAIL verdict with evidence.
+command, and issues a per-criterion PASS/FAIL verdict with evidence — a
+criterion code review alone cannot settle (a browser check, an external API
+contract) is graded `NOT_VERIFIABLE` instead, never counted as a pass, and is
+listed for human review.
 
 > **MCP commit rule:** the MCP `commit` tool refuses while any task is
 > `in_progress`. Finish tasks (`task complete`, which judges them) or delete
