@@ -115,7 +115,7 @@ can see on the current machine.
 2. **Work with your AI agent** — Claude, Hermes, Codex, or Pi does code generation
 3. **Complete tasks** — `gitreins task complete <id>` triggers automatic evaluation. Tier 2 needs an LLM credential; configure `GITREINS_LLM_API_KEY` (plus optional `GITREINS_LLM_BASE_URL` and `GITREINS_LLM_MODEL`) first. For an explicit Tier-1-only run, use `gitreins task complete --skip-tier2 <id>`.
 4. **Tier 1: Static guards** — secrets, build, lint, tests (configurable); optional staged security review (`security_review:` block: `off`/`staged`/`full` — deterministic rules, Antares localization and an LLM judge over the change set, see [docs/security-review.md](docs/security-review.md))
-5. **Tier 2: Agentic evaluator** — LLM loop reads files, runs tests, delivers per-criterion PASS/FAIL
+5. **Tier 2: Agentic evaluator** — LLM loop reads files, runs tests, delivers per-criterion PASS/FAIL (a criterion code review alone cannot settle is graded `NOT_VERIFIABLE`, never counted as a pass, and routed to human review — see [Agentic Evaluator Design](docs/evaluator-loop.md))
 6. **Verdicts persisted** — stored in `.gitreins/history/`, browsable via `gitreins report` or the live judgment browser `gitreins serve`. Each verdict keeps the run's own evidence next to it (`worker-brief.md`, `driver-log.tail.txt`, `commit.patch` and, when the tree was dirty, `worktree.patch` — see `GITREINS_WORKER_BRIEF` / `GITREINS_DRIVER_LOG`), so the browser's detail pane shows the brief, the log tail and the patch the judge graded. QA runs (`worktree fresh|repro|dogfood`) record their own verdict in the QA ledger — `gitreins qa list`, and `gitreins qa record` for a run produced outside the harness (a fleet lane, a bunker battery)
 7. **Commit through harness** — pre-commit hook runs guards, blocks if checks fail
 
@@ -804,7 +804,25 @@ history:
   enabled: true
   storage: "git"
   max_verdicts: 1000
+
+# ── Judge-side second-pass review (GR-171, opt-in) ───
+# An author-independent reviewer that runs BESIDE criteria grading and reads
+# the diff alone. Off by default; set second_pass to literally true to enable.
+# review:
+#   second_pass: true
 ```
+
+Sections and keys not shown above are documented with their features:
+`worktree_fleet:` in [Parallel worktree fleet](#parallel-worktree-fleet),
+`resolution:` in [the resolution gate](docs/jev-resolution-gate.md),
+`commit_audit:` (and its review profile/effort keys) in
+[Review Profiles](docs/review-profiles.md), `security_review:` in
+[Staged Security Review](docs/security-review.md), `quality:` in
+[Quality Metrics](docs/quality-metrics.md), `spec_alignment:`,
+`criteria:` and `pipeline:` in
+[docs/cli-reference.md](docs/cli-reference.md). `gitreins config-validate`
+reports unknown/misspelled keys, wrong types and bad values against the same
+schema the engine reads — including every key `install`/`init` writes.
 
 ### Data protection (optional)
 

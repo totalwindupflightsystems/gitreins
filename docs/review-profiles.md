@@ -92,3 +92,14 @@ output: `CommitReviewResult.to_dict()` (includes `severity_counts` and
 per-issue `compat_severity`). Human output:
 `CommitReviewResult.render_human()` — severity groups with counts, per-finding
 fix-effort estimates, and the remediation brief when present.
+
+## Related: the judge-side second pass (GR-171)
+
+`engine/review_profiles.py` also hosts `SecondPassReviewer` — a judge-side,
+author-independent reviewer that runs BESIDE criteria grading, reads the diff
+alone, and never sees the task's criteria. It is not a commit-audit profile and
+shares no effort budget with them; it is opt-in via `review.second_pass: true`
+(default off), caps its findings at 10, and attaches its findings to the
+verdict record as a `review` block. Its contract and the human-labeled
+precision dry-run are documented in [The author-independent second pass
+(GR-171)](evaluator-loop.md#the-author-independent-second-pass-gr-171).
