@@ -504,7 +504,9 @@ class TestGitleaksFindingCountParser:
         # Must contain the metric, NOT the diff-scope line
         assert "type_hint_pct=72.3%" in result.summary
         assert "diff-scope" not in result.summary
-        # The metric details should be on the console line (truncated to 100 chars)
-        # The line is 103 chars so _truncate_line(100) gives "..." at end
+        # The metric details should be on the console line (truncated to 100
+        # chars). GR-GAP-070: the cut is on a WHITESPACE boundary now — the
+        # 103-char line ends at the last whole word, never half a token.
         assert result.summary.startswith("  ✗ quality — quality: type_hint_pct")
-        assert "scripts/quality_metri..." in result.summary
+        assert "via python3..." in result.summary
+        assert "quality_metri..." not in result.summary

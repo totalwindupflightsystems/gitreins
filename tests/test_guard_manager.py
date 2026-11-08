@@ -28,7 +28,9 @@ from engine.guard_manager import (
     _resolve_test_command,
     _shell_not_found_names,
     is_sensitive_path,
+    write_guard_log,
 )
+from engine import security_stages
 from engine.types import (
     SCANNER_CLEAN,
     SCANNER_NOT_RUN,
@@ -3275,3 +3277,156 @@ class TestTimeoutResultLaundering:
         # The zero-work skip is still reported as such; the timeout is what
         # makes the run non-passing, not the skip.
         assert result.extra["allow_skips"] is True
+
+
+class TestSecurityReviewConsoleSummary:
+    """GR-GAP-070: the console lane line names the blocking security_review
+    finding, and long lane reasons cut on word boundaries — the run log keeps
+    every reason whole. The pipeline outcome is built from
+    engine.security_stages dataclasses, so no rules tool, judge endpoint or
+    network is touched.
+    """
+
+    FINDING_RULE = "python.lang.security.os-system"
+    FINDING_FILE = "app/commands.py"
+    FINDING_LINE = 42
+    FINDING_CWE = "CWE-78"
+    #: Long rule id + deep path so the console identity exceeds the 100-char
+    #: detail bound — the word-boundary cut is exercised, not just the count.
+    LONG_RULE = "python.lang.security.audit.insecure-deserialization.pickle-loads"
+    LONG_FILE = "services/billing/workers/nightly_reconciliation.py"
+    LONG_REASON = (
+        "os.system() spawns a shell — command injection risk from the "
+        "operator-supplied command template assembled in the deployment hook"
+    )
+
+    def _blocked_run(self, long_identity: bool = False) -> tuple[Tier1Result, str]:
+        """A synthetic blocked security_review run + its full rendered output.
+
+        ``long_identity`` stretches rule id and path past the console bound.
+        The rules stage carries the partial-coverage install hint that used to
+        reach the console as the lane's whole reason.
+        """
+        rule = self.LONG_RULE if long_identity else self.FINDING_RULE
+        file = self.LONG_FILE if long_identity else self.FINDING_FILE
+        findings = [
+            security_stages.SecurityFinding(
+                stage="rules",
+                rule_id=rule,
+                cwe=self.FINDING_CWE,
+                file=file,
+                line=self.FINDING_LINE,
+                confidence=1.0,
+                description=self.LONG_REASON,
+            ),
+            security_stages.SecurityFinding(
+                stage="rules",
+                rule_id="python.lang.security.subprocess-shell-true",
+                cwe="CWE-78",
+                file=file,
+                line=self.FINDING_LINE + 30,
+                confidence=0.9,
+                description="subprocess call with shell=True",
+            ),
+        ]
+        rules = security_stages.StageOutcome(
+            stage="rules",
+            status="ok",
+            findings=findings,
+            detail=f"semgrep unavailable (pip install semgrep); ast-grep: {len(findings)} finding(s)",
+            notes=["semgrep unavailable (pip install semgrep)"],
+        )
+        localize = security_stages.StageOutcome(stage="localize", status="ok", findings=[])
+        outcome = security_stages.StagedReviewOutcome(
+            mode="staged", findings=findings, stages=[rules, localize], passed=False
+        )
+        rendered = security_stages.render_outcome(outcome, 0.6)
+        result = GuardResult(name="security_review", passed=False, output=rendered)
+        tier1 = Tier1Result(
+            passed=False,
+            results=[result],
+            extra={"security_review": security_stages.outcome_summary(outcome)},
+        )
+        return tier1, rendered
+
+    @staticmethod
+    def _console_line(summary: str) -> str:
+        """The security_review lane's own console line."""
+        return next(ln for ln in summary.splitlines() if "✗ security_review" in ln)
+
+    def test_console_lane_line_names_blocking_finding(self) -> None:
+        """The lane line carries file:line, rule id, CWE, stage and the count."""
+        tier1, _ = self._blocked_run()
+        line = self._console_line(tier1.summary)
+        assert f"{self.FINDING_FILE}:{self.FINDING_LINE}" in line  # file:line
+        assert self.FINDING_RULE in line  # rule id
+        assert self.FINDING_CWE in line  # CWE
+        assert "[rules]" in line  # stage
+        assert "2 finding(s)" in line  # count of findings
+        # The install hint (tool availability) is no longer the whole reason.
+        assert "pip install semgrep" not in line
+
+    def test_console_reason_truncates_on_word_boundary_and_log_keeps_full(
+        self, tmp_workdir: str, guard_manager: GuardManager
+    ) -> None:
+        """A too-long identity cuts at whitespace, and the run log keeps it all."""
+        tier1, rendered = self._blocked_run(long_identity=True)
+        line = self._console_line(tier1.summary)
+        detail = line.split(" — ", 1)[1]
+        assert detail.endswith("...")
+        # GR-GAP-070: the cut is on WHITESPACE — the kept text is a prefix of
+        # the full detail ending on a whole token, never half a word.
+        kept = detail[:-3].rstrip()
+        full_detail = (
+            f"2 finding(s); [rules] {self.LONG_RULE} {self.FINDING_CWE} "
+            f"{self.LONG_FILE}:{self.FINDING_LINE}"
+        )
+        assert full_detail.startswith(kept), "console detail must be a prefix"
+        assert len(kept) == len(full_detail) or full_detail[len(kept)] == " ", (
+            "cut must land on a word boundary"
+        )
+
+        # The run log keeps the complete finding line and reason, untruncated.
+        guard_manager._remember_full_output("security_review", rendered)
+        log_path = write_guard_log(tmp_workdir, tier1, guard_manager._full_outputs)
+        log_body = Path(log_path).read_text(encoding="utf-8")
+        assert self.LONG_REASON in log_body
+        assert (
+            f"[rules] {self.LONG_RULE} {self.FINDING_CWE} "
+            f"{self.LONG_FILE}:{self.FINDING_LINE}" in log_body
+        )
+        # The install hint survives in the full output too — it is evidence,
+        # just never a substitute for the finding on the console line.
+        assert "pip install semgrep" in log_body
+
+    def test_console_falls_back_to_tail_without_machine_summary(self) -> None:
+        """Findings but no extra summary (library-built GuardResult): the old
+        tail behavior stays — no crash, no invented identity."""
+        _, rendered = self._blocked_run()
+        result = GuardResult(name="security_review", passed=False, output=rendered)
+        tier1 = Tier1Result(passed=False, results=[result], extra=None)
+        line = self._console_line(tier1.summary)
+        # The tail is the last output line; nothing from the finding is named.
+        assert f"{self.FINDING_FILE}:{self.FINDING_LINE}" not in line
+
+    def test_console_degraded_run_without_findings_keeps_stage_detail(self) -> None:
+        """A degraded stage with zero findings names the gap, not a finding."""
+        rules = security_stages.StageOutcome(
+            stage="rules",
+            status="missing_tool",
+            findings=[],
+            detail="semgrep unavailable (pip install semgrep); ast-grep unavailable (cargo install ast-grep)",
+        )
+        outcome = security_stages.StagedReviewOutcome(
+            mode="staged", findings=[], stages=[rules], passed=False
+        )
+        rendered = security_stages.render_outcome(outcome, 0.6)
+        result = GuardResult(name="security_review", passed=False, output=rendered)
+        tier1 = Tier1Result(
+            passed=False,
+            results=[result],
+            extra={"security_review": security_stages.outcome_summary(outcome)},
+        )
+        line = self._console_line(tier1.summary)
+        assert "0 finding(s)" not in line
+        assert "pip install semgrep" in line

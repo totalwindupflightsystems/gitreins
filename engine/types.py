@@ -205,10 +205,50 @@ def _first_nonblank_line(text: str, limit: int = 100) -> str:
 
 
 def _truncate_line(line: str, limit: int = 100) -> str:
-    """Truncate a single-line detail to *limit* chars with a trailing ellipsis."""
-    if len(line) > limit:
-        return line[: limit - 3] + "..."
-    return line
+    """Truncate a single-line detail to *limit* chars with a trailing ellipsis.
+
+    GR-GAP-070: the cut lands on a WHITESPACE boundary, never mid-token — a
+    hard cut at ``limit - 3`` rendered half a word ("quality_metri...") where
+    the console wanted a readable phrase. A single token longer than the whole
+    window still hard-cuts (there is no boundary to break on). Only the
+    console summary passes through here; the persisted run log keeps every
+    reason untruncated.
+    """
+    if len(line) <= limit:
+        return line
+    keep = limit - 3
+    cut = line.rfind(" ", 0, keep + 1)
+    if cut <= 0:
+        cut = keep
+    return line[:cut].rstrip() + "..."
+
+
+def _security_review_lane_detail(extra: dict[str, Any] | None) -> str:
+    """Finding identity for a blocked security_review lane line (GR-GAP-070).
+
+    ``<N> finding(s); [<stage>] <rule_id> <CWE> <file>:<line>`` from the first
+    entry of the machine-readable ``extra["security_review"]`` summary
+    (GR-156). The console used to fall back to the LAST line of the lane
+    output, which on a blocked run was a tool-availability note ("semgrep
+    unavailable (pip install semgrep)"), leaving the finding that actually
+    failed the commit visible only in the run log. Returns "" when there is
+    nothing to name — no summary, or a degraded run with zero findings — so
+    those lanes keep the tail behavior, which names the gap instead.
+    """
+    sr = (extra or {}).get("security_review")
+    if not isinstance(sr, dict):
+        return ""
+    findings = sr.get("findings")
+    if not isinstance(findings, list) or not findings:
+        return ""
+    first = findings[0]
+    if not isinstance(first, dict):
+        return ""
+    stage = str(first.get("stage") or "?")
+    rule_id = str(first.get("rule_id") or "?")
+    cwe = str(first.get("cwe") or "?")
+    location = f"{first.get('file', '?')}:{first.get('line', '?')}"
+    return f"{len(findings)} finding(s); [{stage}] {rule_id} {cwe} {location}"
 
 
 def _first_traceback_id(output: str) -> str | None:
@@ -745,6 +785,18 @@ class Tier1Result:
                     # TRUST-003 (AC1): name the FIRST failing test id parsed
                     # from the pytest output, not just the tail banner.
                     detail = f" — {first_failing_detail}"
+                elif r.name == "security_review" and (
+                    sr_detail := _security_review_lane_detail(self.extra)
+                ):
+                    # GR-GAP-070: a blocked security_review run used to show
+                    # the last output line — a tool-availability note — while
+                    # the finding that failed the commit lived only in the run
+                    # log. Name it: the finding count, plus stage, rule, CWE
+                    # and file:line of the first finding, bounded like every
+                    # lane line. Runs with findings but no machine summary (or
+                    # zero findings) fall through to the tail behavior below;
+                    # the full untruncated finding list stays in the run log.
+                    detail = f" — {_truncate_line(sr_detail)}"
                 elif r.name == "quality":
                     # DF-GITREINS-POC-94: quality output puts the metric line
                     # FIRST (e.g. "quality: type_hint_pct=72.3% (target 80%...)")
