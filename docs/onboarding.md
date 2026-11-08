@@ -1,7 +1,7 @@
 # GitReins Onboarding Guide
 
 **Version-stamped: commands verified against `gitreins 0.17.1` (`python3 -m gitreins --version`,
-2026-10-23); the current release line is `0.19.0` (the source checkout reports `gitreins 0.19.0`,
+2026-10-23); the current release line is `0.20.0` (the source checkout reports `gitreins 0.20.0`,
 2026-11-07).** The guide started as the 2026-08-03 dogfood report
 (`docs/dogfood/2026-08-03-integration.md`) and has been refreshed so every command
 matches the current CLI: `init`, `task`, `guard`, `judge`, `serve` and `worktree`

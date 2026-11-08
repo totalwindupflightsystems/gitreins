@@ -134,9 +134,10 @@ class Judge:
     def _run_second_pass(self, result: "JudgeResult", skip_tier2: bool = False) -> None:
         """Attach the GR-171 second-pass review to *result* when enabled.
 
-        Enabled means ``review.second_pass: true`` in .gitreins/config.yaml
-        and a tier2 LLM client present. Disabled/absent config leaves the
-        result — and every persisted verdict shape — untouched.
+        Enabled means a tier2 LLM client present and ``review.second_pass``
+        not explicitly false in .gitreins/config.yaml — the review is
+        DEFAULT-ON since 0.20.0; ``second_pass: false`` is the opt-out.
+        A broken config must not fail the judge run.
         """
         if skip_tier2 or self.llm is None:
             return
@@ -147,7 +148,9 @@ class Judge:
         except Exception:  # a broken config must not fail the judge run
             logger.debug("second-pass config read failed", exc_info=True)
             return
-        if not isinstance(review_cfg, dict) or review_cfg.get("second_pass") is not True:
+        if not isinstance(review_cfg, dict):
+            review_cfg = {}
+        if review_cfg.get("second_pass", True) is not True:
             return
         from engine.review_profiles import SecondPassReviewer
 
