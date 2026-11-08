@@ -1159,6 +1159,20 @@ def build_verdict_data(workdir: str, task: Task, result: JudgeResult) -> dict[An
     if result.pipeline_result:
         verdict_data["stages"] = result.pipeline_result.get("stages", {})
 
+    # GR-196: a FAIL whose cause is a coverage gap must name its reason at the
+    # TOP LEVEL of the persisted verdict — beside ``passed`` / ``pass_class`` /
+    # ``summary`` — not only inside ``stages.tier2``, so a reader answers
+    # "what reason?" from the document top alone. Sourced from the stage dict
+    # the pipeline already folded (one source of truth: no re-derivation, no
+    # second coverage computation). Absent — never an empty list — when the
+    # stage graded everything, so fully graded verdicts serialize
+    # byte-identically to the pre-GR-196 shape.
+    _stage_map = verdict_data.get("stages")
+    _tier2_stage = _stage_map.get("tier2") if isinstance(_stage_map, dict) else None
+    _ungraded = _tier2_stage.get("ungraded_criteria") if isinstance(_tier2_stage, dict) else None
+    if isinstance(_ungraded, list) and _ungraded:
+        verdict_data["ungraded_criteria"] = list(_ungraded)
+
     # GR-195: the judge's execution transcript — the in-run tool record the
     # AgenticEvaluator kept (GR-179), converted and capped by
     # ``tool_calls_transcript`` — persists under the tier2 stage so a judged

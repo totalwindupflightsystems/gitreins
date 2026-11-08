@@ -1862,3 +1862,70 @@ def test_transcript_refused_command_records_negative_exit_code() -> None:
     assert call["command"] == "yes | head -1"
     assert call["exit_code"] == -1
     assert len(call["output_sha"]) == 64
+
+
+# ── GR-196: ungraded criteria name the FAIL at the verdict top level ────────
+
+
+def test_ungraded_criteria_persist_at_the_top_level_of_the_verdict_document(
+    tmp_path: Path,
+) -> None:
+    """A tier-2 coverage FAIL names the gap beside passed/pass_class/summary.
+
+    The stage dict already carries the list (the GR-196 pipeline fold); the
+    persisted DOCUMENT must carry it too — the judge criterion is literal: a
+    reader answers "what reason?" from the top level alone, without walking
+    ``stages``.
+    """
+    from engine.persist import build_verdict_data
+
+    stage = _tier2_stage()
+    stage["passed"] = False
+    stage["any_failed"] = True
+    stage["ungraded_criteria"] = ["c2 documented"]
+    result = _judge_result(
+        passed=False,
+        pipeline_result={"passed": False, "stages": {"tier2": stage}},
+    )
+
+    data = build_verdict_data(str(tmp_path), _task(), result)
+
+    assert data["passed"] is False
+    assert data["ungraded_criteria"] == ["c2 documented"]
+    # One source of truth: the top level mirrors the stage fold verbatim.
+    assert data["ungraded_criteria"] == data["stages"]["tier2"]["ungraded_criteria"]
+
+
+def test_fully_graded_result_persists_no_top_level_ungraded_criteria_key(
+    tmp_path: Path,
+) -> None:
+    """Coverage complete → the key stays absent at the top level too.
+
+    Absent, never an empty list: a fully graded verdict serializes
+    byte-identically to the pre-GR-196 shape.
+    """
+    from engine.persist import build_verdict_data
+
+    result = _judge_result(
+        pipeline_result={"passed": True, "stages": {"tier2": _tier2_stage()}},
+    )
+
+    data = build_verdict_data(str(tmp_path), _task(), result)
+
+    assert "ungraded_criteria" not in data
+    assert "ungraded_criteria" not in data["stages"]["tier2"]
+
+
+def test_top_level_ungraded_criteria_absent_when_no_tier2_stage_exists(
+    tmp_path: Path,
+) -> None:
+    """A tier1-only shape has no stage to read — no key, not a crash."""
+    from engine.persist import build_verdict_data
+
+    result = _judge_result(
+        pipeline_result={"passed": True, "stages": {"tier1": {"id": "tier1", "passed": True}}},
+    )
+
+    data = build_verdict_data(str(tmp_path), _task(), result)
+
+    assert "ungraded_criteria" not in data
