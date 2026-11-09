@@ -277,6 +277,47 @@ ssh fleet-monitor 'sudo docker ps --format "{{.Names}} {{.Image}}"'
   "[g]itreins serve"` → `0`; `ss -ltn | grep 8616` → empty, exit 1; re-verified 2026-11-09),
   so even a correctly addressed job would have nothing to scrape until §8 item 1 is decided.
 
+**Measured 2026-11-09, second pass (`gitreins-ops` re-fire of tick `10-01-27`) — the
+endpoint itself.** The first pass stopped before starting `serve`; this pass ran it for a
+bounded window to reduce the remaining work to the one write it could not make:
+```bash
+python -m gitreins serve --port 8616 --host 100.97.236.14
+# GitReins judgment browser: http://100.97.236.14:8616/
+# warning: --host 100.97.236.14 serves judgment data over the network with NO
+#          authentication; keep 127.0.0.1 unless the network is trusted
+ss -ltn | grep 8616            # LISTEN 0 5 100.97.236.14:8616 0.0.0.0:*
+curl -sS -o /tmp/m -w '%{http_code} %{content_type}\n' http://100.97.236.14:8616/metrics
+# 200 text/plain; version=1.0.0; charset=utf-8   3341 bytes
+grep -c '^gitreins_' /tmp/m    # 9 sample lines
+grep '^gitreins_' /tmp/m | sed 's/{.*//; s/ .*//' | sort -u    # 6 distinct names:
+# gitreins_history_bytes gitreins_jobs_orphaned_running gitreins_jobs_records
+# gitreins_serve_up gitreins_verdicts_failed_total gitreins_verdicts_total
+```
+- **The `serve` HTTP series are LAZY — this breaks the registration check as written.**
+  On a freshly started server `/metrics` emits only `HELP`/`TYPE` for
+  `gitreins_serve_http_requests_total`: **zero samples**, so
+  `count(gitreins_serve_http_requests_total{product="gitreins"}) >= 1` returns EMPTY and
+  any close-out that uses it reports a false failure on a cold server. `gitreins_serve_up`
+  *is* exported immediately but reads `0.0` until a request has been answered. After one
+  `GET /` the sample set appears and the gauge flips:
+  `gitreins_serve_http_requests_total{method="GET",route="metrics",status_class="2xx"} 1.0`,
+  `{route="other",status_class="2xx"} 1.0`, `{route="other",status_class="4xx"} 1.0`
+  (`/api/board` → 404, which is how the 4xx series appeared), `gitreins_serve_up 1.0`.
+  **Correct predicate for the job-registration check: `gitreins_serve_up == 1` after one
+  request to `/`, or `count(...)` only after traffic.**
+- **The window is closed.** `serve` was terminated after measurement: `ss -ltn | grep 8616`
+  → no listener, `pgrep -f "python -m gitreins serve"` → empty,
+  `curl http://100.97.236.14:8616/metrics` → connection refused (HTTP 000). Nothing
+  supervises it (§8 item 1), so steady state is DOWN and the job below would scrape a down
+  target except during an operator window.
+- **The one remaining step is gated, not owned elsewhere.**
+  `/root/fleet-monitoring/prometheus/prometheus.yml` is writable from this host
+  (`sudo -n test -w …` → true, 121 lines, `--web.enable-lifecycle` is set so a reload needs
+  no restart), and the job text is ready in this tick's board row. The unattended ops
+  surface refused the remote `sudo` write itself — *"BLOCKED: Command timed out without
+  user response. The user has NOT consented"* — so registering it is an **owner action on a
+  consented surface**, not a GitReins code change.
+
 ---
 
 ## 6. Verification — how a reviewer proves each metric is live
@@ -286,7 +327,8 @@ Run in order. **Done** means every command below returns a non-empty, non-zero s
 **Server (after 5a lands):**
 ```bash
 curl -sS http://127.0.0.1:8616/metrics | grep -E '^gitreins_'
-curl -sS http://127.0.0.1:8616/metrics | grep -c '^gitreins_serve_http_requests_total'
+# count SAMPLES, not HELP/TYPE lines: a cold server has 2 non-sample lines and 0 series
+curl -sS http://127.0.0.1:8616/metrics | grep -c '^gitreins_serve_http_requests_total{'
 # the series must MOVE when traffic arrives:
 before=$(curl -sS http://127.0.0.1:8616/metrics | awk '/^gitreins_serve_http_requests_total/{s+=$2}END{print s+0}')
 curl -sS http://127.0.0.1:8616/api/stats >/dev/null
@@ -295,10 +337,14 @@ test "$after" -gt "$before" && echo LIVE
 ```
 PromQL that proves the same through the stack:
 ```promql
-rate(gitreins_serve_http_requests_total{product="gitreins"}[5m])      # > 0 under traffic
-histogram_quantile(0.99, rate(gitreins_serve_http_request_duration_seconds_bucket[5m]))
-gitreins_jobs_orphaned_running{product="gitreins"}                     # expected ~35 today
+gitreins_serve_up{product="gitreins"} == 1                               # direct liveness (no traffic needed)
+count(gitreins_serve_http_requests_total{product="gitreins"}) >= 1       # ONLY after traffic — lazy series
+rate(gitreins_serve_http_requests_total{product="gitreins"}[5m])         # > 0 under traffic
+gitreins_jobs_orphaned_running{product="gitreins"}                       # expected ~40 today
 ```
+Do **not** query `gitreins_serve_http_request_duration_seconds_bucket`: no such metric is
+exported (`gitreins/serve.py` registers no duration histogram), so that expression is
+permanently empty and would have shown as a silent blank panel, not an error.
 
 **CLI records (after 5b lands):**
 ```bash
