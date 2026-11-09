@@ -10,7 +10,7 @@
   "wave_budget": 12,
   "workers": [],
   "dispatch": "none:verification-only-owner-level-host-repair",
-  "evidence": ".coding-hermes/evidence/RELEASE-022-2026-11-09.md",
+  "evidence": ".coding-hermes/evidence/RELEASE-022-2026-11-09-23-11-46.md",
   "local_probes": {
     "inherited_gocache": "dangling symlink to absent /mnt/usb512 target; fresh build failed cache initialization",
     "local_gocache": "fresh build and Go-lane tests passed with tick-local writable cache",
