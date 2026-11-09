@@ -3648,7 +3648,16 @@ def _cmd_judge_ephemeral(
     llm = LLMClient()
     config = load_config(workdir)
     judge = Judge(
-        llm, workdir, guard_config=config, scope=scope, persist_log=False, persist_telemetry=False
+        llm,
+        workdir,
+        guard_config=config,
+        scope=scope,
+        # GR-218: the ephemeral gate grades EXACTLY the scope it was asked for
+        # (EVID-002) — an untracked file must stay invisible to a `staged` run —
+        # so it opts out of the judge's whole-tree default.
+        grade_full_tree=False,
+        persist_log=False,
+        persist_telemetry=False,
     )
 
     if json_output:

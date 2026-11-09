@@ -62,6 +62,7 @@ class Judge:
         scope: str = "staged",
         *,
         scan_root: str | None = None,
+        grade_full_tree: bool = True,
         persist_log: bool = True,
         persist_telemetry: bool = True,
     ) -> None:
@@ -80,10 +81,30 @@ class Judge:
         # defaulting True so no existing caller changes.
         self.persist_telemetry = persist_telemetry
         self.scan_root = scan_root or workdir
+        # GR-218 / SCHED-GAP-1753: a judge run grades the DELIVERED tree, not
+        # the index. `gitreins task complete` and the worktree judge path both
+        # judge an ALREADY-COMMITTED change, so their index is empty — with the
+        # historical default the tier-1 lanes fell back to "no staged files"
+        # SKIPs and the run printed PASS (DEGRADED) over a tree that was never
+        # linted or tested: a phantom pass of exactly the class DF-GITREINS-POC-42
+        # fixed for the Go lanes under --full. `grade_full_tree=True` is the
+        # GuardManager opt-in that makes a clean index grade the whole tree;
+        # with a NON-empty index the change set is unaffected (staged files keep
+        # precedence in `_go_scope_files_or_none`, and the Python lint/tests
+        # lanes keep discovering the index themselves), so the delta is confined
+        # to the empty-index case this fix targets.
+        #
+        # The one caller that must keep the historical scope-only behaviour is
+        # the EPHEMERAL judge (`judge --ephemeral`): its documented contract
+        # (EVID-002, tests/test_cli.py::TestJudgeEphemeralCLI) is "grade exactly
+        # the change set you asked for", so an untracked file stays invisible to
+        # a `--scope staged` run there and is graded only under
+        # `--scope working-tree`. It passes grade_full_tree=False explicitly.
         self.guard_manager = GuardManager(
             workdir,
             self.guard_config,
             scope=scope,
+            grade_full_tree=grade_full_tree,
             persist_log=persist_log,
             scan_root=self.scan_root,
         )
