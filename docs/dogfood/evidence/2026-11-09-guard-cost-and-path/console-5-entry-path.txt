@@ -1,0 +1,8 @@
+Tier 1 Guards: FAIL  (test mode: full)
+  ✓ secrets — clean (gitleaks + builtin cross-check); scanners: nice=nice -n 10
+  ✗ lint — 1 file would be reformatted; scanners: nice=nice -n 10
+  ✓ tests (full)
+  ✓ static_analysis
+  guard log: /home/kara/.hermes/cache/scratch/dogfood-gitreins-20261109-1254-p1/consumer/.gitreins/logs/guard-20261109T133334.613414Z.log
+
+Fix the issues above and re-run: gitreins guard

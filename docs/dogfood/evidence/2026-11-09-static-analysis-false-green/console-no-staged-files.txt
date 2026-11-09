@@ -1,0 +1,7 @@
+gitreins.static_analysis: WARNING: pyright returned invalid JSON
+Tier 1: DEGRADED PASS (skips: lint=no staged files, tests=no staged files)  (test mode: full)
+  ✓ secrets — clean (gitleaks + builtin cross-check); scanners: nice=nice -n 10
+  ~ lint — skipped (no staged files)
+  ~ tests — skipped (no staged files)
+  ✓ static_analysis
+  guard log: /home/kara/.hermes/cache/scratch/dogfood-gitreins-20261109-1254-p1/consumer/.gitreins/logs/guard-20261109T130401.719393Z.log

@@ -1768,3 +1768,103 @@ so they stay unmeasured rather than estimated.
 **What already worked (do not re-file).** `security-scan`'s `CVE-SIMULATED conf=0.00` +
 `[heuristic mode …]` disclosure reproduced verbatim from `docs/cli-reference.md`; the hook refused
 a real token with rc 1 and HEAD unmoved; `init`'s test-lane skip named the exact fix.
+
+## 2026-11-09 — tick `gitreins-dogfood-2026-11-09-12-54-05` (gitreins 0.20.0, HEAD `828d6736`)
+
+### A. `pyright` is "enabled" on a host that does not have pyright
+
+`gitreins init` in a fresh consumer repo printed:
+
+```
+Static analysis: enabled (mypy, pyright)
+```
+
+while `command -v pyright` returned rc=1. Environment census:
+`pyright` absent; `mypy`, `dmypy`, `mypyc` present in `~/.local/bin`; `npx` and `node` present in
+`~/.local/share/vite-plus/bin`.
+
+Trail:
+
+1. `grep -rn "pyright" --include=*.py gitreins/ engine/` → candidate table.
+2. `engine/static_analysis.py:101` — the candidate list includes `npx pyright`.
+3. `engine/static_analysis.py:134-137` — `find_tool()` decides availability with `shutil.which(...)` on the
+   *first token* of the candidate, so `npx` existing is taken as `pyright` existing.
+4. Probe (`probe_pyright.py`, scratch): `find_tool("pyright")` truthy with the real PATH; forced run of the
+   tool produced an empty diagnostics list rather than an error.
+5. `engine/static_analysis.py:636-638` — the run path maps a failed fetch / invalid JSON to an empty
+   diagnostic list.
+6. `engine/guard_manager.py:3464-3466`, `:3477-3479` — empty list + "clean" wording in the persisted guard log.
+
+Repro with a stub `npx` that exits 1 with npm's real "canceled due to missing packages" message, plus a
+staged file so the lane has input:
+
+```
+$ PATH=<scratch>/stub-bin:$PATH gitreins guard
+  ✓ static_analysis
+$ tail -5 .gitreins/logs/guard-<ts>.log
+  … pyright — clean
+```
+
+Both the console and the run log are captured under
+`docs/dogfood/evidence/2026-11-09-static-analysis-false-green/`. Row: **DF-028**.
+
+### B. Same repo, same commit — tests run or tests skip, decided by PATH length
+
+```
+$ gitreins guard                                  # 45-entry ambient PATH
+  ~ tests (full) — skipped (pytest is not installed in 'python3' …)
+  ✓ static_analysis
+$ env PATH=/home/kara/.local/bin:/usr/local/bin:/usr/bin:/bin gitreins guard
+  ✓ tests (full)
+```
+
+The 45-entry run's own log names the interpreter it picked, proving the mechanism rather than inferring it:
+`/home/kara/.hermes/installs/b0e47ae07995f891/environments/24f1df2ad984420181cb6be1707f6a03/venv/bin/python3:
+No module named pytest`.
+
+Source: `engine/guard_manager.py:978-981` (`exe = shutil.which(token)`, first hit wins, no repo-local
+preference, no continued search), `:934-955` (pytest probe spawns `exe -c …`), `:995-999` (pytest-less
+interpreter → `skip_reason` string, not a failure).
+
+Captures: `docs/dogfood/evidence/2026-11-09-guard-cost-and-path/console-45-entry-path.txt`,
+`console-5-entry-path.txt`, `guard-log-tests-skipped-45-entry-path.txt`. Row: **DF-030**.
+
+### C. Where the commit gate's seconds actually go
+
+Consumer repo: `pyproject.toml`, `textkit/__init__.py`, `textkit/truncate.py`, `tests/test_textkit.py`
+(4 tracked files, 5 tests). Warm, n=6, consecutive commits, one appended comment line each:
+
+```
+for i in 1 2 3 4 5 6; do printf '\n# perf probe %s\n' "$i" >> textkit/truncate.py; git add -A; \
+  /usr/bin/time -f "%e s" git commit -q -m "perf probe $i"; done
+→ 7.99 6.35 9.87 10.84 6.16 7.11 s   (median 7.55 s; every run rc=1 on the lint cell)
+```
+
+Each analyzer timed separately: ruff 0.01 s, gitleaks 0.04 s, `npx --no-install pyright --outputjson .`
+0.59 s, `mypy --ignore-missing-imports textkit` 0.62 s, `gitreins --version` 0.14 s
+(`PYTHONPROFILEIMPORTTIME` top: `gitreins.cli` 58 ms, `engine.resolution` 37 ms, `requests` 32 ms).
+Attributable ≈ 1.3 s of 7.55 s.
+
+PATH-length control: `gitreins guard` 10.07 s at the ambient 45-entry PATH vs 4.20 s at a 5-entry PATH;
+`gitreins guard --no-tests` 0.18 s. The spend follows discovery, not analysis. No phase timings exist in
+`.gitreins/logs/guard-*.log` (verdicts only), so this run could not split repeated `which()` from
+interpreter spawns — stated as an open measurement on the row rather than asserted.
+Raw timing file: `docs/dogfood/evidence/2026-11-09-guard-cost-and-path/commit-gate-perf.txt`. Row: **PERF-3-R2**.
+
+### D. Install leg — blocked, not skipped by choice
+
+`systemctl --user is-active bunkerd` → active; `~/.hermes/scripts/bunker-qa.sh` present. The leg's
+clean-install command (`python3 -m venv freshvenv && ./freshvenv/bin/pip install -q --no-cache-dir
+gitreins==0.20.0`) was stopped by the unattended approval gate after 5 minutes without consent. Per lane
+rules it was not retried and no equivalent route was taken, so **no bunker agent was spawned** and no
+fresh-machine result exists. Filed as `DF-029` (P2) with this evidence; installability remains unproven,
+explicitly, instead of passing silently.
+
+### E. Tooling note for the next run
+
+`scripts/board_read.py` does not exist in this repo (only `check-board.sh`, `check_board_ids.py`,
+`resync-board-venv.sh`); read the board with
+`git show HEAD:.coding-hermes/board/tasks.jsonl | jq` for committed state and
+`jq … .coding-hermes/board/tasks.jsonl` for the working tree. Mint ids with
+`python3 ~/.hermes/scripts/board_next_id.py .coding-hermes/board/tasks.jsonl <FAMILY>` and confirm uniqueness
+with `python3 scripts/check_board_ids.py` (this run: "✓ board ids — unique (624 row(s))").

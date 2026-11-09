@@ -1074,3 +1074,33 @@ Also re-proved as DOCUMENTED-CORRECT (do not re-file): `gitreins security-scan` 
 prints `[CVE-SIMULATED conf=0.00]` plus `[heuristic mode (no ML stack installed) — keyword fallback,
 NOT a full scan]`, and in this run its only hit was a *comment* containing "vulnerability" while the
 real injection lines passed clean — exactly the limitation `docs/cli-reference.md` discloses.
+
+## Pitfalls — observed 2026-11-09 (gitreins 0.20.0, tick `gitreins-dogfood-2026-11-09-12-54-05`)
+
+18. **`✓ static_analysis` does not mean static analysis ran.** `find_tool()` accepts the `npx pyright`
+    candidate whenever `npx` exists, and a failed fetch degrades to an empty ("clean") diagnostic list. On a
+    machine without pyright and without a warm npm cache you get a green lane and a `pyright — clean` line in
+    `.gitreins/logs/guard-*.log` for a check that never executed. Before trusting the lane, install the tool
+    you expect (`pyright` on PATH, or `npx pyright --version` once to warm the cache) and confirm the log's
+    wording; if "clean" appears with no tool, treat it as unchecked (DF-028).
+
+19. **The tests lane follows your PATH, not your repo.** Guard resolves a bare `python3` with the first
+    `shutil.which` hit; if that interpreter lacks pytest the lane *skips* (DEGRADED) instead of failing, so
+    the same commit is tested or untested depending on which venv dirs precede `/usr/bin`. Run
+    `gitreins guard` with the project's own venv first on PATH (or set `guards.test_command`) and read the
+    `tests (full)` line — `~` means your tests did not run (DF-030).
+
+20. **Budget ~6-11 s per guarded commit on a small repo.** Analyzers cost ≈1.3 s (ruff 0.01, gitleaks 0.04,
+    pyright 0.59, mypy 0.62); the rest is discovery and grows with PATH length (4.20 s at 5 PATH entries vs
+    10.07 s at 45). Use `gitreins guard --no-tests` (0.18 s in that measurement) while iterating and let the
+    hook pay the full cost on real commits (PERF-3-R2).
+
+21. **`install` writes more than the docs say.** On 0.20.0 it writes both `pre-commit` and `pre-push` hooks and
+    appends twelve `.gitignore` entries (including `quality.json`), while `docs/onboarding.md` §1 still says
+    "the pre-commit hook only" and "exactly eleven". Check `ls .git/hooks/` and `git diff .gitignore` after
+    install instead of trusting the section (DF-GITREINS-POC-63-R2).
+
+22. **Board tooling in this repo ships no reader.** `scripts/board_read.py` does not exist; use
+    `git show HEAD:.coding-hermes/board/tasks.jsonl | jq` for the committed board, mint ids with
+    `python3 ~/.hermes/scripts/board_next_id.py .coding-hermes/board/tasks.jsonl <FAMILY>`, and verify with
+    `python3 scripts/check_board_ids.py`.

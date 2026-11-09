@@ -1,0 +1,41 @@
+GitReins guard run log — full output (the console summary is bounded)
+run_utc: 2026-11-09T13:23:53Z
+workdir: /home/kara/.hermes/cache/scratch/dogfood-gitreins-20261109-1254-p1/consumer
+test_mode: full
+test_targets: all (full mode)
+overall: FAIL (DEGRADED — skipped checks)
+guards: 4 (1 failed, 1 skipped)
+diagnostics:
+  first_failing_test: none detected
+  secrets_scanners: clean (gitleaks + builtin cross-check)
+  scanner_nice: scanners: nice=nice -n 10
+skipped_steps:
+  - tests: pytest is not installed in 'python3' — run `python3 -m pip install pytest` (or `uv sync`), or set guards.test_command
+
+==============================================================================
+[FAIL] lint  passed=false  exit_code=1
+==============================================================================
+--- output (untruncated) ---
+ruff format --check: 1 file(s) would be reformatted — run `ruff format textkit/truncate.py`
+Would reformat: textkit/truncate.py
+1 file would be reformatted
+
+==============================================================================
+[PASS] secrets  passed=true  exit_code=n/a
+==============================================================================
+--- output (untruncated) ---
+gitleaks: clean
+
+==============================================================================
+[PASS] static_analysis  passed=true  exit_code=n/a
+==============================================================================
+--- output (untruncated) ---
+  mypy — clean
+  pyright — clean
+
+==============================================================================
+[SKIP] tests (full)  passed=true  exit_code=1  skip_reason=pytest is not installed in 'python3' — run `python3 -m pip install pytest` (or `uv sync`), or set guards.test_command
+==============================================================================
+--- output (untruncated) ---
+scanners: nice=nice -n 10
+/home/kara/.hermes/installs/b0e47ae07995f891/environments/24f1df2ad984420181cb6be1707f6a03/venv/bin/python3: No module named pytest

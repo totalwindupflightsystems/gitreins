@@ -1,0 +1,9 @@
+gitreins.static_analysis: WARNING: pyright returned invalid JSON
+Tier 1 Guards: FAIL  (test mode: full)
+  ✓ secrets — clean (gitleaks + builtin cross-check); scanners: nice=nice -n 10
+  ✗ lint — 1 file would be reformatted; scanners: nice=nice -n 10
+  ~ tests (full) — skipped (pytest is not installed in 'python3' — run `python3 -m pip install pytest` (or `uv sync`), or set guards.test_command)
+  ✓ static_analysis
+  guard log: /home/kara/.hermes/cache/scratch/dogfood-gitreins-20261109-1254-p1/consumer/.gitreins/logs/guard-20261109T131916.130237Z.log
+
+Fix the issues above and re-run: gitreins guard
