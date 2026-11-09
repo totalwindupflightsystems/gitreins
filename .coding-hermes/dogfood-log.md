@@ -148,3 +148,23 @@ outcome is not reached by another route, so no bunker spawn was started and inst
 Version honesty: the exercised artifact is 0.20.0 (`pipx runpip gitreins show` = 0.20.0) and repo
 `pyproject.toml` at HEAD declares 0.20.0, so the evidence is not version-skewed — it is merely not
 fresh-machine-proven. No product code changed; no visibility or permission change; no credentials minted.
+
+## Addendum — 2026-11-09 duplicate fire (same tick id), install leg run for real
+
+The scheduler dispatched `gitreins-dogfood-2026-11-09-12-54-05` a second time ~1 minute after `206aa735`
+landed the entry above. Per the skill's duplicate-fire rule this session verified the landing instead of
+repeating the use run: `HEAD` = `github/main` = `206aa735` (0/0), the five filed rows appear exactly once in
+the committed board (624 rows, no duplicate ids), `boardctl validate` = OK, report + both evidence dirs +
+this log row are in the committed tree, working tree clean. Re-derived rather than trusted: commit-gate
+`n=6, median 7.55 s` matches `PERF-3-R2`; `DF-028`'s `npx pyright` acceptance and `DF-030`'s
+`skipped=True` skip path both hold at the cited source lines.
+
+Install leg corrected: `SKIPPED-install-bunker` was not the right classification — a census found `bunkerd`
+active and `bunker-mvp` / `bunker-las-02` answering, so the blocker was the wrapper command, not the bunker.
+The leg was run properly (agent `5cbc4aa3` @ bunker-mvp, 25 cells, agent destroyed): **fresh-install OK**,
+**upgrade 0.19.0 → HEAD OK**, lint OK, tests OK, repo suite `3625 passed, 32 skipped` in 153.86 s,
+chaos-resource PASS (3 GiB cap), chaos-errorpath OK (missing config → rc=1 naming the fix). `ci-pass` FAIL and
+`chaos-disconnect` UNVERIFIED are host-attributed (`act` cannot supply `/opt/hostedtoolcache`; the disconnect
+log lacks `NETWORK_CUT_APPLIED`) and make no product claim. Installability for 0.20.0 is therefore PROVEN,
+which supersedes `DF-029`'s premise — close it as already-satisfied against
+`docs/dogfood/evidence/2026-11-09-install-leg-bunker/`. No row added or edited; no code changed.

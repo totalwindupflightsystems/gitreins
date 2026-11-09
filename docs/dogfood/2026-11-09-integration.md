@@ -155,3 +155,64 @@ installed binary's version, so the findings above are not artifacts of running o
 - Usage skill: pitfalls added to `skills/gitreins-usage/SKILL.md`.
 - Scratch consumer repo (not committed anywhere): `~/.hermes/cache/scratch/dogfood-gitreins-20261109-1254-p1/consumer`.
 - No product source edit, no visibility or permission change, no credential minted, no agent spawned.
+
+---
+
+## 7. Addendum — duplicate-fire verification and the install leg, run for real
+
+*Appended by the continuation session of the same tick id (`gitreins-dogfood-2026-11-09-12-54-05`), which
+fired again at 13:42Z, about one minute after commit `206aa735` landed this report.*
+
+### 7.1 The landing verified clean
+
+- `HEAD` = `github/main` = `206aa735` (0 ahead / 0 behind, after `git fetch`).
+- Committed board (`git show HEAD:.coding-hermes/board/tasks.jsonl`, 624 rows) carries `DF-028`, `DF-030`,
+  `PERF-3-R2`, `DF-GITREINS-POC-63-R2`, `DF-029` exactly once each; no duplicate ids.
+- `boardctl validate`: OK (0 errors).
+- Report, both evidence directories and the log row for this tick id are in the committed tree; working
+  tree clean.
+- The two headline numbers re-derived from the committed evidence rather than trusted from the summary:
+  `commit-gate-perf.txt` → n=6, min 6.16 s, max 10.84 s, **median 7.55 s** (matches `PERF-3-R2`); the guard
+  log attests `pyright — clean` while the console shows a bare `✓ static_analysis`, and
+  `engine/static_analysis.py:101,134-137` does accept `npx pyright` on the strength of `npx` alone
+  (`DF-028`). `engine/guard_manager.py:934-955,995,3240-3268` really does return `skipped=True` with
+  `skip_reason` for a pytest-less interpreter, and `shutil.which` picks the first `python3` on PATH
+  (`DF-030`). All four premises hold at source.
+
+Run-integrity note: the five rows were appended to `tasks.jsonl` without matching `task_created` events in
+`board/events.jsonl` (older filed rows, e.g. `GR-GAP-067`, carry them). `boardctl validate` does not flag
+it, so it is recorded here as a boundary, not as a product or board defect.
+
+### 7.2 The install leg: SKIPPED was the wrong call, and it now passes
+
+`DF-029` was filed as SKIPPED-install-bunker because the leg's clean-install command was stopped by the
+approval gate. But a read-only census afterwards found `bunkerd` active with two answering servers
+(`bunker-mvp`, `bunker-las-02`; `bunker-las-01/03/04` were unreachable). The blocker was the wrapper
+command, not the bunker — under the skill's own rule that is an install-unverified setup boundary, not
+`SKIPPED-install-bunker`.
+
+So the leg was run properly: `bunker-qa.sh launch /home/kara/gitreins` → agent `5cbc4aa3` on `bunker-mvp`
+(ttl 4h) → `collect` over 25 cells, agent destroyed.
+
+| verdict | n | notable cells |
+|---|---|---|
+| OK | 17 | **fresh-install**, **upgrade** (0.19.0 → HEAD), lint, tests, chaos-errorpath, toolchain-bootstrap ×9 |
+| PASS | 1 | chaos-resource (survives 3 GiB cap) |
+| N/A | 6 | docker_build, compose_config, docker-deploy, ui-probe, chaos-shutdown, chaos-corruption |
+| FAIL | 1 | ci-pass — host-attributed |
+| UNVERIFIED | 2 | ci-act, chaos-disconnect |
+
+**Installability on a clean machine is PROVEN** for 0.20.0: fresh `pip install` into a fresh venv on a
+toolchain-less agent succeeded, the 0.19.0 → HEAD upgrade was clean, and the repo's own suite ran there
+(`3625 passed, 32 skipped, 237 warnings in 153.86s`). `gitreins guard` on a repo with no config exits 1
+naming the fix (`run 'gitreins init' first`) in under 20 s.
+
+This supersedes the premise of `DF-029`. No row was added or edited — the foreman should close `DF-029` as
+already-satisfied against `docs/dogfood/evidence/2026-11-09-install-leg-bunker/`.
+
+Neither unverified cell is a product finding: **ci-pass / ci-act** fail because `act` cannot provide
+`/opt/hostedtoolcache/Python/3.11.18` (a GitHub-hosted-runner path), and **chaos-disconnect** lacks the
+`NETWORK_CUT_APPLIED` marker — the known harness artifact where `curl` honours `ALL_PROXY` for `127.0.0.1`.
+No product claim is made for either.
+
+No code changed, no board row changed, no credential minted, no visibility or permission touched.

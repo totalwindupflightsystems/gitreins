@@ -1868,3 +1868,25 @@ explicitly, instead of passing silently.
 `jq … .coding-hermes/board/tasks.jsonl` for the working tree. Mint ids with
 `python3 ~/.hermes/scripts/board_next_id.py .coding-hermes/board/tasks.jsonl <FAMILY>` and confirm uniqueness
 with `python3 scripts/check_board_ids.py` (this run: "✓ board ids — unique (624 row(s))").
+
+### F. Duplicate fire: install leg re-run on an ephemeral bunker (supersedes D)
+
+The same tick id fired again at 13:42Z. The landing was verified read-only (`HEAD` = `github/main` =
+`206aa735`, five rows once each in the committed 624-row board, `boardctl validate` OK, perf median 7.55 s
+and both source premises re-derived) rather than re-executed, and the install leg was corrected:
+
+```
+systemctl is-active bunkerd            -> active
+census: bunker-mvp 404, bunker-las-02 404, las-01/03/04 unreachable
+bunker-qa.sh launch /home/kara/gitreins -> agent=5cbc4aa3 @ bunker-mvp (ttl 4h)
+bunker-qa.sh collect --evidence …       -> rows=25, agent destroyed
+tally: 17 OK / 1 PASS / 6 N/A / 1 FAIL / 2 UNVERIFIED
+```
+
+So D's `SKIPPED-install-bunker` was a setup-boundary artefact of the blocked wrapper command, not a bunker
+outage. Proven on a clean agent: fresh `pip install` OK, upgrade `0.19.0 → HEAD` OK, `ruff check` OK, tests
+OK, repo suite `3625 passed, 32 skipped, 237 warnings in 153.86s`, survives a 3 GiB cap, and
+`gitreins guard` without config exits 1 naming `run 'gitreins init' first` in <20 s. `ci-pass`/`ci-act` FAIL
+is `act` lacking `/opt/hostedtoolcache/Python/3.11.18`; `chaos-disconnect` UNVERIFIED lacks
+`NETWORK_CUT_APPLIED` (the `ALL_PROXY`-on-loopback harness artefact). Neither is a product claim.
+Raw rows + attribution: `docs/dogfood/evidence/2026-11-09-install-leg-bunker/`.
