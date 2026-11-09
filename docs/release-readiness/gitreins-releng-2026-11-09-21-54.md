@@ -51,3 +51,29 @@ so releases rule 3 (no material feat/fix) makes a further cut NOT DUE.
 Read-only against the published surfaces (git, `gh`, PyPI JSON, mirror check). The only writes are
 this artifact, the board rows named above, and their events. No tag, no Release edit, no PyPI
 upload, no host mutation — including no repair of the dangling `GOCACHE` symlink.
+
+## Pass 3 — third delivery of the same tick (`2026-11-09T22:07Z`)
+
+**Decision unchanged: NO NEW RELEASE, no tag created or moved.** This delivery re-derived every
+claim above independently rather than trusting the committed record.
+
+Delta since the pass-2 snapshot (`5cbde06a`) is one commit, `2b04dfc4` — the pass-2 evidence commit
+itself (`releng: verify v0.21.0 publication, close RELEASE-019, file RELEASE-022`). Range
+`v0.21.0..HEAD` is 3 commits, all board/readiness bookkeeping; `git diff --stat v0.21.0..HEAD`
+excluding `.coding-hermes/board` and `docs/release-readiness` is **empty**, so releases rule 3 keeps
+a further cut NOT DUE.
+
+| Re-check | Result | Evidence |
+|---|---|---|
+| Worktree / tip | PASS | clean tree; `HEAD` = `github/main` = `2b04dfc4156485c510034abab2f85cd7d0d284f2` |
+| Tag immutability | PASS | `ls-remote` → object `34a4c4d3…`, peeled `8ea9088f…` — identical to cut time; no `v0.21.1` exists |
+| GitHub Release | PASS | `isDraft=false`, `isPrerelease=false`, published `21:39:20Z`, assets 0 (PyPI is the artifact surface) |
+| PyPI artifacts | PASS | `0.21.0` wheel `318360f0…` 617 540 B, sdist `f3aa7893…` 1 344 936 B — digests byte-identical to cut time |
+| CI on tagged SHA | PASS | run `42648256457` success on `8ea9088f…` |
+| Publication run | PASS | run `42704426258` success on tag ref — sole publisher |
+| CI on current tip | PASS | run `42707702262` success on exact `2b04dfc4…` (3.10/3.11/3.12) |
+| RELEASE-021 (deployed binary) | STILL OPEN | `gitreins --version` → `gitreins 0.20.0`; PyPI serves `0.21.0` |
+| RELEASE-022 (GOCACHE) | STILL OPEN | `go env GOCACHE` → `~/.cache/go-build` → `/mnt/usb512/build-artifacts/go-build`; `/mnt/usb512` exists but is an empty, unmounted dir |
+
+No further committed evidence is warranted for this firing beyond this block; the next material
+delta is a fix landing for RELEASE-021 or RELEASE-022, not another re-verification.
