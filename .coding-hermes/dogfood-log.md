@@ -161,7 +161,7 @@ this log row are in the committed tree, working tree clean. Re-derived rather th
 
 Install leg corrected: `SKIPPED-install-bunker` was not the right classification — a census found `bunkerd`
 active and `bunker-mvp` / `bunker-las-02` answering, so the blocker was the wrapper command, not the bunker.
-The leg was run properly (agent `5cbc4aa3` @ bunker-mvp, 25 cells, agent destroyed): **fresh-install OK**,
+The leg was run properly (agent `5cbc4aa3` @ bunker-mvp, 27 rows / 18 distinct cells, agent destroyed): **fresh-install OK**,
 **upgrade 0.19.0 → HEAD OK**, lint OK, tests OK, repo suite `3625 passed, 32 skipped` in 153.86 s,
 chaos-resource PASS (3 GiB cap), chaos-errorpath OK (missing config → rc=1 naming the fix). `ci-pass` FAIL and
 `chaos-disconnect` UNVERIFIED are host-attributed (`act` cannot supply `/opt/hostedtoolcache`; the disconnect

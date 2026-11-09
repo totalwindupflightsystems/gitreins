@@ -11,7 +11,7 @@ agent     5cbc4aa3 @ bunker-mvp (tailscale), ttl 4h
 launched  2026-11-09T13:46:31Z   (bunker-qa.sh launch /home/kara/gitreins)
 collected 2026-11-09T14:10Z      (bunker-qa.sh collect --evidence ...)
 driver    ~/.hermes/scripts/bunker-qa.sh   (install leg still uses bunker-qa.sh)
-raw       install-leg.jsonl (25 rows, verbatim)
+raw       install-leg.jsonl (27 rows / 18 distinct cells, verbatim)
 ```
 
 ## Tally

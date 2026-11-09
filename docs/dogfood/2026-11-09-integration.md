@@ -192,7 +192,7 @@ command, not the bunker — under the skill's own rule that is an install-unveri
 `SKIPPED-install-bunker`.
 
 So the leg was run properly: `bunker-qa.sh launch /home/kara/gitreins` → agent `5cbc4aa3` on `bunker-mvp`
-(ttl 4h) → `collect` over 25 cells, agent destroyed.
+(ttl 4h) → `collect` over 27 rows (18 distinct cells), agent destroyed.
 
 | verdict | n | notable cells |
 |---|---|---|

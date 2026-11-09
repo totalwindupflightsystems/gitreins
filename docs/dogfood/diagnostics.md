@@ -1879,7 +1879,7 @@ and both source premises re-derived) rather than re-executed, and the install le
 systemctl is-active bunkerd            -> active
 census: bunker-mvp 404, bunker-las-02 404, las-01/03/04 unreachable
 bunker-qa.sh launch /home/kara/gitreins -> agent=5cbc4aa3 @ bunker-mvp (ttl 4h)
-bunker-qa.sh collect --evidence …       -> rows=25, agent destroyed
+bunker-qa.sh collect --evidence …       -> rows=27 (18 distinct cells), agent destroyed
 tally: 17 OK / 1 PASS / 6 N/A / 1 FAIL / 2 UNVERIFIED
 ```
 
