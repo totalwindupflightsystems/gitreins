@@ -77,3 +77,22 @@ a further cut NOT DUE.
 
 No further committed evidence is warranted for this firing beyond this block; the next material
 delta is a fix landing for RELEASE-021 or RELEASE-022, not another re-verification.
+
+## Pass 4 — current re-verification (`2026-11-09T22:19Z`)
+
+Decision unchanged: NO NEW RELEASE. The certified current tip is `a3d9ba067a3b28dc76255336195f281884dfa6df`; it is four commits after `v0.21.0`, and every in-range commit is release bookkeeping (`releng:` or `foreman:`). The shipped-source diff from `v0.21.0` to the tip is empty, so releases rule 3 applies. No tag was created, moved, or force-updated.
+
+| Re-check | Result | Evidence |
+|---|---|---|
+| Identity and convergence | PASS | `/home/kara/gitreins`; remote `github` = `git@github.com:totalwindupflightsystems/gitreins.git`; `github/main`, `ls-remote`, and GitHub API all converge on `a3d9ba067a3b28dc76255336195f281884dfa6df`; parity `0 0`; clean checkout. |
+| Commit census | NOT DUE | `v0.21.0..a3d9ba06` = 4 commits, 4 non-merge; `feat=0`, `fix=0`, `perf=0`, `chore=0`, `docs=0`, `refactor=0`, `test=0`, `other=4`; no `BREAKING CHANGE:` footer or bang marker. Changed paths are board/readiness evidence only. |
+| Exact-tip CI | PASS | Run `42709505586`, completed/success on full SHA `a3d9ba067a3b28dc76255336195f281884dfa6df`; jobs `test (3.10)`, `test (3.11)`, and `test (3.12)` all completed/success. |
+| Prior release | PASS | `v0.21.0` remains immutable: annotated tag object `34a4c4d3174004b1db8c880dbbe0f482a2f5a6d3` peels to `8ea9088f535151a87f12445c7bf5549bf5197432`; GitHub Release is published, non-draft, non-prerelease; PyPI serves the wheel and sdist. |
+| Release tooling/version | PASS | Tag-triggered `.github/workflows/release.yml` is the sole publisher; current `pyproject.toml` version is `0.21.0`; no Makefile release target, Goreleaser config, Dockerfile, or `scripts/release*` publisher exists. |
+| GitReins verdicts | UNVERIFIED for current tip; environmental REDs for tag | No committed verdict is bound to `a3d9ba06`. Three judged `passed=false` verdicts (`9c10cd50`, `975a0de1`, `a534a995`) bind the prior release SHA `8ea9088f`; their tier-1 failures are attributed to the dangling `GOCACHE` symlink and remain covered by RELEASE-022, not treated as source failures. |
+| Dogfood/QA | MIXED and stale for this candidate | The latest tracked clean-machine install evidence has install/lint/tests/resource/error-path cells OK/PASS, with `3625 passed, 32 skipped`; `ci-act` is UNVERIFIED because the local image lacks GitHub toolcache paths, and `chaos-disconnect` is UNVERIFIED because no network-cut marker exists. It is not a waiver for a future material cut. |
+| Deployed surface | OPEN | `/home/kara/.local/bin/gitreins --version` and pipx metadata still report `gitreins 0.20.0`; PyPI and the repository report `0.21.0`. RELEASE-021 remains the canonical follow-up. |
+| Public posture | MIXED | Public MIT repository; secret scanning and push protection enabled; Dependabot security updates disabled; `main` branch protection returns 404 (unprotected). |
+| Open blockers | OPEN | RELEASE-021 (stale deployed binary) and RELEASE-022 (unusable host GOCACHE) remain pending. Neither changes the source-release decision for this bookkeeping-only delta. |
+
+This pass adds no new RELEASE-* row: the two actionable findings already have canonical pending rows, and a duplicate would create foreman work without a new acceptance contract. The evidence is appended here rather than replacing prior passes.
