@@ -233,21 +233,49 @@ Every CLI subcommand already returns through a single dispatcher
 
 ### 5c. Collection on fleet-monitor
 
-- **Scrape job** `gitreins`, `metrics_path: /metrics`, `static_configs` target
-  `127.0.0.1:8616` (or the host's `serve` port), with labels
-  `host: <hostname>`, `product: gitreins`, `service: serve`. `serve` binds 127.0.0.1 by
-  default (`gitreins/cli.py:5014`), so the scrape must run on the same host as the agent,
-  or `serve` must be started with `--host` on a trusted interface (which it warns about:
-  `gitreins/serve.py:868-875`).
-- **Caveat, stated plainly:** the fleet agent PUSHES to Prometheus (remote_write), so a
-  scrape-only endpoint needs the new scrape job to exist in
-  `/root/fleet-monitoring/prometheus/prometheus.yml`. That file is **not GitReins' to
-  edit** and was not touched by this audit. Row `OBS-GITREINS-4` owns it.
-- **Push records** arrive via the pushgateway at `<pushgateway-url>/metrics`, scraped by
-  the same or an adjacent job. Same three labels.
-- `gitreins serve` is **not currently running on this host** (`pgrep -af "gitreins serve"`
-  → nothing; `ss -ltn` → nothing on 8616; verified). So there is nothing to scrape today.
-  The supervisor that is supposed to keep it up is an open question — see §8.
+**Measured 2026-11-09 (OBS-GITREINS-4, `gitreins-ops` tick).** What the monitor actually
+runs, before any job is written:
+
+```bash
+# from this work box, over the tailnet
+curl -sS http://100.122.154.108:9090/api/v1/targets |
+  jq -r '.data.activeTargets[].labels.job' | sort -u
+# alertmanager alert-router blackbox-probes cadvisor hermes-cost loki prometheus
+# services-postgres services-redis task-router        ← 10 jobs, no `gitreins`
+ssh fleet-monitor 'sudo docker ps --format "{{.Names}} {{.Image}}"'
+# mon-prometheus prom/prometheus:v3.15.0 (Up 2 days), mon-cadvisor, mon-alloy, mon-loki,
+# mon-grafana … 11 containers — NO pushgateway, NO node-exporter
+```
+
+- **The address is not `127.0.0.1`.** Prometheus *is* the container `mon-prometheus`; every
+  in-stack target is addressed by compose service name (`loki:3100`, `alertmanager:9093`,
+  `cadvisor:8080`) and its self-scrape is `localhost:9090`. A
+  `static_configs: targets: ["127.0.0.1:8616"]` entry would resolve to the *prometheus
+  container's own* loopback and sit DOWN forever no matter what the host runs. **This
+  corrects the earlier text of this section**, which said to use `127.0.0.1:8616`.
+- **The form that works is the one already in the file for off-host exporters.** Everything
+  living on this work box is scraped at its tailnet address, and all of it is up:
+  `hermes-cost 100.97.236.14:19109`, `services-postgres 100.97.236.14:9187`,
+  `services-redis 100.97.236.14:9121`, `task-router 100.97.236.14:9092` and `:9391`. A
+  gitreins job therefore takes `targets: ["100.97.236.14:8616"]` with labels
+  `host: karahermes-mde-7840hs`, `product: gitreins`, `service: serve`.
+- **That form needs `serve` to listen beyond loopback.** `serve` binds 127.0.0.1 by default
+  (`gitreins/cli.py:5505-5506`: `--port` 8616, `--host` 127.0.0.1) and warns when told to
+  bind an interface (`gitreins/serve.py:1000-1003`). Exposing it on the tailnet is a
+  security-posture change and belongs to the supervision decision (§8 item 1), not to a
+  documentation edit.
+- **Pushgateway: the fleet does not run one.** §5b's textfile fallback is therefore the only
+  path for CLI completion records — and it is **not wired either**. The stack mounts
+  `/var/lib/fleet-monitoring/node-exporter-textfile` read-only at
+  `/var/lib/node_exporter/textfile` (`docker-compose.yml:203`), but no node-exporter
+  container is running to collect it and `prometheus.yml` carries no `pushgateway` route.
+  Whether that mount is consumed by another textfile-capable collector was not measured.
+- **Job ownership:** `/root/fleet-monitoring/prometheus/prometheus.yml` is **not GitReins'
+  file**. Row `OBS-GITREINS-4` owns the edit; this audit deliberately did not touch it, and
+  no `gitreins` job is registered today.
+- `gitreins serve` is still **not running on this host** (`ps -eo args | grep -c
+  "[g]itreins serve"` → `0`; `ss -ltn | grep 8616` → empty, exit 1; re-verified 2026-11-09),
+  so even a correctly addressed job would have nothing to scrape until §8 item 1 is decided.
 
 ---
 
@@ -325,7 +353,9 @@ Stated plainly rather than guessed:
    to scrape. This is prerequisite work, not an observability task.
 2. **Is `gitreins serve` deployed anywhere as a service today?** Not verifiable from this
    host; `docs/judgment-viewer.md` documents it as an operator-launched local viewer.
-3. **Does the fleet already have a pushgateway?** The brief names Prometheus with
-   remote_write, a Loki stack and a blackbox-exporter, but not a pushgateway. If there is
-   none, §5b's textfile fallback is the only path and requires node-exporter's
-   `--collector.textfile.directory` to be pointed at a shared dir.
+3. ~~**Does the fleet already have a pushgateway?**~~ **Answered 2026-11-09** (§5c, measured
+   from the monitor): no — `docker ps` on fleet-monitor shows 11 containers and none is a
+   pushgateway, and `prometheus.yml` carries no pushgateway route. §5b's textfile fallback is
+   therefore the only path, and no node-exporter collector is running on the monitor to read
+   it, so the completion-record path has no collector today. Wiring one is separate work from
+   registering the `gitreins` scrape job.
