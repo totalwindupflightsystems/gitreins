@@ -168,3 +168,60 @@ chaos-resource PASS (3 GiB cap), chaos-errorpath OK (missing config → rc=1 nam
 log lacks `NETWORK_CUT_APPLIED`) and make no product claim. Installability for 0.20.0 is therefore PROVEN,
 which supersedes `DF-029`'s premise — close it as already-satisfied against
 `docs/dogfood/evidence/2026-11-09-install-leg-bunker/`. No row added or edited; no code changed.
+
+### 2026-11-09c — THIRD fire of tick `gitreins-dogfood-2026-11-09-12-54-05` — records-only, no arm earned
+
+This tick id was dispatched three times. The **real run** was `206aa735` (2026-11-09T13:41Z): real-use
+consumer run of gitreins 0.20.0 in a scratch `textkit` repo, five rows filed (`DF-028`, `DF-029`,
+`DF-030`, `PERF-3-R2`, `DF-GITREINS-POC-63-R2`). The **second fire** re-ran the install leg on an
+ephemeral bunker (`3ff78e06`) and then corrected its own cell counts (`8456d1b5`). This fire is the
+third; per the duplicate-fire rule it takes no arm and re-measures nothing, but it does not carry a
+prior fire's verification commit as its evidence either — every number below was re-derived at
+`8456d1b5`.
+
+**Fresh parity.** `git fetch github main` → `git rev-list --left-right --count HEAD...github/main` =
+`0 0`; `github/main` = `8456d1b5` = HEAD. Working tree clean (`git status --porcelain` empty).
+
+**No product surface moved.** `git diff --name-only 206aa735 HEAD` (the measured SHA of the real run)
+is exactly `.coding-hermes/dogfood-log.md`, `docs/dogfood/diagnostics.md`,
+`docs/dogfood/2026-11-09-integration.md`, `docs/dogfood/evidence/2026-11-09-install-leg-bunker/README.md`
+and `.../install-leg.jsonl` — dogfood records only, zero source, test, engine or doc-contract files.
+The tree that `PERF-3-R2` is bound to is byte-identical, so its numbers are carried forward, not
+re-measured; no new perf observation exists to file and inventing one would devalue the real rows.
+
+**Board census (fresh, `boardctl -C /home/kara/gitreins validate`).** 624 tasks, 1171 events,
+3 fixtures, header parsed; `RESULT: OK … 605 warnings`, i.e. warnings only, no lint error. Duplicate
+ids: `0` (`jq -r .id … | sort | uniq -d` empty). The five rows above each appear exactly once and are
+all still `pending` — the foreman owns their closure, not this lane.
+
+**Row premises re-proved first-hand, not inherited.** `engine/static_analysis.py:101` still maps
+`"pyright": ["pyright", "npx pyright"]` and `find_tool` is at `:129` (the cited `:101` / `:134-137`
+region) — `DF-028` is live, not stale. `engine/guard_manager.py:960-1010` still resolves a bare
+interpreter token through `shutil.which(token)` and downgrades a pytest-less interpreter via
+`_pytest_interpreter_has_pytest(exe, workdir) is False` into a SKIPPED hint — `DF-030` is live (the
+citation's `:978-981` / `:995-999` window has drifted a few lines inside the same function).
+
+**Install leg — re-censused, not re-run.** Installability for 0.20.0 stays PROVEN by `3ff78e06`; the
+evidence re-derives to **27 rows / 18 distinct cells** (`17 OK, 1 PASS, 6 N/A, 1 FAIL, 2 UNVERIFIED`),
+which matches the corrected `8456d1b5` count rather than the original commit message's 25. A launch
+right now would grade **install-PROVEN / isolation-UNVERIFIED**: `bunker-mvp` reports `Net mode: shared
+— host network namespace (no network isolation)`, so it can never grade isolation; only `/tmp: private
+(pam_namespace)` is proven per-cell. Host census at 2026-11-09T14:27Z: `bunker-mvp` HTTP 404 = alive
+(v0.2.1, uptime 3d11h, 5/50 agents, 20 orphan keys of 16 registered), `bunker-las-02` 404 = alive;
+`bunker-las-01`, `bunker-las-03`, `bunker-las-04`, `cube-las-00` = 000 (down). The five agents present
+(`cf-node`, `7acca5f1`, `b54d42ff`, `37750cea`, `ci-e2e-01`) are all other lanes; the install leg's
+ephemeral agent `5cbc4aa3` is absent, so that teardown holds. No credential was minted, no host state
+touched.
+
+**Residue found — RECORDED, NOT LANDED.** The five rows filed by `206aa735` carry **zero**
+`task_created` events: `grep -c` for each id across `.coding-hermes/board/events.jsonl` returns `0`,
+`git log -1 -- events.jsonl` is `828d6736` (not `206aa735`), and the rows go `0 → 5` between
+`206aa735^` and `206aa735`. So the rows are traceable only from `tasks.jsonl`, never from the event log
+the foreman and `boardctl` read. This lane must not write board state, so the events are handed off
+rather than appended: the next writer to touch `events.jsonl` should append one `task_created` per row
+at the next free ids, append-only, citing the row's own `created` field. Recorded here so the gap is
+not lost, and deliberately not turned into a sixth row — a mint here would collide with the open
+`DF` family and buys a duplicate id, which is a board-lint ERROR.
+
+No row added, edited or closed; no code changed; no repo visibility or permission touched; no
+credentials created.
