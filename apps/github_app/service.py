@@ -306,7 +306,6 @@ class WebhookService:
         identity = delivery or f"{event}:{action}:{repo}:{number}:{head_sha}"
         if identity in self._deliveries:
             return WebhookResponse(202, "duplicate delivery")
-        self._deliveries.add(identity)
         try:
             token = self.token_issuer.token_for(installation_id)
             diff = self.github.get_pull_request_diff(repo, number, token)
@@ -314,6 +313,7 @@ class WebhookService:
             summary = f"## GitReins review\n\n{review.summary}"
             self.github.post_issue_comment(repo, number, summary, token)
             self.github.post_check_run(repo, head_sha, review.conclusion, review.summary, token)
+            self._deliveries.add(identity)
             return WebhookResponse(200, "review posted")
         except Exception as exc:
             failure = f"## GitReins review failed\n\nProvider or review error: {exc}"
@@ -336,7 +336,10 @@ class GitHubAppWSGI:
         length = int(environ.get("CONTENT_LENGTH") or 0)
         body = environ["wsgi.input"].read(length)
         headers = {
-            key[5:].replace("_", "-"): value
+            "-".join(
+                {"HUB": "Hub", "GITHUB": "GitHub"}.get(part, part.capitalize())
+                for part in key[5:].split("_")
+            ): value
             for key, value in environ.items()
             if key.startswith("HTTP_")
         }
