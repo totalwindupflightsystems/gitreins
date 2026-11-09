@@ -1,0 +1,26 @@
+{
+  "tick_id": "gitreins-foreman-2026-11-09-23-11-46",
+  "project": "gitreins",
+  "tested_commit": "278470c1edb358ea4b2706e9049b36bd3de0ad23",
+  "board_source": ".coding-hermes/board/tasks.jsonl",
+  "pending_count": 48,
+  "selected_row": "RELEASE-022",
+  "selection": "highest-value pending row; P1 host/infrastructure verification",
+  "eligible_independent": 0,
+  "wave_budget": 12,
+  "workers": [],
+  "dispatch": "none:verification-only-owner-level-host-repair",
+  "evidence": ".coding-hermes/evidence/RELEASE-022-2026-11-09.md",
+  "local_probes": {
+    "inherited_gocache": "dangling symlink to absent /mnt/usb512 target; fresh build failed cache initialization",
+    "local_gocache": "fresh build and Go-lane tests passed with tick-local writable cache",
+    "focused_go_tests": "5 passed",
+    "full_go_lane_tests": "19 passed"
+  },
+  "remaining_owner_action": "Decide whether /mnt/usb512 should be mounted or GOCACHE should be durably repointed to local disk; then rerun candidate-bound judge on the clean current tip.",
+  "verdict": "none:verification-only",
+  "memory": "none:not-written",
+  "status": "PENDING",
+  "tier": "T3",
+  "evidence_scope": "verification-only; no source or test change; durable host repair and fresh candidate-bound judge remain open"
+}
