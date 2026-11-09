@@ -96,3 +96,22 @@ Decision unchanged: NO NEW RELEASE. The certified current tip is `a3d9ba067a3b28
 | Open blockers | OPEN | RELEASE-021 (stale deployed binary) and RELEASE-022 (unusable host GOCACHE) remain pending. Neither changes the source-release decision for this bookkeeping-only delta. |
 
 This pass adds no new RELEASE-* row: the two actionable findings already have canonical pending rows, and a duplicate would create foreman work without a new acceptance contract. The evidence is appended here rather than replacing prior passes.
+
+## Pass 5 — current re-verification (`2026-11-09T22:33Z`)
+
+Decision unchanged: NO NEW RELEASE. The certified tip is `cd696f8e048e2ce2910300fc246bb7f3892d9a30`, converged across `github/main`, `git ls-remote`, and the GitHub API. The five commits in `v0.21.0..cd696f8e` are all `releng:`/`foreman:` bookkeeping; `feat=0`, `fix=0`, `perf=0`, `chore=0`, `docs=0`, `refactor=0`, `test=0`, `other=5`, with no `BREAKING CHANGE:` footer or bang marker. The shipped-source diff is empty. Releases rule 3 therefore says NOT DUE. No tag was created, moved, or force-updated.
+
+| Re-check | Result | Evidence |
+|---|---|---|
+| Identity and convergence | PASS | `/home/kara/gitreins`; canonical remote `github` = `git@github.com:totalwindupflightsystems/gitreins.git`; `github/main`, `ls-remote`, and `gh api repos/totalwindupflightsystems/gitreins/commits/main` all report `cd696f8e048e2ce2910300fc246bb7f3892d9a30`. The carrier checkout is one commit behind and was not used for evidence. |
+| Commit census | NOT DUE | `v0.21.0..cd696f8e` = 5 non-merge commits; all five are release/foreman bookkeeping. `git diff --name-only v0.21.0..cd696f8e -- . ':(exclude).coding-hermes/board' ':(exclude)docs/release-readiness'` is empty. |
+| Exact-tip CI | PASS | Run `42711089908`, workflow `CI`, completed/success on exact full SHA `cd696f8e048e2ce2910300fc246bb7f3892d9a30`; jobs `test (3.10)`, `test (3.11)`, and `test (3.12)` all completed/success. |
+| Prior release | PASS | Remote `v0.21.0` remains annotated object `34a4c4d3174004b1db8c880dbbe0f482a2f5a6d3`, peeled to `8ea9088f535151a87f12445c7bf5549bf5197432`; GitHub Release is non-draft/non-prerelease; PyPI serves wheel `318360f03d24a2145d58853016aca943b05fef0533a04e18ad5c3a3e11986ce7` (617540 bytes) and sdist `f3aa78933cb5a8cd37dd2df407cc4b0715c5acd5a0c6014b7fe967edfbece34f` (1344936 bytes). |
+| Release tooling/version | PASS | `.github/workflows/release.yml` is the sole publisher and verifies tag↔`pyproject.toml`, builds wheel/sdist, uploads PyPI, and creates the GitHub Release. `pyproject.toml` remains `0.21.0`; no Makefile release target, Goreleaser config, Dockerfile, or `scripts/release*` publisher exists. |
+| GitReins verdicts | UNVERIFIED for current tip | No committed verdict binds `cd696f8e`; the three prior RED verdicts bind `8ea9088f` and remain environmental under RELEASE-022, not evidence for this tip. |
+| Dogfood/QA | MIXED and stale for this candidate | The latest tracked install leg proves clean installation and the suite (`3625 passed, 32 skipped`), with lint/tests/resource/error-path cells OK/PASS. `ci-pass`/`ci-act` are harness-attributed FAIL/UNVERIFIED because the local image lacks GitHub toolcache paths; `chaos-disconnect` is UNVERIFIED because no network-cut marker exists. This is not a waiver for a future material release. |
+| Deployed surface | OPEN (RELEASE-021) | `/home/kara/.local/bin/gitreins --version` reports `gitreins 0.20.0` while PyPI and the repository report `0.21.0`; the deployed-surface script exists but is not executable in this lane (`rc=126`), so the direct version probe is the authoritative evidence here. |
+| Public posture | MIXED | Repository is public MIT; secret scanning and push protection are enabled; Dependabot security updates are disabled; `main` branch protection returns HTTP 404 (unprotected). |
+| Open blockers | OPEN | RELEASE-021 (stale deployed binary) and RELEASE-022 (dangling host `GOCACHE`, which makes local Go guard/judge evidence unusable) remain the canonical pending rows. They do not alter this bookkeeping-only NOT-DUE decision. |
+
+This pass adds no RELEASE-* row: RELEASE-021 and RELEASE-022 already cover the only actionable findings. The report is append-only; prior passes are preserved.
