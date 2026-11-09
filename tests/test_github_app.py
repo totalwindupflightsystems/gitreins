@@ -1,11 +1,13 @@
 import base64
 import hashlib
 import hmac
+import io
 import json
 
 import pytest
 
 from apps.github_app.service import (
+    GitHubAppWSGI,
     GitHubHttpClient,
     GitReinsReviewAdapter,
     InstallationToken,
@@ -152,7 +154,7 @@ class TestInstallationTokens:
 
 
 class TestWebhookService:
-    def test_rejects_bad_signature_before_review(self) -> None:
+    def test_signature_rejection(self) -> None:
         service, github, _, core = make_service()
         body = json.dumps(payload()).encode()
         response = service.handle({"X-Hub-Signature-256": "sha256=wrong"}, body)
@@ -173,6 +175,40 @@ class TestWebhookService:
         assert github.comments[0][0:2] == ("octo/example", 7)
         assert "GitReins review" in github.comments[0][2]
         assert github.checks[0][1:3] == ("abc123", "success")
+
+    def test_wsgi_header_mapping_reaches_service(self) -> None:
+        service, github, _, core = make_service()
+        body = json.dumps(payload()).encode()
+        status: list[str] = []
+
+        def start_response(status_line: str, headers: object) -> None:
+            status.append(status_line)
+
+        environ = {
+            "CONTENT_LENGTH": str(len(body)),
+            "wsgi.input": io.BytesIO(body),
+            **{
+                f"HTTP_{key.upper().replace('-', '_')}": value
+                for key, value in signed_headers(body).items()
+            },
+        }
+
+        response = b"".join(GitHubAppWSGI(service)(environ, start_response))
+
+        assert status == ["200 OK"]
+        assert response == b"review posted"
+        assert core.calls == [(github.diff, "openai", "review-model")]
+
+    def test_failed_review_delivery_can_retry(self) -> None:
+        failing = FakeReviewCore(error=TimeoutError("provider timed out"))
+        service, github, _, core = make_service(failing)
+        body = json.dumps(payload()).encode()
+        headers = signed_headers(body, delivery="retry-me")
+
+        assert service.handle(headers, body).status == 502
+        core.error = None
+        assert service.handle(headers, body).status == 200
+        assert len(github.comments) == 2
 
     def test_non_pull_request_event_is_ignored(self) -> None:
         service, github, _, core = make_service()
