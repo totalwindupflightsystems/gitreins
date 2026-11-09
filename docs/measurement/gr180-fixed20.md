@@ -1,6 +1,10 @@
 # GR-180 fixed-20 reflection measurement
 
-ch:trace row=GR-180 spec=engine/review_profiles.py#FindingReflector wave=none:serial tick test=tests/test_gr180_fixed20_measurement.py::test_fixed_case_count_and_metrics doc=docs/measurement/gr180-fixed20.md
+ch:trace row=GR-180 spec=engine/review_profiles.py#FindingReflector wave=none:serial test=tests/test_gr180_fixed20_measurement.py::test_fixed_case_count_and_metrics doc=docs/measurement/gr180-fixed20.md evidence=docs/measurement/gr180-fixed20.md witness=none:worker-local-measurement verdict=none:control-root-judge-pending commit=fa911010986cc42d9756402a92e75ace1b419830 memory=none:foreman-write
+
+STATUS: complete — fixed-20 measurement acceptance verified at worker level on branch wt/GR-180
+TIER: T2 — real execution (focused suite 10/10 passed + exact measurement command run, exit 0); artifacts committed; no live-model or human-judged claim
+EVIDENCE: this artifact (command + byte-verified stdout below) and tests/test_gr180_fixed20_measurement.py (focused run: 10 passed)
 
 Command (run from the repository root, no network, deterministic):
 
@@ -8,7 +12,17 @@ Command (run from the repository root, no network, deterministic):
 $ .venv/bin/python scripts/gr180_fixed20_measurement.py
 ```
 
-Base commit the shipped FindingReflector was measured at: c10c22fe1f16f387c297017989233b0c5c01e2f3
+Exact commits measured (identification required by the acceptance):
+
+- Implementation (shipped `FindingReflector`): introduced by 98d751cf and present
+  unchanged at base c10c22fe1f16f387c297017989233b0c5c01e2f3 —
+  `git diff c10c22fe fa911010 -- engine/` is empty (0 lines).
+- Measurement tree (harness + this artifact): worker branch wt/GR-180 at
+  fa911010986cc42d9756402a92e75ace1b419830. That commit lands the harness and is
+  NOT merged into github/main at the time of writing; no main SHA and no judge
+  verdict are claimed from this worker branch.
+- Re-verification: the stdout block below was re-run on the fa911010 tree on
+  2026-11-08 and diffed against this recorded block — byte-for-byte identical.
 
 Exact observed output (stdout):
 
