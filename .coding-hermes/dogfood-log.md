@@ -225,3 +225,65 @@ not lost, and deliberately not turned into a sixth row — a mint here would col
 
 No row added, edited or closed; no code changed; no repo visibility or permission touched; no
 credentials created.
+
+### 2026-11-09d — FOURTH fire of tick `gitreins-dogfood-2026-11-09-12-54-05` — records-only, no arm earned
+
+This tick id has now been dispatched four times. The **real run** was `206aa735` (real-use consumer run
+of gitreins 0.20.0 in a scratch `textkit` repo; five rows: `DF-028`, `DF-029`, `DF-030`, `PERF-3-R2`,
+`DF-GITREINS-POC-63-R2`). The **second fire** re-ran the install leg on an ephemeral bunker
+(`3ff78e06`) and corrected its own cell count (`8456d1b5`). The **third fire** (`ca9c4881`) was
+records-only. Hit test before discovery: `grep -c '^#\+ .*2026-11-09-12-54-05'` (level-agnostic) = 1 and
+`git log --fixed-strings --grep=12-54-05` = `3ff78e06`, i.e. already-worked on both surfaces, so this
+fire takes no arm and files no row. Every number below was re-derived at `ca9c4881`, not inherited.
+
+**Fresh parity.** `git fetch github main` → `git rev-list --left-right --count HEAD...github/main` =
+`0	0`; HEAD = `github/main` = `ca9c4881`. Tree clean (`git status --porcelain` empty). No `origin`
+exists here — the published remote is `github` (there is also `gitlab-mirror`/`gitlab-archive`); named
+so the next fire does not re-derive a missing-ref error.
+
+**No product surface moved.** `git diff --name-only 206aa735 HEAD` is exactly
+`.coding-hermes/dogfood-log.md`, `docs/dogfood/2026-11-09-integration.md`, `docs/dogfood/diagnostics.md`,
+`docs/dogfood/evidence/2026-11-09-install-leg-bunker/README.md` and `.../install-leg.jsonl` — dogfood
+records only, zero engine/source/test/docs-contract paths. `PERF-3-R2`'s measured tree is byte-identical,
+so its 6.16–10.84 s (median 7.55 s, n=6) commit-gate numbers are **carried forward, not re-measured**;
+a re-run here would be re-measurement, not evidence, and there is no new perf observation to file.
+
+**Board census (fresh, `boardctl -C /home/kara/gitreins validate`).** 624 tasks, 1171 events, 3 fixtures,
+header parsed; `RESULT: OK (605 warning(s))` — warnings only, no lint error, same 605 as the third fire.
+Duplicate ids: 0 (`jq -r .id … | sort | uniq -d` empty). The five rows each appear exactly once and are
+all still `pending`; closure belongs to the foreman, not this lane.
+
+**Row premises re-proved first-hand (anchor greps at the published tip).** `DF-028` live:
+`engine/static_analysis.py:101` still maps `"pyright": ["pyright", "npx pyright"]` and `find_tool` is at
+`:129`. `DF-030` live: `engine/guard_manager.py:964` `shutil.which(token)`, `:981` `exe = shutil.which(token)`,
+`:995` the `_pytest_interpreter_has_pytest(exe, workdir) is False` SKIP downgrade — the cited window has
+drifted a few lines inside the same function, anchor present.
+
+**`DF-029` needs a foreman close, not a new row.** Its premise (install leg skipped, clean-machine
+installability unproven) was superseded by `3ff78e06`/`8456d1b5`, yet the row is still `pending`. This
+lane writes no board state, so it is handed off again: close `DF-029` as already-satisfied against
+`docs/dogfood/evidence/2026-11-09-install-leg-bunker/`. Filing a sibling would only duplicate the id family.
+
+**Install leg — not run this fire, a launch now would grade install-PROVEN / isolation-UNVERIFIED.**
+Evidence re-derived independently rather than trusted: the committed `install-leg.jsonl` carries 27 rows
+across 18 distinct cells with tally `17 OK + 1 PASS + 6 N/A + 1 FAIL + 2 UNVERIFIED = 27` (the
+`ci-pass` FAIL and `chaos-disconnect` UNVERIFIED are host-attributed and make no product claim). The
+ephemeral agent `5cbc4aa3` is `not_found` on `bunker-mvp`, so that teardown holds. Host census at
+2026-11-09T~18:00Z (one curl invocation): `bunker-mvp` `:18080` → 404 = alive, `bunker-las-02` `:10001`
+→ 404 = alive, `bunker-las-01` `:19090`, `bunker-las-03`, `bunker-las-04`, `cube-las-00` → 000 = down.
+`bunker-mvp` reports `Net mode: shared`, so it can never grade network isolation — the isolation claim
+stays UNVERIFIED while the install leg itself stays PROVEN. No credential was minted, no host state touched.
+
+**Events residue — still RECORDED, NOT LANDED.** The five rows still carry zero `task_created` events
+(`grep -c` for each id across `.coding-hermes/board/events.jsonl` = 0; the events file's last commit is
+`828d6736`, 1171 lines, tail ids `…009/010/011`, and neither board file has an uncommitted diff). The
+handoff stands unchanged: whichever writer next commits `events.jsonl` should append one `task_created`
+per row at the next free ids, append-only, citing each row's `created` field. Deliberately not a sixth
+row — a mint here would duplicate the `DF` family, which is a board-lint ERROR.
+
+**Judging.** No GitReins task or judge ran on this fire: there is no row of this fire's own to bind a
+verdict to, and sibling judges are serialised in this shared checkout. The gate that did run is the
+commit guard's Tier 1 on the records-only commit below.
+
+No row added, edited or closed; no code changed; no repo visibility or permission touched; no credentials
+created.
