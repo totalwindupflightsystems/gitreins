@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-11-09
+
 ### Added
 - **The author-independent second-pass reviewer (GR-171)** — a tier2 verdict now
   has a reviewer beside it that never sees the author's acceptance criteria.
