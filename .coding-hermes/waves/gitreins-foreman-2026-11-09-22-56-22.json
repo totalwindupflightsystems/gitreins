@@ -19,5 +19,7 @@
   },
   "remaining_owner_action": "Decide whether /mnt/usb512 should be mounted or GOCACHE should be durably repointed to local disk; then rerun candidate-bound judge on the clean current tip.",
   "verdict": "none:verification-only",
-  "memory": "none:not-written"
+  "memory": "none:not-written",
+  "finished_at": "2026-11-10T05:27:24-05:00",
+  "recovery": "closed: zero-worker verification-only manifest; branch/worktree evidence was already superseded by main and no merge or fixup was required"
 }

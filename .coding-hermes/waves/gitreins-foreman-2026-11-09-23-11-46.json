@@ -22,5 +22,7 @@
   "memory": "none:not-written",
   "status": "PENDING",
   "tier": "T3",
-  "evidence_scope": "verification-only; no source or test change; durable host repair and fresh candidate-bound judge remain open"
+  "evidence_scope": "verification-only; no source or test change; durable host repair and fresh candidate-bound judge remain open",
+  "finished_at": "2026-11-10T05:27:24-05:00",
+  "recovery": "closed: zero-worker verification-only manifest; preserved closeout branch was already superseded by current main and no merge or fixup was required"
 }
