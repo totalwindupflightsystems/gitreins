@@ -25,9 +25,12 @@ must-catch recall. It does not call a provider or make a network request.
 .venv/bin/python scripts/canary.py /path/to/canaries.jsonl
 ```
 
-Create records through `append_record(path, {"must_catch": True,
-"caught": True|False, ...})`; `report(path)` returns `caught`, `missed`, and
-`recall`. The ledger is fixture/mock-only: this artifact proves local wiring and
+Create records through `append_record(path, {"canary_id": "...",
+"defect_class": "...", "expected_outcome": "caught",
+"actual_verdict_outcome": "caught", "judged_commit": "...",
+"status": "verified", "artifact": "...", "provenance": "fixture"})`;
+`report(path)` returns `caught`, `missed`, and `recall` for must-catch rows.
+The ledger is fixture/mock-only: this artifact proves local wiring and
 accounting, not provider behavior or live detection performance.
 
 Trace: ch:trace row=GR-209 spec=.coding-hermes/board/tasks.jsonl#GR-209 wave=none:serial test=tests/test_canary.py doc=docs/operations.md evidence=scripts/canary.py witness=none:fixture-or-mock-only verdict=none:pending-judge commit=none:pending memory=none:pending
