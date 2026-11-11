@@ -160,9 +160,11 @@ def test_redaction_and_truncation_metadata_are_mandatory(schema: dict, validate:
 # command/scope vocabulary is pinned here until the CLI half exists.
 def test_command_and_scope_vocabularies(schema: dict, validate: object) -> None:
     assert schema["properties"]["command"]["enum"] == ["guard", "judge", "report"]
-    assert schema["properties"]["scope"]["enum"] == ["staged", "working-tree", "history"]
+    assert schema["properties"]["scope"]["enum"] == ["staged", "working-tree", "tree", "history"]
     working_tree = _base_evidence(scope="working-tree")
     assert validate(working_tree) == []
+    # RELEASE-055: the explicit tracked-tree scope is part of the contract too.
+    assert validate(_base_evidence(scope="tree")) == []
     assert validate(_base_evidence(command="bogus"))
     assert validate(_base_evidence(scope="universe"))
 

@@ -372,7 +372,7 @@ MAX_CHECKS = 32
 MAX_REPORT_ENTRIES = 50
 
 #: Scope vocabulary shared with the guard's ``--scope`` flag.
-GUARD_SCOPES = ("staged", "working-tree")
+GUARD_SCOPES = ("staged", "working-tree", "tree")
 HISTORY_SCOPE = "history"
 
 _TRUNCATION_MARKER = "[truncated]"

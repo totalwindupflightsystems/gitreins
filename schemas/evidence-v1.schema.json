@@ -19,7 +19,7 @@
     },
     "command": { "enum": ["guard", "judge", "report"] },
     "generatedAt": { "type": "string", "format": "date-time" },
-    "scope": { "enum": ["staged", "working-tree", "history"] },
+    "scope": { "enum": ["staged", "working-tree", "tree", "history"] },
     "outcome": { "enum": ["pass", "fail", "error", "unknown"] },
     "passed": { "type": ["boolean", "null"] },
     "summary": { "type": "string", "maxLength": 2048 },

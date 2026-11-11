@@ -15,3 +15,15 @@ Exact output:
 Evidence line: metadata.degraded=false
 Executed lanes: go_build=pass, go_lint=pass, go_tests=pass; skippedSteps=[]
 Notes: the scratch docs-only commit changed only docs/CHANGELOG.md after the clean baseline; the tracked Go implementation remained unchanged and all three Go lanes executed.
+
+Schema conformance (judge follow-up, same tick)
+The evidence schema's scope enum originally listed only staged/working-tree/history, so
+`gitreins guard --scope tree --json` emitted a document that violated
+schemas/evidence-v1.schema.json. Fixed in this follow-up commit: the enum now includes `tree`
+and engine/evidence.py GUARD_SCOPES carries it too, so the over-cap fallback cannot relabel a
+tree document as staged. tests/test_evidence_contract.py pins the new enum and validates a
+tree-scope document.
+
+Proof (scratch repo with a docs-only commit, .venv/bin/python /home/kara/.hermes/cache/scratch/tick-20261111-1137/v055-schema-check.py):
+  guard --scope tree --json  -> rc=0, scope=tree,   degraded=False, jsonschema errors=0, SCHEMA OK
+  guard --json               -> rc=0, scope=staged, degraded=True,  jsonschema errors=0, SCHEMA OK
