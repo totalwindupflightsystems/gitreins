@@ -38,6 +38,7 @@ Each command in the surface writes exactly one UTF-8 JSON document to stdout. Th
 
 - `staged` (default): files in the Git index.
 - `working-tree`: union of staged, unstaged, and non-ignored untracked files. Collection uses read-only Git commands and never calls `git add`, `reset`, `stash`, `checkout`, or another index-mutating operation.
+- `tree`: every **tracked** file (`git ls-files --cached`), independent of the current change set — the committed-tree audit that keeps the Go lanes executing on a docs-only change set. Untracked files are deliberately excluded.
 - `history`: report-only verdict history.
 
 ## Ephemeral judge

@@ -27,3 +27,9 @@ tree-scope document.
 Proof (scratch repo with a docs-only commit, .venv/bin/python /home/kara/.hermes/cache/scratch/tick-20261111-1137/v055-schema-check.py):
   guard --scope tree --json  -> rc=0, scope=tree,   degraded=False, jsonschema errors=0, SCHEMA OK
   guard --json               -> rc=0, scope=staged, degraded=True,  jsonschema errors=0, SCHEMA OK
+
+Contract-level coverage (judge follow-up 2)
+docs/evidence-contract-v1.md now documents the `tree` scope next to staged/working-tree/history,
+and tests/test_evidence_contract.py gains test_guard_cli_json_tree_scope_validates_against_the_contract,
+which runs `guard --json --scope tree` through the CLI and asserts validate(document) == [].
+Collection is 3665 tests / 116 files; README.md and CONTRIBUTING.md were re-synced (check_docs_drift.py OK).

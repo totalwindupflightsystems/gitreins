@@ -604,6 +604,23 @@ def test_guard_cli_json_defaults_to_the_staged_scope(tmp_path: Path, validate: o
     assert working_run.returncode == 1
 
 
+# RELEASE-055: the explicit tracked-tree scope is part of the evidence contract,
+# so a `--scope tree --json` document must validate against the schema the CLI
+# help text cites. Without the enum extension the document carries a closed-set
+# violation on `scope` and the contract is silently broken.
+def test_guard_cli_json_tree_scope_validates_against_the_contract(
+    tmp_path: Path, validate: object
+) -> None:
+    repo = _init_repo(tmp_path)
+    _guard_config(repo)
+
+    tree_run = run_cli("guard", "--json", "--scope", "tree", cwd=repo)
+    assert tree_run.returncode == 0, tree_run.stderr
+    document = json.loads(tree_run.stdout)
+    assert document["scope"] == "tree"
+    assert validate(document) == []
+
+
 # EVID-002 AC3: without --json the human output is unchanged, and the scope
 # note appears only for a non-default scope.
 def test_guard_human_output_is_unchanged_without_json(tmp_path: Path) -> None:
