@@ -8,8 +8,24 @@ from pathlib import Path
 from typing import Any
 
 
+_REQUIRED_KEYS = {
+    "canary_id",
+    "defect_class",
+    "expected_outcome",
+    "actual_verdict_outcome",
+    "judged_commit",
+    "status",
+    "artifact",
+    "provenance",
+}
+
+
 def append_record(path: str | Path, record: dict[str, Any]) -> None:
     """Append one canary record without changing existing ledger entries."""
+    missing = sorted(_REQUIRED_KEYS - record.keys())
+    if missing:
+        raise ValueError(f"missing required keys: {', '.join(missing)}")
+
     ledger = Path(path)
     with ledger.open("a", encoding="utf-8") as stream:
         stream.write(json.dumps(record, sort_keys=True))
@@ -26,11 +42,14 @@ def report(path: str | Path) -> dict[str, float | int]:
             if not line.strip():
                 continue
             record = json.loads(line)
-            if not record["must_catch"]:
+            if record["expected_outcome"] != "caught":
                 continue
-            if record["caught"]:
+            if (
+                record["expected_outcome"] == "caught"
+                and record["actual_verdict_outcome"] == "caught"
+            ):
                 caught += 1
-            else:
+            elif record["expected_outcome"] == "caught":
                 missed += 1
     total = caught + missed
     return {
