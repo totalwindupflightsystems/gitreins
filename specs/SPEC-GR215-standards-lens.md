@@ -188,3 +188,21 @@ The required negative control is a poisoned model response containing a conventi
 ## 8. Hilo Impact
 
 `engine/evaluator.py` is the producer of finding kind, rule id, and citation; `engine/pipeline.py` is a transport-only seam; the shared standards filter owns config interpretation; `engine.judge` and `engine.persist` are consumers. `engine/config_schema.py` is unchanged because the effective lint-ignore files are tool configuration, not GitReins settings. SPEC-GR213's judge-derived failure modes are independent of convention findings. SPEC-GR214's coverage downgrade runs first and remains authoritative for `NOT_VERIFIABLE`; GR-215 MUST not remove or weaken that path.
+
+## PANEL VERDICTS (binding amendments)
+
+The three-seat panel's findings and the owner rulings below are normative and override any conflicting sentence above.
+
+1. **One shared serializer and versioned record (schema/write-safety seats; owner D1/D2).** Every persisted verdict MUST contain `schema_version: 2` and `writer_version: gitreins.__version__`. Evaluator, pipeline, judge status, persistence, and history readback MUST use one canonical verdict serializer/deserializer. `_find_pipeline_verdict()` MUST not reconstruct a reduced verdict and MUST preserve every additive standards, coverage, and failure-mode field. Records written before this suite remain readable through a legacy adapter; post-suite writers always emit the new blocks and version fields.
+
+2. **Single filter boundary before all surfaces (consumer seat; owner D7).** `filter_standards_findings()` is the one shared call-site and runs before pipeline items, `judge_result_to_dict()`/CLI/MCP status, persistence, and readback. The pipeline MUST NOT carry an uncited finding to a later persistence-only filter. A single call-site acceptance test MUST cover CLI, MCP/status, pipeline, persistence, and readback and assert the same surviving list, diagnostics, and outcome.
+
+3. **Normative processing order and diagnostics (all seats; owner D3).** Citation verification (GR-208) runs first, coverage downgrade (GR-214) second, standards filtering third, and gate/outcome recomputation last. If a finding meets more than one condition, the earlier stage's reason wins; later reasons MUST be retained in diagnostics and MUST NOT resurrect or overwrite the earlier status. Coverage-created `NOT_VERIFIABLE` items therefore remain authoritative even if an unrelated convention item is filtered.
+
+4. **Snapshot consistency and malformed waivers (write-safety/consumer seats; owner D6).** Waiver files and coverage sets MUST be hashed once per run, and one immutable snapshot MUST feed every serializer and output surface. A malformed or unreadable waiver configuration MUST emit `waiver_config_error` in diagnostics and MUST never suppress a finding. The filter MUST fail closed: an uncited convention finding remains absent, while non-convention findings retain historical behavior.
+
+5. **Coverage naming (schema seat; owner D4).** The top-level `coverage` object is authoritative. The old `StageResult.coverage` string marker remains serialized only as `stage_coverage` and MUST NOT be treated as a coverage block or used to bypass the GR-214 downgrade.
+
+6. **Deep-copy and defensive validation (schema/write-safety seats; owner D5).** Persistence MUST deep-copy the canonical verdict before filtering, revalidate duck-typed `failure_modes`, cap them at three, and leave the live result unchanged. Standards filtering MUST operate on the same transformed copy used by status and persistence; final gate/outcome fields are recomputed after all stages.
+
+7. **Large-list representation (consumer seat; owner D8).** Coverage manifests over approximately 500 files MUST use a content-addressed manifest reference rather than an inline array. Standards/waiver snapshot hashes and that reference MUST remain stable across all serializers and readback.

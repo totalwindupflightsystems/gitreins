@@ -182,4 +182,24 @@ The negative control MUST construct a PASS criterion whose `evidence_files` incl
 
 ## 8. Hilo Impact
 
-`engine/evaluator.py` is the observation producer; `engine/pipeline.py` transports the snapshot; `engine/judge.py` attaches it to `JudgeResult`; `engine/coverage.py` owns pure normalization and GR-178 downgrade logic; and `engine/persist.py` is the durable schema authority. `engine.gate` remains the sole authority for `NOT_VERIFIABLE` semantics and merge recommendation. GR-213 consumes the same result without changing coverage semantics. GR-215 filtering runs before final item serialization and MUST preserve this coverage downgrade ordering.
+`engine/evaluator.py` is the observation producer; `engine/pipeline.py` transports the snapshot; `engine/judge.py` attaches it to `JudgeResult`; `engine/coverage.py` owns pure normalization and GR-178 downgrade logic; and `engine.persist.py` is the durable schema authority. `engine.gate` remains the sole authority for `NOT_VERIFIABLE` semantics and merge recommendation. GR-213 consumes the same result without changing coverage semantics. GR-215 filtering runs before final item serialization and MUST preserve this coverage downgrade ordering.
+
+## PANEL VERDICTS (binding amendments)
+
+The three-seat panel's findings and the owner rulings below are normative and override any conflicting sentence above.
+
+1. **Canonical schema/versioning and legacy reads (schema seat; owner D1/D2).** Every persisted verdict MUST carry `schema_version: 2` and `writer_version: gitreins.__version__`. One shared serializer/deserializer MUST serve evaluator, pipeline, judge status, persistence, and history readback. The pipeline's `_find_pipeline_verdict()` path MUST preserve all additive fields rather than rebuilding a partial object. Records written before this suite remain readable and are interpreted as legacy records without upgrading them to a claimed full pass; post-suite writers always emit the new coverage block and version fields.
+
+2. **Authoritative coverage names (schema seat; owner D4).** The top-level `coverage` object is the sole authoritative coverage representation. Any pre-existing `StageResult.coverage` string marker is retained only as serialized `stage_coverage`; it MUST never shadow, replace, or be interpreted as the top-level `CoverageBlock`.
+
+3. **Immutable per-run snapshot (write-safety/schema seats; owner D6).** Coverage manifests and standards/waiver inputs MUST be hashed once at run start. The same immutable snapshot and hashes MUST be passed to evaluator, pipeline, judge status, persistence, and readback. A later serializer MUST NOT reread the worktree or waiver files and produce a different coverage decision. Reject normalized-path collisions before evaluation and persist the original path list plus normalized digest. A malformed waiver configuration MUST emit `waiver_config_error` in diagnostics and MUST never suppress a finding; coverage collection remains fail-closed.
+
+4. **Normative processing order (all seats; owner D3).** Citation verification (GR-208) runs first, coverage downgrade second, standards filtering (GR-215) third, and gate/outcome recomputation last. When citation and coverage both apply, citation is the authoritative reason; when a later standards filter also applies, it is diagnostic only. Coverage MUST be applied to the deep/local verdict copy before standards filtering and before any final item or outcome serialization.
+
+5. **Persistence second defense (write-safety/schema seats; owner D5).** `persist` MUST deep-copy the live result before any downgrade or normalization, revalidate `failure_modes`, and cap them at three even for duck-typed inputs. It MUST leave the caller's `JudgeResult` and `Verdict` unchanged. It MUST recompute persisted `passed`, verdict, summary, `ungraded_criteria`, and `merge_recommendation` from the transformed copy; a forced PASS can never remain green after a dropped dependency is detected.
+
+6. **Large coverage manifests (consumer/write-safety seats; owner D8).** More than approximately 500 manifest entries MUST be stored as a content-addressed manifest reference containing the digest and retrieval metadata, not as an inline list. The reference is part of the immutable snapshot; readers MUST resolve it without changing the authoritative coverage object or downgrade semantics.
+
+7. **Single filter boundary and surface parity (consumer seat; owner D7).** The shared GR-215 filter runs before every output surface, including pipeline items, judge status/CLI/MCP, persistence, and history readback. A single call-site acceptance test MUST exercise CLI, MCP/status, pipeline, persistence, and readback and assert identical filtered items and coverage outcome.
+
+8. **Concurrent persistence safety (write-safety seat).** The coverage transformation and verdict file writes MUST occur inside the same repository-local inter-process lock as read-modify-write reconciliation, with atomic replacement of record files. Concurrent writers MUST not produce torn JSON, lose coverage fields, or make supersede state disagree with the record.

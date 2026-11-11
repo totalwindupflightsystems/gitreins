@@ -159,3 +159,21 @@ The negative controls MUST include a poisoned convention finding without a citat
 ## 8. Hilo Impact
 
 The producer is `engine/evaluator.py`; the transport seam is `engine/pipeline.py`; the presentation seam is `engine/judge.py`; and the durable schema authority is `engine/persist.py`. Consumers of `judge_result_to_dict()` and history readers receive the additive block. No task-manager, guard, config-schema, CLI, or MCP contract changes are required. GR-214 consumes the same verdict object but owns coverage downgrades; GR-215 consumes the same persistence boundary but owns convention filtering. A worker MUST implement those cross-spec seams without duplicating serializers.
+
+## PANEL VERDICTS (binding amendments)
+
+The three-seat panel's findings and the owner rulings below are normative and override any conflicting sentence above.
+
+1. **Canonical verdict schema and serializer (schema + write-safety seats; owner D1/D2).** Every persisted verdict MUST contain `schema_version: 2` and `writer_version: gitreins.__version__`. One shared serializer/deserializer is the sole conversion boundary for the evaluator result, pipeline result, judge status, and persistence/readback. `_find_pipeline_verdict()` MUST use that boundary and preserve every additive field, including `failure_modes`, rather than reconstructing a partial `Verdict`. Records written before this suite remain readable through the legacy adapter; post-suite writers always emit the new blocks and version fields.
+
+2. **One pre-output filter boundary (consumer seat; owner D7).** Failure modes and their derived coverage flags MUST be attached to the canonical verdict before any output surface is produced. The standards filter from GR-215 is a shared pre-output operation, not a persistence-only operation; pipeline items, judge status/CLI/MCP output, persistence, and history readback MUST converge on the same filtered serialized verdict. A single call-site acceptance test MUST cover all five surfaces.
+
+3. **Normative processing order (all seats; owner D3).** The suite MUST process citation verification (GR-208), then coverage downgrade (GR-214), then standards filtering (GR-215), then gate/outcome recomputation. If multiple reasons apply to one item, the earliest stage's reason is authoritative and later reasons are retained only in diagnostics. Failure-mode summary flags MUST be computed from the post-order canonical item set and MUST never restore a removed or downgraded item.
+
+4. **Coverage naming and snapshot identity (schema/write-safety seats; owner D4/D6).** The top-level verdict `coverage` object is authoritative. The legacy `StageResult.coverage` string marker is retained in serialization under the key `stage_coverage` and is never treated as the top-level coverage object. The immutable per-run coverage/standards snapshot, including its hashes, MUST feed every serializer and status/persistence surface; no surface may independently reread mutable worktree/config state.
+
+5. **Persistence defense and immutability (write-safety/schema seats; owner D5).** Persistence MUST deep-copy the verdict before applying any downgrade, filtering, or cap. It MUST revalidate and cap duck-typed `failure_modes` at three as a second defense without mutating the caller's live result. Malformed entries are skipped fail-closed. The persisted verdict, status view, and pipeline view MUST be derived from that same copy and recompute outcome fields after all transformations.
+
+6. **Large evidence handling (consumer/write-safety seats; owner D8).** A coverage manifest exceeding approximately 500 files MUST be persisted as a content-addressed manifest reference with its digest and retrieval metadata, not as an inline array. Small manifests retain the specified inline shape; the reference is resolved by readers without changing the authoritative top-level coverage semantics.
+
+7. **Concurrent durable writes.** The implementation MUST serialize the complete verdict write/read-modify-write transaction, including supersede/reconciliation bookkeeping, under a repository-local inter-process lock and MUST use atomic replacement for `verdict.json` and `summary.md`. Concurrent runs MUST not lose additive fields or create torn records; usage/diagnostic append records MUST be framed and lock-safe. Tests MUST exercise two independent writers.
