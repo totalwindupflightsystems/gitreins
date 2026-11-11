@@ -368,3 +368,31 @@ R38. The suite MUST run the existing review-profile tests unchanged in addition 
 R39. Hilo edges MUST be `SecondPassReviewer -> ReflectionScorer -> JudgeResult.second_pass_review -> build_verdict_data -> persist_evaluation`, with `ReviewStateStore` downstream of the reflection-kept findings; no edge may route reflection scoring through `CommitAuditor`.
 
 `check:` inspect imports/call sites and assert the edge chain and absence of a `CommitAuditor` import in `engine/review_profiles.py`.
+
+## PANEL VERDICTS (binding amendments)
+
+The amendments below are binding. Where an amendment differs from the body above, this section controls.
+
+1. **Quoted challenged requirement:** “The implementation replaces its score policy with `ReflectionScorer` or delegates to it” and “The existing `FindingReflector` remains available ... `threshold: float`” (§2), plus “Existing pre-GR-212 reflection records using `correctness` and `evidence` fields MUST remain readable” (R20).
+   **Decision:** New reflection configuration uses `review.reflection_score_threshold`, an integer from 0 through 10, with default 5. The legacy `review.reflection_threshold` float is read-only compatibility input only: it may be read to interpret legacy configuration/records, MUST never be rewritten, and MUST never control new scoring when the new key is present. Reflection remains opt-in and default-off in this suite; any default-on change is a separate owner decision. This resolves Seat B’s config/schema collision and Owner Decision D5.
+
+2. **Quoted challenged requirement:** “`ReflectionScorer.score` MUST apply caps and threshold in Python after parsing” (R9), and “A reflection score MUST be an integer from 0 through 10 inclusive” (R2).
+   **Decision:** Category normalization and the canonical category vocabulary are shared with GR-211. The fingerprint identity uses `severity|category|detection` after that normalization; `detail` remains display-only and is preserved in the echo. A detail-only update MUST update the display echo without changing the fingerprint. This resolves Seat B’s cross-spec identity/schema finding and Owner Decision D4.
+
+3. **Quoted challenged requirement:** “The scorer MUST send ... in a fresh message list to a separate `llm.chat(...)` call” (R8), and “The generator call and reflection call MUST be separate invocations” (R21).
+   **Decision:** The scorer receives request-local LLM client context and MUST NOT share the generator’s message list, mutable request context, or transcript. It MUST construct a fresh system/user message list for every scoring request and preserve the generator’s context unchanged. A separate-process test MUST assert message-list and client-request isolation, not merely list inequality within one process. This resolves Seat A and Seat C’s consumer-realism finding and Owner Decision D7.
+
+4. **Quoted challenged requirement:** “A reflection LLM exception, timeout, unavailable response, or unparseable response MUST default every candidate to BELOW threshold” (R12), and “A reflection failure MUST persist `score_unassigned: true` and a non-empty `error`” (R19).
+   **Decision:** On any unavailable or failed reflection result, persistence MUST include `score_unassigned=true`, the candidate count, and a non-empty failure reason. The failed result is not a completed second pass: GR-211 MUST NOT resolve active findings from it, from an absent reflection block, or from an empty candidate list caused by failure. Only a completed reflection pass may authorize reconciliation-based resolution. This resolves Seat A’s durable-failure-marker finding and Owner Decision D6.
+
+5. **Quoted challenged requirement:** “`SecondPassResult.to_dict()` retains its current keys and adds `reflection` only when scoring dropped findings or failed” (§3.3), and “The persisted review block MUST be absent when no findings were supplied” (R18).
+   **Decision:** The serialized reflection receipt is version-compatible with existing review output but is not allowed to erase provenance: when scoring is attempted, it MUST preserve the bounded threshold, per-candidate scores where assigned, candidate count, `score_unassigned`, and failure reason when applicable. Empty input is a deliberate no-call outcome; an unavailable/failed call is never serialized as a clean empty result. This resolves Seat B’s persistence-compatibility finding.
+
+6. **Quoted challenged requirement:** “`FindingReflector` ... `threshold: float`” (§2) and wiring item 2’s use of `review_cfg.get("reflection_threshold", 5)`.
+   **Decision:** Wiring reads `review.reflection_score_threshold` explicitly, validates integer-token semantics, and records `reflection_threshold_invalid` while falling back to 5 for invalid values. The legacy float key is accepted only by the compatibility adapter and is never emitted or rewritten. Reflection is not invoked unless `review.reflection` is explicitly enabled. This resolves Seat B’s config collision and Seat C’s consumer/wiring realism finding.
+
+7. **Quoted challenged requirement:** “The implementation test module is `tests/test_gr212_reflection_scoring.py`” and “The suite MUST include ... the independent-context test” (R37).
+   **Decision:** Tests MUST exercise the real generator-to-scorer-to-`JudgeResult.second_pass_review` wiring, use separate processes for request-local client isolation, and prove that deleting or bypassing the reflection call makes the isolation test fail. Tests MUST use deterministic event/order and count assertions rather than wall-clock thresholds, and MUST verify the exact persisted failure markers and GR-211 non-resolution behavior. This resolves Seat C’s test-realism finding.
+
+8. **Quoted challenged requirement:** “`engine/persist.py` continues to serialize `result.second_pass_review` under the existing top-level `review` key through `build_verdict_data(...)`; no new persistence writer is introduced” (wiring item 5).
+   **Decision:** The existing writer remains authoritative, but every persisted `verdict.json` containing this review result MUST independently carry integer `schema_version: 2` and `writer_version: gitreins.__version__`. The review-state version field and reflection threshold do not provide verdict provenance and MUST NOT substitute for these fields. This resolves Seat B’s verdict-schema/provenance finding and Owner Decision D1.

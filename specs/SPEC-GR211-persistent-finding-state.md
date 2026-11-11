@@ -339,3 +339,31 @@ R37. The state tests MUST exercise the real `ReviewStateStore` path and real JSO
 R38. Hilo dependency edges MUST name `engine/review_state.py -> engine/review_profiles.py`, `engine/judge.py -> engine/review_state.py`, and `engine/persist.py -> JudgeResult.second_pass_review`; no dependency may point from review state into verdict-history persistence.
 
 `check:` inspect imports and assert the three required edges and the absence of a `VerdictPersister` import in `engine/review_state.py`.
+
+## PANEL VERDICTS (binding amendments)
+
+The amendments below are binding. Where an amendment differs from the body above, this section controls.
+
+1. **Quoted challenged requirement:** “`finding_fingerprint` MUST return the lowercase hexadecimal SHA-256 digest of the UTF-8 bytes of `file + normalize_header(header) + body`” (R1), and “`finding_parts` MUST derive ... `body` as `detail`” (R3).
+   **Decision:** The fingerprint hashes the canonical identity body `severity|category|detection`, with `category` normalized exactly as defined by GR-212. `line` and display `detail` are not identity inputs. The `echo` carries the original display header and detail; a detail-only change updates the echo without changing the fingerprint. This resolves Seat B’s identity/display and schema-collision finding and Owner Decision D4.
+
+2. **Quoted challenged requirement:** “`reconcile_and_save` MUST ... atomically save one version-1 state document while holding an exclusive lock for the entire read/reconcile/write transaction” (R8), and “Concurrent runs MUST serialize through the state lock” (R35).
+   **Decision:** Every transaction uses `.gitreins/review-state.lock` and a POSIX `flock` exclusive lock, held across read, reconciliation, and atomic replacement. Acquisition times out after 30 seconds; timeout and stale-lock diagnostics identify the lock path, PID, process start time when available, and holder metadata. Separate processes must exercise the timeout and serialization paths. This resolves Seat A’s lock-operational-definition finding and Owner Decision D2.
+
+3. **Quoted challenged requirement:** “Invalid JSON ... Preserve the corrupt file, skip write, continue with empty in-memory state” and “Schema mismatch ... Preserve the file, skip write, continue with empty in-memory state” (the §5 error catalog).
+   **Decision:** Missing and corrupt state are distinct. MISSING means no state file exists: load empty state and proceed. CORRUPT means invalid JSON or schema: quarantine the original bytes to `.gitreins/review-state.corrupt-<ts>`, write a recovery-required marker, expose the corruption error, and do not silently proceed or reconcile as empty. This resolves Seat A’s corruption-recovery finding and Owner Decision D3.
+
+4. **Quoted challenged requirement:** “The persisted top-level keys MUST be exactly `version`, `run`, and `findings`; `version` MUST equal `1`” (R21), together with the requirement that the bounded `review_state` receipt be copied into the verdict (R25).
+   **Decision:** `review-state.json` retains its integer `version` field, but every persisted `verdict.json` from this suite forward MUST independently contain integer `schema_version: 2` and `writer_version: gitreins.__version__`. The review-state `version` does not provide verdict provenance and MUST NOT be used as its substitute. This resolves Seat B’s verdict-schema/provenance finding and Owner Decision D1.
+
+5. **Quoted challenged requirement:** “The verdict review block MUST add a `review_state` object with `emitted`, `carried`, and optional `state_error`; it MUST NOT copy the entire state file into the verdict” (R25).
+   **Decision:** The persisted review-state receipt is serialized through a dedicated bounded serializer and contains only `emitted`, `carried`, and `state_error` (with the documented omission of a null optional error); it never embeds historical records, lock metadata, quarantine bytes, or the full state document. This resolves Seat B’s persistence-compatibility finding.
+
+6. **Quoted challenged requirement:** “The judge MUST reconcile state after reflection filtering” (R26), and “An existing `ACTIVE` fingerprint absent from the current findings MUST become `RESOLVED`” (R11).
+   **Decision:** Reconciliation may resolve active findings only after a completed reflection/second pass supplies the authoritative candidate set. A failed, unavailable, absent, or `score_unassigned` reflection result MUST leave active findings unresolved for reconciliation purposes, while persisting the failure receipt; it MUST NOT resolve them merely because the candidate list is empty. This resolves Seat A’s durable-failure-marker finding and Owner Decision D6.
+
+7. **Quoted challenged requirement:** “Human decisions arrive through the judge invocation's review input as `review.human_decisions`” (wiring item 3), while the Hilo section says human decisions are consumed by “future human-review UI/CLI surfaces.”
+   **Decision:** Human dismissal is not a future-only contract. The implementation MUST provide a concrete `gitreins review dismiss <fingerprint>` operation with reviewer and reason fields, validate it into `HumanReviewDecision`, and route it through the same locked state transaction; equivalent MCP exposure is optional but, if present, MUST use the same operation. This resolves Seat C’s no-live-consumer finding.
+
+8. **Quoted challenged requirement:** “The state tests MUST exercise the real `ReviewStateStore` path and real JSON file” (R37), and “Concurrent runs MUST serialize through the state lock” (R35).
+   **Decision:** Acceptance tests MUST invoke the concrete dismissal producer and the real store in separate processes, verify byte-level quarantine/recovery behavior, and assert that a completed second pass—not a mocked or absent result—drives resolution. Tests MUST assert outcomes and persisted markers rather than relying on host-load-sensitive wall-clock timing. This resolves Seat A and Seat C’s consumer-realism/test-harness findings.
