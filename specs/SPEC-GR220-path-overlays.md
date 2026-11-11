@@ -57,6 +57,7 @@ class OverlayMatch:
     overlay_id: str
     matched_files: tuple[str, ...]
     matched_globs: tuple[str, ...]
+    state: Literal["configured", "candidate_match", "eligible_match", "suppressed"]
     excluded: bool
 
 @dataclass(frozen=True)
@@ -90,7 +91,7 @@ def resolve_path_overlays(
 
 `PathMatcher` MUST use one glob implementation for all fields. The implementation MUST support `*`, `?`, `**`, and character classes `[abc]`; matching is case-sensitive, slash-separated, and rooted at the repository path. A pattern not beginning with `/` is repository-relative. A leading `/` is normalized away only once; `..`, empty NUL-containing patterns, and malformed character classes raise `REVIEW_GLOB_PARSE_FAILURE`.
 
-`PathSelection.eligible` applies include then exclude. If include is omitted, it is `("**",)`; if exclude is omitted, it is empty. An excluded file is not reviewed and cannot trigger a pass by path, but its path remains available to deterministic diff-signal detection only when a pass is triggered by another eligible file and the pass's scope explicitly includes it.
+`PathSelection.eligible` applies include then exclude. If include is omitted, it is `("**",)`; if exclude is omitted, it is empty. Overlay resolution uses a second exclusion phase: first select candidates with include/exclude, then apply matching `exclude_from_review` overlays and remove those files from `eligible_files`. An excluded file is not reviewed and cannot trigger a pass by path, but its path remains available to deterministic diff-signal detection only when a pass is triggered by another eligible file and the pass's scope explicitly includes it.
 
 ## 3. Data Model
 
@@ -136,7 +137,7 @@ Overlay fields map exactly as follows:
 | `review.tools_add` | list of strings | Ordered set union with effective tools. |
 | `gates` | mapping | Deep-merged through the contract's gate merge rules. |
 | `labels.add` | list of strings | Ordered set union; output lifecycle is handled by GR222. |
-| `action` | `overlay` or `exclude_from_review` | Exclusion affects selection, not the existence of this overlay match record. |
+| `action` | `overlay` or `exclude_from_review` | Exclusion affects selection, not the existence of this overlay match record; the match record state remains explainable. |
 | `reason` | string | Required for `exclude_from_review`; included in diagnostics. |
 
 The output is an ordered trace. For each match, `matched_files` is sorted lexicographically, and `matched_globs` follows the overlay's declared pattern order. Overlay application order is declaration order after the layer merge; a later scalar profile replaces an earlier profile, while tools and labels union.
@@ -169,9 +170,9 @@ A changed set with no eligible files produces an empty review scope and a succes
 
 - `**` matches zero or more path components; `src/**` matches `src/a.py` and `src/pkg/a.py`, but not `services/a.py`.
 - `**/*controller*` matches any filename containing `controller`, including a nested filename; matching never inspects file contents.
-- Include/exclude operate before overlays. A `generated` exclusion overlay does not rewrite `paths.exclude`; it contributes an explicit exclusion match and reason to the trace.
+- Base include/exclude selects candidates before overlay matching. `exclude_from_review` is a second exclusion phase: it removes matching files from `eligible_files` after candidate selection and contributes an explicit exclusion match and reason to the trace.
 - If one file matches several overlays, every overlay applies. Instructions append in overlay order; tools and labels de-duplicate preserving first occurrence; scalar profile is last matching overlay's value.
-- An overlay that matches only excluded files is recorded as `matched=false` and cannot mutate policy. The explain output must distinguish `configured`, `matched`, and `suppressed`.
+- Overlay and file state is exactly `configured`, `candidate_match`, `eligible_match`, or `suppressed`; explain and persistence use these names. An overlay matching only pre-excluded files is `candidate_match`/`suppressed` as applicable and cannot mutate policy.
 - A 1,000+ file diff uses compiled patterns and a single file traversal; matching output is bounded by the number of input files and configured patterns, not repeated glob compilation.
 - Unicode paths are matched as Unicode POSIX strings after NFC normalization. A normalization collision is a denial, because two source paths would otherwise share one trace key.
 - `paths.include` intersected across layers can become empty. That is valid and yields no eligible files; it is not silently widened to `**`.
@@ -194,3 +195,14 @@ A changed set with no eligible files produces an empty review scope and a succes
 ## 8. Hilo Impact
 
 This spec depends on SPEC-GR219's typed path and diagnostic objects and feeds SPEC-GR221's pass trigger scope, SPEC-GR222's path-rule gates, and SPEC-GR223's matched-glob explain trace. It has no direct dependency on `engine/review_profiles.py` beyond profile-name validation; profile resolution remains a scalar policy operation, not a matcher concern. Hilo should connect glob compilation to all review entry points so an unused alternate matcher is detectable.
+
+## PANEL VERDICTS (binding amendments)
+
+These decisions override conflicting text above and are the contract for GR-220.
+
+1. **Overlay state machine (D5).** Every overlay/file record uses exactly one state: `configured`, `candidate_match`, `eligible_match`, or `suppressed`. Explain output and persisted traces MUST use these exact names; `matched` is not a fourth synonym.
+2. **Two-phase exclusion (D5).** Base include/exclude selects candidates first. `exclude_from_review` is a second exclusion phase after selection and MUST remove matching files from `eligible_files`; it does not merely annotate them. Correct any body or test that says otherwise.
+3. **Gate precedence (D2).** Overlay/repository gates are below pass-level gates and locked organization gates, and above defaults. They may add restrictions only; they may not lower thresholds or weaken actions. `deny_and_report` always wins.
+4. **Versioned envelope (D1).** Contract-era persisted records carry `contract_schema_version`, `verdict_schema_version: 2`, and `writer_version`; legacy records are readable but never equivalent.
+5. **Write-safety (panel A).** Resolve overlays from one immutable policy/diff snapshot, reject normalization collisions before matching, and serialize persistence/reconciliation under a store-wide lock or atomic transaction. A dry-run or match result is not a successful verdict until its evidence write is complete.
+6. **Wall-clock discipline (D9/panel C).** Tests assert exact eligible/match sets, state transitions, and bounded record counts. Use an injectable clock/fake scheduler for timeout paths; do not assert tight elapsed durations.

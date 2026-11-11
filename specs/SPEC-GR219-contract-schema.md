@@ -11,7 +11,7 @@ The design authority is `docs/review-contract-design.md` on `github/main`, fetch
 - **R1** `review.yaml` MUST declare `version: 1` when the file exists. `test: test_review_contract_rejects_missing_or_unknown_version`.
 - **R2** `policy_source.ref` MUST equal `base`; no other value is accepted in v1. `test: test_policy_source_base_is_mandatory`.
 - **R3** The policy used for a PR MUST be loaded from the protected base branch, never from the PR head. `test: test_pr_self_weakening_falsifier`.
-- **R4** Layer order MUST be `defaults < organization < repository < path_overlays < pr_policy`. `test: test_layer_order_and_precedence`.
+- **R4** Layer order MUST be `defaults < organization < repository < path_overlays`; `pr_policy` is deferred from v1. `test: test_layer_order_and_precedence`.
 - **R5** Merge behavior MUST be scalar override, map deep-merge, instructions append, passes append, ignores union, include-paths intersect, exclude-paths union, and conflict deny-and-report. `test: test_merge_semantics_matrix`.
 
 ## 2. Interface
@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol
 
-LayerName = Literal["defaults", "organization", "repository", "path_overlays", "pr_policy"]
+LayerName = Literal["defaults", "organization", "repository", "path_overlays"]
 MergeKind = Literal["scalar", "maps", "instructions", "passes", "ignores", "include_paths", "exclude_paths"]
 
 class PolicySource(Protocol):
@@ -94,7 +94,7 @@ def resolve_review_policy(
 ) -> "ResolvedReviewPolicy": ...
 ```
 
-`load_review_contract` MUST resolve and verify the protected base ref before reading `.gitreins/review.yaml`. `head_ref` is used only to compute the diff inputs supplied to `resolve_review_policy`; it MUST NOT be used to read policy. `parse_review_contract` is pure and is the unit-test seam for malformed YAML and schema errors.
+`load_review_contract` MUST resolve the protected ref to an immutable commit SHA before reading `.gitreins/review.yaml`; it MUST read the file from that SHA and persist the SHA and config hash. `head_ref` is used only to compute the diff inputs supplied to `resolve_review_policy`; it MUST NOT be used to read policy. `parse_review_contract` is pure and is the unit-test seam for malformed YAML and schema errors.
 
 The resolver returns a complete policy, not a patch:
 
@@ -139,7 +139,7 @@ policy_source:
   allow_pr_override: false
 
 inheritance:
-  layers: [defaults, organization, repository, path_overlays, pr_policy]
+  layers: [defaults, organization, repository, path_overlays]
   merge:
     scalar: override
     maps: deep_merge
@@ -208,7 +208,7 @@ passes:
     trigger:
       any:
         paths: ["auth/**", "security/**", "**/*middleware*", "**/*permission*"]
-        diff_signals: [authentication_call, authorization_check, secret_access, deserialization, shell_execution]
+        diff_signals: [authentication_call, deserialization] # future-only names are rejected at contract load
     instructions:
       append: |
         Perform a focused security review. Trace attacker-controlled input to
@@ -226,7 +226,7 @@ passes:
     trigger:
       any:
         paths: ["**/*query*", "**/*repository*", "db/**", "storage/**"]
-        diff_signals: [new_loop_over_remote_data, unbounded_query, n_plus_one_candidate, lock_scope_change]
+        diff_signals: [unbounded_query] # future-only names are rejected at contract load
     execution: {model: performance-review, budget: 150, tools: [diff, repository_search, query_analyzer, benchmark_lookup]}
     gates: {minimum_severity: high, minimum_confidence: 0.85, require: [evidence_or_reproducible_reasoning]}
   - id: public-api
@@ -234,7 +234,7 @@ passes:
     trigger:
       any:
         paths: ["api/**", "openapi/**", "sdk/**"]
-        diff_signals: [public_signature_change, schema_change]
+        diff_signals: [public_signature_change] # future-only names are rejected at contract load
     gates:
       require: [backward_compatibility_assessed]
       on_fail: request_changes
@@ -299,7 +299,7 @@ class PolicySourceConfig:
 
 @dataclass(frozen=True)
 class InheritanceConfig:
-    layers: tuple[LayerName, ...] = ("defaults", "organization", "repository", "path_overlays", "pr_policy")
+    layers: tuple[LayerName, ...] = ("defaults", "organization", "repository", "path_overlays")
     merge: "MergeConfig" = MergeConfig()
     conflict: Literal["deny_and_report"] = "deny_and_report"
 
@@ -367,7 +367,7 @@ A denied run has `passed: false`, `disposition: deny_and_report`, and a structur
 
 ## 6. Edge Cases
 
-- No `.gitreins/review.yaml` on the protected base returns the existing GitReins review defaults, with `used_defaults=True`; it does not invent contract gates. The result still carries a config hash of the canonical default object.
+- No `.gitreins/review.yaml` on the protected base returns explicit, versioned v1 defaults, with `used_defaults=True`; it does not invent contract gates. The result still carries a config hash of the canonical default object. An unreadable or malformed file is never treated as absent.
 - Broken YAML is never treated as a missing file. This is the required broken-YAML denial falsifier.
 - A PR that edits `.gitreins/review.yaml` is evaluated against the base copy. A head-only `policy_source.allow_pr_override: true`, lower threshold, removed security pass, or `gates: {}` MUST have no effect.
 - Organization-locked fields include the exact paths listed in `organization.locked`; a lock applies recursively to the named map path. Repository and PR layers cannot remove, weaken, or replace those values.
@@ -396,3 +396,15 @@ Use `pytest` with temporary bare repositories and a fake `PolicySource`. Each te
 ## 8. Hilo Impact
 
 This spec depends on the existing `engine/config.py` defaults, `engine/config_schema.py` issue vocabulary, `engine/review_profiles.py` profile and effort types, Git ref resolution, and the pipeline/judge result contracts. SPEC-GR220 consumes `PathSelectionConfig`; SPEC-GR221 consumes `PassConfig`; SPEC-GR222 consumes resolved gates; SPEC-GR223 consumes `LoadedReviewContract`, `ResolvedReviewPolicy`, diagnostics, and the config hash. No Hilo graph schema changes are required; the implementation MUST add edges from the loader to the pipeline/judge/CLI consumers so a graph audit can find dead contract code.
+
+## PANEL VERDICTS (binding amendments)
+
+These decisions override conflicting text above and are the contract for GR-219.
+
+1. **Versioned verdict envelope (D1).** Every contract-era verdict MUST carry top-level `contract_schema_version`, `verdict_schema_version: 2`, and `writer_version`; legacy records remain readable but MUST NOT claim schema equivalence. The same envelope is used by GR-220–223.
+2. **Protected-base provenance (D4).** Resolve the protected ref to an immutable commit SHA, read `review.yaml` from that SHA, and persist the source commit and config hash. An absent file uses explicit versioned defaults. An unreadable or malformed file is `deny_and_report`, never silent defaults. `pr_policy` is outside v1 and MUST be removed from layer lists, types, examples, and tests; record it as deferred.
+3. **Gate precedence (D2).** The canonical precedence is locked organization gates (`gates.security`) > pass-level gates (GR-221) > repository/path overlay gates (GR-220) > defaults. A lower layer may only add restrictions, never weaken a higher layer; `deny_and_report` always wins.
+4. **Processing order (D3).** The shared review pipeline order is citation check, coverage downgrade, standards filter, then gate/outcome recomputation. GR-219 supplies the resolved policy and provenance consumed by that order.
+5. **Snapshot and concurrency (panel A).** The resolved policy is immutable for a run and carries source commit, config hash, normalized-path digest, and changed-file/diff digest. Reject NFC path collisions before execution. Persistence and any supersede/reconcile operation MUST use a store-wide lock/atomic transaction; partial or stale writes are not successful verdicts.
+6. **Contract-load rejection (panels B/C).** Unknown keys, unsupported layers, malformed YAML, and unsupported signal names are structured denials with diagnostics. Missing policy is distinguishable from unreadable policy.
+7. **Wall-clock discipline (D9/panel C).** Tests assert exact policies, diagnostics, operation counts, and bounded records. Timeout tests use an injectable clock/fake scheduler; no tight elapsed-duration assertion is normative.

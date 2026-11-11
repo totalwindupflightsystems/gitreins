@@ -23,8 +23,6 @@ from typing import Literal, Protocol
 
 SignalName = Literal[
     "authentication_call", "deserialization", "unbounded_query", "public_signature_change",
-    "authorization_check", "secret_access", "shell_execution", "schema_change",
-    "new_loop_over_remote_data", "n_plus_one_candidate", "lock_scope_change",
 ]
 
 @dataclass(frozen=True)
@@ -112,7 +110,7 @@ def run_pass(
 ) -> "PassResult": ...
 ```
 
-`budget` is a maximum number of model-output tokens for the pass; `timeout_seconds` is wall-clock seconds. Both MUST be positive for an enabled triggered pass. The execution adapter MUST pass only the declared tools and MUST use a process-group timeout. The result includes actual consumption and an explicit stop reason.
+`budget` is a maximum number of model-output tokens for the pass; `timeout_seconds` is wall-clock seconds. Both MUST be positive for an enabled triggered pass. The execution adapter MUST pass only the declared tools and MUST use a process-group timeout. The result includes actual consumption and an explicit stop reason. Each pass result MUST also carry the gate-input fields `file`, `line`, `end_line`, `confidence`, `introduced_by_diff`, and `disposition`; the runner derives file/line from detector hits or structured finding locations, introduction status from the base/head diff, confidence from the typed output contract, and disposition from the pass result (defaulting to `unresolved` only when explicitly represented as such).
 
 ## 3. Data Model
 
@@ -131,7 +129,7 @@ passes:
     trigger:
       any:
         paths: ["auth/**", "security/**", "**/*middleware*", "**/*permission*"]
-        diff_signals: [authentication_call, authorization_check, secret_access, deserialization, shell_execution]
+        diff_signals: [authentication_call, deserialization] # future names are rejected at contract load
     instructions:
       append: |
         Perform a focused security review. Trace attacker-controlled input to
@@ -241,9 +239,20 @@ All hit ordering is `(path, line, signal name, detector, evidence)`. Signal enum
 7. Assert one pass run for multiple hits and stable trigger-reason ordering.
 8. Simulate missing tools, timeout, budget exhaustion, malformed pass output, and parse failure; assert status/reason and gate-visible non-completion.
 9. Assert deterministic output by running detection five times and comparing serialized `DiffSignals` bytes.
-10. Assert a 1,200-file diff completes within the test's bounded fixture budget and emits no duplicate hits for identical lines.
+10. Assert a 1,200-file diff produces bounded records and the exact stable match set; do not assert a tight elapsed duration. Timeout paths use an injectable clock/fake scheduler and assert operation counts, terminal status, and bounded records.
 11. Run focused tests, `ruff check`, and the repository test command.
 
 ## 8. Hilo Impact
 
 This spec depends on SPEC-GR219's pass schema and SPEC-GR220's normalized paths. It feeds SPEC-GR222 with typed findings/pass status and SPEC-GR223 with trigger reasons, signal evidence, effective execution, and unavailable-pass traces. Hilo should link each detector to the exact pipeline/judge execution path; an isolated detector module without a runner edge is an inert feature.
+
+## PANEL VERDICTS (binding amendments)
+
+These decisions override conflicting text above and are the contract for GR-221.
+
+1. **SignalName v1 (D6).** The only implemented v1 signals are `authentication_call`, `deserialization`, `unbounded_query`, and `public_signature_change`. Any other signal name is future-only and MUST be rejected at contract load with `REVIEW_SIGNAL_UNSUPPORTED`; examples label future names as future and never use them as accepted v1 input.
+2. **Pass-output gate inputs (D6).** Every `PassResult` sent to GR-222 MUST derive and carry `file`, `line`, `end_line`, `confidence`, `introduced_by_diff`, and `disposition`. Derive location from structured detector/finding evidence, introduction status from the base/head diff, confidence from the typed result, and disposition from the explicit finding state. Free-text summaries cannot substitute for these fields.
+3. **Processing order (D3).** Before pass-level gate evaluation, apply citation check, then coverage downgrade, then standards filter, then recompute outcomes and gates. A pass result is not final before this order completes.
+4. **Gate precedence (D2).** Pass-level gates are below locked organization gates and above repository/path overlay gates and defaults; lower layers may only add restrictions. `deny_and_report` always wins.
+5. **Versioned envelope/digest (D1/D7).** Contract-era pass/verdict records carry `contract_schema_version`, `verdict_schema_version: 2`, `writer_version`, and the gate digest (`source_commit`, worktree fingerprint, policy hash, run id). Legacy records remain readable without equivalence claims.
+6. **Execution/write safety (panel A).** Resolve and execute from one immutable diff snapshot; persist bounded pass output atomically under the shared persistence lock. Timeout tests use an injectable clock/fake scheduler and assert status, operation counts, and bounded records rather than elapsed wall-clock time.

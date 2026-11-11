@@ -178,12 +178,12 @@ Persisted verdict data adds a top-level `review_contract` block and per-item `tr
 }
 ```
 
-The actual persisted schema MUST retain existing task/pipeline/stage/item fields and add these keys only when the review contract ran. A contract denial still writes a verdict record when persistence is enabled, with the diagnostics and `exit_code: 2`.
+The actual persisted schema MUST retain existing task/pipeline/stage/item fields and add these keys only when the review contract ran. A contract denial still writes a verdict record when persistence is enabled, with the diagnostics and `exit_code: 2`. If persistence fails after an in-memory green result, the command exits non-zero and emits no pass/green claim.
 
 ## 4. Wiring
 
 1. SPEC-GR221 emits findings and pass outcomes. SPEC-GR220 supplies path-rule context. SPEC-GR219 supplies policy diagnostics and locked-field results.
-2. `engine/judge.py:Judge.evaluate_task` calls `evaluate_gates` after all triggered pass results are collected, then sets `JudgeResult.passed = pass_result AND gate_result.passed`.
+2. `engine/judge.py:Judge.evaluate_task` calls one final decision function after all triggered pass results are collected. That function combines Tier 1, Tier 2, contract gates, `pass_class`, and required-pass status; its typed result is the only authority for `JudgeResult.passed`, persistence, and the hook exit code.
 3. `engine/persist.py:build_verdict_data` serializes `review_contract`, gate evaluations, blocking finding IDs, and each finding's trace. Existing verdict keys remain backward-compatible.
 4. The pre-commit hook invokes the same review gate evaluation through the guard/judge command. It MUST NOT parse human summary text to decide whether to commit.
 5. The CLI returns `precommit_exit_code(gate_result)`. `0` permits commit, `1` rejects a normal finding/gate failure, and `2` rejects an unverifiable/contract denial. The stdout summary may say `PASS`, `FAIL`, or `DENY_AND_REPORT`, but exit status is authoritative.
@@ -211,7 +211,7 @@ The actual persisted schema MUST retain existing task/pipeline/stage/item fields
 - A finding with `disposition=accepted` or `suppressed` does not block; the trace retains the disposition and gate reason.
 - Multiple gates are composable: all gate evaluations are recorded, and any blocking gate makes the aggregate non-passing. The strongest action is `deny_and_report` > `fail`/`request_changes` > `allow`.
 - No findings does not bypass a required pass gate. A pass marked unavailable is not equivalent to an empty finding list.
-- A 1,000+ file diff emits bounded per-finding gate records and aggregates blocking IDs without changing predicate semantics.
+- A 1,000+ file diff emits bounded per-finding gate records and aggregates blocking IDs without changing predicate semantics. Tests assert bounded records and exact match sets, not tight elapsed durations.
 - Existing verdicts without `review_contract` remain readable; they are not retroactively judged under the new policy.
 
 ## 7. Testing
@@ -232,3 +232,15 @@ The actual persisted schema MUST retain existing task/pipeline/stage/item fields
 ## 8. Hilo Impact
 
 This spec depends on SPEC-GR219's merge/lock diagnostics and SPEC-GR221's pass result contract. It feeds `engine/judge.py`, `engine/persist.py`, the pre-commit hook, and SPEC-GR223's gate explanation. Hilo must connect `evaluate_gates` to both the judge and hook callers; a gate implementation wired to only one surface is non-conforming.
+
+## PANEL VERDICTS (binding amendments)
+
+These decisions override conflicting text above and are the contract for GR-222.
+
+1. **One final decision function (D7).** Define one typed final decision function combining Tier 1, Tier 2, contract gates, `pass_class`, and required-pass statuses. Its result is the sole authority consumed by `JudgeResult`, persisted verdict fields, and the pre-commit hook exit code. Never infer status from summary text, `merge_recommendation`, or an advisory field.
+2. **Gate precedence (D2).** Evaluate locked organization gates (`gates.security`) first, then pass-level gates, then repository/path overlay gates, then defaults. Lower layers may only add restrictions; they cannot weaken higher layers. `deny_and_report` always wins regardless of evaluation order.
+3. **Persistence failure (D7).** If persistence fails after a green in-memory decision, return a non-zero exit and emit no pass/green claim, label, or success receipt. A persisted claim requires a successful atomic write/readback.
+4. **Gate digest (D7).** Attach `source_commit`, worktree fingerprint, policy hash, and run id as a gate digest to `JudgeResult`, the persisted verdict, and the pre-commit hook receipt. The digest binds the decision to the evaluated tree and policy.
+5. **Processing order (D3).** Recompute gates/outcomes only after citation check, coverage downgrade, and standards filtering, in that order. All pass output must satisfy GR-222's typed predicate fields.
+6. **Versioned envelope (D1).** Contract-era verdicts carry `contract_schema_version`, `verdict_schema_version: 2`, and `writer_version`; old records remain readable but never claim equivalence. Existing `pass_class` semantics remain represented, but cannot override the final decision function.
+7. **Write-safety and tests (panels A/C/D9).** Use one immutable snapshot and atomic/locked persistence. Tests assert predicate truth tables, exact gate evaluations, exit codes, digests, and bounded records; timeout paths use an injectable clock/fake scheduler and no tight elapsed-duration assertions.

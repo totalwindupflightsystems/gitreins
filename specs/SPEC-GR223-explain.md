@@ -136,7 +136,7 @@ Suppressed rules are rules prevented by explicit policy (disabled pass, excluded
 1. Add a `review` parser under the existing root parser in `gitreins/cli.py`, then add the `explain` child parser with required `--base`, required `--head`, optional `--dry-run`, and `--json`.
 2. `cmd_review_explain` obtains the repository workdir, resolves the protected base through SPEC-GR219, computes the same changed files/lines as the judge/pre-commit path, and calls `build_explain_document`.
 3. `build_explain_document` calls SPEC-GR219's loader/resolver, SPEC-GR220's matcher, SPEC-GR221's deterministic signal detector, and SPEC-GR222's gate evaluator. It MUST NOT duplicate any of those decisions.
-4. With `--dry-run`, do not construct an LLM client, invoke pass tools, mutate `.gitreins/usage.jsonl`, write history, or write labels. The command may read repository state and render the document.
+4. With `--dry-run`, do not construct an LLM client, invoke pass tools, mutate `.gitreins/usage.jsonl`, write history, or write labels. The command may read repository state and render the document. It must use immutable base/head commit IDs and a changed-file/diff digest so explain cannot race a moving worktree.
 5. With non-dry-run explain, the command still explains the selected diff; it may evaluate configured deterministic gates but does not persist a review verdict unless an explicit review execution command is used. The command never changes source files or refs.
 6. `engine.persist.build_verdict_data` receives `FindingTrace` from SPEC-GR222 and writes it under each persisted item/finding. `gitreins report` and `serve` read the additive fields without requiring them on old records.
 7. The command's exit status is derived from the same `VerdictGateResult` mapping as SPEC-GR222. Human wording is not parsed for status.
@@ -177,8 +177,19 @@ Suppressed rules are rules prevented by explicit policy (disabled pass, excluded
 8. Run the PR-self-weakening fixture and assert explain reads base policy despite a weaker head policy.
 9. Test no-change, 1,000+ file, Unicode, excluded-path, and multiple-overlay output cases.
 10. Assert secrets/URLs are absent from serialized output with a canary config containing secret-like values.
-11. Run CLI focused tests, `ruff check`, and the repository test command.
+11. Verify foreman closeout wiring: `gitreins task complete` invokes review explain with caller-provided base/head from the task worktree context, and closeout evidence contains the explain JSON plus exit code. Run CLI focused tests, `ruff check`, and the repository test command.
 
 ## 8. Hilo Impact
 
 This spec depends on all preceding review-contract specs and existing CLI/parser, persistence, report, and serve surfaces. It is the user-facing proof that the resolver is shared rather than duplicated. Hilo must connect `cmd_review_explain` to the same loader, matcher, detector, and gate nodes used by judge/pre-commit, and connect `FindingTrace` to `engine.persist.build_verdict_data` and readers. No Hilo storage format changes are required.
+
+## PANEL VERDICTS (binding amendments)
+
+These decisions override conflicting text above and are the contract for GR-223.
+
+1. **Foreman closeout wiring (D8).** `gitreins task complete` MUST invoke review explain with caller-provided `--base` and `--head` resolved from the task's worktree context. The closeout evidence MUST contain the explain JSON and exit code. If either ref cannot be resolved, closeout fails closed; explain MUST never silently substitute `HEAD`.
+2. **Immutable explain inputs (panel A).** Explain requests carry immutable base/head commit IDs and a changed-file/diff digest. The document must identify the exact policy source commit and config hash used; it cannot race a moving worktree or claim equivalence with another execution.
+3. **Dry-run safety (panel A/C).** Dry-run uses only resolver, matcher, deterministic detector, and pure gate evaluation. It MUST NOT construct LLM/tool clients or mutate usage, history, labels, refs, or source files. Assert unchanged artifacts before/after.
+4. **Versioned envelope and digest (D1/D7).** Contract-era explain/closeout verdict evidence carries `contract_schema_version`, `verdict_schema_version: 2`, `writer_version`, and the gate digest (`source_commit`, worktree fingerprint, policy hash, run id). Legacy records remain readable without synthetic trace/equivalence claims.
+5. **Shared precedence/order (D2/D3).** Explain calls the same precedence and processing order as execution: locked organization gates > pass gates > overlay gates > defaults; citation check > coverage downgrade > standards filter > gate/outcome recomputation; lower layers only add restrictions and `deny_and_report` wins.
+6. **Wall-clock discipline (D9/panel C).** Explain tests assert exact headings, JSON shape, refs, hashes, match sets, unchanged artifacts, and exit categories. Timeout tests use an injectable clock/fake scheduler; no tight elapsed-duration assertion is allowed.
