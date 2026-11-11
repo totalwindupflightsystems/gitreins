@@ -47,7 +47,7 @@ import sys
 import pytest
 import yaml
 
-from engine.guard_manager import GuardManager
+from engine.guard_manager import GuardManager, _tracked_go_files
 from engine.guards import check_go_tests
 from pathlib import Path
 
@@ -253,6 +253,53 @@ class TestFullTreeGoScope:
         assert set(files) == {"tracked.go", os.path.join("cmd", "untracked.go")}
         assert len(files) == len(set(files)), "the listing must be deduped"
         assert all(f.endswith(".go") for f in files)
+
+    def test_tree_scope_selects_tracked_go_files_and_excludes_untracked(
+        self, tmp_path: Path
+    ) -> None:
+        workdir = _scratch_repo(tmp_path, {"go.mod": GO_MOD, "tracked.go": CLEAN_GO})
+        _write(workdir, "cmd/untracked.go", BROKEN_GO)
+
+        assert _tracked_go_files(workdir) == ["tracked.go"]
+        gm = GuardManager(workdir, config=_go_config(), scope="tree")
+        assert gm.changed_files == ["go.mod", "tracked.go"]
+        assert gm._go_scope_files_or_none() == ["tracked.go"]
+
+    def test_tree_scope_runs_all_go_lanes_on_unchanged_tracked_files(self, tmp_path: Path) -> None:
+        workdir = _scratch_repo(tmp_path, {"go.mod": GO_MOD, "tracked.go": CLEAN_GO})
+        result = GuardManager(workdir, config=_go_config(), scope="tree").run_all()
+
+        assert result.degraded is False
+        for name in LANE_NAMES:
+            lane = _lane(result, name)
+            assert lane.skipped is False, (name, lane.output)
+            assert "No Go files" not in lane.output
+
+    def test_default_scope_remains_staged_and_full_does_not_change_scope(
+        self, tmp_path: Path
+    ) -> None:
+        workdir = _scratch_repo(tmp_path, {"go.mod": GO_MOD, "tracked.go": CLEAN_GO})
+        _write(workdir, "untracked.go", BROKEN_GO)
+
+        default = GuardManager(workdir, config=_go_config())
+        full = GuardManager(workdir, config=_go_config(), grade_full_tree=True)
+        assert default.scope == "staged"
+        assert default._go_scope_files_or_none() is None
+        assert full.scope == "staged"
+        assert full._go_scope_files_or_none() == ["untracked.go", "tracked.go"]
+
+    def test_tree_scope_is_independent_of_full_test_selection(self, tmp_path: Path) -> None:
+        workdir = _scratch_repo(tmp_path, {"go.mod": GO_MOD, "tracked.go": CLEAN_GO})
+        tree = GuardManager(workdir, config=_go_config(), scope="tree")
+        tree_full = GuardManager(workdir, config=_go_config(), scope="tree", grade_full_tree=True)
+        assert tree._go_scope_files_or_none() == tree_full._go_scope_files_or_none()
+
+    def test_working_tree_scope_keeps_untracked_files(self, tmp_path: Path) -> None:
+        workdir = _scratch_repo(tmp_path, {"go.mod": GO_MOD, "tracked.go": CLEAN_GO})
+        _write(workdir, "untracked.go", BROKEN_GO)
+        gm = GuardManager(workdir, config=_go_config(), scope="working-tree")
+        assert "untracked.go" in gm.changed_files
+        assert "untracked.go" in gm._go_scope_files_or_none()
 
 
 # ── 2. Precedence: working-tree scope, staged index, clean repo ───

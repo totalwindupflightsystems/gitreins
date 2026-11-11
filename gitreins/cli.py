@@ -5125,14 +5125,15 @@ def _add_guard_parser(sub: _SubParsers) -> None:
     )
     guard_p.add_argument(
         "--scope",
-        choices=["staged", "working-tree"],
+        choices=["staged", "working-tree", "tree"],
         default="staged",
         help=(
-            "Change set to grade: 'staged' (default) is the Git index; "
-            "'working-tree' adds unstaged and non-ignored untracked files, "
-            "collected with read-only git commands (the index is never "
-            "touched). Selects WHICH files are graded — --full/--staged-only "
-            "still select which tests run over them."
+            "File scope to grade: 'staged' (default) is the Git index; "
+            "'working-tree' adds unstaged and non-ignored untracked files; "
+            "'tree' grades every tracked file, including unchanged files "
+            "and excluding untracked files. Scopes use read-only git commands "
+            "(the index is never touched). Selects WHICH files are graded — "
+            "--full/--staged-only still select which tests run over them."
         ),
     )
     guard_p.add_argument(

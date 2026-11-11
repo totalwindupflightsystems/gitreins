@@ -218,7 +218,7 @@ the quality gate enforced by the pre-commit hook; it can also be run
 manually at any time.
 
 ```
-gitreins guard [--dead-code] [--staged-only] [--full] [--scope staged|working-tree] [--json]
+gitreins guard [--dead-code] [--staged-only] [--full] [--scope staged|working-tree|tree] [--json]
 ```
 
 | Option | Description |
@@ -226,7 +226,7 @@ gitreins guard [--dead-code] [--staged-only] [--full] [--scope staged|working-tr
 | `--dead-code` | Enable Python dead-code detection (overrides config) |
 | `--staged-only` | Run tests in diff mode — only packages with staged changes (overrides `guards.test_mode`) |
 | `--full` | Grade the whole tree even with an empty index: the tests lane runs, lint covers tracked+untracked Python files, and the secrets lane scans every file (`gitleaks detect --no-git` + whole-tree builtin cross-check, line named `; scope: working-tree`) instead of the staged diff. On a Go project (`go.mod`) the same rule lands on the `go_build`/`go_lint`/`go_tests` lanes — they grade the whole tree instead of the index |
-| `--scope staged\|working-tree` | Which change set to grade: `staged` (default) is the Git index; `working-tree` adds unstaged and non-ignored untracked files (the escape hatch when the files you care about are neither staged nor committed) |
+| `--scope staged\|working-tree\|tree` | File scope to grade: `staged` (default) is the Git index; `working-tree` adds unstaged and non-ignored untracked files; `tree` grades every tracked file, including unchanged files, and excludes untracked files |
 | `--json` | Emit one bounded, redacted [evidence v1](evidence-contract-v1.md) JSON document on stdout instead of the human summary (exit 0 pass, 1 non-pass) |
 
 **Exit codes**
@@ -241,16 +241,16 @@ Warnings are printed to stderr and do not affect the exit code. The
 output includes the active test mode (`diff` or `full`) and the tested
 targets.
 
-**`--scope` selects the change set (read-only).** `staged` is the index —
+**`--scope` selects the file set (read-only).** `staged` is the index —
 what the pre-commit hook has always graded. `working-tree` grades the union of
-staged, unstaged and non-ignored untracked files, collected with read-only git
-commands (`git diff`, `git status`, `git ls-files --others --exclude-standard`);
-it never runs `git add`, `reset`, `stash` or `checkout`, so a guarded run
-cannot disturb what you staged. The mode note names the scope
-(`(test mode: diff, scope: working-tree)`) so a working-tree run is
-distinguishable from a staged one; the default scope adds no note, keeping the
-staged line byte for byte. `--scope` composes with `--full`/`--staged-only`,
-which choose WHICH tests run over that change set.
+staged, unstaged and non-ignored untracked files, while `tree` grades every
+tracked file, including unchanged files, and excludes untracked files. All
+scopes use read-only git commands (`git diff`, `git status`, `git ls-files`);
+the guard never runs `git add`, `reset`, `stash` or `checkout`, so it cannot
+disturb what you staged. The mode note names non-default scopes, and
+`--scope` composes with `--full`/`--staged-only`, which choose WHICH tests run
+over that file set. Unlike `--full`, `tree` changes the file scope only; it does
+not change test selection.
 
 **`--json` is the automation surface.** It writes exactly one UTF-8 JSON
 document to stdout — the update check, the mode note and the guard-log line are
@@ -269,7 +269,7 @@ A run that does no work still exits 2 on the human surface when
 **Degraded pass (`guards.allow_skips`, TRUST-001)**
 
 A guard that does no work — nothing staged, no linter on PATH, zero tests
-collected — is not a gate that passed. Those runs print
+collected, or no Go files in the selected `staged`/`working-tree` scope — is not a gate that passed. Use `--scope tree` when the intended gate is every tracked file, including unchanged Go files; untracked files remain excluded. Those runs print
 `Tier 1: DEGRADED PASS (skips: lint=no staged files, tests=no staged files)`,
 mark the skipped steps with `~`, and exit **2** unless the repo sets
 `guards.allow_skips: true`:
@@ -317,7 +317,10 @@ index. A Go run in which no `.go` file was in scope is a DEGRADED pass —
 `~ go_build — skipped (No Go files in scope)`, never `✓ go_build — ok` — and
 exits 2 unless the repo sets `guards.allow_skips: true`. The reason names which
 scope was empty: `No Go files staged` (the index) or `No Go files in scope`
-(working-tree / whole tree).
+(`working-tree` with no Go files). Use `gitreins guard --scope tree` to grade
+every tracked Go file, including unchanged files; untracked Go files are
+excluded and `--full` remains a test-selection flag rather than a file-scope
+flag.
 
 
 ## Optional Auger spec-alignment guard (GR-154)

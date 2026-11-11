@@ -569,6 +569,33 @@ def _tree_go_files(workdir: str) -> list[str]:
     return _tree_source_files(workdir, (".go",))
 
 
+def _tracked_go_files(workdir: str) -> list[str]:
+    """Tracked Go files for the explicit ``tree`` guard scope.
+
+    Unlike ``_tree_go_files``, this intentionally excludes untracked files:
+    ``tree`` is a committed-tree audit, independent of the current change set,
+    while the existing ``--full`` and ``working-tree`` scopes keep their
+    established tracked-plus-untracked behavior.
+    """
+    try:
+        proc = subprocess.run(
+            ["git", "ls-files", "-z", "--cached"],  # noqa: S607 - git resolved via PATH by design
+            cwd=workdir,
+            capture_output=True,
+            timeout=15,
+            env=_sanitized_env(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if proc.returncode != 0:
+        return []
+    return [
+        path
+        for path in proc.stdout.decode("utf-8", "replace").split("\0")
+        if path.endswith(".go") and os.path.isfile(os.path.join(workdir, path))
+    ]
+
+
 def _go_guard_result(r: GoGuardResult) -> GuardResult:
     """Convert a GoGuardResult into the tier-1 GuardResult, signal included.
 
@@ -1460,11 +1487,12 @@ class GuardManager:
             raise ValueError(f"scan root is not a directory: {self.scan_root}")
         # Change scope (EVID-002): "staged" is the index (today's behaviour,
         # byte for byte); "working-tree" is the union of staged, unstaged and
-        # non-ignored untracked files, collected read-only. Keyword-only and
+        # non-ignored untracked files, collected read-only; "tree" is every
+        # tracked file, independent of the current change set. Keyword-only and
         # defaulting to "staged" so every existing caller — judge, worktree
         # manager, MCP server, pipeline — keeps today's semantics.
-        if scope not in ("staged", "working-tree"):
-            raise ValueError("scope must be 'staged' or 'working-tree'")
+        if scope not in ("staged", "working-tree", "tree"):
+            raise ValueError("scope must be 'staged', 'working-tree', or 'tree'")
         self.scope = scope
         # EVID-003: the run log (DF-018) is written INSIDE the graded tree, so
         # a caller whose contract is "do not mutate the repository being
@@ -1646,6 +1674,8 @@ class GuardManager:
         """
         if self.scope == "working-tree":
             return _get_working_tree_files(self.workdir)
+        if self.scope == "tree":
+            return sorted(_worktree_tracked_paths(self.workdir))
         return _get_staged_files(self.workdir)
 
     def _scope_files_or_none(self) -> list[str] | None:
@@ -1654,9 +1684,9 @@ class GuardManager:
         ``None`` keeps the delegated helpers' own staged discovery — the Go
         guards' historical wording ("No Go files staged") and the test
         discovery's linked-worktree behaviour — byte for byte; the
-        working-tree scope hands them the collected set instead.
+        ``working-tree`` and ``tree`` scopes hand them their collected sets.
         """
-        return self.changed_files if self.scope == "working-tree" else None
+        return self.changed_files if self.scope in ("working-tree", "tree") else None
 
     def _go_scope_files_or_none(self) -> list[str] | None:
         """The Go lanes' file scope for this run, or ``None`` for staged discovery.
@@ -1668,8 +1698,8 @@ class GuardManager:
         lanes return a silent pass over a Go tree that does not compile.
         Precedence, in order:
 
-        1. an explicit ``--scope working-tree`` hands over the collected set
-           (unchanged behaviour);
+        1. explicit ``tree`` and ``working-tree`` scopes hand over their
+           collected sets;
         2. a non-empty staged ``.go`` set keeps ``None`` — the lanes then do
            their own index discovery byte for byte, which is exactly what the
            pre-commit hook grades;
@@ -1678,6 +1708,8 @@ class GuardManager:
         ``_scope_files_or_none`` is deliberately left alone: the Python test
         discovery reads it too, and that caller's contract is unchanged.
         """
+        if self.scope == "tree":
+            return _tracked_go_files(self.workdir)
         if self.scope == "working-tree":
             return self.changed_files
         if any(f.endswith(".go") for f in self.changed_files):

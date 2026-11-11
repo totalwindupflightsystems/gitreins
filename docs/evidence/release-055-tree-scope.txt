@@ -1,0 +1,17 @@
+RELEASE-055 tree-scope proof
+
+Scratch clean SHA before docs-only commit:
+c8758bcfa0a30cf8d87c61982cd88d47c9f075d9
+
+Scratch docs-only commit:
+f6cbabbbaaff7367d9aad7fad59466bacdf37259
+
+Exact command:
+PYTHONPATH=/home/kara/worktrees/gitreins-RELEASE-055-20261111 uv run --project /home/kara/worktrees/gitreins-RELEASE-055-20261111 gitreins guard --scope tree --json
+
+Exact output:
+{"$schema":"https://gitreins.dev/schemas/evidence/v1.json","checks":[{"id":"go_build","outcome":"pass","passed":true,"summary":"go build: ok"},{"id":"go_lint","outcome":"pass","passed":true,"summary":"golangci-lint: clean"},{"id":"go_tests","outcome":"pass","passed":true,"summary":"?   \\texample.com/release055/pkg\\t[no test files]\\n"}],"command":"guard","generatedAt":"2026-11-11T12:14:38.427458+00:00","metadata":{"changedFileCount":4,"checkCount":3,"degraded":false,"redacted":true,"redactionsApplied":false,"skippedSteps":[],"truncated":false},"outcome":"pass","passed":true,"producer":{"name":"gitreins","version":"0.21.0"},"schemaVersion":"1.0","scope":"tree","summary":"  ✓ go_build — ok; scanners: nice=nice -n 10\\n  ✓ go_lint — ok; scanners: nice=nice -n 10\\n  ✓ go_tests; scanners: nice=nice -n 10"}
+
+Evidence line: metadata.degraded=false
+Executed lanes: go_build=pass, go_lint=pass, go_tests=pass; skippedSteps=[]
+Notes: the scratch docs-only commit changed only docs/CHANGELOG.md after the clean baseline; the tracked Go implementation remained unchanged and all three Go lanes executed.
