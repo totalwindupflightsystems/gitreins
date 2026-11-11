@@ -1848,6 +1848,29 @@ def _secrets_step_run(
     exclusions = ", ".join(f"{d}/**" for d in HARNESS_STATE_DIRS)
     level, _source = scanner_nice.resolve_level(config)
     prologue, nice_prefix = scanner_nice.shell_prologue(level)
+    # PROF-002-adjacent: two bounds on the scan itself.
+    #
+    # Staged mode. The pre-commit hook sets GITREINS_GUARD_STAGED=1: the thing
+    # being judged at commit time is the STAGED DIFF, so the scan is
+    # `gitleaks protect --staged` — O(changed files), not O(worktree). Without
+    # this every commit walked the whole tree, and a fleet of lanes committing
+    # concurrently stacked several 16-core scans into host-wide saturation
+    # (measured 2026-11-11: gitleaks at ~1010% CPU through routine lane
+    # commits; the largest repo alone scans 409 MB in 48 s). The judge's pass
+    # runs WITHOUT the env and keeps the full-tree detect scan: it grades the
+    # committed tree, where staged-only would be the wrong scope.
+    staged_mode = os.environ.get("GITREINS_GUARD_STAGED", "") == "1"
+    if staged_mode:
+        scan_cmd = 'gitleaks protect --staged --no-banner --no-color --config "$_glcfg"'
+        scan_note = 'echo "secrets: gitleaks scope=staged diff (GITREINS_GUARD_STAGED=1)"; '
+    else:
+        scan_cmd = f'gitleaks detect --source {scan_source} --no-git --no-banner --no-color --config "$_glcfg"'
+        scan_note = ""
+    # Timeout bound. A scan that never finishes proves nothing, so the bound
+    # fails the step (timeout exits 124) and names itself in the evidence
+    # instead of grading an unfinished scan green or letting it run unbounded.
+    timeout_bound, _timeout_source = scanner_nice.resolve_timeout_s(config)
+    bound = scanner_nice.timeout_prefix(config)
     return (
         "if command -v gitleaks >/dev/null 2>&1; then "
         '_glcfg="$(mktemp -t gitreins-gitleaks-XXXXXX.toml)"; '
@@ -1858,18 +1881,20 @@ def _secrets_step_run(
         # evidence, so a judge FAIL says WHICH scanner raised it instead of
         # leaving "secrets" ambiguous (the ambiguity that cost POC-15 a cycle).
         'echo "secrets: scanners=gitleaks+builtin cross-check"; '
+        f'echo "secrets: gitleaks bound=timeout {timeout_bound}s (0=off)"; '
         # DF-GITREINS-POC-55: the nice policy, probed in-band so it sees the
         # PATH the scan runs with, and fail-open so a missing `nice` can never
         # turn a scan into a failure. Level 0 emits neither line nor prefix.
-        f"{prologue}"
+        f"{prologue}{scan_note}"
         # DF-GITREINS-POC-14: --no-color keeps gitleaks' logrus colour codes
         # out of the captured evidence — verdict.json recorded raw
         # `\x1b[32mINF\x1b[0m scanned ~5 MB` lines and the console summary
         # printed them when one landed first. The INFO lines themselves stay:
         # they are the scope evidence ("scanned ~5 MB") a post-mortem reads.
-        f'{nice_prefix}gitleaks detect --source {scan_source} --no-git --no-banner --no-color --config "$_glcfg"; '
+        f"{bound}{nice_prefix}{scan_cmd}; "
         '_glrc=$?; rm -f "$_glcfg"; '
-        'if [ "$_glrc" -eq 0 ]; then echo "secrets: gitleaks: clean"; '
+        f'if [ "$_glrc" -eq 124 ]; then echo "secrets: gitleaks: TIMED OUT after {timeout_bound}s — the scan did not finish, so it cannot grade clean"; '
+        'elif [ "$_glrc" -eq 0 ]; then echo "secrets: gitleaks: clean"; '
         f'else echo "secrets: gitleaks: findings found (exit $_glrc)"; echo "secrets: harness state excluded from gitleaks scope ({exclusions})"; fi; '
         "else _glrc=0; "
         'echo "secrets: scanners=builtin cross-check only (gitleaks not on PATH)"; '

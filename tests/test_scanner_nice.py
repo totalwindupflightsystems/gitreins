@@ -43,10 +43,8 @@ from engine import scanner_nice
 from engine.guard_manager import GuardManager, HARNESS_STATE_DIRS
 from engine.pipeline import (
     SKIP_SENTINEL,
-    _engine_root,
     _lint_step_run,
     _secrets_step_run,
-    harness_scan_gitleaks_config,
     tier1_plan,
 )
 
@@ -170,33 +168,6 @@ def _scratch_repo(tmp_path: Path, files: dict[str, str], staged: dict[str, str])
 # byte", which cannot be checked by calling the thing under test.
 
 
-def _prechange_secrets_step(workdir: str) -> str:
-    exclusions = _EXCLUSIONS
-    return (
-        "if command -v gitleaks >/dev/null 2>&1; then "
-        '_glcfg="$(mktemp -t gitreins-gitleaks-XXXXXX.toml)"; '
-        "cat > \"$_glcfg\" <<'GITREINS_GITLEAKS_CFG'\n"
-        f"{harness_scan_gitleaks_config(workdir)}\n"
-        "GITREINS_GITLEAKS_CFG\n"
-        'echo "secrets: scanners=gitleaks+builtin cross-check"; '
-        'gitleaks detect --source . --no-git --no-banner --no-color --config "$_glcfg"; '
-        '_glrc=$?; rm -f "$_glcfg"; '
-        'if [ "$_glrc" -eq 0 ]; then echo "secrets: gitleaks: clean"; '
-        f'else echo "secrets: gitleaks: findings found (exit $_glrc)"; echo "secrets: harness state excluded from gitleaks scope ({exclusions})"; fi; '
-        "else _glrc=0; "
-        'echo "secrets: scanners=builtin cross-check only (gitleaks not on PATH)"; '
-        'echo "secrets: gitleaks: not on PATH"; fi; g1=$_glrc; '
-        f'PYTHONPATH="{_engine_root()}" {sys.executable} -c "from engine.guard_manager import GuardManager; '
-        "import sys; gm = GuardManager('.'); "
-        "r = gm._builtin_secrets_scan(staged_only=False); "
-        "print('secrets: builtin cross-check: ' + r.output); "
-        "print('secrets: builtin cross-check status: ' "
-        "+ (r.scanners[0][1] if r.scanners else 'clean')); "
-        'sys.exit(1 if not r.passed else 0)"; '
-        'g2=$?; [ "$g1" -eq 0 ] && [ "$g2" -eq 0 ]'
-    )
-
-
 def _prechange_lint_step(lint_cmd: str) -> str:
     binary = lint_cmd.split()[0]
     return (
@@ -259,20 +230,24 @@ class TestBuiltCommandStrings:
     # call and the env var, both exist on the pre-change tree, so they pass
     # there too — which is what validates the transcribed reference text.
 
-    def test_level_zero_secrets_step_is_byte_identical(
+    def test_level_zero_secrets_step_is_nice_free(
         self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
+        """Nice off → no nice prefix, no nice note. The timeout bound stays: it
+        is a grading bound, not a scheduling nicety (PROF-002-adjacent)."""
         monkeypatch.setenv(scanner_nice.ENV_VAR, "0")
-        assert _secrets_step_run(tmp_workdir) == _prechange_secrets_step(tmp_workdir)
+        cmd = _secrets_step_run(tmp_workdir)
+        assert "nice" not in cmd, "level 0 must not put a nice prefix on the scan"
+        assert "timeout 600 gitleaks" in cmd, "the timeout bound is present at every nice level"
 
     def test_level_zero_lint_step_is_byte_identical(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(scanner_nice.ENV_VAR, "0")
         assert _lint_step_run("ruff check .") == _prechange_lint_step("ruff check .")
 
-    def test_config_zero_secrets_step_is_byte_identical(self, tmp_workdir: str) -> None:
-        assert _secrets_step_run(tmp_workdir, {"guards": {"scanner_nice": 0}}) == (
-            _prechange_secrets_step(tmp_workdir)
-        )
+    def test_config_zero_secrets_step_is_nice_free(self, tmp_workdir: str) -> None:
+        cmd = _secrets_step_run(tmp_workdir, {"guards": {"scanner_nice": 0}})
+        assert "nice" not in cmd, "level 0 via config must not put a nice prefix on the scan"
+        assert "timeout 600 " in cmd, "the timeout bound is present at every nice level"
 
     def test_config_zero_lint_step_is_byte_identical(self) -> None:
         assert _lint_step_run("ruff check .", {"guards": {"scanner_nice": 0}}) == (
@@ -481,7 +456,7 @@ class TestFailOpen:
         record = tmp_path / "nice.txt"
         shim = _shim_dir(tmp_path, "gitleaks", record, GITLEAKS)
         # Only the tools the step itself needs: no `nice` anywhere on PATH.
-        for tool in ("mktemp", "cat", "rm"):
+        for tool in ("mktemp", "cat", "rm", "timeout"):
             resolved = shutil.which(tool)
             assert resolved, f"{tool} missing — cannot build the restricted PATH"
             (shim / tool).symlink_to(resolved)

@@ -343,3 +343,72 @@ def shell_wrap(cmd: str, level: int) -> str:
         return cmd
     prologue, prefix = shell_prologue(level)
     return f"{prologue}{prefix}sh -c {sh_single_quote(cmd)}"
+
+
+# ── scanner timeout bound ────────────────────────────────────────────────────
+
+#: Default wall-clock bound for one external scanner run. Generous: the largest
+#: tree measured on the reference host (409 MB, 16 cores) scans in 48 s, so the
+#: default only bites on pathology. ``0`` = off.
+DEFAULT_TIMEOUT_S = 600
+#: Environment override (``0`` = off).
+TIMEOUT_ENV_VAR = "GITREINS_SCANNER_TIMEOUT_S"
+#: Config location of the same knob (``guards.scanner_timeout_s``).
+TIMEOUT_CONFIG_SECTION = "guards"
+TIMEOUT_CONFIG_KEY = "scanner_timeout_s"
+
+
+def parse_timeout_s(value: object) -> int | None:
+    """``>= 0`` seconds from an int or numeric string; ``None`` when unusable.
+
+    Rejects ``bool`` explicitly (``True`` is an ``int`` in Python) and every
+    negative or non-numeric value — an unusable knob is *ignored*, never passed
+    through to ``timeout``, which would break the spawn.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        seconds = value
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text.isdigit():
+            return None
+        seconds = int(text)
+    else:
+        return None
+    return seconds if seconds >= 0 else None
+
+
+def resolve_timeout_s(
+    config: object = None, env: Mapping[str, str] | None = None
+) -> tuple[int, str]:
+    """``(seconds, source)`` — env wins over config over the default."""
+    env_map = os.environ if env is None else env
+    raw = env_map.get(TIMEOUT_ENV_VAR)
+    if raw is not None:
+        parsed = parse_timeout_s(raw)
+        if parsed is not None:
+            return parsed, "env"
+    section = None
+    if isinstance(config, dict):
+        section = config.get(TIMEOUT_CONFIG_SECTION)
+    else:
+        section = getattr(config, TIMEOUT_CONFIG_KEY, None)
+    if isinstance(section, dict):
+        parsed = parse_timeout_s(section.get(TIMEOUT_CONFIG_KEY))
+        if parsed is not None:
+            return parsed, "config"
+    return DEFAULT_TIMEOUT_S, "default"
+
+
+def timeout_prefix(config: object = None, env: Mapping[str, str] | None = None) -> str:
+    """``"timeout <n> "`` or ``""`` when the knob is off.
+
+    A secrets scan that never finishes proves nothing, so a killed scan is a
+    FAIL (``timeout`` exits 124), never a pass — the bound is a grading input,
+    not an availability nicety.
+    """
+    seconds, _source = resolve_timeout_s(config, env)
+    if seconds <= 0:
+        return ""
+    return f"timeout {seconds} "

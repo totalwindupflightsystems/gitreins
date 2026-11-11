@@ -216,6 +216,13 @@ if [ ! -f "$REPO_ROOT/.gitreins/config.yaml" ]; then
 fi
 
 cd "$REPO_ROOT"
+# PROF-002-adjacent: commit time judges the STAGED DIFF, so the Tier 1 secrets
+# scan runs `gitleaks protect --staged` — O(changed files), not O(worktree).
+# Without this every commit walked the entire tree, and concurrent fleet commits
+# stacked several 16-core scans into host-wide saturation. The judge's tier 1
+# pass does NOT set this and keeps the full-tree scope: it grades the committed
+# tree, where staged-only would be the wrong scope.
+export GITREINS_GUARD_STAGED=1
 __GITREINS_CMD__
 exit $?
 """
