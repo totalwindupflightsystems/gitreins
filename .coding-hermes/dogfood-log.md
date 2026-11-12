@@ -433,3 +433,22 @@ Open items, unchanged and not this lane's to close: `DF-028`, `DF-029`, `DF-030`
 
 No row added, edited or closed; no code, config or docs changed beyond this append; no test,
 benchmark or install re-run; no credential created; no repo visibility or permission touched.
+
+## Duplicate fire — 2026-11-12 (records-only, third fire)
+
+This is another delivery of tick `gitreins-dogfood-2026-11-12-13-39-15`. The delivering run and
+its first records-only verification are already committed; this fire did not repeat product use,
+performance measurement, install, board mutation, or judge work.
+
+Re-verified at HEAD `d2fe85674c8aec7d0e0293faca5ea30982b16241`, with `github/main` equal after fetch
+(`git rev-list --left-right --count HEAD...github/main` = `0 0`), clean porcelain, and no active Git
+operation marker. The log's real-delivery heading count for this tick remains `1`; this duplicate
+heading deliberately omits the tick id and cites it only in the body. The committed `PERF-3-R2-R2`
+row and its single `task_created` event remain present exactly once; duplicate task ids remain zero;
+`boardctl validate` remains `RESULT: OK` with 609 warnings and 0 errors. The committed performance
+captures and local install battery file exist; teardown and CI attribution are inherited from the
+prior records-only entry, not rechecked in this fire. The prior entry records a 25-row battery
+snapshot versus the original prose's 27→26 rows; the complete terminal ledger is not established here.
+
+No row added, edited, or closed; no code, config, board, visibility, permission, or credential state
+changed. This append is the only owned change for this fire.
