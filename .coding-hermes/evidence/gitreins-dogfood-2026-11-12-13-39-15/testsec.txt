@@ -1,0 +1,24 @@
+== tests section ==
+[PASS] tests (full)  passed=true  exit_code=0
+==============================================================================
+--- output (untruncated) ---
+scanners: nice=nice -n 10
+============================= test session starts ==============================
+platform linux -- Python 3.14.9, pytest-9.2.0, pluggy-1.7.0
+rootdir: /home/kara
+configfile: pytest.ini
+plugins: anyio-4.15.1
+collected 4 items
+
+tests/test_core.py ....                                                  [100%]
+
+============================== 4 passed in 0.20s ===============================
+
+==============================================================================
+[PASS] static_analysis  passed=true  exit_code=n/a
+==============================================================================
+--- output (untruncated) ---
+  mypy — clean
+  pyright — clean
+== whole log line count ==
+46 /home/kara/.hermes/cache/scratch/df-gitreins-2026-11-12-133915/consumer/.gitreins/logs/guard-20261112T135350.923809Z.log

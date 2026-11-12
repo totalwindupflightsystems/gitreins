@@ -1,0 +1,48 @@
+GitReins guard run log — full output (the console summary is bounded)
+run_utc: 2026-11-12T14:04:52Z
+workdir: /home/kara/.hermes/cache/scratch/df-gitreins-2026-11-12-133915/consumer
+test_mode: full
+test_targets: all (full mode)
+overall: FAIL
+guards: 4 (1 failed, 0 skipped)
+diagnostics:
+  first_failing_test: none detected
+  secrets_scanners: clean (gitleaks + builtin cross-check)
+  scanner_nice: scanners: nice=nice -n 10
+
+==============================================================================
+[FAIL] lint  passed=false  exit_code=1
+==============================================================================
+--- output (untruncated) ---
+ruff format --check: 1 file(s) would be reformatted — run `ruff format slugkit/core.py`
+Would reformat: slugkit/core.py
+1 file would be reformatted
+
+==============================================================================
+[PASS] secrets  passed=true  exit_code=n/a
+==============================================================================
+--- output (untruncated) ---
+gitleaks: clean
+
+==============================================================================
+[PASS] tests (full)  passed=true  exit_code=0
+==============================================================================
+--- output (untruncated) ---
+scanners: nice=nice -n 10
+============================= test session starts ==============================
+platform linux -- Python 3.14.9, pytest-9.2.0, pluggy-1.7.0
+rootdir: /home/kara
+configfile: pytest.ini
+plugins: anyio-4.15.1
+collected 4 items
+
+tests/test_core.py ....                                                  [100%]
+
+============================== 4 passed in 0.18s ===============================
+
+==============================================================================
+[PASS] static_analysis  passed=true  exit_code=n/a
+==============================================================================
+--- output (untruncated) ---
+  mypy — clean
+  pyright — clean

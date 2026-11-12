@@ -1,0 +1,46 @@
+GitReins guard run log — full output (the console summary is bounded)
+run_utc: 2026-11-12T13:53:50Z
+workdir: /home/kara/.hermes/cache/scratch/df-gitreins-2026-11-12-133915/consumer
+test_mode: full
+test_targets: all (full mode)
+overall: PASS
+guards: 4 (0 failed, 0 skipped)
+diagnostics:
+  first_failing_test: none detected
+  secrets_scanners: clean (gitleaks + builtin cross-check)
+  scanner_nice: scanners: nice=nice -n 10
+
+==============================================================================
+[PASS] secrets  passed=true  exit_code=n/a
+==============================================================================
+--- output (untruncated) ---
+gitleaks: clean
+
+==============================================================================
+[PASS] lint  passed=true  exit_code=0
+==============================================================================
+--- output (untruncated) ---
+All checks passed!
+
+==============================================================================
+[PASS] tests (full)  passed=true  exit_code=0
+==============================================================================
+--- output (untruncated) ---
+scanners: nice=nice -n 10
+============================= test session starts ==============================
+platform linux -- Python 3.14.9, pytest-9.2.0, pluggy-1.7.0
+rootdir: /home/kara
+configfile: pytest.ini
+plugins: anyio-4.15.1
+collected 4 items
+
+tests/test_core.py ....                                                  [100%]
+
+============================== 4 passed in 0.20s ===============================
+
+==============================================================================
+[PASS] static_analysis  passed=true  exit_code=n/a
+==============================================================================
+--- output (untruncated) ---
+  mypy — clean
+  pyright — clean

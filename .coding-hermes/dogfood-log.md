@@ -287,3 +287,89 @@ commit guard's Tier 1 on the records-only commit below.
 
 No row added, edited or closed; no code changed; no repo visibility or permission touched; no credentials
 created.
+
+## 2026-11-12 (tick `gitreins-dogfood-2026-11-12-13-39-15`) — consumer install at 0.21.0, gate exercised, install leg RUN on a fresh machine
+
+**Verdict: ✅ WORKS — for a CLI consumer the published release is honest at 0.21.0.** Target
+`/home/kara/gitreins` @ `dba0349a`, tree clean, branch `main`, remote `github`
+(`git@github.com:totalwindupflightsystems/gitreins.git`). Duplicate-fire check first: this tick id
+appears **zero** times on disk and zero times in `git show HEAD:.coding-hermes/dogfood-log.md`, so
+this fire delivers.
+
+**The user path taken — a real consumer, not the dev tree.** `pip install gitreins==0.21.0` into a
+fresh venv, then a 4-file Python package `slugkit` (naive→real unicode-aware `slugify`, 4 pytest
+cases) built *in the consumer*, because that is what a user does. `--version`, `install`, `init`,
+`doctor`, `guard`, `guard --staged-only`, `task create|start|complete|list`, guarded `git commit`
+through the hook `install` wrote, and `npx pyright` along the way. Times to first useful commit:
+minutes, no friction beyond the findings below.
+
+**`DF-028` reproduced live — the one honest red in the gate.** A network-hostile run (isolated npm
+cache, `npm_config_registry=http://127.0.0.1:9`, `npx` off the PATH) still logged:
+
+```
+42:[PASS] static_analysis  passed=true  exit_code=n/a
+45:  mypy — clean
+46:  pyright — clean
+```
+
+`exit_code=n/a` plus "clean" for a tool that could not be fetched. `DF-028` and `DF-030` were both
+still `pending` at tick start and already own this class, so nothing was filed for it — this fire is
+the freshest reproduction, on the published artifact rather than the dev tree. (One probe that would
+have settled whether the consumer venv itself carried `mypy` was refused for want of consent; the
+`pyright` half is not in doubt, since that path needs `npx` and the run had none.)
+
+**The gate is real, and that is worth recording.** A staged comment-only edit failed `lint`
+(`ruff format --check: 1 file(s) would be reformatted`) and the commit was refused (exit 1, tree
+unchanged). `secrets` clean (gitleaks), `tests (full)` PASS `exit_code=0` with `collected 4 items`,
+`lint` PASS `exit_code=0`. Thin criterion (`SLUG-3`, "alpha does a thing") is accepted but warned,
+and the warning names the missing `failure_condition`/`proof` — advisory, and it now audits the
+board as well. Not a defect; recorded because the opposite would have been one.
+
+**Two candidate findings were killed by verification — recorded so nobody re-files them.**
+(1) *Ancestor `pytest.ini` hijacks the consumer's test scope*: the guard's tests lane runs
+`python3 -m pytest -x --tb=short` with `cwd=workdir` (`engine/guard_manager.py:3095`,`:3181`;
+`gitreins/cli.py:1240`), and the log does show `rootdir: /home/kara` / `configfile: pytest.ini` —
+but `python -m pytest` passes an argument, so the ini's `testpaths` never narrows collection and a
+bare run collects the consumer's own 4 tests. No false green, no row. (2) *`git add -A` commits
+runtime artifacts*: `.gitreins/history/` is deliberately **not** ignored — `gitreins/cli.py:104-108`
+calls it "the durable record". Committing it is by design, no row.
+
+**Performance (Step 2b) — nothing a user can feel, and one stale premise re-measured.**
+Headline operation for a CLI consumer is the guarded commit. Warm guarded commit through the
+installed hook, 4-test Python consumer, ambient 42-entry PATH, loadavg 9.20 on 16 cores:
+**2.00 / 1.78 / 1.70 s** (exit 1 every time because lint refuses — by design, work re-staged each
+run). PATH A/B, n=3 each: 45 entries **2.17 / 1.24 / 1.22 s**, 5 entries **1.47 / 1.28 / 1.15 s** —
+no PATH scaling. That is exactly the mechanism `PERF-3-R2` (pending, 0.20.0, same 4-file shape)
+blamed for its `6.16-10.84 s`, median 7.55 s, "4.20 s at 5 PATH entries vs 10.07 s at 45". It does
+not reproduce at 0.21.0. Load differs (9.2 here vs 33 there), so this is **not** proof of a fix —
+filed as **`PERF-3-R2-R2`** with acceptance criteria demanding the controlled re-run at its own load
+before any third row. Everything else (install, init, doctor, a task lifecycle) sat in the
+few-second band; no profile was warranted and none was filed.
+
+**Install leg — RUN, not skipped, and install is PROVEN on a fresh machine.** `bunker-qa.sh status`
+first (`bunkerd=active docker=yes act=no uidmap=yes`, rc=0 — the host was up, so a SKIP would have
+been a lie), then `bunker-qa.sh run /home/kara/gitreins --ttl 2h`, ephemeral agent `c2367fbe`,
+27→26-row battery in `/tmp/bunker-qa-evidence-20261112T140225Z-160441.jsonl`. `fresh-install` **OK**:
+`pip install -e ".[dev]"` on the fresh box installed `gitreins-0.21.0` with `mypy-2.4.1`,
+`pyright-1.1.414`, `ruff-0.17.4` and a working `bin/gitreins`. `upgrade` **OK** (0.20.0 → HEAD
+clean), `tests` **OK** `rc=0`, `lint` **OK** `ruff check . rc=0`, `chaos-resource` **PASS** (suite
+survives a 3 GiB cap), `chaos-errorpath` **OK** (`gitreins guard` on a missing config → rc=1 naming
+the missing file), `toolchain-bootstrap` 10× **OK**; docker/compose/ui/chaos cells **N/A** (no
+Dockerfile, no compose, no web UI, no db/state files), `chaos-disconnect` **UNVERIFIED** (harness log
+lacks the cut marker). `ci-pass` **FAIL** is **harness-attributed, not a product claim**: `act` died at
+`Install system tools for LSP/static analysis`, which does `sudo apt-get install cppcheck` and
+`go install staticcheck@v0.8.1` inside the act container. Ground truth for the same commit, checked
+first-hand on the real forge: `gh api .../commits/dba0349a/check-runs` → `test (3.10) success`,
+`test (3.11) success`, `test (3.12) success`; last four `CI` runs on `main` = success. So CI is green
+where it counts; the act cell cannot express this workflow. Agent harvested; no credential minted, no
+host state touched, no visibility or permission change.
+
+**State left behind.** One row added — **`PERF-3-R2-R2`** (`boardctl create`, id from
+`board_next_id.py ... PERF --recur PERF-3-R2`, `grep -c` before and after = 1, `boardctl validate`
+→ `RESULT: OK`) — plus evidence in
+`.coding-hermes/evidence/gitreins-dogfood-2026-11-12-13-39-15/` (`FINDINGS.md`, `guard-clean-run.log`,
+`guard-lint-fail-run.log`, `warm3.txt`, `pathperf.txt`, `testsec.txt`, `lints.txt`, `barepytest.txt`,
+`dupcheck.txt`, `ownprobe.txt`). No row edited, closed or re-opened; no code or config changed; no
+visibility or permission touched; no credential created. `DF-029` remains the one row that needs a
+foreman close rather than a sibling — its premise is still superseded and this lane still writes no
+board state to close it.

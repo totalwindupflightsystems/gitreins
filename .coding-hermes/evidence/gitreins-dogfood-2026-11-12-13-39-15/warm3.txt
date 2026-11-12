@@ -1,0 +1,6 @@
+Command exited with non-zero status 1
+2.00 s
+Command exited with non-zero status 1
+1.78 s
+Command exited with non-zero status 1
+1.70 s

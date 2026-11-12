@@ -1,0 +1,35 @@
+== toplevel/HEAD ==
+/home/kara/gitreins
+dba0349ae3eb6d875b844901fa057ae5d44836de
+main
+== remote symref ==
+fatal: 'origin' does not appear to be a git repository
+fatal: Could not read from remote repository.
+
+Please make sure you have the correct access rights
+and the repository exists.
+ls-remote FAILED rc=128
+== fetch ==
+
+Please make sure you have the correct access rights
+and the repository exists.
+== parity ==
+fatal: ambiguous argument 'HEAD...origin/main': unknown revision or path not in the working tree.
+Use '--' to separate paths from revisions, like this:
+'git <command> [<revision>...] -- [<file>...]'
+== porcelain ==
+== tick headings on disk ==
+0
+== tick mentions on disk ==
+0
+== committed log headings ==
+0
+== committed log mentions ==
+0
+== last 8 committed log headings ==
+1:# Dogfood Log — gitreins-poc
+102:## 2026-10-23 (run 24, tick gitreins-dogfood-2026-10-23-10-02-55)
+112:## Dogfood Findings (2026-10-23 — run 26: battery-surface leg, install leg RUN on bunker-mvp)
+152:## Addendum — 2026-11-09 duplicate fire (same tick id), install leg run for real
+172:### 2026-11-09c — THIRD fire of tick `gitreins-dogfood-2026-11-09-12-54-05` — records-only, no arm earned
+229:### 2026-11-09d — FOURTH fire of tick `gitreins-dogfood-2026-11-09-12-54-05` — records-only, no arm earned

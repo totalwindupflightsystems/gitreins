@@ -1,0 +1,10 @@
+== bare default (no args) collect-only ==
+.hermes/cache/scratch/df-gitreins-2026-11-12-133915/consumer/tests/test_core.py::test_basic
+.hermes/cache/scratch/df-gitreins-2026-11-12-133915/consumer/tests/test_core.py::test_collapses_punctuation_runs
+.hermes/cache/scratch/df-gitreins-2026-11-12-133915/consumer/tests/test_core.py::test_transliterates_accents
+.hermes/cache/scratch/df-gitreins-2026-11-12-133915/consumer/tests/test_core.py::test_strips_punctuation_only_input
+
+4 tests collected in 0.25s
+rc=0
+== local config present? ==
+0

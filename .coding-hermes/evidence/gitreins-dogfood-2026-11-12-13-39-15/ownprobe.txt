@@ -1,0 +1,20 @@
+== cwd in gitreins ==
+165306 cwd=/home/kara/gitreins cmd=/usr/bin/bash -c source /var/tmp/hermes-scratch/hermes-snap-b708f408fcc7.sh >/dev/null 2>&1 || true
+export AI_AGENT="${AI_AGENT:-hermes-agent}" HERMES_AGENT="${HERMES_AGENT:-true}"
+export GIT_PAGER="${GIT_PAGER:-cat}" PAGER="${PAGER:-cat}"
+builtin cd -- /home/kara/gitreins || exit 126
+eval 'D=/home/kara/.hermes/cache/scratch/df-gitreins-2026-11-12-133915; P=$D/ownprobe.txt; { echo "== cwd in gitreins ==
+
+__hermes_rc=$? __hermes_ps=("${PIPESTATUS[@]}"); (exit $__hermes_rc) && :'
+__hermes_ec=$?
+umask 077
+__hermes_snap_tmp=$(mktemp /var/tmp/hermes-scratch/hermes-snap-b708f408fcc7.sh.tmp.XXXXXXXXXX) && { { ( unset ${!HERMES_
+printf '\n__HERMES_PIPE_b708f408fcc7__%s__HERMES_PIPE_b708f408fcc7__\n' "${__hermes_ps[*]-}"
+printf '\n__HERMES_CWD_b708f408fcc7__%s__HERMES_CWD_b708f408fcc7__\n' "$(pwd -P)"
+exit $__hermes_ec 
+3872501 cwd=/home/kara/gitreins cmd=/home/kara/gitreins/.venv/bin/python3 gitreins_mcp/server.py 
+== gitreins procs ==
+160441 bash /home/kara/.hermes/scripts/bunker-qa.sh run /home/kara/gitreins --ttl 2h
+161780 bash /home/kara/.hermes/scripts/bunker-qa.sh run /home/kara/gitreins --ttl 2h
+161784 bash /home/kara/.hermes/scripts/bunker-qa.sh run /home/kara/gitreins --ttl 2h
+3872501 /home/kara/gitreins/.venv/bin/python3 gitreins_mcp/server.py

@@ -1,0 +1,15 @@
+LOG=/home/kara/.hermes/cache/scratch/df-gitreins-2026-11-12-133915/consumer/.gitreins/logs/guard-20261112T140452.308667Z.log
+== FAIL cells ==
+14:[FAIL] lint  passed=false  exit_code=1
+15-==============================================================================
+16---- output (untruncated) ---
+17-ruff format --check: 1 file(s) would be reformatted — run `ruff format slugkit/core.py`
+18-Would reformat: slugkit/core.py
+19-1 file would be reformatted
+20-
+21-==============================================================================
+22-[PASS] secrets  passed=true  exit_code=n/a
+23-==============================================================================
+24---- output (untruncated) ---
+25-gitleaks: clean
+26-
