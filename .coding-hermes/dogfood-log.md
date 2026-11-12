@@ -452,3 +452,25 @@ snapshot versus the original prose's 27→26 rows; the complete terminal ledger 
 
 No row added, edited, or closed; no code, config, board, visibility, permission, or credential state
 changed. This append is the only owned change for this fire.
+
+## Duplicate fire — 2026-11-12 (records-only, fourth fire)
+
+This is another delivery of tick `gitreins-dogfood-2026-11-12-13-39-15`. The delivering run and
+its prior records-only verifications are already committed; this fire did not repeat product use,
+performance measurement, install, board mutation, or judge work.
+
+Re-verified at HEAD `8df2911160ec47dd448957faf78ed59ff661a4e6`, with remote `github/main` equal after
+fetch (`git rev-list --left-right --count HEAD...github/main` = `0 0`), clean porcelain, and no
+active Git operation marker or owning product process (the resident MCP server is a daemon, not a
+tree writer). The log's real-delivery heading count for this tick remains `1`; this duplicate
+heading deliberately omits the tick id and cites it only in the body.
+
+The committed `PERF-3-R2-R2` row appears exactly once with one `task_created` event; duplicate task
+ids remain zero; `boardctl validate -C .coding-hermes/board` returns `RESULT: OK` with 609
+warnings and 0 errors. The committed evidence directory and consumer report remain present, and the
+prior record's install, performance, CI-attribution, and teardown evidence were not re-run here. The
+prior record's preserved install snapshot remains explicitly bounded at 25 rows versus its prose
+summary of 27→26; no new claim is made from that discrepancy.
+
+No row added, edited, or closed; no code, config, board, evidence, visibility, permission, or
+credential state changed. This append is the only owned change for this fire.
