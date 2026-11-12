@@ -13,5 +13,16 @@
       "status": "committed",
       "commit": "ce91b5a261cef72b61cea2505be03a72a5cab332"
     }
-  ]
+  ],
+  "finished_at": "2026-11-12T20:39:07Z",
+  "recovery": {
+    "disposition": "already_integrated_no_worker_recovery",
+    "canonical_head": "0ea0920053e855092558d30c884438db8ca4bec2",
+    "remote_head": "0ea0920053e855092558d30c884438db8ca4bec2",
+    "worker_count_verified": 0,
+    "task_disposition": "GR-224 implementation ce91b5a2 is an ancestor of canonical main; board row is complete with judged evidence on 3cf691ee and task-completion event. No merge or fixup required.",
+    "gate": "SKIP: no surviving unlanded worker branch; current canonical tree has prior exact-head CI success and board validation RESULT: OK with 609 legacy warnings.",
+    "cleanup": "none: manifest recorded main as the worker path; no preserved worker worktree or branch to remove.",
+    "ci": "observed: exact-head GitHub run for 0ea0920053e855092558d30c884438db8ca4bec2 succeeded; one older failure at 18a8828e is superseded by later successful descendants."
+  }
 }
