@@ -373,3 +373,63 @@ host state touched, no visibility or permission change.
 visibility or permission touched; no credential created. `DF-029` remains the one row that needs a
 foreman close rather than a sibling — its premise is still superseded and this lane still writes no
 board state to close it.
+
+## Duplicate fire — 2026-11-12 (records-only) — the 13:39 tick re-fired; every cited leg verified, nothing re-run
+
+**Verdict: records-only — the committed record for this tick is complete and every artifact behind it
+checks out; no product use, benchmark, install or row was re-run.**
+
+Heading-count note: this heading deliberately does not repeat the tick id
+(`gitreins-dogfood-2026-11-12-13-39-15`, cited here in the body only), so
+`grep -c '^#\+ .*gitreins-dogfood-2026-11-12-13-39-15'` stays at **1** — the number of real
+deliveries. The delivering fire is the entry above, written 14:28-14:31Z, ~50 min after that tick's
+13:39:15Z start by the same session's earlier, pre-compaction context. Read what it claims before
+taking this branch: it walked every leg it names (consumer install and use, Step 2b performance,
+ephemeral-bunker install), so there are no unwalked legs to continue and no duplicate row is due.
+
+Ownership barrier before verification: `/home/kara/gitreins` porcelain empty, and a full `/proc` cwd
+sweep returned zero processes with a cwd inside the checkout — no live worker, guard, judge or
+collector owned the tree, so these reads (and this append) were safe.
+
+What was independently verified against committed blobs and live surfaces:
+
+- **Remote parity.** The remote is `github` (`git@github.com:totalwindupflightsystems/gitreins.git`),
+  not `origin`. `git fetch github main` then `git rev-list --left-right --count HEAD...github/main`
+  → `0  0`, and `git branch -r --contains HEAD` → `github/main`. HEAD `6eae7370` is pushed.
+- **Rows.** `PERF-3-R2-R2` appears exactly once in `git show HEAD:.coding-hermes/board/tasks.jsonl`
+  and once in `events.jsonl`, as a numeric-id `task_created` event (`id=1794171000000000050`,
+  `timestamp=2026-11-12T14:09:54Z`, matching the row's `created_at`) — working tree and committed
+  blob agree. `boardctl validate` → `RESULT: OK` with a warnings-only class (609 `legacy shape
+  tolerated` lines from long-predeating event ids), zero errors.
+- **Cited numbers vs raw captures.** `warm3.txt` = 2.00 / 1.78 / 1.70 s; `pathperf.txt` = longpath
+  2.17 / 1.24 / 1.22, shortpath 1.47 / 1.28 / 1.15; `guard-clean-run.log` = overall PASS, 4 guards,
+  `tests (full)` PASS exit 0 `collected 4 items ... 4 passed in 0.20s`, `static_analysis` PASS
+  `exit_code=n/a` — the DF-028 shape the record reports. Every quoted figure matches its artifact.
+  The `PERF-3-R2` premise the record argues against is real too: that row's own reasoning carries
+  `10.07 s at 45 PATH entries` vs `4.20 s at 5`, median 7.55 s over n=6.
+- **Install leg was really walked.** The claimed battery file still exists on disk
+  (`/tmp/bunker-qa-evidence-20261112T140225Z-160441.jsonl`, 25 rows): `fresh-install` OK with
+  `gitreins-0.21.0` and `/home/bunker-c2367fbe/tools/venv/bin/gitreins` in the artifact list,
+  `upgrade` OK (0.20.0 → HEAD), `tests` OK rc=0, `lint` OK rc=0, `chaos-resource` PASS,
+  `chaos-errorpath` OK, `ci-pass` FAIL (act, harness-attributed), `ci-act` and `chaos-disconnect`
+  UNVERIFIED, docker/compose/ui/corruption N/A. The CI claim behind that FAIL attribution was
+  re-checked at the forge rather than taken on trust: `check-runs` on `dba0349a` → `test (3.10)`,
+  `test (3.11)`, `test (3.12)` all `success`, and the last four `CI` runs on `main` (through HEAD
+  `6eae7370`) all `success`.
+- **Teardown.** `bunker-qa.sh status` → `bunkerd=active docker=yes act=no uidmap=yes`; `docker ps`
+  on `bunker-mvp` shows only `cadvisor` and `fleet-alloy` (5 weeks up), so the ephemeral agent
+  `c2367fbe` is gone and the "agent harvested" claim holds. No credential was minted and no
+  visibility or permission was touched by either fire.
+
+**Evidence boundary named, not re-run.** The record calls the battery a "27→26-row battery"; the
+preserved file holds **25** rows. The delta is a short snapshot, not corruption: the last row is a
+real terminal cell (`chaos-errorpath`, `2026-11-12T14:19:28Z`) and every cell the prose claims a
+verdict for is present (tally 15 OK / 1 PASS / 1 FAIL / 2 UNVERIFIED / 6 N/A). It under-states the
+harness's own final tally by one row and supports every claim drawn from it.
+
+Open items, unchanged and not this lane's to close: `DF-028`, `DF-029`, `DF-030`, `PERF-3-R2` and
+`PERF-3-R2-R2` are all still `pending`; `PERF-3-R2-R2`'s acceptance demands a controlled re-run at
+`PERF-3-R2`'s own loadavg before any third copy is opened.
+
+No row added, edited or closed; no code, config or docs changed beyond this append; no test,
+benchmark or install re-run; no credential created; no repo visibility or permission touched.
