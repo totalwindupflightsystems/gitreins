@@ -17,8 +17,10 @@
   "finished_at": "2026-11-12T20:39:07Z",
   "recovery": {
     "disposition": "already_integrated_no_worker_recovery",
-    "canonical_head": "0ea0920053e855092558d30c884438db8ca4bec2",
-    "remote_head": "0ea0920053e855092558d30c884438db8ca4bec2",
+    "canonical_head_at_recovery": "0ea0920053e855092558d30c884438db8ca4bec2",
+    "remote_head_at_recovery": "0ea0920053e855092558d30c884438db8ca4bec2",
+    "closeout_commit": "fdef322bda8919b31a8caaaab729d245b87b929d",
+    "remote_head_after_closeout": "fdef322bda8919b31a8caaaab729d245b87b929d",
     "worker_count_verified": 0,
     "task_disposition": "GR-224 implementation ce91b5a2 is an ancestor of canonical main; board row is complete with judged evidence on 3cf691ee and task-completion event. No merge or fixup required.",
     "gate": "SKIP: no surviving unlanded worker branch; current canonical tree has prior exact-head CI success and board validation RESULT: OK with 609 legacy warnings.",
