@@ -1,0 +1,17 @@
+{
+  "tick_id": "gitreins-foreman-2026-11-12-19-27-50",
+  "project": "gitreins",
+  "base_ref": "github/main",
+  "base_sha": "e5f7ee7f61b2c0fb6a2c16d066fad5fee8d21a02",
+  "budget": 1,
+  "mode": "serial",
+  "tasks": [
+    {
+      "task_id": "GR-224",
+      "worktree": "/home/kara/gitreins",
+      "branch": "main",
+      "status": "committed",
+      "commit": "ce91b5a261cef72b61cea2505be03a72a5cab332"
+    }
+  ]
+}
