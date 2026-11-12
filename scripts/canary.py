@@ -90,6 +90,8 @@ def verify_verdict_artifact(
             f"verdict commit mismatch for {path}: expected {judged_commit!r}, "
             f"got {verdict.get('commit')!r}"
         )
+    if not isinstance(verdict.get("passed"), bool):
+        raise CanaryProvenanceError(f"verdict is missing a boolean passed field: {path}")
     actual_worktree = verdict.get("worktree")
     if not isinstance(actual_worktree, str) or (
         os.path.realpath(actual_worktree) != os.path.realpath(str(worktree))

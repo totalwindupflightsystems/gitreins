@@ -1,11 +1,12 @@
 import hashlib
 import json
 import stat
+import sys
 from pathlib import Path
 
 import pytest
 
-from scripts.canary import CanaryProvenanceError, append_record, report, run_canary
+from scripts.canary import CanaryProvenanceError, append_record, main, report, run_canary
 
 
 TRACE_MARKER = (
@@ -156,6 +157,84 @@ def test_provenance_commit_mismatch_is_excluded(tmp_path: Path) -> None:
     append_record(ledger, record)
 
     assert report(ledger) == {"caught": 0, "missed": 0, "excluded": 1, "recall": 0.0}
+
+
+def test_verdict_without_boolean_passed_is_excluded(tmp_path: Path) -> None:
+    ledger = tmp_path / "canaries.jsonl"
+    record = _record(tmp_path, canary_id="missing-passed")
+    artifact = Path(record["artifact"])
+    verdict = json.loads(artifact.read_text(encoding="utf-8"))
+    del verdict["passed"]
+    artifact.write_text(json.dumps(verdict, sort_keys=True), encoding="utf-8")
+    record["provenance"]["artifact_sha256"] = hashlib.sha256(  # type: ignore[index]
+        artifact.read_bytes()
+    ).hexdigest()
+    append_record(ledger, record)
+
+    assert report(ledger) == {"caught": 0, "missed": 0, "excluded": 1, "recall": 0.0}
+
+
+def test_canary_runner_rejects_non_executable_binary(tmp_path: Path) -> None:
+    binary = tmp_path / "not-executable"
+    binary.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+
+    with pytest.raises(RuntimeError, match="not executable"):
+        run_canary(tmp_path / "runner.jsonl", binary_path=str(binary), scratch_root=tmp_path)
+
+
+def test_canary_runner_rejects_executable_without_persisted_verdict(tmp_path: Path) -> None:
+    binary = tmp_path / "no-verdict"
+    binary.write_text("#!/bin/sh\nexit 17\n", encoding="utf-8")
+    binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
+
+    with pytest.raises(RuntimeError, match="produced no persisted verdict"):
+        run_canary(tmp_path / "runner.jsonl", binary_path=str(binary), scratch_root=tmp_path)
+
+
+def test_canary_cli_report_and_run_outputs_are_coherent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    report_ledger = tmp_path / "report.jsonl"
+    append_record(report_ledger, _record(tmp_path, canary_id="cli-report"))
+
+    monkeypatch.setattr(sys, "argv", ["canary.py", str(report_ledger)])
+    main()
+    normal_output = json.loads(capsys.readouterr().out)
+    assert normal_output == {"caught": 1, "missed": 0, "excluded": 0, "recall": 1.0}
+
+    binary = tmp_path / "cli-fake-gitreins"
+    binary.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, pathlib, sys\n"
+        "root = pathlib.Path.cwd()\n"
+        "task = sys.argv[2]\n"
+        "commit = __import__('subprocess').check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()\n"
+        "path = root / '.gitreins' / 'verdicts' / 'verdict.json'\n"
+        "path.parent.mkdir(parents=True, exist_ok=True)\n"
+        "path.write_text(json.dumps({'task_id': task, 'commit': commit, 'worktree': str(root), 'passed': False}))\n",
+        encoding="utf-8",
+    )
+    binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
+    run_ledger = tmp_path / "run.jsonl"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "canary.py",
+            str(run_ledger),
+            "--run",
+            "--binary",
+            str(binary),
+            "--scratch-root",
+            str(tmp_path),
+        ],
+    )
+    main()
+    run_output = json.loads(capsys.readouterr().out)
+    assert run_output == {
+        "records": 1,
+        "report": {"caught": 1, "missed": 0, "excluded": 0, "recall": 1.0},
+    }
 
 
 def test_canary_runner_uses_external_binary_and_verifies_persisted_verdict(
