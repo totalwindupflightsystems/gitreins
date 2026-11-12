@@ -474,3 +474,54 @@ summary of 27→26; no new claim is made from that discrepancy.
 
 No row added, edited, or closed; no code, config, board, evidence, visibility, permission, or
 credential state changed. This append is the only owned change for this fire.
+
+## Duplicate fire — 2026-11-12 (records-only, fourth duplicate / fifth fire)
+
+This is a fifth delivery of tick `gitreins-dogfood-2026-11-12-13-39-15` (13:39:15Z start), fired at
+~15:14Z against an already-complete record. No product use, performance measurement, install, judge
+run or board mutation was repeated. The real-delivery heading count for this tick remains `1`; this
+heading deliberately omits the tick id and cites it only here.
+
+**Ownership barrier.** `/home/kara/gitreins` porcelain empty; `git worktree list` shows no marker in
+any linked worktree (no `REBASE_HEAD`/`MERGE_HEAD`/`CHERRY_PICK_HEAD`/`REVERT_HEAD`/`index.lock`, no
+rebase dir); `/proc` cwd sweep matched only this fire's own shell and the resident
+`gitreins_mcp/server.py` daemon (PID 3872501, a long-lived socket server, not a tree writer). Reads
+and this append were safe.
+
+**Re-derived at HEAD `c4d8666d`, not taken from prose.** Remote is `github`
+(`git@github.com:totalwindupflightsystems/gitreins.git`), not `origin`: after `git fetch github main`,
+`git rev-list --left-right --count HEAD...github/main` = `0  0` and `git branch -r --contains HEAD`
+= `github/main`. Committed rows: `PERF-3-R2-R2` and `PERF-3-R2` appear exactly once each in
+`HEAD:.coding-hermes/board/tasks.jsonl`; duplicate task ids across the whole board = zero;
+`boardctl validate -C .coding-hermes/board` = `RESULT: OK (609 warning(s))`, warnings only. The
+preserved captures still say what the delivery quotes: `warm3.txt` 2.00 / 1.78 / 1.70 s,
+`pathperf.txt` longpath 2.17 / 1.24 / 1.22 and shortpath 1.47 / 1.28 / 1.15 s, and
+`guard-clean-run.log` line 42 `[PASS] static_analysis passed=true exit_code=n/a` with line 35
+`collected 4 items` — the DF-028 shape, on the artifact.
+
+**Three things this fire checked that the earlier duplicate records inherited rather than verified.**
+(1) *CI at the record's own HEAD*, not just at the product commit `dba0349a`: `gh api
+.../commits/c4d8666d/check-runs` → `test (3.10)`, `test (3.11)`, `test (3.12)` all `success`, and the
+last four `CI` runs on `main` (`6eae7370`, `d2fe8567`, `8df29111`, `c4d8666d`) all `success` — the
+closeout log commits themselves are green, so the records-only chain did not break `main`.
+(2) *Teardown re-censused at 15:15Z*: `bunker-qa.sh status` → `bunkerd=active docker=yes act=no
+uidmap=yes`; `docker ps` on `bunker-mvp` shows only `cadvisor` (Up 5 weeks) and `fleet-alloy`
+(Up 5 weeks), so ephemeral agent `c2367fbe` is genuinely gone and no scratch container or loopback
+daemon from this run survives.
+(3) *Pending-row premises are still live at HEAD*, so no row has gone stale and nothing was
+re-filed: DF-028's mechanism is intact — `engine/static_analysis.py:101` still offers `"npx pyright"`
+as a candidate and `find_tool()` at `:129` still resolves it, while the observed log still prints
+`exit_code=n/a` as clean; DF-030's PATH-based interpreter resolution is still at
+`engine/guard_manager.py:995-1010` (`shutil.which` plus a pytest probe). Both remain `pending`, as do
+`DF-029` (still owed a foreman close — its premise is superseded by the install leg that now runs)
+and `PERF-3-R2` / `PERF-3-R2-R2` (the latter's acceptance still demands a controlled re-run at
+`PERF-3-R2`'s own loadavg before a third copy).
+
+**Fleet observation, not a gitreins finding, and deliberately unfiled.** This tick has now fired five
+times across ~1h35m against a complete delivery, and each fire's only owned change is another
+records-only append. That is scheduler-side duplicate dispatch, not product behaviour; it belongs on
+the scheduler lane's board, which this dogfood lane does not write. Recorded here so the cost is
+visible: five fires, one delivery.
+
+No row added, edited, or closed; no code, config, board or evidence changed; no visibility,
+permission or credential touched. This append is the only owned change for this fire.
