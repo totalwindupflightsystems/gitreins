@@ -293,6 +293,15 @@ grep '^gitreins_' /tmp/m | sed 's/{.*//; s/ .*//' | sort -u    # 6 distinct name
 # gitreins_history_bytes gitreins_jobs_orphaned_running gitreins_jobs_records
 # gitreins_serve_up gitreins_verdicts_failed_total gitreins_verdicts_total
 ```
+> **That sample inventory is a COLD count, not the full export.** Only `/metrics` itself had
+> been answered, so every lazy `serve` family (`requests_total` and the duration histogram)
+> contributed zero samples and the "6 distinct names" list is missing them. A *warm* window —
+> one `GET /health`, `GET /metrics`, `GET /` — was measured 2026-11-13 on the same tree:
+> `200 text/plain; version=1.0.0; charset=utf-8 5292 bytes`, `grep -c '^gitreins_'` → **29
+> sample lines**, **12 distinct names** (`…_serve_http_requests_total`,
+> `…_serve_http_requests_created`, `…_serve_http_request_duration_seconds_{bucket,count,sum,created}`
+> joining the six above). Never conclude a metric is unregistered from a cold `/metrics` —
+> grep `gitreins/serve.py` or the test that asserts it (§6).
 - **The `serve` HTTP series are LAZY — this breaks the registration check as written.**
   On a freshly started server `/metrics` emits only `HELP`/`TYPE` for
   `gitreins_serve_http_requests_total`: **zero samples**, so
@@ -317,6 +326,22 @@ grep '^gitreins_' /tmp/m | sed 's/{.*//; s/ .*//' | sort -u    # 6 distinct name
   surface refused the remote `sudo` write itself — *"BLOCKED: Command timed out without
   user response. The user has NOT consented"* — so registering it is an **owner action on a
   consented surface**, not a GitReins code change.
+- **Re-measured 2026-11-13 (`gitreins-ops` tick `15-40-31`) — registration still absent, still
+  consent-gated.** `sudo -n grep -n -A6 'job_name: gitreins' …/prometheus.yml` → exit 1, no
+  match; the PromQL selector's raw equivalent
+  — `/api/v1/targets` filtered to `.labels.job=="gitreins"` — prints **0 lines**. The remote
+  write was attempted again (the row asks for a literal re-attempt) and refused again with the
+  same consent message, so the step remains an owner action. **Post-refusal census proves the
+  config is untouched**: `sha256sum` → `08c876193177f98011f945d59a43761d6efe848b19b4c86f2f86cd5a2bf0fc40`,
+  `wc -l` → `121`, backups matching `bak-obsgr4` → `0`, `grep -c "job_name: gitreins"` → `0`.
+  The endpoint itself is unchanged and healthy in a bounded window (started, scraped, killed):
+  `/health` → `200 {"status": "ok", "version": "0.21.0", "repo": "gitreins", "path": "/home/kara/gitreins"}`,
+  `/` → `200`, `/metrics` → `200` with `gitreins_serve_up 1.0`,
+  `gitreins_jobs_orphaned_running 42` (every one of the job store's 42 `running` records is an
+  orphan — dead pid, not live work), `gitreins_verdicts_total{repo="gitreins"} 506`,
+  `gitreins_verdicts_failed_total{repo="gitreins"} 189`, `gitreins_history_bytes 5.83e+07`;
+  after the kill `ss -ltn | grep -c ':8616'` → `0`. Steady state is still DOWN by design (§8
+  item 1), so the registered job would stay `up 0` outside an operator window.
 
 ---
 
@@ -342,9 +367,15 @@ count(gitreins_serve_http_requests_total{product="gitreins"}) >= 1       # ONLY 
 rate(gitreins_serve_http_requests_total{product="gitreins"}[5m])         # > 0 under traffic
 gitreins_jobs_orphaned_running{product="gitreins"}                       # expected ~40 today
 ```
-Do **not** query `gitreins_serve_http_request_duration_seconds_bucket`: no such metric is
-exported (`gitreins/serve.py` registers no duration histogram), so that expression is
-permanently empty and would have shown as a silent blank panel, not an error.
+Do query `gitreins_serve_http_request_duration_seconds_bucket`: **it is registered**
+(`gitreins/serve.py:86`, present since `e2271623` "feat(serve): /metrics endpoint with 5 core
+metrics", and asserted by `tests/test_serve.py:255`), labelled `route` and `le`. It is lazy
+like the rest of the `serve` HTTP family: a cold server exports the name but **no samples**,
+and an empty PromQL result reads exactly like "this metric does not exist" — which is the
+wrong conclusion the 2026-11-09 pass recorded here, drawn from a cold `/metrics`. After one
+answered request it has series, measured 2026-11-13:
+`gitreins_serve_http_request_duration_seconds_bucket{le="0.005",route="health"} 1.0`.
+Route latency: `histogram_quantile(0.9, sum by (le, route) (rate(gitreins_serve_http_request_duration_seconds_bucket{product="gitreins"}[5m])))`.
 
 **CLI records (after 5b lands):**
 ```bash
