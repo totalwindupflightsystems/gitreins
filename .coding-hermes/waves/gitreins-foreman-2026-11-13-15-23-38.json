@@ -1,0 +1,16 @@
+{
+  "tick_id": "gitreins-foreman-2026-11-13-15-23-38",
+  "project": "gitreins",
+  "base_ref": "main",
+  "base_sha": "ced2a4e73f42c9afdb8a06bd6907000d109d3fbf",
+  "wave_budget": 12,
+  "workers": [
+    {
+      "task_id": "GR-189",
+      "worktree": "/home/kara/worktrees/gitreins-GR-189",
+      "branch": "wt/GR-189",
+      "status": "dispatched"
+    }
+  ],
+  "note": "Single worker: GR-189 is the highest-priority dispatchable row; other P1 rows have disjoint or blocked scopes but this tick uses the serial fallback because the requested foreman contract is max one worker per tick."
+}
