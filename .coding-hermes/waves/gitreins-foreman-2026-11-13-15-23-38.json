@@ -9,8 +9,23 @@
       "task_id": "GR-189",
       "worktree": "/home/kara/worktrees/gitreins-GR-189",
       "branch": "wt/GR-189",
-      "status": "dispatched"
+      "status": "no-work-landed",
+      "branch_tip": "ced2a4e73f42c9afdb8a06bd6907000d109d3fbf",
+      "merge_base_at_recovery": "ced2a4e73f42c9afdb8a06bd6907000d109d3fbf",
+      "current_main_at_recovery": "4f7f047c79be0c37726603c9fbdaed7f1d61fd57",
+      "branch_only_commits": 0,
+      "gate": "not-run: zero commits landed; branch tip is an ancestor of current main",
+      "cleanup": "preserved as evidence; no merge or fixup worker dispatched"
     }
   ],
-  "note": "Single worker: GR-189 is the highest-priority dispatchable row; other P1 rows have disjoint or blocked scopes but this tick uses the serial fallback because the requested foreman contract is max one worker per tick."
+  "finished_at": "2026-11-14T04:12:00Z",
+  "recovery": {
+    "disposition": "recovered-no-work-landed",
+    "canonical_head": "4f7f047c79be0c37726603c9fbdaed7f1d61fd57",
+    "remote_head": "4f7f047c79be0c37726603c9fbdaed7f1d61fd57",
+    "board_task": "GR-189 remains pending for a future dispatch; the prior dispatch failure and zero-write outcome are already recorded on the row with an explicit reason",
+    "board_validation": "RESULT: OK with legacy warnings",
+    "worktree_and_branch": "preserved as evidence because no implementation commit landed"
+  },
+  "note": "Recovered before normal QA work. The preserved GR-189 branch has zero commits beyond the recorded base and is already an ancestor of current main; no merge, gate, or fixup dispatch was applicable."
 }
