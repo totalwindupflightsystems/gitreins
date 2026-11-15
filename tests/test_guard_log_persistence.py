@@ -439,7 +439,8 @@ class TestNewestGuardLogAccessor:
 
 
 class TestCallersCiteTheLog:
-    def test_tier1_pipeline_step_data_points_at_the_log(self, tmp_path: Path) -> None:
+    def test_tier1_pipeline_step_does_not_inherit_a_guard_run_log(self, tmp_path: Path) -> None:
+        """Pipeline evidence omits logs produced by an earlier guard run."""
         from engine.pipeline import Pipeline
 
         workdir = _probe_workdir(tmp_path, _passing_script())
@@ -467,15 +468,24 @@ class TestCallersCiteTheLog:
         out = Pipeline(config, workdir).run({"id": "t1", "criteria": []}, trigger="pre-eval")
 
         tier1_step = out["stages"]["tier1"]["steps"][0]
-        assert tier1_step["data"]["guard_log"] == log_path
-        assert os.path.isfile(tier1_step["data"]["guard_log"])
-        # Only the tier-1 stage carries the raw guard evidence.
+        assert "guard_log" not in tier1_step["data"]
+        assert log_path != tier1_step["data"].get("guard_log")
+        # Only the tier-1 stage carries raw guard evidence when it owns the run.
         assert "guard_log" not in out["stages"]["tier2"]["steps"][0]["data"]
 
-    def test_tier1_step_without_a_log_carries_no_path(self, tmp_path: Path) -> None:
+    def test_tier1_step_with_only_an_old_log_carries_no_path(self, tmp_path: Path) -> None:
+        """A pipeline verdict must not inherit evidence from an unrelated run."""
         from engine.pipeline import Pipeline
 
-        workdir = _probe_workdir(tmp_path)  # no guard run → no log
+        workdir = _probe_workdir(tmp_path)
+        old_log = Path(guard_log_dir(workdir))
+        old_log.mkdir(parents=True)
+        stale = old_log / "guard-20261105T170854.274025Z.log"
+        stale.write_text(
+            "GitReins guard run log\\n"
+            "run_utc: 2026-11-05T17:08:54Z\\n"
+            "overall: FAIL (DEGRADED — skipped checks)\\n"
+        )
 
         config = {
             "pipeline": {
