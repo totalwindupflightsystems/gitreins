@@ -693,3 +693,46 @@ listeners on port 8699, no `/proc/*/cwd` under the tick scratch tree.
 16:12:35 Z) — none of them this fire's; `01ef49f2` is a live sibling lane's run and was left
 running. No code, config,
 visibility, permission or credential state changed.
+
+## Duplicate fire — 2026-11-15 (same tick `gitreins-dogfood-2026-11-15-15-54-49`, third fire) — perf leg made verifiable
+
+This fire inherited two landed records (`70af0aa1` product use + rows `GR-225`..`GR-230`;
+`bbbb2c4d` install leg + evidence trail) and did not re-walk product use or the bunker battery.
+It closed the one leg both prior fires left as a claim: **the timings had no artifacts**. Nothing was
+dispatched (`WAVE_BUDGET: 2`, zero workers) and no code, row status or credential changed.
+
+**Re-derived, not re-asserted.** All six rows are on the board exactly once, `status=pending`;
+`boardctl validate -C .coding-hermes/board` = `RESULT: OK (609 warning(s))`, all pre-existing. The
+`perf/` artifacts from this fire sit beside the install and real-use evidence under
+`.coding-hermes/evidence/gitreins-dogfood-2026-11-15-15-54-49/`.
+
+**The headline operation costs 3.26 s and that is a remote call, not a hot path.** Re-measured on
+the consumer install against `clone-fresh` (HEAD `60eb8fac`, code-identical to main `f2704a28` —
+the diff touches only `.coding-hermes/`): floor (`--version`) 0.19 s, local index query
+(`hilo graph search preflight`) 0.06 s, `resolve --json` median **3.26 s** (3.26 / 2.69 / 3.40,
+n=3). So 0.25 s is local and ~3.01 s is the remote Jev call plus bundle assembly. It reproduces the
+first fire's `3,217 ms` to within 43 ms **while host load was 5× higher** (load1 22–25 vs 4.5), which
+is the real conclusion: the cost is network-bound and insensitive to the machine. Artifacts:
+`perf/{env,floor,hilo,resolve_warm}.txt`, `perf/resolve_warm_{1,2,3}.json`, `perf/FINDINGS.md`.
+
+**No `PERF-<n>` row, deliberately, and for the same reason as the first fire** — a win nobody can
+feel is not a finding. Three runs produced `RESOLVED / 0.96 / eq 2 / manifest 5 / 12 seeds /
+cost_usd 0.00051849 / 12345 in / 96 out` with distinct `request_id`s; leg spend ≈ $0.0016.
+
+**One mechanism sharpened, no new row.** `.gitreins/usage.jsonl` rows for those calls carry only
+`ts, tokens_in, tokens_out, cache_read, cache_write, step` — no `model`, no `provider`, no `cost_usd`
+— while the verdict object carries `typesafe/jev-1.13-20260917` and `0.00051849`. That is *why*
+`/api/stats` attributes usage to the config default and drops the cost, i.e. `GR-229` is correct at
+the ledger layer and stays pending; cited rather than duplicated.
+
+**Cold arm UNVERIFIED — declared, not silently passed.** A state-fresh clone was needed for the cold
+arm; the setup command (clone into a new scratch root after `rm -rf` of it) was **blocked by the
+consent gate** with no answer in 5 minutes, was not retried, and no alternative route was used. The
+earlier `5,547 ms` cold and `17,367 ms` `hilo graph warm` figures therefore remain shell-measured
+and unretained, and this record does not restate them as measured fact. The stale-index mechanism
+they illustrated is independent of the timing and remains verified by inspection (`GR-225`).
+
+**State left behind.** New and only change: `perf/` (4 text artifacts + 3 verdict JSONs +
+`FINDINGS.md`) and this append. `gitreins resolve` was exercised in the scratch clone, never in this
+tree, so no board, usage or history state was written here. No row closed, none dispatched, no
+visibility, permission or credential change.

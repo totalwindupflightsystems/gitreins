@@ -1,0 +1,213 @@
+{
+  "question": "Does this repository implement the pre-dispatch premise check in a module named engine/preflight.py?",
+  "verdict": "RESOLVED",
+  "probability": 0.96,
+  "missing_kind": "none",
+  "missing_kind_probability": 1.0,
+  "evidence_quality": 2,
+  "evidence_quality_score": 1.99,
+  "evidence_quality_legend": {
+    "0": "the bundle only mentions the topic",
+    "1": "adjacent code: related, but not the code path the question asks about",
+    "2": "the exact code path the question asks about is present",
+    "3": "the exact code path is present together with its test"
+  },
+  "manifest": [
+    {
+      "file": "gitreins/cli.py",
+      "provenance": "ast_exact",
+      "score": 0.8,
+      "bytes": 11885,
+      "truncated": false,
+      "source": "understand",
+      "lines": 241
+    },
+    {
+      "file": "engine/preflight.py",
+      "provenance": "ast_exact",
+      "score": 1.0,
+      "bytes": 15482,
+      "truncated": false,
+      "source": "understand",
+      "lines": 316
+    },
+    {
+      "file": "engine/guard_manager.py",
+      "provenance": "ast_exact",
+      "score": 0.8,
+      "bytes": 14509,
+      "truncated": false,
+      "source": "understand",
+      "lines": 272
+    },
+    {
+      "file": "engine/judge.py",
+      "provenance": "ast_exact",
+      "score": 0.8,
+      "bytes": 967,
+      "truncated": false,
+      "source": "understand",
+      "lines": 22
+    },
+    {
+      "file": "engine/worktree_manager.py",
+      "provenance": "ast_exact",
+      "score": 0.8,
+      "bytes": 1624,
+      "truncated": false,
+      "source": "understand",
+      "lines": 23
+    }
+  ],
+  "model": "typesafe/jev-1.13-20260917",
+  "request_id": "gen-dec-1794762962-z9Z7zdbKNxox0Kn7SE6m",
+  "provider": "TypeSafe",
+  "tokens_estimated": 13068,
+  "input_tokens": 12345,
+  "output_tokens": 96,
+  "cost_usd": 0.00051849,
+  "clipped": true,
+  "clip_disclosure": "state clipped to the worst-case wall: 44262 chars / 954 line(s) omitted, 13068 tokens estimated (32908 at the densest measured rate); 6 manifest file(s) fell entirely outside the clipped state and are no longer claimed as evidence: engine/pipeline.py, engine/__init__.py, scripts/check_cli_examples.py, engine/cli_metrics.py, gitreins_mcp/server.py",
+  "chars_dropped": 44262,
+  "lines_dropped": 954,
+  "dropped_files": [],
+  "budget_exhausted": false,
+  "seeds": [
+    {
+      "file": "gitreins/cli.py",
+      "score": 0.0308,
+      "symbols": [
+        "py"
+      ]
+    },
+    {
+      "file": "engine/preflight.py",
+      "score": 0.03,
+      "symbols": [
+        "engine",
+        "preflight",
+        "py"
+      ]
+    },
+    {
+      "file": "engine/fingerprint.py",
+      "score": 0.0283,
+      "symbols": [
+        "engine",
+        "py"
+      ]
+    },
+    {
+      "file": "engine/wiring.py",
+      "score": 0.0276,
+      "symbols": [
+        "engine",
+        "py"
+      ]
+    },
+    {
+      "file": "engine/guard_manager.py",
+      "score": 0.0269,
+      "symbols": [
+        "engine",
+        "py"
+      ]
+    },
+    {
+      "file": "engine/data_protection.py",
+      "score": 0.0267,
+      "symbols": [
+        "engine",
+        "py"
+      ]
+    },
+    {
+      "file": "engine/doctor.py",
+      "score": 0.025,
+      "symbols": [
+        "engine",
+        "py"
+      ]
+    },
+    {
+      "file": "gitreins/__main__.py",
+      "score": 0.0244,
+      "symbols": [
+        "py"
+      ]
+    },
+    {
+      "file": "engine/task_manager.py",
+      "score": 0.0239,
+      "symbols": [
+        "engine",
+        "py"
+      ]
+    },
+    {
+      "file": "engine/evidence.py",
+      "score": 0.0238,
+      "symbols": [
+        "engine",
+        "py"
+      ]
+    },
+    {
+      "file": "engine/pipeline.py",
+      "score": 0.0224,
+      "symbols": [
+        "engine",
+        "py"
+      ]
+    },
+    {
+      "file": "engine/prescreen.py",
+      "score": 0.0218,
+      "symbols": [
+        "engine",
+        "py"
+      ]
+    }
+  ],
+  "dependency_paths": {
+    "gitreins/cli.py": [
+      "0",
+      "tests/test_cli.py",
+      "tests/test_v07_features.py",
+      "tests/test_antares.py",
+      "engine/worktree_manager.py",
+      "tests/test_guard_degraded.py",
+      "gitreins/__main__.py",
+      "tests/test_mcp_verdict_persistence.py"
+    ],
+    "engine/preflight.py": [
+      "0",
+      "gitreins/cli.py",
+      "tests/test_cli_preflight.py",
+      "tests/test_preflight.py"
+    ],
+    "engine/fingerprint.py": [
+      "0",
+      "engine/persist.py",
+      "engine/judge.py",
+      "engine/review_state.py",
+      "gitreins/cli.py",
+      "tests/test_fingerprint.py",
+      "tests/test_review_state.py"
+    ]
+  },
+  "abstain_reason": null,
+  "abstain_detail": null,
+  "abstain_action": null,
+  "attempts": [
+    "candidate 1/6: ok"
+  ],
+  "exit_code": 0,
+  "notes": [
+    "state clipped to the worst-case wall: 44262 chars / 954 line(s) omitted, 13068 tokens estimated (32908 at the densest measured rate)",
+    "6 manifest file(s) fell entirely outside the clipped state and are no longer claimed as evidence: engine/pipeline.py, engine/__init__.py, scripts/check_cli_examples.py, engine/cli_metrics.py, gitreins_mcp/server.py",
+    "state clipped to the worst-case wall: 44262 chars / 954 line(s) omitted, 13068 tokens estimated (32908 at the densest measured rate); 6 manifest file(s) fell entirely outside the clipped state and are no longer claimed as evidence: engine/pipeline.py, engine/__init__.py, scripts/check_cli_examples.py, engine/cli_metrics.py, gitreins_mcp/server.py",
+    "token check: estimated=13068 reported=12345 chars=45741 chars/token=3.71",
+    "safety bound: 32908 tokens at the densest measured rate (1.39 chars/token) vs the 28000 ceiling"
+  ]
+}

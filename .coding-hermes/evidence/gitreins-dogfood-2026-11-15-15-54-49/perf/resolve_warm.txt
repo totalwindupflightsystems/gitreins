@@ -1,0 +1,3 @@
+warm i=1 wall_s=3.26 rc=0 load1=22.16 verdict/prob/eq/manifest/cost/in_tok=RESOLVED	0.96	2	5	0.00051849	12345
+warm i=2 wall_s=2.69 rc=0 load1=22.16 verdict/prob/eq/manifest/cost/in_tok=RESOLVED	0.96	2	5	0.00051849	12345
+warm i=3 wall_s=3.40 rc=0 load1=22.47 verdict/prob/eq/manifest/cost/in_tok=RESOLVED	0.96	2	5	0.00051849	12345
