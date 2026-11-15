@@ -881,22 +881,15 @@ class Pipeline:
             )
 
     def _guard_log_ref(self, stage_id: str | None) -> str | None:
-        """Newest persisted guard-run log, for tier-1 step evidence (DF-018).
+        """Return no guard-log path unless this pipeline owns that run.
 
-        The path derivation lives in ONE place (engine.guard_manager's
-        accessor) — the tier-1 stage points a written verdict at the raw,
-        untruncated guard output instead of duplicating the path logic.
-        Returns None when the stage is not tier1, or when no guard run has
-        persisted a log for this workdir yet.
+        A pipeline stage does not produce a guard run. Looking up the newest
+        file on disk therefore binds tier-1 evidence to an unrelated earlier
+        run (AUG-160). The guard command itself attaches its own persisted log
+        through ``Tier1Result.extra``; a pipeline verdict omits this optional
+        field when it has no run-scoped log to attach.
         """
-        if stage_id != "tier1":
-            return None
-        try:
-            from engine.guard_manager import newest_guard_log
-
-            return newest_guard_log(self.workdir)
-        except Exception:  # evidence plumbing must never fail a pipeline
-            return None
+        return None
 
     def _run_script_step(
         self, step_def: dict[str, Any], task: dict[str, Any], stage_id: str | None = None
