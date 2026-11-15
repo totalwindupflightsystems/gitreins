@@ -65,6 +65,7 @@ class Judge:
         grade_full_tree: bool = True,
         persist_log: bool = True,
         persist_telemetry: bool = True,
+        persist_review_state: bool = True,
     ) -> None:
         self.workdir = workdir
         self.llm = llm
@@ -79,7 +80,9 @@ class Judge:
         # and `persist_telemetry=False` keeps the pipeline's ai_eval step from
         # appending to `.gitreins/usage.jsonl` there. Keyword-only and both
         # defaulting True so no existing caller changes.
+        self.persist_log = persist_log
         self.persist_telemetry = persist_telemetry
+        self.persist_review_state = persist_review_state
         self.scan_root = scan_root or workdir
         # GR-218 / SCHED-GAP-1753: a judge run grades the DELIVERED tree, not
         # the index. `gitreins task complete` and the worktree judge path both
@@ -207,22 +210,56 @@ class Judge:
             record = reflection.to_dict()
             if record is not None:
                 review.reflection = record
-        from engine.persist import VerdictPersister
-        from engine.review_state import reconcile_review
+        # Ephemeral judges promise a read-only evaluation surface.  They do
+        # not persist review state or create the lock sidecar.
+        if not self.persist_review_state:
+            result.second_pass_review = review.to_dict()
+            return
+        from engine.fingerprint import compute as compute_fingerprint
+        from engine.review_state import HumanReviewDecision, reconcile_review_findings
 
+        observed = compute_fingerprint(self.workdir)
         review_data = review.to_dict()
-        # Review history is read from the same repository-owned persistence
-        # surface that writes verdicts. A malformed or unavailable prior entry
-        # is handled fail-closed by reconcile_review.
-        prior = None
-        try:
-            prior_entries = VerdictPersister(self.workdir).list_verdicts(
-                n=1, task_id=result.task_id
-            )
-            prior = prior_entries[0] if prior_entries else None
-        except Exception:
-            logger.warning("Unable to read prior finding state", exc_info=True)
-        result.second_pass_review = reconcile_review(self.workdir, review_data, prior)
+        if observed.state != "authoritative" or not observed.digest:
+            review_data["review_state"] = {
+                "emitted": [],
+                "carried": [],
+                "state_error": f"working-tree fingerprint unavailable: {observed.state}",
+            }
+            result.second_pass_review = review_data
+            return
+        result.working_tree_fingerprint = observed.digest
+        decisions: list[HumanReviewDecision] = []
+        configured_decisions = review_cfg.get("human_decisions", ())
+        for raw_decision in configured_decisions or getattr(review, "human_decisions", ()):
+            if isinstance(raw_decision, HumanReviewDecision):
+                decisions.append(raw_decision)
+            elif isinstance(raw_decision, dict):
+                try:
+                    decisions.append(HumanReviewDecision(**raw_decision))
+                except (TypeError, ValueError):
+                    review_data["review_state"] = {
+                        "emitted": [],
+                        "carried": [],
+                        "state_error": "invalid human review decision",
+                    }
+                    result.second_pass_review = review_data
+                    return
+        state_result = reconcile_review_findings(
+            self.workdir,
+            [finding.to_dict() for finding in review.findings],
+            human_decisions=decisions,
+            max_findings=int(max_findings),
+        )
+        review_data["findings"] = list(state_result.emitted)
+        receipt: dict[str, Any] = {
+            "emitted": list(state_result.emitted),
+            "carried": list(state_result.carried),
+        }
+        if state_result.state_error is not None:
+            receipt["state_error"] = state_result.state_error
+        review_data["review_state"] = receipt
+        result.second_pass_review = review_data
 
     def _prepare_auger_task(
         self, task: Task
@@ -684,6 +721,8 @@ class JudgeResult:
         # None unless the judge ran with ``review.second_pass: true`` —
         # absent from every persisted shape otherwise.
         self.second_pass_review: dict[str, Any] | None = None
+        # GR-211: shared authoritative observation for state and persistence.
+        self.working_tree_fingerprint: str | None = None
         # GR-195: the tier2 execution transcript — capped {tool_calls,
         # tool_calls_omitted} built from the evaluator's in-run tool record —
         # or None when the judge kept no record. Persisted under

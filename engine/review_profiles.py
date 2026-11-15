@@ -402,6 +402,7 @@ class SecondPassFinding:
     line: int
     detection: str
     detail: str = ""
+    category: str = "unknown"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -410,6 +411,7 @@ class SecondPassFinding:
             "line": self.line,
             "detection": self.detection,
             "detail": self.detail,
+            "category": self.category,
         }
 
 
@@ -437,9 +439,15 @@ def second_pass_finding_from_dict(data: Any) -> tuple[SecondPassFinding | None, 
     if not detection:
         return None, "empty detection"
     detail = str(data.get("detail", "") or "").strip()
+    category = str(data.get("category", "unknown") or "unknown").strip().lower()
     return (
         SecondPassFinding(
-            severity=severity, file=file, line=raw_line, detection=detection, detail=detail
+            severity=severity,
+            file=file,
+            line=raw_line,
+            detection=detection,
+            detail=detail,
+            category=category,
         ),
         None,
     )

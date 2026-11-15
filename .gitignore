@@ -86,6 +86,10 @@ hivemind-audit.md
 # reads the snapshot, so a conforming producer rewrites it every guard/judge/
 # doctor run. Ignored by default; git keeps versioning an already-tracked copy.
 .gitreins/quality.json
+.gitreins/review-state.json
+.gitreins/review-state.lock
+.gitreins/review-state.corrupt-*
+.gitreins/review-state.recovery-required
 
 # Hilo — local cache files (rebuildable)
 .vfs/graph/graph.db

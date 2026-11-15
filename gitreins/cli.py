@@ -119,6 +119,10 @@ GITREINS_GITIGNORE_ENTRIES = (
     # configured `quality.artifact_path` is protected too (see
     # _gitignore_entries_for_project).
     ".gitreins/quality.json",
+    ".gitreins/review-state.json",
+    ".gitreins/review-state.lock",
+    ".gitreins/review-state.corrupt-*",
+    ".gitreins/review-state.recovery-required",
 )
 
 # EVID-003: the id an ephemeral judge run carries when none was given on the
@@ -2519,6 +2523,19 @@ def cmd_task_delete(args: argparse.Namespace) -> None:
     print(f"Deleted: {args.id}")
 
 
+def cmd_review_dismiss(args: argparse.Namespace) -> None:
+    """Persist an explicit human dismissal for one finding fingerprint."""
+    from engine.review_state import HumanReviewDecision, ReviewStateStore
+
+    result = ReviewStateStore(get_workdir()).dismiss(
+        HumanReviewDecision(args.fingerprint, "dismiss", args.reviewer, args.reason)
+    )
+    if result.state_error:
+        print(result.state_error, file=sys.stderr)
+        raise SystemExit(1)
+    print(f"Dismissed: {args.fingerprint}")
+
+
 def cmd_task_worktree(args: argparse.Namespace) -> None:
     """Create (or idempotently reuse) a task's isolated git worktree."""
     from engine.worktree_manager import WorktreeError, WorktreeManager
@@ -3665,6 +3682,7 @@ def _cmd_judge_ephemeral(
         grade_full_tree=False,
         persist_log=False,
         persist_telemetry=False,
+        persist_review_state=False,
     )
 
     if json_output:
@@ -4977,6 +4995,15 @@ def _add_task_parser(sub: _SubParsers) -> _SubParsers:
     return task_sub
 
 
+def _add_review_parser(sub: _SubParsers) -> None:
+    review_p = sub.add_parser("review", help="Manage persistent review findings")
+    review_sub = review_p.add_subparsers(dest="review_command")
+    dismiss_p = review_sub.add_parser("dismiss", help="Dismiss a finding by fingerprint")
+    dismiss_p.add_argument("fingerprint")
+    dismiss_p.add_argument("--reviewer", required=True)
+    dismiss_p.add_argument("--reason", default="")
+
+
 def _add_worktree_parser(sub: _SubParsers) -> None:
     """`worktree` subcommand tree (diagnostics + lifecycle)."""
     worktree_p = sub.add_parser(
@@ -5544,6 +5571,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_basic_parsers(parser, sub)
     task_sub = _add_task_parser(sub)
     _add_task_worktree_parser(task_sub)
+    _add_review_parser(sub)
     _add_worktree_parser(sub)
     _add_guard_parser(sub)
     _add_judge_parser(sub)
@@ -5577,6 +5605,13 @@ def _parse_review_effort_flags(flags: list[str]) -> dict[str, Any]:
         else:
             override[key] = value
     return override
+
+
+def _dispatch_review_command(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    if args.review_command == "dismiss":
+        _run_subcommand_handler("cmd_review_dismiss", args)
+    else:
+        parser.print_help()
 
 
 def _dispatch_task_command(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
@@ -5775,6 +5810,8 @@ def main() -> None:
         raise SystemExit(check_push_range(get_workdir(), args.local_sha, args.remote_sha))
     elif command == "task":
         _dispatch_task_command(args, parser)
+    elif command == "review":
+        _dispatch_review_command(args, parser)
     elif command == "worktree":
         handler = _WORKTREE_HANDLERS.get(args.subcommand)
         if handler is None:
