@@ -207,7 +207,22 @@ class Judge:
             record = reflection.to_dict()
             if record is not None:
                 review.reflection = record
-        result.second_pass_review = review.to_dict()
+        from engine.persist import VerdictPersister
+        from engine.review_state import reconcile_review
+
+        review_data = review.to_dict()
+        # Review history is read from the same repository-owned persistence
+        # surface that writes verdicts. A malformed or unavailable prior entry
+        # is handled fail-closed by reconcile_review.
+        prior = None
+        try:
+            prior_entries = VerdictPersister(self.workdir).list_verdicts(
+                n=1, task_id=result.task_id
+            )
+            prior = prior_entries[0] if prior_entries else None
+        except Exception:
+            logger.warning("Unable to read prior finding state", exc_info=True)
+        result.second_pass_review = reconcile_review(self.workdir, review_data, prior)
 
     def _prepare_auger_task(
         self, task: Task
