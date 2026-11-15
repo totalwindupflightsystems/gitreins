@@ -74,7 +74,9 @@ def _validated_state_block(block: Any) -> list[dict[str, Any]] | None:
     return entries
 
 
-def _prior_review_entries(review: Any, tree_fingerprint: str) -> tuple[str, list[dict[str, Any]]] | None:
+def _prior_review_entries(
+    review: Any, tree_fingerprint: str
+) -> tuple[str, list[dict[str, Any]]] | None:
     """Read a prior review, accepting legacy blocks but rejecting malformed state."""
     if not isinstance(review, dict):
         return None
@@ -111,7 +113,9 @@ def _empty_state(tree_fingerprint: str) -> dict[str, Any]:
     }
 
 
-def reconcile_review(workdir: str, review: dict[str, Any], prior: dict[str, Any] | None) -> dict[str, Any]:
+def reconcile_review(
+    workdir: str, review: dict[str, Any], prior: dict[str, Any] | None
+) -> dict[str, Any]:
     """Apply persistent finding state to one review block.
 
     A missing/unavailable or malformed prior record is deliberately treated as
@@ -130,7 +134,9 @@ def reconcile_review(workdir: str, review: dict[str, Any], prior: dict[str, Any]
     current: list[dict[str, Any]] = [item for item in current_raw if isinstance(item, dict)]
     prior_data = None
     if isinstance(prior, dict):
-        prior_data = _prior_review_entries(prior.get("review"), str(prior.get("working_tree_content_fingerprint", "")))
+        prior_data = _prior_review_entries(
+            prior.get("review"), str(prior.get("working_tree_content_fingerprint", ""))
+        )
     state = _empty_state(tree_fingerprint)
     state_entries: list[dict[str, Any]] = []
     published: list[dict[str, Any]] = []

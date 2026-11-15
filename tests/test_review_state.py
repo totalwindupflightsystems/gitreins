@@ -85,9 +85,7 @@ class TestPersistentFindingState:
         repo = _repo(tmp_path)
         first = reconcile_review(str(repo), {"findings": [_finding()]}, None)
         dismissed = dict(first["finding_state"])
-        dismissed["findings"] = [
-            {**dismissed["findings"][0], "state": DISMISSED}
-        ]
+        dismissed["findings"] = [{**dismissed["findings"][0], "state": DISMISSED}]
         prior = _persist(repo, {**first, "finding_state": dismissed})
 
         second = reconcile_review(str(repo), {"findings": [_finding()]}, prior)

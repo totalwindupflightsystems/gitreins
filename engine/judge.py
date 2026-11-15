@@ -216,7 +216,9 @@ class Judge:
         # is handled fail-closed by reconcile_review.
         prior = None
         try:
-            prior_entries = VerdictPersister(self.workdir).list_verdicts(n=1, task_id=result.task_id)
+            prior_entries = VerdictPersister(self.workdir).list_verdicts(
+                n=1, task_id=result.task_id
+            )
             prior = prior_entries[0] if prior_entries else None
         except Exception:
             logger.warning("Unable to read prior finding state", exc_info=True)
