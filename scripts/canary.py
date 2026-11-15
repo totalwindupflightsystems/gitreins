@@ -32,10 +32,44 @@ _REQUIRED_KEYS = {
     "artifact",
     "provenance",
 }
+_RECORD_OUTCOMES = {"caught", "missed"}
+_REQUIRED_PROVENANCE_KEYS = {
+    "artifact_path",
+    "artifact_sha256",
+    "task_id",
+    "judged_commit",
+    "worktree",
+}
 
 
 class CanaryProvenanceError(ValueError):
     """The record or persisted verdict cannot be bound to this canary run."""
+
+
+class CanaryLedgerError(ValueError):
+    """The ledger cannot distinguish a run from an absent run."""
+
+
+# This is the persisted JSONL contract.  Every line is one independently judged
+# defect; provenance is deliberately nested so consumers cannot confuse a
+# display field with the artifact that was actually verified.
+CANARY_RECORD_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "required": sorted(_REQUIRED_KEYS),
+    "properties": {
+        "canary_id": {"type": "string"},
+        "defect_class": {"type": "string"},
+        "expected_outcome": {"type": "string"},
+        "actual_verdict_outcome": {"enum": sorted(_RECORD_OUTCOMES)},
+        "judged_commit": {"type": "string"},
+        "status": {"const": "verified"},
+        "artifact": {"type": "string"},
+        "provenance": {
+            "type": "object",
+            "required": sorted(_REQUIRED_PROVENANCE_KEYS),
+        },
+    },
+}
 
 
 def _sha256(path: Path) -> str:
@@ -153,6 +187,10 @@ def append_record(path: str | Path, record: dict[str, Any]) -> None:
     missing = sorted(_REQUIRED_KEYS - record.keys())
     if missing:
         raise ValueError(f"missing required keys: {', '.join(missing)}")
+    if record.get("actual_verdict_outcome") not in _RECORD_OUTCOMES:
+        raise ValueError("actual_verdict_outcome must be caught or missed")
+    if record.get("status") != "verified":
+        raise ValueError("status must be verified")
 
     ledger = Path(path)
     ledger.parent.mkdir(parents=True, exist_ok=True)
@@ -172,28 +210,34 @@ def report(path: str | Path) -> dict[str, float | int]:
     missed = 0
     excluded = 0
     ledger = Path(path)
-    if ledger.exists():
-        for line in ledger.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
+    if not ledger.is_file():
+        raise CanaryLedgerError(f"canary ledger is missing: {ledger}")
+    lines = ledger.read_text(encoding="utf-8").splitlines()
+    if not any(line.strip() for line in lines):
+        raise CanaryLedgerError(f"canary ledger is empty: {ledger}")
+    for line in lines:
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+            if not isinstance(record, dict) or record.get("expected_outcome") != "caught":
                 continue
-            try:
-                record = json.loads(line)
-                if not isinstance(record, dict) or record.get("expected_outcome") != "caught":
-                    continue
-                verify_record_provenance(record, ledger)
-            except (json.JSONDecodeError, CanaryProvenanceError, TypeError, KeyError):
-                excluded += 1
-                continue
-            if record.get("actual_verdict_outcome") == "caught":
-                caught += 1
-            else:
-                missed += 1
+            verify_record_provenance(record, ledger)
+        except (json.JSONDecodeError, CanaryProvenanceError, TypeError, KeyError):
+            excluded += 1
+            continue
+        if record.get("actual_verdict_outcome") == "caught":
+            caught += 1
+        else:
+            missed += 1
     total = caught + missed
+    if total == 0:
+        raise CanaryLedgerError(f"canary ledger has no verifiable must-catch records: {ledger}")
     return {
         "caught": caught,
         "missed": missed,
         "excluded": excluded,
-        "recall": caught / total if total else 0.0,
+        "recall": caught / total,
     }
 
 
@@ -252,7 +296,7 @@ class CanaryRunner:
             raise RuntimeError(f"git {' '.join(args)} failed: {result.stderr.strip()}")
         return result.stdout.strip()
 
-    def _fixture(self, scratch: Path, canary_id: str) -> str:
+    def _fixture(self, scratch: Path, canary_id: str, defect_class: str) -> str:
         (scratch / ".gitreins").mkdir()
         (scratch / ".gitreins" / "config.yaml").write_text(
             "guards:\n"
@@ -267,8 +311,12 @@ class CanaryRunner:
             "history:\n  enabled: false\n",
             encoding="utf-8",
         )
+        defect_source = {
+            "runtime-error": "raise RuntimeError('canary defect')",
+            "assertion-error": "assert False, 'canary defect'",
+        }[defect_class]
         (scratch / "fixture_defect.py").write_text(
-            f"# Deliberate canary defect {canary_id}\nraise RuntimeError('canary defect')\n",
+            f"# Deliberate {defect_class} {canary_id}\n{defect_source}\n",
             encoding="utf-8",
         )
         self._git(scratch, "add", ".")
@@ -291,8 +339,8 @@ class CanaryRunner:
         and provenance checks remain possible.  ``cycles`` and
         ``defects_per_cycle`` must both be positive.
         """
-        if cycles < 1 or defects_per_cycle < 1:
-            raise ValueError("cycles and defects_per_cycle must be positive")
+        if cycles < 1 or defects_per_cycle < 2:
+            raise ValueError("cycles must be positive and defects_per_cycle must be at least 2")
         binary = self._resolve_binary()
         ledger = Path(ledger_path)
         records: list[dict[str, Any]] = []
@@ -310,7 +358,8 @@ class CanaryRunner:
                 self._git(scratch, "init", "-q", "-b", "main")
                 self._git(scratch, "config", "user.name", "GitReins Canary")
                 self._git(scratch, "config", "user.email", "gitreins-canary@localhost")
-                judged_commit = self._fixture(scratch, canary_id)
+                defect_class = ("runtime-error", "assertion-error")[(defect - 1) % 2]
+                judged_commit = self._fixture(scratch, canary_id, defect_class)
                 task_id = f"canary:{canary_id}"
                 artifact = scratch / ".gitreins" / "verdicts" / "verdict.json"
                 result = self._run_command(
@@ -326,7 +375,7 @@ class CanaryRunner:
                         "--title",
                         f"Canary defect {canary_id}",
                         "--criterion",
-                        "The scratch fixture defect is caught",
+                        f"The seeded {defect_class} defect is caught",
                     ],
                     scratch,
                 )
@@ -347,7 +396,7 @@ class CanaryRunner:
                 records.append(
                     {
                         "canary_id": canary_id,
-                        "defect_class": "scratch-fixture",
+                        "defect_class": defect_class,
                         "expected_outcome": "caught",
                         "actual_verdict_outcome": actual,
                         "judged_commit": judged_commit,
@@ -373,7 +422,7 @@ def run_canary(
     binary_path: str = "gitreins",
     scratch_root: str | Path | None = None,
     cycles: int = 1,
-    defects_per_cycle: int = 1,
+    defects_per_cycle: int = 2,
 ) -> list[dict[str, Any]]:
     """Convenience API for a real external-binary canary cycle."""
     return CanaryRunner(
@@ -407,20 +456,25 @@ def main() -> None:
     )
     parser.add_argument("--cycles", type=int, default=1, help="number of cycles (default: 1)")
     parser.add_argument(
-        "--defects-per-cycle", type=int, default=1, help="fixture defects per cycle (default: 1)"
+        "--defects-per-cycle", type=int, default=2, help="seeded defects per cycle (default: 2)"
     )
     args = parser.parse_args()
-    if args.run:
-        records = run_canary(
-            args.ledger,
-            binary_path=args.binary,
-            scratch_root=args.scratch_root,
-            cycles=args.cycles,
-            defects_per_cycle=args.defects_per_cycle,
-        )
-        print(json.dumps({"records": len(records), "report": report(args.ledger)}, sort_keys=True))
-    else:
-        print(json.dumps(report(args.ledger), sort_keys=True))
+    try:
+        if args.run:
+            records = run_canary(
+                args.ledger,
+                binary_path=args.binary,
+                scratch_root=args.scratch_root,
+                cycles=args.cycles,
+                defects_per_cycle=args.defects_per_cycle,
+            )
+            print(
+                json.dumps({"records": len(records), "report": report(args.ledger)}, sort_keys=True)
+            )
+        else:
+            print(json.dumps(report(args.ledger), sort_keys=True))
+    except (CanaryLedgerError, CanaryProvenanceError, RuntimeError, OSError) as exc:
+        parser.error(str(exc))
 
 
 if __name__ == "__main__":

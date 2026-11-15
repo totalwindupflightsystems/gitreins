@@ -16,24 +16,42 @@ Two surfaces exist and they are different animals:
 Only `serve` is a resident network service. Nothing in this repository starts it
 for you — see *Supervision*.
 
-## Fixture canary ledger
+## Seeded-defect canary runner
 
-The append-only canary helper records fixture or mock outcomes and reports
-must-catch recall. It does not call a provider or make a network request.
+`scripts/canary.py` measures the installed external GitReins judge. It creates
+separate disposable repositories, seeds deterministic `runtime-error` and
+`assertion-error` defects, invokes `gitreins judge --ephemeral
+--persist-verdict --skip-tier2 --scope working-tree`, and reads the persisted
+`.gitreins/verdicts/verdict.json`. A record is appended only after the task id,
+judged commit, absolute worktree, and SHA-256 digest all match the artifact.
+Scratch trees are retained; their paths and artifacts are part of the ledger
+provenance and must not be deleted before reporting.
+
+Run one cycle (two independent defects):
 
 ```bash
-.venv/bin/python scripts/canary.py /path/to/canaries.jsonl
+.venv/bin/python scripts/canary.py /path/to/canaries.jsonl --run \
+  --binary .venv/bin/gitreins --scratch-root /path/to/canary-scratch
 ```
 
-Create records through `append_record(path, {"canary_id": "...",
-"defect_class": "...", "expected_outcome": "caught",
-"actual_verdict_outcome": "caught", "judged_commit": "...",
-"status": "verified", "artifact": "...", "provenance": "fixture"})`;
-`report(path)` returns `caught`, `missed`, and `recall` for must-catch rows.
-The ledger is fixture/mock-only: this artifact proves local wiring and
-accounting, not provider behavior or live detection performance.
+The runner is cadence-agnostic. This repository does not ship a scheduler; an
+external caller may schedule the command and must retain the scratch root.
+`--defects-per-cycle N` and `--cycles N` are available for larger batteries;
+the default is two defects per cycle.
 
-Trace: ch:trace row=GR-209 spec=.coding-hermes/board/tasks.jsonl#GR-209 wave=none:serial test=tests/test_canary.py doc=docs/operations.md evidence=scripts/canary.py witness=none:fixture-or-mock-only verdict=none:pending-judge commit=none:pending memory=none:pending
+Each JSONL line has this schema:
+
+```json
+{"canary_id":"canary-1-1","defect_class":"runtime-error","expected_outcome":"caught","actual_verdict_outcome":"caught","judged_commit":"<sha>","status":"verified","artifact":"<absolute path>","provenance":{"artifact_path":"<absolute path>","artifact_sha256":"<64 hex>","task_id":"canary:canary-1-1","judged_commit":"<sha>","worktree":"<absolute path>"}}
+```
+
+`report(path)` returns `caught`, `missed`, `excluded`, and `recall`. Invalid
+records are excluded and never counted as misses. Missing or empty ledgers, or
+ledgers with no verifiable must-catch records, fail loudly with a non-zero CLI
+exit; recall `0.0` is therefore a real result only when at least one verified
+record was judged missed.
+
+Trace: ch:trace row=GR-209-R2 spec=.coding-hermes/board/tasks.jsonl#GR-209 wave=none:serial test=tests/test_canary.py::test_multiple_defects_append_one_record_each doc=docs/operations.md evidence=scripts/canary.py witness=none:worker-local-external-binary-test verdict=none:foreman-judge-after-merge commit=none:foreman-final-sha memory=none:foreman-managed
 
 ## Run it: start the judgment viewer
 

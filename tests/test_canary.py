@@ -6,16 +6,28 @@ from pathlib import Path
 
 import pytest
 
-from scripts.canary import CanaryProvenanceError, append_record, main, report, run_canary
+from scripts.canary import (
+    CANARY_RECORD_SCHEMA,
+    CanaryLedgerError,
+    CanaryProvenanceError,
+    append_record,
+    main,
+    report,
+    run_canary,
+)
 
 
 TRACE_MARKER = (
-    "ch:trace row=GR-209 spec=.coding-hermes/board/tasks.jsonl#GR-209 "
-    "wave=none:serial test=tests/test_canary.py doc=docs/operations.md "
-    "evidence=scripts/canary.py witness=none:fixture-or-mock-only "
-    "verdict=none:pending-judge commit=none:pending "
-    "memory=none:pending"
+    "ch:trace row=GR-209-R2 spec=.coding-hermes/board/tasks.jsonl#GR-209 "
+    "wave=none:serial test=tests/test_canary.py::test_multiple_defects_append_one_record_each "
+    "doc=docs/operations.md evidence=scripts/canary.py "
+    "witness=none:worker-local-external-binary-test "
+    "verdict=none:foreman-judge-after-merge commit=none:foreman-final-sha "
+    "memory=none:foreman-managed"
 )
+
+
+# ch:trace row=GR-209-R2 spec=.coding-hermes/board/tasks.jsonl#GR-209 wave=none:serial test=tests/test_canary.py::test_multiple_defects_append_one_record_each doc=docs/operations.md evidence=scripts/canary.py witness=none:worker-local-external-binary-test verdict=none:foreman-judge-after-merge commit=none:foreman-final-sha memory=none:foreman-managed
 
 # ch:trace row=GR-224 spec=.coding-hermes/board/tasks.jsonl#GR-224 wave=none:serial test=tests/test_canary.py::test_canary_runner_uses_external_binary_and_verifies_persisted_verdict doc=docs/operations.md evidence=scripts/canary.py witness=none:worker-local-fake-binary verdict=none:foreman-judge-after-merge commit=none:worker-commit-after-commit memory=none:foreman-managed
 
@@ -63,6 +75,46 @@ def _record(
             "worktree": str(worktree),
         },
     }
+
+
+def test_documented_record_schema_round_trips(tmp_path: Path) -> None:
+    ledger = tmp_path / "schema.jsonl"
+    record = _record(tmp_path, canary_id="schema")
+    append_record(ledger, record)
+
+    decoded = json.loads(ledger.read_text(encoding="utf-8"))
+    assert set(CANARY_RECORD_SCHEMA["required"]) <= decoded.keys()
+    assert (
+        set(CANARY_RECORD_SCHEMA["properties"]["provenance"]["required"])
+        <= decoded["provenance"].keys()
+    )
+    assert decoded == record
+
+
+def test_must_catch_and_miss_records(tmp_path: Path) -> None:
+    ledger = tmp_path / "canaries.jsonl"
+    append_record(ledger, _record(tmp_path, canary_id="caught"))
+    append_record(ledger, _record(tmp_path, canary_id="missed", actual_verdict_outcome="missed"))
+
+    assert report(ledger) == {"caught": 1, "missed": 1, "excluded": 0, "recall": 0.5}
+
+
+def test_empty_or_missing_ledger_fails_loudly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    missing = tmp_path / "missing.jsonl"
+    with pytest.raises(CanaryLedgerError, match="missing"):
+        report(missing)
+    empty = tmp_path / "empty.jsonl"
+    empty.write_text("\n", encoding="utf-8")
+    with pytest.raises(CanaryLedgerError, match="empty"):
+        report(empty)
+
+    for ledger in (missing, empty):
+        monkeypatch.setattr(sys, "argv", ["canary.py", str(ledger)])
+        with pytest.raises(SystemExit) as error:
+            main()
+        assert error.value.code == 2
 
 
 def test_caught_canary_round_trips_all_fields_and_reports_recall(
@@ -127,7 +179,8 @@ def test_missing_provenance_is_excluded_from_recall(tmp_path: Path) -> None:
     record["provenance"] = "caller supplied"  # type: ignore[assignment]
     append_record(ledger, record)
 
-    assert report(ledger) == {"caught": 0, "missed": 0, "excluded": 1, "recall": 0.0}
+    with pytest.raises(CanaryLedgerError, match="no verifiable"):
+        report(ledger)
 
 
 def test_digest_or_commit_mismatch_is_rejected(tmp_path: Path) -> None:
@@ -136,7 +189,8 @@ def test_digest_or_commit_mismatch_is_rejected(tmp_path: Path) -> None:
     record["provenance"]["artifact_sha256"] = "f" * 64  # type: ignore[index]
     append_record(ledger, record)
 
-    assert report(ledger)["excluded"] == 1
+    with pytest.raises(CanaryLedgerError, match="no verifiable"):
+        report(ledger)
     with pytest.raises(CanaryProvenanceError, match="digest mismatch"):
         from scripts.canary import verify_record_provenance
 
@@ -156,7 +210,8 @@ def test_provenance_commit_mismatch_is_excluded(tmp_path: Path) -> None:
     ).hexdigest()
     append_record(ledger, record)
 
-    assert report(ledger) == {"caught": 0, "missed": 0, "excluded": 1, "recall": 0.0}
+    with pytest.raises(CanaryLedgerError, match="no verifiable"):
+        report(ledger)
 
 
 def test_verdict_without_boolean_passed_is_excluded(tmp_path: Path) -> None:
@@ -171,7 +226,8 @@ def test_verdict_without_boolean_passed_is_excluded(tmp_path: Path) -> None:
     ).hexdigest()
     append_record(ledger, record)
 
-    assert report(ledger) == {"caught": 0, "missed": 0, "excluded": 1, "recall": 0.0}
+    with pytest.raises(CanaryLedgerError, match="no verifiable"):
+        report(ledger)
 
 
 def test_canary_runner_rejects_non_executable_binary(tmp_path: Path) -> None:
@@ -232,9 +288,43 @@ def test_canary_cli_report_and_run_outputs_are_coherent(
     main()
     run_output = json.loads(capsys.readouterr().out)
     assert run_output == {
-        "records": 1,
-        "report": {"caught": 1, "missed": 0, "excluded": 0, "recall": 1.0},
+        "records": 2,
+        "report": {"caught": 2, "missed": 0, "excluded": 0, "recall": 1.0},
     }
+
+
+def test_multiple_defects_append_one_record_each(tmp_path: Path) -> None:
+    binary = tmp_path / "fake-gitreins"
+    binary.write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, pathlib, subprocess, sys\n"
+        "root = pathlib.Path.cwd()\n"
+        "task = sys.argv[2]\n"
+        "commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()\n"
+        "path = root / '.gitreins' / 'verdicts' / 'verdict.json'\n"
+        "path.parent.mkdir(parents=True, exist_ok=True)\n"
+        "path.write_text(json.dumps({'task_id': task, 'commit': commit, 'worktree': str(root), 'passed': False}))\n",
+        encoding="utf-8",
+    )
+    binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
+    ledger = tmp_path / "runner.jsonl"
+
+    records = run_canary(
+        ledger, binary_path=str(binary), scratch_root=tmp_path, defects_per_cycle=2
+    )
+
+    assert [record["defect_class"] for record in records] == ["runtime-error", "assertion-error"]
+    assert len(ledger.read_text(encoding="utf-8").splitlines()) == 2
+    assert report(ledger) == {"caught": 2, "missed": 0, "excluded": 0, "recall": 1.0}
+
+
+def test_runner_requires_external_persisted_verdict(tmp_path: Path) -> None:
+    binary = tmp_path / "no-verdict"
+    binary.write_text("#!/bin/sh\nexit 17\n", encoding="utf-8")
+    binary.chmod(binary.stat().st_mode | stat.S_IXUSR)
+
+    with pytest.raises(RuntimeError, match="produced no persisted verdict"):
+        run_canary(tmp_path / "runner.jsonl", binary_path=str(binary), scratch_root=tmp_path)
 
 
 def test_canary_runner_uses_external_binary_and_verifies_persisted_verdict(
@@ -257,6 +347,6 @@ def test_canary_runner_uses_external_binary_and_verifies_persisted_verdict(
 
     records = run_canary(ledger, binary_path=str(binary), scratch_root=tmp_path)
 
-    assert len(records) == 1
-    assert report(ledger) == {"caught": 1, "missed": 0, "excluded": 0, "recall": 1.0}
+    assert len(records) == 2
+    assert report(ledger) == {"caught": 2, "missed": 0, "excluded": 0, "recall": 1.0}
     assert records[0]["provenance"]["artifact_sha256"]
