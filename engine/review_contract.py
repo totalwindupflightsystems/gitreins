@@ -66,6 +66,53 @@ class PolicySource(Protocol):
     def protected_ref(self, requested_ref: str) -> str: ...
 
 
+class GitPolicySource:
+    """Read review policy only from immutable git commits."""
+
+    def __init__(self, workdir: Path) -> None:
+        self.workdir = workdir
+
+    def _git(self, *args: str) -> str:
+        import subprocess
+
+        result = subprocess.run(
+            ["git", *args],
+            cwd=self.workdir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode:
+            raise OSError(result.stderr.strip() or f"git {' '.join(args)} failed")
+        return result.stdout.strip()
+
+    def resolve_base_ref(self, requested_ref: str) -> str:
+        return self._git("rev-parse", "--verify", f"{requested_ref}^{{commit}}")
+
+    def protected_ref(self, requested_ref: str) -> str:
+        return self.resolve_base_ref(requested_ref)
+
+    def changed_files(self, base_ref: str, head_ref: str) -> tuple[str, ...]:
+        output = self._git("diff", "--name-only", f"{base_ref}..{head_ref}")
+        return tuple(path for path in output.splitlines() if path)
+
+    def read_base_file(self, base_ref: str, relative_path: str) -> str | None:
+        import subprocess
+
+        result = subprocess.run(
+            ["git", "show", f"{base_ref}:{relative_path}"],
+            cwd=self.workdir,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode:
+            if "does not exist" in result.stderr or "exists on disk, but not in" in result.stderr:
+                return None
+            raise OSError(result.stderr.strip() or f"git show {base_ref}:{relative_path} failed")
+        return result.stdout
+
+
 @dataclass(frozen=True)
 class ReviewLoadContext:
     workdir: Path
@@ -397,6 +444,28 @@ def _parse_gate(value: Any, path: str) -> GateConfig:
         "security",
     }
     _unknown(data, allowed, path)
+    for key in ("locked", "minimum_severity", "when", "action", "on_fail", "finding_policy", "security"):
+        if key not in data:
+            continue
+        value = data[key]
+        expected = "boolean" if key == "locked" else "string" if key in {"minimum_severity", "action", "on_fail"} else "mapping"
+        valid = isinstance(value, bool) if key == "locked" else isinstance(value, str) if expected == "string" else isinstance(value, Mapping)
+        if not valid:
+            raise ReviewContractError("REVIEW_YAML_TYPE", f"{path}.{key} must be a {expected}", f"{path}.{key}")
+        if key == "security":
+            security = _require_mapping(value, f"{path}.security")
+            if "locked" in security and not isinstance(security["locked"], bool):
+                raise ReviewContractError("REVIEW_YAML_TYPE", f"{path}.security.locked must be a boolean", f"{path}.security.locked")
+            if "action" in security and not isinstance(security["action"], str):
+                raise ReviewContractError("REVIEW_YAML_TYPE", f"{path}.security.action must be a string", f"{path}.security.action")
+        if key == "minimum_severity" and not isinstance(value, str):
+            raise ReviewContractError("REVIEW_YAML_TYPE", f"{path}.minimum_severity must be a string", f"{path}.minimum_severity")
+    if "minimum_severity" in data and not isinstance(data["minimum_severity"], str):
+        raise ReviewContractError(
+            "REVIEW_YAML_TYPE",
+            f"{path}.minimum_severity must be a string",
+            f"{path}.minimum_severity",
+        )
     confidence = data.get("minimum_confidence")
     if confidence is not None and (
         isinstance(confidence, bool)
@@ -534,9 +603,14 @@ def _parse_pass(value: Any, index: int) -> PassConfig:
                 f"{path}.instructions.append",
             )
         instructions = (raw,) if raw else ()
+    enabled = data.get("enabled", True)
+    if not isinstance(enabled, bool):
+        raise ReviewContractError(
+            "REVIEW_YAML_TYPE", f"{path}.enabled must be a boolean", f"{path}.enabled"
+        )
     return PassConfig(
         id=data["id"],
-        enabled=data.get("enabled", True) if isinstance(data.get("enabled", True), bool) else True,
+        enabled=enabled,
         scope=dict(data.get("scope", {})) if isinstance(data.get("scope", {}), Mapping) else {},
         instructions=instructions,
         execution=_parse_execution(data.get("execution", {}), f"{path}.execution"),
@@ -754,11 +828,20 @@ def parse_review_contract(yaml_text: str, *, source_ref: str, source_commit: str
 
     org_data = _require_mapping(root.get("organization", {}), "organization")
     _unknown(org_data, {"extends", "locked", "defaults"}, "organization")
+    extends = org_data.get("extends")
+    if extends is not None and not isinstance(extends, str):
+        raise ReviewContractError("REVIEW_YAML_TYPE", "organization.extends must be a string", "organization.extends")
+    if isinstance(extends, str) and extends and extends.startswith(("http://", "https://", "org://")):
+        raise ReviewContractError(
+            "REVIEW_ORG_SOURCE_UNAVAILABLE",
+            f"external organization source {extends!r} is unavailable",
+            "organization.extends",
+            "organization",
+        )
+    locked = _tuple_strings(org_data["locked"], "organization.locked") if "locked" in org_data else ()
     organization = OrganizationConfig(
-        extends=org_data.get("extends") if isinstance(org_data.get("extends"), str) else None,
-        locked=_tuple_strings(org_data["locked"], "organization.locked")
-        if "locked" in org_data
-        else (),
+        extends=extends,
+        locked=locked,
         defaults=dict(org_data.get("defaults", {}))
         if isinstance(org_data.get("defaults", {}), Mapping)
         else {},
@@ -1015,13 +1098,12 @@ def _overlay_matches(overlay: PathOverlayConfig, path: str) -> tuple[bool, tuple
         return False, ()
     any_patterns = tuple(str(item) for item in overlay.match.get("any", ()) or ())
     all_patterns = tuple(str(item) for item in overlay.match.get("all", ()) or ())
-    matches = tuple(
-        pattern for pattern in (*any_patterns, *all_patterns) if _matches(pattern, path)
-    )
-    return (
-        bool(any_patterns and any(_matches(pattern, path) for pattern in any_patterns))
-        or bool(all_patterns and all(_matches(pattern, path) for pattern in all_patterns))
-    ), matches
+    any_matches = tuple(pattern for pattern in any_patterns if _matches(pattern, path))
+    all_matches = tuple(pattern for pattern in all_patterns if _matches(pattern, path))
+    matches = (*any_matches, *all_matches)
+    any_ok = not any_patterns or bool(any_matches)
+    all_ok = not all_patterns or len(all_matches) == len(all_patterns)
+    return bool(any_patterns or all_patterns) and any_ok and all_ok, matches
 
 
 def _append_unique(items: list[str], values: Sequence[str]) -> None:
@@ -1030,13 +1112,33 @@ def _append_unique(items: list[str], values: Sequence[str]) -> None:
             items.append(value)
 
 
+_SEVERITY_RANK = {"info": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+
+
+def _restrict_severity(base: str | None, overlay: str | None) -> str | None:
+    if base is None:
+        return overlay
+    if overlay is None:
+        return base
+    return base if _SEVERITY_RANK.get(base, 0) >= _SEVERITY_RANK.get(overlay, 0) else overlay
+
+
+def _merge_locked(base: bool | None, overlay: bool | None) -> bool | None:
+    if base is True:
+        return True
+    return overlay if overlay is not None else base
+
+
 def _merge_gate(base: GateConfig, overlay: GateConfig) -> GateConfig:
     return GateConfig(
-        locked=overlay.locked if overlay.locked is not None else base.locked,
-        minimum_severity=overlay.minimum_severity or base.minimum_severity,
-        minimum_confidence=overlay.minimum_confidence
-        if overlay.minimum_confidence is not None
-        else base.minimum_confidence,
+        locked=_merge_locked(base.locked, overlay.locked),
+        minimum_severity=_restrict_severity(base.minimum_severity, overlay.minimum_severity),
+        minimum_confidence=max(
+            value for value in (base.minimum_confidence, overlay.minimum_confidence)
+            if value is not None
+        )
+        if base.minimum_confidence is not None or overlay.minimum_confidence is not None
+        else None,
         require=tuple(dict.fromkeys((*base.require, *overlay.require))),
         when={**dict(base.when), **dict(overlay.when)},
         action=overlay.action or base.action,
@@ -1205,12 +1307,22 @@ def resolve_review_policy(
                     "repository",
                 )
             )
-        if baseline is None:
+        if baseline is None and locked not in {"passes.security", "gates.security"}:
             diagnostics.append(
                 ReviewDiagnostic(
                     "REVIEW_LOCKED_FIELD_VIOLATION",
                     "error",
                     f"locked field {locked} is absent",
+                    locked,
+                    "organization",
+                )
+            )
+        if locked == "passes.security" and not any(item.id == "security" for item in contract.passes):
+            diagnostics.append(
+                ReviewDiagnostic(
+                    "REVIEW_LOCKED_FIELD_VIOLATION",
+                    "error",
+                    "locked security pass is absent",
                     locked,
                     "organization",
                 )

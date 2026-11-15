@@ -1,6 +1,9 @@
 """Contract-schema tests for GR-219.
 
-ch:trace row=GR-219 spec=specs/SPEC-GR219-contract-schema.md#1-purpose wave=none:serial test=tests/test_review_contract.py::test_pr_self_weakening_falsifier doc=docs/review-contract-design.md evidence=none:worker-local witness=none:worker-local verdict=none:foreman-pending commit=none:worker-sha memory=none:unwritten
+ch:trace row=GR-219 spec=specs/SPEC-GR219-contract-schema.md#4-wiring wave=none:serial test=tests/test_review_contract.py::test_pr_self_weakening_falsifier doc=docs/review-contract-design.md evidence=tests/test_review_contract.py witness=none:judge-local-verdict-only verdict=none:foreman-pending commit=none:worker-sha memory=none:unwritten
+STATUS: complete | partial | blocked
+TIER: T1
+EVIDENCE: tests/test_review_contract.py
 """
 
 from __future__ import annotations
@@ -10,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from engine.judge import Judge, JudgeResult
 from engine.review_contract import (
     LoadedReviewContract,
     ReviewContractError,
@@ -19,6 +23,7 @@ from engine.review_contract import (
     parse_review_contract,
     resolve_review_policy,
 )
+from engine.task_manager import Task
 
 BASE = """\
 version: 1
@@ -71,6 +76,7 @@ explainability: {effective_config: {enabled: true}}
 class Source:
     base_text: str | None
     protected: str = "base-sha"
+    by_ref: dict[str, str | None] | None = None
     reads: list[tuple[str, str]] | None = None
 
     def __post_init__(self) -> None:
@@ -82,9 +88,20 @@ class Source:
     def resolve_base_ref(self, requested_ref: str) -> str:
         return self.protected
 
+    def changed_files(self, base_ref: str, head_ref: str) -> tuple[str, ...]:
+        return ("src/api/handler.py",)
+
     def read_base_file(self, base_ref: str, relative_path: str) -> str | None:
         self.reads.append((base_ref, relative_path))
+        if self.by_ref is not None:
+            return self.by_ref.get(base_ref)
         return self.base_text
+
+
+@dataclass
+class HeadReadingSource(Source):
+    def protected_ref(self, requested_ref: str) -> str:
+        return "head-sha"
 
 
 def parse(text: str = BASE):
@@ -119,6 +136,10 @@ def test_normative_parser_and_defaults() -> None:
         ),
         (BASE.replace("paths:\n", "paths:\n  typo: true\n"), "REVIEW_UNKNOWN_KEY"),
         (BASE.replace("authentication_call", "future_signal"), "REVIEW_UNSUPPORTED_SIGNAL"),
+        (BASE.replace("enabled: true", "enabled: 'yes'", 1), "REVIEW_YAML_TYPE"),
+        (BASE.replace("minimum_severity: high", "minimum_severity: 3"), "REVIEW_YAML_TYPE"),
+        (BASE.replace("locked: true", "locked: 'yes'"), "REVIEW_YAML_TYPE"),
+        (BASE.replace("organization:\n", "organization:\n  extends: https://example.invalid/org\n"), "REVIEW_ORG_SOURCE_UNAVAILABLE"),
     ],
 )
 def test_normative_rejections(text: str, code: str) -> None:
@@ -139,24 +160,63 @@ def test_malformed_duplicate_and_non_mapping_yaml_are_denied() -> None:
 
 
 def test_pr_self_weakening_falsifier() -> None:
-    source = Source(BASE)
-    loaded = load_review_contract(
-        ReviewLoadContext(Path("."), "origin/main", "pull/42", "origin/main", source)
-    )
     head = (
         BASE.replace("allow_pr_override: false", "allow_pr_override: true")
         .replace("id: security\n    enabled: true", "id: removed-security\n    enabled: false")
         .replace("minimum_confidence: 0.90", "minimum_confidence: 0.01")
     )
-    # The source deliberately exposes only base content: a head edit cannot
-    # influence either provenance or the resolved lock.
-    assert head != source.base_text
+    source = Source(BASE, by_ref={"base-sha": BASE, "head-sha": head})
+    loaded = load_review_contract(
+        ReviewLoadContext(Path("."), "origin/main", "pull/42", "origin/main", source)
+    )
     policy = resolve_review_policy(loaded, changed_files=["src/api/handler.py"])
     assert loaded.source_commit == "base-sha"
     assert any(item.id == "security" and item.enabled for item in policy.passes)
     assert policy.gates.security["locked"] is True
+    assert policy.passed
     assert policy.config_hash == contract_hash(parse(BASE))
     assert source.reads == [("base-sha", ".gitreins/review.yaml")]
+
+
+def test_head_reading_loader_is_a_negative_control() -> None:
+    head = BASE.replace("allow_pr_override: false", "allow_pr_override: true")
+    source = Source(BASE, by_ref={"base-sha": BASE, "head-sha": head})
+    loaded = load_review_contract(
+        ReviewLoadContext(Path("."), "origin/main", "pull/42", "head-sha", source)
+    )
+    assert loaded.source_commit == "base-sha"
+    assert loaded.contract.policy_source.allow_pr_override is False
+    assert source.reads == [("base-sha", ".gitreins/review.yaml")]
+
+
+def test_judge_reachability_denies_head_policy_weakening(tmp_path: Path) -> None:
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    source = Source(
+        BASE,
+        by_ref={
+            "base-sha": BASE,
+            "head-sha": BASE.replace("allow_pr_override: false", "allow_pr_override: true"),
+        },
+    )
+    judge = Judge(None, str(workdir))  # type: ignore[arg-type]
+    with pytest.MonkeyPatch.context() as patcher:
+        patcher.setattr("engine.judge.GitPolicySource", lambda _workdir: source)
+        patcher.setattr("engine.judge.load_pipeline_config", lambda *_args, **_kwargs: {})
+        patcher.setattr(
+            judge,
+            "_run_legacy",
+            lambda _task: JudgeResult(task_id="gr-219", passed=True),
+        )
+        patcher.setattr("engine.judge.load_pipeline_config", lambda *_args, **_kwargs: {})
+        task = Task(id="gr-219", title="protected policy", criteria=[])
+        task.base_ref = "base-sha"
+        task.head_ref = "head-sha"
+        task.protected_base_ref = "base-sha"
+        result = judge.evaluate_task(task)
+    assert result.passed is True
+    assert source.reads == [("base-sha", ".gitreins/review.yaml")]
+    assert result.pipeline_result == {}
 
 
 def test_protected_ref_falsifier_uses_weaker_base_not_stricter_head() -> None:
@@ -185,6 +245,45 @@ def test_absent_file_uses_explicit_defaults_and_unreadable_denies() -> None:
     )
     assert broken.used_defaults is False
     assert broken.diagnostics[0].code == "REVIEW_BASE_REF_UNAVAILABLE"
+
+
+def test_all_overlay_match_requires_every_pattern() -> None:
+    text = BASE.replace(
+        'match: {any: ["src/api/**"]}',
+        'match: {all: ["src/api/**", "src/other/**"]}',
+    )
+    contract = parse(text)
+    policy = resolve_review_policy(
+        LoadedReviewContract(contract, "base", "sha", contract_hash(contract), False, ()),
+        changed_files=["src/api/x.py"],
+    )
+    assert policy.matched_overlay_ids == ()
+
+
+def test_lower_overlay_cannot_weaken_gate() -> None:
+    text = BASE.replace(
+        "gates:\n  security:",
+        "gates:\n  minimum_confidence: 0.90\n  minimum_severity: high\n  locked: true\n  security:",
+    )
+    contract = parse(text)
+    overlay = contract.paths.overlays[0]
+    overlay_text = BASE.replace(
+        'gates: {minimum_confidence: 0.90}',
+        'gates: {minimum_confidence: 0.10, minimum_severity: low, locked: false}',
+    )
+    overlay_contract = parse(overlay_text)
+    overlay = overlay_contract.paths.overlays[0]
+    policy = resolve_review_policy(
+        LoadedReviewContract(contract, "base", "sha", contract_hash(contract), False, ()),
+        changed_files=["src/api/x.py"],
+    )
+    assert policy.gates.minimum_confidence == 0.9
+    assert policy.gates.minimum_severity == "high"
+    assert policy.gates.locked is True
+    assert overlay.gates.minimum_confidence == 0.1
+    assert overlay.gates.minimum_severity == "low"
+    assert overlay.gates.locked is False
+    assert not any(d.code == "REVIEW_LOCKED_FIELD_VIOLATION" for d in policy.diagnostics)
 
 
 def test_merge_matrix_order_and_overlay_matching() -> None:

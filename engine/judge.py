@@ -7,6 +7,7 @@ Now delegate to the Pipeline engine for configurable multi-stage evaluation.
 import copy
 import logging
 import re
+from pathlib import Path
 from typing import Any, cast
 
 from engine.auger_packet import PacketValidationError, TaskPacketAdapter
@@ -20,6 +21,12 @@ from engine.guard_manager import GuardManager
 # unchanged — guard_manager itself imports this same object from engine.types.
 from engine.llm import LLMClient
 from engine.pipeline import Pipeline, degradation_warning, load_pipeline_config
+from engine.review_contract import (
+    GitPolicySource,
+    ReviewLoadContext,
+    load_review_contract,
+    resolve_review_policy,
+)
 from engine.task_manager import Task
 from engine.types import GuardResult, Tier1Result
 from engine.usage import provenance_fields
@@ -132,7 +139,13 @@ class Judge:
             return packet_failure
         task = packet_task
 
+        policy = self._resolve_review_policy(task)
+        if policy is not None and not policy.passed:
+            return self._review_policy_failure(task, policy)
         config = load_pipeline_config(self.workdir, scan_root=self.scan_root)
+        if policy is not None:
+            task = copy.copy(task)
+            setattr(task, "_review_policy", policy)
         self._pass_on_error = self._read_pass_on_error()
 
         if config.get("pipeline", {}).get("stages"):
@@ -154,6 +167,52 @@ class Judge:
         if packet_context is not None:
             self._attach_auger_evidence(result, packet_context)
         return result
+
+    def _resolve_review_policy(self, task: Task) -> Any:
+        """Resolve the protected-base review contract before pipeline execution."""
+        source = GitPolicySource(Path(self.workdir))
+        base_ref = str(getattr(task, "base_ref", "origin/main"))
+        head_ref = str(getattr(task, "head_ref", "HEAD"))
+        protected = str(getattr(task, "protected_base_ref", base_ref))
+        try:
+            changed_files = source.changed_files(base_ref, head_ref)
+            loaded = load_review_contract(
+                ReviewLoadContext(Path(self.workdir), base_ref, head_ref, protected, source)
+            )
+        except OSError:
+            if not (Path(self.workdir) / ".gitreins" / "review.yaml").exists():
+                return None
+            changed_files = ()
+            loaded = load_review_contract(
+                ReviewLoadContext(Path(self.workdir), base_ref, head_ref, protected, source)
+            )
+        return resolve_review_policy(loaded, changed_files=changed_files)
+
+    @staticmethod
+    def _review_policy_failure(task: Task, policy: Any) -> "JudgeResult":
+        diagnostics = [
+            {
+                "code": item.code,
+                "severity": item.severity,
+                "message": item.message,
+                "path": item.path,
+            }
+            for item in policy.diagnostics
+        ]
+        return JudgeResult(
+            task_id=task.id,
+            passed=False,
+            pipeline_result={
+                "passed": False,
+                "disposition": policy.disposition,
+                "review_policy": {
+                    "source_ref": policy.source_ref,
+                    "source_commit": policy.source_commit,
+                    "config_hash": policy.config_hash,
+                    "diagnostics": diagnostics,
+                },
+            },
+        )
 
     def _run_second_pass(self, result: "JudgeResult", skip_tier2: bool = False) -> None:
         """Attach the GR-171 second-pass review to *result* when enabled.
