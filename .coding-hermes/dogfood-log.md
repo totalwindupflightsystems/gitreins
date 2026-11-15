@@ -525,3 +525,88 @@ visible: five fires, one delivery.
 
 No row added, edited, or closed; no code, config, board or evidence changed; no visibility,
 permission or credential touched. This append is the only owned change for this fire.
+
+## 2026-11-15 — gitreins dogfood (gitreins-dogfood-2026-11-15-15-54-49, first delivery)
+
+**Ownership barrier.** `/home/kara/gitreins` porcelain empty at the start of this fire, `git rev-parse
+--short HEAD` = `60eb8fac`, no `.git/rebase-merge`, no `.git/rebase-apply`, no `MERGE_HEAD`,
+`CHERRY_PICK_HEAD` or `index.lock`. A stale `.git/REBASE_HEAD` exists from an earlier rebase; it is
+pointing at a live object and was left untouched (hygiene observation, not a row). Nothing was
+dispatched: `WAVE_BUDGET: 2`, zero workers, and this lane wrote no code.
+
+**What a real consumer did, not what the tests say.** The install was built the way a new user would
+build it: a detached worktree at `60eb8fac` under scratch, `uv venv` + `uv pip install -e '.[dev]'`
+(`UV_LINK_MODE=copy`), then the resulting `gitreins` binary was run against a **hardlink-free clone**
+of HEAD — a tree that has never been touched by this machine's history. Six real tasks were performed
+in that clone: a TRUE premise, a FALSE premise (a `frobnicate` subcommand that does not exist), the
+pre-dispatch gate on its default surface and with `--surface cli`, a judgment-history read, `doctor`,
+`report --json`, and `serve` opened in a browser with its own API probed. Findings came from that use,
+not from reading source.
+
+**The headline real-use result is a trust failure, and it reproduces on every clone.** Asking the tool
+about a file that demonstrably exists at HEAD — *"Does this repository implement the pre-dispatch
+premise check in a module named `engine/preflight.py`?"* — the cold run answered **REVIEW,
+probability 0.59, `evidence_quality` 1, `missing_kind=implementation` 0.62**, with 12 seeds and a
+9-file manifest that contains **no** `engine/preflight.py`; 5,547 ms. Ground truth: the file is at
+`HEAD:engine/preflight.py`. The index behind the gate was simply blind: 32 of 53 tracked `engine/*.py`
+modules were indexed, and the string `preflight` appeared zero times in `.vfs/graph/graph.db`, in
+`.symbols_cache.json` and in `edges.jsonl`. `hilo graph search "preflight"` returned only
+`gitreins/cli.py`.
+
+The repair is one command and it is measurable: `hilo init --no-hooks && hilo graph warm` →
+**17,367 ms, 3,673 edges across 231 files, 72 stale edges pruned (57 missing path, 15 superseded)**.
+The same premise then answered **RESOLVED, probability 0.96, `evidence_quality` 2**, with
+`manifest[1] = engine/preflight.py` at provenance `ast_exact`, score 1.0, 3,217 ms. Same command, same
+tree, same model, opposite verdict.
+
+**Mechanism, found by inspection and confirmed by the clone that carries it.**
+`.vfs/graph/edges.jsonl` is **tracked** (196K — the only tracked file under `.vfs`; `graph.db` is
+gitignored), and `.vfs/graph/.last_reconcile` matches its bytes, so bootstrap treats the committed
+1,438-edge snapshot as already reconciled and never parses the modules added since. Row `GR-193`
+untracked `.symbols_cache.json` but left `edges.jsonl` in git, so every clone, every CI runner and
+every ephemeral bunker install inherits a stale index. A pre-dispatch gate that tells a foreman a
+shipped module is missing is worse than no gate: it burns a worker on code that already exists.
+
+**Install leg — ran, and it is not a silent pass either.** Ephemeral bunker (`bunker-mvp`, agent
+`f84c7529`, ttl 4h, 24 evidence rows pulled to
+`bunker-evidence.jsonl`; per-cell logs kept before teardown). `fresh-install` **OK** (venv + pip from
+the synced clone, `Successfully installed ... ast-serialize-0.13.1 ...`), `upgrade` **OK**
+(`pip gitreins==0.20.0` = tag `v0.20.0`, then HEAD install clean), `lint` **OK** (`ruff check .`
+rc=0), `docker_build`/`compose_config`/`chaos-shutdown` **N/A** (no Dockerfile, no compose file),
+`ui-probe` **N/A** (no web UI detected by the harness), `chaos-disconnect` **OK**, `chaos-errorpath`
+**OK**. Two cells are red and both are the product: `tests` **FAIL** rc=2 and `ci-pass` native
+**FAIL** rc=2, on `tests/test_cli_doc_sync.py::test_live_surface_pins_the_current_cli`
+(`assert len(top_level) == 25` → `assert 26 == 25`) and `::test_repository_doc_is_in_sync`. So a
+contributor who clones HEAD gets red before touching anything, and the doc-sync guard is doing its
+job — `docs/cli` is the stale side. `chaos-resource` **FAIL** is attributed, not presumed: the 3 GiB
+cap was applied (`child_saw=3145728KB subshell_saw=3145728 parent_saw=unlimited`) and the two
+failures under it are the same doc-sync tests, so that cell is red from this defect, not from memory
+pressure. The act leg of `ci-pass` died before any test ran with `No such image:
+catthehacker/ubuntu:act-latest` — harness infrastructure, not a gitreins finding, and not filed.
+
+**Performance verdict: no `PERF-<n>` row, deliberately.** The headline operation costs 5,547 ms cold
+and 3,217 ms warm on a 231-file repo; the 2.3 s delta is the stale-index defect above, not a hot path,
+and the one index rebuild is 17.4 s — visible, bounded, and it *is* the repair. No flamegraph,
+criterion or `EXPLAIN QUERY PLAN` was run because the number does not change a user decision; filing
+a perf row here would devalue the real ones. The `serve` page timing was measured but the value was
+not retained with this record, so no claim is made from it.
+
+**Rows filed (pending, for the foreman — none closed, none dispatched):** `GR-225` P1 tracked
+`edges.jsonl` blinds the gate on fresh clones; `GR-226` P2 the gate can speak about a named path it
+never read and `doctor` exposes no index health; `GR-227` P2 `doctor --json` emits the human gitleaks
+table (`jq` parse error at line 1, column 9) although `--help` documents JSON; `GR-228` P2 the
+judgment browser reports a RESOLVED resolution as `passed:false` and `/api/stats` totals zero while
+`resolution_records` is 1; `GR-229` P3 `/api/stats` attributes usage to the config default model
+(`engine/config.py:217`, `deepseek-v4-flash`) and drops the recorded `cost_usd` 0.00051849 that names
+`typesafe/jev-1.13-20260917`; `GR-230` P1 the clean-install suite is red on the 26-vs-25 CLI surface
+pin and the stale `docs/cli`.
+
+**State left behind.** Board: 6 pending rows appended through `boardctl create` plus their events;
+every id appears exactly once; `boardctl validate -C .coding-hermes/board` = `RESULT: OK (609
+warning(s))`, warnings only and all pre-existing. Scratch under
+`~/.hermes/cache/scratch/dogfood-gitreins-dogfood-2026-11-15-15-54-49` (worktree, clone, install-src,
+run artifacts, `bunker-evidence.jsonl`) is disposable. The `serve` process on port 8699 was stopped
+and the port re-probed before this record was written.
+
+No code, config, visibility, permission or credential state changed; no row was closed or dispatched.
+This append plus the six pending rows are the only owned changes for this fire.
