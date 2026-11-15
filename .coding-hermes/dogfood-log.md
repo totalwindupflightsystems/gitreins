@@ -679,7 +679,10 @@ already measured at 5.5 s cold / 3.2 s warm in the first fire, and the delta is 
 defect `GR-225`, not a hot path; no flamegraph or `EXPLAIN QUERY PLAN` was warranted.
 
 **State left behind.** New: `.coding-hermes/evidence/gitreins-dogfood-2026-11-15-15-54-49/` with
-`FINDINGS.md` (provenance + per-file verified/unverified index), `realuse/` (the eight product
+`FINDINGS.md` (provenance + per-file verified/unverified index), `USAGE.md` (the consumer rules the
+probes justify, each bound to an artifact: warm `hilo` before trusting a verdict, pass the surface
+explicitly, `doctor --json` is not JSON while `report --json` is, use a FALSE premise as a control,
+installs clean but the suite is red), `realuse/` (the eight product
 artifacts the first fire kept only in scratch) and `install-bunker/` (this fire's 24-row ledger,
 its chaos-disconnect log, and `cell-logs/`). Board: **0 rows filed this fire, 0 closed, 0
 dispatched** — every finding the fresh battery produced is a row that already exists. Teardown
