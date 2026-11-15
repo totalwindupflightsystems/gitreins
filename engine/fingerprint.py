@@ -37,6 +37,10 @@ from typing import Iterable
 
 _AUTHORITATIVE = "authoritative"
 _DOMAIN = b"gitreins-working-tree-content-v1\0"
+_SELF_STATE_PATHS = {
+    b".gitreins/review-state.json",
+    b".gitreins/review-state.lock",
+}
 
 
 @dataclass(frozen=True)
@@ -155,7 +159,13 @@ def _parse_index(root: Path, deadline: _Deadline) -> dict[bytes, str]:
 
 def _untracked_paths(root: Path, deadline: _Deadline) -> list[bytes]:
     proc = _git(root, deadline, "ls-files", "--others", "--exclude-standard", "-z")
-    return [path for path in proc.stdout.split(b"\0") if path]
+    return [
+        path
+        for path in proc.stdout.split(b"\0")
+        if path
+        and path not in _SELF_STATE_PATHS
+        and not path.startswith(b".gitreins/review-state.corrupt-")
+    ]
 
 
 def _flag_preflight(root: Path, deadline: _Deadline) -> None:

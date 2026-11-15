@@ -1088,7 +1088,14 @@ def build_verdict_data(workdir: str, task: Task, result: JudgeResult) -> dict[An
     from engine.fingerprint import compute as compute_fingerprint
 
     fingerprint = compute_fingerprint(workdir)
-    if fingerprint.state == "authoritative":
+    observed_digest = getattr(result, "working_tree_fingerprint", None)
+    if observed_digest and fingerprint.state == "authoritative":
+        # GR-211: the judge's observation is authoritative for both the state
+        # transaction and this verdict.  Re-observation is only a safety check;
+        # never replace the digest used by reconciliation with a second read.
+        verdict_data["working_tree_content_fingerprint"] = observed_digest
+        verdict_data["working_tree_dirty_path_count"] = fingerprint.dirty_count
+    elif fingerprint.state == "authoritative":
         verdict_data["working_tree_content_fingerprint"] = fingerprint.digest
         verdict_data["working_tree_dirty_path_count"] = fingerprint.dirty_count
     quality_snapshot = getattr(result, "quality_snapshot", None)
