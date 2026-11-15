@@ -1,0 +1,218 @@
+{
+  "question": "Does this repository provide a gitreins frobnicate subcommand that renames the current branch?",
+  "verdict": "UNRESOLVED",
+  "probability": 0.34,
+  "missing_kind": "implementation",
+  "missing_kind_probability": 0.89,
+  "evidence_quality": 2,
+  "evidence_quality_score": 0.8,
+  "evidence_quality_legend": {
+    "0": "the bundle only mentions the topic",
+    "1": "adjacent code: related, but not the code path the question asks about",
+    "2": "the exact code path the question asks about is present",
+    "3": "the exact code path is present together with its test"
+  },
+  "manifest": [
+    {
+      "file": "engine/persist.py",
+      "provenance": "ast_exact",
+      "score": 1.0,
+      "bytes": 4984,
+      "truncated": false,
+      "source": "understand",
+      "lines": 89
+    },
+    {
+      "file": "engine/repo_paths.py",
+      "provenance": "ast_exact",
+      "score": 1.0,
+      "bytes": 12812,
+      "truncated": false,
+      "source": "understand",
+      "lines": 280
+    },
+    {
+      "file": "engine/worktree_manager.py",
+      "provenance": "ast_exact",
+      "score": 0.8,
+      "bytes": 3807,
+      "truncated": false,
+      "source": "understand",
+      "lines": 87
+    },
+    {
+      "file": "gitreins/cli.py",
+      "provenance": "ast_exact",
+      "score": 1.0,
+      "bytes": 5850,
+      "truncated": false,
+      "source": "understand",
+      "lines": 134
+    },
+    {
+      "file": "engine/__init__.py",
+      "provenance": "ast_exact",
+      "score": 1.0,
+      "bytes": 383,
+      "truncated": false,
+      "source": "understand",
+      "lines": 7
+    },
+    {
+      "file": "engine/guard_manager.py",
+      "provenance": "ast_exact",
+      "score": 0.8,
+      "bytes": 1404,
+      "truncated": false,
+      "source": "understand",
+      "lines": 23
+    },
+    {
+      "file": "engine/pipeline.py",
+      "provenance": "ast_exact",
+      "score": 0.8,
+      "bytes": 1257,
+      "truncated": false,
+      "source": "understand",
+      "lines": 23
+    },
+    {
+      "file": "engine/commit_audit.py",
+      "provenance": "ast_exact",
+      "score": 1.0,
+      "bytes": 1841,
+      "truncated": false,
+      "source": "understand",
+      "lines": 39
+    }
+  ],
+  "model": "typesafe/jev-1.13-20260917",
+  "request_id": "gen-dec-1794758275-G2ZoaFOTnVhzSnyAygTx",
+  "provider": "TypeSafe",
+  "tokens_estimated": 13069,
+  "input_tokens": 12032,
+  "output_tokens": 96,
+  "cost_usd": 0.000505344,
+  "clipped": true,
+  "clip_disclosure": "state clipped to the worst-case wall: 6764 chars / 134 line(s) omitted, 13069 tokens estimated (32908 at the densest measured rate); 6 manifest file(s) fell entirely outside the clipped state and are no longer claimed as evidence: engine/worktree_disposable.py, gitreins/__main__.py, gitreins/serve.py, gitreins_mcp/server.py, gitreins/__init__.py",
+  "chars_dropped": 6764,
+  "lines_dropped": 134,
+  "dropped_files": [],
+  "budget_exhausted": false,
+  "seeds": [
+    {
+      "file": "engine/persist.py",
+      "score": 0.031,
+      "symbols": []
+    },
+    {
+      "file": "engine/repo_paths.py",
+      "score": 0.0308,
+      "symbols": []
+    },
+    {
+      "file": "engine/worktree_manager.py",
+      "score": 0.0299,
+      "symbols": []
+    },
+    {
+      "file": "engine/worktree_fleet.py",
+      "score": 0.0295,
+      "symbols": []
+    },
+    {
+      "file": "gitreins/cli.py",
+      "score": 0.0292,
+      "symbols": [
+        "gitreins"
+      ]
+    },
+    {
+      "file": "engine/propagate.py",
+      "score": 0.0286,
+      "symbols": []
+    },
+    {
+      "file": "engine/worktree_disposable.py",
+      "score": 0.0272,
+      "symbols": []
+    },
+    {
+      "file": "engine/evidence.py",
+      "score": 0.0253,
+      "symbols": []
+    },
+    {
+      "file": "gitreins/__main__.py",
+      "score": 0.0235,
+      "symbols": [
+        "gitreins"
+      ]
+    },
+    {
+      "file": "gitreins/serve.py",
+      "score": 0.0227,
+      "symbols": [
+        "gitreins"
+      ]
+    },
+    {
+      "file": "gitreins_mcp/server.py",
+      "score": 0.0225,
+      "symbols": [
+        "gitreins"
+      ]
+    },
+    {
+      "file": "engine/config.py",
+      "score": 0.0215,
+      "symbols": []
+    }
+  ],
+  "dependency_paths": {
+    "engine/persist.py": [
+      "0",
+      "gitreins/cli.py",
+      "tests/test_v07_features.py",
+      "tests/test_persist.py",
+      "engine/worktree_manager.py",
+      "tests/test_worktree.py",
+      "tests/test_corrupted_state_restart.py",
+      "tests/test_mcp_verdict_persistence.py"
+    ],
+    "engine/repo_paths.py": [
+      "0",
+      "engine/worktree_manager.py",
+      "engine/guard_manager.py",
+      "gitreins/cli.py",
+      "tests/test_worktree.py",
+      "gitreins/serve.py",
+      "scripts/judgment_viewer.py",
+      "engine/persist.py"
+    ],
+    "engine/worktree_manager.py": [
+      "0",
+      "gitreins/cli.py",
+      "tests/test_guard_log_persistence.py",
+      "tests/test_worktree.py",
+      "engine/worktree_disposable.py",
+      "tests/test_worktree_disposable.py",
+      "engine/worktree_fleet.py",
+      "tests/test_worktree_fleet.py"
+    ]
+  },
+  "abstain_reason": null,
+  "abstain_detail": null,
+  "abstain_action": null,
+  "attempts": [
+    "candidate 1/6: ok"
+  ],
+  "exit_code": 1,
+  "notes": [
+    "state clipped to the worst-case wall: 6764 chars / 134 line(s) omitted, 13069 tokens estimated (32908 at the densest measured rate)",
+    "6 manifest file(s) fell entirely outside the clipped state and are no longer claimed as evidence: engine/worktree_disposable.py, gitreins/__main__.py, gitreins/serve.py, gitreins_mcp/server.py, gitreins/__init__.py",
+    "state clipped to the worst-case wall: 6764 chars / 134 line(s) omitted, 13069 tokens estimated (32908 at the densest measured rate); 6 manifest file(s) fell entirely outside the clipped state and are no longer claimed as evidence: engine/worktree_disposable.py, gitreins/__main__.py, gitreins/serve.py, gitreins_mcp/server.py, gitreins/__init__.py",
+    "token check: estimated=13069 reported=12032 chars=45742 chars/token=3.80",
+    "safety bound: 32908 tokens at the densest measured rate (1.39 chars/token) vs the 28000 ceiling"
+  ]
+}

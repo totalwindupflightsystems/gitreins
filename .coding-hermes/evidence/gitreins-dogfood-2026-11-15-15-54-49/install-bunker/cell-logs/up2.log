@@ -1,0 +1,106 @@
+Obtaining file:///home/bunker-030af8f7/qa-gitreins
+  Installing build dependencies: started
+  Installing build dependencies: finished with status 'done'
+  Checking if build backend supports build_editable: started
+  Checking if build backend supports build_editable: finished with status 'done'
+  Getting requirements to build editable: started
+  Getting requirements to build editable: finished with status 'done'
+  Preparing editable metadata (pyproject.toml): started
+  Preparing editable metadata (pyproject.toml): finished with status 'done'
+Requirement already satisfied: mcp<3,>=2.0.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from gitreins==0.21.0) (2.3.0)
+Requirement already satisfied: pydantic-core<3,>=2.47.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from gitreins==0.21.0) (2.50.4)
+Requirement already satisfied: pyyaml>=6.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from gitreins==0.21.0) (6.0.3)
+Requirement already satisfied: requests>=2.28 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from gitreins==0.21.0) (2.34.2)
+Requirement already satisfied: packaging>=21.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from gitreins==0.21.0) (26.3)
+Requirement already satisfied: prometheus_client in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from gitreins==0.21.0) (0.26.0)
+Requirement already satisfied: pytest>=7.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from gitreins==0.21.0) (9.2.0)
+Requirement already satisfied: pytest-timeout>=2.3 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from gitreins==0.21.0) (2.4.0)
+Requirement already satisfied: twine>=5.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from gitreins==0.21.0) (7.0.0)
+Requirement already satisfied: build>=1.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from gitreins==0.21.0) (1.6.1)
+Requirement already satisfied: python-lsp-server>=1.10 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from gitreins==0.21.0) (1.15.0)
+Requirement already satisfied: pyflakes>=3.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from gitreins==0.21.0) (4.1.0)
+Requirement already satisfied: pycodestyle>=2.11 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from gitreins==0.21.0) (2.15.0)
+Requirement already satisfied: mypy>=1.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from gitreins==0.21.0) (2.4.1)
+Requirement already satisfied: pyright>=1.1.390 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from gitreins==0.21.0) (1.1.414)
+Requirement already satisfied: pytest-xdist>=3.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from gitreins==0.21.0) (3.8.0)
+Requirement already satisfied: ruff>=0.5 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from gitreins==0.21.0) (0.17.5)
+Requirement already satisfied: types-PyYAML>=6.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from gitreins==0.21.0) (6.0.12.20261113)
+Requirement already satisfied: types-jsonschema>=4.20 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from gitreins==0.21.0) (4.26.0.20261006)
+Requirement already satisfied: anyio>=4.9 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from mcp<3,>=2.0.0->gitreins==0.21.0) (4.16.0)
+Requirement already satisfied: httpx2>=2.10.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from mcp<3,>=2.0.0->gitreins==0.21.0) (2.16.0)
+Requirement already satisfied: jsonschema>=4.20.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from mcp<3,>=2.0.0->gitreins==0.21.0) (4.26.0)
+Requirement already satisfied: mcp-types==2.3.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from mcp<3,>=2.0.0->gitreins==0.21.0) (2.3.0)
+Requirement already satisfied: opentelemetry-api>=1.28.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from mcp<3,>=2.0.0->gitreins==0.21.0) (1.45.2)
+Requirement already satisfied: pydantic>=2.12.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from mcp<3,>=2.0.0->gitreins==0.21.0) (2.14.3)
+Requirement already satisfied: pyjwt>=2.10.1 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from pyjwt[crypto]>=2.10.1->mcp<3,>=2.0.0->gitreins==0.21.0) (2.15.1)
+Requirement already satisfied: python-multipart>=0.0.9 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from mcp<3,>=2.0.0->gitreins==0.21.0) (0.0.33)
+Requirement already satisfied: sse-starlette>=3.0.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from mcp<3,>=2.0.0->gitreins==0.21.0) (3.7.0)
+Requirement already satisfied: starlette>=0.27 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from mcp<3,>=2.0.0->gitreins==0.21.0) (1.10.0)
+Requirement already satisfied: typing-extensions>=4.13.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from mcp<3,>=2.0.0->gitreins==0.21.0) (4.16.0)
+Requirement already satisfied: typing-inspection>=0.4.1 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from mcp<3,>=2.0.0->gitreins==0.21.0) (0.4.5)
+Requirement already satisfied: uvicorn>=0.31.1 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from mcp<3,>=2.0.0->gitreins==0.21.0) (0.54.0)
+Requirement already satisfied: idna>=2.8 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from anyio>=4.9->mcp<3,>=2.0.0->gitreins==0.21.0) (3.20)
+Requirement already satisfied: pyproject_hooks in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from build>=1.0->gitreins==0.21.0) (1.3.3)
+Requirement already satisfied: httpcore2==2.16.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from httpx2>=2.10.0->mcp<3,>=2.0.0->gitreins==0.21.0) (2.16.0)
+Requirement already satisfied: truststore>=0.10 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from httpx2>=2.10.0->mcp<3,>=2.0.0->gitreins==0.21.0) (0.10.5)
+Requirement already satisfied: h11>=0.16 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from httpcore2==2.16.0->httpx2>=2.10.0->mcp<3,>=2.0.0->gitreins==0.21.0) (0.16.0)
+Requirement already satisfied: attrs>=22.2.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from jsonschema>=4.20.0->mcp<3,>=2.0.0->gitreins==0.21.0) (26.1.0)
+Requirement already satisfied: jsonschema-specifications>=2023.03.6 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from jsonschema>=4.20.0->mcp<3,>=2.0.0->gitreins==0.21.0) (2025.9.1)
+Requirement already satisfied: referencing>=0.28.4 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from jsonschema>=4.20.0->mcp<3,>=2.0.0->gitreins==0.21.0) (0.37.0)
+Requirement already satisfied: rpds-py>=0.25.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from jsonschema>=4.20.0->mcp<3,>=2.0.0->gitreins==0.21.0) (2026.9.1)
+Requirement already satisfied: mypy_extensions>=1.0.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from mypy>=1.0->gitreins==0.21.0) (1.2.0)
+Requirement already satisfied: pathspec>=1.0.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from mypy>=1.0->gitreins==0.21.0) (1.1.1)
+Requirement already satisfied: librt>=0.16.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from mypy>=1.0->gitreins==0.21.0) (0.16.0)
+Requirement already satisfied: ast-serialize<1.0.0,>=0.12.1 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from mypy>=1.0->gitreins==0.21.0) (0.13.1)
+Requirement already satisfied: annotated-types>=0.6.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from pydantic>=2.12.0->mcp<3,>=2.0.0->gitreins==0.21.0) (0.8.0)
+Requirement already satisfied: cryptography>=3.4.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from pyjwt[crypto]>=2.10.1->mcp<3,>=2.0.0->gitreins==0.21.0) (50.0.2)
+Requirement already satisfied: cffi>=2.0.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from cryptography>=3.4.0->pyjwt[crypto]>=2.10.1->mcp<3,>=2.0.0->gitreins==0.21.0) (2.1.1)
+Requirement already satisfied: pycparser in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from cffi>=2.0.0->cryptography>=3.4.0->pyjwt[crypto]>=2.10.1->mcp<3,>=2.0.0->gitreins==0.21.0) (3.12)
+Requirement already satisfied: nodeenv>=1.6.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from pyright>=1.1.390->gitreins==0.21.0) (1.12.0)
+Requirement already satisfied: iniconfig>=2 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from pytest>=7.0->gitreins==0.21.0) (2.3.1)
+Requirement already satisfied: pluggy<2,>=1.6 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from pytest>=7.0->gitreins==0.21.0) (1.7.0)
+Requirement already satisfied: pygments>=2.15 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from pytest>=7.0->gitreins==0.21.0) (2.21.0)
+Requirement already satisfied: execnet>=2.1 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from pytest-xdist>=3.0->gitreins==0.21.0) (2.1.2)
+Requirement already satisfied: docstring-to-markdown in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from python-lsp-server>=1.10->gitreins==0.21.0) (0.17)
+Requirement already satisfied: jedi<0.21.0,>=0.17.2 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from python-lsp-server>=1.10->gitreins==0.21.0) (0.20.1)
+Requirement already satisfied: python-lsp-jsonrpc<2.0.0,>=1.1.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from python-lsp-server>=1.10->gitreins==0.21.0) (1.1.2)
+Requirement already satisfied: ujson>=3.0.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from python-lsp-server>=1.10->gitreins==0.21.0) (6.1.0)
+Requirement already satisfied: black in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from python-lsp-server>=1.10->gitreins==0.21.0) (26.10.1)
+Requirement already satisfied: parso<0.9.0,>=0.8.7 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from jedi<0.21.0,>=0.17.2->python-lsp-server>=1.10->gitreins==0.21.0) (0.8.7)
+Requirement already satisfied: charset_normalizer<4,>=2 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from requests>=2.28->gitreins==0.21.0) (3.5.2)
+Requirement already satisfied: urllib3<3,>=1.26 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from requests>=2.28->gitreins==0.21.0) (2.8.0)
+Requirement already satisfied: certifi>=2023.5.7 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from requests>=2.28->gitreins==0.21.0) (2026.10.23)
+Requirement already satisfied: readme-renderer>=35.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from twine>=5.0->gitreins==0.21.0) (46.0)
+Requirement already satisfied: requests-toolbelt!=0.9.0,>=0.8.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from twine>=5.0->gitreins==0.21.0) (1.0.0)
+Requirement already satisfied: keyring>=21.2.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from twine>=5.0->gitreins==0.21.0) (25.7.0)
+Requirement already satisfied: rfc3986>=1.4.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from twine>=5.0->gitreins==0.21.0) (2.0.0)
+Requirement already satisfied: rich>=14.3.3 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from twine>=5.0->gitreins==0.21.0) (15.0.0)
+Requirement already satisfied: id in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from twine>=5.0->gitreins==0.21.0) (1.6.1)
+Requirement already satisfied: SecretStorage>=3.2 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from keyring>=21.2.0->twine>=5.0->gitreins==0.21.0) (3.5.0)
+Requirement already satisfied: jeepney>=0.4.2 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from keyring>=21.2.0->twine>=5.0->gitreins==0.21.0) (0.9.0)
+Requirement already satisfied: jaraco.classes in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from keyring>=21.2.0->twine>=5.0->gitreins==0.21.0) (3.4.0)
+Requirement already satisfied: jaraco.functools in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from keyring>=21.2.0->twine>=5.0->gitreins==0.21.0) (4.6.0)
+Requirement already satisfied: jaraco.context in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from keyring>=21.2.0->twine>=5.0->gitreins==0.21.0) (6.1.2)
+Requirement already satisfied: nh3>=0.2.14 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from readme-renderer>=35.0->twine>=5.0->gitreins==0.21.0) (0.3.7)
+Requirement already satisfied: docutils>=0.21.2 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from readme-renderer>=35.0->twine>=5.0->gitreins==0.21.0) (0.23)
+Requirement already satisfied: markdown-it-py>=2.2.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from rich>=14.3.3->twine>=5.0->gitreins==0.21.0) (4.3.0)
+Requirement already satisfied: mdurl~=0.1 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from markdown-it-py>=2.2.0->rich>=14.3.3->twine>=5.0->gitreins==0.21.0) (0.1.2)
+Requirement already satisfied: click>=7.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from uvicorn>=0.31.1->mcp<3,>=2.0.0->gitreins==0.21.0) (8.5.1)
+Requirement already satisfied: platformdirs>=2 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from black->python-lsp-server>=1.10->gitreins==0.21.0) (4.14.5)
+Requirement already satisfied: pytokens~=0.4.0 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from black->python-lsp-server>=1.10->gitreins==0.21.0) (0.4.1)
+Requirement already satisfied: importlib-metadata>=3.6 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from docstring-to-markdown->python-lsp-server>=1.10->gitreins==0.21.0) (10.2.0)
+Requirement already satisfied: zipp>=3.20 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from importlib-metadata>=3.6->docstring-to-markdown->python-lsp-server>=1.10->gitreins==0.21.0) (4.1.2)
+Requirement already satisfied: lazy-importer>=0.1 in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from importlib-metadata>=3.6->docstring-to-markdown->python-lsp-server>=1.10->gitreins==0.21.0) (0.1.0)
+Requirement already satisfied: more-itertools in /home/bunker-030af8f7/tools/venv/lib/python3.12/site-packages (from jaraco.classes->keyring>=21.2.0->twine>=5.0->gitreins==0.21.0) (11.2.1)
+Building wheels for collected packages: gitreins
+  Building editable for gitreins (pyproject.toml): started
+  Building editable for gitreins (pyproject.toml): finished with status 'done'
+  Created wheel for gitreins: filename=gitreins-0.21.0-0.editable-py3-none-any.whl size=23605 sha256=d5f05988f436f3c5d24b862419f9750470d63b9eb8b1de61b5b344b396739015
+  Stored in directory: /tmp/pip-ephem-wheel-cache-hbrs0l4_/wheels/94/d9/40/4342b361145c53cab19fe6bb7c1dcf50911942638ea5b6e776
+Successfully built gitreins
+Installing collected packages: gitreins
+  Attempting uninstall: gitreins
+    Found existing installation: gitreins 0.20.0
+    Uninstalling gitreins-0.20.0:
+      Successfully uninstalled gitreins-0.20.0
+Successfully installed gitreins-0.21.0

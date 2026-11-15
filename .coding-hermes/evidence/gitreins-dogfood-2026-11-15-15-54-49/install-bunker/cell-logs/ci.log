@@ -1,0 +1,100 @@
+time="2026-11-15T16:45:01Z" level=info msg="Using docker host 'unix:///run/bunker/030af8f7/docker.sock', and daemon socket 'unix:///run/bunker/030af8f7/docker.sock'"
+[CI/test-1] ⭐ Run Set up job
+[CI/test-1] 🚀  Start image=catthehacker/ubuntu:act-latest
+[CI/test-2] ⭐ Run Set up job
+[CI/test-2] 🚀  Start image=catthehacker/ubuntu:act-latest
+[CI/test-3] ⭐ Run Set up job
+[CI/test-3] 🚀  Start image=catthehacker/ubuntu:act-latest
+[CI/test-1]   🐳  docker pull image=catthehacker/ubuntu:act-latest platform= username= forcePull=true
+[CI/test-2]   🐳  docker pull image=catthehacker/ubuntu:act-latest platform= username= forcePull=true
+[CI/test-3]   🐳  docker pull image=catthehacker/ubuntu:act-latest platform= username= forcePull=true
+[CI/test-1]   🐳  docker create image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/test-2]   🐳  docker create image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/test-3]   🐳  docker create image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/test-3]   🐳  docker run image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/test-1]   🐳  docker run image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/test-2]   🐳  docker run image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/test-3]   🐳  docker exec cmd=[node --no-warnings -e console.log(process.execPath)] user= workdir=
+[CI/test-1]   🐳  docker exec cmd=[node --no-warnings -e console.log(process.execPath)] user= workdir=
+[CI/test-2]   🐳  docker exec cmd=[node --no-warnings -e console.log(process.execPath)] user= workdir=
+[CI/test-1]   ✅  Success - Set up job
+[CI/test-2]   ✅  Success - Set up job
+[CI/test-3]   ✅  Success - Set up job
+[CI/test-2]   ☁  git clone 'https://github.com/actions/setup-python' # ref=v5
+[CI/test-1]   ☁  git clone 'https://github.com/actions/setup-python' # ref=v5
+[CI/test-3]   ☁  git clone 'https://github.com/actions/setup-python' # ref=v5
+[CI/test-2] 🧪  Matrix: map[python-version:3.11]
+[CI/test-2] ⭐ Run Main actions/checkout@v4
+[CI/test-2]   🐳  docker cp src=/home/bunker-030af8f7/qa-gitreins/. dst=/home/bunker-030af8f7/qa-gitreins
+[CI/test-2]   ✅  Success - Main actions/checkout@v4 [680.95479ms]
+[CI/test-2] ⭐ Run Main Set up Python 3.11
+[CI/test-2]   🐳  docker cp src=/home/bunker-030af8f7/.cache/act/actions-setup-python@v5/ dst=/var/run/act/actions/actions-setup-python@v5/
+[CI/test-2] <nil>
+[CI/test-2]   ❌  Failure - Main Set up Python 3.11 [203.028883ms]
+[CI/test-2] lstat /home/bunker-030af8f7/.cache/act/actions-setup-python@v5/jest.config.js: no such file or directory
+[CI/test-1] 🧪  Matrix: map[python-version:3.10]
+[CI/test-1] ⭐ Run Main actions/checkout@v4
+[CI/test-1]   🐳  docker cp src=/home/bunker-030af8f7/qa-gitreins/. dst=/home/bunker-030af8f7/qa-gitreins
+[CI/test-1]   ✅  Success - Main actions/checkout@v4 [481.730668ms]
+[CI/test-2] ⭐ Run Complete job
+[CI/test-2]   ✅  Success - Complete job
+[CI/test-2] 🏁  Job failed
+[CI/test-1] ⭐ Run Main Set up Python 3.10
+[CI/test-1]   🐳  docker cp src=/home/bunker-030af8f7/.cache/act/actions-setup-python@v5/ dst=/var/run/act/actions/actions-setup-python@v5/
+[CI/test-3] 🧪  Matrix: map[python-version:3.12]
+[CI/test-3] ⭐ Run Main actions/checkout@v4
+[CI/test-1]   🐳  docker exec cmd=[/opt/acttoolcache/node/24.22.2/x64/bin/node /var/run/act/actions/actions-setup-python@v5/dist/setup/index.js] user= workdir=
+[CI/test-3]   🐳  docker cp src=/home/bunker-030af8f7/qa-gitreins/. dst=/home/bunker-030af8f7/qa-gitreins
+[CI/test-1]   ❓  ::group::Installed versions
+[CI/test-3]   ✅  Success - Main actions/checkout@v4 [501.297407ms]
+[CI/test-3] ⭐ Run Main Set up Python 3.12
+[CI/test-3]   🐳  docker cp src=/home/bunker-030af8f7/.cache/act/actions-setup-python@v5/ dst=/var/run/act/actions/actions-setup-python@v5/
+[CI/test-3]   🐳  docker exec cmd=[/opt/acttoolcache/node/24.22.2/x64/bin/node /var/run/act/actions/actions-setup-python@v5/dist/setup/index.js] user= workdir=
+[CI/test-3]   ❓  ::group::Installed versions
+[CI/test-1]   ❓  ::endgroup::
+[CI/test-1]   ❓ add-matcher /run/act/actions/actions-setup-python@v5/.github/python.json
+[CI/test-1]   ✅  Success - Main Set up Python 3.10 [10.723312788s]
+[CI/test-1]   ⚙  ::set-env:: pythonLocation=/opt/hostedtoolcache/Python/3.10.22/x64
+[CI/test-1]   ⚙  ::set-env:: PKG_CONFIG_PATH=/opt/hostedtoolcache/Python/3.10.22/x64/lib/pkgconfig
+[CI/test-1]   ⚙  ::set-env:: Python_ROOT_DIR=/opt/hostedtoolcache/Python/3.10.22/x64
+[CI/test-1]   ⚙  ::set-env:: Python2_ROOT_DIR=/opt/hostedtoolcache/Python/3.10.22/x64
+[CI/test-1]   ⚙  ::set-env:: Python3_ROOT_DIR=/opt/hostedtoolcache/Python/3.10.22/x64
+[CI/test-1]   ⚙  ::set-env:: LD_LIBRARY_PATH=/opt/hostedtoolcache/Python/3.10.22/x64/lib
+[CI/test-1]   ⚙  ::set-output:: python-version=3.10.22
+[CI/test-1]   ⚙  ::set-output:: python-path=/opt/hostedtoolcache/Python/3.10.22/x64/bin/python
+[CI/test-1]   ⚙  ::add-path:: /opt/hostedtoolcache/Python/3.10.22/x64
+[CI/test-1]   ⚙  ::add-path:: /opt/hostedtoolcache/Python/3.10.22/x64/bin
+[CI/test-1] ⭐ Run Main Install dependencies
+[CI/test-1]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/2] user= workdir=
+[CI/test-3]   ❓  ::endgroup::
+[CI/test-3]   ❓ add-matcher /run/act/actions/actions-setup-python@v5/.github/python.json
+[CI/test-3]   ✅  Success - Main Set up Python 3.12 [9.905054789s]
+[CI/test-3]   ⚙  ::set-env:: pythonLocation=/opt/hostedtoolcache/Python/3.12.16/x64
+[CI/test-3]   ⚙  ::set-env:: PKG_CONFIG_PATH=/opt/hostedtoolcache/Python/3.12.16/x64/lib/pkgconfig
+[CI/test-3]   ⚙  ::set-env:: Python_ROOT_DIR=/opt/hostedtoolcache/Python/3.12.16/x64
+[CI/test-3]   ⚙  ::set-env:: Python2_ROOT_DIR=/opt/hostedtoolcache/Python/3.12.16/x64
+[CI/test-3]   ⚙  ::set-env:: Python3_ROOT_DIR=/opt/hostedtoolcache/Python/3.12.16/x64
+[CI/test-3]   ⚙  ::set-env:: LD_LIBRARY_PATH=/opt/hostedtoolcache/Python/3.12.16/x64/lib
+[CI/test-3]   ⚙  ::set-output:: python-version=3.12.16
+[CI/test-3]   ⚙  ::set-output:: python-path=/opt/hostedtoolcache/Python/3.12.16/x64/bin/python
+[CI/test-3]   ⚙  ::add-path:: /opt/hostedtoolcache/Python/3.12.16/x64
+[CI/test-3]   ⚙  ::add-path:: /opt/hostedtoolcache/Python/3.12.16/x64/bin
+[CI/test-3] ⭐ Run Main Install dependencies
+[CI/test-3]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/2] user= workdir=
+[CI/test-3]   ✅  Success - Main Install dependencies [29.728660108s]
+[CI/test-3] ⭐ Run Main Install system tools for LSP/static analysis
+[CI/test-3]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/3] user= workdir=
+[CI/test-1]   ✅  Success - Main Install dependencies [32.979553657s]
+[CI/test-1] ⭐ Run Main Install system tools for LSP/static analysis
+[CI/test-1]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/3] user= workdir=
+[CI/test-3]   ❌  Failure - Main Install system tools for LSP/static analysis [8.714539185s]
+[CI/test-3] exitcode '127': command not found, please refer to https://github.com/nektos/act/issues/107 for more information
+[CI/test-3] ⭐ Run Complete job
+[CI/test-3]   ✅  Success - Complete job
+[CI/test-3] 🏁  Job failed
+[CI/test-1]   ❌  Failure - Main Install system tools for LSP/static analysis [9.835175631s]
+[CI/test-1] exitcode '127': command not found, please refer to https://github.com/nektos/act/issues/107 for more information
+[CI/test-1] ⭐ Run Complete job
+[CI/test-1]   ✅  Success - Complete job
+[CI/test-1] 🏁  Job failed
+Error: Job 'test' failed

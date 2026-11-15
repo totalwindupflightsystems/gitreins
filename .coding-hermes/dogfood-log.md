@@ -610,3 +610,83 @@ and the port re-probed before this record was written.
 
 No code, config, visibility, permission or credential state changed; no row was closed or dispatched.
 This append plus the six pending rows are the only owned changes for this fire.
+
+## Duplicate fire — 2026-11-15 (same tick `gitreins-dogfood-2026-11-15-15-54-49`, second fire) — install leg RE-RUN, evidence trail landed
+
+This fire inherited the first delivery's product use (commit `70af0aa1`, rows `GR-225`..`GR-230`)
+and did not re-run the consumer probes. What it did instead was re-derive what that record
+claims, and walk the one leg whose evidence had not survived.
+
+**Verified from the committed record, not from its prose.** `git diff --stat 60eb8fac..HEAD` is
+exactly three files — `board/tasks.jsonl`, `board/events.jsonl`, `dogfood-log.md` — so there is
+**no product drift** between the tested HEAD and the record commit. Each of `GR-225`..`GR-230`
+appears exactly once in `tasks.jsonl` (`grep -c '"id": *"<ID>"'`) and carries exactly one
+`task_created` event; `boardctl validate -C .coding-hermes/board` = `RESULT: OK (609 warning(s))`,
+the same warning count the first fire reported, all pre-existing legacy-shape warnings.
+`github/main` = `70af0aa1` = local HEAD (remote parity 0 unpushed). CI at the record commit
+(run `43735717378`) is red in one job, `test (3.11) :: Run tests`, on exactly
+`tests/test_cli_doc_sync.py::test_live_surface_pins_the_current_cli` and
+`::test_repository_doc_is_in_sync` — the `GR-230` / `INT-CI-3722` defect the record names, so the
+record commit introduced no new red.
+
+The load-bearing mechanism re-derives numerically: `engine/preflight.py` is at
+`HEAD:engine/preflight.py` (blob `c8960923`), `.vfs/graph/edges.jsonl` is the **only** tracked
+file under `.vfs`, and that committed blob holds 1,713 records = **1,438 unique
+`(from,to,rel)` triples** with `preflight` appearing **0** times. Mapping every tracked
+`engine/*.py` against the edge endpoints gives **32 of 53 indexed, 21 unindexed** — the same
+split the record states. `true1.json` reads `0.59 / evidence_quality 1 / missing_kind
+implementation`, `true1_warm.json` reads `0.96 / evidence_quality 2 / missing_kind none`, and
+`doctor.json` still fails `jq` at line 1, column 9.
+
+**One claim did not survive: the first fire's install ledger is gone.** The record says 24
+evidence rows were pulled to `bunker-evidence.jsonl` for agent `f84c7529`. No such file exists in
+the tick scratch tree, under `~/.hermes/cache` (depth 2) or under `~` (depth 2) — the only
+`bunker-evidence*` files on this box belong to a sibling lane (`dgdog1115-p1`, agent
+`f88dda51`). The cell verdicts in that paragraph are therefore **UNVERIFIED as retained
+evidence**, and the timings (`5,547 / 3,217 / 17,367 ms`) were shell-measured, not in-band:
+the verdict JSON has no duration field at all.
+
+**So the install battery was walked again, in this fire.** Host census first — `bunker-las-03`
+reachable, `bunkerd` active, 36 G free, load 0.62, **but spawn failed at `slice-limits`:
+`containment landing did not converge within 40 reads: memory.swap.max = "max", want "0"`** (a
+bunker-harness defect on that host, recorded here, not filed on this board);
+`bunker-las-02` 100 % full; `bunker-las-04` publickey denied; `bunker-mvp` 5.4 G free and
+spawned. Agent `030af8f7`, ttl 4h, `bunker-qa.sh launch` + four `collect` polls (every poll
+reported `COLLECT-ADOPT reason=recent tick-death-orphan`; no cell was lost). **24 rows**, per-cell
+logs harvested before destroy:
+
+`fresh-install` **OK** (pip installs `gitreins-0.21.0` from the synced clone) · `lint` **OK**
+(`ruff check .` rc=0) · `upgrade` **OK** (`pip gitreins==0.20.0` = tag `v0.20.0`, then HEAD
+clean) · `tests` **FAIL** rc=2, `2 failed, 400 passed, 13 skipped ... in 47.76s` ·
+`ci-pass` **FAIL** (native rc=2 on the same two tests; the act leg died before any test on
+`No such image: catthehacker/ubuntu:act-latest` — harness infrastructure, not filed) ·
+`chaos-resource` **FAIL**, attributed: 3 GiB cap applied (`child_saw=3145728
+subshell_saw=3145728`) and the only failures under it are the same two doc-sync tests ·
+`chaos-disconnect` **OK** (`NETWORK_CUT_APPLIED`) · `chaos-errorpath` **OK** (missing-config probe
+rc=1 naming `.gitreins/config.yaml`, `HOME` isolated) · `docker_build`, `compose_config`,
+`docker-deploy` **N/A** (no Dockerfile / no compose file) · `ui-probe` **N/A** (no web UI) ·
+`chaos-shutdown`, `chaos-corruption` **N/A** (no compose file, no db/state files).
+
+The red is the same defect, quoted from `cell-logs/tests.log`:
+`tests/test_cli_doc_sync.py:107 assert len(top_level) == 25 → AssertionError: assert 26 == 25`
+and `:161 FAIL: docs/cli-reference.md drifts from the live CLI`. That is `GR-230` reproduced on a
+clean machine — **no new row**, and nothing here re-files it.
+
+**Performance: still no `PERF-<n>` row, and that is a deliberate verdict.** The only numbers this
+fire produced are the battery's own (`tests` 47.76 s for 402 collected tests; `upgrade` install
+wall time) and none of them is a user-visible path a fix could beat. The headline operation was
+already measured at 5.5 s cold / 3.2 s warm in the first fire, and the delta is the stale-index
+defect `GR-225`, not a hot path; no flamegraph or `EXPLAIN QUERY PLAN` was warranted.
+
+**State left behind.** New: `.coding-hermes/evidence/gitreins-dogfood-2026-11-15-15-54-49/` with
+`FINDINGS.md` (provenance + per-file verified/unverified index), `realuse/` (the eight product
+artifacts the first fire kept only in scratch) and `install-bunker/` (this fire's 24-row ledger,
+its chaos-disconnect log, and `cell-logs/`). Board: **0 rows filed this fire, 0 closed, 0
+dispatched** — every finding the fresh battery produced is a row that already exists. Teardown
+proved: agent `030af8f7` absent from `bunker list --server bunker-mvp --status all`, zero
+listeners on port 8699, no `/proc/*/cwd` under the tick scratch tree.
+`bunker list --server bunker-mvp --status all` now returns exactly three agents —
+`ci-e2e-01` (8.9 GB, created 11-07), `cf-node` (268.5 MB, 11-08) and `01ef49f2` (6.4 GB, created
+16:12:35 Z) — none of them this fire's; `01ef49f2` is a live sibling lane's run and was left
+running. No code, config,
+visibility, permission or credential state changed.
