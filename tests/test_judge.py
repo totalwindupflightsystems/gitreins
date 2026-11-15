@@ -397,6 +397,106 @@ class TestVerdictCoverage:
         assert coverage.graded == ("c1",)
         assert coverage.failing == ()
 
+    def test_interior_elision_in_a_nine_of_nine_pass_verdict_is_covered(self) -> None:
+        """A long token echoed as ``...`` must not create a false red (AUG-164)."""
+        from engine.gate import check_coverage, verdict_is_passing
+
+        criteria = [
+            (
+                f"AC{i} - run the proof with PATH=/home/kara/auger/.venv/bin:"
+                "/home/kara/.local/bin:/usr/local/bin:/usr/bin:/bin and assert the result"
+            )
+            for i in range(1, 7)
+        ]
+        echoed = [
+            criterion.replace(
+                "/home/kara/auger/.venv/bin:/home/kara/.local/bin:/usr/local/bin:/usr/bin:/bin",
+                "...",
+            )
+            for criterion in criteria
+        ]
+        criteria.extend(
+            ["derived criterion one", "derived criterion two", "derived criterion three"]
+        )
+        verdict = Verdict(
+            verdict="COMPLETE",
+            items=[
+                *[VerdictItem(criterion, "PASS", "proof") for criterion in echoed],
+                VerdictItem("derived criterion one", "PASS", "proof"),
+                VerdictItem("derived criterion two", "PASS", "proof"),
+                VerdictItem("derived criterion three", "PASS", "proof"),
+            ],
+        )
+
+        coverage = check_coverage(verdict, criteria)
+        assert len(verdict.items) == 9
+        assert len(coverage.graded) == 9
+        assert coverage.ungraded == ()
+        assert verdict_is_passing(verdict, criteria) is True
+
+    def test_persisted_pipeline_shape_uses_nested_complete_outcome(self) -> None:
+        """The persisted 9/9 record has its COMPLETE word under tier2 (AUG-164)."""
+        from engine.gate import check_coverage, verdict_is_passing
+
+        criterion = (
+            "a long proof token /home/kara/auger/.venv/bin:/home/kara/.local/bin/xyz "
+            "and assert the result"
+        )
+        record = {
+            "stages": {
+                "tier2": {
+                    "steps": [
+                        {
+                            "data": {
+                                "verdict": "COMPLETE",
+                                "items": [
+                                    {
+                                        "criterion": criterion.replace(
+                                            "/home/kara/auger/.venv/bin:/home/kara/.local/bin/xyz",
+                                            "...",
+                                        ),
+                                        "status": "PASS",
+                                    }
+                                ],
+                            }
+                        }
+                    ]
+                }
+            },
+        }
+        coverage = check_coverage(record, [criterion])
+        assert coverage.ungraded == ()
+        assert verdict_is_passing(record, [criterion]) is True
+
+    def test_interior_elision_does_not_make_a_fail_or_short_prefix_pass(self) -> None:
+        """A FAIL and a genuinely truncated echo remain negative controls (AUG-164)."""
+        from engine.gate import check_coverage, verdict_is_passing
+
+        criterion = (
+            "AC1 - run PATH=/home/kara/auger/.venv/bin:/home/kara/.local/bin:"
+            "/usr/local/bin:/usr/bin:/bin and assert the result"
+        )
+        elided = criterion.replace(
+            "/home/kara/auger/.venv/bin:/home/kara/.local/bin:/usr/local/bin:/usr/bin:/bin",
+            "...",
+        )
+        failing = Verdict(
+            verdict="COMPLETE",
+            items=[VerdictItem(elided, "FAIL", "failed proof")],
+        )
+        coverage = check_coverage(failing, [criterion])
+        assert coverage.graded == (criterion,)
+        assert coverage.failing == (criterion,)
+        assert verdict_is_passing(failing, [criterion]) is False
+
+        truncated = Verdict(
+            verdict="COMPLETE",
+            items=[VerdictItem(criterion[:30], "PASS", "proof")],
+        )
+        short_coverage = check_coverage(truncated, [criterion])
+        assert short_coverage.ungraded == (criterion,)
+        assert verdict_is_passing(truncated, [criterion]) is False
+
     def test_one_item_cannot_grade_two_criteria(self) -> None:
         """Coverage is per criterion: a duplicated item covers one of them."""
         from engine.gate import verdict_is_passing
