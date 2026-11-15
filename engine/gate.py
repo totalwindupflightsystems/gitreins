@@ -159,15 +159,46 @@ def waiver_satisfied(verdict: object, workdir: str) -> bool:
 # ── GR-167: per-criterion coverage ──────────────────────────────────────────
 
 
+def _nested_tier2_verdict(verdict: object) -> Mapping[str, Any] | None:
+    """Find a persisted Tier 2 verdict when it is nested under ``stages``."""
+    stages = _field(verdict, "stages", None)
+    if not isinstance(stages, Mapping):
+        return None
+    for stage in stages.values():
+        if not isinstance(stage, Mapping):
+            continue
+        for step in stage.get("steps") or ():
+            if not isinstance(step, Mapping):
+                continue
+            data = step.get("data")
+            if isinstance(data, Mapping) and isinstance(data.get("verdict"), str):
+                return data
+    return None
+
+
 def verdict_outcome(verdict: object) -> str:
-    """The verdict's own word: ``COMPLETE`` / ``INCOMPLETE`` / ``""``."""
-    return str(_field(verdict, "verdict", "") or "").strip().upper()
+    """The verdict's own word: ``COMPLETE`` / ``INCOMPLETE`` / ``""``.
+
+    Older persisted pipeline records store the evaluator verdict under the
+    Tier 2 step rather than duplicating it at the top level.  Read that shape
+    too, so coverage does not turn an otherwise complete persisted verdict into
+    a false red.
+    """
+    outcome = str(_field(verdict, "verdict", "") or "").strip().upper()
+    if outcome:
+        return outcome
+    nested = _nested_tier2_verdict(verdict)
+    return str(nested.get("verdict", "") if nested else "").strip().upper()
 
 
 def verdict_items(verdict: object) -> list[Any]:
     """The verdict's per-criterion items, whatever shape it is stored in."""
     items = _field(verdict, "items", None)
-    return list(items) if isinstance(items, (list, tuple)) else []
+    if isinstance(items, (list, tuple)):
+        return list(items)
+    nested = _nested_tier2_verdict(verdict)
+    nested_items = nested.get("items") if nested else None
+    return list(nested_items) if isinstance(nested_items, (list, tuple)) else []
 
 
 def _norm(text: object) -> str:
@@ -175,12 +206,35 @@ def _norm(text: object) -> str:
 
 
 def _matches(wanted: str, graded: str) -> bool:
-    """Exact text first, then a long-enough prefix in either direction."""
+    """Match an evaluator echo without weakening coverage to fuzzy similarity.
+
+    Exact text remains the first choice.  Evaluator output can, however, replace
+    a long interior token with ``...`` when echoing a criterion.  Treat that
+    marker as a single elided span only when both sides retain substantial
+    context that occurs in the authored criterion.  A short prefix or an
+    unrelated paraphrase therefore remains ungraded.
+    """
     if wanted == graded:
         return True
     if len(graded) < _PREFIX_MIN_CHARS or len(wanted) < _PREFIX_MIN_CHARS:
         return False
-    return graded.startswith(wanted) or wanted.startswith(graded)
+    # A bare prefix is a genuinely truncated echo, not evidence of identity.
+    # Only an explicit ellipsis may stand for omitted interior text.
+    if "..." not in graded:
+        return False
+
+    parts = [part for part in graded.split("...") if part]
+    if len(parts) < 2 or len(parts[0]) < _PREFIX_MIN_CHARS or len(parts[-1]) < _PREFIX_MIN_CHARS:
+        return False
+    position = 0
+    retained = 0
+    for part in parts:
+        found = wanted.find(part, position)
+        if found < 0:
+            return False
+        position = found + len(part)
+        retained += len(part)
+    return retained >= 2 * _PREFIX_MIN_CHARS
 
 
 @dataclass(frozen=True)
