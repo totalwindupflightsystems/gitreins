@@ -736,3 +736,61 @@ they illustrated is independent of the timing and remains verified by inspection
 `FINDINGS.md`) and this append. `gitreins resolve` was exercised in the scratch clone, never in this
 tree, so no board, usage or history state was written here. No row closed, none dispatched, no
 visibility, permission or credential change.
+
+## Duplicate fire — 2026-11-15 (same tick `gitreins-dogfood-2026-11-15-15-54-49`, fourth fire) — records-only; the arm gate is empty
+
+Detected before discovery: HEAD's own subject is a closeout of this tick id, and four commits already
+carry it (`70af0aa1` product use + rows, `bbbb2c4d` install leg + evidence trail, `a9cca0ac` + `f2704a28`
+USAGE.md, `abb3d69f` perf leg). This fire did not re-walk product use, did not re-run the battery and
+did not re-time anything.
+
+**The gate that decides arm-vs-records is empty.** `git diff --name-only f2704a28..HEAD` names nine
+paths and every one is a record: `.coding-hermes/dogfood-log.md` plus the eight
+`evidence/.../perf/*` artifacts the third fire committed. No `gitreins` source, docs, tests, config or
+`.gitreins/` file moved since that fire's measured state, so no user-visible surface can be stale and
+no half-finished arm can exist. A re-walk here would only re-report inherited numbers.
+
+**Provenance re-derived from the committed bytes, not from the prose above.** Working tree clean at
+validation time, so the in-tree validator graded the committed bytes rather than a sibling's dirty
+row. All six rows are on the board exactly once and all six are still `status=pending`; each has
+exactly one creation event in `events.jsonl` (counts `1 1 1 1 1 1` for `GR-225`..`GR-230`), so no
+append-without-event repair is owed. `jq -r .id tasks.jsonl | sort | uniq -d` prints nothing.
+`boardctl validate -C .coding-hermes/board` → `RESULT: OK (609 warning(s))` — the same count the third
+fire quoted, and no line names these rows: no new lint class, no new harm.
+
+**Newest open row's premise re-probed with its own cheapest command.** `python3
+scripts/check_cli_doc_sync.py` (repo HEAD, not the pipx 0.21.0 binary) prints `FAIL:
+docs/cli-reference.md drifts from the live CLI: - stated count 25 != live count 26 (live: …) - live
+subcommand \`review\` has no row in the \`## Global\` table`. `GR-230` stands as written and is not
+re-filed; it is the same defect `INT-CI-3722` records on the CI surface. One trap for whoever scripts
+this: **the checker exits 0 even when it prints FAIL**, so `rc=$?` after `| tail` reads `tail`'s status
+and a CI-shaped wrapper would pass a red doc. The verdict is the printed line, never the exit code.
+
+**Install leg restated, not re-run — graded install-PROVEN / isolation-UNVERIFIED.** `bunker list
+--server bunker-mvp --status all` answers (`Total: 5 agents`), so host and credential are live; the
+install path is already proven on this exact host by the second fire's battery, whose artifacts are
+present and readable here (`install-bunker/qa-evidence-bunker-mvp-030af8f7.jsonl`, 20 `cell-logs/`,
+`FINDINGS.md` 5673 B, `USAGE.md` 3371 B, `perf/FINDINGS.md` 4177 B, three `resolve_warm_*.json`).
+Isolation stays UNVERIFIED because every agent on this host reports `net: shared — host network
+namespace … NOT tenant isolation`. Both agents this tick ever owned are gone — `030af8f7` (second
+fire, id proven by the evidence filename) and `f84c7529` (first fire) are absent from the listing.
+
+**Residue left running, and why it is not mine to destroy.** `6c831765` (created 16:57:09Z),
+`c7d08d97` (17:15:23Z) and `81622cde` (17:21:54Z) all post-date the second fire's teardown — its agent
+was `030af8f7`, already absent — so they belong to concurrent sibling lanes, alongside the long-lived
+`ci-e2e-01` (11-07) and `cf-node` (11-08). Killed nothing: destroying a sibling's live run costs more
+than the residue.
+
+**Scheduler observation, not a product row:** this tick id has now been delivered four times (11:28,
+11:57, 12:17 and this fire), each delivery landing on a clean board with no product surface left to
+touch. Three fires before this one already concluded records-only; the duplicate dispatch is the
+finding, and it belongs to the scheduler, not to `gitreins`.
+
+**Performance: no `PERF-<n>` row, deliberately.** Product code is byte-identical to the third fire's
+measured tree, so its retained warm numbers (`resolve` 3.26 s median, network-bound and insensitive to
+a 5× load change) still describe the code; re-timing would launder them as new measurements, and a win
+nobody can feel is not a finding. The cold arm remains UNVERIFIED as that fire declared it.
+
+**State left behind.** One change: this append, committed path-limited. Zero rows filed, zero closed,
+zero dispatched, no workers spawned (`WAVE_BUDGET: 2`, nothing dispatchable). No code, config, board
+status, visibility, permission or credential change.
