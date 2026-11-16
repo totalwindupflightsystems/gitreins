@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Tier 2 coverage now documents, and enforces, its echo-matching contract.**
+  0.21.0 shipped the narrowed matcher in `engine/gate.py::_matches` but its
+  docs and one pipeline test still described the older prefix-tolerant rule,
+  so the intended behaviour and the stated behaviour disagreed. The contract,
+  as of this release: an evaluator item grades the authored criterion when
+  (a) the two texts are identical after whitespace collapsing and case
+  folding, or (b) the echo replaces interior text with an explicit `...`
+  marker and every surviving fragment appears in order inside the authored
+  criterion, with the first and last fragments each at least 10 characters
+  and at least 20 characters retained in total. Anything else leaves the
+  criterion in `ungraded_criteria`, so the stage does not pass — including a
+  shortened echo with **no** `...` marker (a bare trimmed prefix), a short
+  echo under 10 characters, a paraphrase, and an elision whose fragments
+  cannot be located in order. Previously a long-enough prefix graded the
+  criterion in either direction; that tolerance is gone, and
+  `tests/test_pipeline.py::TestAiEvalCoverageGate` now asserts the narrowed
+  rule instead of contradicting it.
+
 ## [0.21.0] - 2026-11-09
 
 ### Added
