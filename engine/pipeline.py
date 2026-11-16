@@ -45,6 +45,7 @@ pipeline:
 """
 
 import concurrent.futures
+import hashlib
 import json
 import logging
 import os
@@ -243,6 +244,30 @@ def _is_degraded_guard_pass(command: str, exit_code: int | None, output: str) ->
     return bool(re.search(r"Tier 1:\s+DEGRADED PASS\b", output or "")) and not bool(
         re.search(r"Tier 1 Guards:\s+FAIL\b", output or "")
     )
+
+
+@dataclass
+class StageContext:
+    """Structured input handed from one pipeline stage to the next.
+
+    The previous stage is represented by its serialized result rather than a
+    derived summary, so findings remain verbatim and provider/model details do
+    not leak into the context contract. ``diff_digest`` is stable for the
+    pipeline run and lets a later stage identify the tree it is reviewing.
+    """
+
+    prior_findings: Any
+    prior_verdict: str
+    prior_status: str
+    diff_digest: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "prior_findings": self.prior_findings,
+            "prior_verdict": self.prior_verdict,
+            "prior_status": self.prior_status,
+            "diff_digest": self.diff_digest,
+        }
 
 
 @dataclass
@@ -676,6 +701,8 @@ class Pipeline:
         self.config = config
         self.stages: list[dict[str, Any]] = config.get("pipeline", {}).get("stages", [])
         self._stage_results: dict[str, StageResult] = {}
+        self._stage_context: StageContext | None = None
+        self._diff_digest = self._compute_diff_digest()
         self._llm = llm  # Can be injected by Judge
         # EVID-003: the judge's token telemetry is appended to
         # ``<workdir>/.gitreins/usage.jsonl`` — a write INSIDE the graded tree.
@@ -702,6 +729,8 @@ class Pipeline:
             Dict with overall verdict and per-stage results.
         """
         self._stage_results = {}
+        self._stage_context = None
+        self._diff_digest = self._compute_diff_digest()
 
         for stage_def in self.stages:
             # Check if this stage should run for this trigger
@@ -739,6 +768,7 @@ class Pipeline:
             _record_runtime_skips(result)
 
             self._stage_results[stage_id] = result
+            self._stage_context = self._context_from_stage(result)
 
         return self._compile_results()
 
@@ -1181,22 +1211,26 @@ class Pipeline:
             # Nothing set in the step — defer to .gitreins/config.yaml
             evaluator = AgenticEvaluator(self._llm, self.scan_root, config_root=self.workdir)
 
-        # Build prompt with template substitution — the custom prompt_template
-        # (if any) is passed to the evaluator as its system-prompt override so
-        # it actually becomes the evaluation prompt. Previously this branch set
-        # _pipeline_context then did nothing with the template (2026-08-08).
-        prompt_template = step_def.get("prompt_template", "")
-        if prompt_template:
-            pipeline_context = self._get_pipeline_context()
+        # GR-234: make the immediate predecessor available to the evaluator's
+        # input prompt. Do not add the key for the first stage: preserving the
+        # historical task shape is part of the single-stage contract.
+        pipeline_context = self._get_pipeline_context()
+        if self._stage_context is not None:
+            task["_stage_context"] = dict(pipeline_context["stage_context"])
+        else:
+            task.pop("_stage_context", None)
+
+        # The evaluator receives this context through the task input. It is
+        # deliberately also available to prompt templates for custom stages.
+        task["_pipeline_context"] = pipeline_context
+        if step_def.get("prompt_template"):
             import json as _json
 
             ctx_str = _json.dumps(pipeline_context.get("stages", {}), default=str)[:4000]
-            rendered = prompt_template.replace(
-                "{{ pipeline_context }}",
-                ctx_str,
-            )
+            rendered = step_def["prompt_template"].replace("{{ pipeline_context }}", ctx_str)
             task["_system_prompt_override"] = rendered
-            task["_pipeline_context"] = pipeline_context
+        else:
+            task.pop("_system_prompt_override", None)
 
         # GR-195: a fresh step clears the slot so a previous ai_eval stage's
         # transcript can never be mistaken for this one's.
@@ -1620,11 +1654,44 @@ class Pipeline:
 
         return text
 
+    def _compute_diff_digest(self) -> str:
+        """Return a stable digest of the tree input shared by all stages."""
+        try:
+            completed = subprocess.run(
+                ["git", "diff", "HEAD", "--no-color"],
+                cwd=self.workdir,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+            diff = completed.stdout
+        except (OSError, subprocess.SubprocessError):
+            diff = ""
+        return hashlib.sha256(diff.encode("utf-8")).hexdigest()
+
+    def _context_from_stage(self, stage: StageResult) -> StageContext:
+        serialized = stage.to_dict()
+        findings = serialized.get("steps", [])
+        verdict = ""
+        for step in stage.steps:
+            if isinstance(step.data, dict) and step.data.get("verdict"):
+                verdict = str(step.data["verdict"])
+        return StageContext(
+            prior_findings=findings,
+            prior_verdict=verdict,
+            prior_status="passed" if stage.passed else "failed",
+            diff_digest=self._diff_digest,
+        )
+
     def _get_pipeline_context(self) -> dict[str, Any]:
         """Get context from previous stages to inject into AI evaluation."""
-        return {
+        context: dict[str, Any] = {
             "stages": {sid: s.to_dict() for sid, s in self._stage_results.items()},
         }
+        if self._stage_context is not None:
+            context["stage_context"] = self._stage_context.to_dict()
+        return context
 
     def _summarize_stage(self, stage: StageResult) -> str:
         """Create a summary string for a stage — ONE line per step.

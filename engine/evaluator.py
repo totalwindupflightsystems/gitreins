@@ -1484,6 +1484,15 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
 
         self._task_index[task.get("id", "unknown")] = task
 
+        # GR-234: later pipeline stages receive the immediately preceding
+        # stage's structured output as an explicit prompt block. Keep the
+        # payload serialized by the pipeline so findings are not summarized or
+        # reinterpreted before the next evaluator sees them.
+        stage_context = task.get("_stage_context")
+        if isinstance(stage_context, dict):
+            task_prompt += "\n\n## PRIOR STAGE CONTEXT\n"
+            task_prompt += json.dumps(stage_context, ensure_ascii=False, sort_keys=True)
+
         # Store and inject LSP diagnostics from Tier 1 if present
         tier1_diags = task.get("tier1_diagnostics", [])
         self._tier1_diagnostics = tier1_diags
