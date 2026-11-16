@@ -1348,15 +1348,24 @@ class TestAiEvalCoverageGate:
         data = build_verdict_data(tmp_workdir, task, judge_result)
         assert "ungraded_criteria" not in data["stages"]["tier2"]
 
-    def test_a_shortened_item_matches_by_prefix(
+    def test_a_shortened_item_without_an_elision_stays_ungraded(
         self, tmp_workdir: str, llm_client: LLMClient
     ) -> None:
-        """Exact text first, then prefix: a trimmed item still grades the criterion."""
+        """A bare trimmed echo is not evidence of identity — AUG-164.
+
+        ``engine.gate._matches`` accepts an evaluator echo that elides interior
+        text with ``...`` (AUG-164), but a shortened item with no marker at all
+        is a truncated paraphrase, so the criterion it *might* cover remains
+        ungraded and Tier 2 cannot pass. This test previously asserted the
+        prefix-tolerant behaviour AUG-164 deliberately replaced; it was the last
+        caller expecting it and kept main red.
+        """
         from engine.evaluator import Verdict, VerdictItem
 
+        criterion = "GET /status returns 200 with a json body"
         result = self._run(
             self._pipeline(tmp_workdir, llm_client),
-            ["GET /status returns 200 with a json body"],
+            [criterion],
             Verdict(
                 verdict="COMPLETE",
                 items=[VerdictItem("GET /status returns 200", "PASS", "ok")],
@@ -1364,7 +1373,9 @@ class TestAiEvalCoverageGate:
             ),
         )
 
-        assert result["stages"]["tier2"]["passed"] is True
+        stage = result["stages"]["tier2"]
+        assert stage["passed"] is False
+        assert stage["ungraded_criteria"] == [criterion]
 
     def test_full_coverage_still_passes(self, tmp_workdir: str, llm_client: LLMClient) -> None:
         """Positive control: every criterion graded and PASSing still passes."""
