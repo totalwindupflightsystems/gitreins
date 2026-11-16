@@ -1284,3 +1284,4 @@
 {"id": 1794171000000000124, "timestamp": "2026-11-16T14:10:08Z", "event_type": "task_created", "task_id": "INT-CI-3723", "actor": "foreman", "detail": "{\"id\":\"INT-CI-3723\",\"status\":\"complete\"}"}
 {"id": 1794171000000000125, "timestamp": "2026-11-16T14:14:41Z", "event_type": "task_updated", "task_id": "RELEASE-026", "actor": "foreman", "detail": "{\"status\":\"blocked\"}"}
 {"id": 1794171000000000126, "timestamp": "2026-11-16T14:14:42Z", "event_type": "task_updated", "task_id": "GR-231", "actor": "foreman", "detail": "{\"status\":\"blocked\"}"}
+{"id": 1794171000000000127, "timestamp": "2026-11-16T14:38:13Z", "event_type": "task_completed", "task_id": "INT-CI-3722", "actor": "foreman", "detail": "{\"status\":\"complete\"}"}
