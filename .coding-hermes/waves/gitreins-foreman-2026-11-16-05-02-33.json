@@ -1,0 +1,17 @@
+{
+  "wave_id": "gitreins-foreman-2026-11-16-05-02-33",
+  "project": "gitreins",
+  "base": "86b87667119e2b8a4c63f172f7d88d8d3bc8ed55",
+  "budget": 3,
+  "mode": "serial-fallback",
+  "rows": [
+    {
+      "id": "GR-234",
+      "priority": "P1",
+      "worktree": "/home/kara/worktrees/gitreins-GR-234",
+      "branch": "wt/GR-234",
+      "depends_on": [],
+      "status": "selected"
+    }
+  ]
+}
