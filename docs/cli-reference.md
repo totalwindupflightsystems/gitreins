@@ -20,7 +20,7 @@ Running `gitreins` with no command prints the top-level help and exits
 **0**. An unknown command exits **2** (argparse behavior for
 unrecognized arguments).
 
-There are **25 top-level subcommands**:
+There are **26 top-level subcommands**:
 
 | # | Command | Purpose |
 |---|---------|---------|
@@ -49,6 +49,7 @@ There are **25 top-level subcommands**:
 | 23 | `disable` | Disarm the managed hooks without removing config or history |
 | 24 | `enable` | Re-arm the hooks `disable` removed |
 | 25 | `uninstall` | Remove the hooks and config GitReins installed (dry-run; `--apply`, `--purge`) |
+| 26 | `review` | Manage persistent review findings (`dismiss <fingerprint> --reviewer <name> [--reason]`) |
 
 ## 1. `gitreins install`
 

@@ -104,7 +104,7 @@ def test_live_surface_pins_the_current_cli() -> None:
     """The truth the doc is compared against — pinned so a silent parser
     change shows up here rather than as a mysterious doc failure."""
     top_level, worktree_options, qa_options = _load_module().live_surface(REPO_ROOT)
-    assert len(top_level) == 25
+    assert len(top_level) == 26
     assert "qa" in top_level
     assert "resolve" in top_level
     assert "preflight" in top_level
@@ -113,6 +113,10 @@ def test_live_surface_pins_the_current_cli() -> None:
     assert "config-validate" in top_level
     # GR-161: the lifecycle trio must stay reachable from the CLI.
     assert {"disable", "enable", "uninstall"} <= set(top_level)
+    # GR-211 (c292e002): persistent review findings add a `review` entry point.
+    # The analyzer still reports its internal dispatch as unwired (RELEASE-025);
+    # the parser serves it regardless, so the doc table must list it.
+    assert "review" in top_level
     # DF-GITREINS-POC-54: the .gitleaks.toml doctor is a TOP-LEVEL subcommand
     # (distinct from `worktree doctor`, which is the board-resolution check).
     assert "doctor" in top_level
