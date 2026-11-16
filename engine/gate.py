@@ -31,6 +31,9 @@ logger = logging.getLogger("gitreins.gate")
 PASS_CLASS_JUDGED = "judged"
 #: Tier 2 never ran: the verdict grades Tier 1 alone.
 PASS_CLASS_TIER1_ONLY = "tier1-only"
+#: GR-231: the record CLAIMS a judged pass but carries no Tier 2 artifact. Not a
+#: weaker pass — not a pass at all. Downstream consumers route it to review.
+PASS_CLASS_UNVERIFIED = "unverified-never-pass"
 
 #: GR-178: the status for a criterion the judge could not assess from the code
 #: at all — a UI actually rendering, an external API contract, a migration
@@ -86,20 +89,48 @@ def _tier2_evidence(source: object) -> bool:
                     data = _field(step, "data", None)
                     if isinstance(data, Mapping) and data.get("verdict"):
                         return True
+        # The third documented shape: a pre-pipeline verdict whose only
+        # surviving Tier 2 artifact is the rendered criterion list.  Read it —
+        # but only when it actually graded something, so a record that merely
+        # CLAIMS ``judged`` with an empty item list is still no artifact.
+        items = _field(candidate, "items", None)
+        if isinstance(items, (list, tuple)) and len(items) > 0:
+            return True
     return False
 
 
+def has_tier2_artifact(source: object) -> bool:
+    """True when *source* carries structured Tier 2 evidence.
+
+    GR-231: ``pass_class`` is persisted input, not proof — an author or a stale
+    writer can record ``judged`` on a record whose Tier 2 never ran.  The class
+    is only honoured when the artifact that class implies is actually present.
+    """
+    return _tier2_evidence(source)
+
+
 def pass_class(source: object) -> str:
-    """``judged`` or ``tier1-only`` for a verdict, a result, or a record.
+    """``judged`` / ``tier1-only`` / ``unverified-never-pass`` for a record.
 
     GR-166: an explicit ``pass_class`` wins; a record written before the field
     existed is classified from its stages — ``judged`` when Tier 2 evidence is
     present, ``tier1-only`` when it is not.
+
+    GR-231: a record that CLAIMS ``judged`` while carrying no Tier 2 artifact is
+    classified ``unverified-never-pass`` instead. The 2026-11-15 slip-through
+    spot-check (4,104 PASS verdicts scanned, 18 confirmed contradictions) found
+    8 of the 18 were records with no Tier 2 artifact behind them and 4 were
+    commit drift — and treating the class claim as proof made forging it the
+    cheapest way through the gate. This class is never a PASS: consumers route
+    it to review, and no owner waiver applies to it (a waiver waives a Tier 2
+    that openly did not run, not a claim that it did).
     """
     explicit = _field(source, "pass_class", None)
-    if explicit in (PASS_CLASS_JUDGED, PASS_CLASS_TIER1_ONLY):
+    if explicit == PASS_CLASS_JUDGED:
+        return PASS_CLASS_JUDGED if has_tier2_artifact(source) else PASS_CLASS_UNVERIFIED
+    if explicit in (PASS_CLASS_TIER1_ONLY, PASS_CLASS_UNVERIFIED):
         return str(explicit)
-    return PASS_CLASS_JUDGED if _tier2_evidence(source) else PASS_CLASS_TIER1_ONLY
+    return PASS_CLASS_JUDGED if has_tier2_artifact(source) else PASS_CLASS_TIER1_ONLY
 
 
 def waiver_digest(token: str) -> str:
@@ -376,11 +407,17 @@ def merge_recommendation(verdict: object, criteria: Any = None) -> str:
 
     ``changes_required`` when any item grades FAIL; ``needs_review`` when any
     item is NOT_VERIFIABLE (a criterion only a human can settle — the whole
-    point of GR-178) or a supplied criterion went ungraded; ``no_concerns_found``
-    only when every item is PASS and every criterion was graded. The merge
-    gate does NOT read this: ``pass_class`` still governs merging, so this is
-    routing advice for a human, never a key.
+    point of GR-178), when a supplied criterion went ungraded, or when the
+    record has no judged pass class at all (GR-231: ``tier1-only`` and
+    ``unverified-never-pass`` both mean no Tier 2 artifact backs the record, so
+    neither is ever ``no_concerns_found`` — an absent artifact cannot be routed
+    to "no concerns"); ``no_concerns_found`` only when the record is a judged
+    pass whose every item is PASS and whose every criterion was graded. The
+    merge gate does NOT read this: ``pass_class`` still governs merging, so this
+    is routing advice for a human, never a key.
     """
+    if pass_class(verdict) != PASS_CLASS_JUDGED:
+        return MERGE_RECOMMENDATION_REVIEW
     items = verdict_items(verdict)
     statuses = [_status_of(item) for item in items]
     if "FAIL" in statuses:
