@@ -695,11 +695,54 @@ class GitReinsMCPServer:
         logger.info("Task started: %s (workdir=%s)", id, tm.workdir)
         return tm.to_dict(task)
 
+    def _board_closeout_refusal(
+        self, root: str, task_id: str, status: str
+    ) -> dict[str, Any] | None:
+        """Refuse a closeout the fleet board does not confirm (GR-231).
+
+        The same readback the CLI performs, on the same canonical board: the row
+        must be terminal and must reference the commit this closeout grades.
+        Returns the tool error, or ``None`` when the checkout has no board (the
+        board is a witness, not a precondition) or the row agrees.
+        """
+        from engine.board import closeout_refusal
+
+        graded = ""
+        try:
+            head = subprocess.run(
+                ["git", "rev-parse", "--verify", "HEAD"],  # noqa: S607 - git resolved via PATH by design
+                capture_output=True,
+                text=True,
+                cwd=root,
+                timeout=5,
+                check=False,
+            )
+            if head.returncode == 0:
+                graded = head.stdout.strip()
+        except (OSError, subprocess.TimeoutExpired):
+            graded = ""
+        refusal = closeout_refusal(root, task_id, graded)
+        if refusal is None:
+            return None
+        logger.info("Task closeout refused: %s — %s", task_id, refusal)
+        return {
+            "error": f"Cannot complete '{task_id}' — {refusal}.",
+            "task_id": task_id,
+            "status": status,
+            "refused": True,
+            "note": "no state changed; no verdict was produced",
+        }
+
     def _task_complete(self, id: str, workdir: str | None = None) -> dict[str, Any]:
         refusal = self._workdir_error(workdir)
         if refusal is not None:
             return refusal
         tm = self._task_manager_for(workdir)
+        existing = tm.get(id)
+        if existing is not None:
+            board_refusal = self._board_closeout_refusal(tm.workdir, id, existing.status)
+            if board_refusal is not None:
+                return board_refusal
         task = tm.complete(id)
         logger.info("Task completed: %s (workdir=%s)", id, tm.workdir)
 

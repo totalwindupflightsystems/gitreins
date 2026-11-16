@@ -680,6 +680,10 @@ def test_merge_gate_reads_the_disk_verdict_for_the_commit_it_grades(fleet_repo: 
             # GR-166: a JUDGED pass — this fixture grades the disk-verdict
             # lookup, not the pass class, so it says which class it is.
             "pass_class": "judged",
+            # GR-231: a judged claim is only honoured when the Tier 2 artifact
+            # it claims is actually present, so the fixture carries the one
+            # this fixture is not otherwise about.
+            "tier2": {"verdict": "COMPLETE"},
             "worktree": str(tree.resolve()),
             "branch": record.branch,
             "commit": commit,

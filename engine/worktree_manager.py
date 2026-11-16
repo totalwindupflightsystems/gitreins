@@ -990,7 +990,8 @@ class WorktreeManager:
                     "--actor to override). Verdict: "
                     f"{self._verdict_reference(task_id, record, verdict)}"
                 )
-            self._refuse_tier1_only(task_id, record, verdict)
+            self._refuse_weak_pass_class(task_id, record, verdict)
+            self._refuse_unbound_board_row(task_id, record, verdict)
 
         rebased = False
         if main_head != record.branch_point:
@@ -1034,7 +1035,8 @@ class WorktreeManager:
                         f"({', '.join(skipped)}) — a PASS whose gates never ran cannot "
                         "merge; task worktree preserved."
                     )
-                self._refuse_tier1_only(task_id, record, verdict)
+                self._refuse_weak_pass_class(task_id, record, verdict)
+                self._refuse_unbound_board_row(task_id, record, verdict)
 
         # Recheck all safety facts immediately before changing canonical main.
         if self._head(self.main_root) != main_head:
@@ -1099,25 +1101,46 @@ class WorktreeManager:
             "worktree": str(tree),
         }
 
-    def _refuse_tier1_only(
+    def _refuse_weak_pass_class(
         self, task_id: str, record: WorktreeRecord, verdict: dict[str, Any]
     ) -> None:
-        """HOLD a PASS whose Tier 2 never ran, unless the owner waived it (GR-166).
+        """HOLD a PASS whose class does not mean "Tier 2 graded this" (GR-166/GR-231).
 
-        Tier 2 is the only stage that reads the change; ``--skip-tier2`` lets
-        the author switch it off, so a ``tier1-only`` verdict is a Tier 1 grade
-        and nothing more. 49 of 297 stored passes were that class and were
-        indistinguishable from a judged pass, which made the weaker class the
-        cheap way through the gate.
+        Two weak classes reach a merge, and neither is a judged pass:
+
+        * ``tier1-only`` — Tier 2 (the only stage that reads the change) never
+          ran, because ``--skip-tier2`` lets the author switch it off. 49 of
+          297 stored passes were that class and were indistinguishable from a
+          judged pass, which made the weaker class the cheap way through the
+          gate. The owner may waive it.
+        * ``unverified-never-pass`` — GR-231: the record CLAIMS a judged pass but
+          carries no Tier 2 artifact, so the claim is unsupported. Nothing ran
+          and nothing was recorded; there is no waiver for a claim that Tier 2
+          did run.
 
         The waiver is the owner's: the token is read from ``GITREINS_TIER2_WAIVER``
         or ``gate.tier2_waiver`` in this checkout's config — never from the
         commit message, a trailer, or the verdict body — and the verdict must
         carry its digest, so an author cannot mint one by writing one.
         """
-        from engine.gate import PASS_CLASS_TIER1_ONLY, pass_class, waiver_satisfied
+        from engine.gate import (
+            PASS_CLASS_TIER1_ONLY,
+            PASS_CLASS_UNVERIFIED,
+            pass_class,
+            waiver_satisfied,
+        )
 
-        if pass_class(verdict) != PASS_CLASS_TIER1_ONLY:
+        verdict_class = pass_class(verdict)
+        if verdict_class == PASS_CLASS_UNVERIFIED:
+            raise WorktreeError(
+                "HOLD: the matching verdict claims a judged pass but carries no Tier 2 "
+                "artifact — it is unverified-never-pass, which is never a PASS (GR-231). "
+                "Re-run the judge so the verdict carries its Tier 2 items, or record the "
+                "owner's waiver and re-judge with --skip-tier2 if Tier 2 is deliberately "
+                "unavailable. Verdict: "
+                f"{self._verdict_reference(task_id, record, verdict)}"
+            )
+        if verdict_class != PASS_CLASS_TIER1_ONLY:
             return
         if waiver_satisfied(verdict, str(self.main_root)):
             return
@@ -1129,6 +1152,31 @@ class WorktreeManager:
             ".gitreins/config.yaml, or GITREINS_TIER2_WAIVER) and re-judge so the "
             "verdict carries it. Verdict: "
             f"{self._verdict_reference(task_id, record, verdict)}"
+        )
+
+    def _refuse_unbound_board_row(
+        self, task_id: str, record: WorktreeRecord, verdict: dict[str, Any]
+    ) -> None:
+        """HOLD a merge whose fleet board row does not confirm the graded commit.
+
+        GR-231: a merge is a closeout — it lands the commit and reaps the branch
+        — but until now it read only ``.gitreins/tasks.yaml`` (what the author
+        says happened) and never the fleet board (what landed). A row that is
+        still ``pending``/``in_progress``/``reopened``, or that references a
+        different commit, means the closeout would manufacture a closed record
+        over an open one. The board stays optional: a checkout without a board
+        has nothing to read back and is not refused.
+        """
+        from engine.board import closeout_refusal
+
+        commit = str(verdict.get("commit") or verdict.get("source_commit") or "").strip()
+        refusal = closeout_refusal(str(self.main_root), task_id, commit)
+        if refusal is None:
+            return
+        raise WorktreeError(
+            f"HOLD: refusing to merge — {refusal}. Close the fleet board row at the "
+            "graded commit first, then re-run the merge; the task worktree was "
+            f"preserved. Verdict: {self._verdict_reference(task_id, record, verdict)}"
         )
 
     def _is_task_worktree(self, workdir: Path) -> bool:

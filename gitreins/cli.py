@@ -2382,6 +2382,53 @@ def _task_complete_lease(task_id: str, control_root: str, scan_root: str) -> Ite
             release_resume_lease(fd)
 
 
+def _head_commit(workdir: str) -> str:
+    """The commit at ``workdir``'s HEAD, or ``""`` when it has none.
+
+    The commit a closeout grades is the one the judge reads, so it is resolved
+    from the control root rather than from a task field an author can write.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD"],  # noqa: S607 - git resolved via PATH by design
+            capture_output=True,
+            text=True,
+            cwd=workdir,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ""
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _refuse_unbound_closeout(workdir: str, task_id: str, status: str) -> None:
+    """Refuse a closeout the fleet board does not confirm (GR-231).
+
+    ``.gitreins/tasks.yaml`` records what the author claims; the fleet board
+    (``.coding-hermes/board/tasks.jsonl``) records what was landed. Closing a
+    task on the first alone is how 18 of 4,104 PASS verdicts were later
+    contradicted — a row still open, or a row pointing at a different commit
+    than the verdict graded. This runs BEFORE the task state is touched, so a
+    refused closeout leaves the task exactly as it found it.
+
+    A checkout with no board is not refused: the board is a witness, not a
+    precondition, and most repositories never create one.
+    """
+    from engine.board import closeout_refusal
+
+    refusal = closeout_refusal(workdir, task_id, _head_commit(workdir))
+    if refusal is None:
+        return
+    print(f"Cannot complete '{task_id}' — {refusal}.", file=sys.stderr)
+    print(
+        f"Task '{task_id}' is still {status} — the closeout was refused before any "
+        "state changed and no verdict was produced (exit code 1).",
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+
 def cmd_task_complete(args: argparse.Namespace) -> None:
     from engine.evaluator import LLM_FAILURE_SUMMARY_PREFIX
     from engine.task_manager import TaskManager
@@ -2404,6 +2451,12 @@ def cmd_task_complete(args: argparse.Namespace) -> None:
     # The resolved task is kept: the refusal below states the status it left
     # the task in (DF-GITREINS-POC-82).
     resolved = _require_task(tm, args.id)
+
+    # GR-231: the board row is the witness for what landed, so a closeout the
+    # board does not confirm is refused HERE — before the task state, the
+    # credential path, or the judge run can change anything.
+    if not force:
+        _refuse_unbound_closeout(workdir, args.id, resolved.status)
 
     # Check dependencies (unless forced)
     if not force:
@@ -2478,9 +2531,15 @@ def cmd_task_complete(args: argparse.Namespace) -> None:
         # GR-166: the weaker class must be visible where the author reads the
         # result, not only in verdict.json. A Tier 1-only pass is a Tier 1
         # grade; it does not satisfy a judge-gated merge on its own.
-        from engine.gate import PASS_CLASS_TIER1_ONLY, configured_waiver, pass_class
+        from engine.gate import (
+            PASS_CLASS_TIER1_ONLY,
+            PASS_CLASS_UNVERIFIED,
+            configured_waiver,
+            pass_class,
+        )
 
-        if pass_class(result) == PASS_CLASS_TIER1_ONLY:
+        result_class = pass_class(result)
+        if result_class == PASS_CLASS_TIER1_ONLY:
             waiver = (
                 "the owner waiver is configured, so the verdict records its digest"
                 if configured_waiver(workdir)
@@ -2490,6 +2549,15 @@ def cmd_task_complete(args: argparse.Namespace) -> None:
             print(
                 "\nPass class: tier1-only — Tier 2 did not run, so this is a Tier 1 grade, "
                 f"not a judged pass ({waiver})."
+            )
+        elif result_class == PASS_CLASS_UNVERIFIED:
+            # GR-231: never a PASS, and there is nothing for a waiver to waive —
+            # the record claims a judged pass that carries no Tier 2 artifact, so
+            # the classification routes it to review instead.
+            print(
+                "\nPass class: unverified-never-pass — the record claims a judged pass "
+                "but carries no Tier 2 artifact, so it is not a PASS and cannot satisfy "
+                "a judge-gated merge (needs_review)."
             )
 
         _persist_result(workdir, task, result)
