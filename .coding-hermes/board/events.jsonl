@@ -1279,3 +1279,8 @@
 {"id": 1794171000000000119, "timestamp": "2026-11-16T11:24:13Z", "event_type": "task_created", "task_id": "RELEASE-026", "actor": "foreman", "detail": "{\"id\":\"RELEASE-026\",\"status\":\"pending\"}"}
 {"id": 1794171000000000120, "timestamp": "2026-11-16T11:27:44Z", "event_type": "task_created", "task_id": "RELEASE-027", "actor": "foreman", "detail": "{\"id\":\"RELEASE-027\",\"status\":\"pending\"}"}
 {"id": 1794171000000000121, "timestamp": "2026-11-16T11:34:31Z", "event_type": "task_created", "task_id": "RELEASE-028", "actor": "foreman", "detail": "{\"id\":\"RELEASE-028\",\"status\":\"pending\"}"}
+{"id": 1794171000000000122, "timestamp": "2026-11-16T12:25:39Z", "event_type": "task_updated", "task_id": "GR-231", "actor": "foreman", "detail": "{\"status\":\"in_progress\"}"}
+{"id": 1794171000000000123, "timestamp": "2026-11-16T13:29:53Z", "event_type": "task_updated", "task_id": "GR-231", "actor": "foreman", "detail": "{\"status\":\"in_progress\"}"}
+{"id": 1794171000000000124, "timestamp": "2026-11-16T14:10:08Z", "event_type": "task_created", "task_id": "INT-CI-3723", "actor": "foreman", "detail": "{\"id\":\"INT-CI-3723\",\"status\":\"complete\"}"}
+{"id": 1794171000000000125, "timestamp": "2026-11-16T14:14:41Z", "event_type": "task_updated", "task_id": "RELEASE-026", "actor": "foreman", "detail": "{\"status\":\"blocked\"}"}
+{"id": 1794171000000000126, "timestamp": "2026-11-16T14:14:42Z", "event_type": "task_updated", "task_id": "GR-231", "actor": "foreman", "detail": "{\"status\":\"blocked\"}"}
