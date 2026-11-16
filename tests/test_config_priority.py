@@ -98,9 +98,9 @@ class TestEvaluatorSectionOverridesDefaults:
         from engine.eval_cap import eval_cap_from_config
 
         cap = eval_cap_from_config(config)
-        assert cap.max_iterations == 50.0, (
-            f"evaluator.max_iterations should override defaults, got {cap.max_iterations}"
-        )
+        assert (
+            cap.max_iterations == 50.0
+        ), f"evaluator.max_iterations should override defaults, got {cap.max_iterations}"
 
     def test_evaluator_overrides_defaults_time(self, tmp_path: Path) -> None:
         """evaluator.max_time overrides defaults.max_time."""
@@ -150,16 +150,18 @@ class TestEvaluatorSectionOverridesDefaults:
         assert cap.max_iterations == 30.0
         assert cap.max_seconds == 600.0
 
-    def test_gitreinsdefaults_overlay_does_not_process_evaluator(self, tmp_path: Path) -> None:
+    def test_gitreinsdefaults_overlay_does_not_process_evaluator(
+        self, tmp_path: Path
+    ) -> None:
         """GitReinsDefaults.overlay() ignores evaluator: keys (they are handled later)."""
         config = {
             "defaults": {"max_iterations": 50},
             "evaluator": {"max_iterations": 999},
         }
         gd = GitReinsDefaults().overlay(config)
-        assert gd.max_iterations == 50.0, (
-            f"overlay should only process defaults: section, got {gd.max_iterations}"
-        )
+        assert (
+            gd.max_iterations == 50.0
+        ), f"overlay should only process defaults: section, got {gd.max_iterations}"
 
 
 class TestExplicitConstructorWins:
@@ -204,9 +206,9 @@ class TestExplicitConstructorWins:
         llm = LLMClient()
         explicit_cap = EvalCap(max_iterations=10, source="explicit")
         evaluator = AgenticEvaluator(llm, workdir=str(tmp_path), eval_cap=explicit_cap)
-        assert evaluator.eval_cap.max_iterations == 10.0, (
-            f"Explicit EvalCap should override config, got {evaluator.eval_cap.max_iterations}"
-        )
+        assert (
+            evaluator.eval_cap.max_iterations == 10.0
+        ), f"Explicit EvalCap should override config, got {evaluator.eval_cap.max_iterations}"
 
     def test_agentic_evaluator_explicit_string_wins(self, tmp_path: Path) -> None:
         """AgenticEvaluator with explicit eval_cap string wins over config."""
@@ -226,7 +228,9 @@ class TestExplicitConstructorWins:
         evaluator = AgenticEvaluator(llm, workdir=str(tmp_path), eval_cap="10")
         assert evaluator.eval_cap.max_iterations == 10.0
 
-    def test_agentic_evaluator_max_iterations_positive_wins(self, tmp_path: Path) -> None:
+    def test_agentic_evaluator_max_iterations_positive_wins(
+        self, tmp_path: Path
+    ) -> None:
         """AgenticEvaluator with explicit max_iterations=5 wins over config."""
         config_dir = os.path.join(str(tmp_path), ".gitreins")
         os.makedirs(config_dir, exist_ok=True)
@@ -250,7 +254,7 @@ class TestExplicitConstructorWins:
         os.makedirs(config_dir, exist_ok=True)
         config = {
             "defaults": {"max_iterations": 100},
-            "evaluator": {"max_iterations": 30},
+            "evaluator": {"max_iterations": 30, "command_timeout": 180},
         }
         with open(os.path.join(config_dir, "config.yaml"), "w") as f:
             yaml.safe_dump(config, f)
@@ -263,4 +267,34 @@ class TestExplicitConstructorWins:
         assert evaluator.eval_cap.max_iterations == 30.0, (
             f"Without explicit params, evaluator should read config, "
             f"got {evaluator.eval_cap.max_iterations}"
+        )
+        assert evaluator.command_timeout == 180
+
+    def test_explicit_command_timeout_overrides_config(self, tmp_path: Path) -> None:
+        """An explicit command timeout stays authoritative over config.yaml."""
+        config_dir = os.path.join(str(tmp_path), ".gitreins")
+        os.makedirs(config_dir, exist_ok=True)
+        with open(os.path.join(config_dir, "config.yaml"), "w") as f:
+            yaml.safe_dump({"evaluator": {"command_timeout": 180}}, f)
+
+        from engine.evaluator import AgenticEvaluator
+        from engine.llm import LLMClient
+
+        assert (
+            AgenticEvaluator(
+                LLMClient(), workdir=str(tmp_path), command_timeout=2
+            ).command_timeout
+            == 2
+        )
+        assert (
+            AgenticEvaluator(
+                LLMClient(), workdir=str(tmp_path), command_timeout=0
+            ).command_timeout
+            == 0
+        )
+        assert (
+            AgenticEvaluator(
+                LLMClient(), workdir=str(tmp_path), command_timeout=None
+            ).command_timeout
+            is None
         )

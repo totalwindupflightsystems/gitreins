@@ -83,6 +83,23 @@ DEFAULT_FILE_SCOPE = "full"
 # whole-file read and asks for a range — see AgenticEvaluator.max_read_bytes.
 DEFAULT_MAX_READ_BYTES = 524_288
 
+# DF-CRIER-506: keep command execution bounded by default (30s) while letting a
+# repository whose deterministic gate is legitimately slower opt into a larger
+# bound with `evaluator.command_timeout` in .gitreins/config.yaml. The evaluator
+# passes the resolved value straight to command_hygiene.run_bounded.
+DEFAULT_COMMAND_TIMEOUT = 30
+
+
+class _CommandTimeoutUnset:
+    """Sentinel: "caller said nothing", which is NOT the same as ``None``.
+
+    An explicit ``command_timeout`` argument (including ``0``/``None``) must keep
+    its legacy meaning; only an omitted one falls back to config.yaml.
+    """
+
+
+_COMMAND_TIMEOUT_UNSET = _CommandTimeoutUnset()
+
 # GR-176: how many criteria the judge may add to the task's own list. The owner's
 # layer-3 point — "it needs to look at the task and decide what criteria is extra
 # needed for itself" — needs a cap so "set your own bar" cannot become an
@@ -301,7 +318,10 @@ EVALUATOR_TOOLS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Path relative to repo root."},
+                    "path": {
+                        "type": "string",
+                        "description": "Path relative to repo root.",
+                    },
                     "offset": {
                         "type": "integer",
                         "description": "Line number to start from (1-indexed). Omit to read from beginning.",
@@ -334,7 +354,9 @@ EVALUATOR_TOOLS = [
             "description": "Run a shell command. Returns exit code, stdout, and stderr. Use for tests, lint, build. Do NOT re-run the same command.",
             "parameters": {
                 "type": "object",
-                "properties": {"cmd": {"type": "string", "description": "Shell command to run."}},
+                "properties": {
+                    "cmd": {"type": "string", "description": "Shell command to run."}
+                },
                 "required": ["cmd"],
             },
         },
@@ -396,7 +418,9 @@ EVALUATOR_TOOLS = [
             "description": "Get the full definition of a task including ALL criteria. Always call this first to know what to check.",
             "parameters": {
                 "type": "object",
-                "properties": {"id": {"type": "string", "description": "Task ID to fetch."}},
+                "properties": {
+                    "id": {"type": "string", "description": "Task ID to fetch."}
+                },
                 "required": ["id"],
             },
         },
@@ -426,7 +450,9 @@ EVALUATOR_TOOLS = [
             "description": "Read from the evaluator's scratch space to check what you've already verified.",
             "parameters": {
                 "type": "object",
-                "properties": {"key": {"type": "string", "description": "Key to read."}},
+                "properties": {
+                    "key": {"type": "string", "description": "Key to read."}
+                },
                 "required": ["key"],
             },
         },
@@ -587,7 +613,9 @@ def tool_calls_transcript(record: list[str]) -> dict[str, Any] | None:
             arguments = {}
         result = parsed.get("result")
         result_text = (
-            result if isinstance(result, str) else json.dumps(result, sort_keys=True, default=str)
+            result
+            if isinstance(result, str)
+            else json.dumps(result, sort_keys=True, default=str)
         )
         if tool == "run_command":
             command = arguments.get("cmd") or arguments.get("command") or ""
@@ -666,7 +694,9 @@ def detected_by_is_backed(detected_by: str, run_record: Iterable[str]) -> bool:
     return all(ref in joined for ref in refs)
 
 
-def failure_mode_summary_flags(verdict: Verdict, run_record: Iterable[str]) -> list[str]:
+def failure_mode_summary_flags(
+    verdict: Verdict, run_record: Iterable[str]
+) -> list[str]:
     """Degradation flags a verdict's failure-mode block earns (GR-179).
 
     An entry is flagged when its ``detected_by`` is empty — the failure path
@@ -683,7 +713,9 @@ def failure_mode_summary_flags(verdict: Verdict, run_record: Iterable[str]) -> l
         if not detected_by:
             flags.append(f"{label}: detected_by is empty — uncovered failure path")
             continue
-        unbacked = [ref for ref in failure_mode_test_refs(detected_by) if ref not in joined]
+        unbacked = [
+            ref for ref in failure_mode_test_refs(detected_by) if ref not in joined
+        ]
         if unbacked:
             flags.append(
                 f"{label}: detected_by cites {', '.join(unbacked)} but no tool result "
@@ -754,7 +786,7 @@ class AgenticEvaluator:
         workdir: str = ".",
         max_iterations: int | None = None,
         eval_cap: str | EvalCap | None = None,
-        command_timeout: int = 30,
+        command_timeout: int | None | _CommandTimeoutUnset = _COMMAND_TIMEOUT_UNSET,
         config_root: str | None = None,
     ) -> None:
         self.llm = llm
@@ -781,8 +813,20 @@ class AgenticEvaluator:
             self.eval_cap.max_iterations if self.eval_cap.max_iterations > 0 else 10_000
         )
 
-        # Command timeout for tool calls — configurable for tests
-        self.command_timeout = command_timeout
+        # DF-CRIER-506: command timeout for tool calls. An explicit argument wins
+        # (tests pin 2s, and 0/None keep their subprocess meanings); an omitted
+        # one is read from evaluator.command_timeout, defaulting to 30s so the
+        # judge can never run a gate unbounded by accident.
+        self.command_timeout: int | None
+        if isinstance(command_timeout, _CommandTimeoutUnset):
+            evaluator_cfg = self._load_config().get("evaluator", {})
+            if not isinstance(evaluator_cfg, dict):
+                evaluator_cfg = {}
+            self.command_timeout = int(
+                evaluator_cfg.get("command_timeout", DEFAULT_COMMAND_TIMEOUT)
+            )
+        else:
+            self.command_timeout = command_timeout
 
         self._sandbox: dict[str, str] = {}
         # GR-179: the run record — every tool call the evaluator actually
@@ -807,7 +851,9 @@ class AgenticEvaluator:
         self._commands_run: set[str] = set()
         self._searches_done: set[str] = set()
         self._tier1_diagnostics: list[dict[str, Any]] = []
-        self._allowed_files: set[str] | None = None  # None = full scope, set = restricted
+        self._allowed_files: set[str] | None = (
+            None  # None = full scope, set = restricted
+        )
         # DF-CRIER-258: pgid of the last run_command's process group, for the
         # belt-and-braces reap in evaluate()'s finally (see there).
         self._last_command_pgid: int | None = None
@@ -829,7 +875,9 @@ class AgenticEvaluator:
         # dump, a minified bundle) and a truncated read of one of those is
         # worse than no read — the judge would grade against half a file and
         # believe it saw the whole thing. Range reads remain available.
-        self.max_read_bytes: int = int(evaluator_cfg.get("max_read_bytes", DEFAULT_MAX_READ_BYTES))
+        self.max_read_bytes: int = int(
+            evaluator_cfg.get("max_read_bytes", DEFAULT_MAX_READ_BYTES)
+        )
 
     def _resolve_fast_track(self) -> bool:
         """Resolve fast_track setting: 'on'→True, 'off'→False, 'auto'→detect.
@@ -868,7 +916,9 @@ class AgenticEvaluator:
                     )
                 ]
                 has_py = any(
-                    f.endswith(".py") and not f.startswith("test_") and f != "__init__.py"
+                    f.endswith(".py")
+                    and not f.startswith("test_")
+                    and f != "__init__.py"
                     for f in files
                 )
                 if has_py and root != self.workdir:
@@ -902,7 +952,11 @@ class AgenticEvaluator:
         import os
         import subprocess
 
-        test_mode = config.get("guards", {}).get("test_mode") or config.get("test_mode") or "full"
+        test_mode = (
+            config.get("guards", {}).get("test_mode")
+            or config.get("test_mode")
+            or "full"
+        )
 
         # Find changed files: staged + unstaged (data files excluded — they
         # carry no reviewable code and blow up the prompt, JUDGE-CONTEXT-001)
@@ -910,7 +964,12 @@ class AgenticEvaluator:
         try:
             # Staged changes
             staged = subprocess.run(
-                ["git", "diff", "--cached", "--name-only"],  # noqa: S607 - git resolved via PATH by design
+                [
+                    "git",
+                    "diff",
+                    "--cached",
+                    "--name-only",
+                ],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -921,7 +980,11 @@ class AgenticEvaluator:
                     changed_files.add(line)
             # Unstaged changes
             unstaged = subprocess.run(
-                ["git", "diff", "--name-only"],  # noqa: S607 - git resolved via PATH by design
+                [
+                    "git",
+                    "diff",
+                    "--name-only",
+                ],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -1000,7 +1063,9 @@ class AgenticEvaluator:
             shown = 0
             for fname in sorted(changed_files):
                 if shown >= max_files:
-                    lines.append(f"... [{len(changed_files) - max_files} more files truncated]")
+                    lines.append(
+                        f"... [{len(changed_files) - max_files} more files truncated]"
+                    )
                     break
                 if _is_data_file_path(fname):
                     continue
@@ -1078,7 +1143,12 @@ class AgenticEvaluator:
 
         try:
             head = subprocess.run(
-                ["git", "log", "-1", "--format=%H %s"],  # noqa: S607 - git resolved via PATH by design
+                [
+                    "git",
+                    "log",
+                    "-1",
+                    "--format=%H %s",
+                ],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -1087,13 +1157,21 @@ class AgenticEvaluator:
             if head.returncode != 0 or not head.stdout.strip():
                 return ""
             stat = subprocess.run(
-                ["git", "show", "--stat", "--format=", "HEAD"],  # noqa: S607 - git resolved via PATH by design
+                [
+                    "git",
+                    "show",
+                    "--stat",
+                    "--format=",
+                    "HEAD",
+                ],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=10,
                 cwd=self.workdir,
             )
-            block = f"## LAST COMMIT (working tree clean)\n\ncommit {head.stdout.strip()}\n"
+            block = (
+                f"## LAST COMMIT (working tree clean)\n\ncommit {head.stdout.strip()}\n"
+            )
             if stat.returncode == 0 and stat.stdout.strip():
                 block += f"\n```\n{stat.stdout.strip()}\n```\n"
             return block
@@ -1277,25 +1355,35 @@ class AgenticEvaluator:
             lines.append("")
 
         if remaining_indices:
-            lines.append(f"### Still to verify ({len(remaining_indices)}/{criteria_total}):")
+            lines.append(
+                f"### Still to verify ({len(remaining_indices)}/{criteria_total}):"
+            )
             for i in remaining_indices:
                 lines.append(f"  {i + 1}. {criteria_list[i]}")
             lines.append("")
 
         lines.append("## INSTRUCTIONS (continued evaluation)")
         lines.append("")
-        lines.append("You are resuming an evaluation with a clean context window. The criteria")
-        lines.append("marked ✓ above are already verified — do NOT re-check them. Focus ONLY on")
+        lines.append(
+            "You are resuming an evaluation with a clean context window. The criteria"
+        )
+        lines.append(
+            "marked ✓ above are already verified — do NOT re-check them. Focus ONLY on"
+        )
         lines.append("the remaining criteria listed above.")
         lines.append("")
         lines.append("Use sandbox_write to track each criterion as you verify it:")
         lines.append('  sandbox_write("verified_N", "PASS: evidence from file:line")')
         lines.append("")
-        lines.append("When ALL remaining criteria are verified, output the JSON verdict for ALL")
+        lines.append(
+            "When ALL remaining criteria are verified, output the JSON verdict for ALL"
+        )
         lines.append(
             f"criteria (both the {len(verified)} already verified and the {len(remaining_indices)} you just checked)."
         )
-        lines.append("Output ONLY the JSON verdict — no markdown fences, no extra text.")
+        lines.append(
+            "Output ONLY the JSON verdict — no markdown fences, no extra text."
+        )
 
         prompt = "\n".join(lines)
 
@@ -1304,7 +1392,9 @@ class AgenticEvaluator:
             prompt += f"\n\n{code_context}"
 
         # Append the full task criteria list for the JSON verdict
-        criteria_text = "\n".join(f"  {i + 1}. {c}" for i, c in enumerate(criteria_list))
+        criteria_text = "\n".join(
+            f"  {i + 1}. {c}" for i, c in enumerate(criteria_list)
+        )
         prompt += f"\n\n## FULL CRITERIA LIST (for verdict JSON)\n{criteria_text}"
 
         return prompt
@@ -1337,15 +1427,19 @@ class AgenticEvaluator:
         return (
             base.replace(
                 "{token_budget}",
-                _fmt_tokens(self.eval_cap.max_input_tokens)
-                if self.eval_cap.max_input_tokens > 0
-                else "unlimited",
+                (
+                    _fmt_tokens(self.eval_cap.max_input_tokens)
+                    if self.eval_cap.max_input_tokens > 0
+                    else "unlimited"
+                ),
             )
             .replace(
                 "{output_budget}",
-                _fmt_tokens(self.eval_cap.max_output_tokens)
-                if self.eval_cap.max_output_tokens > 0
-                else "unlimited",
+                (
+                    _fmt_tokens(self.eval_cap.max_output_tokens)
+                    if self.eval_cap.max_output_tokens > 0
+                    else "unlimited"
+                ),
             )
             .replace("{file_scope}", "full" if full_scope else "changed")
             .replace("{file_scope_rule}", scope_rule)
@@ -1354,12 +1448,14 @@ class AgenticEvaluator:
             .replace("{fast_track_mode}", "ON" if self.fast_track else "OFF")
             .replace(
                 "{fast_track_instruction}",
-                "ON — cost-saving mode on this large tree: verify the changed lines and immediate "
-                "callers, and skip deep call-graph expansion. Step 3 (entrypoint reachability) is "
-                "still required, but with ONE targeted search for the new symbol, not a full trace."
-                if self.fast_track
-                else "OFF — Normal mode. Read surrounding code as needed to verify criteria, "
-                "including the entrypoint that reaches the change.",
+                (
+                    "ON — cost-saving mode on this large tree: verify the changed lines and immediate "
+                    "callers, and skip deep call-graph expansion. Step 3 (entrypoint reachability) is "
+                    "still required, but with ONE targeted search for the new symbol, not a full trace."
+                    if self.fast_track
+                    else "OFF — Normal mode. Read surrounding code as needed to verify criteria, "
+                    "including the entrypoint that reaches the change."
+                ),
             )
         )
 
@@ -1468,7 +1564,9 @@ class AgenticEvaluator:
 
         # Build the task prompt
         criteria_list = task.get("criteria", [])
-        criteria_text = "\n".join(f"  {i + 1}. {c}" for i, c in enumerate(criteria_list))
+        criteria_text = "\n".join(
+            f"  {i + 1}. {c}" for i, c in enumerate(criteria_list)
+        )
         task_prompt = f"""Evaluate this completed task:
 
 TASK: {task.get("title", task.get("id", "unnamed"))}
@@ -1521,7 +1619,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         # where "wired but unreachable" hides. 'changed' stays as the explicit
         # opt-out for repos where the pre-loaded diff is genuinely the whole
         # question and the context budget is tight.
-        file_scope = str(evaluator_cfg.get("file_scope", DEFAULT_FILE_SCOPE)).strip().lower()
+        file_scope = (
+            str(evaluator_cfg.get("file_scope", DEFAULT_FILE_SCOPE)).strip().lower()
+        )
         self._allowed_files = (
             self._compute_allowed_files() if file_scope == "changed" else None
         )  # None = full scope
@@ -1580,7 +1680,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             cap_error = self.eval_cap.check()
             if cap_error:
                 logger.warning("Eval cap exceeded: %s", cap_error)
-                return attach_prescreen(self._cap_verdict(criteria_list, cap_error), prescreen)
+                return attach_prescreen(
+                    self._cap_verdict(criteria_list, cap_error), prescreen
+                )
 
             # Proactive compaction: compact when cumulative input consumption
             # exceeds the configured threshold (default 90% of the input
@@ -1698,7 +1800,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             )
             if cap_error:
                 logger.warning("Eval cap exceeded: %s", cap_error)
-                return attach_prescreen(self._cap_verdict(criteria_list, cap_error), prescreen)
+                return attach_prescreen(
+                    self._cap_verdict(criteria_list, cap_error), prescreen
+                )
 
             # No tool calls → LLM is delivering a verdict
             if not response.tool_calls:
@@ -1753,14 +1857,18 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 # "did that test actually run" against THIS record, never
                 # against the model's say-so.
                 self._tool_record.append(
-                    json.dumps({"tool": tc.name, "arguments": tc.arguments, "result": result})
+                    json.dumps(
+                        {"tool": tc.name, "arguments": tc.arguments, "result": result}
+                    )
                 )
 
                 # Track tool call (costs tool_call_weight, default 0.1 iterations)
                 cap_error = self.eval_cap.record_tool_call()
                 if cap_error:
                     logger.warning("Eval cap exceeded during tool call: %s", cap_error)
-                    return attach_prescreen(self._cap_verdict(criteria_list, cap_error), prescreen)
+                    return attach_prescreen(
+                        self._cap_verdict(criteria_list, cap_error), prescreen
+                    )
 
                 # Add dedup warning to result if this was a repeat
                 if was_dup and isinstance(result, dict):
@@ -1798,7 +1906,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             self._cap_verdict(criteria_list, self.eval_cap.summary()), prescreen
         )
 
-    def _log_grading_progress(self, iteration: int, iter_limit: int, criteria_total: int) -> None:
+    def _log_grading_progress(
+        self, iteration: int, iter_limit: int, criteria_total: int
+    ) -> None:
         """Log coverage + spend each time a criterion is graded (and periodically).
 
         JUDGE-TIER2-001: the only cost signal before the cap was the config's
@@ -1812,7 +1922,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         cap = getattr(self, "eval_cap", None)
         if cap is None:
             return
-        graded = sum(1 for i in range(criteria_total) if f"verified_{i}" in self._sandbox)
+        graded = sum(
+            1 for i in range(criteria_total) if f"verified_{i}" in self._sandbox
+        )
         # GR-176: derived criteria are graded work too — count them so the
         # cost-per-criterion signal on a "sets its own bar" run is not wrong.
         derived_rows = self._derived_criteria_from_sandbox()
@@ -1849,7 +1961,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         """
         partial = self._extract_partial_verdict(criteria_list)
         if partial.items:
-            partial.summary = f"Cap exceeded: {cap_error.rstrip('. ')}. {partial.summary}"
+            partial.summary = (
+                f"Cap exceeded: {cap_error.rstrip('. ')}. {partial.summary}"
+            )
             return partial
         # No criteria to name (a task with none): the cap message is all there is.
         return Verdict(verdict="INCOMPLETE", summary=f"Cap exceeded: {cap_error}")
@@ -1945,7 +2059,11 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 )
         # GR-176: a derived criterion the run proposed is part of the item list
         # too — graded if the run reached it, UNVERIFIED if the budget stopped it.
-        for k, derived_criterion, derived_evidence in self._derived_criteria_from_sandbox():
+        for (
+            k,
+            derived_criterion,
+            derived_evidence,
+        ) in self._derived_criteria_from_sandbox():
             span = spans.get(DERIVED_MARK_OFFSET + k)
             if derived_evidence is None:
                 items.append(
@@ -1980,7 +2098,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         ungraded = len(items) - graded
         cap = getattr(self, "eval_cap", None)
         spend = ""
-        if cap is not None and (cap.cumulative_input_tokens or cap.cumulative_output_tokens):
+        if cap is not None and (
+            cap.cumulative_input_tokens or cap.cumulative_output_tokens
+        ):
             spend = (
                 f" The run spent {cap.cumulative_input_tokens:,} in / "
                 f"{cap.cumulative_output_tokens:,} out over "
@@ -2184,7 +2304,11 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 # Decode as UTF-8 with replacement chars for binary content
                 content = raw.decode("utf-8", errors="replace")
                 shown_bytes = len(raw)
-                has_more = (byte_offset + shown_bytes) < total_bytes if byte_limit > 0 else False
+                has_more = (
+                    (byte_offset + shown_bytes) < total_bytes
+                    if byte_limit > 0
+                    else False
+                )
 
                 # ── Byte cap (GR-064d) ──
                 max_bytes = getattr(self, "max_file_bytes", 131072)
@@ -2318,7 +2442,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         # ── Pure Python last resort ──
         return self._tool_search_pattern_python(regex, file_glob)
 
-    def _tool_search_pattern_rg(self, regex: str, file_glob: str, rg_path: str) -> dict[str, Any]:
+    def _tool_search_pattern_rg(
+        self, regex: str, file_glob: str, rg_path: str
+    ) -> dict[str, Any]:
         """Search using ripgrep (fast, respects .gitignore)."""
         cmd = [
             rg_path,
@@ -2365,7 +2491,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             # GR-170: a whole-repo search must not surface credential stores
             # either (gitignored files are usually skipped by rg, but not
             # always — e.g. a tracked .env).
-            lines = [ln for ln in lines if not _is_sensitive_read_path(ln.split(":", 1)[0])]
+            lines = [
+                ln for ln in lines if not _is_sensitive_read_path(ln.split(":", 1)[0])
+            ]
             return {"matches": lines[:200], "count": min(len(lines), 200)}
         except subprocess.TimeoutExpired:
             if grep_path := shutil.which("grep"):
@@ -2380,7 +2508,15 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         self, regex: str, file_glob: str, grep_path: str
     ) -> dict[str, Any]:
         """Search using GNU grep (slower than rg, faster than Python)."""
-        cmd = [grep_path, "-rnI", "--exclude-dir=__pycache__", "--include=*", "-e", regex, "."]
+        cmd = [
+            grep_path,
+            "-rnI",
+            "--exclude-dir=__pycache__",
+            "--include=*",
+            "-e",
+            regex,
+            ".",
+        ]
         if file_glob != "*":
             cmd = [
                 grep_path,
@@ -2406,7 +2542,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         except Exception:
             return self._tool_search_pattern_python(regex, file_glob)
 
-    def _tool_search_pattern_python(self, regex: str, file_glob: str = "*") -> dict[str, Any]:
+    def _tool_search_pattern_python(
+        self, regex: str, file_glob: str = "*"
+    ) -> dict[str, Any]:
         """Pure Python search — last resort fallback (slow, no .gitignore)."""
         matches: list[str] = []
         try:
@@ -2450,7 +2588,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
 
             if len(matches) > 200:
                 matches = matches[:200]
-                matches.append(f"... [truncated at 200 matches, searched {files_searched} files]")
+                matches.append(
+                    f"... [truncated at 200 matches, searched {files_searched} files]"
+                )
                 break
 
         return {"regex": regex, "matches": matches, "count": len(matches)}
@@ -2459,14 +2599,23 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         """Show git diff."""
         try:
             staged = subprocess.run(
-                ["git", "diff", "--cached", "--stat"],  # noqa: S607 - git resolved via PATH by design
+                [
+                    "git",
+                    "diff",
+                    "--cached",
+                    "--stat",
+                ],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=10,
                 cwd=self.workdir,
             )
             unstaged = subprocess.run(
-                ["git", "diff", "--stat"],  # noqa: S607 - git resolved via PATH by design
+                [
+                    "git",
+                    "diff",
+                    "--stat",
+                ],  # noqa: S607 - git resolved via PATH by design
                 capture_output=True,
                 text=True,
                 timeout=10,
@@ -2486,7 +2635,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         config = self._load_config()
         evaluator_cfg = config.get("evaluator", {})
         if not evaluator_cfg.get("static_analysis_diagnostics", False):
-            return {"error": "static_analysis_diagnostics is not enabled in .gitreins/config.yaml"}
+            return {
+                "error": "static_analysis_diagnostics is not enabled in .gitreins/config.yaml"
+            }
 
         guards_cfg = config.get("guards", {})
         static_tools = guards_cfg.get("static_analysis_tools", {})
@@ -2580,7 +2731,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                     "iteration": round(float(cap.iteration_credit), 1),
                     "tokens_in": int(cap.cumulative_input_tokens),
                     "tokens_out": int(cap.cumulative_output_tokens),
-                    "elapsed_s": int(time.time() - cap.start_time) if cap.start_time else 0,
+                    "elapsed_s": (
+                        int(time.time() - cap.start_time) if cap.start_time else 0
+                    ),
                 }
         return {"key": key, "written": len(content)}
 
@@ -2671,7 +2824,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                     # the ARTIFACT, not only of the prompt. A model that grades a
                     # derived criterion FAIL and still writes COMPLETE would
                     # otherwise pass the task on its own contradiction.
-                    if verdict_val == "COMPLETE" and any(i.status != "PASS" for i in items):
+                    if verdict_val == "COMPLETE" and any(
+                        i.status != "PASS" for i in items
+                    ):
                         logger.warning(
                             "Verdict said COMPLETE with %d non-PASS item(s) — forcing INCOMPLETE",
                             sum(1 for i in items if i.status != "PASS"),
@@ -2694,7 +2849,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                                     where=str(raw.get("where", "")),
                                     trigger=str(raw.get("trigger", "")),
                                     detected_by=str(raw.get("detected_by", "")),
-                                    covered_in_this_pr=bool(raw.get("covered_in_this_pr", False)),
+                                    covered_in_this_pr=bool(
+                                        raw.get("covered_in_this_pr", False)
+                                    ),
                                 )
                             )
                     verdict = Verdict(
@@ -2708,10 +2865,14 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                     # summary — the uncovered failure path is NAMED there, not
                     # silently passed. An empty block earns no flags, so an
                     # ordinary verdict's summary stays byte-identical.
-                    flags = failure_mode_summary_flags(verdict, getattr(self, "_tool_record", ()))
+                    flags = failure_mode_summary_flags(
+                        verdict, getattr(self, "_tool_record", ())
+                    )
                     if flags:
                         prefix = f"{verdict.summary} " if verdict.summary else ""
-                        verdict.summary = f"{prefix}[uncovered failure paths: {'; '.join(flags)}]"
+                        verdict.summary = (
+                            f"{prefix}[uncovered failure paths: {'; '.join(flags)}]"
+                        )
                     return verdict, ""
                 except (json.JSONDecodeError, ValueError) as e:
                     parse_reason = f"JSON parse failed: {e}"
@@ -2739,7 +2900,8 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         if verdict is not None:
             return verdict
         logger.warning(
-            "Unparseable evaluator response — returning INCOMPLETE (reason: %s)", parse_reason
+            "Unparseable evaluator response — returning INCOMPLETE (reason: %s)",
+            parse_reason,
         )
         return self._unparseable_verdict(parse_reason, content)
 
@@ -2783,11 +2945,17 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         terminal INCOMPLETE with both reasons recorded and a summary that
         names the retry ("after 1 retry").
         """
-        retry_messages = list(messages) + [{"role": "user", "content": VERDICT_RETRY_INSTRUCTION}]
+        retry_messages = list(messages) + [
+            {"role": "user", "content": VERDICT_RETRY_INSTRUCTION}
+        ]
         try:
-            retry_response = self.llm.chat(retry_messages, tools=None, max_tokens=max_tokens)
+            retry_response = self.llm.chat(
+                retry_messages, tools=None, max_tokens=max_tokens
+            )
         except Exception as e:
-            logger.warning("Verdict retry LLM call failed — terminal INCOMPLETE: %s", str(e)[:200])
+            logger.warning(
+                "Verdict retry LLM call failed — terminal INCOMPLETE: %s", str(e)[:200]
+            )
             return self._unparseable_verdict(
                 f"{parse_reason}; retry LLM call failed: {str(e)[:200]}",
                 original_content,
@@ -2862,7 +3030,13 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             import subprocess as _sp
 
             result = _sp.run(
-                ["skylos", self.workdir, "--format", "json", "--no-grep-verify"],  # noqa: S607 - skylos is a user-installed tool resolved via PATH
+                [
+                    "skylos",
+                    self.workdir,
+                    "--format",
+                    "json",
+                    "--no-grep-verify",
+                ],  # noqa: S607 - skylos is a user-installed tool resolved via PATH
                 capture_output=True,
                 text=True,
                 timeout=120,
@@ -2954,7 +3128,9 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                 for run in data.get("runs", []):
                     for res in run.get("results", []):
                         msg = (res.get("message", {}) or {}).get("text", "")
-                        loc = (res.get("locations") or [{}])[0].get("physicalLocation", {})
+                        loc = (res.get("locations") or [{}])[0].get(
+                            "physicalLocation", {}
+                        )
                         art = (loc.get("artifactLocation", {}) or {}).get("uri", "")
                         reg = loc.get("region", {}) or {}
                         all_findings.append(

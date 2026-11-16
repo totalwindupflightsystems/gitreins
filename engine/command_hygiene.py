@@ -54,11 +54,14 @@ from typing import Any
 # The shared head+tail, line-bounded evidence bounder. Importing it here is
 # safe — engine.evidence_bounds imports only engine.types (no cycle back into
 # engine.command_hygiene).
-from engine.evidence_bounds import MAX_EVIDENCE_CHARS, _bound_step_evidence
+from engine.evidence_bounds import MAX_EVIDENCE_CHARS as MAX_EVIDENCE_CHARS
+from engine.evidence_bounds import _bound_step_evidence
 
 # ── refusal policy ────────────────────────────────────────────────────────────
 
-_SPIN_LOOP = re.compile(r"while\s+(?::|true)\s*;\s*do\s+(?:(?::|true|continue)\s*;?\s*)+done")
+_SPIN_LOOP = re.compile(
+    r"while\s+(?::|true)\s*;\s*do\s+(?:(?::|true|continue)\s*;?\s*)+done"
+)
 _FORK_BOMB = re.compile(r":\s*\(\s*\)\s*\{[^}]*:\s*\|\s*:[^}]*\}")
 _YES_PIPED = re.compile(r"(?:^|[;&|]\s*)yes\s*\|")
 _BOUNDING_CONSUMER = re.compile(
@@ -190,7 +193,7 @@ def run_bounded(
     cmd: str | list[str],
     *,
     cwd: str | None = None,
-    timeout: float = 30.0,
+    timeout: float | None = 30.0,
     max_output: int = MAX_EVIDENCE_CHARS,
     env: dict[str, Any] | None = None,
     input_text: str | None = None,

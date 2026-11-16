@@ -48,6 +48,9 @@ evaluator:
   max_time: 90m  # 60m→90m (GR-148 tick: tier2 capped at exactly 1h under fleet load on GLM lane)
   max_input_tokens: 10M
   max_output_tokens: 131072  # 128K — deepseek API caps max_tokens at 393216; 1M caused HTTP 400 on every judge call (2026-08-20)
+  # Maximum wall time for one evaluator run_command gate. The safe default is
+  # 30s; raise this for deterministic suites that exceed 30s under host load.
+  command_timeout: 30
   tool_call_weight: 0.1
   compaction_threshold: 0.9
   code_context_budget: 0.7

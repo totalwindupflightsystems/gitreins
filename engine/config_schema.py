@@ -53,7 +53,11 @@ class ConfigIssue:
     hint: str = ""
 
     def to_dict(self) -> dict[str, str]:
-        payload = {"severity": self.severity, "path": self.path, "message": self.message}
+        payload = {
+            "severity": self.severity,
+            "path": self.path,
+            "message": self.message,
+        }
         if self.hint:
             payload["hint"] = self.hint
         return payload
@@ -139,6 +143,7 @@ _GUARDS: dict[str, KeySpec] = {
 _EVALUATOR_KEYS = (
     "cap",
     "code_context_budget",
+    "command_timeout",
     "compaction_threshold",
     "fast_track",
     "file_scope",
@@ -225,7 +230,9 @@ _HISTORY: dict[str, KeySpec] = {
 # ── resolution: ──────────────────────────────────────────────────────────────
 # Read through engine/config.py resolution_cfg/resolution_bands/_resolution_*.
 _RESOLUTION: dict[str, KeySpec] = {
-    "enabled": KeySpec("dict", nested=frozenset({"cli", "mcp", "predispatch", "judge_prescreen"})),
+    "enabled": KeySpec(
+        "dict", nested=frozenset({"cli", "mcp", "predispatch", "judge_prescreen"})
+    ),
     "model": KeySpec("str"),
     "tokens_max": KeySpec("any"),
     "bands": KeySpec("dict"),
@@ -268,10 +275,12 @@ _SECTIONS: dict[str, dict[str, KeySpec]] = {
     "commit_audit": _COMMIT_AUDIT,
     "quality": _specs_from_dataclass(QualityConfig),
     "spec_alignment": _specs_from_dataclass(
-        SpecAlignmentConfig, {"mode": ("warn", "block"), "missing_checker": ("warn", "block")}
+        SpecAlignmentConfig,
+        {"mode": ("warn", "block"), "missing_checker": ("warn", "block")},
     ),
     "data_protection": {
-        key: KeySpec(_kind_of(value)) for key, value in DataProtectionConfig().to_dict().items()
+        key: KeySpec(_kind_of(value))
+        for key, value in DataProtectionConfig().to_dict().items()
     },
     "security_review": _specs_from_dataclass(
         SecurityReviewConfig,
@@ -317,7 +326,9 @@ def known_keys(section: str) -> set[str]:
 
 
 def _suggest(key: str, candidates: set[str]) -> str:
-    matches = difflib.get_close_matches(key, sorted(candidates), n=_MAX_SUGGESTIONS, cutoff=0.6)
+    matches = difflib.get_close_matches(
+        key, sorted(candidates), n=_MAX_SUGGESTIONS, cutoff=0.6
+    )
     if not matches:
         return ""
     if len(matches) == 1:
@@ -336,7 +347,9 @@ def _type_ok(value: Any, spec: KeySpec) -> bool:
     return actual == spec.kind
 
 
-def _check_value(path: str, value: Any, spec: KeySpec, *, strict: bool) -> list[ConfigIssue]:
+def _check_value(
+    path: str, value: Any, spec: KeySpec, *, strict: bool
+) -> list[ConfigIssue]:
     issues: list[ConfigIssue] = []
     severity = ERROR if strict else WARN
     if not _type_ok(value, spec):
@@ -416,12 +429,15 @@ def validate_config(config: Any, *, strict: bool = False) -> list[ConfigIssue]:
                             WARN,
                             path,
                             "unknown key",
-                            _suggest(sub_key_str, set(spec_section)) or "this key is ignored",
+                            _suggest(sub_key_str, set(spec_section))
+                            or "this key is ignored",
                         )
                     )
                     continue
                 issues.extend(
-                    _check_value(path, sub_value, spec_section[sub_key_str], strict=strict)
+                    _check_value(
+                        path, sub_value, spec_section[sub_key_str], strict=strict
+                    )
                 )
         elif key in _FLAT or key in _EXTRA_FLAT:
             spec = _FLAT.get(key) or _EXTRA_FLAT[key]
@@ -432,7 +448,8 @@ def validate_config(config: Any, *, strict: bool = False) -> list[ConfigIssue]:
                     WARN,
                     key,
                     "unknown top-level key",
-                    _suggest(key, known_top_level()) or "this key is ignored by this version",
+                    _suggest(key, known_top_level())
+                    or "this key is ignored by this version",
                 )
             )
     return issues

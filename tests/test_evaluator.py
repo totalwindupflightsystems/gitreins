@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import time
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -21,14 +22,15 @@ from engine.evaluator import (
 from engine.llm import LLMResponse, ToolCall
 from engine.llm import LLMClient
 
-
 # ── Phase 1-4-1: AgenticEvaluator tools, dedup, verdict parsing ──────────────
 
 
 class TestReadFile:
     """Test _tool_read_file — path safety, error handling — step-1-4-1-1."""
 
-    def test_read_existing_file(self, evaluator: AgenticEvaluator, tmp_workdir: str) -> None:
+    def test_read_existing_file(
+        self, evaluator: AgenticEvaluator, tmp_workdir: str
+    ) -> None:
         """read_file of existing file returns content."""
         path = os.path.join(tmp_workdir, "hello.txt")
         with open(path, "w") as f:
@@ -44,7 +46,9 @@ class TestReadFile:
         assert "error" in result
         assert "File not found" in result["error"]
 
-    def test_read_path_traversal_outside_workdir(self, evaluator: AgenticEvaluator) -> None:
+    def test_read_path_traversal_outside_workdir(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
         """read_file with path containing '../' outside workdir returns error."""
         result = evaluator._tool_read_file("../etc/passwd")
         assert "error" in result
@@ -60,7 +64,9 @@ class TestReadFile:
         assert "error" in result
         assert "Path is a directory" in result["error"]
 
-    def test_read_file_with_offset(self, evaluator: AgenticEvaluator, tmp_workdir: str) -> None:
+    def test_read_file_with_offset(
+        self, evaluator: AgenticEvaluator, tmp_workdir: str
+    ) -> None:
         """read_file with offset reads from given line."""
         path = os.path.join(tmp_workdir, "multiline.txt")
         with open(path, "w") as f:
@@ -83,12 +89,16 @@ class TestReadFile:
         result = evaluator._tool_read_file("short.txt", offset=10)
         assert "error" in result
 
-    def test_read_file_byte_mode(self, evaluator: AgenticEvaluator, tmp_workdir: str) -> None:
+    def test_read_file_byte_mode(
+        self, evaluator: AgenticEvaluator, tmp_workdir: str
+    ) -> None:
         """Byte mode reads raw bytes from the file."""
         path = os.path.join(tmp_workdir, "data.txt")
         with open(path, "wb") as f:
             f.write(b"ABCDEFGHIJKLMNOPQRSTUVWXYZ")
-        result = evaluator._tool_read_file("data.txt", mode="bytes", byte_offset=5, byte_limit=5)
+        result = evaluator._tool_read_file(
+            "data.txt", mode="bytes", byte_offset=5, byte_limit=5
+        )
         assert result["mode"] == "bytes"
         assert result["shown_bytes"] == 5
         assert result["byte_offset_start"] == 5
@@ -142,7 +152,9 @@ class TestReadFile:
         path = os.path.join(tmp_workdir, "binary.bin")
         with open(path, "wb") as f:
             f.write(bytes(range(256)))
-        result = evaluator._tool_read_file("binary.bin", mode="bytes", byte_offset=0, byte_limit=10)
+        result = evaluator._tool_read_file(
+            "binary.bin", mode="bytes", byte_offset=0, byte_limit=10
+        )
         assert result["mode"] == "bytes"
         assert result["shown_bytes"] == 10
         assert result["total_bytes"] == 256
@@ -169,10 +181,61 @@ class TestRunCommand:
         self, evaluator: AgenticEvaluator, llm_client: LLMClient, tmp_workdir: str
     ) -> None:
         """run_command with short timeout → timeout error in <5s."""
-        fast_eval = AgenticEvaluator(llm_client, tmp_workdir, max_iterations=5, command_timeout=2)
+        fast_eval = AgenticEvaluator(
+            llm_client, tmp_workdir, max_iterations=5, command_timeout=2
+        )
         result = fast_eval._tool_run_command("sleep 5")
         assert "error" in result
         assert "timed out" in result["error"]
+
+    def test_configured_timeout_reaches_bounded_command_path(
+        self, llm_client: LLMClient, tmp_path: Path
+    ) -> None:
+        """DF-CRIER-506: evaluator.command_timeout, not the hard-coded 30, is what
+        run_bounded receives on the real _tool_run_command path."""
+        workdir = str(tmp_path)
+        os.makedirs(os.path.join(workdir, ".gitreins"))
+        config_path = os.path.join(workdir, ".gitreins", "config.yaml")
+        with open(config_path, "w") as config:
+            config.write("evaluator:\n  command_timeout: 7\n")
+
+        with patch.object(
+            command_hygiene,
+            "run_bounded",
+            return_value={"exit_code": 0, "output": "ok", "pgid": 1234},
+        ) as run_bounded:
+            evaluator = AgenticEvaluator(llm_client, workdir)
+            result = evaluator._tool_run_command("printf ok")
+
+        assert evaluator.command_timeout == 7
+        assert result["exit_code"] == 0
+        assert run_bounded.call_args.kwargs["timeout"] == 7
+
+    def test_configured_timeout_reaps_group_at_bound(
+        self, llm_client: LLMClient, tmp_path: Path
+    ) -> None:
+        """A configured one-second bound still reaps the timed-out process group."""
+        workdir = str(tmp_path)
+        os.makedirs(os.path.join(workdir, ".gitreins"))
+        with open(os.path.join(workdir, ".gitreins", "config.yaml"), "w") as config:
+            config.write("evaluator:\n  command_timeout: 1\n")
+        pidfile = os.path.join(workdir, "child.pid")
+        evaluator = AgenticEvaluator(llm_client, workdir)
+
+        started = time.monotonic()
+        result = evaluator._tool_run_command(
+            f"sh -c 'echo $$ > {pidfile}; exec sleep 60'"
+        )
+        elapsed = time.monotonic() - started
+        assert result.get("timed_out") is True
+        # A 1s configured bound, not the 30s default: the gate died fast.
+        assert elapsed < 10, f"configured 1s bound did not apply (ran {elapsed:.1f}s)"
+        with open(pidfile) as fh:
+            child = int(fh.read().strip())
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and command_hygiene.pids_in_group(child):
+            time.sleep(0.05)
+        assert command_hygiene.pids_in_group(child) == []
 
     def test_output_truncated_at_4000(self, evaluator: AgenticEvaluator) -> None:
         """Output is bounded at 4000 chars and the truncation is REPORTED.
@@ -187,7 +250,9 @@ class TestRunCommand:
         survive).
         """
         # > 4000 chars of output, with a marker as the LAST line.
-        result = evaluator._tool_run_command("python3 -c 'print(\"x\" * 5000)' ; echo TAIL-KEEPME")
+        result = evaluator._tool_run_command(
+            "python3 -c 'print(\"x\" * 5000)' ; echo TAIL-KEEPME"
+        )
         output = result["output"]
         assert len(output) <= 4100  # the 4000-char cap + its omission marker
         assert "chars omitted" in output, output[:200]
@@ -230,15 +295,21 @@ class TestLastCommandPgidReap:
         proc = subprocess.Popen(["sleep", "30"], start_new_session=True)
         evaluator._last_command_pgid = os.getpgid(proc.pid)
         try:
-            with patch.object(llm_client, "chat", side_effect=RuntimeError("LLM crashed")):
-                verdict = evaluator.evaluate({"id": "err", "title": "x", "criteria": []})
+            with patch.object(
+                llm_client, "chat", side_effect=RuntimeError("LLM crashed")
+            ):
+                verdict = evaluator.evaluate(
+                    {"id": "err", "title": "x", "criteria": []}
+                )
             assert verdict.verdict == "INCOMPLETE"
             deadline = time.monotonic() + 5
-            while time.monotonic() < deadline and command_hygiene.pids_in_group(proc.pid):
+            while time.monotonic() < deadline and command_hygiene.pids_in_group(
+                proc.pid
+            ):
                 time.sleep(0.05)
-            assert command_hygiene.pids_in_group(proc.pid) == [], (
-                f"process group {proc.pid} survived evaluate()'s exit reap"
-            )
+            assert (
+                command_hygiene.pids_in_group(proc.pid) == []
+            ), f"process group {proc.pid} survived evaluate()'s exit reap"
         finally:
             # If the hook under test failed, do not leak the sleep.
             command_hygiene.kill_group(os.getpgid(proc.pid))
@@ -251,7 +322,9 @@ class TestLastCommandPgidReap:
         """No run_command this eval → the finally kills nothing and clears
         nothing (no recorded pgid)."""
         verdict_json = '{"verdict":"COMPLETE","items":[],"summary":"done"}'
-        with patch.object(llm_client, "chat", return_value=LLMResponse(content=verdict_json)):
+        with patch.object(
+            llm_client, "chat", return_value=LLMResponse(content=verdict_json)
+        ):
             verdict = evaluator.evaluate({"id": "t1", "title": "x", "criteria": []})
         assert verdict.verdict == "COMPLETE"
         assert evaluator._last_command_pgid is None
@@ -260,7 +333,9 @@ class TestLastCommandPgidReap:
 class TestSearchPattern:
     """Test _tool_search_pattern — regex matching, dir skipping, result capping — step-1-4-1-3."""
 
-    def test_search_finds_todo(self, evaluator: AgenticEvaluator, tmp_workdir: str) -> None:
+    def test_search_finds_todo(
+        self, evaluator: AgenticEvaluator, tmp_workdir: str
+    ) -> None:
         """search_pattern finds TODO comments in working files."""
         path = os.path.join(tmp_workdir, "code.py")
         with open(path, "w") as f:
@@ -268,7 +343,9 @@ class TestSearchPattern:
         result = evaluator._tool_search_pattern("TODO")
         assert result["count"] >= 2
 
-    def test_search_with_file_glob(self, evaluator: AgenticEvaluator, tmp_workdir: str) -> None:
+    def test_search_with_file_glob(
+        self, evaluator: AgenticEvaluator, tmp_workdir: str
+    ) -> None:
         """search_pattern with file_glob='*.py' only searches Python files."""
         py_path = os.path.join(tmp_workdir, "code.py")
         txt_path = os.path.join(tmp_workdir, "notes.txt")
@@ -286,7 +363,9 @@ class TestSearchPattern:
         assert "error" in result
         assert "Invalid regex" in result["error"]
 
-    def test_search_skips_dot_dirs(self, evaluator: AgenticEvaluator, tmp_workdir: str) -> None:
+    def test_search_skips_dot_dirs(
+        self, evaluator: AgenticEvaluator, tmp_workdir: str
+    ) -> None:
         """search_pattern does not descend into .git/ or __pycache__/."""
         # Create files in skipped dirs
         cache_dir = os.path.join(tmp_workdir, "__pycache__")
@@ -310,7 +389,9 @@ class TestSandbox:
         assert result["content"] == "value1"
         assert result["key"] == "key1"
 
-    def test_sandbox_write_returns_written_count(self, evaluator: AgenticEvaluator) -> None:
+    def test_sandbox_write_returns_written_count(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
         """sandbox_write returns written count."""
         result = evaluator._tool_sandbox_write("key2", "hello")
         assert result["written"] == 5
@@ -328,7 +409,9 @@ class TestSandbox:
         evaluator._tool_sandbox_write("persist", "data")
         # Mock LLM to immediately return verdict
         verdict_json = '{"verdict":"COMPLETE","items":[],"summary":"done"}'
-        with patch.object(llm_client, "chat", return_value=LLMResponse(content=verdict_json)):
+        with patch.object(
+            llm_client, "chat", return_value=LLMResponse(content=verdict_json)
+        ):
             evaluator.evaluate({"id": "t1", "title": "x", "criteria": []})
         # Sandbox should be cleared
         result = evaluator._tool_sandbox_read("persist")
@@ -354,7 +437,9 @@ class TestDeduplication:
         assert "path" in result2
         assert result2["path"] == "dup_test.txt"
 
-    def test_repeated_run_command_is_duplicate(self, evaluator: AgenticEvaluator) -> None:
+    def test_repeated_run_command_is_duplicate(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
         """Running the same command twice marks second as duplicate."""
         tc = ToolCall(id="c2", name="run_command", arguments={"cmd": "echo test"})
         _, was_dup1 = evaluator._execute_tool_with_dedup(tc)
@@ -362,7 +447,9 @@ class TestDeduplication:
         _, was_dup2 = evaluator._execute_tool_with_dedup(tc)
         assert was_dup2 is True
 
-    def test_repeated_search_pattern_is_duplicate(self, evaluator: AgenticEvaluator) -> None:
+    def test_repeated_search_pattern_is_duplicate(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
         """Searching the same regex twice marks second as duplicate."""
         tc = ToolCall(id="c3", name="search_pattern", arguments={"regex": r"def test_"})
         _, was_dup1 = evaluator._execute_tool_with_dedup(tc)
@@ -424,13 +511,17 @@ class TestVerdictParsing:
         verdict = evaluator._parse_verdict(content)
         assert verdict.items[0].status == "FAIL"
 
-    def test_invalid_verdict_defaults_to_incomplete(self, evaluator: AgenticEvaluator) -> None:
+    def test_invalid_verdict_defaults_to_incomplete(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
         """Invalid verdict ('ALMOST') defaults to INCOMPLETE."""
         content = '{"verdict":"ALMOST","items":[],"summary":"almost done"}'
         verdict = evaluator._parse_verdict(content)
         assert verdict.verdict == "INCOMPLETE"
 
-    def test_missing_items_cannot_mint_complete(self, evaluator: AgenticEvaluator) -> None:
+    def test_missing_items_cannot_mint_complete(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
         """GR-168: a reply missing 'items' is unparseable, never COMPLETE.
 
         The old keyword path read the WORD "complete" out of the response and
@@ -442,7 +533,9 @@ class TestVerdictParsing:
         assert verdict.items == []
         assert "Missing required fields" in verdict.summary
 
-    def test_prose_containing_complete_is_incomplete(self, evaluator: AgenticEvaluator) -> None:
+    def test_prose_containing_complete_is_incomplete(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
         """GR-168 AC3: prose with the word 'complete' yields INCOMPLETE."""
         content = "I have verified all criteria, everything passes and is complete."
         verdict = evaluator._parse_verdict(content)
@@ -509,7 +602,9 @@ class TestVerdictParsing:
         self, evaluator: AgenticEvaluator
     ) -> None:
         """AC1: trailing junk containing '}' no longer poisons the parse."""
-        content = self._verdict_json("COMPLETE") + "\nNote: the } above closes the object.\n"
+        content = (
+            self._verdict_json("COMPLETE") + "\nNote: the } above closes the object.\n"
+        )
         verdict = evaluator._parse_verdict(content)
         assert verdict.verdict == "COMPLETE"
         assert len(verdict.items) == 3
@@ -525,7 +620,9 @@ class TestVerdictParsing:
         second = json.dumps(
             {
                 "verdict": "INCOMPLETE",
-                "items": [{"criterion": "other", "status": "FAIL", "detail": "second object"}],
+                "items": [
+                    {"criterion": "other", "status": "FAIL", "detail": "second object"}
+                ],
                 "summary": "second",
             }
         )
@@ -542,7 +639,9 @@ class TestVerdictParsing:
         assert verdict.verdict == "INCOMPLETE"
         assert len(verdict.items) == 3
 
-    def test_no_json_object_records_parse_reason(self, evaluator: AgenticEvaluator) -> None:
+    def test_no_json_object_records_parse_reason(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
         """AC3: no JSON object at all → keyword verdict + parse reason in summary."""
         verdict = evaluator._parse_verdict("After reviewing, all criteria pass.")
         # GR-168: unparseable output is INCOMPLETE — there is no COMPLETE fallback.
@@ -550,16 +649,22 @@ class TestVerdictParsing:
         assert "auto-parsed" in verdict.summary
         assert "no JSON object found" in verdict.summary
 
-    def test_malformed_json_records_parse_error(self, evaluator: AgenticEvaluator) -> None:
+    def test_malformed_json_records_parse_error(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
         """A malformed object → keyword verdict + the JSON error in summary."""
         verdict = evaluator._parse_verdict('{"verdict": "COMPLETE", "items": [}')
         assert verdict.verdict == "INCOMPLETE"  # GR-168: no COMPLETE fallback
         assert "auto-parsed" in verdict.summary
         assert "JSON parse failed" in verdict.summary
 
-    def test_missing_items_records_parse_reason(self, evaluator: AgenticEvaluator) -> None:
+    def test_missing_items_records_parse_reason(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
         """A valid object missing 'items' → keyword fallback names the reason."""
-        verdict = evaluator._parse_verdict('{"verdict":"COMPLETE","summary":"all criteria pass"}')
+        verdict = evaluator._parse_verdict(
+            '{"verdict":"COMPLETE","summary":"all criteria pass"}'
+        )
         assert verdict.verdict == "INCOMPLETE"
         assert "Missing required fields" in verdict.summary
 
@@ -574,14 +679,20 @@ class TestMaxIterationsAndErrors:
         # Always return tool calls (never a verdict) — exhausts the cap
         calls = []
         for i in range(10):
-            tc = ToolCall(id=f"tc{i}", name="read_file", arguments={"path": f"f{i}.txt"})
+            tc = ToolCall(
+                id=f"tc{i}", name="read_file", arguments={"path": f"f{i}.txt"}
+            )
             calls.append(LLMResponse(content="working", tool_calls=[tc]))
         mock_chat = MagicMock(side_effect=calls)
         with patch.object(llm_client, "chat", mock_chat):
             from engine.evaluator import AgenticEvaluator
 
-            fast_eval = AgenticEvaluator(llm_client, evaluator.workdir, max_iterations=2)
-            verdict = fast_eval.evaluate({"id": "loop", "title": "x", "criteria": ["c1"]})
+            fast_eval = AgenticEvaluator(
+                llm_client, evaluator.workdir, max_iterations=2
+            )
+            verdict = fast_eval.evaluate(
+                {"id": "loop", "title": "x", "criteria": ["c1"]}
+            )
         assert verdict.verdict == "INCOMPLETE"
         assert "Cap exceeded" in verdict.summary
         assert "Increase max_iterations" in verdict.summary
@@ -593,7 +704,9 @@ class TestMaxIterationsAndErrors:
         calls = [
             LLMResponse(
                 content="working",
-                tool_calls=[ToolCall(id="t0", name="read_file", arguments={"path": "x.txt"})],
+                tool_calls=[
+                    ToolCall(id="t0", name="read_file", arguments={"path": "x.txt"})
+                ],
             )
             for _ in range(5)
         ]
@@ -601,13 +714,17 @@ class TestMaxIterationsAndErrors:
         with patch.object(llm_client, "chat", mock_chat):
             from engine.evaluator import AgenticEvaluator
 
-            fast_eval = AgenticEvaluator(llm_client, evaluator.workdir, max_iterations=1)
+            fast_eval = AgenticEvaluator(
+                llm_client, evaluator.workdir, max_iterations=1
+            )
             verdict = fast_eval.evaluate({"id": "t", "title": "x", "criteria": ["c1"]})
         assert "max_iterations" in verdict.summary
         assert "split criteria" in verdict.summary
         assert str(fast_eval.max_iterations) in verdict.summary
 
-    def test_default_max_iterations_is_100(self, llm_client: LLMClient, tmp_workdir: str) -> None:
+    def test_default_max_iterations_is_100(
+        self, llm_client: LLMClient, tmp_workdir: str
+    ) -> None:
         """Default max_iterations is 100 (was 15 — too low for complex criteria)."""
         evaluator = AgenticEvaluator(llm_client, tmp_workdir)
         assert evaluator.max_iterations == 100
@@ -665,8 +782,12 @@ class TestEvaluatorEvaluate:
         self, evaluator: AgenticEvaluator, llm_client: LLMClient
     ) -> None:
         """Task with no criteria — LLM should return COMPLETE immediately."""
-        verdict_json = '{"verdict":"COMPLETE","items":[],"summary":"no criteria to check"}'
-        with patch.object(llm_client, "chat", return_value=LLMResponse(content=verdict_json)):
+        verdict_json = (
+            '{"verdict":"COMPLETE","items":[],"summary":"no criteria to check"}'
+        )
+        with patch.object(
+            llm_client, "chat", return_value=LLMResponse(content=verdict_json)
+        ):
             verdict = evaluator.evaluate({"id": "empty", "title": "x", "criteria": []})
         assert verdict.verdict == "COMPLETE"
 
@@ -683,7 +804,9 @@ class TestEvaluatorEvaluate:
 class TestExtendedEvaluator:
     """Extended edge case coverage for AgenticEvaluator."""
 
-    def test_search_truncated_at_200(self, evaluator: AgenticEvaluator, tmp_workdir: str) -> None:
+    def test_search_truncated_at_200(
+        self, evaluator: AgenticEvaluator, tmp_workdir: str
+    ) -> None:
         """search_pattern truncates results at 200 matches."""
         path = os.path.join(tmp_workdir, "big.py")
         with open(path, "w") as f:
@@ -763,13 +886,17 @@ class TestExtendedEvaluator:
         assert verdict.verdict == "COMPLETE"
         assert len(verdict.items) == 1
 
-    def test_verdict_keyword_complete_detected(self, evaluator: AgenticEvaluator) -> None:
+    def test_verdict_keyword_complete_detected(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
         """Content with 'complete' keyword and PASS items yields COMPLETE."""
         content = '{"verdict":"COMPLETE","items":[{"criterion":"c1","status":"PASS","detail":"ok"}],"summary":"all pass"}'
         verdict = evaluator._parse_verdict(content)
         assert verdict.verdict == "COMPLETE"
 
-    def test_verdict_missing_items_is_not_complete(self, evaluator: AgenticEvaluator) -> None:
+    def test_verdict_missing_items_is_not_complete(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
         """GR-168: "The task is complete." in prose is not a verdict."""
         content = "The task is complete. All criteria pass."
         verdict = evaluator._parse_verdict(content)
@@ -807,7 +934,9 @@ class TestExtendedEvaluator:
     ) -> None:
         """evaluate() returns INCOMPLETE when LLM returns empty content with no tool calls."""
         with patch.object(llm_client, "chat", return_value=LLMResponse(content=None)):
-            verdict = evaluator.evaluate({"id": "empty", "title": "x", "criteria": ["c1"]})
+            verdict = evaluator.evaluate(
+                {"id": "empty", "title": "x", "criteria": ["c1"]}
+            )
         assert verdict.verdict == "INCOMPLETE"
         assert "empty response" in verdict.summary.lower()
 
@@ -821,10 +950,14 @@ class TestExtendedEvaluator:
             "chat",
             side_effect=[
                 LLMResponse(content="checking", tool_calls=[tc]),
-                LLMResponse(content='{"verdict":"INCOMPLETE","items":[],"summary":"error"}'),
+                LLMResponse(
+                    content='{"verdict":"INCOMPLETE","items":[],"summary":"error"}'
+                ),
             ],
         ):
-            verdict = evaluator.evaluate({"id": "err", "title": "x", "criteria": ["c1"]})
+            verdict = evaluator.evaluate(
+                {"id": "err", "title": "x", "criteria": ["c1"]}
+            )
         assert verdict.verdict == "INCOMPLETE"
 
     def test_verdict_status_fail_default(self, evaluator: AgenticEvaluator) -> None:
@@ -868,7 +1001,9 @@ class TestCompaction:
         assert "Still to verify (1/3)" in prompt
         assert "c1" in prompt  # remaining
 
-    def test_build_compacted_prompt_all_verified(self, evaluator: AgenticEvaluator) -> None:
+    def test_build_compacted_prompt_all_verified(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
         """All criteria verified → no 'still to verify' section."""
         evaluator._sandbox["verified_0"] = "PASS"
         evaluator._sandbox["verified_1"] = "PASS"
@@ -877,18 +1012,25 @@ class TestCompaction:
         assert "Already verified (2/2)" in prompt
         assert "Still to verify" not in prompt
 
-    def test_build_compacted_prompt_none_verified(self, evaluator: AgenticEvaluator) -> None:
+    def test_build_compacted_prompt_none_verified(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
         """No sandbox keys → all criteria listed as remaining."""
         task = {"id": "t1", "title": "Test", "criteria": ["c0", "c1", "c2"]}
         prompt = evaluator._build_compacted_prompt(task, "", 3)
         assert "Already verified" not in prompt
         assert "Still to verify (3/3)" in prompt
 
-    def test_compact_context_rebuilds_clean_messages(self, evaluator: AgenticEvaluator) -> None:
+    def test_compact_context_rebuilds_clean_messages(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
         """_compact_context returns fresh messages with only system + compacted prompt."""
         evaluator._sandbox["verified_0"] = "PASS"
         task = {"id": "t1", "title": "Test", "criteria": ["c0", "c1"]}
-        old_messages = [{"role": "system", "content": "old"}, {"role": "user", "content": "old"}]
+        old_messages = [
+            {"role": "system", "content": "old"},
+            {"role": "user", "content": "old"},
+        ]
         new_msgs, count = evaluator._compact_context(old_messages, task, "", 2, 1)
         assert count == 2  # was compaction #1, now #2
         assert len(new_msgs) == 2
@@ -896,7 +1038,9 @@ class TestCompaction:
         assert "EVALUATION PROGRESS" in new_msgs[1]["content"]
         assert "c0" in new_msgs[1]["content"]
 
-    def test_compact_context_increments_count(self, evaluator: AgenticEvaluator) -> None:
+    def test_compact_context_increments_count(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
         """Each compaction increments the counter."""
         task = {"id": "t1", "title": "Test", "criteria": ["c0"]}
         _, count1 = evaluator._compact_context([], task, "", 1, 0)
@@ -928,15 +1072,21 @@ class TestCompaction:
                 ),
             ],
         ):
-            verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
+            verdict = evaluator.evaluate(
+                {"id": "t1", "title": "Test", "criteria": ["c0"]}
+            )
         assert verdict.verdict == "COMPLETE"
 
     def test_compaction_not_triggered_on_other_error(
         self, evaluator: AgenticEvaluator, llm_client: LLMClient
     ) -> None:
         """Non-context errors (like ValueError) return INCOMPLETE immediately."""
-        with patch.object(llm_client, "chat", side_effect=ValueError("some other error")):
-            verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
+        with patch.object(
+            llm_client, "chat", side_effect=ValueError("some other error")
+        ):
+            verdict = evaluator.evaluate(
+                {"id": "t1", "title": "Test", "criteria": ["c0"]}
+            )
         assert verdict.verdict == "INCOMPLETE"
         assert "other error" in verdict.summary.lower()
 
@@ -961,7 +1111,9 @@ class TestCompaction:
 
         with patch.object(llm_client, "chat", side_effect=transport):
             with patch.object(evaluator, "_compact_context") as compact:
-                verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
+                verdict = evaluator.evaluate(
+                    {"id": "t1", "title": "Test", "criteria": ["c0"]}
+                )
 
         assert compact.call_count == 0, "a transport failure must not compact context"
         assert verdict.verdict == "INCOMPLETE"
@@ -971,7 +1123,9 @@ class TestCompaction:
         self, evaluator: AgenticEvaluator, llm_client: LLMClient
     ) -> None:
         """The keyword path is preserved for errors that reached the provider."""
-        err = RuntimeError("provider returned no choices: maximum context length exceeded")
+        err = RuntimeError(
+            "provider returned no choices: maximum context length exceeded"
+        )
         evaluator._sandbox["verified_0"] = "PASS"
         with patch.object(
             llm_client,
@@ -983,7 +1137,9 @@ class TestCompaction:
                 ),
             ],
         ):
-            verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
+            verdict = evaluator.evaluate(
+                {"id": "t1", "title": "Test", "criteria": ["c0"]}
+            )
         assert verdict.verdict == "COMPLETE"
 
 
@@ -1004,7 +1160,10 @@ class TestTransportFailureClassification:
         """The provider answered — a 4xx body is where context errors live."""
         import requests
 
-        assert _is_transport_failure(requests.HTTPError("400 context length exceeded")) is False
+        assert (
+            _is_transport_failure(requests.HTTPError("400 context length exceeded"))
+            is False
+        )
 
     def test_wrapped_cause_is_walked(self) -> None:
         import requests
@@ -1030,7 +1189,9 @@ class TestTransportFailureClassification:
 
         call_count = [0]
 
-        def fake_chat(messages: list, tools: object = None, max_tokens: int = None) -> object:
+        def fake_chat(
+            messages: list, tools: object = None, max_tokens: int = None
+        ) -> object:
             call_count[0] += 1
             if call_count[0] <= 2:
                 # Build up context: 950 prompt tokens > 900 (90% of 1000)
@@ -1058,9 +1219,13 @@ class TestTransportFailureClassification:
 
         with patch.object(llm_client, "chat", side_effect=fake_chat):
             with patch.object(
-                evaluator, "_tool_read_file", return_value={"content": "test", "total_lines": 1}
+                evaluator,
+                "_tool_read_file",
+                return_value={"content": "test", "total_lines": 1},
             ):
-                verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
+                verdict = evaluator.evaluate(
+                    {"id": "t1", "title": "Test", "criteria": ["c0"]}
+                )
         assert verdict.verdict == "COMPLETE"
 
     def test_max_compactions_limit(
@@ -1074,7 +1239,9 @@ class TestTransportFailureClassification:
         http_err = requests.HTTPError("context length exceeded", response=fake_response)
 
         with patch.object(llm_client, "chat", side_effect=http_err):
-            verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
+            verdict = evaluator.evaluate(
+                {"id": "t1", "title": "Test", "criteria": ["c0"]}
+            )
         assert verdict.verdict == "INCOMPLETE"
         # Should have failed after 3 compaction attempts
         assert "LLM call failed" in verdict.summary
@@ -1094,7 +1261,9 @@ class TestTransportFailureClassification:
 
         call_count = [0]
 
-        def fake_chat(messages: list, tools: object = None, max_tokens: int = None) -> object:
+        def fake_chat(
+            messages: list, tools: object = None, max_tokens: int = None
+        ) -> object:
             call_count[0] += 1
             if call_count[0] <= 2:
                 # 600 prompt tokens > 500 (50% of 1000) — should trigger compaction
@@ -1121,9 +1290,13 @@ class TestTransportFailureClassification:
 
         with patch.object(llm_client, "chat", side_effect=fake_chat):
             with patch.object(
-                evaluator, "_tool_read_file", return_value={"content": "test", "total_lines": 1}
+                evaluator,
+                "_tool_read_file",
+                return_value={"content": "test", "total_lines": 1},
             ):
-                verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
+                verdict = evaluator.evaluate(
+                    {"id": "t1", "title": "Test", "criteria": ["c0"]}
+                )
         assert verdict.verdict == "COMPLETE"
 
     def test_compaction_threshold_not_triggered_below(
@@ -1141,7 +1314,9 @@ class TestTransportFailureClassification:
 
         call_count = [0]
 
-        def fake_chat(messages: list, tools: object = None, max_tokens: int = None) -> object:
+        def fake_chat(
+            messages: list, tools: object = None, max_tokens: int = None
+        ) -> object:
             call_count[0] += 1
             if call_count[0] <= 2:
                 # 400 prompt tokens < 5000 (50% of 10000) — should NOT trigger compaction
@@ -1168,9 +1343,13 @@ class TestTransportFailureClassification:
 
         with patch.object(llm_client, "chat", side_effect=fake_chat):
             with patch.object(
-                evaluator, "_tool_read_file", return_value={"content": "test", "total_lines": 1}
+                evaluator,
+                "_tool_read_file",
+                return_value={"content": "test", "total_lines": 1},
             ):
-                verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
+                verdict = evaluator.evaluate(
+                    {"id": "t1", "title": "Test", "criteria": ["c0"]}
+                )
         assert verdict.verdict == "COMPLETE"
         # Should have completed without compaction — all 3 calls direct
         assert call_count[0] == 3
@@ -1192,14 +1371,18 @@ class TestTransportFailureClassification:
             yaml.dump({"evaluator": {"compaction_threshold": 0.05}}, f)
 
         evaluator.eval_cap.max_input_tokens = 100_000
-        evaluator.eval_cap.max_iterations = -1  # long call sequence; iterations unbounded
+        evaluator.eval_cap.max_iterations = (
+            -1
+        )  # long call sequence; iterations unbounded
         threshold = int(100_000 * 0.05)
 
         call_count = [0]
         max_single_prompt = [0]
         first_firing = {}  # cumulative_input_tokens observed at the first compaction
 
-        def fake_chat(messages: list, tools: object = None, max_tokens: int = None) -> object:
+        def fake_chat(
+            messages: list, tools: object = None, max_tokens: int = None
+        ) -> object:
             call_count[0] += 1
             if call_count[0] <= 20:
                 tc = ToolCall(
@@ -1232,10 +1415,16 @@ class TestTransportFailureClassification:
 
         with patch.object(llm_client, "chat", side_effect=fake_chat):
             with patch.object(
-                evaluator, "_tool_read_file", return_value={"content": "test", "total_lines": 1}
+                evaluator,
+                "_tool_read_file",
+                return_value={"content": "test", "total_lines": 1},
             ):
-                with patch.object(evaluator, "_compact_context", side_effect=spy_compact) as spy:
-                    verdict = evaluator.evaluate({"id": "t1", "title": "Test", "criteria": ["c0"]})
+                with patch.object(
+                    evaluator, "_compact_context", side_effect=spy_compact
+                ) as spy:
+                    verdict = evaluator.evaluate(
+                        {"id": "t1", "title": "Test", "criteria": ["c0"]}
+                    )
 
         assert spy.call_count >= 1
         # The decisive asymmetry the old code cannot satisfy: at the first
@@ -1272,8 +1461,12 @@ class TestTransportFailureClassification:
                 max_tokens: int = None,
                 temperature: float = 0.1,
             ) -> object:
-                captured_prompt.append(messages[1]["content"] if len(messages) > 1 else "")
-                return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
+                captured_prompt.append(
+                    messages[1]["content"] if len(messages) > 1 else ""
+                )
+                return LLMResponse(
+                    content='{"verdict":"COMPLETE","items":[],"summary":"ok"}'
+                )
 
             with patch.object(llm_client, "chat", capture_chat):
                 evaluator.evaluate({"id": "t", "title": "ct", "criteria": ["x"]})
@@ -1301,8 +1494,12 @@ class TestTransportFailureClassification:
                 max_tokens: int = None,
                 temperature: float = 0.1,
             ) -> object:
-                captured_prompt.append(messages[1]["content"] if len(messages) > 1 else "")
-                return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
+                captured_prompt.append(
+                    messages[1]["content"] if len(messages) > 1 else ""
+                )
+                return LLMResponse(
+                    content='{"verdict":"COMPLETE","items":[],"summary":"ok"}'
+                )
 
             with patch.object(llm_client, "chat", capture_chat):
                 evaluator.evaluate({"id": "t", "title": "ct", "criteria": ["x"]})
@@ -1313,13 +1510,17 @@ class TestTransportFailureClassification:
             f"but got no truncation. Prompt length: {len(captured_prompt[0])} chars"
         )
 
-    def test_estimate_context_uses_llm_tokens(self, evaluator: AgenticEvaluator) -> None:
+    def test_estimate_context_uses_llm_tokens(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
         """_estimate_context_tokens uses cumulative_prompt_tok when provided."""
         messages = [{"role": "user", "content": "hello world" * 100}]
         est = evaluator._estimate_context_tokens(messages, cumulative_prompt_tok=5000)
         assert est == 5000
 
-    def test_estimate_context_falls_back_to_chars(self, evaluator: AgenticEvaluator) -> None:
+    def test_estimate_context_falls_back_to_chars(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
         """_estimate_context_tokens falls back to char/3.5 heuristic."""
         messages = [{"role": "user", "content": "hello world" * 100}]
         est = evaluator._estimate_context_tokens(messages, cumulative_prompt_tok=0)
@@ -1347,7 +1548,9 @@ class TestCodeContextPreloading:
         # graded fixtures instead of this repo (two CI reds).
         monkeypatch.chdir(tmp_workdir)
         subprocess.run(["git", "init", "-q"], cwd=tmp_workdir)
-        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp_workdir)
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"], cwd=tmp_workdir
+        )
         subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_workdir)
 
         # Create and commit a file, then modify it
@@ -1386,7 +1589,9 @@ class TestCodeContextPreloading:
         # INT-CI-22: same xdist CWD-leak rule as the diff-mode test above.
         monkeypatch.chdir(tmp_workdir)
         subprocess.run(["git", "init", "-q"], cwd=tmp_workdir)
-        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp_workdir)
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"], cwd=tmp_workdir
+        )
         subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_workdir)
 
         with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
@@ -1441,7 +1646,9 @@ class TestCodeContextPreloading:
         """
         import subprocess
 
-        self._init_repo_with_commit(tmp_workdir, {"main.py": "def foo():\n    return 42\n"})
+        self._init_repo_with_commit(
+            tmp_workdir, {"main.py": "def foo():\n    return 42\n"}
+        )
         self._write(tmp_workdir, "main.py", "def foo():\n    return 99\n")
         subprocess.run(["git", "add", "-A"], cwd=tmp_workdir)
         subprocess.run(
@@ -1457,7 +1664,10 @@ class TestCodeContextPreloading:
         )
         # The working tree is genuinely clean now.
         clean = subprocess.run(
-            ["git", "status", "--porcelain"], cwd=tmp_workdir, capture_output=True, text=True
+            ["git", "status", "--porcelain"],
+            cwd=tmp_workdir,
+            capture_output=True,
+            text=True,
         )
         assert clean.stdout.strip() == ""
 
@@ -1477,7 +1687,9 @@ class TestCodeContextPreloading:
         working tree is clean (no empty CHANGED FILES section)."""
         import subprocess
 
-        self._init_repo_with_commit(tmp_workdir, {"main.py": "def foo():\n    return 42\n"})
+        self._init_repo_with_commit(
+            tmp_workdir, {"main.py": "def foo():\n    return 42\n"}
+        )
         self._write(tmp_workdir, "main.py", "def foo():\n    return 99\n")
         subprocess.run(["git", "add", "-A"], cwd=tmp_workdir)
         subprocess.run(
@@ -1512,7 +1724,9 @@ class TestCodeContextPreloading:
         # _build_code_context reads the CWD: every git call passes
         # cwd=tmp_workdir explicitly.
         subprocess.run(["git", "init", "-q"], cwd=tmp_workdir)
-        subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp_workdir)
+        subprocess.run(
+            ["git", "config", "user.email", "test@test.com"], cwd=tmp_workdir
+        )
         subprocess.run(["git", "config", "user.name", "Test"], cwd=tmp_workdir)
         env = {
             **os.environ,
@@ -1606,7 +1820,9 @@ class TestCodeContextPreloading:
         """Files with >500 chars/line average are capped to a 5-line preview
         in FULL mode (JUDGE-CONTEXT-001)."""
         lines = [f"line-{i}-" + "x" * 1000 for i in range(10)]
-        self._init_repo_with_commit(tmp_workdir, {"metrics.txt": "\n".join(lines[:5]) + "\n"})
+        self._init_repo_with_commit(
+            tmp_workdir, {"metrics.txt": "\n".join(lines[:5]) + "\n"}
+        )
         self._write(tmp_workdir, "metrics.txt", "\n".join(lines) + "\n")
 
         config = {"guards": {"test_mode": "full"}}
@@ -1653,19 +1869,24 @@ class TestCodeContextPreloading:
         captured_tokens = []
 
         def capture_chat(
-            messages: list, max_tokens: int = 131072, tools: object = None, temperature: float = 0.1
+            messages: list,
+            max_tokens: int = 131072,
+            tools: object = None,
+            temperature: float = 0.1,
         ) -> object:
             captured_tokens.append(max_tokens)
-            return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
+            return LLMResponse(
+                content='{"verdict":"COMPLETE","items":[],"summary":"ok"}'
+            )
 
         with patch.object(llm_client, "chat", capture_chat):
             evaluator.evaluate({"id": "t", "title": "token test", "criteria": ["x"]})
 
         assert captured_tokens, "chat() was never called"
         # Per-request max_tokens is always 16384 regardless of session budget
-        assert captured_tokens[0] == 16384, (
-            f"Expected per-request max_tokens=16384 (session budget is 50000), got {captured_tokens[0]}"
-        )
+        assert (
+            captured_tokens[0] == 16384
+        ), f"Expected per-request max_tokens=16384 (session budget is 50000), got {captured_tokens[0]}"
 
     def test_max_tokens_fallback_when_nothing_configured(
         self, evaluator: AgenticEvaluator, llm_client: LLMClient
@@ -1681,18 +1902,23 @@ class TestCodeContextPreloading:
         captured = []
 
         def capture_chat(
-            messages: list, max_tokens: int, tools: object = None, temperature: float = 0.1
+            messages: list,
+            max_tokens: int,
+            tools: object = None,
+            temperature: float = 0.1,
         ) -> object:
             captured.append(max_tokens)
-            return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
+            return LLMResponse(
+                content='{"verdict":"COMPLETE","items":[],"summary":"ok"}'
+            )
 
         with patch.object(llm_client, "chat", capture_chat):
             evaluator.evaluate({"id": "t", "title": "unlimited", "criteria": ["x"]})
 
         assert captured, "chat() was never called"
-        assert captured[0] == 16384, (
-            f"Expected fallback max_tokens=16384 when unlimited, got {captured[0]}"
-        )
+        assert (
+            captured[0] == 16384
+        ), f"Expected fallback max_tokens=16384 when unlimited, got {captured[0]}"
 
     def test_max_tokens_value_set_not_corrupted(
         self, evaluator: AgenticEvaluator, llm_client: LLMClient
@@ -1708,19 +1934,24 @@ class TestCodeContextPreloading:
         captured = []
 
         def capture_chat(
-            messages: list, max_tokens: int, tools: object = None, temperature: float = 0.1
+            messages: list,
+            max_tokens: int,
+            tools: object = None,
+            temperature: float = 0.1,
         ) -> object:
             captured.append(max_tokens)
-            return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
+            return LLMResponse(
+                content='{"verdict":"COMPLETE","items":[],"summary":"ok"}'
+            )
 
         with patch.object(llm_client, "chat", capture_chat):
             evaluator.evaluate({"id": "t", "title": "uncorrupted", "criteria": ["x"]})
 
         assert captured, "chat() was never called"
         # Per-request is always 16384 — session budget of 75000 enforced via EvalCap
-        assert captured[0] == 16384, (
-            f"Per-request max_tokens should be 16384 (session budget 75000), got {captured[0]}"
-        )
+        assert (
+            captured[0] == 16384
+        ), f"Per-request max_tokens should be 16384 (session budget 75000), got {captured[0]}"
         # Verify session budget is correctly stored
         assert evaluator.eval_cap.max_output_tokens == 75_000
 
@@ -1730,7 +1961,11 @@ class TestCodeContextPreloading:
         self, evaluator: AgenticEvaluator, tmp_workdir: str
     ) -> None:
         """In 'changed' scope, read_file on non-allowed file returns error."""
-        evaluator._allowed_files = {"src/main.py", "tests/test_main.py", "pyproject.toml"}
+        evaluator._allowed_files = {
+            "src/main.py",
+            "tests/test_main.py",
+            "pyproject.toml",
+        }
 
         result = evaluator._tool_read_file("other/unrelated.py")
         assert "error" in result
@@ -1785,9 +2020,9 @@ class TestCodeContextPreloading:
         evaluator._allowed_files = {"src/main.py", "Makefile"}
 
         result = evaluator._tool_search_pattern("TODO")
-        assert result["count"] == 1, (
-            f"Expected 1 match in allowed files, got {result['count']}: {result['matches']}"
-        )
+        assert (
+            result["count"] == 1
+        ), f"Expected 1 match in allowed files, got {result['count']}: {result['matches']}"
         assert "src/main.py" in str(result["matches"])
         assert "vendor/lib.py" not in str(result["matches"])
 
@@ -1810,27 +2045,37 @@ class TestCodeContextPreloading:
             f.write("print('ok')\n")
         subprocess.run(["git", "init"], cwd=tmp_workdir, capture_output=True)
         subprocess.run(["git", "add", "-A"], cwd=tmp_workdir, capture_output=True)
-        subprocess.run(["git", "commit", "-m", "initial"], cwd=tmp_workdir, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-m", "initial"], cwd=tmp_workdir, capture_output=True
+        )
         with open(os.path.join(tmp_workdir, "src", "main.py"), "a") as f:
             f.write("# change\n")
 
         captured = []
 
-        def fake_chat(messages: list, tools: object = None, max_tokens: int = None) -> object:
+        def fake_chat(
+            messages: list, tools: object = None, max_tokens: int = None
+        ) -> object:
             captured.append(len(messages))
             if len(captured) == 1:
                 return LLMResponse(
                     content="checking",
                     tool_calls=[
                         ToolCall(
-                            id="tc1", name="read_file", arguments={"path": "nonexistent_outside.py"}
+                            id="tc1",
+                            name="read_file",
+                            arguments={"path": "nonexistent_outside.py"},
                         )
                     ],
                 )
-            return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
+            return LLMResponse(
+                content='{"verdict":"COMPLETE","items":[],"summary":"ok"}'
+            )
 
         with patch.object(llm_client, "chat", side_effect=fake_chat):
-            verdict = evaluator.evaluate({"id": "t", "title": "scope test", "criteria": ["c0"]})
+            verdict = evaluator.evaluate(
+                {"id": "t", "title": "scope test", "criteria": ["c0"]}
+            )
         assert verdict.verdict == "COMPLETE"
 
     def test_file_scope_default_is_full(
@@ -1849,21 +2094,31 @@ class TestCodeContextPreloading:
 
         subprocess.run(["git", "init"], cwd=tmp_workdir, capture_output=True)
         subprocess.run(
-            ["git", "commit", "--allow-empty", "-m", "init"], cwd=tmp_workdir, capture_output=True
+            ["git", "commit", "--allow-empty", "-m", "init"],
+            cwd=tmp_workdir,
+            capture_output=True,
         )
 
-        def fake_chat(messages: list, tools: object = None, max_tokens: int = None) -> object:
-            return LLMResponse(content='{"verdict":"COMPLETE","items":[],"summary":"ok"}')
+        def fake_chat(
+            messages: list, tools: object = None, max_tokens: int = None
+        ) -> object:
+            return LLMResponse(
+                content='{"verdict":"COMPLETE","items":[],"summary":"ok"}'
+            )
 
         with patch.object(llm_client, "chat", side_effect=fake_chat):
-            evaluator.evaluate({"id": "t", "title": "default scope", "criteria": ["c0"]})
+            evaluator.evaluate(
+                {"id": "t", "title": "default scope", "criteria": ["c0"]}
+            )
 
-        assert evaluator._allowed_files is None, (
-            "config-less default must be full scope (None = no restriction)"
-        )
+        assert (
+            evaluator._allowed_files is None
+        ), "config-less default must be full scope (None = no restriction)"
         # The scope computation itself still works — it is just not the default.
         allowed = evaluator._compute_allowed_files()
-        assert "src/main.py" not in allowed, "No changed files should be in scope for a clean repo"
+        assert (
+            "src/main.py" not in allowed
+        ), "No changed files should be in scope for a clean repo"
 
 
 class TestDataFileHelpers:
