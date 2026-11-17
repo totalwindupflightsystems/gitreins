@@ -98,12 +98,6 @@ class Source:
         return self.base_text
 
 
-@dataclass
-class HeadReadingSource(Source):
-    def protected_ref(self, requested_ref: str) -> str:
-        return "head-sha"
-
-
 def parse(text: str = BASE):
     return parse_review_contract(text, source_ref="origin/main", source_commit="base-sha")
 
@@ -139,7 +133,12 @@ def test_normative_parser_and_defaults() -> None:
         (BASE.replace("enabled: true", "enabled: 'yes'", 1), "REVIEW_YAML_TYPE"),
         (BASE.replace("minimum_severity: high", "minimum_severity: 3"), "REVIEW_YAML_TYPE"),
         (BASE.replace("locked: true", "locked: 'yes'"), "REVIEW_YAML_TYPE"),
-        (BASE.replace("organization:\n", "organization:\n  extends: https://example.invalid/org\n"), "REVIEW_ORG_SOURCE_UNAVAILABLE"),
+        (
+            BASE.replace(
+                "organization:\n", "organization:\n  extends: https://example.invalid/org\n"
+            ),
+            "REVIEW_ORG_SOURCE_UNAVAILABLE",
+        ),
     ],
 )
 def test_normative_rejections(text: str, code: str) -> None:
@@ -268,8 +267,8 @@ def test_lower_overlay_cannot_weaken_gate() -> None:
     contract = parse(text)
     overlay = contract.paths.overlays[0]
     overlay_text = BASE.replace(
-        'gates: {minimum_confidence: 0.90}',
-        'gates: {minimum_confidence: 0.10, minimum_severity: low, locked: false}',
+        "gates: {minimum_confidence: 0.90}",
+        "gates: {minimum_confidence: 0.10, minimum_severity: low, locked: false}",
     )
     overlay_contract = parse(overlay_text)
     overlay = overlay_contract.paths.overlays[0]

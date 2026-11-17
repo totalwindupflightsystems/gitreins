@@ -358,6 +358,70 @@ def test_unconsumed_registry_literal_flags_its_handlers(tmp_path) -> None:
     assert "app/orphan.py:1" in hits[0].reason
 
 
+# ── String-dispatch seams: seam("cmd_x", args) is a reference site
+
+
+def test_string_dispatch_seam_reaches_its_handler(tmp_path) -> None:
+    """A handler reached ONLY through a ``globals()[name]`` seam is wired.
+
+    ``dispatch`` never names ``cmd_fixture``; the only reference is the string
+    literal at the call site — the shape of the CLI's
+    ``_run_subcommand_handler("cmd_review_dismiss", args)``. The analyzer has
+    to follow the seam, not a symbol list.
+    """
+    workdir = _repo(
+        tmp_path,
+        {
+            "app/cli.py": (
+                "def dispatch(name, args):\n"
+                "    return globals()[name](args)\n"
+                "\n"
+                "def cmd_fixture(args):\n"
+                "    return args\n"
+                "\n"
+                "def main(argv):\n"
+                '    return dispatch("cmd_fixture", argv)\n'
+                "\n"
+                'if __name__ == "__main__":\n'
+                "    main([])\n"
+            )
+        },
+    )
+    report = wiring.scan(workdir)
+    assert report.findings == [], [f.render() for f in report.findings]
+    assert not _findings(report, "cmd_fixture")
+
+
+def test_seam_dispatch_does_not_hide_a_genuinely_unreferenced_function(tmp_path) -> None:
+    """Seam support must not weaken detection: an unmentioned handler is dead."""
+    workdir = _repo(
+        tmp_path,
+        {
+            "app/cli.py": (
+                "def dispatch(name, args):\n"
+                "    return globals()[name](args)\n"
+                "\n"
+                "def cmd_fixture(args):\n"
+                "    return args\n"
+                "\n"
+                "def cmd_orphan(args):\n"
+                "    return args\n"
+                "\n"
+                "def main(argv):\n"
+                '    return dispatch("cmd_fixture", argv)\n'
+                "\n"
+                'if __name__ == "__main__":\n'
+                "    main([])\n"
+            )
+        },
+    )
+    report = wiring.scan(workdir)
+    hits = _findings(report, "cmd_orphan")
+    assert len(hits) == 1, [f.render() for f in report.findings]
+    assert "not reachable" in hits[0].reason
+    assert not _findings(report, "cmd_fixture")
+
+
 # ── Zero false positives on gitreins' own tree (reported exemptions allowed)
 
 

@@ -25,6 +25,14 @@ Deliberate semantics
   in every module. Same-named methods reach each other — an
   over-approximation that trades recall for silence over false alarms, which
   is the right trade for a health check.
+* String-dispatch seams: a function that resolves a name through
+  ``globals()[param]`` (the CLI's ``_run_subcommand_handler``) makes the
+  string literal at its CALL site the only reference to whatever it resolves.
+  Every ``seam("cmd_x", args)`` call is recorded as a load site of ``cmd_x``
+  when that literal names a defined non-method definition. The seam set is
+  derived from the code (any ``globals()``/``locals()``/``vars()`` subscript
+  keyed by a parameter), never from a symbol list — the next subcommand is
+  wired for free.
 * Test suites are consumers: ``test_*`` functions and ``Test*`` classes under
   a ``tests`` directory are seeds (pytest invokes them by name), and so are
   ``pytest.fixture``-decorated functions (pytest injects them by parameter
@@ -171,6 +179,33 @@ class _Container:
 
 
 @dataclass
+class _StringSeam:
+    """A function that resolves a name dynamically: ``globals()[param]``.
+
+    ``keys`` holds each lookup key that is one of the function's parameters,
+    as (parameter name, positional index) — the index is None for a
+    keyword-only/variadic parameter.
+    """
+
+    name: str
+    file: str
+    line: int
+    keys: tuple[tuple[str, int | None], ...] = ()
+
+
+@dataclass
+class _DispatchCall:
+    """A call whose string argument may name what a seam resolves."""
+
+    seam: str  # the callee as written: ``seam`` in ``seam("cmd_x", args)``
+    file: str
+    line: int
+    owner: int  # enclosing def node id; 0 = module scope
+    positional: dict[int, str] = field(default_factory=dict)  # index → literal
+    keywords: dict[str, str] = field(default_factory=dict)  # parameter → literal
+
+
+@dataclass
 class _FileFacts:
     file: str
     defs: list[_Def] = field(default_factory=list)
@@ -184,6 +219,18 @@ class _FileFacts:
     containers: list[_Container] = field(default_factory=list)
     dispatched: set[str] = field(default_factory=set)  # strings compared with ==
     has_main_guard: bool = False
+    # ``globals()[param]`` seams defined here, and the calls that hand a seam
+    # a string literal; resolved tree-wide in _string_dispatch_references.
+    seams: list[_StringSeam] = field(default_factory=list)
+    dispatch_calls: list[_DispatchCall] = field(default_factory=list)
+
+    def record_reference(self, name: str, line: int, owner: int) -> None:
+        """Record one load site of ``name``, attributed to its owner scope."""
+        self.load_sites.setdefault(name, []).append((self.file, line, owner))
+        if owner == 0:
+            self.module_loads.add(name)
+        else:
+            self.body_refs.setdefault(owner, set()).add(name)
 
 
 def _container_target_name(targets: list[ast.expr]) -> str:
@@ -211,6 +258,66 @@ def _is_framework_decorated(node: ast.FunctionDef | ast.AsyncFunctionDef) -> boo
         if name in _FRAMEWORK_DECORATORS or name.rsplit(".", 1)[-1] == "fixture":
             return True
     return False
+
+
+# Namespace accessors whose subscript is a dynamic name lookup.
+_DYNAMIC_SCOPE_CALLS = {"globals", "locals", "vars"}
+
+
+def _dynamic_lookup_key(node: ast.Subscript) -> str:
+    """The NAME keyed into ``globals()``/``locals()``/``vars()``, else ""."""
+    value = node.value
+    if not (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)):
+        return ""
+    if value.func.id not in _DYNAMIC_SCOPE_CALLS:
+        return ""
+    return node.slice.id if isinstance(node.slice, ast.Name) else ""
+
+
+def _own_scope_nodes(stmts: list[ast.stmt]) -> list[ast.AST]:
+    """Nodes of a body, without descending into nested defs/classes/lambdas."""
+    out: list[ast.AST] = []
+    stack: list[ast.AST] = list(stmts)
+    while stack:
+        node = stack.pop()
+        out.append(node)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        stack.extend(ast.iter_child_nodes(node))
+    return out
+
+
+def _parameter_positions(node: ast.FunctionDef | ast.AsyncFunctionDef) -> dict[str, int | None]:
+    """Parameter name → positional index (None when it can only be a keyword)."""
+    args = node.args
+    ordered = [*args.posonlyargs, *args.args]
+    positions: dict[str, int | None] = {arg.arg: index for index, arg in enumerate(ordered)}
+    for keyword_only in args.kwonlyargs:
+        positions.setdefault(keyword_only.arg, None)
+    for variadic in (args.vararg, args.kwarg):
+        if variadic is not None:
+            positions.setdefault(variadic.arg, None)
+    return positions
+
+
+def _dynamic_lookup_keys(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> tuple[tuple[str, int | None], ...]:
+    """(parameter, index) pairs this def uses to resolve a name dynamically.
+
+    ``globals()[name]`` on a parameter is the string-dispatch seam: the only
+    reference to whatever it resolves is the literal at the CALL site, which a
+    name scan cannot follow. Empty for an ordinary function.
+    """
+    positions = _parameter_positions(node)
+    keys: list[tuple[str, int | None]] = []
+    for sub in _own_scope_nodes(node.body):
+        if not isinstance(sub, ast.Subscript):
+            continue
+        key = _dynamic_lookup_key(sub)
+        if key in positions and (key, positions[key]) not in keys:
+            keys.append((key, positions[key]))
+    return tuple(keys)
 
 
 class _ModuleScanner:
@@ -266,11 +373,45 @@ class _ModuleScanner:
 
     def _record_load(self, name: str, line: int) -> None:
         owner = self._owner_stack[-1] if self._owner_stack else 0
-        self.facts.load_sites.setdefault(name, []).append((self.rel, line, owner))
-        if owner == 0:
-            self.facts.module_loads.add(name)
-        else:
-            self.facts.body_refs.setdefault(owner, set()).add(name)
+        self.facts.record_reference(name, line, owner)
+
+    def _record_dispatch_call(self, node: ast.Call) -> None:
+        """Note a call that hands string literals to some callee.
+
+        Which of these are real seam dispatches is decided tree-wide in
+        _string_dispatch_references, once every seam definition is known.
+        """
+        callee = ""
+        if isinstance(node.func, ast.Name):
+            callee = node.func.id
+        elif isinstance(node.func, ast.Attribute):
+            callee = node.func.attr
+        if not callee:
+            return
+        positional = {
+            index: arg.value
+            for index, arg in enumerate(node.args)
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+        }
+        keywords = {
+            keyword.arg: keyword.value.value
+            for keyword in node.keywords
+            if keyword.arg is not None
+            and isinstance(keyword.value, ast.Constant)
+            and isinstance(keyword.value.value, str)
+        }
+        if not positional and not keywords:
+            return
+        self.facts.dispatch_calls.append(
+            _DispatchCall(
+                seam=callee,
+                file=self.rel,
+                line=node.lineno,
+                owner=self._owner_stack[-1] if self._owner_stack else 0,
+                positional=positional,
+                keywords=keywords,
+            )
+        )
 
     def _visit(self, node: ast.AST, container: _Container | None) -> None:
         if isinstance(node, ast.Constant):
@@ -301,8 +442,18 @@ class _ModuleScanner:
                 if alias.name != "*":
                     self._record_load(alias.asname or alias.name, node.lineno)
             return
+        if isinstance(node, ast.Call):
+            self._record_dispatch_call(node)
+            for child in ast.iter_child_nodes(node):
+                self._visit(child, container)
+            return
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             self._add_def(node)
+            keys = _dynamic_lookup_keys(node)
+            if keys:
+                self.facts.seams.append(
+                    _StringSeam(name=node.name, file=self.rel, line=node.lineno, keys=keys)
+                )
             # Decorators, defaults and annotations execute at definition time
             # (the enclosing scope), so they load with the OUTER owner.
             for decorator in node.decorator_list:
@@ -673,6 +824,52 @@ def _closure(
     return reach_defs, processed_files
 
 
+def _seam_literal(call: _DispatchCall, seam: _StringSeam) -> str:
+    """The string this call hands the seam's dynamic lookup, else ""."""
+    for parameter, index in seam.keys:
+        if index is not None and index in call.positional:
+            return call.positional[index]
+        if parameter in call.keywords:
+            return call.keywords[parameter]
+    return ""
+
+
+def _string_dispatch_references(
+    facts_by_file: dict[str, _FileFacts],
+    defs_by_name: dict[str, list[_Def]],
+) -> set[str]:
+    """Load sites the name scan cannot see: ``seam("cmd_x", args)``.
+
+    The seam set is derived from the scanned code — any function that resolves
+    a name through ``globals()``/``locals()``/``vars()`` on one of its
+    parameters — and each call to one is resolved through the string literal
+    it passes for that parameter. Nothing is per-symbol: the CLI's
+    ``_run_subcommand_handler("cmd_review_dismiss", args)`` is wired for the
+    same reason the next subcommand handler will be.
+
+    A literal only counts when it names a defined non-method definition;
+    arbitrary strings (labels, field names) are not references to anything.
+    """
+    seams: dict[str, _StringSeam] = {}
+    for facts in facts_by_file.values():
+        for candidate in facts.seams:
+            seams.setdefault(candidate.name, candidate)
+    if not seams:
+        return set()
+    injected: set[str] = set()
+    for facts in facts_by_file.values():
+        for call in facts.dispatch_calls:
+            resolved = seams.get(call.seam)
+            if resolved is None:
+                continue
+            literal = _seam_literal(call, resolved)
+            if not any(not defn.is_method for defn in defs_by_name.get(literal, ())):
+                continue
+            facts.record_reference(literal, call.line, call.owner)
+            injected.add(literal)
+    return injected
+
+
 def scan(workdir: str) -> WiringReport:
     """Run the wiring analysis; pure and read-only."""
     report = WiringReport()
@@ -695,16 +892,6 @@ def scan(workdir: str) -> WiringReport:
     # whose ONLY reader is an unreachable function ends up unconsumed in pass
     # 2, which is precisely the "registry literal that no reachable code
     # consumes" shape.
-    all_loads: set[str] = set()
-    for facts in facts_by_file.values():
-        all_loads |= facts.module_loads
-        for names in facts.body_refs.values():
-            all_loads |= names
-    container_members: set[str] = set()
-    for facts in facts_by_file.values():
-        for container in facts.containers:
-            container_members |= container.names | container.attrs
-
     defs: list[_Def] = []
     for facts in facts_by_file.values():
         defs.extend(facts.defs)
@@ -717,6 +904,22 @@ def scan(workdir: str) -> WiringReport:
         if defn.is_method and "." in defn.qual.split(":", 1)[1]:
             class_qual = defn.qual.rsplit(".", 1)[0]
             methods_of_class.setdefault(class_qual, []).append(defn)
+
+    # String-dispatch seams resolve names the static scan cannot follow; the
+    # literals they are called with are load sites like any other (and land in
+    # their caller's body_refs, so an unreachable dispatcher still hides its
+    # handlers).
+    dispatched_refs = _string_dispatch_references(facts_by_file, defs_by_name)
+
+    all_loads: set[str] = set(dispatched_refs)
+    for facts in facts_by_file.values():
+        all_loads |= facts.module_loads
+        for names in facts.body_refs.values():
+            all_loads |= names
+    container_members: set[str] = set()
+    for facts in facts_by_file.values():
+        for container in facts.containers:
+            container_members |= container.names | container.attrs
 
     reach_defs: set[int] = set()  # id(_Def)
     processed_files: set[str] = set()
