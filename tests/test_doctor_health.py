@@ -167,7 +167,8 @@ def test_cli_json_emits_checks_and_exit_zero_when_healthy(tmp_path) -> None:
     )
     assert result.returncode == 0, result.stdout + result.stderr
     payload = json.loads(result.stdout)
-    names = {entry["name"] for entry in payload}
+    # GR-227: one document with a `checks` list, each entry keyed on `id`.
+    names = {entry["id"] for entry in payload["checks"]}
     assert {"config", "hooks", "tools", "manifest", "history"} <= names
 
 
