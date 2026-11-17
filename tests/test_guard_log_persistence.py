@@ -575,13 +575,16 @@ class TestRuntimeArtifactsAreIgnored:
         assert ".gitreins/logs/" in entries
 
     def test_graph_cache_strays_are_gitignored(self) -> None:
-        """QA-GITREINS-POC-9: the code-graph writer re-creates these every run.
+        """QA-GITREINS-POC-9 + GR-225: every graph writer artifact stays out of git.
 
         ``.vfs/graph/.last_reconcile`` and ``.parse_cache.json`` are rewritten
         by the graph reconcile, so without a .gitignore entry a clean tree is
         re-dirtied by two untracked files on every pass (the class the QA
-        battery kept re-filing). ``edges.jsonl`` stays tracked on purpose —
-        its refresh is a separate chore commit.
+        battery kept re-filing). GR-225 untracked the index itself: a shipped
+        ``edges.jsonl`` froze at the commit that produced it, so a fresh clone
+        could not see modules added afterwards (``engine/preflight.py`` was
+        graded missing on every clone). It is derived state and is ignored like
+        its siblings — ``gitreins resolve`` now warms it on demand.
         """
         with open(os.path.join(PROJECT_ROOT, ".gitignore")) as f:
             entries = [line.strip() for line in f.read().splitlines()]
@@ -593,9 +596,13 @@ class TestRuntimeArtifactsAreIgnored:
         # entry its tracked copy re-dirtied every clean worktree with
         # untracked dirt (the class QA kept re-filing).
         assert ".vfs/graph/.symbols_cache.json" in entries
-        # The tracked edge store must NOT be ignored: git would then keep
-        # reporting the refresh as uncommitted work with no way to land it.
-        assert ".vfs/graph/edges.jsonl" not in entries
+        # GR-225: the index and its caches are derived; a tracked index is what
+        # blinded the gate on fresh clones, so it must be ignored — and the
+        # bootstrap's own warm record with it.
+        assert ".vfs/graph/edges.jsonl" in entries
+        assert ".vfs/graph/*.db" in entries
+        assert ".vfs/graph/.gitreins_index.json" in entries
+        assert ".vfs/manifest.yaml" in entries
 
     def test_guard_logs_do_not_block_the_worktree_merge_gate(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

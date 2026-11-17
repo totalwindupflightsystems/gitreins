@@ -88,6 +88,9 @@ class _ResolveKwargs(TypedDict, total=False):
     resolved_at: float
     review_at: float
     egress_exclude: tuple[str, ...] | None
+    # GR-225: preflight is exactly the surface that must never grade a stale
+    # index, so the bootstrap knob is part of the forwarded contract.
+    bootstrap_index: bool
 
 
 #: The policy's one-line why, per decision — printed by the CLI and recorded so

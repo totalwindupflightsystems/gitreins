@@ -314,6 +314,15 @@ def run_prescreen(
         return PrescreenResult(abstained=True, abstain_reason="no-criteria")
 
     question = build_prescreen_question(criteria)
+    # GR-225: the graph bootstrap is a WRITE (it creates `.vfs/manifest.yaml` and
+    # the index), and this surface runs inside a judge/`--ephemeral` run over
+    # somebody else's checkout — a gate that is documented to persist nothing must
+    # not seed runtime state into the tree it grades. So the prescreen never
+    # bootstraps: a stale/absent index degrades to the named ABSTAIN and the judge
+    # proceeds at full authority (the documented fail-open), instead of the judge
+    # rewriting the repo it is judging. `resolve` and `preflight` — read surfaces a
+    # human/foreman runs in their own checkout — bootstrap.
+    resolve_kwargs.setdefault("bootstrap_index", False)
     verdict = resolve(question, workdir=workdir, **resolve_kwargs)
     if verdict.verdict == VERDICT_ABSTAIN or not verdict.ok:
         return PrescreenResult(

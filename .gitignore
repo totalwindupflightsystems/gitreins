@@ -91,23 +91,52 @@ hivemind-audit.md
 .gitreins/review-state.corrupt-*
 .gitreins/review-state.recovery-required
 
-# Hilo — local cache files (rebuildable)
+# Hilo — the code graph is DERIVED state and is not committed (GR-225).
+#
+# `edges.jsonl` and the DuckDB cache hilo builds from it used to ship in git so a
+# clone could answer cold. Measured cost of that choice: a shipped index is frozen
+# at the commit that produced it, so every module added afterwards is invisible —
+# a clone of HEAD indexed 32 of 53 tracked `engine/*.py` modules and carried no
+# mention of `engine/preflight.py` at all, so the pre-dispatch gate graded a
+# tracked module `missing` (evidence_quality 1, REVIEW) on every fresh clone, CI
+# runner and ephemeral install. `gitreins resolve` now bootstraps the index
+# itself when it is absent or stale (`ensure_graph_index` in
+# engine/resolution.py), so a clone pays ONE warm instead of inheriting a lie.
+#
+# Keep this list in step with what hilo writes under `.vfs/`. This file is
+# TRACKED, and `hilo init` APPENDS its managed block whenever its MARKER line is
+# absent — so an omission does not merely leave untracked dirt during the
+# bootstrap, it edits a tracked file in the consumer's checkout. The block below
+# is hilo's own, verbatim and marker included, for exactly that reason.
+# --- hilo managed: rebuildable .vfs cache state (installed by `hilo init`) ---
 .vfs/graph/graph.db
 .vfs/graph/graph.db.wal
+.vfs/graph/graph.duckdb
+.vfs/graph/graph.duckdb.wal
 .vfs/graph/.last_warm
-# Graph-cache bookkeeping strays (QA-GITREINS-POC-9): the code-graph writer
-# recreates these on every reconcile, so without an entry here every run
-# re-dirties a clean tree with two untracked files. (.vfs/graph/edges.jsonl
-# stays TRACKED on purpose — its refresh is a separate chore commit.)
-.vfs/graph/.last_reconcile
 .vfs/graph/.parse_cache.json
-# GR-193: the symbols cache is writer output too — the repo's post-commit and
-# post-merge hooks run `hilo graph warm --changed`, which rewrites it after
-# every commit, so its tracked copy re-dirtied a clean tree in every worktree
-# and rode along inside unrelated commits. It is rebuilt by the hilo writer
-# on demand; edges.jsonl above stays TRACKED on purpose (its refresh is a
-# separate chore commit), only this cache is local.
 .vfs/graph/.symbols_cache.json
+.vfs/graph/.last_reconcile
+# hilo's prelude entry for the derived cache — kept so `hilo init` does not
+# append its prelude either; the edge index itself is NOT committed (see above).
+.vfs/graph/graph.db*
+# The index itself plus the query caches sqlite/duckdb leave behind (GR-225).
+# GR-193: the symbols cache is writer output too — the post-commit/post-merge
+# hooks run `hilo graph warm --changed`, which rewrites it after every commit,
+# so a tracked copy re-dirtied a clean tree in every worktree (it is inside
+# hilo's managed block above now).
+.vfs/graph/*.db
+.vfs/graph/*.db.wal
+.vfs/graph/edges.jsonl
+.vfs/graph/edges.jsonl.lock
+.vfs/graph/state.json
+.vfs/graph/coverage.json
+# The warm record `ensure_graph_index` writes: which HEAD the local index was
+# built at (the staleness signal for the next resolve).
+.vfs/graph/.gitreins_index.json
+# `hilo init` writes this project manifest; its `project.name` is this
+# checkout's directory name — machine-local, not repo config.
+.vfs/manifest.yaml
 
 # Demo projects (own git repos, not part of GitReins source)
 demo-calc/
