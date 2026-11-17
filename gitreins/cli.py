@@ -2116,6 +2116,19 @@ def cmd_setup(args: argparse.Namespace) -> None:
     raise SystemExit(0 if healthy else 1)
 
 
+def _doctor_check_documents(checks: list[doctor.Check]) -> list[dict[str, Any]]:
+    """One JSON document per health check, keyed on the id the table prints.
+
+    GR-227: a check's identity is ``Check.name`` and nothing else — the human
+    table renders ``[OK] config: ...`` from that same attribute, so the two
+    surfaces cannot drift. The JSON key is ``id`` because that is what every
+    other machine surface in this repo calls a check's identity
+    (``schemas/evidence-v1.schema.json``); ``name`` rides along from
+    ``to_dict()`` so the pre-existing ``setup --json`` consumers keep working.
+    """
+    return [{"id": check.name, **check.to_dict()} for check in checks]
+
+
 def cmd_doctor(args: argparse.Namespace) -> None:
     """Repo health check: config, hooks, tools, manifest, version (GR-162).
 
@@ -2123,16 +2136,46 @@ def cmd_doctor(args: argparse.Namespace) -> None:
     a wider answer. Health runs FIRST and fails the command on its own, because
     an install whose hooks git never runs passes every allowlist check while
     enforcing nothing.
+
+    GR-227: ``--json`` is TOTAL — it answers with exactly one JSON object on
+    every repo state, installed or not. Before this, the flag was only honored
+    when ``is_installed()`` was true; any other repo fell through to the human
+    `.gitleaks.toml` table, so the documented machine surface printed prose,
+    still exited 0, and a caller could only detect the miss by a parse failure
+    downstream.
     """
     workdir = get_workdir()
+    # GR-165: --strict upgrades wiring findings from warn to fail, which
+    # is the only way the exit code can change. Without the flag every
+    # pre-existing behavior (checks, output, exit contract) is untouched.
+    strict = bool(getattr(args, "strict", False))
+    if getattr(args, "json", False):
+        if getattr(args, "fix", False):
+            # `--fix` belongs to the allowlist section, which JSON mode never
+            # runs. Say so rather than no-op a mutation the caller asked for.
+            print(
+                "note: --json reports the health checks and exits, so the .gitleaks.toml "
+                "section never ran and --fix was not applied",
+                file=sys.stderr,
+            )
+        # JSON mode never runs the allowlist section, so its exit code follows
+        # the health contract the human path already uses (a `fail` exits 1,
+        # warnings never do) rather than the allowlist section's own codes.
+        checks = doctor.run_checks(workdir, strict=strict)
+        healthy = not doctor.has_failures(checks)
+        print(
+            json.dumps(
+                {
+                    "ok": healthy,
+                    "workdir": workdir,
+                    "checks": _doctor_check_documents(checks),
+                },
+                indent=2,
+            )
+        )
+        raise SystemExit(0 if healthy else 1)
     if doctor.is_installed(workdir):
-        # GR-165: --strict upgrades wiring findings from warn to fail, which
-        # is the only way the exit code can change. Without the flag every
-        # pre-existing behavior (checks, output, exit contract) is untouched.
-        checks = doctor.run_checks(workdir, strict=bool(getattr(args, "strict", False)))
-        if getattr(args, "json", False):
-            print(json.dumps([check.to_dict() for check in checks], indent=2))
-            raise SystemExit(1 if doctor.has_failures(checks) else 0)
+        checks = doctor.run_checks(workdir, strict=strict)
         print("GitReins health:")
         print(doctor.format_checks(checks))
         print()
