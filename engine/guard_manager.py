@@ -29,7 +29,7 @@ import sys
 import tempfile
 import time
 from contextlib import suppress
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from typing import Any, cast
 
@@ -958,14 +958,16 @@ def _shell_not_found_names(output: str) -> set[str]:
     return names
 
 
-def _pytest_interpreter_has_pytest(exe: str, workdir: str) -> bool | None:
+def _pytest_interpreter_has_pytest(exe: str, workdir: str, timeout: float = 30) -> bool | None:
     """True/False whether *exe* can import pytest; None when unprobeable.
 
     Only a literal False marks the interpreter as a missing runner — a probe
     that could not run (OSError, an exotic interpreter) leaves the verdict to
     the exit code, i.e. FAIL, the conservative direction. ``find_spec``
     answers without importing pytest, so the probe costs one interpreter
-    start and no plugins.
+    start and no plugins. *timeout* bounds that start: the DF-030 candidate
+    scan walks every interpreter on PATH, so a hung interpreter must cost
+    seconds, not the classifier's generous 30.
     """
     probe = "import importlib.util, sys; sys.exit(0 if importlib.util.find_spec('pytest') else 3)"
     try:
@@ -973,13 +975,201 @@ def _pytest_interpreter_has_pytest(exe: str, workdir: str) -> bool | None:
             [exe, "-c", probe],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=timeout,
             cwd=workdir,
             env=_sanitized_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return None
     return proc.returncode == 0
+
+
+# ── DF-030: deterministic tests-lane interpreter selection ──────────────────
+# The tests lane used to let the SHELL pick the pytest interpreter: a
+# `python3 -m pytest` test_command resolved `python3` through whatever PATH the
+# guard process inherited. On a host whose session PATH puts a runtime venv
+# first (the agent host does), the lane picked an interpreter without pytest,
+# classified itself SKIPPED, and the gate's strength became a function of the
+# ambient PATH — the same repo with the same staged change graded `✓ tests`
+# under a short PATH and `~ tests (full) — skipped` under the ambient one
+# (dogfood `gitreins-dogfood-2026-11-09-12-54-05`, gitreins 0.20.0, textkit
+# consumer repo). A skip is the WEAK direction: the gate reports success
+# without grading anything, and which way it lands is decided by a directory
+# ordering nobody wrote down.
+#
+# Resolution is explicit, ordered, and independent of PATH ordering:
+#   1. `guards.test_command`'s own pin — an interpreter token containing a
+#      path separator (`.venv/bin/python`, an absolute path) is honoured
+#      verbatim. We never second-guess a configured pin.
+#   2. the repo's local environments — `.venv`, then `venv`, in both the
+#      POSIX `bin/` and Windows `Scripts/` layouts.
+#   3. PATH — EVERY candidate named by the token, in PATH order, each one
+#      PROBED for pytest instead of trusting the first `python3` the shell
+#      would have picked.
+# The first candidate that can import pytest wins and the command segment is
+# rewritten to that absolute path, so the run no longer depends on PATH at all
+# and the same tree grades the same way under any PATH shape. When no
+# candidate can import pytest the command is left untouched (the shell reports
+# the gap exactly as before and the existing runner-missing classifier grades
+# it a loud, named skip) and the resolution reports every interpreter it
+# checked so the skip reason can name them instead of only the first.
+#
+# Out of scope by construction: a pinned `.venv/bin/python` that was never
+# created (a genuine setup gap the existing hint names), a bare `pytest`
+# command (resolved by GR-GAP-037/064), and a runner-prefixed command
+# (`uv run ...` — explicitly configured, and GR-GAP-037 owns its fallback).
+
+# `python`, `python3`, `python3.12`, `python.exe` — a BARE interpreter name.
+# A token with a path separator is a pin and never enters the scan.
+_PYTHON_INTERPRETER_RE = re.compile(r"^python(?:\d+(?:\.\d+)*)?(?:\.exe)?$", re.IGNORECASE)
+# Split a chained test_command on shell separators, keeping the separators so
+# the command can be reassembled byte-for-byte (`;`/`&&`/`||`/`|`).
+_SEGMENT_SPLIT_RE = re.compile(r"(&&|\|\||;|\|)")
+# `<interpreter> -m pytest` at the START of a segment. Mid-segment forms are
+# left alone: `env python -m pytest` and friends do not name the runner the
+# same way and the existing classifier already reports them honestly.
+_INTERPRETER_INVOCATION_RE = re.compile(r"^(\s*)(\S+)(\s+-m\s+pytest\b)")
+# Probe budget per candidate (see _pytest_interpreter_has_pytest).
+_PYTEST_PROBE_TIMEOUT = 10
+# Repo-local environments, in preference order. POSIX before Windows so a
+# cross checkout cannot shadow a real venv.
+_REPO_LOCAL_INTERPRETER_PARTS: tuple[tuple[str, ...], ...] = (
+    (".venv", "bin", "python"),
+    ("venv", "bin", "python"),
+    (".venv", "Scripts", "python.exe"),
+    ("venv", "Scripts", "python.exe"),
+)
+# (realpath, mtime_ns) -> verdict. One probe per interpreter per process: a
+# guard run resolves once per lane, and keying on mtime means a later install
+# into the same path is not masked by a stale answer. Deliberately NOT
+# persisted to disk — a cached choice surviving into a later run is the bug,
+# not the optimisation.
+_PYTEST_PROBE_CACHE: dict[tuple[str, int], bool | None] = {}
+
+
+@dataclass(frozen=True)
+class PytestInterpreterResolution:
+    """DF-030: the tests-lane command with its pytest interpreter decided.
+
+    ``command`` is the effective command (rewritten to an absolute interpreter
+    when one was chosen). ``interpreter`` is that absolute path, or None when
+    nothing capable was found and the command was left as configured.
+    ``considered`` names every interpreter the scan probed, in order, so a
+    caller can say which ones were tried. ``warning`` explains a rewrite.
+    """
+
+    command: str
+    interpreter: str | None = None
+    considered: tuple[str, ...] = ()
+    warning: str | None = None
+
+
+def _repo_local_interpreters(workdir: str) -> list[str]:
+    """Existing, executable repo-local interpreters, in preference order."""
+    found: list[str] = []
+    for parts in _REPO_LOCAL_INTERPRETER_PARTS:
+        candidate = os.path.join(workdir, *parts)
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            found.append(candidate)
+    return found
+
+
+def _path_interpreters(name: str) -> list[str]:
+    """Every PATH hit for *name*, in PATH order, deduplicated by real path.
+
+    Walks the same PATH the shell would, keeping ALL matches instead of only
+    the first: the point of DF-030 is that the first `python3` is not the only
+    candidate. ``shutil.which(name, path=<entry>)`` is the per-entry lookup
+    (``all=True`` only exists on newer Pythons). Deduplicating on
+    ``realpath`` keeps 40 symlinked bin directories from becoming 40 identical
+    probes.
+    """
+    import shutil
+
+    path_value = os.environ.get("PATH") or os.defpath
+    ordered: list[str] = []
+    seen: set[str] = set()
+    for directory in path_value.split(os.pathsep):
+        if not directory:
+            continue
+        exe = shutil.which(name, path=directory)
+        if not exe:
+            continue
+        key = os.path.realpath(exe)
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append(exe)
+    return ordered
+
+
+def _probe_interpreter_cached(exe: str, workdir: str) -> bool | None:
+    """``_pytest_interpreter_has_pytest`` memoised per (realpath, mtime)."""
+    try:
+        mtime = os.stat(exe).st_mtime_ns
+    except OSError:
+        return None
+    key = (os.path.realpath(exe), mtime)
+    if key not in _PYTEST_PROBE_CACHE:
+        _PYTEST_PROBE_CACHE[key] = _pytest_interpreter_has_pytest(
+            exe, workdir, timeout=_PYTEST_PROBE_TIMEOUT
+        )
+    return _PYTEST_PROBE_CACHE[key]
+
+
+def _resolve_pytest_interpreter(cmd: str, workdir: str) -> PytestInterpreterResolution:
+    """DF-030: pin the pytest interpreter instead of trusting PATH order.
+
+    See the block comment above for the order of preference. Only a BARE
+    interpreter name at the start of a command segment is resolved — a pinned
+    path (the repo's own ``guards.test_command``, an absolute interpreter) and
+    a runner-prefixed command are already deterministic and pass through.
+    """
+    original = cmd or ""
+    segments = _SEGMENT_SPLIT_RE.split(original)
+    considered: list[str] = []
+    chosen: str | None = None
+    warning: str | None = None
+
+    for index in range(0, len(segments), 2):
+        segment = segments[index]
+        stripped = segment.strip()
+        if not stripped or stripped.startswith(_KNOWN_TEST_RUNNER_PREFIXES):
+            continue
+        match = _INTERPRETER_INVOCATION_RE.match(segment)
+        if match is None:
+            continue
+        indent, token, rest = match.groups()
+        if "/" in token or "\\" in token or not _PYTHON_INTERPRETER_RE.match(token):
+            # A pinned interpreter — guards.test_command's own choice.
+            continue
+        local = _repo_local_interpreters(workdir)
+        candidates = local + _path_interpreters(token)
+        for candidate in candidates:
+            if candidate not in considered:
+                considered.append(candidate)
+        for candidate in candidates:
+            if _probe_interpreter_cached(candidate, workdir) is not True:
+                continue
+            chosen = candidate
+            where = "repo-local environment" if candidate in local else "PATH"
+            segments[index] = f"{indent}{shlex.quote(candidate)}{rest}{segment[match.end() :]}"
+            if warning is None:
+                warning = (
+                    f"tests interpreter '{token}' resolved to '{candidate}' "
+                    f"({where}, pytest present) — interpreter selection no longer "
+                    "depends on PATH order"
+                )
+            break
+
+    if chosen is None:
+        return PytestInterpreterResolution(command=original, considered=tuple(considered))
+    return PytestInterpreterResolution(
+        command="".join(segments),
+        interpreter=chosen,
+        considered=tuple(considered),
+        warning=warning,
+    )
 
 
 def _pytest_runner_missing_reason(kind: str, token: str, workdir: str) -> str | None:
@@ -3168,7 +3358,14 @@ class GuardManager:
         makes unobservable), same GR-GAP-048 exit-5 benign classification
         on the full output, same GR-GAP-064 exit-127 hint shaping.
         """
-        resolved_cmd, fallback_warning = _resolve_test_command(cmd)
+        # DF-030: decide the pytest interpreter BEFORE the shell can, then let
+        # GR-GAP-037/064 resolve any remaining runner fallback. The resolution
+        # rewrites a bare `<pythonX> -m pytest` to an absolute interpreter
+        # chosen repo-local-first and probed-for-pytest, so PATH order stops
+        # deciding whether the lane grades anything or skips.
+        resolution = _resolve_pytest_interpreter(cmd, self.workdir)
+        resolved_cmd, fallback_warning = _resolve_test_command(resolution.command)
+        lane_warning = "\n".join(part for part in (resolution.warning, fallback_warning) if part)
         # DF-GITREINS-POC-55: the SEMANTIC command stays `resolved_cmd` and the
         # spawn string is the nice-wrapped one. The two must not be conflated:
         # the runner-missing classifier below (POC-51) parses the command text
@@ -3190,7 +3387,7 @@ class GuardManager:
                 name=label,
                 passed=False,
                 error=result["reason"],
-                warning=fallback_warning or "",
+                warning=lane_warning,
             )
         if "error" in result and "exit_code" not in result:
             # Spawn failure (OSError from Popen) — the old except-Exception
@@ -3199,7 +3396,7 @@ class GuardManager:
                 name=label,
                 passed=False,
                 error=result["error"],
-                warning=fallback_warning or "",
+                warning=lane_warning,
             )
         output = result.get("output") or ""
         # DF-GITREINS-POC-51: the run's own words, before the GR-GAP-037
@@ -3207,8 +3404,8 @@ class GuardManager:
         # this copy so a warning ABOUT a missing runner cannot be mistaken for
         # the run's own evidence.
         raw_output = output
-        if fallback_warning:
-            output = f"{fallback_warning}\n{output}"
+        if lane_warning:
+            output = f"{lane_warning}\n{output}"
         # DF-018: keep the untruncated output for the run log BEFORE the
         # tail cap below. The GuardResult keeps the bounded tail the
         # console summary consumes; the log gets the whole traceback.
@@ -3228,6 +3425,16 @@ class GuardManager:
         runner_missing_hint = _pytest_runner_missing_hint(
             resolved_cmd, self.workdir, return_code, raw_output
         )
+        if runner_missing_hint and resolution.interpreter is None and resolution.considered:
+            # DF-030: when the scan walked several interpreters and none could
+            # import pytest, name ALL of them — the old hint named only the one
+            # the shell happened to pick, which is the same blindness that let a
+            # capable interpreter sit unused one PATH entry away.
+            runner_missing_hint = (
+                f"{runner_missing_hint} — probed {len(resolution.considered)} interpreter(s) "
+                "for pytest, none could import it: "
+                + ", ".join(f"'{exe}'" for exe in resolution.considered)
+            )
         if len(output) > 2000:
             output = output[-2000:]  # Keep last 2000 chars for failure context
         if result.get("timed_out"):
@@ -3239,14 +3446,14 @@ class GuardManager:
                     f"To raise the limit: set guards.test_timeout in "
                     f".gitreins/config.yaml (e.g. test_timeout: 300)."
                 ),
-                warning=fallback_warning or "",
+                warning=lane_warning,
             )
         if return_code == 0:
             return GuardResult(
                 name=label,
                 passed=True,
                 output=output[:500],
-                warning=fallback_warning or "",
+                warning=lane_warning,
                 exit_code=return_code,
             )
         elif no_tests_benign:
@@ -3254,8 +3461,8 @@ class GuardManager:
             # errors — fresh-repo case: pass with a warning instead of
             # blocking the repo's first commit.
             warning = (
-                f"{fallback_warning}\n{_PYTEST_NO_TESTS_WARNING}"
-                if fallback_warning
+                f"{lane_warning}\n{_PYTEST_NO_TESTS_WARNING}"
+                if lane_warning
                 else _PYTEST_NO_TESTS_WARNING
             )
             return GuardResult(
@@ -3289,7 +3496,7 @@ class GuardManager:
                 name=label,
                 passed=True,
                 output=shown,
-                warning=fallback_warning or "",
+                warning=lane_warning,
                 exit_code=return_code,
                 skipped=True,
                 skip_reason=runner_missing_hint,
@@ -3320,7 +3527,7 @@ class GuardManager:
                 name=label,
                 passed=False,
                 output=output,
-                warning=fallback_warning or "",
+                warning=lane_warning,
                 exit_code=return_code,
             )
 
