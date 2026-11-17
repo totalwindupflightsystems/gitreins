@@ -873,14 +873,31 @@ git add .gitreins/config.yaml .gitignore .gitleaks.toml
 git commit -m "gitreins: commit guard config"
 ```
 
-Then delete any branch the failed run left behind (a lane that died before
-committing work leaves an empty one, which `worktree clean` does not reap):
+Then clear any branch the failed run left behind (a lane that died before
+committing work leaves an empty one, which `worktree clean` does not reap).
+Inspect it before deleting: if the log prints commits, STOP — the lane did
+commit work, and that branch is the only ref holding it. Merge or re-run the
+lane instead of deleting anything:
 
 ```bash
 gitreins worktree clean
-git branch -D gitreins/task/<id>   # only if the next run names it as unregistered
+
+# nothing printed = a lane that never committed, nothing to lose;
+# any commit printed = unmerged work — keep the branch, merge it
+git log --oneline main..gitreins/task/<id>
+
+git branch -d gitreins/task/<id>   # only if the next run names it as unregistered
 gitreins worktree fleet ../lanes.json --merge
 ```
+
+The plain `-d` form is the right delete here: it refuses a branch that holds
+commits not reachable from your current HEAD, and it refuses one a lane tree
+still has checked out (resolve or reap that tree first). A refusal is the
+signal to look, not a reason to escalate. The force form
+`git branch -D gitreins/task/<id>` is a last resort for a branch you have
+inspected and know is worthless — it deletes the branch ref unconditionally,
+so if that ref was the only pointer to those commits, the reflog is the only
+way back to them.
 
 ### F2. `canonical main has uncommitted changes; refusing merge`
 
