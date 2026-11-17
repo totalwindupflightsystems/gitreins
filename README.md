@@ -150,6 +150,8 @@ gitreins task complete <id> [--force] [--skip-tier2]
 gitreins task list [--status pending|in_progress|complete]
 gitreins task delete <id>
 gitreins judge <id>                   # Evaluate a task
+gitreins review dismiss <fingerprint> --reviewer <name> [--reason <text>]
+                                      # Dismiss a persistent review finding by fingerprint
 gitreins commit <message>             # Commit with guard checks
 gitreins commit-audit [message]       # Validate commit message against staged diff (commit-msg hook)
 gitreins push-check <local_sha> <remote_sha>  # Scan outgoing commit content for secrets (pre-push hook)
