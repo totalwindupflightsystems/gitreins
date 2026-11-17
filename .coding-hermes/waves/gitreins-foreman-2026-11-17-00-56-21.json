@@ -1,0 +1,41 @@
+{
+  "tick": "gitreins-foreman-2026-11-17-00-56-21",
+  "created_at": "2026-11-17T00:58:00Z",
+  "base_sha": "c1c360c0946c9c9bfc7c13ee6b803211c7c4d862",
+  "wave_budget": 5,
+  "wave_size": 2,
+  "merge_order": ["RELEASE-025", "QA-GITREINS-14"],
+  "independence_note": "RELEASE-025 touches engine/wiring.py + tests/test_review_contract.py (+ tests/test_wiring.py additions); QA-GITREINS-14 touches README.md only. No depends_on edges, no file overlap.",
+  "workers": [
+    {
+      "task_id": "RELEASE-025",
+      "row": "CI red: wiring analyzer misses dynamic CLI dispatch (cmd_review_dismiss) plus dead test scaffolding (HeadReadingSource)",
+      "priority": "P1",
+      "worktree": "/home/kara/worktrees/gitreins-RELEASE-025",
+      "branch": "wt/RELEASE-025",
+      "base": "main",
+      "base_sha": "c1c360c0946c9c9bfc7c13ee6b803211c7c4d862",
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro",
+      "gitreins_task": "RELEASE-025 (started)",
+      "brief": "/home/kara/.hermes/cache/scratch/brief-gitreins-foreman-2026-11-17-00-56-21-RELEASE-025.txt"
+    },
+    {
+      "task_id": "QA-GITREINS-14",
+      "row": "CLI reference documentation drifts from the live CLI: review command omitted and top-level count remains 25 while live surface has 26",
+      "priority": "P2",
+      "worktree": "/home/kara/worktrees/gitreins-QA-GITREINS-14",
+      "branch": "wt/QA-GITREINS-14",
+      "base": "main",
+      "base_sha": "c1c360c0946c9c9bfc7c13ee6b803211c7c4d862",
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro",
+      "gitreins_task": "QA-GITREINS-14 (started)",
+      "brief": "/home/kara/.hermes/cache/scratch/brief-gitreins-foreman-2026-11-17-00-56-21-QA-GITREINS-14.txt"
+    }
+  ],
+  "foreman_direct": [
+    {"task_id": "RELEASE-027", "action": "verify+close: counts already synced in-tree (check_docs_drift OK at 3743/121); name introducing commit; bind close to post-wave green CI"},
+    {"task_id": "GR-230", "action": "close as duplicate of INT-CI-3722 (complete at c1c360c0; test_cli_doc_sync 11/11 green at HEAD) per its own foreman_note"}
+  ]
+}
