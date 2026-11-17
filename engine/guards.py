@@ -575,12 +575,41 @@ def _resolve_go_test_argv(test_command: str | None) -> tuple[list[str] | str, st
     return configured, f"go_tests graded by the configured guards.test_command: {configured}"
 
 
+# GITREINS_GUARD_STAGED resolution (DAGGER-1068): a staged pre-commit commit
+# grades inside the commit's own patience. When the repo's
+# ``guards.test_command`` is the tier-1 judge suite (full -race, minute-scale),
+# running it at pre-commit makes every worker commit hang past hook_timeout
+# and fail DEGRADED — the judge lane re-grades the full suite anyway. So in
+# staged mode the SHORT default argv is used unless the repo opts back in via
+# ``guards.staged_test_command``.
+GO_TESTS_SHORT_ARGV = ["go", "test", "-count=1", "-short", "./..."]
+
+
+def _resolve_go_test_argv_staged(
+    test_command: str | None, staged_test_command: str | None
+) -> tuple[list[str] | str, str | None]:
+    staged = (staged_test_command or "").strip() if isinstance(
+        staged_test_command, str
+    ) else ""
+    if staged:
+        return staged, None
+    configured = (test_command or "").strip() if isinstance(test_command, str) else ""
+    if not configured:
+        return GO_TESTS_SHORT_ARGV, None
+    return GO_TESTS_SHORT_ARGV, (
+        "staged pre-commit lane: full guards.test_command deferred to the "
+        "judge lane; graded `go test -count=1 -short ./...` (set "
+        "guards.staged_test_command to override)"
+    )
+
+
 def check_go_tests(
     workdir: str,
     timeout: int | str = 180,
     changed_files: list[str] | None = None,
     test_command: str | None = None,
     nice_level: int = 0,
+    config: dict | None = None,
 ) -> GoGuardResult:
     """Run go test for the selected change scope.
 
@@ -605,7 +634,14 @@ def check_go_tests(
     if not go_files:
         return _no_go_files_result("go_tests", changed_files)
 
-    cmd, configured_note = _resolve_go_test_argv(test_command)
+    staged_mode = os.environ.get("GITREINS_GUARD_STAGED", "") == "1"
+    if staged_mode:
+        staged_override = (config or {}).get("staged_test_command")
+        cmd, configured_note = _resolve_go_test_argv_staged(
+            test_command, staged_override
+        )
+    else:
+        cmd, configured_note = _resolve_go_test_argv(test_command)
     nice_note = ""
     if isinstance(cmd, list):
         prefix, nice_note = scanner_nice.argv_prefix(nice_level, cmd[0])

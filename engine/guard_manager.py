@@ -3816,6 +3816,9 @@ class GuardManager:
             # while `init` printed and the docs promised it everywhere.
             test_command=self.config.get("guards", {}).get("test_command"),
             nice_level=self._nice.level,
+            # DAGGER-1068: staged pre-commit commits grade the short argv
+            # unless guards.staged_test_command opts back in.
+            config=self.config.get("guards", {}),
         )
         return _go_guard_result(r)
 
