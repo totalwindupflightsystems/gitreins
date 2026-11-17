@@ -588,9 +588,7 @@ GO_TESTS_SHORT_ARGV = ["go", "test", "-count=1", "-short", "./..."]
 def _resolve_go_test_argv_staged(
     test_command: str | None, staged_test_command: str | None
 ) -> tuple[list[str] | str, str | None]:
-    staged = (staged_test_command or "").strip() if isinstance(
-        staged_test_command, str
-    ) else ""
+    staged = (staged_test_command or "").strip() if isinstance(staged_test_command, str) else ""
     if staged:
         return staged, None
     configured = (test_command or "").strip() if isinstance(test_command, str) else ""
@@ -637,9 +635,7 @@ def check_go_tests(
     staged_mode = os.environ.get("GITREINS_GUARD_STAGED", "") == "1"
     if staged_mode:
         staged_override = (config or {}).get("staged_test_command")
-        cmd, configured_note = _resolve_go_test_argv_staged(
-            test_command, staged_override
-        )
+        cmd, configured_note = _resolve_go_test_argv_staged(test_command, staged_override)
     else:
         cmd, configured_note = _resolve_go_test_argv(test_command)
     nice_note = ""

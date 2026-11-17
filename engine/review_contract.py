@@ -444,22 +444,56 @@ def _parse_gate(value: Any, path: str) -> GateConfig:
         "security",
     }
     _unknown(data, allowed, path)
-    for key in ("locked", "minimum_severity", "when", "action", "on_fail", "finding_policy", "security"):
+    for key in (
+        "locked",
+        "minimum_severity",
+        "when",
+        "action",
+        "on_fail",
+        "finding_policy",
+        "security",
+    ):
         if key not in data:
             continue
         value = data[key]
-        expected = "boolean" if key == "locked" else "string" if key in {"minimum_severity", "action", "on_fail"} else "mapping"
-        valid = isinstance(value, bool) if key == "locked" else isinstance(value, str) if expected == "string" else isinstance(value, Mapping)
+        expected = (
+            "boolean"
+            if key == "locked"
+            else "string"
+            if key in {"minimum_severity", "action", "on_fail"}
+            else "mapping"
+        )
+        valid = (
+            isinstance(value, bool)
+            if key == "locked"
+            else isinstance(value, str)
+            if expected == "string"
+            else isinstance(value, Mapping)
+        )
         if not valid:
-            raise ReviewContractError("REVIEW_YAML_TYPE", f"{path}.{key} must be a {expected}", f"{path}.{key}")
+            raise ReviewContractError(
+                "REVIEW_YAML_TYPE", f"{path}.{key} must be a {expected}", f"{path}.{key}"
+            )
         if key == "security":
             security = _require_mapping(value, f"{path}.security")
             if "locked" in security and not isinstance(security["locked"], bool):
-                raise ReviewContractError("REVIEW_YAML_TYPE", f"{path}.security.locked must be a boolean", f"{path}.security.locked")
+                raise ReviewContractError(
+                    "REVIEW_YAML_TYPE",
+                    f"{path}.security.locked must be a boolean",
+                    f"{path}.security.locked",
+                )
             if "action" in security and not isinstance(security["action"], str):
-                raise ReviewContractError("REVIEW_YAML_TYPE", f"{path}.security.action must be a string", f"{path}.security.action")
+                raise ReviewContractError(
+                    "REVIEW_YAML_TYPE",
+                    f"{path}.security.action must be a string",
+                    f"{path}.security.action",
+                )
         if key == "minimum_severity" and not isinstance(value, str):
-            raise ReviewContractError("REVIEW_YAML_TYPE", f"{path}.minimum_severity must be a string", f"{path}.minimum_severity")
+            raise ReviewContractError(
+                "REVIEW_YAML_TYPE",
+                f"{path}.minimum_severity must be a string",
+                f"{path}.minimum_severity",
+            )
     if "minimum_severity" in data and not isinstance(data["minimum_severity"], str):
         raise ReviewContractError(
             "REVIEW_YAML_TYPE",
@@ -830,15 +864,23 @@ def parse_review_contract(yaml_text: str, *, source_ref: str, source_commit: str
     _unknown(org_data, {"extends", "locked", "defaults"}, "organization")
     extends = org_data.get("extends")
     if extends is not None and not isinstance(extends, str):
-        raise ReviewContractError("REVIEW_YAML_TYPE", "organization.extends must be a string", "organization.extends")
-    if isinstance(extends, str) and extends and extends.startswith(("http://", "https://", "org://")):
+        raise ReviewContractError(
+            "REVIEW_YAML_TYPE", "organization.extends must be a string", "organization.extends"
+        )
+    if (
+        isinstance(extends, str)
+        and extends
+        and extends.startswith(("http://", "https://", "org://"))
+    ):
         raise ReviewContractError(
             "REVIEW_ORG_SOURCE_UNAVAILABLE",
             f"external organization source {extends!r} is unavailable",
             "organization.extends",
             "organization",
         )
-    locked = _tuple_strings(org_data["locked"], "organization.locked") if "locked" in org_data else ()
+    locked = (
+        _tuple_strings(org_data["locked"], "organization.locked") if "locked" in org_data else ()
+    )
     organization = OrganizationConfig(
         extends=extends,
         locked=locked,
@@ -1134,7 +1176,8 @@ def _merge_gate(base: GateConfig, overlay: GateConfig) -> GateConfig:
         locked=_merge_locked(base.locked, overlay.locked),
         minimum_severity=_restrict_severity(base.minimum_severity, overlay.minimum_severity),
         minimum_confidence=max(
-            value for value in (base.minimum_confidence, overlay.minimum_confidence)
+            value
+            for value in (base.minimum_confidence, overlay.minimum_confidence)
             if value is not None
         )
         if base.minimum_confidence is not None or overlay.minimum_confidence is not None
@@ -1317,7 +1360,9 @@ def resolve_review_policy(
                     "organization",
                 )
             )
-        if locked == "passes.security" and not any(item.id == "security" for item in contract.passes):
+        if locked == "passes.security" and not any(
+            item.id == "security" for item in contract.passes
+        ):
             diagnostics.append(
                 ReviewDiagnostic(
                     "REVIEW_LOCKED_FIELD_VIOLATION",
