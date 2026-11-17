@@ -963,7 +963,7 @@ verdicts persist (kind:resolution + one usage.jsonl row per Jev call), and
 ```bash
 gitreins install && gitreins init
 # one literal edit: .gitreins/config.yaml resolution.enabled.cli: true
-hilo init && hilo graph warm          # REQUIRED on a fresh repo (see pitfall 63)
+# no hilo setup needed: resolve warms a missing/stale index itself (GR-225, pitfall 63)
 gitreins resolve "<question>"         # RESOLVED 0.6-1.1 s warm on a consumer repo
 gitreins preflight "<premise>" --surface cli   # default surface predispatch ships off
 ```
@@ -981,12 +981,17 @@ gitreins preflight "<premise>" --surface cli   # default surface predispatch shi
   claiming the evidence is merely partial. Read
   `verdict.evidence_quality` in the JSON before concluding the gate misfired;
   a repo whose tested module lacks tests can never produce skip-dispatch.
-- **63 — a fresh repo's first `resolve` ABSTAINs empty-bundle with a WRONG hint
-  (DF-025).** It says "check that hilo is installed" and claims the abstain
-  detail names the searched path — hilo may already be installed; the real fix
-  is `hilo init && hilo graph warm`. Until fixed, run those two commands on any
-  repo where resolve abstains empty-bundle despite hilo being on PATH. On a
-  cache-free tree the abstain is FAST (0.195 s) — no hang, just no answer.
+- **63 — FIXED (GR-225): resolve now bootstraps the code graph itself.** A fresh
+  checkout used to inherit a graph index frozen at the commit that produced it
+  (`.vfs/graph/edges.jsonl` was tracked), so a module added since could not be
+  seen and the gate graded a tracked file "missing"; the old workaround was
+  `hilo init && hilo graph warm` by hand. Since GR-225 the index is derived state
+  (gitignored, not shipped) and `resolve`/`preflight` warm it on the first run:
+  full warm when the index is missing or carries no warm record, `hilo graph
+  warm --changed` when only HEAD moved, and the outcome is named in
+  `verdict.notes` ("graph index rebuilt before tracing (...)"). One warm per
+  checkout, not per question. If the warm itself fails, the ABSTAIN detail names
+  the failing command instead of blaming a missing install.
 - **64 — push-check misses a credential whose literal is split by string
   concatenation (DF-026).** `"ghp_" + "<40-char body>"` on an added line reads
   PUSH SECRET CHECK: clean and the push publishes the token, while the joined

@@ -53,6 +53,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -83,6 +84,8 @@ __all__ = [
     "effective_band_for",
     "estimate_tokens",
     "discover_keys",
+    "ensure_graph_index",
+    "graph_index_state",
     "is_excluded_path",
     "is_excluded_path_for_surface",
     "order_blocks",
@@ -153,6 +156,34 @@ RELATED_LIMIT = 8
 READ_LINES_PER_FILE = 200  # last-resort bounded reads
 MAX_READ_FILES = 12
 HILO_TIMEOUT_S = 180
+
+# ── Graph index bootstrap (GR-225) ───────────────────────────────────────────
+# The index hilo queries (`.vfs/graph/edges.jsonl` + the DuckDB cache built from
+# it) is DERIVED state and is no longer committed (GR-225): a shipped copy goes
+# stale the moment a module is added, and then every clone, CI runner and
+# ephemeral install inherits an index that cannot see a tracked file — the gate
+# calls a shipped module "missing" (dogfood gitreins-dogfood-2026-11-15:
+# `engine/preflight.py` resolved REVIEW / evidence_quality 1 on a clone of HEAD).
+# A fresh consumer therefore has to BOOTSTRAP, and these constants describe when.
+GRAPH_DIR = (".vfs", "graph")
+GRAPH_INDEX_FILE = "edges.jsonl"
+#: Our own warm record, next to hilo's caches: the HEAD the index was built at.
+#: A missing record means "an index of unknown provenance" (the shipped-stale
+#: case and every pre-GR-225 checkout), which needs a FULL warm — not a diff warm.
+GRAPH_INDEX_STAMP = ".gitreins_index.json"
+#: hilo writes this after a warm; read as a fallback warm record so a checkout
+#: whose post-commit hook warmed incrementally is not warmed a second time.
+GRAPH_HILO_STATE = "state.json"
+GRAPH_INDEX_FRESH = "fresh"
+GRAPH_INDEX_REBUILT = "rebuilt"
+GRAPH_INDEX_FAILED = "failed"
+#: Why a warm is needed. ``head-moved`` is satisfied by ``warm --changed`` (the
+#: contract hilo's own post-commit hook uses); the other two are full warms — an
+#: index that is missing, or whose provenance is unknown, has no trusted
+#: parse baseline to diff against.
+GRAPH_STALE_MISSING = "missing-index"
+GRAPH_STALE_UNSTAMPED = "unstamped-index"
+GRAPH_STALE_HEAD_MOVED = "head-moved"
 
 # ── Jev transport ────────────────────────────────────────────────────────────
 JEV_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
@@ -565,6 +596,238 @@ def _default_hilo_runner(args: list[str], workdir: str) -> tuple[int, str, str]:
     except (OSError, subprocess.SubprocessError) as exc:
         return 1, "", f"hilo failed: {type(exc).__name__}: {exc}"
     return proc.returncode, proc.stdout, proc.stderr
+
+
+# ── Graph index bootstrap (GR-225) ───────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class GraphIndexState:
+    """Whether the local hilo graph index can be trusted for this checkout.
+
+    ``reason`` is the honest cause, not a boolean: an index that is MISSING, an
+    index whose provenance is UNKNOWN (a clone that shipped one, or a pre-GR-225
+    checkout — nothing records which HEAD it was built at) and an index built at
+    a HEAD that has since moved are three different situations with two different
+    repairs (full warm vs ``warm --changed``).
+    """
+
+    reason: str
+    present: bool
+    head: str | None = None
+    warmed_head: str | None = None
+
+    @property
+    def needs_warm(self) -> bool:
+        """True when tracing against this index could answer from stale edges."""
+        return self.reason != GRAPH_INDEX_FRESH
+
+    @property
+    def incremental(self) -> bool:
+        """True when ``graph warm --changed`` is the right repair (HEAD moved)."""
+        return self.reason == GRAPH_STALE_HEAD_MOVED
+
+
+@dataclass(frozen=True)
+class GraphIndexResult:
+    """The outcome of :func:`ensure_graph_index` — status plus notes for the verdict."""
+
+    status: str
+    state: GraphIndexState | None = None
+    notes: list[str] = field(default_factory=list)
+    commands: list[list[str]] = field(default_factory=list)
+
+    @property
+    def rebuilt(self) -> bool:
+        return self.status == GRAPH_INDEX_REBUILT
+
+    @property
+    def failed(self) -> bool:
+        return self.status == GRAPH_INDEX_FAILED
+
+
+def _graph_dir(workdir: str) -> Path:
+    return Path(workdir).joinpath(*GRAPH_DIR)
+
+
+def _read_json_object(path: Path) -> dict[str, Any]:
+    """Parse *path* as a JSON object; an unreadable or wrong-shaped file is ``{}``."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _git_head(workdir: str) -> str | None:
+    """``HEAD`` of the repo rooted AT *workdir*, or ``None``.
+
+    The toplevel check is load-bearing: ``git -C <dir> rev-parse HEAD`` climbs to
+    an ANCESTOR repository, so a plain directory inside another checkout would
+    otherwise be stamped with a HEAD it knows nothing about.
+    """
+    try:
+        top = subprocess.run(
+            ["git", "-C", str(workdir), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if top.returncode != 0 or not top.stdout.strip():
+            return None
+        if Path(top.stdout.strip()).resolve() != Path(workdir).resolve():
+            return None
+        head = subprocess.run(
+            ["git", "-C", str(workdir), "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if head.returncode != 0:
+        return None
+    value = head.stdout.strip()
+    return value or None
+
+
+def _hilo_project_root(workdir: str) -> Path | None:
+    """The hilo manifest that makes this directory a project root, if any."""
+    for candidate in ("manifest.yaml", ".vfs/manifest.yaml"):
+        path = Path(workdir) / candidate
+        if path.is_file():
+            return path.parent
+    return None
+
+
+def _recorded_warm_head(graph_dir: Path) -> str | None:
+    """The HEAD the index was last warmed at, from our stamp or hilo's state file."""
+    stamp = _read_json_object(graph_dir / GRAPH_INDEX_STAMP)
+    value = stamp.get("head")
+    if isinstance(value, str) and value:
+        return value
+    hilo_state = _read_json_object(graph_dir / GRAPH_HILO_STATE)
+    fallback = hilo_state.get("lastWarmHead")
+    return fallback if isinstance(fallback, str) and fallback else None
+
+
+def _write_warm_stamp(graph_dir: Path, head: str | None, mode: str) -> None:
+    """Record which HEAD the index was warmed at; best-effort, never fatal."""
+    payload = {"version": 1, "head": head or "", "mode": mode, "warmed_at": time.time()}
+    stamp = graph_dir / GRAPH_INDEX_STAMP
+    try:
+        graph_dir.mkdir(parents=True, exist_ok=True)
+        temp = stamp.with_suffix(stamp.suffix + ".tmp")
+        temp.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+        os.replace(temp, stamp)
+    except OSError as exc:  # noqa: BLE001 - a stamp we cannot write is a hint, not a failure
+        logger.warning("could not record the graph warm stamp %s (%s)", stamp, exc)
+
+
+def graph_index_state(workdir: str = ".") -> GraphIndexState:
+    """Inspect the local graph index: present? built at this HEAD? (no hilo call)
+
+    Read-only and cheap: two ``git rev-parse`` calls and up to two small JSON
+    reads. The decision it feeds is "should :func:`ensure_graph_index` run
+    hilo", so it must never depend on hilo itself.
+    """
+    graph_dir = _graph_dir(workdir)
+    index = graph_dir / GRAPH_INDEX_FILE
+    present = False
+    try:
+        present = index.is_file() and index.stat().st_size > 0
+    except OSError:
+        present = False
+    if not present:
+        return GraphIndexState(reason=GRAPH_STALE_MISSING, present=False, head=_git_head(workdir))
+    head = _git_head(workdir)
+    warmed_head = _recorded_warm_head(graph_dir)
+    if not warmed_head:
+        return GraphIndexState(reason=GRAPH_STALE_UNSTAMPED, present=True, head=head)
+    if head is not None and warmed_head != head:
+        return GraphIndexState(
+            reason=GRAPH_STALE_HEAD_MOVED, present=True, head=head, warmed_head=warmed_head
+        )
+    return GraphIndexState(
+        reason=GRAPH_INDEX_FRESH, present=True, head=head, warmed_head=warmed_head
+    )
+
+
+def ensure_graph_index(
+    workdir: str = ".",
+    *,
+    runner: Callable[[list[str], str], tuple[int, str, str]] | None = None,
+) -> GraphIndexResult:
+    """Make the hilo graph index usable for *workdir*, warming it when stale.
+
+    A fresh clone carries no index (GR-225: it is derived state and is no longer
+    committed), so the FIRST ``resolve`` in a checkout must build one — otherwise
+    the gate answers from an empty or stale graph and reports a shipped module as
+    missing. The repair is hilo's own documented bootstrap, in order:
+
+    * ``hilo init --no-hooks`` only when the checkout has no hilo manifest (a
+      project root needs one; ``--no-hooks`` keeps git-hook ownership with the
+      repo, and a repo that ships hilo's managed ``.gitignore`` entries sees no
+      file change at all);
+    * ``hilo graph warm`` — full when the index is missing or unstamped, and
+      ``--changed`` when only HEAD moved (the same incremental contract hilo's
+      own post-commit hook uses, so a post-commit warm costs one no-op pass).
+
+    Failures are RETURNED, never raised: the pipeline degrades to whatever
+    evidence it can assemble and the caller names the cause. A missing binary
+    (exit 127) is reported without a note because the trace leg already names
+    the searched path verbatim, and a second copy would push that actionable
+    string out of ``notes[-1]``.
+
+    *runner* is the same seam the rest of the pipeline takes; ``None`` runs the
+    real binary.
+    """
+    run = runner or _default_hilo_runner
+    state = graph_index_state(workdir)
+    if not state.needs_warm:
+        return GraphIndexResult(status=GRAPH_INDEX_FRESH, state=state)
+
+    commands: list[list[str]] = []
+    if _hilo_project_root(workdir) is None:
+        commands.append(["init", "--no-hooks"])
+    warm_args = ["graph", "warm"]
+    if state.incremental:
+        warm_args.append("--changed")
+    commands.append(warm_args)
+
+    for args in commands:
+        code, out, err = run(args, workdir)
+        if code == 0:
+            continue
+        # 127/`hilo not found`: the trace leg reports this exact path already.
+        if code == 127 and "hilo not found" in f"{err}{out}".lower():
+            return GraphIndexResult(status=GRAPH_INDEX_FAILED, state=state, commands=commands)
+        detail = " ".join(((err or out).strip().splitlines() or [""])[0].split())[:200]
+        note = (
+            f"graph index bootstrap failed (`hilo {' '.join(args)}` exited {code})"
+            f"{': ' + detail if detail else ''}"
+        )
+        return GraphIndexResult(
+            status=GRAPH_INDEX_FAILED, state=state, notes=[note], commands=commands
+        )
+
+    graph_dir = _graph_dir(workdir)
+    index = graph_dir / GRAPH_INDEX_FILE
+    if not (index.is_file() and index.stat().st_size > 0):
+        note = (
+            "graph index bootstrap ran but produced no .vfs/graph/edges.jsonl — "
+            "hilo has no index for this checkout"
+        )
+        return GraphIndexResult(
+            status=GRAPH_INDEX_FAILED, state=state, notes=[note], commands=commands
+        )
+
+    mode = "changed" if state.incremental else "full"
+    _write_warm_stamp(graph_dir, state.head, mode)
+    note = f"graph index rebuilt before tracing ({state.reason}: `hilo {' '.join(commands[-1])}`)"
+    return GraphIndexResult(
+        status=GRAPH_INDEX_REBUILT, state=state, notes=[note], commands=commands
+    )
 
 
 def trace_question(
@@ -1789,6 +2052,7 @@ def resolve(
     resolved_at: float = RESOLVED_AT,
     review_at: float = REVIEW_AT,
     egress_exclude: tuple[str, ...] | None = None,
+    bootstrap_index: bool = True,
 ) -> ResolutionVerdict:
     """Resolve *question* against the repo at *workdir* and return a typed verdict.
 
@@ -1805,9 +2069,21 @@ def resolve(
 
     ``runner`` and ``poster`` are the two seams that make this testable without
     a network or a hilo install; both default to the real implementations.
+
+    ``bootstrap_index`` (GR-225) makes the trace leg honest on a checkout whose
+    graph index is absent or stale — the state of EVERY fresh clone now that the
+    index is no longer committed: hilo is warmed first by
+    :func:`ensure_graph_index`, and the outcome rides in the verdict's notes.
+    It is skipped when *runner* is injected: an injected runner IS the caller's
+    control of hilo, so running the real binary behind it would break the seam
+    that makes these paths testable (and a production caller never injects one).
     """
     if not question or not question.strip():
         return _abstain(question, "empty-question", detail="the question was blank")
+
+    index = GraphIndexResult(status=GRAPH_INDEX_FRESH)
+    if bootstrap_index and runner is None:
+        index = ensure_graph_index(workdir)
 
     bundle = assemble_bundle(
         question,
@@ -1819,15 +2095,21 @@ def resolve(
         max_tokens=max_tokens,
         egress_exclude=egress_exclude,
     )
+    # The bootstrap's own note closes the bundle's note list: on a failed warm it
+    # is the detail a reader needs, and on a successful one it is the provenance
+    # of the evidence behind the verdict.
+    bundle.notes = list(bundle.notes) + list(index.notes)
     if not bundle.text.strip():
         reason = "budget-exhausted" if bundle.budget_exhausted else "empty-bundle"
-        if reason == "empty-bundle" and not (Path(workdir) / ".vfs" / "graph").exists():
+        if reason == "empty-bundle":
             missing_binary = any("hilo not found" in note.lower() for note in bundle.notes)
-            reason = (
-                "hilo-not-installed"
-                if missing_binary or not Path(_hilo_search_path()).exists()
-                else "hilo-not-initialized"
-            )
+            graph_missing = not _graph_dir(workdir).exists()
+            if missing_binary or not Path(_hilo_search_path()).exists():
+                reason = "hilo-not-installed"
+            elif graph_missing or index.failed:
+                # hilo is installed, but this checkout has no USABLE graph: either
+                # there is no cache at all or the bootstrap could not build one.
+                reason = "hilo-not-initialized"
         return _abstain(
             question,
             reason,

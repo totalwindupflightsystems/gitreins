@@ -71,7 +71,7 @@ pip install gitreins
 pytest tests/ -v
 ```
 
-All tests must pass before submitting a PR. Currently **3745 tests collected across 121
+All tests must pass before submitting a PR. Currently **3758 tests collected across 122
 test files** (canonical count: `pytest --collect-only -q`, which is exactly what
 CI recomputes).
 
@@ -126,7 +126,7 @@ parse is a broken promise, and the checker is what keeps the README's
 engine/            — Core engine (evaluator, guards, pipeline, LSP, LLM client, task manager, judge, dead_code)
 gitreins/          — CLI entry point and install script
 gitreins_mcp/      — MCP stdio server (15 tools)
-tests/             — pytest test suite (3745 tests collected across 121 files; canonical count in README)
+tests/             — pytest test suite (3758 tests collected across 122 files; canonical count in README)
 tests/reliability/ — 7 adversarial benchmark projects
 scripts/           — Repo-level checkers run by CI (docs drift, CLI examples, CLI-reference sync, board ids) + the judgment viewer + the bunker full-CI lane (bunker-full-ci.sh, bunker_identity.py)
 docs/              — Architecture, component map, evaluator loop, MCP API, CLI reference, dogfood reports
@@ -139,7 +139,7 @@ sandbox/           — Evaluation scratch space (excluded from ruff; see docs/sa
 bin/               — Machine-specific MCP launcher for a developer checkout (not part of the package)
 skills/            — Agent-facing usage skill for this repo
 website/           — Static landing page
-.vfs/              — Hilo code-graph cache; `.vfs/graph/edges.jsonl` is tracked on purpose
+.vfs/              — Hilo code-graph cache (derived, gitignored; `gitreins resolve` warms it on demand)
 ```
 
 ### Intentional exceptions (CLN-1)
@@ -154,8 +154,13 @@ deleted, and these items that *look* like artifacts are deliberately kept —
 - `.gitreins/history/**/verdict.json` + `summary.md` — committed sample verdicts
   so `scripts/judgment_viewer.py` renders on a fresh clone. New verdicts are
   written unversioned (`.gitignore`) and committed to the `gitreins` branch.
-- `.vfs/graph/edges.jsonl` — the code graph ships so Hilo queries work cold; its
-  siblings (`graph.db`, `.last_reconcile`, `.parse_cache.json`) stay ignored.
+- `.vfs/graph/**` — NOT kept: the code graph is derived state (GR-225). It was
+  tracked until a fresh clone proved the cost — a shipped `edges.jsonl` froze at
+  the commit that produced it, hid every module added afterwards, and made the
+  pre-dispatch gate call a tracked file missing. `gitreins resolve` now warms a
+  missing or stale index on demand (`ensure_graph_index`), so a clone pays one
+  `hilo graph warm` instead of inheriting a stale index. Every writer artifact
+  under `.vfs/` is in `.gitignore`.
 - `bin/hermes-mcp-wrapper.sh` — a launcher pinned to one developer checkout
   (absolute paths, `~/.hermes/.env`); kept because that developer's MCP client
   invokes it by path. The package does not install it.
