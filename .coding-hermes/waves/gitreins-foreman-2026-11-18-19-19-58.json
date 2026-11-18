@@ -8,9 +8,11 @@
       "worktree": "/home/kara/worktrees/gitreins-GR-238",
       "branch": "wt/GR-238",
       "base_sha": "6f093094",
-      "model": "openai/gpt-6.1-terra",
-      "provider": "xkiro",
-      "depends_on": []
+      "model": "gpt-6-luna",
+      "provider": "openai-codex",
+      "depends_on": [],
+      "model_note": "gpt-6.1-terra@xkiro 503 model_maintenance until 2026-11-19T16:25Z (terra AND sol); sanctioned switch",
+      "previous_model": "openai/gpt-6.1-terra"
     },
     {
       "task_id": "README-004-R2",
@@ -24,6 +26,9 @@
     }
   ],
   "excluded": [
-    {"task_id": "RELEASE-027", "reason": "depends on GR-238: live test counts shift when the fix lands"}
+    {
+      "task_id": "RELEASE-027",
+      "reason": "depends on GR-238: live test counts shift when the fix lands"
+    }
   ]
 }

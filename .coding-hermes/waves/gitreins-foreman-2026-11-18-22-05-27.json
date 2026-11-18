@@ -1,0 +1,22 @@
+{
+  "scheduler_tick": "gitreins-foreman-2026-11-18-22-05-27",
+  "wave_budget": 1,
+  "workers": [
+    {
+      "task_id": "GR-237",
+      "mode": "worktree-worker",
+      "worktree": "/home/kara/worktrees/gitreins-GR-237",
+      "branch": "wt/GR-237",
+      "base_sha": "bb8e201c",
+      "model": "gpt-6-luna",
+      "provider": "openai-codex",
+      "depends_on": [],
+      "model_note": "configured worker_model openai/gpt-6.1-terra @ xkiro errored: prior tick measured 503 model_maintenance until 2026-11-19T16:25Z (terra AND sol); live probe this tick timed out at 180s with no reply. Sanctioned switch to the lane that worked earlier today."
+    }
+  ],
+  "inherited_crashed_session": {
+    "from": "gitreins-foreman-2026-11-18-19-19-58",
+    "state": "GR-238 fix landed+merged (7292bdfe, bb8e201c) but tick crashed before push/close; finished this tick: pushed to github (ahead 0), tier2 402 INCOMPLETE verdict retained (da4d01f8), tier1-only close re-running",
+    "residue_committed_in": "board closeout commit this tick"
+  }
+}
