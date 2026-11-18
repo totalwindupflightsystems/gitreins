@@ -1,0 +1,69 @@
+{
+  "tick": "gitreins-foreman-2026-11-17-22-03-45",
+  "created_at": "2026-11-17T22:35:00Z",
+  "base_sha": "e77e03a52bc2d55511ba5ac64fe869f90d189d15",
+  "wave_budget": 6,
+  "wave_size": 4,
+  "merge_order": ["DF-030", "GR-227", "GR-225", "README-011"],
+  "independence_note": "No depends_on edges between the four rows (verified in boardctl pending-list output: deps= for all four). Disjoint file sets: DF-030 = engine/guard_manager.py + new test; GR-227 = gitreins/cli.py doctor path + new test; GR-225 = .vfs/graph/edges.jsonl + .gitignore + resolution bootstrap + new test; README-011 = README.md only. README-011 merged last because it is docs-only and GR-225's .gitignore edit is the only .gitignore writer. Merge order puts the two guard/CLI code rows first so a red gate surfaces before the resolution-index row.",
+  "workers": [
+    {
+      "task_id": "GR-225",
+      "row": "Fresh-clone resolution gate is blind: tracked .vfs/graph/edges.jsonl leaves 21 of 53 engine modules unindexed",
+      "priority": "P1",
+      "worktree": "/home/kara/worktrees/gitreins-GR-225",
+      "branch": "wt/GR-225",
+      "base": "main",
+      "base_sha": "e77e03a5",
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro",
+      "gitreins_task": "GR-225 (started)",
+      "brief": "/home/kara/.hermes/cache/scratch/brief-gitreins-foreman-2026-11-17-22-03-45-GR-225.txt"
+    },
+    {
+      "task_id": "GR-227",
+      "row": "gitreins doctor --json emits the human gitleaks table instead of JSON",
+      "priority": "P2",
+      "worktree": "/home/kara/worktrees/gitreins-GR-227",
+      "branch": "wt/GR-227",
+      "base": "main",
+      "base_sha": "e77e03a5",
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro",
+      "gitreins_task": "GR-227 (started)",
+      "brief": "/home/kara/.hermes/cache/scratch/brief-gitreins-foreman-2026-11-17-22-03-45-GR-227.txt"
+    },
+    {
+      "task_id": "DF-030",
+      "row": "tests lane silently skips when the first python3 on PATH lacks pytest: gate strength depends on ambient PATH",
+      "priority": "P2",
+      "worktree": "/home/kara/worktrees/gitreins-DF-030",
+      "branch": "wt/DF-030",
+      "base": "main",
+      "base_sha": "e77e03a5",
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro",
+      "gitreins_task": "DF-030 (started)",
+      "brief": "/home/kara/.hermes/cache/scratch/brief-gitreins-foreman-2026-11-17-22-03-45-DF-030.txt"
+    },
+    {
+      "task_id": "README-011",
+      "row": "README.md:876-882 worktree-cleanup recipe documents an unconditional force-delete of the task branch",
+      "priority": "P1",
+      "worktree": "/home/kara/worktrees/gitreins-README-011",
+      "branch": "wt/README-011",
+      "base": "main",
+      "base_sha": "e77e03a5",
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro",
+      "gitreins_task": "README-011 (started)",
+      "brief": "/home/kara/.hermes/cache/scratch/brief-gitreins-foreman-2026-11-17-22-03-45-README-011.txt",
+      "note": "docs-only; its brief forbids a full-suite run (no venv) and verifies with the main-tree venv read-only"
+    }
+  ],
+  "foreman_direct": [
+    {"task_id": "RELEASE-028", "action": "verify+close: five landed-but-unclosed rows (GR-211, GR-219, GR-234, RELEASE-025, QA-GITREINS-14) need close only when a verdict is bound to the landed SHA"},
+    {"task_id": "RELEASE-027", "action": "verify+close: premise stale on current main (check_docs_drift exit 0 at 3745/121); close with this tick's own run id"},
+    {"task_id": "RELEASE-022", "action": "re-verify four proven arms + the loadavg-gated arm at the post-wave tip; row stays pending unless arm 4 becomes measurable"}
+  ]
+}
