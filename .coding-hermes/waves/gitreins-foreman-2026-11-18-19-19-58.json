@@ -1,0 +1,29 @@
+{
+  "scheduler_tick": "gitreins-foreman-2026-11-18-19-19-58",
+  "wave_budget": 5,
+  "workers": [
+    {
+      "task_id": "GR-238",
+      "mode": "worktree-worker",
+      "worktree": "/home/kara/worktrees/gitreins-GR-238",
+      "branch": "wt/GR-238",
+      "base_sha": "6f093094",
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro",
+      "depends_on": []
+    },
+    {
+      "task_id": "README-004-R2",
+      "mode": "foreman-direct",
+      "worktree": "main",
+      "branch": "main",
+      "model": "foreman (glm-5.3-flash)",
+      "provider": "opencode-go",
+      "depends_on": [],
+      "note": "trivial one-file doc fix; independent region of README.md from GR-238 (GR-238 does not touch README.md)"
+    }
+  ],
+  "excluded": [
+    {"task_id": "RELEASE-027", "reason": "depends on GR-238: live test counts shift when the fix lands"}
+  ]
+}
