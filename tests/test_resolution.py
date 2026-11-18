@@ -1064,17 +1064,33 @@ def test_missing_hilo_names_the_searched_path_in_the_empty_bundle_detail(
         workdir=str(tmp_path),
     )
     assert verdict.verdict == "ABSTAIN"
-    assert verdict.abstain_reason == "hilo-not-installed"
-    # The runner's searched-path message remains the detail, while the action
-    # distinguishes a missing executable from an uninitialized project cache.
+    assert verdict.abstain_reason == "empty-bundle"
+    # The injected runner owns the hilo seam: preserve the computed reason while
+    # retaining the exact searched-path diagnosis as detail.
     assert verdict.abstain_detail == f"hilo not found (searched PATH, then {cargo_bin})"
     assert "hilo not found" in verdict.abstain_detail
     assert str(Path.home() / ".cargo" / "bin") in verdict.abstain_detail
-    assert verdict.abstain_action == "install hilo and ensure the executable is available on PATH"
+    assert any("hilo is unavailable" in note for note in verdict.notes)
+    assert (
+        verdict.abstain_action == "ask about code in this checkout; the assembled bundle was empty"
+    )
     # at the bundle level the full wrapped note is still on record
     bundle = assemble_bundle("does the gate fail closed?", runner=missing, traced=False)
     assert any("primary understand bundle failed (exit 127)" in note for note in bundle.notes)
     assert bundle.notes[-1].startswith("hilo not found (searched PATH, then ")
+
+    # The real bootstrap path is allowed to name hilo as the cause: it ran, and
+    # its missing executable plausibly caused this otherwise-empty bundle.
+    monkeypatch.setattr(resolution, "_default_hilo_runner", missing)
+    bootstrapped = _resolve_hermetic(
+        runner=None,
+        traced=False,
+        read_files=False,
+        workdir=str(tmp_path),
+    )
+    assert bootstrapped.verdict == "ABSTAIN"
+    assert bootstrapped.abstain_reason == "hilo-not-installed"
+    assert "hilo not found" in (bootstrapped.abstain_detail or "")
 
 
 def test_a_blank_question_never_costs_a_call() -> None:

@@ -2101,20 +2101,32 @@ def resolve(
     bundle.notes = list(bundle.notes) + list(index.notes)
     if not bundle.text.strip():
         reason = "budget-exhausted" if bundle.budget_exhausted else "empty-bundle"
+        abstain_notes: list[str] = []
         if reason == "empty-bundle":
             missing_binary = any("hilo not found" in note.lower() for note in bundle.notes)
+            hilo_missing = missing_binary or not Path(_hilo_search_path()).exists()
             graph_missing = not _graph_dir(workdir).exists()
-            if missing_binary or not Path(_hilo_search_path()).exists():
-                reason = "hilo-not-installed"
-            elif graph_missing or index.failed:
-                # hilo is installed, but this checkout has no USABLE graph: either
-                # there is no cache at all or the bootstrap could not build one.
-                reason = "hilo-not-initialized"
+            if bootstrap_index and runner is None:
+                if hilo_missing:
+                    reason = "hilo-not-installed"
+                elif graph_missing or index.failed:
+                    # hilo is installed, but this checkout has no USABLE graph: either
+                    # there is no cache at all or the bootstrap could not build one.
+                    reason = "hilo-not-initialized"
+            elif hilo_missing:
+                # An injected runner (or an explicitly disabled bootstrap) owns the
+                # hilo seam. Preserve the computed abstain cause and carry availability
+                # as a separate diagnostic instead of rewriting that cause.
+                abstain_notes.append(
+                    "hilo is unavailable; the computed abstain reason was preserved "
+                    "because the hilo runner was injected or bootstrap was disabled"
+                )
         return _abstain(
             question,
             reason,
             detail=bundle.notes[-1] if bundle.notes else None,
             bundle=bundle,
+            notes=abstain_notes,
         )
 
     state = build_state(question, bundle.text)
