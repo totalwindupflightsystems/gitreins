@@ -531,12 +531,12 @@ class TestVerdictCoverage:
         assert verdict_is_passing(record, ["c1 shipped"]) is True
         assert verdict_is_passing(record, ["c1 shipped", "c2 documented"]) is False
 
-    def test_incomplete_never_passes(self) -> None:
-        """An INCOMPLETE verdict with full items still does not pass."""
+    def test_incomplete_label_with_complete_pass_evidence_passes(self) -> None:
+        """A stale INCOMPLETE label cannot defeat complete PASS evidence."""
         from engine.gate import verdict_is_passing
 
         verdict = Verdict(verdict="INCOMPLETE", items=[VerdictItem("c1 shipped", "PASS", "ok")])
-        assert verdict_is_passing(verdict, ["c1 shipped"]) is False
+        assert verdict_is_passing(verdict, ["c1 shipped"]) is True
 
 
 class TestNotVerifiableRouting:

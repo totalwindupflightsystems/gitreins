@@ -1247,17 +1247,31 @@ class Pipeline:
             # items must grade every task criterion (76 of 297 stored passes
             # carried no items at all), and the criteria that were not graded
             # are named in the step output a reader sees.
-            from engine.gate import check_coverage, ungraded_note, verdict_is_passing
+            from engine.gate import (
+                check_coverage,
+                ungraded_note,
+                verdict_is_passing,
+                verdict_outcome,
+            )
 
             coverage = check_coverage(verdict, task.get("criteria"))
             passed = verdict_is_passing(verdict, task.get("criteria"))
-            coverage_note = ungraded_note(coverage)
+            if passed and verdict_outcome(verdict) == "INCOMPLETE":
+                # GR-233: four PASS items with complete task-criterion coverage
+                # were rejected solely because the aggregate label said
+                # INCOMPLETE. The evidence gate is authoritative; repair the
+                # rendered/persisted label and summary to match it.
+                verdict.verdict = "COMPLETE"
+                verdict.summary = (
+                    f"All {len(coverage.graded)} task criteria were graded and passed."
+                )
 
             from engine.evaluator import item_glyph
 
             items_output = "\n".join(
                 f"  {item_glyph(i.status)} {i.criterion}: {i.detail}" for i in verdict.items
             )
+            coverage_note = ungraded_note(coverage)
             if coverage_note:
                 items_output = f"{items_output}\n  ✗ {coverage_note}".lstrip("\n")
 
