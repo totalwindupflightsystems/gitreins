@@ -372,14 +372,15 @@ def verdict_is_passing(verdict: object, criteria: Any) -> bool:
     """The ONLY passing test a gate may use (GR-167).
 
     A COMPLETE verdict passes only when its items grade every task criterion
-    and every graded criterion is PASS. An empty item list never passes, and an
-    empty criteria list never passes either. The persisted ``passed`` value is
-    not consulted: before GR-167 it was ``verdict == "COMPLETE"`` and nothing
-    more, which is the hole this function closes.
+    and every item is PASS. An INCOMPLETE label is accepted only when that
+    complete item evidence contradicts the aggregate label. Empty item/criteria
+    lists never pass, and the persisted ``passed`` value is never consulted.
     """
-    if verdict_outcome(verdict) != "COMPLETE":
+    outcome = verdict_outcome(verdict)
+    if outcome not in ("COMPLETE", "INCOMPLETE"):
         return False
-    if not verdict_items(verdict):
+    items = verdict_items(verdict)
+    if not items or any(_status_of(item) != "PASS" for item in items):
         return False
     return check_coverage(verdict, criteria).complete
 
