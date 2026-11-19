@@ -1,0 +1,41 @@
+{
+  "tick": "gitreins-foreman-2026-11-19-00-19-47",
+  "created_at": "2026-11-19T00:38:00Z",
+  "project": "gitreins",
+  "workdir": "/home/kara/gitreins",
+  "base": "main",
+  "base_sha": "96400880",
+  "worker_model": "openai/gpt-6.1-terra",
+  "worker_provider": "xkiro",
+  "wave_budget": 6,
+  "workers": [
+    {
+      "task_id": "GR-233",
+      "worktree": "/home/kara/worktrees/gitreins-GR-233",
+      "branch": "wt/GR-233",
+      "base_sha": "96400880",
+      "brief": "/home/kara/.hermes/cache/scratch/gitreins-GR-233-brief.md",
+      "objective": "tier2 stage aggregates passed=false despite all-PASS items and 0 ungraded"
+    },
+    {
+      "task_id": "GR-229",
+      "worktree": "/home/kara/worktrees/gitreins-GR-229",
+      "branch": "wt/GR-229",
+      "base_sha": "96400880",
+      "brief": "/home/kara/.hermes/cache/scratch/gitreins-GR-229-brief.md",
+      "objective": "serve /api/stats attributes usage to record model and keeps cost_usd"
+    },
+    {
+      "task_id": "GR-226",
+      "worktree": "/home/kara/worktrees/gitreins-GR-226",
+      "branch": "wt/GR-226",
+      "base_sha": "96400880",
+      "brief": "/home/kara/.hermes/cache/scratch/gitreins-GR-226-brief.md",
+      "objective": "resolution gate must not speak about an unindexed named path; doctor resolution-index check"
+    }
+  ],
+  "not_waved": {
+    "GR-232": "deferred: shares gate/persist surfaces with GR-233/GR-229 in this wave",
+    "GR-175": "deferred: touches engine/judge.py which GR-233 owns this wave"
+  }
+}

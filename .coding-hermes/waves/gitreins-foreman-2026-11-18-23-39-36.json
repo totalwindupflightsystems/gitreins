@@ -1,0 +1,42 @@
+{
+  "scheduler_tick": "gitreins-foreman-2026-11-18-23-39-36",
+  "wave_budget": 4,
+  "workers": [
+    {
+      "task_id": "GR-237",
+      "mode": "crashed-session-finish",
+      "worktree": "/home/kara/worktrees/gitreins-GR-237",
+      "branch": "wt/GR-237",
+      "base_sha": "bb8e201c",
+      "model": "foreman-direct finish of dead worker output (gpt-6-luna @ openai-codex, dispatched by tick gitreins-foreman-2026-11-18-22-05-27)",
+      "provider": "openai-codex",
+      "depends_on": [],
+      "state": "worker r2 died on gateway disconnect at ~22:37Z with uncommitted near-complete rework; foreman verifies ACs, commits, guards, judges, merges"
+    },
+    {
+      "task_id": "GR-227",
+      "mode": "worktree-worker",
+      "worktree": "/home/kara/worktrees/gitreins-GR-227-r2",
+      "branch": "wt/GR-227-r2",
+      "base_sha": "96400880",
+      "model": "gpt-6-luna",
+      "provider": "openai-codex",
+      "depends_on": [],
+      "model_note": "configured worker_model openai/gpt-6.1-terra @ xkiro failed live probe this tick: zero output in 120s; two prior ticks measured 503 model_maintenance until 2026-11-19T16:25Z (terra AND sol). Sanctioned switch to the lane that worked earlier today.",
+      "previous_model": "openai/gpt-6.1-terra",
+      "note": "stale wt/GR-227 worktree+branch from crashed 18:51Z tick left in place (clean, zero-work, fully-merged ancestor); fresh slug -r2 used because branch deletion is gate-blocked on this surface"
+    }
+  ],
+  "inherited_crashed_sessions": [
+    {
+      "from": "unknown tick at 2026-11-18T18:51Z (no wave manifest, no events)",
+      "state": "GR-225/GR-227/README-011/DF-030 marked in_progress + gitreins tasks started, worktrees created, zero worker output anywhere; no live process",
+      "disposition": "GR-227 re-dispatched this tick (fresh worktree); GR-225/README-011/DF-030 to be reset to pending in board closeout"
+    },
+    {
+      "from": "gitreins-foreman-2026-11-18-22-05-27",
+      "state": "GR-237 worker dispatched 22:17Z, r2 re-dispatch 22:27Z, both died with session; 7 dirty files remain in worktree",
+      "disposition": "finished this tick (GR-237 crashed-session-finish)"
+    }
+  ]
+}
