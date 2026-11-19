@@ -1,0 +1,61 @@
+{
+  "tick": "gitreins-foreman-2026-11-19-00-57-21",
+  "project": "gitreins",
+  "workdir": "/home/kara/gitreins",
+  "created_utc": "2026-11-19T01:25:00Z",
+  "mode": "wave",
+  "wave_budget": 12,
+  "sea_level": "default",
+  "worker_model_requested": "openai/gpt-6.1-terra",
+  "worker_provider_requested": "xkiro",
+  "worker_model_used": "gpt-6-luna",
+  "worker_provider_used": "openai-codex",
+  "model_switch_reason": "xkiro 503 model_maintenance (resume 2026-11-19T16:25:12Z); live probe hung 180s with no output. openai-codex gpt-6-luna probed healthy (reply LUNA_OK) and is a $0-marginal subscription seat.",
+  "base_sha": "4b614ba6",
+  "recovered_from": "gitreins-foreman-2026-11-19-00-19-47 (crashed: gateway disconnect, 3 worktrees clean at 96400880, zero commits)",
+  "workers": [
+    {
+      "task_id": "GR-226",
+      "title": "Resolution gate must not speak about a named path it never read; doctor needs a resolution-index check",
+      "priority": "P2",
+      "complexity": 3,
+      "worktree": "/home/kara/worktrees/gitreins-GR-226",
+      "branch": "wt/GR-226",
+      "brief": "/home/kara/.hermes/cache/scratch/brief-GR-226-0057.md",
+      "seam": ["engine/resolution.py", "engine/doctor.py", "tests/test_resolution_named_path_coverage.py"],
+      "resumed": true
+    },
+    {
+      "task_id": "GR-228",
+      "title": "Judgment browser renders a RESOLVED resolution as passed:false and counts zero judgments in stats",
+      "priority": "P2",
+      "complexity": 2,
+      "worktree": "/home/kara/worktrees/gitreins-GR-228",
+      "branch": "wt/GR-228",
+      "brief": "/home/kara/.hermes/cache/scratch/brief-GR-228-0057.md",
+      "seam": ["gitreins/serve.py", "tests/test_serve_resolution_bands.py"],
+      "resumed": false
+    },
+    {
+      "task_id": "GR-233",
+      "title": "tier2 stage aggregates passed=false despite all-PASS items and 0 ungraded",
+      "priority": "P2",
+      "complexity": 3,
+      "worktree": "/home/kara/worktrees/gitreins-GR-233",
+      "branch": "wt/GR-233",
+      "brief": "/home/kara/.hermes/cache/scratch/brief-GR-233-0057.md",
+      "seam": ["engine/evaluator.py", "engine/pipeline.py", "tests/test_tier2_aggregation.py"],
+      "resumed": true
+    }
+  ],
+  "not_dispatched": {
+    "GR-229": "shares gitreins/serve.py and the /api/stats block with GR-228 — same seam, merge collision; deferred one tick",
+    "GR-191": "AC-4 requires a cross-link from action.yml, which does not exist yet (GR-189 pending) — real dependency edge not recorded in the row",
+    "GR-230": "test-heavy install battery at loadavg 17 with three suites already in flight; deferred to a solo tick",
+    "RELEASE-022/023/025/028": "route: [release] rows belong to the releng lane",
+    "QA-GITREINS-15": "route: QA lane (bunker-qa board rewrite)",
+    "DF-028/DF-029": "route: dogfood lane",
+    "GR-211/219/234/235": "landed-but-open: RELEASE-028 reconciler owns re-grading and closing them",
+    "GR-173": "prior dispatch failed on this row; cplx 4 needs hilo graph wiring — deserves a solo tick with the impact tool"
+  }
+}

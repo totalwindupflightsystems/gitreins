@@ -1308,3 +1308,5 @@
 {"id":1794171000000000148,"timestamp":"2026-11-19 00:37:54.969336","event_type":"task_updated","task_id":"GR-233","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
 {"id":1794171000000000149,"timestamp":"2026-11-19 00:37:55.043955","event_type":"task_updated","task_id":"GR-229","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
 {"id":1794171000000000150,"timestamp":"2026-11-19 00:37:55.1184","event_type":"task_updated","task_id":"GR-226","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
+{"id":1794171000000000151,"timestamp":"2026-11-19 01:09:55.714188","event_type":"task_updated","task_id":"GR-229","actor":"foreman","detail":"{\"status\":\"pending\"}","tick_number":null}
+{"id":1794171000000000152,"timestamp":"2026-11-19 01:09:55.744757","event_type":"audit","task_id":"GR-229","actor":"foreman","detail":"crashed wave 00:19Z aborted; worktree gitreins-GR-229 clean at base, zero diff; row back to pending, seam deferred to GR-228","tick_number":null}
