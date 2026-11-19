@@ -1219,19 +1219,20 @@ class TestResolutionRecordsInTheViewerAPI:
         assert by_task["resolution"]["band"] == "RESOLVED"
         assert by_task["resolution"]["title"] == "Does the gate persist its verdicts?"
 
-    def test_stats_count_judgments_only(self, resolution_repo: Path) -> None:
+    def test_stats_count_all_records_and_preserve_resolution_count(
+        self, resolution_repo: Path
+    ) -> None:
         rows = serve.list_verdicts(str(resolution_repo))
         stats = serve.stats(rows)
 
         assert stats == {
-            "total": 1,
-            "passed": 1,
+            "total": 2,
+            "passed": 2,
             "failed": 0,
             "pass_rate": 100,
             "resolution_records": 1,
         }
-        # The exclusion must be reconcilable: header total + gate records = the list.
-        assert stats["total"] + stats["resolution_records"] == len(rows)
+        assert stats["total"] == len(rows)
 
     def test_stats_api_carries_resolution_records_next_to_the_listed_rows(
         self, resolution_repo: Path
@@ -1245,8 +1246,7 @@ class TestResolutionRecordsInTheViewerAPI:
         payload = json_body(stats_body)
 
         assert payload["resolution_records"] == 1
-        assert payload["total"] == 1
-        assert payload["total"] + payload["resolution_records"] == len(rows)
+        assert payload["total"] == len(rows) == 2
 
     def test_http_api_lists_the_record_and_keeps_the_pass_rate_honest(
         self, resolution_repo: Path
@@ -1266,7 +1266,8 @@ class TestResolutionRecordsInTheViewerAPI:
         assert resolution["kind"] == "resolution"
         assert resolution["band"] == "RESOLVED"
         # A resolution record must never be counted as a failed judgment.
-        assert stats_payload["total"] == 1
+        assert stats_payload["total"] == 2
+        assert stats_payload["passed"] == 2
         assert stats_payload["failed"] == 0
         assert stats_payload["pass_rate"] == 100
         # …and its full record (band + nested verdict) is fetchable at its route.
@@ -1274,6 +1275,60 @@ class TestResolutionRecordsInTheViewerAPI:
         full = json_body(record_body)
         assert full["kind"] == "resolution"
         assert full["verdict"]["manifest"][0]["file"] == "engine/persist.py"
+
+
+@pytest.mark.parametrize(
+    ("band", "expected_passed", "expected_total", "expected_passed_count", "expected_failed"),
+    [
+        ("RESOLVED", True, 1, 1, 0),
+        ("UNRESOLVED", False, 1, 0, 1),
+        ("REVIEW", None, 1, 0, 0),
+        ("ABSTAIN", None, 1, 0, 0),
+    ],
+)
+def test_resolution_bands_agree_between_list_stats_and_viewer(
+    tmp_path: Path,
+    band: str,
+    expected_passed: bool | None,
+    expected_total: int,
+    expected_passed_count: int,
+    expected_failed: int,
+) -> None:
+    """One resolution record has the same band outcome in list and aggregate."""
+    _write_resolution_record(tmp_path)
+    path = tmp_path / ".gitreins" / "history" / "2026-09-03" / "aa11bb22" / "verdict.json"
+    record = json.loads(path.read_text(encoding="utf-8"))
+    record["band"] = band
+    path.write_text(json.dumps(record), encoding="utf-8")
+
+    with running_server(str(tmp_path)) as (host, port):
+        _, list_body = get((host, port), "/api/verdicts")
+        _, stats_body = get((host, port), "/api/stats")
+        _, page_body = get((host, port), "/")
+
+    row = json_body(list_body)["verdicts"][0]
+    payload = json_body(stats_body)
+    assert row["kind"] == "resolution"
+    assert row["band"] == band
+    assert row["passed"] is expected_passed
+    assert payload["total"] == expected_total
+    assert payload["passed"] == expected_passed_count
+    assert payload["failed"] == expected_failed
+    assert payload["resolution_records"] == 1
+    assert payload["passed"] == sum(v["passed"] is True for v in json_body(list_body)["verdicts"])
+    assert payload["failed"] == sum(v["passed"] is False for v in json_body(list_body)["verdicts"])
+    page = page_body.decode("utf-8")
+    script_match = re.search(r"<script>(.*?)</script>", page, re.S)
+    assert script_match is not None
+    rendered = run_viewer_js(
+        script_match.group(1),
+        tmp_path,
+        {"row": row},
+        "V=[FIXTURE.row];render();process.stdout.write(dumpPanes());",
+    )
+    assert '<span class="task">resolution</span>' in rendered["list"]
+    assert band in rendered["list"]
+    assert "overall FAIL" not in rendered["list"]
 
 
 # ── detail pane: the criteria fallback must not swallow the sections ────────

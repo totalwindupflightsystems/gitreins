@@ -76,7 +76,7 @@ changed one. Data is re-read from disk on every request, so the contract is
 |--------|------|---------|---------|--------|
 | GET | `/` | 200 HTML | the single-page viewer (no server-side data; it fetches `/api/*`) | — |
 | GET | `/health` | 200 | `status` (`ok`), `version`, `repo`, `path` — a liveness probe that reads no verdict store and aggregates nothing (REVIEW-GITREINS-022) | — |
-| GET | `/api/stats` | 200 | `total`, `passed`, `failed`, `pass_rate`, `resolution_records`, `usage` (aggregate judge tokens/cost), `board` (`configured`/`path`/`message` for the fleet board), `repo`, `path`, `generated`. `total` counts judgments only: resolution-gate records are excluded from it but still listed by `/api/verdicts`, and are reported as `resolution_records`, so `total + resolution_records` always equals the `/api/verdicts` list length | — |
+| GET | `/api/stats` | 200 | `total`, `passed`, `failed`, `pass_rate`, `resolution_records`, `usage` (aggregate judge tokens/cost), `board` (`configured`/`path`/`message` for the fleet board), `repo`, `path`, `generated`. `total` counts every `/api/verdicts` row; `passed`/`failed` count rows whose `passed` is `true`/`false`. Resolution `REVIEW` and `ABSTAIN` rows count toward total but neither outcome counter. `resolution_records` remains an informational subset count | — |
 | GET | `/api/verdicts` | 200 | `{"verdicts": [row, …]}` — metadata only, newest last | — |
 | GET | `/api/verdicts/<date>/<hash>` | 200 | the full `verdict.json` (criteria, `stages.tier1`, `stages.tier2`, `evidence` manifest when one was collected) plus a joined `usage` block when judge telemetry is traceable to it | `400` malformed path (not `<date>/<hash>`), `404` unknown date/hash |
 | GET | `/api/verdicts/<date>/<hash>/evidence/<name>` | 200 `text/plain` | one worker-evidence artifact declared by that verdict's `evidence` manifest (`brief`, `log`, `patch`) | `400` missing `<name>`, `404` unknown verdict or a name the manifest does not declare (including an artifact deleted since) |
@@ -88,8 +88,12 @@ changed one. Data is re-read from disk on every request, so the contract is
 
 Verdict list rows carry `date`, `hash`, `task_id`, `title`, `passed`,
 `n_criteria`, `tier1_passed`, plus `worktree`/`branch` when the verdict recorded
-them. Rows are omitted from the list (not zero-filled) when a field predates the
-schema — the viewer never invents values for legacy records.
+them. Resolution rows additionally carry `kind: "resolution"` and `band`; their
+`passed` mapping is `RESOLVED` → `true`, `UNRESOLVED` → `false`, and `REVIEW` or
+`ABSTAIN` → `null`. The band remains present so clients can display an
+indeterminate resolution by name. Rows are omitted from the list (not zero-filled)
+when a field predates the schema — the viewer never invents values for legacy
+records.
 
 The SPA is a hash-free, single-page app: it loads `/api/stats`, `/api/verdicts`,
 `/api/events`, `/api/ticks` and `/api/qa` once, then opens a verdict via
