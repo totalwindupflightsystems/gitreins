@@ -1310,3 +1310,8 @@
 {"id":1794171000000000150,"timestamp":"2026-11-19 00:37:55.1184","event_type":"task_updated","task_id":"GR-226","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
 {"id":1794171000000000151,"timestamp":"2026-11-19 01:09:55.714188","event_type":"task_updated","task_id":"GR-229","actor":"foreman","detail":"{\"status\":\"pending\"}","tick_number":null}
 {"id":1794171000000000152,"timestamp":"2026-11-19 01:09:55.744757","event_type":"audit","task_id":"GR-229","actor":"foreman","detail":"crashed wave 00:19Z aborted; worktree gitreins-GR-229 clean at base, zero diff; row back to pending, seam deferred to GR-228","tick_number":null}
+{"id":1794171000000000153,"timestamp":"2026-11-19 06:06:44.629062","event_type":"task_completed","task_id":"GR-226","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
+{"id":1794171000000000154,"timestamp":"2026-11-19 06:06:56.292736","event_type":"task_completed","task_id":"GR-231","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
+{"id":1794171000000000155,"timestamp":"2026-11-19 06:07:10.38066","event_type":"task_completed","task_id":"RELEASE-026","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
+{"id":1794171000000000156,"timestamp":"2026-11-19 06:07:10.44854","event_type":"task_updated","task_id":"GR-237","actor":"foreman","detail":"{\"status\":\"pending\"}","tick_number":null}
+{"id":1794171000000000157,"timestamp":"2026-11-19 06:08:44.8711","event_type":"task_updated","task_id":"SKIPPED-install-bunker-2026-10-09-las-03","actor":"foreman","detail":"{\"status\":\"pending\"}","tick_number":null}
