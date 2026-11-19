@@ -1320,3 +1320,7 @@
 {"id":1794171000000000160,"timestamp":"2026-11-19 06:29:42.435313","event_type":"task_updated","task_id":"DF-030","actor":"foreman","detail":"{\"status\":\"pending\"}","tick_number":null}
 {"id":1794171000000000161,"timestamp":"2026-11-19 06:29:42.516906","event_type":"task_updated","task_id":"README-011","actor":"foreman","detail":"{\"status\":\"pending\"}","tick_number":null}
 {"id":1794171000000000162,"timestamp":"2026-11-19 06:29:42.599982","event_type":"task_updated","task_id":"GR-233","actor":"foreman","detail":"{\"status\":\"pending\"}","tick_number":null}
+{"id":1794171000000000163,"timestamp":"2026-11-19 06:36:23.673024","event_type":"task_updated","task_id":"PERF-3-R2","actor":"foreman","detail":"{\"status\":\"blocked\"}","tick_number":null}
+{"id":1794171000000000164,"timestamp":"2026-11-19 06:36:31.278762","event_type":"task_updated","task_id":"PERF-3","actor":"foreman","detail":"{\"status\":\"blocked\"}","tick_number":null}
+{"id":1794171000000000165,"timestamp":"2026-11-19 06:36:31.458944","event_type":"task_updated","task_id":"OBS-GITREINS-4","actor":"foreman","detail":"{\"status\":\"pending\"}","tick_number":null}
+{"id":1794171000000000166,"timestamp":"2026-11-19 06:37:00.204897","event_type":"task_created","task_id":"OBS-GITREINS-6","actor":"foreman","detail":"{\"id\":\"OBS-GITREINS-6\",\"status\":\"pending\"}","tick_number":null}
