@@ -5029,7 +5029,10 @@ def _add_basic_parsers(parser: argparse.ArgumentParser, sub: _SubParsers) -> Non
     doctor_p.add_argument(
         "--strict",
         action="store_true",
-        help="Fail (exit 1) on wiring findings: unwired commands, handlers, tools (GR-165)",
+        help=(
+            "Fail on wiring findings or tracked source files missing from the resolution index "
+            "(GR-226)"
+        ),
     )
 
     fingerprint_p = sub.add_parser(

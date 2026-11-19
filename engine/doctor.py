@@ -21,9 +21,11 @@ the secrets lane leans on the builtin scanner).
 from __future__ import annotations
 
 import dataclasses
+import json
 import os
 import shutil
 import subprocess
+from datetime import datetime, timezone
 from typing import Any
 
 from engine import install_manifest, wiring
@@ -215,6 +217,75 @@ def check_history(workdir: str) -> Check:
     return Check("history", OK, ".gitreins/ present and writable")
 
 
+def check_resolution_index(workdir: str, strict: bool = False) -> Check:
+    """Compare indexed source paths with HEAD and report the index timestamp."""
+    from engine import resolution
+
+    tracked_result = subprocess.run(
+        ["git", "-C", workdir, "ls-tree", "-r", "--name-only", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if tracked_result.returncode != 0:
+        return Check("resolution_index", SKIP, "not a readable Git worktree")
+    source_suffixes = {
+        ".py",
+        ".go",
+        ".rs",
+        ".ts",
+        ".tsx",
+        ".js",
+        ".jsx",
+        ".java",
+        ".c",
+        ".cc",
+        ".cpp",
+        ".h",
+        ".hpp",
+    }
+    tracked = {
+        path
+        for path in tracked_result.stdout.splitlines()
+        if os.path.splitext(path)[1].lower() in source_suffixes
+    }
+    index_path = os.path.join(workdir, *resolution.GRAPH_DIR, resolution.GRAPH_INDEX_FILE)
+    indexed: set[str] = set()
+    index_mtime = "missing"
+    try:
+        stat = os.stat(index_path)
+        index_mtime = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(
+            timespec="seconds"
+        )
+        with open(index_path, encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                try:
+                    row = json.loads(line)
+                except ValueError:
+                    continue
+                stack = [row]
+                while stack:
+                    value = stack.pop()
+                    if isinstance(value, str):
+                        if value in tracked:
+                            indexed.add(value)
+                    elif isinstance(value, dict):
+                        stack.extend(value.values())
+                    elif isinstance(value, list):
+                        stack.extend(value)
+    except OSError:
+        pass
+
+    missing = sorted(tracked - indexed)
+    state = resolution.graph_index_state(workdir)
+    freshness = f"{state.reason}, mtime={index_mtime}"
+    detail = f"indexed {len(indexed)}/{len(tracked)} tracked source files; freshness={freshness}"
+    if missing:
+        hint = "missing from resolution index: " + ", ".join(missing[:5])
+        return Check("resolution_index", FAIL if strict else WARN, detail, hint)
+    return Check("resolution_index", OK, detail)
+
+
 def check_wiring(workdir: str, strict: bool = False) -> Check:
     """Wiring reachability (GR-165): is everything defined actually reachable?
 
@@ -237,17 +308,18 @@ ALL_CHECKS = (
     check_manifest,
     check_version,
     check_history,
+    check_resolution_index,
 )
 
 
 def run_checks(workdir: str, strict: bool = False) -> list[Check]:
-    """The six install checks, then wiring (GR-165) last.
+    """The install checks, resolution index, then wiring (GR-165) last.
 
-    ``strict`` applies to the wiring check only (findings become ``fail``);
-    every other check is untouched, and without the flag the exit-code
-    contract is identical to the pre-GR-165 behavior.
+    ``strict`` upgrades wiring findings and missing indexed source files to
+    failures; without it those conditions remain warnings.
     """
-    checks = [check(workdir) for check in ALL_CHECKS]
+    checks = [check(workdir) for check in ALL_CHECKS[:-1]]
+    checks.append(check_resolution_index(workdir, strict=strict))
     checks.append(check_wiring(workdir, strict=strict))
     return checks
 
