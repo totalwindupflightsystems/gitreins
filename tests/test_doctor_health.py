@@ -146,6 +146,52 @@ def test_manifest_reports_disabled_state(tmp_path) -> None:
     assert "disabled" in _check(checks, "manifest").detail
 
 
+def test_resolution_index_reports_missing_files_and_strict_fails(tmp_path) -> None:
+    workdir = _repo(tmp_path)
+    _install(workdir)
+    source = os.path.join(workdir, "engine", "target.py")
+    os.makedirs(os.path.dirname(source), exist_ok=True)
+    with open(source, "w", encoding="utf-8") as handle:
+        handle.write("def target(): return True\n")
+    subprocess.run(["git", "-C", workdir, "add", "engine/target.py"], check=True)
+    subprocess.run(
+        ["git", "-C", workdir, "-c", "user.name=doctor", "-c",
+         "user.email=doctor@example.invalid", "commit", "-qm", "tracked source"],
+        check=True,
+    )
+
+    stale = doctor.check_resolution_index(workdir, strict=False)
+    strict = doctor.check_resolution_index(workdir, strict=True)
+    assert stale.status == "warn"
+    assert strict.status == "fail"
+    assert "indexed 0/1 tracked source files" in strict.detail
+    assert "freshness=" in strict.detail
+    assert "engine/target.py" in strict.hint
+    cli_stale = subprocess.run(
+        [sys.executable, "-m", "gitreins", "doctor", "--strict"],
+        cwd=workdir, capture_output=True, text=True,
+        env=dict(os.environ, PYTHONPATH=REPO_ROOT),
+    )
+    assert cli_stale.returncode == 1
+    assert "resolution_index" in cli_stale.stdout
+    assert "indexed 0/1 tracked source files" in cli_stale.stdout
+
+    graph = os.path.join(workdir, ".vfs", "graph")
+    os.makedirs(graph, exist_ok=True)
+    with open(os.path.join(graph, "edges.jsonl"), "w", encoding="utf-8") as handle:
+        handle.write('{"file":"engine/target.py","from":"engine/target.py","to":"fn:target"}\n')
+    head = subprocess.run(
+        ["git", "-C", workdir, "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+    with open(os.path.join(graph, ".gitreins_index.json"), "w", encoding="utf-8") as handle:
+        json.dump({"head": head, "warmed_at": 1}, handle)
+
+    warm = doctor.check_resolution_index(workdir, strict=True)
+    assert warm.status == "ok"
+    assert "indexed 1/1 tracked source files" in warm.detail
+
+
 def test_summary_counts_failures_and_warnings(tmp_path) -> None:
     workdir = _repo(tmp_path)
     _install(workdir)
@@ -169,7 +215,7 @@ def test_cli_json_emits_checks_and_exit_zero_when_healthy(tmp_path) -> None:
     payload = json.loads(result.stdout)
     # GR-227: one document with a `checks` list, each entry keyed on `id`.
     names = {entry["id"] for entry in payload["checks"]}
-    assert {"config", "hooks", "tools", "manifest", "history"} <= names
+    assert {"config", "hooks", "tools", "manifest", "history", "resolution_index"} <= names
 
 
 def test_cli_fails_when_hooks_are_missing(tmp_path) -> None:

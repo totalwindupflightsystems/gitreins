@@ -1865,6 +1865,7 @@ class ResolutionVerdict:
     budget_exhausted: bool = False
     seeds: list[TraceSeed] = field(default_factory=list)
     dependency_paths: dict[str, list[str]] = field(default_factory=dict)
+    named_paths_missing: list[str] = field(default_factory=list)
     abstain_reason: str | None = None
     abstain_detail: str | None = None
     attempts: list[str] = field(default_factory=list)
@@ -1927,6 +1928,7 @@ class ResolutionVerdict:
             "budget_exhausted": self.budget_exhausted,
             "seeds": [seed.to_dict() for seed in self.seeds],
             "dependency_paths": {k: list(v) for k, v in self.dependency_paths.items()},
+            "named_paths_missing": list(self.named_paths_missing),
             "abstain_reason": self.abstain_reason,
             "abstain_detail": self.abstain_detail,
             "abstain_action": self.abstain_action,
@@ -2014,6 +2016,7 @@ def _abstain(
     bundle: AssembledBundle | None = None,
     attempts: list[str] | None = None,
     notes: list[str] | None = None,
+    named_paths_missing: list[str] | None = None,
 ) -> ResolutionVerdict:
     """Build a fail-closed verdict: named reason, evidence attached, no score."""
     return ResolutionVerdict(
@@ -2031,9 +2034,37 @@ def _abstain(
         budget_exhausted=bundle.budget_exhausted if bundle else False,
         seeds=list(bundle.seeds) if bundle else [],
         dependency_paths=dict(bundle.dependency_paths) if bundle else {},
+        named_paths_missing=list(named_paths_missing or []),
         attempts=list(attempts or []),
         notes=list(notes or []) + ([bundle.disclosure] if bundle and bundle.disclosure else []),
     )
+
+
+def _named_tracked_paths(question: str, workdir: str) -> list[str]:
+    """Repo-relative paths explicitly named in *question* and tracked at HEAD."""
+    candidates = set(re.findall(r"(?<![\w.-])(?:[\w.-]+/)+[\w.-]+", question))
+    if not candidates:
+        return []
+    try:
+        result = subprocess.run(
+            ["git", "-C", workdir, "ls-tree", "-r", "--name-only", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return []
+    if result.returncode != 0:
+        return []
+    tracked = set(result.stdout.splitlines())
+    return sorted(candidates & tracked)
+
+
+def _missing_named_paths(question: str, workdir: str, bundle: AssembledBundle) -> list[str]:
+    """Named tracked paths not present in the exact evidence shipped to Jev."""
+    shipped = {entry.file.split(":", 1)[0] for entry in bundle.manifest}
+    return [path for path in _named_tracked_paths(question, workdir) if path not in shipped]
 
 
 def resolve(
@@ -2099,6 +2130,7 @@ def resolve(
     # is the detail a reader needs, and on a successful one it is the provenance
     # of the evidence behind the verdict.
     bundle.notes = list(bundle.notes) + list(index.notes)
+    named_paths_missing = _missing_named_paths(question, workdir, bundle)
     if not bundle.text.strip():
         reason = "budget-exhausted" if bundle.budget_exhausted else "empty-bundle"
         abstain_notes: list[str] = []
@@ -2127,6 +2159,7 @@ def resolve(
             detail=bundle.notes[-1] if bundle.notes else None,
             bundle=bundle,
             notes=abstain_notes,
+            named_paths_missing=named_paths_missing,
         )
 
     state = build_state(question, bundle.text)
@@ -2184,6 +2217,7 @@ def resolve(
             detail=call.detail,
             bundle=bundle,
             attempts=call.attempts,
+            named_paths_missing=named_paths_missing,
         )
 
     payload = call.payload or {}
@@ -2210,15 +2244,29 @@ def resolve(
         f"({MEASURED_MIN_CHARS_PER_TOKEN} chars/token) vs the {MAX_BUNDLE_TOKENS} ceiling"
     )
 
+    missing_kind = choice.value
+    evidence_quality = rubric_position(score_answer.value, legend)
+    if named_paths_missing:
+        # A model cannot classify the existence of code it was not shown.
+        # Keep the score bounded and abstain rather than emitting a false
+        # `implementation` finding about a tracked but unread path.
+        missing_kind = None
+        evidence_quality = min(evidence_quality, 1) if evidence_quality is not None else 1
+        notes.append("named path(s) absent from evidence: " + ", ".join(named_paths_missing))
+
     return ResolutionVerdict(
         question=question,
-        verdict=band_for(probability, resolved_at=resolved_at, review_at=review_at),
-        probability=probability,
-        missing_kind=choice.value,
-        missing_kind_probability=(
-            choice.probabilities.get(choice.value) if choice.probabilities else None
+        verdict=VERDICT_ABSTAIN if named_paths_missing else band_for(
+            probability, resolved_at=resolved_at, review_at=review_at
         ),
-        evidence_quality=rubric_position(score_answer.value, legend),
+        probability=probability,
+        missing_kind=missing_kind,
+        missing_kind_probability=(
+            choice.probabilities.get(choice.value)
+            if choice.probabilities and not named_paths_missing
+            else None
+        ),
+        evidence_quality=evidence_quality,
         evidence_quality_score=score_answer.value,
         evidence_quality_legend=legend,
         manifest=list(bundle.manifest),
@@ -2239,6 +2287,14 @@ def resolve(
         budget_exhausted=bundle.budget_exhausted,
         seeds=list(bundle.seeds),
         dependency_paths=dict(bundle.dependency_paths),
+        named_paths_missing=named_paths_missing,
+        abstain_reason="named-paths-unread" if named_paths_missing else None,
+        abstain_detail=(
+            "tracked path(s) named in the question were not included in evidence: "
+            + ", ".join(named_paths_missing)
+            if named_paths_missing
+            else None
+        ),
         attempts=list(call.attempts),
         notes=notes,
     )

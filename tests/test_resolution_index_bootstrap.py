@@ -504,9 +504,9 @@ def test_fresh_clone_bootstraps_the_index_and_finds_the_preflight_module(
 
     Four assertions, in the order the row states them:
 
-    * before the fix's arm (``bootstrap_index=False``) the clone answers REVIEW /
-      evidence_quality 1 with no ``engine/preflight.py`` in the manifest — the
-      defect, reproduced through the same seams the production path uses;
+    * before bootstrap, the stale clone cannot search for ``engine/preflight.py``;
+      the resolution gate now records it as missing evidence and abstains rather
+      than treating it as an absent implementation;
     * after the tool's own bootstrap, ``hilo graph search`` lists the module;
     * the same resolve answers RESOLVED with ``evidence_quality >= 2`` and
       ``engine/preflight.py`` in ``manifest[].file``;
@@ -528,7 +528,7 @@ def test_fresh_clone_bootstraps_the_index_and_finds_the_preflight_module(
         "the stale index must not be able to answer for the module: " + before_search
     )
 
-    # ── AC4 shape: the pre-fix arm, on the very same clone ──────────────────
+    # ── GR-226: the missing named path is explicit, never graded as absent code ──
     stale_oracle = OraclePoster()
     stale = resolution.resolve(
         QUESTION,
@@ -537,8 +537,11 @@ def test_fresh_clone_bootstraps_the_index_and_finds_the_preflight_module(
         poster=stale_oracle,
         bootstrap_index=False,
     )
-    assert stale.verdict == resolution.VERDICT_REVIEW, stale.verdict
-    assert (stale.evidence_quality or 0) == 1, stale.evidence_quality
+    assert stale.verdict == resolution.VERDICT_ABSTAIN, stale.verdict
+    assert stale.named_paths_missing == ["engine/preflight.py"]
+    assert (stale.evidence_quality or 0) <= 1
+    assert stale.missing_kind != "implementation"
+    assert "engine/preflight.py" in (stale.abstain_detail or "")
     assert "engine/preflight.py" not in _manifest_files(stale)
     assert _EVIDENCE_MARKER not in stale_oracle.bundle
 
