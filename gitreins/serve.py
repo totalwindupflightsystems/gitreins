@@ -29,9 +29,9 @@ project's judgment history without ``cd``.
 
 The viewer lists BOTH kinds of record in ``.gitreins/history`` (DF-GITREINS-POC-36):
 a judge verdict (no ``kind`` key) and a resolution-gate record (``kind:
-"resolution"``, carrying its ``band``). ``GET /api/verdicts`` hands a client the
-marker so the two are separable, and ``GET /api/stats`` counts JUDGMENTS only —
-a resolution band is not a pass/fail and never moves the pass rate.
+"resolution"``, carrying its ``band``). ``GET /api/verdicts`` maps resolution
+bands to ``passed`` (with REVIEW/ABSTAIN remaining ``null``), and
+``GET /api/stats`` counts every record using that same mapping.
 
 Security: binds 127.0.0.1 by default; path params are strictly validated;
 read-only — the server never writes to the repo.  The API is an unversioned
@@ -205,7 +205,7 @@ class VerdictRow(_VerdictRowOptional):
     hash: str
     task_id: str
     title: str
-    passed: bool
+    passed: bool | None
     n_criteria: int
     tier1_passed: bool | None
 
@@ -330,6 +330,20 @@ def _criteria_items(value: object) -> list[Any]:
     return []
 
 
+def resolution_passed(band: object) -> bool | None:
+    """Map a resolution-gate band to the verdict-list pass state.
+
+    REVIEW and ABSTAIN are deliberately indeterminate rather than failures;
+    their band remains on the row for clients to display.
+    """
+    return {
+        "RESOLVED": True,
+        "UNRESOLVED": False,
+        "REVIEW": None,
+        "ABSTAIN": None,
+    }.get(str(band).upper())
+
+
 def _verdict_row(day: str, h: str, v: dict[str, Any]) -> VerdictRow:
     """One metadata-only list row for a parsed verdict document."""
     stages = v.get("stages") or {}
@@ -356,7 +370,11 @@ def _verdict_row(day: str, h: str, v: dict[str, Any]) -> VerdictRow:
         "hash": h,
         "task_id": v.get("task_id", "?"),
         "title": v.get("task_title", ""),
-        "passed": bool(v.get("passed")),
+        "passed": (
+            resolution_passed(v.get("band"))
+            if v.get("kind") == KIND_RESOLUTION
+            else bool(v.get("passed"))
+        ),
         "n_criteria": len(items),
         "tier1_passed": t1.get("passed") if t1 else None,
     }
@@ -515,32 +533,26 @@ def load_qa(workdir: str, limit: int = 200) -> QaPayload:
     return {"ledger": ledger, "runs": rows}
 
 
-def graded_verdicts(verdicts: list[VerdictRow]) -> list[VerdictRow]:
-    """The rows that carry a pass/fail JUDGMENT (not resolution-gate records).
-
-    Both kinds live in the same history store (DF-GITREINS-POC-36), but a
-    resolution record has no ``passed`` — counting one as a failed judgment
-    would inflate the failure rate the stats header exists to report.
-    """
-    return [v for v in verdicts if v.get("kind") != KIND_RESOLUTION]
-
-
 def stats(verdicts: list[VerdictRow]) -> Stats:
     """Counts block for ``GET /api/stats`` (``pass_rate`` is an integer percent).
 
-    Resolution-gate records are excluded from ``total`` (they stay listable
-    through ``GET /api/verdicts``) and are reported separately as
-    ``resolution_records``, so ``total + resolution_records`` always equals
-    the verdict-list length a client sees.
+    ``total`` includes every listed record. Resolution bands use
+    :func:`resolution_passed`, the same mapping exposed on ``/api/verdicts``;
+    REVIEW/ABSTAIN count toward total but neither pass nor fail.
     """
-    graded = graded_verdicts(verdicts)
-    n_pass = sum(1 for v in graded if v["passed"])
+    outcomes = [
+        resolution_passed(v.get("band")) if v.get("kind") == KIND_RESOLUTION else v["passed"]
+        for v in verdicts
+    ]
+    n_pass = sum(outcome is True for outcome in outcomes)
+    n_fail = sum(outcome is False for outcome in outcomes)
+    n_graded = n_pass + n_fail
     return {
-        "total": len(graded),
+        "total": len(verdicts),
         "passed": n_pass,
-        "failed": len(graded) - n_pass,
-        "pass_rate": round(100 * n_pass / len(graded)) if graded else 0,
-        "resolution_records": len(verdicts) - len(graded),
+        "failed": n_fail,
+        "pass_rate": round(100 * n_pass / n_graded) if n_graded else 0,
+        "resolution_records": sum(1 for v in verdicts if v.get("kind") == KIND_RESOLUTION),
     }
 
 
