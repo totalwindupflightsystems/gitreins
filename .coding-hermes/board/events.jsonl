@@ -1324,3 +1324,4 @@
 {"id":1794171000000000164,"timestamp":"2026-11-19 06:36:31.278762","event_type":"task_updated","task_id":"PERF-3","actor":"foreman","detail":"{\"status\":\"blocked\"}","tick_number":null}
 {"id":1794171000000000165,"timestamp":"2026-11-19 06:36:31.458944","event_type":"task_updated","task_id":"OBS-GITREINS-4","actor":"foreman","detail":"{\"status\":\"pending\"}","tick_number":null}
 {"id":1794171000000000166,"timestamp":"2026-11-19 06:37:00.204897","event_type":"task_created","task_id":"OBS-GITREINS-6","actor":"foreman","detail":"{\"id\":\"OBS-GITREINS-6\",\"status\":\"pending\"}","tick_number":null}
+{"id":1794171000000000167,"timestamp":"2026-11-20 09:45:16.934011","event_type":"task_completed","task_id":"GR-237","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
