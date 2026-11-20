@@ -86,6 +86,7 @@ def _guard_config(test_command: str, **overrides: object) -> dict:
         "secrets": False,
         "lint": False,
         "tests": True,
+        "trace": False,  # GR-237: fixture pins its own guard set; the trace lane defaults on
         "test_mode": "full",
         "test_on_clean": True,
         "test_command": test_command,

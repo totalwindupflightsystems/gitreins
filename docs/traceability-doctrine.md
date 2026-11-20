@@ -208,14 +208,8 @@ Two consequences of the check that are worth stating as rules:
 
 Stated so that a reader does not mistake the absence of a failure for compliance:
 
-- **No marker validator ships here.** The six hard rules are enforced by the documentation audit lane
-  and by the reviewer, not by CI. A validator that refuses a marker without `row=`, a
-  reference-closure in `evidence=`, a `memory=` used as the sole citation, and a verdict without a
-  bound reachable commit is the obvious next step; until it exists, this section is the honest
-  description of the enforcement.
-- **The doctrine's own checks are manual.** Running the §7 grep and the §6 gate list is a step a
-  human or a lane performs — nothing here automates it, and nothing fails if it is skipped.
-- **Legacy markers predate this file.** Rows closed before 2026-10-11 were not written against these
-  rules and are not being retro-fitted.
+- **The tier-1 marker validator now ships.** Diff mode grades only markers on added or modified lines (including new/untracked files), and requires `row=` plus a valid `evidence=` value: `none:<reason>`, `commit-<7+ hex>`, a well-formed `.gitreins/history/<date>/<8–16 hex>/verdict.json` locator, `.gitreins/verdicts/verdict.json`, or another repository-relative path that exists on the host. History/verdict locators are shape-checked without requiring host-local artifacts to exist. Full mode checks all markers structurally, but applies the evidence grammar only to markers whose lines `git blame` dates after the cutoff (the current HEAD commit date supplied by the guard); older markers are reported as legacy and are not retrofitted. Board task rows with `created_at` before 2026-10-11 retain the existing grandfathering, as do the two legacy bare-field-list rows without `ch:trace`. The validator still does not check commit-message footers, verdict-commit reachability, or resolution of `spec=`, `test=`, and other fields.
+- **The doctrine's remaining checks are manual.** Running the §7 grep and the §6 gate list is a step a human or a lane performs — nothing here automates it, and nothing fails if it is skipped.
+- **Legacy markers are structurally checked, not rewritten.** In full mode, their `ch:trace` token and mandatory `row=` shape remain enforced while their evidence values are exempt under the blame-dated cutoff.
 
 <!-- ch:trace row=DOC-18 spec=docs/traceability-doctrine.md#2-the-marker doc=docs/traceability-doctrine.md test=none:not-a-code-change witness=none:repository-document -->

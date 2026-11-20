@@ -77,15 +77,18 @@ class TestSkippedStepReasons:
 
     def test_clean_tree_records_skip_reasons(self, tmp_path: Path) -> None:
         repo = _repo(tmp_path)
-        result = _manager(repo).run_all()
+        result = _manager(repo, trace=True).run_all()
 
         assert result.passed is True, "a skip is not a failure"
         assert result.degraded is True
         assert result.skipped_steps == [
+            {"step": "trace", "reason": "no staged files"},
             {"step": "lint", "reason": "no staged files"},
             {"step": "tests", "reason": "no staged files"},
         ]
-        assert result.skip_summary == "lint=no staged files, tests=no staged files"
+        assert result.skip_summary == (
+            "trace=no staged files, lint=no staged files, tests=no staged files"
+        )
         # extra carries the same facts for library/MCP callers.
         assert result.extra["degraded"] is True
         assert result.extra["skipped_steps"] == result.skipped_steps
@@ -133,7 +136,7 @@ class TestSkippedStepReasons:
     def test_config_disabled_guards_are_not_degradations(self, tmp_path: Path) -> None:
         """A disabled gate never runs — only a gate that RAN and skipped counts."""
         repo = _repo(tmp_path)
-        result = _manager(repo, lint=False, tests=False).run_all()
+        result = _manager(repo, lint=False, tests=False, trace=False).run_all()
 
         assert result.skipped_steps == []
         assert result.degraded is False
