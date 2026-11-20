@@ -113,6 +113,7 @@ _GUARDS: dict[str, KeySpec] = {
     "secrets": KeySpec("bool"),
     "lint": KeySpec("bool"),
     "tests": KeySpec("bool"),
+    "trace": KeySpec("bool"),
     "test_mode": KeySpec("str", ("diff", "full")),
     "test_on_clean": KeySpec("bool"),
     "test_command": KeySpec("str"),

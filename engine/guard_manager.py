@@ -51,6 +51,7 @@ from engine.guards import (
 )
 from engine.lsp import find_lsp_tool, run_lsp_check, select_lsp_files
 from engine.repo_paths import WorktreeResolutionError, resolve_worktree_identity
+from engine.trace_validator import validate_trace_markers
 from engine.types import (
     SCANNER_CLEAN,
     SCANNER_NOT_RUN,
@@ -1707,6 +1708,9 @@ class GuardManager:
             "secrets": guards_cfg.get("secrets", True),
             "lint": guards_cfg.get("lint", True),
             "tests": guards_cfg.get("tests", True),
+            "trace": guards_cfg.get(
+                "trace", False
+            ),  # opt-in; this repo enables it in .gitreins/config.yaml
             "dead_code": guards_cfg.get("dead_code", False),  # opt-in: Python-only, can be noisy
             "skylos": guards_cfg.get("skylos", False),  # opt-in: needs pip install
             "static_analysis": guards_cfg.get("static_analysis", False),  # opt-in: type checkers
@@ -1955,6 +1959,16 @@ class GuardManager:
 
         if self._enabled["secrets"]:
             results.append(self._check_secrets())
+            if _timed_out():
+                warnings.append(
+                    f"Guard timed out after {self._hook_timeout}s "
+                    f"(hook_timeout). Remaining checks did not run — the run is "
+                    f"DEGRADED, not a pass (GR-169)."
+                )
+                return _finalize(self._timeout_result(results, warnings))
+
+        if self._enabled["trace"]:
+            results.append(self._check_trace())
             if _timed_out():
                 warnings.append(
                     f"Guard timed out after {self._hook_timeout}s "
@@ -2368,6 +2382,57 @@ class GuardManager:
         """
         _prefix, note = scanner_nice.argv_prefix(self._nice.level, program)
         return note
+
+    def _check_trace(self) -> GuardResult:
+        """Validate repository trace markers over the configured text surfaces."""
+        full = self._grade_full_tree or self.scope == "tree"
+        changed_files = self.changed_files
+        if not full:
+            untracked = subprocess.run(
+                ["git", "-C", self.workdir, "ls-files", "--others", "--exclude-standard"],
+                capture_output=True,
+                text=True,
+            )
+            if untracked.returncode == 0:
+                changed_files = sorted(set(changed_files) | set(untracked.stdout.splitlines()))
+        if not full and not changed_files:
+            return GuardResult(
+                name="trace",
+                passed=True,
+                output="no changed files in scope",
+                skipped=True,
+                skip_reason=(
+                    "no files in scope" if self.scope == "working-tree" else "no staged files"
+                ),
+                graded_scope="diff",
+            )
+        cutoff = None
+        if full:
+            head_date = subprocess.run(
+                ["git", "-C", self.workdir, "show", "-s", "--format=%cs", "HEAD"],
+                capture_output=True,
+                text=True,
+            )
+            if head_date.returncode == 0 and head_date.stdout.strip():
+                cutoff = head_date.stdout.strip()
+        findings = validate_trace_markers(
+            self.workdir, full=full, changed_files=changed_files, scope=self.scope, cutoff=cutoff
+        )
+        if findings:
+            output = "\n".join(finding.render() for finding in findings)
+            return GuardResult(
+                name="trace",
+                passed=False,
+                output=output,
+                error=f"{len(findings)} ch:trace marker violation(s)",
+                graded_scope="full repository trace surfaces",
+            )
+        return GuardResult(
+            name="trace",
+            passed=True,
+            output="all discovered markers valid",
+            graded_scope="full repository trace surfaces",
+        )
 
     def _check_secrets(self) -> GuardResult:
         """Scan the selected change scope for secrets using gitleaks or built-in scanner."""

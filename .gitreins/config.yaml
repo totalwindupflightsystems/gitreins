@@ -2,6 +2,8 @@ guards:
   secrets: true
   lint: true
   tests: true
+  # GR-237: validate prefixed ch:trace markers across repository text surfaces.
+  trace: true
   test_mode: diff
   # INT-CI-13: the docs-drift gate is chained onto the test command so the
   # LOCAL guard (and the pre-commit hook, which just runs `gitreins guard` in
