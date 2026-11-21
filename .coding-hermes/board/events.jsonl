@@ -1349,3 +1349,8 @@
 {"id":1794171000000000189,"timestamp":"2026-11-21 07:53:31.113349","event_type":"task_completed","task_id":"QA-GITREINS-11","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
 {"id":1794171000000000190,"timestamp":"2026-11-21 08:23:09.463667","event_type":"task_updated","task_id":"PERF-3-R2-R2","actor":"foreman","detail":"{\"status\":\"pending\"}","tick_number":null}
 {"id":1794171000000000191,"timestamp":"2026-11-21 08:24:30.191329","event_type":"task_completed","task_id":"INT-CI-20261112-01","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
+{"id":1794171000000000192,"timestamp":"2026-11-21 09:10:35.737176","event_type":"task_completed","task_id":"README-004-R2","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
+{"id":1794171000000000193,"timestamp":"2026-11-21 09:11:17.536759","event_type":"task_updated","task_id":"QA-GITREINS-10","actor":"foreman","detail":"{\"status\":\"blocked\"}","tick_number":null}
+{"id":1794171000000000194,"timestamp":"2026-11-21 09:11:17.619315","event_type":"task_updated","task_id":"QA-GITREINS-9","actor":"foreman","detail":"{\"status\":\"blocked\"}","tick_number":null}
+{"id":1794171000000000195,"timestamp":"2026-11-21 09:11:22.513874","event_type":"task_updated","task_id":"QA-GITREINS-12","actor":"foreman","detail":"{\"status\":\"blocked\"}","tick_number":null}
+{"id":1794171000000000196,"timestamp":"2026-11-21 09:11:22.583797","event_type":"task_updated","task_id":"QA-GITREINS-13","actor":"foreman","detail":"{\"status\":\"blocked\"}","tick_number":null}
