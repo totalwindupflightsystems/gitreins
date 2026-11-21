@@ -425,11 +425,38 @@ A gauge that disagrees with its filesystem source is a wiring bug, not a roundin
 
 Stated plainly rather than guessed:
 
-1. **Who supervises `gitreins serve`?** Nothing on this host runs it, and no cron/systemd
-   unit was found referencing it. Until something does, the server metrics have no process
-   to scrape. This is prerequisite work, not an observability task.
-2. **Is `gitreins serve` deployed anywhere as a service today?** Not verifiable from this
-   host; `docs/judgment-viewer.md` documents it as an operator-launched local viewer.
+1. **Who supervises `gitreins serve`?** Nothing on this host runs it, and nothing supervises it.
+   Measured 2026-11-21 on the work box (`karahermes-mde-7840hs`), not asserted from prose:
+
+   | probe | result |
+   |---|---|
+   | `systemctl is-active gitreins-serve` | `inactive` |
+   | `systemctl list-unit-files \| grep -c gitreins` | `0` |
+   | `ss -ltn \| grep -c ":8616"` | `0` |
+   | `pgrep -af "gitreins serve"` | no output |
+
+   Re-measured 2026-11-21. One trap for whoever re-runs the last probe: inside an agent shell
+   wrapper (`bash -c '...'`) the pattern itself appears in the wrapper's own command line, so
+   `pgrep -af "gitreins serve"` self-matches and prints the wrapper. Discriminate with
+   `ss -ltn | grep -c ":8616"` (0) plus `ps -eo pid,cmd | grep '[g]itreins'`, which on this host
+   lists only `gitreins_mcp/server.py` and short-lived `gitreins judge` / `task complete`
+   processes — no `serve`.
+
+   Until something supervises it, the server metrics have no process to scrape — and no scrape
+   job points at them either: re-measured 2026-11-21 from the monitor, `prometheus.yml` carries no
+   `job_name: gitreins` and `/api/v1/targets` lists 12 jobs / 20 targets without one (§5c,
+   registering it is OBS-GITREINS-4). This is prerequisite work, not an observability task, and
+   **no choice has been made** between its two pending arms — (a) a supervised systemd service,
+   (b) an operator-launched on-demand viewer. **OBS-GITREINS-5** owns that decision; nothing in
+   this spec presumes either arm.
+2. **Reading a cold server's `/metrics` without a false alarm.** `gitreins_serve_up` is a
+   label-less gauge registered and set to `0` at import (`gitreins/serve.py:91-92`), so it is
+   present on a server that has answered nothing. The request counter and duration histogram are
+   label-bearing (`gitreins/serve.py:81-90`; metric names at `:82` and `:87`), so they emit **no
+   sample** until the first request arrives: a plain `gitreins_serve_http_requests_total` query
+   returns an EMPTY vector on a perfectly healthy cold server and reads exactly like a broken
+   endpoint. Use `count(gitreins_serve_up{product="gitreins"}) >= 1` as the liveness proof for a
+   cold server, and only count `_http_requests_total` once traffic exists.
 3. ~~**Does the fleet already have a pushgateway?**~~ **Answered 2026-11-09** (§5c, measured
    from the monitor): no — `docker ps` on fleet-monitor shows 11 containers and none is a
    pushgateway, and `prometheus.yml` carries no pushgateway route. §5b's textfile fallback is
