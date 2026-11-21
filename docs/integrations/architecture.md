@@ -19,3 +19,13 @@ Every review attempt posts a PR comment and a completed GitHub check. A provider
 or review failure posts a failure comment/check instead of reporting success.
 Authenticated GitHub delivery ids, with an event/PR/head fallback, are deduplicated
 in-process before any GitHub or provider call.
+
+## Client-side Action
+
+The root `action.yml` is the client-side counterpart: a composite Action a
+consumer repository references from its own workflow instead of installing the
+inbound App. It holds no App private key, registers no webhook and posts nothing
+on the consumer's behalf — it runs `gitreins guard` and `gitreins judge` in the
+checkout and gates the workflow with the step's exit status. Inputs, outputs and
+the secret-handling rule are documented in
+[github-action.md](github-action.md).
