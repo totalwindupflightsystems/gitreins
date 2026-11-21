@@ -1,0 +1,95 @@
+name: GitReins review and guard
+description: Run GitReins Tier 1 guards and judge a task in a consumer checkout
+branding:
+  icon: shield
+  color: blue
+inputs:
+  path:
+    description: Repository path relative to the GitHub workspace
+    required: false
+    default: .
+  scope:
+    description: Judge change scope, staged or working-tree; stage changes first in a clean checkout
+    required: false
+    default: working-tree
+  task-id:
+    description: Existing GitReins task ID; leave empty to use inline title and criterion
+    required: false
+    default: ''
+  title:
+    description: Title for an ephemeral inline task when task-id is empty
+    required: false
+    default: ''
+  criterion:
+    description: Criterion for an ephemeral inline task when task-id is empty
+    required: false
+    default: ''
+  tier1-only:
+    description: Set to true to skip the Tier 2 LLM judge
+    required: false
+    default: 'false'
+  api-key-env:
+    description: Name of the environment variable containing the provider API key supplied from GitHub secrets
+    required: false
+    default: GITREINS_LLM_API_KEY
+outputs:
+  verdict-path:
+    description: Absolute path to the JSON judge evidence on the runner
+    value: ${{ steps.evaluate.outputs.verdict-path }}
+  summary:
+    description: pass or fail; fail is also returned as a non-zero step exit
+    value: ${{ steps.evaluate.outputs.summary }}
+runs:
+  using: composite
+  steps:
+    - name: Install pinned GitReins
+      shell: bash
+      run: python -m pip install 'git+https://github.com/totalwindupflightsystems/gitreins.git@cb9ec90ede1cb8036cbe9416f041d1121606628a'
+    - name: Run guard and judge
+      id: evaluate
+      shell: bash
+      env:
+        ACTION_PATH: ${{ inputs.path }}
+        ACTION_SCOPE: ${{ inputs.scope }}
+        ACTION_TASK_ID: ${{ inputs.task-id }}
+        ACTION_TITLE: ${{ inputs.title }}
+        ACTION_CRITERION: ${{ inputs.criterion }}
+        ACTION_TIER1_ONLY: ${{ inputs.tier1-only }}
+        ACTION_API_KEY_ENV: ${{ inputs.api-key-env }}
+      run: |
+        set -uo pipefail
+        verdict="$RUNNER_TEMP/gitreins-verdict-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.json"
+        printf 'verdict-path=%s\nsummary=fail\n' "$verdict" >> "$GITHUB_OUTPUT"
+        case "$ACTION_SCOPE" in staged|working-tree) ;; *) echo 'Invalid scope' >&2; exit 1 ;; esac
+        case "$ACTION_TIER1_ONLY" in true|false) ;; *) echo 'Invalid tier1-only value' >&2; exit 1 ;; esac
+        if [[ ! "$ACTION_API_KEY_ENV" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
+          echo 'Invalid API key environment variable name' >&2; exit 1
+        fi
+        if [[ "$ACTION_TIER1_ONLY" == false ]]; then
+          if [[ -z "${!ACTION_API_KEY_ENV:-}" ]]; then
+            echo 'Required API key environment variable is empty' >&2; exit 1
+          fi
+          export GITREINS_LLM_API_KEY="${!ACTION_API_KEY_ENV}"
+        fi
+        cd -- "$GITHUB_WORKSPACE/$ACTION_PATH" || exit 1
+        args=(--scope "$ACTION_SCOPE" --json)
+        if [[ "$ACTION_TIER1_ONLY" == true ]]; then args+=(--skip-tier2); fi
+        if [[ -n "$ACTION_TASK_ID" ]]; then
+          if [[ -n "$ACTION_TITLE" || -n "$ACTION_CRITERION" ]]; then
+            echo 'Choose task-id or inline title and criterion, not both' >&2; exit 1
+          fi
+          args+=(-- "$ACTION_TASK_ID")
+        else
+          if [[ -z "$ACTION_TITLE" || -z "$ACTION_CRITERION" ]]; then
+            echo 'Provide task-id or both title and criterion' >&2; exit 1
+          fi
+          args+=(--ephemeral --title "$ACTION_TITLE" --criterion "$ACTION_CRITERION")
+        fi
+        guard_status=0
+        gitreins guard --scope tree --full || guard_status=$?
+        # gitreins review manages findings; judge performs the evaluation.
+        judge_status=0
+        gitreins judge "${args[@]}" > "$verdict" || judge_status=$?
+        if [[ "$guard_status" -ne 0 || "$judge_status" -ne 0 ]]; then exit 1; fi
+        python -c 'import json,sys; d=json.load(open(sys.argv[1])); sys.exit(0 if d.get("outcome") == "pass" and d.get("passed") is True else 1)' "$verdict" || exit 1
+        printf 'summary=pass\n' >> "$GITHUB_OUTPUT"
