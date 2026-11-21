@@ -52,7 +52,6 @@ Thumbs.db
 .skylos/
 # Node (if present from bootstrap)
 node_modules/
-apps/
 packages/
 temporal-vector/
 # Temp
