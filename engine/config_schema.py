@@ -239,6 +239,12 @@ _CRITERIA: dict[str, KeySpec] = {
     "enforce": KeySpec("str", ("refuse", "warn", "off")),
 }
 
+# ── fingerprint: ─────────────────────────────────────────────────────────────
+# Read by engine/fingerprint.py through load_raw_config at observation time.
+# A path in (or under) a directory with its own .git refuses the observation
+# unless the owner opts in; the opt-in hashes those paths as ordinary content.
+_FINGERPRINT: dict[str, KeySpec] = {"allow_nested_repositories": KeySpec("bool")}
+
 # ── pipeline / commit_audit: ─────────────────────────────────────────────────
 _PIPELINE: dict[str, KeySpec] = {"stages": KeySpec("list")}
 _COMMIT_AUDIT: dict[str, KeySpec] = {
@@ -265,6 +271,7 @@ _SECTIONS: dict[str, dict[str, KeySpec]] = {
     "history": _HISTORY,
     "resolution": _RESOLUTION,
     "criteria": _CRITERIA,
+    "fingerprint": _FINGERPRINT,
     "pipeline": _PIPELINE,
     "commit_audit": _COMMIT_AUDIT,
     "quality": _specs_from_dataclass(QualityConfig),

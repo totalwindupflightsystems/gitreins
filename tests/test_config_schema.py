@@ -111,6 +111,19 @@ def test_worktree_fleet_section_keys_are_known() -> None:
     assert validate_config(config) == []
 
 
+def test_fingerprint_section_keys_are_known() -> None:
+    """`fingerprint.allow_nested_repositories` validates instead of warning.
+
+    engine/fingerprint.py reads the key through load_raw_config, so it is not
+    covered by the accessor scans above; the schema must still know it, or a
+    repo that legitimately opts in gets an "unknown key" warning on every run.
+    """
+    assert validate_config({"fingerprint": {"allow_nested_repositories": True}}) == []
+
+    typo = validate_config({"fingerprint": {"allow_nested_repos": True}})
+    assert typo, "a misspelled key inside the section must still warn"
+
+
 def test_loader_reads_the_writers_venv_spellings() -> None:
     """The venv knobs the install writer emits must reach the loaded defaults."""
     config = {
