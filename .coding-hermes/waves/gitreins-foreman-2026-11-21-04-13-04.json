@@ -1,0 +1,46 @@
+{
+  "tick_id": "gitreins-foreman-2026-11-21-04-13-04",
+  "created_at": "2026-11-21T04:25:00-05:00",
+  "workdir": "/home/kara/gitreins",
+  "wave_budget": 5,
+  "workers_dispatched": 2,
+  "tasks": [
+    {
+      "task_id": "GR-239",
+      "kind": "worker",
+      "worktree": "/home/kara/worktrees/gitreins-GR-239",
+      "branch": "wt/GR-239",
+      "status": "dispatched",
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro",
+      "base_sha": "397d799a",
+      "dispatch": "attempt2-hermes-z-openai-gpt-6.1-terra-xkiro"
+    },
+    {
+      "task_id": "QA-GITREINS-11",
+      "kind": "worker",
+      "worktree": "/home/kara/worktrees/gitreins-QA-GITREINS-11",
+      "branch": "wt/QA-GITREINS-11",
+      "status": "dispatched",
+      "model": "openai/gpt-6.1-terra",
+      "provider": "xkiro",
+      "base_sha": "397d799a",
+      "dispatch": "attempt2-hermes-z-openai-gpt-6.1-terra-xkiro"
+    },
+    {
+      "task_id": "RELEASE-028",
+      "kind": "foreman-direct",
+      "status": "judge-running-standalone (gitreins judge RELEASE-028; task complete refused: board row must be terminal first — fleet order judge→close row→complete)",
+      "action": "clean re-judge: gitreins task start + task complete (criterion-1 jq proof fixed in .gitreins/tasks.yaml on 2026-11-20; run 475743e7 criterion-1 ungraded via malformed proof)"
+    }
+  ],
+  "premise_dead_closures_planned": [
+    {
+      "task_id": "GR-230",
+      "evidence": "fixed by 33881ff5 (2026-11-16, ancestor of main): re-pinned CLI surface at 26 + docs/cli review subcommand; tests/test_cli_doc_sync.py 11/11 PASS at HEAD 397d799a; INT-CI-3722 already complete"
+    }
+  ],
+  "incidents": [
+    "attempt1 (hermes chat -q): WRONG SEAT — chat ignored -m, sessions served deepseek-v4p1-flash via fireworks (state.db rowids 1784529/1784530); killed both, swept orphans, reset worktrees, re-dispatched via hermes -z which binds -m"
+  ]
+}
