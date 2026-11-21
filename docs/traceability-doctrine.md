@@ -59,6 +59,10 @@ ch:trace row=<ID> spec=<path#anchor> wave=<tick>#<step> test=<path::test> doc=<p
 A stored marker is **one line**. The wrapping above is documentation formatting only: markers written
 into a board row, a commit footer or an artifact must be greppable as a single logical line.
 
+Free-text annotation tokens may sit between the field tokens (an inline note about how the work went).
+Every `name=value` token on the marker line is parsed, so an annotation never hides a field that
+follows it; annotation text after the last field is not part of the marker.
+
 Partial markers are honest — an author fills what is known and omits the rest. What is never
 acceptable is silence: an unsupported claim is a marker that should not have been written, not a
 marker with a plausible-looking value.

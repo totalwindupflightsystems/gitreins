@@ -14,6 +14,13 @@ def _write(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
+def _fields(marker: str) -> dict[str, str]:
+    """Parse the marker's fields the way the validator does."""
+    from engine.trace_validator import _FIELDS
+
+    return dict(_FIELDS.findall(marker.removeprefix("ch:trace")))
+
+
 def test_dangling_evidence_fails_and_quotes_marker(tmp_path: Path) -> None:
     marker = "ch:trace row=GR-X evidence=artifacts/missing.log"
     _write(tmp_path / "docs/example.md", marker + "\n")
@@ -229,3 +236,83 @@ def test_history_locator_shape_does_not_require_file(tmp_path: Path) -> None:
 
     assert not (tmp_path / ".gitreins/history/2026-10-12/abcdef0123456789/verdict.json").exists()
     assert validate_trace_markers(tmp_path) == []
+
+
+class TestAnnotationTolerance:
+    """Free-text annotation tokens between field tokens must not truncate a marker."""
+
+    def test_fields_after_annotation_are_parsed(self, tmp_path: Path) -> None:
+        _write(tmp_path / "docs/artifact.txt", "generated output\n")
+        marker = (
+            "ch:trace row=GR-239 spec=docs/example.md annotation-text-here "
+            "test=tests/test_guard_trace.py evidence=docs/artifact.txt"
+        )
+        _write(tmp_path / "docs/example.md", marker + "\n")
+
+        markers = scan_trace_markers(tmp_path)
+
+        assert markers == [("docs/example.md", 1, marker)]
+        assert _fields(markers[0][2]) == {
+            "row": "GR-239",
+            "spec": "docs/example.md",
+            "test": "tests/test_guard_trace.py",
+            "evidence": "docs/artifact.txt",
+        }
+        assert validate_trace_markers(tmp_path) == []
+
+    def test_markers_within_one_line_stay_separate(self, tmp_path: Path) -> None:
+        _write(
+            tmp_path / "docs/example.md",
+            "ch:trace row=A-1 note: first claim evidence=none:first, "
+            "ch:trace row=B-2 note: second claim evidence=none:second\n",
+        )
+
+        assert scan_trace_markers(tmp_path) == [
+            ("docs/example.md", 1, "ch:trace row=A-1 note: first claim evidence=none:first,"),
+            ("docs/example.md", 1, "ch:trace row=B-2 note: second claim evidence=none:second"),
+        ]
+
+    def test_board_json_marker_does_not_swallow_json_fields(self, tmp_path: Path) -> None:
+        marker = "ch:trace row=B-1 note: free text here evidence=none:fixture"
+        _write(
+            tmp_path / ".coding-hermes/board/events.jsonl",
+            json.dumps({"detail": marker, "reasoning": "row=OTHER spec=docs/other.md"}) + "\n",
+        )
+
+        assert scan_trace_markers(tmp_path) == [(".coding-hermes/board/events.jsonl", 1, marker)]
+        assert validate_trace_markers(tmp_path) == []
+
+    def test_annotation_without_evidence_still_fails(self, tmp_path: Path) -> None:
+        _write(
+            tmp_path / "docs/example.md",
+            "ch:trace row=GR-239 note: the artifact went missing test=tests/test_guard_trace.py\n",
+        )
+
+        findings = validate_trace_markers(tmp_path)
+
+        assert len(findings) == 1
+        assert findings[0].reason == "missing required evidence="
+
+    def test_annotation_without_row_still_fails(self, tmp_path: Path) -> None:
+        _write(
+            tmp_path / "docs/example.md",
+            "ch:trace note: no work unit named test=none:not-a-code-change "
+            "evidence=none:fixture-only\n",
+        )
+
+        findings = validate_trace_markers(tmp_path)
+
+        assert len(findings) == 1
+        assert findings[0].reason == "missing required row="
+
+    def test_annotation_with_dangling_evidence_still_fails(self, tmp_path: Path) -> None:
+        _write(
+            tmp_path / "docs/example.md",
+            "ch:trace row=GR-239 note: run once more test=none:not-a-code-change "
+            "evidence=artifacts/missing.log\n",
+        )
+
+        findings = validate_trace_markers(tmp_path)
+
+        assert len(findings) == 1
+        assert findings[0].reason == "invalid evidence value: artifacts/missing.log"

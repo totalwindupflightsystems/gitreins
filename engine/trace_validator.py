@@ -5,6 +5,10 @@ structural checks on historical markers and apply the evidence grammar only to
 markers blamed after the supplied cutoff. Commit-message footers and semantic
 resolution of fields other than evidence are intentionally out of scope.
 
+Markers may carry free-text annotation tokens between their field tokens; the
+scanner keeps every field on the line instead of stopping at the first token
+that is not ``name=value``.
+
 ch:trace row=GR-237 test=tests/test_guard_trace.py evidence=tests/test_guard_trace.py
 """
 
@@ -18,8 +22,10 @@ from datetime import date
 from pathlib import Path
 
 DOCTRINE_DATE = date(2026, 10, 11)
-_MARKER = re.compile(r"ch:trace(?:[ \t]+[A-Za-z_][A-Za-z0-9_-]*=[^\s\"']+)+")
+_MARKER_PREFIX = re.compile(r"ch:trace(?=[ \t])")
+_TOKEN = re.compile(r"[^ \t]+")
 _FIELDS = re.compile(r"([A-Za-z_][A-Za-z0-9_-]*)=([^\s\"']+)")
+_QUOTES = ('"', "'")
 _HISTORY_LOCATOR = re.compile(
     r"\.gitreins/history/\d{4}-\d{2}-\d{2}/[0-9a-fA-F]{8,16}/verdict\.json\Z"
 )
@@ -63,6 +69,39 @@ def _is_doctrine_grammar_example(path: Path, line: str) -> bool:
     )
 
 
+def _markers_on_line(line: str) -> list[str]:
+    """Return each prefixed marker on one line, tolerating annotation tokens.
+
+    A marker is the ``ch:trace`` prefix plus whitespace-separated tokens. Any
+    token may be free text (a human annotation), so the marker runs to the last
+    ``field=value`` token appearing before the next marker, an embedded quote
+    (JSON string boundary) or the end of the line. Free text after the last
+    field is dropped so reported markers stay field-shaped, while free text
+    BETWEEN fields is retained and never hides the fields that follow it.
+    """
+    starts = [match.start() for match in _MARKER_PREFIX.finditer(line)]
+    markers: list[str] = []
+    body = len("ch:trace")
+    for index, start in enumerate(starts):
+        stop = starts[index + 1] if index + 1 < len(starts) else len(line)
+        last_field_end = -1
+        for token in _TOKEN.finditer(line, start + body, stop):
+            text = token.group(0)
+            cuts = [position for position in map(text.find, _QUOTES) if position >= 0]
+            terminated = bool(cuts)
+            if terminated:
+                text = text[: min(cuts)]
+            if not text:
+                break
+            if _FIELDS.fullmatch(text):
+                last_field_end = token.start() + len(text)
+            if terminated:
+                break
+        if last_field_end > 0:
+            markers.append(line[start:last_field_end])
+    return markers
+
+
 def scan_trace_markers(root: str | Path) -> list[tuple[str, int, str]]:
     """Discover prefixed markers on the documented text surfaces."""
     repo = Path(root).resolve()
@@ -76,7 +115,7 @@ def scan_trace_markers(root: str | Path) -> list[tuple[str, int, str]]:
         for number, line in enumerate(lines, 1):
             if _is_doctrine_grammar_example(path, line):
                 continue
-            found.extend((rel, number, match.group(0)) for match in _MARKER.finditer(line))
+            found.extend((rel, number, marker) for marker in _markers_on_line(line))
     return found
 
 
