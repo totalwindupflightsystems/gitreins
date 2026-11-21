@@ -202,6 +202,83 @@ def test_nested_repo_refuses_with_named_state(tmp_path: Path) -> None:
     assert compute(repo).state == "nested-repository"
 
 
+def _nested_subtree(repo: Path) -> Path:
+    """A nested repository under *repo* whose files the OUTER repo tracks.
+
+    Git refuses to `git add` a path inside a nested repository, so the shape the
+    opt-in exists for is produced the way it occurs in practice (a checkout that
+    tracked the subtree before the directory became its own repository): track
+    the files first, then initialize the inner repository.
+    """
+    nested = repo / "projects" / "app"
+    (nested / "sub").mkdir(parents=True)
+    (nested / "state.json").write_text('{"version": 1}\n')
+    (nested / "sub" / "deep.txt").write_text("deep\n")
+    _git(repo, "add", "projects/app")
+    _git(repo, "commit", "-qm", "track nested project store")
+    _git(nested, "init", "-q")
+    (nested / "inner-only.txt").write_text("inner\n")
+    return nested
+
+
+def _write_config(repo: Path, body: str) -> None:
+    config_dir = repo / ".gitreins"
+    config_dir.mkdir(exist_ok=True)
+    (config_dir / "config.yaml").write_text(body, encoding="utf-8")
+
+
+def test_nested_opt_in_hashes_the_subtree_as_authoritative_content(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    nested = _nested_subtree(repo)
+    _write_config(repo, "fingerprint:\n  allow_nested_repositories: true\n")
+
+    before = _assert_authoritative(repo)
+
+    (nested / "state.json").write_text('{"version": 2}\n')
+
+    after = _assert_authoritative(repo)
+    assert after.digest != before.digest
+
+
+def test_nested_opt_in_is_read_from_the_target_repos_config(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    _nested_subtree(repo)
+
+    _write_config(repo, "history:\n  storage: filesystem\n")
+    assert compute(repo).state == "nested-repository"
+
+    _write_config(repo, "fingerprint:\n  allow_nested_repositories: false\n")
+    assert compute(repo).state == "nested-repository"
+
+    _write_config(repo, "fingerprint:\n  allow_nested_repositories: true\n")
+    assert _assert_authoritative(repo).digest
+
+
+def test_nested_opt_in_treats_a_bare_git_directory_as_a_directory(tmp_path: Path) -> None:
+    repo = _repo(tmp_path)
+    vendored = repo / "vendored"
+    vendored.mkdir()
+    (vendored / ".git").mkdir()
+    (vendored / "notes.txt").write_text("notes\n")
+    _git(repo, "add", "vendored/notes.txt")
+    _git(repo, "commit", "-qm", "track vendored notes")
+
+    assert compute(repo).state == "nested-repository"
+
+    _write_config(repo, "fingerprint:\n  allow_nested_repositories: true\n")
+    opted_in = _assert_authoritative(repo)
+
+    # The nested .git directory contributes no content: dropping it leaves the
+    # digest unchanged, which is what "hashed as ordinary content" means.
+    (vendored / ".git").rmdir()
+
+    assert _assert_authoritative(repo).digest == opted_in.digest
+
+    (vendored / "notes.txt").write_text("notes edited\n")
+
+    assert _assert_authoritative(repo).digest != opted_in.digest
+
+
 def test_non_sha1_repo_refuses_with_named_state(tmp_path: Path) -> None:
     repo = tmp_path / "sha256-repo"
     repo.mkdir()

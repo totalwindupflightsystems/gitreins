@@ -16,6 +16,26 @@ absolute paths are deliberately absent. Thus staging or unstaging identical
 workspace bytes cannot change the digest, and repositories with identical visible
 content hash identically even when their HEADs differ (including an unborn HEAD).
 
+A path that lives in — or under — a directory carrying its own ``.git`` is
+refused with the named state ``nested-repository`` by default: the outer index
+cannot speak for bytes another repository owns. Some checkouts legitimately
+carry such a subtree in the outer index (an application's own git-backed project
+store, a vendored tool). The repository owner can declare that acceptable per
+target repo:
+
+    fingerprint:
+      allow_nested_repositories: true    # default: false
+
+With the flag on, the digest covers exactly the paths the outer repository
+defines — the index plus the untracked, non-ignored set — and a nested subtree is
+hashed as ordinary content: a nested ``.git`` directory is a directory and
+contributes nothing, while the files beside it are hashed byte-for-byte like any
+other path. The nested repository's own history, modes and ignore rules are
+never consulted, so its commits do not move this digest and an ignored file
+inside it that the outer repository lists is still hashed. Only a literal YAML
+``true`` opts in; a missing, unreadable or malformed config, or any other value,
+keeps the refusal.
+
 This is an observation of a workspace, not an atomic snapshot. It can detect some
 concurrent changes and otherwise fails closed where Git transformations make raw
 workspace bytes non-authoritative, but it is not protection against an adversary
@@ -37,6 +57,8 @@ from typing import Iterable
 
 _AUTHORITATIVE = "authoritative"
 _DOMAIN = b"gitreins-working-tree-content-v1\0"
+_OPT_IN_SECTION = "fingerprint"
+_OPT_IN_KEY = "allow_nested_repositories"
 _SELF_STATE_PATHS = {
     b".gitreins/review-state.json",
     b".gitreins/review-state.lock",
@@ -234,6 +256,26 @@ def _attributes_preflight(root: Path, paths: list[bytes], deadline: _Deadline) -
             raise _Refusal("active-textconv")
 
 
+def _allow_nested_repositories(root: Path) -> bool:
+    """Read ``fingerprint.allow_nested_repositories`` from the target repo.
+
+    The flag widens what this digest claims to observe, so it is fail-closed:
+    only a literal boolean ``true`` opts in. A missing file, an unreadable or
+    malformed config, a section that is not a mapping, and any non-boolean value
+    (``"true"``, ``1``, ``yes``) all keep the ``nested-repository`` refusal,
+    because a config typo must never turn a refusal into an authoritative digest.
+    """
+    try:
+        from engine.config import load_raw_config
+
+        section = load_raw_config(str(root)).get(_OPT_IN_SECTION)
+    except Exception:  # a config read must never make the observation fail open
+        return False
+    if not isinstance(section, dict):
+        return False
+    return section.get(_OPT_IN_KEY) is True
+
+
 def _has_nested_repo(root_bytes: bytes, relative: bytes) -> bool:
     relative = relative.rstrip(b"/")
     current = os.path.dirname(os.path.join(root_bytes, relative))
@@ -252,9 +294,15 @@ def _has_nested_repo(root_bytes: bytes, relative: bytes) -> bool:
     )
 
 
-def _read_visible_bytes(root_bytes: bytes, relative: bytes, deadline: _Deadline) -> bytes | None:
+def _read_visible_bytes(
+    root_bytes: bytes,
+    relative: bytes,
+    deadline: _Deadline,
+    *,
+    allow_nested_repositories: bool = False,
+) -> bytes | None:
     deadline.check()
-    if _has_nested_repo(root_bytes, relative):
+    if not allow_nested_repositories and _has_nested_repo(root_bytes, relative):
         raise _Refusal("nested-repository")
     absolute = os.path.join(root_bytes, relative)
     try:
@@ -272,7 +320,10 @@ def _read_visible_bytes(root_bytes: bytes, relative: bytes, deadline: _Deadline)
         deadline.check()
         return target if isinstance(target, bytes) else os.fsencode(target)
     if stat.S_ISDIR(info.st_mode):
-        if os.path.lexists(os.path.join(absolute, b".git")):
+        # A directory carries no content of its own. By default a directory that
+        # holds its own .git IS the nested-repository refusal; once the owner has
+        # opted in it is just a directory and contributes nothing.
+        if not allow_nested_repositories and os.path.lexists(os.path.join(absolute, b".git")):
             raise _Refusal("nested-repository")
         return None
     if not stat.S_ISREG(info.st_mode):
@@ -341,10 +392,16 @@ def compute(repo_root: str | os.PathLike[str], timeout_s: float = 30.0) -> Finge
 
     Every unsupported/non-authoritative condition returns a named ``state`` and
     an empty digest. Time spent in Git and file reads shares one deadline.
+    Nested repositories are refused unless the TARGET repo sets
+    ``fingerprint.allow_nested_repositories: true`` in its
+    ``.gitreins/config.yaml`` (see the module docstring); the flag is read here
+    rather than threaded through every caller, because the digest is the only
+    thing it changes.
     """
     deadline = _Deadline(timeout_s)
     root = Path(repo_root).resolve()
     try:
+        allow_nested_repositories = _allow_nested_repositories(root)
         _flag_preflight(root, deadline)
         index_entries = _parse_index(root, deadline)
         untracked = _untracked_paths(root, deadline)
@@ -354,7 +411,12 @@ def compute(repo_root: str | os.PathLike[str], timeout_s: float = 30.0) -> Finge
         root_bytes = os.fsencode(root)
         visible: dict[bytes, bytes] = {}
         for relative in paths:
-            content = _read_visible_bytes(root_bytes, relative, deadline)
+            content = _read_visible_bytes(
+                root_bytes,
+                relative,
+                deadline,
+                allow_nested_repositories=allow_nested_repositories,
+            )
             if content is not None:
                 visible[relative] = content
 

@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`fingerprint.allow_nested_repositories` — an opt-in for checkouts whose
+  outer index tracks a nested repository.** The working-tree fingerprint refused
+  with `state=nested-repository` whenever any tracked or untracked path lived in
+  (or under) a directory carrying its own `.git`, which made verdict persistence
+  impossible for a repo that deliberately tracks such a subtree (an app's own
+  git-backed project store, a vendored tool). The default is unchanged and
+  byte-for-byte identical: `false` keeps the refusal. A repo that sets it in its
+  own `.gitreins/config.yaml` gets an authoritative digest over exactly the paths
+  its index and untracked set define — files under the nested subtree are hashed
+  as ordinary content and the nested `.git` directory contributes nothing. Only a
+  literal YAML `true` opts in; a missing, unreadable or malformed config, or a
+  non-boolean value, keeps the refusal.
+
 ### Changed
 - **Tier 2 coverage now documents, and enforces, its echo-matching contract.**
   0.21.0 shipped the narrowed matcher in `engine/gate.py::_matches` but its

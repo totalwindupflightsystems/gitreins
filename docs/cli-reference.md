@@ -1608,6 +1608,27 @@ exit **1** and name the refusal state instead of falling back to `HEAD^{tree}`.
 The digest observes workspace content; it is not an atomic snapshot or protection
 against an adversary restoring previously observed state.
 
+### Nested repositories: opt-in
+
+By default a path that lives in — or under — a directory carrying its own `.git`
+refuses the observation with `state=nested-repository`, because the outer index
+cannot speak for bytes another repository owns. A repo whose outer index
+legitimately tracks such a subtree (an application's own git-backed project
+store, a vendored tool) can declare it acceptable for that target repo:
+
+```yaml
+fingerprint:
+  allow_nested_repositories: true    # default: false
+```
+
+With the flag on, the fingerprint is authoritative and covers exactly the paths
+the outer repository defines — its index plus its untracked, non-ignored set.
+Files under the nested subtree are hashed as ordinary content; the nested `.git`
+directory is a directory and contributes nothing. The nested repository's own
+history, modes and ignore rules are never consulted, so committing inside it does
+not move the digest. Only a literal YAML `true` opts in: a missing, unreadable or
+malformed config, or any non-boolean value, keeps the refusal.
+
 ## Hooks
 
 - **pre-commit**: installed by `gitreins install`; runs `gitreins guard
