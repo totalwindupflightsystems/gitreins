@@ -10,28 +10,34 @@
       "kind": "worker",
       "worktree": "/home/kara/worktrees/gitreins-GR-239",
       "branch": "wt/GR-239",
-      "status": "dispatched",
+      "status": "complete",
       "model": "openai/gpt-6.1-terra",
       "provider": "xkiro",
       "base_sha": "397d799a",
-      "dispatch": "attempt2-hermes-z-openai-gpt-6.1-terra-xkiro"
+      "dispatch": "attempt2-hermes-z-openai-gpt-6.1-terra-xkiro",
+      "merge_commit": "ba8a2867901741e0340ca0af7aeb449d7d100b28",
+      "recovery": "commit is an ancestor of main@1d3ded15; worktree reaped; branch deleted; board row reads status=complete"
     },
     {
       "task_id": "QA-GITREINS-11",
       "kind": "worker",
       "worktree": "/home/kara/worktrees/gitreins-QA-GITREINS-11",
       "branch": "wt/QA-GITREINS-11",
-      "status": "dispatched",
+      "status": "complete",
       "model": "openai/gpt-6.1-terra",
       "provider": "xkiro",
       "base_sha": "397d799a",
-      "dispatch": "attempt2-hermes-z-openai-gpt-6.1-terra-xkiro"
+      "dispatch": "attempt2-hermes-z-openai-gpt-6.1-terra-xkiro",
+      "merge_commit": "f48272c7455254f66711878f22c0d803efa554bf",
+      "recovery": "commit is an ancestor of main@1d3ded15; worktree reaped; branch deleted; board row reads status=complete"
     },
     {
       "task_id": "RELEASE-028",
       "kind": "foreman-direct",
-      "status": "judge-running-standalone (gitreins judge RELEASE-028; task complete refused: board row must be terminal first — fleet order judge→close row→complete)",
-      "action": "clean re-judge: gitreins task start + task complete (criterion-1 jq proof fixed in .gitreins/tasks.yaml on 2026-11-20; run 475743e7 criterion-1 ungraded via malformed proof)"
+      "status": "complete",
+      "merge_commit": "a2c5de1314aa6c43a83961f8d8094f66e6f141c3",
+      "action": "clean re-judge: gitreins task start + task complete (criterion-1 jq proof fixed in .gitreins/tasks.yaml on 2026-11-20; run 475743e7 criterion-1 ungraded via malformed proof)",
+      "recovery": "commit is an ancestor of main@1d3ded15; board row reads status=complete"
     }
   ],
   "premise_dead_closures_planned": [
@@ -42,5 +48,8 @@
   ],
   "incidents": [
     "attempt1 (hermes chat -q): WRONG SEAT — chat ignored -m, sessions served deepseek-v4p1-flash via fireworks (state.db rowids 1784529/1784530); killed both, swept orphans, reset worktrees, re-dispatched via hermes -z which binds -m"
-  ]
+  ],
+  "finished_at": "2026-11-21T10:58:00-05:00",
+  "recovered_by": "gitreins-foreman-2026-11-21-10-55-55",
+  "recovery_verdict": "wave carried 0 live workers at recovery time: both worker branches had already been merged and their worktrees reaped by prior ticks, and every manifest task reads status=complete with its commit an ancestor of main@1d3ded15. No branch left to gate or merge; nothing skipped, nothing refused."
 }
