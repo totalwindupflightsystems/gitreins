@@ -83,6 +83,11 @@ DEFAULT_FILE_SCOPE = "full"
 # Default cap on a whole-file read (GR-170). Above this, read_file refuses the
 # whole-file read and asks for a range — see AgenticEvaluator.max_read_bytes.
 DEFAULT_MAX_READ_BYTES = 524_288
+# DF-INTCI-027: single run_command bound for tier-2 tool calls. 30 s is the
+# fleet-proven default; repos whose gate suite needs longer set
+# evaluator.command_timeout in .gitreins/config.yaml. The bound group-kills
+# (run_bounded), so raising it does not weaken orphan reaping.
+DEFAULT_COMMAND_TIMEOUT = 30.0
 
 # GR-176: how many criteria the judge may add to the task's own list. The owner's
 # layer-3 point — "it needs to look at the task and decide what criteria is extra
@@ -789,7 +794,7 @@ class AgenticEvaluator:
         workdir: str = ".",
         max_iterations: int | None = None,
         eval_cap: str | EvalCap | None = None,
-        command_timeout: int = 30,
+        command_timeout: float | int | None = None,
         config_root: str | None = None,
     ) -> None:
         self.llm = llm
@@ -816,8 +821,11 @@ class AgenticEvaluator:
             self.eval_cap.max_iterations if self.eval_cap.max_iterations > 0 else 10_000
         )
 
-        # Command timeout for tool calls — configurable for tests
-        self.command_timeout = command_timeout
+        # Command timeout for tool calls — explicit arg wins, then
+        # evaluator.command_timeout from config.yaml, then the 30 s default
+        # (DF-INTCI-027: previously hardcoded, group-killing slow gate suites
+        # and leaving the tier-2 judge retrying zero-byte logs forever).
+        self.command_timeout = self._resolve_command_timeout(command_timeout)
 
         # TRBL-138: resolve tool handlers once and capture each one's
         # signature, so _execute_tool can pre-check a model-supplied
@@ -881,6 +889,37 @@ class AgenticEvaluator:
         # worse than no read — the judge would grade against half a file and
         # believe it saw the whole thing. Range reads remain available.
         self.max_read_bytes: int = int(evaluator_cfg.get("max_read_bytes", DEFAULT_MAX_READ_BYTES))
+
+    def _resolve_command_timeout(self, command_timeout: float | int | str | None) -> float:
+        """Resolve the run_command bound: explicit arg > config > 30 s default."""
+        if command_timeout is not None:
+            if isinstance(command_timeout, bool):
+                raise TypeError("command_timeout must be a number of seconds, not a bool")
+            return float(command_timeout)
+        config = self._load_config()
+        evaluator_cfg = config.get("evaluator", {}) or {}
+        raw = evaluator_cfg.get("command_timeout")
+        if raw is None:
+            return DEFAULT_COMMAND_TIMEOUT
+        try:
+            if isinstance(raw, bool):
+                raise ValueError("boolean")
+            value = float(raw)
+        except (TypeError, ValueError):
+            logger.warning(
+                "evaluator.command_timeout=%r is not a number of seconds — using %ss",
+                raw,
+                DEFAULT_COMMAND_TIMEOUT,
+            )
+            return DEFAULT_COMMAND_TIMEOUT
+        if value <= 0:
+            logger.warning(
+                "evaluator.command_timeout=%r must be positive — using %ss",
+                raw,
+                DEFAULT_COMMAND_TIMEOUT,
+            )
+            return DEFAULT_COMMAND_TIMEOUT
+        return value
 
     def _resolve_fast_track(self) -> bool:
         """Resolve fast_track setting: 'on'→True, 'off'→False, 'auto'→detect.
@@ -1595,6 +1634,10 @@ class AgenticEvaluator:
 
     def _evaluate_loop(self, task: dict[str, Any]) -> Verdict:
         """The agentic loop proper — evaluate() wraps this with the reap."""
+        logger.info(
+            "tier2 evaluator: run_command bound = %.1fs (evaluator.command_timeout)",
+            self.command_timeout,
+        )
         # Reset state
         self._sandbox.clear()
         self._criterion_marks.clear()

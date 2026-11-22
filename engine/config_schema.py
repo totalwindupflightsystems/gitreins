@@ -140,6 +140,7 @@ _GUARDS: dict[str, KeySpec] = {
 _EVALUATOR_KEYS = (
     "cap",
     "code_context_budget",
+    "command_timeout",
     "compaction_threshold",
     "fast_track",
     "file_scope",

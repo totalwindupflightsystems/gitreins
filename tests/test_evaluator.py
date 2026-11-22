@@ -13,6 +13,7 @@ import pytest
 
 from engine import command_hygiene
 from engine.evaluator import (
+    DEFAULT_COMMAND_TIMEOUT,
     AgenticEvaluator,
     Verdict,
     VerdictItem,
@@ -192,6 +193,70 @@ class TestRunCommand:
         assert len(output) <= 4100  # the 4000-char cap + its omission marker
         assert "chars omitted" in output, output[:200]
         assert "TAIL-KEEPME" in output, "the tail of the output must survive the bound"
+
+
+class TestResolveCommandTimeout:
+    """DF-INTCI-027: the run_command bound resolves explicit arg > config > default.
+
+    Previously the 30 s bound was hardcoded per-constructor argument, so a repo
+    whose gate suite needs longer could not raise it without a code change and
+    every slow tier-2 judge tool call was group-killed at 30 s. The bound now
+    resolves: explicit ``command_timeout`` arg, then ``evaluator.command_timeout``
+    from .gitreins/config.yaml, then the 30 s fleet default. Invalid config
+    values warn and fall back — they never crash the evaluator.
+    """
+
+    def test_explicit_arg_wins(self, llm_client: LLMClient, tmp_workdir: str) -> None:
+        """An explicit command_timeout argument overrides config and default."""
+        ev = AgenticEvaluator(llm_client, tmp_workdir, max_iterations=5, command_timeout=7)
+        assert ev.command_timeout == 7.0
+
+    def test_config_value_used(self, llm_client: LLMClient, tmp_workdir: str) -> None:
+        """evaluator.command_timeout in .gitreins/config.yaml is honored."""
+        os.makedirs(os.path.join(tmp_workdir, ".gitreins"), exist_ok=True)
+        with open(os.path.join(tmp_workdir, ".gitreins", "config.yaml"), "w") as f:
+            f.write("evaluator:\n  command_timeout: 120\n")
+        ev = AgenticEvaluator(llm_client, tmp_workdir, max_iterations=5, config_root=tmp_workdir)
+        assert ev.command_timeout == 120.0
+
+    def test_default_without_config(self, llm_client: LLMClient, tmp_workdir: str) -> None:
+        """No explicit arg and no config key → the 30 s fleet default."""
+        os.makedirs(tmp_workdir, exist_ok=True)
+        ev = AgenticEvaluator(llm_client, tmp_workdir, max_iterations=5, config_root=tmp_workdir)
+        assert ev.command_timeout == DEFAULT_COMMAND_TIMEOUT
+
+    def test_invalid_string_falls_back(
+        self, llm_client: LLMClient, tmp_workdir: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A non-numeric config value warns and falls back to the default."""
+        os.makedirs(os.path.join(tmp_workdir, ".gitreins"), exist_ok=True)
+        with open(os.path.join(tmp_workdir, ".gitreins", "config.yaml"), "w") as f:
+            f.write("evaluator:\n  command_timeout: forever\n")
+        with caplog.at_level("WARNING"):
+            ev = AgenticEvaluator(
+                llm_client, tmp_workdir, max_iterations=5, config_root=tmp_workdir
+            )
+        assert ev.command_timeout == DEFAULT_COMMAND_TIMEOUT
+        assert "not a number of seconds" in caplog.text
+
+    def test_nonpositive_falls_back(
+        self, llm_client: LLMClient, tmp_workdir: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A zero/negative config value warns and falls back to the default."""
+        os.makedirs(os.path.join(tmp_workdir, ".gitreins"), exist_ok=True)
+        with open(os.path.join(tmp_workdir, ".gitreins", "config.yaml"), "w") as f:
+            f.write("evaluator:\n  command_timeout: 0\n")
+        with caplog.at_level("WARNING"):
+            ev = AgenticEvaluator(
+                llm_client, tmp_workdir, max_iterations=5, config_root=tmp_workdir
+            )
+        assert ev.command_timeout == DEFAULT_COMMAND_TIMEOUT
+        assert "must be positive" in caplog.text
+
+    def test_bool_rejected(self, llm_client: LLMClient, tmp_workdir: str) -> None:
+        """A bool explicit arg raises TypeError — bools are not seconds."""
+        with pytest.raises(TypeError):
+            AgenticEvaluator(llm_client, tmp_workdir, max_iterations=5, command_timeout=True)
 
 
 class TestLastCommandPgidReap:
