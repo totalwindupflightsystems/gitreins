@@ -28,6 +28,12 @@ Tool calls cost a fraction of an iteration. Default 0.1 means:
   - LLM calls search_pattern (cost 0.1) → at 1.2/100
   - LLM reasons again (cost 1.0) → at 2.2/100
 
+TRBL-135 (AC2): a tier-2 run whose every time source is ABSENT gets the
+DEFAULT_MAX_SECONDS wall clock below, so a ceiling that still writes a verdict
+always exists. An operator who wrote a max_time anywhere (evaluator, defaults,
+legacy cap string, GITREINS_MAX_TIME) keeps full authority — including an
+explicit unlimited value (`max_time: "0s"` or `-1`).
+
 At 99.9/100, a full LLM call (1.0) is still allowed — the cap
 is checked BEFORE the call, not after. This means the final count
 may drift slightly above the cap.
@@ -52,6 +58,17 @@ logger = logging.getLogger("gitreins.eval_cap")
 # long-lived process (the MCP server judging in-process) can never attribute
 # an older run's trip to a newer one.
 _last_cap_trip: str | None = None
+
+# TRBL-135 (AC2): the wall clock a tier-2 run gets when NEITHER the repo
+# config nor the environment names a max_time. RELEASE-014's tier-2 had no
+# ceiling at all: it ran >34 minutes, was killed, and left no verdict.json and
+# no history directory — "judging" was indistinguishable from "dead". 45
+# minutes is well above the 10-18m healthy grades measured on chimera-v2
+# (engine/closeout_reuse.py) and below the killed run that pathology measured;
+# lanes that need more set their own evaluator.max_time. An operator sets ANY
+# max_time (including explicit `"0s"` = unlimited) to override it; see
+# eval_cap_from_config for the "was a time config ever present" test.
+DEFAULT_MAX_SECONDS: float = 45 * 60
 
 
 def _trip(message: str) -> str:
@@ -100,6 +117,13 @@ class EvalCap:
     # Display
     source: str = ""
 
+    # TRBL-135 (AC2): the budget that produced the most recent trip —
+    # "time" | "iterations" | "input_tokens" | "output_tokens", "" while no
+    # cap has tripped. The evaluator turns "time" into the first-class
+    # verdict outcome "timeout"; "" or any other value leaves the outcome
+    # unset, so a non-timeout cap verdict keeps the historical shape.
+    trip_kind: str = ""
+
     # ── API ─────────────────────────────────────────────────
 
     @property
@@ -141,6 +165,7 @@ class EvalCap:
         """
         # Check iterations BEFORE adding (allows one final full call)
         if self.max_iterations > 0 and self.iteration_credit >= self.max_iterations:
+            self.trip_kind = "iterations"
             return _trip(
                 f"Iteration cap ({_fmt_num(self.max_iterations)}) reached "
                 f"({_fmt_num(self.iteration_credit)} used). "
@@ -163,6 +188,7 @@ class EvalCap:
         Same lenient check as record_llm_call — allows going slightly over.
         """
         if self.max_iterations > 0 and self.iteration_credit >= self.max_iterations:
+            self.trip_kind = "iterations"
             return _trip(
                 f"Iteration cap ({_fmt_num(self.max_iterations)}) reached "
                 f"({_fmt_num(self.iteration_credit)} used). "
@@ -198,6 +224,7 @@ class EvalCap:
         if self.max_seconds > 0 and self.start_time > 0:
             elapsed = time.time() - self.start_time
             if elapsed >= self.max_seconds:
+                self.trip_kind = "time"
                 return _trip(
                     f"Time cap ({_fmt_seconds(self.max_seconds)}) exceeded "
                     f"({_fmt_seconds(elapsed)} elapsed). "
@@ -205,6 +232,7 @@ class EvalCap:
                 )
 
         if self.max_input_tokens > 0 and self.cumulative_input_tokens >= self.max_input_tokens:
+            self.trip_kind = "input_tokens"
             return _trip(
                 f"Input token budget ({_fmt_tokens(self.max_input_tokens)}) exceeded "
                 f"({_fmt_tokens(self.cumulative_input_tokens)} used). "
@@ -212,6 +240,7 @@ class EvalCap:
             )
 
         if self.max_output_tokens > 0 and self.cumulative_output_tokens >= self.max_output_tokens:
+            self.trip_kind = "output_tokens"
             return _trip(
                 f"Output token budget ({_fmt_tokens(self.max_output_tokens)}) exceeded "
                 f"({_fmt_tokens(self.cumulative_output_tokens)} used). "
@@ -492,9 +521,21 @@ def eval_cap_from_config(config: dict[str, Any]) -> EvalCap:
             cap.max_iterations = parsed.max_iterations
 
     if "max_time" in ev:
-        t = _parse_time(str(ev["max_time"]))
+        # TRBL-135: an explicit NON-POSITIVE numeric max_time means "unlimited"
+        # — recorded as -1 so the default wall clock below cannot override an
+        # operator who turned it off. A parseable duration, or a positive
+        # plain number (`max_time: 90` seconds), is honoured as the value.
+        raw_max_time = ev["max_time"]
+        t = _parse_time(str(raw_max_time))
         if t is not None:
             cap.max_seconds = float(t)
+        elif raw_max_time is not None and str(raw_max_time).lstrip("+-").isdigit():
+            # TRBL-135: a plain number with no unit — <= 0 means "unlimited",
+            # > 0 means seconds. Values that parse neither way stay ignored
+            # (the historical behaviour) and fall through to the default
+            # wall clock below.
+            val = int(str(raw_max_time))
+            cap.max_seconds = -1.0 if val <= 0 else float(val)
 
     if "max_input_tokens" in ev:
         tok = _parse_tokens(str(ev["max_input_tokens"]))
@@ -530,5 +571,28 @@ def eval_cap_from_config(config: dict[str, Any]) -> EvalCap:
         if tok is not None:
             cap.max_output_tokens = tok
             cap.source = f"{cap.source} + GITREINS_MAX_OUTPUT_TOKENS"
+
+    # ── TRBL-135 (AC2): the default wall clock ────────────────────────────
+    # A cap whose max_seconds is still -1 has NO wall clock: RELEASE-014's
+    # tier-2 ran >34 minutes, was killed, and persisted nothing — a tick could
+    # not tell "judging" from "dead". Apply DEFAULT_MAX_SECONDS ONLY when no
+    # time source was EVER present, so explicit configuration (including an
+    # explicit unlimited value) keeps full authority. The sources are read by
+    # PRESENCE, not by the resolved value, because an unparseable -1 key is
+    # currently dropped rather than resolved below.
+    defaults_section = config.get("defaults", {}) or {}
+    if not isinstance(defaults_section, dict):
+        defaults_section = {}
+    time_configured = (
+        "max_time" in ev
+        or "max_time" in defaults_section
+        or os.getenv("GITREINS_MAX_TIME") is not None
+        # A legacy combined cap string whose time component parsed leaves
+        # max_seconds > 0 already, so the cap.max_seconds test below is
+        # the legacy-string guard as well.
+    )
+    if not time_configured and cap.max_seconds <= 0:
+        cap.max_seconds = DEFAULT_MAX_SECONDS
+        cap.source = f"{cap.source} + default wall clock ({_fmt_seconds(DEFAULT_MAX_SECONDS)})"
 
     return cap

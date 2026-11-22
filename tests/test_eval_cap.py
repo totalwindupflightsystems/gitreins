@@ -11,6 +11,7 @@ import pytest
 import yaml
 
 from engine.eval_cap import (
+    DEFAULT_MAX_SECONDS,
     EvalCap,
     parse_eval_cap,
     eval_cap_from_config,
@@ -665,3 +666,98 @@ class TestPipelineCapRegression:
         assert evaluator.eval_cap.max_iterations == 5, (
             f"Explicit max_iterations=5 should win, got {evaluator.eval_cap.max_iterations}"
         )
+
+
+# ── TRBL-135 (AC2): the default wall clock and first-class trip kinds ────────
+
+
+class TestDefaultWallClock:
+    """eval_cap_from_config applies a wall clock where NO time source exists."""
+
+    def test_no_time_anywhere_gets_the_default_ceiling(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A config with no max_time at all gets DEFAULT_MAX_SECONDS."""
+        monkeypatch.delenv("GITREINS_MAX_TIME", raising=False)
+        cap = eval_cap_from_config({})
+        assert cap.max_seconds == DEFAULT_MAX_SECONDS
+        assert DEFAULT_MAX_SECONDS == 2700.0  # 45m — above healthy grades, below the killed run
+        assert "default wall clock" in cap.source
+
+    def test_explicit_evaluator_max_time_is_honored(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The operator's value wins; the default never adds a second ceiling."""
+        monkeypatch.delenv("GITREINS_MAX_TIME", raising=False)
+        cap = eval_cap_from_config({"evaluator": {"max_time": "30m"}})
+        assert cap.max_seconds == 1800.0
+
+    def test_explicit_defaults_max_time_is_honored(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """defaults.max_time counts as a configured source — no default applied."""
+        monkeypatch.delenv("GITREINS_MAX_TIME", raising=False)
+        cap = eval_cap_from_config({"defaults": {"max_time": "10m"}})
+        assert cap.max_seconds == 600.0
+
+    def test_explicit_max_time_zero_stays_unlimited(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """`max_time: "0s"` (and -1) is the explicit-unlimited escape hatch."""
+        monkeypatch.delenv("GITREINS_MAX_TIME", raising=False)
+        assert eval_cap_from_config({"evaluator": {"max_time": "0s"}}).max_seconds == 0.0
+        assert eval_cap_from_config({"evaluator": {"max_time": -1}}).max_seconds == -1.0
+
+    def test_env_max_time_suppresses_the_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """GITREINS_MAX_TIME set → the resolved value wins, default never applies."""
+        monkeypatch.setenv("GITREINS_MAX_TIME", "1h")
+        cap = eval_cap_from_config({})
+        assert cap.max_seconds == 3600.0
+
+    def test_env_max_time_replaces_a_missing_config(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Explicit env 0 = unlimited even with no config key present."""
+        monkeypatch.setenv("GITREINS_MAX_TIME", "0m")
+        assert eval_cap_from_config({}).max_seconds == 0.0
+
+    def test_legacy_cap_string_without_a_time_gets_the_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A legacy combined cap with no time component still gets the ceiling."""
+        monkeypatch.delenv("GITREINS_MAX_TIME", raising=False)
+        cap = eval_cap_from_config({"evaluator": {"cap": "50"}})
+        assert cap.max_iterations == 50.0
+        assert cap.max_seconds == DEFAULT_MAX_SECONDS
+
+    def test_legacy_cap_string_with_a_time_is_honored(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A legacy combined cap WITH a time component is not overwritten."""
+        monkeypatch.delenv("GITREINS_MAX_TIME", raising=False)
+        cap = eval_cap_from_config({"evaluator": {"cap": "100/30m/200k/50k"}})
+        assert cap.max_seconds == 1800.0
+
+
+class TestTripKind:
+    """EvalCap names WHICH budget tripped, so time can become a verdict outcome."""
+
+    def test_time_cap_sets_trip_kind_time(self) -> None:
+        cap = EvalCap(max_iterations=-1.0, max_seconds=30)
+        cap.start()
+        cap.start_time -= 100  # 100s elapsed against a 30s budget
+        assert cap.check() is not None
+        assert cap.trip_kind == "time"
+
+    def test_iteration_cap_sets_trip_kind_iterations(self) -> None:
+        cap = EvalCap(max_iterations=1.0, max_seconds=-1.0)
+        cap.start()
+        assert cap.record_llm_call(prompt_tokens=1, completion_tokens=1) is None
+        trip = cap.record_llm_call(prompt_tokens=1, completion_tokens=1)
+        assert trip is not None
+        assert cap.trip_kind == "iterations"
+
+    def test_input_token_cap_sets_trip_kind_input_tokens(self) -> None:
+        cap = EvalCap(max_iterations=-1.0, max_seconds=-1.0, max_input_tokens=10)
+        cap.start()
+        trip = cap.record_llm_call(prompt_tokens=10, completion_tokens=0)
+        assert trip is not None
+        assert cap.trip_kind == "input_tokens"
+
+    def test_no_trip_keeps_trip_kind_empty(self) -> None:
+        cap = EvalCap(max_iterations=10.0, max_seconds=-1.0)
+        cap.start()
+        assert cap.check() is None
+        assert cap.trip_kind == ""

@@ -2189,3 +2189,73 @@ class TestContentionDegradedSkippedTests:
         _record_runtime_skips(stage)
         assert stage.degraded is False
         assert stage.skipped_steps == []
+
+
+# ── TRBL-135 (AC1/AC2): the timeout outcome and the context census are folded ─
+
+
+class TestTier2OutcomeAndContextFold:
+    """The ai_eval step's outcome/context_stats land on the stage dict."""
+
+    def test_timeout_and_context_stats_are_folded_onto_the_stage(
+        self, tmp_workdir: str, llm_client: LLMClient
+    ) -> None:
+        from engine.evaluator import Verdict
+        from engine.pipeline import Pipeline
+
+        verdict = Verdict(verdict="INCOMPLETE", outcome="timeout")
+        verdict.context_stats = {
+            "diff_source": "first-parent-merge",
+            "diff_bytes": 4822,
+            "prompt_bytes": 1146,
+        }
+        config = {
+            "evaluator": {"max_iterations": 10, "max_time": "30m"},
+            "pipeline": {
+                "stages": [
+                    {
+                        "id": "tier2",
+                        "type": "ai_eval",
+                        "on": ["pre-eval"],
+                        "condition": "true",
+                    }
+                ]
+            },
+        }
+        p = Pipeline(config, tmp_workdir, llm=llm_client)
+        with patch("engine.evaluator.AgenticEvaluator") as mock_eval:
+            mock_eval.return_value.evaluate.return_value = verdict
+            result = p.run({"id": "t1", "title": "x", "criteria": ["c1"]}, trigger="pre-eval")
+        stage = result["stages"]["tier2"]
+        # Flat at the stage dict (the thing verdict.json's stages.tier2 IS).
+        assert stage["outcome"] == "timeout"
+        assert stage["context_stats"]["prompt_bytes"] == 1146
+        assert stage["context_stats"]["diff_source"] == "first-parent-merge"
+
+    def test_normal_verdict_keeps_the_stage_shape_byte_identical(
+        self, tmp_workdir: str, llm_client: LLMClient
+    ) -> None:
+        """No outcome, no census → neither key exists (absent, not null)."""
+        from engine.evaluator import Verdict, VerdictItem
+        from engine.pipeline import Pipeline
+
+        verdict = Verdict(
+            verdict="COMPLETE",
+            items=[VerdictItem("c1", "PASS", "ok")],
+            summary="ok",
+        )
+        config = {
+            "evaluator": {"max_iterations": 10, "max_time": "30m"},
+            "pipeline": {
+                "stages": [
+                    {"id": "tier2", "type": "ai_eval", "on": ["pre-eval"], "condition": "true"}
+                ]
+            },
+        }
+        p = Pipeline(config, tmp_workdir, llm=llm_client)
+        with patch("engine.evaluator.AgenticEvaluator") as mock_eval:
+            mock_eval.return_value.evaluate.return_value = verdict
+            result = p.run({"id": "t1", "title": "x", "criteria": ["c1"]}, trigger="pre-eval")
+        stage = result["stages"]["tier2"]
+        assert "outcome" not in stage
+        assert "context_stats" not in stage

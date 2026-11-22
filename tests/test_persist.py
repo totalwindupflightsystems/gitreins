@@ -1929,3 +1929,167 @@ def test_top_level_ungraded_criteria_absent_when_no_tier2_stage_exists(
     data = build_verdict_data(str(tmp_path), _task(), result)
 
     assert "ungraded_criteria" not in data
+
+
+# ── TRBL-135 (AC2): a wall-clock timeout is a first-class persisted outcome ──
+
+
+class TestTimeoutOutcomePersistence:
+    """verdict.json answers 'judging or dead?' from the record itself."""
+
+    def test_timeout_verdict_stamps_outcome_and_tier2_timeout(self, tmp_path: Path) -> None:
+        from engine.evaluator import Verdict
+        from engine.persist import build_verdict_data
+
+        result = _judge_result(
+            passed=False,
+            verdict=Verdict(
+                verdict="INCOMPLETE",
+                outcome="timeout",
+                summary="Cap exceeded: Time cap (30s) exceeded (30s elapsed).",
+            ),
+        )
+
+        data = build_verdict_data(str(tmp_path), _task(), result)
+
+        assert data["outcome"] == "timeout"
+        assert data["tier2_timeout"] is True
+        assert data["passed"] is False
+
+    def test_non_timeout_verdict_keeps_the_historical_shape(self, tmp_path: Path) -> None:
+        """No outcome → absent (never null), byte-identical keys."""
+        from engine.evaluator import Verdict
+        from engine.persist import build_verdict_data
+
+        data = build_verdict_data(
+            str(tmp_path), _task(), _judge_result(verdict=Verdict(verdict="INCOMPLETE"))
+        )
+        assert "outcome" not in data
+        assert "tier2_timeout" not in data
+        assert "producer_reap" not in data
+
+
+# ── TRBL-135 (AC1): the prompt/diff census is persisted with the verdict ─────
+
+
+class TestContextStatsPersistence:
+    """The audit numbers live in verdict.json, not only in the judge's log."""
+
+    def test_context_stats_land_at_the_top_level(self, tmp_path: Path) -> None:
+        from engine.evaluator import Verdict
+        from engine.persist import build_verdict_data
+
+        verdict = Verdict(verdict="INCOMPLETE")
+        verdict.context_stats = {
+            "diff_source": "first-parent-merge",
+            "diff_bytes": 4822,
+            "prompt_bytes": 1146,
+        }
+        data = build_verdict_data(
+            str(tmp_path), _task(), _judge_result(passed=False, verdict=verdict)
+        )
+
+        assert data["context_stats"] == {
+            "diff_source": "first-parent-merge",
+            "diff_bytes": 4822,
+            "prompt_bytes": 1146,
+        }
+        # No census → no key (absent, not null).
+        bare = build_verdict_data(str(tmp_path), _task(), _judge_result())
+        assert "context_stats" not in bare
+
+
+# ── TRBL-135 (AC2): the timeout verdict reaches verdict.json ON DISK ─────────
+
+
+class TestTimeoutVerdictReachesHistoryOnDisk:
+    """End to end: ceiling trip → persist_evaluation → verdict.json in history."""
+
+    def test_timeout_verdict_is_written_to_the_history_directory(self, tmp_path: Path) -> None:
+        from engine.evaluator import Verdict
+        from engine.judge import JudgeResult
+        from engine.persist import build_verdict_data
+        from engine.task_manager import Task
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        env = {
+            **os.environ,
+            "GIT_CONFIG_GLOBAL": str(tmp_path / "empty-git-config"),
+            "GIT_AUTHOR_NAME": "Test",
+            "GIT_AUTHOR_EMAIL": "t@t.com",
+            "GIT_COMMITTER_NAME": "Test",
+            "GIT_COMMITTER_EMAIL": "t@t.com",
+        }
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True, capture_output=True)
+        (repo / "tracked.txt").write_text("graded\n")
+        subprocess.run(["git", "add", "tracked.txt"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "initial", "--no-verify"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            env=env,
+        )
+        config_dir = repo / ".gitreins"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").write_text(
+            "history:\n  storage: filesystem\n", encoding="utf-8"
+        )
+
+        task = Task(id="TRBL-135", title="timeout", criteria=[])
+        result = JudgeResult(task_id="TRBL-135", passed=False)
+        # The shape the evaluator's cap trip produces: outcome stamped on the
+        # reconstructed pipeline verdict, census attached.
+        verdict = Verdict(
+            verdict="INCOMPLETE",
+            outcome="timeout",
+            summary="Cap exceeded: Time cap (45m) exceeded (45m elapsed).",
+        )
+        verdict.context_stats = {
+            "diff_source": "first-parent-merge",
+            "diff_bytes": 4822,
+            "prompt_bytes": 1146,
+        }
+        data = build_verdict_data(str(repo), task, result)
+        data["outcome"] = verdict.outcome
+        data["tier2_timeout"] = True
+        data["context_stats"] = verdict.context_stats
+        VerdictPersister(str(repo)).persist(task.id, data)
+
+        verdict_files = list((config_dir / "history").glob("*/*/verdict.json"))
+        assert len(verdict_files) == 1
+        on_disk = json.loads(verdict_files[0].read_text(encoding="utf-8"))
+        assert on_disk["outcome"] == "timeout"
+        assert on_disk["tier2_timeout"] is True
+        assert on_disk["context_stats"]["prompt_bytes"] == 1146
+        assert on_disk["passed"] is False
+
+
+# ── TRBL-135 (AC2): the producer reap report is persisted with the verdict ───
+
+
+class TestProducerReapPersistence:
+    """What the timeout teardown did to the quality producers is auditable."""
+
+    def test_producer_reap_is_persisted(self, tmp_path: Path) -> None:
+        from engine.persist import build_verdict_data
+
+        result = _judge_result(
+            passed=False,
+            producer_reap={
+                "triggered_by": "tier2_timeout",
+                "terminated": [{"pid": 123, "terminated": True}],
+            },
+        )
+        data = build_verdict_data(str(tmp_path), _task(), result)
+        assert data["producer_reap"] == {
+            "triggered_by": "tier2_timeout",
+            "terminated": [{"pid": 123, "terminated": True}],
+        }
+
+    def test_absent_reap_keeps_the_shape_absent(self, tmp_path: Path) -> None:
+        from engine.persist import build_verdict_data
+
+        data = build_verdict_data(str(tmp_path), _task(), _judge_result())
+        assert "producer_reap" not in data

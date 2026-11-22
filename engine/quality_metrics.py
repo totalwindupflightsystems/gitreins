@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
+import threading
+import time as _time
 from typing import Any
 
 from engine.config import QualityConfig
@@ -21,6 +24,71 @@ from engine.guard_manager import _is_harness_state_path
 #: (abs workdir, artifact_path) → snapshot for the latest successful read in
 #: this process. One entry per producer; a later surface never re-runs it.
 _snapshot_cache: dict[tuple[str, str], dict[str, Any]] = {}
+
+# ── TRBL-135 (AC2): registry of the producers this process detached ──────
+# `_launch_producer_background` deliberately survives its parent (PERF-1) —
+# which is exactly how RELEASE-014's tier-2 timeout orphaned the async
+# `gitreins guard --quality-async` producer: nothing recorded it, so nothing
+# could be terminated or reported when the outer judge died. The registry
+# fixes the accounting: one row per successfully spawned Popen, keyed by pid,
+# protected by a lock so concurrent stage threads can register safely.
+
+
+_spawned_producers_lock = threading.Lock()
+_spawned_producers: dict[int, dict[str, Any]] = {}
+
+
+def _register_spawned_producer(proc: subprocess.Popen[Any], workdir: str, command: str) -> None:
+    """Add one detached producer to the in-process registry (TRBL-135, AC2).
+
+    Best-effort accounting: a registration failure (an already-reaped pid)
+    is swallowed — the registry must never break a spawn.
+    """
+    with _spawned_producers_lock:
+        _spawned_producers[proc.pid] = {
+            "pid": proc.pid,
+            "workdir": workdir,
+            "command": command,
+            "started_at": _time.time(),
+        }
+
+
+def spawned_producers() -> list[dict[str, Any]]:
+    """The producers this process detached and never reaped (TRBL-135, AC2).
+
+    Returns snapshot rows {pid, workdir, command, started_at}, newest last.
+    Empty when nothing was spawned (or it was already terminated).
+    """
+    with _spawned_producers_lock:
+        return [dict(row) for row in _spawned_producers.values()]
+
+
+def terminate_spawned_producers() -> list[dict[str, Any]]:
+    """Terminate every still-running producer in the registry (TRBL-135, AC2).
+
+    Each producer was spawned with ``start_new_session=True``, so it leads
+    its own process group — ``os.killpg(pid, SIGTERM)`` reaches it and its
+    children. Best-effort by contract: an already-dead pid, a vanished
+    group or an OS error is recorded as ``terminated: False``, never raised
+    out of the timeout path. Returns one report row per registry entry
+    (terminated or not) and drains the registry.
+    """
+    with _spawned_producers_lock:
+        rows = [dict(row) for row in _spawned_producers.values()]
+        _spawned_producers.clear()
+    for row in rows:
+        pid = int(row.get("pid", 0) or 0)
+        killed = False
+        if pid > 0:
+            try:
+                os.killpg(pid, signal.SIGTERM)
+                killed = True
+            except ProcessLookupError:
+                killed = False  # already gone
+            except (OSError, ValueError):
+                killed = False
+        row["terminated"] = killed
+    return rows
 
 
 def _load_target_ladder(
@@ -94,7 +162,9 @@ def _effective_target(
     return row
 
 
-def _launch_producer_background(workdir: str, config: QualityConfig) -> None:
+def _launch_producer_background(
+    workdir: str, config: QualityConfig
+) -> subprocess.Popen[Any] | None:
     """Start the configured producer detached so it outlives the guard process.
 
     PERF-1: the commit path must never wait on the measurement. stdout/stderr
@@ -104,12 +174,17 @@ def _launch_producer_background(workdir: str, config: QualityConfig) -> None:
     producer keeps writing its artifact in the background. A launch failure is
     swallowed here — the read-back reports ``artifact not yet written`` (or the
     last completed artifact) and never raises out of a snapshot read.
+
+    TRBL-135 (AC2): the successful spawn is registered in the process-wide
+    producer registry (``spawned_producers`` / ``terminate_spawned_producers``)
+    so a judge that later times out can terminate it or at least report it
+    instead of orphaning it silently.
     """
     logs_dir = os.path.join(workdir, ".gitreins", "logs")
     try:
         os.makedirs(logs_dir, exist_ok=True)
         with open(os.path.join(logs_dir, "quality-producer.log"), "ab") as log_file:
-            subprocess.Popen(  # noqa: S602 - user-configured producer command (trusted operator input)
+            proc: subprocess.Popen[Any] = subprocess.Popen(  # noqa: S602 - user-configured producer command (trusted operator input)
                 config.command,
                 cwd=workdir,
                 shell=True,
@@ -117,8 +192,10 @@ def _launch_producer_background(workdir: str, config: QualityConfig) -> None:
                 stderr=log_file,
                 start_new_session=True,
             )
+        _register_spawned_producer(proc, workdir, config.command)
+        return proc
     except OSError:
-        pass
+        return None
 
 
 def read_quality_snapshot(

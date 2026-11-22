@@ -1211,6 +1211,36 @@ def build_verdict_data(workdir: str, task: Task, result: JudgeResult) -> dict[An
                 if omitted:
                     tier2_stage["tool_calls_omitted"] = omitted
 
+    # TRBL-135 (AC2): a tier-2 run ended by the WALL-CLOCK ceiling is a
+    # first-class outcome in the persisted record — ``outcome: "timeout"``
+    # plus ``tier2_timeout: true``, at the TOP level so a reader answers
+    # "judging or dead?" from the document without walking stages. Sourced
+    # from the verdict object (legacy path) or from the ai_eval step data
+    # the pipeline carried (_find_pipeline_verdict). Absent — never null —
+    # when no outcome was recorded, so every other verdict serializes
+    # byte-identically to the pre-TRBL-135 shape.
+    tier2_outcome = getattr(verdict_obj, "outcome", None) if verdict_obj is not None else None
+    if tier2_outcome:
+        verdict_data["outcome"] = str(tier2_outcome)
+        if str(tier2_outcome) == "timeout":
+            verdict_data["tier2_timeout"] = True
+
+    # TRBL-135 (AC1): the tier-2 prompt/diff census (diff_source /
+    # diff_bytes / prompt_bytes) at the TOP level of the record, beside the
+    # stages — the audit number the pathology (commit fd1b52f: a 1146-byte
+    # prompt whose empty merge diff cost 249,160 tokens) was measured in.
+    # Absent when the run recorded none, keeping historical shapes.
+    context_stats = getattr(verdict_obj, "context_stats", None) if verdict_obj is not None else None
+    if isinstance(context_stats, dict) and context_stats:
+        verdict_data["context_stats"] = dict(context_stats)
+
+    # TRBL-135 (AC2): what the judge's teardown did to the detached quality
+    # producers when the wall clock tripped ("triggered_by" / "terminated").
+    # Absent when nothing was reaped, so every other record is identical.
+    producer_reap = getattr(result, "producer_reap", None)
+    if isinstance(producer_reap, dict) and producer_reap:
+        verdict_data["producer_reap"] = producer_reap
+
     # REVIEW-GITREINS-030: a legacy (no-pipeline) judge has no stage dict to
     # name the tier2 client, so its credential-free provenance (model +
     # base_url_source + api_key_source) is stamped at the top level of the
