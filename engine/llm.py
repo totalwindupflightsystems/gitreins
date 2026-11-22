@@ -86,6 +86,27 @@ class LLMResponseError(RuntimeError):
     pass
 
 
+class JudgeLaneIncoherent(RuntimeError):
+    """The resolved judge lane (base_url + model + key) cannot serve the model.
+
+    CH-MAINT-015: the judge lane resolves from GITREINS_LLM_* env only
+    (INT-CI-021 deliberately keeps provider/base_url/model out of the config
+    schema keys), so nothing structural stopped a shell exporting a
+    base_url that does not serve the configured model id — the lane used to
+    surface only as HTTP 400s on every tier-2 iteration and a
+    FAIL [DEGRADED] INCOMPLETE verdict. ``LLMClient.validate_lane`` raises
+    this BEFORE tier-1 work starts so the judge refuses loudly and fast.
+    """
+
+    pass
+
+
+# Process-lifetime /models probe results, keyed by base_url. Tier-2 runs many
+# LLM iterations against one endpoint; the coherence probe must happen once
+# per process, never once per iteration.
+_served_models_cache: dict[str, frozenset[str]] = {}
+
+
 class LLMClient:
     """Multi-provider chat completions client with retry logic."""
 
@@ -304,6 +325,112 @@ class LLMClient:
             logger.warning("LLM verify probe failed (%s)", self.describe())
             logger.debug("verify probe failure detail", exc_info=e)
             return False
+
+    def validate_lane(self) -> frozenset[str]:
+        """Verify this client's endpoint actually serves ``self.model``.
+
+        CH-MAINT-015: one GET ``{base_url}/models`` with the resolved
+        credential (the OpenAI-compatible list endpoint; z.ai's coding
+        endpoint and OpenRouter serve it, and api.anthropic.com/v1 takes the
+        same shape with x-api-key headers), then a set-membership check.
+        Raise :class:`JudgeLaneIncoherent` when the model id is absent, the
+        probe is refused (auth), or the endpoint is unreachable. Results are
+        cached per base_url for the process lifetime — tier-2 runs many
+        iterations against one endpoint and must never re-probe per
+        iteration.
+
+        Escape hatch: ``GITREINS_LLM_SKIP_MODEL_CHECK=1`` skips the probe
+        entirely, for endpoints without an OpenAI-compatible /models. The
+        probe is also skipped when ``GITREINS_MOCK_LLM_RESPONSE`` is set:
+        a mocked lane makes no real HTTP call, so demanding a live /models
+        listing would break every subprocess-based test and mock-driven
+        gate out of proportion to the check's value.
+
+        Returns the served model id set on success.
+        """
+        if os.getenv("GITREINS_LLM_SKIP_MODEL_CHECK", "").strip():
+            logger.debug("lane validation skipped (GITREINS_LLM_SKIP_MODEL_CHECK set)")
+            return frozenset()
+        if os.getenv("GITREINS_MOCK_LLM_RESPONSE", "").strip():
+            logger.debug("lane validation skipped (GITREINS_MOCK_LLM_RESPONSE set)")
+            return frozenset()
+
+        cached = _served_models_cache.get(self.base_url)
+        if cached is None:
+            cached = self._probe_served_models()
+            # Success only: a transient probe failure must not poison the
+            # process-lifetime cache — a long-lived caller (MCP server) gets
+            # a real retry on its next judge invocation.
+            _served_models_cache[self.base_url] = cached
+        if self.model not in cached:
+            raise JudgeLaneIncoherent(
+                f"judge lane incoherent: base_url {self.base_url} does not serve "
+                f"model {self.model} (model absent from /models list: {len(cached)} models); "
+                "fix GITREINS_LLM_MODEL or GITREINS_LLM_BASE_URL "
+                "(or set GITREINS_LLM_SKIP_MODEL_CHECK=1 to skip this check)"
+            )
+        return cached
+
+    def _probe_served_models(self) -> frozenset[str]:
+        """One GET ``{base_url}/models``; raise JudgeLaneIncoherent on any
+        answer we cannot use to confirm the model is served."""
+        url = f"{self.base_url}/models"
+        if self.provider == "anthropic":
+            headers: dict[str, str] = {
+                "x-api-key": self.api_key or "",
+                "anthropic-version": self._api_version,
+            }
+        else:
+            headers = {"Authorization": f"Bearer {self.api_key}"} if self.api_key else {}
+        try:
+            # Bounded by the configured request timeout, capped at 30s: the
+            # point of this gate is refusing FAST, before tier-1 work starts.
+            resp = requests.get(url, headers=headers, timeout=min(self.request_timeout, 30))
+        except requests.RequestException as exc:
+            raise JudgeLaneIncoherent(
+                f"judge lane incoherent: base_url {self.base_url} unreachable from /models "
+                f"probe ({exc}); refusing to judge model {self.model}. "
+                "Fix GITREINS_LLM_BASE_URL (or set GITREINS_LLM_SKIP_MODEL_CHECK=1)"
+            ) from exc
+        if resp.status_code in (401, 403):
+            raise JudgeLaneIncoherent(
+                f"judge lane incoherent: base_url {self.base_url} rejected the credential "
+                f"(HTTP {resp.status_code} from /models); cannot verify it serves model "
+                f"{self.model}. Fix GITREINS_LLM_API_KEY (or set "
+                "GITREINS_LLM_SKIP_MODEL_CHECK=1 to skip this check)"
+            )
+        if resp.status_code != 200:
+            raise JudgeLaneIncoherent(
+                f"judge lane incoherent: base_url {self.base_url} does not serve "
+                f"model {self.model} (HTTP {resp.status_code} from /models); "
+                "fix GITREINS_LLM_MODEL or GITREINS_LLM_BASE_URL (or set "
+                "GITREINS_LLM_SKIP_MODEL_CHECK=1 to skip this check)"
+            )
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            raise JudgeLaneIncoherent(
+                f"judge lane incoherent: base_url {self.base_url} returned a non-JSON "
+                f"/models body; cannot verify it serves model {self.model}. "
+                "Fix GITREINS_LLM_BASE_URL (or set GITREINS_LLM_SKIP_MODEL_CHECK=1)"
+            ) from exc
+        raw = data.get("data")
+        if not isinstance(raw, list):
+            raise JudgeLaneIncoherent(
+                f"judge lane incoherent: base_url {self.base_url} returned an unexpected "
+                f"/models shape (no 'data' list); cannot verify it serves model {self.model}. "
+                "Fix GITREINS_LLM_BASE_URL (or set GITREINS_LLM_SKIP_MODEL_CHECK=1)"
+            )
+        # Typed loop instead of a generator: entry.get("id") is Any | None,
+        # which mypy rejects inside the set literal.
+        served: set[str] = set()
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            model_id = entry.get("id")
+            if isinstance(model_id, str) and model_id:
+                served.add(model_id)
+        return frozenset(served)
 
     def describe(self) -> str:
         """One-line, credential-free description of the resolved config.
