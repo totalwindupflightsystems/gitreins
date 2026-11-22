@@ -4,6 +4,7 @@ import importlib.util
 import json
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 SCRIPT_PATH = Path(__file__).resolve().parent.parent / "scripts" / "review_stale_bugs.py"
@@ -79,6 +80,10 @@ def test_missing_board_exits_2(tmp_path: Path) -> None:
 
 
 def test_age_past_max_age_days_gets_stale_marker(tmp_path: Path) -> None:
+    # Relative to the clock so the fixture cannot age past --max-age-days
+    # (the hard-coded 2026-10-22 date crossed the 30-day threshold on
+    # 2026-11-22 and turned this test into a time bomb — INT-CI-3724).
+    now = datetime.now(timezone.utc)
     board = _board(
         tmp_path,
         [
@@ -86,13 +91,13 @@ def test_age_past_max_age_days_gets_stale_marker(tmp_path: Path) -> None:
                 "id": "OLD-1",
                 "title": "[P1] ancient",
                 "status": "pending",
-                "updated_at": "2026-01-01T00:00:00Z",
+                "updated_at": (now - timedelta(days=400)).strftime("%Y-%m-%dT%H:%M:%SZ"),
             },
             {
                 "id": "NEW-1",
                 "title": "[P1] fresh",
                 "status": "pending",
-                "updated_at": "2026-10-22T00:00:00Z",
+                "updated_at": (now - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ"),
             },
         ],
     )
