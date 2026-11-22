@@ -42,6 +42,10 @@ pipeline:
 
     - id: verdict
       type: output
+
+    - id: fix_verification          # GR-235: appended to the default pipeline
+      type: fix_verification        # after tier2 — deterministic, no LLM call
+      condition: "true"
 """
 
 import concurrent.futures
@@ -297,6 +301,17 @@ class StageResult:
     # is read, not only inside ``steps[].data``. Absent (never an empty list)
     # when coverage is complete, keeping the historical shape byte-identical.
     ungraded_criteria: list[str] = field(default_factory=list)
+    # GR-235: the fix-verification stage's per-finding dispositions, folded
+    # from the step data onto the stage dict the same way — a reader of
+    # ``stages.fix_verification`` in verdict.json must not have to walk
+    # ``steps[].data`` to see how each first-round finding was handled.
+    # Absent (never an empty list) when the stage verified nothing.
+    dispositions: list[dict[str, Any]] = field(default_factory=list)
+    # GR-235: ``needs_review`` while the dispositions leave a
+    # critical/high/medium (or unnamed-severity) finding open — the cap the
+    # merge gate and ``merge_recommendation`` honor. Absent (never empty)
+    # when nothing is open, keeping other stages' dicts byte-identical.
+    verdict_cap: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -323,6 +338,13 @@ class StageResult:
             # a reader of ``stages.tier2`` must not have to walk
             # ``steps[].data`` to learn WHY a verdict failed.
             d["ungraded_criteria"] = list(self.ungraded_criteria)
+        if self.dispositions:
+            # GR-235: flat on the stage dict like the folds above —
+            # ``stages.fix_verification`` names each first-round finding's
+            # disposition and evidence without walking ``steps[].data``.
+            d["dispositions"] = list(self.dispositions)
+        if self.verdict_cap:
+            d["verdict_cap"] = self.verdict_cap
         return d
 
 
@@ -372,6 +394,492 @@ def _fold_step_ungraded_criteria(stage: StageResult) -> None:
             folded = [str(c) for c in ungraded]
     if folded:
         stage.ungraded_criteria = folded
+
+
+# ── GR-235: the fix-verification stage ──────────────────────────────────────
+#
+# GR-234 forwards each review stage's findings verbatim to the next stage
+# (StageContext.prior_findings), but nothing checked that the flagged code was
+# actually HANDLED by the judged change. This stage answers that question
+# deterministically — no LLM call, no new transport — by locating each
+# finding's flagged file:line in the judged tree and classifying what the
+# judged diff (``git diff HEAD``) did to it.
+
+FIX_VERIFICATION_STAGE_ID = "fix_verification"
+
+#: The verdict level an open critical/high/medium finding caps the run to.
+#: Same vocabulary engine.gate uses for the merge recommendation (GR-178).
+FIX_VERIFICATION_CAP = "needs_review"
+
+#: The four dispositions a finding can receive (the row's binding vocabulary).
+FIX_DISPOSITIONS = ("fixed", "not_fixed", "partially_fixed", "superseded")
+
+#: Dispositions that leave a finding open — these are the ones that cap.
+_FIX_OPEN_DISPOSITIONS = ("not_fixed", "partially_fixed")
+
+#: Severities whose open findings cap the verdict. The empty string is a
+#: severity the finding text did not name — treated as capping (fail-closed:
+#: an unclassified finding is never provably low).
+_FIX_CAP_SEVERITIES = ("critical", "high", "medium", "")
+
+_SEVERITY_WORDS = {
+    "critical": "critical",
+    "blocker": "critical",
+    "high": "high",
+    "medium": "medium",
+    "moderate": "medium",
+    "low": "low",
+    "minor": "low",
+    "info": "info",
+    "informational": "info",
+}
+
+_SEVERITY_RE = re.compile(
+    r"\b(critical|blocker|high|medium|moderate|low|minor|info|informational)\b", re.I
+)
+
+# A ``path[:line]`` candidate in a finding's text: repo-relative, no spaces,
+# extension-bearing; the line number is optional.
+_PATH_TOKEN_RE = re.compile(
+    r"(?P<path>(?:\./)?[A-Za-z0-9_.][A-Za-z0-9_./-]*\.[A-Za-z0-9]{1,6})(?::(?P<line>\d+))?"
+)
+
+# An explicitly quoted code snippet in a finding's text (backticks — the
+# finding format this codebase's reviewers write).
+_QUOTED_RE = re.compile(r"`([^`\n]{4,160})`")
+
+
+@dataclass
+class FindingDisposition:
+    """One first-round finding's verified disposition (GR-235)."""
+
+    finding_id: str
+    severity: str
+    disposition: str
+    evidence: str
+    path: str = ""
+    line: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "finding_id": self.finding_id,
+            "severity": self.severity,
+            "disposition": self.disposition,
+            "evidence": self.evidence,
+            "path": self.path,
+            "line": self.line,
+        }
+
+    def caps_verdict(self) -> bool:
+        """True when this disposition caps the final verdict at needs_review."""
+        return self.disposition in _FIX_OPEN_DISPOSITIONS and self.severity in _FIX_CAP_SEVERITIES
+
+
+class FixVerification:
+    """Deterministic per-finding fix verification for the tier-2 pipeline (GR-235).
+
+    Input is the immediately preceding review stage's serialized steps — the
+    GR-234 ``StageContext.prior_findings`` — read structurally: every
+    ``FAIL``/``NOT_VERIFIABLE`` verdict item and every structured
+    ``data["findings"]`` entry (the GR-171 second-pass shape, should a custom
+    stage forward one) is one finding. A severity word and a repo-relative
+    ``path:line`` location are parsed from the finding's own text.
+
+    Each finding's flagged code is then checked against the CURRENT working
+    tree, with the judged diff (``git diff HEAD``) as the evidence:
+
+    ================================  ===========================================
+    flagged code in the tree          disposition
+    ================================  ===========================================
+    absent, diff removes/modifies     ``fixed`` — the diff removed the flagged
+    the file                          code (or the whole file)
+    absent, code moved to another     ``superseded`` — invalidated by that
+    file of the judged change         upstream change (the second round re-flags
+                                      the code at its new location)
+    absent, diff does not touch       ``superseded`` — the code is gone without
+    the file                          a change touching the file, so the
+                                      finding no longer names the judged code
+    present at the flagged line       ``not_fixed`` — the region is unchanged
+    present, moved within the file    ``partially_fixed`` — the region changed
+                                      but the flagged code survives
+    no path / no needle resolvable    ``not_fixed`` — fail-closed: an
+                                      unverifiable finding is never reported
+                                      handled
+    ================================  ===========================================
+
+    A ``not_fixed``/``partially_fixed`` finding on a critical/high/medium (or
+    unnamed) severity carries the ``needs_review`` verdict cap — see
+    :func:`engine.gate.fix_verification_unhandled` and
+    docs/fix-verification.md.
+    """
+
+    def __init__(self, workdir: str) -> None:
+        self.workdir = os.path.abspath(workdir)
+        self._diff_files: dict[str, str] | None = None
+        self._head_cache: dict[str, list[str] | None] = {}
+
+    # ── extraction ──
+
+    def extract(self, prior_findings: Any) -> list[dict[str, Any]]:
+        """The open findings carried by the prior stage's serialized steps."""
+        findings: list[dict[str, Any]] = []
+        if not isinstance(prior_findings, list):
+            return findings
+        for step_index, step in enumerate(prior_findings):
+            if not isinstance(step, dict):
+                continue
+            step_id = str(step.get("id") or f"step_{step_index}")
+            raw_data = step.get("data")
+            data = raw_data if isinstance(raw_data, dict) else {}
+            raw_items = data.get("items")
+            items: list[Any] = raw_items if isinstance(raw_items, list) else []
+            for item_index, item in enumerate(items):
+                if not isinstance(item, dict):
+                    continue
+                status = str(item.get("status") or "").strip().upper()
+                if status not in ("FAIL", "NOT_VERIFIABLE"):
+                    continue
+                text = " ".join(str(item.get(k) or "") for k in ("criterion", "detail")).strip()
+                if not text:
+                    continue
+                findings.append(
+                    {
+                        "finding_id": f"{step_id}:item_{item_index}",
+                        "text": text,
+                        "severity": self._parse_severity(text),
+                    }
+                )
+            raw_findings = data.get("findings")
+            structured: list[Any] = raw_findings if isinstance(raw_findings, list) else []
+            for finding_index, entry in enumerate(structured):
+                if not isinstance(entry, dict):
+                    continue
+                text = " ".join(
+                    str(entry.get(k) or "")
+                    for k in ("title", "description", "detail", "message", "file", "path")
+                ).strip()
+                if not text:
+                    continue
+                severity = self._parse_severity(str(entry.get("severity") or "") or text)
+                findings.append(
+                    {
+                        "finding_id": f"{step_id}:finding_{finding_index}",
+                        "text": text,
+                        "severity": severity,
+                    }
+                )
+        return findings
+
+    @staticmethod
+    def _parse_severity(text: str) -> str:
+        match = _SEVERITY_RE.search(text or "")
+        if not match:
+            return ""
+        return _SEVERITY_WORDS.get(match.group(1).lower(), "")
+
+    # ── tree / diff access ──
+
+    def _git(self, *args: str) -> str | None:
+        """``git <args>`` in the graded tree, or None on any failure."""
+        try:
+            completed = subprocess.run(
+                ["git", *args],
+                cwd=self.workdir,
+                capture_output=True,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if completed.returncode != 0:
+            return None
+        return completed.stdout
+
+    def _diff_file_changes(self) -> dict[str, str]:
+        """path -> one-letter change status (M/A/D/R/…) for the judged diff."""
+        if self._diff_files is None:
+            self._diff_files = {}
+            output = self._git("diff", "HEAD", "--no-color", "--name-status")
+            if output is not None:
+                for raw_line in output.splitlines():
+                    parts = raw_line.split("\t")
+                    if len(parts) >= 2 and parts[0]:
+                        # R/C lines carry two paths; the tree now names the last.
+                        self._diff_files.setdefault(parts[-1], parts[0][:1])
+        return self._diff_files
+
+    def _head_lines(self, path: str) -> list[str] | None:
+        """The pre-diff (HEAD) content of *path*, or None when unreadable."""
+        if path not in self._head_cache:
+            output = self._git("show", f"HEAD:{path}")
+            self._head_cache[path] = output.splitlines() if output is not None else None
+        return self._head_cache[path]
+
+    @staticmethod
+    def _read_lines(abs_path: str) -> list[str] | None:
+        try:
+            with open(abs_path, encoding="utf-8", errors="replace") as handle:
+                return handle.read().splitlines()
+        except OSError:
+            return None
+
+    def _diff_excerpt(self, path: str, limit: int = 6) -> str:
+        output = self._git("diff", "HEAD", "--no-color", "--", path)
+        if not output:
+            return ""
+        lines = [line for line in output.splitlines() if line.strip()][:limit]
+        return " | ".join(lines)[:300]
+
+    # ── resolution ──
+
+    def _resolve_location(self, text: str) -> tuple[str, int | None]:
+        """The flagged ``(path, line)`` — grounded in the tree or the diff."""
+        candidates: list[tuple[str, int | None]] = []
+        for match in _PATH_TOKEN_RE.finditer(text or ""):
+            raw = match.group("path")
+            if os.path.isabs(raw) or ".." in raw.split("/"):
+                continue
+            rel = raw[2:] if raw.startswith("./") else raw
+            line_text = match.group("line")
+            candidates.append((rel, int(line_text) if line_text else None))
+        for rel, line in candidates:
+            if os.path.isfile(os.path.join(self.workdir, rel)):
+                return rel, line
+        # A path the working tree no longer has can still be the flagged file
+        # when the judged diff removes it — resolve against the diff file list.
+        changes = self._diff_file_changes()
+        for rel, line in candidates:
+            if rel in changes:
+                return rel, line
+        return "", None
+
+    def _resolve_needle(
+        self, text: str, path: str, line: int | None, current_lines: list[str] | None
+    ) -> str:
+        """The flagged code content to search the current tree for."""
+        head_lines = self._head_lines(path) if path else None
+        # 1. An explicitly quoted snippet the pre-diff tree actually contained
+        #    — grounded, not a reviewer's paraphrase.
+        head_text = "\n".join(head_lines) if head_lines is not None else ""
+        for match in _QUOTED_RE.finditer(text or ""):
+            snippet = match.group(1).strip()
+            if len("".join(snippet.split())) >= 4 and snippet in head_text:
+                return snippet
+        # 2. The flagged line as the pre-diff tree (HEAD) had it — findings
+        #    are flagged against the judged change, whose baseline is HEAD.
+        if path and line and head_lines is not None and 1 <= line <= len(head_lines):
+            stripped = head_lines[line - 1].strip()
+            if len("".join(stripped.split())) >= 4:
+                return stripped
+        # 3. The flagged line as the current tree has it — best effort when
+        #    HEAD cannot be read (e.g. a file the judged diff adds).
+        if path and line and current_lines is not None and 1 <= line <= len(current_lines):
+            stripped = current_lines[line - 1].strip()
+            if len("".join(stripped.split())) >= 4:
+                return stripped
+        return ""
+
+    @staticmethod
+    def _locate_needle(needle: str, current_lines: list[str] | None) -> int | None:
+        """1-based line of the first current-tree line containing *needle*."""
+        if not needle:
+            return None
+        for index, content in enumerate(current_lines or []):
+            if needle in content:
+                return index + 1
+        return None
+
+    def _locate_in_other_diff_files(self, needle: str, exclude_path: str) -> tuple[str, int] | None:
+        """``(path, line)`` where *needle* now lives in another judged-diff file.
+
+        Bounded to the files the judged diff touches (the change set under
+        review, not the whole tree), sorted for determinism. A deleted file
+        cannot be the new home, so only existing files are searched.
+        """
+        if not needle:
+            return None
+        for changed_path in sorted(self._diff_file_changes()):
+            if changed_path == exclude_path:
+                continue
+            abs_path = os.path.join(self.workdir, changed_path)
+            if not os.path.isfile(abs_path):
+                continue
+            found_at = self._locate_needle(needle, self._read_lines(abs_path))
+            if found_at is not None:
+                return changed_path, found_at
+        return None
+
+    # ── classification ──
+
+    def _disposition_for(self, finding: dict[str, Any]) -> FindingDisposition:
+        text = finding["text"]
+        path, line = self._resolve_location(text)
+        if not path:
+            return FindingDisposition(
+                finding_id=finding["finding_id"],
+                severity=finding["severity"],
+                disposition="not_fixed",
+                evidence=(
+                    "flagged code location could not be resolved from the finding text "
+                    "(no repo-relative path matched the working tree or the judged diff); "
+                    "reported unhandled (fail-closed)"
+                ),
+            )
+        abs_path = os.path.join(self.workdir, path)
+        current_lines = self._read_lines(abs_path) if os.path.isfile(abs_path) else None
+        changes = self._diff_file_changes()
+        status = changes.get(path, "")
+
+        if current_lines is None:
+            # The flagged file is gone from the working tree.
+            if status:
+                return FindingDisposition(
+                    finding_id=finding["finding_id"],
+                    severity=finding["severity"],
+                    disposition="fixed",
+                    path=path,
+                    line=line,
+                    evidence=(
+                        f"flagged file absent from the working tree; the judged diff "
+                        f"records '{status}' for {path} — the flagged code was removed "
+                        "with the file"
+                    ),
+                )
+            return FindingDisposition(
+                finding_id=finding["finding_id"],
+                severity=finding["severity"],
+                disposition="superseded",
+                path=path,
+                line=line,
+                evidence=(
+                    f"flagged path {path} is absent from the working tree and the judged "
+                    "diff does not remove it — the finding no longer names the judged code"
+                ),
+            )
+
+        needle = self._resolve_needle(text, path, line, current_lines)
+        if not needle:
+            return FindingDisposition(
+                finding_id=finding["finding_id"],
+                severity=finding["severity"],
+                disposition="not_fixed",
+                path=path,
+                line=line,
+                evidence=(
+                    f"flagged line content could not be resolved to verify {path}"
+                    + (f":{line}" if line else "")
+                    + "; reported unhandled (fail-closed)"
+                ),
+            )
+
+        found_at = self._locate_needle(needle, current_lines)
+        if found_at is not None and (line is None or found_at == line):
+            evidence = f"flagged code still present at {path}:{found_at} — region unchanged"
+            if status:
+                evidence += (
+                    f"; the judged diff touches {path} ('{status}') but leaves this line intact"
+                )
+            return FindingDisposition(
+                finding_id=finding["finding_id"],
+                severity=finding["severity"],
+                disposition="not_fixed",
+                path=path,
+                line=line,
+                evidence=evidence,
+            )
+        if found_at is not None:
+            return FindingDisposition(
+                finding_id=finding["finding_id"],
+                severity=finding["severity"],
+                disposition="partially_fixed",
+                path=path,
+                line=line,
+                evidence=(
+                    f"flagged code still present at {path}:{found_at}"
+                    + (f" (was :{line})" if line else "")
+                    + " — the region changed but the flagged code survives"
+                ),
+            )
+        # The flagged code is gone from the current file.
+        if status:
+            moved = self._locate_in_other_diff_files(needle, path)
+            if moved is not None:
+                # GR-235: the flagged code moved to another file of the judged
+                # change — the finding is invalidated by that upstream change,
+                # not resolved by it (the second round re-flags it there).
+                return FindingDisposition(
+                    finding_id=finding["finding_id"],
+                    severity=finding["severity"],
+                    disposition="superseded",
+                    path=path,
+                    line=line,
+                    evidence=(
+                        f"flagged code absent from {path}"
+                        + (f" (was :{line})" if line else "")
+                        + f" and now lives at {moved[0]}:{moved[1]} — the flagged code "
+                        "moved, so the first-round finding is invalidated"
+                    ),
+                )
+            evidence = (
+                f"flagged code no longer present in {path}"
+                + (f" (was :{line})" if line else "")
+                + f"; the judged diff records '{status}' for {path}"
+            )
+            excerpt = self._diff_excerpt(path)
+            if excerpt:
+                evidence += " — diff: " + excerpt
+            return FindingDisposition(
+                finding_id=finding["finding_id"],
+                severity=finding["severity"],
+                disposition="fixed",
+                path=path,
+                line=line,
+                evidence=evidence,
+            )
+        return FindingDisposition(
+            finding_id=finding["finding_id"],
+            severity=finding["severity"],
+            disposition="superseded",
+            path=path,
+            line=line,
+            evidence=(
+                f"flagged code absent from {path} and the judged diff leaves the file "
+                "untouched — the finding no longer names the judged code"
+            ),
+        )
+
+    def verify(self, prior_findings: Any) -> list[FindingDisposition]:
+        """Classify every open first-round finding against the judged tree."""
+        return [self._disposition_for(finding) for finding in self.extract(prior_findings)]
+
+
+def _fold_step_dispositions(stage: StageResult) -> None:
+    """Lift a fix_verification step's dispositions + verdict cap onto the STAGE.
+
+    GR-235: the dispositions and the ``needs_review`` cap used to live only
+    inside ``steps[].data``, the same burial the GR-196 ungraded-criteria fold
+    fixed for coverage gaps. Folding here puts the SAME lists on
+    ``stages.fix_verification`` in verdict.json (and in
+    ``judge_result_to_dict``), where a reviewer and
+    :func:`engine.gate.fix_verification_unhandled` read the stage. Only
+    fix_verification steps contribute, so other stages' serialized dicts are
+    byte-identical; a step that verified nothing folds nothing.
+    """
+    folded: list[dict[str, Any]] = []
+    cap = ""
+    for step in stage.steps:
+        if step.type != FIX_VERIFICATION_STAGE_ID:
+            continue
+        data = step.data if isinstance(step.data, dict) else {}
+        dispositions = data.get("dispositions")
+        if isinstance(dispositions, list) and dispositions:
+            folded = [dict(entry) for entry in dispositions if isinstance(entry, dict)]
+            named_cap = data.get("verdict_cap")
+            cap = str(named_cap) if isinstance(named_cap, str) and named_cap else ""
+    if folded:
+        stage.dispositions = folded
+        stage.verdict_cap = cap
 
 
 def degradation_warning(stage: dict[str, Any]) -> str | None:
@@ -850,6 +1358,7 @@ class Pipeline:
         result.summary = self._summarize_stage(result)
         _fold_step_provenance(result)
         _fold_step_ungraded_criteria(result)
+        _fold_step_dispositions(result)
         return result
 
     def _run_sequential_stage(
@@ -878,6 +1387,8 @@ class Pipeline:
             step_result = self._run_commit_audit(stage_def, task)
         elif stage_def.get("type") == "output":
             step_result = self._run_output(stage_def, task)
+        elif stage_def.get("type") == FIX_VERIFICATION_STAGE_ID:
+            step_result = self._run_fix_verification(stage_def, task)
         else:
             # Treat as a single script step
             step_result = self._run_script_step(stage_def, task, stage_id)
@@ -888,6 +1399,7 @@ class Pipeline:
         result.summary = step_result.output or step_result.error
         _fold_step_provenance(result)
         _fold_step_ungraded_criteria(result)
+        _fold_step_dispositions(result)
         return result
 
     def _run_step(
@@ -905,6 +1417,8 @@ class Pipeline:
             return self._run_commit_audit(step_def, task)
         elif step_type == "output":
             return self._run_output(step_def, task)
+        elif step_type == FIX_VERIFICATION_STAGE_ID:
+            return self._run_fix_verification(step_def, task)
         else:
             return StepResult(
                 id=step_id, type=step_type, passed=False, error=f"Unknown step type: {step_type}"
@@ -1598,6 +2112,76 @@ class Pipeline:
             },
         )
 
+    def _run_fix_verification(self, step_def: dict[str, Any], task: dict[str, Any]) -> StepResult:
+        """Run the deterministic fix-verification stage (GR-235).
+
+        Verifies that the immediately preceding review stage's findings
+        (``StageContext.prior_findings`` — GR-234) were actually handled by
+        the judged change, via :class:`FixVerification` — no LLM call. The
+        step PASSES when the verification ran: the stage's job is to report
+        per-finding dispositions with evidence, and an open
+        critical/high/medium finding is carried as a ``needs_review`` verdict
+        cap (``data["verdict_cap"]``, folded onto the stage dict) rather than
+        as a stage failure — the cap is the downgrade policy, never a hard
+        pass (see engine.gate.fix_verification_unhandled,
+        WorktreeManager._refuse_unhandled_findings and
+        docs/fix-verification.md). A stage with no prior context — the first
+        stage in a pipeline — returns a named skip so it cannot read as a
+        graded verification.
+        """
+        step_id = step_def.get("id", FIX_VERIFICATION_STAGE_ID)
+        context = self._stage_context
+        if context is None:
+            return StepResult(
+                id=step_id,
+                type="fix_verification",
+                passed=True,
+                output=f"{step_id}: no prior stage context — nothing to verify (named skip)",
+                data={"skipped": True, "skip_reason": "no prior stage findings to verify"},
+            )
+        try:
+            dispositions = FixVerification(self.workdir).verify(context.prior_findings)
+        except Exception as e:  # noqa: BLE001 — a broken verifier must not crash the judge
+            logger.exception("Fix verification failed")
+            return StepResult(
+                id=step_id,
+                type="fix_verification",
+                passed=False,
+                error=f"fix verification failed: {e}",
+            )
+
+        capped = [d for d in dispositions if d.caps_verdict()]
+        counts: dict[str, int] = {}
+        for disposition in dispositions:
+            counts[disposition.disposition] = counts.get(disposition.disposition, 0) + 1
+        data: dict[str, Any] = {
+            "dispositions": [d.to_dict() for d in dispositions],
+            "counts": counts,
+        }
+        lines: list[str] = []
+        for d in dispositions:
+            glyph = "✗" if d.caps_verdict() else ("~" if d.disposition == "superseded" else "✓")
+            lines.append(
+                f"  {glyph} {d.finding_id} [{d.severity or 'unclassified'}] "
+                f"{d.disposition}: {d.evidence}"
+            )
+        if capped:
+            # The binding cap rule (GR-235): an open critical/high/medium (or
+            # unnamed-severity) finding caps the final verdict at
+            # needs_review — never a hard pass. The cap rides the data (and
+            # the folded stage dict); the gates read it from there.
+            data["verdict_cap"] = FIX_VERIFICATION_CAP
+            data["capped_findings"] = [d.finding_id for d in capped]
+            lines.append(
+                f"  ⚠ verdict capped at {FIX_VERIFICATION_CAP} by {len(capped)} unhandled finding(s)"
+            )
+        output = f"{step_id}: {len(dispositions)} finding(s) verified"
+        if lines:
+            output += "\n" + "\n".join(lines)
+        return StepResult(
+            id=step_id, type="fix_verification", passed=True, output=output, data=data
+        )
+
     def _load_commit_audit_config(self) -> dict[str, Any]:
         """Read the commit_audit section from .gitreins/config.yaml.
 
@@ -1771,10 +2355,19 @@ class Pipeline:
     def _compile_results(self) -> dict[str, Any]:
         """Compile final results from all stages."""
         all_passed = all(s.passed for s in self._stage_results.values())
-        return {
+        result: dict[str, Any] = {
             "passed": all_passed,
             "stages": {sid: s.to_dict() for sid, s in self._stage_results.items()},
         }
+        # GR-235: a fix-verification stage that left a critical/high/medium
+        # finding open caps the run's final verdict at needs_review — carried
+        # additively at the top level so a consumer answers "what does this
+        # run mean" without walking the stages. Runs with nothing open keep
+        # the historical {"passed", "stages"} shape byte-identically.
+        cap = next((s.verdict_cap for s in self._stage_results.values() if s.verdict_cap), "")
+        if cap:
+            result["verdict_cap"] = cap
+        return result
 
 
 def _normalize_yaml_bool_keys(obj: object) -> object:
@@ -2206,6 +2799,21 @@ def load_pipeline_config(workdir: str = ".", scan_root: str | None = None) -> di
                             "sandbox",
                         ],
                     },
+                    # GR-235: the fix-verification stage rides the default
+                    # pipeline after tier2 — it verifies, deterministically
+                    # (no LLM call), that the review stage's first-round
+                    # findings were actually handled by the judged diff, and
+                    # caps the verdict at needs_review when a critical/high/
+                    # medium finding survives. A repo whose .gitreins/
+                    # config.yaml declares pipeline.stages keeps working
+                    # unchanged; this stage is opt-in there by declaring it
+                    # (docs/fix-verification.md).
+                    {
+                        "id": FIX_VERIFICATION_STAGE_ID,
+                        "type": FIX_VERIFICATION_STAGE_ID,
+                        "on": ["pre-eval"],
+                        "condition": "true",
+                    },
                 ]
             }
         }
@@ -2248,6 +2856,21 @@ def load_pipeline_config(workdir: str = ".", scan_root: str | None = None) -> di
                             "read_diff",
                             "sandbox",
                         ],
+                    },
+                    # GR-235: the fix-verification stage rides the default
+                    # pipeline after tier2 — it verifies, deterministically
+                    # (no LLM call), that the review stage's first-round
+                    # findings were actually handled by the judged diff, and
+                    # caps the verdict at needs_review when a critical/high/
+                    # medium finding survives. A repo whose .gitreins/
+                    # config.yaml declares pipeline.stages keeps working
+                    # unchanged; this stage is opt-in there by declaring it
+                    # (docs/fix-verification.md).
+                    {
+                        "id": FIX_VERIFICATION_STAGE_ID,
+                        "type": FIX_VERIFICATION_STAGE_ID,
+                        "on": ["pre-eval"],
+                        "condition": "true",
                     },
                 ]
             }

@@ -1151,7 +1151,17 @@ def build_verdict_data(workdir: str, task: Task, result: JudgeResult) -> dict[An
     if verdict_obj is not None and hasattr(verdict_obj, "items"):
         from engine.gate import merge_recommendation
 
-        verdict_data["merge_recommendation"] = merge_recommendation(verdict_obj, task.criteria)
+        # GR-235: the fix-verification cap lives on the pipeline's stage
+        # dicts, which the live Verdict object does not carry — pass them
+        # explicitly so an open high/medium finding downgrades the persisted
+        # recommendation to needs_review even when every item is PASS.
+        _pipeline_result = getattr(result, "pipeline_result", None)
+        _pipeline_stages = (
+            _pipeline_result.get("stages") if isinstance(_pipeline_result, dict) else None
+        )
+        verdict_data["merge_recommendation"] = merge_recommendation(
+            verdict_obj, task.criteria, stages=_pipeline_stages
+        )
 
     # JEVRES-004 tier 1.5: the full pre-screen (per-criterion probabilities,
     # missing kinds, evidence quality, and the engine's own verdict with its

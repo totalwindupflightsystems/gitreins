@@ -630,13 +630,16 @@ class TestLoadPipelineConfig:
     """Test load_pipeline_config() — step-1-5-1-6."""
 
     def test_no_config_file_returns_default_pipeline(self, tmp_workdir: str) -> None:
-        """Config file missing → returns default dict with tier1 + tier2 stages."""
+        """Config file missing → returns default dict with tier1 + tier2 and
+        the GR-235 fix-verification stage appended after tier2."""
         config = load_pipeline_config(tmp_workdir)
         assert "pipeline" in config
         stages = config["pipeline"]["stages"]
-        assert len(stages) == 2
+        assert len(stages) == 3
         assert stages[0]["id"] == "tier1"
         assert stages[1]["id"] == "tier2"
+        assert stages[2]["id"] == "fix_verification"
+        assert stages[2]["type"] == "fix_verification"
 
     def test_config_file_no_pipeline_key_returns_default(self, tmp_workdir: str) -> None:
         """Config file exists but no 'pipeline' key → returns default."""

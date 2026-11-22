@@ -991,6 +991,7 @@ class WorktreeManager:
                     f"{self._verdict_reference(task_id, record, verdict)}"
                 )
             self._refuse_weak_pass_class(task_id, record, verdict)
+            self._refuse_unhandled_findings(task_id, record, verdict)
             self._refuse_unbound_board_row(task_id, record, verdict)
 
         rebased = False
@@ -1036,6 +1037,7 @@ class WorktreeManager:
                         "merge; task worktree preserved."
                     )
                 self._refuse_weak_pass_class(task_id, record, verdict)
+                self._refuse_unhandled_findings(task_id, record, verdict)
                 self._refuse_unbound_board_row(task_id, record, verdict)
 
         # Recheck all safety facts immediately before changing canonical main.
@@ -1151,6 +1153,35 @@ class WorktreeManager:
             "--skip-tier2, or record the owner's waiver (gate.tier2_waiver in "
             ".gitreins/config.yaml, or GITREINS_TIER2_WAIVER) and re-judge so the "
             "verdict carries it. Verdict: "
+            f"{self._verdict_reference(task_id, record, verdict)}"
+        )
+
+    def _refuse_unhandled_findings(
+        self, task_id: str, record: WorktreeRecord, verdict: dict[str, Any]
+    ) -> None:
+        """HOLD a PASS whose fix-verification stage left findings open (GR-235).
+
+        The fix-verification stage (``stages.fix_verification``, GR-235)
+        re-checks each first-round review finding against the judged tree. When
+        a critical/high/medium (or unnamed-severity) finding is still
+        ``not_fixed``/``partially_fixed`` — the flagged code survives the judged
+        diff — the verdict is capped at ``needs_review`` and cannot satisfy
+        this gate, even though the stage itself passed: the cap is the
+        downgrade policy, not a stage failure. The advisory
+        ``merge_recommendation`` degrades the same way through
+        ``engine.gate.merge_recommendation`` — one definition, two callers.
+        """
+        from engine.gate import fix_verification_unhandled
+
+        unhandled = fix_verification_unhandled(verdict)
+        if not unhandled:
+            return
+        names = ", ".join(str(entry.get("finding_id") or "?") for entry in unhandled[:5])
+        raise WorktreeError(
+            "HOLD: fix verification reports unhandled first-round findings "
+            f"({names}) — the flagged code survives the judged diff, so the verdict "
+            "is capped at needs_review and cannot merge. Address the findings and "
+            "re-judge. Verdict: "
             f"{self._verdict_reference(task_id, record, verdict)}"
         )
 

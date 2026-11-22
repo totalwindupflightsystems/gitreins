@@ -189,6 +189,19 @@ kill, so it fails closed and routes:
   exactly what was not verified and what would settle it.
 
 
+## Fix verification of the first round's findings (GR-235)
+
+The `fix_verification` stage (registered after `tier2` in the default
+pipeline) verifies — deterministically, no LLM call — that the immediately
+preceding review stage's findings (`StageContext.prior_findings`, GR-234)
+were actually handled by the judged diff. Each finding gets a disposition
+(`fixed` / `not_fixed` / `partially_fixed` / `superseded`) with file:line
+evidence, and a `not_fixed`/`partially_fixed` finding on a
+critical/high/medium severity caps the verdict at `needs_review` (and the
+worktree merge gate holds). Full semantics, config precedence and the
+verdict.json shape: [docs/fix-verification.md](fix-verification.md).
+
+
 ## The author-independent second pass (GR-171)
 
 GR-176 lets the judge set its own bar *on top of* the author's criteria — but
