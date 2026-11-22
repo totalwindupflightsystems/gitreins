@@ -962,6 +962,15 @@ A lane whose own TREE is dirty fails the mirror-image check
 | [Staged Security Review](docs/security-review.md) | Opt-in `security_review` guard lane: rules → localization → judge pipeline over the change set, three modes (`off`/`staged`/`full`), confidence floor, per-stage timeouts, missing-tool policy |
 | [Review Profiles](docs/review-profiles.md) | Commit-audit review profiles (`quick`/`standard`/`deep`), effort budgets, and the `--review-profile` / `--review-effort` CLI flags |
 
+## Forge & Mirror Policy
+
+Owner ruling (Bane, 2026-11-22): **GitHub is primary, GitLab is a force-mirrored backup.**
+
+- `github` (`totalwindupflightsystems/gitreins`) is the canonical forge. All closeouts land here first.
+- `gitlab-mirror` (`coding-hermes/gitreins-mirror`) is a backup that must always equal `github/main`. When it diverges (GitLab-side mirror merges previously created extra commits — e.g. the `mirror/main` → `main` merge train by the GitLab sync bot), it is corrected by force-matching `github/main`, never by merging the divergence back.
+- `gitlab-archive` (`totalwindup/gitreins-poc`) is retired; its `main` is protected and it is excluded from the strand net.
+- Mechanics used for the 2026-11-22 divergence (`d4112dc0690c` era): the mirror project protects `main` (`allow_force_push: false`), so the force-match flips that flag via the GitLab API, pushes with `--force-with-lease` against the known diverged tip, then restores the flag. The fleet strand net (`fleet-strand-push.py`) never force-pushes; it reports the mirror as STRANDED until the force-match above is applied.
+
 ## License
 
 MIT
