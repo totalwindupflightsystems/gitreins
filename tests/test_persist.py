@@ -1999,6 +1999,73 @@ class TestContextStatsPersistence:
         assert "context_stats" not in bare
 
 
+# ── TRBL-135 (AC2): the timeout verdict reaches verdict.json ON DISK ─────────
+
+
+class TestTimeoutVerdictReachesHistoryOnDisk:
+    """End to end: ceiling trip → persist_evaluation → verdict.json in history."""
+
+    def test_timeout_verdict_is_written_to_the_history_directory(self, tmp_path: Path) -> None:
+        from engine.evaluator import Verdict
+        from engine.judge import JudgeResult
+        from engine.persist import build_verdict_data
+        from engine.task_manager import Task
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        env = {
+            **os.environ,
+            "GIT_CONFIG_GLOBAL": str(tmp_path / "empty-git-config"),
+            "GIT_AUTHOR_NAME": "Test",
+            "GIT_AUTHOR_EMAIL": "t@t.com",
+            "GIT_COMMITTER_NAME": "Test",
+            "GIT_COMMITTER_EMAIL": "t@t.com",
+        }
+        subprocess.run(["git", "init", "-q"], cwd=repo, check=True, capture_output=True)
+        (repo / "tracked.txt").write_text("graded\n")
+        subprocess.run(["git", "add", "tracked.txt"], cwd=repo, check=True, capture_output=True)
+        subprocess.run(
+            ["git", "commit", "-q", "-m", "initial", "--no-verify"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+            env=env,
+        )
+        config_dir = repo / ".gitreins"
+        config_dir.mkdir()
+        (config_dir / "config.yaml").write_text(
+            "history:\n  storage: filesystem\n", encoding="utf-8"
+        )
+
+        task = Task(id="TRBL-135", title="timeout", criteria=[])
+        result = JudgeResult(task_id="TRBL-135", passed=False)
+        # The shape the evaluator's cap trip produces: outcome stamped on the
+        # reconstructed pipeline verdict, census attached.
+        verdict = Verdict(
+            verdict="INCOMPLETE",
+            outcome="timeout",
+            summary="Cap exceeded: Time cap (45m) exceeded (45m elapsed).",
+        )
+        verdict.context_stats = {
+            "diff_source": "first-parent-merge",
+            "diff_bytes": 4822,
+            "prompt_bytes": 1146,
+        }
+        data = build_verdict_data(str(repo), task, result)
+        data["outcome"] = verdict.outcome
+        data["tier2_timeout"] = True
+        data["context_stats"] = verdict.context_stats
+        VerdictPersister(str(repo)).persist(task.id, data)
+
+        verdict_files = list((config_dir / "history").glob("*/*/verdict.json"))
+        assert len(verdict_files) == 1
+        on_disk = json.loads(verdict_files[0].read_text(encoding="utf-8"))
+        assert on_disk["outcome"] == "timeout"
+        assert on_disk["tier2_timeout"] is True
+        assert on_disk["context_stats"]["prompt_bytes"] == 1146
+        assert on_disk["passed"] is False
+
+
 # ── TRBL-135 (AC2): the producer reap report is persisted with the verdict ───
 
 
