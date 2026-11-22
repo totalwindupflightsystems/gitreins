@@ -539,6 +539,21 @@ class Verdict:
     # produced before the block existed serializes exactly as before, and an
     # empty block is the normal, unpenalised case.
     failure_modes: list[FailureMode] = field(default_factory=list)
+    # TRBL-135 (AC2): the run's budget outcome, not its grades. "timeout" when
+    # the WALL-CLOCK ceiling tripped so the run was ended by time, not by the
+    # LLM delivering a verdict (or by any other cap). None (absent, never an
+    # empty string) for every other exit — including iteration/token caps —
+    # so verdicts produced before the field existed serialize exactly as
+    # before. Persisted as verdict.json's ``outcome`` (+ ``tier2_timeout``)
+    # by engine.persist.build_verdict_data.
+    outcome: str | None = None
+    # TRBL-135 (AC1): provenance of the code context the prompt carried —
+    # ``diff_source`` (first-parent-merge / working-tree), ``diff_bytes``,
+    # ``prompt_bytes``. Set by AgenticEvaluator.evaluate for every run that
+    # builds a prompt; a reader answers "did the judge actually SEE the
+    # change?" from the verdict instead of re-measuring the prompt. Absent
+    # (None) where no prompt was built.
+    context_stats: dict[str, Any] | None = None
 
 
 # GR-195: the execution transcript persisted under ``stages.tier2.tool_calls``
@@ -817,6 +832,10 @@ class AgenticEvaluator:
                 self._tool_handlers[tool_name] = (handler, inspect.signature(handler))
 
         self._sandbox: dict[str, str] = {}
+        # TRBL-135 (AC1): context provenance for the current run — diff_source,
+        # diff_bytes, prompt_bytes. Read off the run's verdict (attached in
+        # evaluate()) and persisted in verdict.json as ``context_stats``.
+        self.context_stats: dict[str, Any] = {}
         # GR-179: the run record — every tool call the evaluator actually
         # executed, as one JSON line {"tool", "arguments", "result"}. A
         # verdict's failure_modes[].detected_by may cite a test; the backing
@@ -919,6 +938,82 @@ class AgenticEvaluator:
         except Exception:
             return False
 
+    def _head_is_merge(self) -> bool:
+        """True when HEAD is a merge commit (has a second parent).
+
+        TRBL-135 (AC1). ``git rev-parse --verify HEAD^2`` exits non-zero for
+        every non-merge HEAD (a root commit, a normal commit, a repo with no
+        commits) — reading the exit code, never the stderr, keeps the
+        detection silent.
+        """
+        import subprocess
+
+        try:
+            result = subprocess.run(
+                ["git", "rev-parse", "--verify", "HEAD^2"],  # noqa: S607 - git resolved via PATH by design
+                capture_output=True,
+                text=True,
+                timeout=10,
+                cwd=self.workdir,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
+
+    def _first_parent_merge_context(
+        self,
+    ) -> tuple[list[str], str]:
+        """The merge commit's own change set: (changed files, filtered diff).
+
+        TRBL-135 (AC1): a merge commit's combined diff is EMPTY — ``git show
+        <merge>`` prints no patch and ``git diff HEAD`` on a clean tree shows
+        nothing — so a judge grading a merged worker wave saw a ~1.1KB prompt
+        with criteria and no code, and spent its budget (measured: commit
+        fd1b52f, 1146-byte prompt, 249,160 tokens) re-discovering production
+        wiring the prompt never contained. The merge's OWN change is its
+        first-parent diff: ``git diff --first-parent <merge>~1 <merge>`` —
+        exactly what the worker commits together changed on main. Data-file
+        hunks are filtered like working-tree diffs. Both queries are
+        best-effort: any git failure returns an empty pair and the run
+        degrades to the pre-TRBL-135 behaviour, never an error.
+        """
+        import subprocess
+
+        try:
+            names = subprocess.run(
+                [
+                    "git",
+                    "diff",
+                    "--first-parent",
+                    "--name-only",
+                    "HEAD~1",
+                    "HEAD",
+                ],  # noqa: S607 - git resolved via PATH by design
+                capture_output=True,
+                text=True,
+                timeout=15,
+                cwd=self.workdir,
+            )
+            if names.returncode != 0:
+                return [], ""
+            merge_files: list[str] = [
+                line
+                for line in names.stdout.strip().splitlines()
+                if line and not _is_data_file_path(line)
+            ]
+            diff = subprocess.run(
+                ["git", "diff", "--first-parent", "HEAD~1", "HEAD"],  # noqa: S607 - git resolved via PATH by design
+                capture_output=True,
+                text=True,
+                timeout=15,
+                cwd=self.workdir,
+            )
+            if diff.returncode != 0:
+                return merge_files, ""
+            return merge_files, _filter_diff_text(diff.stdout.strip())
+        except Exception:
+            return [], ""
+
     def _build_code_context(self, config: dict[str, Any]) -> str:
         """Build a compact code-context block to pre-load into the evaluator prompt.
 
@@ -978,6 +1073,34 @@ class AgenticEvaluator:
             diff_text = _filter_diff_text(diff_result.stdout.strip())
         except Exception:
             diff_text = ""
+
+        # TRBL-135 (AC1): grade the change, not an empty diff. When HEAD is a
+        # merge commit, the merge's OWN change set (its first-parent diff) is
+        # invisible to `git diff HEAD` — on the clean tree a merged wave leaves,
+        # both are empty and the prompt carried 1146 bytes of criteria with no
+        # code (measured on fd1b52f). Prepend the first-parent diff and count
+        # its files among the changed ones so BOTH context modes see it. When
+        # uncommitted work also exists, the first-parent section comes first;
+        # the data-file filter applies per-file sections to both.
+        self.context_stats["diff_source"] = "working-tree"
+        if self._head_is_merge():
+            (
+                merge_files,
+                merge_diff,
+            ) = self._first_parent_merge_context()
+            if merge_diff or merge_files:
+                self.context_stats["diff_source"] = (
+                    "first-parent-merge"
+                    if not (diff_text or changed_files)
+                    else "first-parent-merge+working-tree"
+                )
+                changed_files.update(merge_files)
+                diff_text = _filter_diff_text(
+                    "\n".join(part for part in (merge_diff, diff_text) if part)
+                )
+        # TRBL-135 (AC1): the audit number — how many diff bytes the prompt
+        # will actually carry (before the 500-line render cap).
+        self.context_stats["diff_bytes"] = len(diff_text)
 
         # GR-GAP-046: a judge run after a COMMITTED change has an empty
         # `git diff HEAD` — without a fallback the evaluator would see no
@@ -1449,7 +1572,7 @@ class AgenticEvaluator:
         # groups); it exists for the DF-CRIER-254 shape, where a judge died
         # on a cap while its evidence command was still running.
         try:
-            return self._evaluate_loop(task)
+            verdict = self._evaluate_loop(task)
         finally:
             pgid, self._last_command_pgid = self._last_command_pgid, None
             if pgid:
@@ -1461,6 +1584,14 @@ class AgenticEvaluator:
                         leftovers,
                         pgid,
                     )
+        # TRBL-135 (AC1): attach the run's context provenance to whatever
+        # verdict the loop returned — items, cap verdict or LLM failure — so
+        # the persisted record answers "did the judge actually see the
+        # change?" from itself. Absent (None) when the loop never built a
+        # prompt (pre-TRBL-135 shape).
+        if self.context_stats:
+            verdict.context_stats = dict(self.context_stats)
+        return verdict
 
     def _evaluate_loop(self, task: dict[str, Any]) -> Verdict:
         """The agentic loop proper — evaluate() wraps this with the reap."""
@@ -1471,6 +1602,7 @@ class AgenticEvaluator:
         self._files_read.clear()
         self._commands_run.clear()
         self._searches_done.clear()
+        self.context_stats = {}
 
         # Custom system-prompt override from a pipeline prompt_template, if
         # any (2026-08-08 fix — was never wired through before).
@@ -1578,6 +1710,11 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                     code_context = "\n".join(ctx_lines[:keep_lines])
                     code_context += f"\n\n... [code context truncated: {ctx_est} → {max_ctx_tokens} estimated tokens]"
             task_prompt += f"\n\n{code_context}"
+
+        # TRBL-135 (AC1): the whole prompt the LLM actually receives at
+        # turn one — the number the pathology (fd1b52f: 1146 bytes) was
+        # measured in, recorded per run on the verdict.
+        self.context_stats["prompt_bytes"] = len(task_prompt)
 
         messages: list[dict[str, Any]] = [
             {
@@ -1878,13 +2015,31 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         the run could not be closed, retried selectively, or even argued about.
         A cap is a statement about the budget, not about the work, so the
         verdict carries the work: one item per criterion.
+
+        TRBL-135 (AC2): when the budget that tripped is the WALL CLOCK, the
+        verdict is stamped ``outcome="timeout"`` — a first-class, persisted
+        outcome a caller answers "judging or dead?" from, instead of parsing
+        the cap message. Any other cap keeps ``outcome`` unset.
         """
+        timeout_hit = getattr(self.eval_cap, "trip_kind", "") == "time"
         partial = self._extract_partial_verdict(criteria_list)
         if partial.items:
             partial.summary = f"Cap exceeded: {cap_error.rstrip('. ')}. {partial.summary}"
+            if timeout_hit:
+                # TRBL-135 (AC2): the prefix stays the historical
+                # "Cap exceeded: …" shape; the first-class signal is the
+                # outcome field, and the note names it.
+                partial.outcome = "timeout"
+                partial.summary += (
+                    " (tier-2 wall-clock timeout — outcome=timeout, "
+                    "the run never delivered a model verdict)"
+                )
             return partial
         # No criteria to name (a task with none): the cap message is all there is.
-        return Verdict(verdict="INCOMPLETE", summary=f"Cap exceeded: {cap_error}")
+        verdict = Verdict(verdict="INCOMPLETE", summary=f"Cap exceeded: {cap_error}")
+        if timeout_hit:
+            verdict.outcome = "timeout"
+        return verdict
 
     def _derived_criteria_from_sandbox(self) -> list[tuple[int, str, str | None]]:
         """(k, criterion text, evidence or None) for each derived criterion recorded.

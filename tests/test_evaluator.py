@@ -2052,3 +2052,194 @@ class TestDataFileHelpers:
         from engine.evaluator import _filter_diff_text
 
         assert _filter_diff_text("") == ""
+
+
+# ── TRBL-135 (AC1): judge a merge commit by its first-parent diff ────────────
+
+
+def _git_run(tmp_workdir: str, *args: str) -> subprocess.CompletedProcess[str]:
+    env = {
+        **os.environ,
+        "GIT_AUTHOR_NAME": "Test",
+        "GIT_AUTHOR_EMAIL": "t@t.com",
+        "GIT_COMMITTER_NAME": "Test",
+        "GIT_COMMITTER_EMAIL": "t@t.com",
+    }
+    return subprocess.run(
+        ["git", *args],
+        cwd=tmp_workdir,
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
+    )
+
+
+def _init_repo_and_merge(tmp_workdir: str) -> None:
+    """A repo whose HEAD is a merge: base → main edit → merge of feature edit.
+
+    The merge's own change set only exists in its first-parent diff
+    (`git diff --first-parent HEAD~1 HEAD`) — `git show <merge>` prints no
+    patch and the working tree is clean after the merge.
+    """
+    subprocess.run(["git", "init", "-q"], cwd=tmp_workdir, check=True)
+    _git_run(tmp_workdir, "config", "user.email", "test@test.com")
+    _git_run(tmp_workdir, "config", "user.name", "Test")
+    with open(os.path.join(tmp_workdir, "base.py"), "w") as f:
+        f.write("VALUE = 1\n")
+    _git_run(tmp_workdir, "add", "base.py")
+    _git_run(tmp_workdir, "commit", "-q", "-m", "initial", "--no-verify")
+    _git_run(tmp_workdir, "checkout", "-q", "-b", "feature")
+    with open(os.path.join(tmp_workdir, "feature.py"), "w") as f:
+        f.write("FEATURE_MARKER_LINE = 'wired from the worker'\n")
+    _git_run(tmp_workdir, "add", "feature.py")
+    _git_run(tmp_workdir, "commit", "-q", "-m", "feature", "--no-verify")
+    _git_run(tmp_workdir, "checkout", "-q", "-")
+    with open(os.path.join(tmp_workdir, "base.py"), "w") as f:
+        f.write("VALUE = 2\n")
+    _git_run(tmp_workdir, "add", "base.py")
+    _git_run(tmp_workdir, "commit", "-q", "-m", "main moves on", "--no-verify")
+    _git_run(tmp_workdir, "merge", "-q", "--no-ff", "--no-edit", "feature", "-m", "merge feature")
+
+
+class TestMergeCommitContext:
+    """_build_code_context sees a merge commit's own change set."""
+
+    config = {"guards": {"test_mode": "diff"}}
+
+    def test_merge_commit_prompt_carries_the_first_parent_diff(
+        self,
+        evaluator: AgenticEvaluator,
+        tmp_workdir: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A merge commit's first-parent diff is IN the prompt, not empty.
+
+        Measured pathology: merge commit fd1b52f graded with a 1146-byte
+        prompt (empty `git show <merge>` diff), spending 166 iterations /
+        249,160 tokens verifying wiring the prompt never contained.
+        """
+        monkeypatch.chdir(tmp_workdir)
+        _init_repo_and_merge(tmp_workdir)
+
+        ctx = evaluator._build_code_context(self.config)
+        assert "diff --git" in ctx
+        # The feature worker's change — invisible to `git show <merge>` —
+        # is now IN the prompt.
+        assert "FEATURE_MARKER_LINE" in ctx
+        assert evaluator.context_stats["diff_source"] == "first-parent-merge"
+        assert evaluator.context_stats["diff_bytes"] > 0
+
+    def test_non_merge_commit_keeps_the_historical_working_tree_source(
+        self,
+        evaluator: AgenticEvaluator,
+        tmp_workdir: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A normal checkout records diff_source=working-tree, unchanged."""
+        monkeypatch.chdir(tmp_workdir)
+        subprocess.run(["git", "init", "-q"], cwd=tmp_workdir, check=True)
+        _git_run(tmp_workdir, "config", "user.email", "test@test.com")
+        _git_run(tmp_workdir, "config", "user.name", "Test")
+        with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
+            f.write("print('hello')\n")
+        _git_run(tmp_workdir, "add", "main.py")
+        _git_run(tmp_workdir, "commit", "-q", "-m", "initial", "--no-verify")
+        with open(os.path.join(tmp_workdir, "main.py"), "w") as f:
+            f.write("print('hello world')\n")
+
+        ctx = evaluator._build_code_context(self.config)
+        assert "diff --git" in ctx
+        assert evaluator.context_stats["diff_source"] == "working-tree"
+
+    def test_non_repo_directory_records_empty_diff(
+        self,
+        evaluator: AgenticEvaluator,
+    ) -> None:
+        """No git at all → stats recorded as empty, never an exception."""
+        ctx = evaluator._build_code_context(self.config)
+        assert ctx == ""
+        assert evaluator.context_stats["diff_bytes"] == 0
+        assert evaluator.context_stats["diff_source"] == "working-tree"
+
+    def test_full_evaluate_records_prompt_bytes(
+        self,
+        llm_client: LLMClient,
+        tmp_workdir: str,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """End-to-end: the verdict carries prompt_bytes + the merge census."""
+        monkeypatch.chdir(tmp_workdir)
+        _init_repo_and_merge(tmp_workdir)
+        # The judge's own eval cap reads this tmp repo's (absent) config —
+        # give the loop an explicit cap so an ambient cap config cannot
+        # trip this test for the wrong reason.
+        from engine.eval_cap import EvalCap
+
+        evaluator = AgenticEvaluator(
+            llm_client, tmp_workdir, eval_cap=EvalCap(max_iterations=5, max_seconds=-1.0)
+        )
+        verdict_json = (
+            '{"verdict":"COMPLETE","items":[{"criterion":"c","status":"PASS","detail":"e"}]}'
+        )
+        with patch.object(llm_client, "chat", return_value=LLMResponse(content=verdict_json)):
+            verdict = evaluator.evaluate({"id": "t", "title": "T", "criteria": ["c"]})
+        assert verdict.verdict == "COMPLETE"
+        assert verdict.context_stats is not None
+        assert verdict.context_stats["diff_source"] == "first-parent-merge"
+        assert verdict.context_stats["diff_bytes"] > 0
+        assert verdict.context_stats["prompt_bytes"] > len(
+            "diff --git"
+        )  # a real prompt was measured
+
+
+class TestWallClockTimeoutVerdict:
+    """A tripped wall clock is a first-class outcome, not a bare INCOMPLETE."""
+
+    def test_time_cap_trip_yields_timeout_outcome_before_any_llm_call(
+        self, llm_client: LLMClient, tmp_workdir: str
+    ) -> None:
+        """The ceiling trips → verdict.outcome='timeout', no LLM call burned."""
+        import time as _time
+
+        from engine.eval_cap import EvalCap
+
+        evaluator = AgenticEvaluator(
+            llm_client, tmp_workdir, eval_cap=EvalCap(max_iterations=-1.0, max_seconds=300.0)
+        )
+        # Backdate the wall clock's start so the very first check() trips.
+        with patch.object(
+            evaluator.eval_cap,
+            "start",
+            lambda: setattr(evaluator.eval_cap, "start_time", _time.time() - 400),
+        ):
+            with patch.object(llm_client, "chat") as chat_mock:
+                verdict = evaluator.evaluate({"id": "t", "title": "T", "criteria": ["c"]})
+        assert verdict.outcome == "timeout"
+        assert verdict.verdict == "INCOMPLETE"
+        assert "Time cap" in verdict.summary
+        # The ceiling ended the run BEFORE the judge asked the LLM anything —
+        # the pathology's "verify wiring the prompt never contained" burn
+        # cannot start.
+        chat_mock.assert_not_called()
+        # The census still answers the audit even on the timeout exit.
+        assert verdict.context_stats is not None
+        assert verdict.context_stats["prompt_bytes"] > 0
+
+    def test_non_time_cap_keeps_outcome_absent(
+        self, llm_client: LLMClient, tmp_workdir: str
+    ) -> None:
+        """An iteration-cap run is INCOMPLETE but NOT a timeout."""
+        from engine.eval_cap import EvalCap
+
+        evaluator = AgenticEvaluator(
+            llm_client, tmp_workdir, eval_cap=EvalCap(max_iterations=1.0, max_seconds=-1.0)
+        )
+        evaluator.eval_cap.start()
+        assert evaluator.eval_cap.record_llm_call(prompt_tokens=1, completion_tokens=1) is None
+        trip = evaluator.eval_cap.record_llm_call(prompt_tokens=1, completion_tokens=1)
+        assert trip is not None
+        assert evaluator.eval_cap.trip_kind == "iterations"
+        verdict = evaluator._cap_verdict(["c"], trip)
+        assert verdict.outcome is None
+        assert verdict.verdict == "INCOMPLETE"

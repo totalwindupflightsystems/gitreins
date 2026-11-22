@@ -312,6 +312,16 @@ class StageResult:
     # merge gate and ``merge_recommendation`` honor. Absent (never empty)
     # when nothing is open, keeping other stages' dicts byte-identical.
     verdict_cap: str = ""
+    # TRBL-135 (AC2): a tier-2 wall-clock ceiling trip, folded from the
+    # ai_eval step data onto the stage dict so verdict.json's
+    # ``stages.<id>.outcome`` names the timeout without walking
+    # ``steps[].data``. Empty for every other exit, byte-identical.
+    tier2_outcome: str = ""
+    # TRBL-135 (AC1): the tier-2 context census folded from the ai_eval step
+    # data (diff_source / diff_bytes / prompt_bytes) onto the stage dict the
+    # same way — ``stages.<id>.context_stats`` answers "did the judge see the
+    # change?" without walking ``steps[].data``. Empty (absent) otherwise.
+    context_stats: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         d = {
@@ -338,6 +348,14 @@ class StageResult:
             # a reader of ``stages.tier2`` must not have to walk
             # ``steps[].data`` to learn WHY a verdict failed.
             d["ungraded_criteria"] = list(self.ungraded_criteria)
+        if self.tier2_outcome:
+            # TRBL-135 (AC2): flat like the folds above — the timeout is
+            # named where ``stages.tier2`` is read, not only inside the step.
+            d["outcome"] = self.tier2_outcome
+        if self.context_stats:
+            # TRBL-135 (AC1): flat like the folds above — the prompt/diff
+            # census is readable at ``stages.tier2`` directly.
+            d["context_stats"] = dict(self.context_stats)
         if self.dispositions:
             # GR-235: flat on the stage dict like the folds above —
             # ``stages.fix_verification`` names each first-round finding's
@@ -371,6 +389,47 @@ def _fold_step_provenance(stage: StageResult) -> None:
             folded = prov
     if folded:
         stage.provenance = dict(folded)
+
+
+def _fold_step_tier2_outcome(stage: StageResult) -> None:
+    """Lift one ai_eval step's tier-2 outcome onto the STAGE result dict.
+
+    TRBL-135 (AC2): the wall-clock timeout used to live only inside
+    ``steps[].data["outcome"]``, invisible at the stage a reader (and the
+    persisted verdict's ``stages.tier2``) reads. Folding it here puts the
+    same value on ``stages.<id>.outcome``. Only the tier-2 wall-clock
+    outcome is folded — no other exit carries one, so an ai_eval step with
+    no outcome (a normal grade, an exception, a non-timeout cap) leaves the
+    stage dict absent (not null), byte-identical to the pre-TRBL-135 shape.
+    """
+    folded = ""
+    for step in stage.steps:
+        data = step.data if isinstance(step.data, dict) else {}
+        outcome = data.get("outcome")
+        if isinstance(outcome, str) and outcome:
+            folded = outcome
+    if folded:
+        stage.tier2_outcome = folded
+
+
+def _fold_step_context_stats(stage: StageResult) -> None:
+    """Lift one ai_eval step's context census onto the STAGE result dict.
+
+    TRBL-135 (AC1): the prompt/diff sizes (``diff_source`` / ``diff_bytes`` /
+    ``prompt_bytes``) recorded by the evaluator are folded onto
+    ``stages.<id>.context_stats`` exactly like the outcome fold above, so
+    verdict.json answers "how big was the prompt the judge graded?" from the
+    stage dict. A step with no census (an old fake, a non-ai_eval step,
+    prompt_bytes never recorded) leaves the stage dict absent (not empty).
+    """
+    folded: dict[str, Any] = {}
+    for step in stage.steps:
+        data = step.data if isinstance(step.data, dict) else {}
+        stats = data.get("context_stats")
+        if isinstance(stats, dict) and stats:
+            folded = stats
+    if folded:
+        stage.context_stats = dict(folded)
 
 
 def _fold_step_ungraded_criteria(stage: StageResult) -> None:
@@ -1359,6 +1418,8 @@ class Pipeline:
         _fold_step_provenance(result)
         _fold_step_ungraded_criteria(result)
         _fold_step_dispositions(result)
+        _fold_step_tier2_outcome(result)
+        _fold_step_context_stats(result)
         return result
 
     def _run_sequential_stage(
@@ -1400,6 +1461,8 @@ class Pipeline:
         _fold_step_provenance(result)
         _fold_step_ungraded_criteria(result)
         _fold_step_dispositions(result)
+        _fold_step_tier2_outcome(result)
+        _fold_step_context_stats(result)
         return result
 
     def _run_step(
@@ -1808,6 +1871,13 @@ class Pipeline:
 
             self._append_judge_usage(evaluator, step_id, outcome="graded")
 
+            # TRBL-135 (AC1/AC2): the run's context census and, when the
+            # wall clock tripped, its first-class outcome ride the step
+            # data — additive (absent, never null) so every verdict without
+            # them serializes exactly as before.
+            context_stats = getattr(verdict, "context_stats", None)
+            tier2_outcome = getattr(verdict, "outcome", None)
+
             return StepResult(
                 id=step_id,
                 type="ai_eval",
@@ -1826,6 +1896,18 @@ class Pipeline:
                     # provenance is attributable in verdict.json; absent (not
                     # null) when the client carries no identity fields.
                     **({"provenance": dict(provenance)} if provenance else {}),
+                    # TRBL-135 (AC2): "timeout" when the wall-clock ceiling —
+                    # now a default — ended the run; absent for every other
+                    # exit, so non-timeout verdicts keep the historical shape.
+                    **({"outcome": tier2_outcome} if tier2_outcome else {}),
+                    # TRBL-135 (AC1): diff_source/diff_bytes/prompt_bytes from
+                    # the evaluator's own run record; absent when none were
+                    # recorded (no prompt built).
+                    **(
+                        {"context_stats": dict(context_stats)}
+                        if isinstance(context_stats, dict) and context_stats
+                        else {}
+                    ),
                 },
             )
         except Exception as e:

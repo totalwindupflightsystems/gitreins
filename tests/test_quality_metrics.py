@@ -8,7 +8,9 @@ from types import SimpleNamespace
 import pytest
 import yaml
 
-from engine.judge import JudgeResult, judge_result_to_dict
+from engine.judge import Judge, JudgeResult, judge_result_to_dict
+from engine.evaluator import Verdict
+from engine.llm import LLMClient
 from engine.quality_metrics import (
     format_quality_snapshot,
     quality_blocks,
@@ -914,3 +916,165 @@ def test_quality_ensure_passes_without_block_mode_miss(
     cli.cmd_quality_ensure(SimpleNamespace())  # must not raise
     out = capsys.readouterr().out
     assert "type_hint_pct=82%" in out
+
+
+# ── TRBL-135 (AC2): the producer registry — terminate or report on timeout ───
+
+
+class TestSpawnedProducerRegistry:
+    """Every detached quality producer is accounted for (TRBL-135, AC2)."""
+
+    def setup_method(self) -> None:
+        from engine import quality_metrics as qm
+
+        qm._spawned_producers.clear()
+
+    def teardown_method(self) -> None:
+        from engine import quality_metrics as qm
+
+        qm.terminate_spawned_producers()
+
+    def test_background_launch_registers_the_producer(self, tmp_path: Path) -> None:
+        """A successful detached spawn lands in the registry."""
+        import time as _time
+
+        from engine import quality_metrics as qm
+
+        config = QualityConfig.from_dict({"enabled": True, "command": "sleep 20"})
+        proc = qm._launch_producer_background(str(tmp_path), config)
+        try:
+            rows = qm.spawned_producers()
+            assert len(rows) == 1
+            assert rows[0]["pid"] == proc.pid  # type: ignore[union-attr]
+            assert rows[0]["command"] == "sleep 20"
+            assert rows[0]["started_at"] <= _time.time()
+        finally:
+            qm.terminate_spawned_producers()
+
+    def test_terminate_kills_the_process_group_and_drains_the_registry(
+        self, tmp_path: Path
+    ) -> None:
+        """Terminate → the producer is gone and nothing is left registered."""
+        from engine import quality_metrics as qm
+
+        config = QualityConfig.from_dict({"enabled": True, "command": "sleep 20"})
+        proc = qm._launch_producer_background(str(tmp_path), config)
+        assert proc is not None
+        reap = qm.terminate_spawned_producers()
+        assert len(reap) == 1
+        assert reap[0]["pid"] == proc.pid
+        assert reap[0]["terminated"] is True
+        assert qm.spawned_producers() == []
+        # The SIGTERM actually landed: the detached sleeper exits killed (-15).
+        proc.wait(timeout=5)
+        assert proc.returncode == -15
+
+    def test_terminate_records_already_dead_producers_without_raising(self, tmp_path: Path) -> None:
+        """A vanished pid → `terminated: False`, no exception, registry drained."""
+        from engine import quality_metrics as qm
+
+        pid = 999_999_999
+        with qm._spawned_producers_lock:
+            qm._spawned_producers[pid] = {
+                "pid": pid,
+                "workdir": str(tmp_path),
+                "command": "never-ran",
+                "started_at": 0.0,
+            }
+        reap = qm.terminate_spawned_producers()
+        assert reap == [
+            {
+                "pid": pid,
+                "workdir": str(tmp_path),
+                "command": "never-ran",
+                "started_at": 0.0,
+                "terminated": False,
+            }
+        ]
+        assert qm.spawned_producers() == []
+
+
+# ── TRBL-135 (AC2): the judge's timeout teardown wires the registry ──────────
+
+
+class TestJudgeProducerTeardown:
+    """Judge.evaluate_task terminates (timeout) or reports (normal) producers."""
+
+    def _judge(self, llm_client: LLMClient) -> Judge:
+        return Judge(llm_client, ".", guard_config={}, persist_log=False)
+
+    def test_timeout_run_terminates_registered_producers(
+        self, llm_client: LLMClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from engine import quality_metrics as qm
+
+        reap_rows = [{"pid": 42, "terminated": True, "command": "gitreins guard --quality-async"}]
+        calls: dict[str, int] = {"terminated": 0, "spawned": 0}
+
+        def fake_terminate() -> list[dict[str, object]]:
+            calls["terminated"] += 1
+            return reap_rows
+
+        def fake_spawned() -> list[dict[str, object]]:
+            calls["spawned"] += 1
+            return []
+
+        monkeypatch.setattr(qm, "terminate_spawned_producers", fake_terminate)
+        monkeypatch.setattr(qm, "spawned_producers", fake_spawned)
+
+        result = JudgeResult(
+            "t", passed=False, tier2=Verdict(verdict="INCOMPLETE", outcome="timeout")
+        )
+        self._judge(llm_client)._quality_producer_teardown(result)
+        assert calls["terminated"] == 1
+        assert calls["spawned"] == 0
+        assert result.producer_reap == {"triggered_by": "tier2_timeout", "terminated": reap_rows}
+
+    def test_pipeline_stage_timeout_also_counts(
+        self, llm_client: LLMClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from engine import quality_metrics as qm
+
+        monkeypatch.setattr(
+            qm, "terminate_spawned_producers", lambda: [{"pid": 7, "terminated": False}]
+        )
+        result = JudgeResult(
+            "t",
+            passed=False,
+            pipeline_result={"stages": {"tier2": {"id": "tier2", "outcome": "timeout"}}},
+        )
+        self._judge(llm_client)._quality_producer_teardown(result)
+        assert result.producer_reap is not None
+        assert result.producer_reap["triggered_by"] == "tier2_timeout"
+
+    def test_non_timeout_run_only_reports(
+        self, llm_client: LLMClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A healthy run kills nothing and records no reap."""
+        from engine import quality_metrics as qm
+
+        calls: dict[str, int] = {"terminated": 0}
+
+        def fake_terminate() -> list[dict[str, object]]:
+            calls["terminated"] += 1
+            return []
+
+        monkeypatch.setattr(qm, "terminate_spawned_producers", fake_terminate)
+        monkeypatch.setattr(qm, "spawned_producers", lambda: [{"pid": 9}])
+        result = JudgeResult("t", passed=True, tier2=Verdict(verdict="COMPLETE"))
+        self._judge(llm_client)._quality_producer_teardown(result)
+        assert calls["terminated"] == 0
+        assert result.producer_reap is None
+
+    def test_teardown_never_raises_without_the_registry(
+        self, llm_client: LLMClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A missing registry contract degrades to silence, never a failure."""
+        import engine.quality_metrics as qm
+
+        monkeypatch.delattr(qm, "terminate_spawned_producers", raising=False)
+        result = JudgeResult(
+            "t", passed=False, tier2=Verdict(verdict="INCOMPLETE", outcome="timeout")
+        )
+        self._judge(llm_client)._quality_producer_teardown(result)  # must not raise
+        assert result.producer_reap is None

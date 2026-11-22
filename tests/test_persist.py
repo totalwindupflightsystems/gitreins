@@ -1929,3 +1929,100 @@ def test_top_level_ungraded_criteria_absent_when_no_tier2_stage_exists(
     data = build_verdict_data(str(tmp_path), _task(), result)
 
     assert "ungraded_criteria" not in data
+
+
+# ── TRBL-135 (AC2): a wall-clock timeout is a first-class persisted outcome ──
+
+
+class TestTimeoutOutcomePersistence:
+    """verdict.json answers 'judging or dead?' from the record itself."""
+
+    def test_timeout_verdict_stamps_outcome_and_tier2_timeout(self, tmp_path: Path) -> None:
+        from engine.evaluator import Verdict
+        from engine.persist import build_verdict_data
+
+        result = _judge_result(
+            passed=False,
+            verdict=Verdict(
+                verdict="INCOMPLETE",
+                outcome="timeout",
+                summary="Cap exceeded: Time cap (30s) exceeded (30s elapsed).",
+            ),
+        )
+
+        data = build_verdict_data(str(tmp_path), _task(), result)
+
+        assert data["outcome"] == "timeout"
+        assert data["tier2_timeout"] is True
+        assert data["passed"] is False
+
+    def test_non_timeout_verdict_keeps_the_historical_shape(self, tmp_path: Path) -> None:
+        """No outcome → absent (never null), byte-identical keys."""
+        from engine.evaluator import Verdict
+        from engine.persist import build_verdict_data
+
+        data = build_verdict_data(
+            str(tmp_path), _task(), _judge_result(verdict=Verdict(verdict="INCOMPLETE"))
+        )
+        assert "outcome" not in data
+        assert "tier2_timeout" not in data
+        assert "producer_reap" not in data
+
+
+# ── TRBL-135 (AC1): the prompt/diff census is persisted with the verdict ─────
+
+
+class TestContextStatsPersistence:
+    """The audit numbers live in verdict.json, not only in the judge's log."""
+
+    def test_context_stats_land_at_the_top_level(self, tmp_path: Path) -> None:
+        from engine.evaluator import Verdict
+        from engine.persist import build_verdict_data
+
+        verdict = Verdict(verdict="INCOMPLETE")
+        verdict.context_stats = {
+            "diff_source": "first-parent-merge",
+            "diff_bytes": 4822,
+            "prompt_bytes": 1146,
+        }
+        data = build_verdict_data(
+            str(tmp_path), _task(), _judge_result(passed=False, verdict=verdict)
+        )
+
+        assert data["context_stats"] == {
+            "diff_source": "first-parent-merge",
+            "diff_bytes": 4822,
+            "prompt_bytes": 1146,
+        }
+        # No census → no key (absent, not null).
+        bare = build_verdict_data(str(tmp_path), _task(), _judge_result())
+        assert "context_stats" not in bare
+
+
+# ── TRBL-135 (AC2): the producer reap report is persisted with the verdict ───
+
+
+class TestProducerReapPersistence:
+    """What the timeout teardown did to the quality producers is auditable."""
+
+    def test_producer_reap_is_persisted(self, tmp_path: Path) -> None:
+        from engine.persist import build_verdict_data
+
+        result = _judge_result(
+            passed=False,
+            producer_reap={
+                "triggered_by": "tier2_timeout",
+                "terminated": [{"pid": 123, "terminated": True}],
+            },
+        )
+        data = build_verdict_data(str(tmp_path), _task(), result)
+        assert data["producer_reap"] == {
+            "triggered_by": "tier2_timeout",
+            "terminated": [{"pid": 123, "terminated": True}],
+        }
+
+    def test_absent_reap_keeps_the_shape_absent(self, tmp_path: Path) -> None:
+        from engine.persist import build_verdict_data
+
+        data = build_verdict_data(str(tmp_path), _task(), _judge_result())
+        assert "producer_reap" not in data

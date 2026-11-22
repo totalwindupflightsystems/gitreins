@@ -166,6 +166,10 @@ class Judge:
         self._run_second_pass(result, skip_tier2=skip_tier2)
         if packet_context is not None:
             self._attach_auger_evidence(result, packet_context)
+        # TRBL-135 (AC2): the timeout path must not orphan what the run
+        # spawned — terminate (or report) the detached quality producers
+        # before the result leaves the judge.
+        self._quality_producer_teardown(result)
         return result
 
     def _resolve_review_policy(self, task: Task) -> Any:
@@ -680,6 +684,77 @@ class Judge:
         result.pipeline_result = {"skipped_tier2": True, "tier1_passed": True}
         return result
 
+    # ── TRBL-135 (AC2): timeout teardown of spawned quality producers ────
+
+    def _tier2_timeout_hit(self, result: "JudgeResult") -> bool:
+        """True when this run's tier-2 ended on the wall-clock ceiling.
+
+        Reads BOTH shapes the judge can hold: the live verdict object
+        (legacy path — ``result.tier2.outcome``) and the serialized pipeline
+        stage dicts (``stages.<id>.outcome == "timeout"``, the fold the
+        pipeline writes from the ai_eval step data).
+        """
+        tier2 = getattr(result, "tier2", None)
+        if tier2 is not None and getattr(tier2, "outcome", None) == "timeout":
+            return True
+        pipeline_result = getattr(result, "pipeline_result", None)
+        if isinstance(pipeline_result, dict):
+            for stage in (pipeline_result.get("stages") or {}).values():
+                if isinstance(stage, dict) and stage.get("outcome") == "timeout":
+                    return True
+        return False
+
+    def _quality_producer_teardown(self, result: "JudgeResult") -> None:
+        """Terminate or report the detached quality producers this run spawned.
+
+        TRBL-135 (AC2): RELEASE-014's tier-2 was killed and the asynchronous
+        ``gitreins guard --quality-async`` producer it had spawned died with
+        it, silently, with no verdict either. ``quality_metrics`` now keeps a
+        process-wide registry of every producer it detached, and this teardown:
+
+        * when the tier-2 WALL CLOCK tripped → terminates every producer in
+          the registry (their process groups), records what was killed on
+          ``result.producer_reap`` (persisted by ``build_verdict_data`` as
+          ``producer_reap``) and logs it loudly — the timeout is not allowed
+          to orphan it again;
+        * on any other exit → REPORTS still-running producers in the log so
+          nothing outlives the run unseen. Nothing is killed: a healthy run's
+          producer may still be writing the artifact a later surface reads.
+
+        Registry lookups are best-effort — teardown never fails the verdict.
+        """
+        try:
+            timeout_hit = self._tier2_timeout_hit(result)
+        except Exception:
+            logger.debug(
+                "tier-2 timeout detection failed; skipping producer teardown", exc_info=True
+            )
+            return
+        try:
+            from engine.quality_metrics import (
+                spawned_producers,
+                terminate_spawned_producers,
+            )
+
+            if timeout_hit:
+                reap = terminate_spawned_producers()
+                if reap:
+                    result.producer_reap = {"triggered_by": "tier2_timeout", "terminated": reap}
+                    logger.warning(
+                        "Tier-2 timeout terminated %d spawned quality producer(s): %s",
+                        len(reap),
+                        [row.get("pid") for row in reap],
+                    )
+            else:
+                live = spawned_producers()
+                if live:
+                    logger.warning(
+                        "Async quality producers still running after the judge run: %s",
+                        [row.get("pid") for row in live],
+                    )
+        except Exception:
+            logger.debug("quality-producer teardown failed (non-fatal)", exc_info=True)
+
     def _extract_lsp_diagnostics(self, tier1: Tier1Result) -> list[dict[str, Any]]:
         """Extract structured LSP diagnostics from Tier 1 guard results.
 
@@ -782,6 +857,11 @@ class JudgeResult:
         self.second_pass_review: dict[str, Any] | None = None
         # GR-211: shared authoritative observation for state and persistence.
         self.working_tree_fingerprint: str | None = None
+        # TRBL-135 (AC2): what the timeout teardown did to the detached
+        # quality producers — {"triggered_by": "tier2_timeout", "terminated":
+        # [...]} when the tier-2 wall clock tripped and live producers were
+        # killed; None otherwise.
+        self.producer_reap: dict[str, Any] | None = None
         # GR-195: the tier2 execution transcript — capped {tool_calls,
         # tool_calls_omitted} built from the evaluator's in-run tool record —
         # or None when the judge kept no record. Persisted under
@@ -954,6 +1034,10 @@ def judge_result_to_dict(task_id: str, workdir: str, result: Any) -> dict[str, A
         tier2 = _find_pipeline_verdict(result.pipeline_result)
     if tier2:
         d["verdict"] = tier2.verdict
+        # TRBL-135 (AC2): the first-class outcome rides the machine-readable
+        # status too — present only when the run ended on the wall clock.
+        if getattr(tier2, "outcome", None):
+            d["outcome"] = str(tier2.outcome)
         d["items"] = [
             {
                 "criterion": i.criterion,
@@ -1023,9 +1107,17 @@ def _find_pipeline_verdict(pipeline_result: dict[str, Any]) -> Verdict | None:
                     )
                     for i in (data.get("items") or [])
                 ]
+                # TRBL-135 (AC1/AC2): the reconstructed verdict keeps the
+                # run's first-class outcome and context census, so a reader
+                # of the reconstructed object (merge gate, status dict,
+                # persistence) sees the timeout and the prompt/diff sizes
+                # the evaluator recorded. Absent → None, historical shape.
+                stats = data.get("context_stats")
                 return Verdict(
                     verdict=str(data.get("verdict")),
                     items=items,
                     summary=str(data.get("summary", "")),
+                    outcome=data.get("outcome") if isinstance(data.get("outcome"), str) else None,
+                    context_stats=dict(stats) if isinstance(stats, dict) else None,
                 )
     return None
