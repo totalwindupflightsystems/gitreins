@@ -210,9 +210,24 @@ Two consequences of the check that are worth stating as rules:
 
 ## 8. Known gaps in this repository
 
+Enable the optional tier-1 trace guard in `.gitreins/config.yaml`:
+
+```yaml
+guards:
+  trace: true
+```
+
+`guards.trace` defaults to `false` (disabled) when omitted. This repository opts in.
+For a graded marker, `evidence=` must be a non-empty, whitespace-free value in one of
+the forms described below; for example, `evidence=none:fixture-only` records a reason
+for absent evidence, while `evidence=tests/test_guard_trace.py` names an existing
+repository-relative path. Quotes and whitespace are not part of the value; absolute paths
+and paths resolving outside the repository are not accepted. Commit and verdict locators
+are checked for shape, not for the existence of the referenced commit or artifact.
+
 Stated so that a reader does not mistake the absence of a failure for compliance:
 
-- **The tier-1 marker validator now ships.** Diff mode grades only markers on added or modified lines (including new/untracked files), and requires `row=` plus a valid `evidence=` value: `none:<reason>`, `commit-<7+ hex>`, a well-formed `.gitreins/history/<date>/<8–16 hex>/verdict.json` locator, `.gitreins/verdicts/verdict.json`, or another repository-relative path that exists on the host. History/verdict locators are shape-checked without requiring host-local artifacts to exist. Full mode checks all markers structurally, but applies the evidence grammar only to markers whose lines `git blame` dates after the cutoff (the current HEAD commit date supplied by the guard); older markers are reported as legacy and are not retrofitted. Board task rows with `created_at` before 2026-10-11 retain the existing grandfathering, as do the two legacy bare-field-list rows without `ch:trace`. The validator still does not check commit-message footers, verdict-commit reachability, or resolution of `spec=`, `test=`, and other fields.
+- **The tier-1 marker validator now ships.** Diff mode grades only markers on added or modified lines (including new/untracked files), and requires `row=` plus a valid `evidence=` value: `none:<reason>`, `commit-<7+ hex>`, a well-formed `.gitreins/history/<date>/<8–16 hex>/verdict.json` locator, `.gitreins/verdicts/verdict.json`, or another repository-relative path that exists on the host. History/verdict locators are shape-checked without requiring host-local artifacts to exist. Full mode checks all discovered markers for `row=`, but exempts evidence from grammar validation when `git blame` dates the line on or before the cutoff (the current HEAD commit date supplied by the guard); if blame or the cutoff is unavailable, the evidence is graded. Board task rows with `created_at` before 2026-10-11 retain the existing grandfathering, as do the two legacy bare-field-list rows without `ch:trace`. The validator still does not check commit-message footers, verdict-commit reachability, or resolution of `spec=`, `test=`, and other fields.
 - **The doctrine's remaining checks are manual.** Running the §7 grep and the §6 gate list is a step a human or a lane performs — nothing here automates it, and nothing fails if it is skipped.
 - **Legacy markers are structurally checked, not rewritten.** In full mode, their `ch:trace` token and mandatory `row=` shape remain enforced while their evidence values are exempt under the blame-dated cutoff.
 
