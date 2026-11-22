@@ -1776,11 +1776,19 @@ class GuardManager:
         # the code-level default is False (fail loud) while `gitreins init`
         # writes allow_skips: true for ergonomic first commits on a fresh repo.
         self._allow_skips = bool(guards_cfg.get("allow_skips", False))
-        # Test timeout in seconds (default: 180s). Coerced to int — string
-        # config values like '300s' crash subprocess.run(timeout=...) with a
-        # TypeError (GR-GAP-028, Kobayashi-Maru ticks 240-242).
+        # Test timeout in seconds (default: 1200s). GR-001 / DF-WARPFS-180:
+        # the 180s source default cut real ~5-20min suites off mid-run on
+        # config-less call paths, so the deployed pipx venv carried a
+        # hand-applied "INTERIM UNBLOCK" patch raising it to 1200 as a
+        # stopgap. Landing 1200 here upstream retires that hand-patch:
+        # config-less repos keep the deployed interim behavior, and
+        # configured repos now get their real values on the task-complete
+        # judge path too (cli passes load_config(workdir) as guard_config).
+        # Still coerced to int — string config values like '300s' crash
+        # subprocess.run(timeout=...) with a TypeError (GR-GAP-028,
+        # Kobayashi-Maru ticks 240-242).
         self._test_timeout = _coerce_timeout(
-            guards_cfg.get("test_timeout", 180), "test_timeout", 180
+            guards_cfg.get("test_timeout", 1200), "test_timeout", 1200
         )
         # Hook timeout in seconds (default: 300s) — overall guard budget (GR-064e).
         # Same coercion as test_timeout: a string here breaks the _timed_out()
