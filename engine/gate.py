@@ -403,19 +403,73 @@ MERGE_RECOMMENDATION_REVIEW = "needs_review"
 MERGE_RECOMMENDATION_CHANGES = "changes_required"
 
 
-def merge_recommendation(verdict: object, criteria: Any = None) -> str:
+# ── GR-235: fix-verification cap ────────────────────────────────────────────
+
+#: The stage id the fix-verification stage registers under (engine.pipeline).
+FIX_VERIFICATION_STAGE_ID = "fix_verification"
+#: The disposition values that leave a first-round finding open.
+_UNHANDLED_DISPOSITIONS = ("not_fixed", "partially_fixed")
+#: Severities whose open findings cap. ``""`` is a severity the finding text
+#: did not name — treated as capping (fail-closed: an unclassified finding is
+#: never provably low).
+_CAPPING_SEVERITIES = ("critical", "high", "medium", "")
+
+
+def fix_verification_unhandled(source: object) -> list[dict[str, Any]]:
+    """The GR-235 fix-verification dispositions that cap *source* at needs_review.
+
+    Reads ``stages.fix_verification.dispositions`` off a live pipeline result
+    or a persisted verdict record (the shape ``StageResult.to_dict`` and the
+    persister write). One definition, two callers: the advisory downgrade in
+    :func:`merge_recommendation` and the merge-gate hold in
+    ``WorktreeManager._refuse_unhandled_findings`` — imported, never copied.
+
+    Returns ``[]`` for records without the stage (the historical shapes) and
+    for every disposition that is ``fixed`` or ``superseded``; only open
+    (``not_fixed`` / ``partially_fixed``) findings on a critical, high or
+    medium severity are returned. An UNNAMED severity caps too (fail-closed);
+    ``low``/``info`` never cap.
+    """
+    record_stages = _field(source, "stages", None)
+    if not isinstance(record_stages, Mapping):
+        return []
+    stage = record_stages.get(FIX_VERIFICATION_STAGE_ID)
+    if not isinstance(stage, Mapping):
+        return []
+    dispositions = stage.get("dispositions")
+    if not isinstance(dispositions, list):
+        return []
+    unhandled: list[dict[str, Any]] = []
+    for entry in dispositions:
+        if not isinstance(entry, Mapping):
+            continue
+        if str(entry.get("disposition") or "") not in _UNHANDLED_DISPOSITIONS:
+            continue
+        severity = str(entry.get("severity") or "").strip().lower()
+        if severity in _CAPPING_SEVERITIES:
+            unhandled.append(dict(entry))
+    return unhandled
+
+
+def merge_recommendation(verdict: object, criteria: Any = None, stages: Any = None) -> str:
     """The three-valued merge recommendation for *verdict* (GR-178).
 
     ``changes_required`` when any item grades FAIL; ``needs_review`` when any
     item is NOT_VERIFIABLE (a criterion only a human can settle — the whole
-    point of GR-178), when a supplied criterion went ungraded, or when the
+    point of GR-178), when a supplied criterion went ungraded, when the
     record has no judged pass class at all (GR-231: ``tier1-only`` and
     ``unverified-never-pass`` both mean no Tier 2 artifact backs the record, so
     neither is ever ``no_concerns_found`` — an absent artifact cannot be routed
-    to "no concerns"); ``no_concerns_found`` only when the record is a judged
-    pass whose every item is PASS and whose every criterion was graded. The
-    merge gate does NOT read this: ``pass_class`` still governs merging, so this
-    is routing advice for a human, never a key.
+    to "no concerns"), or — GR-235 — when the fix-verification stage left a
+    critical/high/medium finding open; ``no_concerns_found`` only when the
+    record is a judged pass whose every item is PASS, whose every criterion
+    was graded, and whose first-round findings were all handled. The merge
+    gate does NOT read this: ``pass_class`` still governs merging, so this is
+    routing advice for a human, never a key.
+
+    ``stages`` may be supplied explicitly (persist.py passes the pipeline's
+    stage dicts, which a live ``Verdict`` object does not carry); when absent
+    the record's own ``stages`` field is read.
     """
     if pass_class(verdict) != PASS_CLASS_JUDGED:
         return MERGE_RECOMMENDATION_REVIEW
@@ -429,4 +483,12 @@ def merge_recommendation(verdict: object, criteria: Any = None) -> str:
         coverage = check_coverage(verdict, criteria)
         if coverage.ungraded or coverage.not_verifiable:
             return MERGE_RECOMMENDATION_REVIEW
+    # GR-235: the fix-verification stage's open critical/high/medium findings
+    # cap the recommendation at needs_review — never no_concerns_found while
+    # flagged code survives the judged diff. The cap travels on the record's
+    # ``stages.fix_verification`` dict (a live pipeline result or a persisted
+    # verdict); a record without that stage is unaffected.
+    record_stages = stages if stages is not None else _field(verdict, "stages", None)
+    if isinstance(record_stages, Mapping) and fix_verification_unhandled({"stages": record_stages}):
+        return MERGE_RECOMMENDATION_REVIEW
     return MERGE_RECOMMENDATION_OK
