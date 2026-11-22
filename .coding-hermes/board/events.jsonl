@@ -1366,3 +1366,5 @@
 {"id":1794171000000000206,"timestamp":"2026-11-22 11:49:23.775946","event_type":"task_completed","task_id":"GR-191","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
 {"id":1794171000000000207,"timestamp":"2026-11-22 11:49:29.854286","event_type":"task_completed","task_id":"INT-CI-3724","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
 {"id":1794171000000000208,"timestamp":"2026-11-22 11:49:38.19469","event_type":"task_completed","task_id":"DOC-028","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
+{"id":1794171000000000209,"timestamp":"2026-11-22 12:58:38.774818","event_type":"task_completed","task_id":"GR-189","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
+{"id":1794171000000000210,"timestamp":"2026-11-22 12:58:41.849218","event_type":"task_completed","task_id":"GR-189","actor":"foreman","detail":"{\"status\":\"complete\",\"run_id\":\"f1c33e76\",\"graded_commit\":\"0bd885ffbb10e240e2b12c01660c22c8da821d51\",\"passed\":true,\"criteria\":\"5/5 PASS\"}","tick_number":null}
