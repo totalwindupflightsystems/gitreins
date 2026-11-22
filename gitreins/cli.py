@@ -2567,7 +2567,18 @@ def cmd_task_complete(args: argparse.Namespace) -> None:
         # skip_tier2 leaves llm None; Judge only dereferences it for tier-2.
         # engine/judge.py annotates LLMClient (not | None) — widening that
         # signature is out of scope for this tranche, so pin the gap here.
-        judge = Judge(llm, workdir, scan_root=scan_root)  # type: ignore[arg-type]
+        # DF-WARPFS-180: pass the repo guard config through. The config-less
+        # call made Judge coerce guard_config to {} and GuardManager derive
+        # its budgets from defaults (hook 300 / interim test 1200) instead of
+        # the repo's real test_timeout/hook_timeout — every closeout warned
+        # and took the derive path even when .gitreins/config.yaml was sane.
+        config = load_config(workdir)
+        judge = Judge(
+            llm,  # type: ignore[arg-type]  # skip_tier2 leaves llm None
+            workdir,
+            guard_config=config,
+            scan_root=scan_root,
+        )
         result = judge.evaluate_task(task, skip_tier2=skip_tier2)
         _print_judge_result(result)
 

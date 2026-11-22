@@ -4947,7 +4947,13 @@ class TestTaskCompleteScanScopeAndLease:
         evaluations = []
 
         class FakeJudge:
-            def __init__(self, _llm: object, _workdir: object, scan_root: object = None) -> None:
+            def __init__(
+                self,
+                _llm: object,
+                _workdir: object,
+                guard_config: object = None,
+                scan_root: object = None,
+            ) -> None:
                 assert scan_root == str(scan)
 
             def evaluate_task(self, task: object, skip_tier2: bool = False) -> object:
@@ -4970,6 +4976,62 @@ class TestTaskCompleteScanScopeAndLease:
             results = list(pool.map(lambda _index: invoke(), range(2)))
         assert sorted(results) == [0, 1]
         assert evaluations == ["same-task"]
+
+    def test_task_complete_judge_receives_loaded_guard_config(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """DF-WARPFS-180: the closeout judge gets the repo's guard config.
+
+        Regression: cmd_task_complete built Judge without guard_config, so
+        Judge coerced it to {} and GuardManager warned from defaults (hook
+        300 / interim test 1200) while .gitreins/config.yaml said
+        test_timeout 900 / hook_timeout 1200. This drives the real handler
+        with a real load_config read of a written config.yaml and asserts
+        the loaded dict arrives at the Judge constructor.
+        """
+        from types import SimpleNamespace
+
+        from gitreins import cli as cli_mod
+
+        control = tmp_path / "control"
+        scan = tmp_path / "project"
+        (control / ".gitreins").mkdir(parents=True)
+        scan.mkdir()
+        (control / ".gitreins" / "config.yaml").write_text(
+            "guards:\n  test_timeout: 900\n  hook_timeout: 1200\n"
+        )
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.setattr(cli_mod, "get_workdir", lambda: str(control))
+        monkeypatch.setattr(cli_mod, "_require_task", lambda manager, task_id: object())
+        monkeypatch.setattr(cli_mod, "_persist_result", lambda *args: None)
+
+        class FakeTaskManager:
+            def __init__(self, _workdir: object) -> None:
+                pass
+
+            def complete(self, task_id: str, force: bool = False) -> object:
+                return SimpleNamespace(id=task_id, status="complete")
+
+        received: dict = {}
+
+        class FakeJudge:
+            def __init__(
+                self,
+                _llm: object,
+                _workdir: object,
+                guard_config: object = None,
+                scan_root: object = None,
+            ) -> None:
+                received["guard_config"] = guard_config
+
+            def evaluate_task(self, task: object, skip_tier2: bool = False) -> object:
+                return SimpleNamespace(passed=True, summary="PASS")
+
+        monkeypatch.setattr("engine.task_manager.TaskManager", FakeTaskManager)
+        monkeypatch.setattr("engine.judge.Judge", FakeJudge)
+        args = SimpleNamespace(id="cfg-task", scan_root=str(scan), force=True, skip_tier2=True)
+        cli_mod.cmd_task_complete(args)
+        assert received["guard_config"] == {"guards": {"test_timeout": 900, "hook_timeout": 1200}}
 
     def test_task_complete_lease_coalesces_only_identical_inputs(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

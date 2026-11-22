@@ -373,14 +373,54 @@ class TestTimeoutCoercion:
         assert gm._test_timeout == 900
 
     def test_test_timeout_missing_uses_default(self, tmp_workdir: str) -> None:
-        """No test_timeout key → default 180."""
+        """No test_timeout key → default 1200 (GR-001 / DF-WARPFS-180).
+
+        180 cut real ~5-20min suites off mid-run on config-less call paths;
+        the deployed pipx venv carried a hand-applied "INTERIM UNBLOCK"
+        patch (180 -> 1200) until the source default caught up here.
+        """
         gm = GuardManager(tmp_workdir, {})
-        assert gm._test_timeout == 180
+        assert gm._test_timeout == 1200
 
     def test_test_timeout_none_uses_default(self, tmp_workdir: str) -> None:
-        """Explicit null → default 180."""
+        """Explicit null → default 1200 (GR-001 / DF-WARPFS-180)."""
         gm = GuardManager(tmp_workdir, {"guards": {"test_timeout": None}})
-        assert gm._test_timeout == 180
+        assert gm._test_timeout == 1200
+
+    def test_configured_budget_pair_reports_values_without_warning(
+        self, tmp_workdir: str, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A sane explicit pair (900/1200) is honored with no budget warning.
+
+        DF-WARPFS-180: the warpfs repo config says test_timeout 900 /
+        hook_timeout 1200, but the task-complete judge path handed the
+        GuardManager an empty config, so the manager warned from defaults
+        (hook 300 / interim test 1200) instead of reporting these values.
+        The wiring fix (cli passes load_config(workdir)) plus this pin keep
+        a configured repo's closeout warning-free and on its real budgets.
+        """
+        gm = GuardManager(tmp_workdir, {"guards": {"test_timeout": 900, "hook_timeout": 1200}})
+        assert gm._test_timeout == 900
+        assert gm._hook_timeout == 1200
+        assert "WARN: hook_timeout" not in capsys.readouterr().err
+
+    def test_configless_default_matches_deployed_interim_and_derives_hook(
+        self, tmp_workdir: str, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Config-less GuardManager gets the interim budget and derives the hook.
+
+        The deployed pipx venv carried a hand-applied "INTERIM UNBLOCK" patch
+        (test_timeout default 180 -> 1200, GR-001) because config-less call
+        paths cut ~200s suites mid-run. This pins the source default at the
+        retired patch's value and at the exact warning the warpfs closeout
+        printed (DF-WARPFS-180): hook 300 <= test 1200 → derived 1320.
+        """
+        gm = GuardManager(tmp_workdir, {})
+        assert gm._test_timeout == 1200
+        assert gm._hook_timeout == 1200 + 120
+        err = capsys.readouterr().err
+        assert "WARN: hook_timeout=300s <= test_timeout=1200s" in err
+        assert "Raising this run's budget to 1320s" in err
 
     def test_test_timeout_garbage_raises_value_error(self, tmp_workdir: str) -> None:
         """Non-numeric garbage → clear ValueError, not a subprocess TypeError."""
@@ -1142,7 +1182,13 @@ class TestTimeoutEarlyReturnCarriesAllowSkips:
     """
 
     def _manager(self, tmp_workdir: str, guards: list = None) -> object:
-        return GuardManager(tmp_workdir, {"guards": guards or {}})
+        guards = dict(guards or {})
+        # These arms simulate elapsed wall time (301s) to drive the timeout
+        # early-returns; they relied on the old 180s source default to make
+        # that exceed the budget. Pin it explicitly so the premise does not
+        # silently move when the default rises to 1200 (GR-001/DF-WARPFS-180).
+        guards.setdefault("test_timeout", 180)
+        return GuardManager(tmp_workdir, {"guards": guards})
 
     def _fake_clock(self, elapsed_at_call: object) -> object:
         """Deterministic engine.guard_manager.time replacement: per-call readings.
