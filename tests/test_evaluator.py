@@ -321,6 +321,116 @@ class TestSandbox:
         assert "error" in result
         assert "Key not found" in result["error"]
 
+
+class TestToolArgumentValidation:
+    """TRBL-138: a model call that omits a schema-required argument fails THE
+    TOOL CALL with a typed error, never a Python TypeError out of the dispatch.
+
+    The tool schemas declare ``required`` but nothing between the provider and
+    the dispatch enforces it: the OpenAI/DeepSeek path in engine/llm.py
+    silently degrades tool-call arguments to ``{}`` when the arguments JSON
+    fails to parse, and the Anthropic path carries whatever the model put in
+    the tool_use block. The pre-fix behavior dispatched ``**tc.arguments``
+    straight into ``_tool_sandbox_write(key, content)``, producing
+    ``ERROR: Tool sandbox_write failed ... TypeError`` and returning the
+    method's internal signature as an error string the model could not act on.
+    """
+
+    def test_write_missing_key_fails_tool_call_not_the_run(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
+        """sandbox_write without 'key' returns a typed, correctable error."""
+        tc = ToolCall(id="1", name="sandbox_write", arguments={"content": "x"})
+        result = evaluator._execute_tool(tc)
+        assert "error" in result
+        assert "sandbox_write" in result["error"]
+        assert "'key'" in result["error"] or "key" in result["error"]
+        # The typed error names the tool's accepted parameters so the model
+        # can correct the call in one retry.
+        assert "content" in result["error"]
+        # And it is NOT a leaked Python signature error.
+        assert "_tool_sandbox_write()" not in result["error"]
+        assert "missing 1 required positional argument" not in result["error"]
+
+    def test_write_missing_content_fails_tool_call(self, evaluator: AgenticEvaluator) -> None:
+        """sandbox_write with a key but no 'content' returns a typed error."""
+        tc = ToolCall(id="1", name="sandbox_write", arguments={"key": "verified_0"})
+        result = evaluator._execute_tool(tc)
+        assert "error" in result
+        assert "content" in result["error"]
+        # A failed write must not leave keyless state in the sandbox.
+        assert "verified_0" not in evaluator._sandbox
+
+    def test_write_non_string_key_fails_tool_call(self, evaluator: AgenticEvaluator) -> None:
+        """sandbox_write with a null key fails the tool call with a typed error."""
+        tc = ToolCall(id="1", name="sandbox_write", arguments={"key": None, "content": "x"})
+        result = evaluator._execute_tool(tc)
+        assert "error" in result
+        assert "sandbox_write requires 'key'" in result["error"]
+        assert None not in evaluator._sandbox
+
+    def test_write_extra_argument_is_tolerated(self, evaluator: AgenticEvaluator) -> None:
+        """Stray unknown keys in the payload are dropped, not fatal."""
+        tc = ToolCall(
+            id="1",
+            name="sandbox_write",
+            arguments={"key": "k", "content": "v", "note": "model padding"},
+        )
+        result = evaluator._execute_tool(tc)
+        assert result == {"key": "k", "written": 1}
+        assert evaluator._tool_sandbox_read("k")["content"] == "v"
+
+    def test_write_non_string_content_is_coerced(self, evaluator: AgenticEvaluator) -> None:
+        """A model grading with a numeric detail keeps its evidence."""
+        tc = ToolCall(id="1", name="sandbox_write", arguments={"key": "verified_0", "content": 1})
+        result = evaluator._execute_tool(tc)
+        assert "error" not in result
+        assert evaluator._tool_sandbox_read("verified_0")["content"] == "1"
+
+    def test_dedup_wrapper_missing_key_returns_typed_error(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
+        """The real dispatch entry (_execute_tool_with_dedup) stays typed."""
+        tc = ToolCall(id="1", name="sandbox_write", arguments={"content": "x"})
+        result, was_dup = evaluator._execute_tool_with_dedup(tc)
+        assert "error" in result
+        assert was_dup is False
+
+    def test_sibling_tools_missing_required_arg_fail_typed(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
+        """The fix covers the whole class, not just sandbox_write:
+        read_file(path), search_pattern(regex) and sandbox_read(key) all take
+        required parameters and all now fail as typed tool errors."""
+        for name in ("read_file", "search_pattern", "sandbox_read", "get_task_item"):
+            tc = ToolCall(id="1", name=name, arguments={})
+            result = evaluator._execute_tool(tc)
+            assert "error" in result, f"{name} did not fail with an error"
+            assert f"Invalid arguments for tool '{name}'" in result["error"]
+            assert "_tool_" not in result["error"]
+
+    def test_malformed_non_dict_arguments_fail_typed(self, evaluator: AgenticEvaluator) -> None:
+        """A non-dict arguments payload degrades like the LLM client's
+        failed-JSON path and then fails the tool call, not the dispatch."""
+        tc = ToolCall(id="1", name="sandbox_write", arguments=[("content", "x")])  # type: ignore[arg-type]
+        result, was_dup = evaluator._execute_tool_with_dedup(tc)
+        assert "error" in result
+        assert "sandbox_write" in result["error"]
+        assert was_dup is False
+
+    def test_valid_call_still_writes(self, evaluator: AgenticEvaluator) -> None:
+        """Well-formed calls are unchanged by the validation layer."""
+        tc = ToolCall(id="1", name="sandbox_write", arguments={"key": "k1", "content": "v1"})
+        result, was_dup = evaluator._execute_tool_with_dedup(tc)
+        assert result == {"key": "k1", "written": 2}
+        assert was_dup is False
+
+    def test_unknown_tool_still_reports_unknown(self, evaluator: AgenticEvaluator) -> None:
+        """Unknown tool names keep their existing error."""
+        tc = ToolCall(id="1", name="does_not_exist", arguments={})
+        result = evaluator._execute_tool(tc)
+        assert result == {"error": "Unknown tool: does_not_exist"}
+
     def test_evaluate_clears_sandbox(
         self, evaluator: AgenticEvaluator, llm_client: LLMClient
     ) -> None:

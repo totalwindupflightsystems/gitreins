@@ -19,6 +19,7 @@ Usage:
 
 import contextlib
 import hashlib
+import inspect
 import json
 import logging
 import os
@@ -27,7 +28,7 @@ import shutil
 import subprocess
 import time
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from engine import command_hygiene
 from engine.eval_cap import EvalCap, _fmt_tokens, eval_cap_from_config, parse_eval_cap
@@ -546,6 +547,25 @@ class Verdict:
 # the list, so a long run is capped without a silent drop.
 TOOL_TRANSCRIPT_MAX_ENTRIES = 200
 
+# TRBL-138: the single tool-dispatch surface. Maps each tool name the
+# evaluator accepts to the method that implements it, so the dispatch and
+# its argument-shape validation read one table instead of an if/elif chain
+# drifting out of sync with the methods below.
+_TOOL_METHODS: dict[str, str] = {
+    "read_file": "_tool_read_file",
+    "run_command": "_tool_run_command",
+    "search_pattern": "_tool_search_pattern",
+    "read_diff": "_tool_read_diff",
+    "get_task_item": "_tool_get_task_item",
+    "sandbox_write": "_tool_sandbox_write",
+    "sandbox_read": "_tool_sandbox_read",
+    "detect_dead_code": "_tool_detect_dead_code",
+    "skylos_scan": "_tool_skylos_scan",
+    "scan_security": "_tool_scan_security",
+    "read_static_analysis": "_tool_read_static_analysis",
+    "read_lsp_diagnostics": "_tool_read_lsp_diagnostics",
+}
+
 
 def tool_calls_transcript(record: list[str]) -> dict[str, Any] | None:
     """The persisted execution transcript for one judge run's tool record.
@@ -783,6 +803,18 @@ class AgenticEvaluator:
 
         # Command timeout for tool calls — configurable for tests
         self.command_timeout = command_timeout
+
+        # TRBL-138: resolve tool handlers once and capture each one's
+        # signature, so _execute_tool can pre-check a model-supplied
+        # arguments dict against it and fail the TOOL CALL with a typed
+        # error when a required parameter is missing — instead of raising
+        # TypeError (caught as a raw "_tool_sandbox_write() missing 1
+        # required positional argument" string) out of the dispatch.
+        self._tool_handlers: dict[str, tuple[Callable[..., dict[str, Any]], inspect.Signature]] = {}
+        for tool_name, method_name in _TOOL_METHODS.items():
+            handler = getattr(self, method_name, None)
+            if handler is not None:
+                self._tool_handlers[tool_name] = (handler, inspect.signature(handler))
 
         self._sandbox: dict[str, str] = {}
         # GR-179: the run record — every tool call the evaluator actually
@@ -2042,20 +2074,25 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
 
         was_dup = False
 
+        # TRBL-138: arguments may be malformed (non-dict) — degrade to an
+        # empty dict here too, so dedup pre-checks cannot AttributeError
+        # ahead of the typed-error path in _execute_tool.
+        args = tc.arguments if isinstance(tc.arguments, dict) else {}
+
         if tc.name == "read_file":
-            path = tc.arguments.get("path", "")
+            path = args.get("path", "")
             if path in self._files_read:
                 was_dup = True
             else:
                 self._files_read.add(path)
         elif tc.name == "run_command":
-            cmd = tc.arguments.get("cmd", "")
+            cmd = args.get("cmd", "")
             if cmd in self._commands_run:
                 was_dup = True
             else:
                 self._commands_run.add(cmd)
         elif tc.name == "search_pattern":
-            regex = tc.arguments.get("regex", "")
+            regex = args.get("regex", "")
             if regex in self._searches_done:
                 was_dup = True
             else:
@@ -2064,31 +2101,87 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         result = self._execute_tool(tc)
         return result, was_dup
 
+    def _prepare_tool_arguments(self, tc: ToolCall) -> tuple[dict[str, Any], dict[str, Any] | None]:
+        """Validate `tc.arguments` against the handler's signature (TRBL-138).
+
+        Tool schemas declare ``required`` but nothing between the provider and
+        this dispatch enforces it: an Anthropic tool_use carries whatever the
+        model put in the block, an OpenAI/DeepSeek call whose arguments JSON
+        fails to parse is silently degraded to ``{}`` (engine/llm.py), and a
+        non-dict arguments payload degrades to an empty set too. A call that
+        then omits a required parameter used to surface as a bare Python
+        ``TypeError`` traceback (the ``ERROR: Tool sandbox_write failed …
+        TypeError`` line) and returned the method's internal signature as an
+        "error" the model had no way to interpret.
+
+        Returns (arguments to pass, typed tool error). When the typed error is
+        set the call ends there; the arguments dict is always safe to pass
+        otherwise (stray unknown keys are dropped, not forwarded, so an
+        over-padded model payload cannot reach the handler).
+
+        Note this validates PRESENCE and shape of the arguments dict — not the
+        value types — so a handler that needs a stricter contract (e.g.
+        sandbox_write's key must be a non-empty str) keeps its own typed
+        guard on top.
+        """
+        entry = self._tool_handlers.get(tc.name)
+        if entry is None:
+            # Unknown tool names keep the existing "Unknown tool" error
+            # from _execute_tool; nothing to validate against.
+            return {}, None
+        _, signature = entry
+        raw = tc.arguments if isinstance(tc.arguments, dict) else {}
+        filtered: dict[str, Any] = {}
+        for name in signature.parameters:
+            if name == "self":
+                continue
+            if name in raw:
+                filtered[name] = raw[name]
+        missing = [
+            pname
+            for pname, p in signature.parameters.items()
+            if pname != "self" and p.default is inspect.Parameter.empty and pname not in raw
+        ]
+        if missing:
+            accepted = [pname for pname in signature.parameters if pname != "self"]
+            return filtered, {
+                "error": (
+                    f"Invalid arguments for tool '{tc.name}': missing required "
+                    f"parameter(s): {', '.join(missing)}. "
+                    f"This tool accepts: {', '.join(accepted)}. Re-send the "
+                    f"tool call with the required arguments."
+                )
+            }
+        return filtered, None
+
     def _execute_tool(self, tc: ToolCall) -> dict[str, Any]:
         """Execute a tool call and return the result."""
         try:
+            arguments, tool_error = self._prepare_tool_arguments(tc)
+            if tool_error is not None:
+                return tool_error
             if tc.name == "read_file":
-                return self._tool_read_file(**tc.arguments)
+                return self._tool_read_file(**arguments)
             elif tc.name == "run_command":
-                return self._tool_run_command(**tc.arguments)
+                return self._tool_run_command(**arguments)
             elif tc.name == "search_pattern":
-                return self._tool_search_pattern(**tc.arguments)
+                return self._tool_search_pattern(**arguments)
             elif tc.name == "read_diff":
                 return self._tool_read_diff()
             elif tc.name == "get_task_item":
-                return self._tool_get_task_item(**tc.arguments)
+                return self._tool_get_task_item(**arguments)
             elif tc.name == "sandbox_write":
-                return self._tool_sandbox_write(**tc.arguments)
+                return self._tool_sandbox_write(**arguments)
             elif tc.name == "sandbox_read":
-                return self._tool_sandbox_read(**tc.arguments)
+                return self._tool_sandbox_read(**arguments)
             elif tc.name == "detect_dead_code":
                 return self._tool_detect_dead_code()
             elif tc.name == "skylos_scan":
                 return self._tool_skylos_scan()
             elif tc.name == "scan_security":
-                return self._tool_scan_security(**tc.arguments)
+                return self._tool_scan_security(**arguments)
             elif tc.name == "read_static_analysis":
-                return self._tool_read_static_analysis(**tc.arguments)
+                return self._tool_read_static_analysis(**arguments)
             elif tc.name == "read_lsp_diagnostics":
                 return self._tool_read_lsp_diagnostics()
             else:
@@ -2553,7 +2646,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
             return dict(task)
         return {"error": f"Task not found: {id}"}
 
-    def _tool_sandbox_write(self, key: str, content: str) -> dict[str, Any]:
+    def _tool_sandbox_write(self, key: Any = None, content: Any = None) -> dict[str, Any]:
         """Write to sandbox; a ``verified_<n>`` write checkpoints cost.
 
         The judge grades a criterion by writing ``verified_<n>``. That write is
@@ -2561,7 +2654,34 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         the cost of grading it is still knowable — JUDGE-TIER2-001: without a
         checkpoint a capped run could only report its total, and a 9M-token
         grading ended as ``items=[]`` with no per-criterion attribution.
+
+        TRBL-138: a model call that omits an argument — or sends a non-string
+        key — must fail the TOOL CALL with a typed error the model can
+        correct, never a Python TypeError out of the dispatch (the schemas'
+        ``required`` list is advisory for most providers, and a malformed
+        arguments payload is degraded to ``{}`` by the LLM client, so this
+        shape does occur in real tier-2 runs). Non-string values are coerced:
+        a model that grades a criterion with a numeric detail keeps its
+        evidence.
         """
+        if not isinstance(key, str) or not key:
+            return {
+                "error": (
+                    "sandbox_write requires 'key': a non-empty string (e.g. "
+                    "'verified_0'), plus 'content'. Example: "
+                    'sandbox_write("verified_0", "PASS: tests/test_auth.py:45 '
+                    'confirms token validation")'
+                )
+            }
+        if content is None:
+            return {
+                "error": (
+                    f"sandbox_write requires 'content' (text to store under "
+                    f"key '{key}'). Re-send the call including 'content'."
+                )
+            }
+        if not isinstance(content, str):
+            content = str(content)
         self._sandbox[key] = content
         if isinstance(key, str) and key.startswith("verified_"):
             suffix = key[len("verified_") :]
