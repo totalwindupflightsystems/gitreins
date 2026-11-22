@@ -2548,6 +2548,10 @@ def cmd_task_complete(args: argparse.Namespace) -> None:
                 file=sys.stderr,
             )
             sys.exit(1)
+        # CH-MAINT-015: the closeout's re-judge burns tier-2 iterations the
+        # same way `gitreins judge` does, so the lane coherence gate applies
+        # here too — after the credential refusal, before the lease.
+        _validate_judge_lane_or_exit(llm)
 
     lease = _task_complete_lease(args.id, workdir, scan_root)
     if not lease.__enter__():
@@ -3607,6 +3611,31 @@ def _judge_dispatch_mode(
     return False
 
 
+def _validate_judge_lane_or_exit(llm: LLMClient, *, json_output: bool = False) -> None:
+    """Refuse an incoherent judge lane BEFORE tier-1 starts (CH-MAINT-015).
+
+    The judge lane resolves from GITREINS_LLM_* env only (INT-CI-021: no
+    config schema keys), so an incoherent triple used to surface only as
+    HTTP 400s on every tier-2 iteration and a FAIL [DEGRADED] INCOMPLETE
+    verdict. ``LLMClient.validate_lane`` probes the endpoint's /models once
+    per process (cached per base_url) and raises :class:`JudgeLaneIncoherent`
+    naming base_url, model id, and the reason; this turns that into a
+    non-zero exit before any tier-1 guard work or tier-2 iteration runs.
+    """
+    from engine.llm import JudgeLaneIncoherent
+
+    try:
+        llm.validate_lane()
+    except JudgeLaneIncoherent as exc:
+        print(str(exc), file=sys.stderr)
+        if not json_output:
+            print(
+                "No tier-1 guard work was started and no verdict was produced (exit code 1).",
+                file=sys.stderr,
+            )
+        sys.exit(1)
+
+
 def cmd_judge(args: argparse.Namespace) -> None:
     """Evaluate a task — sync (default), ephemeral, or dispatch a background job.
 
@@ -3678,6 +3707,11 @@ def cmd_judge(args: argparse.Namespace) -> None:
         print("Tier 2 skipped (--skip-tier2 flag)")
 
     llm = LLMClient()
+    # CH-MAINT-015: the coherence probe runs once, before tier-1 starts — one
+    # cheap GET beats burning every tier-2 iteration on a 400. A --skip-tier2
+    # run keeps its contract of no LLM at all, so the gate is moot there.
+    if not getattr(args, "skip_tier2", False):
+        _validate_judge_lane_or_exit(llm, json_output=json_output)
     config = load_config(workdir)
     judge = Judge(llm, workdir, guard_config=config, scope=scope)
 
@@ -3792,6 +3826,10 @@ def _cmd_judge_ephemeral(
 
     workdir = get_workdir()
     llm = LLMClient()
+    # CH-MAINT-015: refuse an incoherent lane before anything runs — only
+    # when tier-2 will actually run (--skip-tier2 must stay LLM-free).
+    if not getattr(args, "skip_tier2", False):
+        _validate_judge_lane_or_exit(llm, json_output=json_output)
     config = load_config(workdir)
     judge = Judge(
         llm,
@@ -3919,6 +3957,10 @@ def _cmd_judge_async(task_id: str) -> None:
         )
         sys.exit(1)
 
+    # CH-MAINT-015: refuse dispatch on an incoherent lane up front, instead
+    # of spawning a detached child that can only die far from the caller.
+    _validate_judge_lane_or_exit(_credential_probe)
+
     existing = find_running_job(task_id, workdir)
     if existing is not None:
         print(f"Async job already running: {existing['id']}")
@@ -4025,6 +4067,10 @@ def _cmd_judge_worker(job_id: str) -> None:
 
     try:
         llm = LLMClient()
+        # CH-MAINT-015: the child validates the lane before any work. A
+        # refusal raises JudgeLaneIncoherent, which the generic handler
+        # below records as a terminal job error.
+        llm.validate_lane()
         config = load_config(wd)
         judge = Judge(llm, wd, guard_config=config)
         result = judge.evaluate_task(task)

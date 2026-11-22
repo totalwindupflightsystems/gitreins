@@ -257,6 +257,20 @@ def skip_worker_llm_probe(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def skip_judge_lane_model_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default the judge-lane /models coherence probe OFF in tests (CH-MAINT-015).
+
+    ``LLMClient.validate_lane`` is the one LLM surface that hits the network
+    OUTSIDE a chat iteration, so without a default every direct-call CLI test
+    that exercises a judge dispatcher (async dispatch, ephemeral gates) would
+    dial the ambient provider with a placeholder credential. The probe's own
+    tests opt back in by deleting the env var, mirroring
+    :func:`skip_worker_llm_probe`.
+    """
+    monkeypatch.setenv("GITREINS_LLM_SKIP_MODEL_CHECK", "1")
+
+
+@pytest.fixture(autouse=True)
 def isolate_git_fixtures_from_host_config(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """Neutralize the host's global git config for test subprocesses.
 
