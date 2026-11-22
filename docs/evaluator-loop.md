@@ -23,7 +23,7 @@ slightly above its cap (the final call is allowed through).
 | `max_iterations` | `100` | LLM reasoning turns; every tool call additionally costs `tool_call_weight` |
 | `max_input_tokens` | `10_000_000` (10M) | prompt budget per context window; `"200k"` / `"1.5M"` forms accepted |
 | `max_output_tokens` | `131_072` (128K) | output-token budget |
-| `max_time` | unset | wall-clock cap (`30s`, `5m`, `2h`); unset = unlimited |
+| `max_time` | `45m` (default) | wall-clock cap (`30s`, `5m`, `2h`); **applied as a 45-minute default when NO `max_time` source is configured anywhere** — an explicit value (including `"0s"` / `-1` = unlimited) always wins [TRBL-135] |
 | `max_tokens_per_call` | `16384` | per-request output cap (separate from the session budget) |
 | `tool_call_weight` | `0.1` | iterations charged per tool call |
 | `compaction_threshold` | `0.90` | compact once the **cumulative** input tokens consumed since the last compaction exceed this share of `max_input_tokens` — the same quantity the cap meters |
@@ -57,6 +57,83 @@ evaluator makes a best-effort recovery instead:
    a capped run can never pass a task it did not finish verifying.
 2. **Otherwise INCOMPLETE** with `summary` = `Cap exceeded: <reason>`, which
    names the cap and how much was used.
+
+### The wall-clock ceiling is a first-class timeout (TRBL-135)
+
+A tier-2 run ended by the **time cap** (the default 45 minutes, or the lane's
+own `evaluator.max_time`) is not just an `INCOMPLETE` with a cap message — the
+verdict carries a dedicated outcome:
+
+* the in-memory `Verdict` (and every step-data / stage-dict copy) carries
+  `outcome: "timeout"`; the persisted `verdict.json` stamps it at the TOP
+  level as `outcome: "timeout"` plus `tier2_timeout: true`, next to
+  `passed` / `pass_class` — a reader answers *judging or dead?* from the
+  document without walking stages.
+* the timeout verdict is persisted like any verdict: because the ceiling
+  trips **inside** the evaluator, the pipeline still receives the (partial)
+  verdict and `gitreins task complete` / `gitreins judge` write it to
+  `.gitreins/history/<date>/<id>/verdict.json`. A run that *cannot* persist
+  anymore is one that was killed externally — the default ceiling exists so
+  that should not have to happen.
+* iteration- and token-cap runs do NOT carry the outcome (absent, never an
+  empty string), so everything except a genuine timeout serializes exactly
+  as before.
+* the default is applied at `eval_cap_from_config` only when NO time source
+  was ever present: neither `evaluator.max_time`, `defaults.max_time`, a
+  legacy `cap` string with a time component, nor `GITREINS_MAX_TIME`. Any of
+  those (including explicit `"0s"` / `-1` = unlimited) disables the default —
+  explicit configuration keeps full authority.
+
+### Grading a merge commit: the first-parent diff and the context census (TRBL-135)
+
+A merge commit's own change set is empty to the judge's default context:
+`git show <merge>` prints no patch and `git diff HEAD` on the clean tree a
+merged wave leaves shows nothing. Measured on the trouble board (commit
+fd1b52f), the tier-2 prompt was 1146 bytes and the judge spent 166
+iterations / 249,160 tokens verifying production wiring the prompt never
+contained.
+
+* `AgenticEvaluator._build_code_context` detects a merge (`git rev-parse
+  --verify HEAD^2`) and builds the diff from `git diff --first-parent
+  HEAD~1 HEAD` — the worker commits as seen from the base they changed.
+  Data-file hunks are filtered like working-tree diffs; uncommitted work,
+  when present, is appended after the first-parent section.
+* every run records a **context census** on the verdict — `diff_source`
+  (`first-parent-merge` / `first-parent-merge+working-tree` /
+  `working-tree`), `diff_bytes` and `prompt_bytes` — persisted at the top
+  level of `verdict.json` as `context_stats` and folded flat onto
+  `stages.tier2.context_stats`. The audit question "did the judge actually
+  SEE the change?" is answered by the record itself.
+
+### What Tier 1 alone can prove: `pass_class`
+
+`gitreins task complete` and `gitreins judge` persist a `pass_class` on
+every verdict:
+
+| `pass_class` | Meaning | Merge gate |
+|---|---|---|
+| `judged` | Tier 2 ran and produced a verdict (pass or fail) | A `passed=true, judged` verdict satisfies a judge-gated merge |
+| `tier1-only` | Tier 2 did NOT run (`--skip-tier2`, tier-1 failure short-circuit): the run grades lint/tests/secrets alone | **Cannot satisfy a judge-gated merge on its own.** An owner waiver (`gate.tier2_waiver` in `.gitreins/config.yaml` / `GITREINS_TIER2_WAIVER`, digested into `tier2_waiver_digest`) is the only recorded escape — the gate itself keys on `pass_class`, never on the waiver value |
+| `unverified-never-pass` | The record claims to be judged but carries no tier-2 artifact | Treated as unproven |
+
+A tier1-only close therefore reports `pass_class=tier1-only` in the verdict
+record and in every machine-readable status dict.
+
+### Async quality producers are accounted for (TRBL-135)
+
+A judge configured with `quality.*` can detach the repo's producer
+(`gitreins guard --quality-async`) so the commit path never waits on the
+measurement. That detachment is exactly how a killed run orphaned the
+producer (RELEASE-014). The spawn is now registered in a process-wide
+registry (`engine/quality_metrics.spawned_producers`), and every judge run
+ends with a teardown:
+
+* tier-2 ended on the wall clock → every still-running producer is
+  terminated (SIGTERM to its detached session), the report is persisted as
+  `producer_reap` in `verdict.json`, and a loud warning names the pids;
+* any other exit → still-running producers are reported in the log, not
+  killed (a healthy run's producer may still be writing the artifact a
+  later surface reads).
 
 ### Environment variables
 
