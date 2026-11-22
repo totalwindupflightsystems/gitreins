@@ -231,6 +231,43 @@ class TestFindReusableVerdict:
         llm = SimpleNamespace(model="glm-5.3-flash")
         assert find_reusable_verdict(str(git_repo), task, llm) is None
 
+    def test_registry_flip_does_not_change_the_workspace_digest(self, git_repo: Path) -> None:
+        """CH-MAINT-016: .gitreins/tasks.yaml is self state, not content.
+
+        `task complete` flips status/completed_at into the (tracked) task
+        registry BEFORE re-observing the tree — the first closeout graded
+        one registry state and the adoption re-observe finds another. The
+        exclusion keeps the delivered-workspace digest stable across that
+        flip, so a consecutive closeout of the SAME task on the SAME tree
+        can adopt instead of re-spending the tier2 wall (measured live:
+        without the exclusion the re-grade ran 29.67s instead of adopting).
+        """
+        before = compute_fingerprint(str(git_repo)).digest
+        # Mimic what the lifecycle does: register + flip a task to complete.
+        (git_repo / ".gitreins" / "tasks.yaml").write_text("tasks:\n  T-016:\n")
+        _git(git_repo, "add", ".gitreins/tasks.yaml")
+        (git_repo / ".gitreins" / "tasks.yaml").write_text(
+            "tasks:\n  T-016:\n    status: complete\n    completed_at: '2026-11-22T15:00:00'\n"
+        )
+        after_flip = compute_fingerprint(str(git_repo)).digest
+        (git_repo / ".gitreins" / "tasks.yaml").write_text(
+            "tasks:\n  T-016:\n    status: complete\n    completed_at: '2026-11-22T16:00:00'\n"
+        )
+        after_second_flip = compute_fingerprint(str(git_repo)).digest
+
+        # The registry file does not exist at `before`, is new in the index
+        # after the flip, and its own byte-level edits do not move the
+        # workspace digest in ANY of the three states — self state is not
+        # content.
+        assert before == after_flip == after_second_flip
+        # and a verdict graded before the flip still matches the tree.
+        fingerprint = compute_fingerprint(str(git_repo)).digest
+        commit = _git(git_repo, "rev-parse", "HEAD")
+        write_verdict_entry(git_repo, "T-016", _adoptable_payload(commit, fingerprint, CRITERIA))
+        task = SimpleNamespace(id="T-016", criteria=list(CRITERIA))
+        llm = SimpleNamespace(model="glm-5.3-flash")
+        assert find_reusable_verdict(str(git_repo), task, llm) is not None
+
     def test_unresolvable_lane_never_adopts(self, git_repo: Path) -> None:
         fingerprint = compute_fingerprint(str(git_repo)).digest
         commit = _git(git_repo, "rev-parse", "HEAD")

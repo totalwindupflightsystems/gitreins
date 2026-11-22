@@ -15,6 +15,10 @@ non-ignored files are included. File modes, HEAD ids, index blob ids, mtimes, an
 absolute paths are deliberately absent. Thus staging or unstaging identical
 workspace bytes cannot change the digest, and repositories with identical visible
 content hash identically even when their HEADs differ (including an unborn HEAD).
+GitReins-owned state files that the lifecycle mutates INSIDE a graded run
+(``.gitreins/review-state.*``, ``.gitreins/tasks.yaml``) are excluded from both
+sources: the workspace content being graded does not include the harness's own
+bookkeeping (CH-MAINT-016).
 
 A path that lives in — or under — a directory carrying its own ``.git`` is
 refused with the named state ``nested-repository`` by default: the outer index
@@ -62,6 +66,12 @@ _OPT_IN_KEY = "allow_nested_repositories"
 _SELF_STATE_PATHS = {
     b".gitreins/review-state.json",
     b".gitreins/review-state.lock",
+    # CH-MAINT-016: the task registry is gitreins-owned state the lifecycle
+    # rewrites during evaluation (a closeout flips status/completed_at into
+    # it BEFORE the tree is re-observed for persistence). Binding the digest
+    # to its bytes made every consecutive closeout see a fresh workspace —
+    # the same class the review-state paths were excluded for.
+    b".gitreins/tasks.yaml",
 }
 
 
@@ -405,7 +415,13 @@ def compute(repo_root: str | os.PathLike[str], timeout_s: float = 30.0) -> Finge
         _flag_preflight(root, deadline)
         index_entries = _parse_index(root, deadline)
         untracked = _untracked_paths(root, deadline)
-        paths = sorted(set(index_entries).union(untracked))
+        # Self state is excluded for BOTH sources (CH-MAINT-016): a TRACKED
+        # gitreins-owned file (the task registry) is mutated by the lifecycle
+        # INSIDE a graded run — `task complete` flips status/completed_at in
+        # .gitreins/tasks.yaml before re-observing the tree — so counting it
+        # in the workspace content made every consecutive closeout observe a
+        # different digest over byte-identical delivered content.
+        paths = sorted(set(index_entries).union(untracked) - _SELF_STATE_PATHS)
         _attributes_preflight(root, paths, deadline)
 
         root_bytes = os.fsencode(root)
