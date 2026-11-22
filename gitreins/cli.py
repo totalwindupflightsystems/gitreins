@@ -2567,23 +2567,52 @@ def cmd_task_complete(args: argparse.Namespace) -> None:
         print(f"Control root: {workdir}")
         print(f"Scan scope:   {scan_root}")
 
-        print("\nEvaluating...")
-        # skip_tier2 leaves llm None; Judge only dereferences it for tier-2.
-        # engine/judge.py annotates LLMClient (not | None) — widening that
-        # signature is out of scope for this tranche, so pin the gap here.
-        # DF-WARPFS-180: pass the repo guard config through. The config-less
-        # call made Judge coerce guard_config to {} and GuardManager derive
-        # its budgets from defaults (hook 300 / interim test 1200) instead of
-        # the repo's real test_timeout/hook_timeout — every closeout warned
-        # and took the derive path even when .gitreins/config.yaml was sane.
-        config = load_config(workdir)
-        judge = Judge(
-            llm,  # type: ignore[arg-type]  # skip_tier2 leaves llm None
-            workdir,
-            guard_config=config,
-            scan_root=scan_root,
-        )
-        result = judge.evaluate_task(task, skip_tier2=skip_tier2)
+        # CH-MAINT-016: adopt the verdict the plain `gitreins judge` path
+        # already persisted for this tree when every adoption identity
+        # matches (same HEAD + workspace fingerprint + criteria + lane, fully
+        # graded). The closeout had been re-spending the entire tier2
+        # max_time wall re-grading byte-identical trees — 2 of 2 measured
+        # closeouts capped INCOMPLETE 0-graded on trees judged COMPLETE
+        # minutes earlier (see engine/closeout_reuse.py for the numbers).
+        # --skip-tier2 keeps its no-LLM contract and never adopts.
+        reusable = None
+        if not skip_tier2 and llm is not None:
+            from engine.closeout_reuse import find_reusable_verdict
+
+            reusable = find_reusable_verdict(workdir, task, llm)
+
+        reuse_extra: dict[str, Any] | None = None
+        if reusable is not None:
+            from engine.closeout_reuse import build_adopted_result
+
+            result = build_adopted_result(reusable, task.id)
+            reuse_extra = {
+                "reused_from": reusable.entry,
+                "reused_from_evaluated_at": reusable.evaluated_at,
+            }
+            print(
+                f"\nAdopting stored verdict {reusable.entry} — identical tree, "
+                "criteria and grading lane; the closeout re-judge is skipped "
+                "(CH-MAINT-016)."
+            )
+        else:
+            print("\nEvaluating...")
+            # skip_tier2 leaves llm None; Judge only dereferences it for tier-2.
+            # engine/judge.py annotates LLMClient (not | None) — widening that
+            # signature is out of scope for this tranche, so pin the gap here.
+            # DF-WARPFS-180: pass the repo guard config through. The config-less
+            # call made Judge coerce guard_config to {} and GuardManager derive
+            # its budgets from defaults (hook 300 / interim test 1200) instead of
+            # the repo's real test_timeout/hook_timeout — every closeout warned
+            # and took the derive path even when .gitreins/config.yaml was sane.
+            config = load_config(workdir)
+            judge = Judge(
+                llm,  # type: ignore[arg-type]  # skip_tier2 leaves llm None
+                workdir,
+                guard_config=config,
+                scan_root=scan_root,
+            )
+            result = judge.evaluate_task(task, skip_tier2=skip_tier2)
         _print_judge_result(result)
 
         # GR-166: the weaker class must be visible where the author reads the
@@ -2618,7 +2647,7 @@ def cmd_task_complete(args: argparse.Namespace) -> None:
                 "a judge-gated merge (needs_review)."
             )
 
-        _persist_result(workdir, task, result)
+        _persist_result(workdir, task, result, reuse_extra)
         if not result.passed:
             if LLM_FAILURE_SUMMARY_PREFIX in (result.summary or ""):
                 _print_tier2_recovery(llm, task.id)
@@ -3001,13 +3030,17 @@ def _print_judge_result(result: JudgeResult) -> None:
     print(summary)
 
 
-def _persist_result(workdir: str, task: Task, result: JudgeResult) -> None:
+def _persist_result(workdir: str, task: Task, result: JudgeResult, extra: Any = None) -> None:
     """Save evaluation verdict to history. Non-fatal — logs on failure.
 
     Thin wrapper over ``engine.persist.persist_evaluation`` (the single shared
     implementation the MCP server also calls) that keeps the CLI's console
     behaviour: the saved-verdict line, the dry-run warning and the non-fatal
     warning all stay here, never in the shared helper.
+
+    ``extra`` is stamped into the record by the shared writer (CH-MAINT-016:
+    the closeout's adoption marker ``reused_from`` rides this path). It is
+    positional-optional so every existing caller keeps its exact behavior.
     """
     try:
         from engine.persist import VerdictPersister, persist_evaluation
@@ -3040,7 +3073,9 @@ def _persist_result(workdir: str, task: Task, result: JudgeResult) -> None:
                 pass
             return collect_evidence(workdir, entry_dir, commit=source_commit, task_id=task.id)
 
-        commit_hash = persist_evaluation(workdir, task, result, collect_evidence=_collect_evidence)
+        commit_hash = persist_evaluation(
+            workdir, task, result, extra=extra, collect_evidence=_collect_evidence
+        )
         if commit_hash == "disabled":
             pass  # user opted out
         elif commit_hash == "dry-run":
