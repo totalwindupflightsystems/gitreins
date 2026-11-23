@@ -272,3 +272,119 @@ class TestSelfMatchSemantics:
         assert "error" not in result
         assert result.get("cmd") == "echo df031-noop-check"
         assert "df031-noop-check" in result.get("output", "")
+
+
+class TestEscapedAndAnchoredPatterns:
+    """DF-031 rework: escaped/ERE-special leads and trailing ``$`` anchors.
+
+    Tier-2 verdict 2830e20c findings — (0) escaped-lead patterns were
+    bracket-tricked into an ERE that matches its own rewritten wrapper argv
+    (``pgrep -f '\\.venv/bin/python -c'`` → ``\\[v]enx...`` whose ERE matches
+    the literal ``[v]enx`` in the wrapper) and re-issued probes accumulate
+    brackets matching nothing; (1) a trailing ``$`` ERE end-anchor was refused
+    as "variable-built" although quoted and safe.
+    """
+
+    def test_escaped_lead_single_quoted_refused(self) -> None:
+        """Failure mode 0: an escaped-lead pattern is refused, not rewritten."""
+        snippet = "until pgrep -f '\\.venv/bin/python -c'; do sleep 1; done"
+        new, warning, refusal = _neutralize_pgrep_selfmatch(snippet)
+        assert new == snippet, "escaped-lead probe must not be rewritten"
+        assert warning is None
+        assert refusal is not None
+        assert "pgrep" in refusal
+        assert "bracket-tricked" in refusal
+
+    def test_escaped_lead_unquoted_refused(self) -> None:
+        """Failure mode 0 in unquoted form: refused, cmd unchanged."""
+        snippet = r"pgrep -f \.venv/bin/python -c"
+        new, warning, refusal = _neutralize_pgrep_selfmatch(snippet)
+        assert new == snippet
+        assert warning is None
+        assert refusal is not None
+
+    def test_caret_lead_refused(self) -> None:
+        """Other ERE-special leads are refused for the same soundness reason."""
+        snippet = "pgrep -f '^df031-anchored-sentinel'"
+        new, warning, refusal = _neutralize_pgrep_selfmatch(snippet)
+        assert new == snippet
+        assert warning is None
+        assert refusal is not None
+
+    def test_escaped_lead_raw_probe_self_matches_wrapper(self) -> None:
+        """Red-proof: the RAW escaped-lead probe matches its own wrapper.
+
+        The wrapper argv carries the snippet text verbatim, so the literal
+        ``.df031-esc-9x7q`` (which the ERE ``\\.df031-esc-9x7q`` matches) is
+        present in both the real target AND the wrapper — the hazard the
+        refusal prevents. This passes at every revision: it documents WHY the
+        escaped-lead class must be refused, and the refusal test above is the
+        arm that fails at the parent commit (which rewrote instead).
+        """
+        tag = ".df031-esc-9x7q-raw-sentinel"
+        sentinel = _spawn_sentinel(tag)
+        try:
+            result = command_hygiene.run_bounded(
+                r"pgrep -f '\.df031-esc-9x7q-raw-sentinel'", timeout=10
+            )
+            pids = _pid_lines(result.get("output", ""))
+            assert len(pids) >= 2, f"raw escaped-lead probe did not self-match: {pids}"
+            assert sentinel.pid in pids
+        finally:
+            _kill_group(sentinel)
+
+    def test_escaped_lead_refused_via_run_command(self, evaluator: AgenticEvaluator) -> None:
+        """Wiring: the refusal surfaces at the tool seam with guidance."""
+        result = evaluator._tool_run_command(r"pgrep -f '\.venv/bin/python -c'")
+        assert result.get("refused") is True
+        assert "REFUSED" in result.get("error", "")
+        assert result.get("cmd") == r"pgrep -f '\.venv/bin/python -c'"
+
+    def test_dollar_anchor_unquoted_rewritten(self) -> None:
+        """Failure mode 1: a trailing ``$`` anchor is not a variable reference."""
+        snippet = "until pgrep -f svc-worker$; do sleep 1; done"
+        new, warning, refusal = _neutralize_pgrep_selfmatch(snippet)
+        assert refusal is None
+        assert warning is not None
+        assert 'pgrep -f "[s]vc-worker$"' in new
+        # the wrapper must not contain what the probe matches
+        assert "pgrep -f svc-worker" not in new
+
+    def test_dollar_anchor_double_quoted_rewritten(self) -> None:
+        snippet = 'until pgrep -f "svc-worker$"; do sleep 1; done'
+        new, warning, refusal = _neutralize_pgrep_selfmatch(snippet)
+        assert refusal is None
+        assert warning is not None
+        assert 'pgrep -f "[s]vc-worker$"' in new
+
+    def test_dollar_anchor_pkill_rewritten(self) -> None:
+        snippet = "pkill -f svc-worker$"
+        new, warning, refusal = _neutralize_pgrep_selfmatch(snippet)
+        assert refusal is None
+        assert 'pkill -f "[s]vc-worker$"' in new
+
+    def test_dollar_anchor_probe_still_finds_real_process(
+        self, evaluator: AgenticEvaluator
+    ) -> None:
+        """The anchored rewrite preserves function: the real target is found
+        and the wrapper does not self-match."""
+        tag = "df031-anch-9x7q-e-sentinel"
+        sentinel = _spawn_sentinel(f"{tag} trailing")
+        try:
+            # the sentinel cmdline is `sh -c sleep 61 # <tag> trailing`, so the
+            # ERE ``<tag> trailing$`` matches it (cmdline ends there)
+            result = evaluator._tool_run_command(f"pgrep -f {tag} trailing$")
+            assert "error" not in result
+            assert result.get("cmd") == 'pgrep -f "[d]f031-anch-9x7q-e-sentinel trailing$"'
+            pids = _pid_lines(result.get("output", ""))
+            assert pids == [sentinel.pid], f"rewritten anchored probe found {pids}"
+        finally:
+            _kill_group(sentinel)
+
+    def test_mid_dollar_still_refused_unquoted(self) -> None:
+        """The anchor exemption must not weaken mid-pattern variables."""
+        snippet = "pgrep -f svc-$USER-poller"
+        new, warning, refusal = _neutralize_pgrep_selfmatch(snippet)
+        assert new == snippet
+        assert warning is None
+        assert refusal is not None

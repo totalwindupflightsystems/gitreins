@@ -798,6 +798,15 @@ _PGSELF_TOOL_RE = re.compile(
 # it untouched (rewriting inside a class would also corrupt the regex).
 _PGSELF_LEADING_CLASS_RE = re.compile(r"\[")
 
+# A pattern whose FIRST character is a backslash-escape or an ERE special
+# (``\.venv/bin/python``, ``^svc``, ``.hidden``) must NOT be bracket-tricked:
+# the atomic ERE text left before the bracketed class can match the bracket
+# characters of the rewritten wrapper argv (``pgrep -f '\[v]enx'`` — the ERE
+# ``\[v]enx`` matches the literal ``[v]enx`` inside its own wrapper), so the
+# probe self-matches again and re-issued probes accumulate brackets. Fail
+# closed: the judge rephrases with a plain literal bracket-tricked pattern.
+_PGSELF_UNSAFE_LEAD_RE = re.compile(r"^[\\^$.|?*+(){]")
+
 # Shell variables / command substitution in the pattern make the probe
 # unprovable at rewrite time — the snippet is refused instead of running a
 # self-matching poll (``pkill -f`` would kill the judge shell). A ``$`` inside
@@ -819,10 +828,11 @@ _PGSELF_WARNING = (
 
 _PGSELF_REFUSAL = (
     "REFUSED (self-matching wait-probe): this snippet uses {tool} -f with a "
-    "pattern built from variables ({pattern!r}), so the evaluator cannot "
-    "prove the probe will not match its own `sh -c` wrapper — pgrep would "
-    "poll forever and pkill would kill the judge shell. Rewrite the probe "
-    "with a literal, bracket-tricked pattern instead — e.g. "
+    "pattern built from variables or led by an escape/ERE special "
+    "({pattern!r}), so the evaluator cannot prove the probe will not match "
+    "its own `sh -c` wrapper — pgrep would poll forever and pkill would kill "
+    "the judge shell. Rewrite the probe with a literal, bracket-tricked "
+    "pattern instead — e.g. "
     '{tool} -f "[m]y-daemon" — and re-run.'
 )
 
@@ -932,7 +942,17 @@ def _neutralize_pgrep_selfmatch(cmd: str) -> tuple[str, str | None, str | None]:
             # Already bracket-tricked (or opens with a char class) — the
             # wrapper no longer contains the plain literal at that position.
             continue
-        dynamic = _PGSELF_DYNAMIC_RE.search(pattern)
+        if _PGSELF_UNSAFE_LEAD_RE.match(pattern):
+            # Escaped/ERE-special lead: the bracket-trick at the first
+            # alphanumeric would leave matchable atomic text before the class
+            # (judge finding, DF-031 rework) — refuse instead of rewriting.
+            refusal = _PGSELF_REFUSAL.format(tool=tool, pattern=pattern[:80])
+            break
+        # A single trailing ``$`` is an ERE end-anchor, not a variable
+        # reference — in shell it is literal text at the end of a word in
+        # every quote mode (judge finding, DF-031 rework).
+        anchor = pattern.endswith("$")
+        dynamic = _PGSELF_DYNAMIC_RE.search(pattern[:-1] if anchor else pattern)
         if dynamic and quote != "'":
             refusal = _PGSELF_REFUSAL.format(tool=tool, pattern=pattern[:80])
             break
