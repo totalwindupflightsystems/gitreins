@@ -1,0 +1,41 @@
+{
+  "tick": "gitreins-foreman-2026-11-23-04-52-00",
+  "created_at_utc": "2026-11-23T05:30:00Z",
+  "project": "gitreins",
+  "budget": 3,
+  "cos_review": {
+    "status": "in_flight_background",
+    "proc": "proc_f018cff713fb (pid 1939231)",
+    "first_attempt": "foreground timeout 420s, no output",
+    "rule": "skill 0.5 step 3: retry once; if still no ruling at process end, execute as drafted and stamp handoff plan-unreviewed"
+  },
+  "wave": [
+    {
+      "row": "RELEASE-023",
+      "leg": "AC1 version prep (v0.22.0): pyproject bump, uv.lock sync, CHANGELOG promotion, doc stamp sync — one commit",
+      "worktree": "/home/kara/worktrees/gitreins-RELEASE-023",
+      "branch": "wt/RELEASE-023",
+      "base_sha": "53448080",
+      "worker_model": "glm-5.3-flash",
+      "worker_provider": "opencode-go",
+      "brief": "/tmp/brief-RELEASE-023-prep.txt",
+      "board_status_at_manifest": "in_progress"
+    },
+    {
+      "row": "DF-031",
+      "leg": "evaluator-side self-match detection/rewrite for pgrep -f / pkill -f wait-probe snippets (engine/evaluator.py + tests)",
+      "worktree": "/home/kara/worktrees/gitreins-DF-031",
+      "branch": "wt/DF-031",
+      "base_sha": "53448080",
+      "worker_model": "glm-5.3-flash",
+      "worker_provider": "opencode-go",
+      "brief": "/tmp/brief-DF-031.txt",
+      "board_status_at_manifest": "in_progress"
+    }
+  ],
+  "foreman_direct": [
+    {"row": "QA-GITREINS-15", "action": "deferred to boardctl lane (code leg) with heal-evidence note; board-restore leg proven healed at tip 53448080"},
+    {"row": "RELEASE-023", "action": "AC3 census re-derived foreman-direct: 280 commits v0.21.0..53448080, 246 non-merge, feat=13 fix=26, 0 bang, 0 BREAKING CHANGE -> minor v0.22.0 stands"}
+  ],
+  "merge_plan": "serial in dispatch order after both workers exit; guard+judge per branch, gates re-run on merged tree; push github main after green"
+}
