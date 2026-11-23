@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-11-23
+
 ### Added
 - **`fingerprint.allow_nested_repositories` — an opt-in for checkouts whose
   outer index tracks a nested repository.** The working-tree fingerprint refused
@@ -1126,7 +1128,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitHub Actions CI (lint + test + guard)
 - MIT LICENSE, CONTRIBUTING.md, SECURITY.md
 
-[Unreleased]: https://github.com/totalwindupflightsystems/gitreins/compare/v0.10.2...HEAD
+[Unreleased]: https://github.com/totalwindupflightsystems/gitreins/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/totalwindupflightsystems/gitreins/compare/v0.21.0...v0.22.0
+[0.21.1]: https://github.com/totalwindupflightsystems/gitreins/compare/v0.21.0...v0.21.1
+[0.21.0]: https://github.com/totalwindupflightsystems/gitreins/compare/v0.20.0...v0.21.0
 [0.10.2]: https://github.com/totalwindupflightsystems/gitreins/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/totalwindupflightsystems/gitreins/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/totalwindupflightsystems/gitreins/compare/v0.9.1...v0.10.0
