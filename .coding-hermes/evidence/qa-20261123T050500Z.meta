@@ -1,0 +1,11 @@
+agent=524a8ece
+server=bunker-las-03
+evidence=/home/kara/gitreins/.coding-hermes/evidence/qa-20261123T050500Z
+launched=2026-11-23T01:00:13Z
+keep=0
+project=gitreins
+phase=launched
+target=gitreins
+runner=gitreins-qa
+identity_source=origin-remote
+repo=/home/kara/gitreins

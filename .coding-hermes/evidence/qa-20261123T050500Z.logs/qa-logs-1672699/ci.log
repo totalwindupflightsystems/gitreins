@@ -1,0 +1,1048 @@
+QA-6 hygiene: removed stale agent-workspace venv (/home/bunker-524a8ece/qa-gitreins/.venv) before act replay
+time="2026-11-22T17:04:19-08:00" level=info msg="Using docker host 'unix:///run/bunker/524a8ece/docker.sock', and daemon socket 'unix:///run/bunker/524a8ece/docker.sock'"
+[CI/test-1] ⭐ Run Set up job
+[CI/test-2] ⭐ Run Set up job
+[CI/test-1] 🚀  Start image=catthehacker/ubuntu:act-latest
+[CI/test-2] 🚀  Start image=catthehacker/ubuntu:act-latest
+[CI/test-3] ⭐ Run Set up job
+[CI/test-3] 🚀  Start image=catthehacker/ubuntu:act-latest
+[CI/test-2]   🐳  docker pull image=catthehacker/ubuntu:act-latest platform= username= forcePull=true
+[CI/test-3]   🐳  docker pull image=catthehacker/ubuntu:act-latest platform= username= forcePull=true
+[CI/test-1]   🐳  docker pull image=catthehacker/ubuntu:act-latest platform= username= forcePull=true
+[CI/test-3]   🐳  docker create image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/test-1]   🐳  docker create image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/test-2]   🐳  docker create image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/test-3]   🐳  docker run image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/test-1]   🐳  docker run image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/test-2]   🐳  docker run image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/test-3]   🐳  docker exec cmd=[node --no-warnings -e console.log(process.execPath)] user= workdir=
+[CI/test-1]   🐳  docker exec cmd=[node --no-warnings -e console.log(process.execPath)] user= workdir=
+[CI/test-2]   🐳  docker exec cmd=[node --no-warnings -e console.log(process.execPath)] user= workdir=
+[CI/test-3]   ✅  Success - Set up job
+[CI/test-1]   ✅  Success - Set up job
+[CI/test-1]   ☁  git clone 'https://github.com/actions/setup-python' # ref=v5
+[CI/test-3]   ☁  git clone 'https://github.com/actions/setup-python' # ref=v5
+[CI/test-2]   ✅  Success - Set up job
+[CI/test-2]   ☁  git clone 'https://github.com/actions/setup-python' # ref=v5
+[CI/test-1] 🧪  Matrix: map[python-version:3.10]
+[CI/test-1] ⭐ Run Main actions/checkout@v4
+[CI/test-1]   🐳  docker cp src=/home/bunker-524a8ece/qa-gitreins/. dst=/home/bunker-524a8ece/qa-gitreins
+[CI/test-1]   ✅  Success - Main actions/checkout@v4 [520.420766ms]
+[CI/test-1] ⭐ Run Main Set up Python 3.10
+[CI/test-1]   🐳  docker cp src=/home/bunker-524a8ece/.cache/act/actions-setup-python@v5/ dst=/var/run/act/actions/actions-setup-python@v5/
+[CI/test-3] 🧪  Matrix: map[python-version:3.12]
+[CI/test-3] ⭐ Run Main actions/checkout@v4
+[CI/test-3]   🐳  docker cp src=/home/bunker-524a8ece/qa-gitreins/. dst=/home/bunker-524a8ece/qa-gitreins
+[CI/test-1]   🐳  docker exec cmd=[/opt/acttoolcache/node/24.22.3/x64/bin/node /var/run/act/actions/actions-setup-python@v5/dist/setup/index.js] user= workdir=
+[CI/test-1]   ❓  ::group::Installed versions
+[CI/test-1]   | Version 3.10 was not found in the local cache
+[CI/test-1]   | (node:33) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+[CI/test-1]   | (Use `node --trace-deprecation ...` to show where the warning was created)
+[CI/test-3]   ✅  Success - Main actions/checkout@v4 [562.126635ms]
+[CI/test-3] ⭐ Run Main Set up Python 3.12
+[CI/test-3]   🐳  docker cp src=/home/bunker-524a8ece/.cache/act/actions-setup-python@v5/ dst=/var/run/act/actions/actions-setup-python@v5/
+[CI/test-3] <nil>
+[CI/test-3]   ❌  Failure - Main Set up Python 3.12 [89.502131ms]
+[CI/test-3] lstat /home/bunker-524a8ece/.cache/act/actions-setup-python@v5/.prettierrc.js: no such file or directory
+[CI/test-3] ⭐ Run Complete job
+[CI/test-3]   ✅  Success - Complete job
+[CI/test-3] 🏁  Job failed
+[CI/test-2] 🧪  Matrix: map[python-version:3.11]
+[CI/test-2] ⭐ Run Main actions/checkout@v4
+[CI/test-2]   🐳  docker cp src=/home/bunker-524a8ece/qa-gitreins/. dst=/home/bunker-524a8ece/qa-gitreins
+[CI/test-2]   ✅  Success - Main actions/checkout@v4 [481.30782ms]
+[CI/test-2] ⭐ Run Main Set up Python 3.11
+[CI/test-2]   🐳  docker cp src=/home/bunker-524a8ece/.cache/act/actions-setup-python@v5/ dst=/var/run/act/actions/actions-setup-python@v5/
+[CI/test-1]   | Version 3.10 is available for downloading
+[CI/test-1]   | Download from "https://github.com/actions/python-versions/releases/download/3.10.22-36876129702/python-3.10.22-linux-26.04-x64.tar.gz"
+[CI/test-2]   🐳  docker exec cmd=[/opt/acttoolcache/node/24.22.3/x64/bin/node /var/run/act/actions/actions-setup-python@v5/dist/setup/index.js] user= workdir=
+[CI/test-2]   ❓  ::group::Installed versions
+[CI/test-2]   | Version 3.11 was not found in the local cache
+[CI/test-2]   | (node:32) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+[CI/test-2]   | (Use `node --trace-deprecation ...` to show where the warning was created)
+[CI/test-2]   | Version 3.11 is available for downloading
+[CI/test-2]   | Download from "https://github.com/actions/python-versions/releases/download/3.11.18-40260280589/python-3.11.18-linux-26.04-x64.tar.gz"
+[CI/test-1]   | Extract downloaded archive
+[CI/test-1]   | [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /tmp/fde42cb8-2a35-46d0-bff0-a3d4d03112e4 -f /tmp/db5c2bac-f347-473f-a621-60f793bf8e66
+[CI/test-1]   | Execute installation script
+[CI/test-1]   | Check if Python hostedtoolcache folder exist...
+[CI/test-1]   | Creating Python hostedtoolcache folder...
+[CI/test-1]   | Create Python 3.10.22 folder
+[CI/test-1]   | Copy Python binaries to hostedtoolcache folder
+[CI/test-1]   | Create additional symlinks (Required for the UsePythonVersion Azure Pipelines task and the setup-python GitHub Action)
+[CI/test-1]   | Upgrading pip...
+[CI/test-2]   | Extract downloaded archive
+[CI/test-2]   | [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /tmp/aa972aac-7af1-4551-81ab-c0a9bfd0198c -f /tmp/d15296fe-b3c3-418b-b424-1eeb5bb223ba
+[CI/test-1]   | Collecting pip
+[CI/test-1]   | Downloading pip-26.3-py3-none-any.whl (2.0 MB)
+[CI/test-1]   | ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.0/2.0 MB 3.5 MB/s eta 0:00:00
+[CI/test-1]   | 
+[CI/test-1]   | Installing collected packages: pip
+[CI/test-1]   |   Attempting uninstall: pip
+[CI/test-1]   | Found existing installation: pip 23.0.1
+[CI/test-1]   | Uninstalling pip-23.0.1:
+[CI/test-1]   | Successfully uninstalled pip-23.0.1
+[CI/test-2]   | Execute installation script
+[CI/test-2]   | Check if Python hostedtoolcache folder exist...
+[CI/test-2]   | Create Python 3.11.18 folder
+[CI/test-2]   | Copy Python binaries to hostedtoolcache folder
+[CI/test-1]   | Successfully installed pip-26.3
+[CI/test-1]   | Create complete file
+[CI/test-1]   | Successfully set up CPython (3.10.22)
+[CI/test-1]   ❓  ::endgroup::
+[CI/test-1]   ❓ add-matcher /run/act/actions/actions-setup-python@v5/.github/python.json
+[CI/test-1]   ✅  Success - Main Set up Python 3.10 [21.639112389s]
+[CI/test-1]   ⚙  ::set-env:: pythonLocation=/opt/hostedtoolcache/Python/3.10.22/x64
+[CI/test-1]   ⚙  ::set-env:: PKG_CONFIG_PATH=/opt/hostedtoolcache/Python/3.10.22/x64/lib/pkgconfig
+[CI/test-1]   ⚙  ::set-env:: Python_ROOT_DIR=/opt/hostedtoolcache/Python/3.10.22/x64
+[CI/test-1]   ⚙  ::set-env:: Python2_ROOT_DIR=/opt/hostedtoolcache/Python/3.10.22/x64
+[CI/test-1]   ⚙  ::set-env:: Python3_ROOT_DIR=/opt/hostedtoolcache/Python/3.10.22/x64
+[CI/test-1]   ⚙  ::set-env:: LD_LIBRARY_PATH=/opt/hostedtoolcache/Python/3.10.22/x64/lib
+[CI/test-1]   ⚙  ::set-output:: python-version=3.10.22
+[CI/test-1]   ⚙  ::set-output:: python-path=/opt/hostedtoolcache/Python/3.10.22/x64/bin/python
+[CI/test-1]   ⚙  ::add-path:: /opt/hostedtoolcache/Python/3.10.22/x64
+[CI/test-1]   ⚙  ::add-path:: /opt/hostedtoolcache/Python/3.10.22/x64/bin
+[CI/test-1] ⭐ Run Main Install dependencies
+[CI/test-1]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/2] user= workdir=
+[CI/test-1]   | Requirement already satisfied: pip in /opt/hostedtoolcache/Python/3.10.22/x64/lib/python3.10/site-packages (26.3)
+[CI/test-2]   | Create additional symlinks (Required for the UsePythonVersion Azure Pipelines task and the setup-python GitHub Action)
+[CI/test-2]   | Upgrading pip...
+[CI/test-1]   | WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+[CI/test-1]   | Obtaining file:///home/bunker-524a8ece/qa-gitreins
+[CI/test-1]   |   Installing build dependencies: started
+[CI/test-2]   | Collecting pip
+[CI/test-2]   | Downloading pip-26.3-py3-none-any.whl.metadata (4.6 kB)
+[CI/test-2]   | Downloading pip-26.3-py3-none-any.whl (2.0 MB)
+[CI/test-1]   |   Installing build dependencies: finished with status 'done'
+[CI/test-1]   |   Checking if build backend supports build_editable: started
+[CI/test-1]   |   Checking if build backend supports build_editable: finished with status 'done'
+[CI/test-1]   |   Getting requirements to build editable: started
+[CI/test-2]   | ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.0/2.0 MB 3.0 MB/s eta 0:00:00
+[CI/test-2]   | 
+[CI/test-2]   | Installing collected packages: pip
+[CI/test-2]   | Attempting uninstall: pip
+[CI/test-2]   | Found existing installation: pip 24.0
+[CI/test-2]   | Uninstalling pip-24.0:
+[CI/test-2]   | Successfully uninstalled pip-24.0
+[CI/test-1]   |   Getting requirements to build editable: finished with status 'done'
+[CI/test-1]   |   /tmp/pip-build-env-t18x9qo0/overlay/lib/python3.10/site-packages/setuptools/config/_apply_pyprojecttoml.py:82: BuildBackendWarning: `project.license` as a TOML table is deprecated
+[CI/test-1]   |   !!
+[CI/test-1]   |   
+[CI/test-1]   |           ********************************************************************************
+[CI/test-1]   |           Please use a simple string containing a SPDX expression for `project.license`. You can also use `project.license-files`. (Both options available on setuptools>=77.0.0).
+[CI/test-1]   |   
+[CI/test-1]   |           By 2027-Feb-18, you need to update your project and remove deprecated calls
+[CI/test-1]   |           or your builds will no longer be supported.
+[CI/test-1]   |   
+[CI/test-1]   |           See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+[CI/test-1]   |           ********************************************************************************
+[CI/test-1]   |   
+[CI/test-1]   |   !!
+[CI/test-1]   |     corresp(dist, value, root_dir)
+[CI/test-1]   |   /tmp/pip-build-env-t18x9qo0/overlay/lib/python3.10/site-packages/setuptools/config/_apply_pyprojecttoml.py:61: BuildBackendWarning: License classifiers are deprecated.
+[CI/test-1]   |   !!
+[CI/test-1]   |   
+[CI/test-1]   |           ********************************************************************************
+[CI/test-1]   |           Please consider removing the following classifiers in favor of a SPDX license expression:
+[CI/test-1]   |   
+[CI/test-1]   |           License :: OSI Approved :: MIT License
+[CI/test-1]   |   
+[CI/test-1]   |           See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+[CI/test-1]   |           ********************************************************************************
+[CI/test-1]   |   
+[CI/test-1]   |   !!
+[CI/test-1]   |     dist._finalize_license_expression()
+[CI/test-1]   |   /tmp/pip-build-env-t18x9qo0/overlay/lib/python3.10/site-packages/setuptools/dist.py:765: BuildBackendWarning: License classifiers are deprecated.
+[CI/test-1]   |   !!
+[CI/test-1]   |   
+[CI/test-1]   |           ********************************************************************************
+[CI/test-1]   |           Please consider removing the following classifiers in favor of a SPDX license expression:
+[CI/test-1]   |   
+[CI/test-1]   |           License :: OSI Approved :: MIT License
+[CI/test-1]   |   
+[CI/test-1]   |           See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+[CI/test-1]   |           ********************************************************************************
+[CI/test-1]   |   
+[CI/test-1]   |   !!
+[CI/test-1]   |     self._finalize_license_expression()
+[CI/test-1]   |   Preparing editable metadata (pyproject.toml): started
+[CI/test-1]   |   Preparing editable metadata (pyproject.toml): finished with status 'done'
+[CI/test-1]   |   /tmp/pip-build-env-t18x9qo0/overlay/lib/python3.10/site-packages/setuptools/config/_apply_pyprojecttoml.py:82: BuildBackendWarning: `project.license` as a TOML table is deprecated
+[CI/test-1]   |   !!
+[CI/test-1]   |   
+[CI/test-1]   |           ********************************************************************************
+[CI/test-1]   |           Please use a simple string containing a SPDX expression for `project.license`. You can also use `project.license-files`. (Both options available on setuptools>=77.0.0).
+[CI/test-1]   |   
+[CI/test-1]   |           By 2027-Feb-18, you need to update your project and remove deprecated calls
+[CI/test-1]   |           or your builds will no longer be supported.
+[CI/test-1]   |   
+[CI/test-1]   |           See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+[CI/test-1]   |           ********************************************************************************
+[CI/test-1]   |   
+[CI/test-1]   |   !!
+[CI/test-1]   |     corresp(dist, value, root_dir)
+[CI/test-1]   |   /tmp/pip-build-env-t18x9qo0/overlay/lib/python3.10/site-packages/setuptools/config/_apply_pyprojecttoml.py:61: BuildBackendWarning: License classifiers are deprecated.
+[CI/test-1]   |   !!
+[CI/test-1]   |   
+[CI/test-1]   |           ********************************************************************************
+[CI/test-1]   |           Please consider removing the following classifiers in favor of a SPDX license expression:
+[CI/test-1]   |   
+[CI/test-1]   |           License :: OSI Approved :: MIT License
+[CI/test-1]   |   
+[CI/test-1]   |           See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+[CI/test-1]   |           ********************************************************************************
+[CI/test-1]   |   
+[CI/test-1]   |   !!
+[CI/test-1]   |     dist._finalize_license_expression()
+[CI/test-1]   |   /tmp/pip-build-env-t18x9qo0/overlay/lib/python3.10/site-packages/setuptools/dist.py:765: BuildBackendWarning: License classifiers are deprecated.
+[CI/test-1]   |   !!
+[CI/test-1]   |   
+[CI/test-1]   |           ********************************************************************************
+[CI/test-1]   |           Please consider removing the following classifiers in favor of a SPDX license expression:
+[CI/test-1]   |   
+[CI/test-1]   |           License :: OSI Approved :: MIT License
+[CI/test-1]   |   
+[CI/test-1]   |           See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+[CI/test-1]   |           ********************************************************************************
+[CI/test-1]   |   
+[CI/test-1]   |   !!
+[CI/test-1]   |     self._finalize_license_expression()
+[CI/test-1]   | Collecting mcp<3,>=2.0.0 (from gitreins==0.21.1)
+[CI/test-1]   |   Downloading mcp-2.3.0-py3-none-any.whl.metadata (6.6 kB)
+[CI/test-2]   | Successfully installed pip-26.3
+[CI/test-2]   | Create complete file
+[CI/test-2]   | Successfully set up CPython (3.11.18)
+[CI/test-2]   ❓  ::endgroup::
+[CI/test-2]   ❓ add-matcher /run/act/actions/actions-setup-python@v5/.github/python.json
+[CI/test-2]   ✅  Success - Main Set up Python 3.11 [23.730517596s]
+[CI/test-2]   ⚙  ::set-env:: PKG_CONFIG_PATH=/opt/hostedtoolcache/Python/3.11.18/x64/lib/pkgconfig
+[CI/test-2]   ⚙  ::set-env:: Python_ROOT_DIR=/opt/hostedtoolcache/Python/3.11.18/x64
+[CI/test-2]   ⚙  ::set-env:: Python2_ROOT_DIR=/opt/hostedtoolcache/Python/3.11.18/x64
+[CI/test-2]   ⚙  ::set-env:: Python3_ROOT_DIR=/opt/hostedtoolcache/Python/3.11.18/x64
+[CI/test-2]   ⚙  ::set-env:: LD_LIBRARY_PATH=/opt/hostedtoolcache/Python/3.11.18/x64/lib
+[CI/test-2]   ⚙  ::set-env:: pythonLocation=/opt/hostedtoolcache/Python/3.11.18/x64
+[CI/test-2]   ⚙  ::set-output:: python-version=3.11.18
+[CI/test-2]   ⚙  ::set-output:: python-path=/opt/hostedtoolcache/Python/3.11.18/x64/bin/python
+[CI/test-2]   ⚙  ::add-path:: /opt/hostedtoolcache/Python/3.11.18/x64
+[CI/test-2]   ⚙  ::add-path:: /opt/hostedtoolcache/Python/3.11.18/x64/bin
+[CI/test-2] ⭐ Run Main Install dependencies
+[CI/test-2]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/2] user= workdir=
+[CI/test-2]   | Requirement already satisfied: pip in /opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/site-packages (26.3)
+[CI/test-2]   | WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+[CI/test-2]   | Obtaining file:///home/bunker-524a8ece/qa-gitreins
+[CI/test-2]   |   Installing build dependencies: started
+[CI/test-1]   | Collecting pydantic-core<3,>=2.47.0 (from gitreins==0.21.1)
+[CI/test-1]   |   Downloading pydantic_core-2.50.5-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (6.6 kB)
+[CI/test-1]   | Collecting pyyaml>=6.0 (from gitreins==0.21.1)
+[CI/test-1]   |   Downloading pyyaml-6.0.4-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.3 kB)
+[CI/test-1]   | Collecting requests>=2.28 (from gitreins==0.21.1)
+[CI/test-1]   |   Downloading requests-2.34.2-py3-none-any.whl.metadata (4.8 kB)
+[CI/test-1]   | Collecting packaging>=21.0 (from gitreins==0.21.1)
+[CI/test-1]   |   Using cached packaging-26.3-py3-none-any.whl.metadata (3.5 kB)
+[CI/test-1]   | Collecting prometheus_client (from gitreins==0.21.1)
+[CI/test-1]   |   Downloading prometheus_client-0.26.0-py3-none-any.whl.metadata (2.1 kB)
+[CI/test-1]   | Collecting tomli>=2.0 (from gitreins==0.21.1)
+[CI/test-1]   |   Downloading tomli-2.5.0-py3-none-any.whl.metadata (10 kB)
+[CI/test-1]   | Collecting pytest>=7.0 (from gitreins==0.21.1)
+[CI/test-1]   |   Downloading pytest-9.2.0-py3-none-any.whl.metadata (7.9 kB)
+[CI/test-1]   | Collecting pytest-timeout>=2.3 (from gitreins==0.21.1)
+[CI/test-1]   |   Downloading pytest_timeout-2.4.0-py3-none-any.whl.metadata (20 kB)
+[CI/test-1]   | Collecting twine>=5.0 (from gitreins==0.21.1)
+[CI/test-1]   |   Downloading twine-7.0.0-py3-none-any.whl.metadata (3.5 kB)
+[CI/test-1]   | Collecting build>=1.0 (from gitreins==0.21.1)
+[CI/test-1]   |   Downloading build-1.6.1-py3-none-any.whl.metadata (5.6 kB)
+[CI/test-1]   | Collecting python-lsp-server>=1.10 (from gitreins==0.21.1)
+[CI/test-1]   |   Downloading python_lsp_server-1.15.0-py3-none-any.whl.metadata (10 kB)
+[CI/test-1]   | Collecting pyflakes>=3.0 (from gitreins==0.21.1)
+[CI/test-1]   |   Downloading pyflakes-4.0.3-py2.py3-none-any.whl.metadata (3.7 kB)
+[CI/test-1]   | Collecting pycodestyle>=2.11 (from gitreins==0.21.1)
+[CI/test-2]   |   Installing build dependencies: finished with status 'done'
+[CI/test-2]   |   Checking if build backend supports build_editable: started
+[CI/test-1]   |   Downloading pycodestyle-2.15.0-py2.py3-none-any.whl.metadata (4.5 kB)
+[CI/test-2]   |   Checking if build backend supports build_editable: finished with status 'done'
+[CI/test-2]   |   Getting requirements to build editable: started
+[CI/test-1]   | Collecting mypy>=1.0 (from gitreins==0.21.1)
+[CI/test-1]   |   Downloading mypy-2.4.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+[CI/test-1]   | Collecting pyright>=1.1.390 (from gitreins==0.21.1)
+[CI/test-1]   |   Downloading pyright-1.1.414-py3-none-any.whl.metadata (6.9 kB)
+[CI/test-1]   | Collecting pytest-xdist>=3.0 (from gitreins==0.21.1)
+[CI/test-1]   |   Downloading pytest_xdist-3.8.0-py3-none-any.whl.metadata (3.0 kB)
+[CI/test-2]   |   Getting requirements to build editable: finished with status 'done'
+[CI/test-2]   |   Preparing editable metadata (pyproject.toml): started
+[CI/test-2]   |   /tmp/pip-build-env-jxocurjf/overlay/lib/python3.11/site-packages/setuptools/config/_apply_pyprojecttoml.py:82: BuildBackendWarning: `project.license` as a TOML table is deprecated
+[CI/test-2]   |   !!
+[CI/test-2]   |   
+[CI/test-2]   |           ********************************************************************************
+[CI/test-2]   |           Please use a simple string containing a SPDX expression for `project.license`. You can also use `project.license-files`. (Both options available on setuptools>=77.0.0).
+[CI/test-2]   |   
+[CI/test-2]   |           By 2027-Feb-18, you need to update your project and remove deprecated calls
+[CI/test-2]   |           or your builds will no longer be supported.
+[CI/test-2]   |   
+[CI/test-2]   |           See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+[CI/test-2]   |           ********************************************************************************
+[CI/test-2]   |   
+[CI/test-2]   |   !!
+[CI/test-2]   |     corresp(dist, value, root_dir)
+[CI/test-2]   |   /tmp/pip-build-env-jxocurjf/overlay/lib/python3.11/site-packages/setuptools/config/_apply_pyprojecttoml.py:61: BuildBackendWarning: License classifiers are deprecated.
+[CI/test-2]   |   !!
+[CI/test-2]   |   
+[CI/test-2]   |           ********************************************************************************
+[CI/test-2]   |           Please consider removing the following classifiers in favor of a SPDX license expression:
+[CI/test-2]   |   
+[CI/test-2]   |           License :: OSI Approved :: MIT License
+[CI/test-2]   |   
+[CI/test-2]   |           See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+[CI/test-2]   |           ********************************************************************************
+[CI/test-2]   |   
+[CI/test-2]   |   !!
+[CI/test-2]   |     dist._finalize_license_expression()
+[CI/test-2]   |   /tmp/pip-build-env-jxocurjf/overlay/lib/python3.11/site-packages/setuptools/dist.py:765: BuildBackendWarning: License classifiers are deprecated.
+[CI/test-2]   |   !!
+[CI/test-2]   |   
+[CI/test-2]   |           ********************************************************************************
+[CI/test-2]   |           Please consider removing the following classifiers in favor of a SPDX license expression:
+[CI/test-2]   |   
+[CI/test-2]   |           License :: OSI Approved :: MIT License
+[CI/test-2]   |   
+[CI/test-2]   |           See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+[CI/test-2]   |           ********************************************************************************
+[CI/test-2]   |   
+[CI/test-2]   |   !!
+[CI/test-2]   |     self._finalize_license_expression()
+[CI/test-2]   |   Preparing editable metadata (pyproject.toml): finished with status 'done'
+[CI/test-2]   |   /tmp/pip-build-env-jxocurjf/overlay/lib/python3.11/site-packages/setuptools/config/_apply_pyprojecttoml.py:82: BuildBackendWarning: `project.license` as a TOML table is deprecated
+[CI/test-2]   |   !!
+[CI/test-2]   |   
+[CI/test-2]   |           ********************************************************************************
+[CI/test-2]   |           Please use a simple string containing a SPDX expression for `project.license`. You can also use `project.license-files`. (Both options available on setuptools>=77.0.0).
+[CI/test-2]   |   
+[CI/test-2]   |           By 2027-Feb-18, you need to update your project and remove deprecated calls
+[CI/test-2]   |           or your builds will no longer be supported.
+[CI/test-2]   |   
+[CI/test-2]   |           See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+[CI/test-2]   |           ********************************************************************************
+[CI/test-2]   |   
+[CI/test-2]   |   !!
+[CI/test-2]   |     corresp(dist, value, root_dir)
+[CI/test-2]   |   /tmp/pip-build-env-jxocurjf/overlay/lib/python3.11/site-packages/setuptools/config/_apply_pyprojecttoml.py:61: BuildBackendWarning: License classifiers are deprecated.
+[CI/test-2]   |   !!
+[CI/test-2]   |   
+[CI/test-2]   |           ********************************************************************************
+[CI/test-2]   |           Please consider removing the following classifiers in favor of a SPDX license expression:
+[CI/test-2]   |   
+[CI/test-2]   |           License :: OSI Approved :: MIT License
+[CI/test-2]   |   
+[CI/test-2]   |           See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+[CI/test-2]   |           ********************************************************************************
+[CI/test-2]   |   
+[CI/test-2]   |   !!
+[CI/test-2]   |     dist._finalize_license_expression()
+[CI/test-2]   |   /tmp/pip-build-env-jxocurjf/overlay/lib/python3.11/site-packages/setuptools/dist.py:765: BuildBackendWarning: License classifiers are deprecated.
+[CI/test-2]   |   !!
+[CI/test-2]   |   
+[CI/test-2]   |           ********************************************************************************
+[CI/test-2]   |           Please consider removing the following classifiers in favor of a SPDX license expression:
+[CI/test-2]   |   
+[CI/test-2]   |           License :: OSI Approved :: MIT License
+[CI/test-2]   |   
+[CI/test-2]   |           See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+[CI/test-2]   |           ********************************************************************************
+[CI/test-2]   |   
+[CI/test-2]   |   !!
+[CI/test-2]   |     self._finalize_license_expression()
+[CI/test-2]   | Collecting mcp<3,>=2.0.0 (from gitreins==0.21.1)
+[CI/test-2]   |   Downloading mcp-2.3.0-py3-none-any.whl.metadata (6.6 kB)
+[CI/test-1]   | Collecting ruff>=0.5 (from gitreins==0.21.1)
+[CI/test-1]   |   Downloading ruff-0.17.6-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (20 kB)
+[CI/test-1]   | Collecting types-PyYAML>=6.0 (from gitreins==0.21.1)
+[CI/test-1]   |   Downloading types_pyyaml-6.0.12.20261122-py3-none-any.whl.metadata (1.8 kB)
+[CI/test-1]   | Collecting types-jsonschema>=4.20 (from gitreins==0.21.1)
+[CI/test-1]   |   Downloading types_jsonschema-4.26.0.20261006-py3-none-any.whl.metadata (1.9 kB)
+[CI/test-1]   | Collecting anyio>=4.9 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading anyio-4.16.0-py3-none-any.whl.metadata (4.7 kB)
+[CI/test-1]   | Collecting httpx2>=2.10.0 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading httpx2-2.14.0-py3-none-any.whl.metadata (10 kB)
+[CI/test-1]   | Collecting jsonschema>=4.20.0 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading jsonschema-4.26.0-py3-none-any.whl.metadata (7.6 kB)
+[CI/test-1]   | Collecting mcp-types==2.3.0 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading mcp_types-2.3.0-py3-none-any.whl.metadata (1.9 kB)
+[CI/test-1]   | Collecting opentelemetry-api>=1.28.0 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   | Collecting pydantic-core<3,>=2.47.0 (from gitreins==0.21.1)
+[CI/test-1]   |   Downloading opentelemetry_api-1.45.2-py3-none-any.whl.metadata (1.4 kB)
+[CI/test-2]   |   Downloading pydantic_core-2.50.5-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (6.6 kB)
+[CI/test-2]   | Collecting pyyaml>=6.0 (from gitreins==0.21.1)
+[CI/test-2]   |   Downloading pyyaml-6.0.4-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.3 kB)
+[CI/test-2]   | Collecting requests>=2.28 (from gitreins==0.21.1)
+[CI/test-2]   |   Downloading requests-2.34.2-py3-none-any.whl.metadata (4.8 kB)
+[CI/test-2]   | Collecting packaging>=21.0 (from gitreins==0.21.1)
+[CI/test-2]   |   Using cached packaging-26.3-py3-none-any.whl.metadata (3.5 kB)
+[CI/test-1]   | Collecting pydantic>=2.12.0 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading pydantic-2.14.4-py3-none-any.whl.metadata (143 kB)
+[CI/test-2]   | Collecting prometheus_client (from gitreins==0.21.1)
+[CI/test-2]   |   Downloading prometheus_client-0.26.0-py3-none-any.whl.metadata (2.1 kB)
+[CI/test-2]   | Collecting pytest>=7.0 (from gitreins==0.21.1)
+[CI/test-1]   | Collecting pyjwt>=2.10.1 (from pyjwt[crypto]>=2.10.1->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading pytest-9.2.0-py3-none-any.whl.metadata (7.9 kB)
+[CI/test-1]   |   Downloading pyjwt-2.15.1-py3-none-any.whl.metadata (3.5 kB)
+[CI/test-2]   | Collecting pytest-timeout>=2.3 (from gitreins==0.21.1)
+[CI/test-1]   | Collecting python-multipart>=0.0.9 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading pytest_timeout-2.4.0-py3-none-any.whl.metadata (20 kB)
+[CI/test-1]   |   Downloading python_multipart-0.0.32-py3-none-any.whl.metadata (2.1 kB)
+[CI/test-2]   | Collecting twine>=5.0 (from gitreins==0.21.1)
+[CI/test-1]   | Collecting sse-starlette>=3.0.0 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading twine-7.0.0-py3-none-any.whl.metadata (3.5 kB)
+[CI/test-1]   |   Downloading sse_starlette-3.5.1-py3-none-any.whl.metadata (15 kB)
+[CI/test-2]   | Collecting build>=1.0 (from gitreins==0.21.1)
+[CI/test-2]   |   Downloading build-1.6.1-py3-none-any.whl.metadata (5.6 kB)
+[CI/test-1]   | Collecting starlette>=0.27 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading starlette-1.7.0-py3-none-any.whl.metadata (6.6 kB)
+[CI/test-2]   | Collecting python-lsp-server>=1.10 (from gitreins==0.21.1)
+[CI/test-2]   |   Downloading python_lsp_server-1.15.0-py3-none-any.whl.metadata (10 kB)
+[CI/test-1]   | Collecting typing-extensions>=4.13.0 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+[CI/test-2]   | Collecting pyflakes>=3.0 (from gitreins==0.21.1)
+[CI/test-2]   |   Downloading pyflakes-4.1.0-py2.py3-none-any.whl.metadata (3.7 kB)
+[CI/test-1]   | Collecting typing-inspection>=0.4.1 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading typing_inspection-0.4.5-py3-none-any.whl.metadata (2.6 kB)
+[CI/test-2]   | Collecting pycodestyle>=2.11 (from gitreins==0.21.1)
+[CI/test-2]   |   Downloading pycodestyle-2.15.0-py2.py3-none-any.whl.metadata (4.5 kB)
+[CI/test-1]   | Collecting uvicorn>=0.31.1 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading uvicorn-0.54.0-py3-none-any.whl.metadata (6.6 kB)
+[CI/test-1]   | Collecting exceptiongroup>=1.0.2 (from anyio>=4.9->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   | Collecting mypy>=1.0 (from gitreins==0.21.1)
+[CI/test-1]   |   Downloading exceptiongroup-1.3.2-py3-none-any.whl.metadata (7.1 kB)
+[CI/test-2]   |   Downloading mypy-2.4.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+[CI/test-1]   | Collecting idna>=2.8 (from anyio>=4.9->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   | Collecting pyright>=1.1.390 (from gitreins==0.21.1)
+[CI/test-1]   |   Downloading idna-3.20-py3-none-any.whl.metadata (7.2 kB)
+[CI/test-2]   |   Downloading pyright-1.1.414-py3-none-any.whl.metadata (6.9 kB)
+[CI/test-1]   | Collecting pyproject_hooks (from build>=1.0->gitreins==0.21.1)
+[CI/test-2]   | Collecting pytest-xdist>=3.0 (from gitreins==0.21.1)
+[CI/test-1]   |   Downloading pyproject_hooks-1.3.3-py3-none-any.whl.metadata (1.3 kB)
+[CI/test-2]   |   Downloading pytest_xdist-3.8.0-py3-none-any.whl.metadata (3.0 kB)
+[CI/test-1]   | Collecting httpcore2==2.14.0 (from httpx2>=2.10.0->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading httpcore2-2.14.0-py3-none-any.whl.metadata (27 kB)
+[CI/test-1]   | Collecting truststore>=0.10 (from httpx2>=2.10.0->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading truststore-0.10.5-py3-none-any.whl.metadata (4.5 kB)
+[CI/test-1]   | Collecting h11>=0.16 (from httpcore2==2.14.0->httpx2>=2.10.0->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+[CI/test-1]   | Collecting attrs>=22.2.0 (from jsonschema>=4.20.0->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading attrs-26.1.0-py3-none-any.whl.metadata (8.8 kB)
+[CI/test-1]   | Collecting jsonschema-specifications>=2023.03.6 (from jsonschema>=4.20.0->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   | Collecting ruff>=0.5 (from gitreins==0.21.1)
+[CI/test-1]   |   Downloading jsonschema_specifications-2025.9.1-py3-none-any.whl.metadata (2.9 kB)
+[CI/test-2]   |   Downloading ruff-0.17.6-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (20 kB)
+[CI/test-1]   | Collecting referencing>=0.28.4 (from jsonschema>=4.20.0->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   | Collecting types-PyYAML>=6.0 (from gitreins==0.21.1)
+[CI/test-2]   |   Downloading types_pyyaml-6.0.12.20261122-py3-none-any.whl.metadata (1.8 kB)
+[CI/test-1]   |   Downloading referencing-0.37.0-py3-none-any.whl.metadata (2.8 kB)
+[CI/test-2]   | Collecting types-jsonschema>=4.20 (from gitreins==0.21.1)
+[CI/test-2]   |   Downloading types_jsonschema-4.26.0.20261006-py3-none-any.whl.metadata (1.9 kB)
+[CI/test-2]   | Collecting anyio>=4.9 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading anyio-4.16.0-py3-none-any.whl.metadata (4.7 kB)
+[CI/test-2]   | Collecting httpx2>=2.10.0 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading httpx2-2.16.2-py3-none-any.whl.metadata (10.0 kB)
+[CI/test-2]   | Collecting jsonschema>=4.20.0 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading jsonschema-4.26.0-py3-none-any.whl.metadata (7.6 kB)
+[CI/test-2]   | Collecting mcp-types==2.3.0 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading mcp_types-2.3.0-py3-none-any.whl.metadata (1.9 kB)
+[CI/test-1]   | Collecting rpds-py>=0.25.0 (from jsonschema>=4.20.0->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading rpds_py-0.30.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.1 kB)
+[CI/test-2]   | Collecting opentelemetry-api>=1.28.0 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   | Collecting mypy_extensions>=1.0.0 (from mypy>=1.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading opentelemetry_api-1.45.2-py3-none-any.whl.metadata (1.4 kB)
+[CI/test-1]   |   Downloading mypy_extensions-1.2.0-py3-none-any.whl.metadata (1.1 kB)
+[CI/test-1]   | Collecting pathspec>=1.0.0 (from mypy>=1.0->gitreins==0.21.1)
+[CI/test-2]   | Collecting pydantic>=2.12.0 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading pathspec-1.1.1-py3-none-any.whl.metadata (14 kB)
+[CI/test-2]   |   Downloading pydantic-2.14.4-py3-none-any.whl.metadata (143 kB)
+[CI/test-2]   | Collecting pyjwt>=2.10.1 (from pyjwt[crypto]>=2.10.1->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading pyjwt-2.15.1-py3-none-any.whl.metadata (3.5 kB)
+[CI/test-2]   | Collecting python-multipart>=0.0.9 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading python_multipart-0.0.34-py3-none-any.whl.metadata (6.3 kB)
+[CI/test-1]   | Collecting librt>=0.16.0 (from mypy>=1.0->gitreins==0.21.1)
+[CI/test-2]   | Collecting sse-starlette>=3.0.0 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading librt-0.17.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (1.3 kB)
+[CI/test-2]   |   Downloading sse_starlette-3.7.1-py3-none-any.whl.metadata (15 kB)
+[CI/test-2]   | Collecting starlette>=0.27 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading starlette-1.10.0-py3-none-any.whl.metadata (6.6 kB)
+[CI/test-1]   | Collecting ast-serialize<1.0.0,>=0.12.1 (from mypy>=1.0->gitreins==0.21.1)
+[CI/test-2]   | Collecting typing-extensions>=4.13.0 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading ast_serialize-0.13.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (1.4 kB)
+[CI/test-2]   |   Downloading typing_extensions-4.16.0-py3-none-any.whl.metadata (3.3 kB)
+[CI/test-1]   | Collecting annotated-types>=0.6.0 (from pydantic>=2.12.0->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   | Collecting typing-inspection>=0.4.1 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading annotated_types-0.8.0-py3-none-any.whl.metadata (15 kB)
+[CI/test-2]   |   Downloading typing_inspection-0.4.5-py3-none-any.whl.metadata (2.6 kB)
+[CI/test-2]   | Collecting uvicorn>=0.31.1 (from mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading uvicorn-0.54.0-py3-none-any.whl.metadata (6.6 kB)
+[CI/test-2]   | Collecting idna>=2.8 (from anyio>=4.9->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading idna-3.20-py3-none-any.whl.metadata (7.2 kB)
+[CI/test-2]   | Collecting pyproject_hooks (from build>=1.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading pyproject_hooks-1.3.3-py3-none-any.whl.metadata (1.3 kB)
+[CI/test-2]   | Collecting httpcore2==2.16.2 (from httpx2>=2.10.0->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading httpcore2-2.16.2-py3-none-any.whl.metadata (28 kB)
+[CI/test-2]   | Collecting truststore>=0.10 (from httpx2>=2.10.0->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   | Collecting cryptography>=3.4.0 (from pyjwt[crypto]>=2.10.1->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading truststore-0.10.5-py3-none-any.whl.metadata (4.5 kB)
+[CI/test-1]   |   Downloading cryptography-50.0.2-cp39-abi3-manylinux_2_34_x86_64.whl.metadata (4.4 kB)
+[CI/test-2]   | Collecting h11>=0.16 (from httpcore2==2.16.2->httpx2>=2.10.0->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+[CI/test-2]   | Collecting attrs>=22.2.0 (from jsonschema>=4.20.0->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading attrs-26.1.0-py3-none-any.whl.metadata (8.8 kB)
+[CI/test-2]   | Collecting jsonschema-specifications>=2023.03.6 (from jsonschema>=4.20.0->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading jsonschema_specifications-2025.9.1-py3-none-any.whl.metadata (2.9 kB)
+[CI/test-1]   | Collecting cffi>=2.0.0 (from cryptography>=3.4.0->pyjwt[crypto]>=2.10.1->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading cffi-2.1.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.5 kB)
+[CI/test-2]   | Collecting referencing>=0.28.4 (from jsonschema>=4.20.0->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading referencing-0.37.0-py3-none-any.whl.metadata (2.8 kB)
+[CI/test-1]   | Collecting pycparser (from cffi>=2.0.0->cryptography>=3.4.0->pyjwt[crypto]>=2.10.1->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading pycparser-3.11-py3-none-any.whl.metadata (8.2 kB)
+[CI/test-1]   | Collecting nodeenv>=1.6.0 (from pyright>=1.1.390->gitreins==0.21.1)
+[CI/test-1]   |   Downloading nodeenv-1.12.0-py3-none-any.whl.metadata (49 kB)
+[CI/test-1]   | Collecting iniconfig>=2 (from pytest>=7.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading iniconfig-2.3.1-py3-none-any.whl.metadata (2.8 kB)
+[CI/test-1]   | Collecting pluggy<2,>=1.6 (from pytest>=7.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading pluggy-1.7.0-py3-none-any.whl.metadata (5.0 kB)
+[CI/test-1]   | Collecting pygments>=2.15 (from pytest>=7.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading pygments-2.21.0-py3-none-any.whl.metadata (2.5 kB)
+[CI/test-2]   | Collecting rpds-py>=0.25.0 (from jsonschema>=4.20.0->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading rpds_py-2026.9.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (4.1 kB)
+[CI/test-1]   | Collecting execnet>=2.1 (from pytest-xdist>=3.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading execnet-2.1.2-py3-none-any.whl.metadata (2.9 kB)
+[CI/test-2]   | Collecting mypy_extensions>=1.0.0 (from mypy>=1.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading mypy_extensions-1.2.0-py3-none-any.whl.metadata (1.1 kB)
+[CI/test-1]   | Collecting docstring-to-markdown (from python-lsp-server>=1.10->gitreins==0.21.1)
+[CI/test-2]   | Collecting pathspec>=1.0.0 (from mypy>=1.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading docstring_to_markdown-0.17-py3-none-any.whl.metadata (2.3 kB)
+[CI/test-2]   |   Downloading pathspec-1.1.1-py3-none-any.whl.metadata (14 kB)
+[CI/test-1]   | Collecting jedi<0.21.0,>=0.17.2 (from python-lsp-server>=1.10->gitreins==0.21.1)
+[CI/test-1]   |   Downloading jedi-0.20.1-py2.py3-none-any.whl.metadata (23 kB)
+[CI/test-1]   | Collecting python-lsp-jsonrpc<2.0.0,>=1.1.0 (from python-lsp-server>=1.10->gitreins==0.21.1)
+[CI/test-1]   |   Downloading python_lsp_jsonrpc-1.1.2-py3-none-any.whl.metadata (1.5 kB)
+[CI/test-2]   | Collecting librt>=0.16.0 (from mypy>=1.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading librt-0.17.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (1.3 kB)
+[CI/test-2]   | Collecting ast-serialize<1.0.0,>=0.12.1 (from mypy>=1.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading ast_serialize-0.13.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (1.4 kB)
+[CI/test-1]   | Collecting ujson>=3.0.0 (from python-lsp-server>=1.10->gitreins==0.21.1)
+[CI/test-1]   |   Downloading ujson-6.1.0-cp310-cp310-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (10.0 kB)
+[CI/test-2]   | Collecting annotated-types>=0.6.0 (from pydantic>=2.12.0->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading annotated_types-0.8.0-py3-none-any.whl.metadata (15 kB)
+[CI/test-1]   | Collecting black (from python-lsp-server>=1.10->gitreins==0.21.1)
+[CI/test-1]   |   Downloading black-26.10.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (108 kB)
+[CI/test-1]   | Collecting parso<0.9.0,>=0.8.7 (from jedi<0.21.0,>=0.17.2->python-lsp-server>=1.10->gitreins==0.21.1)
+[CI/test-1]   |   Downloading parso-0.8.7-py2.py3-none-any.whl.metadata (8.2 kB)
+[CI/test-2]   | Collecting cryptography>=3.4.0 (from pyjwt[crypto]>=2.10.1->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading cryptography-50.0.2-cp311-abi3-manylinux_2_34_x86_64.whl.metadata (4.4 kB)
+[CI/test-2]   | Collecting cffi>=2.0.0 (from cryptography>=3.4.0->pyjwt[crypto]>=2.10.1->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   | Collecting charset_normalizer<4,>=2 (from requests>=2.28->gitreins==0.21.1)
+[CI/test-2]   |   Downloading cffi-2.1.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.5 kB)
+[CI/test-1]   |   Downloading charset_normalizer-3.5.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (46 kB)
+[CI/test-2]   | Collecting pycparser (from cffi>=2.0.0->cryptography>=3.4.0->pyjwt[crypto]>=2.10.1->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading pycparser-3.12-py3-none-any.whl.metadata (9.7 kB)
+[CI/test-1]   | Collecting urllib3<3,>=1.26 (from requests>=2.28->gitreins==0.21.1)
+[CI/test-2]   | Collecting nodeenv>=1.6.0 (from pyright>=1.1.390->gitreins==0.21.1)
+[CI/test-1]   |   Downloading urllib3-2.8.0-py3-none-any.whl.metadata (7.4 kB)
+[CI/test-2]   |   Downloading nodeenv-1.12.0-py3-none-any.whl.metadata (49 kB)
+[CI/test-1]   | Collecting certifi>=2023.5.7 (from requests>=2.28->gitreins==0.21.1)
+[CI/test-2]   | Collecting iniconfig>=2 (from pytest>=7.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading certifi-2026.11.20-py3-none-any.whl.metadata (2.5 kB)
+[CI/test-2]   |   Downloading iniconfig-2.3.1-py3-none-any.whl.metadata (2.8 kB)
+[CI/test-1]   | Collecting readme-renderer>=35.0 (from twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   | Collecting pluggy<2,>=1.6 (from pytest>=7.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading pluggy-1.7.0-py3-none-any.whl.metadata (5.0 kB)
+[CI/test-1]   |   Downloading readme_renderer-46.0-py3-none-any.whl.metadata (3.0 kB)
+[CI/test-1]   | Collecting requests-toolbelt!=0.9.0,>=0.8.0 (from twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   | Collecting pygments>=2.15 (from pytest>=7.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading requests_toolbelt-1.0.0-py2.py3-none-any.whl.metadata (14 kB)
+[CI/test-2]   |   Downloading pygments-2.21.0-py3-none-any.whl.metadata (2.5 kB)
+[CI/test-2]   | Collecting execnet>=2.1 (from pytest-xdist>=3.0->gitreins==0.21.1)
+[CI/test-1]   | Collecting keyring>=21.2.0 (from twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading execnet-2.1.2-py3-none-any.whl.metadata (2.9 kB)
+[CI/test-1]   |   Downloading keyring-25.7.0-py3-none-any.whl.metadata (21 kB)
+[CI/test-2]   | Collecting docstring-to-markdown (from python-lsp-server>=1.10->gitreins==0.21.1)
+[CI/test-1]   | Collecting rfc3986>=1.4.0 (from twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading docstring_to_markdown-0.17-py3-none-any.whl.metadata (2.3 kB)
+[CI/test-1]   |   Downloading rfc3986-2.0.0-py2.py3-none-any.whl.metadata (6.6 kB)
+[CI/test-2]   | Collecting jedi<0.21.0,>=0.17.2 (from python-lsp-server>=1.10->gitreins==0.21.1)
+[CI/test-2]   |   Downloading jedi-0.20.1-py2.py3-none-any.whl.metadata (23 kB)
+[CI/test-1]   | Collecting rich>=14.3.3 (from twine>=5.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading rich-15.0.0-py3-none-any.whl.metadata (18 kB)
+[CI/test-2]   | Collecting python-lsp-jsonrpc<2.0.0,>=1.1.0 (from python-lsp-server>=1.10->gitreins==0.21.1)
+[CI/test-1]   | Collecting id (from twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading python_lsp_jsonrpc-1.1.2-py3-none-any.whl.metadata (1.5 kB)
+[CI/test-1]   |   Downloading id-1.6.1-py3-none-any.whl.metadata (5.1 kB)
+[CI/test-1]   | Collecting SecretStorage>=3.2 (from keyring>=21.2.0->twine>=5.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading secretstorage-3.5.0-py3-none-any.whl.metadata (4.0 kB)
+[CI/test-2]   | Collecting ujson>=3.0.0 (from python-lsp-server>=1.10->gitreins==0.21.1)
+[CI/test-2]   |   Downloading ujson-6.1.0-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl.metadata (10.0 kB)
+[CI/test-1]   | Collecting jeepney>=0.4.2 (from keyring>=21.2.0->twine>=5.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading jeepney-0.9.0-py3-none-any.whl.metadata (1.2 kB)
+[CI/test-2]   | Collecting black (from python-lsp-server>=1.10->gitreins==0.21.1)
+[CI/test-2]   |   Downloading black-26.10.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (108 kB)
+[CI/test-1]   | Collecting importlib_metadata>=4.11.4 (from keyring>=21.2.0->twine>=5.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading importlib_metadata-9.0.1-py3-none-any.whl.metadata (4.5 kB)
+[CI/test-2]   | Collecting parso<0.9.0,>=0.8.7 (from jedi<0.21.0,>=0.17.2->python-lsp-server>=1.10->gitreins==0.21.1)
+[CI/test-1]   | Collecting jaraco.classes (from keyring>=21.2.0->twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading parso-0.8.7-py2.py3-none-any.whl.metadata (8.2 kB)
+[CI/test-1]   |   Downloading jaraco.classes-3.4.0-py3-none-any.whl.metadata (2.6 kB)
+[CI/test-1]   | Collecting jaraco.functools (from keyring>=21.2.0->twine>=5.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading jaraco_functools-4.6.0-py3-none-any.whl.metadata (2.9 kB)
+[CI/test-1]   | Collecting jaraco.context (from keyring>=21.2.0->twine>=5.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading jaraco_context-6.1.2-py3-none-any.whl.metadata (4.2 kB)
+[CI/test-2]   | Collecting charset_normalizer<4,>=2 (from requests>=2.28->gitreins==0.21.1)
+[CI/test-2]   |   Downloading charset_normalizer-3.5.2-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (46 kB)
+[CI/test-1]   | Collecting zipp>=3.20 (from importlib_metadata>=4.11.4->keyring>=21.2.0->twine>=5.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading zipp-4.1.2-py3-none-any.whl.metadata (3.6 kB)
+[CI/test-2]   | Collecting urllib3<3,>=1.26 (from requests>=2.28->gitreins==0.21.1)
+[CI/test-2]   |   Downloading urllib3-2.8.0-py3-none-any.whl.metadata (7.4 kB)
+[CI/test-1]   | Collecting nh3>=0.2.14 (from readme-renderer>=35.0->twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   | Collecting certifi>=2023.5.7 (from requests>=2.28->gitreins==0.21.1)
+[CI/test-1]   |   Downloading nh3-0.3.8-cp39-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.0 kB)
+[CI/test-2]   |   Downloading certifi-2026.11.20-py3-none-any.whl.metadata (2.5 kB)
+[CI/test-1]   | Collecting docutils>=0.21.2 (from readme-renderer>=35.0->twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   | Collecting readme-renderer>=35.0 (from twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading readme_renderer-46.0-py3-none-any.whl.metadata (3.0 kB)
+[CI/test-1]   |   Downloading docutils-0.23-py3-none-any.whl.metadata (15 kB)
+[CI/test-2]   | Collecting requests-toolbelt!=0.9.0,>=0.8.0 (from twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading requests_toolbelt-1.0.0-py2.py3-none-any.whl.metadata (14 kB)
+[CI/test-1]   | Collecting markdown-it-py>=2.2.0 (from rich>=14.3.3->twine>=5.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading markdown_it_py-4.3.0-py3-none-any.whl.metadata (7.9 kB)
+[CI/test-1]   | Collecting mdurl~=0.1 (from markdown-it-py>=2.2.0->rich>=14.3.3->twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   | Collecting keyring>=21.2.0 (from twine>=5.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading mdurl-0.1.2-py3-none-any.whl.metadata (1.6 kB)
+[CI/test-2]   |   Downloading keyring-25.7.0-py3-none-any.whl.metadata (21 kB)
+[CI/test-2]   | Collecting rfc3986>=1.4.0 (from twine>=5.0->gitreins==0.21.1)
+[CI/test-1]   | Collecting click>=7.0 (from uvicorn>=0.31.1->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading rfc3986-2.0.0-py2.py3-none-any.whl.metadata (6.6 kB)
+[CI/test-1]   |   Downloading click-8.5.1-py3-none-any.whl.metadata (2.6 kB)
+[CI/test-2]   | Collecting rich>=14.3.3 (from twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading rich-15.0.0-py3-none-any.whl.metadata (18 kB)
+[CI/test-1]   | Collecting platformdirs>=2 (from black->python-lsp-server>=1.10->gitreins==0.21.1)
+[CI/test-1]   |   Downloading platformdirs-4.12.4-py3-none-any.whl.metadata (5.5 kB)
+[CI/test-2]   | Collecting id (from twine>=5.0->gitreins==0.21.1)
+[CI/test-1]   | Collecting pytokens~=0.4.0 (from black->python-lsp-server>=1.10->gitreins==0.21.1)
+[CI/test-2]   |   Downloading id-1.6.1-py3-none-any.whl.metadata (5.1 kB)
+[CI/test-1]   |   Downloading pytokens-0.4.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (3.8 kB)
+[CI/test-2]   | Collecting SecretStorage>=3.2 (from keyring>=21.2.0->twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading secretstorage-3.5.0-py3-none-any.whl.metadata (4.0 kB)
+[CI/test-1]   | Collecting more-itertools (from jaraco.classes->keyring>=21.2.0->twine>=5.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading more_itertools-11.1.0-py3-none-any.whl.metadata (41 kB)
+[CI/test-2]   | Collecting jeepney>=0.4.2 (from keyring>=21.2.0->twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading jeepney-0.9.0-py3-none-any.whl.metadata (1.2 kB)
+[CI/test-1]   | Collecting backports.tarfile (from jaraco.context->keyring>=21.2.0->twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   | Collecting importlib_metadata>=4.11.4 (from keyring>=21.2.0->twine>=5.0->gitreins==0.21.1)
+[CI/test-1]   |   Downloading backports.tarfile-1.2.0-py3-none-any.whl.metadata (2.0 kB)
+[CI/test-2]   |   Downloading importlib_metadata-10.2.0-py3-none-any.whl.metadata (4.6 kB)
+[CI/test-1]   | Downloading mcp-2.3.0-py3-none-any.whl (368 kB)
+[CI/test-2]   | Collecting jaraco.classes (from keyring>=21.2.0->twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading jaraco.classes-3.4.0-py3-none-any.whl.metadata (2.6 kB)
+[CI/test-2]   | Collecting jaraco.functools (from keyring>=21.2.0->twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading jaraco_functools-4.6.0-py3-none-any.whl.metadata (2.9 kB)
+[CI/test-1]   | Downloading mcp_types-2.3.0-py3-none-any.whl (69 kB)
+[CI/test-2]   | Collecting jaraco.context (from keyring>=21.2.0->twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading jaraco_context-6.1.2-py3-none-any.whl.metadata (4.2 kB)
+[CI/test-1]   | Downloading pydantic_core-2.50.5-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (2.3 MB)
+[CI/test-2]   | Collecting zipp>=3.20 (from importlib_metadata>=4.11.4->keyring>=21.2.0->twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading zipp-4.1.2-py3-none-any.whl.metadata (3.6 kB)
+[CI/test-2]   | Collecting lazy-importer>=0.1 (from importlib_metadata>=4.11.4->keyring>=21.2.0->twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading lazy_importer-0.1.0-py3-none-any.whl.metadata (7.3 kB)
+[CI/test-2]   | Collecting nh3>=0.2.14 (from readme-renderer>=35.0->twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading nh3-0.3.8-cp39-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl.metadata (2.0 kB)
+[CI/test-2]   | Collecting docutils>=0.21.2 (from readme-renderer>=35.0->twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading docutils-0.23-py3-none-any.whl.metadata (15 kB)
+[CI/test-2]   | Collecting markdown-it-py>=2.2.0 (from rich>=14.3.3->twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading markdown_it_py-4.3.0-py3-none-any.whl.metadata (7.9 kB)
+[CI/test-2]   | Collecting mdurl~=0.1 (from markdown-it-py>=2.2.0->rich>=14.3.3->twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading mdurl-0.1.2-py3-none-any.whl.metadata (1.6 kB)
+[CI/test-1]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.3/2.3 MB 3.0 MB/s  0:00:00
+[CI/test-1]   | Downloading anyio-4.16.0-py3-none-any.whl (134 kB)
+[CI/test-2]   | Collecting click>=7.0 (from uvicorn>=0.31.1->mcp<3,>=2.0.0->gitreins==0.21.1)
+[CI/test-1]   | Downloading build-1.6.1-py3-none-any.whl (31 kB)
+[CI/test-2]   |   Downloading click-8.5.1-py3-none-any.whl.metadata (2.6 kB)
+[CI/test-1]   | Downloading exceptiongroup-1.3.2-py3-none-any.whl (16 kB)
+[CI/test-1]   | Downloading httpx2-2.14.0-py3-none-any.whl (96 kB)
+[CI/test-2]   | Collecting platformdirs>=2 (from black->python-lsp-server>=1.10->gitreins==0.21.1)
+[CI/test-1]   | Downloading httpcore2-2.14.0-py3-none-any.whl (84 kB)
+[CI/test-2]   |   Downloading platformdirs-4.14.8-py3-none-any.whl.metadata (5.7 kB)
+[CI/test-1]   | Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+[CI/test-2]   | Collecting pytokens~=0.4.0 (from black->python-lsp-server>=1.10->gitreins==0.21.1)
+[CI/test-1]   | Downloading idna-3.20-py3-none-any.whl (69 kB)
+[CI/test-2]   |   Downloading pytokens-0.4.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (3.8 kB)
+[CI/test-1]   | Downloading jsonschema-4.26.0-py3-none-any.whl (90 kB)
+[CI/test-2]   | Collecting more-itertools (from jaraco.classes->keyring>=21.2.0->twine>=5.0->gitreins==0.21.1)
+[CI/test-1]   | Downloading attrs-26.1.0-py3-none-any.whl (67 kB)
+[CI/test-2]   |   Downloading more_itertools-11.2.1-py3-none-any.whl.metadata (42 kB)
+[CI/test-1]   | Downloading jsonschema_specifications-2025.9.1-py3-none-any.whl (18 kB)
+[CI/test-1]   | Downloading mypy-2.4.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (15.5 MB)
+[CI/test-2]   | Collecting backports.tarfile (from jaraco.context->keyring>=21.2.0->twine>=5.0->gitreins==0.21.1)
+[CI/test-2]   |   Downloading backports.tarfile-1.2.0-py3-none-any.whl.metadata (2.0 kB)
+[CI/test-2]   | Downloading mcp-2.3.0-py3-none-any.whl (368 kB)
+[CI/test-2]   | Downloading mcp_types-2.3.0-py3-none-any.whl (69 kB)
+[CI/test-2]   | Downloading pydantic_core-2.50.5-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (2.3 MB)
+[CI/test-2]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.3/2.3 MB 2.7 MB/s  0:00:00
+[CI/test-2]   | Downloading anyio-4.16.0-py3-none-any.whl (134 kB)
+[CI/test-2]   | Downloading build-1.6.1-py3-none-any.whl (31 kB)
+[CI/test-2]   | Downloading httpx2-2.16.2-py3-none-any.whl (97 kB)
+[CI/test-2]   | Downloading httpcore2-2.16.2-py3-none-any.whl (85 kB)
+[CI/test-2]   | Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+[CI/test-2]   | Downloading idna-3.20-py3-none-any.whl (69 kB)
+[CI/test-2]   | Downloading jsonschema-4.26.0-py3-none-any.whl (90 kB)
+[CI/test-2]   | Downloading attrs-26.1.0-py3-none-any.whl (67 kB)
+[CI/test-2]   | Downloading jsonschema_specifications-2025.9.1-py3-none-any.whl (18 kB)
+[CI/test-2]   | Downloading mypy-2.4.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (15.4 MB)
+[CI/test-2]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 15.4/15.4 MB 4.5 MB/s  0:00:03
+[CI/test-2]   | Downloading ast_serialize-0.13.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.3 MB)
+[CI/test-2]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 6.4 MB/s  0:00:00
+[CI/test-2]   | Downloading librt-0.17.0-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (604 kB)
+[CI/test-2]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 604.6/604.6 kB 4.9 MB/s  0:00:00
+[CI/test-2]   | Downloading mypy_extensions-1.2.0-py3-none-any.whl (5.1 kB)
+[CI/test-2]   | Downloading opentelemetry_api-1.45.2-py3-none-any.whl (60 kB)
+[CI/test-2]   | Using cached packaging-26.3-py3-none-any.whl (129 kB)
+[CI/test-2]   | Downloading pathspec-1.1.1-py3-none-any.whl (57 kB)
+[CI/test-2]   | Downloading pycodestyle-2.15.0-py2.py3-none-any.whl (31 kB)
+[CI/test-2]   | Downloading pydantic-2.14.4-py3-none-any.whl (494 kB)
+[CI/test-2]   | Downloading annotated_types-0.8.0-py3-none-any.whl (13 kB)
+[CI/test-2]   | Downloading pyflakes-4.1.0-py2.py3-none-any.whl (66 kB)
+[CI/test-2]   | Downloading pyjwt-2.15.1-py3-none-any.whl (33 kB)
+[CI/test-2]   | Downloading cryptography-50.0.2-cp311-abi3-manylinux_2_34_x86_64.whl (4.8 MB)
+[CI/test-2]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.8/4.8 MB 6.0 MB/s  0:00:00
+[CI/test-2]   | Downloading cffi-2.1.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (217 kB)
+[CI/test-2]   | Downloading pyright-1.1.414-py3-none-any.whl (6.2 MB)
+[CI/test-2]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.2/6.2 MB 6.8 MB/s  0:00:00
+[CI/test-2]   | Downloading nodeenv-1.12.0-py3-none-any.whl (39 kB)
+[CI/test-2]   | Downloading pytest-9.2.0-py3-none-any.whl (411 kB)
+[CI/test-2]   | Downloading pluggy-1.7.0-py3-none-any.whl (27 kB)
+[CI/test-2]   | Downloading iniconfig-2.3.1-py3-none-any.whl (7.6 kB)
+[CI/test-2]   | Downloading pygments-2.21.0-py3-none-any.whl (1.3 MB)
+[CI/test-2]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 11.6 MB/s  0:00:00
+[CI/test-2]   | Downloading pytest_timeout-2.4.0-py3-none-any.whl (14 kB)
+[CI/test-2]   | Downloading pytest_xdist-3.8.0-py3-none-any.whl (46 kB)
+[CI/test-2]   | Downloading execnet-2.1.2-py3-none-any.whl (40 kB)
+[CI/test-2]   | Downloading python_lsp_server-1.15.0-py3-none-any.whl (77 kB)
+[CI/test-2]   | Downloading jedi-0.20.1-py2.py3-none-any.whl (4.9 MB)
+[CI/test-2]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.9/4.9 MB 9.1 MB/s  0:00:00
+[CI/test-2]   | Downloading parso-0.8.7-py2.py3-none-any.whl (107 kB)
+[CI/test-2]   | Downloading python_lsp_jsonrpc-1.1.2-py3-none-any.whl (8.8 kB)
+[CI/test-2]   | Downloading python_multipart-0.0.34-py3-none-any.whl (32 kB)
+[CI/test-1]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 15.5/15.5 MB 1.5 MB/s  0:00:10
+[CI/test-2]   | Downloading pyyaml-6.0.4-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (828 kB)
+[CI/test-1]   | Downloading ast_serialize-0.13.1-cp39-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (1.3 MB)
+[CI/test-2]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 828.0/828.0 kB 3.3 MB/s  0:00:00
+[CI/test-2]   | Downloading referencing-0.37.0-py3-none-any.whl (26 kB)
+[CI/test-2]   | Downloading requests-2.34.2-py3-none-any.whl (73 kB)
+[CI/test-2]   | Downloading charset_normalizer-3.5.2-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (269 kB)
+[CI/test-2]   | Downloading urllib3-2.8.0-py3-none-any.whl (135 kB)
+[CI/test-2]   | Downloading certifi-2026.11.20-py3-none-any.whl (127 kB)
+[CI/test-2]   | Downloading rpds_py-2026.9.1-cp311-cp311-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (375 kB)
+[CI/test-1]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 2.0 MB/s  0:00:00
+[CI/test-2]   | Downloading ruff-0.17.6-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (10.6 MB)
+[CI/test-1]   | Downloading librt-0.17.0-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (604 kB)
+[CI/test-1]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 604.3/604.3 kB 1.2 MB/s  0:00:00
+[CI/test-1]   | Downloading mypy_extensions-1.2.0-py3-none-any.whl (5.1 kB)
+[CI/test-1]   | Downloading opentelemetry_api-1.45.2-py3-none-any.whl (60 kB)
+[CI/test-1]   | Using cached packaging-26.3-py3-none-any.whl (129 kB)
+[CI/test-1]   | Downloading pathspec-1.1.1-py3-none-any.whl (57 kB)
+[CI/test-2]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 10.6/10.6 MB 10.9 MB/s  0:00:00
+[CI/test-2]   | Downloading sse_starlette-3.7.1-py3-none-any.whl (18 kB)
+[CI/test-1]   | Downloading pycodestyle-2.15.0-py2.py3-none-any.whl (31 kB)
+[CI/test-2]   | Downloading starlette-1.10.0-py3-none-any.whl (80 kB)
+[CI/test-1]   | Downloading pydantic-2.14.4-py3-none-any.whl (494 kB)
+[CI/test-2]   | Downloading truststore-0.10.5-py3-none-any.whl (19 kB)
+[CI/test-2]   | Downloading twine-7.0.0-py3-none-any.whl (43 kB)
+[CI/test-2]   | Downloading keyring-25.7.0-py3-none-any.whl (39 kB)
+[CI/test-2]   | Downloading importlib_metadata-10.2.0-py3-none-any.whl (34 kB)
+[CI/test-2]   | Downloading jeepney-0.9.0-py3-none-any.whl (49 kB)
+[CI/test-1]   | Downloading annotated_types-0.8.0-py3-none-any.whl (13 kB)
+[CI/test-2]   | Downloading lazy_importer-0.1.0-py3-none-any.whl (12 kB)
+[CI/test-1]   | Downloading pyflakes-4.0.3-py2.py3-none-any.whl (66 kB)
+[CI/test-2]   | Downloading readme_renderer-46.0-py3-none-any.whl (14 kB)
+[CI/test-2]   | Downloading docutils-0.23-py3-none-any.whl (634 kB)
+[CI/test-1]   | Downloading pyjwt-2.15.1-py3-none-any.whl (33 kB)
+[CI/test-2]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 634.7/634.7 kB 8.2 MB/s  0:00:00
+[CI/test-1]   | Downloading cryptography-50.0.2-cp39-abi3-manylinux_2_34_x86_64.whl (4.8 MB)
+[CI/test-2]   | Downloading nh3-0.3.8-cp39-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (837 kB)
+[CI/test-2]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 837.4/837.4 kB 17.4 MB/s  0:00:00
+[CI/test-2]   | Downloading requests_toolbelt-1.0.0-py2.py3-none-any.whl (54 kB)
+[CI/test-2]   | Downloading rfc3986-2.0.0-py2.py3-none-any.whl (31 kB)
+[CI/test-2]   | Downloading rich-15.0.0-py3-none-any.whl (310 kB)
+[CI/test-2]   | Downloading markdown_it_py-4.3.0-py3-none-any.whl (96 kB)
+[CI/test-2]   | Downloading mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+[CI/test-2]   | Downloading secretstorage-3.5.0-py3-none-any.whl (15 kB)
+[CI/test-2]   | Downloading types_jsonschema-4.26.0.20261006-py3-none-any.whl (16 kB)
+[CI/test-2]   | Downloading types_pyyaml-6.0.12.20261122-py3-none-any.whl (21 kB)
+[CI/test-2]   | Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+[CI/test-2]   | Downloading typing_inspection-0.4.5-py3-none-any.whl (14 kB)
+[CI/test-2]   | Downloading ujson-6.1.0-cp311-cp311-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (56 kB)
+[CI/test-2]   | Downloading uvicorn-0.54.0-py3-none-any.whl (87 kB)
+[CI/test-2]   | Downloading click-8.5.1-py3-none-any.whl (126 kB)
+[CI/test-2]   | Downloading zipp-4.1.2-py3-none-any.whl (10 kB)
+[CI/test-2]   | Downloading black-26.10.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (2.0 MB)
+[CI/test-2]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.0/2.0 MB 9.2 MB/s  0:00:00
+[CI/test-2]   | Downloading pytokens-0.4.1-cp311-cp311-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (260 kB)
+[CI/test-2]   | Downloading platformdirs-4.14.8-py3-none-any.whl (94 kB)
+[CI/test-2]   | Downloading docstring_to_markdown-0.17-py3-none-any.whl (23 kB)
+[CI/test-2]   | Downloading id-1.6.1-py3-none-any.whl (14 kB)
+[CI/test-2]   | Downloading jaraco.classes-3.4.0-py3-none-any.whl (6.8 kB)
+[CI/test-2]   | Downloading jaraco_context-6.1.2-py3-none-any.whl (7.9 kB)
+[CI/test-2]   | Downloading backports.tarfile-1.2.0-py3-none-any.whl (30 kB)
+[CI/test-2]   | Downloading jaraco_functools-4.6.0-py3-none-any.whl (11 kB)
+[CI/test-2]   | Downloading more_itertools-11.2.1-py3-none-any.whl (74 kB)
+[CI/test-2]   | Downloading prometheus_client-0.26.0-py3-none-any.whl (64 kB)
+[CI/test-2]   | Downloading pycparser-3.12-py3-none-any.whl (62 kB)
+[CI/test-2]   | Downloading pyproject_hooks-1.3.3-py3-none-any.whl (10 kB)
+[CI/test-1]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.8/4.8 MB 2.6 MB/s  0:00:01
+[CI/test-1]   | Downloading cffi-2.1.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (218 kB)
+[CI/test-2]   | Building wheels for collected packages: gitreins
+[CI/test-2]   |   Building editable for gitreins (pyproject.toml): started
+[CI/test-1]   | Downloading pyright-1.1.414-py3-none-any.whl (6.2 MB)
+[CI/test-2]   |   Building editable for gitreins (pyproject.toml): finished with status 'done'
+[CI/test-2]   |   /tmp/pip-build-env-jxocurjf/overlay/lib/python3.11/site-packages/setuptools/config/_apply_pyprojecttoml.py:82: BuildBackendWarning: `project.license` as a TOML table is deprecated
+[CI/test-2]   |   !!
+[CI/test-2]   |   
+[CI/test-2]   |           ********************************************************************************
+[CI/test-2]   |           Please use a simple string containing a SPDX expression for `project.license`. You can also use `project.license-files`. (Both options available on setuptools>=77.0.0).
+[CI/test-2]   |   
+[CI/test-2]   |           By 2027-Feb-18, you need to update your project and remove deprecated calls
+[CI/test-2]   |           or your builds will no longer be supported.
+[CI/test-2]   |   
+[CI/test-2]   |           See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+[CI/test-2]   |           ********************************************************************************
+[CI/test-2]   |   
+[CI/test-2]   |   !!
+[CI/test-2]   |     corresp(dist, value, root_dir)
+[CI/test-2]   |   /tmp/pip-build-env-jxocurjf/overlay/lib/python3.11/site-packages/setuptools/config/_apply_pyprojecttoml.py:61: BuildBackendWarning: License classifiers are deprecated.
+[CI/test-2]   |   !!
+[CI/test-2]   |   
+[CI/test-2]   |           ********************************************************************************
+[CI/test-2]   |           Please consider removing the following classifiers in favor of a SPDX license expression:
+[CI/test-2]   |   
+[CI/test-2]   |           License :: OSI Approved :: MIT License
+[CI/test-2]   |   
+[CI/test-2]   |           See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+[CI/test-2]   |           ********************************************************************************
+[CI/test-2]   |   
+[CI/test-2]   |   !!
+[CI/test-2]   |     dist._finalize_license_expression()
+[CI/test-2]   |   /tmp/pip-build-env-jxocurjf/overlay/lib/python3.11/site-packages/setuptools/dist.py:765: BuildBackendWarning: License classifiers are deprecated.
+[CI/test-2]   |   !!
+[CI/test-2]   |   
+[CI/test-2]   |           ********************************************************************************
+[CI/test-2]   |           Please consider removing the following classifiers in favor of a SPDX license expression:
+[CI/test-2]   |   
+[CI/test-2]   |           License :: OSI Approved :: MIT License
+[CI/test-2]   |   
+[CI/test-2]   |           See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+[CI/test-2]   |           ********************************************************************************
+[CI/test-2]   |   
+[CI/test-2]   |   !!
+[CI/test-2]   |     self._finalize_license_expression()
+[CI/test-2]   |   /tmp/pip-build-env-jxocurjf/overlay/lib/python3.11/site-packages/setuptools/command/editable_wheel.py:354: BuildBackendWarning: Editable installation.
+[CI/test-2]   |   !!
+[CI/test-2]   |   
+[CI/test-2]   |           ********************************************************************************
+[CI/test-2]   |           Please be careful with folders in your working directory with the same
+[CI/test-2]   |           name as your package as they may take precedence during imports.
+[CI/test-2]   |           ********************************************************************************
+[CI/test-2]   |   
+[CI/test-2]   |   !!
+[CI/test-2]   |     with strategy, WheelFile(wheel_path, "w") as wheel_obj:
+[CI/test-2]   |   Created wheel for gitreins: filename=gitreins-0.21.1-0.editable-py3-none-any.whl size=24695 sha256=4ba3ee376c4c752af2cc7316a2019bf1c1e2df930949c4f76ebed540f6235a4e
+[CI/test-2]   |   Stored in directory: /tmp/pip-ephem-wheel-cache-99_bevua/wheels/38/0c/55/bce89aa6d5b8eee6a98516cf97a04cb4d6d1e5b0493d0b8804
+[CI/test-2]   | Successfully built gitreins
+[CI/test-2]   | Installing collected packages: zipp, urllib3, ujson, typing-extensions, types-PyYAML, truststore, ruff, rpds-py, rfc3986, pyyaml, pytokens, python-multipart, pyproject_hooks, pyjwt, pygments, pyflakes, pycparser, pycodestyle, prometheus_client, pluggy, platformdirs, pathspec, parso, packaging, nodeenv, nh3, mypy_extensions, more-itertools, mdurl, lazy-importer, jeepney, iniconfig, idna, h11, execnet, docutils, click, charset_normalizer, certifi, backports.tarfile, attrs, ast-serialize, annotated-types, uvicorn, typing-inspection, requests, referencing, readme-renderer, python-lsp-jsonrpc, pytest, pyright, pydantic-core, opentelemetry-api, markdown-it-py, librt, jedi, jaraco.functools, jaraco.context, jaraco.classes, importlib_metadata, id, httpcore2, cffi, build, black, anyio, types-jsonschema, starlette, rich, requests-toolbelt, pytest-xdist, pytest-timeout, pydantic, mypy, jsonschema-specifications, httpx2, docstring-to-markdown, cryptography, sse-starlette, SecretStorage, python-lsp-server, mcp-types, jsonschema, mcp, keyring, twine, gitreins
+[CI/test-1]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 6.2/6.2 MB 2.9 MB/s  0:00:02
+[CI/test-1]   | Downloading nodeenv-1.12.0-py3-none-any.whl (39 kB)
+[CI/test-1]   | Downloading pytest-9.2.0-py3-none-any.whl (411 kB)
+[CI/test-1]   | Downloading pluggy-1.7.0-py3-none-any.whl (27 kB)
+[CI/test-1]   | Downloading iniconfig-2.3.1-py3-none-any.whl (7.6 kB)
+[CI/test-1]   | Downloading pygments-2.21.0-py3-none-any.whl (1.3 MB)
+[CI/test-1]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 1.3/1.3 MB 3.4 MB/s  0:00:00
+[CI/test-1]   | Downloading pytest_timeout-2.4.0-py3-none-any.whl (14 kB)
+[CI/test-1]   | Downloading pytest_xdist-3.8.0-py3-none-any.whl (46 kB)
+[CI/test-1]   | Downloading execnet-2.1.2-py3-none-any.whl (40 kB)
+[CI/test-1]   | Downloading python_lsp_server-1.15.0-py3-none-any.whl (77 kB)
+[CI/test-1]   | Downloading jedi-0.20.1-py2.py3-none-any.whl (4.9 MB)
+[CI/test-1]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 4.9/4.9 MB 3.6 MB/s  0:00:01
+[CI/test-1]   | Downloading parso-0.8.7-py2.py3-none-any.whl (107 kB)
+[CI/test-1]   | Downloading python_lsp_jsonrpc-1.1.2-py3-none-any.whl (8.8 kB)
+[CI/test-1]   | Downloading python_multipart-0.0.32-py3-none-any.whl (30 kB)
+[CI/test-1]   | Downloading pyyaml-6.0.4-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (798 kB)
+[CI/test-1]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 798.9/798.9 kB 4.1 MB/s  0:00:00
+[CI/test-1]   | Downloading referencing-0.37.0-py3-none-any.whl (26 kB)
+[CI/test-1]   | Downloading requests-2.34.2-py3-none-any.whl (73 kB)
+[CI/test-1]   | Downloading charset_normalizer-3.5.2-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (271 kB)
+[CI/test-1]   | Downloading urllib3-2.8.0-py3-none-any.whl (135 kB)
+[CI/test-1]   | Downloading certifi-2026.11.20-py3-none-any.whl (127 kB)
+[CI/test-1]   | Downloading rpds_py-0.30.0-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (390 kB)
+[CI/test-1]   | Downloading ruff-0.17.6-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (10.6 MB)
+[CI/test-1]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 10.6/10.6 MB 3.9 MB/s  0:00:02
+[CI/test-1]   | Downloading sse_starlette-3.5.1-py3-none-any.whl (17 kB)
+[CI/test-1]   | Downloading starlette-1.7.0-py3-none-any.whl (78 kB)
+[CI/test-1]   | Downloading tomli-2.5.0-py3-none-any.whl (14 kB)
+[CI/test-1]   | Downloading truststore-0.10.5-py3-none-any.whl (19 kB)
+[CI/test-1]   | Downloading twine-7.0.0-py3-none-any.whl (43 kB)
+[CI/test-1]   | Downloading keyring-25.7.0-py3-none-any.whl (39 kB)
+[CI/test-1]   | Downloading importlib_metadata-9.0.1-py3-none-any.whl (27 kB)
+[CI/test-1]   | Downloading jeepney-0.9.0-py3-none-any.whl (49 kB)
+[CI/test-1]   | Downloading readme_renderer-46.0-py3-none-any.whl (14 kB)
+[CI/test-1]   | Downloading docutils-0.23-py3-none-any.whl (634 kB)
+[CI/test-1]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 634.7/634.7 kB 3.8 MB/s  0:00:00
+[CI/test-1]   | Downloading nh3-0.3.8-cp39-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl (837 kB)
+[CI/test-1]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 837.4/837.4 kB 3.9 MB/s  0:00:00
+[CI/test-1]   | Downloading requests_toolbelt-1.0.0-py2.py3-none-any.whl (54 kB)
+[CI/test-1]   | Downloading rfc3986-2.0.0-py2.py3-none-any.whl (31 kB)
+[CI/test-1]   | Downloading rich-15.0.0-py3-none-any.whl (310 kB)
+[CI/test-1]   | Downloading markdown_it_py-4.3.0-py3-none-any.whl (96 kB)
+[CI/test-1]   | Downloading mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+[CI/test-1]   | Downloading secretstorage-3.5.0-py3-none-any.whl (15 kB)
+[CI/test-1]   | Downloading types_jsonschema-4.26.0.20261006-py3-none-any.whl (16 kB)
+[CI/test-1]   | Downloading types_pyyaml-6.0.12.20261122-py3-none-any.whl (21 kB)
+[CI/test-1]   | Downloading typing_extensions-4.16.0-py3-none-any.whl (45 kB)
+[CI/test-1]   | Downloading typing_inspection-0.4.5-py3-none-any.whl (14 kB)
+[CI/test-1]   | Downloading ujson-6.1.0-cp310-cp310-manylinux_2_24_x86_64.manylinux_2_28_x86_64.whl (56 kB)
+[CI/test-1]   | Downloading uvicorn-0.54.0-py3-none-any.whl (87 kB)
+[CI/test-1]   | Downloading click-8.5.1-py3-none-any.whl (126 kB)
+[CI/test-1]   | Downloading zipp-4.1.2-py3-none-any.whl (10 kB)
+[CI/test-1]   | Downloading black-26.10.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (2.0 MB)
+[CI/test-2]   | 
+[CI/test-2]   | Successfully installed SecretStorage-3.5.0 annotated-types-0.8.0 anyio-4.16.0 ast-serialize-0.13.1 attrs-26.1.0 backports.tarfile-1.2.0 black-26.10.1 build-1.6.1 certifi-2026.11.20 cffi-2.1.1 charset_normalizer-3.5.2 click-8.5.1 cryptography-50.0.2 docstring-to-markdown-0.17 docutils-0.23 execnet-2.1.2 gitreins-0.21.1 h11-0.16.0 httpcore2-2.16.2 httpx2-2.16.2 id-1.6.1 idna-3.20 importlib_metadata-10.2.0 iniconfig-2.3.1 jaraco.classes-3.4.0 jaraco.context-6.1.2 jaraco.functools-4.6.0 jedi-0.20.1 jeepney-0.9.0 jsonschema-4.26.0 jsonschema-specifications-2025.9.1 keyring-25.7.0 lazy-importer-0.1.0 librt-0.17.0 markdown-it-py-4.3.0 mcp-2.3.0 mcp-types-2.3.0 mdurl-0.1.2 more-itertools-11.2.1 mypy-2.4.1 mypy_extensions-1.2.0 nh3-0.3.8 nodeenv-1.12.0 opentelemetry-api-1.45.2 packaging-26.3 parso-0.8.7 pathspec-1.1.1 platformdirs-4.14.8 pluggy-1.7.0 prometheus_client-0.26.0 pycodestyle-2.15.0 pycparser-3.12 pydantic-2.14.4 pydantic-core-2.50.5 pyflakes-4.1.0 pygments-2.21.0 pyjwt-2.15.1 pyproject_hooks-1.3.3 pyright-1.1.414 pytest-9.2.0 pytest-timeout-2.4.0 pytest-xdist-3.8.0 python-lsp-jsonrpc-1.1.2 python-lsp-server-1.15.0 python-multipart-0.0.34 pytokens-0.4.1 pyyaml-6.0.4 readme-renderer-46.0 referencing-0.37.0 requests-2.34.2 requests-toolbelt-1.0.0 rfc3986-2.0.0 rich-15.0.0 rpds-py-2026.9.1 ruff-0.17.6 sse-starlette-3.7.1 starlette-1.10.0 truststore-0.10.5 twine-7.0.0 types-PyYAML-6.0.12.20261122 types-jsonschema-4.26.0.20261006 typing-extensions-4.16.0 typing-inspection-0.4.5 ujson-6.1.0 urllib3-2.8.0 uvicorn-0.54.0 zipp-4.1.2
+[CI/test-2]   | WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+[CI/test-2]   ✅  Success - Main Install dependencies [41.149179322s]
+[CI/test-2] ⭐ Run Main Install system tools for LSP/static analysis
+[CI/test-2]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/3] user= workdir=
+[CI/test-1]   |    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━ 2.0/2.0 MB 3.5 MB/s  0:00:00
+[CI/test-1]   | Downloading pytokens-0.4.1-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (259 kB)
+[CI/test-1]   | Downloading platformdirs-4.12.4-py3-none-any.whl (32 kB)
+[CI/test-1]   | Downloading docstring_to_markdown-0.17-py3-none-any.whl (23 kB)
+[CI/test-1]   | Downloading id-1.6.1-py3-none-any.whl (14 kB)
+[CI/test-1]   | Downloading jaraco.classes-3.4.0-py3-none-any.whl (6.8 kB)
+[CI/test-1]   | Downloading jaraco_context-6.1.2-py3-none-any.whl (7.9 kB)
+[CI/test-1]   | Downloading backports.tarfile-1.2.0-py3-none-any.whl (30 kB)
+[CI/test-1]   | Downloading jaraco_functools-4.6.0-py3-none-any.whl (11 kB)
+[CI/test-1]   | Downloading more_itertools-11.1.0-py3-none-any.whl (72 kB)
+[CI/test-1]   | Downloading prometheus_client-0.26.0-py3-none-any.whl (64 kB)
+[CI/test-1]   | Downloading pycparser-3.11-py3-none-any.whl (51 kB)
+[CI/test-1]   | Downloading pyproject_hooks-1.3.3-py3-none-any.whl (10 kB)
+[CI/test-1]   | Building wheels for collected packages: gitreins
+[CI/test-1]   |   Building editable for gitreins (pyproject.toml): started
+[CI/test-1]   |   Building editable for gitreins (pyproject.toml): finished with status 'done'
+[CI/test-1]   |   /tmp/pip-build-env-t18x9qo0/overlay/lib/python3.10/site-packages/setuptools/config/_apply_pyprojecttoml.py:82: BuildBackendWarning: `project.license` as a TOML table is deprecated
+[CI/test-1]   |   !!
+[CI/test-1]   |   
+[CI/test-1]   |           ********************************************************************************
+[CI/test-1]   |           Please use a simple string containing a SPDX expression for `project.license`. You can also use `project.license-files`. (Both options available on setuptools>=77.0.0).
+[CI/test-1]   |   
+[CI/test-1]   |           By 2027-Feb-18, you need to update your project and remove deprecated calls
+[CI/test-1]   |           or your builds will no longer be supported.
+[CI/test-1]   |   
+[CI/test-1]   |           See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+[CI/test-1]   |           ********************************************************************************
+[CI/test-1]   |   
+[CI/test-1]   |   !!
+[CI/test-1]   |     corresp(dist, value, root_dir)
+[CI/test-1]   |   /tmp/pip-build-env-t18x9qo0/overlay/lib/python3.10/site-packages/setuptools/config/_apply_pyprojecttoml.py:61: BuildBackendWarning: License classifiers are deprecated.
+[CI/test-1]   |   !!
+[CI/test-1]   |   
+[CI/test-1]   |           ********************************************************************************
+[CI/test-1]   |           Please consider removing the following classifiers in favor of a SPDX license expression:
+[CI/test-1]   |   
+[CI/test-1]   |           License :: OSI Approved :: MIT License
+[CI/test-1]   |   
+[CI/test-1]   |           See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+[CI/test-1]   |           ********************************************************************************
+[CI/test-1]   |   
+[CI/test-1]   |   !!
+[CI/test-1]   |     dist._finalize_license_expression()
+[CI/test-1]   |   /tmp/pip-build-env-t18x9qo0/overlay/lib/python3.10/site-packages/setuptools/dist.py:765: BuildBackendWarning: License classifiers are deprecated.
+[CI/test-1]   |   !!
+[CI/test-1]   |   
+[CI/test-1]   |           ********************************************************************************
+[CI/test-1]   |           Please consider removing the following classifiers in favor of a SPDX license expression:
+[CI/test-1]   |   
+[CI/test-1]   |           License :: OSI Approved :: MIT License
+[CI/test-1]   |   
+[CI/test-1]   |           See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+[CI/test-1]   |           ********************************************************************************
+[CI/test-1]   |   
+[CI/test-1]   |   !!
+[CI/test-1]   |     self._finalize_license_expression()
+[CI/test-1]   |   /tmp/pip-build-env-t18x9qo0/overlay/lib/python3.10/site-packages/setuptools/command/editable_wheel.py:354: BuildBackendWarning: Editable installation.
+[CI/test-1]   |   !!
+[CI/test-1]   |   
+[CI/test-1]   |           ********************************************************************************
+[CI/test-1]   |           Please be careful with folders in your working directory with the same
+[CI/test-1]   |           name as your package as they may take precedence during imports.
+[CI/test-1]   |           ********************************************************************************
+[CI/test-1]   |   
+[CI/test-1]   |   !!
+[CI/test-1]   |     with strategy, WheelFile(wheel_path, "w") as wheel_obj:
+[CI/test-1]   |   Created wheel for gitreins: filename=gitreins-0.21.1-0.editable-py3-none-any.whl size=24695 sha256=8051a537e80d6cdf3b37027a94f5a3a3132f426dfa1c2cf974f84d4601810c51
+[CI/test-1]   |   Stored in directory: /tmp/pip-ephem-wheel-cache-_ga22bju/wheels/5e/d7/71/f7e7ad36908835182ed0b7c00100b3cc042d28acd00541e138
+[CI/test-1]   | Successfully built gitreins
+[CI/test-1]   | Installing collected packages: zipp, urllib3, ujson, typing-extensions, types-PyYAML, truststore, tomli, ruff, rpds-py, rfc3986, pyyaml, pytokens, python-multipart, pyproject_hooks, pygments, pyflakes, pycparser, pycodestyle, prometheus_client, pluggy, platformdirs, pathspec, parso, packaging, nodeenv, nh3, mypy_extensions, more-itertools, mdurl, jeepney, iniconfig, idna, h11, execnet, docutils, click, charset_normalizer, certifi, backports.tarfile, attrs, ast-serialize, annotated-types, uvicorn, typing-inspection, requests, referencing, readme-renderer, python-lsp-jsonrpc, pyright, pyjwt, pydantic-core, opentelemetry-api, markdown-it-py, librt, jedi, jaraco.functools, jaraco.context, jaraco.classes, importlib_metadata, id, httpcore2, exceptiongroup, cffi, build, black, types-jsonschema, rich, requests-toolbelt, pytest, pydantic, mypy, jsonschema-specifications, docstring-to-markdown, cryptography, anyio, starlette, SecretStorage, python-lsp-server, pytest-xdist, pytest-timeout, mcp-types, jsonschema, httpx2, sse-starlette, keyring, twine, mcp, gitreins
+[CI/test-1]   | 
+[CI/test-1]   | Successfully installed SecretStorage-3.5.0 annotated-types-0.8.0 anyio-4.16.0 ast-serialize-0.13.1 attrs-26.1.0 backports.tarfile-1.2.0 black-26.10.1 build-1.6.1 certifi-2026.11.20 cffi-2.1.1 charset_normalizer-3.5.2 click-8.5.1 cryptography-50.0.2 docstring-to-markdown-0.17 docutils-0.23 exceptiongroup-1.3.2 execnet-2.1.2 gitreins-0.21.1 h11-0.16.0 httpcore2-2.14.0 httpx2-2.14.0 id-1.6.1 idna-3.20 importlib_metadata-9.0.1 iniconfig-2.3.1 jaraco.classes-3.4.0 jaraco.context-6.1.2 jaraco.functools-4.6.0 jedi-0.20.1 jeepney-0.9.0 jsonschema-4.26.0 jsonschema-specifications-2025.9.1 keyring-25.7.0 librt-0.17.0 markdown-it-py-4.3.0 mcp-2.3.0 mcp-types-2.3.0 mdurl-0.1.2 more-itertools-11.1.0 mypy-2.4.1 mypy_extensions-1.2.0 nh3-0.3.8 nodeenv-1.12.0 opentelemetry-api-1.45.2 packaging-26.3 parso-0.8.7 pathspec-1.1.1 platformdirs-4.12.4 pluggy-1.7.0 prometheus_client-0.26.0 pycodestyle-2.15.0 pycparser-3.11 pydantic-2.14.4 pydantic-core-2.50.5 pyflakes-4.0.3 pygments-2.21.0 pyjwt-2.15.1 pyproject_hooks-1.3.3 pyright-1.1.414 pytest-9.2.0 pytest-timeout-2.4.0 pytest-xdist-3.8.0 python-lsp-jsonrpc-1.1.2 python-lsp-server-1.15.0 python-multipart-0.0.32 pytokens-0.4.1 pyyaml-6.0.4 readme-renderer-46.0 referencing-0.37.0 requests-2.34.2 requests-toolbelt-1.0.0 rfc3986-2.0.0 rich-15.0.0 rpds-py-0.30.0 ruff-0.17.6 sse-starlette-3.5.1 starlette-1.7.0 tomli-2.5.0 truststore-0.10.5 twine-7.0.0 types-PyYAML-6.0.12.20261122 types-jsonschema-4.26.0.20261006 typing-extensions-4.16.0 typing-inspection-0.4.5 ujson-6.1.0 urllib3-2.8.0 uvicorn-0.54.0 zipp-4.1.2
+[CI/test-1]   | WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager, possibly rendering your system unusable. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv. Use the --root-user-action option if you know what you are doing and want to suppress this warning.
+[CI/test-1]   ✅  Success - Main Install dependencies [56.577928054s]
+[CI/test-1] ⭐ Run Main Install system tools for LSP/static analysis
+[CI/test-1]   🐳  docker exec cmd=[bash -e /var/run/act/workflow/3] user= workdir=
+[CI/test-1]   | debconf: unable to initialize frontend: Dialog
+[CI/test-1]   | debconf: (Dialog frontend will not work on a dumb terminal, an emacs shell buffer, or without a controlling terminal.)
+[CI/test-1]   | debconf: falling back to frontend: Readline
+[CI/test-1]   | debconf: unable to initialize frontend: Readline
+[CI/test-1]   | debconf: (This frontend requires a controlling tty.)
+[CI/test-1]   | debconf: falling back to frontend: Teletype
+[CI/test-1]   | debconf: unable to initialize frontend: Teletype
+[CI/test-1]   | debconf: (This frontend requires a controlling tty.)
+[CI/test-1]   | debconf: falling back to frontend: Noninteractive
+[CI/test-1]   | Selecting previously unselected package python3-pygments.
+[CI/test-1]   | (Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 31340 files and directories currently installed.)
+[CI/test-1]   | Preparing to unpack .../python3-pygments_2.19.2+dfsg-1_all.deb ...
+[CI/test-1]   | Unpacking python3-pygments (2.19.2+dfsg-1) ...
+[CI/test-1]   | Selecting previously unselected package libtinyxml2-11:amd64.
+[CI/test-1]   | Preparing to unpack .../libtinyxml2-11_11.0.0+dfsg-1build1_amd64.deb ...
+[CI/test-1]   | Unpacking libtinyxml2-11:amd64 (11.0.0+dfsg-1build1) ...
+[CI/test-1]   | Selecting previously unselected package cppcheck.
+[CI/test-1]   | Preparing to unpack .../cppcheck_2.19.0-3_amd64.deb ...
+[CI/test-1]   | Unpacking cppcheck (2.19.0-3) ...
+[CI/test-1]   | Setting up libtinyxml2-11:amd64 (11.0.0+dfsg-1build1) ...
+[CI/test-1]   | Setting up python3-pygments (2.19.2+dfsg-1) ...
+[CI/test-1]   | Setting up cppcheck (2.19.0-3) ...
+[CI/test-1]   | Processing triggers for libc-bin (2.43-2ubuntu2.4) ...
+[CI/test-1]   | /var/run/act/workflow/3: line 12: go: command not found
+[CI/test-1]   ❌  Failure - Main Install system tools for LSP/static analysis [28.952991811s]
+[CI/test-1] exitcode '127': command not found, please refer to https://github.com/nektos/act/issues/107 for more information
+[CI/test-1] ⭐ Run Complete job
+[CI/test-1]   ✅  Success - Complete job
+[CI/test-1] 🏁  Job failed
+[CI/test-2]   | debconf: unable to initialize frontend: Dialog
+[CI/test-2]   | debconf: (Dialog frontend will not work on a dumb terminal, an emacs shell buffer, or without a controlling terminal.)
+[CI/test-2]   | debconf: falling back to frontend: Readline
+[CI/test-2]   | debconf: unable to initialize frontend: Readline
+[CI/test-2]   | debconf: (This frontend requires a controlling tty.)
+[CI/test-2]   | debconf: falling back to frontend: Teletype
+[CI/test-2]   | debconf: unable to initialize frontend: Teletype
+[CI/test-2]   | debconf: (This frontend requires a controlling tty.)
+[CI/test-2]   | debconf: falling back to frontend: Noninteractive
+[CI/test-2]   | Selecting previously unselected package python3-pygments.
+[CI/test-2]   | (Reading database ... (Reading database ... 5%(Reading database ... 10%(Reading database ... 15%(Reading database ... 20%(Reading database ... 25%(Reading database ... 30%(Reading database ... 35%(Reading database ... 40%(Reading database ... 45%(Reading database ... 50%(Reading database ... 55%(Reading database ... 60%(Reading database ... 65%(Reading database ... 70%(Reading database ... 75%(Reading database ... 80%(Reading database ... 85%(Reading database ... 90%(Reading database ... 95%(Reading database ... 100%(Reading database ... 31340 files and directories currently installed.)
+[CI/test-2]   | Preparing to unpack .../python3-pygments_2.19.2+dfsg-1_all.deb ...
+[CI/test-2]   | Unpacking python3-pygments (2.19.2+dfsg-1) ...
+[CI/test-2]   | Selecting previously unselected package libtinyxml2-11:amd64.
+[CI/test-2]   | Preparing to unpack .../libtinyxml2-11_11.0.0+dfsg-1build1_amd64.deb ...
+[CI/test-2]   | Unpacking libtinyxml2-11:amd64 (11.0.0+dfsg-1build1) ...
+[CI/test-2]   | Selecting previously unselected package cppcheck.
+[CI/test-2]   | Preparing to unpack .../cppcheck_2.19.0-3_amd64.deb ...
+[CI/test-2]   | Unpacking cppcheck (2.19.0-3) ...
+[CI/test-2]   | Setting up libtinyxml2-11:amd64 (11.0.0+dfsg-1build1) ...
+[CI/test-2]   | Setting up python3-pygments (2.19.2+dfsg-1) ...
+[CI/test-2]   | Setting up cppcheck (2.19.0-3) ...
+[CI/test-2]   | Processing triggers for libc-bin (2.43-2ubuntu2.4) ...
+[CI/test-2]   | /var/run/act/workflow/3: line 12: go: command not found
+[CI/test-2]   ❌  Failure - Main Install system tools for LSP/static analysis [1m21.331713706s]
+[CI/test-2] exitcode '127': command not found, please refer to https://github.com/nektos/act/issues/107 for more information
+[CI/test-2] ⭐ Run Complete job
+[CI/test-2]   ✅  Success - Complete job
+[CI/test-2] 🏁  Job failed
+Error: Job 'test' failed

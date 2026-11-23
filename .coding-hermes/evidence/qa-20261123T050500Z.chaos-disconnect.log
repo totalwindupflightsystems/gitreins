@@ -1,0 +1,126 @@
+NETWORK_CUT_APPLIED
+bringing up nodes...
+bringing up nodes...
+
+........................................................................ [  1%]
+.................................................................sssssss [  3%]
+......ss.....s.......................................................... [  5%]
+........................................................s............... [  7%]
+.....................................s.......s.......................... [  9%]
+........................................................................ [ 10%]
+........................................................................ [ 12%]
+........................................................................ [ 14%]
+........................................................................ [ 16%]
+........................................................................ [ 18%]
+........................................................................ [ 20%]
+........................................................................ [ 21%]
+........................................................................ [ 23%]
+........................................................................ [ 25%]
+..ssss.................................................................. [ 27%]
+........................................................................ [ 29%]
+........................................................................ [ 31%]
+........................................................................ [ 32%]
+........................................................................ [ 34%]
+........................................................................ [ 36%]
+........................................................................ [ 38%]
+........................................................................ [ 40%]
+........................................................................ [ 42%]
+........................................................................ [ 43%]
+........................................................................ [ 45%]
+........................................................................ [ 47%]
+........................................................................ [ 49%]
+........................................................................ [ 51%]
+........................................................................ [ 53%]
+........................................................................ [ 54%]
+................ss.s............................................s....... [ 56%]
+................................................s....................... [ 58%]
+..........................s............................................. [ 60%]
+........................................................................ [ 62%]
+........................................................................ [ 64%]
+........................................................................ [ 65%]
+........................................................................ [ 67%]
+........................................................................ [ 69%]
+........................................................................ [ 71%]
+........................................................................ [ 73%]
+........................................................................ [ 75%]
+..........................................s............................. [ 76%]
+.............s.......................................................... [ 78%]
+........................................................................ [ 80%]
+........................................................................ [ 82%]
+........................................................................ [ 84%]
+...............................ssssss.............s..................... [ 86%]
+........................................................................ [ 87%]
+........................................................................ [ 89%]
+........................................................................ [ 91%]
+........................................................................ [ 93%]
+........................................................................ [ 95%]
+........................................................................ [ 97%]
+........................................................................ [ 98%]
+..........................................                               [100%]
+=============================== warnings summary ===============================
+tests/reliability/dead-tests/test_arithmetic.py::test_subtract_no_assertion
+  /home/bunker-524a8ece/tools/venv/lib/python3.13/site-packages/_pytest/python.py:191: PytestReturnNotNoneWarning: Test functions should return None, but tests/reliability/dead-tests/test_arithmetic.py::test_subtract_no_assertion returned <class 'int'>.
+  Did you mean to use `assert` instead of `return`?
+  See https://docs.pytest.org/en/stable/how-to/assert.html#return-not-none for more information.
+    warnings.warn(
+
+tests/reliability/dead-tests/test_strings.py::test_reverse_against_wrong_value
+  /home/bunker-524a8ece/tools/venv/lib/python3.13/site-packages/_pytest/python.py:191: PytestReturnNotNoneWarning: Test functions should return None, but tests/reliability/dead-tests/test_strings.py::test_reverse_against_wrong_value returned <class 'bool'>.
+  Did you mean to use `assert` instead of `return`?
+  See https://docs.pytest.org/en/stable/how-to/assert.html#return-not-none for more information.
+    warnings.warn(
+
+tests/test_cli.py: 20 warnings
+tests/test_evidence_contract.py: 1 warning
+tests/test_fingerprint.py: 1 warning
+tests/test_llm_lane_validation.py: 1 warning
+tests/test_mcp_verdict_persistence.py: 17 warnings
+tests/test_persist.py: 32 warnings
+tests/test_review_state.py: 3 warnings
+tests/test_v07_features.py: 4 warnings
+tests/test_worktree.py: 2 warnings
+  /home/bunker-524a8ece/qa-gitreins/engine/persist.py:258: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    verdict_data["evaluated_at"] = _as_utc(evaluated_at or datetime.utcnow()).isoformat()
+
+tests/test_cli.py: 20 warnings
+tests/test_cli_preflight.py: 11 warnings
+tests/test_cli_resolve.py: 4 warnings
+tests/test_evidence_contract.py: 1 warning
+tests/test_fingerprint.py: 1 warning
+tests/test_llm_lane_validation.py: 1 warning
+tests/test_mcp_server.py: 6 warnings
+tests/test_mcp_verdict_persistence.py: 17 warnings
+tests/test_persist.py: 39 warnings
+tests/test_preflight.py: 8 warnings
+tests/test_review_state.py: 3 warnings
+tests/test_v07_features.py: 4 warnings
+tests/test_worktree.py: 2 warnings
+  /home/bunker-524a8ece/qa-gitreins/engine/persist.py:264: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    date_str = datetime.utcnow().strftime("%Y-%m-%d")
+
+tests/test_cli_preflight.py: 11 warnings
+tests/test_cli_resolve.py: 4 warnings
+tests/test_mcp_server.py: 6 warnings
+tests/test_persist.py: 8 warnings
+tests/test_preflight.py: 8 warnings
+  /home/bunker-524a8ece/qa-gitreins/engine/persist.py:1461: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    stamp = datetime.utcnow()
+
+tests/test_loadgen.py::test_clean_run_reports_no_survivors
+tests/test_loadgen.py::test_clean_run_reports_no_survivors
+tests/test_loadgen.py::test_shared_host_is_refused_unless_allowlisted
+  /usr/lib/python3.13/multiprocessing/popen_fork.py:67: DeprecationWarning: This process (pid=1732464) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+tests/test_loadgen.py::test_cpu_set_parsing_and_restoration
+tests/test_task_manager_concurrency.py::TestConcurrentComplete::test_two_processes_complete_different_tasks
+tests/test_task_manager_concurrency.py::TestConcurrentComplete::test_two_processes_complete_different_tasks
+tests/test_task_manager_concurrency.py::TestConcurrentComplete::test_many_processes_stress
+tests/test_task_manager_concurrency.py::TestConcurrentComplete::test_many_processes_stress
+tests/test_task_manager_concurrency.py::TestConcurrentComplete::test_many_processes_stress
+tests/test_task_manager_concurrency.py::TestConcurrentComplete::test_many_processes_stress
+  /usr/lib/python3.13/multiprocessing/popen_fork.py:67: DeprecationWarning: This process (pid=1732461) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+3898 passed, 32 skipped, 247 warnings in 99.95s (0:01:39)
