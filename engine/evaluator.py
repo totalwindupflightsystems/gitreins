@@ -776,6 +776,202 @@ def _is_transport_failure(exc: BaseException) -> bool:
     return False
 
 
+# ── DF-031: pgrep/pkill -f self-match neutralization ─────────────────────────
+#
+# A criteria snippet runs through run_command → command_hygiene.run_bounded as
+# ``sh -c "<snippet>"``, so the snippet text is verbatim in the wrapper's own
+# command line. ``pgrep -f PATTERN`` matches PATTERN (a regex) against every
+# process's FULL command line — including that wrapper — so a wait-probe whose
+# pattern appears literally in the snippet always finds at least itself and
+# polls to the iteration cap without concluding; ``pkill -f PATTERN`` is
+# worse: it kills the judge shell mid-probe. Neutralize both at the tool seam.
+
+_PGSELF_TOOL_RE = re.compile(
+    r"(?<![A-Za-z0-9_.-])(?P<tool>pgrep|pkill)\b"
+    r"(?P<mid>[^\n;&|`]*?)"
+    r"-(?P<fgroup>[A-Za-z]*f[A-Za-z]*)\s+"
+    r"(?P<rest>[^\n;&|]*)"
+)
+
+# A pattern opening with a bracket class (``[m]y-daemon``, ``[0-9]daemon``)
+# cannot match its own written form in the wrapper at that position — leave
+# it untouched (rewriting inside a class would also corrupt the regex).
+_PGSELF_LEADING_CLASS_RE = re.compile(r"\[")
+
+# Shell variables / command substitution in the pattern make the probe
+# unprovable at rewrite time — the snippet is refused instead of running a
+# self-matching poll (``pkill -f`` would kill the judge shell). A ``$`` inside
+# SINGLE quotes is literal text and stays rewritable.
+_PGSELF_DYNAMIC_RE = re.compile(r"[$`]")
+
+# Trailing redirections (``> /tmp/x``, ``2>/dev/null``, ``>>log``) and a
+# closing ``)`` from a ``$(...)`` subshell are not part of the pattern.
+_PGSELF_REDIRECT_TAIL_RE = re.compile(r"(?:\s*\d?[<>]{1,2}\s*\S*)+$")
+
+_PGSELF_OPTION_TOKEN_RE = re.compile(r"-{1,2}[A-Za-z][A-Za-z-]*\s+")
+
+_PGSELF_WARNING = (
+    "Neutralized self-matching wait-probe(s) in judge shell snippet: "
+    "{tools} -f pattern(s) {patterns} would have matched this tool's own "
+    "`sh -c` wrapper (the snippet text is verbatim in its command line); "
+    "rewrote with the bracket-trick so the probe only sees real targets."
+)
+
+_PGSELF_REFUSAL = (
+    "REFUSED (self-matching wait-probe): this snippet uses {tool} -f with a "
+    "pattern built from variables ({pattern!r}), so the evaluator cannot "
+    "prove the probe will not match its own `sh -c` wrapper — pgrep would "
+    "poll forever and pkill would kill the judge shell. Rewrite the probe "
+    "with a literal, bracket-tricked pattern instead — e.g. "
+    '{tool} -f "[m]y-daemon" — and re-run.'
+)
+
+
+def _pgself_first_alnum_outside_class(pattern: str) -> int | None:
+    """Index of the first alphanumeric char NOT inside a ``[...]`` class."""
+    in_class = False
+    for i, ch in enumerate(pattern):
+        if ch == "[" and not in_class:
+            in_class = True
+            continue
+        if in_class:
+            if ch == "]":
+                in_class = False
+            continue
+        if ch.isalnum():
+            return i
+    return None
+
+
+def _pgself_clean_unquoted(text: str) -> str:
+    """Strip trailing ``)`` and redirection clauses from an unquoted operand."""
+    changed = True
+    while changed:
+        changed = False
+        t = text.rstrip()
+        if t.endswith(")"):
+            t = t[:-1]
+            changed = True
+        t2 = _PGSELF_REDIRECT_TAIL_RE.sub("", t)
+        if t2 != t:
+            t = t2
+            changed = True
+        text = t
+    return text.strip()
+
+
+def _pgself_pattern_operand(
+    rest: str,
+) -> tuple[str | None, str | None, int]:
+    """Extract the ``-f`` operand from the segment text after ``-f ``.
+
+    Returns ``(pattern_text, quote_char_or_None, start_offset)`` where
+    *start_offset* is the offset within *rest* of the first pattern
+    character and *pattern_text* excludes the surrounding quotes.
+    Unterminated quotes are tolerated by treating the rest of the segment
+    as the content.
+    """
+    stripped = rest.lstrip()
+    if not stripped:
+        return None, None, 0
+    lead = len(rest) - len(stripped)
+    quote = stripped[0]
+    if quote in ("'", '"'):
+        close = stripped.find(quote, 1)
+        if close == -1:
+            inner = stripped[1:]
+        else:
+            inner = stripped[1:close]
+        return inner, quote, lead + 1
+    candidate = _pgself_clean_unquoted(stripped)
+    if not candidate:
+        return None, None, 0
+    # pgrep/pkill may carry options AFTER ``-f`` (``pgrep -f -x foo``) — skip
+    # them so the pattern operand is not corrupted by a rewrite, tracking the
+    # consumed offset so the rewrite span starts at the real pattern.
+    pos = 0
+    while True:
+        m_opt = _PGSELF_OPTION_TOKEN_RE.match(candidate)
+        if not m_opt:
+            break
+        consumed = m_opt.end()
+        after = candidate[m_opt.end() :].lstrip()
+        consumed += len(candidate) - m_opt.end() - len(after)
+        pos += consumed
+        candidate = after
+    if not candidate:
+        return None, None, 0
+    return candidate, None, lead + pos
+
+
+def _neutralize_pgrep_selfmatch(cmd: str) -> tuple[str, str | None, str | None]:
+    """Detect and neutralize self-matching ``pgrep -f``/``pkill -f`` probes (DF-031).
+
+    Returns ``(rewritten_cmd, warning, refusal)``. *warning* is set at most
+    once per snippet when at least one probe was rewritten to the
+    bracket-trick form; *refusal* is set when a probe's pattern is built from
+    variables and cannot be rewritten safely — the caller must refuse the
+    snippet instead of running a self-matching poll. The original *cmd* is
+    returned unchanged when refused.
+    """
+    matches = list(_PGSELF_TOOL_RE.finditer(cmd))
+    if not matches:
+        return cmd, None, None
+
+    rewrites: list[tuple[int, int, str]] = []
+    warned_tools: set[str] = set()
+    warned_patterns: list[str] = []
+    refusal: str | None = None
+
+    for m in matches:
+        tool = m.group("tool")
+        pattern, quote, offset = _pgself_pattern_operand(m.group("rest"))
+        if not pattern:
+            continue
+        if _PGSELF_LEADING_CLASS_RE.match(pattern):
+            # Already bracket-tricked (or opens with a char class) — the
+            # wrapper no longer contains the plain literal at that position.
+            continue
+        dynamic = _PGSELF_DYNAMIC_RE.search(pattern)
+        if dynamic and quote != "'":
+            refusal = _PGSELF_REFUSAL.format(tool=tool, pattern=pattern[:80])
+            break
+        idx = _pgself_first_alnum_outside_class(pattern)
+        if idx is None:
+            # Pure-punctuation pattern (regex specials only) — nothing to
+            # bracket without guessing at the regex syntax.
+            continue
+        bracketed = pattern[:idx] + "[" + pattern[idx] + "]" + pattern[idx + 1 :]
+        if quote in ("'", '"'):
+            # Keep the original quoting; only the inner text is bracketed.
+            start = m.start("rest") + offset
+            replacement = bracketed
+        else:
+            start = m.start("rest") + offset
+            replacement = '"' + bracketed.replace('"', '\\"') + '"'
+        rewrites.append((start, start + len(pattern), replacement))
+        warned_tools.add(tool)
+        warned_patterns.append(pattern)
+
+    if refusal is not None:
+        return cmd, None, refusal
+    if not rewrites:
+        return cmd, None, None
+
+    parts: list[str] = []
+    last = 0
+    for start, end, replacement in rewrites:
+        parts.append(cmd[last:start])
+        parts.append(replacement)
+        last = end
+    parts.append(cmd[last:])
+    warning = _PGSELF_WARNING.format(
+        tools=", ".join(sorted(warned_tools)),
+        patterns=", ".join(sorted(set(warned_patterns))),
+    )
+    return "".join(parts), warning, None
+
+
 class AgenticEvaluator:
     """The evaluator loop: LLM iterates with tools until it delivers a verdict.
 
@@ -2570,6 +2766,18 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         cmd = cmd or command
         if not cmd:
             return {"error": "No command provided"}
+
+        # DF-031: the snippet will run as `sh -c "<cmd>"`, so a literal
+        # `pgrep -f PATTERN` / `pkill -f PATTERN` always matches the wrapper's
+        # own argv (pkill would kill the judge shell). Rewrite plain patterns
+        # to the bracket-trick form before anything else scans or runs them;
+        # variable-built patterns are refused with an actionable error.
+        cmd, pgself_warning, pgself_refusal = _neutralize_pgrep_selfmatch(cmd)
+        if pgself_refusal:
+            logger.warning("%s", pgself_refusal)
+            return {"cmd": cmd, "error": pgself_refusal, "refused": True}
+        if pgself_warning:
+            logger.warning("%s", pgself_warning)
 
         result = command_hygiene.run_bounded(
             cmd,
