@@ -31,6 +31,7 @@ scope; no network, no dependence on the outer repo's index.
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import subprocess
 import sys
@@ -184,13 +185,20 @@ class TestBuiltCommandStrings:
     def test_secrets_step_names_the_default_prefix(self, tmp_workdir: str) -> None:
         cmd = _secrets_step_run(tmp_workdir)
         assert "nice -n 10 true >/dev/null 2>&1" in cmd
-        assert "$_gr_nice gitleaks detect --source . --no-git --no-banner --no-color" in cmd
+        assert (
+            "$_gr_nice gitleaks detect --source "
+            + shlex.quote(tmp_workdir)
+            + " --no-git --no-banner --no-color"
+            in cmd
+        )
+        assert "export GOMAXPROCS=4;" in cmd
         assert "scanners: nice=nice -n 10" in cmd
 
     def test_secrets_step_honours_the_config_level(self, tmp_workdir: str) -> None:
         cmd = _secrets_step_run(tmp_workdir, {"guards": {"scanner_nice": 19}})
         assert "$_gr_nice gitleaks detect" in cmd
         assert "nice -n 19" in cmd
+        assert "export GOMAXPROCS=4;" in cmd
 
     def test_secrets_step_honours_the_env_level(
         self, tmp_workdir: str, monkeypatch: pytest.MonkeyPatch
@@ -209,10 +217,14 @@ class TestBuiltCommandStrings:
     def test_tier1_plan_wraps_every_external_lane(self, tmp_path: Path) -> None:
         workdir = tmp_path / "wd"
         workdir.mkdir()
+        # GR-244: the full-tree secrets step runs only for a git-repo scope —
+        # make every wd fixture a repo so the nice/spawn arms exercise gitleaks.
+        _git(str(workdir), "init", "-q")
         (workdir / "module.py").write_text("x = 1\n", encoding="utf-8")
         steps, _marker = tier1_plan(str(workdir), {"guards": {"test_command": "pytest -x"}})
         by_id = {s["id"]: s["run"] for s in steps}
         assert "$_gr_nice gitleaks detect" in by_id["secrets"]
+        assert "export GOMAXPROCS=4;" in by_id["secrets"]
         assert "$_gr_nice" in by_id["lint"]
         # The opaque test command is wrapped WHOLE so a chain is covered.
         assert "$_gr_nice sh -c 'pytest -x'" in by_id["tests"]
@@ -257,6 +269,9 @@ class TestBuiltCommandStrings:
     def test_level_zero_test_step_keeps_the_command(self, tmp_path: Path) -> None:
         workdir = tmp_path / "wd"
         workdir.mkdir()
+        # GR-244: the full-tree secrets step runs only for a git-repo scope —
+        # make every wd fixture a repo so the nice/spawn arms exercise gitleaks.
+        _git(str(workdir), "init", "-q")
         (workdir / "module.py").write_text("x = 1\n", encoding="utf-8")
         steps, _marker = tier1_plan(
             str(workdir), {"guards": {"scanner_nice": 0, "test_command": "pytest -x"}}
@@ -363,6 +378,9 @@ class TestLiveSpawnedPriority:
     def test_default_scan_runs_at_nice_10(self, tmp_path: Path) -> None:
         workdir = tmp_path / "wd"
         workdir.mkdir()
+        # GR-244: the full-tree secrets step runs only for a git-repo scope —
+        # make every wd fixture a repo so the nice/spawn arms exercise gitleaks.
+        _git(str(workdir), "init", "-q")
         record = tmp_path / "nice.txt"
         shim = _shim_dir(tmp_path, "gitleaks", record, GITLEAKS)
         proc = _run_step(
@@ -377,6 +395,9 @@ class TestLiveSpawnedPriority:
     def test_config_level_19_reaches_the_child(self, tmp_path: Path) -> None:
         workdir = tmp_path / "wd"
         workdir.mkdir()
+        # GR-244: the full-tree secrets step runs only for a git-repo scope —
+        # make every wd fixture a repo so the nice/spawn arms exercise gitleaks.
+        _git(str(workdir), "init", "-q")
         record = tmp_path / "nice.txt"
         shim = _shim_dir(tmp_path, "gitleaks", record, GITLEAKS)
         proc = _run_step(
@@ -390,6 +411,9 @@ class TestLiveSpawnedPriority:
     def test_level_zero_child_stays_unprefixed(self, tmp_path: Path) -> None:
         workdir = tmp_path / "wd"
         workdir.mkdir()
+        # GR-244: the full-tree secrets step runs only for a git-repo scope —
+        # make every wd fixture a repo so the nice/spawn arms exercise gitleaks.
+        _git(str(workdir), "init", "-q")
         record = tmp_path / "nice.txt"
         shim = _shim_dir(tmp_path, "gitleaks", record, GITLEAKS)
         proc = _run_step(
@@ -404,6 +428,9 @@ class TestLiveSpawnedPriority:
         """The pytest lane: the whole configured command is wrapped, not its head."""
         workdir = tmp_path / "wd"
         workdir.mkdir()
+        # GR-244: the full-tree secrets step runs only for a git-repo scope —
+        # make every wd fixture a repo so the nice/spawn arms exercise gitleaks.
+        _git(str(workdir), "init", "-q")
         (workdir / "module.py").write_text("x = 1\n", encoding="utf-8")
         record = tmp_path / "nice.txt"
         script = tmp_path / "recorder.py"
@@ -435,6 +462,9 @@ class TestFailOpen:
         """A `nice` that exits 127 must not turn a scan into a failure."""
         workdir = tmp_path / "wd"
         workdir.mkdir()
+        # GR-244: the full-tree secrets step runs only for a git-repo scope —
+        # make every wd fixture a repo so the nice/spawn arms exercise gitleaks.
+        _git(str(workdir), "init", "-q")
         record = tmp_path / "nice.txt"
         shim = _shim_dir(tmp_path, "gitleaks", record, GITLEAKS)
         broken = shim / "nice"
@@ -453,6 +483,9 @@ class TestFailOpen:
     def test_nice_absent_from_path_still_runs_the_scan(self, tmp_path: Path) -> None:
         workdir = tmp_path / "wd"
         workdir.mkdir()
+        # GR-244: the full-tree secrets step runs only for a git-repo scope —
+        # make every wd fixture a repo so the nice/spawn arms exercise gitleaks.
+        _git(str(workdir), "init", "-q")
         record = tmp_path / "nice.txt"
         shim = _shim_dir(tmp_path, "gitleaks", record, GITLEAKS)
         # Only the tools the step itself needs: no `nice` anywhere on PATH.
@@ -502,6 +535,9 @@ class TestVerdictSemantics:
     def test_clean_tree_passes(self, tmp_path: Path, level: str) -> None:
         workdir = tmp_path / "wd"
         workdir.mkdir()
+        # GR-244: the full-tree secrets step runs only for a git-repo scope —
+        # make every wd fixture a repo so the nice/spawn arms exercise gitleaks.
+        _git(str(workdir), "init", "-q")
         (workdir / "module.py").write_text("x = 1\n", encoding="utf-8")
         proc = _run_step(
             _secrets_step_run(str(workdir), {"guards": {"scanner_nice": level}}), workdir
@@ -518,6 +554,9 @@ class TestVerdictSemantics:
     def test_planted_secret_still_fails(self, tmp_path: Path, level: str) -> None:
         workdir = tmp_path / "wd"
         workdir.mkdir()
+        # GR-244: the full-tree secrets step runs only for a git-repo scope —
+        # make every wd fixture a repo so the nice/spawn arms exercise gitleaks.
+        _git(str(workdir), "init", "-q")
         (workdir / "settings.py").write_text(f'TOKEN = "{PLANTED_SECRET}"\n', encoding="utf-8")
         proc = _run_step(
             _secrets_step_run(str(workdir), {"guards": {"scanner_nice": level}}), workdir
@@ -533,6 +572,9 @@ class TestVerdictSemantics:
         """The control: the verdict does not depend on the knob at all."""
         workdir = tmp_path / "wd"
         workdir.mkdir()
+        # GR-244: the full-tree secrets step runs only for a git-repo scope —
+        # make every wd fixture a repo so the nice/spawn arms exercise gitleaks.
+        _git(str(workdir), "init", "-q")
         (workdir / "settings.py").write_text(f'TOKEN = "{PLANTED_SECRET}"\n', encoding="utf-8")
         proc = _run_step(_secrets_step_run(str(workdir), {"guards": {"scanner_nice": 0}}), workdir)
         assert proc.returncode != 0

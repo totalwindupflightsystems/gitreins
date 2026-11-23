@@ -69,6 +69,7 @@ class TestStagedMode:
         )
         workdir = tmp_path / "repo"
         workdir.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=workdir, capture_output=True, check=True)
         cmd = _secrets_step_run(str(workdir), {})
         proc = _run(
             cmd,
@@ -85,31 +86,45 @@ class TestStagedMode:
         assert "--staged" in args, f"staged mode did not pass --staged: {args}"
         assert "detect" not in args, f"staged mode still walked the tree: {args}"
 
-    def test_default_mode_keeps_the_full_tree_scan(self) -> None:
-        """No env → the judge's full-tree scope is unchanged."""
-        cmd = _secrets_step_run("/tmp")
+    def test_default_mode_keeps_the_full_tree_scan(self, tmp_path: Path) -> None:
+        """No env → the judge's full-tree scope is unchanged (GR-244: the
+        source is the repo-contained realpath)."""
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=workdir, capture_output=True, check=True)
+        cmd = _secrets_step_run(str(workdir), {})
         assert "gitleaks detect" in cmd
         assert "protect --staged" not in cmd
 
 
 class TestScannerTimeout:
-    def test_default_command_carries_a_timeout_bound(self) -> None:
+    def _repo(self, tmp_path: Path) -> str:
+        """The timeout knobs pin the DETECT command, which GR-244 builds only
+        for a git-repo scope."""
+        workdir = tmp_path / "repo"
+        workdir.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=workdir, capture_output=True, check=True)
+        return str(workdir)
+
+    def test_default_command_carries_a_timeout_bound(self, tmp_path: Path) -> None:
         """The scanner is wrapped in `timeout` by default — a runaway scan
         cannot outlive the knob."""
         import re
 
-        cmd = _secrets_step_run("/tmp")
+        cmd = _secrets_step_run(self._repo(tmp_path), {})
         assert re.search(r"timeout 600 (?:\S+ )*?gitleaks", cmd), cmd[:400]
 
-    def test_zero_disables_the_bound(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_zero_disables_the_bound(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         monkeypatch.setenv("GITREINS_SCANNER_TIMEOUT_S", "0")
-        cmd = _secrets_step_run("/tmp")
+        cmd = _secrets_step_run(self._repo(tmp_path), {})
         assert not re.search(r"timeout \d+ (?:\S+ )*?gitleaks", cmd), cmd[:400]
         assert "gitleaks detect" in cmd or "gitleaks protect" in cmd
 
-    def test_timeout_knob_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_timeout_knob_env_override(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
         monkeypatch.setenv("GITREINS_SCANNER_TIMEOUT_S", "45")
-        cmd = _secrets_step_run("/tmp")
+        cmd = _secrets_step_run(self._repo(tmp_path), {})
         assert re.search(r"timeout 45 (?:\S+ )*?gitleaks", cmd), cmd[:400]
 
     def test_a_hung_scan_fails_closed_within_the_bound(
@@ -121,6 +136,7 @@ class TestScannerTimeout:
         fake_bin, _ = _fake_gitleaks(tmp_path, "#!/bin/sh\nsleep 300\nexit 0\n")
         workdir = tmp_path / "repo"
         workdir.mkdir()
+        subprocess.run(["git", "init", "-q"], cwd=workdir, capture_output=True, check=True)
         cmd = _secrets_step_run(str(workdir), {})
         proc = _run(
             cmd,

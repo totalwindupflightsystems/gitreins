@@ -69,6 +69,7 @@ from engine.evidence_bounds import (
     _bound_step_evidence,
 )
 from engine.guard_manager import (
+    GITLEAKS_MAX_PROCS,
     HARNESS_STATE_DIRS,
     _pytest_no_tests_benign,
     _pytest_runner_missing_hint,
@@ -2525,6 +2526,45 @@ def _lint_step_run(lint_cmd: str, config: dict[str, Any] | None = None) -> str:
     )
 
 
+def _resolve_gitleaks_scan_scope(scan_root: str) -> tuple[str | None, str | None]:
+    """GR-244: resolve the full-tree gitleaks source to a repo-CONTAINED scope.
+
+    Returns ``(refusal_reason, quoted_source)``. ``refusal_reason`` is None
+    when the scan may run, and ``quoted_source`` is then an absolute,
+    realpath-resolved path INSIDE the repo root that
+    ``git rev-parse --show-toplevel`` establishes for *scan_root* — never a
+    bare ``.``, so the ``--no-git`` filesystem walk can never start above
+    the repo and escape into the home directory or the whole server. When
+    no repo root can be established (the path is not inside a git repo, or
+    git itself is unusable) the scope is uncontainable: the reason is
+    returned and the caller must refuse the scan — an un-bounded
+    ``--no-git`` walk reads every file under the source path and peaks
+    ~1010% CPU (GR-244).
+
+    The GIT_* environment is stripped for the rev-parse probe (DF-008): a
+    pre-commit-hook-exported ``GIT_DIR`` would otherwise resolve a foreign
+    repo's root and bless an uncontained scope.
+    """
+    src = os.path.realpath(scan_root)
+    try:
+        proc = subprocess.run(
+            ["git", "-C", src, "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+            env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return ("not a git repo — scope cannot be contained", None)
+    if proc.returncode != 0:
+        return ("not a git repo — scope cannot be contained", None)
+    repo_root = os.path.realpath(proc.stdout.strip())
+    if not (src == repo_root or src.startswith(repo_root + os.sep)):
+        return ("scan root outside the repo — scope cannot be contained", None)
+    return (None, shlex.quote(src))
+
+
 def _secrets_step_run(
     workdir: str, config: dict[str, Any] | None = None, scan_root: str | None = None
 ) -> str:
@@ -2568,7 +2608,6 @@ def _secrets_step_run(
     )
     scan_root = os.path.abspath(scan_root or workdir)
     gitleaks_config_root = scan_root if explicit_scan_root else workdir
-    scan_source = shlex.quote(scan_root) if explicit_scan_root else "."
     if explicit_scan_root:
         builtin_code = (
             "from engine.guard_manager import GuardManager; import os, sys; "
@@ -2613,8 +2652,42 @@ def _secrets_step_run(
         scan_cmd = 'gitleaks protect --staged --no-banner --no-color --config "$_glcfg"'
         scan_note = 'echo "secrets: gitleaks scope=staged diff (GITREINS_GUARD_STAGED=1)"; '
     else:
-        scan_cmd = f'gitleaks detect --source {scan_source} --no-git --no-banner --no-color --config "$_glcfg"'
-        scan_note = ""
+        # GR-244: the full-tree scan is repo-CONTAINED, no matter what. The
+        # source is resolved through `git rev-parse --show-toplevel` — never
+        # the caller's cwd — and a scan whose scope cannot be contained
+        # inside a repo root is REFUSED outright: `--no-git` walks the
+        # FILESYSTEM with no ls-files boundary, so an uncontained source
+        # (a lane run from a non-repo cwd, an explicit scan root above the
+        # repo) made gitleaks read the entire server for no reason. The
+        # refusal grades gitleaks as scanner-not-run (the built-in
+        # cross-check still grades the tree) and names itself in the
+        # evidence. A contained scan additionally runs under a hard
+        # GOMAXPROCS cap: nice deprioritizes, it does not bound CPU
+        # (~1010% peak measured 2026-11-11).
+        refusal_reason, scan_source = _resolve_gitleaks_scan_scope(scan_root)
+        if refusal_reason is not None:
+            scan_cmd = (
+                f'echo "gitleaks: skipped ({refusal_reason})"; '
+                f'echo "secrets: gitleaks scope-refused source" {shlex.quote(scan_root)}; '
+                'echo "secrets: gitleaks: not run (scope cannot be contained)"; '
+                "_glrc=0; _gl_skipped=1"
+            )
+            scan_note = ""
+        else:
+            scan_cmd = (
+                f"gitleaks detect --source {scan_source} "
+                '--no-git --no-banner --no-color --config "$_glcfg"'
+            )
+            # The cap is an EXPORT (shell builtin), not an `env` spawn: the
+            # step must not grow a binary dependency, and the assignment has
+            # to sit in the shell — a `nice`-prefixed argv cannot carry a
+            # VAR=VALUE prefix. Inherited by the gitleaks child through
+            # timeout/nice alike.
+            scan_note = (
+                f"export GOMAXPROCS={GITLEAKS_MAX_PROCS}; "
+                f'echo "secrets: gitleaks scope=repo-root" {scan_source}; '
+                f'echo "secrets: gitleaks parallelism=GOMAXPROCS={GITLEAKS_MAX_PROCS}"; '
+            )
     # Timeout bound. A scan that never finishes proves nothing, so the bound
     # fails the step (timeout exits 124) and names itself in the evidence
     # instead of grading an unfinished scan green or letting it run unbounded.
@@ -2643,6 +2716,10 @@ def _secrets_step_run(
         f"{bound}{nice_prefix}{scan_cmd}; "
         '_glrc=$?; rm -f "$_glcfg"; '
         f'if [ "$_glrc" -eq 124 ]; then echo "secrets: gitleaks: TIMED OUT after {timeout_bound}s — the scan did not finish, so it cannot grade clean"; '
+        # GR-244: a scope-refused scan already named itself above — it must
+        # not fall through to the "clean" verdict, which would claim a scan
+        # that never ran.
+        'elif [ "${_gl_skipped:-0}" -eq 1 ]; then :; '
         'elif [ "$_glrc" -eq 0 ]; then echo "secrets: gitleaks: clean"; '
         f'else echo "secrets: gitleaks: findings found (exit $_glrc)"; echo "secrets: harness state excluded from gitleaks scope ({exclusions})"; fi; '
         "else _glrc=0; "

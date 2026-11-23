@@ -1731,6 +1731,10 @@ class TestSecretsScannerAttribution:
         project.mkdir(parents=True)
         sibling.mkdir()
         (control / ".gitreins").mkdir()
+        # GR-244: the judge's full-tree scan refuses a scan root that is not
+        # inside a git repo, so the graded project is a repo (the realistic
+        # shape — every judged tree is).
+        subprocess.run(["git", "init", "-q"], cwd=project, capture_output=True, check=True)
         (project / "source.py").write_text('token = "ghp_' + "D" * 40 + '"\n')
         (sibling / "outside.py").write_text('token = "ghp_' + "E" * 40 + '"\n')
         fake_bin = tmp_path / "bin"
@@ -1769,6 +1773,9 @@ class TestSecretsScannerAttribution:
         control.mkdir()
         project = control / "project$(touch marker) \"double\" 'single'"
         project.mkdir()
+        # GR-244: the scan must live inside a git repo to run at all — the
+        # metachar name still exercises shell-quoting of the resolved source.
+        subprocess.run(["git", "init", "-q"], cwd=str(project), capture_output=True, check=True)
         fake_bin = tmp_path / "bin"
         fake_bin.mkdir()
         fake_gitleaks = fake_bin / "gitleaks"
@@ -1807,9 +1814,16 @@ class TestSecretsScannerAttribution:
         assert f"path = {json.dumps(str(repo_config))}" in rendered
 
     def test_secrets_step_disables_gitleaks_color(self, tmp_workdir: str) -> None:
-        """The capture cannot carry escapes: gitleaks runs with --no-color."""
+        """The capture cannot carry escapes: gitleaks runs with --no-color.
+
+        GR-244: the detect source is the realpath-resolved repo root under a
+        GOMAXPROCS cap — the --no-color/--no-banner flags still travel."""
         cmd = _secrets_step_run(tmp_workdir)
-        assert "gitleaks detect --source . --no-git --no-banner --no-color" in cmd
+        assert (
+            f"gitleaks detect --source {shlex.quote(str(tmp_workdir))} "
+            "--no-git --no-banner --no-color" in cmd
+        )
+        assert "export GOMAXPROCS=4;" in cmd
 
     def test_parse_secrets_scanners_both(self) -> None:
         """Both scanners named → both ids, in the step's order."""

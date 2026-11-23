@@ -94,6 +94,53 @@ def harness_state_allowlist_paths() -> list[str]:
     return [rf"(^|/){re.escape(d)}/.*" for d in HARNESS_STATE_DIRS]
 
 
+# GR-244: generated/vendor/build directories the whole-tree ``--no-git``
+# walk must never grade. ``--no-git`` ignores ``.gitignore`` entirely, so
+# without config-level exclusions the walk descends into ``.venv``
+# site-packages, ``node_modules``, build caches and vendored trees — the
+# resource-exhaustion half of GR-244, and the finding-noise half a judge
+# step trips on vendored doc fixtures (GR-GAP-039's jedi/pydantic hits).
+# Mirrors the built-in scanner's prune list (:meth:`_workdir_files`
+# ``skip_dirs`` + its venv-prefix filter, expressed as the regexes below)
+# so the two whole-tree surfaces never disagree about which paths are
+# graded (the DF-027 doctrine). VCS metadata (``.git``/``.hg``/``.svn``)
+# is excluded by gitleaks itself in directory mode and is deliberately
+# NOT listed here — an allowlisted ``.git/**`` would mask history-wide
+# secrets in any surface that scans objects directly.
+GENERATED_SCAN_SKIP_DIRS: tuple[str, ...] = (
+    "node_modules",
+    "__pycache__",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".vfs",
+    "dist",
+    "build",
+    "vendor",
+    "target",
+    "coverage",
+    ".next",
+    ".turbo",
+    ".pnpm-store",
+    "site-packages",
+    "dist-packages",
+    "demo-slugify",
+    "demo-calc",
+)
+
+
+def generated_dir_allowlist_paths() -> list[str]:
+    """gitleaks ``[allowlist].paths`` regexes for generated/vendor trees.
+
+    The last pattern is the venv FAMILY (``.venv``, ``venv``, ``.venv312``,
+    ``venvs``, ...), mirroring :meth:`_workdir_files`' prefix prune — the
+    judge's whole-tree walk used to grade ``.venv312/lib/.../site-packages``
+    vendored code and trip danger patterns on docs-only commits.
+    """
+    exact = [rf"(^|/){re.escape(d)}/.*" for d in GENERATED_SCAN_SKIP_DIRS]
+    return [*exact, r"(^|/)\.?venv[^/]*/.*"]
+
+
 def harness_scan_gitleaks_config(workdir: str) -> str:
     """Render the gitleaks config every WHOLE-TREE scan runs with.
 
@@ -110,6 +157,15 @@ def harness_scan_gitleaks_config(workdir: str) -> str:
     rejects ``extend.path`` together with ``extend.useDefault``, hence the
     either/or: a repo config carries the default ruleset itself
     (``useDefault = true``); without one we set it directly.
+
+    GR-244: the allowlist also carries the generated/vendor/build dirs
+    (:func:`generated_dir_allowlist_paths`) — ``--no-git`` ignores
+    ``.gitignore``, so without config-level entries the walk descends into
+    ``.venv``/``node_modules``/build caches. Verified empirically
+    (2026-11-22, gitleaks v8): ``[allowlist].paths`` DOES bind in
+    ``--no-git`` mode — allowlisted paths are pruned from the scanned-bytes
+    tally — and child+parent (``[extend]``) allowlists MERGE, so the
+    harness-state entries bind alongside a repo config's own.
 
     DF-027: the renderer lives HERE (next to :func:`harness_state_allowlist_paths`,
     its only dependency) because two lanes now scan the whole tree —
@@ -132,11 +188,12 @@ def harness_scan_gitleaks_config(workdir: str) -> str:
         [
             "",
             "[allowlist]",
-            'description = "GitReins harness state — never graded"',
+            'description = "GitReins harness state + generated/vendor trees — never graded"',
             "paths = [",
         ]
     )
     lines.extend(f"  '''{path_re}'''," for path_re in harness_state_allowlist_paths())
+    lines.extend(f"  '''{path_re}'''," for path_re in generated_dir_allowlist_paths())
     lines.append("]")
     return "\n".join(lines)
 
@@ -1405,6 +1462,18 @@ FULL_TREE_SECRETS_SCOPE = "working-tree"
 # and the built-in cross-check still grades the same whole-tree file listing.
 FULL_TREE_SECRETS_TIMEOUT = 180
 
+# GR-244: gitleaks is a Go program whose walker saturates every core by
+# default (measured 2026-11-11: ~1010% CPU through routine lane commits).
+# ``nice -n 10`` deprioritizes scheduling but does not CAP cpu, so the
+# parallelism of every spawned gitleaks process is bounded here — ~4
+# threads keeps a correctly-scoped scan in the couple-of-seconds band it
+# was measured at, and bounds even a mis-scoped one. This is a hard env
+# cap at the spawn sites (shell steps `export GOMAXPROCS=<N>` before the
+# scan — a shell builtin, so the step grows no `env` binary dependency;
+# argv spawns put it in the child env), not a new knob: nice/scanner_nice
+# policy is untouched.
+GITLEAKS_MAX_PROCS = 4
+
 # DF-GITREINS-POC-54: gitleaks dies BEFORE scanning when ``.gitleaks.toml``
 # carries a pattern Go's regexp package cannot compile. Pre-DF-001 configs (from
 # a `gitreins init` older than 9a54e79) hold bare globs, and gitleaks v8.30.1
@@ -2637,8 +2706,12 @@ class GuardManager:
         config_file = ""
         try:
             # TRUST-002 / POC-17: `detect --no-git` does not honour
-            # .gitignore, so the harness's own state is allowlisted through the
-            # generated config — the one renderer both whole-tree surfaces use.
+            # .gitignore, so the harness's own state — and, since GR-244, the
+            # generated/vendor/build trees — are allowlisted through the
+            # generated config, the one renderer both whole-tree surfaces
+            # use. Allowlist paths DO bind in --no-git mode (verified
+            # 2026-11-22: allowlisted paths are pruned from the scanned-bytes
+            # tally); what .gitignore-based exclusions never did.
             fd, config_file = tempfile.mkstemp(prefix="gitreins-gitleaks-", suffix=".toml")
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
                 handle.write(harness_scan_gitleaks_config(self.workdir))
@@ -2663,7 +2736,9 @@ class GuardManager:
                 timeout=FULL_TREE_SECRETS_TIMEOUT,
                 cwd=self.workdir,
                 errors="replace",
-                env=_sanitized_env(),
+                # GR-244: cap the walker's parallelism — nice deprioritizes
+                # scheduling but does not bound CPU (~1010% peak measured).
+                env={**_sanitized_env(), "GOMAXPROCS": str(GITLEAKS_MAX_PROCS)},
             )
         except FileNotFoundError:
             # GR-GAP-043 parity: a missing gitleaks is NAMED and hinted, and the
