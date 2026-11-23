@@ -46,6 +46,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from engine.evaluator import Verdict, VerdictItem
+from engine.gate import PASS_CLASS_DEGRADED, pass_class
 from engine.judge import JudgeResult
 
 logger = logging.getLogger("gitreins.closeout_reuse")
@@ -176,7 +177,11 @@ def find_reusable_verdict(
     The candidate must be COMPLETE in every dimension the store can still
     falsify: same task id, same criteria list, not superseded, every item
     graded, same HEAD commit, byte-identical working tree, and graded by the
-    lane the closeout is about to use. ``None`` always means "re-judge".
+    lane the closeout is about to use. GR-240 (rework): a candidate whose
+    second-pass review block classifies ``degraded`` (a reviewer-failure
+    error with zero findings) is skipped like an ungraded one — it is not a
+    trustworthy pass and must not be adopted as one. ``None`` always means
+    "re-judge".
     """
     from engine.persist import VerdictPersister
 
@@ -194,6 +199,19 @@ def find_reusable_verdict(
         if not _not_superseded(candidate):
             continue
         if not _fully_graded(candidate):
+            continue
+        # GR-240 (rework): a verdict whose second-pass review block carries a
+        # reviewer-failure error with zero findings classifies ``degraded``
+        # (engine.gate.pass_class) — it is not a trustworthy pass, so it is
+        # skipped like an ungraded candidate instead of being adopted as one.
+        if pass_class(candidate) == PASS_CLASS_DEGRADED:
+            logger.info(
+                "closeout reuse: skipping degraded verdict %s/%s for %s "
+                "(review block shows a reviewer-failure error with zero findings)",
+                candidate.get("_date", "?"),
+                candidate.get("_hash", "?"),
+                task.id,
+            )
             continue
         if not _criteria_match(candidate, criteria):
             continue
@@ -219,6 +237,15 @@ def build_adopted_result(reusable: ReusableVerdict, task_id: str) -> JudgeResult
     record ``judged`` and ``build_verdict_data`` re-persists the same grade
     under a fresh evaluated_at; the caller stamps ``reused_from`` beside it
     so the pair of records names the original.
+
+    GR-240 (rework): the stored second-pass review block is copied onto the
+    adopted result's ``second_pass_review`` (from the candidate's ``review``
+    key) so the adoption record means the same thing as the original run —
+    in particular, a stored verdict whose review block carries a
+    reviewer-failure error with zero findings classifies ``degraded`` (never
+    ``judged``) even if it was adopted by a caller that missed the reuse
+    skip. A candidate without a stored review block adopts exactly as
+    before: ``second_pass_review`` stays ``None``.
     """
     candidate = reusable.verdict
     stored_items = [item for item in candidate.get("items", []) if isinstance(item, dict)]
@@ -253,6 +280,13 @@ def build_adopted_result(reusable: ReusableVerdict, task_id: str) -> JudgeResult
         tier2=verdict_obj,
         provenance=dict(provenance) if isinstance(provenance, dict) else {},
     )
+    # GR-240 (rework): the stored review block rides the adoption record so
+    # pass_class sees the same second-pass evidence the original verdict
+    # carried — a reviewed-by-error candidate that slips past the reuse skip
+    # still classifies ``degraded``, never a fresh judged pass.
+    stored_review = candidate.get("review")
+    if isinstance(stored_review, dict):
+        result.second_pass_review = dict(stored_review)
     # JudgeResult.summary is a derived read-only property rendered from
     # pipeline_result's stages — the stored stages ARE the honest mirror of
     # what was graded, so the adoption record prints like the original run

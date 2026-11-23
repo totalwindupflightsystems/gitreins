@@ -21,6 +21,7 @@ from types import SimpleNamespace
 import pytest
 
 from engine.closeout_reuse import (
+    ReusableVerdict,
     build_adopted_result,
     find_reusable_verdict,
 )
@@ -477,3 +478,117 @@ class TestTaskCompleteAdoptionCLI:
         assert judge_constructed == [True]
         assert reuse_state["regraded"] == ["T-016"]
         assert "Adopting stored verdict" not in capsys.readouterr().out
+
+
+# ═════════════════════════════════════════════════════════════════
+# GR-240 rework: closeout reuse must not resurrect reviewed-by-error
+# verdicts as judged passes
+# ═════════════════════════════════════════════════════════════════
+#
+# The GR-240 base fix closed the DIRECT path (a live reviewed-by-error
+# result classifies degraded and the merge gate refuses it), but the
+# closeout-adoption seam re-entered the same poisoned shape as a judged
+# pass: build_adopted_result built the adopted JudgeResult from the
+# stored verdict's items and stages and DROPPED the stored review block,
+# so find_reusable_verdict happily adopted a stored verdict whose review
+# block carries a reviewer-failure error with zero findings, and the
+# fresh adoption record re-persisted as judged under a new evaluated_at.
+# Both layers fail closed now: degraded candidates are skipped like
+# ungraded ones, and even a wrongly-adopted record classifies degraded
+# because the stored review block rides the adopted result.
+
+_POISONED_CLOSEOUT_REVIEW_BLOCK = {
+    "error": (
+        "unparseable reviewer reply: no parseable JSON object in reply: "
+        "'I found no issues, the code looks great!'"
+    ),
+    "findings": [],
+}
+
+_NO_DIFF_CLOSEOUT_REVIEW_BLOCK = {
+    "error": "no diff to review (clean tree, no commit anchor)",
+    "findings": [],
+}
+
+
+class TestDegradedVerdictNeverAdopted:
+    """GR-240 rework AC-R1a/b/c: the reuse seam fails closed on both layers."""
+
+    def test_reviewed_by_error_verdict_is_never_adopted(self, git_repo: Path) -> None:
+        """A stored verdict whose review block carries a reviewer-failure
+        error with zero findings is NOT a trustworthy pass — skipped like an
+        ungraded candidate, so the closeout re-judges instead of adopting."""
+        fingerprint = compute_fingerprint(str(git_repo)).digest
+        commit = _git(git_repo, "rev-parse", "HEAD")
+        payload = _adoptable_payload(commit, fingerprint, CRITERIA)
+        payload["review"] = dict(_POISONED_CLOSEOUT_REVIEW_BLOCK)
+        write_verdict_entry(git_repo, "T-016", payload)
+        task = SimpleNamespace(id="T-016", criteria=list(CRITERIA))
+        llm = SimpleNamespace(model="glm-5.3-flash")
+
+        assert find_reusable_verdict(str(git_repo), task, llm) is None
+
+    def test_no_diff_review_block_still_adopts(self, git_repo: Path) -> None:
+        """The benign no-diff review error is NOT a reviewer failure — a
+        stored verdict carrying it is adopted exactly as before the rework
+        (the clean-path contract, byte-identical behavior)."""
+        fingerprint = compute_fingerprint(str(git_repo)).digest
+        commit = _git(git_repo, "rev-parse", "HEAD")
+        payload = _adoptable_payload(commit, fingerprint, CRITERIA)
+        payload["review"] = dict(_NO_DIFF_CLOSEOUT_REVIEW_BLOCK)
+        date, entry_hash = write_verdict_entry(git_repo, "T-016", payload)
+        task = SimpleNamespace(id="T-016", criteria=list(CRITERIA))
+        llm = SimpleNamespace(model="glm-5.3-flash")
+
+        reused = find_reusable_verdict(str(git_repo), task, llm)
+
+        assert reused is not None
+        assert reused.entry == f"{date}/{entry_hash}"
+
+    def test_clean_candidate_without_review_key_still_adopts(self, git_repo: Path) -> None:
+        """A stored verdict with no review block at all is unaffected by the
+        skip rule (pre-rework adoption identity unchanged)."""
+        fingerprint = compute_fingerprint(str(git_repo)).digest
+        commit = _git(git_repo, "rev-parse", "HEAD")
+        write_verdict_entry(git_repo, "T-016", _adoptable_payload(commit, fingerprint, CRITERIA))
+        task = SimpleNamespace(id="T-016", criteria=list(CRITERIA))
+        llm = SimpleNamespace(model="glm-5.3-flash")
+        assert find_reusable_verdict(str(git_repo), task, llm) is not None
+
+    def test_adopted_record_with_poisoned_review_classifies_degraded(self, git_repo: Path) -> None:
+        """Defense in depth: build_adopted_result copies the stored review
+        block onto the adopted result's second_pass_review, so even a
+        wrongly-adopted reviewed-by-error record classifies ``degraded``
+        through engine.gate.pass_class — never ``judged``."""
+        from engine.gate import PASS_CLASS_DEGRADED, pass_class
+
+        candidate = _adoptable_payload("0" * 40, "f" * 64, CRITERIA)
+        candidate["review"] = dict(_POISONED_CLOSEOUT_REVIEW_BLOCK)
+        reusable = ReusableVerdict(
+            entry="2026-11-22/deadbeef",
+            verdict=candidate,
+            evaluated_at="2026-11-22T12:00:00",
+        )
+
+        result = build_adopted_result(reusable, "T-016")
+
+        assert result.second_pass_review == dict(_POISONED_CLOSEOUT_REVIEW_BLOCK)
+        assert pass_class(result) == PASS_CLASS_DEGRADED
+
+    def test_adopted_record_with_clean_review_stays_judged(self, git_repo: Path) -> None:
+        """The clean path is byte-identical to pre-rework behavior: a stored
+        verdict whose review block is absent (or benign) is adopted and the
+        adopted record classifies judged."""
+        from engine.gate import PASS_CLASS_JUDGED, pass_class
+
+        candidate = _adoptable_payload("0" * 40, "f" * 64, CRITERIA)
+        reusable = ReusableVerdict(
+            entry="2026-11-22/deadbeef",
+            verdict=candidate,
+            evaluated_at="2026-11-22T12:00:00",
+        )
+
+        result = build_adopted_result(reusable, "T-016")
+
+        assert result.second_pass_review is None
+        assert pass_class(result) == PASS_CLASS_JUDGED
