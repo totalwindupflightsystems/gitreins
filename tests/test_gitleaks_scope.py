@@ -121,9 +121,21 @@ class TestScopeRefusal:
         never ran (TRUST-003: the evidence cannot lie)."""
         plain = tmp_path / "plain"
         plain.mkdir()
+        # A gitleaks MUST be on PATH for the refusal arm to be reachable —
+        # without one the step short-circuits at `gitleaks: not on PATH` and
+        # never prints the refusal (clean-machine divergence, INT-CI-3747
+        # class). The fake also proves the refused scope never invokes the
+        # scanner binary at all.
+        fake_bin, args_file = _fake_gitleaks(tmp_path)
 
-        proc = _run_step(_secrets_step_run(str(plain), {}), plain)
+        proc = _run_step(
+            _secrets_step_run(str(plain), {}),
+            plain,
+            PATH=f"{fake_bin}:{os.environ['PATH']}",
+            FAKE_GITLEAKS_ARGS=str(args_file),
+        )
         assert proc.returncode == 0, proc.stdout + proc.stderr
+        assert not args_file.exists(), "the refusal arm must not invoke the scanner binary"
         assert "gitleaks: skipped (not a git repo — scope cannot be contained)" in proc.stdout
         assert "secrets: gitleaks: not run (scope cannot be contained)" in proc.stdout
         assert "secrets: gitleaks: clean" not in proc.stdout
