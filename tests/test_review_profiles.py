@@ -701,6 +701,100 @@ class TestSecondPassFindingShape:
         assert result.error and "LLM call failed" in result.error
 
 
+class TestUnparseableReplyRetry:
+    """GR-240: a poisoned reviewer reply is retried EXACTLY once and the raw
+    replies ride the record; a clean reply's dict stays byte-identical."""
+
+    def test_poisoned_on_both_attempts_records_one_retry_and_raw_replies(
+        self, tmp_path: object
+    ) -> None:
+        """AC1: two unparseable replies leave the error set, exactly one retry
+        recorded, both raw reply texts persisted, findings empty."""
+        poisoned_first = "I found no issues, the code looks great!"
+        poisoned_retry = "this time for sure: <<<not json>>>"
+        llm = FakeLLM([_second_pass_resp(poisoned_first), _second_pass_resp(poisoned_retry)])
+        result = SecondPassReviewer(llm, workdir=str(tmp_path)).review(diff_text=DIFF)
+        assert result.findings == []
+        assert result.error and "no parseable" in result.error
+        # The first call plus EXACTLY ONE retry — never a second attempt.
+        assert len(llm.calls) == 2
+        assert result.retry is not None
+        assert result.retry["count"] == 1
+        d = result.to_dict()
+        assert d["raw_reply"] == poisoned_first
+        assert d["retry"]["raw_reply"] == poisoned_retry
+
+    def test_a_retry_that_parses_is_used_and_shown(self, tmp_path: object) -> None:
+        """The retry's parseable reply replaces the failure wholesale: no error,
+        its findings kept, and the block still shows the retry happened."""
+        llm = FakeLLM(
+            [_second_pass_resp("prose garbage"), _second_pass_resp(SECOND_PASS_FINDINGS_JSON)]
+        )
+        result = SecondPassReviewer(llm, workdir=str(tmp_path)).review(diff_text=DIFF)
+        assert result.error is None
+        assert len(result.findings) == 1
+        d = result.to_dict()
+        assert d["raw_reply"] == "prose garbage"
+        assert d["retry"]["count"] == 1
+
+    def test_transport_failure_is_never_retried(self, tmp_path: object) -> None:
+        """The retry scope is the parse hole only: a failed LLM call makes
+        exactly one call and never a second."""
+
+        class RecordingRaiser:
+            def __init__(self) -> None:
+                self.calls: list[dict] = []
+
+            def chat(self, *args: object, **kwargs: object) -> object:
+                self.calls.append({})
+                raise RuntimeError("boom")
+
+        llm = RecordingRaiser()
+        result = SecondPassReviewer(llm, workdir=str(tmp_path)).review(diff_text=DIFF)
+        assert len(llm.calls) == 1
+        assert result.error and "LLM call failed" in result.error
+
+    def test_long_raw_replies_are_truncated_with_the_cap_noted(self, tmp_path: object) -> None:
+        from engine.review_profiles import RAW_REPLY_CAP
+
+        long_reply = "x" * (RAW_REPLY_CAP + 500)
+        llm = FakeLLM([_second_pass_resp(long_reply), _second_pass_resp(long_reply)])
+        result = SecondPassReviewer(llm, workdir=str(tmp_path)).review(diff_text=DIFF)
+        d = result.to_dict()
+        assert len(d["raw_reply"]) < len(long_reply)
+        assert "truncated" in d["raw_reply"]
+        assert d["raw_reply"].startswith("x")
+        assert "truncated" in d["retry"]["raw_reply"]
+
+    def test_clean_reply_dict_is_byte_identical_to_the_pre_gr240_shape(
+        self, tmp_path: object
+    ) -> None:
+        """AC2: no parse failure, no new keys — exactly today's key set, and
+        exactly one LLM call."""
+        llm = FakeLLM([_second_pass_resp(SECOND_PASS_FINDINGS_JSON)])
+        result = SecondPassReviewer(llm, workdir=str(tmp_path)).review(diff_text=DIFF)
+        d = result.to_dict()
+        assert set(d) == {
+            "reviewer_email",
+            "reviewer_name",
+            "commit_author_email",
+            "commit_author_name",
+            "self_review",
+            "findings",
+            "summary",
+        }
+        assert len(llm.calls) == 1
+
+    def test_no_diff_error_stays_clean(self, tmp_path: object) -> None:
+        """The benign no-diff case makes no LLM call and adds no GR-240 keys."""
+        llm = FakeLLM([])
+        result = SecondPassReviewer(llm, workdir=str(tmp_path)).review(diff_text="")
+        d = result.to_dict()
+        assert d["error"] is not None and d["error"].startswith("no diff to review")
+        assert "raw_reply" not in d and "retry" not in d
+        assert llm.calls == []
+
+
 class TestBlockingFindings:
     """AC2: the gate can act on the findings — critical|high block, rest advisory."""
 

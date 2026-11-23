@@ -1106,9 +1106,9 @@ class WorktreeManager:
     def _refuse_weak_pass_class(
         self, task_id: str, record: WorktreeRecord, verdict: dict[str, Any]
     ) -> None:
-        """HOLD a PASS whose class does not mean "Tier 2 graded this" (GR-166/GR-231).
+        """HOLD a PASS whose class does not mean "Tier 2 graded this" (GR-166/GR-231/GR-240).
 
-        Two weak classes reach a merge, and neither is a judged pass:
+        Three weak classes reach a merge, and none is a judged pass:
 
         * ``tier1-only`` — Tier 2 (the only stage that reads the change) never
           ran, because ``--skip-tier2`` lets the author switch it off. 49 of
@@ -1119,6 +1119,11 @@ class WorktreeManager:
           carries no Tier 2 artifact, so the claim is unsupported. Nothing ran
           and nothing was recorded; there is no waiver for a claim that Tier 2
           did run.
+        * ``degraded`` — GR-240: Tier 2 graded the change but the second-pass
+          reviewer never reported (a reviewer-failure error with zero findings
+          — e.g. an unparseable reply). A pass the reviewer never reported on
+          is not a judged pass; there is no waiver for a review that silently
+          failed.
 
         The waiver is the owner's: the token is read from ``GITREINS_TIER2_WAIVER``
         or ``gate.tier2_waiver`` in this checkout's config — never from the
@@ -1126,6 +1131,7 @@ class WorktreeManager:
         carry its digest, so an author cannot mint one by writing one.
         """
         from engine.gate import (
+            PASS_CLASS_DEGRADED,
             PASS_CLASS_TIER1_ONLY,
             PASS_CLASS_UNVERIFIED,
             pass_class,
@@ -1140,6 +1146,14 @@ class WorktreeManager:
                 "Re-run the judge so the verdict carries its Tier 2 items, or record the "
                 "owner's waiver and re-judge with --skip-tier2 if Tier 2 is deliberately "
                 "unavailable. Verdict: "
+                f"{self._verdict_reference(task_id, record, verdict)}"
+            )
+        if verdict_class == PASS_CLASS_DEGRADED:
+            raise WorktreeError(
+                "HOLD: the matching verdict's second-pass reviewer never reported (a "
+                "reviewer-failure error with zero findings) — it is degraded, which is "
+                "never a judged pass (GR-240). Re-run the judge so the reviewer actually "
+                "reports on this change. Verdict: "
                 f"{self._verdict_reference(task_id, record, verdict)}"
             )
         if verdict_class != PASS_CLASS_TIER1_ONLY:

@@ -6,6 +6,9 @@ axiom:trace work_item=GR-001 spec=specs/07-Judge-Orchestrator.md plan=.memory-ba
 from unittest import mock
 from unittest.mock import patch
 
+import pytest
+from pathlib import Path
+
 from engine.judge import Judge, JudgeResult
 from engine.guard_manager import GuardResult, Tier1Result
 from engine.evaluator import Verdict, VerdictItem
@@ -1612,3 +1615,197 @@ class TestReflectionJudgeWiring:
         assert block["findings"] == []
         assert block["reflection"]["dropped"] == 2
         assert "unparseable" in block["reflection"]["error"]
+
+
+# ═══════════════════════════════════════════════════════════════
+# GR-240: a reviewed-by-error verdict is degraded, never a judged pass
+# ═══════════════════════════════════════════════════════════════
+#
+# Measured on .gitreins/history: 27 verdicts carry a reviewer-failure error in
+# their second-pass review block ("unparseable reviewer reply: ..."), and 8 of
+# those 27 read passed=true with findings=[] — recorded as judged passes
+# although the reviewer never reported anything. The poison is in the PAST
+# records (GR-240 does not rewrite history); what changes is what NEW verdicts
+# MEAN: pass_class classifies the reviewed-by-error shape ``degraded``, the
+# merge gate refuses it, and the merge recommendation degrades to
+# needs_review.
+
+_POISONED_REVIEW_BLOCK = {
+    "error": (
+        "unparseable reviewer reply: no parseable JSON object in reply: "
+        "'I found no issues, the code looks great!'"
+    ),
+    "findings": [],
+}
+
+_NO_DIFF_REVIEW_BLOCK = {
+    "error": "no diff to review (clean tree, no commit anchor)",
+    "findings": [],
+}
+
+
+def _passing_record(review_block: dict) -> dict:
+    """A persisted verdict the evaluator graded COMPLETE over one criterion,
+    with *review_block* as its second-pass review block."""
+    return {
+        "task_id": "GR-240",
+        "passed": True,
+        "verdict": "COMPLETE",
+        "items": [{"criterion": "c1", "status": "PASS", "detail": "verified"}],
+        "review": review_block,
+    }
+
+
+class TestDegradedReviewVerdict:
+    """GR-240 AC3/AC4: reviewer-failure + zero findings degrades a judged pass
+    in every shape; the benign no-diff error does not; the merge gate refuses
+    the degraded class and the recommendation degrades."""
+
+    def test_live_judge_result_with_reviewer_failure_is_degraded(self) -> None:
+        """The live JudgeResult shape: a Tier 2 artifact plus a poisoned review
+        block classifies degraded, not judged."""
+        from engine.gate import PASS_CLASS_DEGRADED, pass_class
+
+        result = JudgeResult(
+            task_id="GR-240",
+            passed=True,
+            tier2=Verdict(verdict="COMPLETE", items=[VerdictItem("c1", "PASS", "verified")]),
+        )
+        result.second_pass_review = dict(_POISONED_REVIEW_BLOCK)
+        assert pass_class(result) == PASS_CLASS_DEGRADED
+
+    def test_persisted_dict_with_reviewer_failure_is_degraded(self) -> None:
+        """The persisted verdict.json shape classifies the same — here with no
+        explicit pass_class at all, derived purely from the artifacts."""
+        from engine.gate import PASS_CLASS_DEGRADED, pass_class
+
+        record = _passing_record(dict(_POISONED_REVIEW_BLOCK))
+        assert pass_class(record) == PASS_CLASS_DEGRADED
+
+    def test_forged_judged_claim_is_still_degraded(self) -> None:
+        """A record that CLAIMS pass_class=judged over a poisoned review block
+        is still degraded — the class claim is not proof the reviewer reported
+        (the GR-231 precedent, applied to the review block)."""
+        from engine.gate import PASS_CLASS_DEGRADED, pass_class
+
+        forged = dict(_passing_record(dict(_POISONED_REVIEW_BLOCK)), pass_class="judged")
+        assert pass_class(forged) == PASS_CLASS_DEGRADED
+
+    def test_gr231_unverified_keeps_precedence_over_degraded(self) -> None:
+        """A judged CLAIM with no Tier 2 artifact stays unverified-never-pass
+        even with a poisoned review block — GR-231's handling for records with
+        no artifact is intact (both classes refuse the pass; the claim without
+        an artifact is the deeper defect)."""
+        from engine.gate import PASS_CLASS_UNVERIFIED, pass_class
+
+        claimed = {
+            "task_id": "GR-240",
+            "passed": True,
+            "pass_class": "judged",
+            "verdict": "COMPLETE",
+            "items": [],
+            "review": dict(_POISONED_REVIEW_BLOCK),
+        }
+        assert pass_class(claimed) == PASS_CLASS_UNVERIFIED
+
+    def test_no_diff_error_is_not_degraded(self) -> None:
+        """AC4: the benign no-diff case keeps today's class behavior exactly —
+        judged with an artifact, and the advisory recommendation stays
+        no_concerns_found."""
+        from engine.gate import MERGE_RECOMMENDATION_OK, merge_recommendation, pass_class
+
+        record = _passing_record(dict(_NO_DIFF_REVIEW_BLOCK))
+        assert pass_class(record) != "degraded"
+        assert merge_recommendation(record, ["c1"]) == MERGE_RECOMMENDATION_OK
+
+    def test_merge_recommendation_degrades_for_reviewer_failure(self) -> None:
+        """A degraded record recommends needs_review, never no_concerns_found —
+        in the persisted dict shape AND through the live-Verdict path persist.py
+        uses (where the review block must be supplied, or the verdict object
+        alone would still read no_concerns_found)."""
+        from engine.gate import MERGE_RECOMMENDATION_REVIEW, merge_recommendation
+
+        record = _passing_record(dict(_POISONED_REVIEW_BLOCK))
+        assert merge_recommendation(record, ["c1"]) == MERGE_RECOMMENDATION_REVIEW
+
+        live_verdict = Verdict(verdict="COMPLETE", items=[VerdictItem("c1", "PASS", "verified")])
+        assert merge_recommendation(live_verdict, ["c1"]) != MERGE_RECOMMENDATION_REVIEW
+        assert (
+            merge_recommendation(live_verdict, ["c1"], review=dict(_POISONED_REVIEW_BLOCK))
+            == MERGE_RECOMMENDATION_REVIEW
+        )
+
+    def test_persisted_stamp_degrades_end_to_end(self, tmp_path: object) -> None:
+        """build_verdict_data stamps pass_class=degraded and a needs_review
+        recommendation for a live result the reviewer never reported on."""
+        from engine.persist import build_verdict_data
+        from engine.task_manager import Task
+
+        workdir = _wired_repo(tmp_path)
+        result = JudgeResult(
+            task_id="GR-240",
+            passed=True,
+            tier2=Verdict(verdict="COMPLETE", items=[VerdictItem("c1", "PASS", "verified")]),
+            verdict=Verdict(verdict="COMPLETE", items=[VerdictItem("c1", "PASS", "verified")]),
+        )
+        result.second_pass_review = dict(_POISONED_REVIEW_BLOCK)
+        data = build_verdict_data(workdir, Task(id="GR-240", title="t", criteria=["c1"]), result)
+        assert data["pass_class"] == "degraded"
+        assert data["merge_recommendation"] == "needs_review"
+
+    def test_merge_gate_refuses_degraded_verdict(self, tmp_path: object) -> None:
+        """The merge gate routes a degraded PASS to review instead of landing
+        it — the same entrypoint the GR-231 unverified refusal tests drive."""
+        from engine.worktree_manager import (
+            WorktreeError,
+            WorktreeManager,
+            write_disk_verdict,
+        )
+
+        repo = tmp_path / "gr240-repo"  # type: ignore[attr-defined]
+        repo.mkdir()
+        _git_init_repo(repo)
+        manager = WorktreeManager(repo)
+        record, _created = manager.create("GR-240-DEGRADED")
+        tree = Path(record.path)
+        (tree / "lane.txt").write_text("lane\n", encoding="utf-8")
+        _git_run(tree, "add", "lane.txt")
+        _git_run(tree, "commit", "-qm", "lane work")
+        tip = _git_run(tree, "rev-parse", "HEAD").stdout.strip()
+        verdict = {
+            "task_id": record.task_id,
+            "passed": True,
+            "pass_class": "judged",
+            "verdict": "COMPLETE",
+            "items": [{"criterion": "c1", "status": "PASS", "detail": "verified"}],
+            "review": dict(_POISONED_REVIEW_BLOCK),
+            "worktree": str(tree.resolve()),
+            "branch": record.branch,
+            "commit": tip,
+        }
+        write_disk_verdict(tree, verdict)
+
+        with pytest.raises(WorktreeError, match="degraded"):
+            manager.merge(record.task_id)
+        assert _git_run(repo, "rev-parse", "HEAD").stdout.strip() != tip
+
+
+def _git_init_repo(repo: Path) -> None:
+    """A minimal canonical-main checkout: one commit, clean tree."""
+    import subprocess
+
+    run = subprocess.run
+    run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    run(["git", "config", "user.email", "author@example.com"], cwd=repo, check=True)
+    run(["git", "config", "user.name", "Author A"], cwd=repo, check=True)
+    (repo / "base.txt").write_text("base\n", encoding="utf-8")
+    run(["git", "add", "base.txt"], cwd=repo, check=True)
+    run(["git", "commit", "-qm", "initial"], cwd=repo, check=True)
+
+
+def _git_run(repo: Path, *args: str):
+    import subprocess
+
+    return subprocess.run(
+        ["git", *args], cwd=repo, capture_output=True, text=True, check=True, timeout=60
+    )

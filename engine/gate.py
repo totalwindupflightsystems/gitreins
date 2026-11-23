@@ -35,6 +35,14 @@ PASS_CLASS_TIER1_ONLY = "tier1-only"
 #: weaker pass — not a pass at all. Downstream consumers route it to review.
 PASS_CLASS_UNVERIFIED = "unverified-never-pass"
 
+#: GR-240: Tier 2 graded the record, but the second-pass reviewer never
+#: reported — the review block carries a reviewer-failure error (anything
+#: except the benign "no diff to review" case) and zero findings, so the
+#: 8-of-27 history shape "unparseable reviewer reply + findings=[] + passed"
+#: cannot read as a judged pass. Not a pass at all: the merge gate refuses
+#: it, and the merge recommendation degrades to ``needs_review``.
+PASS_CLASS_DEGRADED = "degraded"
+
 #: GR-178: the status for a criterion the judge could not assess from the code
 #: at all — a UI actually rendering, an external API contract, a migration
 #: against real data. A third claim distinct from PASS ("verified good"),
@@ -109,8 +117,52 @@ def has_tier2_artifact(source: object) -> bool:
     return _tier2_evidence(source)
 
 
+#: The benign review error that is NOT a reviewer failure: there was nothing
+#: to review, so the reviewer's silence is honest, not broken (GR-240).
+_NO_DIFF_ERROR_PREFIX = "no diff to review"
+
+
+def _review_block(source: object) -> Mapping[str, Any] | None:
+    """The second-pass review block, in either live or persisted shape.
+
+    GR-240: a live ``JudgeResult`` carries the block as its
+    ``second_pass_review`` attribute; a persisted verdict dict carries the
+    same block under the ``review`` key.
+    """
+    block = _field(source, "second_pass_review", None)
+    if block is None:
+        block = _field(source, "review", None)
+    return block if isinstance(block, Mapping) else None
+
+
+def _reviewer_never_reported_block(block: Any) -> bool:
+    """The GR-240 test over one review BLOCK (the dict itself).
+
+    Reviewer-failure: the block's ``error`` is set and is NOT the benign
+    ``"no diff to review"`` case; zero findings: the block's ``findings`` list
+    is empty (a block without the key counts as empty too). A record in this
+    state was never actually reviewed — "the reviewer found nothing" and "the
+    reviewer never reported" must not be confusable — so it must not read as a
+    judged pass even when the evaluator's own verdict is COMPLETE.
+    """
+    if not isinstance(block, Mapping):
+        return False
+    error = block.get("error")
+    if error is None or str(error).startswith(_NO_DIFF_ERROR_PREFIX):
+        return False
+    findings = block.get("findings")
+    if isinstance(findings, (list, tuple)) and findings:
+        return False
+    return True
+
+
+def _reviewer_never_reported(source: object) -> bool:
+    """True when *source*'s review block shows the reviewer failed and reported nothing."""
+    return _reviewer_never_reported_block(_review_block(source))
+
+
 def pass_class(source: object) -> str:
-    """``judged`` / ``tier1-only`` / ``unverified-never-pass`` for a record.
+    """``judged`` / ``tier1-only`` / ``unverified-never-pass`` / ``degraded``.
 
     GR-166: an explicit ``pass_class`` wins; a record written before the field
     existed is classified from its stages — ``judged`` when Tier 2 evidence is
@@ -124,13 +176,30 @@ def pass_class(source: object) -> str:
     cheapest way through the gate. This class is never a PASS: consumers route
     it to review, and no owner waiver applies to it (a waiver waives a Tier 2
     that openly did not run, not a claim that it did).
+
+    GR-240: a record whose second-pass review block carries a reviewer-failure
+    error with zero findings is classified ``degraded`` whenever it would
+    otherwise read ``judged`` — a class claim (explicit or artifact-derived)
+    is not proof the reviewer reported, and 8 of 27 poisoned review blocks in
+    history read as judged passes. GR-231 keeps precedence for records with no
+    Tier 2 artifact: those stay ``unverified-never-pass`` (the claim is still
+    unsupported, whatever the reviewer did), and explicit ``tier1-only`` /
+    ``unverified-never-pass`` claims are never upgraded by this check.
     """
     explicit = _field(source, "pass_class", None)
     if explicit == PASS_CLASS_JUDGED:
-        return PASS_CLASS_JUDGED if has_tier2_artifact(source) else PASS_CLASS_UNVERIFIED
+        if not has_tier2_artifact(source):
+            return PASS_CLASS_UNVERIFIED
+        if _reviewer_never_reported(source):
+            return PASS_CLASS_DEGRADED
+        return PASS_CLASS_JUDGED
     if explicit in (PASS_CLASS_TIER1_ONLY, PASS_CLASS_UNVERIFIED):
         return str(explicit)
-    return PASS_CLASS_JUDGED if has_tier2_artifact(source) else PASS_CLASS_TIER1_ONLY
+    if has_tier2_artifact(source):
+        if _reviewer_never_reported(source):
+            return PASS_CLASS_DEGRADED
+        return PASS_CLASS_JUDGED
+    return PASS_CLASS_TIER1_ONLY
 
 
 def waiver_digest(token: str) -> str:
@@ -451,7 +520,9 @@ def fix_verification_unhandled(source: object) -> list[dict[str, Any]]:
     return unhandled
 
 
-def merge_recommendation(verdict: object, criteria: Any = None, stages: Any = None) -> str:
+def merge_recommendation(
+    verdict: object, criteria: Any = None, stages: Any = None, review: Any = None
+) -> str:
     """The three-valued merge recommendation for *verdict* (GR-178).
 
     ``changes_required`` when any item grades FAIL; ``needs_review`` when any
@@ -460,18 +531,28 @@ def merge_recommendation(verdict: object, criteria: Any = None, stages: Any = No
     record has no judged pass class at all (GR-231: ``tier1-only`` and
     ``unverified-never-pass`` both mean no Tier 2 artifact backs the record, so
     neither is ever ``no_concerns_found`` — an absent artifact cannot be routed
-    to "no concerns"), or — GR-235 — when the fix-verification stage left a
-    critical/high/medium finding open; ``no_concerns_found`` only when the
-    record is a judged pass whose every item is PASS, whose every criterion
-    was graded, and whose first-round findings were all handled. The merge
-    gate does NOT read this: ``pass_class`` still governs merging, so this is
-    routing advice for a human, never a key.
+    to "no concerns"), when GR-240's review block shows the second-pass
+    reviewer never reported (a degraded record — never "no concerns" over a
+    review that never happened), or — GR-235 — when the fix-verification stage
+    left a critical/high/medium finding open; ``no_concerns_found`` only when
+    the record is a judged pass whose every item is PASS, whose every
+    criterion was graded, and whose first-round findings were all handled. The
+    merge gate does NOT read this: ``pass_class`` still governs merging, so
+    this is routing advice for a human, never a key.
 
     ``stages`` may be supplied explicitly (persist.py passes the pipeline's
     stage dicts, which a live ``Verdict`` object does not carry); when absent
-    the record's own ``stages`` field is read.
+    the record's own ``stages`` field is read. ``review`` is the same deal for
+    GR-240: persist.py passes the live result's second-pass review block,
+    which a live ``Verdict`` object does not carry either; when absent the
+    record's own block (``second_pass_review`` attribute or ``review`` key)
+    is read.
     """
     if pass_class(verdict) != PASS_CLASS_JUDGED:
+        return MERGE_RECOMMENDATION_REVIEW
+    # GR-240: the review block may live outside *verdict* (the caller supplies
+    # it for a live Verdict object); degrade the same way pass_class would.
+    if _reviewer_never_reported_block(review if review is not None else _review_block(verdict)):
         return MERGE_RECOMMENDATION_REVIEW
     items = verdict_items(verdict)
     statuses = [_status_of(item) for item in items]

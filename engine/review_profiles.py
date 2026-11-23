@@ -558,6 +558,16 @@ class SecondPassResult:
     # something. Absent — never an empty dict — otherwise, so every pre-GR-180
     # (and every no-drop) review dict serializes byte-identically.
     reflection: dict[str, Any] | None = None
+    # GR-240: the raw first-attempt reply text when it failed to parse,
+    # truncated to RAW_REPLY_CAP chars (the truncation noted in the value).
+    # Serialized only when a parse failure happened, so a clean reply's dict
+    # is byte-identical to the pre-GR-240 shape.
+    raw_reply: str | None = None
+    # GR-240: the single retry record {"count": 1, "raw_reply": <truncated
+    # retry reply text or None>}, present only when a retry was made. A retry
+    # that parsed still records its raw text; a retry whose own LLM call
+    # failed records None and the original parse error stands.
+    retry: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -573,7 +583,23 @@ class SecondPassResult:
             d["error"] = self.error
         if self.reflection is not None:
             d["reflection"] = self.reflection
+        if self.raw_reply is not None:
+            d["raw_reply"] = self.raw_reply
+        if self.retry is not None:
+            d["retry"] = self.retry
         return d
+
+
+#: GR-240: each stored raw reviewer reply is truncated to this many chars,
+#: with the truncation noted in the stored value itself.
+RAW_REPLY_CAP = 2000
+
+
+def _raw_reply_record(content: str) -> str:
+    """*content* capped at :data:`RAW_REPLY_CAP`, truncation noted in-value."""
+    if len(content) <= RAW_REPLY_CAP:
+        return content
+    return content[:RAW_REPLY_CAP] + f"... [truncated, {len(content)} chars total]"
 
 
 def _extract_json_object(content: str) -> dict[str, Any] | None:
@@ -699,6 +725,12 @@ class SecondPassReviewer:
         "who reviewed, and was it the author?" (AC3). A review failure is
         recorded on the result as ``error``; it never raises, because a
         second pass must not be able to fail the judge run it accompanies.
+
+        GR-240: a reply that fails to PARSE is retried exactly once (the
+        poisoned reply is the model's failure, and one more call is cheap);
+        a transport failure is not retried. Either attempt's raw reply text
+        rides the result when a parse failure happened, and the block shows
+        whether the retry fired.
         """
         identities = collect_review_identities(self.workdir)
         result = SecondPassResult(
@@ -726,10 +758,46 @@ class SecondPassReviewer:
         findings, summary, drops = self._parse_findings(content)
         for reason in drops:
             logger.warning("Second-pass reviewer dropped %s", reason)
+        if not findings and drops and drops[0].startswith("no parseable"):
+            return self._retry_unparseable(result, messages, content, drops[0])
         result.findings = findings
         result.summary = summary
+        return result
+
+    def _retry_unparseable(
+        self,
+        result: SecondPassResult,
+        messages: list[dict[str, str]],
+        content: str,
+        first_drop: str,
+    ) -> SecondPassResult:
+        """GR-240: the single retry after a first reply failed to parse.
+
+        The raw first reply rides the result either way. A retry that PARSES
+        replaces the failure wholesale (``error`` stays None — the reviewer
+        did report); a retry that also fails to parse keeps the unparseable
+        error state, and a retry whose own LLM call breaks on transport keeps
+        the original parse error. Exactly one retry is ever made: the caller
+        reaches this helper once per ``review()`` and never re-enters it.
+        """
+        result.raw_reply = _raw_reply_record(content)
+        try:
+            response = self.llm.chat(messages, max_tokens=4096)
+        except Exception as e:
+            logger.warning("Second-pass reviewer retry LLM call failed: %s", e)
+            result.retry = {"count": 1, "raw_reply": None}
+            result.error = f"unparseable reviewer reply: {first_drop}"
+            return result
+        retry_content = getattr(response, "content", "") or ""
+        findings, summary, drops = self._parse_findings(retry_content)
+        for reason in drops:
+            logger.warning("Second-pass reviewer retry dropped %s", reason)
+        result.retry = {"count": 1, "raw_reply": _raw_reply_record(retry_content)}
         if not findings and drops and drops[0].startswith("no parseable"):
             result.error = f"unparseable reviewer reply: {drops[0]}"
+            return result
+        result.findings = findings
+        result.summary = summary
         return result
 
 

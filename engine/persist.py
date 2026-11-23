@@ -1155,12 +1155,18 @@ def build_verdict_data(workdir: str, task: Task, result: JudgeResult) -> dict[An
         # dicts, which the live Verdict object does not carry — pass them
         # explicitly so an open high/medium finding downgrades the persisted
         # recommendation to needs_review even when every item is PASS.
+        # GR-240: same deal for the second-pass review block — a live Verdict
+        # does not carry it, so a reviewed-by-error record's recommendation
+        # must degrade to needs_review like its pass_class does.
         _pipeline_result = getattr(result, "pipeline_result", None)
         _pipeline_stages = (
             _pipeline_result.get("stages") if isinstance(_pipeline_result, dict) else None
         )
         verdict_data["merge_recommendation"] = merge_recommendation(
-            verdict_obj, task.criteria, stages=_pipeline_stages
+            verdict_obj,
+            task.criteria,
+            stages=_pipeline_stages,
+            review=getattr(result, "second_pass_review", None),
         )
 
     # JEVRES-004 tier 1.5: the full pre-screen (per-criterion probabilities,
