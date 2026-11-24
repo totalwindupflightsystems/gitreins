@@ -794,3 +794,40 @@ nobody can feel is not a finding. The cold arm remains UNVERIFIED as that fire d
 **State left behind.** One change: this append, committed path-limited. Zero rows filed, zero closed,
 zero dispatched, no workers spawned (`WAVE_BUDGET: 2`, nothing dispatchable). No code, config, board
 status, visibility, permission or credential change.
+## 2026-11-24 — gitreins dogfood (tick `gitreins-dogfood-2026-11-24-19-47-57`, first delivery at 2026-11-24 14:48:50 host-local per gateway.log)
+
+Verdict **SHIPPABLE** (tier-1 surfaces; tier-2 works end-to-end, polish findings filed).
+First delivery of this tick id; product moved since the 2026-11-15 fires (v0.22.0 tree:
+nested-repo fingerprint opt-in, tier-2 first-parent-diff contract, fix-verification stage,
+gitleaks repo-scope containment), so a full consumer run was earned, not records-only.
+
+Promise vs reality: a consumer can `install`+`init` a repo in <1s combined and get working
+guarded commits (DEGRADED PASS on the fresh-repo first commit), and 0.22.0's nested-repo
+fingerprint promise held under decisive arms — content change inside a nested subtree moves
+the digest; the nested `.git` moved out of the workspace leaves it bit-identical (`723133…`).
+Tier-2 ran end-to-end in 66.43s on a keyless local lane (GITREINS_LLM_API_KEY/BASE_URL/MODEL
+per docs/model-keys.md): tier1 PASS → tier2 staged FAIL/INCOMPLETE (weak 27B judge) →
+fix-verification stage PASS → verdict id 25878013, history c5bc5b37, task held in_progress —
+the contract refuses to pass a weak judge silently.
+
+Time-to-first-success: ~2 minutes install→first guarded commit. Friction count: 3 new
+(rows DF-032 init-warns-forever on its own defaults; DF-033 `commit -m` refuses
+usage-dump, positional message; DF-034 `task complete` silent for its whole tier-2
+duration — first attempt killed at 180s believing it hung).
+
+Perf (Step 2b): warm med `--version` 0.309s / `fingerprint` 0.509s / `guard` 0.772s;
+cold fresh-venv first run 0.484s / 0.315s. All sub-second on the consumer repo — no
+PERF row filed (a win nobody can feel is not a finding); prior PERF-3 rows own the gate
+economics. Cold arm fresh venv build 1.9s (`uv venv`+local install).
+
+Install leg (bunker-qa.sh launch, agent `6b506a4b` @ bunker-mvp): fresh-install OK
+(0.22.0 from synced clone), lint OK, tests OK `3932 passed, 41 skipped in 173.70s`
+(= 3973 collected per README), upgrade 0.21.0→0.22.0-clean OK; ci-act FAIL =
+HOST disk exhaustion (`No space left on device`, act leg, not product); 5 chaos cells
+NOT-COLLECTED. Graded install-PROVEN / battery-PARTIAL. Evidence in
+`.coding-hermes/evidence/qa-20261124T200710Z/`; agent left intact (ttl 4h).
+
+Artifacts: `docs/dogfood/2026-11-24-integration.md`, diagnostics.md § 2026-11-24,
+skills/gitreins-usage items 23–26. Not re-driven: MCP surface (walked 2026-10-15, no
+0.22.0 MCP delta claimed), `resolve`/Jev gate (previous fire's 3.26s warm median
+describes unchanged code), `gitreins serve` viewer.

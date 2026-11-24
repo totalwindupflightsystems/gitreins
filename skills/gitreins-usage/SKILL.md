@@ -1109,3 +1109,27 @@ real injection lines passed clean — exactly the limitation `docs/cli-reference
     `git show HEAD:.coding-hermes/board/tasks.jsonl | jq` for the committed board, mint ids with
     `python3 ~/.hermes/scripts/board_next_id.py .coding-hermes/board/tasks.jsonl <FAMILY>`, and verify with
     `python3 scripts/check_board_ids.py`.
+
+## 2026-11-24 addendum — 0.22.0 nested-repo fingerprints and consumer pitfalls (dogfood tick 2026-11-24-19-47-57)
+
+23. **Nested-repo fingerprints (0.22.0).** A checkout whose outer index tracks files under a
+    nested `.git` (e.g. a vendored tool or app project store) fingerprints `unavailable
+    (state=nested-repository)` by default. Opt in with `fingerprint.allow_nested_repositories:
+    true` — then the digest covers the subtree files as ordinary content and the nested `.git`
+    contributes nothing, verified bit-identical with it moved out of the workspace.
+    Index pitfall: you cannot `git add` files UNDER an embedded repo (silently stages nothing,
+    rc=0). Track the subtree via paths while the nested `.git` is parked aside (or before it is
+    checked out in place), then restore `.git`.
+
+24. **`gitreins commit` is positional.** MESSAGE is an argument, not `-m`; `-m` answers rc=2
+    `unrecognized arguments: -m` with a bare usage dump (DF-033).
+
+25. **Tier-2 needs a key before the first `task complete`.** Export `GITREINS_LLM_API_KEY`
+    (docs/model-keys.md); `GITREINS_LLM_BASE_URL`/`GITREINS_LLM_MODEL` for non-default lanes,
+    `GITREINS_MAX_TIME`/`GITREINS_MAX_ITERATIONS` to bound it. The run prints ONLY the tier-1
+    block while the evaluator works — minutes of silence is normal, not a hang (DF-034); a weak
+    judge lane grades INCOMPLETE and holds the task in_progress, which is the contract working.
+
+26. **Fresh `init` repos warn on every guard run.** `init` writes neither `hook_timeout` nor
+    `test_timeout`; the guard warns `hook_timeout=300s <= test_timeout=1200s` each time. Write
+    an explicit coherent pair in `guards:` to silence it (DF-032). `config-validate` reports OK.

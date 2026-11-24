@@ -1890,3 +1890,24 @@ OK, repo suite `3625 passed, 32 skipped, 237 warnings in 153.86s`, survives a 3 
 is `act` lacking `/opt/hostedtoolcache/Python/3.11.18`; `chaos-disconnect` UNVERIFIED lacks
 `NETWORK_CUT_APPLIED` (the `ALL_PROXY`-on-loopback harness artefact). Neither is a product claim.
 Raw rows + attribution: `docs/dogfood/evidence/2026-11-09-install-leg-bunker/`.
+
+## 2026-11-24 — dogfood tick gitreins-dogfood-2026-11-24-19-47-57 (first delivery)
+
+Built the 0.22.0 consumer story from the release note and proved it with decisive arms:
+a scratch app repo whose outer index tracks `vend/tool/ver.txt` (100644) under a nested
+`vend/tool/.git`. Default config: fingerprint refuses `state=nested-repository` (rc=1).
+Opt-in `fingerprint.allow_nested_repositories: true`: `state=authoritative`. The release
+note's two claims each got a discriminating arm — content change inside the subtree moves
+the digest (dirty 1→2), and moving the nested `.git` OUT of the workspace leaves the digest
+bit-identical (`723133…` vs `723133…`). Right way: track the content FIRST (with the nested
+`.git` parked or before checkout), because `git add` under an embedded repo silently stages
+nothing (rc=0, no staging, no warning) — recreated the index by moving `.git` aside,
+adding, restoring. Tier-2 end-to-end ran 66.43s with a keyless local lane via
+GITREINS_LLM_API_KEY/BASE_URL/MODEL envs (docs/model-keys.md): tier1 PASS → tier2
+staged FAIL/INCOMPLETE (weak 27B judge returned an empty response) → fix_verification
+PASS → overall FAIL, verdict id 25878013, history c5bc5b37, task held in_progress.
+Product-own pitfalls recorded this run: init's defaults trip the guard's own
+hook_timeout WARN on every run (DF-032); `gitreins commit` takes a positional message
+(DF-033); `task complete` prints nothing between tier-1 and the verdict (DF-034).
+Install leg on bunker agent 6b506a4b: fresh-install/lint/upgrade/3932-tests OK;
+ci-act red on HOST disk exhaustion (not product); chaos cells NOT-COLLECTED — battery PARTIAL.

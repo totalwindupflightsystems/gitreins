@@ -1,0 +1,133 @@
+QA-6 hygiene: removed stale agent-workspace venv (/home/bunker-6b506a4b/qa-gitreins/.venv) before act replay
+time="2026-11-24T19:59:15Z" level=info msg="Using docker host 'unix:///run/bunker/6b506a4b/docker.sock', and daemon socket 'unix:///run/bunker/6b506a4b/docker.sock'"
+[CI/test-3] ⭐ Run Set up job
+[CI/test-2] ⭐ Run Set up job
+[CI/test-1] ⭐ Run Set up job
+[CI/test-3] 🚀  Start image=catthehacker/ubuntu:act-latest
+[CI/test-2] 🚀  Start image=catthehacker/ubuntu:act-latest
+[CI/test-1] 🚀  Start image=catthehacker/ubuntu:act-latest
+[CI/test-1]   🐳  docker pull image=catthehacker/ubuntu:act-latest platform= username= forcePull=true
+[CI/test-3]   🐳  docker pull image=catthehacker/ubuntu:act-latest platform= username= forcePull=true
+[CI/test-2]   🐳  docker pull image=catthehacker/ubuntu:act-latest platform= username= forcePull=true
+[CI/test-1]   🐳  docker create image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/test-2]   🐳  docker create image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/test-3]   🐳  docker create image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/test-2]   🐳  docker run image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/test-3]   🐳  docker run image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/test-1]   🐳  docker run image=catthehacker/ubuntu:act-latest platform= entrypoint=["tail" "-f" "/dev/null"] cmd=[] network="host"
+[CI/test-1]   🐳  docker exec cmd=[node --no-warnings -e console.log(process.execPath)] user= workdir=
+[CI/test-3]   🐳  docker exec cmd=[node --no-warnings -e console.log(process.execPath)] user= workdir=
+[CI/test-2]   🐳  docker exec cmd=[node --no-warnings -e console.log(process.execPath)] user= workdir=
+[CI/test-1]   ✅  Success - Set up job
+[CI/test-3]   ✅  Success - Set up job
+[CI/test-2]   ✅  Success - Set up job
+[CI/test-3]   ☁  git clone 'https://github.com/actions/setup-python' # ref=v5
+[CI/test-2]   ☁  git clone 'https://github.com/actions/setup-python' # ref=v5
+[CI/test-1]   ☁  git clone 'https://github.com/actions/setup-python' # ref=v5
+[CI/test-3] 🧪  Matrix: map[python-version:3.12]
+[CI/test-3] ⭐ Run Main actions/checkout@v4
+[CI/test-3]   🐳  docker cp src=/home/bunker-6b506a4b/qa-gitreins/. dst=/home/bunker-6b506a4b/qa-gitreins
+[CI/test-2] 🧪  Matrix: map[python-version:3.11]
+[CI/test-2] ⭐ Run Main actions/checkout@v4
+[CI/test-2]   🐳  docker cp src=/home/bunker-6b506a4b/qa-gitreins/. dst=/home/bunker-6b506a4b/qa-gitreins
+[CI/test-3]   ✅  Success - Main actions/checkout@v4 [1.405433298s]
+[CI/test-2]   ✅  Success - Main actions/checkout@v4 [485.216591ms]
+[CI/test-3] ⭐ Run Main Set up Python 3.12
+[CI/test-2] ⭐ Run Main Set up Python 3.11
+[CI/test-3]   🐳  docker cp src=/home/bunker-6b506a4b/.cache/act/actions-setup-python@v5/ dst=/var/run/act/actions/actions-setup-python@v5/
+[CI/test-2]   🐳  docker cp src=/home/bunker-6b506a4b/.cache/act/actions-setup-python@v5/ dst=/var/run/act/actions/actions-setup-python@v5/
+[CI/test-1] 🧪  Matrix: map[python-version:3.10]
+[CI/test-1] ⭐ Run Main actions/checkout@v4
+[CI/test-1]   🐳  docker cp src=/home/bunker-6b506a4b/qa-gitreins/. dst=/home/bunker-6b506a4b/qa-gitreins
+[CI/test-2]   🐳  docker exec cmd=[/opt/acttoolcache/node/24.22.3/x64/bin/node /var/run/act/actions/actions-setup-python@v5/dist/setup/index.js] user= workdir=
+[CI/test-3]   🐳  docker exec cmd=[/opt/acttoolcache/node/24.22.3/x64/bin/node /var/run/act/actions/actions-setup-python@v5/dist/setup/index.js] user= workdir=
+[CI/test-1]   ✅  Success - Main actions/checkout@v4 [631.221764ms]
+[CI/test-2]   ❓  ::group::Installed versions
+[CI/test-3]   ❓  ::group::Installed versions
+[CI/test-2]   | Version 3.11 was not found in the local cache
+[CI/test-3]   | Version 3.12 was not found in the local cache
+[CI/test-2]   | (node:32) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+[CI/test-2]   | (Use `node --trace-deprecation ...` to show where the warning was created)
+[CI/test-3]   | (node:31) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+[CI/test-3]   | (Use `node --trace-deprecation ...` to show where the warning was created)
+[CI/test-1] ⭐ Run Main Set up Python 3.10
+[CI/test-1]   🐳  docker cp src=/home/bunker-6b506a4b/.cache/act/actions-setup-python@v5/ dst=/var/run/act/actions/actions-setup-python@v5/
+[CI/test-3]   | Version 3.12 is available for downloading
+[CI/test-3]   | Download from "https://github.com/actions/python-versions/releases/download/3.12.16-40260402378/python-3.12.16-linux-26.04-x64.tar.gz"
+[CI/test-2]   | Version 3.11 is available for downloading
+[CI/test-2]   | Download from "https://github.com/actions/python-versions/releases/download/3.11.18-40260280589/python-3.11.18-linux-26.04-x64.tar.gz"
+[CI/test-1]   🐳  docker exec cmd=[/opt/acttoolcache/node/24.22.3/x64/bin/node /var/run/act/actions/actions-setup-python@v5/dist/setup/index.js] user= workdir=
+[CI/test-1]   ❓  ::group::Installed versions
+[CI/test-1]   | Version 3.10 was not found in the local cache
+[CI/test-1]   | (node:32) [DEP0040] DeprecationWarning: The `punycode` module is deprecated. Please use a userland alternative instead.
+[CI/test-1]   | (Use `node --trace-deprecation ...` to show where the warning was created)
+[CI/test-1]   | Version 3.10 is available for downloading
+[CI/test-1]   | Download from "https://github.com/actions/python-versions/releases/download/3.10.22-36876129702/python-3.10.22-linux-26.04-x64.tar.gz"
+[CI/test-2]   | Extract downloaded archive
+[CI/test-3]   | Extract downloaded archive
+[CI/test-2]   | [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /tmp/2782661c-716d-4899-b977-a40d9cbc19df -f /tmp/007e054a-4eb5-43ce-829c-d34753c521f6
+[CI/test-3]   | [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /tmp/ecdc5c6b-d2b6-4144-a30a-6168862a5d06 -f /tmp/392f460c-d18c-429f-98d1-e80d7c76ebb0
+[CI/test-1]   | Extract downloaded archive
+[CI/test-1]   | [command]/usr/bin/tar xz --warning=no-unknown-keyword --overwrite -C /tmp/6329c54b-825a-4cfe-af5d-3c761babc8ce -f /tmp/f8997bc7-c4f8-457d-8f8f-38f7aa5c61aa
+[CI/test-3]   | Execute installation script
+[CI/test-3]   | Check if Python hostedtoolcache folder exist...
+[CI/test-3]   | Creating Python hostedtoolcache folder...
+[CI/test-3]   | Create Python 3.12.16 folder
+[CI/test-3]   | Copy Python binaries to hostedtoolcache folder
+[CI/test-1]   | Execute installation script
+[CI/test-1]   | Check if Python hostedtoolcache folder exist...
+[CI/test-1]   | Create Python 3.10.22 folder
+[CI/test-1]   | Copy Python binaries to hostedtoolcache folder
+[CI/test-2]   | Execute installation script
+[CI/test-2]   | Check if Python hostedtoolcache folder exist...
+[CI/test-2]   | Create Python 3.11.18 folder
+[CI/test-2]   | Copy Python binaries to hostedtoolcache folder
+[CI/test-2]   ❗  ::error::cp: error writing '/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/idlelib/idle_test/__pycache__/test_autocomplete_w.cpython-311.opt-2.pyc': No space left on device%0Acp: error writing '/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/idlelib/idle_test/__pycache__/test_warning.cpython-311.pyc': No space left on device%0Acp: error writing '/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/idlelib/idle_test/__pycache__/test_pyparse.cpython-311.opt-1.pyc': No space left on device%0Acp: error writing '/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/idlelib/idle_test/__pycache__/template.cpython-311.pyc': No space left on device
+[CI/test-1]   ❗  ::error::cp: error writing '/opt/hostedtoolcache/Python/3.10.22/x64/lib/python3.10/test/test_email/data/audiotest.au': No space left on device%0Acp: error writing '/opt/hostedtoolcache/Python/3.10.22/x64/lib/python3.10/test/test_email/data/msg_09.txt': No space left on Failed to write to log, write /dev/stdout: no space left on device
+[CI/test-2]   ❗  ::error::yc': No space left on device%0Acp: error writing '/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/idlelib/idle_test/__pycache__/test_iomenu.cpython-311.opt-1.pyc': No space left on device%0Acp: error writing '/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/idlelib/idle_test/__pycache__/test_filelist.cpython-311.opt-1.pyc': No space left on device%0Acp: error writing '/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/idlelib/idle_test/__pycache__/test_statusbar.cpython-311.opt-1.pyc': No space left on device%0Acp: error writing '/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/idlelib/idle_test/__pycache__/test_zoomheight.cpython-311.opt-2.pyc': No space left on device%0Acp: error writing '/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/idlelib/idle_test/__pycache__/test_zoomheight.cpython-311.opt-1.pyc': No space left on device%0Acp: error writing '/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/idlelib/idle_test/__pycache__/test_debugger.cpython-311.opt-2.pyc': No space left on device%0Acp: error writing '/opt/hostedtoolcache/Python/3.11.18/x64/lib/python3.11/idlelib/idle_test/__pycache__/test_percolator.cpython-311.opt-2.pyc': No space left on device
+[CI/test-2]   ❗  ::error::cp:
+[CI/test-1]   ❗  ::error::error writing '/opt/hostedtoolcache/Python/3.10.22/x64/lib/python3.10/test/profilee.py'
+[CI/test-1]   ❓  ::error::: No space left on device
+[CI/test-1]   ❗  ::error::
+[CI/test-3]   ❗  ::error::error writing '/opt/hostedtoolcache/Python/3.12.16/x64/lib/python3.12/configparser.py'
+[CI/test-1]   ❗  ::error::cp: error writing '/opt/hostedtoolcache/Python/3.10.22/x64/lib/python3.10/test/test_sundry.py': No space left on device
+[CI/test-3]   ❓  ::error::: No space left on device
+[CI/test-3]   ❗  ::error::
+[CI/test-3]   ❗  ::error::cp:
+[CI/test-3]   ❗  ::error::error writing '/opt/hostedtoolcache/Python/3.12.16/x64/lib/python3.12/LICENSE.txt'
+[CI/test-3]   ❓  ::error::: No space left on device
+[CI/test-3]   ❗  ::error::
+[CI/test-3]   ❗  ::error::cp:
+[CI/test-3]   ❗  ::error::cannot create directory '/opt/hostedtoolcache/Python/3.12.16/x64/lib/python3.12/json'
+[CI/test-3]   ❓  ::error::: No space left on device
+[CI/test-3]   ❗  ::error::
+[CI/test-3]   ❗  ::error::cp:
+[CI/test-3]   ❗  ::error::error writing '/opt/hostedtoolcache/Python/3.12.16/x64/lib/python3.12/compileall.py'
+[CI/test-3]   ❓  ::error::: No space left on device
+[CI/test-3]   ❗  ::error::
+[CI/test-3]   ❗  ::error::cp:
+[CI/test-3]   ❗  ::error::error writing '/opt/hostedtoolcache/Python/3.12.16/x64/lib/python3.12/reprlib.py'
+[CI/test-3]   ❓  ::error::: No space left on device
+[CI/test-3]   ❗  ::error::
+[CI/test-3]   ❗  ::error::cp:
+[CI/test-3]   ❗  ::error::cannot create directory '/opt/hostedtoolcache/Python/3.12.16/x64/lib/python3.12/urllib'
+[CI/test-3]   ❓  ::error::: No space left on device
+[CI/test-3]   ❗  ::error::
+[CI/test-3]   ❗  ::error::cp:
+[CI/test-3]   ❗  ::error::cannot create directory '/opt/hostedtoolcache/Python/3.12.16/x64/lib/python3.12/asyncio'
+[CI/test-3]   ❓  ::error::: No space left on device
+[CI/test-3]   ❗  ::error::
+[CI/test-3]   ❗  ::error::cp:
+[CI/test-3]   ❗  ::error::error writing '/opt/hostedtoolcache/Python/3.12.16/x64/lib/python3.12/socket.py'
+[CI/test-3]   ❓  ::error::: No space left on device
+[CI/test-3]   ❗  ::error::
+[CI/test-3]   ❗  ::error::cp:
+[CI/test-3]   ❗  ::error::cannot create directory '/opt/hostedtoolcache/Python/3.12.16/x64/lib/python3.12/venv'
+[CI/test-3]   ❓  ::error::: No space left on device
+[CI/test-3]   ❗  ::error::
+[CI/test-3]   ❗  ::error::cp:
+[CI/test-3]   ❗  ::error::error writing '/opt/hostedtoolcache/Python/3.12.16/x64/lib/python3.12/modulefinder.py'
+[CI/test-3]   ❓  ::error::: No space left on device
+[CI/test-3]   ❗  ::error::
+[CI/test-3]   ❗  ::error::cp:
+[CI/test-1]   ❗  ::error::cp: error writing '/opt/hostedtoolcache/Python/3.10.22/x64/lib/python3.10/test/test_stat.py': No spa
