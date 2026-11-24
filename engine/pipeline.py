@@ -2647,6 +2647,7 @@ def _secrets_step_run(
     # commits; the largest repo alone scans 409 MB in 48 s). The judge's pass
     # runs WITHOUT the env and keeps the full-tree detect scan: it grades the
     # committed tree, where staged-only would be the wrong scope.
+    cd_part = ""  # GR-GITLEAKS-SOURCE: `cd <repo-root> &&` prefix for the full-tree scan
     staged_mode = os.environ.get("GITREINS_GUARD_STAGED", "") == "1"
     if staged_mode:
         scan_cmd = 'gitleaks protect --staged --no-banner --no-color --config "$_glcfg"'
@@ -2674,10 +2675,29 @@ def _secrets_step_run(
             )
             scan_note = ""
         else:
+            # GR-GITLEAKS-SOURCE (2026-11-24): the scan must cd into the repo
+            # root and pass --source . (relative), NOT an absolute --source.
+            # Measured on mischief: with an ABSOLUTE --source, gitleaks reports
+            # file paths as absolute, so repo allowlist regexes anchored
+            # '^internal/...' never match and repo-allowlisted synthetic
+            # fixtures grade as leaks (2 false findings on a proven-clean
+            # tree), while the same rendered config with --source . from the
+            # repo root scans clean. cd'ing into the resolved repo root keeps
+            # the GR-244 containment guarantee (the cwd IS the realpath-resolved
+            # repo toplevel; the walk cannot start above it) and restores
+            # parity with GuardManager._check_secrets_full_tree, whose
+            # docstring promises "the exact mode the Tier 1 judge step uses".
             scan_cmd = (
-                f"gitleaks detect --source {scan_source} "
+                "gitleaks detect --source . "
                 '--no-git --no-banner --no-color --config "$_glcfg"'
             )
+            # The cd runs OUTSIDE the timeout/nice-wrapped argv (the nice
+            # prefix execs a PROGRAM, and `cd` is a shell builtin — a
+            # `nice -n 10 cd ...` argv fails with "No such file or
+            # directory", measured this tick). The cwd IS the resolved repo
+            # root, so containment is preserved and the timeout/nice bound
+            # still wraps the gitleaks invocation itself.
+            cd_part = f"cd {scan_source} && "
             # The cap is an EXPORT (shell builtin), not an `env` spawn: the
             # step must not grow a binary dependency, and the assignment has
             # to sit in the shell — a `nice`-prefixed argv cannot carry a
@@ -2713,7 +2733,7 @@ def _secrets_step_run(
         # `\x1b[32mINF\x1b[0m scanned ~5 MB` lines and the console summary
         # printed them when one landed first. The INFO lines themselves stay:
         # they are the scope evidence ("scanned ~5 MB") a post-mortem reads.
-        f"{bound}{nice_prefix}{scan_cmd}; "
+        f"{cd_part}{bound}{nice_prefix}{scan_cmd}; "
         '_glrc=$?; rm -f "$_glcfg"; '
         f'if [ "$_glrc" -eq 124 ]; then echo "secrets: gitleaks: TIMED OUT after {timeout_bound}s — the scan did not finish, so it cannot grade clean"; '
         # GR-244: a scope-refused scan already named itself above — it must
