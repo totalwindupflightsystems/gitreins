@@ -831,3 +831,32 @@ Artifacts: `docs/dogfood/2026-11-24-integration.md`, diagnostics.md § 2026-11-2
 skills/gitreins-usage items 23–26. Not re-driven: MCP surface (walked 2026-10-15, no
 0.22.0 MCP delta claimed), `resolve`/Jev gate (previous fire's 3.26s warm median
 describes unchanged code), `gitreins serve` viewer.
+## 2026-11-24 no-op provenance — delivery 2
+
+Tick id `gitreins-dogfood-2026-11-24-19-47-57`, second (records-only) delivery of the same
+label. Dispatch census: 2 distinct `inbound message` timestamps across the
+gateway.log/agent.log globs — 2026-11-24 14:48:50 and 15:12:11, both host-local (-05);
+this fire = delivery 2 (= the 15:12:11 line). Delivery-1's full consumer run is the
+SHIPPABLE entry above this one.
+
+Parity/delta proof, measured at this delivery before any product contact:
+`git fetch --quiet github main`; `git rev-list --left-right --count HEAD...github/main`
+= `0 0` at `5186535c` (delivery-1's record commit); working tree clean; every file
+touched since the record lives under `.coding-hermes/` — product delta 0. An unchanged
+tree re-driven measures the host, not the product: re-walk, real-use, tier-2 and the
+perf leg (warm/cold) are all NOT re-measured this delivery.
+
+Board at this delivery: tasks.jsonl 690 rows, all lines parse (jq -c .), duplicate-id
+census 0, mtime 15:06:47 (matches delivery-1's commit window, board untouched since).
+Working tree carries no foreign staged or untracked files.
+
+Residue closed this delivery: QA agent `6b506a4b` @ bunker-mvp, left intact (ttl 4h) by
+delivery 1 with the battery graded PARTIAL. Probed before deciding: `qa-run.finished`
+(0 B, 20:01 UTC) present, agent ledger 20 rows = strict subset of the committed 29-row
+`evidence/qa-20261124T200710Z/evidence.jsonl` (which carries the 5 chaos cells graded
+UNVERIFIED, `collect` OK, `evidence-outside-repo` WARN) — nothing newer to harvest. Then
+`bunker --server bunker-mvp destroy 6b506a4b` and `bunker list` shows it gone (archive-
+before-delete, verified after). Install-leg residue loop closed on the remote surface.
+
+This append is deliberate: the no-op's single write. No rows filed, no perf re-drive, no
+product contact beyond read-only git/ledger probes.
