@@ -860,3 +860,39 @@ before-delete, verified after). Install-leg residue loop closed on the remote su
 
 This append is deliberate: the no-op's single write. No rows filed, no perf re-drive, no
 product contact beyond read-only git/ledger probes.
+## 2026-11-24 no-op provenance — delivery 3
+
+Tick id `gitreins-dogfood-2026-11-24-19-47-57`, third delivery of the same label. Dispatch
+census: 3 distinct `inbound message` timestamps across the gateway.log/agent.log globs —
+2026-11-24 14:48:50, 15:12:11 and 15:15:39, all host-local (-05); raw distinct count 3,
+attributed count 3, this fire = delivery 3 (= the 15:15:39 line). Delivery-1's full consumer
+run is the SHIPPABLE entry above; delivery-2 was the records-only no-op.
+
+Parity/delta proof, measured at this delivery before any product contact:
+`git fetch --quiet github main`; `git rev-list --left-right --count HEAD...github/main`
+= `0 0` at `0cbf042e` (delivery-2's no-op record commit); working tree clean
+(`git status --porcelain` empty); delivery-2's only product-adjacent write lives under
+`.coding-hermes/` — product delta 0. An unchanged tree re-driven measures the host, not the
+product: real-use walk, tier-2 and the perf leg (warm/cold) are all NOT re-measured this
+delivery, and no PERF rows are filed (delivery-1's Step-2b verdict stands: all sub-second
+warm/cold on the consumer repo; a win nobody can feel is not a finding).
+
+Board at this delivery: tasks.jsonl 690 rows, every line parses (`jq -c .`), duplicate-id
+census 0, mtime 2026-11-24 15:06:47 — the delivery-1 commit window, board untouched by
+delivery-2 or delivery-3. No rows filed this delivery.
+
+Residue scan at this delivery (`/proc/*/cmdline` keyed on the gitreins path + product
+argv, then `ss -ltnp` for the viewer/port range): every gitreins process found is a
+gateway-parented (pid 4190889) fleet worker of a DIFFERENT lane — `judge HD-SUP-001 --json`,
+`task complete INT-CI-1`, `guard`, `task complete REST-PK-UNIQUENESS-001`,
+`judge REVIEW-MUSTERFLOW-20261121-API-CATCHALL`, `judge DF-HERMES-DAGGER-70` — none keyed
+to this tick id, none older-spawned by a dogfood delivery; real concurrent use of gitreins
+as the fleet harness, left running. No dogfood residue. No `gitreins serve` viewer; :8642
+is the Hermes gateway, :8765 chimera — not gitreins surfaces.
+
+Classification: three deliveries of one tick label is a scheduler/gateway dispatch defect,
+NOT a product defect — filed on no product board; the owning board is the coding-hermes
+scheduler, and the raw/attributed dispatch counts above are the evidence it needs.
+
+This append is deliberate: the no-op's single write. No rows filed, no perf re-drive, no
+product contact beyond read-only git/ledger/proc/ss probes.
