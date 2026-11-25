@@ -1389,3 +1389,6 @@
 {"id":1794171000000000228,"timestamp":"2026-11-24 20:06:46.993002","event_type":"task_created","task_id":"DF-033","actor":"foreman","detail":"{\"id\":\"DF-033\",\"status\":\"pending\"}","tick_number":null}
 {"id":1794171000000000229,"timestamp":"2026-11-24 20:06:47.178406","event_type":"task_created","task_id":"DF-034","actor":"foreman","detail":"{\"id\":\"DF-034\",\"status\":\"pending\"}","tick_number":null}
 {"id":1794171000000000230,"timestamp":"2026-11-25 01:33:51.313462","event_type":"task_completed","task_id":"GR-232","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
+{"id":1794171000000000231,"timestamp":"2026-11-25 07:35:00.594277","event_type":"task_updated","task_id":"GR-MYPY-001","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
+{"id":1794171000000000232,"timestamp":"2026-11-25 07:35:00.824273","event_type":"task_updated","task_id":"DF-032","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
+{"id":1794171000000000233,"timestamp":"2026-11-25 07:35:01.030323","event_type":"task_updated","task_id":"DF-034","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
