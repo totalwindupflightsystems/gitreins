@@ -743,6 +743,7 @@ def _update_guards_section(
         # nothing to stage yet. The code-level default stays False (fail loud)
         # for configs that predate this key.
         existing["guards"].setdefault("allow_skips", True)
+        _apply_default_timeout_pair(existing["guards"])
         changed.append("guards")
     else:
         # Fill in missing guard keys, then upgrade only the exact default that
@@ -751,8 +752,43 @@ def _update_guards_section(
         updates = _fill_missing_guards(guards, lang_info, test_cmd, static_tools)
         if _upgrade_install_default_test_command(guards, test_cmd):
             updates.append("test_command")
+        updates.extend(_apply_default_timeout_pair(guards))
         if updates:
             changed.append(f"guards (+{', '.join(updates)})")
+
+
+def _apply_default_timeout_pair(guards: dict[str, Any]) -> list[str]:
+    """Write an explicit coherent hook_timeout/test_timeout pair (DF-032).
+
+    GuardManager treats an ABSENT hook_timeout as derived — it raises the run
+    budget to test_timeout + slack and prints a mismatch warning on every
+    single guard run of a config written by `install`/`init`. Writing the
+    exact values the derivation produces makes the config explicit without
+    changing any behavior: an explicit hook_timeout is honored as configured
+    (QA-GITREINS-REVIEW-1), and a pair above the tests arm never warns. The
+    constants are imported from engine.guard_manager so the writer and the
+    deriver can never drift apart. Keys that already exist are user-authored
+    and are never touched.
+    """
+    from engine.guard_manager import DEFAULT_TEST_TIMEOUT, HOOK_TIMEOUT_SLACK
+
+    added: list[str] = []
+    existing_test = guards.get("test_timeout")
+    if existing_test is None:
+        guards["test_timeout"] = DEFAULT_TEST_TIMEOUT
+        added.append("test_timeout")
+        effective_test_timeout = DEFAULT_TEST_TIMEOUT
+    else:
+        try:
+            effective_test_timeout = int(existing_test)
+        except (TypeError, ValueError):
+            # A user-authored non-numeric test_timeout (e.g. "300s", coerced
+            # later by the guard) is data, not a default: touch nothing.
+            return added
+    if "hook_timeout" not in guards:
+        guards["hook_timeout"] = effective_test_timeout + HOOK_TIMEOUT_SLACK
+        added.append("hook_timeout")
+    return added
 
 
 def _update_evaluator_history_sections(

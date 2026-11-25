@@ -68,6 +68,14 @@ from engine.types import (
     scanner_finding_status,
 )
 
+# DF-032: the timeout pair smart init writes. These are the SAME numbers the
+# derivation below uses for a config-less / key-less run, so an init-written
+# explicit pair can never disagree with the guard's implicit budget — the
+# mismatch warning ("set guards.hook_timeout above guards.test_timeout to fix
+# it at the source") disappears at the source.
+DEFAULT_TEST_TIMEOUT = 1200
+HOOK_TIMEOUT_SLACK = 120
+
 logger = logging.getLogger("gitreins.guard")
 
 
@@ -1857,7 +1865,9 @@ class GuardManager:
         # subprocess.run(timeout=...) with a TypeError (GR-GAP-028,
         # Kobayashi-Maru ticks 240-242).
         self._test_timeout = _coerce_timeout(
-            guards_cfg.get("test_timeout", 1200), "test_timeout", 1200
+            guards_cfg.get("test_timeout", DEFAULT_TEST_TIMEOUT),
+            "test_timeout",
+            DEFAULT_TEST_TIMEOUT,
         )
         # Hook timeout in seconds (default: 300s) — overall guard budget (GR-064e).
         # Same coercion as test_timeout: a string here breaks the _timed_out()
@@ -1902,7 +1912,7 @@ class GuardManager:
                     file=sys.stderr,
                 )
             else:
-                derived = self._test_timeout + 120
+                derived = self._test_timeout + HOOK_TIMEOUT_SLACK
                 print(
                     f"WARN: hook_timeout={self._hook_timeout}s <= test_timeout="
                     f"{self._test_timeout}s in {self.workdir}: the guard would be cut "
