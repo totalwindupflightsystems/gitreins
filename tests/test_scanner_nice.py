@@ -185,12 +185,12 @@ class TestBuiltCommandStrings:
     def test_secrets_step_names_the_default_prefix(self, tmp_workdir: str) -> None:
         cmd = _secrets_step_run(tmp_workdir)
         assert "nice -n 10 true >/dev/null 2>&1" in cmd
-        assert (
-            "$_gr_nice gitleaks detect --source "
-            + shlex.quote(tmp_workdir)
-            + " --no-git --no-banner --no-color"
-            in cmd
-        )
+        # GR-245: the scan cds into the repo root (quoted if needed) and
+        # passes a RELATIVE --source . — an absolute --source breaks
+        # repo-relative allowlist anchors (test_gitleaks_scope.py contract).
+        assert "cd " + tmp_workdir + " &&" in cmd
+        assert "$_gr_nice gitleaks detect --source . " + "--no-git --no-banner --no-color" in cmd
+        assert "--source " + tmp_workdir not in cmd
         assert "export GOMAXPROCS=4;" in cmd
         assert "scanners: nice=nice -n 10" in cmd
 
