@@ -368,6 +368,7 @@ class TestTaskCompleteAdoptionCLI:
                 _workdir: object,
                 guard_config: object = None,
                 scan_root: object = None,
+                progress: object = None,  # DF-034: phase callback, unused here
             ) -> None:
                 judge_constructed.append(True)
 
