@@ -592,3 +592,27 @@ class TestDegradedVerdictNeverAdopted:
 
         assert result.second_pass_review is None
         assert pass_class(result) == PASS_CLASS_JUDGED
+
+    def test_tier1_skipped_verdict_is_never_adopted(self, git_repo: Path) -> None:
+        """GR-232: a stored verdict whose Tier 1 graded a subset (an
+        allow_skips run — stages.tier1 carries the structured degradation
+        marker) classifies ``degraded`` and is NOT adopted — the closeout
+        re-judges instead of mirroring a partial run's pass. The same stage
+        summary TEXT with no marker must not trigger this: the structured
+        ``degraded`` key is the only authority."""
+        fingerprint = compute_fingerprint(str(git_repo)).digest
+        commit = _git(git_repo, "rev-parse", "HEAD")
+        payload = _adoptable_payload(commit, fingerprint, CRITERIA)
+        payload["stages"]["tier1"] = {
+            "id": "tier1",
+            "passed": True,
+            "coverage": "secrets",
+            "degraded": True,
+            "skipped_steps": ["lint", "tests"],
+            "degradation_reason": "guard reported DEGRADED PASS (allow_skips)",
+        }
+        write_verdict_entry(git_repo, "T-016", payload)
+        task = SimpleNamespace(id="T-016", criteria=list(CRITERIA))
+        llm = SimpleNamespace(model="glm-5.3-flash")
+
+        assert find_reusable_verdict(str(git_repo), task, llm) is None

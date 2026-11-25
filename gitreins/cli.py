@@ -2619,6 +2619,7 @@ def cmd_task_complete(args: argparse.Namespace) -> None:
         # result, not only in verdict.json. A Tier 1-only pass is a Tier 1
         # grade; it does not satisfy a judge-gated merge on its own.
         from engine.gate import (
+            PASS_CLASS_DEGRADED,
             PASS_CLASS_TIER1_ONLY,
             PASS_CLASS_UNVERIFIED,
             configured_waiver,
@@ -2645,6 +2646,16 @@ def cmd_task_complete(args: argparse.Namespace) -> None:
                 "\nPass class: unverified-never-pass — the record claims a judged pass "
                 "but carries no Tier 2 artifact, so it is not a PASS and cannot satisfy "
                 "a judge-gated merge (needs_review)."
+            )
+        elif result_class == PASS_CLASS_DEGRADED:
+            # GR-232: a partial run is never a judged pass — either a graded gate
+            # did no work under allow_skips, or the second-pass reviewer never
+            # reported. The verdict.json summary carries the DEGRADED token; this
+            # line names the class where the author reads the result.
+            print(
+                "\nPass class: degraded — a graded gate did no work this run (allow_skips) "
+                "or the second-pass reviewer never reported, so this is not a judged pass. "
+                "Re-run the judge with those gates available."
             )
 
         _persist_result(workdir, task, result, reuse_extra)

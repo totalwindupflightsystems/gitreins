@@ -1809,3 +1809,206 @@ def _git_run(repo: Path, *args: str):
     return subprocess.run(
         ["git", *args], cwd=repo, capture_output=True, text=True, check=True, timeout=60
     )
+
+
+# ── GR-232: an allow_skips DEGRADED PASS never reads as PASS downstream ──────
+
+
+class TestDegradedSkipsSummaryToken:
+    """GR-232 AC1: a verdict summary rendered with skips>0 under allow_skips
+    carries a grep-able DEGRADED token (never a bare PASS); a zero-skip run
+    carries none. Pins the POC-83 Overall-line suffix in BOTH shapes the
+    judge can hold — the legacy tier1.results lanes and the pipeline stage
+    dict — because each path hides the skip somewhere else."""
+
+    def test_legacy_shape_summary_carries_degraded_token(self) -> None:
+        result = JudgeResult(
+            task_id="GR-232",
+            passed=True,
+            tier1=Tier1Result(
+                passed=True,
+                results=[
+                    GuardResult(
+                        name="lint",
+                        passed=True,
+                        output="",
+                        skipped=True,
+                        skip_reason="no linter on PATH",
+                    ),
+                    GuardResult(
+                        name="tests",
+                        passed=True,
+                        output="",
+                        skipped=True,
+                        skip_reason="no tests collected",
+                    ),
+                    GuardResult(name="secrets", passed=True, output="clean"),
+                ],
+            ),
+        )
+        summary = result.summary
+        assert "Overall: PASS" in summary
+        assert "DEGRADED" in summary
+        # The token rides the LAST line — the one scripted consumers parse.
+        assert "DEGRADED" in summary.splitlines()[-1]
+
+    def test_pipeline_shape_summary_carries_degraded_token(self) -> None:
+        result = JudgeResult(
+            task_id="GR-232",
+            passed=True,
+            pipeline_result={
+                "passed": True,
+                "stages": {
+                    "tier1": {
+                        "id": "tier1",
+                        "passed": True,
+                        "degraded": True,
+                        "skipped_steps": ["lint", "tests"],
+                        "degradation_reason": "guard reported DEGRADED PASS (allow_skips)",
+                        "summary": "  ~ lint: skipped (no linter on PATH)",
+                    },
+                    "tier2": {"id": "tier2", "passed": True, "summary": "COMPLETE"},
+                },
+            },
+        )
+        summary = result.summary
+        assert "Overall: PASS" in summary
+        assert "DEGRADED" in summary.splitlines()[-1]
+
+    def test_zero_skip_summary_carries_no_degraded_token(self) -> None:
+        result = JudgeResult(
+            task_id="GR-232",
+            passed=True,
+            pipeline_result={
+                "passed": True,
+                "stages": {
+                    "tier1": {"id": "tier1", "passed": True, "summary": "ok"},
+                    "tier2": {"id": "tier2", "passed": True, "summary": "COMPLETE"},
+                },
+            },
+        )
+        summary = result.summary
+        assert "Overall: PASS" in summary
+        assert "DEGRADED" not in summary
+
+
+class TestPassClassClassifiesTier1SkipsDegraded:
+    """GR-232 AC2: the pass_class vocabulary classifies a verdict whose graded
+    Tier 1 skipped checks (an allow_skips run) as ``degraded`` — so every
+    consumer that already refuses/skips PASS_CLASS_DEGRADED covers it, and no
+    consumer can read the record as a judged pass."""
+
+    _TIER1_DEGRADED_STAGE = {
+        "id": "tier1",
+        "passed": True,
+        "coverage": "secrets",
+        "degraded": True,
+        "skipped_steps": ["lint", "tests"],
+        "degradation_reason": "guard reported DEGRADED PASS (allow_skips)",
+    }
+
+    def test_recorded_judged_claim_with_degraded_tier1_is_degraded(self) -> None:
+        """A record that CLAIMS judged while its tier1 stage carries the
+        degradation marker classifies degraded — the claim is not proof the
+        gates ran (the GR-231 precedent applied to the tier1 stage)."""
+        from engine.gate import PASS_CLASS_DEGRADED, pass_class
+
+        record = {
+            "task_id": "GR-232",
+            "passed": True,
+            "pass_class": "judged",
+            "items": [{"criterion": "c1", "status": "PASS", "detail": "verified"}],
+            "review": {"findings": [], "reviewer": "r", "self_review": False},
+            "stages": {"tier1": dict(self._TIER1_DEGRADED_STAGE), "tier2": {"passed": True}},
+        }
+        assert pass_class(record) == PASS_CLASS_DEGRADED
+
+    def test_derived_record_with_degraded_tier1_is_degraded(self) -> None:
+        """No explicit pass_class: classification comes from the artifacts —
+        tier2 evidence present, tier1 degraded → degraded."""
+        from engine.gate import PASS_CLASS_DEGRADED, pass_class
+
+        record = {
+            "task_id": "GR-232",
+            "passed": True,
+            "items": [{"criterion": "c1", "status": "PASS", "detail": "verified"}],
+            "review": {"findings": [], "reviewer": "r", "self_review": False},
+            "stages": {"tier1": dict(self._TIER1_DEGRADED_STAGE), "tier2": {"passed": True}},
+        }
+        assert pass_class(record) == PASS_CLASS_DEGRADED
+
+    def test_live_judge_result_with_skipped_lanes_is_degraded(self) -> None:
+        """The live legacy shape: Tier1Result lanes skipped under allow_skips
+        (TRUST-001 substantive gates) + a Tier 2 verdict → degraded."""
+        from engine.gate import PASS_CLASS_DEGRADED, pass_class
+
+        result = JudgeResult(
+            task_id="GR-232",
+            passed=True,
+            tier1=Tier1Result(
+                passed=True,
+                results=[
+                    GuardResult(
+                        name="lint",
+                        passed=True,
+                        output="",
+                        skipped=True,
+                        skip_reason="no linter on PATH",
+                    ),
+                    GuardResult(name="secrets", passed=True, output="clean"),
+                ],
+            ),
+            tier2=Verdict(
+                verdict="COMPLETE", items=[VerdictItem(criterion="c1", status="PASS", detail="ok")]
+            ),
+        )
+        assert pass_class(result) == PASS_CLASS_DEGRADED
+
+    def test_clean_record_stays_judged(self) -> None:
+        """The clean path is unchanged: a tier1 stage that graded everything
+        with tier2 evidence behind it is a judged pass."""
+        from engine.gate import PASS_CLASS_JUDGED, pass_class
+
+        record = {
+            "task_id": "GR-232",
+            "passed": True,
+            "items": [{"criterion": "c1", "status": "PASS", "detail": "verified"}],
+            "review": {"findings": [], "reviewer": "r", "self_review": False},
+            "stages": {
+                "tier1": {"id": "tier1", "passed": True, "coverage": "full"},
+                "tier2": {"passed": True},
+            },
+        }
+        assert pass_class(record) == PASS_CLASS_JUDGED
+
+    def test_stage_summary_text_alone_is_not_a_degradation(self) -> None:
+        """The summary TEXT mentioning "DEGRADED PASS" (regex-only detection)
+        must not classify the record — only the structured stage marker is
+        authoritative, so a legacy record whose stage dict carries no
+        ``degraded`` key stays whatever its artifacts say."""
+        from engine.gate import PASS_CLASS_JUDGED, pass_class
+
+        record = {
+            "task_id": "GR-232",
+            "passed": True,
+            "items": [{"criterion": "c1", "status": "PASS", "detail": "verified"}],
+            "review": {"findings": [], "reviewer": "r", "self_review": False},
+            "stages": {
+                "tier1": {"id": "tier1", "passed": True, "summary": "Tier 1: DEGRADED PASS"},
+                "tier2": {"passed": True},
+            },
+        }
+        assert pass_class(record) == PASS_CLASS_JUDGED
+
+    def test_gr231_unverified_keeps_precedence_over_tier1_skips(self) -> None:
+        """A judged CLAIM with no Tier 2 artifact stays unverified-never-pass
+        even when tier1 also degraded — GR-231's precedence is intact."""
+        from engine.gate import PASS_CLASS_UNVERIFIED, pass_class
+
+        claimed = {
+            "task_id": "GR-232",
+            "passed": True,
+            "pass_class": "judged",
+            "stages": {"tier1": dict(self._TIER1_DEGRADED_STAGE)},
+        }
+        assert pass_class(claimed) == PASS_CLASS_UNVERIFIED
