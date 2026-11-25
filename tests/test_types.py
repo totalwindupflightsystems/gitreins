@@ -40,6 +40,58 @@ def test_guard_result_pass_detail(name: str, output: str, detail: str) -> None:
     assert result._pass_detail() == detail
 
 
+class TestStaticAnalysisPassDetail:
+    """DF-028 rework: a passing static_analysis console cell names a sibling
+    tool that did not run instead of printing a bare ✓."""
+
+    def test_one_clean_one_missing_names_both(self) -> None:
+        result = GuardResult(
+            name="static_analysis",
+            passed=True,
+            output="  mypy — clean\n  pyright — not installed (skipped)",
+        )
+
+        detail = result._pass_detail()
+        assert "mypy" in detail
+        assert "pyright — not installed (skipped)" in detail
+        assert "\n" not in detail
+        # The console line itself carries the note, not just the run log.
+        summary = Tier1Result(passed=True, results=[result]).summary
+        assert "  ✓ static_analysis" in summary
+        assert "pyright — not installed (skipped)" in summary
+
+    def test_one_clean_one_did_not_run_names_the_reason(self) -> None:
+        result = GuardResult(
+            name="static_analysis",
+            passed=True,
+            output="  mypy — clean\n  pyright — DID NOT RUN (unparseable output)",
+        )
+
+        detail = result._pass_detail()
+        assert "mypy" in detail
+        assert "pyright — DID NOT RUN (unparseable output)" in detail
+        assert "\n" not in detail
+        summary = Tier1Result(passed=True, results=[result]).summary
+        assert "DID NOT RUN (unparseable output)" in summary
+
+    def test_all_tools_clean_keeps_the_bare_default(self) -> None:
+        result = GuardResult(name="static_analysis", passed=True, output="  mypy — clean")
+
+        assert result._pass_detail() == " — clean"
+        assert "pyright" not in Tier1Result(passed=True, results=[result]).summary
+
+    def test_skip_shapes_keep_the_legacy_bare_cell(self) -> None:
+        # Lane-level skips (Go repos, no tool selected) have neither a clean
+        # line nor a per-tool note — the historical bare ✓ holds.
+        for output in (
+            "Go compiler covers static analysis — skipped",
+            "No static analysis tools selected for this language",
+        ):
+            result = GuardResult(name="static_analysis", passed=True, output=output)
+
+            assert result._pass_detail() == ""
+
+
 def test_guard_result_defaults_and_frozen_contract() -> None:
     result = GuardResult(name="lint", passed=True)
 
