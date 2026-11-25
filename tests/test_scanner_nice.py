@@ -31,7 +31,6 @@ scope; no network, no dependence on the outer repo's index.
 from __future__ import annotations
 
 import os
-import shlex
 import shutil
 import subprocess
 import sys
