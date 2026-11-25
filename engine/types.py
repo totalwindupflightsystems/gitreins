@@ -140,6 +140,33 @@ class GuardResult:
             if "passed" in self.output.lower() or "ok" in self.output.lower():
                 return " — passed"
             return ""
+        elif self.name == "static_analysis":
+            # DF-028 rework: the run log already names a sibling tool that did
+            # not run ("<tool> — not installed (skipped)" / "<tool> — DID NOT
+            # RUN (reason)") — the console cell used to print a bare ✓ anyway,
+            # so an operator reading only the console could not tell a fully
+            # graded run from one where a configured checker never executed.
+            # Surface a terse single-line summary of the same notes; when
+            # every configured tool ran clean the line stays as bare as the
+            # historical default.
+            notes = [
+                line.strip()
+                for line in (self.output or "").split("\n")
+                if "— not installed (skipped)" in line or "— DID NOT RUN" in line
+            ]
+            clean_tools = re.findall(r"^\s*(\S+) — clean\s*$", self.output or "", re.MULTILINE)
+            if notes:
+                parts = []
+                if clean_tools:
+                    parts.append(f"clean ({', '.join(clean_tools)})")
+                parts.extend(notes)
+                # One line, no newlines: a DID-NOT-RUN reason or a crash text
+                # can itself carry control characters via the tool output.
+                detail = " — " + "; ".join(" ".join(part.split()) for part in parts)
+                return _truncate_line(detail, 200)
+            if clean_tools:
+                return " — clean"
+            return ""
         return ""
 
 

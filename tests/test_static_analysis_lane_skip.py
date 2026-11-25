@@ -21,7 +21,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from engine.guard_manager import GuardManager
-from engine.static_analysis import diff_files_match_tools, tool_languages
+from engine.static_analysis import (
+    StaticCheckResult,
+    diff_files_match_tools,
+    tool_languages,
+)
 
 
 # ── Fixture: a real git repo whose committed tree would fail mypy ─────────
@@ -97,7 +101,10 @@ def _patched_tool_infrastructure(
         patch(
             "engine.static_analysis.find_tool", side_effect=lambda tool: f"/fake/{tool}"
         ) as mock_find,
-        patch("engine.static_analysis.run_static_check", return_value=list(diags)) as mock_run,
+        patch(
+            "engine.static_analysis.run_static_check",
+            return_value=StaticCheckResult(ran=True, diagnostics=list(diags)),
+        ) as mock_run,
     ):
         yield mock_run, mock_find
 

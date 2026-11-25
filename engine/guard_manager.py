@@ -3799,10 +3799,12 @@ class GuardManager:
 
         Respects static_analysis_tools config key. Only runs tools that
         exist on PATH; a configured tool that is absent is reported as
-        not-installed and (when none ran) makes the whole step a skip —
-        never a "clean" pass. A language with no tool selected is the same
-        kind of skip (REVIEW-GITREINS-018). Returns FAIL if any
-        tool finds errors.
+        not-installed, and one that could not run (timeout, crash,
+        unparseable output) is reported as DID NOT RUN with its reason —
+        never folded into "clean" (DF-028). When no tool ran, the whole
+        step is a skip naming each tool and its reason. A language with no
+        tool selected is the same kind of skip (REVIEW-GITREINS-018).
+        Returns FAIL if any tool finds errors.
         """
         if self._is_go:
             return GuardResult(
@@ -3864,14 +3866,20 @@ class GuardManager:
                 skip_reason=skip_reason,
             )
 
-        # DF-019: `run_static_check` returns [] when the binary is absent, and
-        # that empty list used to be reported as "<tool> — clean" — a vacuous
-        # green on a gate that never ran, while `init` announced the tool as
-        # enabled. Check the binary first (same rule the LSP gate learned in
-        # TRUST-001) and name the gap instead of grading nothing as clean.
+        # DF-019: `run_static_check` used to return [] when the binary was
+        # absent, and that empty list was reported as "<tool> — clean" — a
+        # vacuous green on a gate that never ran, while `init` announced the
+        # tool as enabled. Check the binary first (same rule the LSP gate
+        # learned in TRUST-001) and name the gap instead of grading nothing
+        # as clean.
         all_diagnostics: list[str] = []
         had_errors = False
         missing: list[str] = []
+        # DF-028: a tool that was found but could not run (timeout, crash,
+        # unparseable output) is recorded with its reason — never folded into
+        # "clean", and never masked by a sibling tool that did run.
+        not_ran: list[tuple[str, str]] = []
+        ran_any = False
 
         for tool in lang_tools:
             if not find_tool(tool):
@@ -3881,16 +3889,23 @@ class GuardManager:
                 # cppcheck on a real C++ repo can exceed the default 120s —
                 # grant C++/Rust tools the same generous budget as clangd.
                 tool_timeout = 300.0 if (self._is_cpp or self._is_rust) else 120.0
-                diags = run_static_check(tool, self.workdir, timeout=tool_timeout)
+                result = run_static_check(tool, self.workdir, timeout=tool_timeout)
             except Exception as exc:
                 logger.warning("static_analysis %s failed: %s", tool, exc)
+                not_ran.append((tool, f"crashed: {exc}"))
                 continue
 
-            if not diags:
+            if not result.ran:
+                logger.warning("static_analysis %s did not run: %s", tool, result.reason)
+                not_ran.append((tool, result.reason))
+                continue
+            ran_any = True
+
+            if not result.diagnostics:
                 all_diagnostics.append(f"  {tool} — clean")
                 continue
 
-            for d in diags:
+            for d in result.diagnostics:
                 severity = d.get("severity", "error")
                 prefix = "✗" if severity == "error" else "⚠"
                 all_diagnostics.append(
@@ -3899,34 +3914,30 @@ class GuardManager:
                 if severity == "error":
                     had_errors = True
 
-        if not all_diagnostics and missing:
-            # Every configured tool is absent: nothing was graded. DF-019 —
-            # this reports as a skip with the tools named, never as "clean".
+        if not ran_any:
+            # DF-028: nothing was graded — every configured tool is either
+            # absent or could not run. One working tool must not mask a broken
+            # one, so name every tool and its reason; never a "clean" pass.
+            reasons: list[str] = []
+            if missing:
+                reasons.append(
+                    f"no static analysis tool on PATH ({', '.join(missing)} not installed)"
+                )
+            reasons.extend(f"{tool} did not run ({reason})" for tool, reason in not_ran)
             return GuardResult(
                 name="static_analysis",
                 passed=True,
                 output="No static analysis tools ran — check static_analysis_tools config",
                 skipped=True,
-                skip_reason=(
-                    f"no static analysis tool on PATH ({', '.join(missing)} not installed)"
-                ),
-            )
-
-        if not all_diagnostics:
-            # Every configured tool failed to run (crash, timeout) —
-            # TRUST-001: nothing was graded, so this is a skip.
-            return GuardResult(
-                name="static_analysis",
-                passed=True,
-                output="No tools ran — check static_analysis_tools config",
-                skipped=True,
-                skip_reason="no configured static-analysis tool ran",
+                skip_reason="; ".join(reasons) or "no configured static-analysis tool ran",
             )
 
         if missing:
             # Some tools ran, some are absent — keep the graded result and name
             # the gap in the output so "clean" is never read as full coverage.
             all_diagnostics.extend(f"  {tool} — not installed (skipped)" for tool in missing)
+        for tool, reason in not_ran:
+            all_diagnostics.append(f"  {tool} — DID NOT RUN ({reason})")
 
         output = "\n".join(all_diagnostics)
         if len(output) > 2000:

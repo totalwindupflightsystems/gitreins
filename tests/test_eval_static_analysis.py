@@ -8,6 +8,7 @@ from unittest.mock import patch, MagicMock
 
 from engine.evaluator import EVALUATOR_TOOLS
 from engine.evaluator import AgenticEvaluator
+from engine.static_analysis import StaticCheckResult
 
 
 class TestReadStaticAnalysis:
@@ -43,16 +44,19 @@ class TestReadStaticAnalysis:
                 "guards": {"static_analysis_tools": {"python": ["mypy"]}},
             },
         )
-        mock_run.return_value = [
-            {
-                "file": "main.py",
-                "line": 10,
-                "severity": "error",
-                "message": "Incompatible types",
-                "code": "",
-                "tool": "mypy",
-            },
-        ]
+        mock_run.return_value = StaticCheckResult(
+            ran=True,
+            diagnostics=[
+                {
+                    "file": "main.py",
+                    "line": 10,
+                    "severity": "error",
+                    "message": "Incompatible types",
+                    "code": "",
+                    "tool": "mypy",
+                },
+            ],
+        )
         result = evaluator._tool_read_static_analysis()
         assert result["count"] == 1
         assert len(result["diagnostics"]) == 1
@@ -74,7 +78,7 @@ class TestReadStaticAnalysis:
         )
         subdir = os.path.join(tmp_workdir, "src")
         os.makedirs(subdir)
-        mock_run.return_value = []
+        mock_run.return_value = StaticCheckResult(ran=True)
         result = evaluator._tool_read_static_analysis(path="src")
         assert result["diagnostics"] == []
         mock_run.assert_called_once_with("mypy", subdir)
@@ -154,16 +158,19 @@ class TestReadStaticAnalysis:
                 "guards": {"static_analysis_tools": {"python": ["pyright"]}},
             },
         )
-        mock_run.return_value = [
-            {
-                "file": "app.py",
-                "line": 5,
-                "severity": "warning",
-                "message": "Type not declared",
-                "code": "",
-                "tool": "pyright",
-            },
-        ]
+        mock_run.return_value = StaticCheckResult(
+            ran=True,
+            diagnostics=[
+                {
+                    "file": "app.py",
+                    "line": 5,
+                    "severity": "warning",
+                    "message": "Type not declared",
+                    "code": "",
+                    "tool": "pyright",
+                },
+            ],
+        )
         result = evaluator._tool_read_static_analysis()
         assert result["count"] == 1
         assert result["diagnostics"][0]["tool"] == "pyright"
@@ -182,7 +189,7 @@ class TestReadStaticAnalysis:
                 "guards": {"static_analysis_tools": {"python": ["mypy"]}},
             },
         )
-        mock_run.return_value = []
+        mock_run.return_value = StaticCheckResult(ran=True)
         result = evaluator._tool_read_static_analysis()
         assert isinstance(result, dict)
         assert "diagnostics" in result
@@ -205,26 +212,32 @@ class TestReadStaticAnalysis:
             },
         )
         mock_run.side_effect = [
-            [
-                {
-                    "file": "a.py",
-                    "line": 1,
-                    "severity": "error",
-                    "message": "err1",
-                    "code": "",
-                    "tool": "mypy",
-                }
-            ],
-            [
-                {
-                    "file": "b.py",
-                    "line": 2,
-                    "severity": "warning",
-                    "message": "warn1",
-                    "code": "",
-                    "tool": "pyright",
-                }
-            ],
+            StaticCheckResult(
+                ran=True,
+                diagnostics=[
+                    {
+                        "file": "a.py",
+                        "line": 1,
+                        "severity": "error",
+                        "message": "err1",
+                        "code": "",
+                        "tool": "mypy",
+                    }
+                ],
+            ),
+            StaticCheckResult(
+                ran=True,
+                diagnostics=[
+                    {
+                        "file": "b.py",
+                        "line": 2,
+                        "severity": "warning",
+                        "message": "warn1",
+                        "code": "",
+                        "tool": "pyright",
+                    }
+                ],
+            ),
         ]
         result = evaluator._tool_read_static_analysis()
         assert result["count"] == 2
@@ -233,3 +246,23 @@ class TestReadStaticAnalysis:
         assert mock_run.call_count == 2
         mock_run.assert_any_call("mypy", evaluator.workdir)
         mock_run.assert_any_call("pyright", evaluator.workdir)
+
+    # Test 11 (DF-028): a tool that could not run is surfaced, not silent
+    @patch("engine.static_analysis.run_static_check")
+    def test_tool_did_not_run_is_surfaced(
+        self, mock_run: object, evaluator: AgenticEvaluator, tmp_workdir: str
+    ) -> None:
+        self._write_config(
+            tmp_workdir,
+            {
+                "evaluator": {"static_analysis_diagnostics": True},
+                "guards": {"static_analysis_tools": {"python": ["pyright"]}},
+            },
+        )
+        mock_run.return_value = StaticCheckResult(ran=False, reason="returned invalid JSON")
+        result = evaluator._tool_read_static_analysis()
+        assert result["count"] == 1
+        diag = result["diagnostics"][0]
+        assert diag["tool"] == "pyright"
+        assert "did not run" in diag["message"]
+        assert "invalid JSON" in diag["error"]
