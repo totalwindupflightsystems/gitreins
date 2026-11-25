@@ -70,6 +70,7 @@ from typing import Any, cast
 
 from engine import usage
 from engine.evaluator import VerdictItem, item_glyph
+from engine.gate import PASS_CLASS_DEGRADED
 from engine.judge import JudgeResult
 from engine.repo_paths import WorktreeResolutionError, resolve_worktree_identity
 from engine.resolution import ResolutionVerdict
@@ -575,7 +576,18 @@ class VerdictPersister:
         lines.append("")
         lines.append(f"**Task:** {task_title}")
         lines.append(f"**Evaluated:** {evaluated_at}")
-        lines.append(f"**Result:** {'✓ PASS' if passed else '✗ FAIL'}")
+        # GR-232: a partial run (a graded stage skipped its checks, or the
+        # recorded pass_class says degraded) never renders a bare PASS — the
+        # DEGRADED token rides the Result line a reader quotes as the verdict.
+        degraded = verdict_data.get("pass_class") == PASS_CLASS_DEGRADED
+        if isinstance(stages, dict) and not degraded:
+            degraded = any(
+                isinstance(stage, dict) and stage.get("degraded") for stage in stages.values()
+            )
+        result_label = "✓ PASS" if passed else "✗ FAIL"
+        if degraded:
+            result_label += " (DEGRADED — skipped checks)"
+        lines.append(f"**Result:** {result_label}")
         if verdict:
             verdict_str = verdict.verdict if hasattr(verdict, "verdict") else str(verdict)
             lines.append(f"**Verdict:** {verdict_str}")

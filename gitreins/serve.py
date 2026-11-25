@@ -196,6 +196,10 @@ class _VerdictRowOptional(TypedDict, total=False):
     branch: str
     kind: str
     band: str
+    #: GR-232: the pass-class vocabulary rides the row when the record carries
+    # it, so a ``degraded`` partial run is never indistinguishable from a
+    # judged pass on the listing surface.
+    pass_class: str
 
 
 class VerdictRow(_VerdictRowOptional):
@@ -391,6 +395,9 @@ def _verdict_row(day: str, h: str, v: dict[str, Any]) -> VerdictRow:
         row["kind"] = v["kind"]
     if v.get("band"):
         row["band"] = v["band"]
+    # GR-232: a degraded partial run must not read as a bare passed=true row.
+    if v.get("pass_class"):
+        row["pass_class"] = str(v["pass_class"])
     return row
 
 

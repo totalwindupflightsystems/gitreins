@@ -39,8 +39,11 @@ PASS_CLASS_UNVERIFIED = "unverified-never-pass"
 #: reported — the review block carries a reviewer-failure error (anything
 #: except the benign "no diff to review" case) and zero findings, so the
 #: 8-of-27 history shape "unparseable reviewer reply + findings=[] + passed"
-#: cannot read as a judged pass. Not a pass at all: the merge gate refuses
-#: it, and the merge recommendation degrades to ``needs_review``.
+#: cannot read as a judged pass. GR-232 adds the sibling cause to the same
+#: class: a graded gate (Tier 1 under allow_skips) did no work — the stage
+#: dict carries the structured ``degraded``/``skipped_steps`` marker — so the
+#: record is a PARTIAL run, not a judged pass. Not a pass at all: the merge
+#: gate refuses it, and the merge recommendation degrades to ``needs_review``.
 PASS_CLASS_DEGRADED = "degraded"
 
 #: GR-178: the status for a criterion the judge could not assess from the code
@@ -161,6 +164,39 @@ def _reviewer_never_reported(source: object) -> bool:
     return _reviewer_never_reported_block(_review_block(source))
 
 
+def _graded_stage_skipped(source: object) -> list[str]:
+    """``stage(gates)`` for every stage whose graded work was skipped (GR-232).
+
+    Reads ONLY the structured degradation markers — never the summary text —
+    in both shapes:
+
+    * a live ``JudgeResult`` carries ``pipeline_result["stages"]`` (pipeline
+      path) or a :class:`Tier1Result` on ``tier1`` whose ``degraded`` property
+      already applies the TRUST-001 substantive-gate semantics (config-disabled
+      guards are not degradations, a language-appropriate Go replacement is
+      not either);
+    * a persisted ``verdict.json`` dict carries the same stage dicts under
+      ``stages`` (``degraded`` / ``skipped_steps``).
+    """
+    skipped: list[str] = []
+    tier1 = _field(source, "tier1", None)
+    if tier1 is not None and getattr(tier1, "degraded", False):
+        for step in getattr(tier1, "degraded_steps", None) or []:
+            skipped.append(str(step.get("step", "?")))
+    for holder in (source, _field(source, "pipeline_result", None)):
+        if holder is None:
+            continue
+        stages = _field(holder, "stages", None)
+        if not isinstance(stages, Mapping):
+            continue
+        for stage_id, stage in stages.items():
+            if not isinstance(stage, Mapping) or not stage.get("degraded"):
+                continue
+            gates = ",".join(str(step) for step in stage.get("skipped_steps") or [])
+            skipped.append(f"{stage_id}({gates or 'unknown checks'})")
+    return skipped
+
+
 def pass_class(source: object) -> str:
     """``judged`` / ``tier1-only`` / ``unverified-never-pass`` / ``degraded``.
 
@@ -185,18 +221,24 @@ def pass_class(source: object) -> str:
     Tier 2 artifact: those stay ``unverified-never-pass`` (the claim is still
     unsupported, whatever the reviewer did), and explicit ``tier1-only`` /
     ``unverified-never-pass`` claims are never upgraded by this check.
+
+    GR-232: a record whose graded stage skipped checks (an allow_skips Tier 1
+    — the structured ``degraded``/``skipped_steps`` stage marker, never the
+    summary text) also classifies ``degraded`` whenever it would otherwise
+    read ``judged`` — a partial run is not a judged pass, whatever the Tier 2
+    artifacts say. Same precedence rules as GR-240.
     """
     explicit = _field(source, "pass_class", None)
     if explicit == PASS_CLASS_JUDGED:
         if not has_tier2_artifact(source):
             return PASS_CLASS_UNVERIFIED
-        if _reviewer_never_reported(source):
+        if _reviewer_never_reported(source) or _graded_stage_skipped(source):
             return PASS_CLASS_DEGRADED
         return PASS_CLASS_JUDGED
     if explicit in (PASS_CLASS_TIER1_ONLY, PASS_CLASS_UNVERIFIED):
         return str(explicit)
     if has_tier2_artifact(source):
-        if _reviewer_never_reported(source):
+        if _reviewer_never_reported(source) or _graded_stage_skipped(source):
             return PASS_CLASS_DEGRADED
         return PASS_CLASS_JUDGED
     return PASS_CLASS_TIER1_ONLY

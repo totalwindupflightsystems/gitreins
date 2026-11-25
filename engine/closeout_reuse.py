@@ -207,7 +207,8 @@ def find_reusable_verdict(
         if pass_class(candidate) == PASS_CLASS_DEGRADED:
             logger.info(
                 "closeout reuse: skipping degraded verdict %s/%s for %s "
-                "(review block shows a reviewer-failure error with zero findings)",
+                "(review block shows a reviewer-failure error with zero findings, "
+                "or a graded stage skipped checks under allow_skips — GR-240/GR-232)",
                 candidate.get("_date", "?"),
                 candidate.get("_hash", "?"),
                 task.id,

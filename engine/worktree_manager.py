@@ -1150,10 +1150,11 @@ class WorktreeManager:
             )
         if verdict_class == PASS_CLASS_DEGRADED:
             raise WorktreeError(
-                "HOLD: the matching verdict's second-pass reviewer never reported (a "
-                "reviewer-failure error with zero findings) — it is degraded, which is "
-                "never a judged pass (GR-240). Re-run the judge so the reviewer actually "
-                "reports on this change. Verdict: "
+                "HOLD: the matching verdict is degraded — either its second-pass "
+                "reviewer never reported (a reviewer-failure error with zero findings, "
+                "GR-240) or a graded gate did no work under allow_skips (GR-232) — "
+                "so it is never a judged pass. Re-run the judge so every graded gate "
+                "runs and the reviewer actually reports on this change. Verdict: "
                 f"{self._verdict_reference(task_id, record, verdict)}"
             )
         if verdict_class != PASS_CLASS_TIER1_ONLY:

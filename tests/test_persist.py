@@ -255,6 +255,66 @@ def test_build_summary_preserves_degraded_tier1_shape(tmp_path: Path) -> None:
     assert "**tier2**" in summary
 
 
+def test_build_summary_result_line_carries_degraded_token(tmp_path: Path) -> None:
+    """GR-232 AC1: summary.md's ``**Result:**`` line never reads as a bare
+    PASS when a graded stage was skipped — the DEGRADED token rides the one
+    line a reader quotes as the verdict."""
+    p = VerdictPersister(str(tmp_path))
+    data = {
+        "passed": True,
+        "task_title": "allow_skips run",
+        "verdict": None,
+        "stages": {
+            "tier1": {
+                "passed": True,
+                "degraded": True,
+                "skipped_steps": ["lint", "tests"],
+                "degradation_reason": "guard reported DEGRADED PASS (allow_skips)",
+                "summary": "guard reported DEGRADED PASS",
+            },
+            "tier2": {"passed": True, "summary": "COMPLETE"},
+        },
+    }
+    summary = p._build_summary("task-x", data)
+    result_line = next(line for line in summary.splitlines() if line.startswith("**Result:**"))
+    assert "PASS" in result_line
+    assert "DEGRADED" in result_line
+
+
+def test_build_summary_result_line_clean_run_has_no_degraded_token(tmp_path: Path) -> None:
+    """GR-232 AC1 (zero-skip arm): a fully graded pass renders no DEGRADED
+    token on the Result line."""
+    p = VerdictPersister(str(tmp_path))
+    data = {
+        "passed": True,
+        "task_title": "clean run",
+        "verdict": None,
+        "stages": {
+            "tier1": {"passed": True, "summary": "ok"},
+            "tier2": {"passed": True, "summary": "COMPLETE"},
+        },
+    }
+    summary = p._build_summary("task-x", data)
+    result_line = next(line for line in summary.splitlines() if line.startswith("**Result:**"))
+    assert "PASS" in result_line
+    assert "DEGRADED" not in result_line
+
+
+def test_build_summary_result_line_degraded_pass_class_carries_token(tmp_path: Path) -> None:
+    """GR-232 AC1: the recorded pass_class is enough to token the Result line
+    even when a legacy record carries no stages dict at all."""
+    p = VerdictPersister(str(tmp_path))
+    data = {
+        "passed": True,
+        "task_title": "recorded degraded class",
+        "verdict": None,
+        "pass_class": "degraded",
+    }
+    summary = p._build_summary("task-x", data)
+    result_line = next(line for line in summary.splitlines() if line.startswith("**Result:**"))
+    assert "DEGRADED" in result_line
+
+
 # ── REVIEW-GITREINS-030: judge provenance survives into verdict.json ────────
 
 
