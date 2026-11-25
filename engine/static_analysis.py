@@ -244,6 +244,82 @@ def select_tools(
     return (tools, "") if tools else ([], reason)
 
 
+# ── Diff-set relevance (GR-MYPY-001) ────────────────────────────────────
+
+# Tool → language, mirroring the language branches in select_tools above and
+# list_available_tools' language_tools map, so the diff-set check cannot
+# disagree with tool selection about what "matching" means.
+_TOOL_LANGUAGE: dict[str, str] = {
+    "mypy": "python",
+    "pyright": "python",
+    "sorbet": "ruby",
+    "sqlfluff": "sql",
+    "phpstan": "php",
+    "cppcheck": "cpp",
+    "staticcheck": "go",
+    "clippy": "rust",
+    "eslint": "js",
+}
+
+
+def tool_languages(tools: Sequence[str]) -> list[str]:
+    """Language names for a tool list, deduped (unknown tools pass through)."""
+    return list(dict.fromkeys(_TOOL_LANGUAGE.get(tool, tool) for tool in tools))
+
+
+def _diff_suffixes_by_language() -> dict[str, tuple[str, ...]]:
+    """Diff suffixes per language, derived from lang_detect where possible.
+
+    Imported lazily (same pattern as select_tools) so module import order
+    stays unchanged. The C/C++ entry reuses ``CPP_SOURCE_SUFFIXES`` —
+    "derived from SOURCE_EXTENSIONS so the two can't drift" — and the js
+    entry mirrors SOURCE_EXTENSIONS' own js block, which already covers
+    TypeScript (.ts/.tsx count as js for detection too).
+    """
+    from engine import lang_detect
+
+    return {
+        "python": (".py", ".pyi"),
+        "ruby": (".rb",),
+        "sql": (".sql",),
+        "php": (".php",),
+        "cpp": lang_detect.CPP_SOURCE_SUFFIXES,
+        "go": (".go",),
+        "rust": (".rs",),
+        "js": (".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"),
+    }
+
+
+def diff_files_match_tools(changed_files: Sequence[str], tools: Sequence[str]) -> bool:
+    """True when the diff set holds at least one file the selected tools would grade.
+
+    GR-MYPY-001: the static-analysis lane runs its tools WHOLE-TREE (mypy
+    checks ``.`` with ``--explicit-package-bases``), so on a diff whose files
+    are all outside the tools' language (a board-only commit: a .md note, a
+    .jsonl row) the run grades only files the commit cannot have affected —
+    and a cold checker cache can surface unrelated diagnostics and hard-block
+    the commit. The lane asks this helper first and skips the whole-tree run
+    when the answer is ``False``.
+
+    Two inputs keep the legacy whole-tree behavior (fail open to grading):
+    an EMPTY diff set (no diff information — nothing staged, non-repo
+    probes) and a tool whose language is unknown here (we cannot classify
+    its diff relevance, so we do not skip it).
+    """
+    if not changed_files:
+        return True
+    suffixes: set[str] = set()
+    suffix_map = _diff_suffixes_by_language()
+    for tool in tools:
+        language = _TOOL_LANGUAGE.get(tool)
+        if language is None:
+            return True
+        suffixes.update(suffix_map.get(language, ()))
+    if not suffixes:
+        return True
+    return any(f.lower().endswith(tuple(suffixes)) for f in changed_files)
+
+
 # ── Text output parsers ─────────────────────────────────────────────────
 
 # Mypy: "file.py:line: severity: message  [code]"

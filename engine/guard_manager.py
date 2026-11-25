@@ -3805,11 +3805,16 @@ class GuardManager:
         # so the announcement and the gate read the same language→tool map and
         # cannot disagree about what will run. Marker queries underneath still
         # come from engine.lang_detect (single source of truth).
-        from engine.static_analysis import find_tool, run_static_check, select_tools
-
-        lang_tools, no_tool_reason = select_tools(
-            self.workdir, self._static_tools, self.changed_files
+        from engine.static_analysis import (
+            diff_files_match_tools,
+            find_tool,
+            run_static_check,
+            select_tools,
+            tool_languages,
         )
+
+        changed = self.changed_files
+        lang_tools, no_tool_reason = select_tools(self.workdir, self._static_tools, changed)
 
         if not lang_tools:
             # DF-019 follow-up: no tool was selected for this repo's language,
@@ -3824,6 +3829,29 @@ class GuardManager:
                 output="No static analysis tools selected for this language",
                 skipped=True,
                 skip_reason=no_tool_reason,
+            )
+
+        # GR-MYPY-001: the tools run WHOLE-TREE (mypy checks "." with
+        # --explicit-package-bases), so a diff with no file in the selected
+        # language gives the run nothing commit-relevant to grade — and a cold
+        # checker cache can still surface unrelated diagnostics (or blow the
+        # timeout) and hard-block a board-only commit. Skip the run instead.
+        # An empty diff set (nothing staged, non-repo probes) and tools in an
+        # unclassifiable language keep the legacy whole-tree behavior inside
+        # diff_files_match_tools.
+        if changed and not diff_files_match_tools(changed, lang_tools):
+            skip_reason = (
+                "staged/diff set has no files matching the selected static-analysis "
+                f"tools ({', '.join(lang_tools)}; languages: "
+                f"{', '.join(tool_languages(lang_tools))}) — whole-tree run skipped: "
+                "a cold tool cache would grade only files this commit cannot have touched"
+            )
+            return GuardResult(
+                name="static_analysis",
+                passed=True,
+                output="No diff files match the selected static-analysis language",
+                skipped=True,
+                skip_reason=skip_reason,
             )
 
         # DF-019: `run_static_check` returns [] when the binary is absent, and
