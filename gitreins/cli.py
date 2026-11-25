@@ -2508,6 +2508,98 @@ def _refuse_unbound_closeout(workdir: str, task_id: str, status: str) -> None:
     sys.exit(1)
 
 
+def _task_complete_progress() -> Callable[[str], None]:
+    """DF-034: one narration line per evaluator phase transition.
+
+    A tier-2 closeout used to print nothing between the tier-1 guard block and
+    the final verdict, so a ten-minute silent run was indistinguishable from a
+    hang (the get-h3 digest lane wraps the command in `timeout 570 … | tail`
+    for exactly that reason). Progress is narration, not a document: on a TTY
+    it rides stdout; on a piped stdout it moves to stderr so captured output
+    keeps its existing shape. The job-id handle prints on stdout
+    unconditionally — see :func:`_task_complete_open_job`.
+    """
+
+    def report(message: str) -> None:
+        stream = sys.stdout if sys.stdout.isatty() else sys.stderr
+        print(f"evaluator: {message}", file=stream)
+
+    return report
+
+
+def _task_complete_open_job(task_id: str, workdir: str) -> tuple[dict[str, Any] | None, Any]:
+    """Create the closeout's pollable job record and announce its id (DF-034).
+
+    The record is the handle behind ``gitreins judge --status <job id>``: the
+    id prints while the evaluation runs, a heartbeat keeps the record live for
+    the in-process (thread) worker, and :func:`_close_task_complete_job` writes
+    the terminal state. Failing to persist the record is bookkeeping, not the
+    closeout's verdict — the run proceeds without a pollable handle.
+    """
+    from engine.job_store import (
+        WORKER_KIND_THREAD,
+        JobHeartbeat,
+        make_job,
+        save_job,
+        worker_identity,
+    )
+
+    job = make_job(task_id, workdir)
+    # The evaluation runs in THIS process (thread worker): liveness is the
+    # heartbeat this record keeps, never the pid of whoever printed the banner.
+    job.update(worker_identity(WORKER_KIND_THREAD))
+    try:
+        save_job(job)
+    except OSError as exc:
+        print(f"evaluator job tracking unavailable: {exc}", file=sys.stderr)
+        return None, None
+    print(f"Evaluator job: {job['id']}")
+    print(f"  poll:    gitreins judge --status {job['id']}")
+    return job, JobHeartbeat(job["id"]).start()
+
+
+def _close_task_complete_job(
+    job: dict[str, Any] | None,
+    heartbeat: Any,
+    *,
+    result: Any = None,
+    error: str | None = None,
+) -> None:
+    """Terminal write for the closeout's own job record (DF-034).
+
+    Mirrors ``_cmd_judge_worker``: the heartbeat stops BEFORE the terminal
+    write, so a last beat can never resurrect a record that already finished.
+    A FAIL verdict is a COMPLETE job — the record carries the graded result.
+    Every failure here is bookkeeping: the closeout already holds its verdict,
+    and the record must never be the thing that breaks it. A result that
+    cannot be snapshotted (a caller's non-standard result object) leaves
+    ``result`` unset on an otherwise-complete record.
+    """
+    if job is None:
+        return
+    if heartbeat is not None:
+        heartbeat.stop()
+    if error is None:
+        try:
+            from engine.judge import judge_result_to_dict
+
+            job["result"] = judge_result_to_dict(job["task_id"], job["workdir"], result)
+        except Exception as exc:  # noqa: BLE001 - the verdict outranks the record
+            print(f"evaluator job result snapshot failed: {exc}", file=sys.stderr)
+        job["status"] = "complete"
+    else:
+        job["error"] = error
+        job["status"] = "error"
+    job["running"] = False
+    job["finished_at"] = time.time()
+    try:
+        from engine.job_store import save_job
+
+        save_job(job)
+    except OSError as exc:
+        print(f"evaluator job status update failed: {exc}", file=sys.stderr)
+
+
 def cmd_task_complete(args: argparse.Namespace) -> None:
     from engine.evaluator import LLM_FAILURE_SUMMARY_PREFIX
     from engine.task_manager import TaskManager
@@ -2633,6 +2725,14 @@ def cmd_task_complete(args: argparse.Namespace) -> None:
             )
         else:
             print("\nEvaluating...")
+            # DF-034: the tier-2 closeout is the silent wall — publish a
+            # pollable job handle first, then narrate each evaluator phase
+            # through the Judge's progress callback. --skip-tier2 and the
+            # adoption path never open a job: there is no tier-2 to poll.
+            job: dict[str, Any] | None = None
+            heartbeat: Any = None
+            if not skip_tier2:
+                job, heartbeat = _task_complete_open_job(args.id, workdir)
             # skip_tier2 leaves llm None; Judge only dereferences it for tier-2.
             # engine/judge.py annotates LLMClient (not | None) — widening that
             # signature is out of scope for this tranche, so pin the gap here.
@@ -2647,8 +2747,14 @@ def cmd_task_complete(args: argparse.Namespace) -> None:
                 workdir,
                 guard_config=config,
                 scan_root=scan_root,
+                progress=_task_complete_progress(),
             )
-            result = judge.evaluate_task(task, skip_tier2=skip_tier2)
+            try:
+                result = judge.evaluate_task(task, skip_tier2=skip_tier2)
+            except Exception as exc:
+                _close_task_complete_job(job, heartbeat, error=str(exc))
+                raise
+            _close_task_complete_job(job, heartbeat, result=result)
         _print_judge_result(result)
 
         # GR-166: the weaker class must be visible where the author reads the

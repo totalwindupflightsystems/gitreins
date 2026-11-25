@@ -4953,6 +4953,7 @@ class TestTaskCompleteScanScopeAndLease:
                 _workdir: object,
                 guard_config: object = None,
                 scan_root: object = None,
+                progress: object = None,  # DF-034: phase callback, unused here
             ) -> None:
                 assert scan_root == str(scan)
 
@@ -5021,6 +5022,7 @@ class TestTaskCompleteScanScopeAndLease:
                 _workdir: object,
                 guard_config: object = None,
                 scan_root: object = None,
+                progress: object = None,  # DF-034: phase callback, unused here
             ) -> None:
                 received["guard_config"] = guard_config
 

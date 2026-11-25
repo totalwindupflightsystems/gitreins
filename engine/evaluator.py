@@ -1012,8 +1012,15 @@ class AgenticEvaluator:
         eval_cap: str | EvalCap | None = None,
         command_timeout: float | int | None = None,
         config_root: str | None = None,
+        *,
+        progress: Callable[[str], None] | None = None,
     ) -> None:
         self.llm = llm
+        # DF-034: optional phase callback — one call per evaluator phase
+        # transition (each loop iteration, judging). None (every existing
+        # caller) keeps the historical silence; the closeout CLI passes one so
+        # a 10-minute tier-2 wall is no longer indistinguishable from a hang.
+        self._progress = progress
         self.workdir = os.path.abspath(workdir)
         self.config_root = os.path.abspath(config_root or workdir)
 
@@ -1810,6 +1817,11 @@ class AgenticEvaluator:
 
         return new_messages, compaction_count + 1
 
+    def _report(self, message: str) -> None:
+        """Emit one phase line through the optional progress callback (DF-034)."""
+        if self._progress is not None:
+            self._progress(message)
+
     def evaluate(self, task: dict[str, Any]) -> Verdict:
         """Run the agentic loop against a task and return a verdict.
 
@@ -2004,6 +2016,10 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         iter_limit = self.eval_cap.max_iterations_int
 
         while iteration < iter_limit:
+            # DF-034: per-iteration progress — this loop is the silent wall a
+            # closeout caller stares at (get-h3 wraps `task complete` in a
+            # blind timeout because silence reads as a hang).
+            self._report(f"tier-2 iteration {iteration + 1}/{iter_limit}")
             # Check caps (handles time/token limits even with unlimited iterations)
             cap_error = self.eval_cap.check()
             if cap_error:
@@ -2130,6 +2146,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
 
             # No tool calls → LLM is delivering a verdict
             if not response.tool_calls:
+                self._report("tier-2 judging")
                 if response.content:
                     verdict, parse_reason = self._try_parse_verdict(response.content)
                     if verdict is not None:

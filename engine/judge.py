@@ -8,7 +8,7 @@ import copy
 import logging
 import re
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Callable, cast
 
 from engine.auger_packet import PacketValidationError, TaskPacketAdapter
 from engine.eval_cap import EvalCap
@@ -73,6 +73,7 @@ class Judge:
         persist_log: bool = True,
         persist_telemetry: bool = True,
         persist_review_state: bool = True,
+        progress: Callable[[str], None] | None = None,
     ) -> None:
         self.workdir = workdir
         self.llm = llm
@@ -119,6 +120,16 @@ class Judge:
             scan_root=self.scan_root,
         )
         self.eval_cap = eval_cap
+        # DF-034: optional phase callback — the closeout CLI passes one so each
+        # pipeline phase (guard, evaluator, second pass) prints a progress line
+        # instead of the whole tier-2 wall running silent. None (every existing
+        # caller) keeps the historical silence.
+        self._progress = progress
+
+    def _report(self, message: str) -> None:
+        """Emit one phase line through the optional progress callback (DF-034)."""
+        if self._progress is not None:
+            self._progress(message)
 
     def evaluate_task(self, task: Task, skip_tier2: bool = False) -> "JudgeResult":
         """Run the pipeline against a task.
@@ -239,6 +250,8 @@ class Judge:
             review_cfg = {}
         if review_cfg.get("second_pass", True) is not True:
             return
+        # DF-034: the second pass is its own silent LLM phase — name it.
+        self._report("second-pass review")
         from engine.review_profiles import (
             DEFAULT_REFLECTION_THRESHOLD,
             FindingReflector,
@@ -512,6 +525,7 @@ class Judge:
             llm=self.llm,
             persist_telemetry=self.persist_telemetry,
             scan_root=self.scan_root,
+            progress=self._progress,
         )
 
         task_dict = self._task_context(task, include_status=True)
@@ -616,14 +630,21 @@ class Judge:
 
         if not tier1.passed:
             print("  Tier 1 FAILED — skipping evaluator")
+            self._report("tier-1 guard failed — skipping evaluator")
             result.passed = False
             return result
 
         print("  Tier 1 PASSED")
         print("  Tier 2: Running agentic evaluator...")
+        self._report("tier-1 guard ok")
+        self._report("tier-2 evaluating")
 
         evaluator = AgenticEvaluator(
-            self.llm, self.scan_root, eval_cap=self.eval_cap, config_root=self.workdir
+            self.llm,
+            self.scan_root,
+            eval_cap=self.eval_cap,
+            config_root=self.workdir,
+            progress=self._progress,
         )
         task_dict = self._task_context(task)
         if tier1_diagnostics:
@@ -676,10 +697,13 @@ class Judge:
         result.quality_snapshot = tier1.extra.get("quality_snapshot")
         if not tier1.passed:
             print("  Tier 1 FAILED — skipping evaluator")
+            self._report("tier-1 guard failed — skipping evaluator")
             result.passed = False
             return result
         print("  Tier 1 PASSED")
         print("  Tier 2 SKIPPED (--skip-tier2 flag)")
+        self._report("tier-1 guard ok")
+        self._report("tier-2 skipped (--skip-tier2)")
         result.passed = True
         result.pipeline_result = {"skipped_tier2": True, "tier1_passed": True}
         return result

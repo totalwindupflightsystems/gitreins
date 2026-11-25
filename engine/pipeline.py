@@ -58,7 +58,7 @@ import shlex
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 import yaml
 
@@ -1263,6 +1263,7 @@ class Pipeline:
         *,
         persist_telemetry: bool = True,
         scan_root: str | None = None,
+        progress: Callable[[str], None] | None = None,
     ) -> None:
         self.workdir = os.path.abspath(workdir)
         self.scan_root = os.path.abspath(scan_root or workdir)
@@ -1272,6 +1273,11 @@ class Pipeline:
         self._stage_context: StageContext | None = None
         self._diff_digest = self._compute_diff_digest()
         self._llm = llm  # Can be injected by Judge
+        # DF-034: optional phase callback forwarded to every ai_eval step's
+        # evaluator, so a pipeline-driven tier-2 reports its iterations the
+        # same way the legacy path does. None (every existing caller) is
+        # silent, as before.
+        self._progress = progress
         # EVID-003: the judge's token telemetry is appended to
         # ``<workdir>/.gitreins/usage.jsonl`` — a write INSIDE the graded tree.
         # An ephemeral judge run (``persist_telemetry=False``) leaves nothing
@@ -1317,6 +1323,15 @@ class Pipeline:
             stage_id = stage_def.get("id", f"stage_{len(self._stage_results)}")
             logger.info("Running stage: %s", stage_id)
 
+            # DF-034: name each phase as it happens. An ai_eval stage reports
+            # before its (long, silent) evaluator loop starts; the evaluator's
+            # own iterations and judging then report through the callback. The
+            # guard is named the moment its stage lands — never after the
+            # whole run, which would print "tier-1 guard ok" after the
+            # tier-2 lines it precedes.
+            if self._stage_has_ai_eval(stage_def):
+                self._report("tier-2 evaluating")
+
             if stage_def.get("parallel"):
                 result = self._run_parallel_stage(stage_id, stage_def, task)
             else:
@@ -1337,8 +1352,24 @@ class Pipeline:
 
             self._stage_results[stage_id] = result
             self._stage_context = self._context_from_stage(result)
+            if stage_id == "tier1":
+                # DF-034: one line per evaluator phase — the guard closes here,
+                # in run order, whether or not the evaluator stage follows.
+                self._report("tier-1 guard ok" if result.passed else "tier-1 guard failed")
 
         return self._compile_results()
+
+    @staticmethod
+    def _stage_has_ai_eval(stage_def: dict[str, Any]) -> bool:
+        """True when the stage (or any of its steps) runs an LLM evaluator."""
+        if stage_def.get("type") == "ai_eval":
+            return True
+        return any(step.get("type") == "ai_eval" for step in stage_def.get("steps", []))
+
+    def _report(self, message: str) -> None:
+        """Emit one phase line through the optional progress callback (DF-034)."""
+        if self._progress is not None:
+            self._progress(message)
 
     def _check_condition(self, condition: str | None, task: dict[str, Any]) -> bool:
         """Evaluate a condition expression.
@@ -1783,11 +1814,20 @@ class Pipeline:
                 ),
             )
             evaluator = AgenticEvaluator(
-                self._llm, self.scan_root, eval_cap=eval_cap, config_root=self.workdir
+                self._llm,
+                self.scan_root,
+                eval_cap=eval_cap,
+                config_root=self.workdir,
+                progress=self._progress,
             )
         else:
             # Nothing set in the step — defer to .gitreins/config.yaml
-            evaluator = AgenticEvaluator(self._llm, self.scan_root, config_root=self.workdir)
+            evaluator = AgenticEvaluator(
+                self._llm,
+                self.scan_root,
+                config_root=self.workdir,
+                progress=self._progress,
+            )
 
         # GR-234: make the immediate predecessor available to the evaluator's
         # input prompt. Do not add the key for the first stage: preserving the
