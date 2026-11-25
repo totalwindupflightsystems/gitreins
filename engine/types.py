@@ -162,8 +162,8 @@ class GuardResult:
                 parts.extend(notes)
                 # One line, no newlines: a DID-NOT-RUN reason or a crash text
                 # can itself carry control characters via the tool output.
-                detail = " — " + "; ".join(parts)
-                return _truncate_line(" ".join(detail.split()), 200)
+                detail = " — " + "; ".join(" ".join(part.split()) for part in parts)
+                return _truncate_line(detail, 200)
             if clean_tools:
                 return " — clean"
             return ""
