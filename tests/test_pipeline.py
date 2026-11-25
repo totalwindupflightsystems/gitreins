@@ -1740,7 +1740,9 @@ class TestSecretsScannerAttribution:
         fake_bin = tmp_path / "bin"
         fake_bin.mkdir()
         fake_gitleaks = fake_bin / "gitleaks"
-        fake_gitleaks.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$FAKE_GITLEAKS_ARGS"\n')
+        fake_gitleaks.write_text(
+            '#!/bin/sh\nprintf "%s\\n" "$@" > "$FAKE_GITLEAKS_ARGS"\nprintf "PWD=%s\\n" "$PWD" >> "$FAKE_GITLEAKS_ARGS"\n'
+        )
         fake_gitleaks.chmod(0o755)
         args_file = tmp_path / "gitleaks-args.txt"
         env = dict(
@@ -1758,8 +1760,10 @@ class TestSecretsScannerAttribution:
         assert "source.py" in proc.stdout
         assert "outside.py" not in proc.stdout
         args = args_file.read_text()
+        # GR-GITLEAKS-SOURCE: the argv passes `--source .` and the cwd line
+        # proves the cd landed exactly on the resolved scan root.
         assert "--source" in args
-        assert str(project) in args
+        assert f"PWD={project}\n" in args
 
     """DF-GITREINS-POC-15: the scanner that ran is machine-readable."""
 
@@ -1779,7 +1783,9 @@ class TestSecretsScannerAttribution:
         fake_bin = tmp_path / "bin"
         fake_bin.mkdir()
         fake_gitleaks = fake_bin / "gitleaks"
-        fake_gitleaks.write_text('#!/bin/sh\nprintf "%s\\n" "$@" > "$FAKE_GITLEAKS_ARGS"\n')
+        fake_gitleaks.write_text(
+            '#!/bin/sh\nprintf "%s\\n" "$@" > "$FAKE_GITLEAKS_ARGS"\nprintf "PWD=%s\\n" "$PWD" >> "$FAKE_GITLEAKS_ARGS"\n'
+        )
         fake_gitleaks.chmod(0o755)
         args_file = tmp_path / "gitleaks-args.txt"
         env = dict(
@@ -1797,7 +1803,9 @@ class TestSecretsScannerAttribution:
 
         assert proc.returncode == 0, proc.stderr
         assert not (control / "marker").exists()
-        assert str(project) in args_file.read_text()
+        # GR-GITLEAKS-SOURCE: the (quoted) cd target must land the scan cwd
+        # exactly on the resolved root — metachars intact, nothing executed.
+        assert f"PWD={project}\n" in args_file.read_text()
 
     def test_gitleaks_config_quotes_a_path_with_single_quotes(self, tmp_path: Path) -> None:
         import json
@@ -1820,9 +1828,10 @@ class TestSecretsScannerAttribution:
         GOMAXPROCS cap — the --no-color/--no-banner flags still travel."""
         cmd = _secrets_step_run(tmp_workdir)
         assert (
-            f"gitleaks detect --source {shlex.quote(str(tmp_workdir))} "
+            "gitleaks detect --source . "
             "--no-git --no-banner --no-color" in cmd
         )
+        assert f"cd {shlex.quote(str(tmp_workdir))} && " in cmd
         assert "export GOMAXPROCS=4;" in cmd
 
     def test_parse_secrets_scanners_both(self) -> None:

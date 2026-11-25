@@ -163,17 +163,22 @@ class TestScopeRefusal:
 
 class TestContainedScope:
     def test_scan_source_is_absolute_inside_the_repo_root(self, tmp_path: Path) -> None:
-        """A contained workdir sources its realpath — never a bare ``.`` that
-        resolves wherever the step's cwd lands."""
+        """The step cd's into the realpath-resolved repo root and passes
+        ``--source .`` (GR-GITLEAKS-SOURCE): a relative source reports
+        relative file paths, so repo allowlist regexes anchored ``^...``
+        match. The cd target itself stays absolute and contained — never a
+        bare ``.`` that resolves wherever the step's cwd lands."""
         repo = tmp_path / "repo"
         _init_repo(repo)
         cmd = _secrets_step_run(str(repo), {})
-        assert f"--source {shlex.quote(str(repo))}" in cmd
-        assert "--source ." not in cmd
+        assert f"cd {shlex.quote(str(repo))} && " in cmd
+        assert "gitleaks detect --source . --no-git" in cmd
+        assert f"--source {shlex.quote(str(repo))}" not in cmd
 
     def test_scan_root_inside_a_repo_is_allowed(self, tmp_path: Path) -> None:
         """An explicit scan root that lives INSIDE a repo keeps grading that
-        contained scope (a tracked subpath is a sanctioned source)."""
+        contained scope (a tracked subpath is a sanctioned source): the cd
+        target is the subpath, the gitleaks argv stays ``--source .``."""
         repo = tmp_path / "repo"
         _init_repo(repo)
         sub = repo / "src"
@@ -181,7 +186,8 @@ class TestContainedScope:
         fake_bin, args_file = _fake_gitleaks(tmp_path)
 
         cmd = _secrets_step_run(str(repo), {}, str(sub))
-        assert f"--source {shlex.quote(str(sub))}" in cmd
+        assert f"cd {shlex.quote(str(sub))} && " in cmd
+        assert "gitleaks detect --source . --no-git" in cmd
 
         proc = _run_step(
             cmd,
@@ -201,7 +207,7 @@ class TestParallelismCap:
         _init_repo(repo)
         cmd = _secrets_step_run(str(repo), {})
         assert f"export GOMAXPROCS={GITLEAKS_MAX_PROCS};" in cmd
-        assert f"gitleaks detect --source {shlex.quote(str(repo))} --no-git" in cmd
+        assert f"cd {shlex.quote(str(repo))} && " in cmd and "gitleaks detect --source . --no-git" in cmd
         # The cap is named in the evidence (TRUST-003 attribution).
         assert f"secrets: gitleaks parallelism=GOMAXPROCS={GITLEAKS_MAX_PROCS}" in cmd
 
