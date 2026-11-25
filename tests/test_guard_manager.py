@@ -31,6 +31,7 @@ from engine.guard_manager import (
     write_guard_log,
 )
 from engine import security_stages
+from engine.static_analysis import StaticCheckResult
 from engine.types import (
     SCANNER_CLEAN,
     SCANNER_NOT_RUN,
@@ -2886,7 +2887,10 @@ class TestStaticAnalysisGuardHonesty:
 
         with (
             patch("engine.static_analysis.find_tool", side_effect=fake_find),
-            patch("engine.static_analysis.run_static_check", return_value=[]),
+            patch(
+                "engine.static_analysis.run_static_check",
+                return_value=StaticCheckResult(ran=True),
+            ),
         ):
             result = manager._check_static_analysis()
 
@@ -2901,7 +2905,10 @@ class TestStaticAnalysisGuardHonesty:
 
         with (
             patch("engine.static_analysis.find_tool", side_effect=lambda tool: f"/fake/{tool}"),
-            patch("engine.static_analysis.run_static_check", return_value=[]),
+            patch(
+                "engine.static_analysis.run_static_check",
+                return_value=StaticCheckResult(ran=True),
+            ),
         ):
             result = manager._check_static_analysis()
 
@@ -2912,16 +2919,206 @@ class TestStaticAnalysisGuardHonesty:
     def test_findings_from_an_installed_tool_still_fail(self, tmp_path: Path) -> None:
         """The honesty check must not swallow a real diagnostic."""
         manager = self._manager(tmp_path, ["mypy"])
-        diag = [{"file": "main.py", "line": 2, "severity": "error", "message": "boom"}]
 
         with (
             patch("engine.static_analysis.find_tool", return_value="/fake/mypy"),
-            patch("engine.static_analysis.run_static_check", return_value=diag),
+            patch(
+                "engine.static_analysis.run_static_check",
+                return_value=StaticCheckResult(
+                    ran=True,
+                    diagnostics=[
+                        {"file": "main.py", "line": 2, "severity": "error", "message": "boom"}
+                    ],
+                ),
+            ),
         ):
             result = manager._check_static_analysis()
 
         assert result.passed is False
         assert "main.py:2 [mypy] boom" in result.output
+
+
+# ── DF-028: "could not run" is never "clean" — npx wrapper, broken tool, reason surfacing ──
+
+
+class TestStaticAnalysisDidNotRun:
+    """DF-028: a configured tool that could not run must surface its reason.
+
+    Three lies this class pins shut:
+    - `find_tool` accepted "npx pyright" because npx existed (npx would fetch
+      the package at check time), so an absent pyright was announced enabled
+      and its empty result rendered "pyright — clean".
+    - `run_static_check` returned [] for BOTH "ran, zero diagnostics" and
+      "could not run", so a timeout/crash/invalid-JSON became "clean".
+    - guard_manager only skipped when EVERY tool was missing, so one working
+      tool (mypy) masked a broken one (pyright) behind a bare ✓.
+    """
+
+    @staticmethod
+    def _manager(tmp_path: Path, tools: object) -> object:
+        (tmp_path / "main.py").write_text("def add(a, b):\n    return a + b\n", encoding="utf-8")
+        (tmp_path / "pyproject.toml").write_text("[project]\nname = 'consumer'\n", encoding="utf-8")
+        return GuardManager(
+            str(tmp_path),
+            {
+                "guards": {
+                    "secrets": False,
+                    "lint": False,
+                    "tests": False,
+                    "static_analysis": True,
+                    "static_analysis_tools": {"python": list(tools)},
+                }
+            },
+        )
+
+    def test_tool_that_could_not_run_is_never_clean(self, tmp_path: Path) -> None:
+        """mypy runs clean, pyright returns ran=False → the cell names pyright
+        and its reason; the run log can never record 'pyright — clean'."""
+        manager = self._manager(tmp_path, ["mypy", "pyright"])
+
+        def fake_check(tool: str, _workdir: str, timeout: float = 120.0) -> object:
+            if tool == "mypy":
+                return StaticCheckResult(ran=True)
+            return StaticCheckResult(ran=False, reason="returned invalid JSON")
+
+        with (
+            patch("engine.static_analysis.find_tool", side_effect=lambda tool: f"/fake/{tool}"),
+            patch("engine.static_analysis.run_static_check", side_effect=fake_check),
+        ):
+            result = manager._check_static_analysis()
+
+        assert result.skipped is False
+        assert "mypy — clean" in result.output
+        assert "pyright — DID NOT RUN (returned invalid JSON)" in result.output
+        assert "pyright — clean" not in result.output
+        assert result.passed is True  # did-not-run is surfaced, not failed
+
+    def test_every_tool_could_not_run_is_a_skip_with_reasons(self, tmp_path: Path) -> None:
+        """No tool ran (all ran=False) → skip naming each tool and its reason."""
+        manager = self._manager(tmp_path, ["mypy", "pyright"])
+
+        with (
+            patch("engine.static_analysis.find_tool", side_effect=lambda tool: f"/fake/{tool}"),
+            patch(
+                "engine.static_analysis.run_static_check",
+                side_effect=lambda tool, _w, timeout=120.0: StaticCheckResult(
+                    ran=False, reason=f"{tool} timed out"
+                ),
+            ),
+        ):
+            result = manager._check_static_analysis()
+
+        assert result.passed is True
+        assert result.skipped is True
+        assert "mypy did not run" in result.skip_reason
+        assert "pyright did not run" in result.skip_reason
+        assert "clean" not in result.output
+
+    def test_crashing_tool_is_surfaced_not_silently_dropped(self, tmp_path: Path) -> None:
+        """A run_static_check exception is a did-not-run with a reason — the
+        old code `continue`d silently and could pass as clean."""
+        manager = self._manager(tmp_path, ["mypy"])
+
+        def boom(tool: str, _workdir: str, timeout: float = 120.0) -> object:
+            raise RuntimeError(f"{tool} exploded")
+
+        with (
+            patch("engine.static_analysis.find_tool", return_value="/fake/mypy"),
+            patch("engine.static_analysis.run_static_check", side_effect=boom),
+        ):
+            result = manager._check_static_analysis()
+
+        assert result.skipped is True
+        assert "mypy did not run" in result.skip_reason
+        assert "exploded" in result.skip_reason
+
+    def test_npx_only_pyright_is_never_recorded_clean(self, tmp_path: Path) -> None:
+        """DF-028 AC1: npx cannot resolve pyright → find_tool returns None for
+        pyright (the npx wrapper is rejected), mypy grades the tree, and the
+        output names pyright as not-installed — never 'pyright — clean'."""
+        manager = self._manager(tmp_path, ["mypy", "pyright"])
+
+        def fake_find(tool: str) -> object:
+            return "/fake/bin/mypy" if tool == "mypy" else None
+
+        with (
+            patch("engine.static_analysis.find_tool", side_effect=fake_find),
+            patch(
+                "engine.static_analysis.run_static_check",
+                return_value=StaticCheckResult(ran=True),
+            ),
+        ):
+            result = manager._check_static_analysis()
+
+        assert result.passed is True
+        assert result.skipped is False
+        assert "mypy — clean" in result.output
+        assert "pyright — not installed (skipped)" in result.output
+        assert "pyright — clean" not in result.output
+
+    # ── AC4: real (fake-binary) pyright through the whole subprocess path ──
+
+    @staticmethod
+    def _fake_pyright(tmp_path: Path, script_body: str) -> str:
+        """Write an executable fake `pyright` on a scratch bin dir; returns the
+        dir to prepend to PATH."""
+        bindir = tmp_path / "fake-bin"
+        bindir.mkdir(exist_ok=True)
+        fake = bindir / "pyright"
+        fake.write_text(f"#!/bin/sh\n{script_body}\n", encoding="utf-8")
+        fake.chmod(0o755)
+        return str(bindir)
+
+    def test_real_fake_pyright_clean_tree_reports_clean(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC4: a working pyright on a clean tree → 'pyright — clean'."""
+        monkeypatch.setenv(
+            "PATH",
+            self._fake_pyright(tmp_path, "echo '{\"generalDiagnostics\": []}'")
+            + os.pathsep
+            + os.environ.get("PATH", ""),
+        )
+        manager = self._manager(tmp_path, ["pyright"])
+
+        result = manager._check_static_analysis()
+
+        assert result.skipped is False
+        assert result.passed is True
+        assert "pyright — clean" in result.output
+
+    def test_real_fake_pyright_type_error_fails_the_gate(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """AC4: a working pyright on a tree with a type error → FAIL with the
+        diagnostic rendered."""
+        error_json = json.dumps(
+            {
+                "generalDiagnostics": [
+                    {
+                        "file": "main.py",
+                        "severity": "error",
+                        "message": "Argument of type str cannot be assigned to int",
+                        "rule": "reportArgumentType",
+                        "range": {"start": {"line": 1, "character": 11}},
+                    }
+                ]
+            }
+        )
+        monkeypatch.setenv(
+            "PATH",
+            self._fake_pyright(tmp_path, f"echo '{error_json}'")
+            + os.pathsep
+            + os.environ.get("PATH", ""),
+        )
+        manager = self._manager(tmp_path, ["pyright"])
+
+        result = manager._check_static_analysis()
+
+        assert result.passed is False
+        assert "main.py:2 [pyright]" in result.output
+        assert "reportArgumentType" not in result.output  # message rendered, code via message
+        assert "Argument of type str" in result.output
 
 
 # ── REVIEW-GITREINS-018: a language that selects no tool is a skip ──
@@ -2996,7 +3193,10 @@ class TestStaticAnalysisNoToolSelected:
 
         with (
             patch("engine.static_analysis.find_tool", side_effect=lambda tool: f"/fake/{tool}"),
-            patch("engine.static_analysis.run_static_check", return_value=[]),
+            patch(
+                "engine.static_analysis.run_static_check",
+                return_value=StaticCheckResult(ran=True),
+            ),
         ):
             result = manager._check_static_analysis()
 

@@ -33,7 +33,7 @@ import re
 import shutil
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 logger = logging.getLogger("gitreins.static_analysis")
 
@@ -94,6 +94,23 @@ class StaticDiag:
         }
 
 
+@dataclass
+class StaticCheckResult:
+    """Outcome of one static-analysis run (DF-028).
+
+    ``run_static_check`` used to return a bare diagnostic list, so "the tool
+    ran and found nothing" and "the tool could not run" were both ``[]`` and
+    consumers rendered the latter as "<tool> — clean" — an affirmative PASS
+    for a gate that never executed. ``ran=False`` always carries a human
+    -readable ``reason``; consumers must surface it, never fold it into
+    "clean".
+    """
+
+    ran: bool
+    reason: str = ""
+    diagnostics: list[dict[str, object]] = field(default_factory=list)
+
+
 # ── Tool discovery ──────────────────────────────────────────────────────
 
 _TOOL_BINARIES = {
@@ -126,6 +143,31 @@ def _install_help(tool: str) -> str:
     return _TOOL_INSTALL_GUIDE.get(tool, f"Install {tool} from your package manager")
 
 
+# DF-028: "npx <pkg>" resolves even when <pkg> is not installed — npx would
+# fetch it at check time. Probe whether the package resolves LOCALLY and cache
+# the answer per package so repeated find_tool() calls stay cheap.
+_NPX_PROBE_CACHE: dict[str, bool] = {}
+
+
+def _npx_package_resolves(package: str) -> bool:
+    """True when ``npx --no-install <package>`` can resolve without fetching."""
+    cached = _NPX_PROBE_CACHE.get(package)
+    if cached is not None:
+        return cached
+    try:
+        proc = subprocess.run(
+            ["npx", "--no-install", package, "--version"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        ok = proc.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        ok = False
+    _NPX_PROBE_CACHE[package] = ok
+    return ok
+
+
 def find_tool(tool_name: str) -> str | None:
     """Return the path to a tool binary, or None if not found."""
     candidates = _TOOL_BINARIES.get(tool_name, [tool_name])
@@ -134,6 +176,11 @@ def find_tool(tool_name: str) -> str | None:
         if "/" in candidate or " " in candidate:
             parts = candidate.split()
             if shutil.which(parts[0]):
+                # DF-028: an npx wrapper on PATH is not evidence the package
+                # is installed — require the package itself to resolve locally
+                # before accepting the candidate.
+                if parts[0] == "npx" and len(parts) > 1 and not _npx_package_resolves(parts[1]):
+                    continue
                 return candidate  # Return the full command string
             continue
         path = shutil.which(candidate)
@@ -645,16 +692,18 @@ _TEXT_PARSERS: dict[str, Parser] = {
 }
 
 
-def run_static_check(tool: str, workdir: str, timeout: float = 120.0) -> list[dict[str, object]]:
-    """Run a static analysis tool against a directory and return diagnostics.
+def run_static_check(tool: str, workdir: str, timeout: float = 120.0) -> StaticCheckResult:
+    """Run a static analysis tool against a directory.
 
     Args:
         tool: Tool name (e.g. "mypy", "pyright", "sorbet")
         workdir: Absolute path to the project root or target directory
 
     Returns:
-        List of normalized diagnostic dicts: {file, line, severity, message, code, tool}
-        Empty list if the tool binary is not found (graceful fallback).
+        A StaticCheckResult that distinguishes "the tool ran and found nothing"
+        (ran=True, empty diagnostics) from "the tool could not be run"
+        (ran=False + reason: absent binary, timeout, crash, unparseable output
+        — DF-028). Consumers must never render a ran=False outcome as "clean".
     """
     # Resolve the binary
     binary = find_tool(tool)
@@ -666,7 +715,9 @@ def run_static_check(tool: str, workdir: str, timeout: float = 120.0) -> list[di
             tool,
             _install_help(tool),
         )
-        return []
+        return StaticCheckResult(
+            ran=False, reason=f"not found on PATH — install with: {_install_help(tool)}"
+        )
 
     # Build command
     cmd = _build_command(tool, binary, workdir)
@@ -683,13 +734,13 @@ def run_static_check(tool: str, workdir: str, timeout: float = 120.0) -> list[di
         )
     except subprocess.TimeoutExpired:
         logger.warning("%s timed out after %ss", tool, timeout)
-        return []
+        return StaticCheckResult(ran=False, reason=f"timed out after {timeout:g}s")
     except FileNotFoundError:
         logger.warning("%s binary not found: %s", tool, binary)
-        return []
+        return StaticCheckResult(ran=False, reason=f"binary not found: {binary}")
     except Exception as exc:
         logger.warning("%s failed: %s", tool, exc)
-        return []
+        return StaticCheckResult(ran=False, reason=f"failed: {exc}")
 
     stdout = result.stdout.strip()
     stderr = result.stderr.strip()
@@ -711,13 +762,13 @@ def run_static_check(tool: str, workdir: str, timeout: float = 120.0) -> list[di
             diags = parser(data, tool=tool)
         except json.JSONDecodeError:
             logger.warning("%s returned invalid JSON", tool)
-            return []
+            return StaticCheckResult(ran=False, reason="returned invalid JSON")
     elif tool in _TEXT_PARSERS:
         parser = _TEXT_PARSERS[tool]
         diags = parser(output, tool=tool)
     else:
         logger.warning("No parser available for tool '%s'", tool)
-        return []
+        return StaticCheckResult(ran=False, reason="no parser available")
 
     # Normalize paths relative to workdir
     for d in diags:
@@ -727,7 +778,7 @@ def run_static_check(tool: str, workdir: str, timeout: float = 120.0) -> list[di
         if d.file.startswith(workdir):
             d.file = os.path.relpath(d.file, workdir)
 
-    return [d.to_dict() for d in diags]
+    return StaticCheckResult(ran=True, diagnostics=[d.to_dict() for d in diags])
 
 
 def _build_command(tool: str, binary: str, workdir: str) -> list[str]:

@@ -3049,8 +3049,7 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
         all_diagnostics: list[dict[str, Any]] = []
         for tool in lang_tools:
             try:
-                diags = run_static_check(tool, target_dir)
-                all_diagnostics.extend(diags)
+                result = run_static_check(tool, target_dir)
             except Exception as exc:
                 all_diagnostics.append(
                     {
@@ -3060,6 +3059,22 @@ Output ONLY the JSON verdict when done — no markdown fences, no extra text."""
                         "line": 0,
                         "severity": "error",
                         "message": f"Tool failed: {exc}",
+                        "code": "",
+                    }
+                )
+                continue
+            if result.ran:
+                all_diagnostics.extend(result.diagnostics)
+            else:
+                # DF-028: "could not run" is not "no diagnostics" — surface it.
+                all_diagnostics.append(
+                    {
+                        "tool": tool,
+                        "error": result.reason,
+                        "file": "",
+                        "line": 0,
+                        "severity": "error",
+                        "message": f"Tool did not run: {result.reason}",
                         "code": "",
                     }
                 )

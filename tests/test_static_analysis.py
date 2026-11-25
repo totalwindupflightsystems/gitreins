@@ -21,6 +21,7 @@ from engine.static_analysis import (
     _parse_staticcheck,
     _parse_clippy_json,
     _parse_eslint_json,
+    _npx_package_resolves,
     find_tool,
     list_available_tools,
     run_static_check,
@@ -303,17 +304,48 @@ class TestFindTool:
         mock_which.assert_called_once_with("mypy")
 
     def test_find_tool_compound_candidate(self) -> None:
-        """Compound candidate: bare binary absent, npx present → the full
-        'npx pyright' command string is returned, in candidate order."""
-        with patch(
-            "engine.static_analysis.shutil.which",
-            side_effect=lambda cmd: "/usr/bin/npx" if cmd == "npx" else None,
-        ) as mock_which:
+        """Compound candidate: bare binary absent, npx present AND the package
+        resolves locally → the full 'npx pyright' command string is returned,
+        in candidate order."""
+        with (
+            patch(
+                "engine.static_analysis.shutil.which",
+                side_effect=lambda cmd: "/usr/bin/npx" if cmd == "npx" else None,
+            ) as mock_which,
+            patch("engine.static_analysis._npx_package_resolves", return_value=True),
+        ):
             path = find_tool("pyright")
         assert path == "npx pyright"
         assert "pyright" in path
         # Lookup order: bare "pyright" first, then the compound head "npx".
         assert [c.args[0] for c in mock_which.call_args_list] == ["pyright", "npx"]
+
+    def test_find_tool_npx_wrapper_without_package_is_rejected(self) -> None:
+        """DF-028: npx on PATH is not evidence pyright is installed — when the
+        package cannot be resolved locally (npx would have to fetch it), the
+        wrapper candidate is rejected and find_tool returns None."""
+        with (
+            patch(
+                "engine.static_analysis.shutil.which",
+                side_effect=lambda cmd: "/usr/bin/npx" if cmd == "npx" else None,
+            ),
+            patch("engine.static_analysis._npx_package_resolves", return_value=False) as mock_probe,
+        ):
+            path = find_tool("pyright")
+        assert path is None
+        mock_probe.assert_called_once_with("pyright")
+
+    def test_find_tool_npx_probe_cache_hits(self) -> None:
+        """The package probe result is cached per package — a second probe does
+        not re-run npx."""
+        with (
+            patch("engine.static_analysis.subprocess.run") as mock_run,
+            patch.dict("engine.static_analysis._NPX_PROBE_CACHE", {}, clear=True),
+        ):
+            mock_run.return_value = MagicMock(returncode=0)
+            assert _npx_package_resolves("pyright") is True
+            assert _npx_package_resolves("pyright") is True
+        assert mock_run.call_count == 1
 
     def test_find_tool_unknown_tool_falls_back_to_name(self) -> None:
         """Unknown tool: candidates default to [name] — the name itself is
@@ -1028,12 +1060,13 @@ class TestRunStaticCheck:
             with patch("engine.static_analysis.subprocess.run", return_value=mock_result):
                 result = run_static_check("mypy", "/tmp/workdir")
 
-        assert len(result) == 3
-        assert result[0]["file"] == "main.py"
-        assert result[0]["line"] == 9
-        assert result[0]["severity"] == "error"
-        assert result[0]["tool"] == "mypy"
-        assert result[0]["code"] == "arg-type"
+        assert result.ran is True
+        assert len(result.diagnostics) == 3
+        assert result.diagnostics[0]["file"] == "main.py"
+        assert result.diagnostics[0]["line"] == 9
+        assert result.diagnostics[0]["severity"] == "error"
+        assert result.diagnostics[0]["tool"] == "mypy"
+        assert result.diagnostics[0]["code"] == "arg-type"
 
     def test_run_static_check_pyright(self, pyright_json_output: object) -> None:
         """Pyright with mocked subprocess returns normalized diagnostics
@@ -1046,48 +1079,59 @@ class TestRunStaticCheck:
             with patch("engine.static_analysis.subprocess.run", return_value=mock_result):
                 result = run_static_check("pyright", "/tmp/workdir")
 
-        assert len(result) == 2
+        assert result.ran is True
+        assert len(result.diagnostics) == 2
         # Path is relativized because it starts with workdir
-        assert result[0]["file"] == "main.py"
-        assert result[0]["line"] == 9
-        assert result[0]["severity"] == "error"
-        assert result[0]["code"] == "reportGeneralTypeIssues"
-        assert result[0]["tool"] == "pyright"
+        assert result.diagnostics[0]["file"] == "main.py"
+        assert result.diagnostics[0]["line"] == 9
+        assert result.diagnostics[0]["severity"] == "error"
+        assert result.diagnostics[0]["code"] == "reportGeneralTypeIssues"
+        assert result.diagnostics[0]["tool"] == "pyright"
 
     def test_run_static_check_tool_not_found(self) -> None:
-        """When tool is not found, returns empty list."""
+        """When tool is not found, it did not run — with a named reason."""
         with patch("engine.static_analysis.find_tool", return_value=None):
             result = run_static_check("nonexistent-tool", "/tmp/workdir")
-        assert result == []
+        assert result.ran is False
+        assert result.diagnostics == []
+        assert result.reason, "a did-not-run outcome must carry a reason"
 
     def test_run_static_check_timeout(self) -> None:
-        """When subprocess times out, returns empty list."""
+        """When subprocess times out, it did not run — with a named reason."""
         with patch("engine.static_analysis.find_tool", return_value="/usr/bin/mypy"):
             with patch(
                 "engine.static_analysis.subprocess.run",
                 side_effect=subprocess.TimeoutExpired(cmd="mypy", timeout=120),
             ):
                 result = run_static_check("mypy", "/tmp/workdir")
-        assert result == []
+        assert result.ran is False
+        assert result.diagnostics == []
+        assert "timed out" in result.reason
 
     def test_run_static_check_file_not_found(self) -> None:
-        """When subprocess raises FileNotFoundError, returns empty list."""
+        """When subprocess raises FileNotFoundError, it did not run."""
         with patch("engine.static_analysis.find_tool", return_value="/usr/bin/mypy"):
             with patch("engine.static_analysis.subprocess.run", side_effect=FileNotFoundError):
                 result = run_static_check("mypy", "/tmp/workdir")
-        assert result == []
+        assert result.ran is False
+        assert result.diagnostics == []
+        assert result.reason
 
     def test_run_static_check_generic_exception(self) -> None:
-        """When subprocess raises generic exception, returns empty list."""
+        """When subprocess raises generic exception, it did not run."""
         with patch("engine.static_analysis.find_tool", return_value="/usr/bin/mypy"):
             with patch(
                 "engine.static_analysis.subprocess.run", side_effect=PermissionError("denied")
             ):
                 result = run_static_check("mypy", "/tmp/workdir")
-        assert result == []
+        assert result.ran is False
+        assert result.diagnostics == []
+        assert "denied" in result.reason
 
     def test_run_static_check_invalid_json(self) -> None:
-        """When tool returns invalid JSON, returns empty list."""
+        """DF-028 AC3: non-JSON output from a JSON tool means the tool could
+        NOT be graded — ran=False with a reason, never an indistinguishable
+        empty list."""
         mock_result = MagicMock()
         mock_result.stdout = "not valid json"
         mock_result.stderr = ""
@@ -1095,7 +1139,23 @@ class TestRunStaticCheck:
         with patch("engine.static_analysis.find_tool", return_value="/usr/bin/pyright"):
             with patch("engine.static_analysis.subprocess.run", return_value=mock_result):
                 result = run_static_check("pyright", "/tmp/workdir")
-        assert result == []
+        assert result.ran is False
+        assert result.diagnostics == []
+        assert "invalid JSON" in result.reason
+
+    def test_run_static_check_empty_json_is_ran_with_zero_diagnostics(self) -> None:
+        """DF-028 AC3 control: valid JSON with no diagnostics is the OTHER arm
+        — ran=True, zero diagnostics. This is what "clean" is allowed to mean."""
+        mock_result = MagicMock()
+        mock_result.stdout = json.dumps({"generalDiagnostics": []})
+        mock_result.stderr = ""
+
+        with patch("engine.static_analysis.find_tool", return_value="/usr/bin/pyright"):
+            with patch("engine.static_analysis.subprocess.run", return_value=mock_result):
+                result = run_static_check("pyright", "/tmp/workdir")
+        assert result.ran is True
+        assert result.diagnostics == []
+        assert result.reason == ""
 
     def test_run_static_check_sorbet_stderr(self, sorbet_output_errors: object) -> None:
         """Sorbet reads diagnostics from stderr."""
@@ -1107,9 +1167,10 @@ class TestRunStaticCheck:
             with patch("engine.static_analysis.subprocess.run", return_value=mock_result):
                 result = run_static_check("sorbet", "/tmp/workdir")
 
-        assert len(result) == 2
-        assert result[0]["file"] == "main.rb"
-        assert result[0]["tool"] == "sorbet"
+        assert result.ran is True
+        assert len(result.diagnostics) == 2
+        assert result.diagnostics[0]["file"] == "main.rb"
+        assert result.diagnostics[0]["tool"] == "sorbet"
 
     def test_run_static_check_cppcheck(self, cppcheck_output_errors: object) -> None:
         """Cppcheck text output parsed through the text-parser path."""
@@ -1121,11 +1182,12 @@ class TestRunStaticCheck:
             with patch("engine.static_analysis.subprocess.run", return_value=mock_result):
                 result = run_static_check("cppcheck", "/tmp/workdir")
 
-        assert len(result) == 6
-        assert result[0]["file"] == "test.cpp"
-        assert result[0]["severity"] == "error"
-        assert result[0]["tool"] == "cppcheck"
-        assert result[0]["code"] == "uninitvar"
+        assert result.ran is True
+        assert len(result.diagnostics) == 6
+        assert result.diagnostics[0]["file"] == "test.cpp"
+        assert result.diagnostics[0]["severity"] == "error"
+        assert result.diagnostics[0]["tool"] == "cppcheck"
+        assert result.diagnostics[0]["code"] == "uninitvar"
 
     def test_run_static_check_staticcheck(self, staticcheck_output_errors: object) -> None:
         """staticcheck text output parsed through the text-parser path."""
@@ -1137,18 +1199,21 @@ class TestRunStaticCheck:
             with patch("engine.static_analysis.subprocess.run", return_value=mock_result):
                 result = run_static_check("staticcheck", "/tmp/workdir")
 
-        assert len(result) == 4
-        assert result[0]["file"] == "main.go"
-        assert result[0]["line"] == 10
-        assert result[0]["severity"] == "warning"
-        assert result[0]["tool"] == "staticcheck"
-        assert result[0]["code"] == "ST1005"
+        assert result.ran is True
+        assert len(result.diagnostics) == 4
+        assert result.diagnostics[0]["file"] == "main.go"
+        assert result.diagnostics[0]["line"] == 10
+        assert result.diagnostics[0]["severity"] == "warning"
+        assert result.diagnostics[0]["tool"] == "staticcheck"
+        assert result.diagnostics[0]["code"] == "ST1005"
 
     def test_run_static_check_staticcheck_not_found(self) -> None:
-        """staticcheck not installed returns empty list."""
+        """staticcheck not installed → ran=False with a reason."""
         with patch("engine.static_analysis.find_tool", return_value=None):
             result = run_static_check("staticcheck", "/tmp/workdir")
-        assert result == []
+        assert result.ran is False
+        assert result.diagnostics == []
+        assert result.reason
 
     def test_run_static_check_clippy(self, clippy_output: object) -> None:
         """Clippy JSON output parsed through the JSON-parser path."""
@@ -1160,15 +1225,18 @@ class TestRunStaticCheck:
             with patch("engine.static_analysis.subprocess.run", return_value=mock_result):
                 result = run_static_check("clippy", "/tmp/workdir")
 
-        assert len(result) == 2
-        assert result[0]["file"] == "src/main.rs"
-        assert result[0]["line"] == 5
-        assert result[0]["severity"] == "warning"
-        assert result[0]["tool"] == "clippy"
-        assert result[0]["code"] == "clippy::needless_return"
+        assert result.ran is True
+        assert len(result.diagnostics) == 2
+        assert result.diagnostics[0]["file"] == "src/main.rs"
+        assert result.diagnostics[0]["line"] == 5
+        assert result.diagnostics[0]["severity"] == "warning"
+        assert result.diagnostics[0]["tool"] == "clippy"
+        assert result.diagnostics[0]["code"] == "clippy::needless_return"
 
     def test_run_static_check_clippy_not_found(self) -> None:
-        """clippy not installed returns empty list."""
+        """clippy not installed → ran=False with a reason."""
         with patch("engine.static_analysis.find_tool", return_value=None):
             result = run_static_check("clippy", "/tmp/workdir")
-        assert result == []
+        assert result.ran is False
+        assert result.diagnostics == []
+        assert result.reason
