@@ -1,0 +1,11 @@
+{
+  "scheduler_tick_id": "gitreins-foreman-2026-11-25-07-31-24",
+  "composed_at": "2026-11-25T07:45:00Z",
+  "wave_budget": 3,
+  "tasks": [
+    {"id": "GR-MYPY-001", "worktree": "wt/GR-MYPY-001", "branch": "wt/GR-MYPY-001", "reason": "independent: engine static-analysis lane"},
+    {"id": "DF-032", "worktree": "wt/DF-032", "branch": "wt/DF-032", "reason": "independent: init timeout keys + config schema"},
+    {"id": "DF-034", "worktree": "wt/DF-034", "branch": "wt/DF-034", "reason": "independent: task-complete progress output"}
+  ],
+  "independence_note": "Disjoint regions: engine/guard_manager.py+guards.py vs engine/config*+cli.py init block vs cli.py task-complete block + evaluator. cli.py shared by DF-032/DF-034 in different regions; serial merge with per-merge gate."
+}
