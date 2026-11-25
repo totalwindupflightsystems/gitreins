@@ -1827,10 +1827,7 @@ class TestSecretsScannerAttribution:
         GR-244: the detect source is the realpath-resolved repo root under a
         GOMAXPROCS cap — the --no-color/--no-banner flags still travel."""
         cmd = _secrets_step_run(tmp_workdir)
-        assert (
-            "gitleaks detect --source . "
-            "--no-git --no-banner --no-color" in cmd
-        )
+        assert "gitleaks detect --source . --no-git --no-banner --no-color" in cmd
         assert f"cd {shlex.quote(str(tmp_workdir))} && " in cmd
         assert "export GOMAXPROCS=4;" in cmd
 

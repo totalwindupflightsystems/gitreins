@@ -207,7 +207,10 @@ class TestParallelismCap:
         _init_repo(repo)
         cmd = _secrets_step_run(str(repo), {})
         assert f"export GOMAXPROCS={GITLEAKS_MAX_PROCS};" in cmd
-        assert f"cd {shlex.quote(str(repo))} && " in cmd and "gitleaks detect --source . --no-git" in cmd
+        assert (
+            f"cd {shlex.quote(str(repo))} && " in cmd
+            and "gitleaks detect --source . --no-git" in cmd
+        )
         # The cap is named in the evidence (TRUST-003 attribution).
         assert f"secrets: gitleaks parallelism=GOMAXPROCS={GITLEAKS_MAX_PROCS}" in cmd
 

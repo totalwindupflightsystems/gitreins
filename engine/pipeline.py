@@ -2728,8 +2728,7 @@ def _secrets_step_run(
             # parity with GuardManager._check_secrets_full_tree, whose
             # docstring promises "the exact mode the Tier 1 judge step uses".
             scan_cmd = (
-                "gitleaks detect --source . "
-                '--no-git --no-banner --no-color --config "$_glcfg"'
+                'gitleaks detect --source . --no-git --no-banner --no-color --config "$_glcfg"'
             )
             # The cd runs OUTSIDE the timeout/nice-wrapped argv (the nice
             # prefix execs a PROGRAM, and `cd` is a shell builtin — a
