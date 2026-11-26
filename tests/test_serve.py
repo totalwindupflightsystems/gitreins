@@ -245,6 +245,153 @@ def test_stats_counts_fixture_verdicts(live_server: object) -> None:
     }
 
 
+_RESOLUTION_RECORD_MODEL = "typesafe/jev-1.13-20260917"
+
+
+def _nested_resolution_record() -> dict:
+    """The REAL on-disk shape persist_resolution writes (GR-229 rework).
+
+    Mirrors engine/persist.py build_resolution_record + ResolutionVerdict.to_dict
+    (engine/resolution.py): model/input_tokens/output_tokens/cost_usd live INSIDE
+    record["verdict"]; the top level carries only kind/source/band/probability/
+    missing_kind/question/task_title/evaluated_at and the nested "verdict" key.
+    """
+
+    def engine_entry(value: object) -> dict:
+        return {"file": value, "bytes": 1, "truncated": False}
+
+    return {
+        "kind": "resolution",
+        "source": "mcp.context_resolve",
+        "band": "PASS",
+        "probability": 0.93,
+        "missing_kind": None,
+        "question": "Does the change hold together?",
+        "task_title": "Does the change hold together?",
+        "evaluated_at": "2026-09-17T12:00:00Z",
+        "verdict": {
+            "question": "Does the change hold together?",
+            "verdict": "PASS",
+            "probability": 0.93,
+            "missing_kind": None,
+            "missing_kind_probability": None,
+            "evidence_quality": "SUFFICIENT",
+            "evidence_quality_score": 0.8,
+            "evidence_quality_legend": "ok",
+            "manifest": [engine_entry("state.md")],
+            "model": _RESOLUTION_RECORD_MODEL,
+            "request_id": "req-1",
+            "provider": "typesafe",
+            "tokens_estimated": False,
+            "input_tokens": 3000,
+            "output_tokens": 500,
+            "cost_usd": 0.012345,
+            "clipped": False,
+            "clip_disclosure": None,
+            "chars_dropped": 0,
+            "lines_dropped": 0,
+            "dropped_files": [],
+            "budget_exhausted": False,
+            "seeds": [],
+            "dependency_paths": {},
+            "named_paths_missing": [],
+            "abstain_reason": None,
+            "abstain_detail": None,
+            "abstain_action": None,
+            "attempts": [],
+            "exit_code": 0,
+            "notes": [],
+        },
+    }
+
+
+def test_stats_reads_usage_from_the_nested_resolution_verdict_shape(tmp_path: Path) -> None:
+    """The verdict record's own model/cost live under "verdict" on disk.
+
+    The tier-2 judge reproduced the live break on a real record: with the
+    reader only consulting top-level record.get("model")/record.get("cost_usd"),
+    /api/stats attributed the record to the config default and served
+    cost_usd=None/unpriced=1 (GR-229 rework). The reader must resolve the
+    nested fields, keep the record's model over the configured default (the
+    config default here deliberately differs) and count the record cost.
+    """
+    record = _nested_resolution_record()
+    verdict_dir = tmp_path / ".gitreins" / "history" / "2026-09-17" / "b1a2c3d4"
+    verdict_dir.mkdir(parents=True)
+    (verdict_dir / "verdict.json").write_text(json.dumps(record), encoding="utf-8")
+    (tmp_path / ".gitreins" / "config.yaml").write_text(
+        "defaults:\n  model: deepseek-v4-flash\n", encoding="utf-8"
+    )
+    subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True)
+
+    with running_server(str(tmp_path)) as address:
+        status, body = get(address, "/api/stats")
+
+    assert status == 200
+    payload = json_body(body)
+    usage_summary = payload["usage"]
+    assert usage_summary["judgements"] == 1
+    assert usage_summary["model"] == _RESOLUTION_RECORD_MODEL
+    assert usage_summary["model_source"] == "record"
+    assert usage_summary["priced"] == 1
+    assert usage_summary["unpriced"] == 0
+    assert usage_summary["cost_usd"] == 0.012345
+
+
+def test_verdict_usage_records_prefers_nested_and_falls_back_to_top_level(
+    tmp_path: Path,
+) -> None:
+    """Both on-disk shapes feed the same record fields.
+
+    A resolution record carries its usage under record["verdict"]; a legacy/
+    synthetic record that carried model/tokens/cost flat still resolves — and
+    the nested fields win when both levels carry them.
+    """
+    history = tmp_path / ".gitreins" / "history"
+    nested = history / "2026-09-17" / "b1a2c3d4"
+    nested.mkdir(parents=True)
+    (nested / "verdict.json").write_text(json.dumps(_nested_resolution_record()), encoding="utf-8")
+    legacy = history / "2026-09-18" / "c2b3d4e5"
+    legacy.mkdir(parents=True)
+    (legacy / "verdict.json").write_text(
+        json.dumps(
+            {
+                "evaluated_at": "2026-09-18T12:00:00Z",
+                "model": "legacy-flat-model",
+                "input_tokens": 10,
+                "output_tokens": 2,
+                "cost_usd": 0.5,
+            }
+        ),
+        encoding="utf-8",
+    )
+    both = history / "2026-09-19" / "d3c4e5f6"
+    both.mkdir(parents=True)
+    both_record = _nested_resolution_record()
+    both_record["evaluated_at"] = "2026-09-19T12:00:00Z"
+    both_record["model"] = "top-level-imposter"
+    (both / "verdict.json").write_text(json.dumps(both_record), encoding="utf-8")
+
+    records = serve.verdict_usage_records(str(tmp_path))
+
+    assert records["2026-09-17/b1a2c3d4"] == {
+        "evaluated_at": 1789646400.0,
+        "model": _RESOLUTION_RECORD_MODEL,
+        "tokens_in": 3000,
+        "tokens_out": 500,
+        "cost_usd": 0.012345,
+    }
+    assert records["2026-09-18/c2b3d4e5"] == {
+        "evaluated_at": 1789732800.0,
+        "model": "legacy-flat-model",
+        "tokens_in": 10,
+        "tokens_out": 2,
+        "cost_usd": 0.5,
+    }
+    # Nested fields win over a stray top-level key of the same name.
+    assert records["2026-09-19/d3c4e5f6"]["model"] == _RESOLUTION_RECORD_MODEL
+
+
 def test_metrics_endpoint_exports_five_core_metric_families(live_server: object) -> None:
     status, body = get(live_server, "/metrics")
 
