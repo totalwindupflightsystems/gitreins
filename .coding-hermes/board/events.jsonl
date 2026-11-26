@@ -1414,3 +1414,4 @@
 {"id":1794171000000000253,"timestamp":"2026-11-26 06:38:39.63087","event_type":"task_completed","task_id":"QA-GITREINS-15","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
 {"id":1794171000000000254,"timestamp":"2026-11-26 07:02:21.072427","event_type":"task_created","task_id":"SCHED-GAP-17082","actor":"foreman","detail":"{\"id\":\"SCHED-GAP-17082\",\"status\":\"in_progress\"}","tick_number":null}
 {"id":1794171000000000255,"timestamp":"2026-11-26 07:48:31.02428","event_type":"task_completed","task_id":"SCHED-GAP-17082","actor":"foreman","detail":"{\"status\":\"complete\"}","tick_number":null}
+{"id":1794171000000000256,"timestamp":"2026-11-26 08:10:10.341606","event_type":"task_updated","task_id":"QA-GITREINS-17","actor":"foreman","detail":"{\"status\":\"in_progress\"}","tick_number":null}
