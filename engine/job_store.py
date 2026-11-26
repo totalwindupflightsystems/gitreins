@@ -503,6 +503,20 @@ class JobHeartbeat:
 
     def start(self) -> "JobHeartbeat":
         if self._thread is None:
+            # INT-FLAKE-10: beat BEFORE the thread's first interval wait, and
+            # make that beat durable (save_job fsyncs) before start() returns.
+            # Until the first beat lands, the record's freshness rests entirely
+            # on the claim-time stamp: a worker descheduled between claim and
+            # start — or a dispatcher liveness read/reap landing in that
+            # window — would see a cap-old heartbeat and orphan a job whose
+            # heartbeat thread is live. The observed CI signature was exactly
+            # this: "job looked orphaned mid-run after 0 beats". Callers save
+            # a freshly stamped record right before start(), and none holds
+            # the per-job lease here, so the synchronous beat cannot deadlock
+            # or clobber a terminal write (it only refreshes heartbeat_at on
+            # a still-running record).
+            if self.beat():
+                self.beats += 1
             self._thread = threading.Thread(
                 target=self._run,
                 name=f"job-heartbeat-{self.job_id}",

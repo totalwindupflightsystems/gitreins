@@ -361,6 +361,40 @@ def test_heartbeat_keeps_a_long_job_live(
     assert "heartbeat is stale" in why_now
 
 
+def test_heartbeat_first_beat_is_durable_before_first_liveness_read(
+    store_dir: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """INT-FLAKE-10: start() must beat durably before any liveness read.
+
+    Deterministic interleaving of the CI flake ("job looked orphaned mid-run
+    after 0 beats", hosted run 42405312216): the worker claimed the record and
+    its heartbeat thread is live, but the first beat has not landed when a
+    liveness read runs (slow start under xdist load). Here the claim stamp is
+    already past the stale cap at start() and the thread's own first beat is a
+    full interval (30 s) away, so a start() that only spawns the thread leaves
+    the record orphaned; a start() that beats synchronously refreshes it
+    before the read.
+    """
+    import time as _time
+
+    monkeypatch.setenv("GITREINS_JOB_HEARTBEAT_STALE_SECONDS", "0.5")
+    job = make_job("t-first-beat", "/r")
+    job.update(worker_identity(WORKER_KIND_THREAD))
+    # The claim stamp aged past the cap before the heartbeat thread got to
+    # beat: the record looks orphaned even though the thread is live.
+    job["heartbeat_at"] = _time.time() - 0.6
+    save_job(job)
+    hb = JobHeartbeat(job["id"], interval=30).start()
+    try:
+        live, why = worker_liveness(load_job(job["id"]))
+        assert live is True, (
+            f"live heartbeat thread left a cap-old record orphaned after {hb.beats} beats: {why}"
+        )
+    finally:
+        hb.stop()
+    assert hb.beats >= 1
+
+
 def test_heartbeat_does_not_resurrect_a_terminal_record(store_dir: object) -> None:
     """stop() joins the thread, so a terminal write always wins."""
     import time as _time
