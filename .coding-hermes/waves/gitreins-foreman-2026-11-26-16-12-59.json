@@ -1,0 +1,27 @@
+{
+  "scheduler_tick_id": "gitreins-foreman-2026-11-26-16-12-59",
+  "created_at_utc": "2026-11-26T16:15:00Z",
+  "wave_budget": 2,
+  "workers": [
+    {
+      "task_id": "DF-033",
+      "worktree": "/home/kara/worktrees/gitreins-DF-033",
+      "branch": "wt/DF-033",
+      "base": "main",
+      "base_sha": "b63bbf8f",
+      "model": "glm-5.3-flash",
+      "provider": "opencode-go-2",
+      "brief_file": "/tmp/gitreins-foreman-DF-033-brief-162611161259.txt"
+    },
+    {
+      "task_id": "README-015",
+      "worktree": "/home/kara/worktrees/gitreins-README-015",
+      "branch": "wt/README-015",
+      "base": "main",
+      "base_sha": "b63bbf8f",
+      "model": "glm-5.3-flash",
+      "provider": "opencode-go-2",
+      "brief_file": "/tmp/gitreins-foreman-README-015-brief-162611161259.txt"
+    }
+  ]
+}
