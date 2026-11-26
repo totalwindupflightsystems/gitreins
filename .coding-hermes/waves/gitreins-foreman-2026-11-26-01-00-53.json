@@ -1,0 +1,13 @@
+{
+  "tick": "gitreins-foreman-2026-11-26-01-00-53",
+  "budget": 6,
+  "composed": [
+    {"task_id": "INT-FLAKE-10", "worktree": "/home/kara/worktrees/gitreins-INT-FLAKE-10", "branch": "wt/INT-FLAKE-10", "base_sha": "e1af2fcf", "model": "glm-5.3-flash", "provider": "opencode-go-2", "gitreins_task": "INT-FLAKE-10 (in_progress)"},
+    {"task_id": "INT-FLAKE-11", "worktree": "/home/kara/worktrees/gitreins-INT-FLAKE-11", "branch": "wt/INT-FLAKE-11", "base_sha": "e1af2fcf", "model": "glm-5.3-flash", "provider": "opencode-go-2", "gitreins_task": "INT-FLAKE-11 (in_progress)"},
+    {"task_id": "GR-229", "worktree": "/home/kara/worktrees/gitreins-GR-229", "branch": "wt/GR-229", "base_sha": "e1af2fcf", "model": "glm-5.3-flash", "provider": "opencode-go-2", "gitreins_task": "GR-229 (in_progress)"},
+    {"task_id": "README-013", "worktree": "/home/kara/worktrees/gitreins-README-013", "branch": "wt/README-013", "base_sha": "e1af2fcf", "model": "glm-5.3-flash", "provider": "opencode-go-2", "gitreins_task": "README-013 (in_progress)"},
+    {"task_id": "DOC-26", "worktree": "/home/kara/worktrees/gitreins-DOC-26", "branch": "wt/DOC-26", "base_sha": "e1af2fcf", "model": "glm-5.3-flash", "provider": "opencode-go-2", "gitreins_task": "DOC-26 (in_progress)"}
+  ],
+  "independence_note": "Five disjoint surfaces: tests/test_job_store.py, tests/test_security_rules.py, gitreins/serve.py /api/stats, guard --help text in gitreins/cli.py, docs/operations.md. No shared files except cli.py between GR-229 and README-013 (different functions, merge-safe). QA-GITREINS-15 rejected for wave: board-damage arm healed 2026-11-20, write-path fix is external boardctl (zero-diff phantom risk). DF-035 closeable evidence-only (test passes live). GR-241 needs multi-row evidence cleanup, not a wave slot.",
+  "dispatched_at": "2026-11-26T01:10Z"
+}
