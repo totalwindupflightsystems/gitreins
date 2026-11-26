@@ -269,3 +269,93 @@ class TestReloadGetWindow:
         assert final.get("stable") is not None
         for n in range(creates):
             assert final.get(f"new-{n}") is not None, f"lost created task new-{n}"
+
+
+# ch:trace row=QA-GITREINS-17 spec=none:board-acceptance wave=none:serial test=tests/test_task_manager_concurrency.py::test_concurrent_create_and_complete_preserves_both_tasks doc=none:reason evidence=none:pending-foreman-judge witness=none:worker-local verdict=none:foreman-judge-required commit=none:worker-commit memory=none:foreman-write
+
+
+def _completer_worker(
+    workdir: str, task_id: str, at_writeback: object, create_landed: object
+) -> None:
+    """Complete one task, parking just before the locked write-back.
+
+    The hook patches THIS child's copy of ``_locked_load_save`` (fork start
+    method = copy-on-write memory): the parent sees ``at_writeback`` the moment
+    the completer holds its pre-mutation snapshot and is about to serialize,
+    then releases the creator. When ``create_landed`` fires, the hook resumes
+    into the real locked load-mutate-save. No lock is held while waiting, so
+    the creator's write can proceed freely — this is the exact interleaving
+    where the completing writer's snapshot predates the created task.
+    """
+    from engine import task_manager as tm_mod
+
+    real_locked_load_save = tm_mod.TaskManager._locked_load_save
+
+    def hooked_locked_load_save(self: object, mutate: object) -> object:
+        at_writeback.set()
+        if not create_landed.wait(timeout=60):
+            raise AssertionError("creator never landed its create before our write-back")
+        return real_locked_load_save(self, mutate)
+
+    tm_mod.TaskManager._locked_load_save = hooked_locked_load_save
+    try:
+        # The constructor IS the snapshot: it must run before the parent starts
+        # the creator, which is guaranteed because the parent waits for
+        # at_writeback — which only fires from inside complete() — before
+        # spawning the creator.
+        tm_mod.TaskManager(workdir).complete(task_id)
+    finally:
+        tm_mod.TaskManager._locked_load_save = real_locked_load_save
+
+
+def _create_worker(workdir: str, task_id: str, create_landed: object) -> None:
+    """Create one task in a separate process, then signal that it landed."""
+    TaskManager(workdir).create(task_id, "Created mid-race", ["c1"])
+    create_landed.set()
+
+
+class TestConcurrentCreateVsComplete:
+    """QA-GITREINS-17: a create racing a complete must lose neither task.
+
+    The completing writer takes its snapshot, then a create lands BEFORE its
+    locked write-back. The lock's in-lock reload must merge the created task
+    into the completing writer's view, so its save publishes BOTH tasks —
+    not just its own snapshot plus its mutation.
+    """
+
+    def test_concurrent_create_and_complete_preserves_both_tasks(self, tmp_path: Path) -> None:
+        workdir = str(tmp_path)
+        _write_store(workdir, ["existing"])
+
+        ctx = multiprocessing.get_context("fork")
+        at_writeback = ctx.Event()
+        create_landed = ctx.Event()
+
+        completer = ctx.Process(
+            target=_completer_worker, args=(workdir, "existing", at_writeback, create_landed)
+        )
+        completer.start()
+        assert at_writeback.wait(timeout=60), "completer never reached its write-back"
+
+        # The completer now holds a snapshot without "newcomer" and is parked
+        # before the lock. Land the create while it waits.
+        creator = ctx.Process(target=_create_worker, args=(workdir, "newcomer", create_landed))
+        creator.start()
+
+        for p in (creator, completer):
+            p.join(timeout=60)
+            assert p.exitcode == 0, f"{p.name} failed with exit code {p.exitcode}"
+
+        # The final file must parse AND contain both tasks with the right
+        # statuses: the completing writer's write-back must not have removed
+        # the task created after its snapshot.
+        tasks = {t["id"]: t for t in _read_store(workdir)}
+        assert set(tasks) == {"existing", "newcomer"}, f"lost tasks: {sorted(tasks)}"
+        assert tasks["existing"]["status"] == "complete"
+        assert tasks["existing"].get("completed_at")
+        assert tasks["newcomer"]["status"] == "pending"
+        # No torn temp file left behind.
+        assert not os.path.exists(os.path.join(workdir, ".gitreins", "tasks.yaml.tmp"))
+        # No corruption sidecar was produced.
+        leftovers = [n for n in os.listdir(os.path.join(workdir, ".gitreins")) if ".corrupt-" in n]
+        assert leftovers == [], f"corruption sidecars appeared: {leftovers}"
