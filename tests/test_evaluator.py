@@ -258,6 +258,16 @@ class TestResolveCommandTimeout:
         with pytest.raises(TypeError):
             AgenticEvaluator(llm_client, tmp_workdir, max_iterations=5, command_timeout=True)
 
+    @pytest.mark.parametrize("bad", [0, -5])
+    def test_nonpositive_explicit_arg_falls_back(
+        self, llm_client: LLMClient, tmp_workdir: str, caplog: pytest.LogCaptureFixture, bad: int
+    ) -> None:
+        """A zero/negative explicit arg warns and falls back, like the config path (GR-243)."""
+        with caplog.at_level("WARNING"):
+            ev = AgenticEvaluator(llm_client, tmp_workdir, max_iterations=5, command_timeout=bad)
+        assert ev.command_timeout == DEFAULT_COMMAND_TIMEOUT
+        assert "must be positive" in caplog.text
+
 
 class TestLastCommandPgidReap:
     """DF-CRIER-258: the evaluator remembers the last run_command's process

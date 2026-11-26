@@ -1118,7 +1118,15 @@ class AgenticEvaluator:
         if command_timeout is not None:
             if isinstance(command_timeout, bool):
                 raise TypeError("command_timeout must be a number of seconds, not a bool")
-            return float(command_timeout)
+            value = float(command_timeout)
+            if value <= 0:
+                logger.warning(
+                    "command_timeout=%r must be positive — using %ss",
+                    command_timeout,
+                    DEFAULT_COMMAND_TIMEOUT,
+                )
+                return DEFAULT_COMMAND_TIMEOUT
+            return value
         config = self._load_config()
         evaluator_cfg = config.get("evaluator", {}) or {}
         raw = evaluator_cfg.get("command_timeout")
