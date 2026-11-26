@@ -621,15 +621,21 @@ def test_guard_cli_json_tree_scope_validates_against_the_contract(
     assert validate(document) == []
 
 
-# EVID-002 AC3: without --json the human output is unchanged, and the scope
-# note appears only for a non-default scope.
+# EVID-002 AC3 + README-013: without --json the human output is unchanged in
+# shape, and the graded scope is never left ambiguous — a full test mode over
+# the DEFAULT index scope names it ("scope: staged (index)") so the header
+# cannot read as a whole-tree claim, while a non-default scope names its own.
 def test_guard_human_output_is_unchanged_without_json(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
     _guard_config(repo)
 
     default_run = run_cli("guard", cwd=repo)
     assert "Tier 1 Guards: PASS" in default_run.stdout
-    assert "scope:" not in default_run.stdout
+    assert "(test mode: full, scope: staged (index))" in default_run.stdout
+    # README-013: the bare whole-tree-reading note is gone, and the run does
+    # not claim any wider scope than the index it graded.
+    assert "(test mode: full)" not in default_run.stdout
+    assert ", scope: working-tree" not in default_run.stdout
 
     scoped_run = run_cli("guard", "--scope", "working-tree", cwd=repo)
     assert "Tier 1 Guards: PASS" in scoped_run.stdout

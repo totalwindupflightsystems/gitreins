@@ -3554,6 +3554,14 @@ def _guard_mode_note(gm: GuardManager, scope: str, result: Tier1Result) -> str:
         mode_note += f", scope: {scope}"
     if extra.get("grade_full_tree"):
         mode_note += ", whole tree"
+    elif mode == "full" and scope == "staged":
+        # README-013: a full TEST mode over the DEFAULT (index) scope must not
+        # read as a whole-tree claim. Test mode (which tests would run) and the
+        # graded scope are different dimensions, so an index-scoped full run
+        # names its scope — a bare "(test mode: full)" next to 'no staged
+        # files' skips looked like the whole tree was graded when it was not.
+        # The --full note above ("whole tree") keeps its historical string.
+        mode_note += ", scope: staged (index)"
     if extra.get("test_targets"):
         mode_note += f", {extra['test_targets']} test file(s)"
     elif extra.get("test_scope") == "no-match":

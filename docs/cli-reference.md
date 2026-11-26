@@ -299,7 +299,11 @@ working-tree)`), so a credential committed to HEAD can no longer print
 `clean` under a flag that advertises the whole tree. The mode note reads
 `(test mode: full, whole tree)` so a whole-tree run is distinguishable from
 a staged run, and the plain PASS header is only printed when the gates
-actually ran. `--staged-only` and a bare `gitreins guard` keep the
+actually ran. Test mode (which tests would run) and the graded scope are
+different dimensions: a full test mode over the DEFAULT index scope names
+the scope it graded — `(test mode: full, scope: staged (index))` — so an
+index-scoped run can never read as a whole-tree claim next to `no staged
+files` skips. `--staged-only` and a bare `gitreins guard` keep the
 degraded-pass semantics above and grade the index; when the index is
 non-empty, staged files are graded rather than the whole tree.
 

@@ -706,6 +706,13 @@ class TestGuardRunCLI:
         assert "DEGRADED PASS (skips:" in result.stdout
         assert "~ lint — skipped (no staged files)" in result.stdout
         assert "Tier 1 Guards: PASS" not in result.stdout
+        # README-013: the mode note must not read as a whole-tree claim when
+        # the graded scope is the (empty) index — test mode and graded scope
+        # are different dimensions, so a full test mode over the default
+        # staged scope names the scope instead of printing a bare
+        # "(test mode: full)" next to the 'no staged files' skips.
+        assert "(test mode: full, scope: staged (index))" in result.stdout
+        assert "(test mode: full)" not in result.stdout
 
     def test_guard_staged_only_sets_diff_test_mode(self, tmp_workdir: str) -> None:
         """--staged-only forces diff test mode (GR-GAP-043)."""
@@ -720,6 +727,9 @@ class TestGuardRunCLI:
         result = run_cli("guard", "--full", cwd=tmp_workdir)
         assert result.returncode == 0
         assert "(test mode: full" in result.stdout
+        # README-013: --full keeps the whole-tree note — that is the one
+        # direction where "test mode: full" really does grade the whole tree.
+        assert "(test mode: full, whole tree)" in result.stdout
 
     def test_guard_refuses_without_config(self, tmp_workdir: str) -> None:
         """No .gitreins/config.yaml → non-zero, actionable message, no PASS (GR-GAP-051)."""

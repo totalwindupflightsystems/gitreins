@@ -428,13 +428,18 @@ guards:
 
 ### Output examples
 
-**Full mode:**
+**Full mode (index scope — `guards.test_mode: full`, no `--full`):**
 ```
-Tier 1 Guards: PASS  (test mode: full)
+Tier 1 Guards: PASS  (test mode: full, scope: staged (index))
   ✓ secrets — clean (gitleaks + builtin cross-check)
   ✓ lint — ok
   ✓ tests — passed
 ```
+
+`test mode` (which tests run) and the graded scope are different dimensions:
+a full test mode over the default index scope names the scope, so the header
+can never read as a whole-tree claim. `gitreins guard --full` is the one
+direction that grades the whole tree (see the last example below).
 
 **Diff mode (targeted):**
 ```
@@ -467,7 +472,7 @@ Tier 1: DEGRADED PASS (skips: lint=no staged files, tests=no staged files)  (tes
 
 **Failure diagnostics (named, not just counted):**
 ```
-Tier 1 Guards: FAIL  (test mode: full)
+Tier 1 Guards: FAIL  (test mode: full, scope: staged (index))
   ✗ secrets — FAIL (builtin cross-check: 2 findings; gitleaks: clean)
       findings: 2 finding(s): .env:1, src/db.py:7
   ✗ tests (full) — FAIL (tests/test_probe.py::test_boom [first failing id]; 3 failure(s))
