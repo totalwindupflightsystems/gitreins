@@ -318,45 +318,92 @@ def test_heartbeat_keeps_a_long_job_live(
 ) -> None:
     """While the worker evaluates, beats keep the record live past the cap.
 
-    The stale cap is 0.4 s here and the fake evaluation runs 0.9 s: without a
-    heartbeat the record would be an orphan halfway through, which is exactly
-    how a 48-minute tier2 run must NOT be graded.
+    INT-FLAKE-10 rework — reclassification. The recorded CI failures for this
+    test include run 42324985842, which failed "after 3 beats" on a product
+    tree byte-identical to a green rerun: beats HAD landed when the liveness
+    read went stale. A claim-to-first-beat race cannot produce that shape
+    (the synchronous first beat fixes it), and that race is covered
+    separately by ``test_heartbeat_first_beat_is_durable_before_first_liveness_read``.
+    The honest mechanism here is a wall-clock/parallelism dependency: the test
+    stamps a fresh heartbeat, then requires the DAEMON beat thread to land
+    beats on a real timer inside a fixed stale cap; a thread starved by the
+    GIL or host load past the cap mid-loop fails the assertion even though
+    the product beat path is healthy.
+
+    The reworked contract still tests real liveness while being robust to
+    beat-timing starvation: a test-owned clock measures record age, and the
+    test asserts on beats it observes landing (bounded wait; a thread that
+    stops beating fails loudly instead of flaking). Every landed beat
+    advances the test clock by exactly one interval, so the record's age at
+    each read is one interval on that clock — beat-cadence jitter in wall
+    time cannot age the record past the cap. The falsifier is unchanged in
+    spirit and now deterministic too: with the beat WRITE silenced, the same
+    record IS orphaned by the cap on the same clock (negative control:
+    ``JobHeartbeat.beat`` stubbed to count-but-never-write fails this test at
+    tick 21 with "job looked orphaned mid-run after 21 beats").
     """
     import time as _time
 
-    # Load-window determinism: this test failed twice in CI and once in a
-    # judged self-review run (SR-2, 2026-11-07) because under pytest-xdist on
-    # a loaded host the daemon heartbeat thread can be GIL-starved past a
-    # 0.4 s stale cap — a scheduler artifact, not a product defect. The
-    # mechanism under test is the RATIO (beats refresh the record inside the
-    # cap; a silenced record is orphaned by it), so size the window so
-    # realistic jitter cannot win: stale cap 2.0 s, beats every 0.1 s, run
-    # 2.6 s. The falsifier below is unchanged and still fails if beats stop.
-    monkeypatch.setenv("GITREINS_JOB_HEARTBEAT_STALE_SECONDS", "2.0")
+    import engine.job_store as _job_store
+
+    class _TestClock:
+        """Test-owned clock: advances only when the test advances it."""
+
+        def __init__(self) -> None:
+            self.now = 1_700_000.0
+
+        def time(self) -> float:
+            return self.now
+
+    stale_cap = 2.0
+    interval = 0.1
+    # 25 beats over a 2.5-tick run: past the 2.0 cap when beats stop, and the
+    # falsifier's silenced record ages past the cap inside the same loop.
+    ticks = 25
+    monkeypatch.setenv("GITREINS_JOB_HEARTBEAT_STALE_SECONDS", str(stale_cap))
+    clock = _TestClock()
+    # Beat stamps read the test clock (job_store calls time.time() through the
+    # module attribute), so record age is measured in ticks the beats produce.
+    monkeypatch.setattr(_job_store.time, "time", clock.time)
     job = make_job("t1", "/r")
     job.update(worker_identity(WORKER_KIND_THREAD))
     save_job(job)
-    stale_cap = 2.0
-    hb = JobHeartbeat(job["id"], interval=0.1).start()
+    hb = JobHeartbeat(job["id"], interval=interval).start()
     try:
-        deadline = _time.monotonic() + 2.6
-        while _time.monotonic() < deadline:
-            _time.sleep(0.1)
-            live, _why = worker_liveness(load_job(job["id"]))
-            assert live is True, f"job looked orphaned mid-run after {hb.beats} beats"
+        prev = hb.beats
+        for _ in range(ticks):
+            # The daemon thread beats on a REAL timer; under GIL/load its
+            # cadence can be arbitrarily slow, so wait for the beat to LAND
+            # (bounded so a dead thread fails loudly, never hangs) instead of
+            # for wall time to pass.
+            deadline = _time.monotonic() + 4.0
+            while hb.beats == prev and _time.monotonic() < deadline:
+                _time.sleep(0.02)
+            assert hb.beats > prev, (
+                f"daemon heartbeat thread stopped producing beats (stuck at {prev})"
+            )
+            prev = hb.beats
+            # One tick per landed beat: the age at this read is exactly one
+            # interval, so cadence jitter cannot win. This is the
+            # reclassified contract — beat cadence is a wall-clock property,
+            # liveness is cap-vs-last-beat.
+            clock.now += interval
+            live, _why = worker_liveness(load_job(job["id"]), now=clock.now)
+            assert live is True, f"job looked orphaned mid-run after {hb.beats} beats: {_why}"
     finally:
         hb.stop()
-    assert hb.beats >= 3
-    assert _time.time() - load_job(job["id"])["heartbeat_at"] < stale_cap
+    assert hb.beats >= ticks
 
-    # Falsifier: the same record with the heartbeat silenced (its beat is not
-    # refreshed) IS orphaned inside that window — the cap, not the pid, decides.
+    # Falsifier: the same record with the heartbeat silenced (its stamp never
+    # refreshed) IS orphaned by the cap on the same test-owned clock — no
+    # wall-clock sleep, so this half cannot flake either. The cap, not the
+    # pid, decides.
     silent = make_job("t2", "/s")
     silent.update(worker_identity(WORKER_KIND_THREAD))
-    silent["heartbeat_at"] = _time.time()
+    silent["heartbeat_at"] = clock.time()
     save_job(silent)
-    _time.sleep(stale_cap + 0.1)  # must exceed the cap to prove staleness
-    live_now, why_now = worker_liveness(load_job(silent["id"]))
+    clock.now += stale_cap + interval  # must exceed the cap to prove staleness
+    live_now, why_now = worker_liveness(load_job(silent["id"]), now=clock.now)
     assert live_now is False
     assert "heartbeat is stale" in why_now
 
