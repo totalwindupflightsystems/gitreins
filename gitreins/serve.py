@@ -609,7 +609,10 @@ def verdict_usage_records(workdir: str) -> dict[str, dict[str, Any]]:
     measurements — ``model``, ``input_tokens`` (served as ``tokens_in``),
     ``output_tokens`` (served as ``tokens_out``) and ``cost_usd`` — present
     only when the record actually carries them, plus ``evaluated_at`` (the
-    epoch the attribution keys need). A malformed record or one without any of
+    epoch the attribution keys need). A resolution-gate record nests those
+    fields under ``record["verdict"]`` (engine/persist.py), so they are read
+    there first and from the top level as a legacy/synthetic fallback. A
+    malformed record or one without any of
     these fields contributes no key, so the merge stays additive: records that
     predate record-level usage keep their telemetry-only aggregation.
     """
@@ -632,18 +635,34 @@ def verdict_usage_records(workdir: str) -> dict[str, dict[str, Any]]:
                 continue
             if not isinstance(record, dict):
                 continue
+            # A resolution-gate record (engine/persist.py build_resolution_record)
+            # nests the engine's own dict under "verdict" (ResolutionVerdict.to_dict):
+            # model/cost/tokens live THERE on disk, not at the top level. Prefer the
+            # nested fields and fall back to top-level keys for legacy/synthetic
+            # shapes that carried them flat.
+            nested = record.get("verdict")
+            if not isinstance(nested, dict):
+                nested = {}
+
+            def own(field: str, *parents: dict[str, Any]) -> Any:
+                for parent in parents:
+                    value = parent.get(field)
+                    if value is not None:
+                        return value
+                return None
+
             fields: dict[str, Any] = {}
             epoch = _epoch(record.get("evaluated_at"))
             if epoch is not None:
                 fields["evaluated_at"] = epoch
-            model = record.get("model")
+            model = own("model", nested, record)
             if isinstance(model, str) and model:
                 fields["model"] = model
             for field, key in (("input_tokens", "tokens_in"), ("output_tokens", "tokens_out")):
-                value = record.get(field)
+                value = own(field, nested, record)
                 if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
                     fields[key] = int(value)
-            cost = record.get("cost_usd")
+            cost = own("cost_usd", nested, record)
             if isinstance(cost, (int, float)) and not isinstance(cost, bool):
                 fields["cost_usd"] = float(cost)
             if fields:
