@@ -310,3 +310,71 @@ def test_task_complete_writes_brief_log_and_patch_next_to_verdict_json(
 
     # And the same artifacts are reachable through the module the viewer uses.
     assert evidence.read_evidence(str(entry), verdict, evidence.WORKTREE_NAME)[1] == graded
+
+
+# ── guard evidence: degraded summaries (SCHED-GAP-17082) ─────────────────────
+
+
+def _timeout_tier1():
+    """A GR-169 hook_timeout result: degraded, but with NO skipped steps."""
+    from engine.types import GuardResult, Tier1Result
+
+    return Tier1Result(
+        passed=True,
+        results=[GuardResult("tests", True, "ok")],
+        extra={
+            "timeout": {
+                "guard": "tests",
+                "budget_seconds": 1200,
+                "reason": "tests exceeded the 1200s hook_timeout budget",
+            }
+        },
+    )
+
+
+def test_timeout_degraded_summary_names_the_timeout_reason() -> None:
+    """SCHED-GAP-17082: a timed-out run's evidence summary names the cause.
+
+    The hook_timeout arm degrades WITHOUT any skipped steps, so the old
+    unconditional "DEGRADED PASS (skips: )" line emitted a degradation with
+    an empty skip list. It must name the guard and budget instead.
+    """
+    doc = evidence.guard_evidence(_timeout_tier1())
+    summary = doc["summary"]
+    assert "tests exceeded the 1200s hook_timeout budget" in summary
+    assert "DEGRADED" in summary
+    assert "skips: )" not in summary
+    assert doc["metadata"]["degraded"] is True
+    assert doc["metadata"]["skippedSteps"] == []
+
+
+def test_timeout_degraded_summary_is_defensive_on_missing_reason() -> None:
+    """The evidence emission never raises, even on a bare timeout marker."""
+    from engine.types import Tier1Result
+
+    result = Tier1Result(passed=True, results=[], extra={"timeout": {}})
+    doc = evidence.guard_evidence(result)
+    assert "DEGRADED — the guard run exceeded its hook_timeout budget" in doc["summary"]
+
+
+def test_skip_steps_degraded_summary_is_unchanged() -> None:
+    """The skip-steps arm keeps its exact "DEGRADED PASS (skips: ...)" shape.
+
+    engine/pipeline.py matches "Tier 1: DEGRADED PASS" on the console line and
+    the evidence summary mirrors it — pin the wording so the fix cannot drift
+    the string the regex depends on.
+    """
+    from engine.types import GuardResult, Tier1Result
+
+    result = Tier1Result(
+        passed=True,
+        results=[
+            GuardResult("lint", True, "", skipped=True, skip_reason="no staged files"),
+            GuardResult("tests", True, "ok"),
+        ],
+    )
+    assert result.degraded is True
+    assert result.timed_out is False
+    doc = evidence.guard_evidence(result)
+    assert doc["summary"].endswith("DEGRADED PASS (skips: lint=no staged files)")
+    assert doc["metadata"]["skippedSteps"] == ["lint"]

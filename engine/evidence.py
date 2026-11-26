@@ -609,7 +609,14 @@ def guard_evidence(
         "All guards passed" if passed else "One or more guards failed"
     )
     if getattr(result, "degraded", False):
-        summary = f"{summary}\nDEGRADED PASS (skips: {getattr(result, 'skip_summary', '')})"
+        if getattr(result, "timed_out", False):
+            # GR-169 / SCHED-GAP-17082: a hook_timeout run has no skipped
+            # steps, so "(skips: )" would name a degradation with no cause.
+            # Name the guard and the budget instead (the ``timeout_reason``
+            # property already does both).
+            summary = f"{summary}\nDEGRADED — {getattr(result, 'timeout_reason', '')}"
+        else:
+            summary = f"{summary}\nDEGRADED PASS (skips: {getattr(result, 'skip_summary', '')})"
     document["summary"] = _safe_text(summary, flags)
     document["checks"] = checks
 
