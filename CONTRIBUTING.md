@@ -179,7 +179,10 @@ reproducible from something still tracked. Untracked strays (build output,
 3. Write tests first (TDD)
 4. Implement the feature
 5. Run `pytest tests/ -v` — all tests must pass
-6. Run `gitreins guard` — Tier 1 guards must pass
+6. Run `gitreins guard` — Tier 1 guards must pass (the optional `guards.trace`
+   lane, which validates prefixed `ch:trace` markers, is off by default — see
+   README's Configuration section and `docs/traceability-doctrine.md`; this
+   repository enables it in `.gitreins/config.yaml`)
 7. Submit a PR against `main`
 
 ## Commit Convention

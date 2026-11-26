@@ -747,6 +747,14 @@ guards:
   #         as a gate that passed
   # allow_skips: true   # code default: false; `gitreins init` writes true
 
+  # Opt-in Tier-1 lane validating prefixed `ch:trace` markers across the
+  # repository's text surfaces (diff mode grades markers on added or
+  # modified lines; full mode checks every marker discovered). Code
+  # default: false (disabled) — with the key omitted, markers are never
+  # graded. This repository opts in via `.gitreins/config.yaml`. See
+  # docs/traceability-doctrine.md for the marker grammar and known gaps.
+  # trace: true          # code default: false (opt-in)
+
   # Priority (nice(1)) for every external scanner the guard and the judge
   # spawn: gitleaks, golangci-lint / go build / go test, ruff, the configured
   # test_command (pytest) and the LSP servers. Scans are background work, so
