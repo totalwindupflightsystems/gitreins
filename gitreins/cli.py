@@ -5510,10 +5510,13 @@ def _add_guard_parser(sub: _SubParsers) -> None:
         dest="full",
         action="store_true",
         help=(
-            "Run the full test suite (overrides config guards.test_mode; "
-            "default when neither flag is given). Grades the whole tree "
-            "even with an empty index: the tests lane runs and lint covers "
-            "tracked+untracked Python files instead of skipping."
+            "Run the full test suite (overrides config guards.test_mode). "
+            "Grades the whole tree even with an empty index: the tests lane "
+            "runs and lint covers tracked+untracked Python files instead of "
+            "skipping. Without either flag, guards.test_mode picks the test "
+            "mode and the graded scope stays the Git index — an empty index "
+            "yields the 'no staged files' skip (unless guards.test_on_clean "
+            "is set)."
         ),
     )
     guard_p.add_argument(

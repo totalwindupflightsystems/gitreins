@@ -431,6 +431,11 @@ class TestHelpOutput:
         assert result.returncode == 0
         assert "--staged-only" in result.stdout
         assert "--full" in result.stdout
+        # README-013: --full must not claim to be the default — a bare
+        # `gitreins guard` grades the index and skips tests on an empty
+        # index ('no staged files'), while --full grades the whole tree.
+        assert "default when neither flag is given" not in result.stdout
+        assert "graded scope stays the Git index" in result.stdout
 
 
 class TestWorkdirDetection:
