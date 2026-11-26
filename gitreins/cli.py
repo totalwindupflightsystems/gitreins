@@ -4595,6 +4595,30 @@ def _commit_run_and_verify(workdir: str, message: str, skip_tier2: bool) -> None
 def cmd_commit(args: argparse.Namespace) -> None:
     from engine.guard_manager import GuardManager
 
+    # DF-033: resolve the message source ONCE. The parser takes a positional
+    # (message_pos) or the `-m/--message` alias (message); both supplied is a
+    # conflict, neither is an error naming both forms. args.message is set here
+    # so the rest of the handler (and tests building a bare Namespace with
+    # message=) keep working unchanged.
+    message_pos = getattr(args, "message_pos", None)
+    message_opt = getattr(args, "message", None)
+    if message_pos is not None and message_opt is not None:
+        print(
+            "error: commit message given twice — pass either the positional form "
+            'gitreins commit "msg" or -m/--message, not both.',
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    message = message_opt if message_opt is not None else message_pos
+    if message is None:
+        print(
+            'error: commit takes a message — gitreins commit "msg" '
+            '(positional) or gitreins commit -m "msg".',
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    args.message = message
+
     workdir = get_workdir()
     # DF-GITREINS-POC-66: MCP parity for the in-progress door. The MCP commit
     # tool refuses while any task is in_progress (task.complete grades the
@@ -5659,7 +5683,19 @@ def _add_judge_parser(sub: _SubParsers) -> None:
 def _add_commit_parsers(sub: _SubParsers) -> None:
     """`commit` and `commit-audit` subcommands (incl. GR-148 review overrides)."""
     commit_p = sub.add_parser("commit", help="Commit with guard checks")
-    commit_p.add_argument("message")
+    # DF-033: git instinct types `-m 'msg'`; accept it as an alias alongside the
+    # positional form. The positional keeps its own dest (message_pos) and
+    # cmd_commit resolves the two — see cmd_commit for the conflict rule.
+    commit_p.add_argument(
+        "message_pos", nargs="?", default=None, help='Commit message, e.g. gitreins commit "msg"'
+    )
+    commit_p.add_argument(
+        "-m",
+        "--message",
+        dest="message",
+        default=None,
+        help='Commit message alias for the positional form, e.g. gitreins commit -m "msg"',
+    )
     commit_p.add_argument(
         "--skip-tier2", action="store_true", help="Skip any Tier 2 processing; Tier 1 guards only"
     )
