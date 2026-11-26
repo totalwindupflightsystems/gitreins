@@ -18,9 +18,12 @@ that reads the repo's judgment stores on EVERY request (live, not a snapshot):
 
 Per-judgment telemetry (JVIEW-006): ``/api/verdicts/<date>/<hash>`` carries a
 ``usage`` block when ``.gitreins/usage.jsonl`` has rows traceable to that verdict
-and ``/api/stats`` an aggregate ``usage`` summary; costs are reported only when
-the checkout configures rates (``usage.price_per_1m_input/_output``), never
-invented.
+and ``/api/stats`` an aggregate ``usage`` summary; costs are reported when the
+checkout configures rates (``usage.price_per_1m_input/_output``) or when the
+verdict record itself carries a ``cost_usd``, and are never invented. The
+aggregation reads each record's own ``model``/tokens/``cost_usd`` first
+(GR-229) — the config default model is used only when a record carries no
+model, and the payload names that fallback via ``model_source``.
 
 The browsed checkout defaults to the repository containing the working
 directory; ``--repo <path>`` (see :func:`resolve_workdir`) points the same
@@ -246,6 +249,10 @@ class UsageEntry(TypedDict):
     first_ts: float
     last_ts: float
     model: str
+    # GR-229: "record" when the model is the verdict record's own, or
+    # "config-default" when the record carried no model and the checkout's
+    # configured default was used instead — the payload names the fallback.
+    model_source: str
     cost_usd: float | None
     priced: bool
 
@@ -264,6 +271,10 @@ class UsageSummary(TypedDict):
     priced: int
     unpriced: int
     model: str
+    # GR-229: "record" when every attributed verdict named its record's own
+    # model (all agreeing), "mixed" when the records disagree with each other
+    # or with the default, "config-default" when no record carried a model.
+    model_source: str
     prices_configured: bool
 
 
@@ -591,6 +602,55 @@ def verdict_stamps(workdir: str) -> list[tuple[str, str, float]]:
     return stamps
 
 
+def verdict_usage_records(workdir: str) -> dict[str, dict[str, Any]]:
+    """Per-verdict usage truth each stored verdict record carries (GR-229).
+
+    Returns ``{"<date>/<hash>": fields}`` where ``fields`` are the record's own
+    measurements — ``model``, ``input_tokens`` (served as ``tokens_in``),
+    ``output_tokens`` (served as ``tokens_out``) and ``cost_usd`` — present
+    only when the record actually carries them, plus ``evaluated_at`` (the
+    epoch the attribution keys need). A malformed record or one without any of
+    these fields contributes no key, so the merge stays additive: records that
+    predate record-level usage keep their telemetry-only aggregation.
+    """
+    hist = _verdict_dir(workdir)
+    records: dict[str, dict[str, Any]] = {}
+    if not os.path.isdir(hist):
+        return records
+    for day in sorted(os.listdir(hist)):
+        ddir = os.path.join(hist, day)
+        if not _DATE_RE.match(day) or not os.path.isdir(ddir):
+            continue
+        for h in sorted(os.listdir(ddir)):
+            vpath = os.path.join(ddir, h, "verdict.json")
+            if not _HASH_RE.match(h) or not os.path.isfile(vpath):
+                continue
+            try:
+                with open(vpath) as fh:
+                    record = json.load(fh)
+            except Exception:
+                continue
+            if not isinstance(record, dict):
+                continue
+            fields: dict[str, Any] = {}
+            epoch = _epoch(record.get("evaluated_at"))
+            if epoch is not None:
+                fields["evaluated_at"] = epoch
+            model = record.get("model")
+            if isinstance(model, str) and model:
+                fields["model"] = model
+            for field, key in (("input_tokens", "tokens_in"), ("output_tokens", "tokens_out")):
+                value = record.get(field)
+                if isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0:
+                    fields[key] = int(value)
+            cost = record.get("cost_usd")
+            if isinstance(cost, (int, float)) and not isinstance(cost, bool):
+                fields["cost_usd"] = float(cost)
+            if fields:
+                records[f"{day}/{h}"] = fields
+    return records
+
+
 def _epoch(value: Any) -> float | None:  # noqa: ANN401
     """Epoch seconds for an ISO-8601 stamp; naive stamps are read as UTC."""
     if not isinstance(value, str) or not value:
@@ -608,11 +668,18 @@ def load_usage(workdir: str) -> tuple[dict[str, UsageEntry], UsageSummary]:
     """Attributed usage per verdict plus the aggregate the stats header shows.
 
     Attribution is by time (the telemetry carries no task id) and each line is
-    charged to at most one verdict — see :mod:`engine.usage`.
+    charged to at most one verdict — see :mod:`engine.usage`. Each verdict's
+    own record is then consulted (GR-229): a record's ``model``/tokens/``cost_usd``
+    are the verdict's own measurements and win over the time-attributed
+    estimate, with the config default model used only when the record carries
+    no model (the payload names that fallback via ``model_source``).
     """
     prices = usage.load_price_config(workdir)
     rows = usage.load_usage_rows(workdir)
     index = usage.attribute_rows(verdict_stamps(workdir), rows, prices)
+    index = usage.merge_record_usage(
+        index, verdict_usage_records(workdir), default_model=str(prices.get("model", ""))
+    )
     total = len(list_verdicts(workdir))
     summary = usage.summarize(index, prices, total_verdicts=total)
     # The usage engine intentionally exposes JSON-shaped dicts.  These casts
@@ -737,15 +804,15 @@ async function boot(){
 function money(usd){return '$'+(Number(usd)||0).toFixed(2)}
 function costBadge(v){
   const u=v.usage;if(!u)return '';
-  if(u.priced)return ' <span class="badge mute" title="judge cost from usage.jsonl at the rates configured in .gitreins/config.yaml">$'+Number(u.cost_usd).toFixed(4)+'</span>';
-  return ' <span class="badge warn" title="usage.jsonl rows are traceable, but no price is configured">cost unpriced</span>';
+  if(u.priced)return ' <span class="badge mute" title="judge cost — the cost_usd on the verdict record, or usage.jsonl at the rates configured in .gitreins/config.yaml">$'+Number(u.cost_usd).toFixed(4)+'</span>';
+  return ' <span class="badge warn" title="traceable telemetry but no price configured and no cost on the record">cost unpriced</span>';
 }
 function spendCard(u){
   if(!u)return '<div class="stat"><span class="n">—</span><span class="l">Judge spend</span></div>';
-  const priced=u.prices_configured&&u.priced>0;
+  const priced=u.priced>0;
   const head=priced?money(u.cost_usd):'unpriced';
   const sub=priced
-    ? (u.priced+' priced · '+u.unpriced+' unpriced')
+    ? (u.priced+' priced'+(u.prices_configured?'':' (record cost)')+' · '+u.unpriced+' unpriced')
     : 'tokens only · set usage.price_per_1m_input/_output';
   return '<div class="stat" title="'+esc(sub)+'"><span class="n">'+head+'</span><span class="l">Judge spend</span>'+
     '<span class="u">'+u.judgements+'/'+u.verdicts+' judgments · '+
@@ -754,7 +821,7 @@ function spendCard(u){
 }
 function telemetry(v){
   const u=v.usage;if(!u)return '';
-  const cost=u.priced?('$'+Number(u.cost_usd).toFixed(4)+' · '+esc(u.model||'configured rates')):'unpriced (cost needs usage.price_per_1m_input/_output)';
+  const cost=u.priced?('$'+Number(u.cost_usd).toFixed(4)+' · '+esc(u.model||'configured rates')):'unpriced (no cost on the record; cost needs usage.price_per_1m_input/_output)';
   return '<div class="sec">Judge telemetry</div><div class="meta">'+u.rows+' line(s) from usage.jsonl · '+
     (u.tokens_in||0)+' tokens in / '+(u.tokens_out||0)+' out'+
     ((u.cache_read||0)?' · '+u.cache_read+' cache read':'')+

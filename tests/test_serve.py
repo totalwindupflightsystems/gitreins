@@ -1060,6 +1060,112 @@ def test_stats_report_a_priced_subtotal_next_to_the_unpriced_count(
     assert usage["prices_configured"] is True
 
 
+# ── record-carried usage truth (GR-229) ─────────────────────────────────────
+
+
+def _record_truth_repo(tmp_path: Path, record: dict) -> Path:
+    """One verdict record that carries its own usage fields, and nothing else."""
+    entry = tmp_path / ".gitreins" / "history" / "2026-09-05" / "abcd1234"
+    entry.mkdir(parents=True)
+    (entry / "verdict.json").write_text(json.dumps(record), encoding="utf-8")
+    return tmp_path
+
+
+def test_stats_echo_a_record_model_and_record_cost(tmp_path: Path) -> None:
+    """GR-229: a record's own model and cost_usd are the aggregation's truth.
+
+    No config.yaml at all: the echoed model comes from the record, the echoed
+    cost comes from the record's ``cost_usd`` (priced even though no rates are
+    configured), and ``unpriced`` counts nothing because every record carries
+    a cost.
+    """
+    root = _record_truth_repo(
+        tmp_path,
+        {
+            "task_id": "GR229-RECORD",
+            "task_title": "record carries its own usage truth",
+            "passed": True,
+            "evaluated_at": "2026-09-05T12:00:00Z",
+            "model": "glm-5.3-flash",
+            "input_tokens": 3000,
+            "output_tokens": 500,
+            "cost_usd": 0.012345,
+        },
+    )
+
+    with running_server(str(root)) as (host, port):
+        status, body = get((host, port), "/api/stats")
+
+    assert status == 200
+    usage = json_body(body)["usage"]
+    assert usage["model"] == "glm-5.3-flash"
+    assert usage["model_source"] == "record"
+    assert usage["cost_usd"] == 0.012345
+    assert usage["priced"] == 1
+    assert usage["unpriced"] == 0
+    assert usage["tokens_in"] == 3000
+    assert usage["tokens_out"] == 500
+    assert usage["prices_configured"] is False
+
+
+def test_stats_name_the_config_default_only_when_the_record_has_no_model(
+    tmp_path: Path,
+) -> None:
+    """GR-229: the configured default is a fallback, and the payload says so."""
+    root = _record_truth_repo(
+        tmp_path,
+        {
+            "task_id": "GR229-DEFAULT",
+            "task_title": "record carries no model",
+            "passed": True,
+            "evaluated_at": "2026-09-05T12:00:00Z",
+        },
+    )
+    (root / ".gitreins" / "config.yaml").write_text(
+        "defaults:\n  model: deepseek-v4-flash\n", encoding="utf-8"
+    )
+
+    with running_server(str(root)) as (host, port):
+        status, body = get((host, port), "/api/stats")
+
+    assert status == 200
+    usage = json_body(body)["usage"]
+    assert usage["model"] == "deepseek-v4-flash"
+    assert usage["model_source"] == "config-default"
+
+
+def test_record_model_wins_over_the_configured_default(tmp_path: Path) -> None:
+    """GR-229: with rates configured, a record's own model still wins."""
+    root = _record_truth_repo(
+        tmp_path,
+        {
+            "task_id": "GR229-OVERRIDE",
+            "task_title": "record model beats the config default",
+            "passed": True,
+            "evaluated_at": "2026-09-05T12:00:00Z",
+            "model": "glm-5.3-flash",
+            "cost_usd": 0.05,
+        },
+    )
+    (root / ".gitreins" / "config.yaml").write_text(
+        "defaults:\n  model: deepseek-v4-flash\n"
+        "usage:\n  price_per_1m_input: 0.28\n  price_per_1m_output: 0.42\n",
+        encoding="utf-8",
+    )
+
+    with running_server(str(root)) as (host, port):
+        status, body = get((host, port), "/api/stats")
+
+    assert status == 200
+    usage = json_body(body)["usage"]
+    assert usage["model"] == "glm-5.3-flash"
+    assert usage["model_source"] == "record"
+    # The record's own cost, not the config rates' arithmetic over zero tokens.
+    assert usage["cost_usd"] == 0.05
+    assert usage["priced"] == 1
+    assert usage["unpriced"] == 0
+
+
 def test_viewer_page_renders_the_cost_badge_and_the_spend_card(live_server: object) -> None:
     """The SPA carries the detail cost badge and the aggregate spend card."""
     status, body = get(live_server, "/")

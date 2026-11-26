@@ -211,6 +211,88 @@ def test_summarize_aggregate_cost_is_a_float_once_anything_is_priced() -> None:
     assert summary["cost_usd"] == round((500 * 0.28 + 25 * 0.42) / 1_000_000, 6)
 
 
+# ── record-carried usage truth (GR-229) ─────────────────────────────────────
+
+
+def test_merge_record_usage_prefers_the_record_model_and_names_the_fallback() -> None:
+    stamps = [("2026-09-01", "aaaa1111", 100.0), ("2026-09-02", "bbbb2222", 200.0)]
+    index = usage.attribute_rows(stamps, [_row(50.0, 10, 2)])
+    records = {
+        "2026-09-01/aaaa1111": {"evaluated_at": 100.0, "model": "glm-5.3-flash"},
+        # Usage truth but NO model on this record: the configured default
+        # stays, and the entry names that fallback.
+        "2026-09-02/bbbb2222": {"evaluated_at": 200.0, "tokens_in": 5, "tokens_out": 1},
+    }
+
+    merged = usage.merge_record_usage(index, records, default_model="deepseek-v4-flash")
+
+    assert merged["2026-09-01/aaaa1111"]["model"] == "glm-5.3-flash"
+    assert merged["2026-09-01/aaaa1111"]["model_source"] == "record"
+    assert merged["2026-09-02/bbbb2222"]["model"] == "deepseek-v4-flash"
+    assert merged["2026-09-02/bbbb2222"]["model_source"] == "config-default"
+
+
+def test_merge_record_usage_counts_a_record_cost_without_config_rates() -> None:
+    index = usage.attribute_rows([("2026-09-01", "aaaa1111", 100.0)], [])
+    records = {
+        "2026-09-01/aaaa1111": {
+            "evaluated_at": 100.0,
+            "model": "glm-5.3-flash",
+            "tokens_in": 3000,
+            "tokens_out": 500,
+            "cost_usd": 0.012345,
+        }
+    }
+
+    merged = usage.merge_record_usage(index, records, default_model="")
+
+    entry = merged["2026-09-01/aaaa1111"]
+    # A record-only verdict gains an entry (no telemetry rows) so its own
+    # provider-reported cost is never dropped from the aggregate.
+    assert entry["rows"] == 0
+    assert (entry["tokens_in"], entry["tokens_out"]) == (3000, 500)
+    assert entry["priced"] is True
+    assert entry["cost_usd"] == 0.012345
+
+    summary = usage.summarize(merged, total_verdicts=1)
+
+    assert summary["priced"] == 1
+    assert summary["unpriced"] == 0
+    assert summary["cost_usd"] == 0.012345
+
+
+def test_summarize_refuses_to_pick_one_model_when_the_records_disagree() -> None:
+    index = usage.merge_record_usage(
+        {},
+        {
+            "2026-09-01/aaaa1111": {"evaluated_at": 100.0, "model": "glm-5.3-flash"},
+            "2026-09-02/bbbb2222": {"evaluated_at": 200.0, "model": "deepseek-v4-flash"},
+        },
+        default_model="deepseek-v4-flash",
+    )
+
+    summary = usage.summarize(index, total_verdicts=2)
+
+    assert summary["model"] == ""
+    assert summary["model_source"] == "mixed"
+
+
+def test_summarize_echoes_a_record_model_when_every_record_agrees() -> None:
+    index = usage.merge_record_usage(
+        {},
+        {
+            "2026-09-01/aaaa1111": {"evaluated_at": 100.0, "model": "glm-5.3-flash"},
+            "2026-09-02/bbbb2222": {"evaluated_at": 200.0, "model": "glm-5.3-flash"},
+        },
+        default_model="deepseek-v4-flash",
+    )
+
+    summary = usage.summarize(index, total_verdicts=2)
+
+    assert summary["model"] == "glm-5.3-flash"
+    assert summary["model_source"] == "record"
+
+
 def test_provenance_fields_and_usage_row_never_persist_secret(tmp_path: Path) -> None:
     class Client:
         model = "deepseek-v4-flash"
