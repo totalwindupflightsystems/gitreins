@@ -158,6 +158,72 @@ not product state. They were deleted (`OPS-GITREINS-1`) so that a future census 
 a curious operator does not mistake them for something worth backing up. Deleting
 them loses nothing: the product never opened them.
 
+## Async judge jobs: heartbeat and orphan reaping
+
+Async judge runs (`gitreins judge --async`, and the MCP dispatcher) do not keep a
+verdict store open while they evaluate: each run is a JSON record in a shared
+jobs directory, default `~/.local/share/gitreins/jobs/`. The location is
+overridable with `GITREINS_JOB_DIR` (`engine/job_store.py`, `job_dir()` /
+`DEFAULT_JOB_DIR`). A job writes `<id>.json` (the record), `<id>.log` (the
+worker's stdout/stderr) and `<id>.lock` (the per-job resume lease). The records
+are host-local state — the backup table above already lists the directory.
+
+### The two heartbeat knobs
+
+Liveness of an async job is the EVALUATION WORKER's, never the dispatcher's
+(JUDGE-JOB-001, `engine/job_store.py`). While a worker evaluates, a daemon
+thread (`JobHeartbeat`, `engine/job_store.py`) re-stamps `heartbeat_at` on the
+record every interval; each beat re-reads the record under the resume lease so
+it can never resurrect a record a reaper already ended, and the last beat lands
+before the worker's terminal write.
+
+| env var | default | meaning |
+|---|---|---|
+| `GITREINS_JOB_HEARTBEAT_SECONDS` | `15.0` | seconds between worker heartbeats (`heartbeat_interval()`) |
+| `GITREINS_JOB_HEARTBEAT_STALE_SECONDS` | `180.0` | heartbeat age after which the worker is an orphan (`heartbeat_stale_seconds()`) |
+
+Both are read at call time from `engine/job_store.py` (invalid or unset values
+fall back to the defaults). For unattended deployments that poll frequently,
+tightening `GITREINS_JOB_HEARTBEAT_STALE_SECONDS` makes orphan detection faster;
+leaving it at the default gives a worker up to three minutes of silence before
+the next poll judges it dead.
+
+### What an operator sees when a worker dies mid-grading
+
+The record is live only while its `worker_pid` is alive AND its heartbeat is
+younger than the stale cap (`worker_liveness()` in `engine/job_store.py`). A
+running record whose worker died — or went silent past the cap — is an orphan:
+nothing will ever write a terminal status for it, so the next `gitreins judge
+<id> --status` poll (or any dispatcher calling `find_running_job()`) reaps it
+under the resume lease and flips it to a terminal record:
+
+```json
+{"status": "error", "running": false, "error_kind": "orphaned_worker",
+ "error": "worker heartbeat is stale: last update 245s ago (cap 180s), worker
+ 12345 stopped reporting (no verdict was written)", "finished_at": ...}
+```
+
+In practice the operator sees, from the status poll (`gitreins/cli.py`):
+
+```
+Job worker is GONE: worker process died before completing (pid 12345); no verdict was written
+No verdict was written for this job — the record is marked error (orphan).
+Re-dispatch with: gitreins judge <task-id>
+```
+
+and the poll exits 3 (exit 2 still means "running, poll again"). While the job
+is healthy, the status banner shows the heartbeat age directly:
+
+```
+Worker:   12345 (process)
+Heartbeat: 7s ago
+```
+
+A reaped job frees its single-flight key (one in-flight evaluation per
+`task_id` + workdir), so the next dispatch for the same task is not blocked by
+the dead record. Re-dispatch with the printed `gitreins judge <task-id>`
+command; the failed record stays on disk as the audit of what happened.
+
 ## Upgrade
 
 ```bash
