@@ -181,13 +181,35 @@ includes cache reads, so a cost is charged on input + output only. The rates
 belong to the model named by `usage.model` (else `defaults.model`), and usage
 lines do not carry a model of their own.
 
+### The verdict record's own usage truth (GR-229)
+
+A verdict record can carry what its own evaluation reported — `model`,
+`input_tokens`/`output_tokens` and `cost_usd` (the resolution gate's records
+do). Those are the verdict's own measurements, so the aggregation reads them
+first and treats the telemetry attribution as the estimate:
+
+- The record's model wins; the configured default model is used ONLY when the
+  record carries no model, and the payload names that fallback via
+  `model_source: "config-default"` (a record's own model is named
+  `model_source: "record"`). The aggregate echoes the record model when every
+  attributed record agrees, refuses to pick one (`model: ""`,
+  `model_source: "mixed"`) when they disagree with each other or with the
+  default, and falls back to the configured default only when no record
+  carried a model.
+- A record's `cost_usd` counts as priced even with no rates configured — it is
+  the cost the provider actually reported, not a rate times a token count —
+  and contributes to the aggregate `cost_usd`; `unpriced` counts only records
+  with no cost. A record that carries usage truth but owns no telemetry lines
+  still gains a `usage` entry (zero rows, the record's own tokens), so its
+  cost is never dropped from the aggregate.
+
 ## Data sources
 
 | Surface | Source | Absent source | Notes |
 |---------|--------|---------------|-------|
 | Verdict list + detail | `<checkout>/.gitreins/history/<YYYY-MM-DD>/<hash>/verdict.json` | `total: 0`, empty list | Filesystem only. Unparseable or non-matching entries are skipped, never guessed |
 | Worker evidence | the same verdict directory: `worker-brief.md`, `driver-log.tail.txt`, `commit.patch` | the pane says the artifact was not recorded | Written by `task complete` (see [Worker evidence](#worker-evidence-in-a-verdict-directory)); served only for names the verdict's own `evidence` manifest declares |
-| Judge telemetry | `<repo>/.gitreins/usage.jsonl` (written by every Tier 2 evaluation) | no `usage` block, counted as `unattributed` | Joined to verdicts by timestamp, 1:1; costs need `usage.price_per_1m_input/_output` in `.gitreins/config.yaml` (see [Judge telemetry](#judge-telemetry-tokens-and-cost-per-judgment)) |
+| Judge telemetry | `<repo>/.gitreins/usage.jsonl` (written by every Tier 2 evaluation), plus each verdict record's own `model`/`input_tokens`/`output_tokens`/`cost_usd` when it carries them (GR-229) | no `usage` block, counted as `unattributed` | Joined to verdicts by timestamp, 1:1; costs need `usage.price_per_1m_input/_output` in `.gitreins/config.yaml` OR the record's own `cost_usd` (see [Judge telemetry](#judge-telemetry-tokens-and-cost-per-judgment)); the model block names record vs config-default via `model_source` |
 | Board timeline | `<canonical>/.coding-hermes/board/events.jsonl` | `[]` | Resolved through Git's common dir, so a linked worktree shows the shared board |
 | Board tasks | `<canonical>/.coding-hermes/board/tasks.jsonl` | `[]` | Last 2000 lines are read |
 | Ticks | `~/.hermes/coding-hermes/scheduler.db`, table `ticks`, filtered by `project_name` | `[]` | Host-coupled, read-only SQLite, opt-in per `--project`; without `--project` the panel reads `no scheduler project selected (start with --project <name>)`, and a selected project with no ledger rows reads `no scheduler ticks recorded for <project>` |

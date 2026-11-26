@@ -328,6 +328,10 @@ def attribute_rows(
                 "first_ts": ts,
                 "last_ts": ts,
                 "model": prices.get("model", ""),
+                # GR-229: this attribution had no verdict record to read, so the
+                # model it names is the checkout's configured default — named as
+                # such so a consumer can tell it from a record's own model.
+                "model_source": "config-default",
             },
         )
         entry["rows"] += 1
@@ -344,6 +348,67 @@ def attribute_rows(
     return entries
 
 
+def merge_record_usage(
+    index: dict[str, dict[str, Any]],
+    records: dict[str, dict[str, Any]],
+    default_model: str = "",
+) -> dict[str, dict[str, Any]]:
+    """Fold each verdict record's own usage truth into the attributed index.
+
+    A stored verdict record (``verdict.json``) can carry what its own
+    evaluation reported — ``model``, ``input_tokens``/``output_tokens`` (served
+    here as ``tokens_in``/``tokens_out``) and ``cost_usd``. Those are the
+    verdict's own measurements, not estimates: the model names the client that
+    produced the record and ``cost_usd`` is the cost the provider actually
+    reported, so neither is replaced by the checkout's price configuration.
+    The config default model is used ONLY when the record carries no model,
+    and the entry then names that fallback via ``model_source:
+    "config-default"`` (GR-229).
+
+    A record that carries usage truth but owns no telemetry entry gains one
+    (zero rows, the record's own tokens), so a provider-reported cost is never
+    dropped from the aggregate: ``priced``/``unpriced`` count records, not
+    telemetry rows. When telemetry and the record both speak, the record wins
+    on the token keys it carries; the cache counters stay telemetry-owned
+    because the record schema has no cache fields. Returns the mutated index.
+    """
+    for key, fields in records.items():
+        if not any(name in fields for name in ("model", "tokens_in", "tokens_out", "cost_usd")):
+            continue
+        entry = index.get(key)
+        if entry is None:
+            date, _, verdict_hash = key.partition("/")
+            epoch = fields.get("evaluated_at")
+            epoch = float(epoch) if isinstance(epoch, (int, float)) else 0.0
+            entry = index[key] = {
+                "date": date,
+                "hash": verdict_hash,
+                "evaluated_at": epoch,
+                "rows": 0,
+                "steps": [],
+                "tokens_in": 0,
+                "tokens_out": 0,
+                "cache_read": 0,
+                "cache_write": 0,
+                "first_ts": epoch,
+                "last_ts": epoch,
+                "model": default_model,
+                "model_source": "config-default",
+                "cost_usd": None,
+                "priced": False,
+            }
+        if "model" in fields:
+            entry["model"] = str(fields["model"])
+            entry["model_source"] = "record"
+        for name in ("tokens_in", "tokens_out"):
+            if name in fields:
+                entry[name] = int(fields[name])
+        if "cost_usd" in fields:
+            entry["cost_usd"] = float(fields["cost_usd"])
+            entry["priced"] = True
+    return index
+
+
 def summarize(
     index: dict[str, dict[str, Any]],
     prices: dict[str, Any] | None = None,
@@ -356,9 +421,36 @@ def summarize(
     per-verdict usage blocks use; ``unpriced`` counts attributed judgements
     that could not be costed and ``unattributed`` the verdicts with no
     telemetry at all, so a partial total is never presented as the whole truth.
+
+    ``model``/``model_source`` say whose model the aggregate names: entries
+    that carry their verdict record's own model all agree on exactly one, the
+    aggregate echoes it with ``model_source: "record"``; when the records
+    disagree with each other or with the configured default the aggregate
+    refuses to pick one (``model: ""``, ``model_source: "mixed"``) and the
+    per-verdict blocks stay the per-verdict truth; only when NO record carried
+    a model does the aggregate fall back to the config default and name that
+    fallback via ``model_source: "config-default"`` (GR-229).
     """
     prices = dict(DEFAULT_PRICE_CONFIG if prices is None else prices)
     verdicts = len(index) if total_verdicts is None else max(total_verdicts, len(index))
+    record_models = {
+        entry["model"]
+        for entry in index.values()
+        if entry.get("model_source") == "record" and entry.get("model")
+    }
+    if (
+        record_models
+        and len(record_models) == 1
+        and all(entry.get("model_source") == "record" for entry in index.values())
+    ):
+        model = next(iter(record_models))
+        model_source = "record"
+    elif record_models:
+        model = ""
+        model_source = "mixed"
+    else:
+        model = str(prices.get("model", ""))
+        model_source = "config-default"
     total: dict[str, Any] = {
         "judgements": len(index),
         "verdicts": verdicts,
@@ -370,7 +462,8 @@ def summarize(
         "cost_usd": None,
         "priced": 0,
         "unpriced": 0,
-        "model": prices.get("model", ""),
+        "model": model,
+        "model_source": model_source,
         "prices_configured": prices_configured(prices),
     }
     for entry in index.values():
