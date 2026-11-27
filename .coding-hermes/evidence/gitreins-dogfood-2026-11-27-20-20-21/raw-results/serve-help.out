@@ -1,0 +1,12 @@
+usage: gitreins serve [-h] [--port PORT] [--host HOST] [--repo REPO]
+                      [--project PROJECT] [--open]
+
+options:
+  -h, --help         show this help message and exit
+  --port PORT        Port to bind (default 8616)
+  --host HOST        Bind address (default 127.0.0.1)
+  --repo REPO        Browse another checkout's judgments by path (default: the
+                     repository you run from)
+  --project PROJECT  Scheduler project name for the tick ledger (e.g.
+                     gitreins)
+  --open             Open the browser automatically

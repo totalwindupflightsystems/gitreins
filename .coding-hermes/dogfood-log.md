@@ -896,3 +896,17 @@ scheduler, and the raw/attributed dispatch counts above are the evidence it need
 
 This append is deliberate: the no-op's single write. No rows filed, no perf re-drive, no
 product contact beyond read-only git/ledger/proc/ss probes.
+
+## 2026-11-27 — tick gitreins-dogfood-2026-11-27-20-20-21
+
+Verdict: PROMISING-BUT-ROUGH. Promise: a user can install GitReins, initialize guards, run the documented CLI lifecycle, inspect a verdict, and commit through the hook.
+
+Real-use result: a fresh disposable consumer workflow at GitReins 0.22.0 succeeded through install, init, doctor, guard, fingerprint, task create/start, explicit Tier-1-only task completion, task list, report, and a guarded commit. Time-to-first-success was immediate for `--version`; the guarded commit took 1.06s. The task output explicitly said Tier-2 did not run, so no judged pass is claimed. Consumer doctor warned about an unwired test symbol; this is consumer-tree diagnostic noise, not an install failure.
+
+Finding filed: DF-GITREINS-POC-63-R2-R2, recurrence of DF-GITREINS-POC-63-R2. The live 0.22.0 install created pre-commit and pre-push and printed 17 `.gitignore` additions, while docs/onboarding.md still says pre-commit only and exactly eleven exclusions. Existing GR-226 owns the resolution-index drift observed on the source checkout, so no duplicate row was filed.
+
+Performance: fingerprint warm 0.31/0.34/0.40s; isolated HOME/XDG cold-import 0.29s; all successful and below a user-noticeable threshold. No PERF row and no profile.
+
+Install leg: RUN and PROVEN on bunker-las-03 agent 36a8d5cd; bunker evidence 29 rows, SHA256 f932d057180af3306f65de87bdee7550b70f0b67b46b9967e9f29d0fd109c738. Fresh install, native tests, lint, upgrade, and chaos-disconnect OK; act simulation failed/unverified; Docker lifecycle safety-skipped; UI/corruption N/A. Agent destroyed and verified absent.
+
+Artifacts: docs/dogfood/2026-11-27-integration.md, docs/dogfood/diagnostics-2026-11-27.md, .coding-hermes/evidence/gitreins-dogfood-2026-11-27-20-20-21/, and the 2026-11-27 section in skills/gitreins-usage/SKILL.md. DuckBrain key /dogfood/2026-11-27-20-20-21 was written and read back in namespace gitreins.

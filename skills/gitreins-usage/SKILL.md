@@ -696,6 +696,14 @@ and the first write after the upgrade chains onto the legacy tip. One-ref
 migration, if you want it:
 `git update-ref refs/gitreins/history refs/heads/gitreins`.
 
+## Dogfood 2026-11-27 — install surface and honest Tier-1 wording
+
+A fresh consumer workflow at GitReins 0.22.0 reached install → init → doctor → guard → fingerprint → task create/start/complete/list → report and a guarded commit. The completion used `--skip-tier2`; its PASS is Tier-1-only, not a judged pass. A guarded docs commit took 1.06 seconds and reported a DEGRADED PASS because lint and static analysis had no staged matching files; that is expected scope behavior, not full coverage.
+
+The live install output created both `.git/hooks/pre-commit` and `.git/hooks/pre-push` and added 17 `.gitignore` entries. Do not rely on the onboarding sentence that says install writes only pre-commit and exactly eleven exclusions; that documentation drift is tracked by recurrence row DF-GITREINS-POC-63-R2-R2.
+
+For a small consumer, `doctor --json` may warn about an unwired test symbol. Treat the warning as consumer-tree diagnostics, not as a failed installation. Fingerprint timing in this run was 0.31/0.34/0.40 seconds warm and 0.29 seconds in an isolated HOME/XDG cold-import arm; this is below the user-noticeable threshold, so no PERF row was filed.
+
 ## Pitfalls 40–43 (2026-09-24b run — `gitreins serve`, the judgment browser)
 
 **Pitfall 40 — the serve detail pane shows ONLY the header (POC-56, P0).**

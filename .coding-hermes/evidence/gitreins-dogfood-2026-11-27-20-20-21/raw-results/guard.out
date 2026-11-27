@@ -1,0 +1,6 @@
+Tier 1 Guards: PASS  (test mode: full, whole tree)
+  ✓ secrets — clean (gitleaks + builtin cross-check; scope: working-tree); scanners: nice=nice -n 10
+  ✓ lint — ok; scanners: nice=nice -n 10
+  ✓ tests (full)
+  ✓ static_analysis — clean
+  guard log: /home/kara/.hermes/cache/scratch/gitreins-dogfood-20261127-202021/consumer/.gitreins/logs/guard-20261127T203406.297504Z.log

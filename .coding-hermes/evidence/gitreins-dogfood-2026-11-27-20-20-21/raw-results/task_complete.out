@@ -1,0 +1,18 @@
+Completed: DF-CONSUMER-1 → complete
+Control root: /home/kara/.hermes/cache/scratch/gitreins-dogfood-20261127-202021/consumer
+Scan scope:   /home/kara/.hermes/cache/scratch/gitreins-dogfood-20261127-202021/consumer
+
+Evaluating...
+Judge Result: DF-CONSUMER-1
+Stage tier1: PASS
+    ✓ lint: scanners: nice=nice -n 10
+  ✓ secrets: secrets: scanners=gitleaks+builtin cross-check
+  ✓ tests: scanners: nice=nice -n 10
+
+Stage fix_verification: PASS
+  fix_verification: 0 finding(s) verified
+
+Overall: PASS ✓
+
+Pass class: tier1-only — Tier 2 did not run, so this is a Tier 1 grade, not a judged pass (no owner waiver is configured, so this verdict cannot satisfy a judge-gated merge).
+  📋 Verdict saved: b13bdb6d

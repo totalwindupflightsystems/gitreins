@@ -1,0 +1,1056 @@
+[
+  {
+    "ts": "2026-10-09T21:18:48+00:00",
+    "project": "gitreins",
+    "status": "pass",
+    "verdict": "PASS",
+    "kind": "fresh",
+    "cells": {
+      "fresh": "passed"
+    },
+    "findings": [],
+    "evidence": "",
+    "note": "",
+    "exit_code": 0,
+    "run_id": "run-997534b864a24d859b2d58628a2cfecf",
+    "commit": "e6d081d6a8523fb20ad55d4364ba334d71c3a882",
+    "harness_version": "0.16.0",
+    "detail": {
+      "command": "pytest -q --override-ini=addopts= tests/test_worktree_disposable.py tests/test_preflight.py 2>&1 | tail -2",
+      "duration_s": 7.673981,
+      "tree": "/home/kara/gitreins-wt/.disposable/run-997534b864a24d859b2d58628a2cfecf",
+      "kept": false,
+      "output": "....................................                                     [100%]\n36 passed in 7.25s"
+    }
+  },
+  {
+    "ts": "2026-10-09T21:19:23+00:00",
+    "project": "gitreins",
+    "status": "fail",
+    "verdict": "FAIL",
+    "kind": "repro",
+    "cells": {
+      "run-1": "failed",
+      "run-2": "failed",
+      "run-3": "failed"
+    },
+    "findings": [],
+    "evidence": "",
+    "note": "",
+    "exit_code": 1,
+    "commit": "e6d081d6a8523fb20ad55d4364ba334d71c3a882",
+    "harness_version": "0.16.0",
+    "detail": {
+      "command": "test $RUN_INDEX -ne 2",
+      "k": 3,
+      "concurrency": 1,
+      "passes": 0,
+      "failures": 3,
+      "pass_rate": 0.0,
+      "head": "e6d081d6a8523fb20ad55d4364ba334d71c3a882",
+      "runs": [
+        {
+          "index": 1,
+          "exit_code": 2,
+          "duration_s": 0.163882
+        },
+        {
+          "index": 2,
+          "exit_code": 2,
+          "duration_s": 0.16702
+        },
+        {
+          "index": 3,
+          "exit_code": 2,
+          "duration_s": 0.181035
+        }
+      ]
+    }
+  },
+  {
+    "ts": "2026-10-09T21:19:24+00:00",
+    "project": "gitreins",
+    "status": "fail",
+    "verdict": "FAIL",
+    "kind": "repro",
+    "cells": {
+      "run-1": "failed",
+      "run-2": "failed"
+    },
+    "findings": [],
+    "evidence": "",
+    "note": "",
+    "exit_code": 1,
+    "commit": "e6d081d6a8523fb20ad55d4364ba334d71c3a882",
+    "harness_version": "0.16.0",
+    "detail": {
+      "command": "sh -c \"exit 7\"",
+      "k": 2,
+      "concurrency": 2,
+      "passes": 0,
+      "failures": 2,
+      "pass_rate": 0.0,
+      "head": "e6d081d6a8523fb20ad55d4364ba334d71c3a882",
+      "runs": [
+        {
+          "index": 1,
+          "exit_code": 7,
+          "duration_s": 0.363909
+        },
+        {
+          "index": 2,
+          "exit_code": 7,
+          "duration_s": 0.379675
+        }
+      ]
+    }
+  },
+  {
+    "ts": "2026-10-12T00:58:03+00:00",
+    "project": "gitreins",
+    "status": "fail",
+    "verdict": "FAIL",
+    "kind": "repro",
+    "cells": {
+      "run-1": "failed",
+      "run-2": "failed",
+      "run-3": "failed"
+    },
+    "findings": [],
+    "evidence": "",
+    "note": "",
+    "exit_code": 1,
+    "commit": "aba7b9e17df3380966bf5727552d8aee1ed3fb20",
+    "harness_version": "0.16.0",
+    "detail": {
+      "command": "test $RUN_INDEX -ne 2",
+      "k": 3,
+      "concurrency": 2,
+      "passes": 0,
+      "failures": 3,
+      "pass_rate": 0.0,
+      "head": "aba7b9e17df3380966bf5727552d8aee1ed3fb20",
+      "runs": [
+        {
+          "index": 1,
+          "exit_code": 2,
+          "duration_s": 0.600118
+        },
+        {
+          "index": 2,
+          "exit_code": 2,
+          "duration_s": 0.834832
+        },
+        {
+          "index": 3,
+          "exit_code": 2,
+          "duration_s": 0.238899
+        }
+      ]
+    }
+  },
+  {
+    "ts": "2026-10-12T01:05:35+00:00",
+    "project": "gitreins",
+    "status": "fail",
+    "verdict": "FAIL",
+    "kind": "repro",
+    "cells": {
+      "run-1": "failed",
+      "run-2": "failed",
+      "run-3": "failed"
+    },
+    "findings": [],
+    "evidence": "",
+    "note": "",
+    "exit_code": 1,
+    "commit": "8ada8a0d8d4ad022a12aac0f0c0e37b3ba6584bc",
+    "harness_version": "0.16.0",
+    "detail": {
+      "command": "test $RUN_INDEX -ne 2",
+      "k": 3,
+      "concurrency": 2,
+      "passes": 0,
+      "failures": 3,
+      "pass_rate": 0.0,
+      "head": "8ada8a0d8d4ad022a12aac0f0c0e37b3ba6584bc",
+      "runs": [
+        {
+          "index": 1,
+          "exit_code": 2,
+          "duration_s": 0.430143
+        },
+        {
+          "index": 2,
+          "exit_code": 2,
+          "duration_s": 0.43034
+        },
+        {
+          "index": 3,
+          "exit_code": 2,
+          "duration_s": 0.219883
+        }
+      ]
+    }
+  },
+  {
+    "ts": "2026-10-12T01:05:50+00:00",
+    "project": "gitreins",
+    "status": "fail",
+    "verdict": "FAIL",
+    "kind": "repro",
+    "cells": {
+      "run-1": "failed",
+      "run-2": "failed",
+      "run-3": "failed"
+    },
+    "findings": [],
+    "evidence": "",
+    "note": "",
+    "exit_code": 1,
+    "commit": "8ada8a0d8d4ad022a12aac0f0c0e37b3ba6584bc",
+    "harness_version": "0.16.0",
+    "detail": {
+      "command": "test $RUN_INDEX -ne 2",
+      "k": 3,
+      "concurrency": 2,
+      "passes": 0,
+      "failures": 3,
+      "pass_rate": 0.0,
+      "head": "8ada8a0d8d4ad022a12aac0f0c0e37b3ba6584bc",
+      "runs": [
+        {
+          "index": 1,
+          "exit_code": 2,
+          "duration_s": 0.357585
+        },
+        {
+          "index": 2,
+          "exit_code": 2,
+          "duration_s": 0.357026
+        },
+        {
+          "index": 3,
+          "exit_code": 2,
+          "duration_s": 0.172472
+        }
+      ]
+    }
+  },
+  {
+    "ts": "2026-10-23T10:31:04+00:00",
+    "project": "gitreins",
+    "status": "fail",
+    "verdict": "FAIL",
+    "kind": "bunker",
+    "cells": {
+      "launch": "OK",
+      "fresh-install": "OK",
+      "ci-pass": "OK",
+      "ci-act": "UNVERIFIED",
+      "upgrade": "OK",
+      "docker-deploy": "N/A",
+      "ui-probe": "N/A",
+      "chaos-disconnect": "UNVERIFIED"
+    },
+    "findings": [],
+    "evidence": "/tmp/gitreins-df-20261023/bunker-evidence.jsonl",
+    "note": "bunker-qa battery completed on bunker-mvp; native suite passed, act was unverified due to local container execution, chaos-disconnect was unverified because the generated disc.log was empty; evidence controller collection remained launch-only before destroy",
+    "exit_code": 1,
+    "commit": "156c36c74f8a22716a24dfe706502a0f8cb7c8a5",
+    "agent": "6d19e402",
+    "server": "bunker-mvp",
+    "harness_version": "0.17.0"
+  },
+  {
+    "ts": "2026-10-23T10:41:16+00:00",
+    "project": "gitreins",
+    "status": "pass",
+    "verdict": "PASS",
+    "kind": "bunker",
+    "cells": {
+      "launch": "OK",
+      "fresh-install": "OK",
+      "ci-pass": "OK",
+      "ci-act": "UNVERIFIED",
+      "upgrade": "OK",
+      "docker-deploy": "N/A",
+      "ui-probe": "N/A",
+      "chaos-disconnect": "UNVERIFIED",
+      "chaos-shutdown": "N/A",
+      "chaos-corruption": "N/A"
+    },
+    "findings": [],
+    "evidence": "/tmp/gitreins-df-20261023/bunker-evidence.jsonl",
+    "note": "gitreins-dogfood-2026-10-23-10-02-55 install+battery leg: 7 OK (repo-head/toolchain x9/fresh-install/ci-pass/upgrade), 3 N/A, 2 UNVERIFIED (ci-act act-env fallback, chaos-disconnect never-exercised); collect evidence-file drift + chaos vacuity + destroy-refused residue filed as DF-GITREINS-POC-99/100/101",
+    "exit_code": 0,
+    "commit": "156c36c74f8a22716a24dfe706502a0f8cb7c8a5",
+    "agent": "6d19e402",
+    "server": "bunker-mvp",
+    "harness_version": "0.17.0"
+  },
+  {
+    "ts": "2026-10-29T13:10:45+00:00",
+    "project": "gitreins",
+    "status": "pass",
+    "verdict": "PASS",
+    "kind": "dogfood",
+    "cells": {
+      "init": "passed",
+      "task": "passed",
+      "guard": "passed",
+      "judge": "skipped"
+    },
+    "findings": [],
+    "evidence": "",
+    "note": "",
+    "exit_code": 0,
+    "commit": "d8f0b159ad08046186069a21bed24976213ec5ea",
+    "harness_version": "0.17.1",
+    "detail": {
+      "command": "gitreins dogfood",
+      "tree": "/home/kara/gitreins-wt/.disposable/dogfood-0b6629b05f294968957283e8e4f59df5",
+      "steps": [
+        {
+          "name": "init",
+          "status": "passed",
+          "exit_code": 0,
+          "duration_s": 0.157021
+        },
+        {
+          "name": "task",
+          "status": "passed",
+          "exit_code": 0,
+          "duration_s": 0.282325
+        },
+        {
+          "name": "guard",
+          "status": "passed",
+          "exit_code": 0,
+          "duration_s": 2.352044
+        },
+        {
+          "name": "judge",
+          "status": "skipped",
+          "exit_code": null,
+          "duration_s": 0.0
+        }
+      ],
+      "judge": {
+        "status": "skipped",
+        "reason": "--skip-judge",
+        "exit_code": null,
+        "duration_s": 0.0
+      }
+    }
+  },
+  {
+    "ts": "2026-10-29T13:10:46+00:00",
+    "project": "gitreins",
+    "status": "pass",
+    "verdict": "PASS",
+    "kind": "fresh",
+    "cells": {
+      "fresh": "passed"
+    },
+    "findings": [],
+    "evidence": "",
+    "note": "",
+    "exit_code": 0,
+    "run_id": "run-26d5114f02dc4c63821eae2bd5c6c862",
+    "commit": "d8f0b159ad08046186069a21bed24976213ec5ea",
+    "harness_version": "0.17.1",
+    "detail": {
+      "command": "true",
+      "duration_s": 0.288941,
+      "tree": "/home/kara/gitreins-wt/.disposable/run-26d5114f02dc4c63821eae2bd5c6c862",
+      "kept": false,
+      "output": ""
+    }
+  },
+  {
+    "ts": "2026-11-05T16:40:00+00:00",
+    "project": "gitreins",
+    "status": "findings",
+    "verdict": "FINDINGS",
+    "kind": "bunker",
+    "cells": {
+      "launch": "OK",
+      "fresh-install": "OK",
+      "lint": "OK",
+      "tests": "OK",
+      "ci-pass": "FAIL",
+      "ci-act": "UNVERIFIED",
+      "upgrade": "OK",
+      "chaos-resource": "PASS",
+      "chaos-errorpath": "OK",
+      "chaos-disconnect": "UNVERIFIED",
+      "docker-deploy": "N/A",
+      "docker_build": "N/A",
+      "ui-probe": "N/A",
+      "chaos-shutdown": "N/A",
+      "chaos-corruption": "N/A"
+    },
+    "findings": [
+      "QA-GITREINS-3",
+      "QA-GITREINS-4"
+    ],
+    "evidence": "/home/kara/reports-repo/qa/gitreins-20261105/evidence.jsonl",
+    "note": "2026-11-05 clean-machine battery on bunker-mvp agent 0e553c02 at 4d8c625f (v0.18.0): fresh-install/lint/tests(3272p/28s)/upgrade/chaos-resource/chaos-errorpath OK; ci-pass FAIL from act step 'Install system tools for LSP/static analysis' rc=127 on 3/3 legs while hosted CI run 42064826053 is green at the same sha (filed QA-GITREINS-3, harness-class recurrence of POC-5); chaos-disconnect UNVERIFIED is a classifier false negative \u2014 NETWORK_CUT_APPLIED + '3275 passed' are in disc.log but the suite-count regex rejects the comma (filed QA-GITREINS-4). No product defect reproduced.",
+    "exit_code": 0,
+    "commit": "4d8c625f3b6c73fa67786449a5e986e712b86d91",
+    "agent": "0e553c02",
+    "server": "bunker-mvp",
+    "harness_version": "0.17.1"
+  },
+  {
+    "ts": "2026-11-11T06:25:00Z",
+    "tick": "gitreins-qa-2026-11-11-05-38-47",
+    "cycle": 1,
+    "lane": "gitreins-qa",
+    "project": "gitreins",
+    "target": "/home/kara/gitreins",
+    "kind": "bunker",
+    "mode": "fresh full clean-machine battery (phase A launch on JIT agent, phase B collect), 25 evidence rows",
+    "verdict": "FINDINGS",
+    "status": "findings",
+    "launch": {
+      "server": "bunker-mvp",
+      "agent": "b6ac6e1d",
+      "battery_pid": 2288300,
+      "qa_run_bytes": 137438,
+      "cells_done": true,
+      "collect_attempts": 2,
+      "collect_abort_then_ok": true
+    },
+    "tested_revision": {
+      "head": "87284cd9eeec53399b569ca70dadd8602b0e8d08",
+      "equals_origin_main": true,
+      "tracked_files": 575,
+      "dirty": 0,
+      "manifest_digest": "0f03de8a424dfa97e0e60b079979c48cda2370b9c7dbc9681e4a7ebe41998748",
+      "agent_side_match": true
+    },
+    "cells": {
+      "launch": "OK",
+      "toolchain-bootstrap": "OK",
+      "fresh-install": "OK",
+      "lint": "OK",
+      "tests": "OK",
+      "ci-pass": "FAIL",
+      "ci-act": "UNVERIFIED",
+      "upgrade": "OK",
+      "docker_build": "N/A",
+      "compose_config": "N/A",
+      "docker-deploy": "N/A",
+      "ui-probe": "N/A",
+      "chaos-disconnect": "UNVERIFIED",
+      "chaos-shutdown": "N/A",
+      "chaos-corruption": "N/A",
+      "chaos-resource": "PASS",
+      "chaos-errorpath": "OK"
+    },
+    "cell_truth_overrides": {
+      "tests": "3622 passed, 35 skipped, 0 failed, 186.13s",
+      "fresh-install": "gitreins-0.21.0 installed from synced tree",
+      "upgrade": "0.20.0 -> 0.21.0 clean",
+      "ci-pass": "act rc=127: go MISSING in catthehacker/ubuntu:act-latest; hosted CI 42922110937 green at same SHA",
+      "ui-probe": "false N/A: gitreins serve -> 200 text/html 14089 bytes",
+      "chaos-disconnect": "false UNVERIFIED: NETWORK_CUT_APPLIED + 3625 passed; grader regex rejects 'passed,'",
+      "chaos-corruption": "N/A: CLI without start command; corrupt quality.json handled rc=0 out of band"
+    },
+    "product_regressions": 0,
+    "findings": [
+      {
+        "id": "QA-GITREINS-9",
+        "kind": "new",
+        "defect": "collect aborts on one empty SSH probe with no retry, leaves a FAIL row in merged evidence"
+      },
+      {
+        "id": "QA-GITREINS-3",
+        "kind": "recurrence",
+        "defect": "act leg non-hermetic (go missing in act image), rc=127"
+      },
+      {
+        "id": "QA-GITREINS-4",
+        "kind": "recurrence",
+        "defect": "disconnect suite-count regex rejects pytest summary"
+      },
+      {
+        "id": "QA-GITREINS-6",
+        "kind": "recurrence",
+        "defect": "ui-probe has no Python HTTP server arm"
+      },
+      {
+        "id": "QA-GITREINS-7",
+        "kind": "partial",
+        "defect": "corruption cell needs a CLI-state arm, finder fix insufficient"
+      },
+      {
+        "id": "QA-GITREINS-8",
+        "kind": "recurrence",
+        "defect": "evidence carries no tree binding"
+      }
+    ],
+    "not_observed": [
+      "QA-GITREINS-5"
+    ],
+    "board": {
+      "commit": "1cc93575f9983b8e67a1c87b307e45f74926808d",
+      "pushed": "github/main 87284cd9..1cc93575",
+      "event": "1794171000000000029",
+      "rows_filed": [
+        "QA-GITREINS-9"
+      ],
+      "rows_annotated": [
+        "QA-GITREINS-3",
+        "QA-GITREINS-4",
+        "QA-GITREINS-6",
+        "QA-GITREINS-7",
+        "QA-GITREINS-8"
+      ],
+      "validate": "OK (603 pre-existing warnings, 0 errors)"
+    },
+    "evidence": "/home/kara/.hermes/cache/scratch/gitreins-qa-2026-11-11-05-38-47/evidence.jsonl",
+    "logs": "/home/kara/.hermes/cache/scratch/gitreins-qa-2026-11-11-05-38-47/harvest/extract/qa-logs-2288300",
+    "unverified": [
+      "chaos-corruption on the config path (write blocked in the unattended lane)",
+      "docker cells have no trigger (repo ships no Dockerfile/compose)"
+    ]
+  },
+  {
+    "ts": "2026-11-14T18:00:00Z",
+    "tick": "gitreins-qa-2026-11-14-17-29-39",
+    "project": "gitreins",
+    "lane": "gitreins-qa",
+    "cycle": 1,
+    "kind": "bunker",
+    "mode": "fresh full clean-machine battery via bunker-qa.sh launch/collect",
+    "verdict": "FINDINGS",
+    "status": "findings",
+    "agent": "88ce938f",
+    "server": "bunker-mvp",
+    "tested_sha": "UNVERIFIED",
+    "controller_baseline": "025dc9eec59e880994cbc537c87909b0a7539e87",
+    "agent_evidence": "/home/kara/.hermes/cache/scratch/gitreins-qa-2026-11-14-17-29-39/harvest/qa-evidence.jsonl",
+    "agent_evidence_sha256": "778503ac2288f5b462494e62e55ecdc512f35f5a916eb20d11fc4bd8c5a955d0",
+    "agent_rows": 25,
+    "agent_status_histogram": {
+      "OK": 15,
+      "PASS": 1,
+      "FAIL": 1,
+      "UNVERIFIED": 2,
+      "N/A": 6
+    },
+    "controller_precollect": "/home/kara/.hermes/cache/scratch/gitreins-qa-2026-11-14-17-29-39-precollect.jsonl",
+    "controller_precollect_sha256": "b1aabfb4f9d65a29a51a1b0350827e582967ed5033baed9b39b61cf25574e583",
+    "controller_rows": 27,
+    "controller_status_histogram": {
+      "OK": 17,
+      "PASS": 1,
+      "FAIL": 1,
+      "UNVERIFIED": 2,
+      "N/A": 6
+    },
+    "completion_marker": "harvest/qa-run.finished present",
+    "logs": "/home/kara/.hermes/cache/scratch/gitreins-qa-2026-11-14-17-29-39/harvest/qa-logs-285716",
+    "collector": "COLLECTED agent=88ce938f rows=25 after recent tick-death-orphan adoption",
+    "teardown": "verified absent from bunker-mvp server-scoped listing after collect",
+    "cells": {
+      "fresh-install": "OK",
+      "lint": "OK",
+      "tests": "OK 3646 passed, 34 skipped, 197.95s",
+      "native": "OK 3648 passed, 32 skipped, 170.86s",
+      "ci-pass": "FAIL act all 3 matrix legs at Install system tools for LSP/static analysis, exitcode 127",
+      "ci-act": "UNVERIFIED product steps did not execute",
+      "upgrade": "OK v0.20.0 to v0.21.0",
+      "chaos-disconnect": "UNVERIFIED; log has NETWORK_CUT_APPLIED and 3648 passed, 32 skipped but grader rejects comma summary",
+      "chaos-resource": "PASS 3G cap observed",
+      "chaos-errorpath": "OK",
+      "ui-probe": "N/A no web UI detected",
+      "chaos-corruption": "N/A no db/state files in repo",
+      "docker": "N/A no Dockerfile/compose trigger",
+      "chaos-shutdown": "N/A no compose file"
+    },
+    "findings": [
+      "QA-GITREINS-3",
+      "QA-GITREINS-4",
+      "QA-GITREINS-6",
+      "QA-GITREINS-7",
+      "QA-GITREINS-8",
+      "QA-GITREINS-13"
+    ],
+    "new_rows": [],
+    "unverified": [
+      "battery source revision binding",
+      "act product steps after bootstrap",
+      "Python UI rendering/interactions",
+      "corrupt-state recovery",
+      "Docker/compose surfaces absent by trigger",
+      "real external-network degradation"
+    ],
+    "evidence_note": "Agent evidence and recursive per-cell logs were harvested before collect; controller merged evidence has two additional wrapper/transport rows and was not used to upgrade product coverage."
+  },
+  {
+    "ts": "2026-11-14T18:20:00Z",
+    "tick": "gitreins-qa-2026-11-14-17-29-39",
+    "project": "gitreins",
+    "lane": "gitreins-qa",
+    "cycle": 2,
+    "kind": "verification-only",
+    "mode": "cycle-2 refire: adopted and re-verified the cycle-1 JIT bunker battery; no relaunch (second agent would double spend and duplicate the battery under one tick id)",
+    "verdict": "FINDINGS",
+    "status": "findings",
+    "agent": "88ce938f",
+    "server": "bunker-mvp",
+    "tested_sha": "UNVERIFIED",
+    "controller_baseline": "025dc9eec59e880994cbc537c87909b0a7539e87",
+    "agent_evidence": "/home/kara/.hermes/cache/scratch/gitreins-qa-2026-11-14-17-29-39/harvest/qa-evidence.jsonl",
+    "agent_evidence_sha256": "778503ac2288f5b462494e62e55ecdc512f35f5a916eb20d11fc4bd8c5a955d0",
+    "agent_rows": 25,
+    "agent_status_histogram": {
+      "OK": 15,
+      "PASS": 1,
+      "FAIL": 1,
+      "UNVERIFIED": 2,
+      "N/A": 6
+    },
+    "agent_missing_status_rows": 0,
+    "completion_marker": "harvest/qa-run.finished present",
+    "cells": {
+      "fresh-install": "OK",
+      "lint": "OK ruff rc=0",
+      "tests": "OK rc=0",
+      "native": "OK",
+      "ci-pass": "FAIL act rc=1 all 3 test legs at Install system tools for LSP/static analysis exitcode 127",
+      "ci-act": "UNVERIFIED product steps did not execute",
+      "upgrade": "OK v0.20.0 -> HEAD",
+      "chaos-disconnect": "UNVERIFIED; disc.log has NETWORK_CUT_APPLIED and 3648 passed comma summary rejected by grader",
+      "chaos-resource": "PASS 3G cap observed",
+      "chaos-errorpath": "OK clean error on missing config",
+      "ui-probe": "N/A no web UI",
+      "chaos-corruption": "N/A no db/state files",
+      "docker": "N/A no Dockerfile/compose trigger"
+    },
+    "findings_carried": [
+      "QA-GITREINS-3",
+      "QA-GITREINS-4",
+      "QA-GITREINS-6",
+      "QA-GITREINS-7",
+      "QA-GITREINS-8"
+    ],
+    "new_rows": [],
+    "annotated": [
+      "QA-GITREINS-4"
+    ],
+    "record_corrections": [
+      "cycle-1 event pairs controller_precollect_sha256 b1aabf with controller_rows=27; that digest is the 1-row launch precollect, the 27-row/17-OK histogram belongs to the merged collect artifact /tmp/bunker-qa-evidence-20261114T173745Z-2885297.jsonl",
+      "harvested chaos-disconnect row detail claims the log lacks NETWORK_CUT_APPLIED; disc.log line 1 contradicts it \u2014 status correct, reason string wrong"
+    ],
+    "unverified": [
+      "tested source revision binding",
+      "act product steps after bootstrap",
+      "UI rendering/interactions",
+      "corrupt-state recovery",
+      "real external-network degradation"
+    ],
+    "board_trace": "cycle-1 commit 201cae23 event 1794171000000000089; cycle-2 adds QA-GITREINS-4 note + paired audit event"
+  },
+  {
+    "ts": "2026-11-14T18:30:00Z",
+    "tick": "gitreins-qa-2026-11-14-17-29-39",
+    "project": "gitreins",
+    "lane": "gitreins-qa",
+    "cycle": 3,
+    "kind": "verification-only",
+    "mode": "cycle-3 refire: terminal read-only steward of the cycle-1 JIT bunker battery; no relaunch, no new agent, no rows minted (two graded cycles already exist for this tick id)",
+    "verdict": "FINDINGS",
+    "status": "findings",
+    "agent": "88ce938f",
+    "server": "bunker-mvp",
+    "tested_sha": "UNVERIFIED",
+    "controller_baseline": "025dc9eec59e880994cbc537c87909b0a7539e87",
+    "agent_evidence": "/home/kara/.hermes/cache/scratch/gitreins-qa-2026-11-14-17-29-39/harvest/qa-evidence.jsonl",
+    "agent_evidence_sha256": "778503ac2288f5b462494e62e55ecdc512f35f5a916eb20d11fc4bd8c5a955d0",
+    "agent_rows": 25,
+    "agent_status_histogram": {
+      "OK": 15,
+      "PASS": 1,
+      "FAIL": 1,
+      "UNVERIFIED": 2,
+      "N/A": 6
+    },
+    "agent_missing_status_rows": 0,
+    "effective_product_cells": 15,
+    "wrapper_rows_excluded": 10,
+    "completion_marker": "harvest/qa-run.finished present (0 bytes, agent-owned)",
+    "logs": "/home/kara/.hermes/cache/scratch/gitreins-qa-2026-11-14-17-29-39/harvest/qa-logs-285716",
+    "cells": {
+      "fresh-install": "OK",
+      "lint": "OK ruff rc=0, 'All checks passed!'",
+      "tests": "OK 3646 passed, 34 skipped, 237 warnings in 197.95s",
+      "native": "OK 3648 passed, 32 skipped, 237 warnings in 170.86s",
+      "ci-pass": "FAIL act rc=1, all three matrix legs at 'Install system tools for LSP/static analysis', exitcode 127 command not found (ci.log confirmed)",
+      "ci-act": "UNVERIFIED product steps did not execute after bootstrap",
+      "upgrade": "OK v0.20.0 -> v0.21.0 (Successfully uninstalled 0.20.0, installed 0.21.0)",
+      "chaos-disconnect": "UNVERIFIED; disc.log line 1 NETWORK_CUT_APPLIED, line 125 '3648 passed, 32 skipped, 237 warnings in 150.69s' \u2014 grader rejects comma summary",
+      "chaos-resource": "PASS 3G cap observed",
+      "chaos-errorpath": "OK",
+      "ui-probe": "N/A no web UI detected",
+      "chaos-corruption": "N/A no db/state files",
+      "docker_build": "N/A no trigger",
+      "compose_config": "N/A no trigger",
+      "docker-deploy": "N/A no trigger",
+      "chaos-shutdown": "N/A no compose file"
+    },
+    "findings_carried": [
+      "QA-GITREINS-3",
+      "QA-GITREINS-4",
+      "QA-GITREINS-6",
+      "QA-GITREINS-7",
+      "QA-GITREINS-8"
+    ],
+    "new_rows": [],
+    "annotated": [],
+    "record_corrections": [
+      "independently confirmed cycle-2's controller-evidence correction: the 1-row artifact /home/kara/.hermes/cache/scratch/gitreins-qa-2026-11-14-17-29-39-precollect.jsonl hashes to b1aabfb4f9d65a29a51a1b0350827e582967ed5033baed9b39b61cf25574e583, while the merged collect artifact /tmp/bunker-qa-evidence-20261114T173745Z-2885297.jsonl carries 27 rows and the 17-OK histogram; cycle-1's event paired them wrongly",
+      "durable record for this tick lives under namespace 'gitreins' at key /project/gitreins/qa/2026-11-14-17-29-39, not under namespace 'qa' as the cycle-2 event's durable_key path implied (ns qa has no gitreins key)"
+    ],
+    "unverified": [
+      "tested source revision binding",
+      "act product steps after bootstrap",
+      "UI rendering/interactions",
+      "corrupt-state recovery",
+      "real external-network degradation"
+    ],
+    "board_trace": "cycle-1 commit 201cae23 event 1794171000000000089; cycle-2 commit dac1f0a2 event 1794171000000000091; cycle-3 adds audit event only"
+  },
+  {
+    "ts": "2026-11-14T18:40:00Z",
+    "tick": "gitreins-qa-2026-11-14-17-29-39",
+    "project": "gitreins",
+    "lane": "gitreins-qa",
+    "cycle": 4,
+    "kind": "verification-only",
+    "mode": "cycle-4 refire: terminal read-only steward of the cycle-1 JIT bunker battery; no relaunch, no new agent, no rows minted, no annotations (three graded cycles and three board events already exist for this tick id)",
+    "verdict": "FINDINGS",
+    "status": "findings",
+    "agent": "88ce938f",
+    "server": "bunker-mvp",
+    "tested_sha": "UNVERIFIED",
+    "controller_baseline": "7f9489c0fbe8cc4cda74797aad1fb1cb299edde0",
+    "controller_baseline_note": "HEAD at cycle-4 delivery is the cycle-3 steward commit; the battery's executed tree is not bound by it",
+    "agent_evidence": "/home/kara/.hermes/cache/scratch/gitreins-qa-2026-11-14-17-29-39/harvest/qa-evidence.jsonl",
+    "agent_evidence_sha256": "778503ac2288f5b462494e62e55ecdc512f35f5a916eb20d11fc4bd8c5a955d0",
+    "agent_evidence_sha256_reverified": true,
+    "agent_rows": 25,
+    "agent_status_histogram": {
+      "OK": 15,
+      "PASS": 1,
+      "FAIL": 1,
+      "UNVERIFIED": 2,
+      "N/A": 6
+    },
+    "agent_missing_status_rows": 0,
+    "effective_product_cells": 15,
+    "wrapper_rows_excluded": 10,
+    "completion_marker": "harvest/qa-run.finished present (0 bytes, agent-owned)",
+    "logs": "/home/kara/.hermes/cache/scratch/gitreins-qa-2026-11-14-17-29-39/harvest/qa-logs-285716",
+    "cells": {
+      "fresh-install": "OK",
+      "lint": "OK ruff rc=0",
+      "tests": "OK 3646 passed, 34 skipped",
+      "native": "OK 3648 passed, 32 skipped",
+      "ci-pass": "FAIL act rc=1, all matrix legs at 'Install system tools for LSP/static analysis', exitcode 127",
+      "ci-act": "UNVERIFIED product steps did not execute after bootstrap",
+      "upgrade": "OK v0.20.0 -> v0.21.0",
+      "chaos-disconnect": "UNVERIFIED; disc.log line 1 NETWORK_CUT_APPLIED and tail '3648 passed, 32 skipped, 237 warnings in 150.69s' re-read by this lane \u2014 grader rejects the comma summary",
+      "chaos-resource": "PASS 3G cap observed",
+      "chaos-errorpath": "OK",
+      "ui-probe": "N/A no web UI detected",
+      "chaos-corruption": "N/A no db/state files",
+      "docker_build": "N/A no trigger",
+      "compose_config": "N/A no trigger",
+      "docker-deploy": "N/A no trigger",
+      "chaos-shutdown": "N/A no compose file"
+    },
+    "findings_carried": [
+      "QA-GITREINS-3",
+      "QA-GITREINS-4",
+      "QA-GITREINS-6",
+      "QA-GITREINS-7",
+      "QA-GITREINS-8",
+      "QA-GITREINS-13"
+    ],
+    "new_rows": [],
+    "annotated": [],
+    "premise_reprobe": {
+      "QA-GITREINS-4": "HOLDS \u2014 re-proved from the artifact this cycle: disc.log line 1 = NETWORK_CUT_APPLIED, tail = '3648 passed, 32 skipped, 237 warnings in 150.69s'; the chaos-disconnect cell is still graded UNVERIFIED, so the comma-summary rejection is live",
+      "QA-GITREINS-3": "UNVERIFIED this cycle \u2014 premise probe command was gate-blocked without consent and was not retried or rerouted",
+      "QA-GITREINS-6": "UNVERIFIED this cycle \u2014 same gate block",
+      "QA-GITREINS-7": "UNVERIFIED this cycle \u2014 same gate block",
+      "QA-GITREINS-8": "UNVERIFIED this cycle \u2014 same gate block",
+      "QA-GITREINS-13": "UNVERIFIED this cycle \u2014 same gate block"
+    },
+    "record_corrections": [
+      "cycle-3's carried list omitted QA-GITREINS-13, which cycle 1 carried and which the board still holds pending; this cycle re-read all six pending QA-GITREINS rows from the committed board and lists all six",
+      "durable record for this tick lives in namespace 'gitreins' (verified by dbq get and dbq ls), key /project/gitreins/qa/2026-11-14-17-29-39; cycle-4 writes a distinct -cycle4 key rather than overwriting it"
+    ],
+    "unverified": [
+      "tested source revision binding",
+      "act product steps after bootstrap",
+      "UI rendering/interactions",
+      "corrupt-state recovery",
+      "real external-network degradation",
+      "premise re-derivation for QA-GITREINS-3/6/7/8/13 (probe gate-blocked)"
+    ],
+    "board_trace": "cycle-1 commit 201cae23 event 1794171000000000089; cycle-2 commit dac1f0a2 event 1794171000000000091; cycle-3 commit 7f9489c0 event 1794171000000000092; cycle-4 event appended this delivery"
+  },
+  {
+    "ts": "2026-11-14T18:52:00Z",
+    "tick": "gitreins-qa-2026-11-14-17-29-39",
+    "project": "gitreins",
+    "lane": "gitreins-qa",
+    "cycle": 5,
+    "kind": "verification-only",
+    "mode": "cycle-5 refire: terminal read-only steward of the cycle-1 JIT bunker battery; no relaunch, no new agent, no rows minted, no annotations (four graded cycles and four board events already exist for this tick id)",
+    "verdict": "FINDINGS",
+    "status": "findings",
+    "agent": "88ce938f",
+    "server": "bunker-mvp",
+    "tested_sha": "UNVERIFIED",
+    "controller_baseline": "c70ab70da13b8d6d53cf83c62e08f9b8dbd4b0b1",
+    "controller_baseline_note": "HEAD at cycle-5 delivery is the cycle-4 steward commit; the battery's executed tree is not bound by it",
+    "agent_evidence": "/home/kara/.hermes/cache/scratch/gitreins-qa-2026-11-14-17-29-39/harvest/qa-evidence.jsonl",
+    "agent_evidence_sha256": "778503ac2288f5b462494e62e55ecdc512f35f5a916eb20d11fc4bd8c5a955d0",
+    "agent_evidence_sha256_reverified": true,
+    "agent_rows": 25,
+    "agent_status_histogram": {
+      "OK": 15,
+      "PASS": 1,
+      "FAIL": 1,
+      "UNVERIFIED": 2,
+      "N/A": 6
+    },
+    "agent_missing_status_rows": 0,
+    "effective_product_cells": 15,
+    "wrapper_rows_excluded": 10,
+    "completion_marker": "harvest/qa-run.finished present (0 bytes, agent-owned, mtime 2026-11-14T12:57:47-05:00)",
+    "logs": "/home/kara/.hermes/cache/scratch/gitreins-qa-2026-11-14-17-29-39/harvest/qa-logs-285716",
+    "cells": {
+      "fresh-install": "OK",
+      "lint": "OK ruff rc=0 (lint.log 'All checks passed!')",
+      "tests": "OK 3646 passed, 34 skipped, 237 warnings in 197.95s",
+      "native": "OK 3648 passed, 32 skipped, 237 warnings in 170.86s",
+      "ci-pass": "FAIL act rc=1, all three matrix legs at 'Install system tools for LSP/static analysis', exitcode 127 after 'Install dependencies' succeeded",
+      "ci-act": "UNVERIFIED product steps did not execute after bootstrap",
+      "upgrade": "OK v0.20.0 -> v0.21.0",
+      "chaos-disconnect": "UNVERIFIED; disc.log line 1 = NETWORK_CUT_APPLIED and line 125 = '3648 passed, 32 skipped, 237 warnings in 150.69s'",
+      "chaos-resource": "PASS 3G cap observed",
+      "chaos-errorpath": "OK",
+      "ui-probe": "N/A no web UI detected",
+      "chaos-corruption": "N/A no db/state files",
+      "docker_build": "N/A no trigger",
+      "compose_config": "N/A no trigger",
+      "docker-deploy": "N/A no trigger",
+      "chaos-shutdown": "N/A no compose file"
+    },
+    "findings_carried": [
+      "QA-GITREINS-3",
+      "QA-GITREINS-4",
+      "QA-GITREINS-5",
+      "QA-GITREINS-6",
+      "QA-GITREINS-7",
+      "QA-GITREINS-8",
+      "QA-GITREINS-9",
+      "QA-GITREINS-10",
+      "QA-GITREINS-12",
+      "QA-GITREINS-13"
+    ],
+    "new_rows": [],
+    "annotated": [],
+    "premise_reprobe": {
+      "QA-GITREINS-3": "HOLDS and REPRODUCED this cycle \u2014 ci.log lines 96-107: all three legs 'Run Main Install system tools for LSP/static analysis' then 'Failure' with exitcode 127 after 'Install dependencies' Success; the step (ci.yml:23) runs `sudo apt-get update -qq` / `sudo apt-get install -y -qq cppcheck`, environment-shaped inside the act container, not a product defect claim",
+      "QA-GITREINS-4": "HOLDS and REPRODUCED WITH A CONTROL this cycle \u2014 disc.log has the cut marker (grep -c '^NETWORK_CUT_APPLIED$' = 1) and the suite counts (line 125), yet the exact regex at bunker-qa.sh:3230 returns NO-MATCH; stripping the comma from 'passed,' makes the same regex MATCH, so the comma summary is the sole cause",
+      "QA-GITREINS-5": "HOLDS structurally \u2014 bunker-qa.sh:3267 final arm is `else cell chaos-disconnect OK` with no rc guard, so any rc outside 0/1/124/127 that clears the named env arms grades OK; not triggered by this battery (disc_rc=0)",
+      "QA-GITREINS-6": "HOLDS \u2014 gitreins/serve.py at HEAD serves a dark mobile-first SPA at http://127.0.0.1:<port>/ and cli.py:30 documents `gitreins serve`; bunker-qa.sh ui-probe has only three arms (root package.json npm, frontend/package.json npm, Go $BIN) and falls to line 3221 `else cell ui-probe N/A \"no web UI detected\"` for a Python package",
+      "QA-GITREINS-7": "HOLDS \u2014 `.gitreins/config.yaml` is tracked at HEAD (git ls-files) while the chaos-corruption cell grades N/A 'no db/state files in repo'",
+      "QA-GITREINS-8": "HOLDS \u2014 the 25 harvested evidence rows carry only the keys cell/detail/project/status/ts; no revision, sha, or tree field exists",
+      "QA-GITREINS-9": "HOLDS (with one refinement) \u2014 `abort_collect` on collect_attempt 1 is the documented policy (QA-BUNKER-45 comment) and emits a permanent harness-failure row; the emitted status is INFO, not the FAIL the row title names",
+      "QA-GITREINS-10": "HOLDS \u2014 the script contains zero `git fetch` occurrences; the sync path streams `git -C \"$repo\" archive HEAD` with no fetch or upstream check",
+      "QA-GITREINS-12": "CARRIED, not reproduced this tick \u2014 the launcher-detach path is intact but this tick's battery completed with 25 rows; the zero-cell orphan case is intermittent",
+      "QA-GITREINS-13": "HOLDS and LIVE-REPRODUCED this cycle \u2014 /var/lib/bunker-qa does not exist and /var/lib is not writable as kara, so `mkdir -p /var/lib/bunker-qa/quarantine/...` returns rc=1 exactly as the row states"
+    },
+    "record_corrections": [
+      "cycle-4's carried list held six rows; the committed board still carries TEN pending QA-GITREINS rows (3,4,5,6,7,8,9,10,12,13) \u2014 this cycle reads all ten from the committed tree and carries all ten",
+      "cycle-4 recorded QA-GITREINS-3/6/7/8/13 premises as UNVERIFIED because its probe command was gate-blocked; this cycle re-derived every one with plain jq/git grep/grep probes and all five premises resolve"
+    ],
+    "unverified": [
+      "tested source revision binding",
+      "act product steps after bootstrap",
+      "UI rendering/interactions",
+      "corrupt-state recovery",
+      "real external-network degradation"
+    ],
+    "board_trace": "cycle-1 commit 201cae23 event 1794171000000000089; cycle-2 commit dac1f0a2 event 1794171000000000091; cycle-3 commit 7f9489c0 event 1794171000000000092; cycle-4 commit c70ab70d event 1794171000000000093; cycle-5 event appended this delivery"
+  },
+  {
+    "ts": "2026-11-14T18:50:00Z",
+    "tick": "gitreins-qa-2026-11-14-17-29-39",
+    "project": "gitreins",
+    "lane": "gitreins-qa",
+    "cycle": 6,
+    "cycle_label": "CORRECTION ADDENDUM to cycle 5 (same delivery, not a sixth delivery)",
+    "kind": "verification-only",
+    "mode": "correction of the cycle-5 ledger row's carried list; no relaunch, no new agent, no rows minted, no annotations",
+    "corrects_cycle": 5,
+    "corrects_event": 1794171000000000095,
+    "verdict": "FINDINGS",
+    "status": "findings",
+    "agent": "88ce938f",
+    "server": "bunker-mvp",
+    "tested_sha": "UNVERIFIED",
+    "controller_baseline": "a168134bec714e16de035c1e7b5a94cfccc97240",
+    "agent_evidence": "/home/kara/.hermes/cache/scratch/gitreins-qa-2026-11-14-17-29-39/harvest/qa-evidence.jsonl",
+    "agent_evidence_sha256": "778503ac2288f5b462494e62e55ecdc512f35f5a916eb20d11fc4bd8c5a955d0",
+    "agent_rows": 25,
+    "agent_status_histogram": {
+      "OK": 15,
+      "PASS": 1,
+      "FAIL": 1,
+      "UNVERIFIED": 2,
+      "N/A": 6
+    },
+    "correction": "cycle 5 carried TEN pending QA-GITREINS rows and omitted QA-GITREINS-11, repeating the incomplete-carry defect it had recorded against cycle 4. The committed board holds ELEVEN pending QA-GITREINS rows.",
+    "findings_carried_complete": [
+      "QA-GITREINS-3",
+      "QA-GITREINS-4",
+      "QA-GITREINS-5",
+      "QA-GITREINS-6",
+      "QA-GITREINS-7",
+      "QA-GITREINS-8",
+      "QA-GITREINS-9",
+      "QA-GITREINS-10",
+      "QA-GITREINS-11",
+      "QA-GITREINS-12",
+      "QA-GITREINS-13"
+    ],
+    "premise_reprobe_added": {
+      "QA-GITREINS-11": "HOLDS - apps/ carries 5 tracked files at HEAD (apps/__init__.py and apps/github_app/{README.md,__init__.py,__main__.py,service.py}) while .gitignore line 55 is a bare apps/, so the ignore rule hides a whole tracked package"
+    },
+    "new_rows": [],
+    "annotated": [],
+    "board_trace": "cycle-5 event 1794171000000000094 commit a168134b; correction event 1794171000000000095 and this ledger row appended in a follow-up commit"
+  },
+  {
+    "tick": "gitreins-qa-2026-11-23-00-25-44",
+    "ts": "2026-11-23T00:50:00Z",
+    "project": "gitreins",
+    "lane": "gitreins-qa",
+    "cycle": 1,
+    "verdict": "FINDINGS",
+    "finding": "carried reds re-verified; 0 new product rows",
+    "kind": "bunker",
+    "mode": "full battery",
+    "server": "bunker-las-03",
+    "agent": "e934f5c6",
+    "tested_sha": "120ccb703500aad5620e566be4a0dd8d2d1bf2d2 (tree c224449f verified agent-side; 1 commit ahead github/main e0b92e4 \u2014 GR-240 fix unpushed at test time)",
+    "evidence": "/home/kara/gitreins/.coding-hermes/evidence/qa-20261123T004650Z (29 rows; agent copy sha256 71a74e798c95207aa25b1be34b325145a6cb1351200d1e1dc047891fb5e97175 pre-collect; merged sha256 cf9969635e599e4dc2f45d89a16fc837daafe5ebce8867089a4694e4efc0eb6d)",
+    "cells_total": {
+      "raw_rows": 25,
+      "distinct_cells": 16,
+      "bootstrap_cells": 10,
+      "effective_product_cells": 7
+    },
+    "cells": {
+      "fresh-install": "OK",
+      "lint": "OK ruff rc=0",
+      "tests": "OK 3892 passed, 33 skipped, 247 warnings in 109s \u2014 full suite rc=0 (11-15 cycle's test_cli_doc_sync FAILURES resolved at current tip)",
+      "upgrade": "OK pip gitreins==0.20.0 (tag v0.20.0) \u2192 HEAD install clean",
+      "chaos-resource": "PASS suite survives 3G ulimit -v cap (cap mechanism confirmed, caps effective 3145728KB)",
+      "chaos-errorpath": "OK clean rc=1 error naming the missing config on .gitreins/config.yaml absent",
+      "ci-pass": "FAIL act exitcode 127, all 3 legs, step 'Install system tools for LSP/static analysis'",
+      "ci-act": "UNVERIFIED product steps did not execute (same harness failure)",
+      "docker_build": "N/A no Dockerfile trigger",
+      "compose_config": "N/A no compose file trigger",
+      "docker-deploy": "SKIPPED safety gate: controller is live Hermes host; compose lifecycle forced off",
+      "chaos-shutdown": "SKIPPED same safety gate",
+      "ui-probe": "N/A no web UI detected",
+      "chaos-corruption": "N/A no db/state files found (sqlite-only scan)",
+      "chaos-disconnect": "UNVERIFIED grader reports log lacks NETWORK_CUT_APPLIED or suite counts"
+    },
+    "grader_contradiction": "chaos-disconnect disc.log ON AGENT contains BOTH 'NETWORK_CUT_APPLIED' (line 1) and '3892 passed, 33 skipped' summary; agent-side grader still graded UNVERIFIED \u2014 suite-count regex rejects the comma summary (mechanism) while the OR-shaped message cannot name which arm failed (QA-GITREINS-4 repro)",
+    "carried_annotations": [
+      "QA-GITREINS-3 (pending): ci-pass act exitcode 127 at 'Install system tools for LSP/static analysis' all 3 legs \u2014 same mechanism as filed; log ci.log lines [CI/test-1..3] exitcode 127",
+      "QA-GITREINS-4 (pending): disc.log carries '3892 passed, 33 skipped' yet suite-count regex grades 0 matches \u2014 comma-summary rejection reproduced at sha 120ccb70",
+      "QA-GITREINS-6 (pending): ui-probe still grades N/A 'no web UI detected' (no Python-entrypoint arm)",
+      "QA-GITREINS-7 (pending): chaos-corruption still N/A 'no db/state files' (sqlite-only scan; .gitreins/config.yaml not a corruption candidate)",
+      "QA-GITREINS-8 (pending): manifest.json still lacks tested_revision field; controller binding row NOW records head=120ccb70 \u2014 partially improved, row stays open"
+    ],
+    "new_rows": 0,
+    "destroy_verify": "agent absent from bunker-las-03 after collect (bunker list 0 agents)",
+    "completion_marker": "~/qa-run.finished present (0 bytes)",
+    "harvest": "pre-collect agent copy: /home/kara/.hermes/cache/scratch/qa-ev-2425 (evidence + 15 per-cell logs)",
+    "observations": [
+      "launch phase B collector adopted the same tick's agent (COLLECT-ADOPT recent tick-death-orphan)",
+      "foreign live batteries on bunker-las-02 (agent 7054c940, qa-run.sh since 16:15Z-8) and bunker-mvp (f73c4169) \u2014 both withheld as foreign capacity",
+      "last fire's failing pair tests/test_cli_doc_sync.py resolved at tip: CI doc-sync now green",
+      "timestamp ts=00:50Z; collect finished 00:48Z"
+    ]
+  },
+  {
+    "tick": "gitreins-qa-2026-11-23-00-25-44",
+    "ts": "2026-11-23T01:44:30Z",
+    "project": "gitreins",
+    "lane": "gitreins-qa",
+    "cycle": 2,
+    "verdict": "FINDINGS",
+    "finding": "carried reds re-verified; 0 new product rows",
+    "kind": "bunker",
+    "mode": "full battery (cycle-2 refire of the cycle-1 battery on a second JIT agent)",
+    "server": "bunker-las-03",
+    "agent": "524a8ece",
+    "tested_sha": "92a583dbc4afb784dfb638b350758d3ed8560264 (binding row; tree includes GR-240 rework 465b3f68; board tip moved to 4a2fff0e mid-run for a closeout commit only)",
+    "evidence": "/home/kara/gitreins/.coding-hermes/evidence/qa-20261123T050500Z (29 rows; merged sha256 65d6373baa5d0f46c27aaac9a7105a10123299361497fec24c7fd2b245294fa4; per-cell logs .coding-hermes/evidence/qa-20261123T050500Z.logs/qa-logs-1672699; agent pre-collect copy /home/kara/.hermes/cache/scratch/gitreins-qa-harvest-20261123002544)",
+    "raw_rows": 25,
+    "distinct_cells": 17,
+    "effective_product_cells": 10,
+    "cells": {
+      "fresh-install": "OK full pip -e .[dev] toolchain install",
+      "lint": "OK ruff check . rc=0",
+      "tests": "OK full suite 3898 passed, 32 skipped, 247 warnings in 108.03s rc=0",
+      "upgrade": "OK pip gitreins==0.20.0 (tag v0.20.0) -> HEAD install clean",
+      "chaos-resource": "PASS 3G ulimit -v cap; suite survives",
+      "chaos-errorpath": "OK clean rc=1 naming missing .gitreins/config.yaml",
+      "ci-pass": "FAIL act rc=1: [CI/test-1] and [CI/test-2] exitcode 127 at 'Install system tools for LSP/static analysis'; [CI/test-3] failed earlier at 'Set up Python 3.12'",
+      "ci-act": "UNVERIFIED product steps did not execute after bootstrap (same harness failure as QA-GITREINS-3)",
+      "chaos-disconnect": "UNVERIFIED grader rejects a disc.log that carries BOTH markers",
+      "docker_build": "N/A no Dockerfile trigger",
+      "compose_config": "N/A no compose file trigger",
+      "docker-deploy": "SKIPPED controller-is-live-Hermes-host safety gate",
+      "chaos-shutdown": "SKIPPED same safety gate",
+      "ui-probe": "N/A no web UI detected (no Python-entrypoint arm, QA-GITREINS-6)",
+      "chaos-corruption": "N/A no db/state files found (sqlite-only scan, QA-GITREINS-7)",
+      "target-binding": "OK head=92a583db recorded",
+      "evidence-outside-repo": "WARN controller cwd /home/kara/.hermes/scripts resolves the evidence dir outside 'the checkout'; path is in-repo",
+      "collect": "OK pulled 25 agent rows, agent destroyed after collect (synced-524a8ece marker)"
+    },
+    "carried_reproduced": [
+      "QA-GITREINS-3 (pending): ci-pass act exitcode 127 at 'Install system tools' 2/3 legs this cycle \u2014 same mechanism, ci.log 1014-1015",
+      "QA-GITREINS-4 (pending): 3rd consecutive repro, STRONGEST yet \u2014 disc.log contains NETWORK_CUT_APPLIED (line 1, grep=1) AND '3898 passed, 32 skipped' (grep=1) yet grader disc.log arm grades UNVERIFIED 'lacks NETWORK_CUT_APPLIED or suite counts'; comma summary '3898 passed,' rejected by the exact regex",
+      "QA-GITREINS-6 (pending): ui-probe N/A 'no web UI detected' again",
+      "QA-GITREINS-7 (pending): chaos-corruption N/A 'no db/state files' again",
+      "QA-GITREINS-8 (pending, holds): 0 occurrences of tested_revision across the 29 merged evidence rows; controller binding row records head but the field the row demands is still absent"
+    ],
+    "premise_observed": {
+      "QA-GITREINS-15": "premise appears stale: 'grep -c RELEASE-025 tasks.jsonl' now returns 11 on the live board; rows restored since 1d30376c \u2014 not reproduced by this battery (QA closeout-rewrite row, out of battery scope)"
+    },
+    "new_rows": 0,
+    "completion_marker": "qa-run.finished present agent-side; collect cell OK",
+    "observations": [
+      "cycle-2 refire confirms cycle-1 reds independently on a second JIT agent (e934f5c6 -> 524a8ece)",
+      "both cycles graded chaos-disconnect UNVERIFIED with the identical comma-summary mechanism",
+      "prior cycle's test_cli_doc_sync reds stayed green at tip (3898 passed both cycles)"
+    ]
+  }
+]

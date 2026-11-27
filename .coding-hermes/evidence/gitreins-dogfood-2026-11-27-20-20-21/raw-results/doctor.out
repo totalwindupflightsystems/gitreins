@@ -1,0 +1,56 @@
+{
+  "ok": true,
+  "workdir": "/home/kara/.hermes/cache/scratch/gitreins-dogfood-20261127-202021/consumer",
+  "checks": [
+    {
+      "id": "config",
+      "name": "config",
+      "status": "ok",
+      "detail": "every key is one this version reads"
+    },
+    {
+      "id": "hooks",
+      "name": "hooks",
+      "status": "ok",
+      "detail": "pre-commit and pre-push present, managed, executable"
+    },
+    {
+      "id": "tools",
+      "name": "tools",
+      "status": "ok",
+      "detail": "git, gitleaks present"
+    },
+    {
+      "id": "manifest",
+      "name": "manifest",
+      "status": "ok",
+      "detail": "3 artifact(s) recorded; enforcement armed"
+    },
+    {
+      "id": "version",
+      "name": "version",
+      "status": "ok",
+      "detail": "installed 0.22.0"
+    },
+    {
+      "id": "history",
+      "name": "history",
+      "status": "ok",
+      "detail": ".gitreins/ present and writable"
+    },
+    {
+      "id": "resolution_index",
+      "name": "resolution_index",
+      "status": "warn",
+      "detail": "indexed 0/1 tracked source files; freshness=missing-index, mtime=missing",
+      "hint": "missing from resolution index: test_smoke.py"
+    },
+    {
+      "id": "wiring",
+      "name": "wiring",
+      "status": "warn",
+      "detail": "1 unwired finding(s) from 0 entry point(s): test_smoke.py:1 test_smoke:test_smoke \u2014 defined but not reachable from any entry point (no references outside its definition). 0 exemption(s) reported",
+      "hint": "wire the symbol into its dispatch table/registry or remove it; `--json` lists every finding"
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+Created task: DF-CONSUMER-1 — Smoke task
+  1. README.md exists
+criteria warning: criterion 1 is missing failure_condition, proof
+criteria audit: 0 of 0 existing task(s) have at least one criterion without a proof (not rewritten)

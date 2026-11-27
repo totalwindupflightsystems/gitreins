@@ -1,0 +1,10 @@
+GitReins init: /home/kara/.hermes/cache/scratch/gitreins-dogfood-20261127-202021/consumer
+  Language:    Python
+  Packages:    1
+  Test cmd:    uv run pytest -x --tb=short
+  Test mode:   full
+  Eval cap:    100 iterations
+  History:     enabled
+  Static analysis: enabled (mypy, pyright)
+
+Updated: guards (+static_analysis, static_analysis_tools, test_command, test_timeout, hook_timeout), resolution, backup: config.yaml.bak, .gitleaks.toml

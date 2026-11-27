@@ -1,0 +1,30 @@
+GitReins installed in /home/kara/.hermes/cache/scratch/gitreins-dogfood-20261127-202021/consumer
+
+Created:
+  + /home/kara/.hermes/cache/scratch/gitreins-dogfood-20261127-202021/consumer/.gitreins/config.yaml
+  + /home/kara/.hermes/cache/scratch/gitreins-dogfood-20261127-202021/consumer/.git/hooks/pre-commit
+  + /home/kara/.hermes/cache/scratch/gitreins-dogfood-20261127-202021/consumer/.git/hooks/pre-push
+  + /home/kara/.hermes/cache/scratch/gitreins-dogfood-20261127-202021/consumer/.gitreins/install-manifest.json (manifest of what GitReins owns)
+  + .gitignore (added .gitreins/tasks.yaml)
+  + .gitignore (added .gitreins/config.yaml.bak)
+  + .gitignore (added .gitreins/usage.jsonl)
+  + .gitignore (added .gitreins/logs/)
+  + .gitignore (added .gitreins/qa-ledger.jsonl)
+  + .gitignore (added .gitreins/worktrees.json)
+  + .gitignore (added .gitreins/worktrees.lock)
+  + .gitignore (added .gitreins/disposable.json)
+  + .gitignore (added .gitreins/disposable.lock)
+  + .gitignore (added .gitreins/tasks.yaml.lock)
+  + .gitignore (added .gitreins/verdicts/)
+  + .gitignore (added .gitreins/quality.json)
+  + .gitignore (added .gitreins/review-state.json)
+  + .gitignore (added .gitreins/review-state.lock)
+  + .gitignore (added .gitreins/review-state.corrupt-*)
+  + .gitignore (added .gitreins/review-state.recovery-required)
+  + .gitignore (added __pycache__/)
+
+Next steps:
+  - Run smart init:  gitreins init
+  - Create a task:  gitreins task create <id> <title> [criteria...]
+  - Run guards:     gitreins guard
+  - Try the hook:   make a change, git add ., git commit -m 'test'

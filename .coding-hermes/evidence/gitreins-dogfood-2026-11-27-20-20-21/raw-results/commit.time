@@ -1,0 +1,7 @@
+Tier 1: DEGRADED PASS (skips: lint=no staged files, static_analysis=staged/diff set has no files matching the selected static-analysis tools (mypy, pyright; languages: python) — whole-tree run skipped: a cold tool cache would grade only files this commit cannot have touched)  (test mode: full, scope: staged (index))
+  ✓ secrets — clean (gitleaks + builtin cross-check); scanners: nice=nice -n 10
+  ~ lint — skipped (no staged files)
+  ✓ tests (full)
+  ~ static_analysis — skipped (staged/diff set has no files matching the selected static-analysis tools (mypy, pyright; languages: python) — whole-tree run skipped: a cold tool cache would grade only files this commit cannot have touched)
+  guard log: /home/kara/.hermes/cache/scratch/gitreins-dogfood-20261127-202021/consumer/.gitreins/logs/guard-20261127T203859.214795Z.log
+commit wall=1.06 user=0.68 sys=0.19 rc=0

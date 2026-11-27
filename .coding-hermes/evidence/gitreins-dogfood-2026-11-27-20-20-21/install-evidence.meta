@@ -1,0 +1,11 @@
+agent=36a8d5cd
+server=bunker-las-03
+evidence=/home/kara/.hermes/cache/scratch/gitreins-dogfood-20261127-202021/install/evidence.jsonl
+launched=2026-11-27T20:36:57Z
+keep=1
+project=gitreins
+phase=launched
+target=
+runner=
+identity_source=origin-remote
+repo=/home/kara/gitreins

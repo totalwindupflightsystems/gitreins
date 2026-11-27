@@ -1,0 +1,11 @@
+═══ GitReins Verdict Report ═══
+
+Recent: 1 evaluations
+Pass:   1 (100%)
+Fail:   0 (0%)
+
+  ✓ DF-CONSUMER-1            2026-11-27  
+     Smoke task
+
+Storage: git (/home/kara/.hermes/cache/scratch/gitreins-dogfood-20261127-202021/consumer/.gitreins/history)
+Total entries: 1

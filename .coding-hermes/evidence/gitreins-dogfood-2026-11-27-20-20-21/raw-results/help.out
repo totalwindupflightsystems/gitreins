@@ -1,0 +1,48 @@
+usage: gitreins [-h] [--version]
+                {install,push-check,quality-ensure,init,setup,disable,enable,uninstall,config-validate,doctor,fingerprint,task,review,worktree,guard,judge,commit,commit-audit,resolve,preflight,mcp-server,security-scan,setup-tools,qa,report,serve} ...
+
+GitReins — Git-Native Agent Co-Harness
+
+positional arguments:
+  {install,push-check,quality-ensure,init,setup,disable,enable,uninstall,config-validate,doctor,fingerprint,task,review,worktree,guard,judge,commit,commit-audit,resolve,preflight,mcp-server,security-scan,setup-tools,qa,report,serve}
+    install             Install GitReins hooks and config in the current repo
+    push-check          Scan outgoing commit content for secrets
+    quality-ensure      Run the repo's quality producer to completion and
+                        enforce block-mode (pre-push)
+    init                Smart init — detect language, size, optimal config
+    setup               Guided setup: smart config, hooks, then a health check
+                        that decides done
+    disable             Disarm the hooks without removing config or history
+    enable              Re-arm the hooks after `gitreins disable`
+    uninstall           Remove the hooks and config GitReins installed (dry-
+                        run by default)
+    config-validate     Check .gitreins/config.yaml for unknown keys, wrong
+                        types and bad values
+    doctor              Validate .gitleaks.toml (and migrate pre-DF-001 glob
+                        allowlist entries)
+    fingerprint         Hash the final Git-visible workspace content without
+                        mutating the repo
+    task                Task management
+    review              Manage persistent review findings
+    worktree            Git worktree diagnostics and task worktree lifecycle
+    guard               Run Tier 1 guards
+    judge               Evaluate a task
+    commit              Commit with guard checks
+    commit-audit        Validate commit message against staged diff (commit-
+                        msg hook)
+    resolve             Resolve a question against the repo's code (Jev
+                        resolution gate)
+    preflight           Pre-dispatch premise check: resolve a row, get a
+                        dispatch decision
+    mcp-server          Run MCP stdio server
+    security-scan       Run the Antares CVE localization scanner (opt-in)
+    setup-tools         Show available static analysis tools and install
+                        instructions
+    qa                  QA run ledger — record and read QA run outcomes
+    report              Show verdict history
+    serve               Live judgment browser — local web server (Ctrl-C to
+                        stop)
+
+options:
+  -h, --help            show this help message and exit
+  --version             show program's version number and exit
