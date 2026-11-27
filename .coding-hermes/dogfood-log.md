@@ -921,3 +921,11 @@ No product re-walk, performance remeasurement, or new finding was run. Product-s
 The required install follow-up is not re-run: the prior committed record owns the bunker evidence. An independent current census of bunker-las-03 reports ONLINE and No agents found, so no named install agent remains. The prior committed INDEX/report text says the agent was retained while the prior log entry and DuckBrain record say it was destroyed; this delivery records the independent no-agent census and leaves the earlier prose unchanged. No product or board row is filed for that records inconsistency.
 
 No-op closeout: only this provenance entry is owned by delivery 2. The perf leg is intentionally not remeasured because the product tree is unchanged; prior warm/cold numbers remain scoped to the first delivery.
+
+## 2026-11-27 — repeat delivery 8 — fresh bunker install
+
+Tick: gitreins-dogfood-2026-11-27-20-20-21. Eight distinct inbound timestamps observed. The prior user workflow and performance measurements at dd5e4692 are reused, not rerun; product paths through 540623797458b9eda0afd87d04d05e7c51fa6b7e were unchanged. Tier-2 judgment was not exercised. Existing finding DF-GITREINS-POC-63-R2-R2 remains pending; QA-GITREINS-3 already tracks act's system-tools failure.
+
+The explicitly required new bunker leg used agent b6957399 on bunker-mvp and tested 540623797458b9eda0afd87d04d05e7c51fa6b7e. Fresh editable installation of gitreins 0.22.0, lint, native tests, upgrade and disconnect passed. act CI failed because `go` was not found in the container; hosted CI was not checked. UI detection reported N/A and lifecycle operations were safety-skipped. The collector timed out then reported agent-gone and could not retrieve per-cell logs; incremental ledger rows were recovered. An independent bunker list no longer shows the agent, but clean teardown and final battery completeness are unverified. Raw incremental evidence: .coding-hermes/evidence/gitreins-dogfood-2026-11-27-20-20-21-fire8/bunker-evidence.jsonl. No new board rows were filed.
+
+The previous fingerprint warm 0.31/0.34/0.40s and isolated HOME/XDG import 0.29s are unchanged-tree first-delivery results, not new measurements and not an OS-cold-cache claim. DuckBrain read failed because the MCP subprocess exited; this delivery's memory write and readback are unverified.
