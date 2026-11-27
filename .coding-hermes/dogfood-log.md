@@ -929,3 +929,84 @@ Tick: gitreins-dogfood-2026-11-27-20-20-21. Eight distinct inbound timestamps ob
 The explicitly required new bunker leg used agent b6957399 on bunker-mvp and tested 540623797458b9eda0afd87d04d05e7c51fa6b7e. Fresh editable installation of gitreins 0.22.0, lint, native tests, upgrade and disconnect passed. act CI failed because `go` was not found in the container; hosted CI was not checked. UI detection reported N/A and lifecycle operations were safety-skipped. The collector timed out then reported agent-gone and could not retrieve per-cell logs; incremental ledger rows were recovered. An independent bunker list no longer shows the agent, but clean teardown and final battery completeness are unverified. Raw incremental evidence: .coding-hermes/evidence/gitreins-dogfood-2026-11-27-20-20-21-fire8/bunker-evidence.jsonl. No new board rows were filed.
 
 The previous fingerprint warm 0.31/0.34/0.40s and isolated HOME/XDG import 0.29s are unchanged-tree first-delivery results, not new measurements and not an OS-cold-cache claim. DuckBrain read failed because the MCP subprocess exited; this delivery's memory write and readback are unverified.
+
+
+
+## 2026-11-27 no-op provenance — delivery 9 (records reconciliation)
+
+Tick: gitreins-dogfood-2026-11-27-20-20-21, ninth distinct inbound dispatch (17:58:33 host-local).
+
+The label has fired NINE times, not two. `~/.hermes/logs/{gateway.log,agent.log}` carry nine distinct
+`inbound message` timestamps for the exact tick id — 15:20:24, 16:05:17, 16:12:30, 16:28:24,
+16:54:53, 17:06:32, 17:15:38, 17:30:26, 17:58:33 (-05) — and nine matching
+`agent.turn_context ... history=0` lines, each fire starting on a different model
+(gpt-6.1-terra → gpt-6.1-sol → glm-5.3-flash → … → deepseek-flash): the cross-fire
+retry/fallback signature, so each timestamp is its own fire. The committed record before this one
+covered 2 of the 9: delivery 1 (full use walk) and delivery 2 (no-op). Deliveries 3, 6 and 7 left
+no committed trace at all; deliveries 4 and 5 left a DuckBrain key pair plus a host evidence dir but
+no git entry; delivery 8 committed its entry at 17:58:13 — 20 seconds before this fire's inbound
+line — on the local branch `dogfood/gitreins-20261127-fire8`, and never merged or pushed it. That
+gap, not a product delta, is what this entry repairs.
+
+Parity: `git rev-list --left-right --count HEAD...github/main` = `0 0` before landing;
+`git diff --name-only dd5e4692..github/main` = `.coding-hermes/dogfood-log.md` only. No product path
+changed across all nine dispatches, the main working tree was clean, and the one divergent worktree
+(`/home/kara/gitreins-dogfood-fire8`) held records only. Nothing was re-driven: an unchanged tree
+re-driven measures the host.
+
+Delivery 8's stranded commit was LANDED, not rewritten: `08ebc134` fast-forwarded onto main
+byte-for-byte (2 files, +37/-0 — its log entry and its `bunker-evidence.jsonl`). Its prose matches
+its artifact (29 rows including `collect agent-gone` x1 and `collect INFO` x1, i.e. the incremental
+ledger was all that survived its timed-out collector). Its sentence attributing the act failure to a
+missing `go` was inherited evidence, not that battery's own log; it is now independently
+corroborated below.
+
+Install leg — the third and most complete verification of the same tree, retained rather than
+re-run. The 16:28 fire's battery on bunker-las-03 agent `1fb44061` tested
+`540623797458b9eda0afd87d04d05e7c51fa6b7e` and produced 29 rows, sha256
+`be6ab99e5c6055a4ca8cdcf8db58ee9af2d14d9c885bd65a1912956d534a1672`. That artifact existed only under
+`~/.hermes/qa/evidence/gitreins/qa-20261127T215020Z/`, so it is now committed at
+`.coding-hermes/evidence/gitreins-dogfood-2026-11-27-20-20-21-refire-1628/` with its manifest, its
+`ci.log` (sha256 `bcf816d8dffdba3b4f3187764573e246be22b2cb30ec105b6d6d3cc21c0aac03`, 1043 lines) and
+an `INDEX.md` recording provenance and transformations. Cells: fresh-install OK, lint OK, tests OK,
+upgrade OK (v0.21.0 → HEAD), chaos-disconnect OK, chaos-resource PASS, chaos-errorpath OK,
+toolchain-bootstrap OK x10, ui-probe/compose_config/docker_build N/A, docker-deploy and
+chaos-shutdown SKIPPED by the live-host safety gate; ci-pass FAIL, ci-act UNVERIFIED. Both CI cells
+are the act-simulation leg and both fail on `/var/run/act/workflow/3: line 12: go: command not
+found`, `exitcode '127'` (`ci.log:1008`, `ci.log:1037`) — the harness class already owned by pending
+row QA-GITREINS-3. Hosted CI is not a surface this battery exercised, so QA-GITREINS-3's "hosted CI
+is green at the same SHA" clause is not re-confirmed here. No ENOSPC anywhere in the battery log
+tree (`grep -ril 'no space left\|errno 28'` → no hits), so this is not DF-GITREINS-POC-104-R2. The
+two other batteries for this tick — agent `36a8d5cd`, evidence sha256 `f932d057…`, 29 rows,
+committed by delivery 1 — and the partial bunker-mvp one (`25b18b74…`, 29 rows, landed above) agree
+on every non-act cell. No fourth battery was launched: same commit, same harness, nothing new to
+learn, and the act defect is filed and pending.
+
+Board at THIS delivery's time: 697 rows, whole-stream `jq` parse clean, zero duplicate task ids,
+`boardctl -C .coding-hermes/board validate` → `RESULT: OK (615 warning(s))` (unchanged baseline),
+finding `DF-GITREINS-POC-63-R2-R2` present exactly once and `pending`, with exactly one
+`task_created` event (id 1794171000000000266). No row is filed by this fire: every defect this tick
+can see is already owned — QA-GITREINS-3 (act/toolchain), DF-GITREINS-POC-63-R2-R2 (install docs),
+DF-036 (stale pipx CLI), DF-GITREINS-POC-104-R2 (ENOSPC grading).
+
+Perf: deliberately not re-measured. Delivery 1's numbers stand, scoped to that run: fingerprint warm
+0.31 / 0.34 / 0.40 s, isolated-HOME/XDG cold import 0.29 s. Nothing user-noticeable, so no PERF row
+and no profile — a win nobody can feel is not a finding.
+
+Residue scan: `/proc/*/cmdline` keyed on the product path found one process,
+`/home/kara/gitreins/.venv/bin/python3 gitreins_mcp/server.py` (pid 799995, started 2026-11-26
+22:31:49, parent 795128 = the Hermes gateway) — the deployed MCP bridge for this host, older than
+every dispatch of this tick and not a dogfood artifact; left running. `ss -ltnp` shows no gitreins
+serve/viewer listener (8642 = Hermes gateway, 9090/9091 = scheduler, 3000 = DuckBrain, 8080
+unrelated). Bunker teardown of agent `1fb44061` was recorded by delivery 5; this fire did not
+re-census bunker hosts, so teardown rests on that prior record, not on a new probe.
+
+Classification: nine dispatches of one label at a zero product delta is a scheduler/gateway dispatch
+defect, NOT a product defect — no row on this board. Owning surface: the coding-hermes scheduler
+board, where the nine-timestamp list above is the evidence. Deliveries 3, 6, 7 are pure no-trace
+fires; 4 and 5 spent a bunker battery for a DuckBrain-only record; 8 stranded its record on a local
+branch. All nine kept turning while an earlier fire still held the turn.
+
+DuckBrain: `/dogfood/2026-11-27-20-20-21-delivery9` written in namespace `gitreins`
+(id 897536ab-8811-44aa-b98c-4a2428701159), read back from the on-disk partition
+`event/2026-11/current.jsonl` — one hit, key and id matched.
