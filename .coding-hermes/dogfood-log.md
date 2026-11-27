@@ -910,3 +910,14 @@ Performance: fingerprint warm 0.31/0.34/0.40s; isolated HOME/XDG cold-import 0.2
 Install leg: RUN and PROVEN on bunker-las-03 agent 36a8d5cd; bunker evidence 29 rows, SHA256 f932d057180af3306f65de87bdee7550b70f0b67b46b9967e9f29d0fd109c738. Fresh install, native tests, lint, upgrade, and chaos-disconnect OK; act simulation failed/unverified; Docker lifecycle safety-skipped; UI/corruption N/A. Agent destroyed and verified absent.
 
 Artifacts: docs/dogfood/2026-11-27-integration.md, docs/dogfood/diagnostics-2026-11-27.md, .coding-hermes/evidence/gitreins-dogfood-2026-11-27-20-20-21/, and the 2026-11-27 section in skills/gitreins-usage/SKILL.md. DuckBrain key /dogfood/2026-11-27-20-20-21 was written and read back in namespace gitreins.
+## 2026-11-27 — no-op provenance — delivery 2
+
+Tick id: gitreins-dogfood-2026-11-27-20-20-21.
+
+This is the second distinct dispatch observed for this tick: raw distinct inbound timestamps were 2026-11-27 15:20:24 and 2026-11-27 16:05:17 local time; attributed delivery count = 2. The first delivery landed commit dd5e469222a3f5b4fa02de4fc8c3cf9797d2e0ca, and this delivery verified that commit is the live github/main tip.
+
+No product re-walk, performance remeasurement, or new finding was run. Product-surface delta from dd5e4692 to github/main is empty; the committed dogfood entry, finding DF-GITREINS-POC-63-R2-R2, evidence bundle, integration report, diagnostics, and usage skill are already present. Board census at this delivery is 697 task rows, zero duplicate task ids, and boardctl validate RESULT: OK with 615 pre-existing warnings. The committed board contains DF-GITREINS-POC-63-R2-R2 exactly once with its paired task_created event exactly once.
+
+The required install follow-up is not re-run: the prior committed record owns the bunker evidence. An independent current census of bunker-las-03 reports ONLINE and No agents found, so no named install agent remains. The prior committed INDEX/report text says the agent was retained while the prior log entry and DuckBrain record say it was destroyed; this delivery records the independent no-agent census and leaves the earlier prose unchanged. No product or board row is filed for that records inconsistency.
+
+No-op closeout: only this provenance entry is owned by delivery 2. The perf leg is intentionally not remeasured because the product tree is unchanged; prior warm/cold numbers remain scoped to the first delivery.
