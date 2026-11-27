@@ -1010,3 +1010,28 @@ branch. All nine kept turning while an earlier fire still held the turn.
 DuckBrain: `/dogfood/2026-11-27-20-20-21-delivery9` written in namespace `gitreins`
 (id 897536ab-8811-44aa-b98c-4a2428701159), read back from the on-disk partition
 `event/2026-11/current.jsonl` — one hit, key and id matched.
+
+
+## 2026-11-27 no-op provenance — delivery 10 (records-only)
+
+Tick: gitreins-dogfood-2026-11-27-20-20-21, tenth distinct inbound dispatch (18:03:07 host-local).
+The exact tick has ten distinct inbound timestamps across the gateway/agent log families; each has
+its own history=0 turn context. Delivery 9 is already committed at 325278b3 and github/main is
+still exactly that tip. This is a duplicate scheduler dispatch, not a fresh product run.
+
+Canonical proof: HEAD == github/main == 325278b3910ba52149beb838f61b1c252a73cd96, with zero
+product-path delta since delivery 9. The board remains untouched: 697 task rows, whole-stream jq
+parse clean, zero duplicate task IDs, DF-GITREINS-POC-63-R2-R2 exactly once with one task_created
+event. Existing findings remain owned by QA-GITREINS-3 (act/toolchain),
+DF-GITREINS-POC-63-R2-R2 (install documentation), DF-036 (stale pipx CLI), and
+DF-GITREINS-POC-104-R2 (ENOSPC grading); this fire files no row and never re-drives the product.
+
+Performance is not re-measured: the product tree is unchanged, and repeating the prior fingerprint
+warm/cold run would measure host state rather than a new product revision. The prior scoped numbers
+remain 0.31/0.34/0.40 s warm and 0.29 s isolated-HOME/XDG cold import, with no user-noticeable
+performance finding and no profile justified.
+
+Residue check found only the gateway-parented deployed gitreins_mcp/server.py process, older than this
+tick, and no dogfood serve/viewer listener. It was left running. This repeated label at zero product
+delta is scheduler/gateway dispatch evidence owned by the coding-hermes scheduler board, not a
+GitReins product finding.
